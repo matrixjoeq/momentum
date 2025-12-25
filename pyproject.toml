@@ -14,7 +14,7 @@ dependencies = [
   "sqlalchemy>=2.0.0",
   "pydantic>=2.6.0",
   "pydantic-settings>=2.3.0",
-  "akshare>=1.13.0",
+  "akshare==1.16.72",
   "pandas>=2.2.0",
   "httpx>=0.25.0",
 ]
@@ -35,4 +35,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["src"]
+markers = [
+  "integration: tests that hit real external services (opt-in)",
+]
 

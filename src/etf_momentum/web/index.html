@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ETF 候选池</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 24px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+      label { display: block; font-size: 12px; color: #444; margin-bottom: 4px; }
+      input { padding: 8px; min-width: 160px; }
+      button { padding: 8px 12px; cursor: pointer; }
+      table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 10px; text-align: left; }
+      th { background: #f7f7f7; }
+      .muted { color: #666; font-size: 12px; }
+      .status-success { color: #0a7; }
+      .status-failed { color: #c33; }
+      .status-null { color: #999; }
+      .actions { display: flex; gap: 8px; }
+      .msg { margin-top: 10px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
+    </style>
+  </head>
+  <body>
+    <h2>ETF 候选池配置</h2>
+    <div class="muted">数据源：akshare/eastmoney，日频，前复权（qfq），落地 SQLite。</div>
+    <div class="muted" style="margin-top: 6px">
+      <a href="/research">进入基准分析（等权组合）</a>
+    </div>
+
+    <div style="margin-top: 16px" class="row">
+      <div>
+        <label>代码</label>
+        <input id="code" placeholder="如 510300" />
+      </div>
+      <div>
+        <label>名称</label>
+        <input id="name" placeholder="如 沪深300ETF" />
+      </div>
+      <div>
+        <label>开始日期</label>
+        <input id="start" placeholder="YYYYMMDD (可空)" />
+      </div>
+      <div>
+        <label>结束日期</label>
+        <input id="end" placeholder="YYYYMMDD (可空)" />
+      </div>
+      <div>
+        <label>校验策略</label>
+        <select id="policy" style="padding: 8px; min-width: 220px;"></select>
+      </div>
+      <div>
+        <label>收益跳变覆盖</label>
+        <input id="maxAbsReturn" placeholder="如 0.12 (可空)" />
+      </div>
+      <button id="save">保存/更新</button>
+      <button id="fetchAll">抓取全部</button>
+      <div>
+        <label>复权类型（全局）</label>
+        <select id="adjust" style="padding: 8px; min-width: 160px;">
+          <option value="hfq" selected>后复权（默认）</option>
+          <option value="qfq">前复权</option>
+          <option value="none">不复权</option>
+        </select>
+      </div>
+      <button id="selectAll">全选</button>
+      <button id="selectNone">取消全选</button>
+      <button id="selectInvert">反选</button>
+      <button id="fetchSelected">抓取所选</button>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>选择</th>
+          <th>代码</th>
+          <th>名称</th>
+          <th>区间</th>
+          <th>校验策略</th>
+          <th>抓取状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <script>
+      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const $ = (id) => document.getElementById(id);
+      const setMsg = (t) => ($("msg").textContent = t || "");
+      let policies = [];
+      const selected = new Set();
+
+      function statusClass(s) {
+        if (!s) return "status-null";
+        if (s === "success") return "status-success";
+        if (s === "failed") return "status-failed";
+        return "";
+      }
+
+      function renderPolicySelect(selectedId) {
+        const sel = $("policy");
+        sel.innerHTML = "";
+        const optAuto = document.createElement("option");
+        optAuto.value = "";
+        optAuto.textContent = "自动推断";
+        sel.appendChild(optAuto);
+        for (const p of policies) {
+          const o = document.createElement("option");
+          o.value = String(p.id);
+          o.textContent = `${p.name} (max_abs_return=${p.max_abs_return})`;
+          if (selectedId && String(selectedId) === String(p.id)) o.selected = true;
+          sel.appendChild(o);
+        }
+      }
+
+      async function loadPolicies() {
+        const resp = await api("/validation-policies", { method: "GET" });
+        policies = await resp.json();
+        renderPolicySelect(null);
+      }
+
+      async function refresh() {
+        const adj = $("adjust") ? $("adjust").value : "hfq";
+        const resp = await api(`/etf?adjust=${encodeURIComponent(adj)}`, { method: "GET" });
+        const data = await resp.json();
+        const tbody = $("tbody");
+        tbody.innerHTML = "";
+        if (!Array.isArray(data) || data.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" class="muted">候选池为空：请在上方填写代码/名称后点“保存/更新”，再选择并抓取数据。</td></tr>`;
+          return;
+        }
+        for (const it of data) {
+          const tr = document.createElement("tr");
+          const cfgRange = `${it.start_date || "-"} ~ ${it.end_date || "-"}`;
+          const dataRange = it.last_data_start_date && it.last_data_end_date ? `${it.last_data_start_date} ~ ${it.last_data_end_date}` : "没有";
+          const st = it.last_fetch_status || "";
+          const msg = it.last_fetch_message || "";
+          const pol = it.validation_policy ? it.validation_policy.name : "自动";
+          const eff = it.max_abs_return_effective != null ? it.max_abs_return_effective : "-";
+          const ov = it.max_abs_return_override != null ? it.max_abs_return_override : "";
+          const checked = selected.has(it.code) ? "checked" : "";
+          tr.innerHTML = `
+            <td><input type="checkbox" data-act="sel" data-code="${it.code}" ${checked} /></td>
+            <td>${it.code}</td>
+            <td>${it.name}</td>
+            <td><div>${cfgRange}</div><div class="muted">已抓取：${dataRange}</div></td>
+            <td>${pol} <span class="muted">· eff=${eff}${ov !== "" ? " (ov=" + ov + ")" : ""}</span></td>
+            <td class="${statusClass(st)}">${st || "-"} <span class="muted">${msg ? "· " + msg : ""}</span></td>
+            <td>
+              <div class="actions">
+                <button data-act="edit" data-code="${it.code}">编辑</button>
+                <button data-act="fetch" data-code="${it.code}">抓取</button>
+                <button data-act="del" data-code="${it.code}">删除</button>
+              </div>
+            </td>
+          `;
+          tr.dataset.item = JSON.stringify(it);
+          tbody.appendChild(tr);
+        }
+      }
+
+      $("save").addEventListener("click", async () => {
+        setMsg("");
+        const policyId = $("policy").value ? Number($("policy").value) : null;
+        const maxAbsReturn = $("maxAbsReturn").value.trim();
+        const payload = {
+          code: $("code").value.trim(),
+          name: $("name").value.trim(),
+          start_date: $("start").value.trim() || null,
+          end_date: $("end").value.trim() || null,
+          validation_policy_id: policyId,
+          max_abs_return_override: maxAbsReturn === "" ? null : Number(maxAbsReturn),
+        };
+        const resp = await api("/etf", { method: "POST", body: JSON.stringify(payload) });
+        const text = await resp.text();
+        if (!resp.ok) return setMsg(text);
+        $("code").value = ""; $("name").value = ""; $("start").value = ""; $("end").value = "";
+        $("maxAbsReturn").value = "";
+        renderPolicySelect(null);
+        await refresh();
+      });
+
+      $("fetchAll").addEventListener("click", async () => {
+        const adj = $("adjust").value;
+        setMsg("fetch-all...");
+        const resp = await api(`/fetch-all?adjust=${encodeURIComponent(adj)}`, { method: "POST", body: "{}" });
+        const text = await resp.text();
+        if (!resp.ok) return setMsg(text);
+        setMsg(text);
+        await refresh();
+      });
+
+      $("selectAll").addEventListener("click", async () => {
+        const adj = $("adjust").value;
+        const resp = await api(`/etf?adjust=${encodeURIComponent(adj)}`, { method: "GET" });
+        const data = await resp.json();
+        for (const it of data) selected.add(it.code);
+        await refresh();
+      });
+
+      $("selectNone").addEventListener("click", async () => {
+        selected.clear();
+        await refresh();
+      });
+
+      $("selectInvert").addEventListener("click", async () => {
+        const adj = $("adjust").value;
+        const resp = await api(`/etf?adjust=${encodeURIComponent(adj)}`, { method: "GET" });
+        const data = await resp.json();
+        const next = new Set();
+        for (const it of data) if (!selected.has(it.code)) next.add(it.code);
+        selected.clear();
+        for (const x of next) selected.add(x);
+        await refresh();
+      });
+
+      $("fetchSelected").addEventListener("click", async () => {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const adj = $("adjust").value;
+        setMsg(`fetch-selected: ${codes.join(", ")} ...`);
+        const resp = await api("/fetch-selected", { method: "POST", body: JSON.stringify({ codes, adjust: adj }) });
+        const text = await resp.text();
+        if (!resp.ok) return setMsg(text);
+        setMsg(text);
+        await refresh();
+      });
+
+      $("tbody").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button");
+        const cb = e.target.closest('input[type="checkbox"][data-act="sel"]');
+        if (cb) {
+          const code = cb.getAttribute("data-code");
+          if (cb.checked) selected.add(code);
+          else selected.delete(code);
+          return;
+        }
+        if (!btn) return;
+        const act = btn.getAttribute("data-act");
+        const code = btn.getAttribute("data-code");
+        const tr = btn.closest("tr");
+        const it = tr && tr.dataset.item ? JSON.parse(tr.dataset.item) : null;
+        if (act === "del") {
+          const resp = await api(`/etf/${code}`, { method: "DELETE" });
+          if (!resp.ok) return setMsg(await resp.text());
+          await refresh();
+        }
+        if (act === "edit" && it) {
+          $("code").value = it.code;
+          $("name").value = it.name;
+          $("start").value = it.start_date || "";
+          $("end").value = it.end_date || "";
+          $("maxAbsReturn").value = it.max_abs_return_override != null ? String(it.max_abs_return_override) : "";
+          renderPolicySelect(it.validation_policy ? it.validation_policy.id : null);
+          setMsg("已载入到表单，修改后点“保存/更新”。");
+        }
+        if (act === "fetch") {
+          const adj = $("adjust").value;
+          setMsg(`fetch ${code}...`);
+          const resp = await api(`/etf/${code}/fetch?adjust=${encodeURIComponent(adj)}`, { method: "POST", body: "{}" });
+          const text = await resp.text();
+          if (!resp.ok) return setMsg(text);
+          setMsg(text);
+          await refresh();
+        }
+      });
+
+      $("adjust").addEventListener("change", refresh);
+
+      loadPolicies()
+        .then(refresh)
+        .catch((e) => setMsg(String(e)));
+    </script>
+  </body>
+</html>
+

@@ -1,0 +1,308 @@
+from __future__ import annotations
+
+import datetime as dt
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..db.models import EtfPrice
+
+
+TRADING_DAYS_PER_YEAR = 252
+
+
+@dataclass(frozen=True)
+class BaselineInputs:
+    codes: list[str]
+    start: dt.date
+    end: dt.date
+    benchmark_code: str | None = None
+    adjust: str = "hfq"  # qfq/hfq/none (global)
+    rebalance: str = "yearly"  # daily/weekly/monthly/quarterly/yearly/none
+    risk_free_rate: float = 0.025  # annualized rf (decimal), default 2.5% CN 0-1y gov
+    rolling_weeks: list[int] | None = None
+    rolling_months: list[int] | None = None
+    rolling_years: list[int] | None = None
+
+
+def _to_date(x: str) -> dt.date:
+    return dt.datetime.strptime(x, "%Y%m%d").date()
+
+
+def _max_drawdown(nav: pd.Series) -> float:
+    peak = nav.cummax()
+    dd = nav / peak - 1.0
+    return float(dd.min())
+
+
+def _max_drawdown_duration_days(nav: pd.Series) -> int:
+    peak = nav.cummax()
+    in_dd = nav < peak
+    if not in_dd.any():
+        return 0
+    # duration since last peak high
+    last_peak_idx = nav.index[0]
+    max_dur = 0
+    for t in nav.index:
+        if nav.loc[t] >= peak.loc[t]:
+            last_peak_idx = t
+        else:
+            dur = (t - last_peak_idx).days
+            if dur > max_dur:
+                max_dur = dur
+    return int(max_dur)
+
+
+def _annualized_return(nav: pd.Series, ann_factor: int = TRADING_DAYS_PER_YEAR) -> float:
+    if nav.empty:
+        return float("nan")
+    n = len(nav) - 1
+    if n <= 0:
+        return 0.0
+    total = nav.iloc[-1] / nav.iloc[0]
+    return float(total ** (ann_factor / n) - 1.0)
+
+
+def _annualized_vol(daily_ret: pd.Series, ann_factor: int = TRADING_DAYS_PER_YEAR) -> float:
+    if daily_ret.empty:
+        return float("nan")
+    return float(daily_ret.std(ddof=1) * np.sqrt(ann_factor))
+
+
+def _sharpe(daily_ret: pd.Series, rf: float = 0.0, ann_factor: int = TRADING_DAYS_PER_YEAR) -> float:
+    if daily_ret.empty:
+        return float("nan")
+    ex = daily_ret - rf / ann_factor
+    std = ex.std(ddof=1)
+    if std == 0 or np.isnan(std):
+        return float("nan")
+    return float(ex.mean() / std * np.sqrt(ann_factor))
+
+
+def _sortino(daily_ret: pd.Series, rf: float = 0.0, ann_factor: int = TRADING_DAYS_PER_YEAR) -> float:
+    if daily_ret.empty:
+        return float("nan")
+    ex = daily_ret - rf / ann_factor
+    downside = ex.where(ex < 0, 0.0)
+    dd_std = downside.std(ddof=1)
+    if dd_std == 0 or np.isnan(dd_std):
+        return float("nan")
+    return float(ex.mean() / dd_std * np.sqrt(ann_factor))
+
+
+def _information_ratio(active_daily: pd.Series, ann_factor: int = TRADING_DAYS_PER_YEAR) -> float:
+    if active_daily.empty:
+        return float("nan")
+    std = active_daily.std(ddof=1)
+    if std == 0 or np.isnan(std):
+        return float("nan")
+    return float(active_daily.mean() / std * np.sqrt(ann_factor))
+
+
+def _rolling_max_drawdown(nav: pd.Series, window: int) -> pd.Series:
+    # rolling apply on values; window in trading days
+    def f(x: np.ndarray) -> float:
+        peak = np.maximum.accumulate(x)
+        dd = x / peak - 1.0
+        return float(dd.min())
+
+    return nav.rolling(window=window, min_periods=window).apply(lambda x: f(x.to_numpy()), raw=False)
+
+
+def load_close_prices(
+    db: Session,
+    *,
+    codes: list[str],
+    start: dt.date,
+    end: dt.date,
+    adjust: str,
+) -> pd.DataFrame:
+    stmt = (
+        select(EtfPrice.trade_date, EtfPrice.code, EtfPrice.close)
+        .where(EtfPrice.code.in_(codes))
+        .where(EtfPrice.adjust == adjust)
+        .where(EtfPrice.trade_date >= start)
+        .where(EtfPrice.trade_date <= end)
+        .order_by(EtfPrice.trade_date.asc())
+    )
+    rows = db.execute(stmt).all()
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows, columns=["date", "code", "close"])
+    df["date"] = pd.to_datetime(df["date"])
+    pivot = df.pivot_table(index="date", columns="code", values="close", aggfunc="last").sort_index()
+    return pivot
+
+
+def _compute_equal_weight_nav(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+) -> pd.Series:
+    """
+    Equal-weight portfolio NAV under different rebalancing schedules.
+
+    rebalance:
+    - none: buy-and-hold equal initial weights (no rebalancing)
+    - daily/weekly/monthly/quarterly/yearly: reset to equal weights at period boundaries
+    """
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+
+    # buy & hold (equal initial weights): mean of individual NAVs
+    if reb == "none":
+        indiv_nav = (1.0 + daily_ret.fillna(0.0)).cumprod()
+        indiv_nav.iloc[0, :] = 1.0
+        return indiv_nav.mean(axis=1)
+
+    if reb == "daily":
+        ew_ret = daily_ret.fillna(0.0).mean(axis=1)
+        ew_nav = (1.0 + ew_ret).cumprod()
+        ew_nav.iloc[0] = 1.0
+        return ew_nav
+
+    freq_map = {
+        "weekly": "W-FRI",
+        "monthly": "M",
+        "quarterly": "Q",
+        "yearly": "Y",
+    }
+    labels = daily_ret.index.to_period(freq_map[reb])
+
+    nav = 1.0
+    n = daily_ret.shape[1]
+    w = np.full(n, 1.0 / n, dtype=float)
+    out = []
+    prev_label = None
+    rmat = daily_ret.fillna(0.0).to_numpy(dtype=float)
+    for i, lab in enumerate(labels):
+        if prev_label is None or lab != prev_label:
+            w[:] = 1.0 / n
+        r = rmat[i]
+        port_r = float(np.dot(w, r))
+        nav *= (1.0 + port_r)
+        # update weights post-move
+        if 1.0 + port_r != 0.0:
+            w = w * (1.0 + r) / (1.0 + port_r)
+        out.append(nav)
+        prev_label = lab
+    s = pd.Series(out, index=daily_ret.index, name="EW")
+    if len(s) > 0:
+        s.iloc[0] = 1.0
+    return s
+
+
+def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
+    codes = list(dict.fromkeys(inp.codes))
+    if not codes:
+        raise ValueError("codes is empty")
+
+    close = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust=inp.adjust)
+    if close.empty:
+        raise ValueError("no price data for given range")
+
+    close = close.sort_index()
+    missing = [c for c in codes if c not in close.columns or close[c].dropna().empty]
+    if missing:
+        raise ValueError(f"missing data for adjust={inp.adjust}: {missing}")
+    # individual NAVs (forward-fill for plotting continuity)
+    close_ff = close.ffill()
+    daily_ret = close_ff.pct_change()
+    nav = (1.0 + daily_ret).cumprod()
+    nav.iloc[0, :] = 1.0
+
+    # common start where all selected have data after ffill (i.e. each has first valid close)
+    first_valid = {c: close[c].first_valid_index() for c in codes if c in close.columns}
+    common_start = max([d for d in first_valid.values() if d is not None])
+    nav_common = nav.loc[common_start:]
+    ret_common = daily_ret.loc[common_start:].fillna(0.0)
+
+    # equal-weight with configurable rebalancing
+    ew_nav = _compute_equal_weight_nav(ret_common[codes], rebalance=inp.rebalance)
+    ew_ret = ew_nav.pct_change().fillna(0.0)
+
+    # benchmark
+    bench_code = inp.benchmark_code
+    if bench_code is None:
+        bench_code = "510300" if "510300" in codes else codes[0]
+    bench_ret = ret_common[bench_code] if bench_code in ret_common.columns else ew_ret * 0.0
+    bench_nav = (1.0 + bench_ret.fillna(0.0)).cumprod()
+    bench_nav.iloc[0] = 1.0
+
+    # periodic returns
+    def period_returns(series: pd.Series, freq: str) -> pd.DataFrame:
+        s = series.copy()
+        s.index = pd.to_datetime(s.index)
+        r = s.resample(freq).last().pct_change().dropna()
+        return pd.DataFrame({"period_end": r.index.date.astype(str), "return": r.values})
+
+    weekly = period_returns(ew_nav, "W-FRI")
+    monthly = period_returns(ew_nav, "ME")
+    yearly = period_returns(ew_nav, "YE")
+
+    # metrics on ew
+    cum_ret = float(ew_nav.iloc[-1] / ew_nav.iloc[0] - 1.0)
+    ann_ret = _annualized_return(ew_nav)
+    ann_vol = _annualized_vol(ew_ret)
+    mdd = _max_drawdown(ew_nav)
+    mdd_dur = _max_drawdown_duration_days(ew_nav)
+    sharpe = _sharpe(ew_ret, rf=float(inp.risk_free_rate))
+    calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
+    sortino = _sortino(ew_ret, rf=float(inp.risk_free_rate))
+    ir = _information_ratio(ew_ret - bench_ret.fillna(0.0))
+
+    metrics = {
+        "benchmark_code": bench_code,
+        "rebalance": inp.rebalance,
+        "risk_free_rate": float(inp.risk_free_rate),
+        "cumulative_return": cum_ret,
+        "annualized_return": ann_ret,
+        "annualized_volatility": ann_vol,
+        "max_drawdown": mdd,
+        "max_drawdown_recovery_days": mdd_dur,
+        "sharpe_ratio": sharpe,
+        "calmar_ratio": calmar,
+        "sortino_ratio": sortino,
+        "information_ratio": ir,
+    }
+
+    # rolling
+    rolling = {"returns": {}, "max_drawdown": {}}
+    for weeks in inp.rolling_weeks or []:
+        window = weeks * 5
+        rolling["returns"][f"{weeks}w"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
+        rolling["max_drawdown"][f"{weeks}w"] = _rolling_max_drawdown(ew_nav, window).dropna()
+    for months in inp.rolling_months or []:
+        window = months * 21
+        rolling["returns"][f"{months}m"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
+        rolling["max_drawdown"][f"{months}m"] = _rolling_max_drawdown(ew_nav, window).dropna()
+    for years in inp.rolling_years or []:
+        window = years * 252
+        rolling["returns"][f"{years}y"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
+        rolling["max_drawdown"][f"{years}y"] = _rolling_max_drawdown(ew_nav, window).dropna()
+
+    # package series for UI (plotly expects arrays)
+    dates = nav_common.index.date.astype(str).tolist()
+    series = {c: nav_common[c].astype(float).fillna(np.nan).tolist() for c in codes if c in nav_common.columns}
+    series["EW"] = ew_nav.astype(float).tolist()
+    series[f"BENCH:{bench_code}"] = bench_nav.astype(float).tolist()
+
+    rolling_out = {
+        "returns": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["returns"].items()},
+        "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
+    }
+
+    return {
+        "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
+        "codes": codes,
+        "nav": {"dates": dates, "series": series},
+        "period_returns": {"weekly": weekly.to_dict(orient="records"), "monthly": monthly.to_dict(orient="records"), "yearly": yearly.to_dict(orient="records")},
+        "metrics": metrics,
+        "rolling": rolling_out,
+    }
+

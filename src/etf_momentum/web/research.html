@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>基准分析（等权组合）</title>
+    <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 24px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+      label { display: block; font-size: 12px; color: #444; margin-bottom: 4px; }
+      input, select { padding: 8px; min-width: 180px; }
+      button { padding: 8px 12px; cursor: pointer; }
+      .muted { color: #666; font-size: 12px; }
+      .panel { margin-top: 16px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
+      th { background: #f7f7f7; }
+      #chart, #rollingReturns, #rollingDD { width: 100%; height: 520px; }
+      .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .code-list { max-height: 220px; overflow: auto; border: 1px solid #ddd; padding: 8px; min-width: 320px; }
+      .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
+    </style>
+  </head>
+  <body>
+    <h2>基准分析：等权持有组合</h2>
+    <div class="muted">用于动量轮动研究的基准数据：标的净值、等权组合净值、绩效指标与滚动统计。</div>
+
+    <div class="panel row">
+      <div>
+        <label>开始日期</label>
+        <input id="start" placeholder="YYYYMMDD" />
+      </div>
+      <div>
+        <label>结束日期</label>
+        <input id="end" placeholder="YYYYMMDD" />
+      </div>
+      <div>
+        <label>复权类型（全局）</label>
+        <select id="adjust">
+          <option value="hfq" selected>后复权（默认）</option>
+          <option value="qfq">前复权</option>
+          <option value="none">不复权</option>
+        </select>
+      </div>
+      <div>
+        <label>等权再平衡周期</label>
+        <select id="rebalance">
+          <option value="daily">日度</option>
+          <option value="weekly">周度</option>
+          <option value="monthly">月度</option>
+          <option value="quarterly">季度</option>
+          <option value="yearly" selected>年度（默认）</option>
+          <option value="none">不平衡（买入持有）</option>
+        </select>
+      </div>
+      <div>
+        <label>基准标的（用于信息比率）</label>
+        <select id="benchmark"></select>
+      </div>
+      <div>
+        <label>无风险收益率（年化，长期中国0-1年国债）</label>
+        <input id="rf" placeholder="如 2.5 或 0.025" value="2.5" />
+      </div>
+      <button id="run">运行分析</button>
+      <div id="status" class="muted"></div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <div class="code-list" id="codes"></div>
+        <div class="muted">
+          勾选候选池中的标的组成组合。图例可点击隐藏/显示曲线。
+          <div style="margin-top:8px">
+            <button id="selAll">全选</button>
+            <button id="selNone">取消全选</button>
+            <button id="selInvert">反选</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div id="chart"></div>
+    </div>
+
+    <div class="panel two">
+      <div>
+        <h3>等权组合指标</h3>
+        <table id="metrics"></table>
+      </div>
+      <div>
+        <h3>周期收益率（等权组合）</h3>
+        <div class="two">
+          <div>
+            <div class="muted">周度</div>
+            <table id="weekly"></table>
+          </div>
+          <div>
+            <div class="muted">月度</div>
+            <table id="monthly"></table>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <div class="muted">年度</div>
+          <table id="yearly"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>滚动收益率（等权组合）</h3>
+      <div id="rollingReturns"></div>
+    </div>
+
+    <div class="panel">
+      <h3>滚动最大回撤（等权组合）</h3>
+      <div id="rollingDD"></div>
+    </div>
+
+    <div class="panel msg" id="msg"></div>
+
+    <script>
+      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const $ = (id) => document.getElementById(id);
+
+      function fmtPct(x) {
+        if (x == null || Number.isNaN(x)) return "-";
+        return (x * 100).toFixed(2) + "%";
+      }
+      function fmtNum(x) {
+        if (x == null || Number.isNaN(x)) return "-";
+        return Number(x).toFixed(4);
+      }
+
+      let pool = [];
+      const selected = new Set();
+
+      function ymdToNum(s) {
+        if (!s || s.length < 8) return null;
+        const n = Number(s.slice(0, 8));
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function numToYmd(n) {
+        if (!Number.isFinite(n)) return "";
+        return String(Math.trunc(n)).padStart(8, "0");
+      }
+
+      function computeAvailableRangeForSelection() {
+        const items = pool.filter(x => selected.has(x.code));
+        const starts = items.map(x => x.last_data_start_date).filter(Boolean).sort();
+        const ends = items.map(x => x.last_data_end_date).filter(Boolean).sort();
+        if (!starts.length || !ends.length) return { start: null, end: null };
+        return { start: starts[starts.length - 1], end: ends[0] }; // max start, min end
+      }
+
+      function maybeAdjustBacktestRange() {
+        const avail = computeAvailableRangeForSelection();
+        if (!avail.start || !avail.end) return;
+        const curS = ($("start").value || "").trim();
+        const curE = ($("end").value || "").trim();
+        const curSn = ymdToNum(curS);
+        const curEn = ymdToNum(curE);
+        const availSn = ymdToNum(avail.start);
+        const availEn = ymdToNum(avail.end);
+        if (curSn == null || curEn == null) {
+          // if user hasn't set a valid range yet, initialize to available
+          $("start").value = avail.start;
+          $("end").value = avail.end;
+          return;
+        }
+        // Only adjust if available interval is smaller than current specified interval (i.e. doesn't cover it)
+        if (curSn < availSn || curEn > availEn) {
+          const nextS = Math.max(curSn, availSn);
+          const nextE = Math.min(curEn, availEn);
+          if (nextS > nextE) {
+            // no overlap -> fall back to full available interval
+            $("start").value = avail.start;
+            $("end").value = avail.end;
+          } else {
+            $("start").value = numToYmd(nextS);
+            $("end").value = numToYmd(nextE);
+          }
+        }
+      }
+
+      function renderCodeList() {
+        const box = $("codes");
+        box.innerHTML = "";
+        for (const it of pool) {
+          const div = document.createElement("div");
+          const checked = selected.has(it.code) ? "checked" : "";
+          div.innerHTML = `<label style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" data-code="${it.code}" ${checked}/>
+            <span>${it.code} ${it.name} <span class="muted">(${(it.last_data_start_date && it.last_data_end_date) ? (it.last_data_start_date + "~" + it.last_data_end_date) : "没有"})</span></span>
+          </label>`;
+          box.appendChild(div);
+        }
+        box.querySelectorAll("input[type=checkbox]").forEach(cb => {
+          cb.addEventListener("change", () => {
+            const c = cb.getAttribute("data-code");
+            if (cb.checked) selected.add(c); else selected.delete(c);
+            renderBenchmarkSelect();
+          });
+        });
+      }
+
+      function renderBenchmarkSelect() {
+        const sel = $("benchmark");
+        const codes = Array.from(selected);
+        sel.innerHTML = "";
+        for (const c of codes) {
+          const opt = document.createElement("option");
+          opt.value = c;
+          opt.textContent = c;
+          sel.appendChild(opt);
+        }
+        if (codes.includes("510300")) sel.value = "510300";
+      }
+
+      async function loadPool() {
+        const adj = $("adjust").value || "hfq";
+        const resp = await api(`/etf?adjust=${encodeURIComponent(adj)}`, { method: "GET" });
+        pool = await resp.json();
+        // default select all
+        for (const it of pool) selected.add(it.code);
+        renderCodeList();
+        renderBenchmarkSelect();
+        // Initialize or clamp backtest range to available intersection (only if needed)
+        maybeAdjustBacktestRange();
+      }
+
+      function setMsg(t) { $("msg").textContent = t || ""; }
+
+      function renderMetrics(metrics) {
+        const rows = [
+          ["基准标的", metrics.benchmark_code],
+          ["无风险收益率(年化)", metrics.risk_free_rate != null ? fmtPct(metrics.risk_free_rate) : "-"],
+          ["累积收益率", fmtPct(metrics.cumulative_return)],
+          ["年化收益率", fmtPct(metrics.annualized_return)],
+          ["年化波动率", fmtPct(metrics.annualized_volatility)],
+          ["最大回撤", fmtPct(metrics.max_drawdown)],
+          ["最大回撤修复时长(天)", metrics.max_drawdown_recovery_days],
+          ["夏普比率", fmtNum(metrics.sharpe_ratio)],
+          ["卡玛比率", fmtNum(metrics.calmar_ratio)],
+          ["索诺提比率", fmtNum(metrics.sortino_ratio)],
+          ["信息比率", fmtNum(metrics.information_ratio)],
+        ];
+        const t = $("metrics");
+        t.innerHTML = `<tr><th>指标</th><th>值</th></tr>` + rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+      }
+
+      function renderPeriodTable(id, data, limit=10) {
+        const t = $(id);
+        const head = `<tr><th>期末</th><th>收益</th></tr>`;
+        const body = (data || []).slice(-limit).reverse().map(x => `<tr><td>${x.period_end}</td><td>${fmtPct(x.return)}</td></tr>`).join("");
+        t.innerHTML = head + body;
+      }
+
+      function plotNav(nav) {
+        const dates = nav.dates;
+        const series = nav.series;
+        const traces = Object.keys(series).map(name => ({
+          x: dates,
+          y: series[name],
+          mode: "lines",
+          name,
+        }));
+        Plotly.newPlot(
+          "chart",
+          traces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: {
+              type: "log",
+              tick0: 0,
+              dtick: Math.log10(1.1), // one grid = +10%
+              showgrid: true,
+              gridcolor: "#eee",
+            },
+          },
+          { responsive: true }
+        );
+      }
+
+      function plotRolling(id, title, rollingMap) {
+        const traces = [];
+        for (const k of Object.keys(rollingMap || {})) {
+          traces.push({ x: rollingMap[k].dates, y: rollingMap[k].values, mode: "lines", name: k });
+        }
+        Plotly.newPlot(id, traces, { margin: { t: 20 }, legend: { orientation: "h" } }, { responsive: true });
+      }
+
+      async function runAnalysis() {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = $("start").value.trim();
+        const end = $("end").value.trim();
+        const benchmark_code = $("benchmark").value || null;
+        const adjust = $("adjust").value || "hfq";
+        const rebalance = $("rebalance").value || "yearly";
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 0.02");
+        // allow percent input like "2.5" to mean 2.5%
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        $("status").textContent = "计算中...";
+        setMsg("");
+        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust, rebalance, risk_free_rate }) });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
+        plotNav(data.nav);
+        renderMetrics(data.metrics);
+        renderPeriodTable("weekly", data.period_returns.weekly);
+        renderPeriodTable("monthly", data.period_returns.monthly);
+        renderPeriodTable("yearly", data.period_returns.yearly, 20);
+        plotRolling("rollingReturns", "Rolling Returns", data.rolling.returns);
+        plotRolling("rollingDD", "Rolling Max Drawdown", data.rolling.max_drawdown);
+      }
+
+      $("run").addEventListener("click", runAnalysis);
+      $("adjust").addEventListener("change", () => {
+        // preserve user's current start/end; only clamp if new adjust's available range can't cover it
+        const curS = $("start").value;
+        const curE = $("end").value;
+        selected.clear();
+        loadPool()
+          .then(() => {
+            // restore then clamp if needed
+            if (curS) $("start").value = curS;
+            if (curE) $("end").value = curE;
+            maybeAdjustBacktestRange();
+          })
+          .catch(e => setMsg(String(e)));
+      });
+      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); });
+      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); });
+      $("selInvert").addEventListener("click", () => {
+        const next = new Set();
+        for (const it of pool) if (!selected.has(it.code)) next.add(it.code);
+        selected.clear(); for (const c of next) selected.add(c);
+        renderCodeList(); renderBenchmarkSelect();
+      });
+
+      loadPool().catch(e => setMsg(String(e)));
+    </script>
+  </body>
+</html>
+
