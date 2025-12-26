@@ -20,7 +20,7 @@ from .schemas import (
 )
 from ..analysis.baseline import BaselineInputs, compute_baseline
 from ..data.ingestion import ingest_one_etf
-from ..data.rollback import rollback_batch_with_fallback
+from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..db.repo import (
     delete_etf_pool,
     delete_prices,
@@ -33,6 +33,7 @@ from ..db.repo import (
     list_validation_policies,
     list_prices,
     mark_fetch_status,
+    update_ingestion_batch,
     upsert_etf_pool,
 )
 from ..settings import get_settings
@@ -41,6 +42,33 @@ from ..validation.policy_infer import infer_policy_name
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_ALL_ADJUSTS = ("qfq", "hfq", "none")
+
+
+def _adjust_ranges(db: Session, code: str) -> dict[str, tuple[str | None, str | None]]:
+    return {adj: get_price_date_range(db, code=code, adjust=adj) for adj in _ALL_ADJUSTS}
+
+
+def _ensure_adjust_ranges_consistent(db: Session, code: str) -> tuple[str, str]:
+    ranges = _adjust_ranges(db, code)
+    vals = list(ranges.values())
+    if any(v[0] is None or v[1] is None for v in vals):
+        raise ValueError(f"adjust coverage missing for {code}: {ranges}")  # pragma: no cover
+    if len(set(vals)) != 1:
+        raise ValueError(f"adjust coverage mismatch for {code}: {ranges}")
+    return vals[0][0], vals[0][1]
+
+
+def _rollback_batches_best_effort(db: Session, batch_ids: list[int], *, reason: str) -> None:
+    # logical rollback only (no snapshot restore) to avoid cross-adjust interference
+    for bid in reversed([x for x in batch_ids if x and x > 0]):
+        b = get_ingestion_batch(db, bid)
+        if b is None:  # pragma: no cover
+            continue
+        logical_rollback_batch(db, b)
+        update_ingestion_batch(db, batch_id=b.id, status="rolled_back", message=reason)
+        db.commit()
 
 
 def _parse_yyyymmdd(x: str) -> dt.date:
@@ -189,7 +217,7 @@ def delete_etf(code: str, db: Session = Depends(get_session)) -> dict[str, bool]
 @router.post("/etf/{code}/fetch", response_model=FetchResult)
 def fetch_one(
     code: str,
-    adjust: str = "hfq",
+    adjust: str = "hfq",  # kept for backward-compat; ignored (we always fetch all adjusts)
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> FetchResult:
@@ -201,22 +229,42 @@ def fetch_one(
     start = item.start_date or settings.default_start_date
     end = item.end_date or settings.default_end_date
 
-    try:
-        res = ingest_one_etf(db, ak=ak, code=code, start_date=start, end_date=end, adjust=adjust)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if res.status == "success":
-        mark_fetch_status(db, code=code, status="success", message=f"batch={res.batch_id} upserted={res.upserted}")
-        db.commit()
-        return FetchResult(code=code, inserted_or_updated=res.upserted, status="success", message=f"batch={res.batch_id}")
-    mark_fetch_status(db, code=code, status="failed", message=f"batch={res.batch_id} {res.message}")
+    total = 0
+    ok = True
+    parts: list[str] = []
+    batch_ids: list[int] = []
+    for adj in _ALL_ADJUSTS:
+        res = ingest_one_etf(db, ak=ak, code=code, start_date=start, end_date=end, adjust=adj)
+        batch_ids.append(int(res.batch_id))
+        total += int(res.upserted or 0)
+        if res.status != "success":
+            ok = False
+        extra = f",msg={res.message}" if res.status != "success" and res.message else ""
+        parts.append(f"{adj}:{res.status}(batch={res.batch_id},upserted={res.upserted}{extra})")
+
+    if ok:
+        try:
+            _ensure_adjust_ranges_consistent(db, code)
+        except ValueError as e:
+            ok = False
+            parts.append(f"range_check:failed({e})")
+            try:
+                _rollback_batches_best_effort(db, batch_ids, reason="auto rollback: adjust range mismatch")
+            except Exception as rb_e:  # pylint: disable=broad-exception-caught
+                parts.append(f"rollback:failed({rb_e})")
+
+    status = "success" if ok else "failed"
+    msg = "; ".join(parts)
+    mark_fetch_status(db, code=code, status=status, message=msg)
     db.commit()
-    raise HTTPException(status_code=500, detail=res.message or "ingestion failed")
+    if not ok:
+        raise HTTPException(status_code=500, detail=msg or "ingestion failed")
+    return FetchResult(code=code, inserted_or_updated=total, status="success", message=msg)
 
 
 @router.post("/fetch-all", response_model=list[FetchResult])
 def fetch_all(
-    adjust: str = "hfq",
+    adjust: str = "hfq",  # kept for backward-compat; ignored (we always fetch all adjusts)
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[FetchResult]:
@@ -224,16 +272,32 @@ def fetch_all(
     for item in list_etf_pool(db):
         start = item.start_date or get_settings().default_start_date
         end = item.end_date or get_settings().default_end_date
-        try:
-            res = ingest_one_etf(db, ak=ak, code=item.code, start_date=start, end_date=end, adjust=adjust)
-        except ValueError as e:
-            res = type("Tmp", (), {"status": "failed", "batch_id": -1, "upserted": 0, "message": str(e)})()
-        if res.status == "success":
-            mark_fetch_status(db, code=item.code, status="success", message=f"batch={res.batch_id} upserted={res.upserted}")
-            out.append(FetchResult(code=item.code, inserted_or_updated=res.upserted, status="success", message=f"batch={res.batch_id}"))
-        else:
-            mark_fetch_status(db, code=item.code, status="failed", message=f"batch={res.batch_id} {res.message}")
-            out.append(FetchResult(code=item.code, inserted_or_updated=0, status="failed", message=res.message))
+        total = 0
+        ok = True
+        parts: list[str] = []
+        batch_ids: list[int] = []
+        for adj in _ALL_ADJUSTS:
+            res = ingest_one_etf(db, ak=ak, code=item.code, start_date=start, end_date=end, adjust=adj)
+            batch_ids.append(int(res.batch_id))
+            total += int(res.upserted or 0)
+            if res.status != "success":
+                ok = False
+            extra = f",msg={res.message}" if res.status != "success" and res.message else ""
+            parts.append(f"{adj}:{res.status}(batch={res.batch_id},upserted={res.upserted}{extra})")
+        if ok:
+            try:
+                _ensure_adjust_ranges_consistent(db, item.code)
+            except ValueError as e:
+                ok = False
+                parts.append(f"range_check:failed({e})")
+                try:
+                    _rollback_batches_best_effort(db, batch_ids, reason="auto rollback: adjust range mismatch")
+                except Exception as rb_e:  # pylint: disable=broad-exception-caught
+                    parts.append(f"rollback:failed({rb_e})")
+        status = "success" if ok else "failed"
+        msg = "; ".join(parts)
+        mark_fetch_status(db, code=item.code, status=status, message=msg)
+        out.append(FetchResult(code=item.code, inserted_or_updated=(total if ok else 0), status=status, message=msg))
     return out
 
 
@@ -252,19 +316,32 @@ def fetch_selected(
             continue
         start = item.start_date or get_settings().default_start_date
         end = item.end_date or get_settings().default_end_date
-        try:
-            res = ingest_one_etf(db, ak=ak, code=item.code, start_date=start, end_date=end, adjust=payload.adjust)
-        except ValueError as e:
-            out.append(FetchResult(code=item.code, inserted_or_updated=0, status="failed", message=str(e)))
-            continue
-        if res.status == "success":
-            mark_fetch_status(db, code=item.code, status="success", message=f"batch={res.batch_id} upserted={res.upserted}")
-            out.append(
-                FetchResult(code=item.code, inserted_or_updated=res.upserted, status="success", message=f"batch={res.batch_id}")
-            )
-        else:
-            mark_fetch_status(db, code=item.code, status="failed", message=f"batch={res.batch_id} {res.message}")
-            out.append(FetchResult(code=item.code, inserted_or_updated=0, status="failed", message=res.message))
+        total = 0
+        ok = True
+        parts: list[str] = []
+        batch_ids: list[int] = []
+        for adj in _ALL_ADJUSTS:
+            res = ingest_one_etf(db, ak=ak, code=item.code, start_date=start, end_date=end, adjust=adj)
+            batch_ids.append(int(res.batch_id))
+            total += int(res.upserted or 0)
+            if res.status != "success":
+                ok = False
+            extra = f",msg={res.message}" if res.status != "success" and res.message else ""
+            parts.append(f"{adj}:{res.status}(batch={res.batch_id},upserted={res.upserted}{extra})")
+        if ok:
+            try:
+                _ensure_adjust_ranges_consistent(db, item.code)
+            except ValueError as e:
+                ok = False
+                parts.append(f"range_check:failed({e})")
+                try:
+                    _rollback_batches_best_effort(db, batch_ids, reason="auto rollback: adjust range mismatch")
+                except Exception as rb_e:  # pylint: disable=broad-exception-caught
+                    parts.append(f"rollback:failed({rb_e})")
+        status = "success" if ok else "failed"
+        msg = "; ".join(parts)
+        mark_fetch_status(db, code=item.code, status=status, message=msg)
+        out.append(FetchResult(code=item.code, inserted_or_updated=(total if ok else 0), status=status, message=msg))
     return out
 
 
@@ -328,7 +405,7 @@ def get_prices(
     code: str,
     start: str | None = None,
     end: str | None = None,
-    adjust: str | None = None,
+    adjust: str = "hfq",
     limit: int = 5000,
     db: Session = Depends(get_session),
 ) -> list[PriceOut]:
@@ -357,11 +434,12 @@ def delete_prices_api(
     code: str,
     start: str | None = None,
     end: str | None = None,
-    adjust: str | None = None,
+    adjust: str = "hfq",
     db: Session = Depends(get_session),
 ) -> dict[str, int]:
     start_d = _parse_yyyymmdd(start) if start else None
     end_d = _parse_yyyymmdd(end) if end else None
     n = delete_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adjust)
+    db.commit()
     return {"deleted": n}
 

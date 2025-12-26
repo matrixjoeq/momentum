@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pathlib
 import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
@@ -50,6 +51,8 @@ def test_ingest_success_creates_batch_items_and_prices(session_factory: sessionm
         assert batch.status == "success"
         assert batch.pre_fingerprint is not None
         assert batch.post_fingerprint is not None
+        # snapshot is ephemeral: should be deleted after ingestion completes
+        assert batch.snapshot_path is None
 
         items = list(db.execute(select(IngestionItem).where(IngestionItem.batch_id == res.batch_id)).scalars().all())
         assert len(items) == 2
@@ -57,6 +60,10 @@ def test_ingest_success_creates_batch_items_and_prices(session_factory: sessionm
 
         audits = list(db.execute(select(EtfPriceAudit).where(EtfPriceAudit.batch_id == res.batch_id)).scalars().all())
         assert audits == []
+
+    backups_dir = pathlib.Path(sqlite_path).parent / "backups"
+    if backups_dir.exists():
+        assert list(backups_dir.glob("*.sqlite3")) == []
 
 
 def test_ingest_update_records_audit(session_factory: sessionmaker, monkeypatch, sqlite_path) -> None:

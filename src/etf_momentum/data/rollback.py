@@ -75,6 +75,16 @@ def restore_snapshot(sqlite_path: Path, snapshot_path: Path) -> None:
     shutil.copy2(snapshot_path, sqlite_path)
 
 
+def _delete_snapshot_if_exists(path_str: str | None) -> None:
+    if not path_str:
+        return
+    try:
+        p = Path(path_str)
+        if p.exists():
+            p.unlink()
+    except Exception:  # pylint: disable=broad-exception-caught
+        return
+
 def _validate_db_prices(
     db: Session,
     *,
@@ -129,6 +139,7 @@ def rollback_batch_with_fallback(
     start_d = _parse_yyyymmdd(batch.start_date)
     end_d = _parse_yyyymmdd(batch.end_date)
     adj = normalize_adjust(batch.adjust)
+    sqlite_path = settings.sqlite_path
 
     pre_fp = batch.pre_fingerprint
     empty_fp = hashlib.sha256(b"[]").hexdigest()
@@ -168,12 +179,19 @@ def rollback_batch_with_fallback(
             needs_snapshot = True
 
     if not needs_snapshot:
+        # Requirement: snapshot file should not be kept after operation unless file-level rollback fails.
+        _delete_snapshot_if_exists(batch.snapshot_path)
+        # clear path in batch record (best-effort)
+        b3 = db.get(IngestionBatch, batch.id)
+        if b3 is not None:
+            b3.snapshot_path = None
+        update_ingestion_batch(db, batch_id=batch.id, status="rolled_back", message="logical rollback (snapshot deleted)")
+        db.commit()
         return RollbackResult(batch_id=batch.id, status="success", message="rolled back (validated)")
 
     # Fallback to snapshot restore if available
     if batch.snapshot_path:
         snap = Path(batch.snapshot_path)
-        sqlite_path = settings.sqlite_path
         # Close current engine connections by disposing if running under app; here we only best-effort
         try:
             bind = db.get_bind()
@@ -184,7 +202,12 @@ def rollback_batch_with_fallback(
         try:
             restore_snapshot(sqlite_path, snap)
         except Exception as e:  # pylint: disable=broad-exception-caught
-            return RollbackResult(batch_id=batch.id, status="failed", message=f"snapshot restore failed: {e}")
+            # Keep snapshot for investigation (requirement)
+            return RollbackResult(
+                batch_id=batch.id,
+                status="failed",
+                message=f"snapshot restore failed: {e}; kept_snapshot={snap}",
+            )
 
         # Re-validate using a fresh engine/session after restoring the file.
         engine = make_engine(str(sqlite_path))
@@ -197,6 +220,12 @@ def rollback_batch_with_fallback(
                 if fp2 != pre_fp:
                     return RollbackResult(batch_id=batch.id, status="failed", message="snapshot restored but fingerprint mismatch")
             update_ingestion_batch(db2, batch_id=batch.id, status="snapshot_restored", message="snapshot restored after rollback validation/fingerprint mismatch")
+            db2.commit()
+            # snapshot restore succeeded -> delete snapshot (do not accumulate)
+            _delete_snapshot_if_exists(batch.snapshot_path)
+            b3 = db2.get(IngestionBatch, batch.id)
+            if b3 is not None:
+                b3.snapshot_path = None
             db2.commit()
         return RollbackResult(batch_id=batch.id, status="snapshot_restored", message="snapshot restored")
 

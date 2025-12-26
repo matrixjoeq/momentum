@@ -36,14 +36,6 @@
         <input id="end" placeholder="YYYYMMDD" />
       </div>
       <div>
-        <label>复权类型（全局）</label>
-        <select id="adjust">
-          <option value="hfq" selected>后复权（默认）</option>
-          <option value="qfq">前复权</option>
-          <option value="none">不复权</option>
-        </select>
-      </div>
-      <div>
         <label>等权再平衡周期</label>
         <select id="rebalance">
           <option value="daily">日度</option>
@@ -81,29 +73,94 @@
     </div>
 
     <div class="panel">
+      <div class="muted" id="dataNote">数据口径：hfq（后复权）。净值/收益/回撤/夏普/索诺提等均使用 hfq 价格序列。</div>
       <div id="chart"></div>
     </div>
 
-    <div class="panel two">
-      <div>
-        <h3>等权组合指标</h3>
-        <table id="metrics"></table>
-      </div>
-      <div>
-        <h3>周期收益率（等权组合）</h3>
-        <div class="two">
-          <div>
-            <div class="muted">周度</div>
-            <table id="weekly"></table>
+    <div class="panel">
+      <div class="two" style="grid-template-columns: 1fr 1fr 1fr;">
+        <div>
+          <h3>等权组合指标</h3>
+          <table id="metrics"></table>
+
+          <h3 style="margin-top:16px">相关性矩阵（日收益，回测全区间）</h3>
+          <div class="muted">口径：hfq（后复权）。横纵坐标为标的编号（见下方映射）。</div>
+          <div id="corrLegend" class="muted" style="margin-top:6px;"></div>
+          <div id="corrHeatmap" style="width:100%; height:520px;"></div>
+        </div>
+
+        <div>
+          <h3>周期收益率（等权组合）</h3>
+
+          <div class="muted">周度</div>
+          <div class="row" style="gap:8px; margin:6px 0;">
+            <select id="weeklySortKey" style="min-width:120px;">
+              <option value="date">日期</option>
+              <option value="return">收益</option>
+            </select>
+            <select id="weeklySortDir" style="min-width:120px;">
+              <option value="desc">递减</option>
+              <option value="asc">递增</option>
+            </select>
+            <button id="weeklyPrev">上一页</button>
+            <button id="weeklyNext">下一页</button>
+            <span class="muted" id="weeklyPage"></span>
           </div>
-          <div>
-            <div class="muted">月度</div>
-            <table id="monthly"></table>
+          <table id="weekly"></table>
+
+          <div style="margin-top:12px">
+            <div class="muted">季度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="quarterlySortKey" style="min-width:120px;">
+                <option value="date">日期</option>
+                <option value="return">收益</option>
+              </select>
+              <select id="quarterlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="quarterlyPrev">上一页</button>
+              <button id="quarterlyNext">下一页</button>
+              <span class="muted" id="quarterlyPage"></span>
+            </div>
+            <table id="quarterly"></table>
           </div>
         </div>
-        <div style="margin-top:12px">
-          <div class="muted">年度</div>
-          <table id="yearly"></table>
+
+        <div>
+          <div class="muted" style="margin-top:38px">月度</div>
+          <div class="row" style="gap:8px; margin:6px 0;">
+            <select id="monthlySortKey" style="min-width:120px;">
+              <option value="date">日期</option>
+              <option value="return">收益</option>
+            </select>
+            <select id="monthlySortDir" style="min-width:120px;">
+              <option value="desc">递减</option>
+              <option value="asc">递增</option>
+            </select>
+            <button id="monthlyPrev">上一页</button>
+            <button id="monthlyNext">下一页</button>
+            <span class="muted" id="monthlyPage"></span>
+          </div>
+          <table id="monthly"></table>
+
+          <div style="margin-top:12px">
+            <div class="muted">年度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="yearlySortKey" style="min-width:120px;">
+                <option value="date">日期</option>
+                <option value="return">收益</option>
+              </select>
+              <select id="yearlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="yearlyPrev">上一页</button>
+              <button id="yearlyNext">下一页</button>
+              <span class="muted" id="yearlyPage"></span>
+            </div>
+            <table id="yearly"></table>
+          </div>
         </div>
       </div>
     </div>
@@ -120,6 +177,19 @@
 
     <div class="panel msg" id="msg"></div>
 
+    <div id="metricModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45);">
+      <div style="max-width:760px; margin:8vh auto; background:#fff; border-radius:10px; padding:16px 16px 12px 16px; box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+          <div>
+            <div id="metricModalTitle" style="font-weight:600; font-size:16px;"></div>
+            <div id="metricModalSub" class="muted" style="margin-top:4px;"></div>
+          </div>
+          <button id="metricModalClose" style="padding:6px 10px;">关闭</button>
+        </div>
+        <div id="metricModalBody" style="margin-top:10px; line-height:1.55;"></div>
+      </div>
+    </div>
+
     <script>
       const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
       const $ = (id) => document.getElementById(id);
@@ -135,6 +205,136 @@
 
       let pool = [];
       const selected = new Set();
+      const ADJUST_USED = "hfq"; // baseline research currently uses hfq only
+      const ANN_FACTOR = 252;
+
+      const metricHelp = {
+        benchmark_code: {
+          title: "基准标的（benchmark_code）",
+          sub: "用于信息比率（IR）的对比基准。",
+          body: `
+            <div><b>含义</b>：把“等权组合”的日收益与基准标的的日收益相减，得到主动收益（active return）。</div>
+            <div style="margin-top:8px"><b>口径</b>：当前页面所有收益与指标均使用 <b>${ADJUST_USED}</b>（后复权）价格序列。</div>
+          `,
+        },
+        rebalance: {
+          title: "等权再平衡周期（rebalance）",
+          sub: "决定等权组合的权重何时重置为等权。",
+          body: `
+            <div><b>含义</b>：等权组合在每个再平衡点将权重重置为等权（每个标的权重相同）。</div>
+            <div style="margin-top:8px"><b>实现</b>：日度=每天重置；周/月/季/年=在对应周期边界重置；不平衡=等权买入持有（不再重置）。</div>
+          `,
+        },
+        risk_free_rate: {
+          title: "无风险收益率（risk_free_rate）",
+          sub: "用于夏普比率与索诺提比率（年化）。默认 2.5%（长期中国0-1年国债）。",
+          body: `
+            <div><b>含义</b>：在风险调整收益指标中，从组合收益中扣除无风险收益。</div>
+            <div style="margin-top:8px"><b>换算</b>：年化 rf 按日频近似换算为 rf/252。</div>
+          `,
+        },
+        cumulative_return: {
+          title: "累积收益率（cumulative_return）",
+          sub: "区间内的总收益。",
+          body: `
+            <div><b>定义</b>：\\(R_{cum} = \\frac{NAV_T}{NAV_0} - 1\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：这里 NAV 为等权组合净值（起点=1）。</div>
+          `,
+        },
+        annualized_return: {
+          title: "年化收益率（annualized_return）",
+          sub: "把区间收益折算为年化复利。",
+          body: `
+            <div><b>定义</b>：\\(R_{ann} = (\\frac{NAV_T}{NAV_0})^{\\frac{${ANN_FACTOR}}{N}} - 1\\)，其中 N 为区间交易日数（约）。</div>
+            <div style="margin-top:8px"><b>注意</b>：这是基于交易日频率的折算，不等同于自然日年化。</div>
+          `,
+        },
+        annualized_volatility: {
+          title: "年化波动率（annualized_volatility）",
+          sub: "日收益率标准差的年化。",
+          body: `
+            <div><b>定义</b>：\\(\\sigma_{ann} = \\sigma_{daily} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：\\(\\sigma_{daily}\\) 为日收益率的样本标准差（ddof=1）。</div>
+          `,
+        },
+        max_drawdown: {
+          title: "最大回撤（max_drawdown）",
+          sub: "净值从历史峰值到后续低点的最大跌幅。",
+          body: `
+            <div><b>定义</b>：\\(MDD = \\min_t( \\frac{NAV_t}{\\max_{s\\le t} NAV_s} - 1 )\\)。</div>
+            <div style="margin-top:8px"><b>取值</b>：通常为负数，越接近 0 越好。</div>
+          `,
+        },
+        max_drawdown_recovery_days: {
+          title: "最大回撤修复时长（max_drawdown_recovery_days）",
+          sub: "最大回撤发生后，从峰值开始到再次创出新高的最长天数（用自然日计）。",
+          body: `
+            <div><b>定义</b>：沿时间轴跟踪“最新峰值日期”，在回撤区间内计算 (当前日期 - 峰值日期) 的最大值。</div>
+            <div style="margin-top:8px"><b>说明</b>：这里按日期差（自然日）计算，非交易日数。</div>
+          `,
+        },
+        sharpe_ratio: {
+          title: "夏普比率（sharpe_ratio）",
+          sub: "单位总波动的超额收益（相对无风险）。",
+          body: `
+            <div><b>定义（年化）</b>：\\(Sharpe = \\frac{\\mathbb{E}[r - rf/${ANN_FACTOR}]}{\\sigma(r - rf/${ANN_FACTOR})} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：r 为日收益率，rf 为年化无风险收益率。</div>
+          `,
+        },
+        calmar_ratio: {
+          title: "卡玛比率（calmar_ratio）",
+          sub: "年化收益相对最大回撤（更偏向回撤风险）。",
+          body: `
+            <div><b>定义</b>：\\(Calmar = \\frac{R_{ann}}{|MDD|}\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：当 MDD=0 时该值无意义。</div>
+          `,
+        },
+        sortino_ratio: {
+          title: "索诺提比率（sortino_ratio）",
+          sub: "只用下行波动衡量风险的超额收益。",
+          body: `
+            <div><b>定义（年化）</b>：\\(Sortino = \\frac{\\mathbb{E}[r - rf/${ANN_FACTOR}]}{\\sigma(\\min(r - rf/${ANN_FACTOR}, 0))} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：只统计负的（下行）超额收益作为“下行风险”。</div>
+          `,
+        },
+        information_ratio: {
+          title: "信息比率（information_ratio）",
+          sub: "单位跟踪误差的主动收益（相对基准）。",
+          body: `
+            <div><b>定义（年化）</b>：\\(IR = \\frac{\\mathbb{E}[r_p - r_b]}{\\sigma(r_p - r_b)} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：\\(r_p\\) 为组合日收益，\\(r_b\\) 为基准标的日收益。</div>
+          `,
+        },
+        ulcer_index: {
+          title: "溃疡指标（ulcer_index, UI）",
+          sub: "衡量“持有体验”：惩罚回撤的深度与持续时间（只看水下部分）。",
+          body: `
+            <div><b>步骤</b>：先算回撤 \\(DD_t = \\frac{NAV_t}{\\max_{s\\le t} NAV_s} - 1\\)（≤0）。</div>
+            <div style="margin-top:8px"><b>定义</b>：\\(UI = \\sqrt{\\frac{1}{T}\\sum (100\\cdot \\max(0,-DD_t))^2}\\)。</div>
+            <div style="margin-top:8px"><b>单位</b>：当前实现返回“百分比点”的 RMS（例如 5.0 表示平均水下幅度约 5% 的 RMS）。</div>
+          `,
+        },
+        ulcer_performance_index: {
+          title: "溃疡绩效指标（ulcer_performance_index, UPI）",
+          sub: "类似“收益/痛苦”：用超额年化收益除以 Ulcer Index。",
+          body: `
+            <div><b>定义</b>：\\(UPI = \\frac{R_{ann} - rf}{UI_{dec}}\\)，其中 \\(UI_{dec}=UI/100\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：rf 为年化无风险收益率；UI 越小、收益越高，UPI 越大。</div>
+          `,
+        },
+      };
+
+      function openMetricModal(key, metrics) {
+        const h = metricHelp[key] || { title: key, sub: "", body: "<div class='muted'>暂无说明。</div>" };
+        $("metricModalTitle").textContent = h.title;
+        $("metricModalSub").textContent = h.sub || "";
+        $("metricModalBody").innerHTML = h.body || "";
+        $("metricModal").style.display = "block";
+      }
+
+      function closeMetricModal() {
+        $("metricModal").style.display = "none";
+      }
 
       function ymdToNum(s) {
         if (!s || s.length < 8) return null;
@@ -220,8 +420,7 @@
       }
 
       async function loadPool() {
-        const adj = $("adjust").value || "hfq";
-        const resp = await api(`/etf?adjust=${encodeURIComponent(adj)}`, { method: "GET" });
+        const resp = await api(`/etf?adjust=${encodeURIComponent(ADJUST_USED)}`, { method: "GET" });
         pool = await resp.json();
         // default select all
         for (const it of pool) selected.add(it.code);
@@ -235,27 +434,84 @@
 
       function renderMetrics(metrics) {
         const rows = [
-          ["基准标的", metrics.benchmark_code],
-          ["无风险收益率(年化)", metrics.risk_free_rate != null ? fmtPct(metrics.risk_free_rate) : "-"],
-          ["累积收益率", fmtPct(metrics.cumulative_return)],
-          ["年化收益率", fmtPct(metrics.annualized_return)],
-          ["年化波动率", fmtPct(metrics.annualized_volatility)],
-          ["最大回撤", fmtPct(metrics.max_drawdown)],
-          ["最大回撤修复时长(天)", metrics.max_drawdown_recovery_days],
-          ["夏普比率", fmtNum(metrics.sharpe_ratio)],
-          ["卡玛比率", fmtNum(metrics.calmar_ratio)],
-          ["索诺提比率", fmtNum(metrics.sortino_ratio)],
-          ["信息比率", fmtNum(metrics.information_ratio)],
+          { key: "benchmark_code", label: "基准标的", value: metrics.benchmark_code },
+          { key: "rebalance", label: "再平衡周期", value: metrics.rebalance || "-" },
+          { key: "risk_free_rate", label: "无风险收益率(年化)", value: metrics.risk_free_rate != null ? fmtPct(metrics.risk_free_rate) : "-" },
+          { key: "cumulative_return", label: "累积收益率", value: fmtPct(metrics.cumulative_return) },
+          { key: "annualized_return", label: "年化收益率", value: fmtPct(metrics.annualized_return) },
+          { key: "annualized_volatility", label: "年化波动率", value: fmtPct(metrics.annualized_volatility) },
+          { key: "max_drawdown", label: "最大回撤", value: fmtPct(metrics.max_drawdown) },
+          { key: "max_drawdown_recovery_days", label: "最大回撤修复时长(天)", value: metrics.max_drawdown_recovery_days },
+          { key: "sharpe_ratio", label: "夏普比率", value: fmtNum(metrics.sharpe_ratio) },
+          { key: "calmar_ratio", label: "卡玛比率", value: fmtNum(metrics.calmar_ratio) },
+          { key: "sortino_ratio", label: "索诺提比率", value: fmtNum(metrics.sortino_ratio) },
+          { key: "information_ratio", label: "信息比率", value: fmtNum(metrics.information_ratio) },
+          { key: "ulcer_index", label: "溃疡指标(UI)", value: fmtNum(metrics.ulcer_index) },
+          { key: "ulcer_performance_index", label: "溃疡绩效(UPI)", value: fmtNum(metrics.ulcer_performance_index) },
         ];
         const t = $("metrics");
-        t.innerHTML = `<tr><th>指标</th><th>值</th></tr>` + rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+        t.innerHTML =
+          `<tr><th>指标</th><th>值</th></tr>` +
+          rows
+            .map(
+              (r) => `
+                <tr>
+                  <td>
+                    <span>${r.label}</span>
+                    <button class="helpBtn" data-metric="${r.key}" title="查看说明"
+                      style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">
+                      ?
+                    </button>
+                  </td>
+                  <td>${r.value}</td>
+                </tr>
+              `
+            )
+            .join("");
       }
 
-      function renderPeriodTable(id, data, limit=10) {
-        const t = $(id);
-        const head = `<tr><th>期末</th><th>收益</th></tr>`;
-        const body = (data || []).slice(-limit).reverse().map(x => `<tr><td>${x.period_end}</td><td>${fmtPct(x.return)}</td></tr>`).join("");
-        t.innerHTML = head + body;
+      const pageSize = 12;
+      const periodState = {
+        weekly: { page: 1, data: [] },
+        monthly: { page: 1, data: [] },
+        quarterly: { page: 1, data: [] },
+        yearly: { page: 1, data: [] },
+      };
+
+      function _sortedPeriodRows(rows, sortKey, sortDir) {
+        const arr = (rows || []).slice();
+        const key = sortKey === "return" ? "return" : "period_end";
+        arr.sort((a, b) => {
+          const av = key === "return" ? Number(a.return) : String(a.period_end);
+          const bv = key === "return" ? Number(b.return) : String(b.period_end);
+          if (av < bv) return -1;
+          if (av > bv) return 1;
+          return 0;
+        });
+        if (sortDir === "desc") arr.reverse();
+        return arr;
+      }
+
+      function renderPeriodPaged(kind) {
+        const st = periodState[kind];
+        const sortKey = $(`${kind}SortKey`).value;
+        const sortDir = $(`${kind}SortDir`).value;
+        const rows = _sortedPeriodRows(st.data, sortKey, sortDir);
+        const total = rows.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        st.page = Math.min(Math.max(1, st.page), totalPages);
+        const startIdx = (st.page - 1) * pageSize;
+        const pageRows = rows.slice(startIdx, startIdx + pageSize);
+        const t = $(kind);
+        t.innerHTML = `<tr><th>期末</th><th>收益</th></tr>` + pageRows.map(x => `<tr><td>${x.period_end}</td><td>${fmtPct(x.return)}</td></tr>`).join("");
+        $(`${kind}Page`).textContent = `${st.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+
+      function wirePeriodControls(kind) {
+        $(`${kind}SortKey`).addEventListener("change", () => { periodState[kind].page = 1; renderPeriodPaged(kind); });
+        $(`${kind}SortDir`).addEventListener("change", () => { periodState[kind].page = 1; renderPeriodPaged(kind); });
+        $(`${kind}Prev`).addEventListener("click", () => { periodState[kind].page -= 1; renderPeriodPaged(kind); });
+        $(`${kind}Next`).addEventListener("click", () => { periodState[kind].page += 1; renderPeriodPaged(kind); });
       }
 
       function plotNav(nav) {
@@ -266,6 +522,7 @@
           y: series[name],
           mode: "lines",
           name,
+          hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
         }));
         Plotly.newPlot(
           "chart",
@@ -277,6 +534,7 @@
               type: "log",
               tick0: 0,
               dtick: Math.log10(1.1), // one grid = +10%
+              tickformat: ".4f",
               showgrid: true,
               gridcolor: "#eee",
             },
@@ -285,12 +543,76 @@
         );
       }
 
-      function plotRolling(id, title, rollingMap) {
+      function plotRolling(id, title, rollingMap, yTickFormat) {
         const traces = [];
         for (const k of Object.keys(rollingMap || {})) {
-          traces.push({ x: rollingMap[k].dates, y: rollingMap[k].values, mode: "lines", name: k });
+          const isPct = yTickFormat === ".0%";
+          traces.push({
+            x: rollingMap[k].dates,
+            y: rollingMap[k].values,
+            mode: "lines",
+            name: k,
+            // Keep axis at 0-decimal percent as requested, but show more precision on hover
+            // so long windows (1y/3y) don't look like "steps" due to rounding.
+            hovertemplate: isPct ? "%{x}<br>%{y:.2%}<extra></extra>" : "%{x}<br>%{y:.4f}<extra></extra>",
+          });
         }
-        Plotly.newPlot(id, traces, { margin: { t: 20 }, legend: { orientation: "h" } }, { responsive: true });
+        Plotly.newPlot(
+          id,
+          traces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: yTickFormat ? { tickformat: yTickFormat } : undefined,
+          },
+          { responsive: true }
+        );
+      }
+
+      function plotCorrelation(corr) {
+        const el = $("corrHeatmap");
+        if (!corr || !corr.codes || !corr.matrix) {
+          el.innerHTML = "<div class='muted'>无相关性数据</div>";
+          return;
+        }
+        const codes = corr.codes;
+        const z = corr.matrix;
+        const n = codes.length;
+        const idx = Array.from({ length: n }, (_, i) => String(i + 1));
+        const text = z.map(row => row.map(v => (v == null || Number.isNaN(v)) ? "" : Number(v).toFixed(2)));
+
+        // legend: 1..N -> code + name
+        const nameByCode = new Map((pool || []).map(x => [x.code, x.name]));
+        const lines = codes.map((c, i) => `${i + 1}. ${c} ${nameByCode.get(c) || ""}`.trim());
+        $("corrLegend").textContent = lines.join("    ");
+
+        Plotly.newPlot(
+          "corrHeatmap",
+          [{
+            type: "heatmap",
+            x: idx,
+            y: idx,
+            z,
+            zmin: -1,
+            zmax: 1,
+            colorscale: [
+              [0.0, "#2ca02c"],  // green for -1
+              [0.5, "#ffffff"],  // white for 0
+              [1.0, "#d62728"],  // red for +1
+            ],
+            text,
+            texttemplate: "%{text}",
+            textfont: { color: "#000000" },
+            hovertemplate: "编号 %{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>",
+            showscale: false,
+          }],
+          {
+            margin: { t: 20, l: 60, r: 20, b: 60 },
+            xaxis: { tickmode: "array", tickvals: idx, ticktext: idx, side: "top" },
+            yaxis: { tickmode: "array", tickvals: idx, ticktext: idx, autorange: "reversed", scaleanchor: "x", scaleratio: 1 },
+          },
+          { responsive: true }
+        );
       }
 
       async function runAnalysis() {
@@ -299,7 +621,6 @@
         const start = $("start").value.trim();
         const end = $("end").value.trim();
         const benchmark_code = $("benchmark").value || null;
-        const adjust = $("adjust").value || "hfq";
         const rebalance = $("rebalance").value || "yearly";
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
@@ -308,35 +629,46 @@
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         $("status").textContent = "计算中...";
         setMsg("");
-        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust, rebalance, risk_free_rate }) });
+        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust: ADJUST_USED, rebalance, risk_free_rate }) });
         const text = await resp.text();
         $("status").textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         plotNav(data.nav);
         renderMetrics(data.metrics);
-        renderPeriodTable("weekly", data.period_returns.weekly);
-        renderPeriodTable("monthly", data.period_returns.monthly);
-        renderPeriodTable("yearly", data.period_returns.yearly, 20);
-        plotRolling("rollingReturns", "Rolling Returns", data.rolling.returns);
-        plotRolling("rollingDD", "Rolling Max Drawdown", data.rolling.max_drawdown);
+        periodState.weekly.data = data.period_returns.weekly || [];
+        periodState.monthly.data = data.period_returns.monthly || [];
+        periodState.quarterly.data = data.period_returns.quarterly || [];
+        periodState.yearly.data = data.period_returns.yearly || [];
+        periodState.weekly.page = 1;
+        periodState.monthly.page = 1;
+        periodState.quarterly.page = 1;
+        periodState.yearly.page = 1;
+        renderPeriodPaged("weekly");
+        renderPeriodPaged("monthly");
+        renderPeriodPaged("quarterly");
+        renderPeriodPaged("yearly");
+        plotCorrelation(data.correlation);
+        // show percent with 0 decimals
+        plotRolling("rollingReturns", "Rolling Returns", data.rolling.returns, ".0%");
+        plotRolling("rollingDD", "Rolling Max Drawdown", data.rolling.max_drawdown, ".0%");
       }
 
       $("run").addEventListener("click", runAnalysis);
-      $("adjust").addEventListener("change", () => {
-        // preserve user's current start/end; only clamp if new adjust's available range can't cover it
-        const curS = $("start").value;
-        const curE = $("end").value;
-        selected.clear();
-        loadPool()
-          .then(() => {
-            // restore then clamp if needed
-            if (curS) $("start").value = curS;
-            if (curE) $("end").value = curE;
-            maybeAdjustBacktestRange();
-          })
-          .catch(e => setMsg(String(e)));
+      $("metricModalClose").addEventListener("click", closeMetricModal);
+      $("metricModal").addEventListener("click", (e) => {
+        if (e.target && e.target.id === "metricModal") closeMetricModal();
       });
+      $("metrics").addEventListener("click", (e) => {
+        const btn = e.target.closest && e.target.closest("button.helpBtn");
+        if (!btn) return;
+        const key = btn.getAttribute("data-metric");
+        openMetricModal(key, {});
+      });
+      wirePeriodControls("weekly");
+      wirePeriodControls("monthly");
+      wirePeriodControls("quarterly");
+      wirePeriodControls("yearly");
       $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); });
       $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); });
       $("selInvert").addEventListener("click", () => {

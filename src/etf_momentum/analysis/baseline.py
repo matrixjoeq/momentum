@@ -113,6 +113,21 @@ def _rolling_max_drawdown(nav: pd.Series, window: int) -> pd.Series:
     return nav.rolling(window=window, min_periods=window).apply(lambda x: f(x.to_numpy()), raw=False)
 
 
+def _ulcer_index(nav: pd.Series, *, in_percent: bool = True) -> float:
+    """
+    Ulcer Index (UI): RMS of percentage drawdowns from prior peaks.
+
+    Common definition uses percent drawdown (0..100). We default to percent units.
+    """
+    if nav.empty:
+        return float("nan")
+    peak = nav.cummax()
+    dd = nav / peak - 1.0  # <= 0
+    underwater = (-dd).clip(lower=0.0)
+    x = underwater * (100.0 if in_percent else 1.0)
+    return float(np.sqrt(np.mean(np.square(x.to_numpy(dtype=float)))))
+
+
 def load_close_prices(
     db: Session,
     *,
@@ -222,6 +237,16 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     nav_common = nav.loc[common_start:]
     ret_common = daily_ret.loc[common_start:].fillna(0.0)
 
+    # correlation matrix (using full backtest range after common_start)
+    corr_ret = ret_common[codes].astype(float)
+    corr = corr_ret.corr(method="pearson")
+    corr_out = {
+        "method": "pearson",
+        "n_obs": int(len(corr_ret.index)),
+        "codes": [c for c in codes if c in corr.columns],
+        "matrix": corr.to_numpy(dtype=float).tolist(),
+    }
+
     # equal-weight with configurable rebalancing
     ew_nav = _compute_equal_weight_nav(ret_common[codes], rebalance=inp.rebalance)
     ew_ret = ew_nav.pct_change().fillna(0.0)
@@ -243,6 +268,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
 
     weekly = period_returns(ew_nav, "W-FRI")
     monthly = period_returns(ew_nav, "ME")
+    quarterly = period_returns(ew_nav, "QE")
     yearly = period_returns(ew_nav, "YE")
 
     # metrics on ew
@@ -255,6 +281,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
     sortino = _sortino(ew_ret, rf=float(inp.risk_free_rate))
     ir = _information_ratio(ew_ret - bench_ret.fillna(0.0))
+    ui = _ulcer_index(ew_nav, in_percent=True)
+    ui_den = ui / 100.0
+    upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
 
     metrics = {
         "benchmark_code": bench_code,
@@ -269,6 +298,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "calmar_ratio": calmar,
         "sortino_ratio": sortino,
         "information_ratio": ir,
+        "ulcer_index": ui,
+        "ulcer_performance_index": upi,
     }
 
     # rolling
@@ -301,8 +332,14 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
         "codes": codes,
         "nav": {"dates": dates, "series": series},
-        "period_returns": {"weekly": weekly.to_dict(orient="records"), "monthly": monthly.to_dict(orient="records"), "yearly": yearly.to_dict(orient="records")},
+        "period_returns": {
+            "weekly": weekly.to_dict(orient="records"),
+            "monthly": monthly.to_dict(orient="records"),
+            "quarterly": quarterly.to_dict(orient="records"),
+            "yearly": yearly.to_dict(orient="records"),
+        },
         "metrics": metrics,
+        "correlation": corr_out,
         "rolling": rolling_out,
     }
 

@@ -13,10 +13,17 @@ def test_etf_list_range_changes_with_adjust(api_client):
     assert it_h["last_data_start_date"] == "20240102"
     assert it_h["last_data_end_date"] == "20240103"
 
-    # qfq should show missing range
+    # qfq should also have identical range
     resp_q = c.get("/api/etf?adjust=qfq")
     assert resp_q.status_code == 200
     it_q = resp_q.json()[0]
-    assert it_q["last_data_start_date"] is None
-    assert it_q["last_data_end_date"] is None
+    assert it_q["last_data_start_date"] == "20240102"
+    assert it_q["last_data_end_date"] == "20240103"
+
+    # none should also have identical range
+    resp_n = c.get("/api/etf?adjust=none")
+    assert resp_n.status_code == 200
+    it_n = resp_n.json()[0]
+    assert it_n["last_data_start_date"] == "20240102"
+    assert it_n["last_data_end_date"] == "20240103"
 

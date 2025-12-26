@@ -57,4 +57,11 @@ def test_compute_baseline_basic_metrics(session_factory):
     assert out["nav"]["series"]["EW"][0] == pytest.approx(1.0)
     assert out["metrics"]["cumulative_return"] == pytest.approx(out["nav"]["series"]["EW"][-1] - 1.0, rel=1e-12)
     assert out["metrics"]["max_drawdown"] <= 0.0
+    assert "ulcer_index" in out["metrics"]
+    assert out["metrics"]["ulcer_index"] >= 0.0
+    assert "ulcer_performance_index" in out["metrics"]
+    assert "correlation" in out
+    assert out["correlation"]["codes"] == [code_a, code_b]
+    assert len(out["correlation"]["matrix"]) == 2
+    assert len(out["correlation"]["matrix"][0]) == 2
 

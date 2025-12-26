@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from ..data.akshare_fetcher import FetchRequest, fetch_etf_daily_qfq
-from ..db.models import EtfPool
+from ..db.models import EtfPool, IngestionBatch
 from ..db.repo import (
     PriceRow,
     compute_price_fingerprint,
@@ -60,6 +60,31 @@ def make_sqlite_snapshot(sqlite_path: Path, *, batch_id: int) -> Path:
     snap = backups_dir / f"{sqlite_path.stem}_batch{batch_id}_{ts}{sqlite_path.suffix}"
     shutil.copy2(sqlite_path, snap)
     return snap
+
+
+def _cleanup_snapshot_for_batch(db: Session, *, batch_id: int, snapshot_path: Path | None) -> None:
+    """
+    Best-effort cleanup: remove snapshot file and clear snapshot_path in batch row.
+
+    Per product requirement, snapshots are ephemeral and should not accumulate.
+    """
+    if snapshot_path is None:
+        return
+    try:
+        if snapshot_path.exists():
+            snapshot_path.unlink()
+    except Exception:  # pylint: disable=broad-exception-caught
+        # If deletion fails, keep the file (best-effort).
+        return
+    try:
+        with Session(bind=db.get_bind()) as s2:
+            b2 = s2.get(IngestionBatch, batch_id)
+            if b2 is not None:
+                b2.snapshot_path = None
+            s2.commit()
+    except Exception:  # pylint: disable=broad-exception-caught
+        # best-effort
+        return
 
 
 def ingest_one_etf(
@@ -217,6 +242,7 @@ def ingest_one_etf(
         post_fp = compute_price_fingerprint(db, code=code, start_date=start_d, end_date=end_d, adjust=adj)
         update_ingestion_batch(db, batch_id=batch.id, status="success", message=f"rows={len(rows)} upserted={n}", pre_fingerprint=pre_fp, post_fingerprint=post_fp)
         db.commit()
+        _cleanup_snapshot_for_batch(db, batch_id=batch.id, snapshot_path=snapshot_path)
         return IngestResult(batch_id=batch.id, code=code, upserted=n, status="success")
     except Exception as e:  # pylint: disable=broad-exception-caught
         db.rollback()
@@ -224,5 +250,6 @@ def ingest_one_etf(
         msg = e.to_json() if isinstance(e, ValidationError) else str(e)
         update_ingestion_batch(db, batch_id=batch.id, status="failed", message=msg)
         db.commit()
+        _cleanup_snapshot_for_batch(db, batch_id=batch.id, snapshot_path=snapshot_path)
         return IngestResult(batch_id=batch.id, code=code, upserted=0, status="failed", message=msg)
 

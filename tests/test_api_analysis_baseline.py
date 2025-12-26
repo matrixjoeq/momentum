@@ -27,8 +27,14 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert data["metrics"]["benchmark_code"] == "510300"
     assert data["metrics"]["rebalance"] == "yearly"
     assert data["metrics"]["risk_free_rate"] == 0.02
+    assert "ulcer_index" in data["metrics"]
+    assert "ulcer_performance_index" in data["metrics"]
     assert "EW" in data["nav"]["series"]
     assert "510300" in data["nav"]["series"]
     assert "511010" in data["nav"]["series"]
     assert any(k.startswith("BENCH:") for k in data["nav"]["series"].keys())
+    assert "quarterly" in data["period_returns"]
+    assert "correlation" in data
+    assert data["correlation"]["codes"] == ["510300", "511010"]
+    assert len(data["correlation"]["matrix"]) == 2
 
