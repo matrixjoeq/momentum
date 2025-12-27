@@ -60,6 +60,9 @@ def test_compute_baseline_basic_metrics(session_factory):
     assert "ulcer_index" in out["metrics"]
     assert out["metrics"]["ulcer_index"] >= 0.0
     assert "ulcer_performance_index" in out["metrics"]
+    assert "holding_weekly_win_rate" in out["metrics"]
+    assert "holding_quarterly_payoff_ratio" in out["metrics"]
+    assert "holding_yearly_kelly_fraction" in out["metrics"]
     assert "correlation" in out
     assert out["correlation"]["codes"] == [code_a, code_b]
     assert len(out["correlation"]["matrix"]) == 2

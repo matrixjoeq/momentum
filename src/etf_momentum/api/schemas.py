@@ -83,7 +83,7 @@ class BaselineAnalysisRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
     benchmark_code: str | None = None
     adjust: str = Field(default="hfq", description="qfq/hfq/none (global)")
-    rebalance: str = Field(default="yearly", description="daily/weekly/monthly/quarterly/yearly/none")
+    rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly/none")
     risk_free_rate: float = Field(
         default=0.025,
         description="Annualized risk-free rate for Sharpe/Sortino (decimal). Default 0.025 ~= 2.5% (CN 0-1y gov).",
@@ -91,4 +91,19 @@ class BaselineAnalysisRequest(BaseModel):
     rolling_weeks: list[int] = Field(default_factory=lambda: [4, 12, 52])
     rolling_months: list[int] = Field(default_factory=lambda: [3, 6, 12])
     rolling_years: list[int] = Field(default_factory=lambda: [1, 3])
+
+
+class RotationBacktestRequest(BaseModel):
+    codes: list[str] = Field(min_length=1)
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly")
+    top_k: int = Field(default=1, ge=1)
+    lookback_days: int = Field(default=20, ge=1)
+    skip_days: int = Field(default=0, ge=0)
+    risk_off: bool = False
+    defensive_code: str | None = None
+    momentum_floor: float = 0.0
+    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    cost_bps: float = Field(default=0.0, ge=0.0)
 

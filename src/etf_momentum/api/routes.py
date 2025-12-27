@@ -10,6 +10,7 @@ import datetime as dt
 from .deps import get_akshare, get_session
 from .schemas import (
     BaselineAnalysisRequest,
+    RotationBacktestRequest,
     EtfPoolOut,
     EtfPoolUpsert,
     FetchResult,
@@ -19,6 +20,7 @@ from .schemas import (
     ValidationPolicyOut,
 )
 from ..analysis.baseline import BaselineInputs, compute_baseline
+from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..data.ingestion import ingest_one_etf
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..db.repo import (
@@ -91,6 +93,28 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
     )
     try:
         return compute_baseline(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/rotation")
+def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(get_session)) -> dict:
+    inp = RotationAnalysisInputs(
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        rebalance=payload.rebalance,
+        top_k=payload.top_k,
+        lookback_days=payload.lookback_days,
+        skip_days=payload.skip_days,
+        risk_off=payload.risk_off,
+        defensive_code=payload.defensive_code,
+        momentum_floor=payload.momentum_floor,
+        risk_free_rate=payload.risk_free_rate,
+        cost_bps=payload.cost_bps,
+    )
+    try:
+        return compute_rotation_backtest(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -264,7 +288,7 @@ def fetch_one(
 
 @router.post("/fetch-all", response_model=list[FetchResult])
 def fetch_all(
-    adjust: str = "hfq",  # kept for backward-compat; ignored (we always fetch all adjusts)
+    adjust: str = "hfq",  # pylint: disable=unused-argument  # backward-compat; ignored
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[FetchResult]:

@@ -39,10 +39,10 @@
         <label>等权再平衡周期</label>
         <select id="rebalance">
           <option value="daily">日度</option>
-          <option value="weekly">周度</option>
+          <option value="weekly" selected>周度（默认）</option>
           <option value="monthly">月度</option>
           <option value="quarterly">季度</option>
-          <option value="yearly" selected>年度（默认）</option>
+          <option value="yearly">年度</option>
           <option value="none">不平衡（买入持有）</option>
         </select>
       </div>
@@ -78,91 +78,97 @@
     </div>
 
     <div class="panel">
-      <div class="two" style="grid-template-columns: 1fr 1fr 1fr;">
+      <div class="two" style="grid-template-columns: 1.05fr 1.95fr; align-items:start;">
         <div>
           <h3>等权组合指标</h3>
           <table id="metrics"></table>
-
-          <h3 style="margin-top:16px">相关性矩阵（日收益，回测全区间）</h3>
-          <div class="muted">口径：hfq（后复权）。横纵坐标为标的编号（见下方映射）。</div>
-          <div id="corrLegend" class="muted" style="margin-top:6px;"></div>
-          <div id="corrHeatmap" style="width:100%; height:520px;"></div>
         </div>
 
         <div>
           <h3>周期收益率（等权组合）</h3>
 
-          <div class="muted">周度</div>
-          <div class="row" style="gap:8px; margin:6px 0;">
-            <select id="weeklySortKey" style="min-width:120px;">
-              <option value="date">日期</option>
-              <option value="return">收益</option>
-            </select>
-            <select id="weeklySortDir" style="min-width:120px;">
-              <option value="desc">递减</option>
-              <option value="asc">递增</option>
-            </select>
-            <button id="weeklyPrev">上一页</button>
-            <button id="weeklyNext">下一页</button>
-            <span class="muted" id="weeklyPage"></span>
-          </div>
-          <table id="weekly"></table>
+          <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start;">
+            <div>
+              <div class="muted">周度</div>
+              <div class="row" style="gap:8px; margin:6px 0;">
+                <select id="weeklySortKey" style="min-width:120px;">
+                  <option value="date">日期</option>
+                  <option value="return">收益</option>
+                </select>
+                <select id="weeklySortDir" style="min-width:120px;">
+                  <option value="desc">递减</option>
+                  <option value="asc">递增</option>
+                </select>
+                <button id="weeklyPrev">上一页</button>
+                <button id="weeklyNext">下一页</button>
+                <span class="muted" id="weeklyPage"></span>
+              </div>
+              <table id="weekly"></table>
 
-          <div style="margin-top:12px">
-            <div class="muted">季度</div>
-            <div class="row" style="gap:8px; margin:6px 0;">
-              <select id="quarterlySortKey" style="min-width:120px;">
-                <option value="date">日期</option>
-                <option value="return">收益</option>
-              </select>
-              <select id="quarterlySortDir" style="min-width:120px;">
-                <option value="desc">递减</option>
-                <option value="asc">递增</option>
-              </select>
-              <button id="quarterlyPrev">上一页</button>
-              <button id="quarterlyNext">下一页</button>
-              <span class="muted" id="quarterlyPage"></span>
+              <div style="margin-top:12px">
+                <div class="muted">季度</div>
+                <div class="row" style="gap:8px; margin:6px 0;">
+                  <select id="quarterlySortKey" style="min-width:120px;">
+                    <option value="date">日期</option>
+                    <option value="return">收益</option>
+                  </select>
+                  <select id="quarterlySortDir" style="min-width:120px;">
+                    <option value="desc">递减</option>
+                    <option value="asc">递增</option>
+                  </select>
+                  <button id="quarterlyPrev">上一页</button>
+                  <button id="quarterlyNext">下一页</button>
+                  <span class="muted" id="quarterlyPage"></span>
+                </div>
+                <table id="quarterly"></table>
+              </div>
             </div>
-            <table id="quarterly"></table>
-          </div>
-        </div>
 
-        <div>
-          <div class="muted" style="margin-top:38px">月度</div>
-          <div class="row" style="gap:8px; margin:6px 0;">
-            <select id="monthlySortKey" style="min-width:120px;">
-              <option value="date">日期</option>
-              <option value="return">收益</option>
-            </select>
-            <select id="monthlySortDir" style="min-width:120px;">
-              <option value="desc">递减</option>
-              <option value="asc">递增</option>
-            </select>
-            <button id="monthlyPrev">上一页</button>
-            <button id="monthlyNext">下一页</button>
-            <span class="muted" id="monthlyPage"></span>
-          </div>
-          <table id="monthly"></table>
+            <div>
+              <div class="muted">月度</div>
+              <div class="row" style="gap:8px; margin:6px 0;">
+                <select id="monthlySortKey" style="min-width:120px;">
+                  <option value="date">日期</option>
+                  <option value="return">收益</option>
+                </select>
+                <select id="monthlySortDir" style="min-width:120px;">
+                  <option value="desc">递减</option>
+                  <option value="asc">递增</option>
+                </select>
+                <button id="monthlyPrev">上一页</button>
+                <button id="monthlyNext">下一页</button>
+                <span class="muted" id="monthlyPage"></span>
+              </div>
+              <table id="monthly"></table>
 
-          <div style="margin-top:12px">
-            <div class="muted">年度</div>
-            <div class="row" style="gap:8px; margin:6px 0;">
-              <select id="yearlySortKey" style="min-width:120px;">
-                <option value="date">日期</option>
-                <option value="return">收益</option>
-              </select>
-              <select id="yearlySortDir" style="min-width:120px;">
-                <option value="desc">递减</option>
-                <option value="asc">递增</option>
-              </select>
-              <button id="yearlyPrev">上一页</button>
-              <button id="yearlyNext">下一页</button>
-              <span class="muted" id="yearlyPage"></span>
+              <div style="margin-top:12px">
+                <div class="muted">年度</div>
+                <div class="row" style="gap:8px; margin:6px 0;">
+                  <select id="yearlySortKey" style="min-width:120px;">
+                    <option value="date">日期</option>
+                    <option value="return">收益</option>
+                  </select>
+                  <select id="yearlySortDir" style="min-width:120px;">
+                    <option value="desc">递减</option>
+                    <option value="asc">递增</option>
+                  </select>
+                  <button id="yearlyPrev">上一页</button>
+                  <button id="yearlyNext">下一页</button>
+                  <span class="muted" id="yearlyPage"></span>
+                </div>
+                <table id="yearly"></table>
+              </div>
             </div>
-            <table id="yearly"></table>
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="panel">
+      <h3>相关性矩阵（日收益，回测全区间）</h3>
+      <div class="muted">口径：hfq（后复权）。横纵坐标为标的编号（见下方映射）。</div>
+      <div id="corrLegend" class="muted" style="margin-top:6px;"></div>
+      <div id="corrHeatmap" style="width:100%; height:520px;"></div>
     </div>
 
     <div class="panel">
@@ -173,6 +179,188 @@
     <div class="panel">
       <h3>滚动最大回撤（等权组合）</h3>
       <div id="rollingDD"></div>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin-top: 8px">动量轮动回测</h2>
+      <div class="muted">信号：hfq（后复权）动量；交易价格：none（不复权）；轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。</div>
+
+      <div class="panel row">
+        <div>
+          <label>调仓频率 <button class="helpBtn" data-metric="param_rot_rebalance" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <select id="rotRebalance">
+            <option value="daily">日度</option>
+            <option value="weekly" selected>周度（默认）</option>
+            <option value="monthly">月度</option>
+            <option value="quarterly">季度</option>
+            <option value="yearly">年度</option>
+          </select>
+        </div>
+        <div>
+          <label>TopK <button class="helpBtn" data-metric="param_rot_topk" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <input id="rotTopK" value="1" />
+        </div>
+        <div>
+          <label>动量回看(交易日) <button class="helpBtn" data-metric="param_rot_lookback" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <input id="rotLookback" value="20" />
+        </div>
+        <div>
+          <label>跳过最近(交易日) <button class="helpBtn" data-metric="param_rot_skip" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <input id="rotSkip" value="0" />
+        </div>
+        <div>
+          <label>交易成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <input id="rotCost" value="0" />
+        </div>
+        <div>
+          <label>风险规避 <button class="helpBtn" data-metric="param_rot_riskoff" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <select id="rotRiskOff">
+            <option value="false" selected>关闭（默认）</option>
+            <option value="true">启用</option>
+          </select>
+        </div>
+        <div>
+          <label>防守标的(可空) <button class="helpBtn" data-metric="param_rot_defensive" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <input id="rotDefensive" placeholder="如 511010" />
+        </div>
+        <div>
+          <label>动量门槛 <button class="helpBtn" data-metric="param_rot_floor" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <input id="rotFloor" value="0" />
+        </div>
+        <button id="runRotation">运行轮动回测</button>
+      </div>
+
+      <div class="panel two" style="grid-template-columns: 1fr 1fr;">
+        <div>
+          <h3>净值曲线（轮动 vs 等权同频再平衡）</h3>
+          <div id="rotChart" style="width:100%; height:520px;"></div>
+        </div>
+        <div>
+          <h3>超额净值（轮动 / 等权）</h3>
+          <div id="rotExcessChart" style="width:100%; height:520px;"></div>
+        </div>
+      </div>
+
+      <div class="panel two" style="grid-template-columns: 1fr 1fr;">
+        <div>
+          <h3>轮动策略指标</h3>
+          <table id="rotMetrics"></table>
+        </div>
+        <div>
+          <h3>轮动策略胜率赔率（按调仓周期）</h3>
+          <table id="rotWinPayoff"></table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>轮动策略周期收益率（策略 none vs 基准 hfq）</h3>
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:8px">
+          <div>
+            <div class="muted">周度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="rotWeeklySortKey" style="min-width:140px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="rotWeeklySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="rotWeeklyPrev">上一页</button>
+              <button id="rotWeeklyNext">下一页</button>
+              <span class="muted" id="rotWeeklyPage"></span>
+            </div>
+            <table id="rotWeekly"></table>
+          </div>
+          <div>
+            <div class="muted">月度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="rotMonthlySortKey" style="min-width:140px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="rotMonthlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="rotMonthlyPrev">上一页</button>
+              <button id="rotMonthlyNext">下一页</button>
+              <span class="muted" id="rotMonthlyPage"></span>
+            </div>
+            <table id="rotMonthly"></table>
+          </div>
+        </div>
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:12px">
+          <div>
+            <div class="muted">季度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="rotQuarterlySortKey" style="min-width:140px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="rotQuarterlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="rotQuarterlyPrev">上一页</button>
+              <button id="rotQuarterlyNext">下一页</button>
+              <span class="muted" id="rotQuarterlyPage"></span>
+            </div>
+            <table id="rotQuarterly"></table>
+          </div>
+          <div>
+            <div class="muted">年度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="rotYearlySortKey" style="min-width:140px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="rotYearlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="rotYearlyPrev">上一页</button>
+              <button id="rotYearlyNext">下一页</button>
+              <span class="muted" id="rotYearlyPage"></span>
+            </div>
+            <table id="rotYearly"></table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel two" style="grid-template-columns: 1fr 1fr;">
+        <div>
+          <h3>滚动收益率（轮动策略）</h3>
+          <div id="rotRollingReturns" style="width:100%; height:520px;"></div>
+        </div>
+        <div>
+          <h3>滚动最大回撤（轮动策略）</h3>
+          <div id="rotRollingDD" style="width:100%; height:520px;"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>逐期对比（轮动 vs 等权）</h3>
+        <div class="row" style="gap:8px; margin:6px 0;">
+          <select id="rotPeriodSortKey" style="min-width:140px;">
+            <option value="start">开始日期</option>
+            <option value="end">结束日期</option>
+            <option value="excess">超额收益</option>
+          </select>
+          <select id="rotPeriodSortDir" style="min-width:120px;">
+            <option value="desc">递减</option>
+            <option value="asc">递增</option>
+          </select>
+          <button id="rotPeriodPrev">上一页</button>
+          <button id="rotPeriodNext">下一页</button>
+          <span class="muted" id="rotPeriodPage"></span>
+        </div>
+        <table id="rotPeriods"></table>
+      </div>
     </div>
 
     <div class="panel msg" id="msg"></div>
@@ -322,6 +510,247 @@
             <div style="margin-top:8px"><b>说明</b>：rf 为年化无风险收益率；UI 越小、收益越高，UPI 越大。</div>
           `,
         },
+        holding_weekly_win_rate: {
+          title: "周度绝对胜率（holding_weekly_win_rate）",
+          sub: "等权组合按周统计：周收益>0 的比例。",
+          body: `<div><b>计算</b>：胜率 = count(r_week>0) / count(r_week)。</div>`,
+        },
+        holding_weekly_payoff_ratio: {
+          title: "周度绝对赔率（holding_weekly_payoff_ratio）",
+          sub: "等权组合按周统计：平均盈利周收益 / 平均亏损周收益(绝对值)。",
+          body: `<div><b>计算</b>：payoff = mean(r|r>0) / abs(mean(r|r<0))（算术平均）。</div>`,
+        },
+        holding_weekly_kelly_fraction: {
+          title: "周度绝对凯利比（holding_weekly_kelly_fraction）",
+          sub: "基于周度绝对胜率与赔率的二项近似。",
+          body: `<div><b>计算</b>：f* = p - (1-p)/b，其中 p=胜率，b=赔率。</div>`,
+        },
+        holding_monthly_win_rate: {
+          title: "月度绝对胜率（holding_monthly_win_rate）",
+          sub: "等权组合按月统计：月收益>0 的比例。",
+          body: `<div><b>计算</b>：胜率 = count(r_month>0) / count(r_month)。</div>`,
+        },
+        holding_monthly_payoff_ratio: {
+          title: "月度绝对赔率（holding_monthly_payoff_ratio）",
+          sub: "等权组合按月统计：平均盈利月收益 / 平均亏损月收益(绝对值)。",
+          body: `<div><b>计算</b>：payoff = mean(r|r>0) / abs(mean(r|r<0))（算术平均）。</div>`,
+        },
+        holding_monthly_kelly_fraction: {
+          title: "月度绝对凯利比（holding_monthly_kelly_fraction）",
+          sub: "基于月度绝对胜率与赔率的二项近似。",
+          body: `<div><b>计算</b>：f* = p - (1-p)/b。</div>`,
+        },
+        holding_quarterly_win_rate: {
+          title: "季度绝对胜率（holding_quarterly_win_rate）",
+          sub: "等权组合按季统计：季度收益>0 的比例。",
+          body: `<div><b>计算</b>：胜率 = count(r_q>0) / count(r_q)。</div>`,
+        },
+        holding_quarterly_payoff_ratio: {
+          title: "季度绝对赔率（holding_quarterly_payoff_ratio）",
+          sub: "等权组合按季统计：平均盈利季度收益 / 平均亏损季度收益(绝对值)。",
+          body: `<div><b>计算</b>：payoff = mean(r|r>0) / abs(mean(r|r<0))（算术平均）。</div>`,
+        },
+        holding_quarterly_kelly_fraction: {
+          title: "季度绝对凯利比（holding_quarterly_kelly_fraction）",
+          sub: "基于季度绝对胜率与赔率的二项近似。",
+          body: `<div><b>计算</b>：f* = p - (1-p)/b。</div>`,
+        },
+        holding_yearly_win_rate: {
+          title: "年度绝对胜率（holding_yearly_win_rate）",
+          sub: "等权组合按年统计：年度收益>0 的比例。",
+          body: `<div><b>计算</b>：胜率 = count(r_y>0) / count(r_y)。</div>`,
+        },
+        holding_yearly_payoff_ratio: {
+          title: "年度绝对赔率（holding_yearly_payoff_ratio）",
+          sub: "等权组合按年统计：平均盈利年度收益 / 平均亏损年度收益(绝对值)。",
+          body: `<div><b>计算</b>：payoff = mean(r|r>0) / abs(mean(r|r<0))（算术平均）。</div>`,
+        },
+        holding_yearly_kelly_fraction: {
+          title: "年度绝对凯利比（holding_yearly_kelly_fraction）",
+          sub: "基于年度绝对胜率与赔率的二项近似。",
+          body: `<div><b>计算</b>：f* = p - (1-p)/b。</div>`,
+        },
+        param_rot_rebalance: {
+          title: "调仓频率（rebalance）",
+          sub: "每隔多长时间重新选择 TopK 并调仓。",
+          body: `
+            <div><b>含义</b>：在日/周/月/季/年周期末根据动量重新排名，下一交易日开始按新持仓运行。</div>
+            <div style="margin-top:8px"><b>用途</b>：控制换手与信号稳定性。频率越高换手越大，越低反应越慢。</div>
+            <div style="margin-top:8px"><b>范围</b>：daily / weekly / monthly / quarterly / yearly。</div>
+            <div style="margin-top:8px"><b>示例</b>：weekly 表示每周调仓；daily 表示每日调仓。</div>
+          `,
+        },
+        param_rot_topk: {
+          title: "TopK",
+          sub: "每次调仓持有动量排名前 K 的标的（等权）。",
+          body: `
+            <div><b>含义</b>：K=1 表示单标的轮动；K>1 表示持有多标的等权组合。</div>
+            <div style="margin-top:8px"><b>用途</b>：K 越大分散越强、波动更低，但动量暴露更弱。</div>
+            <div style="margin-top:8px"><b>范围</b>：整数 ≥ 1，且不应超过可用标的数量。</div>
+            <div style="margin-top:8px"><b>示例</b>：TopK=2 在 4 个标的池里会持有前 2 名等权。</div>
+          `,
+        },
+        param_rot_lookback: {
+          title: "动量回看（lookback_days）",
+          sub: "动量收益计算的回看窗口（交易日）。",
+          body: `
+            <div><b>含义</b>：动量分数 = 过去回看窗口内的累计收益（可配合 skip_days 跳过最近段）。</div>
+            <div style="margin-top:8px"><b>用途</b>：窗口越长更偏“长期趋势”，越短更偏“短期动量”。</div>
+            <div style="margin-top:8px"><b>范围</b>：整数 ≥ 1。常用：63(3M)、126(6M)、252(12M)。</div>
+            <div style="margin-top:8px"><b>示例</b>：252 表示约 1 年动量。</div>
+          `,
+        },
+        param_rot_skip: {
+          title: "跳过最近（skip_days）",
+          sub: "计算动量时跳过最近 N 个交易日（常用于 12-1）。",
+          body: `
+            <div><b>含义</b>：动量分数用 \\(close_{t-skip}/close_{t-skip-lookback} - 1\\)。</div>
+            <div style="margin-top:8px"><b>用途</b>：降低短期反转/噪声影响。</div>
+            <div style="margin-top:8px"><b>范围</b>：整数 ≥ 0。常用：21（约 1 个月）。</div>
+            <div style="margin-top:8px"><b>示例</b>：lookback=252 且 skip=21 即 12-1 动量。</div>
+          `,
+        },
+        param_rot_cost: {
+          title: "交易成本（cost_bps）",
+          sub: "按换手率估算的成本（bps）。",
+          body: `
+            <div><b>含义</b>：每日换手率 \\(turnover=\\frac{1}{2}\\sum |w_t-w_{t-1}|\\)，成本=turnover×(bps/10000)，从当日收益中扣减。</div>
+            <div style="margin-top:8px"><b>用途</b>：让回测更接近实盘，抑制过度换手策略。</div>
+            <div style="margin-top:8px"><b>范围</b>：≥0。常见取值：2~10 bps（视品种/滑点假设）。</div>
+            <div style="margin-top:8px"><b>示例</b>：cost_bps=5 表示每 100% 换手扣 0.05%。</div>
+          `,
+        },
+        param_rot_riskoff: {
+          title: "风险规避（risk_off）",
+          sub: "当动量不达标时切换到防守标的。",
+          body: `
+            <div><b>含义</b>：若当期最优动量 ≤ 动量门槛，则持有防守标的（如国债 ETF）。</div>
+            <div style="margin-top:8px"><b>用途</b>：降低大回撤，提高持有体验。</div>
+            <div style="margin-top:8px"><b>范围</b>：true/false。</div>
+            <div style="margin-top:8px"><b>示例</b>：开启 risk_off，defensive=511010，floor=0。</div>
+          `,
+        },
+        param_rot_defensive: {
+          title: "防守标的（defensive_code）",
+          sub: "风险规避触发时切换持有的标的代码。",
+          body: `
+            <div><b>含义</b>：当风险规避触发时，持有该标的（通常是国债/货币类）。</div>
+            <div style="margin-top:8px"><b>用途</b>：提供“避险仓位”。</div>
+            <div style="margin-top:8px"><b>范围</b>：可空；不为空时必须在候选池里且有数据。</div>
+            <div style="margin-top:8px"><b>示例</b>：511010（国债ETF）。</div>
+          `,
+        },
+        param_rot_floor: {
+          title: "动量门槛（momentum_floor）",
+          sub: "风险规避触发阈值（用动量分数判断）。",
+          body: `
+            <div><b>含义</b>：若最佳动量分数 ≤ 门槛，则切换防守标的。</div>
+            <div style="margin-top:8px"><b>用途</b>：控制“什么时候认为风险资产不值得持有”。</div>
+            <div style="margin-top:8px"><b>范围</b>：实数。常用：0（动量为负就避险）。</div>
+            <div style="margin-top:8px"><b>重要</b>：需开启“风险规避”。若防守标的为空，则门槛触发时会进入<b>空仓(现金)</b>；若防守标的有值，则切换至该防守标的。</div>
+            <div style="margin-top:8px"><b>示例</b>：floor=0 表示只在动量为正时才持有风险资产；若 defensive=511010，则触发后持有 511010；若 defensive 为空，则空仓。</div>
+          `,
+        },
+        rot_cum: {
+          title: "策略累积收益",
+          sub: "轮动策略净值（none）在回测区间的总收益。",
+          body: `<div><b>计算</b>：NAV_T/NAV_0 - 1（已扣换手成本）。</div><div style="margin-top:8px"><b>口径</b>：轮动净值使用 none（不复权）。</div>`,
+        },
+        rot_ann: {
+          title: "策略年化收益",
+          sub: "把轮动净值区间收益折算为年化复利。",
+          body: `<div><b>计算</b>：与基准分析一致，按交易日近似年化。</div>`,
+        },
+        rot_vol: {
+          title: "策略年化波动",
+          sub: "轮动策略日收益波动的年化。",
+          body: `<div><b>计算</b>：σ_daily×√252。</div>`,
+        },
+        rot_mdd: {
+          title: "策略最大回撤",
+          sub: "轮动策略净值从峰值到低点的最大跌幅。",
+          body: `<div><b>计算</b>：min(NAV/peak-1)。</div>`,
+        },
+        rot_sharpe: {
+          title: "策略夏普",
+          sub: "基于日收益与无风险收益率的风险调整收益（年化）。",
+          body: `<div><b>计算</b>：Sharpe = mean(r-rf/252)/std(r-rf/252)×√252。</div>`,
+        },
+        rot_sortino: {
+          title: "策略索诺提",
+          sub: "只用下行波动衡量风险的风险调整收益（年化）。",
+          body: `<div><b>计算</b>：Sortino = mean(r-rf/252)/std(min(r-rf/252,0))×√252。</div>`,
+        },
+        rot_ui: {
+          title: "策略溃疡指标(UI)",
+          sub: "衡量持有体验：惩罚回撤深度与持续时间。",
+          body: `<div><b>计算</b>：回撤水下百分比的 RMS（与基准分析一致）。</div>`,
+        },
+        rot_upi: {
+          title: "策略溃疡绩效(UPI)",
+          sub: "收益/痛苦：用(年化收益-rf)除以 UI。",
+          body: `<div><b>计算</b>：UPI=(R_ann-rf)/(UI/100)。</div>`,
+        },
+        rot_turnover: {
+          title: "平均日换手",
+          sub: "反映交易频率与成本敏感度。",
+          body: `<div><b>计算</b>：turnover=0.5×Σ|w_t-w_{t-1}| 的日均值。</div>`,
+        },
+        rot_excess_cum: {
+          title: "超额累积收益",
+          sub: "轮动(none,net) 相对 等权(hfq,同频再平衡) 的总超额。",
+          body: `<div><b>计算</b>：active_ret = r_rot(none,net) - r_ew(hfq,rebal)；EXCESS 为其累积净值。</div>`,
+        },
+        rot_excess_ann: {
+          title: "超额年化收益",
+          sub: "超额净值的年化。",
+          body: `<div><b>计算</b>：对 EXCESS 序列做年化收益折算。</div>`,
+        },
+        rot_ir: {
+          title: "超额信息比率(近似)",
+          sub: "用主动收益序列的 Sharpe 形式近似信息比率。",
+          body: `<div><b>计算</b>：IR ≈ mean(active)/std(active)×√252。</div>`,
+        },
+        rot_wp_win: {
+          title: "胜率",
+          sub: "按调仓周期统计，策略超额收益>0 的比例。",
+          body: `<div><b>计算</b>：胜率=胜场数/期数；每期超额=期收益(轮动)-期收益(等权)。</div>`,
+        },
+        rot_wp_payoff: {
+          title: "赔率(盈/亏)",
+          sub: "平均盈利超额 / 平均亏损超额(绝对值)。",
+          body: `<div><b>计算</b>：payoff=mean(excess|>0)/abs(mean(excess|<0))。</div>`,
+        },
+        rot_wp_avg_win: {
+          title: "平均盈利(超额)",
+          sub: "所有胜出期（超额>0）的超额收益均值。",
+          body: `<div><b>计算</b>：mean(excess_return | excess_return>0)。</div>`,
+        },
+        rot_wp_avg_loss: {
+          title: "平均亏损(超额)",
+          sub: "所有亏损期（超额<0）的超额收益均值（为负数）。",
+          body: `<div><b>计算</b>：mean(excess_return | excess_return<0)。展示为负值。</div>`,
+        },
+        rot_wp_kelly: {
+          title: "凯利比(近似)",
+          sub: "基于胜率 p 与赔率 b 的二项近似最优仓位比例。",
+          body: `<div><b>计算</b>：f* = p - (1-p)/b。仅作参考，实盘通常会折扣（如 0.5×凯利）。</div>`,
+        },
+        rot_abs_win: {
+          title: "绝对胜率",
+          sub: "按调仓周期统计，策略每期收益>0 的比例（不与基准比较）。",
+          body: `<div><b>计算</b>：胜率=期收益(轮动)>0 的期数 / 总期数。</div>`,
+        },
+        rot_abs_payoff: {
+          title: "绝对赔率(盈/亏)",
+          sub: "策略自身：平均盈利期收益 / 平均亏损期收益(绝对值)。",
+          body: `<div><b>计算</b>：payoff_abs=mean(r|r>0)/abs(mean(r|r<0))。</div>`,
+        },
+        rot_abs_kelly: {
+          title: "绝对凯利比(近似)",
+          sub: "基于绝对胜率与绝对赔率的二项近似最优仓位比例。",
+          body: `<div><b>计算</b>：f*_abs = p_abs - (1-p_abs)/b_abs。</div>`,
+        },
       };
 
       function openMetricModal(key, metrics) {
@@ -426,6 +855,7 @@
         for (const it of pool) selected.add(it.code);
         renderCodeList();
         renderBenchmarkSelect();
+        // default defensive ETF: keep empty as requested
         // Initialize or clamp backtest range to available intersection (only if needed)
         maybeAdjustBacktestRange();
       }
@@ -448,6 +878,18 @@
           { key: "information_ratio", label: "信息比率", value: fmtNum(metrics.information_ratio) },
           { key: "ulcer_index", label: "溃疡指标(UI)", value: fmtNum(metrics.ulcer_index) },
           { key: "ulcer_performance_index", label: "溃疡绩效(UPI)", value: fmtNum(metrics.ulcer_performance_index) },
+          { key: "holding_weekly_win_rate", label: "周度绝对胜率", value: fmtPct(metrics.holding_weekly_win_rate) },
+          { key: "holding_weekly_payoff_ratio", label: "周度绝对赔率(盈/亏)", value: fmtNum(metrics.holding_weekly_payoff_ratio) },
+          { key: "holding_weekly_kelly_fraction", label: "周度绝对凯利比(近似)", value: fmtPct(metrics.holding_weekly_kelly_fraction) },
+          { key: "holding_monthly_win_rate", label: "月度绝对胜率", value: fmtPct(metrics.holding_monthly_win_rate) },
+          { key: "holding_monthly_payoff_ratio", label: "月度绝对赔率(盈/亏)", value: fmtNum(metrics.holding_monthly_payoff_ratio) },
+          { key: "holding_monthly_kelly_fraction", label: "月度绝对凯利比(近似)", value: fmtPct(metrics.holding_monthly_kelly_fraction) },
+          { key: "holding_quarterly_win_rate", label: "季度绝对胜率", value: fmtPct(metrics.holding_quarterly_win_rate) },
+          { key: "holding_quarterly_payoff_ratio", label: "季度绝对赔率(盈/亏)", value: fmtNum(metrics.holding_quarterly_payoff_ratio) },
+          { key: "holding_quarterly_kelly_fraction", label: "季度绝对凯利比(近似)", value: fmtPct(metrics.holding_quarterly_kelly_fraction) },
+          { key: "holding_yearly_win_rate", label: "年度绝对胜率", value: fmtPct(metrics.holding_yearly_win_rate) },
+          { key: "holding_yearly_payoff_ratio", label: "年度绝对赔率(盈/亏)", value: fmtNum(metrics.holding_yearly_payoff_ratio) },
+          { key: "holding_yearly_kelly_fraction", label: "年度绝对凯利比(近似)", value: fmtPct(metrics.holding_yearly_kelly_fraction) },
         ];
         const t = $("metrics");
         t.innerHTML =
@@ -615,6 +1057,236 @@
         );
       }
 
+      function plotRotation(result) {
+        const dates = result.nav.dates;
+        const s = result.nav.series;
+        const traces = [
+          { x: dates, y: s.ROTATION, mode: "lines", name: "ROTATION", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          { x: dates, y: s.EW_REBAL, mode: "lines", name: "EW_REBAL", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+        ];
+        Plotly.newPlot(
+          "rotChart",
+          traces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(1.1), tickformat: ".4f", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+        Plotly.newPlot(
+          "rotExcessChart",
+          [{ x: dates, y: s.EXCESS, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" }],
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(1.1), tickformat: ".4f", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+      }
+
+      function renderRotationMetrics(m) {
+        const s = m.strategy || {};
+        const ex = m.excess_vs_equal_weight || {};
+        const rows = [
+          { key: "rot_cum", label: "策略累积收益", value: fmtPct(s.cumulative_return) },
+          { key: "rot_ann", label: "策略年化收益", value: fmtPct(s.annualized_return) },
+          { key: "rot_vol", label: "策略年化波动", value: fmtPct(s.annualized_volatility) },
+          { key: "rot_mdd", label: "策略最大回撤", value: fmtPct(s.max_drawdown) },
+          { key: "rot_sharpe", label: "策略夏普", value: fmtNum(s.sharpe_ratio) },
+          { key: "rot_sortino", label: "策略索诺提", value: fmtNum(s.sortino_ratio) },
+          { key: "rot_ui", label: "溃疡指标(UI)", value: fmtNum(s.ulcer_index) },
+          { key: "rot_upi", label: "溃疡绩效(UPI)", value: fmtNum(s.ulcer_performance_index) },
+          { key: "rot_turnover", label: "平均日换手", value: fmtPct(s.avg_daily_turnover) },
+          { key: "rot_excess_cum", label: "超额累积收益", value: fmtPct(ex.cumulative_return) },
+          { key: "rot_excess_ann", label: "超额年化收益", value: fmtPct(ex.annualized_return) },
+          { key: "rot_ir", label: "超额信息比率(近似)", value: fmtNum(ex.information_ratio) },
+        ];
+        $("rotMetrics").innerHTML =
+          `<tr><th>指标</th><th>值</th></tr>` +
+          rows
+            .map(
+              (r) => `
+                <tr>
+                  <td>
+                    <span>${r.label}</span>
+                    <button class="helpBtn" data-metric="${r.key}" title="查看说明"
+                      style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">
+                      ?
+                    </button>
+                  </td>
+                  <td>${r.value}</td>
+                </tr>
+              `
+            )
+            .join("");
+      }
+
+      function renderWinPayoff(wp) {
+        const rows = [
+          { key: null, label: "调仓频率", value: wp.rebalance || "-" },
+          { key: null, label: "期数", value: wp.periods != null ? wp.periods : "-" },
+          { key: "rot_wp_win", label: "胜率(超额>0)", value: wp.win_rate != null ? fmtPct(wp.win_rate) : "-" },
+          { key: "rot_wp_avg_win", label: "平均盈利(超额)", value: wp.avg_win_excess != null ? fmtPct(wp.avg_win_excess) : "-" },
+          { key: "rot_wp_avg_loss", label: "平均亏损(超额)", value: wp.avg_loss_excess != null ? fmtPct(wp.avg_loss_excess) : "-" },
+          { key: "rot_wp_payoff", label: "赔率(盈/亏)", value: wp.payoff_ratio != null ? fmtNum(wp.payoff_ratio) : "-" },
+          { key: "rot_wp_kelly", label: "凯利比(近似)", value: wp.kelly_fraction != null ? fmtPct(wp.kelly_fraction) : "-" },
+          { key: "rot_abs_win", label: "绝对胜率(期收益>0)", value: wp.abs_win_rate != null ? fmtPct(wp.abs_win_rate) : "-" },
+          { key: null, label: "绝对平均盈利", value: wp.abs_avg_win != null ? fmtPct(wp.abs_avg_win) : "-" },
+          { key: null, label: "绝对平均亏损", value: wp.abs_avg_loss != null ? fmtPct(wp.abs_avg_loss) : "-" },
+          { key: "rot_abs_payoff", label: "绝对赔率(盈/亏)", value: wp.abs_payoff_ratio != null ? fmtNum(wp.abs_payoff_ratio) : "-" },
+          { key: "rot_abs_kelly", label: "绝对凯利比(近似)", value: wp.abs_kelly_fraction != null ? fmtPct(wp.abs_kelly_fraction) : "-" },
+        ];
+        $("rotWinPayoff").innerHTML =
+          `<tr><th>指标</th><th>值</th></tr>` +
+          rows
+            .map(
+              (r) => `
+                <tr>
+                  <td>
+                    <span>${r.label}</span>
+                    ${
+                      r.key
+                        ? `<button class="helpBtn" data-metric="${r.key}" title="查看说明"
+                          style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button>`
+                        : ""
+                    }
+                  </td>
+                  <td>${r.value}</td>
+                </tr>
+              `
+            )
+            .join("");
+      }
+
+      const rotState = { page: 1, rows: [] };
+      function _sortedRotRows(rows, key, dir) {
+        const arr = (rows || []).slice();
+        const k = key === "excess" ? "excess_return" : (key === "end" ? "end_date" : "start_date");
+        arr.sort((a, b) => {
+          const av = k === "excess_return" ? Number(a[k]) : String(a[k]);
+          const bv = k === "excess_return" ? Number(b[k]) : String(b[k]);
+          if (av < bv) return -1;
+          if (av > bv) return 1;
+          return 0;
+        });
+        if (dir === "desc") arr.reverse();
+        return arr;
+      }
+      function renderRotPeriods() {
+        const key = $("rotPeriodSortKey").value;
+        const dir = $("rotPeriodSortDir").value;
+        const rows = _sortedRotRows(rotState.rows, key, dir);
+        const total = rows.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        rotState.page = Math.min(Math.max(1, rotState.page), totalPages);
+        const startIdx = (rotState.page - 1) * pageSize;
+        const pageRows = rows.slice(startIdx, startIdx + pageSize);
+        const fmtLegBuy = (xs) => (xs || []).map(x => `${x.code}:${fmtPct(x.delta_weight)}`).join(" ");
+        const fmtLegSell = (xs) => (xs || []).map(x => `${x.code}:${fmtPct(Math.abs(x.delta_weight))}`).join(" ");
+        $("rotPeriods").innerHTML =
+          `<tr><th>开始</th><th>结束</th><th>轮动收益</th><th>等权收益</th><th>超额</th><th>胜</th><th>调入(Δw)</th><th>调出(Δw)</th></tr>` +
+          pageRows.map(r => `<tr><td>${r.start_date}</td><td>${r.end_date}</td><td>${fmtPct(r.strategy_return)}</td><td>${fmtPct(r.equal_weight_return)}</td><td>${fmtPct(r.excess_return)}</td><td>${r.win ? "是" : "否"}</td><td>${fmtLegBuy(r.buys)}</td><td>${fmtLegSell(r.sells)}</td></tr>`).join("");
+        $("rotPeriodPage").textContent = `${rotState.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+
+      const rotPeriodTableState = {
+        weekly: { page: 1, rows: [] },
+        monthly: { page: 1, rows: [] },
+        quarterly: { page: 1, rows: [] },
+        yearly: { page: 1, rows: [] },
+      };
+      function _sortedRotPeriodRows(rows, sortKey, sortDir) {
+        const arr = (rows || []).slice();
+        let k = "period_end";
+        if (sortKey === "strategy") k = "strategy_return";
+        if (sortKey === "excess") k = "excess_return";
+        arr.sort((a, b) => {
+          const av = k === "period_end" ? String(a[k]) : Number(a[k]);
+          const bv = k === "period_end" ? String(b[k]) : Number(b[k]);
+          if (av < bv) return -1;
+          if (av > bv) return 1;
+          return 0;
+        });
+        if (sortDir === "desc") arr.reverse();
+        return arr;
+      }
+      function renderRotPeriodTable(kind) {
+        const st = rotPeriodTableState[kind];
+        const sortKey = $(`rot${kind[0].toUpperCase() + kind.slice(1)}SortKey`).value;
+        const sortDir = $(`rot${kind[0].toUpperCase() + kind.slice(1)}SortDir`).value;
+        const rows = _sortedRotPeriodRows(st.rows, sortKey, sortDir);
+        const total = rows.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        st.page = Math.min(Math.max(1, st.page), totalPages);
+        const startIdx = (st.page - 1) * pageSize;
+        const pageRows = rows.slice(startIdx, startIdx + pageSize);
+        $( `rot${kind[0].toUpperCase() + kind.slice(1)}` ).innerHTML =
+          `<tr><th>期末</th><th>策略</th><th>基准</th><th>超额</th></tr>` +
+          pageRows.map(r => `<tr><td>${r.period_end}</td><td>${fmtPct(r.strategy_return)}</td><td>${fmtPct(r.benchmark_return)}</td><td>${fmtPct(r.excess_return)}</td></tr>`).join("");
+        $(`rot${kind[0].toUpperCase() + kind.slice(1)}Page`).textContent = `${st.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+      function wireRotPeriodControls(kind) {
+        const cap = kind[0].toUpperCase() + kind.slice(1);
+        $(`rot${cap}SortKey`).addEventListener("change", () => { rotPeriodTableState[kind].page = 1; renderRotPeriodTable(kind); });
+        $(`rot${cap}SortDir`).addEventListener("change", () => { rotPeriodTableState[kind].page = 1; renderRotPeriodTable(kind); });
+        $(`rot${cap}Prev`).addEventListener("click", () => { rotPeriodTableState[kind].page -= 1; renderRotPeriodTable(kind); });
+        $(`rot${cap}Next`).addEventListener("click", () => { rotPeriodTableState[kind].page += 1; renderRotPeriodTable(kind); });
+      }
+
+      async function runRotation() {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = $("start").value.trim();
+        const end = $("end").value.trim();
+        const rebalance = $("rotRebalance").value;
+        const top_k = Number(($("rotTopK").value || "1").trim());
+        const lookback_days = Number(($("rotLookback").value || "252").trim());
+        const skip_days = Number(($("rotSkip").value || "0").trim());
+        const cost_bps = Number(($("rotCost").value || "0").trim());
+        const risk_off = ($("rotRiskOff").value === "true");
+        const defensive_code = ($("rotDefensive").value || "").trim() || null;
+        const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+
+        $("status").textContent = "回测中...";
+        setMsg("");
+        const resp = await api("/analysis/rotation", {
+          method: "POST",
+          body: JSON.stringify({ codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps, risk_off, defensive_code, momentum_floor, risk_free_rate }),
+        });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
+        plotRotation(data);
+        renderRotationMetrics(data.metrics || {});
+        renderWinPayoff(data.win_payoff || {});
+        rotState.rows = data.period_details || [];
+        rotState.page = 1;
+        renderRotPeriods();
+        // periodic returns tables
+        rotPeriodTableState.weekly.rows = (data.period_returns && data.period_returns.weekly) ? data.period_returns.weekly : [];
+        rotPeriodTableState.monthly.rows = (data.period_returns && data.period_returns.monthly) ? data.period_returns.monthly : [];
+        rotPeriodTableState.quarterly.rows = (data.period_returns && data.period_returns.quarterly) ? data.period_returns.quarterly : [];
+        rotPeriodTableState.yearly.rows = (data.period_returns && data.period_returns.yearly) ? data.period_returns.yearly : [];
+        rotPeriodTableState.weekly.page = 1;
+        rotPeriodTableState.monthly.page = 1;
+        rotPeriodTableState.quarterly.page = 1;
+        rotPeriodTableState.yearly.page = 1;
+        renderRotPeriodTable("weekly");
+        renderRotPeriodTable("monthly");
+        renderRotPeriodTable("quarterly");
+        renderRotPeriodTable("yearly");
+        // rolling charts (percent axis, hover .2%)
+        plotRolling("rotRollingReturns", "Rotation Rolling Returns", data.rolling.returns, ".0%");
+        plotRolling("rotRollingDD", "Rotation Rolling Max Drawdown", data.rolling.max_drawdown, ".0%");
+      }
+
       async function runAnalysis() {
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何标的。");
@@ -655,20 +1327,32 @@
       }
 
       $("run").addEventListener("click", runAnalysis);
+      $("runRotation").addEventListener("click", runRotation);
       $("metricModalClose").addEventListener("click", closeMetricModal);
       $("metricModal").addEventListener("click", (e) => {
         if (e.target && e.target.id === "metricModal") closeMetricModal();
       });
-      $("metrics").addEventListener("click", (e) => {
-        const btn = e.target.closest && e.target.closest("button.helpBtn");
+      // Global delegation for all help buttons (metrics + parameters)
+      document.addEventListener("click", (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest("button.helpBtn") : null;
         if (!btn) return;
         const key = btn.getAttribute("data-metric");
+        if (!key) return;
         openMetricModal(key, {});
       });
       wirePeriodControls("weekly");
       wirePeriodControls("monthly");
       wirePeriodControls("quarterly");
       wirePeriodControls("yearly");
+
+      $("rotPeriodSortKey").addEventListener("change", () => { rotState.page = 1; renderRotPeriods(); });
+      $("rotPeriodSortDir").addEventListener("change", () => { rotState.page = 1; renderRotPeriods(); });
+      $("rotPeriodPrev").addEventListener("click", () => { rotState.page -= 1; renderRotPeriods(); });
+      $("rotPeriodNext").addEventListener("click", () => { rotState.page += 1; renderRotPeriods(); });
+      wireRotPeriodControls("weekly");
+      wireRotPeriodControls("monthly");
+      wireRotPeriodControls("quarterly");
+      wireRotPeriodControls("yearly");
       $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); });
       $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); });
       $("selInvert").addEventListener("click", () => {

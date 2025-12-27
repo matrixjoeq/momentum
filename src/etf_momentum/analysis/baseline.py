@@ -271,6 +271,27 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     quarterly = period_returns(ew_nav, "QE")
     yearly = period_returns(ew_nav, "YE")
 
+    def _win_payoff_kelly(df: pd.DataFrame) -> dict[str, float]:
+        r = pd.Series(df["return"].astype(float).to_numpy()) if (df is not None and not df.empty) else pd.Series([], dtype=float)
+        if r.empty:
+            return {"win_rate": float("nan"), "payoff_ratio": float("nan"), "kelly_fraction": float("nan")}
+        pos = r[r > 0]
+        neg = r[r < 0]
+        win_rate = float(len(pos) / len(r)) if len(r) else float("nan")
+        avg_win = float(pos.mean()) if len(pos) else float("nan")
+        avg_loss = float(neg.mean()) if len(neg) else float("nan")  # negative
+        payoff = float(avg_win / abs(avg_loss)) if (len(pos) and len(neg) and avg_loss != 0) else float("nan")
+        if np.isfinite(win_rate) and np.isfinite(payoff) and payoff > 0:
+            kelly = float(win_rate - (1.0 - win_rate) / payoff)
+        else:
+            kelly = float("nan")
+        return {"win_rate": win_rate, "payoff_ratio": payoff, "kelly_fraction": kelly}
+
+    weekly_wp = _win_payoff_kelly(weekly)
+    monthly_wp = _win_payoff_kelly(monthly)
+    quarterly_wp = _win_payoff_kelly(quarterly)
+    yearly_wp = _win_payoff_kelly(yearly)
+
     # metrics on ew
     cum_ret = float(ew_nav.iloc[-1] / ew_nav.iloc[0] - 1.0)
     ann_ret = _annualized_return(ew_nav)
@@ -300,6 +321,19 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "information_ratio": ir,
         "ulcer_index": ui,
         "ulcer_performance_index": upi,
+        # holding (absolute) win/payoff/kelly by period
+        "holding_weekly_win_rate": weekly_wp["win_rate"],
+        "holding_weekly_payoff_ratio": weekly_wp["payoff_ratio"],
+        "holding_weekly_kelly_fraction": weekly_wp["kelly_fraction"],
+        "holding_monthly_win_rate": monthly_wp["win_rate"],
+        "holding_monthly_payoff_ratio": monthly_wp["payoff_ratio"],
+        "holding_monthly_kelly_fraction": monthly_wp["kelly_fraction"],
+        "holding_quarterly_win_rate": quarterly_wp["win_rate"],
+        "holding_quarterly_payoff_ratio": quarterly_wp["payoff_ratio"],
+        "holding_quarterly_kelly_fraction": quarterly_wp["kelly_fraction"],
+        "holding_yearly_win_rate": yearly_wp["win_rate"],
+        "holding_yearly_payoff_ratio": yearly_wp["payoff_ratio"],
+        "holding_yearly_kelly_fraction": yearly_wp["kelly_fraction"],
     }
 
     # rolling

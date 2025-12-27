@@ -1,2 +1,2 @@
-__all__ = ["baseline"]
+__all__ = ["baseline", "rotation"]
 
