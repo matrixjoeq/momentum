@@ -164,6 +164,17 @@
       </div>
     </div>
 
+    <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
+      <div>
+        <h3>收益贡献（等权组合，全区间） <button class="helpBtn" data-metric="ew_return_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
+        <table id="ewReturnContrib"></table>
+      </div>
+      <div>
+        <h3>风险贡献（等权组合，全区间） <button class="helpBtn" data-metric="ew_risk_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
+        <table id="ewRiskContrib"></table>
+      </div>
+    </div>
+
     <div class="panel">
       <h3>相关性矩阵（日收益，回测全区间）</h3>
       <div class="muted">口径：hfq（后复权）。横纵坐标为标的编号（见下方映射）。</div>
@@ -179,6 +190,54 @@
     <div class="panel">
       <h3>滚动最大回撤（等权组合）</h3>
       <div id="rollingDD"></div>
+    </div>
+
+    <div class="panel">
+      <h3>蒙特卡洛模拟（等权组合）</h3>
+      <div class="row">
+        <div>
+          <label>模拟次数</label>
+          <input id="mcN" value="10000" />
+        </div>
+        <div>
+          <label>区块长度(交易日)</label>
+          <input id="mcBlock" value="5" />
+        </div>
+        <div>
+          <label>滚动窗口(交易日，可空)</label>
+          <input id="mcWindow" placeholder="如 2520 表示近10年" />
+        </div>
+        <div>
+          <label>随机种子(可空)</label>
+          <input id="mcSeed" placeholder="如 42" />
+        </div>
+        <button id="runMcEw">运行蒙特卡洛（等权）</button>
+      </div>
+      <table id="mcEwTable"></table>
+      <div class="row" style="margin-top:8px">
+        <label>直方图指标</label>
+        <select id="mcEwMetric" style="min-width:220px;">
+          <option value="cumulative_return">累积收益</option>
+          <option value="annualized_return">年化收益</option>
+          <option value="annualized_volatility">年化波动</option>
+          <option value="max_drawdown">最大回撤</option>
+          <option value="sharpe_ratio">夏普</option>
+        </select>
+      </div>
+      <div id="mcEwHist" style="width:100%; height:420px;"></div>
+      <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:8px">
+        <div>
+          <div class="muted">分布拟合结果（按 BIC 排序）</div>
+          <table id="mcEwFitTable"></table>
+        </div>
+        <div>
+          <div class="row" style="gap:8px">
+            <label>Q-Q 分布</label>
+            <select id="mcEwDist" style="min-width:180px;"></select>
+          </div>
+          <div id="mcEwQQ" style="width:100%; height:420px;"></div>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
@@ -249,6 +308,17 @@
         <div>
           <h3>轮动策略胜率赔率（按调仓周期）</h3>
           <table id="rotWinPayoff"></table>
+        </div>
+      </div>
+
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
+        <div>
+          <h3>收益贡献（轮动策略，全区间） <button class="helpBtn" data-metric="rot_return_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
+          <table id="rotReturnContrib"></table>
+        </div>
+        <div>
+          <h3>风险贡献（轮动策略，全区间） <button class="helpBtn" data-metric="rot_risk_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
+          <table id="rotRiskContrib"></table>
         </div>
       </div>
 
@@ -340,6 +410,72 @@
         <div>
           <h3>滚动最大回撤（轮动策略）</h3>
           <div id="rotRollingDD" style="width:100%; height:520px;"></div>
+        </div>
+      </div>
+
+    <div class="panel">
+        <h3>蒙特卡洛模拟（轮动策略）</h3>
+        <div class="row">
+          <div class="muted">使用与等权相同的模拟次数/区块长度/种子配置。</div>
+          <button id="runMcRot">运行蒙特卡洛（轮动）</button>
+        </div>
+        <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:8px">
+          <div>
+            <div class="muted">策略本身</div>
+            <table id="mcRotTable"></table>
+            <div class="row" style="margin-top:8px">
+              <label>直方图指标</label>
+              <select id="mcRotMetric" style="min-width:220px;">
+                <option value="cumulative_return">累积收益</option>
+                <option value="annualized_return">年化收益</option>
+                <option value="annualized_volatility">年化波动</option>
+                <option value="max_drawdown">最大回撤</option>
+                <option value="sharpe_ratio">夏普</option>
+              </select>
+            </div>
+            <div id="mcRotHist" style="width:100%; height:420px;"></div>
+            <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:8px">
+              <div>
+                <div class="muted">分布拟合结果（按 BIC 排序）</div>
+                <table id="mcRotFitTable"></table>
+              </div>
+              <div>
+                <div class="row" style="gap:8px">
+                  <label>Q-Q 分布</label>
+                  <select id="mcRotDist" style="min-width:180px;"></select>
+                </div>
+                <div id="mcRotQQ" style="width:100%; height:420px;"></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="muted">超额（轮动-等权）</div>
+            <table id="mcExcessTable"></table>
+            <div class="row" style="margin-top:8px">
+              <label>直方图指标</label>
+              <select id="mcExcessMetric" style="min-width:220px;">
+                <option value="cumulative_return">累积收益</option>
+                <option value="annualized_return">年化收益</option>
+                <option value="annualized_volatility">年化波动</option>
+                <option value="max_drawdown">最大回撤</option>
+                <option value="sharpe_ratio">夏普</option>
+              </select>
+            </div>
+            <div id="mcExcessHist" style="width:100%; height:420px;"></div>
+            <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:8px">
+              <div>
+                <div class="muted">分布拟合结果（按 BIC 排序）</div>
+                <table id="mcExcessFitTable"></table>
+              </div>
+              <div>
+                <div class="row" style="gap:8px">
+                  <label>Q-Q 分布</label>
+                  <select id="mcExcessDist" style="min-width:180px;"></select>
+                </div>
+                <div id="mcExcessQQ" style="width:100%; height:420px;"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -570,6 +706,26 @@
           sub: "基于年度绝对胜率与赔率的二项近似。",
           body: `<div><b>计算</b>：f* = p - (1-p)/b。</div>`,
         },
+        ew_return_contrib: {
+          title: "收益贡献（等权组合）",
+          sub: "把组合的总收益按标的拆分的归因结果。",
+          body: `<div><b>方法</b>：按日用权重×log(1+r) 做收益归因，并按总收益缩放使各标的贡献之和等于组合总收益。</div><div style="margin-top:8px"><b>说明</b>：这是一个“可加”的近似归因方法，便于比较各标的对长期收益的贡献大小。</div>`,
+        },
+        ew_risk_contrib: {
+          title: "风险贡献（等权组合）",
+          sub: "把组合波动风险按标的拆分（方差贡献占比）。",
+          body: `<div><b>方法</b>：用收益协方差矩阵 Σ 与平均权重 w̄，计算方差贡献：RC_i = w̄_i·(Σw̄)_i / (w̄'Σw̄)。</div>`,
+        },
+        rot_return_contrib: {
+          title: "收益贡献（轮动策略）",
+          sub: "把轮动策略的总收益按标的拆分的归因结果。",
+          body: `<div><b>方法</b>：同等权组合，按日权重做 log 归因并缩放到总收益。</div><div style="margin-top:8px"><b>注意</b>：该贡献基于持仓收益（不把交易成本按标的拆分）。策略净值展示为扣成本后的结果。</div>`,
+        },
+        rot_risk_contrib: {
+          title: "风险贡献（轮动策略）",
+          sub: "轮动策略风险按标的拆分（方差贡献占比）。",
+          body: `<div><b>方法</b>：与等权相同，使用全区间收益协方差与平均权重计算方差贡献占比。</div>`,
+        },
         param_rot_rebalance: {
           title: "调仓频率（rebalance）",
           sub: "每隔多长时间重新选择 TopK 并调仓。",
@@ -751,7 +907,189 @@
           sub: "基于绝对胜率与绝对赔率的二项近似最优仓位比例。",
           body: `<div><b>计算</b>：f*_abs = p_abs - (1-p_abs)/b_abs。</div>`,
         },
+        mc_col_metric: {
+          title: "指标",
+          sub: "蒙特卡洛模拟输出的指标名称。",
+          body: `<div><b>说明</b>：每行对应一个绩效指标（如累积收益、年化收益、最大回撤等）。</div>`,
+        },
+        mc_col_observed: {
+          title: "Observed",
+          sub: "原始样本（真实历史序列）计算出的指标值。",
+          body: `<div><b>说明</b>：用回测区间内的原始日收益序列直接计算得到的“观测值”。</div>`,
+        },
+        mc_col_mean: {
+          title: "Mean",
+          sub: "蒙特卡洛模拟得到的指标均值。",
+          body: `<div><b>说明</b>：对多次重采样路径分别计算指标后取平均。</div>`,
+        },
+        mc_col_p05: {
+          title: "P05",
+          sub: "指标分布的 5% 分位数。",
+          body: `<div><b>说明</b>：有约 5% 的模拟结果低于该值（经验分位数）。</div>`,
+        },
+        mc_col_p50: {
+          title: "P50",
+          sub: "指标分布的 50% 分位数（中位数）。",
+          body: `<div><b>说明</b>：把所有模拟结果从小到大排序后居中的值。</div>`,
+        },
+        mc_col_p95: {
+          title: "P95",
+          sub: "指标分布的 95% 分位数。",
+          body: `<div><b>说明</b>：有约 95% 的模拟结果低于该值。</div>`,
+        },
+        mc_col_p_le_0: {
+          title: "P(r≤0)",
+          sub: "该指标在模拟下“≤0”的比例（经验概率）。",
+          body: `<div><b>说明</b>：统计模拟样本里指标 ≤ 0 的占比。例如对累积收益/年化收益，这可近似理解为“亏损概率”。</div>`,
+        },
       };
+
+      function renderMcTable(elId, mc) {
+        const el = $(elId);
+        const header =
+          `<tr>
+            <th>指标 <button class="helpBtn" data-metric="mc_col_metric" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></th>
+            <th>Observed <button class="helpBtn" data-metric="mc_col_observed" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></th>
+            <th>Mean <button class="helpBtn" data-metric="mc_col_mean" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></th>
+            <th>P05 <button class="helpBtn" data-metric="mc_col_p05" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></th>
+            <th>P50 <button class="helpBtn" data-metric="mc_col_p50" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></th>
+            <th>P95 <button class="helpBtn" data-metric="mc_col_p95" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></th>
+            <th>P(r≤0) <button class="helpBtn" data-metric="mc_col_p_le_0" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></th>
+          </tr>`;
+        if (!mc || !mc.metrics) {
+          el.innerHTML = header;
+          return;
+        }
+        const order = ["cumulative_return", "annualized_return", "annualized_volatility", "max_drawdown", "sharpe_ratio"];
+        const rows = order.filter(k => mc.metrics[k]).map(k => ({ k, v: mc.metrics[k] }));
+        const label = {
+          cumulative_return: "累积收益",
+          annualized_return: "年化收益",
+          annualized_volatility: "年化波动",
+          max_drawdown: "最大回撤",
+          sharpe_ratio: "夏普",
+        };
+        const fmt = (k, x) => {
+          if (x == null || Number.isNaN(x)) return "-";
+          if (k.includes("drawdown")) return fmtPct(Number(x));
+          if (k.includes("volatility")) return fmtPct(Number(x));
+          if (k.includes("return")) return fmtPct(Number(x));
+          return Number(x).toFixed(4);
+        };
+        el.innerHTML =
+          header +
+          rows.map(({k, v}) => `<tr><td>${label[k] || k}</td><td>${fmt(k, v.observed)}</td><td>${fmt(k, v.mean)}</td><td>${fmt(k, v.p05)}</td><td>${fmt(k, v.p50)}</td><td>${fmt(k, v.p95)}</td><td>${(v.p_value_le_0==null||Number.isNaN(v.p_value_le_0))? "-" : (Number(v.p_value_le_0)*100).toFixed(2)+"%"}</td></tr>`).join("");
+      }
+
+      function plotMcHist(divId, mc, metricKey) {
+        const el = $(divId);
+        if (!mc || !mc.metrics || !mc.metrics[metricKey] || !mc.metrics[metricKey].hist) {
+          el.innerHTML = "<div class='muted'>无直方图数据</div>";
+          return;
+        }
+        const h = mc.metrics[metricKey].hist;
+        const edges = h.bin_edges || [];
+        const counts = h.counts || [];
+        if (edges.length < 2 || counts.length < 1) {
+          el.innerHTML = "<div class='muted'>无直方图数据</div>";
+          return;
+        }
+        const x = [];
+        for (let i = 0; i < counts.length; i++) x.push((edges[i] + edges[i + 1]) / 2);
+        const isPct = metricKey.includes("return") || metricKey.includes("volatility") || metricKey.includes("drawdown");
+        const fmtX = isPct ? ".0%" : ".4f";
+        Plotly.newPlot(
+          divId,
+          [{
+            x,
+            y: counts,
+            type: "bar",
+            marker: { color: "#4c78a8" },
+            hovertemplate: isPct ? "%{x:.2%}<br>count=%{y}<extra></extra>" : "%{x:.4f}<br>count=%{y}<extra></extra>",
+          }],
+          {
+            margin: { t: 20 },
+            xaxis: { tickformat: fmtX, title: metricKey },
+            yaxis: { title: "count" },
+            annotations: [
+              {
+                xref: "paper",
+                yref: "paper",
+                x: 0.01,
+                y: 0.98,
+                showarrow: false,
+                text: `under=${h.underflow||0}, over=${h.overflow||0}`,
+                font: { size: 12, color: "#666" },
+              },
+            ],
+          },
+          { responsive: true }
+        );
+      }
+
+      function renderFit(prefix, mc, metricKey) {
+        const fitTable = $(`mc${prefix}FitTable`);
+        const distSel = $(`mc${prefix}Dist`);
+        const qqDiv = `mc${prefix}QQ`;
+        if (!fitTable || !distSel) return;
+        if (!mc || !mc.metrics || !mc.metrics[metricKey] || !mc.metrics[metricKey].fit) {
+          fitTable.innerHTML = "<tr><th>分布</th><th>BIC</th><th>AIC</th><th>KS p</th><th>AD</th></tr>";
+          distSel.innerHTML = "";
+          $(qqDiv).innerHTML = "<div class='muted'>无拟合数据</div>";
+          return;
+        }
+        const fit = mc.metrics[metricKey].fit;
+        const cands = fit.candidates || [];
+        const rows = [];
+        for (const d of cands) {
+          const r = (fit.dists && fit.dists[d]) ? fit.dists[d] : null;
+          if (!r || !r.ok) continue;
+          rows.push({ d, bic: r.bic, aic: r.aic, ksp: r.ks ? r.ks.p_value : null, ad: r.ad ? r.ad.stat : null });
+        }
+        rows.sort((a,b) => Number(a.bic) - Number(b.bic));
+        fitTable.innerHTML =
+          "<tr><th>分布</th><th>BIC</th><th>AIC</th><th>KS p</th><th>AD</th></tr>" +
+          rows.map(r => `<tr><td>${r.d}</td><td>${Number(r.bic).toFixed(2)}</td><td>${Number(r.aic).toFixed(2)}</td><td>${r.ksp==null? "-" : Number(r.ksp).toFixed(4)}</td><td>${r.ad==null? "-" : Number(r.ad).toFixed(2)}</td></tr>`).join("");
+
+        // dist selector
+        distSel.innerHTML = "";
+        for (const r of rows) {
+          const opt = document.createElement("option");
+          opt.value = r.d;
+          opt.textContent = r.d + (r.d === fit.best_by_bic ? "（BIC最优）" : "");
+          distSel.appendChild(opt);
+        }
+        if (fit.best_by_bic) distSel.value = fit.best_by_bic;
+
+        const plotQQ = () => {
+          const d = distSel.value;
+          const qq = fit.qq && fit.qq[d] ? fit.qq[d] : null;
+          const el = $(qqDiv);
+          if (!qq || !qq.emp || qq.emp.length === 0) {
+            el.innerHTML = "<div class='muted'>无 Q-Q 数据</div>";
+            return;
+          }
+          const x = qq.theory;
+          const y = qq.emp;
+          const minv = Math.min(...x, ...y);
+          const maxv = Math.max(...x, ...y);
+          Plotly.newPlot(
+            qqDiv,
+            [
+              { x, y, mode: "markers", type: "scatter", name: "Q-Q", marker: { size: 6, color: "#4c78a8" }, hovertemplate: "theory=%{x:.4f}<br>emp=%{y:.4f}<extra></extra>" },
+              { x: [minv, maxv], y: [minv, maxv], mode: "lines", name: "y=x", line: { dash: "dot", color: "#999" }, hoverinfo: "skip" },
+            ],
+            { margin: { t: 20 }, xaxis: { title: "theoretical quantile" }, yaxis: { title: "empirical quantile" } },
+            { responsive: true }
+          );
+        };
+        distSel.onchange = plotQQ;
+        plotQQ();
+      }
+
+      let lastMcEw = null;
+      let lastMcRot = null;
+      let lastMcExcess = null;
 
       function openMetricModal(key, metrics) {
         const h = metricHelp[key] || { title: key, sub: "", body: "<div class='muted'>暂无说明。</div>" };
@@ -909,6 +1247,48 @@
                 </tr>
               `
             )
+            .join("");
+      }
+
+      function renderContributionTables(kind, attribution) {
+        const nameByCode = new Map((pool || []).map(x => [x.code, x.name]));
+        const retEl = $(kind === "ew" ? "ewReturnContrib" : "rotReturnContrib");
+        const riskEl = $(kind === "ew" ? "ewRiskContrib" : "rotRiskContrib");
+        if (!retEl || !riskEl) return;
+
+        if (!attribution || !attribution.return || !attribution.risk) {
+          retEl.innerHTML = "<tr><th>标的</th><th>总收益贡献</th><th>贡献占比</th></tr>";
+          riskEl.innerHTML = "<tr><th>标的</th><th>风险贡献占比</th></tr>";
+          return;
+        }
+
+        const rrows = (attribution.return.by_code || []).slice();
+        rrows.sort((a, b) => (Number(b.return_contribution || 0) - Number(a.return_contribution || 0)));
+        retEl.innerHTML =
+          `<tr><th>标的</th><th>总收益贡献</th><th>贡献占比</th></tr>` +
+          rrows
+            .map((x) => {
+              const c = x.code;
+              const nm = nameByCode.get(c) || "";
+              const label = `${c}${nm ? " " + nm : ""}`;
+              const contrib = (x.return_contribution == null) ? "-" : fmtPct(Number(x.return_contribution));
+              const share = (x.return_share == null) ? "-" : (Number(x.return_share) * 100).toFixed(2) + "%";
+              return `<tr><td>${label}</td><td>${contrib}</td><td>${share}</td></tr>`;
+            })
+            .join("");
+
+        const kRisk = (attribution.risk.by_code || []).slice();
+        kRisk.sort((a, b) => (Number(b.risk_share || 0) - Number(a.risk_share || 0)));
+        riskEl.innerHTML =
+          `<tr><th>标的</th><th>风险贡献占比</th></tr>` +
+          kRisk
+            .map((x) => {
+              const c = x.code;
+              const nm = nameByCode.get(c) || "";
+              const label = `${c}${nm ? " " + nm : ""}`;
+              const share = (x.risk_share == null) ? "-" : (Number(x.risk_share) * 100).toFixed(2) + "%";
+              return `<tr><td>${label}</td><td>${share}</td></tr>`;
+            })
             .join("");
       }
 
@@ -1266,6 +1646,7 @@
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
         renderWinPayoff(data.win_payoff || {});
+        renderContributionTables("rot", data.attribution);
         rotState.rows = data.period_details || [];
         rotState.page = 1;
         renderRotPeriods();
@@ -1308,6 +1689,7 @@
         const data = JSON.parse(text);
         plotNav(data.nav);
         renderMetrics(data.metrics);
+        renderContributionTables("ew", data.attribution);
         periodState.weekly.data = data.period_returns.weekly || [];
         periodState.monthly.data = data.period_returns.monthly || [];
         periodState.quarterly.data = data.period_returns.quarterly || [];
@@ -1328,6 +1710,122 @@
 
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+
+      async function runMcEw() {
+        const btn = $("runMcEw");
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = $("start").value.trim();
+        const end = $("end").value.trim();
+        const benchmark_code = $("benchmark").value || null;
+        const rebalance = $("rebalance").value || "weekly";
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        const n_sims = Number(($("mcN").value || "2000").trim());
+        const block_size = Number(($("mcBlock").value || "5").trim());
+        const winRaw = ($("mcWindow").value || "").trim();
+        const sample_window_days = winRaw === "" ? null : Number(winRaw);
+        if (sample_window_days != null && !Number.isFinite(sample_window_days)) return setMsg("滚动窗口必须是整数交易日，例如 2520");
+        const seedRaw = ($("mcSeed").value || "").trim();
+        const seed = seedRaw === "" ? null : Number(seedRaw);
+        const oldTxt = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "计算中...";
+        $("status").textContent = "蒙特卡洛模拟中...";
+        setMsg("");
+        try {
+          const resp = await api("/analysis/baseline/montecarlo", {
+            method: "POST",
+            body: JSON.stringify({ codes, start, end, benchmark_code, adjust: ADJUST_USED, rebalance, risk_free_rate, n_sims, block_size, seed, sample_window_days }),
+          });
+          const text = await resp.text();
+          if (!resp.ok) return setMsg(text);
+          const data = JSON.parse(text);
+          lastMcEw = data.mc;
+          renderMcTable("mcEwTable", data.mc);
+          plotMcHist("mcEwHist", data.mc, $("mcEwMetric").value);
+          renderFit("Ew", data.mc, $("mcEwMetric").value);
+        } finally {
+          $("status").textContent = "";
+          btn.disabled = false;
+          btn.textContent = oldTxt;
+        }
+      }
+
+      async function runMcRot() {
+        const btn = $("runMcRot");
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = $("start").value.trim();
+        const end = $("end").value.trim();
+        const rebalance = $("rotRebalance").value;
+        const top_k = Number(($("rotTopK").value || "1").trim());
+        const lookback_days = Number(($("rotLookback").value || "20").trim());
+        const skip_days = Number(($("rotSkip").value || "0").trim());
+        const cost_bps = Number(($("rotCost").value || "0").trim());
+        const risk_off = ($("rotRiskOff").value === "true");
+        const defensive_code = ($("rotDefensive").value || "").trim() || null;
+        const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        const n_sims = Number(($("mcN").value || "2000").trim());
+        const block_size = Number(($("mcBlock").value || "5").trim());
+        const winRaw = ($("mcWindow").value || "").trim();
+        const sample_window_days = winRaw === "" ? null : Number(winRaw);
+        if (sample_window_days != null && !Number.isFinite(sample_window_days)) return setMsg("滚动窗口必须是整数交易日，例如 2520");
+        const seedRaw = ($("mcSeed").value || "").trim();
+        const seed = seedRaw === "" ? null : Number(seedRaw);
+        const oldTxt = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "计算中...";
+        $("status").textContent = "蒙特卡洛模拟中...";
+        setMsg("");
+        try {
+          const resp = await api("/analysis/rotation/montecarlo", {
+            method: "POST",
+            body: JSON.stringify({ codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps, risk_off, defensive_code, momentum_floor, risk_free_rate, n_sims, block_size, seed, sample_window_days }),
+          });
+          const text = await resp.text();
+          if (!resp.ok) return setMsg(text);
+          const data = JSON.parse(text);
+          lastMcRot = data.mc.strategy;
+          lastMcExcess = data.mc.excess;
+          renderMcTable("mcRotTable", data.mc.strategy);
+          renderMcTable("mcExcessTable", data.mc.excess);
+          plotMcHist("mcRotHist", data.mc.strategy, $("mcRotMetric").value);
+          plotMcHist("mcExcessHist", data.mc.excess, $("mcExcessMetric").value);
+          renderFit("Rot", data.mc.strategy, $("mcRotMetric").value);
+          renderFit("Excess", data.mc.excess, $("mcExcessMetric").value);
+        } finally {
+          $("status").textContent = "";
+          btn.disabled = false;
+          btn.textContent = oldTxt;
+        }
+      }
+
+      $("runMcEw").addEventListener("click", runMcEw);
+      $("runMcRot").addEventListener("click", runMcRot);
+
+      // Re-plot histograms when metric selection changes (if mc already rendered)
+      $("mcEwMetric").addEventListener("change", () => {
+        if (!lastMcEw) return;
+        plotMcHist("mcEwHist", lastMcEw, $("mcEwMetric").value);
+        renderFit("Ew", lastMcEw, $("mcEwMetric").value);
+      });
+      $("mcRotMetric").addEventListener("change", () => {
+        if (!lastMcRot) return;
+        plotMcHist("mcRotHist", lastMcRot, $("mcRotMetric").value);
+        renderFit("Rot", lastMcRot, $("mcRotMetric").value);
+      });
+      $("mcExcessMetric").addEventListener("change", () => {
+        if (!lastMcExcess) return;
+        plotMcHist("mcExcessHist", lastMcExcess, $("mcExcessMetric").value);
+        renderFit("Excess", lastMcExcess, $("mcExcessMetric").value);
+      });
       $("metricModalClose").addEventListener("click", closeMetricModal);
       $("metricModal").addEventListener("click", (e) => {
         if (e.target && e.target.id === "metricModal") closeMetricModal();

@@ -107,3 +107,23 @@ class RotationBacktestRequest(BaseModel):
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=0.0, ge=0.0)
 
+
+class MonteCarloRequest(BaseModel):
+    n_sims: int = Field(default=10000, ge=100, le=50000, description="Number of Monte Carlo simulations")
+    block_size: int = Field(default=5, ge=1, le=252, description="Circular block size in trading days")
+    seed: int | None = Field(default=None, description="Optional RNG seed for reproducibility")
+    sample_window_days: int | None = Field(
+        default=None,
+        ge=2,
+        le=20000,
+        description="Optional rolling window length (trading days) used as sampling pool; None means full backtest range.",
+    )
+
+
+class BaselineMonteCarloRequest(BaselineAnalysisRequest, MonteCarloRequest):
+    pass
+
+
+class RotationMonteCarloRequest(RotationBacktestRequest, MonteCarloRequest):
+    pass
+

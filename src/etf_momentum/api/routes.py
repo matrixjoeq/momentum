@@ -10,6 +10,8 @@ import datetime as dt
 from .deps import get_akshare, get_session
 from .schemas import (
     BaselineAnalysisRequest,
+    BaselineMonteCarloRequest,
+    RotationMonteCarloRequest,
     RotationBacktestRequest,
     EtfPoolOut,
     EtfPoolUpsert,
@@ -20,6 +22,7 @@ from .schemas import (
     ValidationPolicyOut,
 )
 from ..analysis.baseline import BaselineInputs, compute_baseline
+from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..data.ingestion import ingest_one_etf
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
@@ -117,6 +120,70 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         return compute_rotation_backtest(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/baseline/montecarlo")
+def baseline_montecarlo(payload: BaselineMonteCarloRequest, db: Session = Depends(get_session)) -> dict:
+    # reuse baseline computation to ensure exact same portfolio construction
+    base = baseline_analysis(payload, db=db)
+    try:
+        import pandas as pd
+
+        nav = pd.Series(base["nav"]["series"]["EW"], index=pd.to_datetime(base["nav"]["dates"]), dtype=float)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        raise HTTPException(status_code=500, detail=f"invalid baseline nav payload: {e}") from e
+    daily_ret = nav.pct_change().fillna(0.0)
+    if payload.sample_window_days is not None:
+        daily_ret = daily_ret.tail(int(payload.sample_window_days))
+    cfg = MonteCarloConfig(n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed)
+    try:
+        mc = bootstrap_metrics_from_daily_returns(daily_ret, rf=float(payload.risk_free_rate), cfg=cfg)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "meta": {
+            "type": "baseline",
+            "codes": payload.codes,
+            "start": payload.start,
+            "end": payload.end,
+            "sample_window_days": payload.sample_window_days,
+        },
+        "mc": mc,
+    }
+
+
+@router.post("/analysis/rotation/montecarlo")
+def rotation_montecarlo(payload: RotationMonteCarloRequest, db: Session = Depends(get_session)) -> dict:
+    rot = rotation_backtest(payload, db=db)
+    try:
+        import pandas as pd
+
+        nav = pd.Series(rot["nav"]["series"]["ROTATION"], index=pd.to_datetime(rot["nav"]["dates"]), dtype=float)
+        excess = pd.Series(rot["nav"]["series"]["EXCESS"], index=pd.to_datetime(rot["nav"]["dates"]), dtype=float)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        raise HTTPException(status_code=500, detail=f"invalid rotation nav payload: {e}") from e
+    daily_ret = nav.pct_change().fillna(0.0)
+    daily_excess = excess.pct_change().fillna(0.0)
+    if payload.sample_window_days is not None:
+        daily_ret = daily_ret.tail(int(payload.sample_window_days))
+        daily_excess = daily_excess.tail(int(payload.sample_window_days))
+    cfg = MonteCarloConfig(n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed)
+    try:
+        mc_strategy = bootstrap_metrics_from_daily_returns(daily_ret, rf=float(payload.risk_free_rate), cfg=cfg)
+        mc_excess = bootstrap_metrics_from_daily_returns(daily_excess, rf=0.0, cfg=cfg)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "meta": {
+            "type": "rotation",
+            "codes": payload.codes,
+            "start": payload.start,
+            "end": payload.end,
+            "rebalance": payload.rebalance,
+            "sample_window_days": payload.sample_window_days,
+        },
+        "mc": {"strategy": mc_strategy, "excess": mc_excess},
+    }
 
 
 @router.get("/validation-policies", response_model=list[ValidationPolicyOut])
@@ -241,7 +308,7 @@ def delete_etf(code: str, db: Session = Depends(get_session)) -> dict[str, bool]
 @router.post("/etf/{code}/fetch", response_model=FetchResult)
 def fetch_one(
     code: str,
-    adjust: str = "hfq",  # kept for backward-compat; ignored (we always fetch all adjusts)
+    adjust: str = "hfq",  # pylint: disable=unused-argument  # backward-compat; ignored (we always fetch all adjusts)
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> FetchResult:

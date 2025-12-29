@@ -16,6 +16,7 @@ dependencies = [
   "pydantic-settings>=2.3.0",
   "akshare==1.16.72",
   "pandas>=2.2.0",
+  "scipy>=1.16.3",
   "httpx>=0.25.0",
 ]
 

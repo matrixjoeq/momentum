@@ -212,6 +212,143 @@ def _compute_equal_weight_nav(
     return s
 
 
+def _compute_equal_weight_nav_and_weights(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+) -> tuple[pd.Series, pd.DataFrame]:
+    """
+    Compute equal-weight NAV and the corresponding pre-return weights per day.
+
+    Weights are aligned so that for date t, weights[t] apply to the return r[t]
+    (where r[t] is close[t]/close[t-1]-1).
+    """
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+    if daily_ret.empty:
+        return pd.Series(dtype=float, name="EW"), pd.DataFrame()
+
+    cols = list(daily_ret.columns)
+    n = len(cols)
+    if n <= 0:
+        return pd.Series(dtype=float, name="EW"), pd.DataFrame()
+
+    rmat = daily_ret.fillna(0.0).to_numpy(dtype=float)
+
+    # none: buy-and-hold equal initial weights
+    if reb == "none":
+        indiv_nav = (1.0 + daily_ret.fillna(0.0)).cumprod()
+        indiv_nav.iloc[0, :] = 1.0
+        nav = indiv_nav.mean(axis=1)
+        w = indiv_nav.div(indiv_nav.sum(axis=1), axis=0).fillna(0.0)
+        w = w.reindex(columns=cols)
+        if len(nav) > 0:
+            nav.iloc[0] = 1.0
+        return nav.rename("EW"), w
+
+    # daily: reset to equal weights every day (pre-return weights always equal)
+    if reb == "daily":
+        w = pd.DataFrame((1.0 / n), index=daily_ret.index, columns=cols, dtype=float)
+        ew_ret = daily_ret.fillna(0.0).mean(axis=1)
+        nav = (1.0 + ew_ret).cumprod()
+        if len(nav) > 0:
+            nav.iloc[0] = 1.0
+        return nav.rename("EW"), w
+
+    freq_map = {"weekly": "W-FRI", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
+    labels = daily_ret.index.to_period(freq_map[reb])
+    prev_label = None
+    nav = 1.0
+    w = np.full(n, 1.0 / n, dtype=float)
+    nav_out: list[float] = []
+    w_out: list[np.ndarray] = []
+    for i, lab in enumerate(labels):
+        if prev_label is None or lab != prev_label:
+            w[:] = 1.0 / n
+        # record pre-return weights for attribution
+        w_out.append(w.copy())
+        r = rmat[i]
+        port_r = float(np.dot(w, r))
+        nav *= (1.0 + port_r)
+        # update weights post-move
+        if 1.0 + port_r != 0.0:
+            w = w * (1.0 + r) / (1.0 + port_r)
+        nav_out.append(nav)
+        prev_label = lab
+    nav_s = pd.Series(nav_out, index=daily_ret.index, name="EW")
+    if len(nav_s) > 0:
+        nav_s.iloc[0] = 1.0
+    w_df = pd.DataFrame(np.vstack(w_out), index=daily_ret.index, columns=cols, dtype=float)
+    return nav_s, w_df
+
+
+def _compute_return_risk_contributions(
+    *,
+    asset_ret: pd.DataFrame,
+    weights: pd.DataFrame,
+    total_return: float,
+) -> dict[str, Any]:
+    """
+    Return & risk contribution (by code) for a portfolio with time-varying weights.
+
+    - Return contribution uses a log-return based attribution and is scaled to sum to total_return.
+    - Risk contribution uses variance decomposition based on sample covariance of returns and mean weights.
+    """
+    r = asset_ret.astype(float).fillna(0.0)
+    w = weights.reindex(index=r.index, columns=r.columns).astype(float).fillna(0.0)
+    # log-return attribution (scaled)
+    log_r = np.log1p(r.clip(lower=-0.999999))
+    log_contrib = (w * log_r).sum(axis=0).astype(float)
+    approx_port_log = float(np.nansum(log_contrib.to_numpy(dtype=float)))
+    if approx_port_log == 0.0 or np.isnan(approx_port_log):
+        share = log_contrib * np.nan
+        contrib = log_contrib * np.nan
+    else:
+        share = (log_contrib / approx_port_log).astype(float)
+        contrib = (share * float(total_return)).astype(float)
+
+    return_rows = []
+    for c in r.columns:
+        return_rows.append(
+            {
+                "code": str(c),
+                "return_contribution": (None if pd.isna(contrib.get(c)) else float(contrib.get(c))),
+                "return_share": (None if pd.isna(share.get(c)) else float(share.get(c))),
+            }
+        )
+
+    # variance contribution
+    cov = r.cov()
+    w_bar = w.mean(axis=0).astype(float)
+    w_vec = w_bar.reindex(cov.index).fillna(0.0).to_numpy(dtype=float)
+    cov_mat = cov.to_numpy(dtype=float)
+    port_var = float(w_vec.T @ cov_mat @ w_vec) if len(w_vec) else float("nan")
+    if port_var == 0.0 or np.isnan(port_var):
+        risk_rows = [{"code": str(c), "risk_share": None} for c in cov.index]
+    else:
+        m = cov_mat @ w_vec  # marginal contribution to variance
+        rc = w_vec * m
+        rc_share = rc / port_var
+        risk_rows = []
+        for i, c in enumerate(cov.index):
+            risk_rows.append({"code": str(c), "risk_share": float(rc_share[i])})
+
+    return {
+        "return": {
+            "method": "log_scaled",
+            "total_return": float(total_return),
+            "approx_port_log": approx_port_log,
+            "by_code": return_rows,
+        },
+        "risk": {
+            "method": "variance_share",
+            "portfolio_variance": port_var,
+            "by_code": risk_rows,
+        },
+    }
+
+
 def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     codes = list(dict.fromkeys(inp.codes))
     if not codes:
@@ -247,8 +384,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "matrix": corr.to_numpy(dtype=float).tolist(),
     }
 
-    # equal-weight with configurable rebalancing
-    ew_nav = _compute_equal_weight_nav(ret_common[codes], rebalance=inp.rebalance)
+    # equal-weight with configurable rebalancing (also return weights for attribution)
+    ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes], rebalance=inp.rebalance)
     ew_ret = ew_nav.pct_change().fillna(0.0)
 
     # benchmark
@@ -362,6 +499,12 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
     }
 
+    attribution = _compute_return_risk_contributions(
+        asset_ret=ret_common[codes],
+        weights=ew_w[codes] if not ew_w.empty else pd.DataFrame(index=ret_common.index, columns=codes),
+        total_return=float(cum_ret),
+    )
+
     return {
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
         "codes": codes,
@@ -375,5 +518,6 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "metrics": metrics,
         "correlation": corr_out,
         "rolling": rolling_out,
+        "attribution": attribution,
     }
 

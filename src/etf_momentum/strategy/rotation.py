@@ -19,6 +19,7 @@ from ..analysis.baseline import (
     _ulcer_index,
 )
 from ..analysis.baseline import load_close_prices as _load_close_prices
+from ..analysis.baseline import _compute_return_risk_contributions as _compute_return_risk_contributions
 
 
 @dataclass(frozen=True)
@@ -217,6 +218,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     active_ret = port_ret_net - ew_ret
     excess_nav = (1.0 + active_ret).cumprod()
     excess_nav.iloc[0] = 1.0
+
+    attribution = _compute_return_risk_contributions(
+        asset_ret=ret_exec[codes],
+        weights=w[codes],
+        total_return=float(port_nav.iloc[-1] - 1.0),  # gross return (before costs)
+    )
 
     # Metrics
     ann_ret = _annualized_return(port_nav_net)
@@ -425,7 +432,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                         "corp_factor": float(f),
                     }
                 )
-        except Exception:  # pragma: no cover - defensive, should not break backtest
+        except (ValueError, TypeError, KeyError):  # pragma: no cover - defensive, should not break backtest
             corporate_actions = []
 
     out = {
@@ -445,6 +452,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 "EXCESS": excess_nav.astype(float).tolist(),
             },
         },
+        "attribution": attribution,
         "metrics": metrics,
         "win_payoff": stats,
         "period_returns": periodic,
