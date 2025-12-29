@@ -20,13 +20,29 @@
       .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
       .code-list { max-height: 220px; overflow: auto; border: 1px solid #ddd; padding: 8px; min-width: 320px; }
       .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
+      .no-print { }
+
+      @media print {
+        body { margin: 12mm; }
+        .no-print { display: none !important; }
+        #metricModal { display: none !important; }
+        .panel, table { break-inside: avoid; page-break-inside: avoid; }
+        h2, h3 { break-after: avoid; page-break-after: avoid; }
+        #chart, #rollingReturns, #rollingDD,
+        #rotChart, #rotExcessChart, #rotRollingReturns, #rotRollingDD,
+        #corrHeatmap,
+        #mcEwHist, #mcRotHist, #mcExcessHist,
+        #mcEwQQ, #mcRotQQ, #mcExcessQQ {
+          height: 420px !important;
+        }
+      }
     </style>
   </head>
   <body>
     <h2>基准分析：等权持有组合</h2>
     <div class="muted">用于动量轮动研究的基准数据：标的净值、等权组合净值、绩效指标与滚动统计。</div>
 
-    <div class="panel row">
+    <div class="panel row no-print">
       <div>
         <label>开始日期</label>
         <input id="start" placeholder="YYYYMMDD" />
@@ -55,10 +71,11 @@
         <input id="rf" placeholder="如 2.5 或 0.025" value="2.5" />
       </div>
       <button id="run">运行分析</button>
+      <button id="exportPdf">导出PDF报告</button>
       <div id="status" class="muted"></div>
     </div>
 
-    <div class="panel">
+    <div class="panel no-print">
       <div class="row">
         <div class="code-list" id="codes"></div>
         <div class="muted">
@@ -244,7 +261,7 @@
       <h2 style="margin-top: 8px">动量轮动回测</h2>
       <div class="muted">信号：hfq（后复权）动量；交易价格：none（不复权）；轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。</div>
 
-      <div class="panel row">
+      <div class="panel row no-print">
         <div>
           <label>调仓频率 <button class="helpBtn" data-metric="param_rot_rebalance" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
           <select id="rotRebalance">
@@ -1103,6 +1120,36 @@
         $("metricModal").style.display = "none";
       }
 
+      function exportPdfReport() {
+        // Best-effort resize Plotly charts before printing.
+        try {
+          const ids = [
+            "chart", "rollingReturns", "rollingDD",
+            "corrHeatmap",
+            "rotChart", "rotExcessChart", "rotRollingReturns", "rotRollingDD",
+            "mcEwHist", "mcEwQQ",
+            "mcRotHist", "mcRotQQ",
+            "mcExcessHist", "mcExcessQQ",
+          ];
+          for (const id of ids) {
+            const el = $(id);
+            if (el && window.Plotly && el.data) {
+              try { Plotly.Plots.resize(el); } catch (e) {}
+            }
+          }
+        } catch (e) {}
+
+        const start = ($("start").value || "").trim();
+        const end = ($("end").value || "").trim();
+        const codes = Array.from(selected).join("-");
+        const oldTitle = document.title;
+        document.title = `research_${start || "START"}_${end || "END"}_${codes || "codes"}`;
+        setTimeout(() => {
+          window.print();
+          setTimeout(() => { document.title = oldTitle; }, 200);
+        }, 150);
+      }
+
       function ymdToNum(s) {
         if (!s || s.length < 8) return null;
         const n = Number(s.slice(0, 8));
@@ -1710,6 +1757,7 @@
 
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+      $("exportPdf").addEventListener("click", exportPdfReport);
 
       async function runMcEw() {
         const btn = $("runMcEw");
