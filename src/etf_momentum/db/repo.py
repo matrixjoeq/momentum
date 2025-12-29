@@ -174,25 +174,37 @@ def upsert_prices(db: Session, rows: list[PriceRow]) -> int:
         for r in rows
     ]
 
-    stmt = insert(EtfPrice).values(values)
-    # On conflict, update OHLCV/amount/source/adjust to latest ingested values.
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[EtfPrice.code, EtfPrice.trade_date, EtfPrice.adjust],
-        set_={
-            "open": stmt.excluded.open,
-            "high": stmt.excluded.high,
-            "low": stmt.excluded.low,
-            "close": stmt.excluded.close,
-            "volume": stmt.excluded.volume,
-            "amount": stmt.excluded.amount,
-            "source": stmt.excluded.source,
-            "adjust": stmt.excluded.adjust,
-            "ingested_at": dt.datetime.now(dt.timezone.utc),
-        },
-    )
-    result = db.execute(stmt)
+    # SQLite has a hard limit on the number of bound variables per statement.
+    # Large ETFs (e.g. 510300) can easily exceed it if we insert everything in one VALUES(...),(...) statement.
+    #
+    # EtfPrice has 10 bound params per row here (code, trade_date, ohlc, volume, amount, source, adjust),
+    # plus a small constant overhead from SQLAlchemy, so a conservative chunk size keeps us safe across platforms.
+    chunk_size = 1000
+
+    total = 0
+    for i in range(0, len(values), chunk_size):
+        chunk = values[i : i + chunk_size]
+        stmt = insert(EtfPrice).values(chunk)
+        # On conflict, update OHLCV/amount/source/adjust to latest ingested values.
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[EtfPrice.code, EtfPrice.trade_date, EtfPrice.adjust],
+            set_={
+                "open": stmt.excluded.open,
+                "high": stmt.excluded.high,
+                "low": stmt.excluded.low,
+                "close": stmt.excluded.close,
+                "volume": stmt.excluded.volume,
+                "amount": stmt.excluded.amount,
+                "source": stmt.excluded.source,
+                "adjust": stmt.excluded.adjust,
+                "ingested_at": dt.datetime.now(dt.timezone.utc),
+            },
+        )
+        result = db.execute(stmt)
+        total += int(getattr(result, "rowcount", 0) or 0)
+
     # sqlite returns rowcount for DML
-    return int(getattr(result, "rowcount", 0) or 0)
+    return total
 
 
 def list_prices(

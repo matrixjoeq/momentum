@@ -51,6 +51,17 @@
         <label>结束日期</label>
         <input id="end" placeholder="YYYYMMDD" />
       </div>
+      <div style="min-width: 420px;">
+        <label>回测区间快捷选项（按勾选标的共同区间计算）</label>
+        <div class="row" style="gap:8px; align-items:center;">
+          <button id="range1y" title="近一年（按共同最大区间）">近一年</button>
+          <button id="range3y" title="近三年（按共同最大区间）">近三年</button>
+          <button id="range5y" title="近五年（按共同最大区间）">近五年</button>
+          <button id="range10y" title="近十年（按共同最大区间）">近十年</button>
+          <button id="rangeAll" title="成立以来（按共同最大区间）">成立以来</button>
+          <span id="rangeHint" class="muted" style="margin-left:6px;"></span>
+        </div>
+      </div>
       <div>
         <label>等权再平衡周期</label>
         <select id="rebalance">
@@ -1161,12 +1172,85 @@
         return String(Math.trunc(n)).padStart(8, "0");
       }
 
+      function ymdToDate(s) {
+        if (!s || s.length < 8) return null;
+        const y = Number(s.slice(0, 4));
+        const m = Number(s.slice(4, 6));
+        const d = Number(s.slice(6, 8));
+        if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+        // Use local time; we only care about YYYYMMDD arithmetic.
+        return new Date(y, m - 1, d);
+      }
+
+      function dateToYmd(dt) {
+        if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "";
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, "0");
+        const d = String(dt.getDate()).padStart(2, "0");
+        return String(y) + m + d;
+      }
+
       function computeAvailableRangeForSelection() {
         const items = pool.filter(x => selected.has(x.code));
         const starts = items.map(x => x.last_data_start_date).filter(Boolean).sort();
         const ends = items.map(x => x.last_data_end_date).filter(Boolean).sort();
         if (!starts.length || !ends.length) return { start: null, end: null };
         return { start: starts[starts.length - 1], end: ends[0] }; // max start, min end
+      }
+
+      function renderRangeHint() {
+        const el = $("rangeHint");
+        if (!el) return;
+        const avail = computeAvailableRangeForSelection();
+        if (!avail.start || !avail.end) {
+          el.textContent = "共同区间：无";
+          return;
+        }
+        el.textContent = `共同区间：${avail.start}~${avail.end}`;
+      }
+
+      function applyQuickRange(years) {
+        const avail = computeAvailableRangeForSelection();
+        if (!avail.start || !avail.end) {
+          setMsg("无法计算快捷区间：请先勾选至少一个且已抓取过数据的标的。");
+          return;
+        }
+        const availSn = ymdToNum(avail.start);
+        const availEn = ymdToNum(avail.end);
+        if (availSn == null || availEn == null) {
+          setMsg("无法计算快捷区间：共同区间无效。");
+          return;
+        }
+
+        let startYmd = avail.start;
+        let endYmd = avail.end;
+        if (Number.isFinite(years) && years > 0) {
+          const endDt = ymdToDate(avail.end);
+          if (!endDt) {
+            setMsg("无法计算快捷区间：共同结束日期无效。");
+            return;
+          }
+          const startDt = new Date(endDt.getTime());
+          startDt.setFullYear(startDt.getFullYear() - Number(years));
+          const candidate = dateToYmd(startDt);
+          const candN = ymdToNum(candidate);
+          if (candN != null) {
+            const nextS = Math.max(availSn, candN);
+            startYmd = numToYmd(nextS);
+          } else {
+            startYmd = avail.start;
+          }
+        }
+
+        // Always clamp within [avail.start, avail.end]
+        const nextSn = ymdToNum(startYmd);
+        const nextEn = ymdToNum(endYmd);
+        if (nextSn == null || nextEn == null || nextSn > nextEn) {
+          startYmd = avail.start;
+          endYmd = avail.end;
+        }
+        $("start").value = startYmd;
+        $("end").value = endYmd;
       }
 
       function maybeAdjustBacktestRange() {
@@ -1216,6 +1300,8 @@
             const c = cb.getAttribute("data-code");
             if (cb.checked) selected.add(c); else selected.delete(c);
             renderBenchmarkSelect();
+            maybeAdjustBacktestRange();
+            renderRangeHint();
           });
         });
       }
@@ -1243,6 +1329,7 @@
         // default defensive ETF: keep empty as requested
         // Initialize or clamp backtest range to available intersection (only if needed)
         maybeAdjustBacktestRange();
+        renderRangeHint();
       }
 
       function setMsg(t) { $("msg").textContent = t || ""; }
@@ -1900,13 +1987,20 @@
       wireRotPeriodControls("quarterly");
       wireRotPeriodControls("yearly");
       $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); });
-      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); });
+      $("selAll").addEventListener("click", () => { maybeAdjustBacktestRange(); renderRangeHint(); });
+      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); maybeAdjustBacktestRange(); renderRangeHint(); });
       $("selInvert").addEventListener("click", () => {
         const next = new Set();
         for (const it of pool) if (!selected.has(it.code)) next.add(it.code);
         selected.clear(); for (const c of next) selected.add(c);
-        renderCodeList(); renderBenchmarkSelect();
+        renderCodeList(); renderBenchmarkSelect(); maybeAdjustBacktestRange(); renderRangeHint();
       });
+
+      $("range1y").addEventListener("click", () => { setMsg(""); applyQuickRange(1); });
+      $("range3y").addEventListener("click", () => { setMsg(""); applyQuickRange(3); });
+      $("range5y").addEventListener("click", () => { setMsg(""); applyQuickRange(5); });
+      $("range10y").addEventListener("click", () => { setMsg(""); applyQuickRange(10); });
+      $("rangeAll").addEventListener("click", () => { setMsg(""); applyQuickRange(null); });
 
       loadPool().catch(e => setMsg(String(e)));
     </script>

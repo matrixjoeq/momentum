@@ -10,7 +10,9 @@ DEFAULT_POLICIES: list[dict] = [
     {
         "name": "cn_stock_etf_10",
         "description": "A股大多数跟踪指数ETF，10%涨跌幅，异常检测阈值略放宽。",
-        "max_abs_return": 0.12,
+        # Some broad-market ETFs can occasionally exceed 12% in adjusted series due to corporate actions / data quirks.
+        # Keep it only slightly relaxed to still catch true anomalies.
+        "max_abs_return": 0.13,
         "max_hl_spread": 0.30,
         "max_gap_days": 12,
     },
