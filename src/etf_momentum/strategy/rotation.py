@@ -36,6 +36,27 @@ class RotationInputs:
     risk_off: bool = False
     defensive_code: str | None = None
     momentum_floor: float = 0.0  # if best score <= floor -> risk-off
+    # --- Ranking method ---
+    score_method: str = "raw_mom"  # raw_mom | sharpe_mom | sortino_mom | return_over_vol
+    score_lambda: float = 0.0  # used by mom_minus_lambda_vol
+    score_vol_power: float = 1.0  # used by mom_over_vol_power
+    # --- Pre-trade risk controls (drawdown prevention heuristics) ---
+    # Trend filter: decide whether to buy at all, and/or exclude candidates that are not in trend.
+    trend_filter: bool = False
+    trend_mode: str = "each"  # "each" | "universe"
+    trend_sma_window: int = 200  # trading days (approx)
+    # RSI filter: avoid buying overbought / oversold assets.
+    rsi_filter: bool = False
+    rsi_window: int = 14
+    rsi_overbought: float = 70.0
+    rsi_oversold: float = 30.0
+    rsi_block_overbought: bool = True
+    rsi_block_oversold: bool = False
+    # Volatility monitor: scale position size (cash remainder) to reduce exposure during high vol.
+    vol_monitor: bool = False
+    vol_window: int = 20
+    vol_target_ann: float = 0.20  # annualized target vol; scales down if realized vol is higher
+    vol_max_ann: float = 0.60  # annualized hard stop; above this -> no risk position (cash/defensive)
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str) -> pd.PeriodIndex:
@@ -51,6 +72,121 @@ def _momentum_scores(close_hfq: pd.DataFrame, *, lookback_days: int, skip_days: 
     lag = skip_days
     lb = lookback_days
     return close_hfq.shift(lag) / close_hfq.shift(lag + lb) - 1.0
+
+
+def _rolling_prod_minus_1(gross: pd.DataFrame, *, window: int) -> pd.DataFrame:
+    w = max(1, int(window))
+    # rolling product is not built-in for DataFrame; use apply on ndarray for speed-enough.
+    return gross.rolling(window=w, min_periods=max(2, w // 2)).apply(lambda x: float(np.prod(x)) - 1.0, raw=True)
+
+
+def _risk_adjusted_scores(
+    close_hfq: pd.DataFrame,
+    *,
+    lookback_days: int,
+    skip_days: int,
+    method: str,
+    rf_annual: float,
+) -> pd.DataFrame:
+    """
+    Compute alternative momentum scores for ranking:
+    - return_over_vol: cumulative return / realized vol over same window
+    - sharpe_mom: Sharpe ratio over lookback window
+    - sortino_mom: Sortino ratio over lookback window
+
+    All are computed on hfq daily close-to-close returns, with window ending at (t - skip_days).
+    """
+    m = (method or "raw_mom").strip().lower()
+    if m not in {"return_over_vol", "sharpe_mom", "sortino_mom", "mom_minus_lambda_vol", "mom_over_vol_power"}:
+        raise ValueError(f"invalid score_method={method}")
+
+    lb = max(1, int(lookback_days))
+    lag = max(0, int(skip_days))
+    rf_daily = float(rf_annual) / 252.0
+
+    ret = close_hfq.pct_change().replace([np.inf, -np.inf], np.nan)
+    # Align the window to end at (t - lag): shift returns forward by lag.
+    ret = ret.shift(lag)
+
+    # window stats
+    mean = ret.rolling(window=lb, min_periods=max(3, lb // 2)).mean()
+    std = ret.rolling(window=lb, min_periods=max(3, lb // 2)).std(ddof=1)
+    ann_vol = std * np.sqrt(252.0)
+
+    # cumulative return over the window
+    gross = (1.0 + ret).fillna(1.0)
+    cum_ret = _rolling_prod_minus_1(gross, window=lb)
+
+    # robust division: if denom is ~0, map to large +/- depending on numerator sign (for deterministic ranking)
+    def safe_div(numer: pd.DataFrame, denom: pd.DataFrame) -> pd.DataFrame:
+        eps = 1e-12
+        out = numer / denom.replace(0.0, np.nan)
+        small = denom.abs() < eps
+        if small.to_numpy().any():
+            sign = np.sign(numer.where(small, other=0.0))
+            out = out.mask(small & (sign > 0), other=1e9)
+            out = out.mask(small & (sign < 0), other=-1e9)
+            out = out.mask(small & (sign == 0), other=0.0)
+        return out
+
+    if m == "return_over_vol":
+        return safe_div(cum_ret.astype(float), ann_vol.astype(float))
+
+    if m == "mom_minus_lambda_vol":
+        # Placeholder; actual lambda is applied in backtest_rotation for consistency with input validation.
+        return cum_ret.astype(float)  # will be adjusted by caller
+
+    if m == "mom_over_vol_power":
+        return cum_ret.astype(float)  # will be adjusted by caller
+
+    # sharpe/sortino use excess mean over rf
+    excess_mean = (mean - rf_daily).astype(float)
+    if m == "sharpe_mom":
+        return safe_div(excess_mean, std.astype(float))
+
+    # sortino: downside deviation on (ret - rf_daily)
+    downside = (ret - rf_daily).clip(upper=0.0)
+    dd = downside.rolling(window=lb, min_periods=max(3, lb // 2)).std(ddof=1)
+    return safe_div(excess_mean, dd.astype(float))
+
+
+def _trend_ok_each(close: pd.DataFrame, *, sma_window: int) -> pd.DataFrame:
+    """
+    Simple trend filter: close > SMA(close, window).
+    Returns boolean DataFrame aligned to `close`.
+    """
+    w = max(1, int(sma_window))
+    sma = close.rolling(window=w, min_periods=max(2, w // 2)).mean()
+    return (close > sma).fillna(False)
+
+
+def _rsi(close: pd.DataFrame, *, window: int) -> pd.DataFrame:
+    """
+    RSI (Wilder-style smoothing via EWM).
+    Returns DataFrame in [0, 100], aligned to `close`.
+    """
+    w = max(1, int(window))
+    diff = close.diff()
+    gain = diff.clip(lower=0.0)
+    loss = (-diff).clip(lower=0.0)
+    # Wilder uses alpha=1/w
+    avg_gain = gain.ewm(alpha=1.0 / w, adjust=False, min_periods=w).mean()
+    avg_loss = loss.ewm(alpha=1.0 / w, adjust=False, min_periods=w).mean()
+    rs = avg_gain / avg_loss.replace(0.0, np.nan)
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    # If avg_loss==0 and avg_gain>0, RSI should be 100. If both 0, RSI undefined -> NaN.
+    rsi = rsi.fillna(100.0).clip(lower=0.0, upper=100.0)
+    return rsi
+
+
+def _ann_realized_vol_from_close(close: pd.DataFrame, *, window: int) -> pd.DataFrame:
+    """
+    Annualized realized vol from daily close-to-close returns.
+    """
+    w = max(2, int(window))
+    ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
+    vol_daily = ret.rolling(window=w, min_periods=max(3, w // 2)).std(ddof=1)
+    return (vol_daily * np.sqrt(252.0)).astype(float)
 
 
 def _pick_assets(
@@ -90,16 +226,52 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         raise ValueError("lookback_days must be > 0")
     if inp.skip_days < 0:
         raise ValueError("skip_days must be >= 0")
+    sm = (inp.score_method or "raw_mom").strip().lower()
+    if sm not in {
+        "raw_mom",
+        "sharpe_mom",
+        "sortino_mom",
+        "return_over_vol",
+        "mom_minus_lambda_vol",
+        "mom_over_vol_power",
+    }:
+        raise ValueError(f"invalid score_method={inp.score_method}")
+    if not np.isfinite(float(inp.score_lambda)):
+        raise ValueError("score_lambda must be finite")
+    if not np.isfinite(float(inp.score_vol_power)):
+        raise ValueError("score_vol_power must be finite")
+    if inp.trend_sma_window <= 0:
+        raise ValueError("trend_sma_window must be > 0")
+    if inp.rsi_window <= 0:
+        raise ValueError("rsi_window must be > 0")
+    if inp.vol_window <= 0:
+        raise ValueError("vol_window must be > 0")
+    if inp.trend_mode not in {"each", "universe"}:
+        raise ValueError(f"invalid trend_mode={inp.trend_mode}")
+    if not (0.0 <= float(inp.rsi_oversold) <= 100.0) or not (0.0 <= float(inp.rsi_overbought) <= 100.0):
+        raise ValueError("rsi thresholds must be within [0,100]")
+    if float(inp.vol_target_ann) <= 0:
+        raise ValueError("vol_target_ann must be > 0")
+    if float(inp.vol_max_ann) <= 0:
+        raise ValueError("vol_max_ann must be > 0")
 
     codes = universe[:]  # may include defensive later for strategy holdings
+    rank_codes = universe[:]  # ranking / filters apply to the original universe only
     defensive = (inp.defensive_code or "").strip() or None
     if inp.risk_off and defensive:
         if defensive not in codes:
             codes = codes + [defensive]
 
     # Load hfq for signal and benchmark(total return), none for execution (trading simulation).
-    # Need enough history for momentum.
-    ext_start = inp.start - dt.timedelta(days=inp.lookback_days + inp.skip_days + 60)
+    # Need enough history for momentum + optional risk controls.
+    need_hist = inp.lookback_days + inp.skip_days + 60
+    if inp.trend_filter:
+        need_hist = max(need_hist, int(inp.trend_sma_window) + 60)
+    if inp.rsi_filter:
+        need_hist = max(need_hist, int(inp.rsi_window) + 60)
+    if inp.vol_monitor:
+        need_hist = max(need_hist, int(inp.vol_window) + 60)
+    ext_start = inp.start - dt.timedelta(days=int(need_hist))
     close_hfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
     close_none = _load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
     if close_none.empty:
@@ -118,7 +290,45 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     if miss_sig:
         raise ValueError(f"missing signal data (hfq) for: {miss_sig}")
 
-    scores = _momentum_scores(close_hfq[codes], lookback_days=inp.lookback_days, skip_days=inp.skip_days)
+    if sm == "raw_mom":
+        scores = _momentum_scores(close_hfq[rank_codes], lookback_days=inp.lookback_days, skip_days=inp.skip_days)
+    else:
+        base_scores = _risk_adjusted_scores(
+            close_hfq[rank_codes],
+            lookback_days=inp.lookback_days,
+            skip_days=inp.skip_days,
+            method=inp.score_method,
+            rf_annual=float(inp.risk_free_rate),
+        )
+        if sm == "mom_minus_lambda_vol":
+            # mom is base cumulative return; subtract lambda * annualized vol over the same window
+            lb = max(2, int(inp.lookback_days))
+            lag = max(0, int(inp.skip_days))
+            ret = close_hfq[rank_codes].pct_change().replace([np.inf, -np.inf], np.nan).shift(lag)
+            vol = ret.rolling(window=lb, min_periods=max(3, lb // 2)).std(ddof=1) * np.sqrt(252.0)
+            scores = base_scores - float(inp.score_lambda) * vol.astype(float)
+        elif sm == "mom_over_vol_power":
+            lb = max(2, int(inp.lookback_days))
+            lag = max(0, int(inp.skip_days))
+            ret = close_hfq[rank_codes].pct_change().replace([np.inf, -np.inf], np.nan).shift(lag)
+            vol = ret.rolling(window=lb, min_periods=max(3, lb // 2)).std(ddof=1) * np.sqrt(252.0)
+            denom = vol.astype(float).pow(float(inp.score_vol_power))
+            scores = base_scores / denom.replace(0.0, np.nan)
+            # keep deterministic ranking for zero-vol series
+            scores = scores.replace([np.inf, -np.inf], np.nan)
+        else:
+            scores = base_scores
+
+    # Pre-compute risk-control signals on hfq close (aligned to execution calendar).
+    trend_ok_each = _trend_ok_each(close_hfq[rank_codes], sma_window=int(inp.trend_sma_window)) if inp.trend_filter else None
+    rsi = _rsi(close_hfq[rank_codes], window=int(inp.rsi_window)) if inp.rsi_filter else None
+    ann_vol = _ann_realized_vol_from_close(close_hfq[rank_codes], window=int(inp.vol_window)) if inp.vol_monitor else None
+    # Universe-level trend uses average price series across the selected universe.
+    if inp.trend_filter and inp.trend_mode == "universe":
+        uni_close = close_hfq[rank_codes].mean(axis=1).to_frame("UNIVERSE")
+        uni_ok = _trend_ok_each(uni_close, sma_window=int(inp.trend_sma_window))["UNIVERSE"]
+    else:
+        uni_ok = None
 
     # Determine rebalance decision dates: last trading day within each period.
     # If we rebalance at close on decision_date, then returns on the NEXT trading day onward
@@ -146,10 +356,125 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             defensive_code=defensive,
             floor=inp.momentum_floor,
         )
+        # Defensive/cash branch from momentum floor:
+        # - picks == [defensive] => invest 100% in defensive (if provided)
+        # - picks == [] => cash
+        reasons: list[str] = []
+        details: dict[str, Any] = {}
+
         picks = [p for p in picks if p in codes]
+        risk_picks = [p for p in picks if p in rank_codes]  # only rank codes are considered "risk assets"
+
+        # Apply pre-trade risk controls only when we are in risk-on mode (holding risk assets).
+        if risk_picks:
+            # 1) Trend filter
+            if inp.trend_filter:
+                if inp.trend_mode == "universe":
+                    ok = bool(uni_ok.loc[d]) if (uni_ok is not None and d in uni_ok.index) else False
+                    details["trend_universe_ok"] = ok
+                    if not ok:
+                        reasons.append("trend_universe_block")
+                        if inp.risk_off and defensive:
+                            picks = [defensive]
+                            risk_picks = []
+                            meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "defensive"}
+                        else:
+                            picks = []
+                            risk_picks = []
+                            meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
+                else:
+                    ok_map = {}
+                    if trend_ok_each is not None and d in trend_ok_each.index:
+                        for p in risk_picks:
+                            ok_map[p] = bool(trend_ok_each.loc[d, p])
+                    details["trend_each_ok"] = ok_map
+                    before = risk_picks[:]
+                    risk_picks = [p for p in risk_picks if ok_map.get(p, False)]
+                    removed = [p for p in before if p not in risk_picks]
+                    if removed:
+                        reasons.append(f"trend_each_exclude:{','.join(removed)}")
+                        picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
+
+            # 2) RSI filter
+            if risk_picks and inp.rsi_filter and rsi is not None and d in rsi.index:
+                rsi_map = {p: (None if pd.isna(rsi.loc[d, p]) else float(rsi.loc[d, p])) for p in risk_picks}
+                details["rsi"] = rsi_map
+                before = risk_picks[:]
+                if inp.rsi_block_overbought:
+                    risk_picks = [p for p in risk_picks if (rsi_map.get(p) is None) or (rsi_map[p] <= float(inp.rsi_overbought))]
+                if inp.rsi_block_oversold:
+                    risk_picks = [p for p in risk_picks if (rsi_map.get(p) is None) or (rsi_map[p] >= float(inp.rsi_oversold))]
+                removed = [p for p in before if p not in risk_picks]
+                if removed:
+                    reasons.append(f"rsi_exclude:{','.join(removed)}")
+                    picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
+
+            # If filters removed all risk assets, fall back to defensive/cash (planned no-buy).
+            if (not risk_picks) and (meta.get("mode") == "risk_on"):
+                reasons.append("risk_controls_block_all")
+                if inp.risk_off and defensive:
+                    picks = [defensive]
+                    meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "defensive"}
+                else:
+                    picks = []
+                    meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
+
+        # 3) Volatility sizing: scale down weights of risk assets (cash remainder).
+        exposure = 1.0
+        weight_map: dict[str, float] = {}
         if picks:
-            weight = 1.0 / len(picks)
-            w.loc[dates[start_i] : dates[end_i], picks] = weight
+            if picks == [defensive] and defensive:
+                weight_map[defensive] = 1.0
+                exposure = 1.0
+            else:
+                risk_picks = [p for p in picks if p in rank_codes]
+                if not risk_picks:
+                    exposure = 0.0
+                else:
+                    # default equal-weight, full exposure
+                    scales = {p: 1.0 for p in risk_picks}
+                    if inp.vol_monitor and ann_vol is not None and d in ann_vol.index:
+                        vol_map = {p: (None if pd.isna(ann_vol.loc[d, p]) else float(ann_vol.loc[d, p])) for p in risk_picks}
+                        details["ann_vol"] = vol_map
+                        for p in risk_picks:
+                            v = vol_map.get(p)
+                            if v is None or (not np.isfinite(v)) or v <= 0:
+                                # If vol is missing/invalid, we conservatively skip this asset.
+                                # If vol is (near) zero (e.g. flat price in synthetic tests), it should not force
+                                # a "no-buy" decision; treat it as low-vol and cap scale to 1.
+                                if v is not None and np.isfinite(v) and v <= 0:
+                                    scales[p] = 1.0
+                                else:
+                                    scales[p] = 0.0
+                                continue
+                            if v >= float(inp.vol_max_ann):
+                                scales[p] = 0.0
+                                continue
+                            scales[p] = float(min(1.0, float(inp.vol_target_ann) / v))
+                    exposure = float(np.mean(list(scales.values()))) if scales else 0.0
+                    per = 0.0 if not risk_picks else 1.0 / len(risk_picks)
+                    for p in risk_picks:
+                        weight_map[p] = float(scales.get(p, 0.0) * per)
+
+                    # If vol sizing zeroed all positions, fall back to defensive/cash.
+                    if exposure <= 0.0:
+                        reasons.append("vol_block_all")
+                        if inp.risk_off and defensive:
+                            weight_map = {defensive: 1.0}
+                            picks = [defensive]
+                            meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "defensive"}
+                            exposure = 1.0
+                        else:
+                            weight_map = {}
+                            picks = []
+                            meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
+                            exposure = 0.0
+
+            # write weights for the whole holding segment
+            if weight_map:
+                for c, wt in weight_map.items():
+                    if wt and wt > 0:
+                        w.loc[dates[start_i] : dates[end_i], c] = float(wt)
         holdings["periods"].append(
             {
                 "decision_date": d.date().isoformat(),
@@ -160,6 +485,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 "best_score": meta.get("best_score"),
                 "risk_off_triggered": bool(meta.get("risk_off_triggered")),
                 "mode": meta.get("mode"),
+                "exposure": float(exposure),
+                "risk_controls": {"reasons": reasons, **details},
             }
         )
 
@@ -437,6 +764,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
 
     out = {
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d")},
+        "score_method": (inp.score_method or "raw_mom"),
+        "score_params": {"lambda": float(inp.score_lambda), "vol_power": float(inp.score_vol_power)},
         "codes": codes,
         "benchmark_codes": bench_codes,
         "price_basis": {

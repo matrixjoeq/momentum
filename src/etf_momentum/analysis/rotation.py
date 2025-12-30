@@ -23,6 +23,23 @@ class RotationAnalysisInputs:
     risk_off: bool = False
     defensive_code: str | None = None
     momentum_floor: float = 0.0
+    score_method: str = "raw_mom"
+    score_lambda: float = 0.0
+    score_vol_power: float = 1.0
+    # Risk controls (defaults off)
+    trend_filter: bool = False
+    trend_mode: str = "each"
+    trend_sma_window: int = 200
+    rsi_filter: bool = False
+    rsi_window: int = 14
+    rsi_overbought: float = 70.0
+    rsi_oversold: float = 30.0
+    rsi_block_overbought: bool = True
+    rsi_block_oversold: bool = False
+    vol_monitor: bool = False
+    vol_window: int = 20
+    vol_target_ann: float = 0.20
+    vol_max_ann: float = 0.60
 
 
 def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
@@ -41,6 +58,22 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             risk_off=inp.risk_off,
             defensive_code=inp.defensive_code,
             momentum_floor=inp.momentum_floor,
+            score_method=inp.score_method,
+            score_lambda=inp.score_lambda,
+            score_vol_power=inp.score_vol_power,
+            trend_filter=inp.trend_filter,
+            trend_mode=inp.trend_mode,
+            trend_sma_window=inp.trend_sma_window,
+            rsi_filter=inp.rsi_filter,
+            rsi_window=inp.rsi_window,
+            rsi_overbought=inp.rsi_overbought,
+            rsi_oversold=inp.rsi_oversold,
+            rsi_block_overbought=inp.rsi_block_overbought,
+            rsi_block_oversold=inp.rsi_block_oversold,
+            vol_monitor=inp.vol_monitor,
+            vol_window=inp.vol_window,
+            vol_target_ann=inp.vol_target_ann,
+            vol_max_ann=inp.vol_max_ann,
         ),
     )
 

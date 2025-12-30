@@ -288,6 +288,15 @@
           <input id="rotTopK" value="1" />
         </div>
         <div>
+          <label>打分方式 <button class="helpBtn" data-metric="param_rot_score_method" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <select id="rotScoreMethod" style="min-width:200px;">
+            <option value="raw_mom" selected>纯动量（raw）</option>
+            <option value="return_over_vol">收益/波动率</option>
+            <option value="sharpe_mom">Sharpe 动量</option>
+            <option value="sortino_mom">Sortino 动量</option>
+          </select>
+        </div>
+        <div>
           <label>动量回看(交易日) <button class="helpBtn" data-metric="param_rot_lookback" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
           <input id="rotLookback" value="20" />
         </div>
@@ -313,6 +322,62 @@
         <div>
           <label>动量门槛 <button class="helpBtn" data-metric="param_rot_floor" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
           <input id="rotFloor" value="0" />
+        </div>
+        <div>
+          <label>趋势过滤 <button class="helpBtn" data-metric="param_rot_trend" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <select id="rotTrendOn" style="min-width:160px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>趋势模式</label>
+          <select id="rotTrendMode" style="min-width:160px;">
+            <option value="each" selected>逐标的</option>
+            <option value="universe">全市场(候选均值)</option>
+          </select>
+        </div>
+        <div>
+          <label>SMA窗口(交易日)</label>
+          <input id="rotTrendSma" value="200" />
+        </div>
+        <div>
+          <label>RSI过滤 <button class="helpBtn" data-metric="param_rot_rsi" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <select id="rotRsiOn" style="min-width:160px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>RSI窗口</label>
+          <input id="rotRsiWin" value="14" />
+        </div>
+        <div>
+          <label>超买阈值</label>
+          <input id="rotRsiOver" value="70" />
+        </div>
+        <div>
+          <label>超卖阈值</label>
+          <input id="rotRsiUnder" value="30" />
+        </div>
+        <div>
+          <label>波动率监控 <button class="helpBtn" data-metric="param_rot_vol" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <select id="rotVolOn" style="min-width:160px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>Vol窗口</label>
+          <input id="rotVolWin" value="20" />
+        </div>
+        <div>
+          <label>目标年化Vol</label>
+          <input id="rotVolTarget" value="0.20" />
+        </div>
+        <div>
+          <label>最大年化Vol</label>
+          <input id="rotVolMax" value="0.60" />
         </div>
         <button id="runRotation">运行轮动回测</button>
       </div>
@@ -833,6 +898,44 @@
             <div style="margin-top:8px"><b>范围</b>：实数。常用：0（动量为负就避险）。</div>
             <div style="margin-top:8px"><b>重要</b>：需开启“风险规避”。若防守标的为空，则门槛触发时会进入<b>空仓(现金)</b>；若防守标的有值，则切换至该防守标的。</div>
             <div style="margin-top:8px"><b>示例</b>：floor=0 表示只在动量为正时才持有风险资产；若 defensive=511010，则触发后持有 511010；若 defensive 为空，则空仓。</div>
+          `,
+        },
+        param_rot_score_method: {
+          title: "打分方式（score_method）",
+          sub: "决定“动量排序”用什么指标：偏向涨得猛 or 涨得稳。",
+          body: `
+            <div><b>raw_mom</b>：纯动量，score = close(t-skip)/close(t-skip-lookback) - 1。</div>
+            <div style="margin-top:8px"><b>return_over_vol</b>：过去收益 / 过去波动率（年化）。偏向“涨得稳”。</div>
+            <div style="margin-top:8px"><b>sharpe_mom</b>：看过去窗口内的 Sharpe（用 rf 作为无风险）。</div>
+            <div style="margin-top:8px"><b>sortino_mom</b>：看过去窗口内的 Sortino（只惩罚下行波动）。</div>
+            <div style="margin-top:8px"><b>说明</b>：这些打分只影响“排序与选标”，不改变成交价格口径/回测结算逻辑。</div>
+          `,
+        },
+        param_rot_trend: {
+          title: "趋势过滤（trend_filter）",
+          sub: "用趋势条件决定是否允许进入风险资产（事前风控）。",
+          body: `
+            <div><b>逐标的</b>：对每个候选标的判断 close(hfq) 是否在 SMA(window) 之上；不满足的标的不会被买入。</div>
+            <div style="margin-top:8px"><b>全市场(候选均值)</b>：对“候选池均值价格”做同样判断；若不满足，则本期不买风险资产（进入防守/现金）。</div>
+            <div style="margin-top:8px"><b>目的</b>：在下行趋势中减少错误入场，降低大回撤。</div>
+          `,
+        },
+        param_rot_rsi: {
+          title: "RSI过滤（rsi_filter）",
+          sub: "用超买超卖指标决定是否允许买入（事前风控）。",
+          body: `
+            <div><b>含义</b>：RSI 是动量强弱指标（0~100）。</div>
+            <div style="margin-top:8px"><b>默认</b>：只屏蔽超买（RSI&gt;70），避免追高；超卖是否屏蔽可扩展。</div>
+            <div style="margin-top:8px"><b>目的</b>：减少在极端情绪位置买入导致的回撤风险。</div>
+          `,
+        },
+        param_rot_vol: {
+          title: "波动率监控（vol_monitor）",
+          sub: "用历史波动率决定买入仓位（事前仓位控制）。",
+          body: `
+            <div><b>逻辑</b>：对每个买入标的计算年化实现波动率 vol；若 vol&gt;target，则仓位按 target/vol 比例缩小（剩余留现金）。</div>
+            <div style="margin-top:8px"><b>硬阈值</b>：若 vol&gt;max，则该标的不买；如果全部都不买，则进入防守/现金。</div>
+            <div style="margin-top:8px"><b>目的</b>：在高波动阶段降低暴露，事前控制回撤。</div>
           `,
         },
         rot_cum: {
@@ -1762,16 +1865,42 @@
         const risk_off = ($("rotRiskOff").value === "true");
         const defensive_code = ($("rotDefensive").value || "").trim() || null;
         const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const score_method = $("rotScoreMethod").value;
+        const trend_filter = ($("rotTrendOn").value === "true");
+        const trend_mode = $("rotTrendMode").value;
+        const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
+        const rsi_filter = ($("rotRsiOn").value === "true");
+        const rsi_window = Number(($("rotRsiWin").value || "14").trim());
+        const rsi_overbought = Number(($("rotRsiOver").value || "70").trim());
+        const rsi_oversold = Number(($("rotRsiUnder").value || "30").trim());
+        const vol_monitor = ($("rotVolOn").value === "true");
+        const vol_window = Number(($("rotVolWin").value || "20").trim());
+        const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
+        const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        if (trend_filter && (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0)) return setMsg("趋势 SMA 窗口必须是正整数");
+        if (rsi_filter && (!Number.isFinite(rsi_window) || rsi_window <= 0)) return setMsg("RSI 窗口必须是正整数");
+        if (rsi_filter && (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100)) return setMsg("RSI 超买阈值需在 0~100");
+        if (rsi_filter && (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100)) return setMsg("RSI 超卖阈值需在 0~100");
+        if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
+        if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
+        if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
 
         $("status").textContent = "回测中...";
         setMsg("");
         const resp = await api("/analysis/rotation", {
           method: "POST",
-          body: JSON.stringify({ codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps, risk_off, defensive_code, momentum_floor, risk_free_rate }),
+          body: JSON.stringify({
+            codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
+            risk_off, defensive_code, momentum_floor, risk_free_rate,
+            score_method,
+            trend_filter, trend_mode, trend_sma_window,
+            rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
+            vol_monitor, vol_window, vol_target_ann, vol_max_ann,
+          }),
         });
         const text = await resp.text();
         $("status").textContent = "";
@@ -1903,10 +2032,29 @@
         const risk_off = ($("rotRiskOff").value === "true");
         const defensive_code = ($("rotDefensive").value || "").trim() || null;
         const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const score_method = $("rotScoreMethod").value;
+        const trend_filter = ($("rotTrendOn").value === "true");
+        const trend_mode = $("rotTrendMode").value;
+        const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
+        const rsi_filter = ($("rotRsiOn").value === "true");
+        const rsi_window = Number(($("rotRsiWin").value || "14").trim());
+        const rsi_overbought = Number(($("rotRsiOver").value || "70").trim());
+        const rsi_oversold = Number(($("rotRsiUnder").value || "30").trim());
+        const vol_monitor = ($("rotVolOn").value === "true");
+        const vol_window = Number(($("rotVolWin").value || "20").trim());
+        const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
+        const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        if (trend_filter && (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0)) return setMsg("趋势 SMA 窗口必须是正整数");
+        if (rsi_filter && (!Number.isFinite(rsi_window) || rsi_window <= 0)) return setMsg("RSI 窗口必须是正整数");
+        if (rsi_filter && (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100)) return setMsg("RSI 超买阈值需在 0~100");
+        if (rsi_filter && (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100)) return setMsg("RSI 超卖阈值需在 0~100");
+        if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
+        if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
+        if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
         const n_sims = Number(($("mcN").value || "2000").trim());
         const block_size = Number(($("mcBlock").value || "5").trim());
         const winRaw = ($("mcWindow").value || "").trim();
@@ -1922,7 +2070,15 @@
         try {
           const resp = await api("/analysis/rotation/montecarlo", {
             method: "POST",
-            body: JSON.stringify({ codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps, risk_off, defensive_code, momentum_floor, risk_free_rate, n_sims, block_size, seed, sample_window_days }),
+            body: JSON.stringify({
+              codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
+              risk_off, defensive_code, momentum_floor, risk_free_rate,
+              score_method,
+              trend_filter, trend_mode, trend_sma_window,
+              rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
+              vol_monitor, vol_window, vol_target_ann, vol_max_ann,
+              n_sims, block_size, seed, sample_window_days
+            }),
           });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);

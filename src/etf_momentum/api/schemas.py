@@ -104,8 +104,28 @@ class RotationBacktestRequest(BaseModel):
     risk_off: bool = False
     defensive_code: str | None = None
     momentum_floor: float = 0.0
+    score_method: str = Field(
+        default="raw_mom",
+        description="Ranking score: raw_mom | sharpe_mom | sortino_mom | return_over_vol | mom_minus_lambda_vol | mom_over_vol_power",
+    )
+    score_lambda: float = Field(default=0.0, description="Used by mom_minus_lambda_vol: score = mom - lambda * vol")
+    score_vol_power: float = Field(default=1.0, description="Used by mom_over_vol_power: score = mom / vol**power")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=0.0, ge=0.0)
+    # Pre-trade risk controls (all optional; defaults keep previous behavior)
+    trend_filter: bool = Field(default=False, description="Enable trend filter gating (pre-trade)")
+    trend_mode: str = Field(default="each", description="each|universe")
+    trend_sma_window: int = Field(default=200, ge=1, description="SMA window for trend filter (trading days)")
+    rsi_filter: bool = Field(default=False, description="Enable RSI filter gating (pre-trade)")
+    rsi_window: int = Field(default=14, ge=1, description="RSI window (trading days)")
+    rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)
+    rsi_oversold: float = Field(default=30.0, ge=0.0, le=100.0)
+    rsi_block_overbought: bool = Field(default=True, description="If true, exclude assets with RSI > overbought")
+    rsi_block_oversold: bool = Field(default=False, description="If true, exclude assets with RSI < oversold")
+    vol_monitor: bool = Field(default=False, description="Enable volatility-based position sizing (pre-trade)")
+    vol_window: int = Field(default=20, ge=1, description="Realized vol window (trading days)")
+    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for sizing")
+    vol_max_ann: float = Field(default=0.60, gt=0.0, description="Annualized hard stop vol; above -> no risk position")
 
 
 class MonteCarloRequest(BaseModel):
