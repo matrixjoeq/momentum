@@ -9,8 +9,24 @@ from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
 def _seed_prices(db, *, code: str, dates: list[dt.date], closes: list[float]) -> None:
     assert len(dates) == len(closes)
     for d, px in zip(dates, closes):
-        for adj in ("hfq", "none"):
-            db.add(EtfPrice(code=code, trade_date=d, close=float(px), source="eastmoney", adjust=adj))
+        # For tests that exercise technical-analysis filters we also provide qfq.
+        for adj in ("hfq", "qfq", "none"):
+            c = float(px)
+            # Provide synthetic OHLC so that indicators like ADX (high/low/close) can be computed.
+            hi = c * 1.01
+            lo = c * 0.99
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    open=c,
+                    high=hi,
+                    low=lo,
+                    close=c,
+                    source="eastmoney",
+                    adjust=adj,
+                )
+            )
 
 
 def test_trend_filter_universe_blocks_risk_and_goes_cash(session_factory):
@@ -170,5 +186,44 @@ def test_score_method_return_over_vol_prefers_stable_winner(session_factory):
     raw_picks = [p.get("picks") for p in out_raw["holdings"]]
     rav_picks = [p.get("picks") for p in out_rav["holdings"]]
     assert raw_picks != rav_picks
+
+
+def test_chop_filter_adx_excludes_low_trend_asset(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["AAA", "BBB"]
+        start = dt.date(2024, 1, 1)
+        dates = [start + dt.timedelta(days=i) for i in range(140)]
+        # AAA: choppy but slightly up overall (so momentum can rank it well)
+        a = [100.0]
+        for i in range(1, len(dates)):
+            a.append(a[-1] * (1.01 if i % 2 == 0 else 0.99))
+        # BBB: steadier uptrend
+        b = [100.0 + i * 0.15 for i in range(len(dates))]
+        _seed_prices(db, code="AAA", dates=dates, closes=a)
+        _seed_prices(db, code="BBB", dates=dates, closes=b)
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=start,
+                end=dates[-1],
+                rebalance="monthly",
+                top_k=2,
+                lookback_days=20,
+                cost_bps=0.0,
+                chop_filter=True,
+                chop_mode="adx",
+                chop_adx_window=14,
+                chop_adx_threshold=15.0,
+            ),
+        )
+
+    # When ADX filter is active, at least one period should exclude the choppy asset.
+    picks = [p.get("picks") for p in out["holdings"] if p.get("mode") == "risk_on"]
+    assert picks, "expected some risk_on periods"
+    assert any((ps is not None) and ("AAA" not in (ps or [])) for ps in picks)
 
 

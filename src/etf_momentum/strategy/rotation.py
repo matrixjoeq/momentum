@@ -19,6 +19,7 @@ from ..analysis.baseline import (
     _ulcer_index,
 )
 from ..analysis.baseline import load_close_prices as _load_close_prices
+from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
 from ..analysis.baseline import _compute_return_risk_contributions as _compute_return_risk_contributions
 
 
@@ -44,10 +45,10 @@ class RotationInputs:
     # Trend filter: decide whether to buy at all, and/or exclude candidates that are not in trend.
     trend_filter: bool = False
     trend_mode: str = "each"  # "each" | "universe"
-    trend_sma_window: int = 200  # trading days (approx)
+    trend_sma_window: int = 20  # trading days (weekly use-case default)
     # RSI filter: avoid buying overbought / oversold assets.
     rsi_filter: bool = False
-    rsi_window: int = 14
+    rsi_window: int = 20
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
     rsi_block_overbought: bool = True
@@ -57,6 +58,13 @@ class RotationInputs:
     vol_window: int = 20
     vol_target_ann: float = 0.20  # annualized target vol; scales down if realized vol is higher
     vol_max_ann: float = 0.60  # annualized hard stop; above this -> no risk position (cash/defensive)
+    # Choppiness (range-bound) filter via Efficiency Ratio (close-only)
+    chop_filter: bool = False
+    chop_mode: str = "er"  # "er" | "adx"
+    chop_window: int = 20
+    chop_er_threshold: float = 0.25  # ER < threshold => choppy => exclude
+    chop_adx_window: int = 20
+    chop_adx_threshold: float = 20.0  # ADX < threshold => choppy => exclude
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str) -> pd.PeriodIndex:
@@ -189,6 +197,53 @@ def _ann_realized_vol_from_close(close: pd.DataFrame, *, window: int) -> pd.Data
     return (vol_daily * np.sqrt(252.0)).astype(float)
 
 
+def _efficiency_ratio(close: pd.DataFrame, *, window: int) -> pd.DataFrame:
+    """
+    Kaufman Efficiency Ratio (ER) using close only.
+    ER = abs(close_t - close_{t-n}) / sum_{i=1..n} abs(close_{t-i+1} - close_{t-i})
+    ER near 0 => choppy; ER near 1 => trending.
+    """
+    w = max(2, int(window))
+    net = (close - close.shift(w)).abs()
+    noise = close.diff().abs().rolling(window=w, min_periods=max(3, w // 2)).sum()
+    er = net / noise.replace(0.0, np.nan)
+    return er.astype(float)
+
+
+def _adx(high: pd.DataFrame, low: pd.DataFrame, close: pd.DataFrame, *, window: int) -> pd.DataFrame:
+    """
+    Average Directional Index (ADX) with Wilder-style smoothing (RMA via EWM alpha=1/window).
+
+    Output is in the standard 0..100 scale; lower ADX indicates weaker trend / more range-bound.
+    """
+    n = max(2, int(window))
+    hi = high.astype(float)
+    lo = low.astype(float)
+    cl = close.astype(float)
+
+    prev_cl = cl.shift(1)
+    prev_hi = hi.shift(1)
+    prev_lo = lo.shift(1)
+
+    tr1 = (hi - lo).abs()
+    tr2 = (hi - prev_cl).abs()
+    tr3 = (lo - prev_cl).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=0).groupby(level=0).max()
+
+    up_move = hi - prev_hi
+    down_move = prev_lo - lo
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0.0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0.0), 0.0)
+
+    alpha = 1.0 / float(n)
+    atr = tr.ewm(alpha=alpha, adjust=False, min_periods=n).mean()
+    plus_di = 100.0 * (plus_dm.ewm(alpha=alpha, adjust=False, min_periods=n).mean() / atr)
+    minus_di = 100.0 * (minus_dm.ewm(alpha=alpha, adjust=False, min_periods=n).mean() / atr)
+    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    adx = dx.ewm(alpha=alpha, adjust=False, min_periods=n).mean()
+    return adx.replace([np.inf, -np.inf], np.nan).astype(float)
+
+
 def _pick_assets(
     scores_row: pd.Series, *, top_k: int, risk_off: bool, defensive_code: str | None, floor: float
 ) -> tuple[list[str], dict[str, Any]]:
@@ -246,6 +301,22 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         raise ValueError("rsi_window must be > 0")
     if inp.vol_window <= 0:
         raise ValueError("vol_window must be > 0")
+    if inp.chop_window <= 1:
+        raise ValueError("chop_window must be > 1")
+    if not np.isfinite(float(inp.chop_er_threshold)):
+        raise ValueError("chop_er_threshold must be finite")
+    if float(inp.chop_er_threshold) <= 0:
+        raise ValueError("chop_er_threshold must be > 0")
+    cm = (inp.chop_mode or "er").strip().lower()
+    if cm not in {"er", "adx"}:
+        raise ValueError(f"invalid chop_mode={inp.chop_mode}")
+    if cm == "adx":
+        if inp.chop_adx_window <= 1:
+            raise ValueError("chop_adx_window must be > 1")
+        if not np.isfinite(float(inp.chop_adx_threshold)):
+            raise ValueError("chop_adx_threshold must be finite")
+        if float(inp.chop_adx_threshold) <= 0:
+            raise ValueError("chop_adx_threshold must be > 0")
     if inp.trend_mode not in {"each", "universe"}:
         raise ValueError(f"invalid trend_mode={inp.trend_mode}")
     if not (0.0 <= float(inp.rsi_oversold) <= 100.0) or not (0.0 <= float(inp.rsi_overbought) <= 100.0):
@@ -262,7 +333,10 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         if defensive not in codes:
             codes = codes + [defensive]
 
-    # Load hfq for signal and benchmark(total return), none for execution (trading simulation).
+    # Load:
+    # - hfq: momentum score + momentum_floor (as requested)
+    # - qfq: technical analysis (trend/RSI/vol/chop filters)
+    # - none: execution/trading price basis
     # Need enough history for momentum + optional risk controls.
     need_hist = inp.lookback_days + inp.skip_days + 60
     if inp.trend_filter:
@@ -271,8 +345,15 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         need_hist = max(need_hist, int(inp.rsi_window) + 60)
     if inp.vol_monitor:
         need_hist = max(need_hist, int(inp.vol_window) + 60)
+    if inp.chop_filter:
+        need_hist = max(need_hist, (int(inp.chop_adx_window) if cm == "adx" else int(inp.chop_window)) + 60)
     ext_start = inp.start - dt.timedelta(days=int(need_hist))
     close_hfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
+    # Only load qfq when we actually need technical-analysis indicators.
+    need_qfq = bool(inp.trend_filter or inp.rsi_filter or inp.vol_monitor or inp.chop_filter)
+    close_qfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq else pd.DataFrame()
+    need_qfq_hl = bool(inp.chop_filter and cm == "adx")
+    high_qfq, low_qfq = _load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq_hl else (pd.DataFrame(), pd.DataFrame())
     close_none = _load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
@@ -281,6 +362,11 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     close_none = close_none.sort_index().ffill()
     dates = close_none.index
     close_hfq = close_hfq.sort_index().reindex(dates).ffill()
+    if need_qfq and not close_qfq.empty:
+        close_qfq = close_qfq.sort_index().reindex(dates).ffill()
+    if need_qfq_hl:
+        high_qfq = high_qfq.sort_index().reindex(dates).ffill()
+        low_qfq = low_qfq.sort_index().reindex(dates).ffill()
 
     # Require each selected code has data
     miss_exec = [c for c in codes if c not in close_none.columns or close_none[c].dropna().empty]
@@ -289,6 +375,17 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     miss_sig = [c for c in codes if c not in close_hfq.columns or close_hfq[c].dropna().empty]
     if miss_sig:
         raise ValueError(f"missing signal data (hfq) for: {miss_sig}")
+    # qfq is required for technical analysis features
+    if need_qfq:
+        miss_ta = [c for c in codes if c not in close_qfq.columns or close_qfq[c].dropna().empty]
+        if miss_ta:
+            raise ValueError(f"missing technical-analysis data (qfq) for: {miss_ta}")
+    if need_qfq_hl:
+        miss_hi = [c for c in codes if c not in high_qfq.columns or high_qfq[c].dropna().empty]
+        miss_lo = [c for c in codes if c not in low_qfq.columns or low_qfq[c].dropna().empty]
+        miss_hl = sorted(set(miss_hi + miss_lo))
+        if miss_hl:
+            raise ValueError(f"missing technical-analysis high/low data (qfq) for: {miss_hl}")
 
     if sm == "raw_mom":
         scores = _momentum_scores(close_hfq[rank_codes], lookback_days=inp.lookback_days, skip_days=inp.skip_days)
@@ -320,12 +417,18 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             scores = base_scores
 
     # Pre-compute risk-control signals on hfq close (aligned to execution calendar).
-    trend_ok_each = _trend_ok_each(close_hfq[rank_codes], sma_window=int(inp.trend_sma_window)) if inp.trend_filter else None
-    rsi = _rsi(close_hfq[rank_codes], window=int(inp.rsi_window)) if inp.rsi_filter else None
-    ann_vol = _ann_realized_vol_from_close(close_hfq[rank_codes], window=int(inp.vol_window)) if inp.vol_monitor else None
+    # IMPORTANT: per your rule, all TA uses qfq; only momentum scoring & momentum floor uses hfq.
+    ta_close = close_qfq[rank_codes] if need_qfq else None
+    trend_ok_each = _trend_ok_each(ta_close, sma_window=int(inp.trend_sma_window)) if (inp.trend_filter and ta_close is not None) else None
+    rsi = _rsi(ta_close, window=int(inp.rsi_window)) if (inp.rsi_filter and ta_close is not None) else None
+    ann_vol = _ann_realized_vol_from_close(ta_close, window=int(inp.vol_window)) if (inp.vol_monitor and ta_close is not None) else None
+    er = _efficiency_ratio(ta_close, window=int(inp.chop_window)) if (inp.chop_filter and cm == "er" and ta_close is not None) else None
+    adx = _adx(high_qfq[rank_codes], low_qfq[rank_codes], ta_close, window=int(inp.chop_adx_window)) if (inp.chop_filter and cm == "adx" and ta_close is not None) else None
     # Universe-level trend uses average price series across the selected universe.
     if inp.trend_filter and inp.trend_mode == "universe":
-        uni_close = close_hfq[rank_codes].mean(axis=1).to_frame("UNIVERSE")
+        if ta_close is None:  # pragma: no cover
+            raise ValueError("trend_filter requires qfq data")
+        uni_close = ta_close.mean(axis=1).to_frame("UNIVERSE")
         uni_ok = _trend_ok_each(uni_close, sma_window=int(inp.trend_sma_window))["UNIVERSE"]
     else:
         uni_ok = None
@@ -367,6 +470,29 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
 
         # Apply pre-trade risk controls only when we are in risk-on mode (holding risk assets).
         if risk_picks:
+            # 0) Choppiness filter (ER / ADX)
+            if inp.chop_filter:
+                if cm == "er" and er is not None and d in er.index:
+                    er_map = {p: (None if pd.isna(er.loc[d, p]) else float(er.loc[d, p])) for p in risk_picks}
+                    details["er"] = er_map
+                    before = risk_picks[:]
+                    thr = float(inp.chop_er_threshold)
+                    risk_picks = [p for p in risk_picks if (er_map.get(p) is not None) and (er_map[p] >= thr)]
+                    removed = [p for p in before if p not in risk_picks]
+                    if removed:
+                        reasons.append(f"chop_er_exclude<{thr}:{','.join(removed)}")
+                        picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
+                if cm == "adx" and adx is not None and d in adx.index:
+                    adx_map = {p: (None if pd.isna(adx.loc[d, p]) else float(adx.loc[d, p])) for p in risk_picks}
+                    details["adx"] = adx_map
+                    before = risk_picks[:]
+                    thr = float(inp.chop_adx_threshold)
+                    risk_picks = [p for p in risk_picks if (adx_map.get(p) is not None) and (adx_map[p] >= thr)]
+                    removed = [p for p in before if p not in risk_picks]
+                    if removed:
+                        reasons.append(f"chop_adx_exclude<{thr}:{','.join(removed)}")
+                        picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
+
             # 1) Trend filter
             if inp.trend_filter:
                 if inp.trend_mode == "universe":

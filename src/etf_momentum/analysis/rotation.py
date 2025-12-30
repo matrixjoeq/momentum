@@ -29,9 +29,9 @@ class RotationAnalysisInputs:
     # Risk controls (defaults off)
     trend_filter: bool = False
     trend_mode: str = "each"
-    trend_sma_window: int = 200
+    trend_sma_window: int = 20
     rsi_filter: bool = False
-    rsi_window: int = 14
+    rsi_window: int = 20
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
     rsi_block_overbought: bool = True
@@ -40,6 +40,12 @@ class RotationAnalysisInputs:
     vol_window: int = 20
     vol_target_ann: float = 0.20
     vol_max_ann: float = 0.60
+    chop_filter: bool = False
+    chop_mode: str = "er"
+    chop_window: int = 20
+    chop_er_threshold: float = 0.25
+    chop_adx_window: int = 20
+    chop_adx_threshold: float = 20.0
 
 
 def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
@@ -74,6 +80,12 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             vol_window=inp.vol_window,
             vol_target_ann=inp.vol_target_ann,
             vol_max_ann=inp.vol_max_ann,
+            chop_filter=inp.chop_filter,
+            chop_mode=inp.chop_mode,
+            chop_window=inp.chop_window,
+            chop_er_threshold=inp.chop_er_threshold,
+            chop_adx_window=inp.chop_adx_window,
+            chop_adx_threshold=inp.chop_adx_threshold,
         ),
     )
 

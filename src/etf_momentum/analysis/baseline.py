@@ -153,6 +153,38 @@ def load_close_prices(
     return pivot
 
 
+def load_high_low_prices(
+    db: Session,
+    *,
+    codes: list[str],
+    start: dt.date,
+    end: dt.date,
+    adjust: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Load high/low price matrices for each code.
+
+    Returns:
+      (high_df, low_df) indexed by date with columns as codes.
+    """
+    stmt = (
+        select(EtfPrice.trade_date, EtfPrice.code, EtfPrice.high, EtfPrice.low)
+        .where(EtfPrice.code.in_(codes))
+        .where(EtfPrice.adjust == adjust)
+        .where(EtfPrice.trade_date >= start)
+        .where(EtfPrice.trade_date <= end)
+        .order_by(EtfPrice.trade_date.asc())
+    )
+    rows = db.execute(stmt).all()
+    if not rows:
+        return pd.DataFrame(), pd.DataFrame()
+    df = pd.DataFrame(rows, columns=["date", "code", "high", "low"])
+    df["date"] = pd.to_datetime(df["date"])
+    high = df.pivot_table(index="date", columns="code", values="high", aggfunc="last").sort_index()
+    low = df.pivot_table(index="date", columns="code", values="low", aggfunc="last").sort_index()
+    return high, low
+
+
 def _compute_equal_weight_nav(
     daily_ret: pd.DataFrame,
     *,

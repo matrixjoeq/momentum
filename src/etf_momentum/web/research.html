@@ -21,6 +21,11 @@
       .code-list { max-height: 220px; overflow: auto; border: 1px solid #ddd; padding: 8px; min-width: 320px; }
       .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
       .no-print { }
+      .tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid #ddd; padding-bottom: 8px; margin-bottom: 12px; }
+      .tabBtn { padding: 8px 12px; border: 1px solid #bbb; background: #fff; border-radius: 10px 10px 0 0; cursor: pointer; }
+      .tabBtn.active { border-color: #444; font-weight: 600; }
+      .tabPanel { display: none; }
+      .tabPanel.active { display: block; }
 
       @media print {
         body { margin: 12mm; }
@@ -101,7 +106,9 @@
     </div>
 
     <div class="panel">
-      <div class="muted" id="dataNote">数据口径：hfq（后复权）。净值/收益/回撤/夏普/索诺提等均使用 hfq 价格序列。</div>
+      <div class="muted" id="dataNote">
+        数据口径：交易价格=none（不复权）；动量评分/动量门槛=hfq（后复权，总回报）；趋势/RSI/波动率/震荡过滤= qfq（前复权）。
+      </div>
       <div id="chart"></div>
     </div>
 
@@ -270,116 +277,187 @@
 
     <div class="panel">
       <h2 style="margin-top: 8px">动量轮动回测</h2>
-      <div class="muted">信号：hfq（后复权）动量；交易价格：none（不复权）；轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。</div>
+      <div class="muted">
+        动量信号：hfq（后复权，总回报）；技术分析（趋势/RSI/波动率/震荡过滤）：qfq（前复权）；交易价格：none（不复权）。
+        轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。
+      </div>
 
-      <div class="panel row no-print">
-        <div>
-          <label>调仓频率 <button class="helpBtn" data-metric="param_rot_rebalance" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <select id="rotRebalance">
-            <option value="daily">日度</option>
-            <option value="weekly" selected>周度（默认）</option>
-            <option value="monthly">月度</option>
-            <option value="quarterly">季度</option>
-            <option value="yearly">年度</option>
-          </select>
+      <div class="panel no-print">
+        <div class="tabs" id="rotTabs" role="tablist" aria-label="动量轮动参数">
+          <button class="tabBtn active" data-tab="rotTabBase" role="tab" aria-selected="true">基础参数</button>
+          <button class="tabBtn" data-tab="rotTabFloor" role="tab" aria-selected="false">动量阈值</button>
+          <button class="tabBtn" data-tab="rotTabTrend" role="tab" aria-selected="false">趋势过滤</button>
+          <button class="tabBtn" data-tab="rotTabRsi" role="tab" aria-selected="false">RSI过滤</button>
+          <button class="tabBtn" data-tab="rotTabVol" role="tab" aria-selected="false">波动率过滤</button>
+          <button class="tabBtn" data-tab="rotTabChop" role="tab" aria-selected="false">震荡过滤</button>
         </div>
-        <div>
-          <label>TopK <button class="helpBtn" data-metric="param_rot_topk" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <input id="rotTopK" value="1" />
+
+        <div id="rotTabBase" class="tabPanel active" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>调仓频率 <button class="helpBtn" data-metric="param_rot_rebalance" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <select id="rotRebalance">
+                <option value="daily">日度</option>
+                <option value="weekly" selected>周度（默认）</option>
+                <option value="monthly">月度</option>
+                <option value="quarterly">季度</option>
+                <option value="yearly">年度</option>
+              </select>
+            </div>
+            <div>
+              <label>TopK <button class="helpBtn" data-metric="param_rot_topk" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <input id="rotTopK" value="1" />
+            </div>
+            <div>
+              <label>打分方式 <button class="helpBtn" data-metric="param_rot_score_method" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <select id="rotScoreMethod" style="min-width:200px;">
+                <option value="raw_mom" selected>纯动量（raw）</option>
+                <option value="return_over_vol">收益/波动率</option>
+                <option value="sharpe_mom">Sharpe 动量</option>
+                <option value="sortino_mom">Sortino 动量</option>
+              </select>
+            </div>
+            <div>
+              <label>动量回看(交易日) <button class="helpBtn" data-metric="param_rot_lookback" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <input id="rotLookback" value="20" />
+            </div>
+            <div>
+              <label>跳过最近(交易日) <button class="helpBtn" data-metric="param_rot_skip" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <input id="rotSkip" value="0" />
+            </div>
+            <div>
+              <label>交易成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <input id="rotCost" value="0" />
+            </div>
+          </div>
         </div>
-        <div>
-          <label>打分方式 <button class="helpBtn" data-metric="param_rot_score_method" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <select id="rotScoreMethod" style="min-width:200px;">
-            <option value="raw_mom" selected>纯动量（raw）</option>
-            <option value="return_over_vol">收益/波动率</option>
-            <option value="sharpe_mom">Sharpe 动量</option>
-            <option value="sortino_mom">Sortino 动量</option>
-          </select>
+
+        <div id="rotTabFloor" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>动量阈值开关 <button class="helpBtn" data-metric="param_rot_riskoff" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <select id="rotRiskOff">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">启用</option>
+              </select>
+            </div>
+            <div>
+              <label>动量阈值 <button class="helpBtn" data-metric="param_rot_floor" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <input id="rotFloor" value="0" />
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">说明：阈值触发后将进入空仓（现金）。</div>
         </div>
-        <div>
-          <label>动量回看(交易日) <button class="helpBtn" data-metric="param_rot_lookback" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <input id="rotLookback" value="20" />
+
+        <div id="rotTabTrend" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>趋势过滤开关 <button class="helpBtn" data-metric="param_rot_trend" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <select id="rotTrendOn" style="min-width:160px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>趋势过滤模式</label>
+              <select id="rotTrendMode" style="min-width:160px;">
+                <option value="each" selected>逐标的</option>
+                <option value="universe">全市场(候选均值)</option>
+              </select>
+            </div>
+            <div>
+              <label>SMA窗口(交易日)</label>
+              <input id="rotTrendSma" value="20" />
+            </div>
+          </div>
         </div>
-        <div>
-          <label>跳过最近(交易日) <button class="helpBtn" data-metric="param_rot_skip" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <input id="rotSkip" value="0" />
+
+        <div id="rotTabRsi" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>RSI过滤开关 <button class="helpBtn" data-metric="param_rot_rsi" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <select id="rotRsiOn" style="min-width:160px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>RSI窗口</label>
+              <input id="rotRsiWin" value="20" />
+            </div>
+            <div>
+              <label>超买阈值</label>
+              <input id="rotRsiOver" value="70" />
+            </div>
+            <div>
+              <label>超卖阈值</label>
+              <input id="rotRsiUnder" value="30" />
+            </div>
+          </div>
         </div>
-        <div>
-          <label>交易成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <input id="rotCost" value="0" />
+
+        <div id="rotTabVol" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>波动率过滤开关 <button class="helpBtn" data-metric="param_rot_vol" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <select id="rotVolOn" style="min-width:160px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>波动率窗口</label>
+              <input id="rotVolWin" value="20" />
+            </div>
+            <div>
+              <label>目标年化波动率</label>
+              <input id="rotVolTarget" value="0.20" />
+            </div>
+            <div>
+              <label>最大年化波动率</label>
+              <input id="rotVolMax" value="0.60" />
+            </div>
+          </div>
         </div>
-        <div>
-          <label>风险规避 <button class="helpBtn" data-metric="param_rot_riskoff" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <select id="rotRiskOff">
-            <option value="false" selected>关闭（默认）</option>
-            <option value="true">启用</option>
-          </select>
+
+        <div id="rotTabChop" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>震荡过滤开关 <button class="helpBtn" data-metric="param_rot_chop" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <select id="rotChopOn" style="min-width:160px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>模式</label>
+              <select id="rotChopMode" style="min-width:160px;">
+                <option value="er" selected>ER（Efficiency Ratio）</option>
+                <option value="adx">ADX（Average Directional Index）</option>
+              </select>
+            </div>
+            <div id="rotChopErBox">
+              <label>ER窗口</label>
+              <input id="rotChopWin" value="20" />
+            </div>
+            <div id="rotChopErThrBox">
+              <label>ER阈值</label>
+              <input id="rotChopThr" value="0.25" />
+            </div>
+            <div id="rotChopAdxBox">
+              <label>ADX窗口</label>
+              <input id="rotChopAdxWin" value="20" />
+            </div>
+            <div id="rotChopAdxThrBox">
+              <label>ADX阈值</label>
+              <input id="rotChopAdxThr" value="20" />
+            </div>
+          </div>
         </div>
-        <div>
-          <label>防守标的(可空) <button class="helpBtn" data-metric="param_rot_defensive" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <input id="rotDefensive" placeholder="如 511010" />
+
+        <div class="row" style="margin-top:12px">
+          <button id="runRotation">运行轮动回测</button>
         </div>
-        <div>
-          <label>动量门槛 <button class="helpBtn" data-metric="param_rot_floor" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <input id="rotFloor" value="0" />
-        </div>
-        <div>
-          <label>趋势过滤 <button class="helpBtn" data-metric="param_rot_trend" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <select id="rotTrendOn" style="min-width:160px;">
-            <option value="false" selected>关闭</option>
-            <option value="true">开启</option>
-          </select>
-        </div>
-        <div>
-          <label>趋势模式</label>
-          <select id="rotTrendMode" style="min-width:160px;">
-            <option value="each" selected>逐标的</option>
-            <option value="universe">全市场(候选均值)</option>
-          </select>
-        </div>
-        <div>
-          <label>SMA窗口(交易日)</label>
-          <input id="rotTrendSma" value="200" />
-        </div>
-        <div>
-          <label>RSI过滤 <button class="helpBtn" data-metric="param_rot_rsi" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <select id="rotRsiOn" style="min-width:160px;">
-            <option value="false" selected>关闭</option>
-            <option value="true">开启</option>
-          </select>
-        </div>
-        <div>
-          <label>RSI窗口</label>
-          <input id="rotRsiWin" value="14" />
-        </div>
-        <div>
-          <label>超买阈值</label>
-          <input id="rotRsiOver" value="70" />
-        </div>
-        <div>
-          <label>超卖阈值</label>
-          <input id="rotRsiUnder" value="30" />
-        </div>
-        <div>
-          <label>波动率监控 <button class="helpBtn" data-metric="param_rot_vol" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-          <select id="rotVolOn" style="min-width:160px;">
-            <option value="false" selected>关闭</option>
-            <option value="true">开启</option>
-          </select>
-        </div>
-        <div>
-          <label>Vol窗口</label>
-          <input id="rotVolWin" value="20" />
-        </div>
-        <div>
-          <label>目标年化Vol</label>
-          <input id="rotVolTarget" value="0.20" />
-        </div>
-        <div>
-          <label>最大年化Vol</label>
-          <input id="rotVolMax" value="0.60" />
-        </div>
-        <button id="runRotation">运行轮动回测</button>
       </div>
 
       <div class="panel two" style="grid-template-columns: 1fr 1fr;">
@@ -870,34 +948,24 @@
           `,
         },
         param_rot_riskoff: {
-          title: "风险规避（risk_off）",
-          sub: "当动量不达标时切换到防守标的。",
+          title: "动量阈值开关（risk_off）",
+          sub: "当动量不达标时不买入风险资产（进入空仓/现金）。",
           body: `
-            <div><b>含义</b>：若当期最优动量 ≤ 动量门槛，则持有防守标的（如国债 ETF）。</div>
-            <div style="margin-top:8px"><b>用途</b>：降低大回撤，提高持有体验。</div>
+            <div><b>含义</b>：若当期最优动量 ≤ 动量阈值，则本期不买风险资产，进入<b>空仓(现金)</b>。</div>
+            <div style="margin-top:8px"><b>用途</b>：当市场/标的动量不足时降低暴露，减少“下行趋势里硬上车”。</div>
             <div style="margin-top:8px"><b>范围</b>：true/false。</div>
-            <div style="margin-top:8px"><b>示例</b>：开启 risk_off，defensive=511010，floor=0。</div>
-          `,
-        },
-        param_rot_defensive: {
-          title: "防守标的（defensive_code）",
-          sub: "风险规避触发时切换持有的标的代码。",
-          body: `
-            <div><b>含义</b>：当风险规避触发时，持有该标的（通常是国债/货币类）。</div>
-            <div style="margin-top:8px"><b>用途</b>：提供“避险仓位”。</div>
-            <div style="margin-top:8px"><b>范围</b>：可空；不为空时必须在候选池里且有数据。</div>
-            <div style="margin-top:8px"><b>示例</b>：511010（国债ETF）。</div>
+            <div style="margin-top:8px"><b>示例</b>：开启 risk_off，floor=0（动量≤0 就空仓）。</div>
           `,
         },
         param_rot_floor: {
-          title: "动量门槛（momentum_floor）",
-          sub: "风险规避触发阈值（用动量分数判断）。",
+          title: "动量阈值（momentum_floor）",
+          sub: "动量阈值触发条件（用动量分数判断）。",
           body: `
-            <div><b>含义</b>：若最佳动量分数 ≤ 门槛，则切换防守标的。</div>
-            <div style="margin-top:8px"><b>用途</b>：控制“什么时候认为风险资产不值得持有”。</div>
+            <div><b>含义</b>：若最佳动量分数 ≤ 阈值，则本期进入<b>空仓(现金)</b>。</div>
+            <div style="margin-top:8px"><b>用途</b>：控制“什么时候认为风险资产不值得持有/不应买入”。</div>
             <div style="margin-top:8px"><b>范围</b>：实数。常用：0（动量为负就避险）。</div>
-            <div style="margin-top:8px"><b>重要</b>：需开启“风险规避”。若防守标的为空，则门槛触发时会进入<b>空仓(现金)</b>；若防守标的有值，则切换至该防守标的。</div>
-            <div style="margin-top:8px"><b>示例</b>：floor=0 表示只在动量为正时才持有风险资产；若 defensive=511010，则触发后持有 511010；若 defensive 为空，则空仓。</div>
+            <div style="margin-top:8px"><b>重要</b>：需开启“动量阈值开关”。</div>
+            <div style="margin-top:8px"><b>示例</b>：floor=0 表示只在动量为正时才持有风险资产。</div>
           `,
         },
         param_rot_score_method: {
@@ -915,8 +983,8 @@
           title: "趋势过滤（trend_filter）",
           sub: "用趋势条件决定是否允许进入风险资产（事前风控）。",
           body: `
-            <div><b>逐标的</b>：对每个候选标的判断 close(hfq) 是否在 SMA(window) 之上；不满足的标的不会被买入。</div>
-            <div style="margin-top:8px"><b>全市场(候选均值)</b>：对“候选池均值价格”做同样判断；若不满足，则本期不买风险资产（进入防守/现金）。</div>
+            <div><b>逐标的</b>：对每个候选标的判断 close(qfq) 是否在 SMA(window) 之上；不满足的标的不会被买入。</div>
+            <div style="margin-top:8px"><b>全市场(候选均值)</b>：对“候选池均值价格”做同样判断；若不满足，则本期不买风险资产（进入空仓/现金）。</div>
             <div style="margin-top:8px"><b>目的</b>：在下行趋势中减少错误入场，降低大回撤。</div>
           `,
         },
@@ -934,8 +1002,19 @@
           sub: "用历史波动率决定买入仓位（事前仓位控制）。",
           body: `
             <div><b>逻辑</b>：对每个买入标的计算年化实现波动率 vol；若 vol&gt;target，则仓位按 target/vol 比例缩小（剩余留现金）。</div>
-            <div style="margin-top:8px"><b>硬阈值</b>：若 vol&gt;max，则该标的不买；如果全部都不买，则进入防守/现金。</div>
+            <div style="margin-top:8px"><b>硬阈值</b>：若 vol&gt;max，则该标的不买；如果全部都不买，则进入空仓/现金。</div>
             <div style="margin-top:8px"><b>目的</b>：在高波动阶段降低暴露，事前控制回撤。</div>
+          `,
+        },
+        param_rot_chop: {
+          title: "震荡过滤（chop_filter）",
+          sub: "用 ER / ADX 识别震荡/盘整并过滤标的。",
+          body: `
+            <div><b>定义</b>：ER = |P_t-P_{t-n}| / Σ|ΔP|，接近 0 表示来回震荡，接近 1 表示更单边趋势。</div>
+            <div style="margin-top:8px"><b>规则</b>：ER &lt; 阈值 ⇒ 认为震荡 ⇒ 本期不买该标的（从候选里剔除）。</div>
+            <div style="margin-top:8px"><b>ADX</b>：趋势强度指标（0~100）。一般 ADX 越低越偏震荡；可用阈值如 20。</div>
+            <div style="margin-top:8px"><b>规则</b>：ADX &lt; 阈值 ⇒ 认为震荡 ⇒ 本期不买该标的（从候选里剔除）。</div>
+            <div style="margin-top:8px"><b>口径</b>：使用 <b>qfq（前复权）</b> close 序列计算。</div>
           `,
         },
         rot_cum: {
@@ -1863,7 +1942,6 @@
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
         const risk_off = ($("rotRiskOff").value === "true");
-        const defensive_code = ($("rotDefensive").value || "").trim() || null;
         const momentum_floor = Number(($("rotFloor").value || "0").trim());
         const score_method = $("rotScoreMethod").value;
         const trend_filter = ($("rotTrendOn").value === "true");
@@ -1877,6 +1955,12 @@
         const vol_window = Number(($("rotVolWin").value || "20").trim());
         const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
         const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
+        const chop_filter = ($("rotChopOn").value === "true");
+        const chop_mode = ($("rotChopMode").value || "er");
+        const chop_window = Number(($("rotChopWin").value || "20").trim());
+        const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
+        const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
+        const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -1888,6 +1972,10 @@
         if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
         if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
         if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
+        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_window) || chop_window <= 1)) return setMsg("ER窗口必须>=2");
+        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0)) return setMsg("ER阈值必须>0，例如 0.25");
+        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1)) return setMsg("ADX窗口必须>=2");
+        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
 
         $("status").textContent = "回测中...";
         setMsg("");
@@ -1895,11 +1983,12 @@
           method: "POST",
           body: JSON.stringify({
             codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
-            risk_off, defensive_code, momentum_floor, risk_free_rate,
+            risk_off, momentum_floor, risk_free_rate,
             score_method,
             trend_filter, trend_mode, trend_sma_window,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
+            chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
           }),
         });
         const text = await resp.text();
@@ -1971,6 +2060,46 @@
         plotRolling("rollingDD", "Rolling Max Drawdown", data.rolling.max_drawdown, ".0%");
       }
 
+      function initTabs(containerId) {
+        const root = $(containerId);
+        if (!root) return;
+        const buttons = Array.from(root.querySelectorAll(".tabBtn[data-tab]"));
+        const panels = buttons.map(b => $(b.dataset.tab)).filter(Boolean);
+        const setActive = (tabId) => {
+          buttons.forEach((b) => {
+            const on = (b.dataset.tab === tabId);
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-selected", on ? "true" : "false");
+          });
+          panels.forEach((p) => p.classList.toggle("active", p.id === tabId));
+        };
+        buttons.forEach((b) => b.addEventListener("click", () => setActive(b.dataset.tab)));
+        const first = buttons[0] && buttons[0].dataset ? buttons[0].dataset.tab : null;
+        if (first) setActive(first);
+      }
+      initTabs("rotTabs");
+
+      function setBoxVisible(boxId, on) {
+        const el = $(boxId);
+        if (!el) return;
+        el.style.display = on ? "" : "none";
+        const inputs = Array.from(el.querySelectorAll("input, select"));
+        inputs.forEach((x) => { x.disabled = !on; });
+      }
+      function updateChopModeUI() {
+        const chopOn = ($("rotChopOn").value === "true");
+        const mode = ($("rotChopMode").value || "er");
+        const showEr = chopOn && mode === "er";
+        const showAdx = chopOn && mode === "adx";
+        setBoxVisible("rotChopErBox", showEr);
+        setBoxVisible("rotChopErThrBox", showEr);
+        setBoxVisible("rotChopAdxBox", showAdx);
+        setBoxVisible("rotChopAdxThrBox", showAdx);
+      }
+      $("rotChopOn").addEventListener("change", updateChopModeUI);
+      $("rotChopMode").addEventListener("change", updateChopModeUI);
+      updateChopModeUI();
+
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
       $("exportPdf").addEventListener("click", exportPdfReport);
@@ -2030,7 +2159,6 @@
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
         const risk_off = ($("rotRiskOff").value === "true");
-        const defensive_code = ($("rotDefensive").value || "").trim() || null;
         const momentum_floor = Number(($("rotFloor").value || "0").trim());
         const score_method = $("rotScoreMethod").value;
         const trend_filter = ($("rotTrendOn").value === "true");
@@ -2044,6 +2172,12 @@
         const vol_window = Number(($("rotVolWin").value || "20").trim());
         const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
         const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
+        const chop_filter = ($("rotChopOn").value === "true");
+        const chop_mode = ($("rotChopMode").value || "er");
+        const chop_window = Number(($("rotChopWin").value || "20").trim());
+        const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
+        const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
+        const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -2055,6 +2189,10 @@
         if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
         if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
         if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
+        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_window) || chop_window <= 1)) return setMsg("ER窗口必须>=2");
+        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0)) return setMsg("ER阈值必须>0，例如 0.25");
+        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1)) return setMsg("ADX窗口必须>=2");
+        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
         const n_sims = Number(($("mcN").value || "2000").trim());
         const block_size = Number(($("mcBlock").value || "5").trim());
         const winRaw = ($("mcWindow").value || "").trim();
@@ -2072,11 +2210,12 @@
             method: "POST",
             body: JSON.stringify({
               codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
-              risk_off, defensive_code, momentum_floor, risk_free_rate,
+              risk_off, momentum_floor, risk_free_rate,
               score_method,
               trend_filter, trend_mode, trend_sma_window,
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,
+              chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
               n_sims, block_size, seed, sample_window_days
             }),
           });

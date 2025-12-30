@@ -131,6 +131,12 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         vol_window=payload.vol_window,
         vol_target_ann=payload.vol_target_ann,
         vol_max_ann=payload.vol_max_ann,
+        chop_filter=payload.chop_filter,
+        chop_mode=payload.chop_mode,
+        chop_window=payload.chop_window,
+        chop_er_threshold=payload.chop_er_threshold,
+        chop_adx_window=payload.chop_adx_window,
+        chop_adx_threshold=payload.chop_adx_threshold,
     )
     try:
         return compute_rotation_backtest(db, inp)

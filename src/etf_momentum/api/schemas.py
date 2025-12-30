@@ -115,9 +115,9 @@ class RotationBacktestRequest(BaseModel):
     # Pre-trade risk controls (all optional; defaults keep previous behavior)
     trend_filter: bool = Field(default=False, description="Enable trend filter gating (pre-trade)")
     trend_mode: str = Field(default="each", description="each|universe")
-    trend_sma_window: int = Field(default=200, ge=1, description="SMA window for trend filter (trading days)")
+    trend_sma_window: int = Field(default=20, ge=1, description="SMA window for trend filter (trading days)")
     rsi_filter: bool = Field(default=False, description="Enable RSI filter gating (pre-trade)")
-    rsi_window: int = Field(default=14, ge=1, description="RSI window (trading days)")
+    rsi_window: int = Field(default=20, ge=1, description="RSI window (trading days)")
     rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)
     rsi_oversold: float = Field(default=30.0, ge=0.0, le=100.0)
     rsi_block_overbought: bool = Field(default=True, description="If true, exclude assets with RSI > overbought")
@@ -126,6 +126,12 @@ class RotationBacktestRequest(BaseModel):
     vol_window: int = Field(default=20, ge=1, description="Realized vol window (trading days)")
     vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for sizing")
     vol_max_ann: float = Field(default=0.60, gt=0.0, description="Annualized hard stop vol; above -> no risk position")
+    chop_filter: bool = Field(default=False, description="Enable choppiness filter (ER/ADX)")
+    chop_mode: str = Field(default="er", description="Choppiness mode: er|adx")
+    chop_window: int = Field(default=20, ge=2, description="Efficiency Ratio window (trading days)")
+    chop_er_threshold: float = Field(default=0.25, gt=0.0, description="ER < threshold => choppy => exclude")
+    chop_adx_window: int = Field(default=20, ge=2, description="ADX window (trading days)")
+    chop_adx_threshold: float = Field(default=20.0, gt=0.0, description="ADX < threshold => choppy => exclude")
 
 
 class MonteCarloRequest(BaseModel):
