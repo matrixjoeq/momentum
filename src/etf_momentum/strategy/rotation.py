@@ -65,6 +65,24 @@ class RotationInputs:
     chop_er_threshold: float = 0.25  # ER < threshold => choppy => exclude
     chop_adx_window: int = 20
     chop_adx_threshold: float = 20.0  # ADX < threshold => choppy => exclude
+    # --- Take-profit / stop-loss (qfq price basis) ---
+    # Mode names are intentionally stringly-typed to keep API/UI flexible.
+    # - none: disabled
+    # - prev_week_low_stop: stop-loss based on last-week low (initial) and rolling update on rebalance
+    tp_sl_mode: str = "none"
+    atr_window: int | None = None  # None -> defaults to lookback_days
+    atr_mult: float = 2.0
+    atr_step: float = 0.5
+    atr_min_mult: float = 0.5
+    # --- Correlation filter (hfq price basis) ---
+    corr_filter: bool = False
+    corr_window: int | None = None  # None -> defaults to lookback_days
+    corr_threshold: float = 0.5
+    # --- Rolling-return based position sizing (strategy trailing return) ---
+    rr_sizing: bool = False
+    rr_years: float = 3.0
+    rr_thresholds: list[float] | None = None  # max 5
+    rr_weights: list[float] | None = None  # len = len(thresholds)+1
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str) -> pd.PeriodIndex:
@@ -319,6 +337,38 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             raise ValueError("chop_adx_threshold must be > 0")
     if inp.trend_mode not in {"each", "universe"}:
         raise ValueError(f"invalid trend_mode={inp.trend_mode}")
+    tp_sl_mode = (inp.tp_sl_mode or "none").strip().lower()
+    if tp_sl_mode not in {"none", "prev_week_low_stop", "atr_chandelier_fixed", "atr_chandelier_progressive"}:
+        raise ValueError(f"invalid tp_sl_mode={inp.tp_sl_mode}")
+    if inp.atr_window is not None and int(inp.atr_window) < 2:
+        raise ValueError("atr_window must be >= 2")
+    if not np.isfinite(float(inp.atr_mult)) or float(inp.atr_mult) <= 0:
+        raise ValueError("atr_mult must be finite and > 0")
+    if not np.isfinite(float(inp.atr_step)) or float(inp.atr_step) <= 0:
+        raise ValueError("atr_step must be finite and > 0")
+    if not np.isfinite(float(inp.atr_min_mult)) or float(inp.atr_min_mult) <= 0:
+        raise ValueError("atr_min_mult must be finite and > 0")
+    if inp.corr_window is not None and int(inp.corr_window) < 2:
+        raise ValueError("corr_window must be >= 2")
+    if not np.isfinite(float(inp.corr_threshold)) or float(inp.corr_threshold) < -1.0 or float(inp.corr_threshold) > 1.0:
+        raise ValueError("corr_threshold must be within [-1,1]")
+    if not np.isfinite(float(inp.rr_years)) or float(inp.rr_years) <= 0:
+        raise ValueError("rr_years must be finite and > 0")
+    rr_thresholds = inp.rr_thresholds if inp.rr_thresholds is not None else [0.5, 1.0, 1.5, 2.0, 2.5]
+    rr_weights = inp.rr_weights if inp.rr_weights is not None else [1.0, 0.8, 0.6, 0.4, 0.2, 0.1]
+    if bool(inp.rr_sizing):
+        if len(rr_thresholds) > 5:
+            raise ValueError("rr_thresholds must have at most 5 thresholds")
+        if any((not np.isfinite(float(x))) for x in rr_thresholds):
+            raise ValueError("rr_thresholds must be finite")
+        if any(float(rr_thresholds[i]) >= float(rr_thresholds[i + 1]) for i in range(len(rr_thresholds) - 1)):
+            raise ValueError("rr_thresholds must be strictly increasing")
+        if len(rr_weights) != len(rr_thresholds) + 1:
+            raise ValueError("rr_weights length must be len(rr_thresholds)+1")
+        if any((not np.isfinite(float(x))) for x in rr_weights):
+            raise ValueError("rr_weights must be finite")
+        if any((float(x) < 0.0 or float(x) > 1.0) for x in rr_weights):
+            raise ValueError("rr_weights must be within [0,1]")
     if not (0.0 <= float(inp.rsi_oversold) <= 100.0) or not (0.0 <= float(inp.rsi_overbought) <= 100.0):
         raise ValueError("rsi thresholds must be within [0,100]")
     if float(inp.vol_target_ann) <= 0:
@@ -350,10 +400,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     ext_start = inp.start - dt.timedelta(days=int(need_hist))
     close_hfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
     # Only load qfq when we actually need technical-analysis indicators.
-    need_qfq = bool(inp.trend_filter or inp.rsi_filter or inp.vol_monitor or inp.chop_filter)
+    need_qfq = bool(inp.trend_filter or inp.rsi_filter or inp.vol_monitor or inp.chop_filter or tp_sl_mode != "none")
     close_qfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq else pd.DataFrame()
     need_qfq_hl = bool(inp.chop_filter and cm == "adx")
-    high_qfq, low_qfq = _load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq_hl else (pd.DataFrame(), pd.DataFrame())
+    high_qfq, low_qfq = (
+        _load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq_hl else (pd.DataFrame(), pd.DataFrame())
+    )
     close_none = _load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
@@ -441,9 +493,100 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     last_idx = pd.Series(np.arange(len(dates)), index=dates).groupby(labels).max().to_list()
     decision_dates = dates[last_idx]
 
+    # Precompute execution returns (hfq) for running NAV (needed by rr_sizing).
+    # This matches the final P&L basis (hfq total return proxy).
+    ret_exec_all = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
     # Build weights per date (apply from next trading day after decision date).
     w = pd.DataFrame(0.0, index=dates, columns=codes)
     holdings: dict[str, list[dict[str, Any]]] = {"periods": []}
+    # Stop-loss carry: track prior picks and whether a stop-out occurred in the prior holding segment.
+    prev_picks_key: tuple[str, ...] | None = None
+    prev_segment_stopped_out: bool = False
+    period_min_close_qfq = (
+        close_qfq[rank_codes].astype(float).groupby(labels).min() if (tp_sl_mode == "prev_week_low_stop" and need_qfq) else pd.DataFrame()
+    )
+    # ATR from qfq close only (close-to-close absolute range); aligned to execution calendar.
+    # Note: classic ATR uses high/low/prev close; this is a close-only approximation per spec.
+    if tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"}:
+        w_atr = int(inp.atr_window) if inp.atr_window is not None else int(inp.lookback_days)
+        w_atr = max(2, w_atr)
+        close_for_atr = close_qfq[rank_codes].astype(float)
+        atr = close_for_atr.diff().abs().rolling(window=w_atr, min_periods=max(2, w_atr // 2)).mean()
+    else:
+        w_atr = None
+        atr = pd.DataFrame()
+
+    # Correlation filter params (hfq).
+    corr_enabled = bool(inp.corr_filter)
+    corr_window = int(inp.corr_window) if inp.corr_window is not None else int(inp.lookback_days)
+    corr_window = max(2, corr_window)
+    corr_threshold = float(inp.corr_threshold)
+
+    def _pair_corr_hfq(*, code_a: str, code_b: str, end_pos: int) -> float | None:
+        """
+        Pearson corr of daily returns (pct_change) for hfq close over a lookback window ending at end_pos.
+        end_pos is an integer index into `dates` (aligned calendar).
+        """
+        if code_a == code_b:
+            return 1.0
+        if code_a not in close_hfq.columns or code_b not in close_hfq.columns:
+            return None
+        start_pos = max(0, int(end_pos) - int(corr_window))
+        # Need at least 3 return observations => at least 4 prices.
+        if end_pos - start_pos < 3:
+            return None
+        pa = close_hfq[code_a].iloc[start_pos : end_pos + 1].astype(float)
+        pb = close_hfq[code_b].iloc[start_pos : end_pos + 1].astype(float)
+        ra = pa.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+        rb = pb.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+        idx = ra.index.intersection(rb.index)
+        if len(idx) < 3:
+            return None
+        xa = ra.loc[idx].to_numpy(dtype=float)
+        xb = rb.loc[idx].to_numpy(dtype=float)
+        if not (np.isfinite(xa).all() and np.isfinite(xb).all()):
+            return None
+        if float(np.std(xa, ddof=1)) == 0.0 or float(np.std(xb, ddof=1)) == 0.0:
+            return None
+        return float(np.corrcoef(xa, xb)[0, 1])
+
+    # Rolling-return sizing (strategy trailing net return).
+    rr_enabled = bool(inp.rr_sizing)
+    rr_window_days = max(2, int(round(float(inp.rr_years) * 252.0)))
+    nav_running = pd.Series(np.ones(len(dates), dtype=float), index=dates, dtype=float)
+    processed_idx = 0
+
+    def _advance_nav_to(idx: int) -> None:
+        nonlocal processed_idx
+        idx = int(idx)
+        if idx <= processed_idx:
+            return
+        rng = np.arange(processed_idx + 1, idx + 1, dtype=int)
+        w_slice = w.iloc[rng].astype(float)
+        r_slice = ret_exec_all.iloc[rng].astype(float)
+        port_ret = (w_slice * r_slice).sum(axis=1).astype(float)
+        # Turnover must be computed by position, not by index alignment.
+        w_np = w_slice.to_numpy(dtype=float)
+        w_prev_np = w.iloc[rng - 1].astype(float).to_numpy(dtype=float)
+        turnover_np = np.abs(w_np - w_prev_np).sum(axis=1) / 2.0
+        cost_np = turnover_np * (float(inp.cost_bps) / 10000.0)
+        nav = float(nav_running.iloc[processed_idx])
+        # Use raw arrays to avoid any index-alignment surprises.
+        xnet = port_ret.to_numpy(dtype=float) - cost_np.astype(float)
+        out = np.empty(len(xnet), dtype=float)
+        for j, x in enumerate(xnet):
+            nav *= (1.0 + float(x))
+            out[j] = nav
+        nav_running.iloc[rng] = out
+        processed_idx = idx
+
+    def _rr_bucket_exposure(trailing_return: float) -> tuple[int, float]:
+        for i, thr in enumerate(rr_thresholds):
+            if trailing_return < float(thr):
+                return i, float(rr_weights[i])
+        return len(rr_thresholds), float(rr_weights[-1])
+
     for i, d in enumerate(decision_dates):
         # apply from next trading day after decision date
         di = dates.get_loc(d)
@@ -467,6 +610,59 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
 
         picks = [p for p in picks if p in codes]
         risk_picks = [p for p in picks if p in rank_codes]  # only rank codes are considered "risk assets"
+
+        # Take-profit / stop-loss: currently only stop-loss mode is implemented.
+        # IMPORTANT: per requirement, stop-loss uses qfq close for both stop level and trigger.
+        # Behavior: once stopped out within a holding segment, the portfolio goes to cash
+        # for the remainder of that segment until the next rebalance decision.
+        tp_sl: dict[str, Any] = {"mode": tp_sl_mode}
+        stop_levels: dict[str, float] = {}
+        stop_trigger_date: str | None = None
+        stop_triggered = False
+        if tp_sl_mode == "prev_week_low_stop" and risk_picks:
+            picks_key = tuple(sorted(risk_picks))
+            # Determine stop levels (all from qfq close):
+            # - New entry: stop = previous rebalance-period min(qfq_close)
+            # - Holdings unchanged and NOT stopped out in prior segment: update stop to current rebalance-period min(qfq_close)
+            # - Special rule: if decision_date close is already below previous-period min, use current-period min as stop
+            di2 = dates.get_loc(d)
+            cur_label = labels[di2]
+            prev_label = labels[dates.get_loc(decision_dates[i - 1])] if i - 1 >= 0 else None
+            for c in risk_picks:
+                cur_min = None
+                prev_min = None
+                if not period_min_close_qfq.empty:
+                    if c in period_min_close_qfq.columns and cur_label in period_min_close_qfq.index:
+                        v = period_min_close_qfq.loc[cur_label, c]
+                        cur_min = (None if pd.isna(v) else float(v))
+                    if prev_label is not None and c in period_min_close_qfq.columns and prev_label in period_min_close_qfq.index:
+                        v = period_min_close_qfq.loc[prev_label, c]
+                        prev_min = (None if pd.isna(v) else float(v))
+
+                # base stop: new entry uses prev_min; hold-unchanged uses cur_min
+                if (prev_picks_key == picks_key) and (not prev_segment_stopped_out):
+                    base = cur_min
+                else:
+                    base = prev_min if prev_min is not None else cur_min
+
+                # special rule: if decision-day close already below prev_min -> use cur_min
+                if prev_min is not None:
+                    try:
+                        d_close = float(close_qfq.loc[d, c])
+                    except (KeyError, TypeError, ValueError):  # pragma: no cover
+                        d_close = float("nan")
+                    if np.isfinite(d_close) and d_close < float(prev_min) and (cur_min is not None):
+                        base = cur_min
+
+                if base is not None and np.isfinite(float(base)):
+                    stop_levels[c] = float(base)
+
+            tp_sl["stop_loss_level_by_code"] = {k: float(v) for k, v in stop_levels.items()}
+        elif tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"} and risk_picks:
+            tp_sl["atr_window_used"] = int(w_atr) if w_atr is not None else None
+            tp_sl["atr_mult"] = float(inp.atr_mult)
+            tp_sl["atr_step"] = float(inp.atr_step)
+            tp_sl["atr_min_mult"] = float(inp.atr_min_mult)
 
         # Apply pre-trade risk controls only when we are in risk-on mode (holding risk assets).
         if risk_picks:
@@ -545,6 +741,59 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                     picks = []
                     meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
 
+        # Correlation gate (hfq): if new picks are too correlated with current holdings, skip rebalance this period.
+        corr_meta: dict[str, Any] = {"enabled": bool(corr_enabled), "window": int(corr_window), "threshold": float(corr_threshold)}
+        if corr_enabled:
+            cur_hold = [] if prev_segment_stopped_out else (list(prev_picks_key) if prev_picks_key else [])
+            cur_key = tuple(sorted([c for c in cur_hold if c in rank_codes]))
+            new_key = tuple(sorted([c for c in (picks or []) if c in rank_codes]))
+            corr_meta["current_holdings"] = list(cur_key)
+            corr_meta["new_picks"] = list(new_key)
+            corr_meta["blocked"] = False
+            if cur_key and new_key and (cur_key != new_key):
+                end_pos = int(dates.get_loc(d))
+                max_corr = None
+                max_pair = None
+                for a in new_key:
+                    for b in cur_key:
+                        cval = _pair_corr_hfq(code_a=a, code_b=b, end_pos=end_pos)
+                        if cval is None or (not np.isfinite(cval)):
+                            continue
+                        if (max_corr is None) or (float(cval) > float(max_corr)):
+                            max_corr = float(cval)
+                            max_pair = (a, b)
+                corr_meta["max_corr"] = max_corr
+                corr_meta["max_pair"] = list(max_pair) if max_pair else None
+                if max_corr is not None and float(max_corr) > float(corr_threshold):
+                    corr_meta["blocked"] = True
+                    # keep current holdings (no rebalance)
+                    picks = list(cur_key)
+                    # also reset risk_picks to match picks for downstream sizing logic
+                    risk_picks = list(cur_key)
+
+        # Rolling-return based exposure scaling (cash remainder).
+        rr_meta: dict[str, Any] = {"enabled": bool(rr_enabled), "years": float(inp.rr_years), "window_days": int(rr_window_days)}
+        rr_exposure = 1.0
+        if rr_enabled:
+            _advance_nav_to(int(di))
+            start_rr = max(0, int(di) - int(rr_window_days))
+            base_nav = float(nav_running.iloc[start_rr])
+            cur_nav = float(nav_running.iloc[int(di)])
+            trailing = (cur_nav / base_nav - 1.0) if base_nav > 0 else float("nan")
+            bucket, rr_exposure = _rr_bucket_exposure(float(trailing) if np.isfinite(trailing) else -1e9)
+            rr_meta.update(
+                {
+                    "asof": d.date().isoformat(),
+                    "trailing_return": float(trailing),
+                    "bucket": int(bucket),
+                    "exposure": float(rr_exposure),
+                    "thresholds": [float(x) for x in rr_thresholds],
+                    "weights": [float(x) for x in rr_weights],
+                }
+            )
+        else:
+            rr_meta.update({"asof": d.date().isoformat(), "trailing_return": None, "bucket": None, "exposure": None})
+
         # 3) Volatility sizing: scale down weights of risk assets (cash remainder).
         exposure = 1.0
         weight_map: dict[str, float] = {}
@@ -596,11 +845,133 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                             meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
                             exposure = 0.0
 
+            # Apply rolling-return exposure scaling as the final layer (cash remainder).
+            if rr_enabled and weight_map and float(rr_exposure) < 1.0:
+                for c in list(weight_map.keys()):
+                    weight_map[c] = float(weight_map[c]) * float(rr_exposure)
+                exposure = float(exposure) * float(rr_exposure)
+
             # write weights for the whole holding segment
             if weight_map:
                 for c, wt in weight_map.items():
                     if wt and wt > 0:
                         w.loc[dates[start_i] : dates[end_i], c] = float(wt)
+
+        # In-segment stop-loss check (after weights are written for the segment).
+        # We approximate execution as: hold through close on trigger day, then go cash from next trading day.
+        if tp_sl_mode == "prev_week_low_stop" and risk_picks and stop_levels:
+            seg_dates = dates[start_i : end_i + 1]
+            # Find earliest trigger among held assets.
+            trig_idx: int | None = None
+            trig_code: str | None = None
+            for j, day in enumerate(seg_dates):
+                for c in risk_picks:
+                    sl = stop_levels.get(c)
+                    if sl is None:
+                        continue
+                    try:
+                        px = float(close_qfq.loc[day, c])
+                    except (KeyError, TypeError, ValueError):  # pragma: no cover
+                        continue
+                    if np.isfinite(px) and px < float(sl):
+                        trig_idx = j
+                        trig_code = c
+                        break
+                if trig_idx is not None:
+                    break
+
+            if trig_idx is not None:
+                stop_triggered = True
+                stop_trigger_date = seg_dates[trig_idx].date().isoformat()
+                tp_sl["triggered"] = True
+                tp_sl["trigger_date"] = stop_trigger_date
+                tp_sl["trigger_code"] = trig_code
+                # go cash from next trading day after trigger date, until segment end
+                if trig_idx + 1 < len(seg_dates):
+                    w.loc[seg_dates[trig_idx + 1] : seg_dates[-1], :] = 0.0
+            else:
+                tp_sl["triggered"] = False
+        elif tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"} and risk_picks:
+            seg_dates = dates[start_i : end_i + 1]
+            # Build/initialize per-asset state at segment start.
+            # We maintain a trailing stop that never decreases.
+            entry_px: dict[str, float] = {}
+            stop: dict[str, float] = {}
+            for c in risk_picks:
+                try:
+                    p0 = float(close_qfq.loc[seg_dates[0], c])
+                    a0 = float(atr.loc[seg_dates[0], c])
+                except (KeyError, TypeError, ValueError):  # pragma: no cover
+                    continue
+                if not (np.isfinite(p0) and np.isfinite(a0) and a0 > 0):
+                    continue
+                entry_px[c] = p0
+                stop[c] = p0 - float(inp.atr_mult) * a0
+            tp_sl["entry_price_by_code"] = {k: float(v) for k, v in entry_px.items()}
+            tp_sl["initial_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+
+            trig_idx: int | None = None
+            trig_code: str | None = None
+            # Iterate days: first check trigger vs previous stop, then update stop for next day.
+            for j, day in enumerate(seg_dates):
+                # 1) check trigger
+                for c in risk_picks:
+                    if c not in stop:
+                        continue
+                    try:
+                        px = float(close_qfq.loc[day, c])
+                    except (KeyError, TypeError, ValueError):  # pragma: no cover
+                        continue
+                    if np.isfinite(px) and px < float(stop[c]):
+                        trig_idx = j
+                        trig_code = c
+                        break
+                if trig_idx is not None:
+                    break
+
+                # 2) update trailing stop using today's close and today's ATR (for next day)
+                for c in risk_picks:
+                    if c not in stop:
+                        continue
+                    try:
+                        px = float(close_qfq.loc[day, c])
+                        a = float(atr.loc[day, c])
+                    except (KeyError, TypeError, ValueError):  # pragma: no cover
+                        continue
+                    if not (np.isfinite(px) and np.isfinite(a) and a > 0):
+                        continue
+
+                    if tp_sl_mode == "atr_chandelier_fixed":
+                        dist_mult = float(inp.atr_mult)
+                    else:
+                        # progressive distance reduction:
+                        # distance_mult = max(min_mult, atr_mult - floor(gain/step)*step)
+                        # gain is measured in ATR units using current ATR.
+                        ep = float(entry_px.get(c, px))
+                        gain_units = (px - ep) / a
+                        steps = int(np.floor(gain_units / float(inp.atr_step))) if np.isfinite(gain_units) else 0
+                        dist_mult = float(inp.atr_mult) - float(steps) * float(inp.atr_step)
+                        dist_mult = float(max(float(inp.atr_min_mult), dist_mult))
+
+                    cand = px - dist_mult * a
+                    # chandelier stop never decreases
+                    stop[c] = float(max(float(stop[c]), float(cand)))
+
+            if trig_idx is not None:
+                stop_triggered = True
+                stop_trigger_date = seg_dates[trig_idx].date().isoformat()
+                tp_sl["triggered"] = True
+                tp_sl["trigger_date"] = stop_trigger_date
+                tp_sl["trigger_code"] = trig_code
+                if trig_idx + 1 < len(seg_dates):
+                    w.loc[seg_dates[trig_idx + 1] : seg_dates[-1], :] = 0.0
+            else:
+                tp_sl["triggered"] = False
+            tp_sl["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+
+        # Carry forward for next rebalance decision (risk holdings only; stop-out means "cash" next decision).
+        prev_picks_key = tuple(sorted([p for p in (risk_picks or []) if p in rank_codes])) if risk_picks else None
+        prev_segment_stopped_out = bool(stop_triggered)
         holdings["periods"].append(
             {
                 "decision_date": d.date().isoformat(),
@@ -612,6 +983,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 "risk_off_triggered": bool(meta.get("risk_off_triggered")),
                 "mode": meta.get("mode"),
                 "exposure": float(exposure),
+                "tp_sl": tp_sl,
+                "corr_filter": corr_meta,
+                "rr_sizing": rr_meta,
                 "risk_controls": {"reasons": reasons, **details},
             }
         )
@@ -891,6 +1265,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     out = {
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d")},
         "score_method": (inp.score_method or "raw_mom"),
+        "tp_sl_mode": tp_sl_mode,
         "score_params": {"lambda": float(inp.score_lambda), "vol_power": float(inp.score_vol_power)},
         "codes": codes,
         "benchmark_codes": bench_codes,

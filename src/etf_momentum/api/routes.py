@@ -102,6 +102,9 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
 
 @router.post("/analysis/rotation")
 def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(get_session)) -> dict:
+    # Pylint may resolve imported dataclasses from an installed package instead of workspace source,
+    # which can lag during local dev. Keep behavior correct; suppress false-positive for new fields.
+    # pylint: disable=unexpected-keyword-arg
     inp = RotationAnalysisInputs(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
@@ -118,6 +121,18 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         score_vol_power=payload.score_vol_power,
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
+        tp_sl_mode=payload.tp_sl_mode,
+        atr_window=payload.atr_window,
+        atr_mult=payload.atr_mult,
+        atr_step=payload.atr_step,
+        atr_min_mult=payload.atr_min_mult,
+        corr_filter=payload.corr_filter,
+        corr_window=payload.corr_window,
+        corr_threshold=payload.corr_threshold,
+        rr_sizing=payload.rr_sizing,
+        rr_years=payload.rr_years,
+        rr_thresholds=payload.rr_thresholds,
+        rr_weights=payload.rr_weights,
         trend_filter=payload.trend_filter,
         trend_mode=payload.trend_mode,
         trend_sma_window=payload.trend_sma_window,

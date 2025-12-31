@@ -46,9 +46,26 @@ class RotationAnalysisInputs:
     chop_er_threshold: float = 0.25
     chop_adx_window: int = 20
     chop_adx_threshold: float = 20.0
+    # Take-profit / stop-loss (qfq)
+    tp_sl_mode: str = "none"
+    atr_window: int | None = None
+    atr_mult: float = 2.0
+    atr_step: float = 0.5
+    atr_min_mult: float = 0.5
+    # Correlation filter (hfq)
+    corr_filter: bool = False
+    corr_window: int | None = None
+    corr_threshold: float = 0.5
+    rr_sizing: bool = False
+    rr_years: float = 3.0
+    rr_thresholds: list[float] | None = None
+    rr_weights: list[float] | None = None
 
 
 def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
+    # Pylint may resolve imported dataclasses from an installed package instead of workspace source,
+    # which can lag during local dev. Keep behavior correct; suppress false-positive for new fields.
+    # pylint: disable=unexpected-keyword-arg
     return backtest_rotation(
         db,
         RotationInputs(
@@ -86,6 +103,18 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             chop_er_threshold=inp.chop_er_threshold,
             chop_adx_window=inp.chop_adx_window,
             chop_adx_threshold=inp.chop_adx_threshold,
+            tp_sl_mode=inp.tp_sl_mode,
+            atr_window=inp.atr_window,
+            atr_mult=inp.atr_mult,
+            atr_step=inp.atr_step,
+            atr_min_mult=inp.atr_min_mult,
+            corr_filter=inp.corr_filter,
+            corr_window=inp.corr_window,
+            corr_threshold=inp.corr_threshold,
+            rr_sizing=inp.rr_sizing,
+            rr_years=inp.rr_years,
+            rr_thresholds=inp.rr_thresholds,
+            rr_weights=inp.rr_weights,
         ),
     )
 

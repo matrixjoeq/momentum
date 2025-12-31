@@ -132,6 +132,39 @@ class RotationBacktestRequest(BaseModel):
     chop_er_threshold: float = Field(default=0.25, gt=0.0, description="ER < threshold => choppy => exclude")
     chop_adx_window: int = Field(default=20, ge=2, description="ADX window (trading days)")
     chop_adx_threshold: float = Field(default=20.0, gt=0.0, description="ADX < threshold => choppy => exclude")
+    # Take-profit / stop-loss (qfq)
+    tp_sl_mode: str = Field(
+        default="none",
+        description="Take-profit/stop-loss mode: none | prev_week_low_stop (qfq low-based stop-loss).",
+    )
+    # ATR chandelier (qfq close-based)
+    atr_window: int | None = Field(
+        default=None,
+        ge=2,
+        description="ATR lookback window (trading days) computed from qfq close. None -> defaults to lookback_days.",
+    )
+    atr_mult: float = Field(default=2.0, gt=0.0, description="ATR stop multiple (e.g. 2.0).")
+    atr_step: float = Field(default=0.5, gt=0.0, description="Progressive mode step in ATR units (e.g. 0.5).")
+    atr_min_mult: float = Field(default=0.5, gt=0.0, description="Progressive mode minimum distance multiple (e.g. 0.5).")
+    # Correlation filter (hfq)
+    corr_filter: bool = Field(default=False, description="Enable correlation gate between new pick and current holding (hfq).")
+    corr_window: int | None = Field(
+        default=None,
+        ge=2,
+        description="Correlation lookback window (trading days) computed from hfq closes. None -> defaults to lookback_days.",
+    )
+    corr_threshold: float = Field(default=0.5, ge=-1.0, le=1.0, description="Block rebalance if corr > threshold.")
+    # Rolling-return based position sizing (strategy trailing return)
+    rr_sizing: bool = Field(default=False, description="Enable rolling-return based exposure sizing at rebalance.")
+    rr_years: float = Field(default=3.0, gt=0.0, description="Trailing window length in years (approx 252*years trading days).")
+    rr_thresholds: list[float] | None = Field(
+        default=None,
+        description="Optional return thresholds (decimal). Max 5. If null, backend uses defaults when rr_sizing=true.",
+    )
+    rr_weights: list[float] | None = Field(
+        default=None,
+        description="Optional exposure levels. If null, backend uses defaults when rr_sizing=true.",
+    )
 
 
 class MonteCarloRequest(BaseModel):

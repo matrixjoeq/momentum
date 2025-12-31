@@ -211,8 +211,19 @@
     </div>
 
     <div class="panel">
-      <h3>相关性矩阵（日收益，回测全区间）</h3>
+      <h3>相关性矩阵（日收益） <span id="corrRangeTitle" class="muted"></span></h3>
       <div class="muted">口径：hfq（后复权）。横纵坐标为标的编号（见下方映射）。</div>
+      <div class="row no-print" style="gap:8px; margin-top:8px;">
+        <button id="corrRange1m">近一月</button>
+        <button id="corrRange3m">近三月</button>
+        <button id="corrRange6m">近六月</button>
+        <button id="corrRange1y">近一年</button>
+        <button id="corrRange3y">近三年</button>
+        <button id="corrRange5y">近五年</button>
+        <button id="corrRange10y">近十年</button>
+        <button id="corrRangeAll">全回测区间</button>
+        <span id="corrRangeHint" class="muted" style="margin-left:6px;"></span>
+      </div>
       <div id="corrLegend" class="muted" style="margin-top:6px;"></div>
       <div id="corrHeatmap" style="width:100%; height:520px;"></div>
     </div>
@@ -290,6 +301,9 @@
           <button class="tabBtn" data-tab="rotTabRsi" role="tab" aria-selected="false">RSI过滤</button>
           <button class="tabBtn" data-tab="rotTabVol" role="tab" aria-selected="false">波动率过滤</button>
           <button class="tabBtn" data-tab="rotTabChop" role="tab" aria-selected="false">震荡过滤</button>
+          <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益率</button>
+          <button class="tabBtn" data-tab="rotTabCorr" role="tab" aria-selected="false">相关性过滤</button>
+          <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
         </div>
 
         <div id="rotTabBase" class="tabPanel active" role="tabpanel">
@@ -452,6 +466,89 @@
               <label>ADX阈值</label>
               <input id="rotChopAdxThr" value="20" />
             </div>
+          </div>
+        </div>
+
+        <div id="rotTabRR" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>滚动收益率仓位开关</label>
+              <select id="rotRROn" style="min-width:160px;">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>窗口年数 N</label>
+              <input id="rotRRYears" value="3" />
+            </div>
+            <div style="min-width:360px;">
+              <label>收益率阈值（最多5档）</label>
+              <input id="rotRRThr" value="50,100,150,200,250" />
+            </div>
+            <div style="min-width:360px;">
+              <label>对应仓位（阈值+1 档）</label>
+              <input id="rotRRWts" value="100,80,60,40,20,10" />
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">
+            说明：调仓决策时，根据策略过去 N 年滚动收益率（基于策略净值）决定本期总仓位（现金为剩余仓位）。阈值和仓位支持输入百分比（如 50 表示 50%）。
+          </div>
+        </div>
+
+        <div id="rotTabCorr" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>相关性过滤开关（hfq）</label>
+              <select id="rotCorrOn" style="min-width:160px;">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>回看窗口(交易日)</label>
+              <input id="rotCorrWindow" placeholder="空=同步动量回看" />
+            </div>
+            <div>
+              <label>相关性阈值</label>
+              <input id="rotCorrThr" value="0.5" />
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">
+            说明：若本期计划调入标的与当前持仓标的在回看窗口内的相关性（基于 hfq 收盘价日收益）大于阈值，则本期不调仓（保持原持仓）。
+          </div>
+        </div>
+
+        <div id="rotTabTpSl" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>止盈止损模式（qfq）</label>
+              <select id="rotTpSlMode" style="min-width:240px;">
+                <option value="none" selected>关闭（默认）</option>
+                <option value="prev_week_low_stop">上一周期最低止损（止损价=上一调仓周期 qfq 收盘最低；持仓不变则更新为本周期最低）</option>
+                <option value="atr_chandelier_fixed">ATR 吊灯止损（固定倍数）</option>
+                <option value="atr_chandelier_progressive">ATR 吊灯止损（渐进式倍数）</option>
+              </select>
+            </div>
+            <div>
+              <label>ATR窗口(交易日)</label>
+              <input id="rotAtrWindow" placeholder="空=同步动量回看" />
+            </div>
+            <div>
+              <label>ATR倍数</label>
+              <input id="rotAtrMult" value="2.0" />
+            </div>
+            <div id="rotAtrStepBox">
+              <label>渐进步长(ATR)</label>
+              <input id="rotAtrStep" value="0.5" />
+            </div>
+            <div id="rotAtrMinMultBox">
+              <label>最小倍数(ATR)</label>
+              <input id="rotAtrMinMult" value="0.5" />
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">
+            说明：止损价与触发均使用前复权(qfq)收盘价 close。触发后从下一交易日起空仓，直到下一次调仓。支持周/月/季/年等所有调仓周期（“上一周期/本周期”以调仓周期划分）。
           </div>
         </div>
 
@@ -1300,6 +1397,8 @@
       let lastMcEw = null;
       let lastMcRot = null;
       let lastMcExcess = null;
+      let lastBaseline = null; // latest baseline analysis payload (for client-side correlation re-slicing)
+      let corrRangeKey = "all";
 
       function openMetricModal(key, metrics) {
         const h = metricHelp[key] || { title: key, sub: "", body: "<div class='muted'>暂无说明。</div>" };
@@ -1362,6 +1461,170 @@
         if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
         // Use local time; we only care about YYYYMMDD arithmetic.
         return new Date(y, m - 1, d);
+      }
+
+      function isoToDate(s) {
+        // Expect "YYYY-MM-DD"
+        if (!s) return null;
+        const dt = new Date(s);
+        return Number.isNaN(dt.getTime()) ? null : dt;
+      }
+
+      function _shiftMonths(d, months) {
+        const x = new Date(d.getTime());
+        x.setMonth(x.getMonth() + months);
+        return x;
+      }
+
+      function _shiftYears(d, years) {
+        const x = new Date(d.getTime());
+        x.setFullYear(x.getFullYear() + years);
+        return x;
+      }
+
+      function _corrRangeSpec(key) {
+        const m = {
+          "1m": { label: "近一月", threshold: (end) => _shiftMonths(end, -1) },
+          "3m": { label: "近三月", threshold: (end) => _shiftMonths(end, -3) },
+          "6m": { label: "近六月", threshold: (end) => _shiftMonths(end, -6) },
+          "1y": { label: "近一年", threshold: (end) => _shiftYears(end, -1) },
+          "3y": { label: "近三年", threshold: (end) => _shiftYears(end, -3) },
+          "5y": { label: "近五年", threshold: (end) => _shiftYears(end, -5) },
+          "10y": { label: "近十年", threshold: (end) => _shiftYears(end, -10) },
+          all: { label: "全回测区间", threshold: null },
+        };
+        return m[key] || m.all;
+      }
+
+      function _findStartIndexByThreshold(dates, thresholdDt) {
+        if (!thresholdDt) return 0;
+        for (let i = 0; i < dates.length; i++) {
+          const d = isoToDate(dates[i]);
+          if (d && d >= thresholdDt) return i;
+        }
+        return dates.length; // not found
+      }
+
+      function _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx) {
+        const endIdx = dates.length - 1;
+        const n = codes.length;
+        if (startIdx >= endIdx) {
+          return { ok: false, error: "not enough dates" };
+        }
+        // build daily returns arrays (aligned by index)
+        const rets = codes.map((c) => {
+          const nav = (seriesByCode[c] || []).slice(startIdx, endIdx + 1);
+          const r = [];
+          for (let i = 1; i < nav.length; i++) {
+            const a = Number(nav[i - 1]);
+            const b = Number(nav[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || a === 0) r.push(NaN);
+            else r.push(b / a - 1.0);
+          }
+          return r;
+        });
+        const t = rets[0].length;
+        const corr = Array.from({ length: n }, () => Array.from({ length: n }, () => null));
+
+        const corrPair = (x, y) => {
+          let nObs = 0;
+          let sx = 0, sy = 0;
+          for (let i = 0; i < t; i++) {
+            const xi = x[i], yi = y[i];
+            if (Number.isFinite(xi) && Number.isFinite(yi)) {
+              nObs += 1;
+              sx += xi;
+              sy += yi;
+            }
+          }
+          if (nObs < 3) return { nObs, value: null };
+          const mx = sx / nObs;
+          const my = sy / nObs;
+          let sxx = 0, syy = 0, sxy = 0;
+          for (let i = 0; i < t; i++) {
+            const xi = x[i], yi = y[i];
+            if (Number.isFinite(xi) && Number.isFinite(yi)) {
+              const dx = xi - mx;
+              const dy = yi - my;
+              sxx += dx * dx;
+              syy += dy * dy;
+              sxy += dx * dy;
+            }
+          }
+          if (sxx <= 0 || syy <= 0) return { nObs, value: null };
+          return { nObs, value: sxy / Math.sqrt(sxx * syy) };
+        };
+
+        let nObsMin = null;
+        for (let i = 0; i < n; i++) {
+          for (let j = 0; j < n; j++) {
+            if (i === j) {
+              corr[i][j] = 1.0;
+              continue;
+            }
+            const { nObs, value } = corrPair(rets[i], rets[j]);
+            if (nObsMin == null || nObs < nObsMin) nObsMin = nObs;
+            corr[i][j] = value;
+          }
+        }
+        return { ok: true, matrix: corr, nObsMin: nObsMin == null ? 0 : nObsMin };
+      }
+
+      function refreshCorrelationForRange(key) {
+        if (!lastBaseline || !lastBaseline.nav || !lastBaseline.codes) return;
+        const codes = lastBaseline.codes;
+        const dates = lastBaseline.nav.dates || [];
+        const end = isoToDate(dates[dates.length - 1]);
+        if (!end) return;
+        const spec = _corrRangeSpec(key);
+        const threshold = spec.threshold ? spec.threshold(end) : null;
+        const startIdx = _findStartIndexByThreshold(dates, threshold);
+        if (startIdx >= dates.length) return;
+
+        // Build series-by-code for selected codes only (exclude EW/BENCH series)
+        const seriesByCode = {};
+        for (const c of codes) seriesByCode[c] = lastBaseline.nav.series[c];
+
+        const calc = _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx);
+        if (!calc.ok) return;
+
+        const startDate = dates[startIdx];
+        const endDate = dates[dates.length - 1];
+        $("corrRangeTitle").textContent = `· ${spec.label}（${startDate} ~ ${endDate}）`;
+        $("corrRangeHint").textContent = `样本数(最小对)：${calc.nObsMin}`;
+        plotCorrelation({ method: "pearson", codes, matrix: calc.matrix, n_obs: calc.nObsMin });
+      }
+
+      function updateCorrRangeButtons() {
+        const btns = [
+          ["1m", "corrRange1m"],
+          ["3m", "corrRange3m"],
+          ["6m", "corrRange6m"],
+          ["1y", "corrRange1y"],
+          ["3y", "corrRange3y"],
+          ["5y", "corrRange5y"],
+          ["10y", "corrRange10y"],
+          ["all", "corrRangeAll"],
+        ];
+        if (!lastBaseline || !lastBaseline.nav || !lastBaseline.nav.dates || lastBaseline.nav.dates.length === 0) {
+          for (const [, id] of btns) { const el = $(id); if (el) el.disabled = true; }
+          return;
+        }
+        const dates = lastBaseline.nav.dates;
+        const first = isoToDate(dates[0]);
+        const end = isoToDate(dates[dates.length - 1]);
+        for (const [key, id] of btns) {
+          const el = $(id);
+          if (!el) continue;
+          if (key === "all") {
+            el.disabled = false;
+            continue;
+          }
+          const spec = _corrRangeSpec(key);
+          const thr = spec.threshold ? spec.threshold(end) : null;
+          // disable if full backtest shorter than desired window
+          el.disabled = (!first || !thr) ? true : (first > thr);
+        }
       }
 
       function dateToYmd(dt) {
@@ -1944,6 +2207,16 @@
         const risk_off = ($("rotRiskOff").value === "true");
         const momentum_floor = Number(($("rotFloor").value || "0").trim());
         const score_method = $("rotScoreMethod").value;
+        const tp_sl_mode = ($("rotTpSlMode").value || "none");
+        const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
+        const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
+        if (atr_window != null && (!Number.isFinite(atr_window) || atr_window < 2)) return setMsg("ATR窗口必须>=2（或留空表示同步动量回看）");
+        const atr_mult = Number(($("rotAtrMult").value || "2.0").trim());
+        if (!Number.isFinite(atr_mult) || atr_mult <= 0) return setMsg("ATR倍数必须>0，例如 2");
+        const atr_step = Number(($("rotAtrStep").value || "0.5").trim());
+        if (!Number.isFinite(atr_step) || atr_step <= 0) return setMsg("渐进步长必须>0，例如 0.5");
+        const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
+        if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
         const trend_mode = $("rotTrendMode").value;
         const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
@@ -1961,6 +2234,34 @@
         const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
         const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
         const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
+        const corr_filter = ($("rotCorrOn").value === "true");
+        const corrWinRaw = ($("rotCorrWindow").value || "").trim();
+        const corr_window = corrWinRaw === "" ? null : Number(corrWinRaw);
+        if (corr_filter && corr_window != null && (!Number.isFinite(corr_window) || corr_window < 2)) return setMsg("相关性回看窗口必须>=2（或留空表示同步动量回看）");
+        const corr_threshold = Number(($("rotCorrThr").value || "0.5").trim());
+        if (corr_filter && (!Number.isFinite(corr_threshold) || corr_threshold < -1 || corr_threshold > 1)) return setMsg("相关性阈值需在 [-1,1]，例如 0.5");
+        const rr_sizing = ($("rotRROn").value === "true");
+        const rrYearsRaw = ($("rotRRYears").value || "3").trim();
+        const rr_years = Number(rrYearsRaw);
+        if (rr_sizing && (!Number.isFinite(rr_years) || rr_years <= 0)) return setMsg("滚动收益率窗口年数 N 必须>0，例如 3");
+        const thrRaw = ($("rotRRThr").value || "").trim();
+        const wtsRaw = ($("rotRRWts").value || "").trim();
+        const parseCsvNums = (s) => s.split(",").map(x => x.trim()).filter(Boolean).map(Number);
+        let rr_thresholds = null;
+        let rr_weights = null;
+        if (rr_sizing) {
+          rr_thresholds = parseCsvNums(thrRaw);
+          rr_weights = parseCsvNums(wtsRaw);
+          if (rr_thresholds.length === 0 || rr_thresholds.length > 5) return setMsg("收益率阈值必须为 1~5 个逗号分隔数字，例如 50,100,150,200,250");
+          if (rr_weights.length !== rr_thresholds.length + 1) return setMsg("仓位档位数量必须 = 阈值数量 + 1，例如 6 档对应 5 个阈值");
+          // normalize percent-like inputs
+          rr_thresholds = rr_thresholds.map(x => (x > 1.0 ? x / 100.0 : x));
+          rr_weights = rr_weights.map(x => (x > 1.0 ? x / 100.0 : x));
+          for (const x of rr_thresholds) if (!Number.isFinite(x)) return setMsg("收益率阈值必须是数字");
+          for (const x of rr_weights) if (!Number.isFinite(x)) return setMsg("仓位必须是数字");
+          for (let i = 0; i + 1 < rr_thresholds.length; i++) if (!(rr_thresholds[i] < rr_thresholds[i + 1])) return setMsg("收益率阈值必须严格递增");
+          for (const x of rr_weights) if (x < 0 || x > 1) return setMsg("仓位必须在 0~100%（或 0~1）");
+        }
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -1985,6 +2286,10 @@
             codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
             risk_off, momentum_floor, risk_free_rate,
             score_method,
+            tp_sl_mode,
+            atr_window, atr_mult, atr_step, atr_min_mult,
+            corr_filter, corr_window, corr_threshold,
+            rr_sizing, rr_years, rr_thresholds, rr_weights,
             trend_filter, trend_mode, trend_sma_window,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
@@ -2039,6 +2344,8 @@
         $("status").textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
+        lastBaseline = data;
+        corrRangeKey = "all";
         plotNav(data.nav);
         renderMetrics(data.metrics);
         renderContributionTables("ew", data.attribution);
@@ -2054,7 +2361,9 @@
         renderPeriodPaged("monthly");
         renderPeriodPaged("quarterly");
         renderPeriodPaged("yearly");
-        plotCorrelation(data.correlation);
+        updateCorrRangeButtons();
+        // default: full backtest range (client-side recompute for consistency)
+        refreshCorrelationForRange("all");
         // show percent with 0 decimals
         plotRolling("rollingReturns", "Rolling Returns", data.rolling.returns, ".0%");
         plotRolling("rollingDD", "Rolling Max Drawdown", data.rolling.max_drawdown, ".0%");
@@ -2161,6 +2470,16 @@
         const risk_off = ($("rotRiskOff").value === "true");
         const momentum_floor = Number(($("rotFloor").value || "0").trim());
         const score_method = $("rotScoreMethod").value;
+        const tp_sl_mode = ($("rotTpSlMode").value || "none");
+        const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
+        const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
+        if (atr_window != null && (!Number.isFinite(atr_window) || atr_window < 2)) return setMsg("ATR窗口必须>=2（或留空表示同步动量回看）");
+        const atr_mult = Number(($("rotAtrMult").value || "2.0").trim());
+        if (!Number.isFinite(atr_mult) || atr_mult <= 0) return setMsg("ATR倍数必须>0，例如 2");
+        const atr_step = Number(($("rotAtrStep").value || "0.5").trim());
+        if (!Number.isFinite(atr_step) || atr_step <= 0) return setMsg("渐进步长必须>0，例如 0.5");
+        const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
+        if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
         const trend_mode = $("rotTrendMode").value;
         const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
@@ -2178,6 +2497,33 @@
         const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
         const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
         const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
+        const corr_filter = ($("rotCorrOn").value === "true");
+        const corrWinRaw = ($("rotCorrWindow").value || "").trim();
+        const corr_window = corrWinRaw === "" ? null : Number(corrWinRaw);
+        if (corr_filter && corr_window != null && (!Number.isFinite(corr_window) || corr_window < 2)) return setMsg("相关性回看窗口必须>=2（或留空表示同步动量回看）");
+        const corr_threshold = Number(($("rotCorrThr").value || "0.5").trim());
+        if (corr_filter && (!Number.isFinite(corr_threshold) || corr_threshold < -1 || corr_threshold > 1)) return setMsg("相关性阈值需在 [-1,1]，例如 0.5");
+        const rr_sizing = ($("rotRROn").value === "true");
+        const rrYearsRaw = ($("rotRRYears").value || "3").trim();
+        const rr_years = Number(rrYearsRaw);
+        if (rr_sizing && (!Number.isFinite(rr_years) || rr_years <= 0)) return setMsg("滚动收益率窗口年数 N 必须>0，例如 3");
+        const thrRaw = ($("rotRRThr").value || "").trim();
+        const wtsRaw = ($("rotRRWts").value || "").trim();
+        const parseCsvNums = (s) => s.split(",").map(x => x.trim()).filter(Boolean).map(Number);
+        let rr_thresholds = null;
+        let rr_weights = null;
+        if (rr_sizing) {
+          rr_thresholds = parseCsvNums(thrRaw);
+          rr_weights = parseCsvNums(wtsRaw);
+          if (rr_thresholds.length === 0 || rr_thresholds.length > 5) return setMsg("收益率阈值必须为 1~5 个逗号分隔数字，例如 50,100,150,200,250");
+          if (rr_weights.length !== rr_thresholds.length + 1) return setMsg("仓位档位数量必须 = 阈值数量 + 1，例如 6 档对应 5 个阈值");
+          rr_thresholds = rr_thresholds.map(x => (x > 1.0 ? x / 100.0 : x));
+          rr_weights = rr_weights.map(x => (x > 1.0 ? x / 100.0 : x));
+          for (const x of rr_thresholds) if (!Number.isFinite(x)) return setMsg("收益率阈值必须是数字");
+          for (const x of rr_weights) if (!Number.isFinite(x)) return setMsg("仓位必须是数字");
+          for (let i = 0; i + 1 < rr_thresholds.length; i++) if (!(rr_thresholds[i] < rr_thresholds[i + 1])) return setMsg("收益率阈值必须严格递增");
+          for (const x of rr_weights) if (x < 0 || x > 1) return setMsg("仓位必须在 0~100%（或 0~1）");
+        }
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -2212,6 +2558,10 @@
               codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
               risk_off, momentum_floor, risk_free_rate,
               score_method,
+              tp_sl_mode,
+              atr_window, atr_mult, atr_step, atr_min_mult,
+              corr_filter, corr_window, corr_threshold,
+              rr_sizing, rr_years, rr_thresholds, rr_weights,
               trend_filter, trend_mode, trend_sma_window,
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,
@@ -2239,6 +2589,38 @@
 
       $("runMcEw").addEventListener("click", runMcEw);
       $("runMcRot").addEventListener("click", runMcRot);
+
+      // Correlation range buttons (default full range; disable unavailable based on current backtest).
+      const wireCorrBtn = (key, id) => {
+        const el = $(id);
+        if (!el) return;
+        el.addEventListener("click", () => {
+          corrRangeKey = key;
+          refreshCorrelationForRange(key);
+        });
+      };
+      wireCorrBtn("1m", "corrRange1m");
+      wireCorrBtn("3m", "corrRange3m");
+      wireCorrBtn("6m", "corrRange6m");
+      wireCorrBtn("1y", "corrRange1y");
+      wireCorrBtn("3y", "corrRange3y");
+      wireCorrBtn("5y", "corrRange5y");
+      wireCorrBtn("10y", "corrRange10y");
+      wireCorrBtn("all", "corrRangeAll");
+
+      function updateAtrUi() {
+        const mode = ($("rotTpSlMode").value || "none");
+        const isAtr = (mode === "atr_chandelier_fixed" || mode === "atr_chandelier_progressive");
+        const prog = (mode === "atr_chandelier_progressive");
+        $("rotAtrWindow").disabled = !isAtr;
+        $("rotAtrMult").disabled = !isAtr;
+        $("rotAtrStepBox").style.display = prog ? "" : "none";
+        $("rotAtrMinMultBox").style.display = prog ? "" : "none";
+        $("rotAtrStep").disabled = !prog;
+        $("rotAtrMinMult").disabled = !prog;
+      }
+      $("rotTpSlMode").addEventListener("change", updateAtrUi);
+      updateAtrUi();
 
       // Re-plot histograms when metric selection changes (if mc already rendered)
       $("mcEwMetric").addEventListener("change", () => {
