@@ -80,6 +80,32 @@ def _seed_prices_high_corr_switch(db, *, start: dt.date, end: dt.date) -> tuple[
     return codes, dates
 
 
+def _seed_prices_drawdown_crash(db, *, start: dt.date, end: dt.date) -> tuple[list[str], list[dt.date]]:
+    """
+    Construct a dataset that produces a clear peak-to-trough drawdown on the selected holding.
+    AAA rallies then crashes to trigger drawdown control; BBB/CCC are flat-ish.
+    """
+    codes = ["AAA", "BBB", "CCC"]
+    dates = list(pd.date_range(start, end, freq="B").date)
+    for i, d in enumerate(dates):
+        # AAA: rise then crash then slow recovery
+        if i < 8:
+            aaa = 100.0 + i * 3.0
+        elif i == 8:
+            aaa = 124.0
+        elif i == 9:
+            aaa = 105.0  # ~15% drawdown from 124
+        else:
+            aaa = 105.0 + (i - 9) * 0.3
+        bbb = 100.0 + (i % 3) * 0.1
+        ccc = 100.0 + (i % 5) * 0.05
+        _add_bar(db, code="AAA", day=d, close=aaa)
+        _add_bar(db, code="BBB", day=d, close=bbb)
+        _add_bar(db, code="CCC", day=d, close=ccc)
+    db.commit()
+    return codes, dates
+
+
 def _assert_common_payload(out: dict) -> None:
     assert "nav" in out and "series" in out["nav"]
     assert len(out["nav"]["dates"]) == len(out["nav"]["series"]["ROTATION"])
@@ -151,42 +177,133 @@ def _assert_rr_sizing(out: dict, *, enabled: bool, expect_scaled: bool) -> None:
         assert any(x < 0.999 for x in exposures), "expected at least one period with exposure < 1"
 
 
+def _assert_dd_control(out: dict, *, enabled: bool, expect_trigger: bool, expect_sleep: bool) -> None:
+    for p in out.get("holdings", []):
+        dd = p.get("dd_control")
+        assert isinstance(dd, dict)
+        assert dd.get("enabled") in {True, False}
+        if enabled:
+            assert dd.get("enabled") is True
+            assert isinstance(dd.get("threshold"), float)
+            assert isinstance(dd.get("reduce"), float)
+            assert isinstance(dd.get("sleep_days"), int)
+            assert "in_sleep" in dd
+            assert "triggered" in dd
+    if enabled and expect_trigger:
+        assert any(bool((p.get("dd_control") or {}).get("triggered")) for p in out.get("holdings", [])), "expected at least one dd trigger"
+    if enabled and expect_sleep:
+        assert any(bool((p.get("dd_control") or {}).get("in_sleep")) for p in out.get("holdings", [])), "expected at least one in_sleep period"
+    if enabled and expect_trigger:
+        # This fixture constructs one crash; should not repeatedly re-trigger every period.
+        n = sum(1 for p in out.get("holdings", []) if bool((p.get("dd_control") or {}).get("triggered")))
+        assert n <= 2
+
+
 CASES = [
     dict(
         name="base",
         seed="regime",
         cfg=dict(),
-        expect=dict(tp_sl_mode="none", corr_enabled=False, corr_block=False, rr_enabled=False, rr_scaled=False),
+        expect=dict(
+            tp_sl_mode="none",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=False,
+            rr_scaled=False,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
     dict(
         name="prev_period_stop",
         seed="regime",
         cfg=dict(tp_sl_mode="prev_week_low_stop"),
-        expect=dict(tp_sl_mode="prev_week_low_stop", corr_enabled=False, corr_block=False, rr_enabled=False, rr_scaled=False),
+        expect=dict(
+            tp_sl_mode="prev_week_low_stop",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=False,
+            rr_scaled=False,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
     dict(
         name="atr_fixed",
         seed="regime",
         cfg=dict(tp_sl_mode="atr_chandelier_fixed", atr_window=10, atr_mult=2.0),
-        expect=dict(tp_sl_mode="atr_chandelier_fixed", corr_enabled=False, corr_block=False, rr_enabled=False, rr_scaled=False),
+        expect=dict(
+            tp_sl_mode="atr_chandelier_fixed",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=False,
+            rr_scaled=False,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
     dict(
         name="atr_progressive",
         seed="regime",
         cfg=dict(tp_sl_mode="atr_chandelier_progressive", atr_window=10, atr_mult=2.0, atr_step=0.5, atr_min_mult=0.5),
-        expect=dict(tp_sl_mode="atr_chandelier_progressive", corr_enabled=False, corr_block=False, rr_enabled=False, rr_scaled=False),
+        expect=dict(
+            tp_sl_mode="atr_chandelier_progressive",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=False,
+            rr_scaled=False,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
     dict(
         name="corr_gate_blocks",
         seed="high_corr_switch",
         cfg=dict(corr_filter=True, corr_window=10, corr_threshold=0.5, lookback_days=2),
-        expect=dict(tp_sl_mode="none", corr_enabled=True, corr_block=True, rr_enabled=False, rr_scaled=False),
+        expect=dict(
+            tp_sl_mode="none",
+            corr_enabled=True,
+            corr_block=True,
+            rr_enabled=False,
+            rr_scaled=False,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
     dict(
         name="rr_sizing_scales",
         seed="regime",
         cfg=dict(rr_sizing=True, rr_years=0.2, rr_thresholds=[0.0], rr_weights=[1.0, 0.6]),
-        expect=dict(tp_sl_mode="none", corr_enabled=False, corr_block=False, rr_enabled=True, rr_scaled=True),
+        expect=dict(
+            tp_sl_mode="none",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=True,
+            rr_scaled=True,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
+    ),
+    dict(
+        name="dd_control_triggers_sleep",
+        seed="drawdown",
+        cfg=dict(dd_control=True, dd_threshold=0.10, dd_reduce=1.0, dd_sleep_days=10, lookback_days=2),
+        expect=dict(
+            tp_sl_mode="none",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=False,
+            rr_scaled=False,
+            dd_enabled=True,
+            dd_trigger=True,
+            dd_sleep=True,
+        ),
     ),
     dict(
         name="combo_tp_sl_corr_rr",
@@ -203,7 +320,16 @@ CASES = [
             rr_thresholds=[0.0],
             rr_weights=[1.0, 0.6],
         ),
-        expect=dict(tp_sl_mode="atr_chandelier_fixed", corr_enabled=True, corr_block=False, rr_enabled=True, rr_scaled=True),
+        expect=dict(
+            tp_sl_mode="atr_chandelier_fixed",
+            corr_enabled=True,
+            corr_block=False,
+            rr_enabled=True,
+            rr_scaled=True,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
     dict(
         name="risk_controls_combo",
@@ -223,7 +349,16 @@ CASES = [
             chop_adx_window=20,
             chop_adx_threshold=20.0,
         ),
-        expect=dict(tp_sl_mode="none", corr_enabled=False, corr_block=False, rr_enabled=False, rr_scaled=False),
+        expect=dict(
+            tp_sl_mode="none",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=False,
+            rr_scaled=False,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
     dict(
         name="all_on",
@@ -257,7 +392,16 @@ CASES = [
             chop_window=20,
             chop_er_threshold=0.25,
         ),
-        expect=dict(tp_sl_mode="atr_chandelier_progressive", corr_enabled=True, corr_block=False, rr_enabled=True, rr_scaled=True),
+        expect=dict(
+            tp_sl_mode="atr_chandelier_progressive",
+            corr_enabled=True,
+            corr_block=False,
+            rr_enabled=True,
+            rr_scaled=True,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
     ),
 ]
 
@@ -273,6 +417,10 @@ def test_rotation_parameter_behavior_matrix(session_factory, case):
     seed = case["seed"]
     cfg = dict(case["cfg"])
     expect = case["expect"]
+    rebalance = cfg.pop("rebalance", "weekly")
+    lookback_days = int(cfg.pop("lookback_days", 10))
+    skip_days = int(cfg.pop("skip_days", 0))
+    cost_bps = float(cfg.pop("cost_bps", 0.0))
 
     if seed == "high_corr_switch":
         with sf() as db:
@@ -283,10 +431,29 @@ def test_rotation_parameter_behavior_matrix(session_factory, case):
                     codes=codes,
                     start=dates[0],
                     end=dates[-1],
-                    rebalance="weekly",
+                    rebalance=rebalance,
                     top_k=1,
-                    skip_days=0,
-                    cost_bps=0.0,
+                    lookback_days=lookback_days,
+                    skip_days=skip_days,
+                    cost_bps=cost_bps,
+                    risk_off=False,
+                    **cfg,
+                ),
+            )
+    elif seed == "drawdown":
+        with sf() as db:
+            codes, dates = _seed_prices_drawdown_crash(db, start=dt.date(2024, 1, 1), end=dt.date(2024, 2, 29))
+            out = backtest_rotation(
+                db,
+                RotationInputs(
+                    codes=codes,
+                    start=dates[0],
+                    end=dates[-1],
+                    rebalance=rebalance,
+                    top_k=1,
+                    lookback_days=lookback_days,
+                    skip_days=skip_days,
+                    cost_bps=cost_bps,
                     risk_off=False,
                     **cfg,
                 ),
@@ -301,11 +468,11 @@ def test_rotation_parameter_behavior_matrix(session_factory, case):
                     codes=codes,
                     start=dates[0],
                     end=dates[-1],
-                    rebalance="weekly",
+                    rebalance=rebalance,
                     top_k=1,
-                    lookback_days=10,
-                    skip_days=0,
-                    cost_bps=0.0,
+                    lookback_days=lookback_days,
+                    skip_days=skip_days,
+                    cost_bps=cost_bps,
                     risk_off=False,
                     **cfg,
                 ),
@@ -315,4 +482,5 @@ def test_rotation_parameter_behavior_matrix(session_factory, case):
     _assert_tp_sl(out, expect["tp_sl_mode"])
     _assert_corr_gate(out, enabled=bool(expect["corr_enabled"]), expect_block=bool(expect["corr_block"]))
     _assert_rr_sizing(out, enabled=bool(expect["rr_enabled"]), expect_scaled=bool(expect["rr_scaled"]))
+    _assert_dd_control(out, enabled=bool(expect["dd_enabled"]), expect_trigger=bool(expect["dd_trigger"]), expect_sleep=bool(expect["dd_sleep"]))
 

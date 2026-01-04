@@ -34,7 +34,7 @@
         .panel, table { break-inside: avoid; page-break-inside: avoid; }
         h2, h3 { break-after: avoid; page-break-after: avoid; }
         #chart, #rollingReturns, #rollingDD,
-        #rotChart, #rotExcessChart, #rotRollingReturns, #rotRollingDD,
+        #rotChart, #rotDDCompare, #rotExcessChart, #rot40dDiffChart, #rotRollingCombo, #rotExcessRollingCombo,
         #corrHeatmap,
         #mcEwHist, #mcRotHist, #mcExcessHist,
         #mcEwQQ, #mcRotQQ, #mcExcessQQ {
@@ -296,14 +296,15 @@
       <div class="panel no-print">
         <div class="tabs" id="rotTabs" role="tablist" aria-label="动量轮动参数">
           <button class="tabBtn active" data-tab="rotTabBase" role="tab" aria-selected="true">基础参数</button>
-          <button class="tabBtn" data-tab="rotTabFloor" role="tab" aria-selected="false">动量阈值</button>
+          <button class="tabBtn" data-tab="rotTabFloor" role="tab" aria-selected="false">动量过滤</button>
           <button class="tabBtn" data-tab="rotTabTrend" role="tab" aria-selected="false">趋势过滤</button>
           <button class="tabBtn" data-tab="rotTabRsi" role="tab" aria-selected="false">RSI过滤</button>
           <button class="tabBtn" data-tab="rotTabVol" role="tab" aria-selected="false">波动率过滤</button>
           <button class="tabBtn" data-tab="rotTabChop" role="tab" aria-selected="false">震荡过滤</button>
-          <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益率</button>
           <button class="tabBtn" data-tab="rotTabCorr" role="tab" aria-selected="false">相关性过滤</button>
+          <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益率</button>
           <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
+          <button class="tabBtn" data-tab="rotTabDD" role="tab" aria-selected="false">回撤控制</button>
         </div>
 
         <div id="rotTabBase" class="tabPanel active" role="tabpanel">
@@ -469,6 +470,29 @@
           </div>
         </div>
 
+        <div id="rotTabCorr" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>相关性过滤开关（hfq）</label>
+              <select id="rotCorrOn" style="min-width:160px;">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>回看窗口(交易日)</label>
+              <input id="rotCorrWindow" placeholder="空=同步动量回看" />
+            </div>
+            <div>
+              <label>相关性阈值</label>
+              <input id="rotCorrThr" value="0.5" />
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">
+            说明：若本期计划调入标的与当前持仓标的在回看窗口内的相关性（基于 hfq 收盘价日收益）大于阈值，则本期不调仓（保持原持仓）。
+          </div>
+        </div>
+
         <div id="rotTabRR" class="tabPanel" role="tabpanel">
           <div class="row">
             <div>
@@ -493,29 +517,6 @@
           </div>
           <div class="muted" style="margin-top:8px">
             说明：调仓决策时，根据策略过去 N 年滚动收益率（基于策略净值）决定本期总仓位（现金为剩余仓位）。阈值和仓位支持输入百分比（如 50 表示 50%）。
-          </div>
-        </div>
-
-        <div id="rotTabCorr" class="tabPanel" role="tabpanel">
-          <div class="row">
-            <div>
-              <label>相关性过滤开关（hfq）</label>
-              <select id="rotCorrOn" style="min-width:160px;">
-                <option value="false" selected>关闭（默认）</option>
-                <option value="true">开启</option>
-              </select>
-            </div>
-            <div>
-              <label>回看窗口(交易日)</label>
-              <input id="rotCorrWindow" placeholder="空=同步动量回看" />
-            </div>
-            <div>
-              <label>相关性阈值</label>
-              <input id="rotCorrThr" value="0.5" />
-            </div>
-          </div>
-          <div class="muted" style="margin-top:8px">
-            说明：若本期计划调入标的与当前持仓标的在回看窗口内的相关性（基于 hfq 收盘价日收益）大于阈值，则本期不调仓（保持原持仓）。
           </div>
         </div>
 
@@ -552,6 +553,34 @@
           </div>
         </div>
 
+        <div id="rotTabDD" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>回撤控制开关</label>
+              <select id="rotDDOn" style="min-width:160px;">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>触发回撤阈值 X%</label>
+              <input id="rotDDThr" value="10" />
+            </div>
+            <div>
+              <label>减仓比例 Y%</label>
+              <input id="rotDDReduce" value="100" />
+            </div>
+            <div>
+              <label>休眠天数(交易日)</label>
+              <input id="rotDDSleep" value="20" />
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">
+            说明：以策略净值的峰值回撤为触发条件。触发后从下一交易日起将仓位按 (1 - Y) 缩放（Y=100% 则空仓），并在休眠期内保持上一日持仓（不再产生新的调仓决策），直至休眠结束后的下一次调仓。
+            输入支持百分比（如 10 表示 10%）。
+          </div>
+        </div>
+
         <div class="row" style="margin-top:12px">
           <button id="runRotation">运行轮动回测</button>
         </div>
@@ -561,10 +590,25 @@
         <div>
           <h3>净值曲线（轮动 vs 等权同频再平衡）</h3>
           <div id="rotChart" style="width:100%; height:520px;"></div>
+          <h3 style="margin-top:12px">回撤对比（轮动 vs 等权）</h3>
+          <div id="rotDDCompare" style="width:100%; height:260px;"></div>
         </div>
         <div>
           <h3>超额净值（轮动 / 等权）</h3>
           <div id="rotExcessChart" style="width:100%; height:520px;"></div>
+          <h3 style="margin-top:12px">40日收益差（轮动 - 等权）</h3>
+          <div id="rot40dDiffChart" style="width:100%; height:260px;"></div>
+        </div>
+      </div>
+
+      <div class="panel two" style="grid-template-columns: 1fr 1fr;">
+        <div>
+          <h3>轮动策略滚动收益&回撤（1/3/5年）</h3>
+          <div id="rotRollingCombo" style="width:100%; height:520px;"></div>
+        </div>
+        <div>
+          <h3>超额滚动收益&回撤（1/3/5年）</h3>
+          <div id="rotExcessRollingCombo" style="width:100%; height:520px;"></div>
         </div>
       </div>
 
@@ -667,17 +711,6 @@
             </div>
             <table id="rotYearly"></table>
           </div>
-        </div>
-      </div>
-
-      <div class="panel two" style="grid-template-columns: 1fr 1fr;">
-        <div>
-          <h3>滚动收益率（轮动策略）</h3>
-          <div id="rotRollingReturns" style="width:100%; height:520px;"></div>
-        </div>
-        <div>
-          <h3>滚动最大回撤（轮动策略）</h3>
-          <div id="rotRollingDD" style="width:100%; height:520px;"></div>
         </div>
       </div>
 
@@ -1418,7 +1451,8 @@
           const ids = [
             "chart", "rollingReturns", "rollingDD",
             "corrHeatmap",
-            "rotChart", "rotExcessChart", "rotRollingReturns", "rotRollingDD",
+            "rotChart", "rotDDCompare", "rotExcessChart", "rot40dDiffChart",
+            "rotRollingCombo", "rotExcessRollingCombo",
             "mcEwHist", "mcEwQQ",
             "mcRotHist", "mcRotQQ",
             "mcExcessHist", "mcExcessQQ",
@@ -2019,6 +2053,81 @@
       function plotRotation(result) {
         const dates = result.nav.dates;
         const s = result.nav.series;
+        const _drawdownFromNav = (nav) => {
+          let peak = -Infinity;
+          const out = [];
+          for (const v of nav) {
+            const x = Number(v);
+            if (!Number.isFinite(x) || x <= 0) { out.push(null); continue; }
+            peak = Math.max(peak, x);
+            out.push(peak > 0 ? (x / peak - 1.0) : null);
+          }
+          return out;
+        };
+        const _rollingReturn = (nav, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w; i < nav.length; i++) {
+            const a = Number(nav[i - w]);
+            const b = Number(nav[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+            out[i] = (b / a) - 1.0;
+          }
+          return out;
+        };
+        const _rollingMaxDrawdown = (nav, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w - 1; i < nav.length; i++) {
+            const start = i - w + 1;
+            let peak = -Infinity;
+            let mdd = 0.0;
+            let ok = true;
+            for (let j = start; j <= i; j++) {
+              const x = Number(nav[j]);
+              if (!Number.isFinite(x) || x <= 0) { ok = false; break; }
+              peak = Math.max(peak, x);
+              const dd = (peak > 0) ? (x / peak - 1.0) : 0.0;
+              if (dd < mdd) mdd = dd;
+            }
+            out[i] = ok ? mdd : null;
+          }
+          return out;
+        };
+        const _rollingMeanStd = (arr, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const mean = new Array(arr.length).fill(null);
+          const std = new Array(arr.length).fill(null);
+          let sum = 0.0;
+          let sumsq = 0.0;
+          let cnt = 0;
+          const q = [];
+          for (let i = 0; i < arr.length; i++) {
+            const x = Number(arr[i]);
+            q.push(x);
+            if (Number.isFinite(x)) {
+              sum += x;
+              sumsq += x * x;
+              cnt += 1;
+            }
+            if (q.length > w) {
+              const y = Number(q.shift());
+              if (Number.isFinite(y)) {
+                sum -= y;
+                sumsq -= y * y;
+                cnt -= 1;
+              }
+            }
+            if (q.length === w && cnt === w) {
+              const m = sum / w;
+              const v = Math.max(0.0, (sumsq / w) - (m * m));
+              mean[i] = m;
+              std[i] = Math.sqrt(v);
+            }
+          }
+          return { mean, std };
+        };
+        const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
         const traces = [
           { x: dates, y: s.ROTATION, mode: "lines", name: "ROTATION", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
           { x: dates, y: s.EW_REBAL, mode: "lines", name: "EW_REBAL", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
@@ -2034,8 +2143,35 @@
           { responsive: true }
         );
         Plotly.newPlot(
+          "rotDDCompare",
+          [
+            { x: dates, y: _drawdownFromNav(s.ROTATION), mode: "lines", name: "ROTATION DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+            { x: dates, y: _drawdownFromNav(s.EW_REBAL), mode: "lines", name: "EW_REBAL DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".0%", rangemode: "tozero", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+        Plotly.newPlot(
           "rotExcessChart",
-          [{ x: dates, y: s.EXCESS, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" }],
+          (() => {
+            const ex = s.EXCESS || [];
+            const ms250 = _rollingMeanStd(ex, 250);
+            const ma250 = ms250.mean;
+            const sd250 = ms250.std;
+            const upper = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m + 2.0 * sd250[i])));
+            const lower = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m - 2.0 * sd250[i])));
+            return [
+              { x: dates, y: ex, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+              // Bollinger band (lower -> upper fill)
+              { x: dates, y: lower, mode: "lines", name: "BB Lower(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, hoverinfo: "skip" },
+              { x: dates, y: upper, mode: "lines", name: "BB Upper(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, fill: "tonexty", fillcolor: "rgba(31,119,180,0.10)", hoverinfo: "skip" },
+              { x: dates, y: ma250, mode: "lines", name: "MA250", line: { color: "rgba(31,119,180,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>MA250=%{y:.4f}<extra></extra>" },
+            ];
+          })(),
           {
             margin: { t: 20 },
             legend: { orientation: "h" },
@@ -2043,6 +2179,59 @@
           },
           { responsive: true }
         );
+
+        // 40-day rolling return difference: ROTATION - EW_REBAL
+        const rot40 = _rollingReturn(s.ROTATION || [], 40);
+        const ew40 = _rollingReturn(s.EW_REBAL || [], 40);
+        const diff40 = rot40.map((x, i) => {
+          const a = Number(x);
+          const b = Number(ew40[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+          return a - b;
+        });
+        const diff40Ma250 = _rollingMean(diff40, 250);
+        Plotly.newPlot(
+          "rot40dDiffChart",
+          [
+            { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
+            { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".0%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+
+        // Rolling (1/3/5y) return & max drawdown for ROTATION and EXCESS.
+        const w1 = 252, w3 = 252 * 3, w5 = 252 * 5;
+        const _plotRollingCombo = (divId, nav, titlePrefix) => {
+          const r1 = _rollingReturn(nav, w1), r3 = _rollingReturn(nav, w3), r5 = _rollingReturn(nav, w5);
+          const d1 = _rollingMaxDrawdown(nav, w1), d3 = _rollingMaxDrawdown(nav, w3), d5 = _rollingMaxDrawdown(nav, w5);
+          const c1 = "rgba(31,119,180,0.90)";
+          const c3 = "rgba(44,160,44,0.90)";
+          const c5 = "rgba(255,127,14,0.90)";
+          Plotly.newPlot(
+            divId,
+            [
+              { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1y)`, line: { color: c1, width: 1.4 }, hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1y)`, line: { color: c1, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3y)`, line: { color: c3, width: 1.4 }, hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3y)`, line: { color: c3, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r5, mode: "lines", name: `${titlePrefix} R(5y)`, line: { color: c5, width: 1.4 }, hovertemplate: "%{x}<br>R5Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d5, mode: "lines", name: `${titlePrefix} DD(5y)`, line: { color: c5, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD5Y=%{y:.1%}<extra></extra>" },
+            ],
+            {
+              margin: { t: 10, b: 30 },
+              legend: { orientation: "h" },
+              yaxis: { tickformat: ".0%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+            },
+            { responsive: true }
+          );
+        };
+        _plotRollingCombo("rotRollingCombo", s.ROTATION || [], "ROT");
+        _plotRollingCombo("rotExcessRollingCombo", s.EXCESS || [], "EX");
       }
 
       function renderRotationMetrics(m) {
@@ -2262,6 +2451,17 @@
           for (let i = 0; i + 1 < rr_thresholds.length; i++) if (!(rr_thresholds[i] < rr_thresholds[i + 1])) return setMsg("收益率阈值必须严格递增");
           for (const x of rr_weights) if (x < 0 || x > 1) return setMsg("仓位必须在 0~100%（或 0~1）");
         }
+        const dd_control = ($("rotDDOn").value === "true");
+        let dd_threshold = Number(($("rotDDThr").value || "10").trim());
+        if (dd_control && (!Number.isFinite(dd_threshold) || dd_threshold <= 0)) return setMsg("回撤阈值 X 必须>0，例如 10 或 0.10");
+        if (dd_threshold > 1.0) dd_threshold = dd_threshold / 100.0;
+        if (dd_control && (dd_threshold <= 0 || dd_threshold >= 1.0)) return setMsg("回撤阈值 X 需在 (0,100%)，例如 10");
+        let dd_reduce = Number(($("rotDDReduce").value || "100").trim());
+        if (dd_control && (!Number.isFinite(dd_reduce) || dd_reduce < 0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
+        if (dd_reduce > 1.0) dd_reduce = dd_reduce / 100.0;
+        if (dd_control && (dd_reduce < 0 || dd_reduce > 1.0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
+        const dd_sleep_days = Number(($("rotDDSleep").value || "20").trim());
+        if (dd_control && (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)) return setMsg("休眠天数必须>=1，例如 20");
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -2290,6 +2490,7 @@
             atr_window, atr_mult, atr_step, atr_min_mult,
             corr_filter, corr_window, corr_threshold,
             rr_sizing, rr_years, rr_thresholds, rr_weights,
+            dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             trend_filter, trend_mode, trend_sma_window,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
@@ -2320,9 +2521,6 @@
         renderRotPeriodTable("monthly");
         renderRotPeriodTable("quarterly");
         renderRotPeriodTable("yearly");
-        // rolling charts (percent axis, hover .2%)
-        plotRolling("rotRollingReturns", "Rotation Rolling Returns", data.rolling.returns, ".0%");
-        plotRolling("rotRollingDD", "Rotation Rolling Max Drawdown", data.rolling.max_drawdown, ".0%");
       }
 
       async function runAnalysis() {
@@ -2524,6 +2722,17 @@
           for (let i = 0; i + 1 < rr_thresholds.length; i++) if (!(rr_thresholds[i] < rr_thresholds[i + 1])) return setMsg("收益率阈值必须严格递增");
           for (const x of rr_weights) if (x < 0 || x > 1) return setMsg("仓位必须在 0~100%（或 0~1）");
         }
+        const dd_control = ($("rotDDOn").value === "true");
+        let dd_threshold = Number(($("rotDDThr").value || "10").trim());
+        if (dd_control && (!Number.isFinite(dd_threshold) || dd_threshold <= 0)) return setMsg("回撤阈值 X 必须>0，例如 10 或 0.10");
+        if (dd_threshold > 1.0) dd_threshold = dd_threshold / 100.0;
+        if (dd_control && (dd_threshold <= 0 || dd_threshold >= 1.0)) return setMsg("回撤阈值 X 需在 (0,100%)，例如 10");
+        let dd_reduce = Number(($("rotDDReduce").value || "100").trim());
+        if (dd_control && (!Number.isFinite(dd_reduce) || dd_reduce < 0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
+        if (dd_reduce > 1.0) dd_reduce = dd_reduce / 100.0;
+        if (dd_control && (dd_reduce < 0 || dd_reduce > 1.0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
+        const dd_sleep_days = Number(($("rotDDSleep").value || "20").trim());
+        if (dd_control && (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)) return setMsg("休眠天数必须>=1，例如 20");
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -2562,6 +2771,7 @@
               atr_window, atr_mult, atr_step, atr_min_mult,
               corr_filter, corr_window, corr_threshold,
               rr_sizing, rr_years, rr_thresholds, rr_weights,
+              dd_control, dd_threshold, dd_reduce, dd_sleep_days,
               trend_filter, trend_mode, trend_sma_window,
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,

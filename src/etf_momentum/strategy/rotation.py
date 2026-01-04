@@ -83,6 +83,11 @@ class RotationInputs:
     rr_years: float = 3.0
     rr_thresholds: list[float] | None = None  # max 5
     rr_weights: list[float] | None = None  # len = len(thresholds)+1
+    # --- Drawdown control (strategy NAV) ---
+    dd_control: bool = False
+    dd_threshold: float = 0.10  # decimal, e.g. 0.10 = 10%
+    dd_reduce: float = 1.0  # fraction to reduce, e.g. 1.0 => reduce 100% -> cash
+    dd_sleep_days: int = 20  # trading days
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str) -> pd.PeriodIndex:
@@ -375,6 +380,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         raise ValueError("vol_target_ann must be > 0")
     if float(inp.vol_max_ann) <= 0:
         raise ValueError("vol_max_ann must be > 0")
+    if not np.isfinite(float(inp.dd_threshold)) or float(inp.dd_threshold) <= 0.0 or float(inp.dd_threshold) >= 1.0:
+        raise ValueError("dd_threshold must be within (0,1)")
+    if not np.isfinite(float(inp.dd_reduce)) or float(inp.dd_reduce) < 0.0 or float(inp.dd_reduce) > 1.0:
+        raise ValueError("dd_reduce must be within [0,1]")
+    if int(inp.dd_sleep_days) < 1:
+        raise ValueError("dd_sleep_days must be >= 1")
 
     codes = universe[:]  # may include defensive later for strategy holdings
     rank_codes = universe[:]  # ranking / filters apply to the original universe only
@@ -587,6 +598,115 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 return i, float(rr_weights[i])
         return len(rr_thresholds), float(rr_weights[-1])
 
+    # Drawdown control (strategy NAV drawdown, net of turnover cost).
+    dd_enabled = bool(inp.dd_control)
+    dd_threshold = float(inp.dd_threshold)
+    dd_reduce = float(inp.dd_reduce)
+    dd_scale = float(max(0.0, 1.0 - dd_reduce))
+    dd_sleep_days = int(max(1, int(inp.dd_sleep_days)))
+    dd_sleep_until_idx = -1  # last trading-day index that remains in "sleep"
+    dd_nav = 1.0
+    dd_peak = 1.0
+    dd_prev_w = np.zeros(len(codes), dtype=float)
+    dd_processed_idx = 0
+    dd_prev_drawdown = 0.0
+
+    def _apply_dd_control_segment(*, seg_start_i: int, seg_end_i: int) -> dict[str, Any]:
+        """
+        Advance running NAV across a segment and apply drawdown control if triggered.
+        Trigger rule:
+        - compute drawdown from running peak NAV: dd = 1 - nav/peak
+        - if dd >= threshold and not currently sleeping -> scale positions by (1-reduce) from next trading day
+          and enter sleep for dd_sleep_days trading days (starting next day).
+        """
+        nonlocal dd_sleep_until_idx, dd_nav, dd_peak, dd_prev_w, dd_processed_idx, dd_prev_drawdown
+        seg_start_i = int(seg_start_i)
+        seg_end_i = int(seg_end_i)
+        meta: dict[str, Any] = {
+            "enabled": bool(dd_enabled),
+            "threshold": float(dd_threshold),
+            "reduce": float(dd_reduce),
+            "sleep_days": int(dd_sleep_days),
+            "sleep_until": (dates[dd_sleep_until_idx].date().isoformat() if dd_sleep_until_idx >= 0 else None),
+            "triggered": False,
+            "trigger_date": None,
+            "trigger_drawdown": None,
+            "trigger_nav": None,
+            "trigger_peak": None,
+        }
+        if not dd_enabled:
+            # Disabled: keep payload shape stable but avoid extra simulation cost.
+            meta.update({"in_sleep": False, "nav_asof": None, "peak_asof": None, "drawdown_asof": None})
+            return meta
+
+        start = max(int(dd_processed_idx) + 1, seg_start_i)
+        if start > seg_end_i:
+            # Nothing to do; still provide as-of stats for decision day visibility.
+            dd_now = 0.0 if dd_peak <= 0 else float(1.0 - dd_nav / dd_peak)
+            meta.update(
+                {
+                    "nav_asof": float(dd_nav),
+                    "peak_asof": float(dd_peak),
+                    "drawdown_asof": float(dd_now),
+                    "in_sleep": bool(dd_enabled and (seg_start_i <= dd_sleep_until_idx)),
+                }
+            )
+            return meta
+
+        # Simulate day-by-day; when triggered, scale future weights inside this segment.
+        for t in range(start, seg_end_i + 1):
+            w_row = w.iloc[t].to_numpy(dtype=float)
+            r_row = ret_exec_all.iloc[t].to_numpy(dtype=float)
+            port_ret = float(np.dot(w_row, r_row))
+            turnover = float(np.abs(w_row - dd_prev_w).sum() / 2.0)
+            cost = float(turnover * (float(inp.cost_bps) / 10000.0))
+            dd_nav *= (1.0 + float(port_ret) - float(cost))
+            dd_peak = float(max(float(dd_peak), float(dd_nav)))
+            dd_prev_w = w_row
+            dd_processed_idx = int(t)
+
+            # Trigger check on end-of-day NAV; apply from next trading day.
+            if not dd_enabled:
+                continue
+            if int(t) <= int(dd_sleep_until_idx):
+                continue  # already sleeping
+            if float(dd_peak) <= 0:
+                continue
+            dd_now = float(1.0 - float(dd_nav) / float(dd_peak))
+            # IMPORTANT: to avoid re-triggering every time sleep ends while dd stays above threshold,
+            # only trigger on a crossing from below -> above.
+            crossed = (float(dd_prev_drawdown) < float(dd_threshold)) and (float(dd_now) >= float(dd_threshold))
+            if crossed:
+                meta["triggered"] = True
+                meta["trigger_date"] = dates[int(t)].date().isoformat()
+                meta["trigger_drawdown"] = float(dd_now)
+                meta["trigger_nav"] = float(dd_nav)
+                meta["trigger_peak"] = float(dd_peak)
+                # enter sleep starting next day
+                dd_sleep_until_idx = min(len(dates) - 1, int(t) + int(dd_sleep_days))
+                meta["sleep_until"] = dates[int(dd_sleep_until_idx)].date().isoformat()
+                # reduce from next trading day to segment end
+                if int(t) + 1 <= seg_end_i:
+                    if dd_scale <= 0.0:
+                        w.iloc[int(t) + 1 : seg_end_i + 1, :] = 0.0
+                    else:
+                        w.iloc[int(t) + 1 : seg_end_i + 1, :] = w.iloc[int(t) + 1 : seg_end_i + 1, :].astype(float) * float(
+                            dd_scale
+                        )
+            # keep tracking drawdown for crossing detection
+            dd_prev_drawdown = float(dd_now)
+
+        dd_now = 0.0 if dd_peak <= 0 else float(1.0 - dd_nav / dd_peak)
+        meta.update(
+            {
+                "nav_asof": float(dd_nav),
+                "peak_asof": float(dd_peak),
+                "drawdown_asof": float(dd_now),
+                "in_sleep": bool(dd_enabled and (seg_start_i <= dd_sleep_until_idx)),
+            }
+        )
+        return meta
+
     for i, d in enumerate(decision_dates):
         # apply from next trading day after decision date
         di = dates.get_loc(d)
@@ -595,18 +715,41 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         start_i = di + 1
         next_di = (dates.get_loc(decision_dates[i + 1]) if i + 1 < len(decision_dates) else (len(dates) - 1))
         end_i = min(len(dates) - 1, next_di)
-        picks, meta = _pick_assets(
-            scores.loc[d],
-            top_k=inp.top_k,
-            risk_off=inp.risk_off,
-            defensive_code=defensive,
-            floor=inp.momentum_floor,
-        )
+        dd_in_sleep = bool(dd_enabled and (start_i <= dd_sleep_until_idx))
+        dd_meta: dict[str, Any] = {
+            "enabled": bool(dd_enabled),
+            "threshold": float(dd_threshold),
+            "reduce": float(dd_reduce),
+            "sleep_days": int(dd_sleep_days),
+            "sleep_until": (dates[dd_sleep_until_idx].date().isoformat() if dd_sleep_until_idx >= 0 else None),
+            "in_sleep": bool(dd_in_sleep),
+            "triggered": False,
+            "trigger_date": None,
+            "trigger_drawdown": None,
+        }
+
+        # Sleep branch: keep previous day's weights; skip new decisions.
+        if dd_in_sleep:
+            prev_w_row = w.iloc[start_i - 1].astype(float)
+            w.iloc[start_i : end_i + 1, :] = prev_w_row.to_numpy(dtype=float)
+            held = [c for c in codes if float(prev_w_row.get(c, 0.0)) > 0.0]
+            picks = [c for c in held if c in codes]
+            meta = {"best_score": None, "risk_off_triggered": True, "mode": "dd_sleep"}
+        else:
+            picks, meta = _pick_assets(
+                scores.loc[d],
+                top_k=inp.top_k,
+                risk_off=inp.risk_off,
+                defensive_code=defensive,
+                floor=inp.momentum_floor,
+            )
         # Defensive/cash branch from momentum floor:
         # - picks == [defensive] => invest 100% in defensive (if provided)
         # - picks == [] => cash
         reasons: list[str] = []
         details: dict[str, Any] = {}
+        if dd_in_sleep:
+            reasons.append("dd_sleep")
 
         picks = [p for p in picks if p in codes]
         risk_picks = [p for p in picks if p in rank_codes]  # only rank codes are considered "risk assets"
@@ -665,7 +808,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             tp_sl["atr_min_mult"] = float(inp.atr_min_mult)
 
         # Apply pre-trade risk controls only when we are in risk-on mode (holding risk assets).
-        if risk_picks:
+        if risk_picks and (not dd_in_sleep):
             # 0) Choppiness filter (ER / ADX)
             if inp.chop_filter:
                 if cm == "er" and er is not None and d in er.index:
@@ -774,7 +917,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         # Rolling-return based exposure scaling (cash remainder).
         rr_meta: dict[str, Any] = {"enabled": bool(rr_enabled), "years": float(inp.rr_years), "window_days": int(rr_window_days)}
         rr_exposure = 1.0
-        if rr_enabled:
+        if rr_enabled and (not dd_in_sleep):
             _advance_nav_to(int(di))
             start_rr = max(0, int(di) - int(rr_window_days))
             base_nav = float(nav_running.iloc[start_rr])
@@ -797,7 +940,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         # 3) Volatility sizing: scale down weights of risk assets (cash remainder).
         exposure = 1.0
         weight_map: dict[str, float] = {}
-        if picks:
+        if picks and (not dd_in_sleep):
             if picks == [defensive] and defensive:
                 weight_map[defensive] = 1.0
                 exposure = 1.0
@@ -856,6 +999,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 for c, wt in weight_map.items():
                     if wt and wt > 0:
                         w.loc[dates[start_i] : dates[end_i], c] = float(wt)
+        elif dd_in_sleep:
+            # weights already copied from previous day; compute exposure for reporting
+            exposure = float(w.iloc[start_i].sum()) if start_i < len(dates) else 0.0
 
         # In-segment stop-loss check (after weights are written for the segment).
         # We approximate execution as: hold through close on trigger day, then go cash from next trading day.
@@ -972,6 +1118,14 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         # Carry forward for next rebalance decision (risk holdings only; stop-out means "cash" next decision).
         prev_picks_key = tuple(sorted([p for p in (risk_picks or []) if p in rank_codes])) if risk_picks else None
         prev_segment_stopped_out = bool(stop_triggered)
+
+        # Apply drawdown control (may further scale weights inside this segment and update sleep state).
+        dd_meta = _apply_dd_control_segment(seg_start_i=start_i, seg_end_i=end_i)
+        # propagate trigger info for convenience
+        if dd_meta.get("triggered"):
+            dd_in_sleep = True
+            dd_meta["in_sleep"] = True
+
         holdings["periods"].append(
             {
                 "decision_date": d.date().isoformat(),
@@ -986,6 +1140,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 "tp_sl": tp_sl,
                 "corr_filter": corr_meta,
                 "rr_sizing": rr_meta,
+                "dd_control": dd_meta,
                 "risk_controls": {"reasons": reasons, **details},
             }
         )

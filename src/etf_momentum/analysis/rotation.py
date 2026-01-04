@@ -60,6 +60,11 @@ class RotationAnalysisInputs:
     rr_years: float = 3.0
     rr_thresholds: list[float] | None = None
     rr_weights: list[float] | None = None
+    # Drawdown control (strategy NAV)
+    dd_control: bool = False
+    dd_threshold: float = 0.10
+    dd_reduce: float = 1.0
+    dd_sleep_days: int = 20
 
 
 def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
@@ -115,6 +120,10 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             rr_years=inp.rr_years,
             rr_thresholds=inp.rr_thresholds,
             rr_weights=inp.rr_weights,
+            dd_control=inp.dd_control,
+            dd_threshold=inp.dd_threshold,
+            dd_reduce=inp.dd_reduce,
+            dd_sleep_days=inp.dd_sleep_days,
         ),
     )
 

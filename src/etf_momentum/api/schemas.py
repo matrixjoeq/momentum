@@ -165,6 +165,21 @@ class RotationBacktestRequest(BaseModel):
         default=None,
         description="Optional exposure levels. If null, backend uses defaults when rr_sizing=true.",
     )
+    # Drawdown control (strategy NAV)
+    dd_control: bool = Field(default=False, description="Enable drawdown control (based on strategy NAV drawdown).")
+    dd_threshold: float = Field(
+        default=0.10,
+        gt=0.0,
+        lt=1.0,
+        description="Trigger when drawdown >= threshold (decimal). Default 0.10 (=10%).",
+    )
+    dd_reduce: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Reduce position by this fraction on trigger (0..1). Default 1.0 (=reduce 100% -> cash).",
+    )
+    dd_sleep_days: int = Field(default=20, ge=1, description="Sleep days after trigger (trading days). Default 20.")
 
 
 class MonteCarloRequest(BaseModel):
