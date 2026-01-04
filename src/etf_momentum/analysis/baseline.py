@@ -27,6 +27,9 @@ class BaselineInputs:
     rolling_weeks: list[int] | None = None
     rolling_months: list[int] | None = None
     rolling_years: list[int] | None = None
+    fft_windows: list[int] | None = None
+    fft_roll: bool = True
+    fft_roll_step: int = 5
 
 
 def _to_date(x: str) -> dt.date:
@@ -126,6 +129,196 @@ def _ulcer_index(nav: pd.Series, *, in_percent: bool = True) -> float:
     underwater = (-dd).clip(lower=0.0)
     x = underwater * (100.0 if in_percent else 1.0)
     return float(np.sqrt(np.mean(np.square(x.to_numpy(dtype=float)))))
+
+
+def _fft_summary_from_returns(
+    daily_ret: pd.Series,
+    *,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """
+    FFT features from daily returns (approx log-return is recommended, but pct-return is ok for small moves).
+
+    Notes:
+    - Uses Hann window + rFFT power spectrum.
+    - Returns band energy ratios and dominant periods (in trading days).
+    """
+    x = pd.Series(daily_ret).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    if len(x) < 8:
+        return {"n": int(len(x)), "ok": False, "reason": "not enough samples (<8)", "peaks": [], "band_energy": {}, "spectral_entropy": None}
+
+    # de-mean
+    arr = x.to_numpy(dtype=float)
+    arr = arr - float(np.mean(arr))
+    n = len(arr)
+    win = np.hanning(n)
+    y = arr * win
+
+    spec = np.fft.rfft(y)
+    power = (np.abs(spec) ** 2).astype(float)
+    freqs = np.fft.rfftfreq(n, d=1.0)  # cycles / day
+
+    # exclude DC component
+    power = power[1:]
+    freqs = freqs[1:]
+    if len(power) == 0 or float(np.sum(power)) <= 0:
+        return {"n": int(n), "ok": False, "reason": "empty spectrum", "peaks": [], "band_energy": {}, "spectral_entropy": None}
+
+    total = float(np.sum(power))
+    p = power / total
+
+    # band energies by (approx) period thresholds (in trading days)
+    # low: >=60d, mid: 20-60d, high: <20d
+    # convert period->freq: f = 1/period
+    f_low = 1.0 / 60.0
+    f_mid = 1.0 / 20.0
+    low_mask = freqs <= f_low
+    mid_mask = (freqs > f_low) & (freqs <= f_mid)
+    high_mask = freqs > f_mid
+    band = {
+        "low": float(np.sum(p[low_mask])) if np.any(low_mask) else 0.0,
+        "mid": float(np.sum(p[mid_mask])) if np.any(mid_mask) else 0.0,
+        "high": float(np.sum(p[high_mask])) if np.any(high_mask) else 0.0,
+    }
+
+    # spectral entropy (normalized)
+    eps = 1e-12
+    ent = float(-np.sum(p * np.log(p + eps)) / np.log(len(p) + eps))
+
+    # dominant peaks
+    idx = np.argsort(power)[::-1]
+    peaks: list[dict[str, float]] = []
+    for i in idx[: int(top_k)]:
+        f = float(freqs[i])
+        if f <= 0:
+            continue
+        period = 1.0 / f
+        peaks.append(
+            {
+                "period_days": float(period),
+                "freq": float(f),
+                "power_share": float(p[i]),
+            }
+        )
+
+    return {
+        "n": int(n),
+        "ok": True,
+        "method": "hann_rfft_power",
+        "peaks": peaks,
+        "band_energy": band,
+        "spectral_entropy": ent,
+    }
+
+
+def _fft_analysis(
+    close: pd.DataFrame,
+    *,
+    ew_nav: pd.Series,
+    windows: list[int] | None = None,
+) -> dict[str, Any]:
+    """
+    Fourier analysis for candidate ETF series under the same adjustment basis as `close`.
+
+    We compute on log returns (diff(log(price))) for robustness.
+    """
+    if close.empty:
+        return {"ok": False, "reason": "empty close", "per_code": {}, "ew": {}}
+    windows = windows or [252, 126]  # ~1y, ~0.5y
+    # sanitize windows
+    win_clean: list[int] = []
+    for w in windows:
+        try:
+            wi = int(w)
+        except Exception:
+            continue
+        if wi >= 8:
+            win_clean.append(wi)
+    windows = sorted(list(dict.fromkeys(win_clean)), reverse=True)  # unique, desc
+    px = close.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    logret = np.log(px).diff()
+    out: dict[str, Any] = {"ok": True, "method": "fft_on_log_returns", "windows": windows, "per_code": {}, "ew": {}}
+
+    for c in px.columns:
+        s = logret[c].dropna()
+        per = {"full": _fft_summary_from_returns(s)}
+        for w in windows:
+            per[f"last_{w}"] = _fft_summary_from_returns(s.tail(int(w)))
+        out["per_code"][str(c)] = per
+
+    # EW portfolio series (based on ew_nav)
+    ew = pd.Series(ew_nav).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    ew_lr = np.log(ew).diff().dropna()
+    ew_per = {"full": _fft_summary_from_returns(ew_lr)}
+    for w in windows:
+        ew_per[f"last_{w}"] = _fft_summary_from_returns(ew_lr.tail(int(w)))
+    out["ew"] = ew_per
+    return out
+
+
+def _fft_roll_timeseries_from_returns(
+    log_returns: pd.Series,
+    *,
+    windows: list[int],
+    step: int = 5,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """
+    Rolling FFT feature time series computed on log returns.
+
+    Output per window w:
+    - spectral_entropy
+    - high_band_energy (share)
+
+    To keep runtime manageable, compute every `step` trading days.
+    """
+    # sanitize windows similarly to _fft_analysis
+    win_clean: list[int] = []
+    for w in windows or []:
+        try:
+            wi = int(w)
+        except Exception:
+            continue
+        if wi >= 8:
+            win_clean.append(wi)
+    win_clean = sorted(list(dict.fromkeys(win_clean)), reverse=True)
+
+    x = pd.Series(log_returns).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    n = int(len(x))
+    step_i = int(step) if int(step) > 0 else 1
+    out: dict[str, Any] = {
+        "ok": True,
+        "method": "rolling_fft_on_log_returns",
+        "windows": win_clean,
+        "step": int(step_i),
+        "series": {},
+    }
+    if n < 8:
+        out["ok"] = False
+        out["reason"] = "not enough samples (<8)"
+        return out
+
+    idx = x.index
+    arr = x.to_numpy(dtype=float)
+
+    for wi in win_clean:
+        if n < wi:
+            out["series"][f"last_{wi}"] = {"ok": False, "reason": f"not enough samples (<{wi})", "dates": [], "spectral_entropy": [], "high_band_energy": []}
+            continue
+        dates: list[str] = []
+        ent: list[float] = []
+        high: list[float] = []
+        for end_i in range(wi - 1, n, step_i):
+            seg = arr[end_i - wi + 1 : end_i + 1]
+            s = _fft_summary_from_returns(pd.Series(seg), top_k=top_k)
+            if not s.get("ok"):
+                continue
+            dates.append(pd.to_datetime(idx[end_i]).date().isoformat())
+            ent.append(float(s.get("spectral_entropy")))
+            be = s.get("band_energy") or {}
+            high.append(float(be.get("high", 0.0)))
+        out["series"][f"last_{wi}"] = {"ok": True, "dates": dates, "spectral_entropy": ent, "high_band_energy": high}
+    return out
 
 
 def load_close_prices(
@@ -537,6 +730,19 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         total_return=float(cum_ret),
     )
 
+    # FFT analysis (on log returns, using the same adjustment basis as baseline close)
+    fft = _fft_analysis(close_ff.loc[common_start:, codes], ew_nav=ew_nav, windows=inp.fft_windows)
+    fft_roll = {"ok": False, "reason": "disabled", "windows": fft.get("windows", []), "step": int(inp.fft_roll_step), "series": {}}
+    if bool(inp.fft_roll):
+        ew = pd.Series(ew_nav).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+        ew_lr = np.log(ew).diff().dropna()
+        fft_roll = _fft_roll_timeseries_from_returns(
+            ew_lr,
+            windows=list(fft.get("windows", []) or []),
+            step=int(inp.fft_roll_step),
+            top_k=5,
+        )
+
     return {
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
         "codes": codes,
@@ -551,5 +757,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "correlation": corr_out,
         "rolling": rolling_out,
         "attribution": attribution,
+        "fft": fft,
+        "fft_roll": {"ew": fft_roll},
     }
 

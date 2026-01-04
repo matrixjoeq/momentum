@@ -20,6 +20,7 @@ def test_api_baseline_analysis_happy_path(api_client):
             "rolling_weeks": [1],
             "rolling_months": [],
             "rolling_years": [],
+            "fft_windows": [20, 10],
         },
     )
     assert resp.status_code == 200
@@ -40,6 +41,12 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert "correlation" in data
     assert data["correlation"]["codes"] == ["510300", "511010"]
     assert len(data["correlation"]["matrix"]) == 2
+    assert "fft" in data
+    assert data["fft"]["windows"] == [20, 10]
+    assert "fft_roll" in data
+    assert "ew" in data["fft_roll"]
+    assert data["fft_roll"]["ew"]["windows"] == [20, 10]
+    assert data["fft_roll"]["ew"]["step"] == 5
 
 
 def test_api_rotation_backtest_happy_path(api_client):

@@ -228,14 +228,46 @@
       <div id="corrHeatmap" style="width:100%; height:520px;"></div>
     </div>
 
-    <div class="panel">
-      <h3>滚动收益率（等权组合）</h3>
-      <div id="rollingReturns"></div>
+    <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
+      <div>
+        <h3>滚动收益率（等权组合）</h3>
+        <div id="rollingReturns"></div>
+      </div>
+      <div>
+        <h3>滚动最大回撤（等权组合）</h3>
+        <div id="rollingDD"></div>
+      </div>
     </div>
 
     <div class="panel">
-      <h3>滚动最大回撤（等权组合）</h3>
-      <div id="rollingDD"></div>
+      <h3>傅里叶变换分析（候选标的）</h3>
+      <div class="muted">口径：对数收益（Δlog(P)）；输出主导周期、频段能量占比（低/中/高频）与谱熵。默认同时给出全区间与近1年/近半年窗口。</div>
+      <div class="row no-print" style="margin-top:8px">
+        <div>
+          <label>FFT滚动窗口(交易日, 逗号分隔)</label>
+          <input id="fftWindows" value="252,126" />
+        </div>
+        <div>
+          <label>滚动FFT指标开关</label>
+          <select id="fftRollOn" style="min-width:160px;">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </div>
+        <div>
+          <label>滚动FFT步长(交易日)</label>
+          <input id="fftRollStep" value="5" />
+        </div>
+      </div>
+      <div id="fftSummary" class="muted" style="margin-top:8px;"></div>
+      <table id="fftTable"></table>
+    </div>
+
+    <div class="panel">
+      <h3>滚动FFT指标时间序列（等权 EW）</h3>
+      <div class="muted">展示 EW 组合在不同滚动窗口下的谱熵与高频能量占比随时间变化（按步长采样）。如果某些阶段谱熵显著下降/高频占比下降，才可能用于降低换手或提高入场门槛。</div>
+      <div id="fftRollEntropy" style="width:100%; height:420px; margin-top:8px;"></div>
+      <div id="fftRollHigh" style="width:100%; height:420px; margin-top:8px;"></div>
     </div>
 
     <div class="panel">
@@ -818,6 +850,26 @@
     <script>
       const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
       const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+      // Surface JS errors on the page (helps debug when charts fail to render due to a runtime exception).
+      window.addEventListener("error", (e) => {
+        try {
+          const msg = `JS错误: ${e.message || e.error || "unknown"}\\n${e.filename || ""}:${e.lineno || ""}:${e.colno || ""}`;
+          if ($("msg")) $("msg").textContent = msg;
+        } catch { /* ignore */ }
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        try {
+          const msg = `Promise错误: ${String(e.reason || "unknown")}`;
+          if ($("msg")) $("msg").textContent = msg;
+        } catch { /* ignore */ }
+      });
 
       function fmtPct(x) {
         if (x == null || Number.isNaN(x)) return "-";
@@ -2004,6 +2056,142 @@
         );
       }
 
+      function renderFft(fft) {
+        const tbl = $("fftTable");
+        const sum = $("fftSummary");
+        if (!tbl) return;
+        if (!fft || fft.ok === false) {
+          if (sum) sum.textContent = fft && fft.reason ? `FFT不可用：${fft.reason}` : "FFT不可用。";
+          tbl.innerHTML = "";
+          return;
+        }
+        const windows = fft.windows || [];
+        const winLabels = ["full"].concat(windows.map(w => `last_${w}`));
+        const fmtPct = (x) => (x == null || !Number.isFinite(Number(x)) ? "-" : (Number(x) * 100).toFixed(1) + "%");
+        const fmtNum = (x) => (x == null || !Number.isFinite(Number(x)) ? "-" : Number(x).toFixed(2));
+        const fmtPeaks = (peaks) => {
+          if (!Array.isArray(peaks) || peaks.length === 0) return "-";
+          return peaks
+            .slice(0, 3)
+            .map((p) => {
+              const d = p && Number.isFinite(Number(p.period_days)) ? Math.round(Number(p.period_days)) : null;
+              const s = p && Number.isFinite(Number(p.power_share)) ? (Number(p.power_share) * 100).toFixed(1) + "%" : null;
+              return d == null ? "-" : `${d}d(${s || "-"})`;
+            })
+            .join(", ");
+        };
+
+        const rows = [];
+        const addRowsFor = (label, obj) => {
+          for (const w of winLabels) {
+            const one = (obj && obj[w]) ? obj[w] : null;
+            const ok = one && one.ok;
+            rows.push({
+              code: label,
+              window: w,
+              n: one ? one.n : null,
+              peaks: ok ? fmtPeaks(one.peaks) : (one && one.reason ? `- (${one.reason})` : "-"),
+              low: ok ? fmtPct(one.band_energy && one.band_energy.low) : "-",
+              mid: ok ? fmtPct(one.band_energy && one.band_energy.mid) : "-",
+              high: ok ? fmtPct(one.band_energy && one.band_energy.high) : "-",
+              ent: ok ? fmtNum(one.spectral_entropy) : "-",
+            });
+          }
+        };
+
+        addRowsFor("EW(等权)", fft.ew || {});
+        const per = fft.per_code || {};
+        for (const code of Object.keys(per)) addRowsFor(code, per[code]);
+
+        if (sum) {
+          const nCodes = Object.keys(per).length;
+          sum.textContent = `共 ${nCodes} 个标的 + EW(等权)；FFT方法=${fft.method || "-"}。`;
+        }
+
+        tbl.innerHTML =
+          `<tr><th>标的</th><th>窗口</th><th>样本数</th><th>主导周期(Top3)</th><th>低频能量</th><th>中频能量</th><th>高频能量</th><th>谱熵</th></tr>` +
+          rows
+            .map(
+              (r) =>
+                `<tr>` +
+                `<td>${esc(r.code)}</td>` +
+                `<td>${esc(r.window)}</td>` +
+                `<td>${esc(r.n == null ? "-" : String(r.n))}</td>` +
+                `<td>${esc(r.peaks)}</td>` +
+                `<td>${esc(r.low)}</td>` +
+                `<td>${esc(r.mid)}</td>` +
+                `<td>${esc(r.high)}</td>` +
+                `<td>${esc(r.ent)}</td>` +
+                `</tr>`
+            )
+            .join("");
+      }
+
+      function renderFftRoll(fftRoll) {
+        const boxEnt = $("fftRollEntropy");
+        const boxHigh = $("fftRollHigh");
+        if (!boxEnt || !boxHigh) return;
+        if (!fftRoll || !fftRoll.ew) {
+          boxEnt.innerHTML = "<div class='muted'>无滚动FFT数据</div>";
+          boxHigh.innerHTML = "<div class='muted'>无滚动FFT数据</div>";
+          return;
+        }
+        const ew = fftRoll.ew;
+        if (ew.ok === false) {
+          const reason = ew.reason ? `：${esc(ew.reason)}` : "";
+          boxEnt.innerHTML = `<div class='muted'>滚动FFT不可用${reason}</div>`;
+          boxHigh.innerHTML = `<div class='muted'>滚动FFT不可用${reason}</div>`;
+          return;
+        }
+        const series = ew.series || {};
+        const keys = Object.keys(series);
+        if (keys.length === 0) {
+          boxEnt.innerHTML = "<div class='muted'>滚动FFT暂无数据（可能样本不足）</div>";
+          boxHigh.innerHTML = "<div class='muted'>滚动FFT暂无数据（可能样本不足）</div>";
+          return;
+        }
+
+        // Entropy chart
+        const entTraces = [];
+        for (const k of keys) {
+          const s = series[k];
+          if (!s || s.ok === false) continue;
+          entTraces.push({
+            x: s.dates,
+            y: s.spectral_entropy,
+            mode: "lines",
+            name: k,
+            hovertemplate: "%{x}<br>entropy=%{y:.3f}<extra></extra>",
+          });
+        }
+        Plotly.newPlot(
+          "fftRollEntropy",
+          entTraces,
+          { margin: { t: 20 }, legend: { orientation: "h" }, yaxis: { title: "谱熵(0-1)" } },
+          { responsive: true }
+        );
+
+        // High-band energy chart
+        const highTraces = [];
+        for (const k of keys) {
+          const s = series[k];
+          if (!s || s.ok === false) continue;
+          highTraces.push({
+            x: s.dates,
+            y: s.high_band_energy,
+            mode: "lines",
+            name: k,
+            hovertemplate: "%{x}<br>high_energy=%{y:.2%}<extra></extra>",
+          });
+        }
+        Plotly.newPlot(
+          "fftRollHigh",
+          highTraces,
+          { margin: { t: 20 }, legend: { orientation: "h" }, yaxis: { title: "高频能量占比", tickformat: ".0%" } },
+          { responsive: true }
+        );
+      }
+
       function plotCorrelation(corr) {
         const el = $("corrHeatmap");
         if (!corr || !corr.codes || !corr.matrix) {
@@ -2535,9 +2723,22 @@
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 0.02");
         // allow percent input like "2.5" to mean 2.5%
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        const fftWindowsRaw = (($("fftWindows") && $("fftWindows").value) ? $("fftWindows").value : "252,126").trim();
+        const fft_windows = fftWindowsRaw
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .map((x) => Number(x))
+          .filter((x) => Number.isFinite(x))
+          .map((x) => Math.floor(x))
+          .filter((x) => x >= 8);
+        if (fft_windows.length === 0) return setMsg("FFT滚动窗口必须至少包含一个 >=8 的交易日整数，例如 252,126");
+        const fft_roll = ($("fftRollOn").value === "true");
+        const fft_roll_step = Math.max(1, Math.floor(Number(($("fftRollStep").value || "5").trim())));
+        if (!Number.isFinite(fft_roll_step) || fft_roll_step < 1) return setMsg("滚动FFT步长必须是正整数，例如 5");
         $("status").textContent = "计算中...";
         setMsg("");
-        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust: ADJUST_USED, rebalance, risk_free_rate }) });
+        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust: ADJUST_USED, rebalance, risk_free_rate, fft_windows, fft_roll, fft_roll_step }) });
         const text = await resp.text();
         $("status").textContent = "";
         if (!resp.ok) return setMsg(text);
@@ -2565,6 +2766,8 @@
         // show percent with 0 decimals
         plotRolling("rollingReturns", "Rolling Returns", data.rolling.returns, ".0%");
         plotRolling("rollingDD", "Rolling Max Drawdown", data.rolling.max_drawdown, ".0%");
+        renderFft(data.fft);
+        renderFftRoll(data.fft_roll);
       }
 
       function initTabs(containerId) {

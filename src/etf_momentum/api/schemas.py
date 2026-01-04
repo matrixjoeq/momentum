@@ -91,6 +91,12 @@ class BaselineAnalysisRequest(BaseModel):
     rolling_weeks: list[int] = Field(default_factory=lambda: [4, 12, 52])
     rolling_months: list[int] = Field(default_factory=lambda: [3, 6, 12])
     rolling_years: list[int] = Field(default_factory=lambda: [1, 3])
+    fft_windows: list[int] = Field(
+        default_factory=lambda: [252, 126],
+        description="FFT rolling windows in trading days, e.g. [252,126] -> last_252 and last_126 summaries",
+    )
+    fft_roll: bool = Field(default=True, description="If true, compute rolling FFT time series for EW (downsampled by fft_roll_step)")
+    fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
 
 
 class RotationBacktestRequest(BaseModel):

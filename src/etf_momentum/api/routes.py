@@ -94,6 +94,9 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
         rolling_weeks=payload.rolling_weeks,
         rolling_months=payload.rolling_months,
         rolling_years=payload.rolling_years,
+        fft_windows=payload.fft_windows,
+        fft_roll=payload.fft_roll,
+        fft_roll_step=payload.fft_roll_step,
     )
     try:
         return compute_baseline(db, inp)
