@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert
@@ -123,6 +124,45 @@ def delete_etf_pool(db: Session, code: str) -> bool:
     db.delete(obj)
     db.flush()
     return True
+
+
+def purge_etf_data(db: Session, *, code: str) -> dict[str, int]:
+    """
+    Permanently delete all persisted data for an ETF code:
+    - all price rows (hfq/qfq/none)
+    - ingestion batches + items + audits
+    - snapshot files referenced by ingestion batches (best-effort)
+
+    Returns deletion counts.
+    """
+    batches = list(db.execute(select(IngestionBatch).where(IngestionBatch.code == code)).scalars().all())
+    snapshot_paths = [b.snapshot_path for b in batches if b.snapshot_path]
+
+    # Delete child tables first (safe even if FK constraints are enabled).
+    r_items = db.execute(delete(IngestionItem).where(IngestionItem.code == code))
+    r_audits = db.execute(delete(EtfPriceAudit).where(EtfPriceAudit.code == code))
+    r_batches = db.execute(delete(IngestionBatch).where(IngestionBatch.code == code))
+
+    n_prices = delete_prices(db, code=code)  # all adjusts
+
+    # Best-effort: delete snapshot files that were kept (normally snapshots are ephemeral and removed after ingestion/rollback).
+    n_snaps = 0
+    for p in snapshot_paths:
+        try:
+            fp = Path(str(p))
+            if fp.exists():
+                fp.unlink()
+                n_snaps += 1
+        except Exception:  # pylint: disable=broad-exception-caught
+            continue
+
+    return {
+        "prices": int(n_prices),
+        "batches": int(getattr(r_batches, "rowcount", 0) or 0),
+        "items": int(getattr(r_items, "rowcount", 0) or 0),
+        "audits": int(getattr(r_audits, "rowcount", 0) or 0),
+        "snapshots": int(n_snaps),
+    }
 
 
 def list_validation_policies(db: Session) -> list[ValidationPolicy]:

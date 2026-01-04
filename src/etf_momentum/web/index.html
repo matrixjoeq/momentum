@@ -232,8 +232,23 @@
         const tr = btn.closest("tr");
         const it = tr && tr.dataset.item ? JSON.parse(tr.dataset.item) : null;
         if (act === "del") {
-          const resp = await api(`/etf/${code}`, { method: "DELETE" });
-          if (!resp.ok) return setMsg(await resp.text());
+          const ok = confirm(
+            `将彻底删除：${code}\n\n- 候选池记录\n- 全部已抓取价格数据（hfq/qfq/none）\n- 对应 ingestion batch 记录（含回滚审计/记录）\n- 若存在，会删除 batch 备份快照文件\n\n此操作不可恢复，确认继续？`
+          );
+          if (!ok) return;
+          const resp = await api(`/etf/${code}?purge=true`, { method: "DELETE" });
+          const text = await resp.text();
+          if (!resp.ok) return setMsg(text);
+          try {
+            const data = JSON.parse(text);
+            if (data && data.purged) {
+              setMsg(`删除成功：prices=${data.purged.prices}, batches=${data.purged.batches}, items=${data.purged.items}, audits=${data.purged.audits}, snapshots=${data.purged.snapshots}`);
+            } else {
+              setMsg("删除成功。");
+            }
+          } catch {
+            setMsg("删除成功。");
+          }
           await refresh();
         }
         if (act === "edit" && it) {

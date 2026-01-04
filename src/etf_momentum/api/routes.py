@@ -38,6 +38,7 @@ from ..db.repo import (
     list_validation_policies,
     list_prices,
     mark_fetch_status,
+    purge_etf_data,
     update_ingestion_batch,
     upsert_etf_pool,
 )
@@ -339,11 +340,15 @@ def upsert_etf(payload: EtfPoolUpsert, db: Session = Depends(get_session)) -> Et
 
 
 @router.delete("/etf/{code}")
-def delete_etf(code: str, db: Session = Depends(get_session)) -> dict[str, bool]:
+def delete_etf(code: str, purge: bool = False, db: Session = Depends(get_session)) -> dict:
     ok = delete_etf_pool(db, code)
     if not ok:
         raise HTTPException(status_code=404, detail="ETF not found")
-    return {"deleted": True}
+    purged = None
+    if purge:
+        purged = purge_etf_data(db, code=code)
+    db.commit()
+    return {"deleted": True, "purged": purged}
 
 
 @router.post("/etf/{code}/fetch", response_model=FetchResult)
