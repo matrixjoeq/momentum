@@ -10,7 +10,9 @@ import datetime as dt
 from .deps import get_akshare, get_session
 from .schemas import (
     BaselineAnalysisRequest,
+    BaselineCalendarEffectRequest,
     BaselineMonteCarloRequest,
+    RotationCalendarEffectRequest,
     RotationMonteCarloRequest,
     RotationBacktestRequest,
     EtfPoolOut,
@@ -22,6 +24,7 @@ from .schemas import (
     ValidationPolicyOut,
 )
 from ..analysis.baseline import BaselineInputs, compute_baseline
+from ..analysis.calendar_effect import BaselineCalendarEffectInputs, compute_baseline_calendar_effect, compute_rotation_calendar_effect
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..data.ingestion import ingest_one_etf
@@ -104,6 +107,28 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.post("/analysis/baseline/calendar-effect")
+def baseline_calendar_effect(payload: BaselineCalendarEffectRequest, db: Session = Depends(get_session)) -> dict:
+    anchors = payload.anchors
+    # backward-compat for weekly-only payloads
+    if (payload.weekdays is not None) and (payload.anchors == [0, 1, 2, 3, 4]) and ((payload.rebalance or "weekly").lower() == "weekly"):
+        anchors = payload.weekdays
+    inp = BaselineCalendarEffectInputs(
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        adjust=payload.adjust,
+        risk_free_rate=payload.risk_free_rate,
+        rebalance=payload.rebalance,
+        anchors=anchors,
+        exec_prices=payload.exec_prices,
+    )
+    try:
+        return compute_baseline_calendar_effect(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.post("/analysis/rotation")
 def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(get_session)) -> dict:
     # Pylint may resolve imported dataclasses from an installed package instead of workspace source,
@@ -163,6 +188,72 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
     )
     try:
         return compute_rotation_backtest(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/rotation/calendar-effect")
+def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session = Depends(get_session)) -> dict:
+    # Reuse all rotation params as the "base" strategy config for the grid; then vary weekday + exec_price.
+    # pylint: disable=unexpected-keyword-arg
+    base = RotationAnalysisInputs(
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        rebalance=payload.rebalance,
+        top_k=payload.top_k,
+        lookback_days=payload.lookback_days,
+        skip_days=payload.skip_days,
+        risk_off=payload.risk_off,
+        defensive_code=payload.defensive_code,
+        momentum_floor=payload.momentum_floor,
+        score_method=payload.score_method,
+        score_lambda=payload.score_lambda,
+        score_vol_power=payload.score_vol_power,
+        risk_free_rate=payload.risk_free_rate,
+        cost_bps=payload.cost_bps,
+        tp_sl_mode=payload.tp_sl_mode,
+        atr_window=payload.atr_window,
+        atr_mult=payload.atr_mult,
+        atr_step=payload.atr_step,
+        atr_min_mult=payload.atr_min_mult,
+        corr_filter=payload.corr_filter,
+        corr_window=payload.corr_window,
+        corr_threshold=payload.corr_threshold,
+        rr_sizing=payload.rr_sizing,
+        rr_years=payload.rr_years,
+        rr_thresholds=payload.rr_thresholds,
+        rr_weights=payload.rr_weights,
+        dd_control=payload.dd_control,
+        dd_threshold=payload.dd_threshold,
+        dd_reduce=payload.dd_reduce,
+        dd_sleep_days=payload.dd_sleep_days,
+        trend_filter=payload.trend_filter,
+        trend_mode=payload.trend_mode,
+        trend_sma_window=payload.trend_sma_window,
+        rsi_filter=payload.rsi_filter,
+        rsi_window=payload.rsi_window,
+        rsi_overbought=payload.rsi_overbought,
+        rsi_oversold=payload.rsi_oversold,
+        rsi_block_overbought=payload.rsi_block_overbought,
+        rsi_block_oversold=payload.rsi_block_oversold,
+        vol_monitor=payload.vol_monitor,
+        vol_window=payload.vol_window,
+        vol_target_ann=payload.vol_target_ann,
+        vol_max_ann=payload.vol_max_ann,
+        chop_filter=payload.chop_filter,
+        chop_mode=payload.chop_mode,
+        chop_window=payload.chop_window,
+        chop_er_threshold=payload.chop_er_threshold,
+        chop_adx_window=payload.chop_adx_window,
+        chop_adx_threshold=payload.chop_adx_threshold,
+        rebalance_anchor=None,
+    )
+    try:
+        anchors = payload.anchors
+        if (payload.weekdays is not None) and (payload.anchors == [0, 1, 2, 3, 4]) and ((payload.rebalance or "weekly").lower() == "weekly"):
+            anchors = payload.weekdays
+        return compute_rotation_calendar_effect(db, base=base, anchors=anchors, exec_prices=payload.exec_prices)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

@@ -20,6 +20,7 @@ from ..analysis.baseline import (
 )
 from ..analysis.baseline import load_close_prices as _load_close_prices
 from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
+from ..analysis.baseline import load_ohlc_prices as _load_ohlc_prices
 from ..analysis.baseline import _compute_return_risk_contributions as _compute_return_risk_contributions
 
 
@@ -29,6 +30,8 @@ class RotationInputs:
     start: dt.date
     end: dt.date
     rebalance: str = "weekly"  # daily/weekly/monthly/quarterly/yearly
+    rebalance_weekday: int | None = None  # only used when rebalance=weekly; 0=Mon..4=Fri; default Fri when None
+    rebalance_anchor: int | None = None  # weekly:0..4; monthly:1..28; quarterly/yearly:nth trading day (1..)
     top_k: int = 1
     lookback_days: int = 20
     skip_days: int = 0  # skip recent trading days (0 means no skip)
@@ -88,11 +91,17 @@ class RotationInputs:
     dd_threshold: float = 0.10  # decimal, e.g. 0.10 = 10%
     dd_reduce: float = 1.0  # fraction to reduce, e.g. 1.0 => reduce 100% -> cash
     dd_sleep_days: int = 20  # trading days
+    # --- Execution price proxy (hfq, aligned to execution calendar) ---
+    # Used to study open/close/OHLC4 calendar effects. Default "close" matches existing behavior.
+    exec_price: str = "close"  # close | open | ohlc4
 
 
-def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str) -> pd.PeriodIndex:
+def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str, *, weekly_anchor: str = "FRI") -> pd.PeriodIndex:
     r = (rebalance or "monthly").lower()
-    freq_map = {"daily": "D", "weekly": "W-FRI", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
+    anchor = str(weekly_anchor).strip().upper()
+    if anchor not in {"MON", "TUE", "WED", "THU", "FRI"}:
+        raise ValueError(f"invalid weekly_anchor={weekly_anchor} (expected MON..FRI)")
+    freq_map = {"daily": "D", "weekly": f"W-{anchor}", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
     if r not in freq_map:
         raise ValueError(f"invalid rebalance={rebalance}")
     return index.to_period(freq_map[r])
@@ -386,6 +395,15 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         raise ValueError("dd_reduce must be within [0,1]")
     if int(inp.dd_sleep_days) < 1:
         raise ValueError("dd_sleep_days must be >= 1")
+    ep = (inp.exec_price or "close").strip().lower()
+    if ep not in {"close", "open", "ohlc4"}:
+        raise ValueError("exec_price must be one of: close|open|ohlc4")
+    if inp.rebalance_weekday is not None:
+        if int(inp.rebalance_weekday) < 0 or int(inp.rebalance_weekday) > 4:
+            raise ValueError("rebalance_weekday must be within [0..4] (Mon..Fri)")
+    if inp.rebalance_anchor is not None:
+        if int(inp.rebalance_anchor) < 0:
+            raise ValueError("rebalance_anchor must be >= 0")
 
     codes = universe[:]  # may include defensive later for strategy holdings
     rank_codes = universe[:]  # ranking / filters apply to the original universe only
@@ -421,10 +439,20 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
 
+    # For calendar-effect research: execution return basis can use hfq open/close/OHLC4.
+    # We only load hfq OHLC when needed to keep the default path unchanged.
+    need_hfq_ohlc = ep in {"open", "ohlc4"}
+    ohlc_hfq = (
+        _load_ohlc_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq") if need_hfq_ohlc else {"open": pd.DataFrame(), "high": pd.DataFrame(), "low": pd.DataFrame(), "close": pd.DataFrame()}
+    )
+
     # Align calendars using execution dates; forward-fill hfq onto those dates.
     close_none = close_none.sort_index().ffill()
     dates = close_none.index
     close_hfq = close_hfq.sort_index().reindex(dates).ffill()
+    if need_hfq_ohlc:
+        for k in ["open", "high", "low", "close"]:
+            ohlc_hfq[k] = ohlc_hfq[k].sort_index().reindex(dates).ffill()
     if need_qfq and not close_qfq.empty:
         close_qfq = close_qfq.sort_index().reindex(dates).ffill()
     if need_qfq_hl:
@@ -496,17 +524,114 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     else:
         uni_ok = None
 
-    # Determine rebalance decision dates: last trading day within each period.
+    def _decision_indices_for_rebalance(*, rebalance: str, anchor: int | None) -> list[int]:
+        """
+        Decision dates are where we compute picks; holdings apply from the next trading day.
+
+        anchor semantics:
+        - weekly: 0=Mon..4=Fri (week ending on that weekday; choose last trading day in that weekly period)
+        - monthly: day-of-month 1..28 (choose first trading day with day>=anchor in month; fallback month-end)
+        - quarterly/yearly: Nth trading day in period (1-indexed; fallback period-end)
+        - if anchor is None: keep legacy behavior (period-end)
+        """
+        r = (rebalance or "monthly").lower()
+        if r not in {"daily", "weekly", "monthly", "quarterly", "yearly"}:
+            raise ValueError(f"invalid rebalance={rebalance}")
+        if r == "daily":
+            return list(range(len(dates)))
+
+        if r == "weekly":
+            if anchor is None:
+                labels_local = _rebalance_labels(dates, r, weekly_anchor="FRI")
+            else:
+                wd_map_local = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
+                if int(anchor) not in wd_map_local:
+                    raise ValueError("weekly rebalance_anchor must be within [0..4] (Mon..Fri)")
+                labels_local = _rebalance_labels(dates, r, weekly_anchor=wd_map_local[int(anchor)])
+            return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+
+        if r == "monthly":
+            if anchor is None:
+                labels_local = _rebalance_labels(dates, r, weekly_anchor="FRI")
+                return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+            dom = int(anchor)
+            if dom < 1 or dom > 28:
+                raise ValueError("monthly rebalance_anchor must be within [1..28] (day-of-month)")
+            labels_local = dates.to_period("M")
+            out: list[int] = []
+            for _, pos in pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local):
+                arr = pos.to_numpy(dtype=int)
+                dts = dates[arr]
+                pick: int | None = None
+                for i, d in zip(arr, dts):
+                    if int(d.day) >= dom:
+                        pick = int(i)
+                        break
+                out.append(int(pick) if pick is not None else int(arr[-1]))
+            return out
+
+        # quarterly/yearly
+        if anchor is None:
+            labels_local = _rebalance_labels(dates, r, weekly_anchor="FRI")
+            return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+        n = int(anchor)
+        if n < 1:
+            raise ValueError("quarterly/yearly rebalance_anchor must be >= 1 (Nth trading day)")
+        labels_local = dates.to_period("Q" if r == "quarterly" else "Y")
+        out = []
+        for _, pos in pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local):
+            arr = pos.to_numpy(dtype=int)
+            k = min(n - 1, len(arr) - 1)
+            out.append(int(arr[int(k)]))
+        return out
+
+    # Determine rebalance decision dates.
     # If we rebalance at close on decision_date, then returns on the NEXT trading day onward
     # should reflect the new holdings. Therefore the holdings from one decision apply through
     # the NEXT decision date (inclusive), to avoid "gaps" on decision dates.
-    labels = _rebalance_labels(dates, inp.rebalance)
-    last_idx = pd.Series(np.arange(len(dates)), index=dates).groupby(labels).max().to_list()
+    anchor_val = inp.rebalance_anchor
+    if anchor_val is None and inp.rebalance_weekday is not None and (inp.rebalance or "weekly").lower() == "weekly":
+        anchor_val = int(inp.rebalance_weekday)
+    last_idx = _decision_indices_for_rebalance(rebalance=inp.rebalance, anchor=anchor_val)
     decision_dates = dates[last_idx]
 
+    # Period labels are used by some features (e.g. prev_week_low_stop) to aggregate within a rebalance period.
+    # Keep behavior backward-compatible:
+    # - weekly: use the same weekly anchor as the decision schedule (default FRI)
+    # - monthly/quarterly/yearly: natural calendar periods
+    if (inp.rebalance or "weekly").lower() == "weekly":
+        wd_map = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
+        w_anchor = wd_map.get(int(anchor_val), "FRI") if anchor_val is not None else "FRI"
+        labels = _rebalance_labels(dates, inp.rebalance, weekly_anchor=w_anchor)
+    else:
+        labels = _rebalance_labels(dates, inp.rebalance, weekly_anchor="FRI")
+
     # Precompute execution returns (hfq) for running NAV (needed by rr_sizing).
-    # This matches the final P&L basis (hfq total return proxy).
-    ret_exec_all = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    # This matches the final P&L basis.
+    def _has_cols(df: pd.DataFrame, cols: list[str]) -> bool:
+        return (df is not None) and (not df.empty) and all((c in df.columns) for c in cols)
+
+    # Prefer the selected hfq proxy; if OHLC is missing (e.g. synthetic tests only seeded close),
+    # fall back to hfq close to keep core strategy logic working.
+    if ep == "close":
+        px_exec_hfq = close_hfq[codes]
+    elif ep == "open":
+        px_exec_hfq = ohlc_hfq.get("open", pd.DataFrame())
+        if not _has_cols(px_exec_hfq, codes):
+            px_exec_hfq = close_hfq[codes]
+        else:
+            px_exec_hfq = px_exec_hfq[codes]
+    else:
+        o = ohlc_hfq.get("open", pd.DataFrame())
+        h = ohlc_hfq.get("high", pd.DataFrame())
+        l = ohlc_hfq.get("low", pd.DataFrame())
+        c = ohlc_hfq.get("close", pd.DataFrame())
+        if not (_has_cols(o, codes) and _has_cols(h, codes) and _has_cols(l, codes) and _has_cols(c, codes)):
+            px_exec_hfq = close_hfq[codes]
+        else:
+            px_exec_hfq = (o[codes].astype(float) + h[codes].astype(float) + l[codes].astype(float) + c[codes].astype(float)) / 4.0
+    px_exec_hfq = px_exec_hfq.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    ret_exec_all = px_exec_hfq.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
 
     # Build weights per date (apply from next trading day after decision date).
     w = pd.DataFrame(0.0, index=dates, columns=codes)
@@ -1145,33 +1270,44 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             }
         )
 
-    # Daily holding return:
-    # - trades are assumed executed at none prices (close-to-close approximation),
-    # - BUT to correctly model investor economics across dividends/splits, we apply a corporate-action factor
-    #   implied by hfq vs none. In a weight-based backtest, this is equivalent to using hfq daily returns
-    #   for holding P&L (total return), while keeping the "execution price basis" as none.
-    #
-    # This prevents artificial NAV cliffs from splits and also captures dividend cashflows implicitly.
+    # Corporate action factor (gross): (1+hfq_ret)/(1+none_ret) on CLOSE series.
+    # This is used only for transparency/debugging output (and to preserve prior payload fields),
+    # not for P&L once exec_price is configurable.
     ret_none = close_none[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
     ret_hfq_all = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    # Corporate action factor (gross): (1+hfq_ret)/(1+none_ret). Close to 1 on normal days,
-    # deviates on dividend/split days or bad ticks. We don't need it for P&L (hfq already embeds it),
-    # but we surface large deviations for debugging.
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq_all).astype(float)
     corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
 
-    # Use hfq return for holding P&L (total return proxy).
-    ret_exec = ret_hfq_all
+    # Daily holding return (hfq, configurable exec_price proxy).
+    # Note: close-based hfq is still the default and remains the recommended "total return proxy".
+    ret_exec = ret_exec_all
     port_ret = (w * ret_exec).sum(axis=1)
     port_nav = (1.0 + port_ret).cumprod()
     port_nav.iloc[0] = 1.0
 
-    # Equal-weight benchmark (hfq total return) WITH SAME rebalance frequency:
+    # Equal-weight benchmark WITH SAME rebalance frequency and SAME exec_price proxy:
     # equal-weight across the selected universe only (not including defensive unless user selected it).
     bench_codes = universe[:]  # fixed benchmark universe
-    ret_hfq = close_hfq[bench_codes].pct_change().fillna(0.0)
+    if ep == "close":
+        bench_px = close_hfq[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    elif ep == "open":
+        b = ohlc_hfq.get("open", pd.DataFrame())
+        if not _has_cols(b, bench_codes):
+            bench_px = close_hfq[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+        else:
+            bench_px = b[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    else:
+        bo = ohlc_hfq.get("open", pd.DataFrame())
+        bh = ohlc_hfq.get("high", pd.DataFrame())
+        bl = ohlc_hfq.get("low", pd.DataFrame())
+        bc = ohlc_hfq.get("close", pd.DataFrame())
+        if not (_has_cols(bo, bench_codes) and _has_cols(bh, bench_codes) and _has_cols(bl, bench_codes) and _has_cols(bc, bench_codes)):
+            bench_px = close_hfq[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+        else:
+            bench_px = (bo[bench_codes].astype(float) + bh[bench_codes].astype(float) + bl[bench_codes].astype(float) + bc[bench_codes].astype(float)) / 4.0
+            bench_px = bench_px.replace([np.inf, -np.inf], np.nan).ffill()
+    ret_hfq = bench_px.pct_change().fillna(0.0)
     w_ew = pd.DataFrame(0.0, index=dates, columns=bench_codes)
     n_b = len(bench_codes)
     if n_b <= 0:

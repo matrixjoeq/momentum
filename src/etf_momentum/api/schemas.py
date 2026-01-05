@@ -99,6 +99,22 @@ class BaselineAnalysisRequest(BaseModel):
     fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
 
 
+class BaselineCalendarEffectRequest(BaseModel):
+    codes: list[str] = Field(min_length=1)
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="hfq", description="qfq/hfq/none (global)")
+    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    rebalance: str = Field(default="weekly", description="weekly/monthly/quarterly/yearly (calendar-effect study)")
+    anchors: list[int] = Field(
+        default_factory=lambda: [0, 1, 2, 3, 4],
+        description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
+    )
+    # Backward compatibility: old field name used by weekly-only UI/tests.
+    weekdays: list[int] | None = Field(default=None, description="[deprecated] same as anchors when rebalance=weekly")
+    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "ohlc4"], description="Execution price list: open|close|ohlc4")
+
+
 class RotationBacktestRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
@@ -186,6 +202,15 @@ class RotationBacktestRequest(BaseModel):
         description="Reduce position by this fraction on trigger (0..1). Default 1.0 (=reduce 100% -> cash).",
     )
     dd_sleep_days: int = Field(default=20, ge=1, description="Sleep days after trigger (trading days). Default 20.")
+
+
+class RotationCalendarEffectRequest(RotationBacktestRequest):
+    anchors: list[int] = Field(
+        default_factory=lambda: [0, 1, 2, 3, 4],
+        description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
+    )
+    weekdays: list[int] | None = Field(default=None, description="[deprecated] same as anchors when rebalance=weekly")
+    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "ohlc4"], description="Execution price list: open|close|ohlc4")
 
 
 class MonteCarloRequest(BaseModel):

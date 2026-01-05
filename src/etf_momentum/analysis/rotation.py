@@ -15,6 +15,8 @@ class RotationAnalysisInputs:
     start: dt.date
     end: dt.date
     rebalance: str = "weekly"
+    rebalance_weekday: int | None = None  # legacy weekly-only anchor; prefer rebalance_anchor
+    rebalance_anchor: int | None = None  # weekly:0..4; monthly:1..28; quarterly/yearly:nth trading day (1..)
     top_k: int = 1
     lookback_days: int = 20
     skip_days: int = 0
@@ -65,6 +67,7 @@ class RotationAnalysisInputs:
     dd_threshold: float = 0.10
     dd_reduce: float = 1.0
     dd_sleep_days: int = 20
+    exec_price: str = "close"  # close|open|ohlc4
 
 
 def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
@@ -78,6 +81,8 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             start=inp.start,
             end=inp.end,
             rebalance=inp.rebalance,
+            rebalance_weekday=inp.rebalance_weekday,
+            rebalance_anchor=inp.rebalance_anchor,
             top_k=inp.top_k,
             lookback_days=inp.lookback_days,
             skip_days=inp.skip_days,
@@ -124,6 +129,7 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             dd_threshold=inp.dd_threshold,
             dd_reduce=inp.dd_reduce,
             dd_sleep_days=inp.dd_sleep_days,
+            exec_price=inp.exec_price,
         ),
     )
 

@@ -378,10 +378,43 @@ def load_high_low_prices(
     return high, low
 
 
+def load_ohlc_prices(
+    db: Session,
+    *,
+    codes: list[str],
+    start: dt.date,
+    end: dt.date,
+    adjust: str,
+) -> dict[str, pd.DataFrame]:
+    """
+    Load OHLC price matrices for each code.
+
+    Returns a dict with keys: open/high/low/close, each a DataFrame indexed by date with columns as codes.
+    """
+    stmt = (
+        select(EtfPrice.trade_date, EtfPrice.code, EtfPrice.open, EtfPrice.high, EtfPrice.low, EtfPrice.close)
+        .where(EtfPrice.code.in_(codes))
+        .where(EtfPrice.adjust == adjust)
+        .where(EtfPrice.trade_date >= start)
+        .where(EtfPrice.trade_date <= end)
+        .order_by(EtfPrice.trade_date.asc())
+    )
+    rows = db.execute(stmt).all()
+    if not rows:
+        return {"open": pd.DataFrame(), "high": pd.DataFrame(), "low": pd.DataFrame(), "close": pd.DataFrame()}
+    df = pd.DataFrame(rows, columns=["date", "code", "open", "high", "low", "close"])
+    df["date"] = pd.to_datetime(df["date"])
+    out = {}
+    for k in ["open", "high", "low", "close"]:
+        out[k] = df.pivot_table(index="date", columns="code", values=k, aggfunc="last").sort_index()
+    return out
+
+
 def _compute_equal_weight_nav(
     daily_ret: pd.DataFrame,
     *,
     rebalance: str,
+    weekly_anchor: str = "FRI",
 ) -> pd.Series:
     """
     Equal-weight portfolio NAV under different rebalancing schedules.
@@ -407,7 +440,7 @@ def _compute_equal_weight_nav(
         return ew_nav
 
     freq_map = {
-        "weekly": "W-FRI",
+        "weekly": f"W-{str(weekly_anchor).strip().upper()}",
         "monthly": "M",
         "quarterly": "Q",
         "yearly": "Y",
@@ -441,6 +474,7 @@ def _compute_equal_weight_nav_and_weights(
     daily_ret: pd.DataFrame,
     *,
     rebalance: str,
+    weekly_anchor: str = "FRI",
 ) -> tuple[pd.Series, pd.DataFrame]:
     """
     Compute equal-weight NAV and the corresponding pre-return weights per day.
@@ -481,7 +515,7 @@ def _compute_equal_weight_nav_and_weights(
             nav.iloc[0] = 1.0
         return nav.rename("EW"), w
 
-    freq_map = {"weekly": "W-FRI", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
+    freq_map = {"weekly": f"W-{str(weekly_anchor).strip().upper()}", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
     labels = daily_ret.index.to_period(freq_map[reb])
     prev_label = None
     nav = 1.0

@@ -270,6 +270,44 @@
       <div id="fftRollHigh" style="width:100%; height:420px; margin-top:8px;"></div>
     </div>
 
+    <div class="panel no-print">
+      <h3>日历效应研究（等权 EW）</h3>
+      <div class="muted">研究不同调仓周期下：调仓锚点（周度=周一~周五；月度=每月1~28号；季度/年度=当期第N个交易日）与成交价口径（开盘/收盘/OHLC4均价）对组合表现的影响。此处参数与轮动策略研究互不影响。</div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>开始日期（留空=沿用上方）</label>
+          <input id="ewCalStart" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>结束日期（留空=沿用上方）</label>
+          <input id="ewCalEnd" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>价格复权口径</label>
+          <select id="ewCalAdjust" style="min-width:160px;">
+            <option value="hfq" selected>hfq（后复权）</option>
+            <option value="qfq">qfq（前复权）</option>
+            <option value="none">none（不复权）</option>
+          </select>
+        </div>
+        <div style="min-width:360px;">
+          <label id="ewCalAnchorLabel">调仓锚点</label>
+          <div id="ewCalAnchorBox"></div>
+        </div>
+        <div style="min-width:260px;">
+          <label>成交价口径</label>
+          <div class="row" style="gap:10px; align-items:center;">
+            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="ewCalPx" value="open" checked />开盘</label>
+            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="ewCalPx" value="close" checked />收盘</label>
+            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="ewCalPx" value="ohlc4" checked />OHLC4</label>
+          </div>
+        </div>
+        <button id="runEwCalendar">运行（日历效应 EW）</button>
+      </div>
+      <div id="ewCalHeatmap" style="width:100%; height:360px; margin-top:10px;"></div>
+      <table id="ewCalTable" style="margin-top:6px;"></table>
+    </div>
+
     <div class="panel">
       <h3>蒙特卡洛模拟（等权组合）</h3>
       <div class="row">
@@ -746,6 +784,55 @@
         </div>
       </div>
 
+      <div class="panel">
+        <h3>逐期对比（轮动 vs 等权）</h3>
+        <div class="row" style="gap:8px; margin:6px 0;">
+          <select id="rotPeriodSortKey" style="min-width:140px;">
+            <option value="start">开始日期</option>
+            <option value="end">结束日期</option>
+            <option value="excess">超额收益</option>
+          </select>
+          <select id="rotPeriodSortDir" style="min-width:120px;">
+            <option value="desc">递减</option>
+            <option value="asc">递增</option>
+          </select>
+          <button id="rotPeriodPrev">上一页</button>
+          <button id="rotPeriodNext">下一页</button>
+          <span class="muted" id="rotPeriodPage"></span>
+        </div>
+        <table id="rotPeriods"></table>
+      </div>
+
+      <div class="panel no-print">
+        <h3>日历效应研究（轮动策略）</h3>
+        <div class="muted">在保持轮动参数不变的前提下，批量回测不同调仓周期下的调仓锚点（周度/月度/季度/年度）与成交价口径（开盘/收盘/OHLC4均价）对策略表现的影响。此处参数与等权研究互不影响。</div>
+        <div class="row" style="margin-top:8px; align-items:end;">
+          <div>
+            <label>开始日期（留空=沿用上方）</label>
+            <input id="rotCalStart" placeholder="YYYYMMDD" />
+          </div>
+          <div>
+            <label>结束日期（留空=沿用上方）</label>
+            <input id="rotCalEnd" placeholder="YYYYMMDD" />
+          </div>
+          <div style="min-width:360px;">
+            <label id="rotCalAnchorLabel">调仓锚点</label>
+            <div id="rotCalAnchorBox"></div>
+          </div>
+          <div style="min-width:260px;">
+            <label>成交价口径</label>
+            <div class="row" style="gap:10px; align-items:center;">
+              <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="rotCalPx" value="open" checked />开盘</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="rotCalPx" value="close" checked />收盘</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="rotCalPx" value="ohlc4" checked />OHLC4</label>
+            </div>
+          </div>
+          <button id="runRotCalendar">运行（日历效应 轮动）</button>
+        </div>
+        <div id="rotCalHeatmap" style="width:100%; height:360px; margin-top:10px;"></div>
+        <table id="rotCalTable" style="margin-top:6px;"></table>
+      </div>
+
     <div class="panel">
         <h3>蒙特卡洛模拟（轮动策略）</h3>
         <div class="row">
@@ -810,25 +897,6 @@
             </div>
           </div>
         </div>
-      </div>
-
-      <div class="panel">
-        <h3>逐期对比（轮动 vs 等权）</h3>
-        <div class="row" style="gap:8px; margin:6px 0;">
-          <select id="rotPeriodSortKey" style="min-width:140px;">
-            <option value="start">开始日期</option>
-            <option value="end">结束日期</option>
-            <option value="excess">超额收益</option>
-          </select>
-          <select id="rotPeriodSortDir" style="min-width:120px;">
-            <option value="desc">递减</option>
-            <option value="asc">递增</option>
-          </select>
-          <button id="rotPeriodPrev">上一页</button>
-          <button id="rotPeriodNext">下一页</button>
-          <span class="muted" id="rotPeriodPage"></span>
-        </div>
-        <table id="rotPeriods"></table>
       </div>
     </div>
 
@@ -2571,6 +2639,144 @@
         $(`rot${cap}Next`).addEventListener("click", () => { rotPeriodTableState[kind].page += 1; renderRotPeriodTable(kind); });
       }
 
+      function _checkedValues(sel) {
+        return Array.from(document.querySelectorAll(sel)).filter(x => x && x.checked).map(x => x.value);
+      }
+
+      function renderCalendarAnchorBox(prefix, rebalance) {
+        const box = $(`${prefix}CalAnchorBox`);
+        const label = $(`${prefix}CalAnchorLabel`);
+        if (!box || !label) return;
+        const r = String(rebalance || "weekly").toLowerCase();
+        box.innerHTML = "";
+        const mkCb = (cls, val, text, checked=true) =>
+          `<label style="display:flex; gap:6px; align-items:center; margin:0;">
+            <input type="checkbox" class="${cls}" value="${val}" ${checked ? "checked" : ""} />${text}
+          </label>`;
+        const mkCsv = (id, val, placeholder) =>
+          `<input id="${id}" value="${esc(val)}" placeholder="${esc(placeholder)}" style="min-width:280px;" />
+           <div class="muted" style="margin-top:4px;">输入逗号分隔整数，例如 1,5,10（表示当期第1/5/10个交易日）。</div>`;
+
+        if (r === "weekly") {
+          label.textContent = "调仓日（周度）";
+          const cls = `${prefix}CalAnchor`;
+          box.innerHTML = `<div class="row" style="gap:10px; align-items:center; flex-wrap:wrap;">
+            ${mkCb(cls, 0, "周一")}
+            ${mkCb(cls, 1, "周二")}
+            ${mkCb(cls, 2, "周三")}
+            ${mkCb(cls, 3, "周四")}
+            ${mkCb(cls, 4, "周五")}
+          </div>`;
+          return;
+        }
+        if (r === "monthly") {
+          label.textContent = "调仓日（月度，日历日 1~28）";
+          const cls = `${prefix}CalAnchor`;
+          const items = Array.from({length: 28}, (_, i) => i + 1)
+            .map((d) => mkCb(cls, d, `${d}号`, d === 1))
+            .join("");
+          box.innerHTML = `<div class="row" style="gap:10px; align-items:center; flex-wrap:wrap; max-height:140px; overflow:auto; border:1px solid #ddd; padding:8px; border-radius:8px;">${items}</div>`;
+          return;
+        }
+        if (r === "quarterly") {
+          label.textContent = "调仓日（季度，第N个交易日）";
+          box.innerHTML = mkCsv(`${prefix}CalAnchorCsv`, "1,5,10,20,40,60", "例如 1,5,10,20,40,60");
+          return;
+        }
+        if (r === "yearly") {
+          label.textContent = "调仓日（年度，第N个交易日）";
+          box.innerHTML = mkCsv(`${prefix}CalAnchorCsv`, "1,5,10,20,60,120,180,240", "例如 1,5,10,20,60,120,180,240");
+          return;
+        }
+        label.textContent = "调仓锚点";
+        box.innerHTML = `<div class="muted">当前调仓周期不支持日历锚点研究（仅支持 weekly/monthly/quarterly/yearly）。</div>`;
+      }
+
+      function parseCalendarAnchors(prefix, rebalance) {
+        const r = String(rebalance || "weekly").toLowerCase();
+        const cls = `${prefix}CalAnchor`;
+        if (r === "weekly" || r === "monthly") {
+          const xs = _checkedValues(`input.${cls}`).map((x) => Number(x)).filter((x) => Number.isFinite(x));
+          if (xs.length === 0) return { ok: false, reason: "请至少选择一个调仓锚点" };
+          return { ok: true, anchors: xs };
+        }
+        if (r === "quarterly" || r === "yearly") {
+          const el = $(`${prefix}CalAnchorCsv`);
+          const raw = (el && el.value ? el.value : "").trim();
+          const xs = raw.split(",").map(x => x.trim()).filter(Boolean).map(Number).map(x => Math.floor(x)).filter(x => Number.isFinite(x));
+          const ys = xs.filter(x => x >= 1);
+          if (ys.length === 0) return { ok: false, reason: "请输入至少一个 >=1 的整数锚点（逗号分隔）" };
+          const maxN = (r === "quarterly") ? 90 : 300;
+          const bad = ys.find(x => x > maxN);
+          if (bad != null) return { ok: false, reason: `锚点 N 过大：${bad}（${r === "quarterly" ? "季度" : "年度"}建议 <= ${maxN}）` };
+          return { ok: true, anchors: ys };
+        }
+        return { ok: false, reason: "当前调仓周期不支持日历锚点研究（仅支持 weekly/monthly/quarterly/yearly）" };
+      }
+
+      function _renderCalendarTable(tableId, data) {
+        const el = $(tableId);
+        if (!el) return;
+        const grid = (data && data.grid) ? data.grid : [];
+        const reb = (data && data.meta && data.meta.rebalance) ? String(data.meta.rebalance) : "weekly";
+        const pxMap = (data && data.exec_price_map) ? data.exec_price_map : {};
+        const anchorLabel = (a) => {
+          const n = Number(a);
+          if (reb === "weekly") {
+            const m = {0:"周一",1:"周二",2:"周三",3:"周四",4:"周五"};
+            return m[n] || String(a);
+          }
+          if (reb === "monthly") return `${n}号`;
+          if (reb === "quarterly") return `季度第${n}个交易日`;
+          if (reb === "yearly") return `年度第${n}个交易日`;
+          return String(a);
+        };
+        const rows = grid.slice().sort((a, b) => {
+          if (a.anchor !== b.anchor) return Number(a.anchor) - Number(b.anchor);
+          return String(a.exec_price).localeCompare(String(b.exec_price));
+        });
+        el.innerHTML =
+          `<tr><th>调仓锚点</th><th>成交价</th><th>年化收益</th><th>夏普</th><th>最大回撤</th><th>平均日换手</th><th>状态</th></tr>` +
+          rows.map((r) => {
+            const ok = !!r.ok;
+            const m = ok ? (r.metrics || {}) : {};
+            const ann = ok ? fmtPct(m.annualized_return) : "-";
+            const sr = ok ? fmtNum(m.sharpe_ratio) : "-";
+            const mdd = ok ? fmtPct(m.max_drawdown) : "-";
+            const to = ok ? fmtPct(m.avg_daily_turnover) : "-";
+            const status = ok ? "OK" : (esc(r.reason || "ERR"));
+            return `<tr><td>${anchorLabel(r.anchor)}</td><td>${pxMap[r.exec_price] || r.exec_price}</td><td>${ann}</td><td>${sr}</td><td>${mdd}</td><td>${to}</td><td>${status}</td></tr>`;
+          }).join("");
+
+        // Heatmap (annualized_return)
+        const divId = (tableId === "ewCalTable") ? "ewCalHeatmap" : "rotCalHeatmap";
+        const okRows = rows.filter(x => x.ok && x.metrics && Number.isFinite(Number(x.metrics.annualized_return)));
+        if (!$(divId)) return;
+        if (okRows.length === 0) { Plotly.purge(divId); return; }
+        const uniqWk = Array.from(new Set(rows.map(x => Number(x.anchor)))).sort((a, b) => a - b);
+        const uniqPx = Array.from(new Set(rows.map(x => String(x.exec_price)))).sort();
+        const z = uniqWk.map(wd => uniqPx.map(px => {
+          const one = rows.find(x => Number(x.anchor) === wd && String(x.exec_price) === px && x.ok);
+          if (!one) return null;
+          const v = one.metrics ? Number(one.metrics.annualized_return) : NaN;
+          return Number.isFinite(v) ? v * 100.0 : null; // percent
+        }));
+        const y = uniqWk.map(wd => anchorLabel(wd));
+        const x = uniqPx.map(px => pxMap[px] || px);
+        Plotly.newPlot(divId, [{
+          type: "heatmap",
+          x,
+          y,
+          z,
+          colorscale: "RdYlGn",
+          colorbar: { title: "年化收益(%)" },
+          hovertemplate: "%{y} · %{x}<br>%{z:.2f}%<extra></extra>",
+        }], {
+          title: (tableId === "ewCalTable") ? "等权：年化收益热力图（%）" : "轮动：年化收益热力图（%）",
+          margin: { l: 60, r: 20, t: 50, b: 60 },
+        }, { displayModeBar: false });
+      }
+
       async function runRotation() {
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何标的。");
@@ -2711,6 +2917,163 @@
         renderRotPeriodTable("yearly");
       }
 
+      async function runEwCalendarEffect() {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = (($("ewCalStart").value || "").trim()) || $("start").value.trim();
+        const end = (($("ewCalEnd").value || "").trim()) || $("end").value.trim();
+        const adjust = $("ewCalAdjust").value || ADJUST_USED;
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        const rebalance = $("rebalance").value || "weekly";
+        const parsed = parseCalendarAnchors("ew", rebalance);
+        if (!parsed.ok) return setMsg(parsed.reason);
+        const anchors = parsed.anchors;
+        const exec_prices = _checkedValues("input.ewCalPx");
+        if (anchors.length === 0) return setMsg("请至少选择一个调仓锚点");
+        if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OHLC4）");
+        $("status").textContent = "计算日历效应（等权）...";
+        setMsg("");
+        const resp = await api("/analysis/baseline/calendar-effect", {
+          method: "POST",
+          body: JSON.stringify({ codes, start, end, adjust, risk_free_rate, rebalance, anchors, exec_prices }),
+        });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
+        _renderCalendarTable("ewCalTable", data);
+      }
+
+      async function runRotCalendarEffect() {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = (($("rotCalStart").value || "").trim()) || $("start").value.trim();
+        const end = (($("rotCalEnd").value || "").trim()) || $("end").value.trim();
+        const rebalance = $("rotRebalance").value;
+        const top_k = Number(($("rotTopK").value || "1").trim());
+        const lookback_days = Number(($("rotLookback").value || "252").trim());
+        const skip_days = Number(($("rotSkip").value || "0").trim());
+        const cost_bps = Number(($("rotCost").value || "0").trim());
+        const risk_off = ($("rotRiskOff").value === "true");
+        const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const score_method = $("rotScoreMethod").value;
+        const tp_sl_mode = ($("rotTpSlMode").value || "none");
+        const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
+        const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
+        if (atr_window != null && (!Number.isFinite(atr_window) || atr_window < 2)) return setMsg("ATR窗口必须>=2（或留空表示同步动量回看）");
+        const atr_mult = Number(($("rotAtrMult").value || "2.0").trim());
+        if (!Number.isFinite(atr_mult) || atr_mult <= 0) return setMsg("ATR倍数必须>0，例如 2");
+        const atr_step = Number(($("rotAtrStep").value || "0.5").trim());
+        if (!Number.isFinite(atr_step) || atr_step <= 0) return setMsg("渐进步长必须>0，例如 0.5");
+        const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
+        if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
+        const trend_filter = ($("rotTrendOn").value === "true");
+        const trend_mode = $("rotTrendMode").value;
+        const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
+        const rsi_filter = ($("rotRsiOn").value === "true");
+        const rsi_window = Number(($("rotRsiWin").value || "14").trim());
+        const rsi_overbought = Number(($("rotRsiOver").value || "70").trim());
+        const rsi_oversold = Number(($("rotRsiUnder").value || "30").trim());
+        const vol_monitor = ($("rotVolOn").value === "true");
+        const vol_window = Number(($("rotVolWin").value || "20").trim());
+        const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
+        const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
+        const chop_filter = ($("rotChopOn").value === "true");
+        const chop_mode = ($("rotChopMode").value || "er");
+        const chop_window = Number(($("rotChopWin").value || "20").trim());
+        const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
+        const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
+        const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
+        const corr_filter = ($("rotCorrOn").value === "true");
+        const corrWinRaw = ($("rotCorrWindow").value || "").trim();
+        const corr_window = corrWinRaw === "" ? null : Number(corrWinRaw);
+        if (corr_filter && corr_window != null && (!Number.isFinite(corr_window) || corr_window < 2)) return setMsg("相关性回看窗口必须>=2（或留空表示同步动量回看）");
+        const corr_threshold = Number(($("rotCorrThr").value || "0.5").trim());
+        if (corr_filter && (!Number.isFinite(corr_threshold) || corr_threshold < -1 || corr_threshold > 1)) return setMsg("相关性阈值需在 [-1,1]，例如 0.5");
+        const rr_sizing = ($("rotRROn").value === "true");
+        const rrYearsRaw = ($("rotRRYears").value || "3").trim();
+        const rr_years = Number(rrYearsRaw);
+        if (rr_sizing && (!Number.isFinite(rr_years) || rr_years <= 0)) return setMsg("滚动收益率窗口年数 N 必须>0，例如 3");
+        const thrRaw = ($("rotRRThr").value || "").trim();
+        const wtsRaw = ($("rotRRWts").value || "").trim();
+        const parseCsvNums = (s) => s.split(",").map(x => x.trim()).filter(Boolean).map(Number);
+        let rr_thresholds = null;
+        let rr_weights = null;
+        if (rr_sizing) {
+          rr_thresholds = parseCsvNums(thrRaw);
+          rr_weights = parseCsvNums(wtsRaw);
+          if (rr_thresholds.length === 0 || rr_thresholds.length > 5) return setMsg("收益率阈值必须为 1~5 个逗号分隔数字，例如 50,100,150,200,250");
+          if (rr_weights.length !== rr_thresholds.length + 1) return setMsg("仓位档位数量必须 = 阈值数量 + 1，例如 6 档对应 5 个阈值");
+          rr_thresholds = rr_thresholds.map(x => (x > 1.0 ? x / 100.0 : x));
+          rr_weights = rr_weights.map(x => (x > 1.0 ? x / 100.0 : x));
+          for (const x of rr_thresholds) if (!Number.isFinite(x)) return setMsg("收益率阈值必须是数字");
+          for (const x of rr_weights) if (!Number.isFinite(x)) return setMsg("仓位必须是数字");
+          for (let i = 0; i + 1 < rr_thresholds.length; i++) if (!(rr_thresholds[i] < rr_thresholds[i + 1])) return setMsg("收益率阈值必须严格递增");
+          for (const x of rr_weights) if (x < 0 || x > 1) return setMsg("仓位必须在 0~100%（或 0~1）");
+        }
+        const dd_control = ($("rotDDOn").value === "true");
+        let dd_threshold = Number(($("rotDDThr").value || "10").trim());
+        if (dd_control && (!Number.isFinite(dd_threshold) || dd_threshold <= 0)) return setMsg("回撤阈值 X 必须>0，例如 10 或 0.10");
+        if (dd_threshold > 1.0) dd_threshold = dd_threshold / 100.0;
+        if (dd_control && (dd_threshold <= 0 || dd_threshold >= 1.0)) return setMsg("回撤阈值 X 需在 (0,100%)，例如 10");
+        let dd_reduce = Number(($("rotDDReduce").value || "100").trim());
+        if (dd_control && (!Number.isFinite(dd_reduce) || dd_reduce < 0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
+        if (dd_reduce > 1.0) dd_reduce = dd_reduce / 100.0;
+        if (dd_control && (dd_reduce < 0 || dd_reduce > 1.0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
+        const dd_sleep_days = Number(($("rotDDSleep").value || "20").trim());
+        if (dd_control && (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)) return setMsg("休眠天数必须>=1，例如 20");
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        if (trend_filter && (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0)) return setMsg("趋势 SMA 窗口必须是正整数");
+        if (rsi_filter && (!Number.isFinite(rsi_window) || rsi_window <= 0)) return setMsg("RSI 窗口必须是正整数");
+        if (rsi_filter && (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100)) return setMsg("RSI 超买阈值需在 0~100");
+        if (rsi_filter && (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100)) return setMsg("RSI 超卖阈值需在 0~100");
+        if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
+        if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
+        if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
+        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_window) || chop_window <= 1)) return setMsg("ER窗口必须>=2");
+        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0)) return setMsg("ER阈值必须>0，例如 0.25");
+        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1)) return setMsg("ADX窗口必须>=2");
+        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
+        const parsed = parseCalendarAnchors("rot", rebalance);
+        if (!parsed.ok) return setMsg(parsed.reason);
+        const anchors = parsed.anchors;
+        const exec_prices = _checkedValues("input.rotCalPx");
+        if (anchors.length === 0) return setMsg("请至少选择一个调仓锚点");
+        if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OHLC4）");
+
+        $("status").textContent = "计算日历效应（轮动）...";
+        setMsg("");
+        const resp = await api("/analysis/rotation/calendar-effect", {
+          method: "POST",
+          body: JSON.stringify({
+            codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
+            risk_off, momentum_floor, risk_free_rate,
+            score_method,
+            tp_sl_mode,
+            atr_window, atr_mult, atr_step, atr_min_mult,
+            corr_filter, corr_window, corr_threshold,
+            rr_sizing, rr_years, rr_thresholds, rr_weights,
+            dd_control, dd_threshold, dd_reduce, dd_sleep_days,
+            trend_filter, trend_mode, trend_sma_window,
+            rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
+            vol_monitor, vol_window, vol_target_ann, vol_max_ann,
+            chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
+            anchors, exec_prices,
+          }),
+        });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
+        _renderCalendarTable("rotCalTable", data);
+      }
+
       async function runAnalysis() {
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何标的。");
@@ -2812,7 +3175,17 @@
 
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+      $("runEwCalendar").addEventListener("click", runEwCalendarEffect);
+      $("runRotCalendar").addEventListener("click", runRotCalendarEffect);
       $("exportPdf").addEventListener("click", exportPdfReport);
+
+      // dynamic anchor options for calendar-effect panels (EW uses top rebalance; rotation uses rotRebalance)
+      const updateEwAnchorUI = () => renderCalendarAnchorBox("ew", $("rebalance").value || "weekly");
+      const updateRotAnchorUI = () => renderCalendarAnchorBox("rot", $("rotRebalance").value || "weekly");
+      $("rebalance").addEventListener("change", updateEwAnchorUI);
+      $("rotRebalance").addEventListener("change", updateRotAnchorUI);
+      updateEwAnchorUI();
+      updateRotAnchorUI();
 
       async function runMcEw() {
         const btn = $("runMcEw");
