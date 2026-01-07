@@ -92,8 +92,8 @@ class RotationInputs:
     dd_reduce: float = 1.0  # fraction to reduce, e.g. 1.0 => reduce 100% -> cash
     dd_sleep_days: int = 20  # trading days
     # --- Execution price proxy (hfq, aligned to execution calendar) ---
-    # Used to study open/close/OHLC4 calendar effects. Default "close" matches existing behavior.
-    exec_price: str = "close"  # close | open | ohlc4
+    # Used to study open/close/OC(=avg(open,close)) calendar effects. Default "close" matches existing behavior.
+    exec_price: str = "close"  # close | open | oc2
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str, *, weekly_anchor: str = "FRI") -> pd.PeriodIndex:
@@ -396,8 +396,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     if int(inp.dd_sleep_days) < 1:
         raise ValueError("dd_sleep_days must be >= 1")
     ep = (inp.exec_price or "close").strip().lower()
-    if ep not in {"close", "open", "ohlc4"}:
-        raise ValueError("exec_price must be one of: close|open|ohlc4")
+    if ep not in {"close", "open", "oc2"}:
+        raise ValueError("exec_price must be one of: close|open|oc2")
     if inp.rebalance_weekday is not None:
         if int(inp.rebalance_weekday) < 0 or int(inp.rebalance_weekday) > 4:
             raise ValueError("rebalance_weekday must be within [0..4] (Mon..Fri)")
@@ -439,9 +439,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
 
-    # For calendar-effect research: execution return basis can use hfq open/close/OHLC4.
+    # For calendar-effect research: execution return basis can use hfq open/close/OC2.
     # We only load hfq OHLC when needed to keep the default path unchanged.
-    need_hfq_ohlc = ep in {"open", "ohlc4"}
+    need_hfq_ohlc = ep in {"open", "oc2"}
     ohlc_hfq = (
         _load_ohlc_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq") if need_hfq_ohlc else {"open": pd.DataFrame(), "high": pd.DataFrame(), "low": pd.DataFrame(), "close": pd.DataFrame()}
     )
@@ -623,13 +623,11 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             px_exec_hfq = px_exec_hfq[codes]
     else:
         o = ohlc_hfq.get("open", pd.DataFrame())
-        h = ohlc_hfq.get("high", pd.DataFrame())
-        l = ohlc_hfq.get("low", pd.DataFrame())
         c = ohlc_hfq.get("close", pd.DataFrame())
-        if not (_has_cols(o, codes) and _has_cols(h, codes) and _has_cols(l, codes) and _has_cols(c, codes)):
+        if not (_has_cols(o, codes) and _has_cols(c, codes)):
             px_exec_hfq = close_hfq[codes]
         else:
-            px_exec_hfq = (o[codes].astype(float) + h[codes].astype(float) + l[codes].astype(float) + c[codes].astype(float)) / 4.0
+            px_exec_hfq = (o[codes].astype(float) + c[codes].astype(float)) / 2.0
     px_exec_hfq = px_exec_hfq.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
     ret_exec_all = px_exec_hfq.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
 
@@ -1298,14 +1296,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         else:
             bench_px = b[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
     else:
-        bo = ohlc_hfq.get("open", pd.DataFrame())
-        bh = ohlc_hfq.get("high", pd.DataFrame())
-        bl = ohlc_hfq.get("low", pd.DataFrame())
         bc = ohlc_hfq.get("close", pd.DataFrame())
-        if not (_has_cols(bo, bench_codes) and _has_cols(bh, bench_codes) and _has_cols(bl, bench_codes) and _has_cols(bc, bench_codes)):
+        bo = ohlc_hfq.get("open", pd.DataFrame())
+        if not (_has_cols(bo, bench_codes) and _has_cols(bc, bench_codes)):
             bench_px = close_hfq[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
         else:
-            bench_px = (bo[bench_codes].astype(float) + bh[bench_codes].astype(float) + bl[bench_codes].astype(float) + bc[bench_codes].astype(float)) / 4.0
+            bench_px = (bo[bench_codes].astype(float) + bc[bench_codes].astype(float)) / 2.0
             bench_px = bench_px.replace([np.inf, -np.inf], np.nan).ffill()
     ret_hfq = bench_px.pct_change().fillna(0.0)
     w_ew = pd.DataFrame(0.0, index=dates, columns=bench_codes)

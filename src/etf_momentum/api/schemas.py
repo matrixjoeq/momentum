@@ -112,7 +112,7 @@ class BaselineCalendarEffectRequest(BaseModel):
     )
     # Backward compatibility: old field name used by weekly-only UI/tests.
     weekdays: list[int] | None = Field(default=None, description="[deprecated] same as anchors when rebalance=weekly")
-    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "ohlc4"], description="Execution price list: open|close|ohlc4")
+    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
 class RotationBacktestRequest(BaseModel):
@@ -210,7 +210,7 @@ class RotationCalendarEffectRequest(RotationBacktestRequest):
         description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
     )
     weekdays: list[int] | None = Field(default=None, description="[deprecated] same as anchors when rebalance=weekly")
-    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "ohlc4"], description="Execution price list: open|close|ohlc4")
+    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
 class MonteCarloRequest(BaseModel):

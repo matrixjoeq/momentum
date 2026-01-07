@@ -272,7 +272,7 @@
 
     <div class="panel no-print">
       <h3>日历效应研究（等权 EW）</h3>
-      <div class="muted">研究不同调仓周期下：调仓锚点（周度=周一~周五；月度=每月1~28号；季度/年度=当期第N个交易日）与成交价口径（开盘/收盘/OHLC4均价）对组合表现的影响。此处参数与轮动策略研究互不影响。</div>
+      <div class="muted">研究不同调仓周期下：调仓锚点（周度=周一~周五；月度=每月1~28号；季度/年度=当期第N个交易日）与成交价口径（开盘/收盘/OC均价）对组合表现的影响。此处参数与轮动策略研究互不影响。</div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div>
           <label>开始日期（留空=沿用上方）</label>
@@ -299,13 +299,15 @@
           <div class="row" style="gap:10px; align-items:center;">
             <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="ewCalPx" value="open" checked />开盘</label>
             <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="ewCalPx" value="close" checked />收盘</label>
-            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="ewCalPx" value="ohlc4" checked />OHLC4</label>
+            <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="ewCalPx" value="oc2" checked />OC均价</label>
           </div>
         </div>
         <button id="runEwCalendar">运行（日历效应 EW）</button>
       </div>
       <div id="ewCalHeatmap" style="width:100%; height:360px; margin-top:10px;"></div>
       <table id="ewCalTable" style="margin-top:6px;"></table>
+      <div id="ewCalRollingChart" style="width:100%; height:360px; margin-top:12px;"></div>
+      <table id="ewCalRollingStats" style="margin-top:6px;"></table>
     </div>
 
     <div class="panel">
@@ -805,7 +807,7 @@
 
       <div class="panel no-print">
         <h3>日历效应研究（轮动策略）</h3>
-        <div class="muted">在保持轮动参数不变的前提下，批量回测不同调仓周期下的调仓锚点（周度/月度/季度/年度）与成交价口径（开盘/收盘/OHLC4均价）对策略表现的影响。此处参数与等权研究互不影响。</div>
+        <div class="muted">在保持轮动参数不变的前提下，批量回测不同调仓周期下的调仓锚点（周度/月度/季度/年度）与成交价口径（开盘/收盘/OC均价）对策略表现的影响。此处参数与等权研究互不影响。</div>
         <div class="row" style="margin-top:8px; align-items:end;">
           <div>
             <label>开始日期（留空=沿用上方）</label>
@@ -824,13 +826,15 @@
             <div class="row" style="gap:10px; align-items:center;">
               <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="rotCalPx" value="open" checked />开盘</label>
               <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="rotCalPx" value="close" checked />收盘</label>
-              <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="rotCalPx" value="ohlc4" checked />OHLC4</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;"><input type="checkbox" class="rotCalPx" value="oc2" checked />OC均价</label>
             </div>
           </div>
           <button id="runRotCalendar">运行（日历效应 轮动）</button>
         </div>
         <div id="rotCalHeatmap" style="width:100%; height:360px; margin-top:10px;"></div>
         <table id="rotCalTable" style="margin-top:6px;"></table>
+        <div id="rotCalRollingChart" style="width:100%; height:360px; margin-top:12px;"></div>
+        <table id="rotCalRollingStats" style="margin-top:6px;"></table>
       </div>
 
     <div class="panel">
@@ -2720,6 +2724,9 @@
         const grid = (data && data.grid) ? data.grid : [];
         const reb = (data && data.meta && data.meta.rebalance) ? String(data.meta.rebalance) : "weekly";
         const pxMap = (data && data.exec_price_map) ? data.exec_price_map : {};
+        const rolling = (data && data.rolling) ? data.rolling : null;
+        const rollingStats = (data && data.rolling_stats) ? data.rolling_stats : null;
+        const rollYears = (data && data.meta && Array.isArray(data.meta.rolling_years)) ? data.meta.rolling_years : [1, 3, 5];
         const anchorLabel = (a) => {
           const n = Number(a);
           if (reb === "weekly") {
@@ -2730,6 +2737,12 @@
           if (reb === "quarterly") return `季度第${n}个交易日`;
           if (reb === "yearly") return `年度第${n}个交易日`;
           return String(a);
+        };
+        const keyLabel = (key) => {
+          const parts = String(key).split("|");
+          const a = parts[0];
+          const px = parts[1] || "";
+          return `${anchorLabel(a)} · ${(pxMap[px] || px)}`;
         };
         const rows = grid.slice().sort((a, b) => {
           if (a.anchor !== b.anchor) return Number(a.anchor) - Number(b.anchor);
@@ -2775,6 +2788,82 @@
           title: (tableId === "ewCalTable") ? "等权：年化收益热力图（%）" : "轮动：年化收益热力图（%）",
           margin: { l: 60, r: 20, t: 50, b: 60 },
         }, { displayModeBar: false });
+
+        // Rolling N-year return curves (1/3/5y) + summary stats table (stability).
+        const chartId = (tableId === "ewCalTable") ? "ewCalRollingChart" : "rotCalRollingChart";
+        const statId = (tableId === "ewCalTable") ? "ewCalRollingStats" : "rotCalRollingStats";
+        const chartEl = $(chartId);
+        const statEl = $(statId);
+        if (chartEl && rolling && rolling.dates && rolling.series) {
+          const rdates = rolling.dates;
+          const series = rolling.series;
+          const keys = Object.keys(series);
+          const years = rollYears.map(x => Number(x)).filter(x => Number.isFinite(x));
+          const yearKeys = years.map(y => `${y}y`);
+          const buildTraces = (yk) => keys.map((k) => ({
+            x: rdates,
+            y: (series[k] && series[k][yk]) ? series[k][yk] : [],
+            mode: "lines",
+            name: keyLabel(k),
+            line: { width: 1.2 },
+            hovertemplate: "%{x}<br>%{y:.1%}<extra></extra>",
+          }));
+          const tracesAll = [];
+          const vis = [];
+          for (const yk of yearKeys) {
+            const ts = buildTraces(yk);
+            for (const t of ts) { tracesAll.push(t); vis.push(false); }
+          }
+          // default: 1y visible
+          const nKeys = keys.length;
+          for (let i = 0; i < nKeys; i++) vis[i] = true;
+          tracesAll.forEach((t, i) => { t.visible = vis[i]; });
+          const buttons = yearKeys.map((yk, idx) => {
+            const v = new Array(tracesAll.length).fill(false);
+            const base = idx * nKeys;
+            for (let i = 0; i < nKeys; i++) v[base + i] = true;
+            return { label: yk.toUpperCase(), method: "update", args: [{ visible: v }, { title: `${tableId === "ewCalTable" ? "等权" : "轮动"}：滚动收益率（${yk.toUpperCase()}）` }] };
+          });
+          Plotly.newPlot(chartId, tracesAll, {
+            title: `${tableId === "ewCalTable" ? "等权" : "轮动"}：滚动收益率（1Y/3Y/5Y）`,
+            margin: { t: 50, b: 40, l: 60, r: 20 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".0%", gridcolor: "#eee", zeroline: true, zerolinecolor: "#bbb" },
+            updatemenus: [{ type: "buttons", direction: "right", x: 0.0, y: 1.18, showactive: true, buttons }],
+          }, { responsive: true, displayModeBar: false });
+        }
+        if (statEl && rollingStats) {
+          const keys = Object.keys(rollingStats);
+          const years = rollYears.map(x => Number(x)).filter(x => Number.isFinite(x));
+          const yearKeys = years.map(y => `${y}y`);
+          const rows2 = [];
+          for (const k of keys.sort()) {
+            for (const yk of yearKeys) {
+              const st = (rollingStats[k] && rollingStats[k][yk]) ? rollingStats[k][yk] : {};
+              rows2.push({
+                key: k,
+                yk,
+                count: st.count,
+                mean: st.mean,
+                std: st.std,
+                p10: st.p10,
+                p50: st.p50,
+                p90: st.p90,
+                pos: st.pos_ratio,
+                min: st.min,
+                max: st.max,
+              });
+            }
+          }
+          statEl.innerHTML =
+            `<tr><th>方案</th><th>窗口</th><th>样本数</th><th>均值</th><th>Std</th><th>P10</th><th>P50</th><th>P90</th><th>正收益占比</th><th>最小</th><th>最大</th></tr>` +
+            rows2.map(r => {
+              const f = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtPct(Number(x));
+              const n = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : String(x);
+              const label = keyLabel(r.key);
+              return `<tr><td>${label}</td><td>${r.yk.toUpperCase()}</td><td>${n(r.count)}</td><td>${f(r.mean)}</td><td>${f(r.std)}</td><td>${f(r.p10)}</td><td>${f(r.p50)}</td><td>${f(r.p90)}</td><td>${f(r.pos)}</td><td>${f(r.min)}</td><td>${f(r.max)}</td></tr>`;
+            }).join("");
+        }
       }
 
       async function runRotation() {
@@ -2933,7 +3022,7 @@
         const anchors = parsed.anchors;
         const exec_prices = _checkedValues("input.ewCalPx");
         if (anchors.length === 0) return setMsg("请至少选择一个调仓锚点");
-        if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OHLC4）");
+        if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OC均价）");
         $("status").textContent = "计算日历效应（等权）...";
         setMsg("");
         const resp = await api("/analysis/baseline/calendar-effect", {
@@ -3045,7 +3134,7 @@
         const anchors = parsed.anchors;
         const exec_prices = _checkedValues("input.rotCalPx");
         if (anchors.length === 0) return setMsg("请至少选择一个调仓锚点");
-        if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OHLC4）");
+        if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OC均价）");
 
         $("status").textContent = "计算日历效应（轮动）...";
         setMsg("");
