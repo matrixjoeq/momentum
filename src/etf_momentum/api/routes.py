@@ -15,6 +15,7 @@ from .schemas import (
     RotationCalendarEffectRequest,
     RotationMonteCarloRequest,
     RotationBacktestRequest,
+    TrendBacktestRequest,
     EtfPoolOut,
     EtfPoolUpsert,
     FetchResult,
@@ -27,6 +28,7 @@ from ..analysis.baseline import BaselineInputs, compute_baseline
 from ..analysis.calendar_effect import BaselineCalendarEffectInputs, compute_baseline_calendar_effect, compute_rotation_calendar_effect
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
+from ..analysis.trend import TrendInputs, compute_trend_backtest
 from ..data.ingestion import ingest_one_etf
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..db.repo import (
@@ -188,6 +190,28 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
     )
     try:
         return compute_rotation_backtest(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/trend")
+def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_session)) -> dict:
+    inp = TrendInputs(
+        code=payload.code,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        risk_free_rate=payload.risk_free_rate,
+        cost_bps=payload.cost_bps,
+        strategy=payload.strategy,
+        sma_window=payload.sma_window,
+        fast_window=payload.fast_window,
+        slow_window=payload.slow_window,
+        donchian_entry=payload.donchian_entry,
+        donchian_exit=payload.donchian_exit,
+        mom_lookback=payload.mom_lookback,
+    )
+    try:
+        return compute_trend_backtest(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

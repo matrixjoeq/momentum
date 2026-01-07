@@ -213,6 +213,26 @@ class RotationCalendarEffectRequest(RotationBacktestRequest):
     exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
+class TrendBacktestRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=32, description="Single ETF code for trend-following backtest")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(
+        default="hfq",
+        description="[deprecated] Trend research uses mixed basis like rotation: signal=qfq, nav=none with hfq fallback, benchmark=hfq.",
+    )
+    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    strategy: str = Field(default="ma_filter", description="ma_filter|ma_cross|donchian|tsmom (long/cash)")
+    # parameters (some are strategy-specific)
+    sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
+    fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")
+    slow_window: int = Field(default=200, ge=2, description="Slow MA window (trading days)")
+    donchian_entry: int = Field(default=20, ge=2, description="Donchian entry window (trading days)")
+    donchian_exit: int = Field(default=10, ge=2, description="Donchian exit window (trading days)")
+    mom_lookback: int = Field(default=252, ge=2, description="TS momentum lookback (trading days)")
+
+
 class MonteCarloRequest(BaseModel):
     n_sims: int = Field(default=10000, ge=100, le=50000, description="Number of Monte Carlo simulations")
     block_size: int = Field(default=5, ge=1, le=252, description="Circular block size in trading days")

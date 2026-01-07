@@ -34,8 +34,11 @@
         .panel, table { break-inside: avoid; page-break-inside: avoid; }
         h2, h3 { break-after: avoid; page-break-after: avoid; }
         #chart, #rollingReturns, #rollingDD,
+        #ewCalHeatmap, #ewCalRollingChart,
         #rotChart, #rotDDCompare, #rotExcessChart, #rot40dDiffChart, #rotRollingCombo, #rotExcessRollingCombo,
+        #rotCalHeatmap, #rotCalRollingChart,
         #corrHeatmap,
+        #trendChart, #trendDD,
         #mcEwHist, #mcRotHist, #mcExcessHist,
         #mcEwQQ, #mcRotQQ, #mcExcessQQ {
           height: 420px !important;
@@ -270,10 +273,10 @@
       <div id="fftRollHigh" style="width:100%; height:420px; margin-top:8px;"></div>
     </div>
 
-    <div class="panel no-print">
+    <div class="panel">
       <h3>日历效应研究（等权 EW）</h3>
       <div class="muted">研究不同调仓周期下：调仓锚点（周度=周一~周五；月度=每月1~28号；季度/年度=当期第N个交易日）与成交价口径（开盘/收盘/OC均价）对组合表现的影响。此处参数与轮动策略研究互不影响。</div>
-      <div class="row" style="margin-top:8px; align-items:end;">
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
         <div>
           <label>开始日期（留空=沿用上方）</label>
           <input id="ewCalStart" placeholder="YYYYMMDD" />
@@ -805,10 +808,10 @@
         <table id="rotPeriods"></table>
       </div>
 
-      <div class="panel no-print">
+      <div class="panel">
         <h3>日历效应研究（轮动策略）</h3>
         <div class="muted">在保持轮动参数不变的前提下，批量回测不同调仓周期下的调仓锚点（周度/月度/季度/年度）与成交价口径（开盘/收盘/OC均价）对策略表现的影响。此处参数与等权研究互不影响。</div>
-        <div class="row" style="margin-top:8px; align-items:end;">
+        <div class="row no-print" style="margin-top:8px; align-items:end;">
           <div>
             <label>开始日期（留空=沿用上方）</label>
             <input id="rotCalStart" placeholder="YYYYMMDD" />
@@ -902,6 +905,66 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="panel">
+      <h3>趋势跟踪策略研究（单标的）</h3>
+      <div class="muted">
+        独立于等权组合与轮动策略。选择一个候选标的，回测常见趋势策略（长/空=长/现金），并与该标的买入持有对比指标与净值。
+      </div>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>标的</label>
+          <select id="trendCode" style="min-width:180px;"></select>
+        </div>
+        <div>
+          <label>策略</label>
+          <select id="trendStrategy" style="min-width:220px;">
+            <option value="ma_filter" selected>均线过滤（收盘 &gt; SMA）</option>
+            <option value="ma_cross">双均线交叉（SMA_fast &gt; SMA_slow）</option>
+            <option value="donchian">唐奇安突破（入场/退出）</option>
+            <option value="tsmom">时间序列动量（lookback收益&gt;0）</option>
+          </select>
+        </div>
+        <div id="trendSmaBox">
+          <label>SMA窗口</label>
+          <input id="trendSmaWin" value="200" />
+        </div>
+        <div id="trendCrossBox">
+          <label>快/慢均线</label>
+          <div class="row" style="gap:8px; align-items:end;">
+            <input id="trendFastWin" value="50" style="min-width:120px" />
+            <input id="trendSlowWin" value="200" style="min-width:120px" />
+          </div>
+        </div>
+        <div id="trendDonchianBox">
+          <label>入场/退出窗口</label>
+          <div class="row" style="gap:8px; align-items:end;">
+            <input id="trendDonEntry" value="20" style="min-width:120px" />
+            <input id="trendDonExit" value="10" style="min-width:120px" />
+          </div>
+        </div>
+        <div id="trendMomBox">
+          <label>动量回看(交易日)</label>
+          <input id="trendMomLb" value="252" />
+        </div>
+        <div>
+          <label>交易成本(bps)</label>
+          <input id="trendCost" value="0" />
+        </div>
+        <button id="runTrend">运行（趋势跟踪）</button>
+      </div>
+      <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <div class="muted">净值对比（策略 vs 买入持有）</div>
+          <div id="trendChart" style="width:100%; height:420px;"></div>
+        </div>
+        <div>
+          <div class="muted">回撤对比</div>
+          <div id="trendDD" style="width:100%; height:420px;"></div>
+        </div>
+      </div>
+      <table id="trendMetrics" style="margin-top:8px;"></table>
     </div>
 
     <div class="panel msg" id="msg"></div>
@@ -1575,6 +1638,9 @@
           const ids = [
             "chart", "rollingReturns", "rollingDD",
             "corrHeatmap",
+            "ewCalHeatmap", "ewCalRollingChart",
+            "rotCalHeatmap", "rotCalRollingChart",
+            "trendChart", "trendDD",
             "rotChart", "rotDDCompare", "rotExcessChart", "rot40dDiffChart",
             "rotRollingCombo", "rotExcessRollingCombo",
             "mcEwHist", "mcEwQQ",
@@ -1903,6 +1969,7 @@
             const c = cb.getAttribute("data-code");
             if (cb.checked) selected.add(c); else selected.delete(c);
             renderBenchmarkSelect();
+            renderTrendCodeSelect();
             maybeAdjustBacktestRange();
             renderRangeHint();
           });
@@ -1922,6 +1989,21 @@
         if (codes.includes("510300")) sel.value = "510300";
       }
 
+      function renderTrendCodeSelect() {
+        const sel = $("trendCode");
+        if (!sel) return;
+        const codes = Array.from(selected);
+        const prev = sel.value || "";
+        sel.innerHTML = "";
+        for (const c of codes) {
+          const opt = document.createElement("option");
+          opt.value = c;
+          opt.textContent = c;
+          sel.appendChild(opt);
+        }
+        if (codes.includes(prev)) sel.value = prev;
+      }
+
       async function loadPool() {
         const resp = await api(`/etf?adjust=${encodeURIComponent(ADJUST_USED)}`, { method: "GET" });
         pool = await resp.json();
@@ -1929,6 +2011,7 @@
         for (const it of pool) selected.add(it.code);
         renderCodeList();
         renderBenchmarkSelect();
+        renderTrendCodeSelect();
         // default defensive ETF: keep empty as requested
         // Initialize or clamp backtest range to available intersection (only if needed)
         maybeAdjustBacktestRange();
@@ -3262,8 +3345,111 @@
       $("rotChopMode").addEventListener("change", updateChopModeUI);
       updateChopModeUI();
 
+      function updateTrendUi() {
+        const mode = ($("trendStrategy") && $("trendStrategy").value) ? $("trendStrategy").value : "ma_filter";
+        setBoxVisible("trendSmaBox", mode === "ma_filter");
+        setBoxVisible("trendCrossBox", mode === "ma_cross");
+        setBoxVisible("trendDonchianBox", mode === "donchian");
+        setBoxVisible("trendMomBox", mode === "tsmom");
+      }
+      if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendUi);
+      updateTrendUi();
+
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+      async function runTrend() {
+        const code = ($("trendCode") && $("trendCode").value) ? $("trendCode").value : "";
+        if (!code) return setMsg("请先选择一个标的。");
+        const start = ($("start").value || "").trim();
+        const end = ($("end").value || "").trim();
+        const strategy = ($("trendStrategy").value || "ma_filter");
+        const sma_window = Number(($("trendSmaWin").value || "200").trim());
+        const fast_window = Number(($("trendFastWin").value || "50").trim());
+        const slow_window = Number(($("trendSlowWin").value || "200").trim());
+        const donchian_entry = Number(($("trendDonEntry").value || "20").trim());
+        const donchian_exit = Number(($("trendDonExit").value || "10").trim());
+        const mom_lookback = Number(($("trendMomLb").value || "252").trim());
+        const cost_bps = Number(($("trendCost").value || "0").trim());
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+
+        if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("交易成本(bps)必须>=0");
+        if (strategy === "ma_filter" && (!Number.isFinite(sma_window) || sma_window < 2)) return setMsg("SMA窗口必须>=2");
+        if (strategy === "ma_cross") {
+          if (!Number.isFinite(fast_window) || fast_window < 2) return setMsg("快均线窗口必须>=2");
+          if (!Number.isFinite(slow_window) || slow_window < 2) return setMsg("慢均线窗口必须>=2");
+          if (!(fast_window < slow_window)) return setMsg("快均线窗口必须小于慢均线窗口");
+        }
+        if (strategy === "donchian") {
+          if (!Number.isFinite(donchian_entry) || donchian_entry < 2) return setMsg("入场窗口必须>=2");
+          if (!Number.isFinite(donchian_exit) || donchian_exit < 2) return setMsg("退出窗口必须>=2");
+        }
+        if (strategy === "tsmom" && (!Number.isFinite(mom_lookback) || mom_lookback < 2)) return setMsg("动量回看必须>=2");
+
+        $("status").textContent = "回测趋势策略中...";
+        setMsg("");
+        const resp = await api("/analysis/trend", {
+          method: "POST",
+          body: JSON.stringify({
+            code, start, end,
+            risk_free_rate,
+            cost_bps,
+            strategy,
+            sma_window, fast_window, slow_window,
+            donchian_entry, donchian_exit,
+            mom_lookback,
+          }),
+        });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
+
+        // plots
+        const dates = data.nav.dates;
+        const s = data.nav.series;
+        const dd = (nav) => {
+          let peak = -Infinity;
+          const out = [];
+          for (const v of nav) {
+            const x = Number(v);
+            if (!Number.isFinite(x) || x <= 0) { out.push(null); continue; }
+            peak = Math.max(peak, x);
+            out.push(peak > 0 ? (x / peak - 1.0) : null);
+          }
+          return out;
+        };
+        Plotly.newPlot("trendChart", [
+          { x: dates, y: s.STRAT, mode: "lines", name: "STRAT", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          { x: dates, y: s.BUY_HOLD, mode: "lines", name: "BUY_HOLD", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+        ], { margin: { t: 20 }, legend: { orientation: "h" }, yaxis: { type: "log", tickformat: ".4f", gridcolor: "#eee" } }, { responsive: true });
+        Plotly.newPlot("trendDD", [
+          { x: dates, y: dd(s.STRAT), mode: "lines", name: "STRAT DD", hovertemplate: "%{x}<br>%{y:.1%}<extra></extra>" },
+          { x: dates, y: dd(s.BUY_HOLD), mode: "lines", name: "BH DD", hovertemplate: "%{x}<br>%{y:.1%}<extra></extra>" },
+        ], { margin: { t: 20 }, legend: { orientation: "h" }, yaxis: { tickformat: ".0%", gridcolor: "#eee", zeroline: true, zerolinecolor: "#bbb" } }, { responsive: true });
+
+        // metrics table
+        const ms = (data.metrics && data.metrics.strategy) ? data.metrics.strategy : {};
+        const mb = (data.metrics && data.metrics.benchmark) ? data.metrics.benchmark : {};
+        const ex = (data.metrics && data.metrics.excess) ? data.metrics.excess : {};
+        const rows = [
+          ["策略累积收益", fmtPct(ms.cumulative_return), "买入持有累积收益", fmtPct(mb.cumulative_return)],
+          ["策略年化收益", fmtPct(ms.annualized_return), "买入持有年化收益", fmtPct(mb.annualized_return)],
+          ["策略年化波动", fmtPct(ms.annualized_volatility), "买入持有年化波动", fmtPct(mb.annualized_volatility)],
+          ["策略最大回撤", fmtPct(ms.max_drawdown), "买入持有最大回撤", fmtPct(mb.max_drawdown)],
+          ["策略夏普", fmtNum(ms.sharpe_ratio), "买入持有夏普", fmtNum(mb.sharpe_ratio)],
+          ["策略索诺提", fmtNum(ms.sortino_ratio), "买入持有索诺提", fmtNum(mb.sortino_ratio)],
+          ["策略溃疡(UI)", fmtNum(ms.ulcer_index), "买入持有溃疡(UI)", fmtNum(mb.ulcer_index)],
+          ["平均日换手", fmtPct(ms.avg_daily_turnover), "超额年化收益", fmtPct(ex.annualized_return)],
+          ["超额累积收益", fmtPct(ex.cumulative_return), "信息比率(近似)", fmtNum(ex.information_ratio)],
+        ];
+        $("trendMetrics").innerHTML =
+          `<tr><th colspan="2">策略</th><th colspan="2">基准/超额</th></tr>` +
+          rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`).join("");
+      }
+      $("runTrend").addEventListener("click", runTrend);
       $("runEwCalendar").addEventListener("click", runEwCalendarEffect);
       $("runRotCalendar").addEventListener("click", runRotCalendarEffect);
       $("exportPdf").addEventListener("click", exportPdfReport);
