@@ -921,9 +921,12 @@
           <label>策略</label>
           <select id="trendStrategy" style="min-width:220px;">
             <option value="ma_filter" selected>均线过滤（收盘 &gt; SMA）</option>
+            <option value="ema_filter">EMA过滤（收盘 &gt; EMA）</option>
             <option value="ma_cross">双均线交叉（SMA_fast &gt; SMA_slow）</option>
             <option value="donchian">唐奇安突破（入场/退出）</option>
             <option value="tsmom">时间序列动量（lookback收益&gt;0）</option>
+            <option value="linreg_slope">回归斜率趋势（log价斜率&gt;0）</option>
+            <option value="bias">乖离率趋势（BIAS 上升跟随：入场/过热止盈/过冷止损）</option>
           </select>
         </div>
         <div id="trendSmaBox">
@@ -947,6 +950,19 @@
         <div id="trendMomBox">
           <label>动量回看(交易日)</label>
           <input id="trendMomLb" value="252" />
+        </div>
+        <div id="trendBiasBox">
+          <label>乖离率参数</label>
+          <div class="row" style="gap:8px; align-items:end;">
+            <input id="trendBiasMA" value="20" style="min-width:90px" placeholder="EMA窗口" title="EMA(C,N)窗口(交易日)，用于 BIAS=(LN(C)-LN(EMA))*100" />
+            <input id="trendBiasEntry" value="2" style="min-width:80px" placeholder="入场%" title="入场阈值(%)：BIAS > entry" />
+            <input id="trendBiasHot" value="10" style="min-width:80px" placeholder="过热%" title="过热止盈阈值(%)：BIAS >= hot" />
+            <input id="trendBiasCold" value="-2" style="min-width:80px" placeholder="过冷%" title="过冷止损阈值(%)：BIAS <= cold" />
+            <select id="trendBiasPosMode" style="min-width:120px" title="仓位管理模式">
+              <option value="binary" selected>0/1仓位</option>
+              <option value="continuous">动态仓位</option>
+            </select>
+          </div>
         </div>
         <div>
           <label>交易成本(bps)</label>
@@ -3347,10 +3363,11 @@
 
       function updateTrendUi() {
         const mode = ($("trendStrategy") && $("trendStrategy").value) ? $("trendStrategy").value : "ma_filter";
-        setBoxVisible("trendSmaBox", mode === "ma_filter");
+        setBoxVisible("trendSmaBox", mode === "ma_filter" || mode === "ema_filter" || mode === "linreg_slope");
         setBoxVisible("trendCrossBox", mode === "ma_cross");
         setBoxVisible("trendDonchianBox", mode === "donchian");
         setBoxVisible("trendMomBox", mode === "tsmom");
+        setBoxVisible("trendBiasBox", mode === "bias");
       }
       if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendUi);
       updateTrendUi();
@@ -3369,6 +3386,11 @@
         const donchian_entry = Number(($("trendDonEntry").value || "20").trim());
         const donchian_exit = Number(($("trendDonExit").value || "10").trim());
         const mom_lookback = Number(($("trendMomLb").value || "252").trim());
+        const bias_ma_window = Number(($("trendBiasMA") && $("trendBiasMA").value ? $("trendBiasMA").value : "20").trim());
+        const bias_entry_raw = Number(($("trendBiasEntry") && $("trendBiasEntry").value ? $("trendBiasEntry").value : "2").trim());
+        const bias_hot_raw = Number(($("trendBiasHot") && $("trendBiasHot").value ? $("trendBiasHot").value : "10").trim());
+        const bias_cold_raw = Number(($("trendBiasCold") && $("trendBiasCold").value ? $("trendBiasCold").value : "-2").trim());
+        const bias_pos_mode = ($("trendBiasPosMode") && $("trendBiasPosMode").value) ? $("trendBiasPosMode").value : "binary";
         const cost_bps = Number(($("trendCost").value || "0").trim());
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
@@ -3376,7 +3398,7 @@
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
 
         if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("交易成本(bps)必须>=0");
-        if (strategy === "ma_filter" && (!Number.isFinite(sma_window) || sma_window < 2)) return setMsg("SMA窗口必须>=2");
+        if ((strategy === "ma_filter" || strategy === "ema_filter" || strategy === "linreg_slope") && (!Number.isFinite(sma_window) || sma_window < 2)) return setMsg("窗口必须>=2");
         if (strategy === "ma_cross") {
           if (!Number.isFinite(fast_window) || fast_window < 2) return setMsg("快均线窗口必须>=2");
           if (!Number.isFinite(slow_window) || slow_window < 2) return setMsg("慢均线窗口必须>=2");
@@ -3387,6 +3409,14 @@
           if (!Number.isFinite(donchian_exit) || donchian_exit < 2) return setMsg("退出窗口必须>=2");
         }
         if (strategy === "tsmom" && (!Number.isFinite(mom_lookback) || mom_lookback < 2)) return setMsg("动量回看必须>=2");
+        if (strategy === "bias") {
+          if (!Number.isFinite(bias_ma_window) || bias_ma_window < 2) return setMsg("BIAS MA窗口必须>=2");
+          if (!Number.isFinite(bias_entry_raw)) return setMsg("入场阈值(%)必须是数字");
+          if (!Number.isFinite(bias_hot_raw)) return setMsg("过热阈值(%)必须是数字");
+          if (!Number.isFinite(bias_cold_raw)) return setMsg("过冷阈值(%)必须是数字");
+          if (!(bias_cold_raw < bias_entry_raw && bias_entry_raw < bias_hot_raw)) return setMsg("阈值必须满足：过冷 < 入场 < 过热");
+          if (!(bias_pos_mode === "binary" || bias_pos_mode === "continuous")) return setMsg("仓位模式必须是 0/1仓位 或 动态仓位");
+        }
 
         $("status").textContent = "回测趋势策略中...";
         setMsg("");
@@ -3400,6 +3430,11 @@
             sma_window, fast_window, slow_window,
             donchian_entry, donchian_exit,
             mom_lookback,
+            bias_ma_window,
+            bias_entry: bias_entry_raw,
+            bias_hot: bias_hot_raw,
+            bias_cold: bias_cold_raw,
+            bias_pos_mode,
           }),
         });
         const text = await resp.text();

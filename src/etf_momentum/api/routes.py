@@ -209,6 +209,11 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         donchian_entry=payload.donchian_entry,
         donchian_exit=payload.donchian_exit,
         mom_lookback=payload.mom_lookback,
+        bias_ma_window=payload.bias_ma_window,
+        bias_entry=payload.bias_entry,
+        bias_hot=payload.bias_hot,
+        bias_cold=payload.bias_cold,
+        bias_pos_mode=payload.bias_pos_mode,
     )
     try:
         return compute_trend_backtest(db, inp)

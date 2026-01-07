@@ -223,7 +223,7 @@ class TrendBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
-    strategy: str = Field(default="ma_filter", description="ma_filter|ma_cross|donchian|tsmom (long/cash)")
+    strategy: str = Field(default="ma_filter", description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias (long/cash)")
     # parameters (some are strategy-specific)
     sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
     fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")
@@ -231,6 +231,12 @@ class TrendBacktestRequest(BaseModel):
     donchian_entry: int = Field(default=20, ge=2, description="Donchian entry window (trading days)")
     donchian_exit: int = Field(default=10, ge=2, description="Donchian exit window (trading days)")
     mom_lookback: int = Field(default=252, ge=2, description="TS momentum lookback (trading days)")
+    # BIAS strategy params
+    bias_ma_window: int = Field(default=20, ge=2, description="EMA window N in BIAS=(LN(C)-LN(EMA(C,N)))*100 (trading days)")
+    bias_entry: float = Field(default=2.0, description="Enter when BIAS > entry (percent)")
+    bias_hot: float = Field(default=10.0, description="Take-profit exit when BIAS >= hot (percent)")
+    bias_cold: float = Field(default=-2.0, description="Stop-loss exit when BIAS <= cold (percent)")
+    bias_pos_mode: str = Field(default="binary", description="Position mode for BIAS strategy: binary|continuous")
 
 
 class MonteCarloRequest(BaseModel):
