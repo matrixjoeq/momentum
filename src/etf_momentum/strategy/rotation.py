@@ -17,6 +17,7 @@ from ..analysis.baseline import (
     _sharpe,
     _sortino,
     _ulcer_index,
+    _rsi_wilder,
 )
 from ..analysis.baseline import load_close_prices as _load_close_prices
 from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
@@ -91,6 +92,9 @@ class RotationInputs:
     dd_threshold: float = 0.10  # decimal, e.g. 0.10 = 10%
     dd_reduce: float = 1.0  # fraction to reduce, e.g. 1.0 => reduce 100% -> cash
     dd_sleep_days: int = 20  # trading days
+    # --- Timing control (strategy NAV RSI gate; uses shadow NAV that ignores this timing gate) ---
+    timing_rsi_gate: bool = False
+    timing_rsi_window: int = 24  # typical choices: 6/12/24; default=24
     # --- Execution price proxy (hfq, aligned to execution calendar) ---
     # Used to study open/close/OC(=avg(open,close)) calendar effects. Default "close" matches existing behavior.
     exec_price: str = "close"  # close | open | oc2
@@ -395,6 +399,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         raise ValueError("dd_reduce must be within [0,1]")
     if int(inp.dd_sleep_days) < 1:
         raise ValueError("dd_sleep_days must be >= 1")
+    if int(inp.timing_rsi_window) < 2:
+        raise ValueError("timing_rsi_window must be >= 2")
     ep = (inp.exec_price or "close").strip().lower()
     if ep not in {"close", "open", "oc2"}:
         raise ValueError("exec_price must be one of: close|open|oc2")
@@ -1322,12 +1328,70 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     ew_nav.iloc[0] = 1.0
 
     # Simple turnover and cost: turnover = sum |w_t - w_{t-1}| / 2 ; cost applied to return.
+    # NOTE: we first compute a "shadow" (ungated) NAV for timing signals, then optionally apply timing gating
+    # to weights and recompute strategy NAV/metrics.
     w_prev = w.shift(1).fillna(0.0)
     turnover = (w - w_prev).abs().sum(axis=1) / 2.0
     cost = turnover * (inp.cost_bps / 10000.0)
-    port_ret_net = port_ret - cost
-    port_nav_net = (1.0 + port_ret_net).cumprod()
-    port_nav_net.iloc[0] = 1.0
+    port_ret_net_shadow = (port_ret - cost).astype(float)
+    port_nav_net_shadow = (1.0 + port_ret_net_shadow).cumprod()
+    port_nav_net_shadow.iloc[0] = 1.0
+
+    timing_meta: dict[str, Any] = {
+        "enabled": bool(inp.timing_rsi_gate),
+        "window": int(inp.timing_rsi_window),
+        "threshold": 50.0,
+        "signal_source": "shadow_nav_net",
+        "active_days": None,
+        "inactive_days": None,
+        "active_ratio": None,
+        "rsi": None,
+        "active": None,
+    }
+
+    timing_expo = pd.Series(np.ones(len(dates), dtype=float), index=dates, dtype=float)
+    timing_active = pd.Series(np.ones(len(dates), dtype=bool), index=dates, dtype=bool)
+    if bool(inp.timing_rsi_gate):
+        win = int(inp.timing_rsi_window)
+        thr = 50.0
+        # RSI computed on shadow NAV (ignores this timing gate). NaN RSI => do not block (remain active).
+        rsi_sig = _rsi_wilder(port_nav_net_shadow, window=win)
+        # Rule:
+        # - RSI <= 50 => switch to equal-weight holding (EW_REBAL)
+        # - RSI > 50 => activate rotation strategy
+        active = ((rsi_sig > thr) | rsi_sig.isna()).astype(bool)
+        # Use yesterday's RSI signal to decide today's exposure (avoid look-ahead).
+        expo = active.shift(1).fillna(True).astype(float)
+        timing_expo = expo.astype(float)
+        timing_active = active.astype(bool)
+        # When inactive (RSI <= 50), switch to equal-weight holdings (same as EW_REBAL),
+        # rather than going to cash. During active periods, use rotation weights.
+        w_ew_full = pd.DataFrame(0.0, index=dates, columns=w.columns)
+        for c in bench_codes:
+            if c in w_ew.columns and c in w_ew_full.columns:
+                w_ew_full[c] = w_ew[c].astype(float)
+        w = (w.mul(expo, axis=0) + w_ew_full.mul(1.0 - expo, axis=0)).astype(float)
+        # Recompute strategy return/cost/NAV on timed weights.
+        port_ret = (w * ret_exec).sum(axis=1).astype(float)
+        port_nav = (1.0 + port_ret).cumprod()
+        port_nav.iloc[0] = 1.0
+        w_prev = w.shift(1).fillna(0.0)
+        turnover = (w - w_prev).abs().sum(axis=1) / 2.0
+        cost = turnover * (inp.cost_bps / 10000.0)
+        port_ret_net = (port_ret - cost).astype(float)
+        port_nav_net = (1.0 + port_ret_net).cumprod()
+        port_nav_net.iloc[0] = 1.0
+
+        # timing summary payload (cap arrays by using full; UI needs dates anyway)
+        timing_meta["active_days"] = int(active.sum())
+        timing_meta["inactive_days"] = int((~active).sum())
+        timing_meta["active_ratio"] = float(active.mean()) if len(active) else None
+        timing_meta["rsi"] = {"dates": dates.date.astype(str).tolist(), "values": rsi_sig.astype(float).tolist()}
+        timing_meta["active"] = {"dates": dates.date.astype(str).tolist(), "values": expo.astype(float).tolist()}
+    else:
+        # keep original (ungated) values
+        port_ret_net = port_ret_net_shadow
+        port_nav_net = port_nav_net_shadow
 
     active_ret = port_ret_net - ew_ret
     excess_nav = (1.0 + active_ret).cumprod()
@@ -1388,6 +1452,17 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     for p in holdings["periods"]:
         s = pd.to_datetime(p["start_date"])
         e = pd.to_datetime(p["end_date"])
+        # Timing sleep indicator for this holding period (based on exposure series).
+        timing_ratio = None
+        timing_sleep = False
+        if bool(inp.timing_rsi_gate):
+            try:
+                seg = timing_expo.loc[s:e].astype(float)
+                timing_ratio = float(seg.mean()) if len(seg) else None
+                timing_sleep = bool((timing_ratio is not None) and (timing_ratio <= 1e-12))
+            except Exception:  # pragma: no cover (defensive)
+                timing_ratio = None
+                timing_sleep = False
         nav_s = float(port_nav_net.loc[s])
         nav_e = float(port_nav_net.loc[e])
         ew_s = float(ew_nav.loc[s])
@@ -1426,6 +1501,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 "equal_weight_return": float(r_ew),
                 "excess_return": ex,
                 "win": ex > 0,
+                "timing_sleep": bool(timing_sleep),
+                "timing_active_ratio": timing_ratio,
                 "buys": buys,
                 "sells": sells,
                 "turnover": period_turnover,
@@ -1561,12 +1638,21 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             "strategy_nav": "none execution + hfq-implied corporate action factor (total return proxy)",
             "benchmark_nav": "hfq",
         },
+        "timing": timing_meta,
         "nav": {
             "dates": dates.date.astype(str).tolist(),
             "series": {
                 "ROTATION": port_nav_net.astype(float).tolist(),
                 "EW_REBAL": ew_nav.astype(float).tolist(),
                 "EXCESS": excess_nav.astype(float).tolist(),
+            },
+        },
+        "nav_rsi": {
+            "windows": [6, 12, 24],
+            "dates": dates.date.astype(str).tolist(),
+            "series": {
+                "ROTATION": {},
+                "EW_REBAL": {},
             },
         },
         "attribution": attribution,
@@ -1578,5 +1664,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         "holdings": holdings["periods"],
         "corporate_actions": corporate_actions,
     }
+    # fill nav RSI series (avoid recomputing windows extraction twice)
+    for w in out["nav_rsi"]["windows"]:
+        out["nav_rsi"]["series"]["ROTATION"][str(w)] = _rsi_wilder(port_nav_net, window=int(w)).astype(float).tolist()
+        out["nav_rsi"]["series"]["EW_REBAL"][str(w)] = _rsi_wilder(ew_nav, window=int(w)).astype(float).tolist()
     return out
 

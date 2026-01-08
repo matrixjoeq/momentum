@@ -47,6 +47,8 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert "ew" in data["fft_roll"]
     assert data["fft_roll"]["ew"]["windows"] == [20, 10]
     assert data["fft_roll"]["ew"]["step"] == 5
+    assert "nav_rsi" in data
+    assert data["nav_rsi"]["windows"] == [6, 12, 24]
 
 
 def test_api_rotation_backtest_happy_path(api_client):
@@ -69,6 +71,8 @@ def test_api_rotation_backtest_happy_path(api_client):
             "risk_off": False,
             "risk_free_rate": 0.025,
             "cost_bps": 0.0,
+            "timing_rsi_gate": True,
+            "timing_rsi_window": 6,
         },
     )
     assert resp.status_code == 200
@@ -77,5 +81,10 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "ROTATION" in data["nav"]["series"]
     assert "EW_REBAL" in data["nav"]["series"]
     assert "EXCESS" in data["nav"]["series"]
+    assert "nav_rsi" in data
+    assert data["nav_rsi"]["windows"] == [6, 12, 24]
+    assert "timing" in data
+    assert data["timing"]["enabled"] is True
+    assert data["timing"]["threshold"] == 50.0
     assert "win_payoff" in data
 

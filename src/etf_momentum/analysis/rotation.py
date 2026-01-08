@@ -68,6 +68,8 @@ class RotationAnalysisInputs:
     dd_reduce: float = 1.0
     dd_sleep_days: int = 20
     exec_price: str = "close"  # close|open|oc2
+    timing_rsi_gate: bool = False
+    timing_rsi_window: int = 24
 
 
 def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
@@ -129,6 +131,8 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             dd_threshold=inp.dd_threshold,
             dd_reduce=inp.dd_reduce,
             dd_sleep_days=inp.dd_sleep_days,
+            timing_rsi_gate=inp.timing_rsi_gate,
+            timing_rsi_window=inp.timing_rsi_window,
             exec_price=inp.exec_price,
         ),
     )

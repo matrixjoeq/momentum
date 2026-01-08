@@ -242,6 +242,8 @@
       </div>
     </div>
 
+    <!-- RSI is overlaid on NAV charts (secondary axis) -->
+
     <div class="panel">
       <h3>傅里叶变换分析（候选标的）</h3>
       <div class="muted">口径：对数收益（Δlog(P)）；输出主导周期、频段能量占比（低/中/高频）与谱熵。默认同时给出全区间与近1年/近半年窗口。</div>
@@ -379,6 +381,7 @@
           <button class="tabBtn" data-tab="rotTabCorr" role="tab" aria-selected="false">相关性过滤</button>
           <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益率</button>
           <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
+          <button class="tabBtn" data-tab="rotTabTiming" role="tab" aria-selected="false">择时</button>
           <button class="tabBtn" data-tab="rotTabDD" role="tab" aria-selected="false">回撤控制</button>
         </div>
 
@@ -628,6 +631,30 @@
           </div>
         </div>
 
+        <div id="rotTabTiming" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>择时开关</label>
+              <select id="rotTimingOn" style="min-width:160px;">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>RSI窗口(交易日)</label>
+              <select id="rotTimingRsiWin" style="min-width:160px;">
+                <option value="6">6</option>
+                <option value="12">12</option>
+                <option value="24" selected>24</option>
+              </select>
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">
+            规则：当“策略净值 RSI” ≤ 50 时切换为等权持有（EW_REBAL），当 RSI &gt; 50 时重新激活轮动策略。<br/>
+            重要：RSI 信号使用 <b>不考虑择时休眠</b> 的“假想净值（shadow NAV）”计算，避免“休眠导致RSI变形”的自我反馈问题；择时只改变实际持仓与净值。
+          </div>
+        </div>
+
         <div id="rotTabDD" class="tabPanel" role="tabpanel">
           <div class="row">
             <div>
@@ -675,6 +702,8 @@
           <div id="rot40dDiffChart" style="width:100%; height:260px;"></div>
         </div>
       </div>
+
+      <!-- RSI is overlaid on NAV/EXCESS charts (secondary axis) -->
 
       <div class="panel two" style="grid-template-columns: 1fr 1fr;">
         <div>
@@ -2182,6 +2211,67 @@
           name,
           hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
         }));
+        // RSI overlay (fixed windows: 6/12/24) on EW + benchmark only
+        const rsiWins = [6, 12, 24];
+        const _rsiWilder = (arr, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(arr.length).fill(null);
+          if (arr.length < w + 1) return out;
+          // Wilder smoothing: alpha=1/w
+          let avgGain = null;
+          let avgLoss = null;
+          for (let i = 1; i < arr.length; i++) {
+            const prev = Number(arr[i - 1]);
+            const cur = Number(arr[i]);
+            if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0 || cur <= 0) continue;
+            const chg = cur - prev;
+            const gain = Math.max(0, chg);
+            const loss = Math.max(0, -chg);
+            if (i <= w) {
+              // seed with SMA of first w diffs
+              // accumulate via temp sums
+              if (avgGain == null) { avgGain = 0.0; avgLoss = 0.0; }
+              avgGain += gain;
+              avgLoss += loss;
+              if (i === w) {
+                avgGain = avgGain / w;
+                avgLoss = avgLoss / w;
+              }
+            } else {
+              avgGain = ((avgGain * (w - 1)) + gain) / w;
+              avgLoss = ((avgLoss * (w - 1)) + loss) / w;
+            }
+            if (i >= w && avgGain != null && avgLoss != null) {
+              let rsi = null;
+              if (avgLoss === 0 && avgGain === 0) rsi = 50.0;
+              else if (avgLoss === 0) rsi = 100.0;
+              else if (avgGain === 0) rsi = 0.0;
+              else {
+                const rs = avgGain / avgLoss;
+                rsi = 100.0 - (100.0 / (1.0 + rs));
+              }
+              out[i] = rsi;
+            }
+          }
+          return out;
+        };
+        const addRsiFor = (key, labelPrefix, dash) => {
+          if (!key || !series[key]) return;
+          const navArr = series[key];
+          for (const w of rsiWins) {
+            traces.push({
+              x: dates,
+              y: _rsiWilder(navArr, w),
+              mode: "lines",
+              name: `${labelPrefix}RSI${w}`,
+              yaxis: "y2",
+              line: { dash: dash || "dot", width: 1.1 },
+              hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>",
+            });
+          }
+        };
+        // Only show EW RSI (no benchmark RSI)
+        addRsiFor("EW", "", "solid");
         Plotly.newPlot(
           "chart",
           traces,
@@ -2191,11 +2281,24 @@
             yaxis: {
               type: "log",
               tick0: 0,
-              dtick: Math.log10(1.1), // one grid = +10%
-              tickformat: ".4f",
+              // Coarser ticks to avoid dense labels; roughly 1,2,4,8...
+              dtick: Math.log10(2.0),
+              tickformat: ".0f",
               showgrid: true,
               gridcolor: "#eee",
+              domain: [0.32, 1.0],
             },
+            yaxis2: {
+              title: "RSI",
+              range: [0, 100],
+              showgrid: false,
+              zeroline: false,
+              domain: [0.0, 0.25],
+            },
+            shapes: [
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 30, y1: 30, line: { color: "#999", width: 1, dash: "dot" } },
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 70, y1: 70, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
           },
           { responsive: true }
         );
@@ -2226,6 +2329,8 @@
           { responsive: true }
         );
       }
+
+      // plotNavRsi removed: RSI is overlaid on NAV charts
 
       function renderFft(fft) {
         const tbl = $("fftTable");
@@ -2412,6 +2517,46 @@
       function plotRotation(result) {
         const dates = result.nav.dates;
         const s = result.nav.series;
+        const rsiWins = [6, 12, 24];
+        const _rsiWilder = (arr, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(arr.length).fill(null);
+          if (arr.length < w + 1) return out;
+          let avgGain = null;
+          let avgLoss = null;
+          for (let i = 1; i < arr.length; i++) {
+            const prev = Number(arr[i - 1]);
+            const cur = Number(arr[i]);
+            if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0 || cur <= 0) continue;
+            const chg = cur - prev;
+            const gain = Math.max(0, chg);
+            const loss = Math.max(0, -chg);
+            if (i <= w) {
+              if (avgGain == null) { avgGain = 0.0; avgLoss = 0.0; }
+              avgGain += gain;
+              avgLoss += loss;
+              if (i === w) {
+                avgGain = avgGain / w;
+                avgLoss = avgLoss / w;
+              }
+            } else {
+              avgGain = ((avgGain * (w - 1)) + gain) / w;
+              avgLoss = ((avgLoss * (w - 1)) + loss) / w;
+            }
+            if (i >= w && avgGain != null && avgLoss != null) {
+              let rsi = null;
+              if (avgLoss === 0 && avgGain === 0) rsi = 50.0;
+              else if (avgLoss === 0) rsi = 100.0;
+              else if (avgGain === 0) rsi = 0.0;
+              else {
+                const rs = avgGain / avgLoss;
+                rsi = 100.0 - (100.0 / (1.0 + rs));
+              }
+              out[i] = rsi;
+            }
+          }
+          return out;
+        };
         const _drawdownFromNav = (nav) => {
           let peak = -Infinity;
           const out = [];
@@ -2491,13 +2636,22 @@
           { x: dates, y: s.ROTATION, mode: "lines", name: "ROTATION", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
           { x: dates, y: s.EW_REBAL, mode: "lines", name: "EW_REBAL", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
         ];
+        // RSI (strategy only) below NAV (same figure, separate panel)
+        for (const w of rsiWins) {
+          traces.push({ x: dates, y: _rsiWilder(s.ROTATION || [], w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
+        }
         Plotly.newPlot(
           "rotChart",
           traces,
           {
             margin: { t: 20 },
             legend: { orientation: "h" },
-            yaxis: { type: "log", tick0: 0, dtick: Math.log10(1.1), tickformat: ".4f", gridcolor: "#eee" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+            yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+            shapes: [
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 30, y1: 30, line: { color: "#999", width: 1, dash: "dot" } },
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 70, y1: 70, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
           },
           { responsive: true }
         );
@@ -2523,18 +2677,28 @@
             const sd250 = ms250.std;
             const upper = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m + 2.0 * sd250[i])));
             const lower = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m - 2.0 * sd250[i])));
-            return [
+            const out = [
               { x: dates, y: ex, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
               // Bollinger band (lower -> upper fill)
               { x: dates, y: lower, mode: "lines", name: "BB Lower(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, hoverinfo: "skip" },
               { x: dates, y: upper, mode: "lines", name: "BB Upper(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, fill: "tonexty", fillcolor: "rgba(31,119,180,0.10)", hoverinfo: "skip" },
               { x: dates, y: ma250, mode: "lines", name: "MA250", line: { color: "rgba(31,119,180,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>MA250=%{y:.4f}<extra></extra>" },
             ];
+            // RSI on EXCESS below chart (same figure, separate panel)
+            for (const w of rsiWins) {
+              out.push({ x: dates, y: _rsiWilder(ex, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
+            }
+            return out;
           })(),
           {
             margin: { t: 20 },
             legend: { orientation: "h" },
-            yaxis: { type: "log", tick0: 0, dtick: Math.log10(1.1), tickformat: ".4f", gridcolor: "#eee" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+            yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+            shapes: [
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 30, y1: 30, line: { color: "#999", width: 1, dash: "dot" } },
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 70, y1: 70, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
           },
           { responsive: true }
         );
@@ -2571,20 +2735,41 @@
           const c1 = "rgba(31,119,180,0.90)";
           const c3 = "rgba(44,160,44,0.90)";
           const c5 = "rgba(255,127,14,0.90)";
+          const ddMin = (() => {
+            let m = 0.0;
+            for (const arr of [d1, d3, d5]) {
+              for (const v of arr) {
+                const x = Number(v);
+                if (!Number.isFinite(x)) continue;
+                if (x < m) m = x;
+              }
+            }
+            // pad slightly for readability
+            return Math.min(-0.01, m - 0.02);
+          })();
           Plotly.newPlot(
             divId,
             [
-              { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1y)`, line: { color: c1, width: 1.4 }, hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1y)`, line: { color: c1, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3y)`, line: { color: c3, width: 1.4 }, hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3y)`, line: { color: c3, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: r5, mode: "lines", name: `${titlePrefix} R(5y)`, line: { color: c5, width: 1.4 }, hovertemplate: "%{x}<br>R5Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: d5, mode: "lines", name: `${titlePrefix} DD(5y)`, line: { color: c5, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD5Y=%{y:.1%}<extra></extra>" },
+              // returns (top panel)
+              { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1y)`, xaxis: "x2", yaxis: "y", line: { color: c1, width: 1.4 }, hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3y)`, xaxis: "x2", yaxis: "y", line: { color: c3, width: 1.4 }, hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r5, mode: "lines", name: `${titlePrefix} R(5y)`, xaxis: "x2", yaxis: "y", line: { color: c5, width: 1.4 }, hovertemplate: "%{x}<br>R5Y=%{y:.1%}<extra></extra>" },
+              // drawdowns (bottom panel)
+              { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1y)`, xaxis: "x", yaxis: "y2", line: { color: c1, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3y)`, xaxis: "x", yaxis: "y2", line: { color: c3, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d5, mode: "lines", name: `${titlePrefix} DD(5y)`, xaxis: "x", yaxis: "y2", line: { color: c5, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD5Y=%{y:.1%}<extra></extra>" },
             ],
             {
               margin: { t: 10, b: 30 },
               legend: { orientation: "h" },
-              yaxis: { tickformat: ".0%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+              // bottom x-axis
+              xaxis: { domain: [0, 1], anchor: "y2" },
+              // top x-axis (hidden ticks, match zoom)
+              xaxis2: { domain: [0, 1], anchor: "y", matches: "x", showticklabels: false },
+              // top panel: returns
+              yaxis: { title: "Rolling Return", tickformat: ".0%", domain: [0.55, 1.0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+              // bottom panel: drawdowns
+              yaxis2: { title: "Rolling MDD", tickformat: ".0%", domain: [0.0, 0.45], range: [ddMin, 0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
             },
             { responsive: true }
           );
@@ -3049,6 +3234,9 @@
         if (dd_control && (dd_reduce < 0 || dd_reduce > 1.0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
         const dd_sleep_days = Number(($("rotDDSleep").value || "20").trim());
         if (dd_control && (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)) return setMsg("休眠天数必须>=1，例如 20");
+        const timing_rsi_gate = ($("rotTimingOn").value === "true");
+        const timing_rsi_window = Number(($("rotTimingRsiWin").value || "24").trim());
+        if (timing_rsi_gate && (!Number.isFinite(timing_rsi_window) || timing_rsi_window < 2)) return setMsg("择时 RSI 窗口必须>=2");
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -3064,7 +3252,6 @@
         if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0)) return setMsg("ER阈值必须>0，例如 0.25");
         if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1)) return setMsg("ADX窗口必须>=2");
         if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
-
         $("status").textContent = "回测中...";
         setMsg("");
         const resp = await api("/analysis/rotation", {
@@ -3078,6 +3265,7 @@
             corr_filter, corr_window, corr_threshold,
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
+            timing_rsi_gate, timing_rsi_window,
             trend_filter, trend_mode, trend_sma_window,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
@@ -3464,7 +3652,7 @@
         Plotly.newPlot("trendChart", [
           { x: dates, y: s.STRAT, mode: "lines", name: "STRAT", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
           { x: dates, y: s.BUY_HOLD, mode: "lines", name: "BUY_HOLD", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
-        ], { margin: { t: 20 }, legend: { orientation: "h" }, yaxis: { type: "log", tickformat: ".4f", gridcolor: "#eee" } }, { responsive: true });
+        ], { margin: { t: 20 }, legend: { orientation: "h" }, yaxis: { type: "log", dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee" } }, { responsive: true });
         Plotly.newPlot("trendDD", [
           { x: dates, y: dd(s.STRAT), mode: "lines", name: "STRAT DD", hovertemplate: "%{x}<br>%{y:.1%}<extra></extra>" },
           { x: dates, y: dd(s.BUY_HOLD), mode: "lines", name: "BH DD", hovertemplate: "%{x}<br>%{y:.1%}<extra></extra>" },

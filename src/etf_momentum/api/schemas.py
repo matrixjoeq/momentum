@@ -202,6 +202,9 @@ class RotationBacktestRequest(BaseModel):
         description="Reduce position by this fraction on trigger (0..1). Default 1.0 (=reduce 100% -> cash).",
     )
     dd_sleep_days: int = Field(default=20, ge=1, description="Sleep days after trigger (trading days). Default 20.")
+    # Timing (strategy NAV RSI gate; uses shadow NAV that ignores this timing gate for RSI signal)
+    timing_rsi_gate: bool = Field(default=False, description="Enable timing: sleep when strategy NAV RSI < 50, reactivate when >= 50 (signal from shadow NAV)")
+    timing_rsi_window: int = Field(default=24, ge=2, description="RSI window (trading days) for timing gate; typical 6/12/24; default=24")
 
 
 class RotationCalendarEffectRequest(RotationBacktestRequest):

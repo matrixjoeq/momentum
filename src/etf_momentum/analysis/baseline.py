@@ -131,6 +131,28 @@ def _ulcer_index(nav: pd.Series, *, in_percent: bool = True) -> float:
     return float(np.sqrt(np.mean(np.square(x.to_numpy(dtype=float)))))
 
 
+def _rsi_wilder(price: pd.Series, *, window: int) -> pd.Series:
+    """
+    RSI (Wilder-style smoothing via EWM alpha=1/window) on a price-like series.
+    Returns a Series in [0,100], aligned to `price`. The first ~window points are NaN.
+    """
+    w = max(1, int(window))
+    s = pd.Series(price).astype(float).replace([np.inf, -np.inf], np.nan)
+    diff = s.diff()
+    gain = diff.clip(lower=0.0)
+    loss = (-diff).clip(lower=0.0)
+    avg_gain = gain.ewm(alpha=1.0 / w, adjust=False, min_periods=w).mean()
+    avg_loss = loss.ewm(alpha=1.0 / w, adjust=False, min_periods=w).mean()
+    rs = avg_gain / avg_loss.replace(0.0, np.nan)
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    # handle division-by-zero edge cases deterministically
+    both0 = (avg_gain == 0.0) & (avg_loss == 0.0)
+    rsi = rsi.mask(both0, other=50.0)
+    rsi = rsi.mask((avg_loss == 0.0) & (avg_gain > 0.0), other=100.0)
+    rsi = rsi.mask((avg_gain == 0.0) & (avg_loss > 0.0), other=0.0)
+    return rsi.clip(lower=0.0, upper=100.0)
+
+
 def _fft_summary_from_returns(
     daily_ret: pd.Series,
     *,
@@ -753,6 +775,17 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     series["EW"] = ew_nav.astype(float).tolist()
     series[f"BENCH:{bench_code}"] = bench_nav.astype(float).tolist()
 
+    # NAV RSI (EW + benchmark), windows configurable
+    rsi_windows = [6, 12, 24]
+    nav_rsi = {
+        "windows": rsi_windows,
+        "dates": dates,
+        "series": {
+            "EW": {str(w): _rsi_wilder(ew_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
+            f"BENCH:{bench_code}": {str(w): _rsi_wilder(bench_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
+        },
+    }
+
     rolling_out = {
         "returns": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["returns"].items()},
         "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
@@ -781,6 +814,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
         "codes": codes,
         "nav": {"dates": dates, "series": series},
+        "nav_rsi": nav_rsi,
         "period_returns": {
             "weekly": weekly.to_dict(orient="records"),
             "monthly": monthly.to_dict(orient="records"),
