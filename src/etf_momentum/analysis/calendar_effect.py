@@ -12,11 +12,13 @@ from .baseline import (
     TRADING_DAYS_PER_YEAR,
     _annualized_return,
     _annualized_vol,
+    _information_ratio,
     _max_drawdown,
     _max_drawdown_duration_days,
     _sharpe,
     _sortino,
     _ulcer_index,
+    load_close_prices,
     load_ohlc_prices,
 )
 from .rotation import RotationAnalysisInputs, compute_rotation_backtest
@@ -181,6 +183,9 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
     if ohlc["close"].empty:
         raise ValueError("no price data for given range")
 
+    # Benchmark for information ratio: same-frequency EW rebalancing on hfq close.
+    bench_close_hfq = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="hfq")
+
     grid: list[dict[str, Any]] = []
     # rolling return stability diagnostics (1/3/5 years)
     years_list = [1, 3, 5]
@@ -238,6 +243,14 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             ew_nav, ew_w = _ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
             ew_ret = ew_nav.pct_change().fillna(0.0)
 
+            # Benchmark EW NAV (hfq close) on the SAME trading calendar and SAME decision dates.
+            bench_px = bench_close_hfq.sort_index().reindex(px_common.index).ffill()
+            bench_ret = bench_px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            bench_nav, _ = _ew_nav_and_weights_by_decision_dates(bench_ret[codes], decision_dates=decision_dates)
+            bench_daily = bench_nav.pct_change().fillna(0.0)
+            active_daily = (ew_ret - bench_daily).astype(float)
+            info_ratio = _information_ratio(active_daily, ann_factor=TRADING_DAYS_PER_YEAR)
+
             # implied turnover from weights (same definition as rotation module)
             w_prev = ew_w.shift(1).fillna(0.0)
             turnover = (ew_w - w_prev).abs().sum(axis=1) / 2.0
@@ -248,6 +261,7 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             mdd_dur = _max_drawdown_duration_days(ew_nav)
             sharpe = _sharpe(ew_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)
             sortino = _sortino(ew_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)
+            calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
             ui = _ulcer_index(ew_nav, in_percent=True)
             ui_den = ui / 100.0
             upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
@@ -264,9 +278,11 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                         "max_drawdown": float(mdd),
                         "max_drawdown_recovery_days": int(mdd_dur),
                         "sharpe_ratio": float(sharpe),
+                        "calmar_ratio": float(calmar),
                         "sortino_ratio": float(sortino),
                         "ulcer_index": float(ui),
                         "ulcer_performance_index": float(upi),
+                        "information_ratio": float(info_ratio),
                         "avg_daily_turnover": float(turnover.mean()) if len(turnover) else float("nan"),
                     },
                 }
@@ -322,6 +338,9 @@ def compute_rotation_calendar_effect(
     anchors = anchors or ([0, 1, 2, 3, 4] if reb == "weekly" else [1])
     exec_prices = exec_prices or ["open", "close", "oc2"]
 
+    # Benchmark for information ratio: same-frequency EW rebalancing on hfq close (same anchor schedule).
+    bench_close_hfq = load_close_prices(db, codes=list(dict.fromkeys(base.codes)), start=base.start, end=base.end, adjust="hfq")
+
     grid: list[dict[str, Any]] = []
     years_list = [1, 3, 5]
     win_days = [int(TRADING_DAYS_PER_YEAR * y) for y in years_list]
@@ -363,6 +382,32 @@ def compute_rotation_calendar_effect(
                 )
                 res = compute_rotation_backtest(db, inp)
                 strat = (res.get("metrics") or {}).get("strategy") or {}
+
+                # Compute IR vs hfq EW benchmark (same anchor schedule).
+                nav_dates = (res.get("nav") or {}).get("dates") or []
+                nav_series = ((res.get("nav") or {}).get("series") or {}).get("ROTATION") or []
+                info_ratio = float("nan")
+                calmar = float("nan")
+                if nav_dates and nav_series:
+                    idx = pd.to_datetime(nav_dates)
+                    nav = pd.Series([float(x) for x in nav_series], index=idx, dtype=float)
+                    strat_ret = nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+                    ann_ret = _annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR)
+                    mdd = _max_drawdown(nav)
+                    calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
+
+                    bench_px = bench_close_hfq.sort_index().reindex(idx).ffill()
+                    bench_ret = bench_px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                    decision_dates = _decision_dates_for_rebalance(idx, rebalance=reb, anchor=int(a))
+                    bench_nav, _ = _ew_nav_and_weights_by_decision_dates(bench_ret[list(dict.fromkeys(base.codes))], decision_dates=decision_dates)
+                    bench_daily = bench_nav.pct_change().fillna(0.0)
+                    active = (strat_ret - bench_daily).astype(float)
+                    info_ratio = _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)
+
+                # enrich strategy metrics with calendar-effect specific comparisons
+                strat = dict(strat)
+                strat["calmar_ratio"] = float(calmar)
+                strat["information_ratio"] = float(info_ratio)
                 grid.append(
                     {
                         "anchor": int(a),
@@ -373,8 +418,6 @@ def compute_rotation_calendar_effect(
                 )
 
                 # rolling return curves + stability stats (strategy NAV series)
-                nav_dates = (res.get("nav") or {}).get("dates") or []
-                nav_series = ((res.get("nav") or {}).get("series") or {}).get("ROTATION") or []
                 if nav_dates and nav_series and (rolling_dates is None):
                     rolling_dates = [str(x) for x in nav_dates[::roll_step]]
                 if nav_dates and nav_series:
