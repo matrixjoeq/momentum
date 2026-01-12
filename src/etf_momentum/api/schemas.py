@@ -238,6 +238,20 @@ class RotationCalendarEffectRequest(RotationBacktestRequest):
     exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
+class RotationWeekly5OpenSimRequest(BaseModel):
+    """
+    Simplified weekly simulation used by the mini-program:
+    - weekly rebalance
+    - anchors fixed to Mon..Fri (0..4) in one call
+    - exec_price fixed to open
+    - all risk controls off
+    - cost_bps fixed to 0
+    """
+
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+
+
 class TrendBacktestRequest(BaseModel):
     code: str = Field(min_length=1, max_length=32, description="Single ETF code for trend-following backtest")
     start: str = Field(description="YYYYMMDD")

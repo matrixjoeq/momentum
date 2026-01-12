@@ -44,7 +44,9 @@ def _policy_params_for_pool(db: Session, pool: EtfPool) -> ValidationPolicyParam
     policy = get_validation_policy_by_id(db, pool.validation_policy_id) if pool.validation_policy_id else None
     if policy is None:
         # safe default
-        return ValidationPolicyParams(max_abs_return=0.35, max_hl_spread=0.6, max_gap_days=15)
+        # For ingestion robustness (esp. around splits/dividends or cross-market ETFs),
+        # keep a permissive abs-return default; stricter policies can be set per ETF pool.
+        return ValidationPolicyParams(max_abs_return=2.0, max_hl_spread=0.6, max_gap_days=15)
     max_abs_return = pool.max_abs_return_override if pool.max_abs_return_override is not None else policy.max_abs_return
     return ValidationPolicyParams(
         max_abs_return=max_abs_return,

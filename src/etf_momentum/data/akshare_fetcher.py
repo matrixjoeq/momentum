@@ -64,7 +64,9 @@ def fetch_etf_daily_qfq(
     renamed = {c: col_map[c] for c in df.columns if c in col_map}
     df2 = df.rename(columns=renamed).copy()
 
-    required = ["date", "open", "high", "low", "close"]
+    # Minimal required fields for our strategy backtests are open/close.
+    # high/low/volume/amount are optional and will be stored when available.
+    required = ["date", "open", "close"]
     missing = [c for c in required if c not in df2.columns]
     if missing:
         raise ValueError(f"akshare result missing columns: {missing}. columns={list(df.columns)}")
@@ -83,8 +85,8 @@ def fetch_etf_daily_qfq(
                 code=req.code,
                 trade_date=r["trade_date"],
                 open=float(r["open"]) if pd.notna(r["open"]) else None,
-                high=float(r["high"]) if pd.notna(r["high"]) else None,
-                low=float(r["low"]) if pd.notna(r["low"]) else None,
+                high=float(r["high"]) if ("high" in df2.columns and pd.notna(r.get("high"))) else None,
+                low=float(r["low"]) if ("low" in df2.columns and pd.notna(r.get("low"))) else None,
                 close=float(r["close"]) if pd.notna(r["close"]) else None,
                 volume=float(r["volume"]) if "volume" in df2.columns and pd.notna(r.get("volume")) else None,
                 amount=float(r["amount"]) if "amount" in df2.columns and pd.notna(r.get("amount")) else None,

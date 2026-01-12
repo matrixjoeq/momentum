@@ -15,6 +15,7 @@ from .schemas import (
     RotationCalendarEffectRequest,
     RotationMonteCarloRequest,
     RotationBacktestRequest,
+    RotationWeekly5OpenSimRequest,
     TrendBacktestRequest,
     EtfPoolOut,
     EtfPoolUpsert,
@@ -294,6 +295,72 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         return compute_rotation_calendar_effect(db, base=base, anchors=anchors, exec_prices=payload.exec_prices)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/rotation/weekly5-open")
+def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    Mini-program friendly simplified simulation:
+    - candidate pool fixed to the 4 ETFs in product spec
+    - weekly rebalance, TopK=1, lookback=20, skip=0
+    - exec_price=open, rebalance_shift=prev
+    - cost=0, all risk controls off
+    - run 5 variants for weekly anchor weekday Mon..Fri (0..4)
+    """
+    codes = ["159915", "511010", "513100", "518880"]
+    start = _parse_yyyymmdd(payload.start)
+    end = _parse_yyyymmdd(payload.end)
+    base = RotationAnalysisInputs(
+        codes=codes,
+        start=start,
+        end=end,
+        rebalance="weekly",
+        rebalance_shift="prev",
+        rebalance_anchor=None,
+        top_k=1,
+        lookback_days=20,
+        skip_days=0,
+        cost_bps=0.0,
+        risk_off=False,
+        defensive_code=None,
+        momentum_floor=0.0,
+        score_method="raw_mom",
+        score_lambda=0.0,
+        score_vol_power=1.0,
+        # risk controls all off
+        trend_filter=False,
+        rsi_filter=False,
+        vol_monitor=False,
+        chop_filter=False,
+        corr_filter=False,
+        inertia=False,
+        rr_sizing=False,
+        dd_control=False,
+        timing_rsi_gate=False,
+        # execution on open
+        exec_price="open",
+    )
+    by_anchor: dict[str, dict] = {}
+    for a in [0, 1, 2, 3, 4]:
+        # pylint: disable=unexpected-keyword-arg
+        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
+        by_anchor[str(a)] = compute_rotation_backtest(db, inp)
+    return {
+        "meta": {
+            "type": "rotation_weekly5_open",
+            "codes": codes,
+            "start": payload.start,
+            "end": payload.end,
+            "rebalance": "weekly",
+            "rebalance_shift": "prev",
+            "exec_price": "open",
+            "anchors": [0, 1, 2, 3, 4],
+            "fixed_params": {"top_k": 1, "lookback_days": 20, "skip_days": 0, "cost_bps": 0},
+            "risk_controls": "all_off",
+        },
+        "by_anchor": by_anchor,
+        "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+    }
 
 
 @router.post("/analysis/baseline/montecarlo")

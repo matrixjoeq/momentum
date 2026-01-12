@@ -18,6 +18,7 @@ dependencies = [
   "pandas>=2.2.0",
   "scipy>=1.16.3",
   "httpx>=0.25.0",
+  "exchange-calendars>=4.6.0",
 ]
 
 [project.optional-dependencies]
