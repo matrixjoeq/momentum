@@ -106,6 +106,10 @@ class BaselineCalendarEffectRequest(BaseModel):
     adjust: str = Field(default="hfq", description="qfq/hfq/none (global)")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     rebalance: str = Field(default="weekly", description="weekly/monthly/quarterly/yearly (calendar-effect study)")
+    rebalance_shift: str = Field(
+        default="prev",
+        description="If anchor falls on non-trading day: prev -> shift to previous trading day (default); next -> shift to next trading day.",
+    )
     anchors: list[int] = Field(
         default_factory=lambda: [0, 1, 2, 3, 4],
         description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
@@ -120,6 +124,10 @@ class RotationBacktestRequest(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly")
+    rebalance_shift: str = Field(
+        default="prev",
+        description="If anchor falls on non-trading day: prev -> shift to previous trading day (default); next -> shift to next trading day. Only used when rebalance_anchor is set (e.g. calendar-effect study).",
+    )
     top_k: int = Field(default=1, ge=1)
     lookback_days: int = Field(default=20, ge=1)
     skip_days: int = Field(default=0, ge=0)

@@ -299,6 +299,13 @@
           <label id="ewCalAnchorLabel">调仓锚点</label>
           <div id="ewCalAnchorBox"></div>
         </div>
+        <div>
+          <label>休市处理</label>
+          <select id="ewCalShift" style="min-width:180px;">
+            <option value="prev" selected>提前至上一交易日（默认）</option>
+            <option value="next">顺延至下一交易日</option>
+          </select>
+        </div>
         <div style="min-width:260px;">
           <label>成交价口径</label>
           <div class="row" style="gap:10px; align-items:center;">
@@ -853,6 +860,13 @@
             <label id="rotCalAnchorLabel">调仓锚点</label>
             <div id="rotCalAnchorBox"></div>
           </div>
+        <div>
+          <label>休市处理</label>
+          <select id="rotCalShift" style="min-width:180px;">
+            <option value="prev" selected>提前至上一交易日（默认）</option>
+            <option value="next">顺延至下一交易日</option>
+          </select>
+        </div>
           <div style="min-width:260px;">
             <label>成交价口径</label>
             <div class="row" style="gap:10px; align-items:center;">
@@ -3309,6 +3323,7 @@
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const rebalance = $("rebalance").value || "weekly";
+        const rebalance_shift = ($("ewCalShift") && $("ewCalShift").value) ? $("ewCalShift").value : "prev";
         const parsed = parseCalendarAnchors("ew", rebalance);
         if (!parsed.ok) return setMsg(parsed.reason);
         const anchors = parsed.anchors;
@@ -3319,7 +3334,7 @@
         setMsg("");
         const resp = await api("/analysis/baseline/calendar-effect", {
           method: "POST",
-          body: JSON.stringify({ codes, start, end, adjust, risk_free_rate, rebalance, anchors, exec_prices }),
+          body: JSON.stringify({ codes, start, end, adjust, risk_free_rate, rebalance, rebalance_shift, anchors, exec_prices }),
         });
         const text = await resp.text();
         $("status").textContent = "";
@@ -3334,6 +3349,7 @@
         const start = (($("rotCalStart").value || "").trim()) || $("start").value.trim();
         const end = (($("rotCalEnd").value || "").trim()) || $("end").value.trim();
         const rebalance = $("rotRebalance").value;
+        const rebalance_shift = ($("rotCalShift") && $("rotCalShift").value) ? $("rotCalShift").value : "prev";
         const top_k = Number(($("rotTopK").value || "1").trim());
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
@@ -3433,7 +3449,7 @@
         const resp = await api("/analysis/rotation/calendar-effect", {
           method: "POST",
           body: JSON.stringify({
-            codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
+            codes, start, end, rebalance, rebalance_shift, top_k, lookback_days, skip_days, cost_bps,
             risk_off, momentum_floor, risk_free_rate,
             score_method,
             tp_sl_mode,

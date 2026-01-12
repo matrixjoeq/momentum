@@ -122,6 +122,7 @@ def baseline_calendar_effect(payload: BaselineCalendarEffectRequest, db: Session
         adjust=payload.adjust,
         risk_free_rate=payload.risk_free_rate,
         rebalance=payload.rebalance,
+        rebalance_shift=payload.rebalance_shift,
         anchors=anchors,
         exec_prices=payload.exec_prices,
     )
@@ -141,6 +142,7 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         start=_parse_yyyymmdd(payload.start),
         end=_parse_yyyymmdd(payload.end),
         rebalance=payload.rebalance,
+        rebalance_shift=payload.rebalance_shift,
         top_k=payload.top_k,
         lookback_days=payload.lookback_days,
         skip_days=payload.skip_days,
@@ -232,6 +234,7 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         start=_parse_yyyymmdd(payload.start),
         end=_parse_yyyymmdd(payload.end),
         rebalance=payload.rebalance,
+        rebalance_shift=payload.rebalance_shift,
         top_k=payload.top_k,
         lookback_days=payload.lookback_days,
         skip_days=payload.skip_days,

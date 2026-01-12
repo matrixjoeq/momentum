@@ -33,6 +33,7 @@ class RotationInputs:
     rebalance: str = "weekly"  # daily/weekly/monthly/quarterly/yearly
     rebalance_weekday: int | None = None  # only used when rebalance=weekly; 0=Mon..4=Fri; default Fri when None
     rebalance_anchor: int | None = None  # weekly:0..4; monthly:1..28; quarterly/yearly:nth trading day (1..)
+    rebalance_shift: str = "prev"  # prev|next when anchor falls on non-trading day (used with rebalance_anchor)
     top_k: int = 1
     lookback_days: int = 20
     skip_days: int = 0  # skip recent trading days (0 means no skip)
@@ -401,6 +402,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         raise ValueError("dd_sleep_days must be >= 1")
     if int(inp.timing_rsi_window) < 2:
         raise ValueError("timing_rsi_window must be >= 2")
+    reb_shift = (inp.rebalance_shift or "next").strip().lower()
+    if reb_shift not in {"prev", "next"}:
+        raise ValueError("rebalance_shift must be one of: prev|next")
     ep = (inp.exec_price or "close").strip().lower()
     if ep not in {"close", "open", "oc2"}:
         raise ValueError("exec_price must be one of: close|open|oc2")
@@ -549,12 +553,31 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         if r == "weekly":
             if anchor is None:
                 labels_local = _rebalance_labels(dates, r, weekly_anchor="FRI")
+                return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
             else:
                 wd_map_local = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
                 if int(anchor) not in wd_map_local:
                     raise ValueError("weekly rebalance_anchor must be within [0..4] (Mon..Fri)")
                 labels_local = _rebalance_labels(dates, r, weekly_anchor=wd_map_local[int(anchor)])
-            return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+            # If anchor calendar day is non-trading, choose prev/next trading day per rebalance_shift.
+            def _shift_idx(target: pd.Timestamp) -> int:
+                t = pd.to_datetime(target).normalize()
+                if t in dates:
+                    return int(dates.get_loc(t))
+                pos = int(dates.searchsorted(t))
+                if reb_shift == "next":
+                    return int(min(pos, len(dates) - 1))
+                return int(max(pos - 1, 0))
+
+            out: list[int] = []
+            seen: set[int] = set()
+            for p in pd.unique(labels_local):
+                target = pd.Timestamp(p.end_time).normalize()
+                i = _shift_idx(target)
+                if i not in seen:
+                    out.append(i)
+                    seen.add(i)
+            return out
 
         if r == "monthly":
             if anchor is None:
@@ -564,16 +587,24 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             if dom < 1 or dom > 28:
                 raise ValueError("monthly rebalance_anchor must be within [1..28] (day-of-month)")
             labels_local = dates.to_period("M")
+
+            def _shift_idx(target: pd.Timestamp) -> int:
+                t = pd.to_datetime(target).normalize()
+                if t in dates:
+                    return int(dates.get_loc(t))
+                pos = int(dates.searchsorted(t))
+                if reb_shift == "next":
+                    return int(min(pos, len(dates) - 1))
+                return int(max(pos - 1, 0))
+
             out: list[int] = []
-            for _, pos in pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local):
-                arr = pos.to_numpy(dtype=int)
-                dts = dates[arr]
-                pick: int | None = None
-                for i, d in zip(arr, dts):
-                    if int(d.day) >= dom:
-                        pick = int(i)
-                        break
-                out.append(int(pick) if pick is not None else int(arr[-1]))
+            seen: set[int] = set()
+            for p in pd.unique(labels_local):
+                target = pd.Timestamp(dt.date(int(p.year), int(p.month), dom))
+                i = _shift_idx(target)
+                if i not in seen:
+                    out.append(i)
+                    seen.add(i)
             return out
 
         # quarterly/yearly
@@ -1350,7 +1381,6 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     }
 
     timing_expo = pd.Series(np.ones(len(dates), dtype=float), index=dates, dtype=float)
-    timing_active = pd.Series(np.ones(len(dates), dtype=bool), index=dates, dtype=bool)
     if bool(inp.timing_rsi_gate):
         win = int(inp.timing_rsi_window)
         thr = 50.0
@@ -1363,7 +1393,6 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         # Use yesterday's RSI signal to decide today's exposure (avoid look-ahead).
         expo = active.shift(1).fillna(True).astype(float)
         timing_expo = expo.astype(float)
-        timing_active = active.astype(bool)
         # When inactive (RSI <= 50), switch to equal-weight holdings (same as EW_REBAL),
         # rather than going to cash. During active periods, use rotation weights.
         w_ew_full = pd.DataFrame(0.0, index=dates, columns=w.columns)
@@ -1460,7 +1489,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 seg = timing_expo.loc[s:e].astype(float)
                 timing_ratio = float(seg.mean()) if len(seg) else None
                 timing_sleep = bool((timing_ratio is not None) and (timing_ratio <= 1e-12))
-            except Exception:  # pragma: no cover (defensive)
+            except (KeyError, TypeError, ValueError):  # pragma: no cover (defensive)
                 timing_ratio = None
                 timing_sleep = False
         nav_s = float(port_nav_net.loc[s])

@@ -39,6 +39,7 @@ def _decision_dates_for_rebalance(
     *,
     rebalance: str,
     anchor: int,
+    shift: str = "next",
 ) -> list[pd.Timestamp]:
     """
     Compute rebalance decision dates on a trading-day calendar.
@@ -54,28 +55,50 @@ def _decision_dates_for_rebalance(
     if dates.empty:
         return []
 
+    sm = (shift or "next").strip().lower()
+    if sm not in {"prev", "next"}:
+        raise ValueError("rebalance_shift must be one of: prev|next")
+
+    def _shift_to_trading_day(target: pd.Timestamp) -> pd.Timestamp:
+        t = pd.to_datetime(target).normalize()
+        if t in dates:
+            return pd.Timestamp(t)
+        pos = int(dates.searchsorted(t))
+        if sm == "next":
+            return dates[min(pos, len(dates) - 1)]
+        # prev
+        return dates[max(pos - 1, 0)]
+
     if r == "weekly":
         wd = int(anchor)
         w_anchor = _weekly_anchor_from_weekday(wd)
         labels = dates.to_period(f"W-{w_anchor}")
-        idx = pd.Series(np.arange(len(dates)), index=dates).groupby(labels).max().to_list()
-        return [dates[i] for i in idx]
+        periods = pd.unique(labels)
+        out: list[pd.Timestamp] = []
+        seen: set[pd.Timestamp] = set()
+        for p in periods:
+            # weekly anchor is the period end calendar day (Mon..Fri).
+            target = pd.Timestamp(p.end_time).normalize()
+            d = _shift_to_trading_day(target)
+            if d not in seen:
+                out.append(d)
+                seen.add(d)
+        return out
 
     if r == "monthly":
         dom = int(anchor)
         if dom < 1 or dom > 28:
             raise ValueError("monthly anchor must be within [1..28] (day-of-month)")
         labels = dates.to_period("M")
-        out: list[pd.Timestamp] = []
-        for _, pos in pd.Series(np.arange(len(dates)), index=dates).groupby(labels):
-            arr = pos.to_numpy(dtype=int)
-            dts = dates[arr]
-            pick = None
-            for d in dts:
-                if int(d.day) >= dom:
-                    pick = d
-                    break
-            out.append(pick if pick is not None else dts[-1])
+        periods = pd.unique(labels)
+        out = []
+        seen: set[pd.Timestamp] = set()
+        for p in periods:
+            target = pd.Timestamp(dt.date(int(p.year), int(p.month), dom))
+            d = _shift_to_trading_day(target)
+            if d not in seen:
+                out.append(d)
+                seen.add(d)
         return out
 
     # quarterly/yearly: Nth trading day in that period
@@ -166,6 +189,7 @@ class BaselineCalendarEffectInputs:
     adjust: str = "hfq"
     risk_free_rate: float = 0.025
     rebalance: str = "weekly"
+    rebalance_shift: str = "prev"
     anchors: list[int] | None = None  # semantics depend on rebalance
     exec_prices: list[str] | None = None  # open/close/ohlc4
 
@@ -239,7 +263,7 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             px_common = px_ff.loc[common_start:, codes]
             daily_ret = px_common.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
-            decision_dates = _decision_dates_for_rebalance(px_common.index, rebalance=reb, anchor=int(a))
+            decision_dates = _decision_dates_for_rebalance(px_common.index, rebalance=reb, anchor=int(a), shift=str(inp.rebalance_shift))
             ew_nav, ew_w = _ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
             ew_ret = ew_nav.pct_change().fillna(0.0)
 
@@ -308,6 +332,7 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             "end": inp.end.strftime("%Y%m%d"),
             "adjust": inp.adjust,
             "rebalance": reb,
+            "rebalance_shift": str(inp.rebalance_shift),
             "anchors": [int(x) for x in anchors],
             "exec_prices": [str(x) for x in exec_prices],
             "rolling_years": years_list,
@@ -398,7 +423,7 @@ def compute_rotation_calendar_effect(
 
                     bench_px = bench_close_hfq.sort_index().reindex(idx).ffill()
                     bench_ret = bench_px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-                    decision_dates = _decision_dates_for_rebalance(idx, rebalance=reb, anchor=int(a))
+                    decision_dates = _decision_dates_for_rebalance(idx, rebalance=reb, anchor=int(a), shift=str(getattr(base, "rebalance_shift", "next")))
                     bench_nav, _ = _ew_nav_and_weights_by_decision_dates(bench_ret[list(dict.fromkeys(base.codes))], decision_dates=decision_dates)
                     bench_daily = bench_nav.pct_change().fillna(0.0)
                     active = (strat_ret - bench_daily).astype(float)
@@ -441,6 +466,7 @@ def compute_rotation_calendar_effect(
             "start": base.start.strftime("%Y%m%d"),
             "end": base.end.strftime("%Y%m%d"),
             "rebalance": reb,
+            "rebalance_shift": str(getattr(base, "rebalance_shift", "next")),
             "anchors": [int(x) for x in anchors],
             "exec_prices": [str(x) for x in exec_prices],
             "rolling_years": years_list,

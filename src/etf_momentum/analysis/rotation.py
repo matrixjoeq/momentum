@@ -17,6 +17,7 @@ class RotationAnalysisInputs:
     rebalance: str = "weekly"
     rebalance_weekday: int | None = None  # legacy weekly-only anchor; prefer rebalance_anchor
     rebalance_anchor: int | None = None  # weekly:0..4; monthly:1..28; quarterly/yearly:nth trading day (1..)
+    rebalance_shift: str = "prev"  # prev|next when anchor falls on non-trading day
     top_k: int = 1
     lookback_days: int = 20
     skip_days: int = 0
@@ -85,6 +86,7 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             rebalance=inp.rebalance,
             rebalance_weekday=inp.rebalance_weekday,
             rebalance_anchor=inp.rebalance_anchor,
+            rebalance_shift=inp.rebalance_shift,
             top_k=inp.top_k,
             lookback_days=inp.lookback_days,
             skip_days=inp.skip_days,
