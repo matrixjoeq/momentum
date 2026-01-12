@@ -83,6 +83,11 @@ class RotationInputs:
     corr_filter: bool = False
     corr_window: int | None = None  # None -> defaults to lookback_days
     corr_threshold: float = 0.5
+    # --- Inertia / dampening (avoid frequent rebalances) ---
+    inertia: bool = False
+    inertia_min_hold_periods: int = 0  # minimum decision periods between holding changes (0 disables)
+    inertia_score_gap: float = 0.0  # only for top_k=1: require new_score - cur_score >= gap to switch
+    inertia_min_turnover: float = 0.0  # if expected turnover < threshold, skip rebalance (0 disables)
     # --- Rolling-return based position sizing (strategy trailing return) ---
     rr_sizing: bool = False
     rr_years: float = 3.0
@@ -371,6 +376,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         raise ValueError("corr_window must be >= 2")
     if not np.isfinite(float(inp.corr_threshold)) or float(inp.corr_threshold) < -1.0 or float(inp.corr_threshold) > 1.0:
         raise ValueError("corr_threshold must be within [-1,1]")
+    if int(inp.inertia_min_hold_periods) < 0:
+        raise ValueError("inertia_min_hold_periods must be >= 0")
+    if not np.isfinite(float(inp.inertia_score_gap)) or float(inp.inertia_score_gap) < 0.0:
+        raise ValueError("inertia_score_gap must be finite and >= 0")
+    if not np.isfinite(float(inp.inertia_min_turnover)) or float(inp.inertia_min_turnover) < 0.0 or float(inp.inertia_min_turnover) > 1.0:
+        raise ValueError("inertia_min_turnover must be within [0,1]")
     if not np.isfinite(float(inp.rr_years)) or float(inp.rr_years) <= 0:
         raise ValueError("rr_years must be finite and > 0")
     rr_thresholds = inp.rr_thresholds if inp.rr_thresholds is not None else [0.5, 1.0, 1.5, 2.0, 2.5]
@@ -694,6 +705,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     corr_window = max(2, corr_window)
     corr_threshold = float(inp.corr_threshold)
 
+    inertia_enabled = bool(inp.inertia)
+    inertia_min_hold = int(max(0, int(inp.inertia_min_hold_periods)))
+    inertia_score_gap = float(inp.inertia_score_gap)
+    inertia_min_turnover = float(inp.inertia_min_turnover)
+    last_change_decision_i = -10**9  # decision index when holdings last changed (for min-hold)
+
     def _pair_corr_hfq(*, code_a: str, code_b: str, end_pos: int) -> float | None:
         """
         Pearson corr of daily returns (pct_change) for hfq close over a lookback window ending at end_pos.
@@ -896,6 +913,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             picks = [c for c in held if c in codes]
             meta = {"best_score": None, "risk_off_triggered": True, "mode": "dd_sleep"}
         else:
+            prev_w_row = w.iloc[start_i - 1].astype(float)
             picks, meta = _pick_assets(
                 scores.loc[d],
                 top_k=inp.top_k,
@@ -914,58 +932,25 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         picks = [p for p in picks if p in codes]
         risk_picks = [p for p in picks if p in rank_codes]  # only rank codes are considered "risk assets"
 
-        # Take-profit / stop-loss: currently only stop-loss mode is implemented.
-        # IMPORTANT: per requirement, stop-loss uses qfq close for both stop level and trigger.
-        # Behavior: once stopped out within a holding segment, the portfolio goes to cash
-        # for the remainder of that segment until the next rebalance decision.
+        # Inertia (dampening) is applied after core pick + risk-control decisions.
+        inertia_meta: dict[str, Any] = {
+            "enabled": bool(inertia_enabled),
+            "min_hold_periods": int(inertia_min_hold),
+            "score_gap": float(inertia_score_gap),
+            "min_turnover": float(inertia_min_turnover),
+            "blocked": False,
+            "reason": None,
+            "current_holdings": [],
+            "new_picks": [],
+            "expected_turnover": None,
+        }
+
+        # Take-profit / stop-loss: initialized here, but stop levels are computed after the final picks
+        # are stabilized (risk controls / corr / inertia). This avoids mismatches when picks are modified.
         tp_sl: dict[str, Any] = {"mode": tp_sl_mode}
         stop_levels: dict[str, float] = {}
         stop_trigger_date: str | None = None
         stop_triggered = False
-        if tp_sl_mode == "prev_week_low_stop" and risk_picks:
-            picks_key = tuple(sorted(risk_picks))
-            # Determine stop levels (all from qfq close):
-            # - New entry: stop = previous rebalance-period min(qfq_close)
-            # - Holdings unchanged and NOT stopped out in prior segment: update stop to current rebalance-period min(qfq_close)
-            # - Special rule: if decision_date close is already below previous-period min, use current-period min as stop
-            di2 = dates.get_loc(d)
-            cur_label = labels[di2]
-            prev_label = labels[dates.get_loc(decision_dates[i - 1])] if i - 1 >= 0 else None
-            for c in risk_picks:
-                cur_min = None
-                prev_min = None
-                if not period_min_close_qfq.empty:
-                    if c in period_min_close_qfq.columns and cur_label in period_min_close_qfq.index:
-                        v = period_min_close_qfq.loc[cur_label, c]
-                        cur_min = (None if pd.isna(v) else float(v))
-                    if prev_label is not None and c in period_min_close_qfq.columns and prev_label in period_min_close_qfq.index:
-                        v = period_min_close_qfq.loc[prev_label, c]
-                        prev_min = (None if pd.isna(v) else float(v))
-
-                # base stop: new entry uses prev_min; hold-unchanged uses cur_min
-                if (prev_picks_key == picks_key) and (not prev_segment_stopped_out):
-                    base = cur_min
-                else:
-                    base = prev_min if prev_min is not None else cur_min
-
-                # special rule: if decision-day close already below prev_min -> use cur_min
-                if prev_min is not None:
-                    try:
-                        d_close = float(close_qfq.loc[d, c])
-                    except (KeyError, TypeError, ValueError):  # pragma: no cover
-                        d_close = float("nan")
-                    if np.isfinite(d_close) and d_close < float(prev_min) and (cur_min is not None):
-                        base = cur_min
-
-                if base is not None and np.isfinite(float(base)):
-                    stop_levels[c] = float(base)
-
-            tp_sl["stop_loss_level_by_code"] = {k: float(v) for k, v in stop_levels.items()}
-        elif tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"} and risk_picks:
-            tp_sl["atr_window_used"] = int(w_atr) if w_atr is not None else None
-            tp_sl["atr_mult"] = float(inp.atr_mult)
-            tp_sl["atr_step"] = float(inp.atr_step)
-            tp_sl["atr_min_mult"] = float(inp.atr_min_mult)
 
         # Apply pre-trade risk controls only when we are in risk-on mode (holding risk assets).
         if risk_picks and (not dd_in_sleep):
@@ -1074,6 +1059,43 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                     # also reset risk_picks to match picks for downstream sizing logic
                     risk_picks = list(cur_key)
 
+        # Inertia: block frequent holding changes.
+        if inertia_enabled and (not dd_in_sleep):
+            cur_key = tuple(sorted([c for c in rank_codes if float(prev_w_row.get(c, 0.0)) > 1e-12]))
+            cur_def = tuple(sorted([c for c in codes if (c not in rank_codes) and float(prev_w_row.get(c, 0.0)) > 1e-12]))
+            new_key = tuple(sorted([c for c in (risk_picks or []) if c in rank_codes]))
+            inertia_meta["current_holdings"] = list(cur_key)
+            inertia_meta["new_picks"] = list(new_key)
+
+            # Only dampen when both sides are "risk-on" and holdings would change.
+            if cur_key and new_key and (cur_key != new_key):
+                # 1) Minimum holding periods (decision-count based)
+                if inertia_min_hold > 0 and (int(i) - int(last_change_decision_i)) < int(inertia_min_hold):
+                    inertia_meta["blocked"] = True
+                    inertia_meta["reason"] = "min_hold"
+                    reasons.append(f"inertia_min_hold<{inertia_min_hold}")
+                    picks = list(cur_key) + list(cur_def)
+                    risk_picks = list(cur_key)
+                # 2) Score gap (only meaningful for top_k=1)
+                elif (float(inertia_score_gap) > 0.0) and (int(inp.top_k) == 1) and (len(cur_key) == 1) and (len(new_key) == 1):
+                    cur_c = str(cur_key[0])
+                    new_c = str(new_key[0])
+                    try:
+                        cur_s = float(scores.loc[d, cur_c])
+                        new_s = float(scores.loc[d, new_c])
+                    except Exception:  # pragma: no cover (defensive)
+                        cur_s = float("nan")
+                        new_s = float("nan")
+                    if np.isfinite(cur_s) and np.isfinite(new_s):
+                        gap = float(new_s - cur_s)
+                        inertia_meta["score_gap_now"] = gap
+                        if gap < float(inertia_score_gap):
+                            inertia_meta["blocked"] = True
+                            inertia_meta["reason"] = "score_gap"
+                            reasons.append(f"inertia_score_gap<{inertia_score_gap}")
+                            picks = list(cur_key) + list(cur_def)
+                            risk_picks = list(cur_key)
+
         # Rolling-return based exposure scaling (cash remainder).
         rr_meta: dict[str, Any] = {"enabled": bool(rr_enabled), "years": float(inp.rr_years), "window_days": int(rr_window_days)}
         rr_exposure = 1.0
@@ -1154,7 +1176,28 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                     weight_map[c] = float(weight_map[c]) * float(rr_exposure)
                 exposure = float(exposure) * float(rr_exposure)
 
-            # write weights for the whole holding segment
+            # Inertia: turnover threshold gate (applied after sizing determines final target weights).
+            if inertia_enabled and float(inertia_min_turnover) > 0.0:
+                prev_np = prev_w_row.to_numpy(dtype=float)
+                new_np = np.zeros(len(codes), dtype=float)
+                if weight_map:
+                    for j, c in enumerate(codes):
+                        if c in weight_map:
+                            new_np[j] = float(weight_map[c])
+                exp_turn = float(np.abs(new_np - prev_np).sum() / 2.0)
+                inertia_meta["expected_turnover"] = exp_turn
+                if exp_turn < float(inertia_min_turnover):
+                    inertia_meta["blocked"] = True
+                    inertia_meta["reason"] = "min_turnover"
+                    reasons.append(f"inertia_turnover<{inertia_min_turnover}")
+                    # keep previous holdings for the whole segment
+                    w.iloc[start_i : end_i + 1, :] = prev_np
+                    picks = [c for c in codes if float(prev_w_row.get(c, 0.0)) > 1e-12]
+                    risk_picks = [c for c in rank_codes if float(prev_w_row.get(c, 0.0)) > 1e-12]
+                    exposure = float(np.sum(prev_np))
+                    weight_map = {}
+
+            # write weights for the whole holding segment (unless overridden by inertia turnover gate above)
             if weight_map:
                 for c, wt in weight_map.items():
                     if wt and wt > 0:
@@ -1162,6 +1205,48 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         elif dd_in_sleep:
             # weights already copied from previous day; compute exposure for reporting
             exposure = float(w.iloc[start_i].sum()) if start_i < len(dates) else 0.0
+
+        # Compute stop-loss / take-profit metadata AFTER final picks are fixed.
+        # IMPORTANT: per requirement, stop-loss uses qfq close for both stop level and trigger.
+        if tp_sl_mode == "prev_week_low_stop" and (not dd_in_sleep) and risk_picks:
+            picks_key = tuple(sorted([c for c in risk_picks if c in rank_codes]))
+            di2 = dates.get_loc(d)
+            cur_label = labels[di2]
+            prev_label = labels[dates.get_loc(decision_dates[i - 1])] if i - 1 >= 0 else None
+            for c in picks_key:
+                cur_min = None
+                prev_min = None
+                if not period_min_close_qfq.empty:
+                    if c in period_min_close_qfq.columns and cur_label in period_min_close_qfq.index:
+                        v = period_min_close_qfq.loc[cur_label, c]
+                        cur_min = (None if pd.isna(v) else float(v))
+                    if prev_label is not None and c in period_min_close_qfq.columns and prev_label in period_min_close_qfq.index:
+                        v = period_min_close_qfq.loc[prev_label, c]
+                        prev_min = (None if pd.isna(v) else float(v))
+
+                # base stop: new entry uses prev_min; hold-unchanged uses cur_min
+                if (prev_picks_key == picks_key) and (not prev_segment_stopped_out):
+                    base = cur_min
+                else:
+                    base = prev_min if prev_min is not None else cur_min
+
+                # special rule: if decision-day close already below prev_min -> use cur_min
+                if prev_min is not None:
+                    try:
+                        d_close = float(close_qfq.loc[d, c])
+                    except (KeyError, TypeError, ValueError):  # pragma: no cover
+                        d_close = float("nan")
+                    if np.isfinite(d_close) and d_close < float(prev_min) and (cur_min is not None):
+                        base = cur_min
+
+                if base is not None and np.isfinite(float(base)):
+                    stop_levels[c] = float(base)
+            tp_sl["stop_loss_level_by_code"] = {k: float(v) for k, v in stop_levels.items()}
+        elif tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"} and (not dd_in_sleep) and risk_picks:
+            tp_sl["atr_window_used"] = int(w_atr) if w_atr is not None else None
+            tp_sl["atr_mult"] = float(inp.atr_mult)
+            tp_sl["atr_step"] = float(inp.atr_step)
+            tp_sl["atr_min_mult"] = float(inp.atr_min_mult)
 
         # In-segment stop-loss check (after weights are written for the segment).
         # We approximate execution as: hold through close on trigger day, then go cash from next trading day.
@@ -1279,6 +1364,13 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         prev_picks_key = tuple(sorted([p for p in (risk_picks or []) if p in rank_codes])) if risk_picks else None
         prev_segment_stopped_out = bool(stop_triggered)
 
+        # Update last-change marker for inertia min-hold.
+        if inertia_enabled and (not dd_in_sleep):
+            cur_key = tuple(sorted([c for c in rank_codes if float(prev_w_row.get(c, 0.0)) > 1e-12]))
+            new_key = tuple(sorted([c for c in (risk_picks or []) if c in rank_codes]))
+            if cur_key != new_key:
+                last_change_decision_i = int(i)
+
         # Apply drawdown control (may further scale weights inside this segment and update sleep state).
         dd_meta = _apply_dd_control_segment(seg_start_i=start_i, seg_end_i=end_i)
         # propagate trigger info for convenience
@@ -1299,6 +1391,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 "exposure": float(exposure),
                 "tp_sl": tp_sl,
                 "corr_filter": corr_meta,
+                "inertia": inertia_meta,
                 "rr_sizing": rr_meta,
                 "dd_control": dd_meta,
                 "risk_controls": {"reasons": reasons, **details},

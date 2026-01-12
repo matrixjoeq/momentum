@@ -59,6 +59,11 @@ class RotationAnalysisInputs:
     corr_filter: bool = False
     corr_window: int | None = None
     corr_threshold: float = 0.5
+    # Inertia / dampening (avoid frequent rebalances)
+    inertia: bool = False
+    inertia_min_hold_periods: int = 0
+    inertia_score_gap: float = 0.0
+    inertia_min_turnover: float = 0.0
     rr_sizing: bool = False
     rr_years: float = 3.0
     rr_thresholds: list[float] | None = None
@@ -125,6 +130,10 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             corr_filter=inp.corr_filter,
             corr_window=inp.corr_window,
             corr_threshold=inp.corr_threshold,
+            inertia=inp.inertia,
+            inertia_min_hold_periods=inp.inertia_min_hold_periods,
+            inertia_score_gap=inp.inertia_score_gap,
+            inertia_min_turnover=inp.inertia_min_turnover,
             rr_sizing=inp.rr_sizing,
             rr_years=inp.rr_years,
             rr_thresholds=inp.rr_thresholds,

@@ -386,6 +386,7 @@
           <button class="tabBtn" data-tab="rotTabVol" role="tab" aria-selected="false">波动率过滤</button>
           <button class="tabBtn" data-tab="rotTabChop" role="tab" aria-selected="false">震荡过滤</button>
           <button class="tabBtn" data-tab="rotTabCorr" role="tab" aria-selected="false">相关性过滤</button>
+          <button class="tabBtn" data-tab="rotTabInertia" role="tab" aria-selected="false">钝化</button>
           <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益率</button>
           <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
           <button class="tabBtn" data-tab="rotTabTiming" role="tab" aria-selected="false">择时</button>
@@ -575,6 +576,36 @@
           </div>
           <div class="muted" style="margin-top:8px">
             说明：若本期计划调入标的与当前持仓标的在回看窗口内的相关性（基于 hfq 收盘价日收益）大于阈值，则本期不调仓（保持原持仓）。
+          </div>
+        </div>
+
+        <div id="rotTabInertia" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>钝化开关</label>
+              <select id="rotInertiaOn" style="min-width:160px;">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>最短持有期(调仓次数)</label>
+              <input id="rotInertiaMinHold" value="0" placeholder="如 2" />
+            </div>
+            <div>
+              <label>单标的切换阈值(动量差)</label>
+              <input id="rotInertiaScoreGap" value="0" placeholder="如 0.01" />
+            </div>
+            <div>
+              <label>最小换手阈值</label>
+              <input id="rotInertiaMinTurnover" value="0" placeholder="如 0.2" />
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px">
+            说明：用于降低频繁调仓。<br/>
+            - 最短持有期：当计划换仓时，若距离上一次“持仓发生变化”的调仓决策不足 N 次，则本期保持原持仓。<br/>
+            - 单标的切换阈值：仅对 TopK=1 生效；只有当新标的动量分数比当前持仓至少高出 Δ 时才允许切换。<br/>
+            - 最小换手阈值：根据目标权重与当前权重估算换手（0.5×Σ|Δw|）；若换手低于阈值则本期不调仓。
           </div>
         </div>
 
@@ -3215,6 +3246,13 @@
         if (corr_filter && corr_window != null && (!Number.isFinite(corr_window) || corr_window < 2)) return setMsg("相关性回看窗口必须>=2（或留空表示同步动量回看）");
         const corr_threshold = Number(($("rotCorrThr").value || "0.5").trim());
         if (corr_filter && (!Number.isFinite(corr_threshold) || corr_threshold < -1 || corr_threshold > 1)) return setMsg("相关性阈值需在 [-1,1]，例如 0.5");
+        const inertia = ($("rotInertiaOn").value === "true");
+        const inertia_min_hold_periods = Number(($("rotInertiaMinHold").value || "0").trim());
+        if (inertia && (!Number.isFinite(inertia_min_hold_periods) || inertia_min_hold_periods < 0)) return setMsg("最短持有期必须是 >=0 的整数，例如 2");
+        const inertia_score_gap = Number(($("rotInertiaScoreGap").value || "0").trim());
+        if (inertia && (!Number.isFinite(inertia_score_gap) || inertia_score_gap < 0)) return setMsg("单标的切换阈值必须是 >=0 的数字，例如 0.01");
+        const inertia_min_turnover = Number(($("rotInertiaMinTurnover").value || "0").trim());
+        if (inertia && (!Number.isFinite(inertia_min_turnover) || inertia_min_turnover < 0 || inertia_min_turnover > 1)) return setMsg("最小换手阈值需在 [0,1]，例如 0.2");
         const rr_sizing = ($("rotRROn").value === "true");
         const rrYearsRaw = ($("rotRRYears").value || "3").trim();
         const rr_years = Number(rrYearsRaw);
@@ -3277,6 +3315,7 @@
             tp_sl_mode,
             atr_window, atr_mult, atr_step, atr_min_mult,
             corr_filter, corr_window, corr_threshold,
+            inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             timing_rsi_gate, timing_rsi_window,

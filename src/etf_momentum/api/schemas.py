@@ -184,6 +184,20 @@ class RotationBacktestRequest(BaseModel):
         description="Correlation lookback window (trading days) computed from hfq closes. None -> defaults to lookback_days.",
     )
     corr_threshold: float = Field(default=0.5, ge=-1.0, le=1.0, description="Block rebalance if corr > threshold.")
+    # Inertia / dampening (avoid frequent rebalances)
+    inertia: bool = Field(default=False, description="Enable inertia (dampening) to avoid frequent rebalances.")
+    inertia_min_hold_periods: int = Field(default=0, ge=0, description="Minimum decision periods between holding changes (0 disables).")
+    inertia_score_gap: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Only for top_k=1: require new_score - cur_score >= gap to switch (0 disables).",
+    )
+    inertia_min_turnover: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Skip rebalance if expected turnover < threshold (0 disables).",
+    )
     # Rolling-return based position sizing (strategy trailing return)
     rr_sizing: bool = Field(default=False, description="Enable rolling-return based exposure sizing at rebalance.")
     rr_years: float = Field(default=3.0, gt=0.0, description="Trailing window length in years (approx 252*years trading days).")
