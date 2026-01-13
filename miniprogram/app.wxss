@@ -64,8 +64,8 @@
   font-size: 22rpx;
   color: #111;
 }
-.cal-cell.trade.pos .cal-ret { color: #2e7d32; }
-.cal-cell.trade.neg .cal-ret { color: #c62828; }
+.cal-cell.trade.pos .cal-ret { color: #c62828; } /* 正收益：红 */
+.cal-cell.trade.neg .cal-ret { color: #2e7d32; } /* 负收益：绿 */
 
 .mon-grid {
   display: grid;
@@ -79,12 +79,12 @@
   padding: 10rpx;
   min-height: 88rpx;
 }
-.mon-cell.pos { background: #eef7ee; }
-.mon-cell.neg { background: #fdeeee; }
+.mon-cell.pos { background: #fdeeee; } /* 正收益：红 */
+.mon-cell.neg { background: #eef7ee; } /* 负收益：绿 */
 .mon-title { font-size: 24rpx; color: #333; }
 .mon-ret { margin-top: 6rpx; font-size: 24rpx; }
-.mon-cell.pos .mon-ret { color: #2e7d32; }
-.mon-cell.neg .mon-ret { color: #c62828; }
+.mon-cell.pos .mon-ret { color: #c62828; } /* 正收益：红 */
+.mon-cell.neg .mon-ret { color: #2e7d32; } /* 负收益：绿 */
 
 .yr-grid {
   display: grid;
@@ -97,10 +97,27 @@
   padding: 12rpx;
   min-height: 92rpx;
 }
-.yr-cell.pos { background: #eef7ee; }
-.yr-cell.neg { background: #fdeeee; }
+.yr-cell.pos { background: #fdeeee; } /* 正收益：红 */
+.yr-cell.neg { background: #eef7ee; } /* 负收益：绿 */
 .yr-title { font-size: 26rpx; font-weight: 600; color: #111; }
 .yr-ret { margin-top: 8rpx; font-size: 24rpx; }
-.yr-cell.pos .yr-ret { color: #2e7d32; }
-.yr-cell.neg .yr-ret { color: #c62828; }
+.yr-cell.pos .yr-ret { color: #c62828; } /* 正收益：红 */
+.yr-cell.neg .yr-ret { color: #2e7d32; } /* 负收益：绿 */
 
+/* --- Floating tooltip for interactive charts --- */
+.canvasWrap {
+  position: relative;
+}
+.tip {
+  position: absolute;
+  max-width: 80%;
+  padding: 10rpx 12rpx;
+  border-radius: 10rpx;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 22rpx;
+  line-height: 1.35;
+  white-space: pre-line;
+  pointer-events: none;
+  z-index: 10;
+}

@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 import datetime as dt
 
+import numpy as np
+import pandas as pd
+
 from .deps import get_akshare, get_session
 from .schemas import (
     BaselineAnalysisRequest,
@@ -17,6 +20,7 @@ from .schemas import (
     RotationMonteCarloRequest,
     RotationBacktestRequest,
     RotationWeekly5OpenSimRequest,
+    RotationNextPlanRequest,
     SimDecisionGenerateRequest,
     SimInitFixedStrategyResponse,
     SimPortfolioCreateRequest,
@@ -75,7 +79,7 @@ from ..db.repo import (
 )
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
-from ..calendar.trading_calendar import trading_days
+from ..calendar.trading_calendar import shift_to_trading_day, trading_days
 from ..db.models import SimDecision, SimPortfolio, SimPositionDaily, SimStrategyConfig, SimTrade, SimVariant
 
 logger = logging.getLogger(__name__)
@@ -396,6 +400,69 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
         },
         "by_anchor": by_anchor,
         "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+    }
+
+
+@router.post("/analysis/rotation/next-plan")
+def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    "Tomorrow plan" for the fixed mini-program rotation strategy.
+    If the next trading day is a rebalance effective day (open execution), return the top pick based on asof close.
+    """
+    asof = _parse_yyyymmdd(payload.asof)
+    anchor = int(payload.anchor_weekday)
+    if anchor not in {0, 1, 2, 3, 4}:
+        raise HTTPException(status_code=400, detail="anchor_weekday must be 0..4")
+
+    # next trading day (XSHG) after asof
+    try:
+        tds = trading_days(asof, asof + dt.timedelta(days=20), cal="XSHG")
+        next_td = next((d for d in tds if d > asof), asof)
+    except Exception:  # pragma: no cover
+        next_td = asof
+
+    # Determine if asof is the decision day for the coming weekly anchor period.
+    # For weekly anchor weekday, the period end is the next occurrence of that weekday (>= asof),
+    # and decision_date is shifted to previous trading day if end is not a session ("prev").
+    delta = (anchor - asof.weekday()) % 7
+    anchor_date = asof + dt.timedelta(days=int(delta))
+    try:
+        decision_date = shift_to_trading_day(anchor_date, shift="prev", cal="XSHG")
+    except Exception:  # pragma: no cover
+        decision_date = anchor_date
+    rebalance_effective_next_day = bool(decision_date == asof)
+
+    codes = _FIXED_CODES[:]
+    start = asof - dt.timedelta(days=90)
+    px = load_close_prices(db, codes=codes, start=start, end=asof, adjust="hfq")
+    if px.empty:
+        raise HTTPException(status_code=400, detail="no price data")
+    px = px.sort_index().ffill()
+    first_valid = {c: px[c].first_valid_index() for c in codes if c in px.columns}
+    common_start = max([d for d in first_valid.values() if d is not None])
+    px = px.loc[common_start:, codes]
+    if len(px) < 21:
+        raise HTTPException(status_code=400, detail="insufficient history for lookback_days=20")
+
+    last = px.iloc[-1]
+    prev = px.iloc[-21]
+    scores: dict[str, float] = {}
+    for c in codes:
+        a = float(last[c])
+        b = float(prev[c])
+        s = (a / b - 1.0) if (np.isfinite(a) and np.isfinite(b) and b > 0) else float("nan")
+        scores[c] = float(s)
+    pick_code = max(scores.keys(), key=lambda k: (scores.get(k) if np.isfinite(scores.get(k, float("nan"))) else -1e18))
+    pick_name = _FIXED_NAMES.get(pick_code, pick_code)
+
+    return {
+        "asof": asof.strftime("%Y%m%d"),
+        "next_trading_day": next_td.isoformat(),
+        "rebalance_effective_next_day": rebalance_effective_next_day,
+        "pick_code": pick_code,
+        "pick_name": pick_name,
+        "scores": {c: float(scores[c]) for c in codes},
+        "meta": {"anchor_weekday": anchor, "rebalance_shift": "prev", "lookback_days": 20, "top_k": 1, "exec_price": "open"},
     }
 
 

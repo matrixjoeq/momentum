@@ -26,7 +26,7 @@
     }
   },
   "compileType": "miniprogram",
-  "libVersion": "3.4.8",
+  "libVersion": "3.13.1",
   "appid": "wx818c2df6e39532df",
   "projectname": "momentum-rotation",
   "miniprogramRoot": "./",

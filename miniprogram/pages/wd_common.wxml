@@ -18,28 +18,54 @@
   </view>
 
   <view class="card">
-    <view class="title">图表1：等权净值（log）+ EMA252 + 布林带</view>
-    <canvas canvas-id="cNav" id="cNav" style="width: 100%; height: 300rpx;"></canvas>
+    <view class="title">图表1：等权净值 + EMA252 + 布林带</view>
+    <view class="canvasWrap">
+      <!-- height +50% (300rpx -> 450rpx) -->
+      <canvas canvas-id="cNav" id="cNav" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 450rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='cNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
   </view>
 
   <view class="card">
     <view class="title">图表2：回撤</view>
-    <canvas canvas-id="cDD" id="cDD" style="width: 100%; height: 240rpx;"></canvas>
+    <view class="canvasWrap">
+      <canvas canvas-id="cDD" id="cDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 240rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='cDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
   </view>
 
   <view class="card">
     <view class="title">图表3：RSI(24)</view>
-    <canvas canvas-id="cRSI" id="cRSI" style="width: 100%; height: 220rpx;"></canvas>
+    <view class="canvasWrap">
+      <canvas canvas-id="cRSI" id="cRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='cRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
   </view>
 
   <view class="card">
     <view class="title">图表4：滚动三年收益率</view>
-    <canvas canvas-id="cRR3Y" id="cRR3Y" style="width: 100%; height: 220rpx;"></canvas>
+    <view class="canvasWrap">
+      <canvas canvas-id="cRR3Y" id="cRR3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='cRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
   </view>
 
   <view class="card">
     <view class="title">图表5：滚动三年回撤</view>
-    <canvas canvas-id="cRDD3Y" id="cRDD3Y" style="width: 100%; height: 220rpx;"></canvas>
+    <view class="canvasWrap">
+      <canvas canvas-id="cRDD3Y" id="cRDD3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='cRDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
   </view>
 
   <view class="card">
@@ -62,7 +88,15 @@
 
   <view class="card">
     <view class="title">图表9：相关性（Pearson）</view>
-    <canvas canvas-id="cCorr" id="cCorr" style="width: 100%; height: 260rpx;"></canvas>
+    <view class="muted" style="margin-top: 8rpx;">
+      <block wx:for="{{corrMapLines}}" wx:key="*this">
+        <view>{{item}}</view>
+      </block>
+      <view style="margin-top: 6rpx;">颜色：红=正相关，绿=负相关</view>
+    </view>
+    <view class="row" style="justify-content:center; margin-top: 8rpx;">
+      <canvas canvas-id="cCorr" id="cCorr" style="width: 94%; height: 380rpx;"></canvas>
+    </view>
   </view>
 
   <view class="card">
@@ -102,23 +136,30 @@
       </view>
     </view>
 
-    <!-- Monthly calendar: each year 3x4 -->
+    <!-- Monthly calendar: one year (switchable) -->
     <view wx:if="{{calMode==='monthly'}}" style="margin-top: 12rpx;">
-      <block wx:for="{{calMonthlyYears}}" wx:key="year">
-        <view class="muted" style="margin-top: 10rpx;">{{item.year}}</view>
-        <view class="mon-grid">
-          <block wx:for="{{item.cells}}" wx:key="k">
-            <view class="mon-cell {{item.kind}}">
-              <view class="mon-title">{{item.title}}</view>
-              <view class="mon-ret">{{item.retText}}</view>
-            </view>
-          </block>
-        </view>
-      </block>
+      <view class="row" style="justify-content:space-between;">
+        <button size="mini" bindtap="prevCalYear">上一年</button>
+        <view class="muted">{{calMonthlyYear}}</view>
+        <button size="mini" bindtap="nextCalYear">下一年</button>
+      </view>
+      <view class="mon-grid" style="margin-top: 10rpx;">
+        <block wx:for="{{calMonthlyCells}}" wx:key="k">
+          <view class="mon-cell {{item.kind}}">
+            <view class="mon-title">{{item.title}}</view>
+            <view class="mon-ret">{{item.retText}}</view>
+          </view>
+        </block>
+      </view>
     </view>
 
     <!-- Yearly calendar: 4 columns -->
     <view wx:if="{{calMode==='yearly'}}" style="margin-top: 12rpx;">
+      <view class="row" style="justify-content:space-between; margin-bottom: 10rpx;">
+        <button size="mini" bindtap="prevYearPage">上一页</button>
+        <view class="muted">每页最多 12 年｜第 {{calYearlyPage}} 页</view>
+        <button size="mini" bindtap="nextYearPage">下一页</button>
+      </view>
       <view class="yr-grid">
         <block wx:for="{{calYearlyCells}}" wx:key="year">
           <view class="yr-cell {{item.kind}}">
@@ -128,6 +169,206 @@
         </block>
       </view>
     </view>
+  </view>
+
+  <!-- ================= Rotation Strategy Section ================= -->
+  <view class="card">
+    <view class="title">轮动策略（固定参数：周频 / Top1 / 回看20 / 开盘价执行 / 无风控）</view>
+    <view class="muted">展示区间与上方等权组合一致</view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表1：策略净值 vs 等权净值</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rNav" id="rNav" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 450rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表2：回撤对比（策略 vs 等权）</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rDD" id="rDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 260rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表3：策略净值 RSI(24)</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rRSI" id="rRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表4：策略滚动三年收益率</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rRR3Y" id="rRR3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表5：策略滚动三年回撤</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rMDD3Y" id="rMDD3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rMDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表6：净值比值 ROT/EW + EMA252 + 布林带</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rRatio" id="rRatio" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 300rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rRatio'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表7：比值曲线 RSI(24)</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rRatioRSI" id="rRatioRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rRatioRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表8：40日收益差（策略 - 等权）</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rDiff40" id="rDiff40" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rDiff40'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表9：策略绩效指标（含超额）</view>
+    <view class="muted">策略累计：{{rm.cumulative_return}}｜年化：{{rm.annualized_return}}｜波动：{{rm.annualized_volatility}}｜最大回撤：{{rm.max_drawdown}}</view>
+    <view class="muted">夏普：{{rm.sharpe_ratio}}｜索诺提：{{rm.sortino_ratio}}｜平均日换手：{{rm.avg_daily_turnover}}</view>
+    <view class="muted">累计超额：{{rm.excess_cum}}｜超额年化：{{rm.excess_ann}}｜信息比率：{{rm.excess_ir}}</view>
+    <view class="muted">超额胜率：{{rm.excess_win_rate}}｜平均超额盈利：{{rm.excess_avg_win}}｜平均超额亏损：{{rm.excess_avg_loss}}</view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表10：标的收益贡献</view>
+    <canvas canvas-id="rRC" id="rRC" style="width: 100%; height: 220rpx;"></canvas>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表11：标的风险贡献</view>
+    <canvas canvas-id="rRiskC" id="rRiskC" style="width: 100%; height: 220rpx;"></canvas>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表12：策略收益率日历（日/月/年）</view>
+    <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
+      <button size="mini" bindtap="setRotCalMode" data-m="daily">日度</button>
+      <button size="mini" bindtap="setRotCalMode" data-m="monthly">月度</button>
+      <button size="mini" bindtap="setRotCalMode" data-m="yearly">年度</button>
+      <view class="muted" style="margin-left: 10rpx;">当前：{{rotCalModeLabel}}</view>
+    </view>
+
+    <view wx:if="{{rotCalMode==='daily'}}" style="margin-top: 12rpx;">
+      <view class="row" style="justify-content:space-between;">
+        <button size="mini" bindtap="prevRotCalMonth">上一月</button>
+        <view class="muted">{{rotCalDailyMonth}}</view>
+        <button size="mini" bindtap="nextRotCalMonth">下一月</button>
+      </view>
+      <view class="cal-grid" style="margin-top: 10rpx;">
+        <view class="cal-head">日</view>
+        <view class="cal-head">一</view>
+        <view class="cal-head">二</view>
+        <view class="cal-head">三</view>
+        <view class="cal-head">四</view>
+        <view class="cal-head">五</view>
+        <view class="cal-head">六</view>
+        <block wx:for="{{rotCalDailyCells}}" wx:key="k">
+          <view class="cal-cell {{item.kind}}">
+            <view class="cal-day">{{item.dayText}}</view>
+            <view class="cal-ret">{{item.retText}}</view>
+          </view>
+        </block>
+      </view>
+    </view>
+
+    <view wx:if="{{rotCalMode==='monthly'}}" style="margin-top: 12rpx;">
+      <view class="row" style="justify-content:space-between;">
+        <button size="mini" bindtap="prevRotCalYear">上一年</button>
+        <view class="muted">{{rotCalMonthlyYear}}</view>
+        <button size="mini" bindtap="nextRotCalYear">下一年</button>
+      </view>
+      <view class="mon-grid" style="margin-top: 10rpx;">
+        <block wx:for="{{rotCalMonthlyCells}}" wx:key="k">
+          <view class="mon-cell {{item.kind}}">
+            <view class="mon-title">{{item.title}}</view>
+            <view class="mon-ret">{{item.retText}}</view>
+          </view>
+        </block>
+      </view>
+    </view>
+
+    <view wx:if="{{rotCalMode==='yearly'}}" style="margin-top: 12rpx;">
+      <view class="row" style="justify-content:space-between; margin-bottom: 10rpx;">
+        <button size="mini" bindtap="prevRotYearPage">上一页</button>
+        <view class="muted">每页最多 12 年｜第 {{rotCalYearlyPage}} 页</view>
+        <button size="mini" bindtap="nextRotYearPage">下一页</button>
+      </view>
+      <view class="yr-grid">
+        <block wx:for="{{rotCalYearlyCells}}" wx:key="year">
+          <view class="yr-cell {{item.kind}}">
+            <view class="yr-title">{{item.year}}</view>
+            <view class="yr-ret">{{item.retText}}</view>
+          </view>
+        </block>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表13：逐期收益对比（策略 vs 等权）</view>
+    <view class="muted">{{rotPeriodPageText}}</view>
+    <view class="row" style="justify-content:space-between; margin-top: 10rpx;">
+      <button size="mini" bindtap="prevRotPeriodPage">上一页</button>
+      <button size="mini" bindtap="nextRotPeriodPage">下一页</button>
+    </view>
+    <view style="margin-top: 10rpx;">
+      <block wx:for="{{rotPeriodsView}}" wx:key="k">
+        <view style="margin: 10rpx 0;">
+          <view class="row" style="justify-content:space-between;">
+            <view class="muted">{{item.end_date}}</view>
+            <view class="muted">策 {{item.strategy_return_text}} / 等 {{item.equal_weight_return_text}} / 超 {{item.excess_return_text}}</view>
+          </view>
+          <view class="muted" style="margin-top: 6rpx;">{{item.trade_text}}</view>
+        </view>
+      </block>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表14：下一调仓日计划</view>
+    <view wx:if="{{nextPlan && nextPlan.rebalance_effective_next_day}}" class="muted">
+      下一交易日（{{nextPlan.next_trading_day}}）为调仓执行日；计划持有：{{nextPlan.pick_name}}（{{nextPlan.pick_code}}）
+    </view>
+    <view wx:if="{{nextPlan && !nextPlan.rebalance_effective_next_day}}" class="muted">
+      下一交易日（{{nextPlan.next_trading_day}}）非调仓执行日
+    </view>
+    <view wx:if="{{!nextPlan}}" class="muted">计划未加载</view>
   </view>
 </view>
 

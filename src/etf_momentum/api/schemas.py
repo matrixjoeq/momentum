@@ -252,6 +252,16 @@ class RotationWeekly5OpenSimRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
 
 
+class RotationNextPlanRequest(BaseModel):
+    """
+    Next rebalance plan for the fixed 4-ETF mini-program strategy (weekly, top1, lookback20, open execution).
+    Used by the mini-program to show "tomorrow plan" when tomorrow is a rebalance effective day.
+    """
+
+    anchor_weekday: int = Field(ge=0, le=4, description="0=Mon..4=Fri")
+    asof: str = Field(description="YYYYMMDD (usually the latest available trading day in backtest range)")
+
+
 class SimPortfolioCreateRequest(BaseModel):
     name: str = Field(default="默认账户", description="Portfolio name")
     initial_cash: float = Field(default=1_000_000.0, gt=0.0, description="Initial cash (base_ccy units)")

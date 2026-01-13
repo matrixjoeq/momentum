@@ -26,7 +26,7 @@ function _downsample(xs, maxN) {
   return { idx };
 }
 
-function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed = null, title = "" }) {
+function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed = null, title = "", yLabelFmt = null }) {
   const padL = 46, padR = 16, padT = 18, padB = 22;
   const W = width, H = height;
   ctx.clearRect(0, 0, W, H);
@@ -82,8 +82,9 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
   ctx.setFontSize(10);
   const yMin = yr.min;
   const yMax = yr.max;
-  ctx.fillText(String(yMax.toFixed(4)), 2, padT + 10);
-  ctx.fillText(String(yMin.toFixed(4)), 2, padT + plotH);
+  const fmt = (typeof yLabelFmt === "function") ? yLabelFmt : ((v) => Number(v).toFixed(4));
+  ctx.fillText(String(fmt(yMax)), 2, padT + 10);
+  ctx.fillText(String(fmt(yMin)), 2, padT + plotH);
 
   const n = (x || []).length;
   const ds = _downsample(x || [], 220);
@@ -132,16 +133,31 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix }) {
   const n = (labels || []).length;
   if (!n) { ctx.draw(); return; }
   const gridTop = 24;
-  const gridLeft = 54;
-  const cell = Math.min((W - gridLeft - pad) / n, (H - gridTop - pad) / n);
+  // estimate left label width and center the matrix area in remaining space
+  const leftLabelW = 18; // labels are "1..4"; keep a small gutter
+  const availW = Math.max(1, W - leftLabelW - pad);
+  const availH = Math.max(1, H - gridTop - pad);
+  const cell = Math.min(availW / n, availH / n);
+  const gridW = cell * n;
+  const gridLeft = leftLabelW + Math.max(0, (availW - gridW) / 2);
 
   function color(v) {
     const x = Math.max(-1, Math.min(1, Number(v)));
-    // blue(-1) -> white(0) -> red(+1)
-    const t = (x + 1) / 2;
-    const r = Math.round(255 * t + 255 * (1 - t) * 0.9);
-    const g = Math.round(255 * (1 - Math.abs(x)) * 0.95);
-    const b = Math.round(255 * (1 - t) + 255 * t * 0.9);
+    // green(-1) -> white(0) -> red(+1) (avoid purple/blue tint)
+    if (!Number.isFinite(x)) return "rgb(240,240,240)";
+    if (x >= 0) {
+      // 0..1 : white -> red
+      const t = x;
+      const r = 255;
+      const g = Math.round(255 * (1 - t));
+      const b = Math.round(255 * (1 - t));
+      return `rgb(${r},${g},${b})`;
+    }
+    // -1..0 : green -> white
+    const t = -x;
+    const r = Math.round(255 * (1 - t));
+    const g = 255;
+    const b = Math.round(255 * (1 - t));
     return `rgb(${r},${g},${b})`;
   }
 
@@ -150,7 +166,7 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix }) {
   for (let i = 0; i < n; i++) {
     const lab = String(labels[i]);
     ctx.fillText(lab, 2, gridTop + i * cell + cell * 0.65);
-    ctx.fillText(lab, gridLeft + i * cell, gridTop - 4);
+    ctx.fillText(lab, gridLeft + i * cell + 2, gridTop - 4);
   }
 
   for (let i = 0; i < n; i++) {
@@ -165,6 +181,18 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix }) {
     }
   }
   ctx.draw();
+}
+
+function lineIndexFromTouchX(xRel, width, n) {
+  const padL = 46, padR = 16;
+  if (!Number.isFinite(xRel) || !Number.isFinite(width) || !Number.isFinite(n) || n <= 0) return null;
+  const W = width;
+  const plotW = W - padL - padR;
+  if (plotW <= 1) return 0;
+  const x = Math.max(padL, Math.min(W - padR, Number(xRel)));
+  const t = (x - padL) / plotW;
+  const idx = Math.round(t * (n - 1));
+  return Math.max(0, Math.min(n - 1, idx));
 }
 
 function drawBarChart(ctx, { width, height, title, labels, values, colors = [], valueFmt = (x) => String(x), vmin = null, vmax = null }) {
@@ -317,5 +345,5 @@ function drawCalendarMonthHeatmap(ctx, { width, height, title, dates, values }) 
   ctx.draw();
 }
 
-module.exports = { drawLineChart, drawHeatmap4, drawBarChart, drawCalendarDailyHeatmap, drawCalendarMonthHeatmap };
+module.exports = { drawLineChart, drawHeatmap4, drawBarChart, drawCalendarDailyHeatmap, drawCalendarMonthHeatmap, lineIndexFromTouchX };
 
