@@ -1,0 +1,106 @@
+.page {
+  background: #f6f7fb;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12rpx;
+  padding: 20rpx;
+  margin: 20rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0,0,0,0.05);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.muted {
+  color: #888;
+  font-size: 24rpx;
+}
+
+.title {
+  font-size: 32rpx;
+  font-weight: 600;
+}
+
+.btn {
+  margin-top: 12rpx;
+}
+
+/* --- Calendar styles (Chart 10) --- */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8rpx;
+}
+.cal-head {
+  text-align: center;
+  color: #666;
+  font-size: 24rpx;
+  padding: 6rpx 0;
+}
+.cal-cell {
+  background: #f6f7fb;
+  border-radius: 10rpx;
+  padding: 8rpx;
+  min-height: 86rpx;
+}
+.cal-cell.empty {
+  background: transparent;
+}
+.cal-cell.trade {
+  background: #eef4ff;
+}
+.cal-day {
+  font-size: 22rpx;
+  color: #666;
+}
+.cal-ret {
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #111;
+}
+.cal-cell.trade.pos .cal-ret { color: #2e7d32; }
+.cal-cell.trade.neg .cal-ret { color: #c62828; }
+
+.mon-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10rpx;
+  margin-top: 8rpx;
+}
+.mon-cell {
+  background: #f6f7fb;
+  border-radius: 10rpx;
+  padding: 10rpx;
+  min-height: 88rpx;
+}
+.mon-cell.pos { background: #eef7ee; }
+.mon-cell.neg { background: #fdeeee; }
+.mon-title { font-size: 24rpx; color: #333; }
+.mon-ret { margin-top: 6rpx; font-size: 24rpx; }
+.mon-cell.pos .mon-ret { color: #2e7d32; }
+.mon-cell.neg .mon-ret { color: #c62828; }
+
+.yr-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10rpx;
+}
+.yr-cell {
+  background: #f6f7fb;
+  border-radius: 10rpx;
+  padding: 12rpx;
+  min-height: 92rpx;
+}
+.yr-cell.pos { background: #eef7ee; }
+.yr-cell.neg { background: #fdeeee; }
+.yr-title { font-size: 26rpx; font-weight: 600; color: #111; }
+.yr-ret { margin-top: 8rpx; font-size: 24rpx; }
+.yr-cell.pos .yr-ret { color: #2e7d32; }
+.yr-cell.neg .yr-ret { color: #c62828; }
+

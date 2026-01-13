@@ -1,0 +1,37 @@
+<view class="page">
+  <view class="card">
+    <view class="title">周周轮动 · 说明</view>
+    <view class="muted" style="margin-top: 10rpx;">
+      本小程序用于记录与复盘「ETF 周度动量轮动」的模拟结果，面向个人学习研究。
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">免责声明</view>
+    <view class="text" style="margin-top: 10rpx;">
+      1）本小程序仅用于个人学习、研究与复盘，不构成任何形式的投资建议、理财建议或交易建议。<br/>
+      2）小程序展示的策略、标的、参数、收益、回撤等信息仅为历史模拟或计算结果，不代表未来表现。<br/>
+      3）投资有风险，入市需谨慎。任何因使用本小程序信息而产生的投资损益，均由使用者自行承担。<br/>
+      4）数据来源可能存在延迟、错误或缺失，结果仅供参考。
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="row">
+      <label class="row" style="justify-content:flex-start;">
+        <checkbox-group bindchange="onAcknowledgeChange">
+          <checkbox value="ack" checked="{{acknowledged}}" />我已阅读并知晓以上说明与免责声明
+        </checkbox-group>
+      </label>
+    </view>
+    <view class="row" style="margin-top: 12rpx;">
+      <label class="row" style="justify-content:flex-start;">
+        <checkbox-group bindchange="onSkipChange">
+          <checkbox value="skip" checked="{{skipNext}}" />以后进入不再显示说明页
+        </checkbox-group>
+      </label>
+    </view>
+    <button class="btn" type="primary" disabled="{{!acknowledged}}" bindtap="onEnter">进入小程序</button>
+  </view>
+</view>
+

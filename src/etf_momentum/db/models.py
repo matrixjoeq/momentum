@@ -157,3 +157,94 @@ class EtfPriceAudit(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+
+class SimPortfolio(Base):
+    __tablename__ = "sim_portfolio"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="默认账户")
+    base_ccy: Mapped[str] = mapped_column(String(16), nullable=False, default="CNY")
+    initial_cash: Mapped[float] = mapped_column(Float, nullable=False, default=1_000_000.0)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SimStrategyConfig(Base):
+    __tablename__ = "sim_strategy_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_portfolio.id"), index=True, nullable=False)
+
+    codes_json: Mapped[str] = mapped_column(String(512), nullable=False)  # json list
+    rebalance: Mapped[str] = mapped_column(String(16), nullable=False, default="weekly")
+    lookback_days: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    exec_price: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    rebalance_shift: Mapped[str] = mapped_column(String(8), nullable=False, default="prev")
+    risk_controls_json: Mapped[str] = mapped_column(String(1024), nullable=False, default="{}")
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SimVariant(Base):
+    __tablename__ = "sim_variant"
+    __table_args__ = (UniqueConstraint("portfolio_id", "anchor_weekday", name="uq_sim_variant_portfolio_anchor"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_portfolio.id"), index=True, nullable=False)
+    config_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_strategy_config.id"), index=True, nullable=False)
+
+    anchor_weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 0..4
+    label: Mapped[str] = mapped_column(String(8), nullable=False)  # MON..FRI
+    is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0/1 for sqlite simplicity
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SimDecision(Base):
+    __tablename__ = "sim_decision"
+    __table_args__ = (UniqueConstraint("variant_id", "decision_date", name="uq_sim_decision_variant_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    variant_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_variant.id"), index=True, nullable=False)
+
+    decision_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    effective_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    picked_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    scores_json: Mapped[str] = mapped_column(String(4096), nullable=False, default="{}")
+    prev_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reason_json: Mapped[str] = mapped_column(String(2048), nullable=False, default="{}")
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SimTrade(Base):
+    __tablename__ = "sim_trade"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    variant_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_variant.id"), index=True, nullable=False)
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)  # BUY/SELL
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    qty: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    decision_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sim_decision.id"), index=True, nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SimPositionDaily(Base):
+    __tablename__ = "sim_position_daily"
+    __table_args__ = (UniqueConstraint("variant_id", "trade_date", name="uq_sim_position_variant_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    variant_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_variant.id"), index=True, nullable=False)
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    positions_json: Mapped[str] = mapped_column(String(4096), nullable=False, default="{}")
+    cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    nav: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    mdd: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+

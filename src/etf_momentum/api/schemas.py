@@ -252,6 +252,53 @@ class RotationWeekly5OpenSimRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
 
 
+class SimPortfolioCreateRequest(BaseModel):
+    name: str = Field(default="默认账户", description="Portfolio name")
+    initial_cash: float = Field(default=1_000_000.0, gt=0.0, description="Initial cash (base_ccy units)")
+
+
+class SimPortfolioOut(BaseModel):
+    id: int
+    name: str
+    base_ccy: str
+    initial_cash: float
+    created_at: str
+
+
+class SimInitFixedStrategyResponse(BaseModel):
+    portfolio_id: int
+    config_id: int
+    variant_ids: list[int]
+
+
+class SimDecisionGenerateRequest(BaseModel):
+    portfolio_id: int = Field(ge=1)
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+
+
+class SimTradePreviewRequest(BaseModel):
+    variant_id: int = Field(ge=1)
+    decision_id: int = Field(ge=1)
+
+
+class SimTradeConfirmRequest(BaseModel):
+    variant_id: int = Field(ge=1)
+    decision_id: int = Field(ge=1)
+
+
+class BaselineWeekly5EWDashboardRequest(BaseModel):
+    """
+    Equal-weight benchmark dashboard for the fixed 4-ETF pool, for 5 weekly anchor weekdays (MON..FRI).
+    Uses hfq close and rebalances at close on decision_date (effective next trading day).
+    """
+
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    rebalance_shift: str = Field(default="prev", description="prev|next when anchor falls on non-trading day")
+
+
 class TrendBacktestRequest(BaseModel):
     code: str = Field(min_length=1, max_length=32, description="Single ETF code for trend-following backtest")
     start: str = Field(description="YYYYMMDD")

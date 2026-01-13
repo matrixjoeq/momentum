@@ -1,0 +1,15 @@
+.title {
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.text {
+  color: #333;
+  font-size: 28rpx;
+  line-height: 1.7;
+}
+
+.btn {
+  margin-top: 18rpx;
+}
+

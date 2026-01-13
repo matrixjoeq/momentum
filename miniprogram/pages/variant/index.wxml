@@ -1,0 +1,46 @@
+<view class="page">
+  <view class="card">
+    <view class="row">
+      <view class="title">{{label}}</view>
+      <view class="muted">{{asof}}</view>
+    </view>
+    <view class="row" style="margin-top: 10rpx;">
+      <view>净值：{{nav}}</view>
+      <view>回撤：{{mdd}}</view>
+    </view>
+    <view class="muted" style="margin-top: 6rpx;">持仓：{{posText}}</view>
+    <button class="btn" size="mini" bindtap="goExecute">执行确认</button>
+  </view>
+
+  <view class="card">
+    <view class="row">
+      <view class="title">周度决策</view>
+      <view class="muted">近20条</view>
+    </view>
+    <block wx:for="{{decisions}}" wx:key="id">
+      <view style="padding: 10rpx 0; border-bottom: 1px solid #f0f0f0;">
+        <view class="row">
+          <view>{{item.decision_date}} → {{item.effective_date}}</view>
+          <view>{{item.picked_code || "-"}}</view>
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <view class="card">
+    <view class="row">
+      <view class="title">成交记录</view>
+      <view class="muted">近20条</view>
+    </view>
+    <block wx:for="{{trades}}" wx:key="id">
+      <view style="padding: 10rpx 0; border-bottom: 1px solid #f0f0f0;">
+        <view class="row">
+          <view>{{item.trade_date}}</view>
+          <view>{{item.side}} {{item.code}}</view>
+        </view>
+        <view class="muted">{{item.qty}} @ {{item.price}}</view>
+      </view>
+    </block>
+  </view>
+</view>
+
