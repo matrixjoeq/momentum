@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("data")
     sqlite_path: Path = Path("data/etf_momentum.sqlite3")
+    # If provided, overrides sqlite_path and uses this SQLAlchemy database URL.
+    # Example (MySQL 8): mysql+pymysql://user:pass@host:3306/dbname?charset=utf8mb4
+    db_url: str | None = None
 
     default_start_date: str = "20100101"  # YYYYMMDD
     default_end_date: str = "20991231"  # YYYYMMDD
@@ -35,7 +38,8 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     s = Settings()
     s.data_dir.mkdir(parents=True, exist_ok=True)
-    # ensure parent exists
-    s.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    # ensure sqlite parent exists for local dev (only when sqlite is used)
+    if not s.db_url:
+        s.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
     return s
 

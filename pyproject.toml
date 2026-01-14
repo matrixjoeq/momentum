@@ -19,6 +19,8 @@ dependencies = [
   "scipy>=1.16.3",
   "httpx>=0.25.0",
   "exchange-calendars>=4.6.0",
+  # MySQL 8 support (cloud hosting): SQLAlchemy dialect driver
+  "pymysql>=1.1.0",
 ]
 
 [project.optional-dependencies]
