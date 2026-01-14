@@ -53,6 +53,21 @@
 - **小程序**：微信小程序（原生或 uni-app），仅通过 HTTP 调用后端 API
 - **数据源**：akshare（ETF 日线）+ exchange-calendars（交易日历）
 
+### 4.3 微信云托管：用“云开发定时触发器”驱动数据更新（推荐）
+- **目标**：避免后端进程内定时器（云托管实例可能扩缩容/重启），改用**云开发定时触发器**按计划调用一个同步接口来更新行情数据。
+- **同步接口**：`POST /api/admin/sync/fixed-pool`
+  - **鉴权**：建议在云托管环境变量设置 `MOMENTUM_SYNC_TOKEN`，触发器调用时通过以下任一方式携带：
+    - Header：`X-Momentum-Token: <token>`
+    - Body：`{ "token": "<token>", ... }`
+  - **Body（最小）**：`{ "date": "YYYYMMDD" }`（不传 date 默认按服务器“北京时间”当天）
+  - **可选参数**：
+    - `adjusts`: `["qfq","hfq","none"]` 子集
+    - `full_refresh`: `true|false|null`（null 表示用服务端默认；默认建议 true，保证历史修订一致）
+  - **非交易日**：接口会自动 `skipped=true` 返回，不会报错（便于触发器每天跑一次）。
+- **触发器建议**：
+  - 时间：交易日 15:10（或 15:30）以后
+  - 频率：每天一次即可（接口会在非交易日自动跳过）
+
 ### 4.2 模块划分
 - **Market Data**
   - 抓取 ETF open/close（可扩展）

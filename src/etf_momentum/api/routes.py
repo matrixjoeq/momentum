@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 
 import datetime as dt
@@ -33,6 +33,8 @@ from .schemas import (
     FetchResult,
     FetchSelectedRequest,
     IngestionBatchOut,
+    SyncFixedPoolRequest,
+    SyncFixedPoolResponse,
     PriceOut,
     ValidationPolicyOut,
 )
@@ -76,11 +78,14 @@ from ..db.repo import (
     purge_etf_data,
     update_ingestion_batch,
     upsert_etf_pool,
+    update_etf_pool_data_range,
 )
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
 from ..calendar.trading_calendar import shift_to_trading_day, trading_days
 from ..db.models import EtfPrice, SimDecision, SimPortfolio, SimPositionDaily, SimStrategyConfig, SimTrade, SimVariant
+from ..calendar.trading_calendar import is_trading_day
+from ..services.market_sync import sync_fixed_pool_prices
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +130,64 @@ def _iso(d: dt.date | None) -> str | None:
 _FIXED_CODES = ["159915", "511010", "513100", "518880"]
 _FIXED_NAMES = {"159915": "创业板ETF", "511010": "国债ETF", "513100": "纳指ETF", "518880": "黄金ETF"}
 _WD_LABEL = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
+
+
+def _now_shanghai_date() -> dt.date:
+    # Keep timezone logic lightweight (no external deps). WeChat cloud runs in CN region by default.
+    return (dt.datetime.utcnow() + dt.timedelta(hours=8)).date()
+
+
+@router.post("/admin/sync/fixed-pool", response_model=SyncFixedPoolResponse)
+def admin_sync_fixed_pool(
+    payload: SyncFixedPoolRequest,
+    db: Session = Depends(get_session),
+    x_momentum_token: str | None = Header(default=None, alias="X-Momentum-Token"),
+) -> SyncFixedPoolResponse:
+    """
+    Sync fixed 4-ETF pool prices (qfq/hfq/none).
+
+    Designed for WeChat Cloud scheduled trigger (HTTP):
+    - Set env MOMENTUM_SYNC_TOKEN in cloud hosting, and pass it via header `X-Momentum-Token` or JSON body `token`.
+    - If triggered on non-trading day, it will skip safely.
+    """
+    settings = get_settings()
+    expected = getattr(settings, "sync_token", None)
+    if expected:
+        provided = (payload.token or x_momentum_token or "").strip()
+        if (not provided) or (provided != expected):
+            raise HTTPException(status_code=403, detail="invalid sync token")
+
+    run_date = _now_shanghai_date() if not payload.date else _parse_yyyymmdd(payload.date)
+    cal = getattr(settings, "auto_sync_calendar", "XSHG")
+    if not is_trading_day(run_date, cal=cal):
+        return SyncFixedPoolResponse(
+            ok=True,
+            skipped=True,
+            reason=f"not_trading_day({cal})",
+            date=run_date.strftime("%Y%m%d"),
+            full_refresh=bool(settings.auto_sync_full_refresh if payload.full_refresh is None else payload.full_refresh),
+            adjusts=[str(x).strip().lower() for x in (payload.adjusts or [])],
+            codes={},
+        )
+
+    ak = get_akshare()
+    res = sync_fixed_pool_prices(db=db, ak=ak, run_date=run_date, adjusts=payload.adjusts, full_refresh=payload.full_refresh)
+    # ensure pool coverage updated (best effort) - already done per code inside service
+    for code in _FIXED_CODES:
+        try:
+            update_etf_pool_data_range(db, code=code)
+        except Exception:  # pragma: no cover
+            pass
+    db.commit()
+    return SyncFixedPoolResponse(
+        ok=bool(res.get("ok")),
+        skipped=False,
+        reason=None,
+        date=str(res.get("date")),
+        full_refresh=bool(res.get("full_refresh")),
+        adjusts=list(res.get("adjusts") or []),
+        codes=dict(res.get("codes") or {}),
+    )
 
 
 @router.post("/analysis/baseline")

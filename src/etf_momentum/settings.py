@@ -16,9 +16,10 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    # --- Background scheduler: auto-sync market data after close ---
-    # NOTE: In tests (pytest), the scheduler is automatically disabled.
-    auto_sync_enabled: bool = True
+    # --- Market data sync (Cloud trigger preferred) ---
+    # Recommended: use WeChat Cloud scheduled trigger to call /api/admin/sync/fixed-pool.
+    # If you still want in-process scheduler, you can enable it explicitly.
+    auto_sync_enabled: bool = False
     auto_sync_tz: str = "Asia/Shanghai"
     auto_sync_calendar: str = "XSHG"
     auto_sync_hour: int = 15
@@ -26,6 +27,9 @@ class Settings(BaseSettings):
     # For data consistency/completeness, refresh full history every run (qfq/hfq/none).
     # This is heavier than incremental mode but guarantees no stale history.
     auto_sync_full_refresh: bool = True
+
+    # If set, /api/admin/sync/fixed-pool requires this token via header X-Momentum-Token or body.token
+    sync_token: str | None = None
 
 
 def get_settings() -> Settings:

@@ -77,6 +77,28 @@ class IngestionBatchOut(BaseModel):
     val_max_gap_days: int | None = None
 
 
+class SyncFixedPoolRequest(BaseModel):
+    """
+    Cloud-triggerable market data sync for the fixed 4-ETF pool.
+    Intended to be invoked by WeChat Cloud scheduled trigger (HTTP).
+    """
+
+    token: str | None = Field(default=None, description="Optional sync token. If MOMENTUM_SYNC_TOKEN is set, token is required.")
+    date: str | None = Field(default=None, description="YYYYMMDD; default=server today (Asia/Shanghai)")
+    adjusts: list[str] = Field(default_factory=lambda: ["qfq", "hfq", "none"], description="Adjust list: subset of qfq/hfq/none")
+    full_refresh: bool | None = Field(default=None, description="If true, refresh full history every run; if null, use server default.")
+
+
+class SyncFixedPoolResponse(BaseModel):
+    ok: bool
+    skipped: bool = False
+    reason: str | None = None
+    date: str
+    full_refresh: bool
+    adjusts: list[str]
+    codes: dict
+
+
 class BaselineAnalysisRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
