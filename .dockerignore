@@ -1,0 +1,15 @@
+.venv/
+data/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+.cursor/
+tests/
+miniprogram/
+docs/
+agent-transcripts/
+*.sqlite3
+*.log
+
