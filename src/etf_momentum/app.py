@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from .api.routes import router as api_router
 from .api.deps import init_app_state
 from .settings import get_settings
+from .scheduler import start_auto_sync, stop_auto_sync
 
 
 def create_app() -> FastAPI:
@@ -17,9 +18,11 @@ def create_app() -> FastAPI:
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI):  # pylint: disable=redefined-outer-name
         init_app_state(app)
+        start_auto_sync(app)
         yield
+        await stop_auto_sync(app)
 
     app = FastAPI(title="ETF Momentum - Pool & Data Service", version="0.1.0", lifespan=lifespan)
 

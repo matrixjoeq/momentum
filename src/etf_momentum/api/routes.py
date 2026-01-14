@@ -80,7 +80,7 @@ from ..db.repo import (
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
 from ..calendar.trading_calendar import shift_to_trading_day, trading_days
-from ..db.models import SimDecision, SimPortfolio, SimPositionDaily, SimStrategyConfig, SimTrade, SimVariant
+from ..db.models import EtfPrice, SimDecision, SimPortfolio, SimPositionDaily, SimStrategyConfig, SimTrade, SimVariant
 
 logger = logging.getLogger(__name__)
 
@@ -380,11 +380,35 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
         # execution on open
         exec_price="open",
     )
+    one_anchor = payload.anchor_weekday
+    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
+    def _slim_for_miniprogram(x: dict) -> dict:
+        # Keep only what the mini-program renders (avoid shipping large unused blobs like rolling series).
+        keep = [
+            "date_range",
+            "score_method",
+            "tp_sl_mode",
+            "score_params",
+            "codes",
+            "benchmark_codes",
+            "price_basis",
+            "timing",
+            "nav",
+            "nav_rsi",
+            "attribution",
+            "metrics",
+            "win_payoff",
+            "period_details",
+            # used by sim_decision/generate to extract per-period decisions
+            "holdings",
+        ]
+        return {k: x.get(k) for k in keep if k in x}
+
     by_anchor: dict[str, dict] = {}
-    for a in [0, 1, 2, 3, 4]:
+    for a in anchors:
         # pylint: disable=unexpected-keyword-arg
         inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
-        by_anchor[str(a)] = compute_rotation_backtest(db, inp)
+        by_anchor[str(a)] = _slim_for_miniprogram(compute_rotation_backtest(db, inp))
     return {
         "meta": {
             "type": "rotation_weekly5_open",
@@ -394,9 +418,82 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
             "rebalance": "weekly",
             "rebalance_shift": "prev",
             "exec_price": "open",
-            "anchors": [0, 1, 2, 3, 4],
+            "anchors": anchors,
             "fixed_params": {"top_k": 1, "lookback_days": 20, "skip_days": 0, "cost_bps": 0},
             "risk_controls": "all_off",
+        },
+        "by_anchor": by_anchor,
+        "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+    }
+
+
+@router.post("/analysis/rotation/weekly5-open-lite")
+def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    Lite version for mini-program first paint:
+    - returns only NAV series (and minimal meta) for one anchor (or 5 anchors if anchor_weekday is omitted)
+    - omits heavy fields to reduce payload/JSON serialization time
+    """
+    codes = ["159915", "511010", "513100", "518880"]
+    start = _parse_yyyymmdd(payload.start)
+    end = _parse_yyyymmdd(payload.end)
+    base = RotationAnalysisInputs(
+        codes=codes,
+        start=start,
+        end=end,
+        rebalance="weekly",
+        rebalance_shift="prev",
+        rebalance_anchor=None,
+        top_k=1,
+        lookback_days=20,
+        skip_days=0,
+        cost_bps=0.0,
+        risk_off=False,
+        defensive_code=None,
+        momentum_floor=0.0,
+        score_method="raw_mom",
+        score_lambda=0.0,
+        score_vol_power=1.0,
+        # risk controls all off
+        trend_filter=False,
+        rsi_filter=False,
+        vol_monitor=False,
+        chop_filter=False,
+        corr_filter=False,
+        inertia=False,
+        rr_sizing=False,
+        dd_control=False,
+        timing_rsi_gate=False,
+        # execution on open
+        exec_price="open",
+    )
+
+    one_anchor = payload.anchor_weekday
+    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
+
+    def _lite(x: dict) -> dict:
+        nav = x.get("nav") if isinstance(x, dict) else None
+        return {
+            "date_range": (x.get("date_range") if isinstance(x, dict) else None),
+            "nav": nav,
+        }
+
+    by_anchor: dict[str, dict] = {}
+    for a in anchors:
+        # pylint: disable=unexpected-keyword-arg
+        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
+        by_anchor[str(a)] = _lite(compute_rotation_backtest(db, inp))
+
+    return {
+        "meta": {
+            "type": "rotation_weekly5_open_lite",
+            "codes": codes,
+            "start": payload.start,
+            "end": payload.end,
+            "rebalance": "weekly",
+            "rebalance_shift": "prev",
+            "exec_price": "open",
+            "anchors": anchors,
         },
         "by_anchor": by_anchor,
         "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
@@ -510,8 +607,10 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
         peak = nav.cummax()
         return (nav / peak - 1.0).astype(float)
 
+    one_anchor = payload.anchor_weekday
+    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
     by_anchor: dict[str, dict] = {}
-    for a in [0, 1, 2, 3, 4]:
+    for a in anchors:
         decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
         ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
         ew_ret = ew_nav.pct_change().fillna(0.0).astype(float)
@@ -605,6 +704,99 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
             "rebalance": "weekly",
             "rebalance_shift": shift,
             "price": "hfq_close",
+            "anchors": anchors,
+        },
+        "by_anchor": by_anchor,
+        "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+    }
+
+
+@router.post("/analysis/baseline/weekly5-ew-dashboard-lite")
+def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    Lite version for mini-program first paint:
+    - returns only chart series needed for (1)~(5) quickly
+    - omits metrics/attribution/correlation/calendar
+    """
+    start = _parse_yyyymmdd(payload.start)
+    end = _parse_yyyymmdd(payload.end)
+    shift = (payload.rebalance_shift or "prev").strip().lower()
+    if shift not in {"prev", "next"}:
+        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next")
+
+    codes = _FIXED_CODES[:]
+    close = load_close_prices(db, codes=codes, start=start, end=end, adjust="hfq")
+    if close.empty:
+        raise HTTPException(status_code=400, detail="no price data for given range")
+    close = close.sort_index()
+    missing = [c for c in codes if c not in close.columns or close[c].dropna().empty]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"missing hfq data: {missing}")
+    close_ff = close.ffill()
+
+    first_valid = {c: close[c].first_valid_index() for c in codes if c in close.columns}
+    common_start = max([d for d in first_valid.values() if d is not None])
+    px = close_ff.loc[common_start:, codes]
+    daily_ret = px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    idx = px.index
+
+    def _ema(series: pd.Series, span: int) -> pd.Series:
+        s = pd.Series(series).astype(float)
+        return s.ewm(span=int(span), adjust=False, min_periods=int(span)).mean()
+
+    def _rolling_std(series: pd.Series, window: int) -> pd.Series:
+        return pd.Series(series).astype(float).rolling(window=int(window), min_periods=int(window)).std(ddof=1)
+
+    def _drawdown(nav: pd.Series) -> pd.Series:
+        peak = nav.cummax()
+        return (nav / peak - 1.0).astype(float)
+
+    def _tolist(s: pd.Series) -> list[float | None]:
+        return [None if (pd.isna(x) or not np.isfinite(float(x))) else float(x) for x in s.to_numpy(dtype=float)]
+
+    one_anchor = payload.anchor_weekday
+    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
+    by_anchor: dict[str, dict] = {}
+    for a in anchors:
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
+        ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+
+        ema252 = _ema(ew_nav, 252)
+        sd252 = _rolling_std(ew_nav, 252)
+        bb_u = ema252 + 2.0 * sd252
+        bb_l = ema252 - 2.0 * sd252
+
+        dd = _drawdown(ew_nav)
+        rsi24 = _rsi_wilder(ew_nav, window=24)
+
+        win_3y = 3 * TRADING_DAYS_PER_YEAR
+        rr3y = (ew_nav / ew_nav.shift(win_3y) - 1.0).astype(float)
+        rdd3y = _rolling_max_drawdown(ew_nav, win_3y).astype(float)
+
+        by_anchor[str(a)] = {
+            "meta": {"anchor_weekday": int(a), "label": _WD_LABEL[int(a)], "rebalance_shift": shift, "price": "hfq_close"},
+            "dates": idx.date.astype(str).tolist(),
+            "nav": _tolist(ew_nav),
+            "ema252": _tolist(ema252),
+            "bb_upper": _tolist(bb_u),
+            "bb_lower": _tolist(bb_l),
+            "drawdown": _tolist(dd),
+            "rsi24": _tolist(rsi24),
+            "roll3y_return": _tolist(rr3y),
+            "roll3y_mdd": _tolist(rdd3y),
+        }
+
+    return {
+        "meta": {
+            "type": "baseline_weekly5_ew_dashboard_lite",
+            "codes": codes,
+            "start": payload.start,
+            "end": payload.end,
+            "common_start": common_start.date().strftime("%Y%m%d"),
+            "rebalance": "weekly",
+            "rebalance_shift": shift,
+            "price": "hfq_close",
+            "anchors": anchors,
         },
         "by_anchor": by_anchor,
         "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},

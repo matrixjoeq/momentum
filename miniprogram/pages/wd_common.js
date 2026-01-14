@@ -436,7 +436,7 @@ function attachWeekdayPage({ anchor, title }) {
       status: "",
       rangeKey: "all",
       rangeLabel: "全区间",
-      raw: null,
+      raw: null, // kept for backward-compat in data shape; large payloads are stored on page.__raw
       m: {},
       attrReturn: [],
       attrRisk: [],
@@ -458,7 +458,7 @@ function attachWeekdayPage({ anchor, title }) {
       tip: { show: false, id: "", x: 0, y: 0, text: "" },
 
       // rotation section
-      rot: null,
+      rot: null, // kept for backward-compat in data shape; large payloads are stored on page.__rot
       rm: {},
       rotCalMode: "daily",
       rotCalModeLabel: "日度",
@@ -488,7 +488,7 @@ function attachWeekdayPage({ anchor, title }) {
 
     onShow() {
       // default load
-      if (!this.data.raw) this.loadRange("all");
+      if (!this.__raw) this.loadRange(this.data.rangeKey || "all");
     },
 
     async setRange(e) {
@@ -499,6 +499,20 @@ function attachWeekdayPage({ anchor, title }) {
     async loadRange(k) {
       try {
         this.setData({ status: "加载中...", rangeKey: k });
+        const cacheKey = `wd_dash_v1_${String(anchor)}_${String(k)}`;
+        try {
+          const cached = wx.getStorageSync(cacheKey);
+          if (cached && cached.base && cached.end0) {
+            // quick render from cache for better UX
+            this.__raw = cached.base;
+            this.__rot = cached.rot || null;
+            this.__fullBase = cached.fullBase || null;
+            this.__fullRot = cached.fullRot || null;
+            this.setData({ status: "使用缓存加载中..." });
+          }
+        } catch (e0) {
+          // ignore cache errors
+        }
 
         // First time: fetch a wide window (10y) to support all range buttons.
         // Subsequent range picks: slice by dates and re-fetch for accurate metrics/attribution/correlation.
@@ -507,42 +521,54 @@ function attachWeekdayPage({ anchor, title }) {
         // Fetch a sufficiently early start so backend can derive the true max-common-history range
         // (e.g. 20130729 for the fixed 4-ETF universe), rather than being truncated by request start.
         const start0 = "20000101";
-        const base = await request("/analysis/baseline/weekly5-ew-dashboard", {
-          method: "POST",
-          data: { start: start0, end: end0, rebalance_shift: "prev" },
-        });
+        // Stage 1 (lite): fetch full-range once (per page instance) to get the trading-date axis fast.
+        let baseLite = this.__fullBaseLite;
+        if (!baseLite || !baseLite.by_anchor || !(baseLite.by_anchor[String(anchor)]) || !baseLite.meta || baseLite.meta.end !== end0 || baseLite.meta.start !== start0) {
+          baseLite = await request("/analysis/baseline/weekly5-ew-dashboard-lite", {
+            method: "POST",
+            data: { start: start0, end: end0, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
+          });
+          this.__fullBaseLite = baseLite;
+        }
 
-        const full = (base.by_anchor || {})[String(anchor)];
+        const full = (baseLite.by_anchor || {})[String(anchor)];
         const fullDates = full.dates || [];
         const picked = pickRangeDates(fullDates, k);
         const rangeLabel = picked.label;
 
-        let data = full;
+        // Stage 1 (lite): render charts ASAP
+        let dataLite = full;
         if (picked.start && picked.end && k !== "all") {
-          const res = await request("/analysis/baseline/weekly5-ew-dashboard", {
+          const resLite = await request("/analysis/baseline/weekly5-ew-dashboard-lite", {
             method: "POST",
-            data: { start: ymd(picked.start), end: ymd(picked.end), rebalance_shift: "prev" },
+            data: { start: ymd(picked.start), end: ymd(picked.end), rebalance_shift: "prev", anchor_weekday: Number(anchor) },
           });
-          data = (res.by_anchor || {})[String(anchor)];
+          dataLite = (resLite.by_anchor || {})[String(anchor)];
         }
 
         // rotation (fixed strategy, open execution) — use the same range window
         let rotFull = null;
         try {
-          const rotBase = await request("/analysis/rotation/weekly5-open", { method: "POST", data: { start: start0, end: end0 } });
-          rotFull = (rotBase.by_anchor || {})[String(anchor)];
+          // Stage 1 (lite): nav-only, faster & smaller
+          let rotBaseLite = this.__fullRotLite;
+          if (!rotBaseLite || !rotBaseLite.by_anchor || !(rotBaseLite.by_anchor[String(anchor)]) || !rotBaseLite.meta || rotBaseLite.meta.end !== end0 || rotBaseLite.meta.start !== start0) {
+            rotBaseLite = await request("/analysis/rotation/weekly5-open-lite", { method: "POST", data: { start: start0, end: end0, anchor_weekday: Number(anchor) } });
+            this.__fullRotLite = rotBaseLite;
+          }
+          rotFull = (rotBaseLite.by_anchor || {})[String(anchor)];
           if (picked.start && picked.end && k !== "all") {
-            const rotRes = await request("/analysis/rotation/weekly5-open", { method: "POST", data: { start: ymd(picked.start), end: ymd(picked.end) } });
+            const rotRes = await request("/analysis/rotation/weekly5-open-lite", { method: "POST", data: { start: ymd(picked.start), end: ymd(picked.end), anchor_weekday: Number(anchor) } });
             rotFull = (rotRes.by_anchor || {})[String(anchor)];
           }
         } catch (e2) {
           rotFull = null;
         }
 
-        const m = data.metrics || {};
-        const cal = data.calendar || {};
+        // For stage-1 lite payload, metrics/calendar may be absent.
+        const m = (dataLite && dataLite.metrics) ? dataLite.metrics : {};
+        const cal = (dataLite && dataLite.calendar) ? dataLite.calendar : {};
         const dm = _buildDailyMonthState(cal.daily || {});
-        const dailyCells = _buildMonthCells(dm.month, dm.map);
+        const dailyCells = dm.month ? _buildMonthCells(dm.month, dm.map) : [];
         const monthlyYears = _buildMonthlyYearCells(cal.monthly || {});
         const yearlyAll = _buildYearlyCells(cal.yearly || {});
         const yearPageSize = 12;
@@ -554,10 +580,13 @@ function attachWeekdayPage({ anchor, title }) {
         const mode = this.data.calMode || "daily";
         const modeLabel = mode === "monthly" ? "月度" : (mode === "yearly" ? "年度" : "日度");
 
+        // Keep large series off setData (setData is expensive with big arrays).
+        this.__raw = dataLite;
+        this.__rot = rotFull;
+
         this.setData({
-          raw: data,
           rangeLabel,
-          status: "OK",
+          status: "图表已加载，指标计算中...",
           m: {
             cumulative_return: pct(m.cumulative_return),
             annualized_return: pct(m.annualized_return),
@@ -586,11 +615,83 @@ function attachWeekdayPage({ anchor, title }) {
           calYearlyAll: yearlyAll,
           calYearlyPage: yearPage,
           calYearlyPageSize: yearPageSize,
-          rot: rotFull,
         });
 
-        await drawAll(this, data);
+        await drawAll(this, dataLite);
         await this._drawRotation(rotFull);
+
+        // Stage 2 (full): fetch metrics/attribution/correlation/calendar in background and then redraw.
+        (async () => {
+          try {
+            const s1 = (picked.start && picked.end && k !== "all") ? ymd(picked.start) : start0;
+            const e1 = (picked.start && picked.end && k !== "all") ? ymd(picked.end) : end0;
+
+            const fullRes = await request("/analysis/baseline/weekly5-ew-dashboard", {
+              method: "POST",
+              data: { start: s1, end: e1, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
+            });
+            const dataFull = (fullRes.by_anchor || {})[String(anchor)];
+            if (dataFull) {
+              this.__raw = dataFull;
+              const mm = dataFull.metrics || {};
+              const cc = dataFull.calendar || {};
+              const dm2 = _buildDailyMonthState(cc.daily || {});
+              const dailyCells2 = dm2.month ? _buildMonthCells(dm2.month, dm2.map) : [];
+              const monthlyYears2 = _buildMonthlyYearCells(cc.monthly || {});
+              const yearlyAll2 = _buildYearlyCells(cc.yearly || {});
+              const myIdx2 = monthlyYears2.length ? (monthlyYears2.length - 1) : 0;
+              const my2 = monthlyYears2[myIdx2] || { year: "", cells: [] };
+              const yearPageSize2 = 12;
+              const yearPage2 = 1;
+              const yearlyCells2 = yearlyAll2.slice(Math.max(0, yearlyAll2.length - yearPageSize2), yearlyAll2.length);
+
+              this.setData({
+                status: "OK",
+                m: {
+                  cumulative_return: pct(mm.cumulative_return),
+                  annualized_return: pct(mm.annualized_return),
+                  annualized_volatility: pct(mm.annualized_volatility),
+                  max_drawdown: pct(mm.max_drawdown),
+                  max_drawdown_recovery_days: mm.max_drawdown_recovery_days,
+                  sharpe_ratio: num(mm.sharpe_ratio),
+                  calmar_ratio: num(mm.calmar_ratio),
+                  sortino_ratio: num(mm.sortino_ratio),
+                  ulcer_index: num(mm.ulcer_index),
+                  ulcer_performance_index: num(mm.ulcer_performance_index),
+                },
+                calDailyMonth: dm2.month,
+                calDailyCells: dailyCells2,
+                calDailyMonths: dm2.months,
+                calDailyMap: dm2.map,
+                calMonthlyYears: monthlyYears2,
+                calMonthlyYearIdx: myIdx2,
+                calMonthlyYear: my2.year,
+                calMonthlyCells: my2.cells,
+                calYearlyCells: yearlyCells2,
+                calYearlyAll: yearlyAll2,
+                calYearlyPage: yearPage2,
+                calYearlyPageSize: yearPageSize2,
+              });
+              await drawAll(this, dataFull);
+            }
+
+            const rotFullRes = await request("/analysis/rotation/weekly5-open", { method: "POST", data: { start: s1, end: e1, anchor_weekday: Number(anchor) } });
+            const rotDataFull = (rotFullRes.by_anchor || {})[String(anchor)];
+            if (rotDataFull) {
+              this.__rot = rotDataFull;
+              await this._drawRotation(rotDataFull);
+            }
+
+            // persist cache for instant next open (store full payloads)
+            try {
+              wx.setStorageSync(cacheKey, { end0, base: this.__raw, rot: this.__rot });
+            } catch (e4) {
+              // ignore cache quota errors
+            }
+          } catch (eFull) {
+            // keep stage-1 result; best-effort
+          }
+        })();
 
         // next rebalance plan: show only when we have a concrete asof date
         if (picked.end) {
@@ -1020,7 +1121,7 @@ function attachWeekdayPage({ anchor, title }) {
     onChartTouch(e) {
       try {
         const id = e.currentTarget.id;
-        const raw = (id && id.startsWith("r")) ? (this.data.rot || {}) : (this.data.raw || {});
+        const raw = (id && id.startsWith("r")) ? (this.__rot || {}) : (this.__raw || {});
         const dates = (raw.dates || (raw.nav && raw.nav.dates) || []);
         const n = dates.length;
         if (!id || !n) return;

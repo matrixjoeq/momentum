@@ -250,6 +250,12 @@ class RotationWeekly5OpenSimRequest(BaseModel):
 
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
+    anchor_weekday: int | None = Field(
+        default=None,
+        ge=0,
+        le=4,
+        description="Optional: if set, compute only one anchor weekday (0=Mon..4=Fri) to reduce payload/runtime.",
+    )
 
 
 class RotationNextPlanRequest(BaseModel):
@@ -307,6 +313,12 @@ class BaselineWeekly5EWDashboardRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     rebalance_shift: str = Field(default="prev", description="prev|next when anchor falls on non-trading day")
+    anchor_weekday: int | None = Field(
+        default=None,
+        ge=0,
+        le=4,
+        description="Optional: if set, compute only one anchor weekday (0=Mon..4=Fri) to reduce payload/runtime.",
+    )
 
 
 class TrendBacktestRequest(BaseModel):
