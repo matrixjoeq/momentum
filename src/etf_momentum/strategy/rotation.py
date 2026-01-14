@@ -460,11 +460,17 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
 
-    # For calendar-effect research: execution return basis can use hfq open/close/OC2.
-    # We only load hfq OHLC when needed to keep the default path unchanged.
+    # Execution return basis:
+    # - Strategy NAV uses NONE prices (tradeable) by default, with HFQ fallback on corporate-action cliff days.
+    # - For plotting/benchmark comparisons we still compute HFQ series.
+    # We only load OHLC when needed (open/oc2).
     need_hfq_ohlc = ep in {"open", "oc2"}
+    need_none_ohlc = ep in {"open", "oc2"}
     ohlc_hfq = (
         _load_ohlc_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq") if need_hfq_ohlc else {"open": pd.DataFrame(), "high": pd.DataFrame(), "low": pd.DataFrame(), "close": pd.DataFrame()}
+    )
+    ohlc_none = (
+        _load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none") if need_none_ohlc else {"open": pd.DataFrame(), "high": pd.DataFrame(), "low": pd.DataFrame(), "close": pd.DataFrame()}
     )
 
     # Align calendars using execution dates; forward-fill hfq onto those dates.
@@ -474,6 +480,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     if need_hfq_ohlc:
         for k in ["open", "high", "low", "close"]:
             ohlc_hfq[k] = ohlc_hfq[k].sort_index().reindex(dates).ffill()
+    if need_none_ohlc:
+        for k in ["open", "high", "low", "close"]:
+            ohlc_none[k] = ohlc_none[k].sort_index().reindex(dates).ffill()
     if need_qfq and not close_qfq.empty:
         close_qfq = close_qfq.sort_index().reindex(dates).ffill()
     if need_qfq_hl:
@@ -654,13 +663,13 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     else:
         labels = _rebalance_labels(dates, inp.rebalance, weekly_anchor="FRI")
 
-    # Precompute execution returns (hfq) for running NAV (needed by rr_sizing).
-    # This matches the final P&L basis.
+    # Precompute execution returns for strategy NAV:
+    # - prefer NONE (tradeable) prices
+    # - if corporate-action cliff detected, use HFQ return on that day to avoid artificial NAV jump
     def _has_cols(df: pd.DataFrame, cols: list[str]) -> bool:
         return (df is not None) and (not df.empty) and all((c in df.columns) for c in cols)
 
-    # Prefer the selected hfq proxy; if OHLC is missing (e.g. synthetic tests only seeded close),
-    # fall back to hfq close to keep core strategy logic working.
+    # HFQ exec proxy (used for benchmark + corp-action fallback returns).
     if ep == "close":
         px_exec_hfq = close_hfq[codes]
     elif ep == "open":
@@ -677,7 +686,46 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         else:
             px_exec_hfq = (o[codes].astype(float) + c[codes].astype(float)) / 2.0
     px_exec_hfq = px_exec_hfq.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
-    ret_exec_all = px_exec_hfq.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
+    # NONE exec proxy (strategy tradeable prices).
+    if ep == "close":
+        px_exec_none = close_none[codes]
+    elif ep == "open":
+        px_exec_none = ohlc_none.get("open", pd.DataFrame())
+        if not _has_cols(px_exec_none, codes):
+            px_exec_none = close_none[codes]
+        else:
+            px_exec_none = px_exec_none[codes]
+    else:
+        o = ohlc_none.get("open", pd.DataFrame())
+        c = ohlc_none.get("close", pd.DataFrame())
+        if not (_has_cols(o, codes) and _has_cols(c, codes)):
+            px_exec_none = close_none[codes]
+        else:
+            px_exec_none = (o[codes].astype(float) + c[codes].astype(float)) / 2.0
+    px_exec_none = px_exec_none.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+
+    ret_exec_none = px_exec_none.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_exec_hfq = px_exec_hfq.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
+    # Corporate action factor (gross): (1+hfq_ret)/(1+none_ret) on CLOSE series.
+    # Use this to identify cliff days, then swap that day's execution return to hfq for NAV stability.
+    ret_none_close = close_none[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_hfq_close = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    gross_none_close = (1.0 + ret_none_close).astype(float)
+    gross_hfq_close = (1.0 + ret_hfq_close).astype(float)
+    corp_factor = (gross_hfq_close / gross_none_close).replace([np.inf, -np.inf], np.nan)
+    dev = (corp_factor - 1.0).abs()
+    corp_mask = (dev > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
+
+    # Final execution returns for NAV: none preferred, hfq fallback on cliff days.
+    ret_exec_all = ret_exec_none.copy()
+    for c in codes:
+        if c in ret_exec_all.columns and c in ret_exec_hfq.columns and c in corp_mask.columns:
+            m = corp_mask[c].fillna(False)
+            if bool(m.any()):
+                ret_exec_all.loc[m, c] = ret_exec_hfq.loc[m, c]
+    ret_exec_all = ret_exec_all.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
 
     # Build weights per date (apply from next trading day after decision date).
     w = pd.DataFrame(0.0, index=dates, columns=codes)
@@ -1398,14 +1446,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             }
         )
 
-    # Corporate action factor (gross): (1+hfq_ret)/(1+none_ret) on CLOSE series.
-    # This is used only for transparency/debugging output (and to preserve prior payload fields),
-    # not for P&L once exec_price is configurable.
-    ret_none = close_none[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    ret_hfq_all = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    gross_none = (1.0 + ret_none).astype(float)
-    gross_hfq = (1.0 + ret_hfq_all).astype(float)
-    corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
+    # Corporate-action diagnostics (close-based):
+    # We compute these earlier and also use the mask to apply HFQ fallback for NAV stability.
+    ret_none = ret_none_close
+    ret_hfq_all = ret_hfq_close
+    gross_none = gross_none_close
+    gross_hfq = gross_hfq_close
 
     # Daily holding return (hfq, configurable exec_price proxy).
     # Note: close-based hfq is still the default and remains the recommended "total return proxy".
