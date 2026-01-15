@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/intro/index",
+    "pages/mix/index",
     "pages/wd0/index",
     "pages/wd1/index",
     "pages/wd2/index",

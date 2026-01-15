@@ -496,8 +496,13 @@ function attachWeekdayPage({ anchor, title }) {
       await this.loadRange(k);
     },
 
+    goMix() {
+      wx.navigateTo({ url: "/pages/mix/index" });
+    },
+
     async loadRange(k) {
       try {
+        const isMix = String(anchor) === "mix";
         this.setData({ status: "加载中...", rangeKey: k });
         const cacheKey = `wd_dash_v1_${String(anchor)}_${String(k)}`;
         try {
@@ -521,12 +526,19 @@ function attachWeekdayPage({ anchor, title }) {
         // Fetch a sufficiently early start so backend can derive the true max-common-history range
         // (e.g. 20130729 for the fixed 4-ETF universe), rather than being truncated by request start.
         const start0 = "20000101";
+        const baseLitePath = isMix ? "/analysis/baseline/weekly5-ew-dashboard-combo-lite" : "/analysis/baseline/weekly5-ew-dashboard-lite";
+        const baseFullPath = isMix ? "/analysis/baseline/weekly5-ew-dashboard-combo" : "/analysis/baseline/weekly5-ew-dashboard";
+        const rotLitePath = isMix ? "/analysis/rotation/weekly5-open-combo-lite" : "/analysis/rotation/weekly5-open-lite";
+        const rotFullPath = isMix ? "/analysis/rotation/weekly5-open-combo" : "/analysis/rotation/weekly5-open";
+
         // Stage 1 (lite): fetch full-range once (per page instance) to get the trading-date axis fast.
         let baseLite = this.__fullBaseLite;
         if (!baseLite || !baseLite.by_anchor || !(baseLite.by_anchor[String(anchor)]) || !baseLite.meta || baseLite.meta.end !== end0 || baseLite.meta.start !== start0) {
-          baseLite = await request("/analysis/baseline/weekly5-ew-dashboard-lite", {
+          baseLite = await request(baseLitePath, {
             method: "POST",
-            data: { start: start0, end: end0, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
+            data: isMix
+              ? { start: start0, end: end0, rebalance_shift: "prev" }
+              : { start: start0, end: end0, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
           });
           this.__fullBaseLite = baseLite;
         }
@@ -539,9 +551,11 @@ function attachWeekdayPage({ anchor, title }) {
         // Stage 1 (lite): render charts ASAP
         let dataLite = full;
         if (picked.start && picked.end && k !== "all") {
-          const resLite = await request("/analysis/baseline/weekly5-ew-dashboard-lite", {
+          const resLite = await request(baseLitePath, {
             method: "POST",
-            data: { start: ymd(picked.start), end: ymd(picked.end), rebalance_shift: "prev", anchor_weekday: Number(anchor) },
+            data: isMix
+              ? { start: ymd(picked.start), end: ymd(picked.end), rebalance_shift: "prev" }
+              : { start: ymd(picked.start), end: ymd(picked.end), rebalance_shift: "prev", anchor_weekday: Number(anchor) },
           });
           dataLite = (resLite.by_anchor || {})[String(anchor)];
         }
@@ -552,12 +566,12 @@ function attachWeekdayPage({ anchor, title }) {
           // Stage 1 (lite): nav-only, faster & smaller
           let rotBaseLite = this.__fullRotLite;
           if (!rotBaseLite || !rotBaseLite.by_anchor || !(rotBaseLite.by_anchor[String(anchor)]) || !rotBaseLite.meta || rotBaseLite.meta.end !== end0 || rotBaseLite.meta.start !== start0) {
-            rotBaseLite = await request("/analysis/rotation/weekly5-open-lite", { method: "POST", data: { start: start0, end: end0, anchor_weekday: Number(anchor) } });
+            rotBaseLite = await request(rotLitePath, { method: "POST", data: isMix ? { start: start0, end: end0 } : { start: start0, end: end0, anchor_weekday: Number(anchor) } });
             this.__fullRotLite = rotBaseLite;
           }
           rotFull = (rotBaseLite.by_anchor || {})[String(anchor)];
           if (picked.start && picked.end && k !== "all") {
-            const rotRes = await request("/analysis/rotation/weekly5-open-lite", { method: "POST", data: { start: ymd(picked.start), end: ymd(picked.end), anchor_weekday: Number(anchor) } });
+            const rotRes = await request(rotLitePath, { method: "POST", data: isMix ? { start: ymd(picked.start), end: ymd(picked.end) } : { start: ymd(picked.start), end: ymd(picked.end), anchor_weekday: Number(anchor) } });
             rotFull = (rotRes.by_anchor || {})[String(anchor)];
           }
         } catch (e2) {
@@ -626,9 +640,9 @@ function attachWeekdayPage({ anchor, title }) {
             const s1 = (picked.start && picked.end && k !== "all") ? ymd(picked.start) : start0;
             const e1 = (picked.start && picked.end && k !== "all") ? ymd(picked.end) : end0;
 
-            const fullRes = await request("/analysis/baseline/weekly5-ew-dashboard", {
+            const fullRes = await request(baseFullPath, {
               method: "POST",
-              data: { start: s1, end: e1, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
+              data: isMix ? { start: s1, end: e1, rebalance_shift: "prev" } : { start: s1, end: e1, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
             });
             const dataFull = (fullRes.by_anchor || {})[String(anchor)];
             if (dataFull) {
@@ -675,7 +689,7 @@ function attachWeekdayPage({ anchor, title }) {
               await drawAll(this, dataFull);
             }
 
-            const rotFullRes = await request("/analysis/rotation/weekly5-open", { method: "POST", data: { start: s1, end: e1, anchor_weekday: Number(anchor) } });
+            const rotFullRes = await request(rotFullPath, { method: "POST", data: isMix ? { start: s1, end: e1 } : { start: s1, end: e1, anchor_weekday: Number(anchor) } });
             const rotDataFull = (rotFullRes.by_anchor || {})[String(anchor)];
             if (rotDataFull) {
               this.__rot = rotDataFull;
@@ -696,7 +710,9 @@ function attachWeekdayPage({ anchor, title }) {
         // next rebalance plan: show only when we have a concrete asof date
         if (picked.end) {
           try {
-            const plan = await request("/analysis/rotation/next-plan", { method: "POST", data: { anchor_weekday: Number(anchor), asof: ymd(picked.end) } });
+            const plan = isMix
+              ? await request("/analysis/rotation/next-plan-auto", { method: "POST", data: { asof: ymd(picked.end) } })
+              : await request("/analysis/rotation/next-plan", { method: "POST", data: { anchor_weekday: Number(anchor), asof: ymd(picked.end) } });
             this.setData({ nextPlan: plan || null });
           } catch (e3) {
             this.setData({ nextPlan: null });
@@ -1018,10 +1034,18 @@ function attachWeekdayPage({ anchor, title }) {
       const view = rows.slice(start, end).map((r, i) => {
         const buys = Array.isArray(r.buys) ? r.buys : [];
         const sells = Array.isArray(r.sells) ? r.sells : [];
-        const cashText = "空仓";
-        const normName = (code) => {
+        const cashText = "空";
+        const abbr = (code) => {
           const c = String(code || "").trim();
-          return c ? dispCode(c) : cashText;
+          if (!c) return cashText;
+          // fixed pool abbreviations
+          if (c === "159915") return "创";
+          if (c === "511010") return "债";
+          if (c === "513100") return "纳";
+          if (c === "518880") return "金";
+          // fallback: first char of display name
+          const nm = dispCode(c);
+          return String(nm || c).slice(0, 1);
         };
         // In this mini-program fixed strategy, turnover is effectively 0% or 100%.
         // Show "无调仓" or "X->Y" only.
@@ -1044,7 +1068,7 @@ function attachWeekdayPage({ anchor, title }) {
           }
           toCode = best.code;
         }
-        const tradeTxt = hasTrade ? `${normName(fromCode)}->${normName(toCode)}` : "无调仓";
+        const tradeTxt = hasTrade ? `${abbr(fromCode)}->${abbr(toCode)}` : "无";
         return {
         k: `${p}-${i}`,
         start_date: r.start_date,
@@ -1220,8 +1244,19 @@ function attachWeekdayPage({ anchor, title }) {
         const w = Number(rect.width || 0);
         const h = Number(rect.height || 0);
         const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-        const tx = clamp(Number(xRel) + 8, 0, Math.max(0, w - 10));
-        const ty = clamp(Number(yRel) - 28, 0, Math.max(0, h - 10));
+        // Estimate tooltip box size to prevent overflow on right/bottom.
+        const maxChars = Math.max(String(d || "").length, ...lines.map((s) => String(s || "").length));
+        const estW = Math.max(120, Math.min(w * 0.8, 24 + maxChars * 7)); // px (rough)
+        const estH = Math.max(46, Math.min(h * 0.6, 20 + (lines.length + 1) * 16)); // px (rough)
+        const margin = 8;
+
+        // Prefer to show on the right; if it would overflow, flip to left.
+        const tx0 = (Number(xRel) + margin + estW <= w) ? (Number(xRel) + margin) : (Number(xRel) - margin - estW);
+        const tx = clamp(tx0, 0, Math.max(0, w - estW));
+
+        // Prefer above the finger; if it would overflow, place below.
+        const ty0 = (Number(yRel) - margin - estH >= 0) ? (Number(yRel) - margin - estH) : (Number(yRel) + margin);
+        const ty = clamp(ty0, 0, Math.max(0, h - estH));
         this.setData({ tip: { show: true, id, x: tx, y: ty, text: `${d}\n${lines.join("\n")}` } });
       } catch (err) {
         // best effort

@@ -563,6 +563,281 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
     }
 
 
+@router.post("/analysis/rotation/weekly5-open-combo-lite")
+def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    Composite (MON~FRI equally weighted) rotation weekly5-open NAV only.
+    Intended for the mini-program "mix" page first paint.
+    """
+    codes = ["159915", "511010", "513100", "518880"]
+    start = _parse_yyyymmdd(payload.start)
+    end = _parse_yyyymmdd(payload.end)
+    base = RotationAnalysisInputs(
+        codes=codes,
+        start=start,
+        end=end,
+        rebalance="weekly",
+        rebalance_shift="prev",
+        rebalance_anchor=None,
+        top_k=1,
+        lookback_days=20,
+        skip_days=0,
+        cost_bps=0.0,
+        risk_off=False,
+        defensive_code=None,
+        momentum_floor=0.0,
+        score_method="raw_mom",
+        score_lambda=0.0,
+        score_vol_power=1.0,
+        # risk controls all off
+        trend_filter=False,
+        rsi_filter=False,
+        vol_monitor=False,
+        chop_filter=False,
+        corr_filter=False,
+        inertia=False,
+        rr_sizing=False,
+        dd_control=False,
+        timing_rsi_gate=False,
+        exec_price="open",
+    )
+
+    def _nav_arr(x: dict, key: str) -> np.ndarray:
+        s = ((x or {}).get("nav") or {}).get("series") or {}
+        arr = s.get(key) or []
+        return np.asarray([float(v) for v in arr], dtype=float)
+
+    outs: list[dict] = []
+    for a in [0, 1, 2, 3, 4]:
+        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
+        outs.append(compute_rotation_backtest(db, inp))
+    if not outs:
+        raise HTTPException(status_code=400, detail="no backtest data")  # pragma: no cover
+
+    nav0 = outs[0].get("nav") or {}
+    dates = nav0.get("dates") or []
+    rot = np.vstack([_nav_arr(o, "ROTATION") for o in outs]).mean(axis=0)
+    ew = np.vstack([_nav_arr(o, "EW_REBAL") for o in outs]).mean(axis=0)
+    ex = np.where(ew != 0, rot / ew, np.nan)
+
+    by_anchor = {
+        "mix": {
+            "date_range": outs[0].get("date_range"),
+            "nav": {"dates": dates, "series": {"ROTATION": rot.tolist(), "EW_REBAL": ew.tolist(), "EXCESS": ex.tolist()}},
+        }
+    }
+    return {
+        "meta": {
+            "type": "rotation_weekly5_open_combo_lite",
+            "codes": codes,
+            "start": payload.start,
+            "end": payload.end,
+            "rebalance": "weekly",
+            "rebalance_shift": "prev",
+            "exec_price": "open",
+            "anchors": ["mix"],
+        },
+        "by_anchor": by_anchor,
+        "weekday_map": {"mix": "MIX"},
+    }
+
+
+@router.post("/analysis/rotation/weekly5-open-combo")
+def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    Composite (MON~FRI equally weighted) rotation weekly5-open full payload (slimmed but UI-complete).
+    """
+    codes = ["159915", "511010", "513100", "518880"]
+    start = _parse_yyyymmdd(payload.start)
+    end = _parse_yyyymmdd(payload.end)
+    base = RotationAnalysisInputs(
+        codes=codes,
+        start=start,
+        end=end,
+        rebalance="weekly",
+        rebalance_shift="prev",
+        rebalance_anchor=None,
+        top_k=1,
+        lookback_days=20,
+        skip_days=0,
+        cost_bps=0.0,
+        risk_off=False,
+        defensive_code=None,
+        momentum_floor=0.0,
+        score_method="raw_mom",
+        score_lambda=0.0,
+        score_vol_power=1.0,
+        # risk controls all off
+        trend_filter=False,
+        rsi_filter=False,
+        vol_monitor=False,
+        chop_filter=False,
+        corr_filter=False,
+        inertia=False,
+        rr_sizing=False,
+        dd_control=False,
+        timing_rsi_gate=False,
+        exec_price="open",
+    )
+
+    def _nav_arr(x: dict, key: str) -> np.ndarray:
+        s = ((x or {}).get("nav") or {}).get("series") or {}
+        arr = s.get(key) or []
+        return np.asarray([float(v) for v in arr], dtype=float)
+
+    def _avg_share(items: list[dict], field: str) -> float | None:
+        xs = []
+        for it in items:
+            v = it.get(field)
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except Exception:  # pragma: no cover
+                continue
+            if np.isfinite(fv):
+                xs.append(fv)
+        return float(np.mean(xs)) if xs else None
+
+    outs: list[dict] = []
+    for a in [0, 1, 2, 3, 4]:
+        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
+        outs.append(compute_rotation_backtest(db, inp))
+    if not outs:
+        raise HTTPException(status_code=400, detail="no backtest data")  # pragma: no cover
+
+    nav0 = outs[0].get("nav") or {}
+    dates = nav0.get("dates") or []
+    if not dates:
+        raise HTTPException(status_code=400, detail="no nav dates")  # pragma: no cover
+
+    rot = np.vstack([_nav_arr(o, "ROTATION") for o in outs]).mean(axis=0)
+    ew = np.vstack([_nav_arr(o, "EW_REBAL") for o in outs]).mean(axis=0)
+    ex = np.where(ew != 0, rot / ew, np.nan)
+
+    # metrics from composite nav
+    dt_idx = pd.to_datetime(dates)
+    s_rot = pd.Series(rot, index=dt_idx).astype(float)
+    s_ew = pd.Series(ew, index=dt_idx).astype(float)
+    r_rot = s_rot.pct_change().fillna(0.0).astype(float)
+    r_ew = s_ew.pct_change().fillna(0.0).astype(float)
+    excess_ret = (r_rot - r_ew).astype(float)
+    ann_ret = _annualized_return(s_rot, ann_factor=TRADING_DAYS_PER_YEAR)
+    ann_vol = _annualized_vol(r_rot, ann_factor=TRADING_DAYS_PER_YEAR)
+    mdd = _max_drawdown(s_rot)
+    sharpe = _sharpe(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
+    sortino = _sortino(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
+    ann_excess = float(excess_ret.mean() * TRADING_DAYS_PER_YEAR) if len(excess_ret) else float("nan")
+    ir = float(excess_ret.mean() / excess_ret.std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)) if float(excess_ret.std(ddof=1) or 0) > 0 else float("nan")
+    metrics = {
+        "strategy": {
+            "cumulative_return": float(s_rot.iloc[-1] / s_rot.iloc[0] - 1.0) if len(s_rot) else float("nan"),
+            "annualized_return": float(ann_ret),
+            "annualized_volatility": float(ann_vol),
+            "max_drawdown": float(mdd),
+            "sharpe_ratio": float(sharpe),
+            "sortino_ratio": float(sortino),
+            "avg_daily_turnover": None,
+        },
+        "equal_weight": {"cumulative_return": float(s_ew.iloc[-1] / s_ew.iloc[0] - 1.0) if len(s_ew) else float("nan")},
+        "excess_vs_equal_weight": {
+            "cumulative_return": float((s_rot.iloc[-1] / s_rot.iloc[0]) / (s_ew.iloc[-1] / s_ew.iloc[0]) - 1.0) if len(s_rot) and len(s_ew) else float("nan"),
+            "annualized_return": float(ann_excess),
+            "information_ratio": float(ir),
+        },
+    }
+
+    # win/payoff and period_details on weekly periods (W-FRI) for display
+    rr = s_rot.resample("W-FRI").last().pct_change().dropna()
+    bb = s_ew.resample("W-FRI").last().pct_change().dropna()
+    idx_w = rr.index.intersection(bb.index)
+    pos = []
+    neg = []
+    period_details: list[dict] = []
+    prev_end = None
+    for t in idx_w:
+        rs = float(rr.loc[t])
+        rb = float(bb.loc[t])
+        exr = float(rs - rb)
+        if exr > 0:
+            pos.append(exr)
+        elif exr < 0:
+            neg.append(exr)
+        end_d = t.date().isoformat()
+        start_d = (prev_end or end_d)
+        period_details.append(
+            {
+                "start_date": start_d,
+                "end_date": end_d,
+                "strategy_return": rs,
+                "equal_weight_return": rb,
+                "excess_return": exr,
+                "win": exr > 0,
+                "timing_sleep": False,
+                "timing_active_ratio": None,
+                "buys": [],
+                "sells": [],
+                "turnover": None,
+            }
+        )
+        prev_end = end_d
+    win_rate = float((np.sum([1 for x in pos if x > 0]) / len(idx_w))) if len(idx_w) else float("nan")
+    avg_win = float(np.mean(pos)) if pos else float("nan")
+    avg_loss = float(np.mean(neg)) if neg else float("nan")
+    payoff = float(avg_win / abs(avg_loss)) if (pos and neg and avg_loss != 0) else float("nan")
+    win_payoff = {
+        "rebalance": "weekly",
+        "periods": int(len(idx_w)),
+        "win_rate": float(win_rate),
+        "avg_win_excess": float(avg_win),
+        "avg_loss_excess": float(avg_loss),
+        "payoff_ratio": float(payoff),
+        "kelly_fraction": float("nan"),
+    }
+
+    # attribution: average variant shares
+    ret_by_code: dict[str, list[float]] = {c: [] for c in codes}
+    risk_by_code: dict[str, list[float]] = {c: [] for c in codes}
+    for o in outs:
+        attr = (o or {}).get("attribution") or {}
+        for it in ((attr.get("return") or {}).get("by_code") or []):
+            c = str(it.get("code") or "")
+            if c in ret_by_code and it.get("return_share") is not None:
+                ret_by_code[c].append(float(it.get("return_share")))
+        for it in ((attr.get("risk") or {}).get("by_code") or []):
+            c = str(it.get("code") or "")
+            if c in risk_by_code and it.get("risk_share") is not None:
+                risk_by_code[c].append(float(it.get("risk_share")))
+    attribution = {
+        "return": {"by_code": [{"code": c, "return_share": _avg_share([{"return_share": v} for v in ret_by_code[c]], "return_share")} for c in codes]},
+        "risk": {"by_code": [{"code": c, "risk_share": _avg_share([{"risk_share": v} for v in risk_by_code[c]], "risk_share")} for c in codes]},
+    }
+
+    out = {
+        "date_range": outs[0].get("date_range"),
+        "codes": codes,
+        "nav": {"dates": dates, "series": {"ROTATION": rot.tolist(), "EW_REBAL": ew.tolist(), "EXCESS": ex.tolist()}},
+        "metrics": metrics,
+        "win_payoff": win_payoff,
+        "period_details": period_details,
+        "attribution": attribution,
+    }
+    return {
+        "meta": {
+            "type": "rotation_weekly5_open_combo",
+            "codes": codes,
+            "start": payload.start,
+            "end": payload.end,
+            "rebalance": "weekly",
+            "rebalance_shift": "prev",
+            "exec_price": "open",
+            "anchors": ["mix"],
+        },
+        "by_anchor": {"mix": out},
+        "weekday_map": {"mix": "MIX"},
+    }
+
+
 @router.post("/analysis/rotation/next-plan")
 def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(get_session)) -> dict:
     """
@@ -631,6 +906,32 @@ def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(g
         "scores": {c: float(scores[c]) for c in codes},
         "meta": {"anchor_weekday": anchor, "rebalance_shift": "prev", "lookback_days": 20, "top_k": 1, "exec_price": "open"},
     }
+
+
+@router.post("/analysis/rotation/next-plan-auto")
+def rotation_next_plan_auto(payload: dict, db: Session = Depends(get_session)) -> dict:
+    """
+    Convenience endpoint for the mini-program "mix" page:
+    return the plan for the weekday of the next trading day.
+    """
+    asof = _parse_yyyymmdd(str((payload or {}).get("asof")))
+    try:
+        tds = trading_days(asof, asof + dt.timedelta(days=20), cal="XSHG")
+        next_td = next((d for d in tds if d > asof), asof)
+    except Exception:  # pragma: no cover
+        next_td = asof
+    wd = int(next_td.weekday())
+    if wd not in {0, 1, 2, 3, 4}:
+        return {
+            "asof": asof.strftime("%Y%m%d"),
+            "next_trading_day": next_td.isoformat(),
+            "rebalance_effective_next_day": False,
+            "pick_code": None,
+            "pick_name": None,
+            "scores": {},
+            "meta": {"anchor_weekday": wd, "rebalance_shift": "prev", "lookback_days": 20, "top_k": 1, "exec_price": "open"},
+        }
+    return rotation_next_plan(RotationNextPlanRequest(anchor_weekday=wd, asof=asof.strftime("%Y%m%d")), db=db)
 
 
 @router.post("/analysis/baseline/weekly5-ew-dashboard")
@@ -870,6 +1171,238 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
         },
         "by_anchor": by_anchor,
         "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+    }
+
+
+@router.post("/analysis/baseline/weekly5-ew-dashboard-combo-lite")
+def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboardRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    Composite (MON~FRI equally weighted) EW dashboard lite:
+    return only series needed for charts (1)~(5) for the mini-program "mix" page.
+    """
+    start = _parse_yyyymmdd(payload.start)
+    end = _parse_yyyymmdd(payload.end)
+    shift = (payload.rebalance_shift or "prev").strip().lower()
+    if shift not in {"prev", "next"}:
+        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next")
+
+    codes = _FIXED_CODES[:]
+    close = load_close_prices(db, codes=codes, start=start, end=end, adjust="hfq")
+    if close.empty:
+        raise HTTPException(status_code=400, detail="no price data for given range")
+    close = close.sort_index()
+    missing = [c for c in codes if c not in close.columns or close[c].dropna().empty]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"missing hfq data: {missing}")
+    close_ff = close.ffill()
+
+    first_valid = {c: close[c].first_valid_index() for c in codes if c in close.columns}
+    common_start = max([d for d in first_valid.values() if d is not None])
+    px = close_ff.loc[common_start:, codes]
+    daily_ret = px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    idx = px.index
+
+    def _ema(series: pd.Series, span: int) -> pd.Series:
+        s = pd.Series(series).astype(float)
+        return s.ewm(span=int(span), adjust=False, min_periods=int(span)).mean()
+
+    def _rolling_std(series: pd.Series, window: int) -> pd.Series:
+        return pd.Series(series).astype(float).rolling(window=int(window), min_periods=int(window)).std(ddof=1)
+
+    def _drawdown(nav: pd.Series) -> pd.Series:
+        peak = nav.cummax()
+        return (nav / peak - 1.0).astype(float)
+
+    def _tolist(s: pd.Series) -> list[float | None]:
+        return [None if (pd.isna(x) or not np.isfinite(float(x))) else float(x) for x in s.to_numpy(dtype=float)]
+
+    navs = []
+    for a in [0, 1, 2, 3, 4]:
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
+        ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+        navs.append(ew_nav.astype(float))
+    nav_df = pd.concat(navs, axis=1)
+    nav_mix = nav_df.mean(axis=1).astype(float)
+
+    ema252 = _ema(nav_mix, 252)
+    sd252 = _rolling_std(nav_mix, 252)
+    bb_u = ema252 + 2.0 * sd252
+    bb_l = ema252 - 2.0 * sd252
+    dd = _drawdown(nav_mix)
+    rsi24 = _rsi_wilder(nav_mix, window=24)
+    win_3y = 3 * TRADING_DAYS_PER_YEAR
+    rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
+    rdd3y = _rolling_max_drawdown(nav_mix, win_3y).astype(float)
+
+    by_anchor = {
+        "mix": {
+            "meta": {"anchor_weekday": None, "label": "MIX", "rebalance_shift": shift, "price": "hfq_close"},
+            "dates": idx.date.astype(str).tolist(),
+            "nav": _tolist(nav_mix),
+            "ema252": _tolist(ema252),
+            "bb_upper": _tolist(bb_u),
+            "bb_lower": _tolist(bb_l),
+            "drawdown": _tolist(dd),
+            "rsi24": _tolist(rsi24),
+            "roll3y_return": _tolist(rr3y),
+            "roll3y_mdd": _tolist(rdd3y),
+        }
+    }
+    return {
+        "meta": {
+            "type": "baseline_weekly5_ew_dashboard_combo_lite",
+            "codes": codes,
+            "start": payload.start,
+            "end": payload.end,
+            "common_start": common_start.date().strftime("%Y%m%d"),
+            "rebalance": "weekly",
+            "rebalance_shift": shift,
+            "price": "hfq_close",
+            "anchors": ["mix"],
+        },
+        "by_anchor": by_anchor,
+        "weekday_map": {"mix": "MIX"},
+    }
+
+
+@router.post("/analysis/baseline/weekly5-ew-dashboard-combo")
+def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardRequest, db: Session = Depends(get_session)) -> dict:
+    """
+    Composite (MON~FRI equally weighted) EW dashboard full:
+    include metrics/attribution/correlation/calendar for the mini-program "mix" page.
+    """
+    start = _parse_yyyymmdd(payload.start)
+    end = _parse_yyyymmdd(payload.end)
+    rf = float(payload.risk_free_rate)
+    shift = (payload.rebalance_shift or "prev").strip().lower()
+    if shift not in {"prev", "next"}:
+        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next")
+
+    codes = _FIXED_CODES[:]
+    close = load_close_prices(db, codes=codes, start=start, end=end, adjust="hfq")
+    if close.empty:
+        raise HTTPException(status_code=400, detail="no price data for given range")
+    close = close.sort_index()
+    missing = [c for c in codes if c not in close.columns or close[c].dropna().empty]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"missing hfq data: {missing}")
+    close_ff = close.ffill()
+
+    first_valid = {c: close[c].first_valid_index() for c in codes if c in close.columns}
+    common_start = max([d for d in first_valid.values() if d is not None])
+    px = close_ff.loc[common_start:, codes]
+    daily_ret = px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    idx = px.index
+
+    def _ema(series: pd.Series, span: int) -> pd.Series:
+        s = pd.Series(series).astype(float)
+        return s.ewm(span=int(span), adjust=False, min_periods=int(span)).mean()
+
+    def _rolling_std(series: pd.Series, window: int) -> pd.Series:
+        return pd.Series(series).astype(float).rolling(window=int(window), min_periods=int(window)).std(ddof=1)
+
+    def _drawdown(nav: pd.Series) -> pd.Series:
+        peak = nav.cummax()
+        return (nav / peak - 1.0).astype(float)
+
+    def _tolist(s: pd.Series) -> list[float | None]:
+        return [None if (pd.isna(x) or not np.isfinite(float(x))) else float(x) for x in s.to_numpy(dtype=float)]
+
+    navs = []
+    ws = []
+    for a in [0, 1, 2, 3, 4]:
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
+        ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+        navs.append(ew_nav.astype(float))
+        ws.append(ew_w[codes].astype(float))
+    nav_mix = pd.concat(navs, axis=1).mean(axis=1).astype(float)
+    w_mix = sum(ws) / float(len(ws)) if ws else pd.DataFrame(index=idx, columns=codes).fillna(0.0)
+
+    ew_ret = nav_mix.pct_change().fillna(0.0).astype(float)
+    ema252 = _ema(nav_mix, 252)
+    sd252 = _rolling_std(nav_mix, 252)
+    bb_u = ema252 + 2.0 * sd252
+    bb_l = ema252 - 2.0 * sd252
+    dd = _drawdown(nav_mix)
+    rsi24 = _rsi_wilder(nav_mix, window=24)
+    win_3y = 3 * TRADING_DAYS_PER_YEAR
+    rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
+    rdd3y = _rolling_max_drawdown(nav_mix, win_3y).astype(float)
+
+    cum_ret = float(nav_mix.iloc[-1] / nav_mix.iloc[0] - 1.0) if len(nav_mix) else float("nan")
+    ann_ret = _annualized_return(nav_mix, ann_factor=TRADING_DAYS_PER_YEAR)
+    ann_vol = _annualized_vol(ew_ret, ann_factor=TRADING_DAYS_PER_YEAR)
+    mdd = _max_drawdown(nav_mix)
+    mdd_dur = _max_drawdown_duration_days(nav_mix)
+    sharpe = _sharpe(ew_ret, rf=rf, ann_factor=TRADING_DAYS_PER_YEAR)
+    calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and mdd < 0 else float("nan")
+    sortino = _sortino(ew_ret, rf=rf, ann_factor=TRADING_DAYS_PER_YEAR)
+    ui = _ulcer_index(nav_mix, in_percent=True)
+    ui_den = ui / 100.0
+    upi = float((ann_ret - rf) / ui_den) if ui_den > 0 else float("nan")
+    metrics = {
+        "cumulative_return": float(cum_ret),
+        "annualized_return": float(ann_ret),
+        "annualized_volatility": float(ann_vol),
+        "max_drawdown": float(mdd),
+        "max_drawdown_recovery_days": int(mdd_dur),
+        "sharpe_ratio": float(sharpe),
+        "calmar_ratio": float(calmar),
+        "sortino_ratio": float(sortino),
+        "ulcer_index": float(ui),
+        "ulcer_performance_index": float(upi),
+    }
+
+    corr = daily_ret[codes].corr(method="pearson")
+    corr_out = {
+        "method": "pearson",
+        "n_obs": int(len(daily_ret)),
+        "codes": codes,
+        "matrix": corr.to_numpy(dtype=float).tolist(),
+    }
+    attribution = _compute_return_risk_contributions(asset_ret=daily_ret[codes], weights=w_mix[codes], total_return=float(cum_ret))
+
+    daily = ew_ret.copy()
+    monthly = nav_mix.resample("ME").last().pct_change().dropna()
+    yearly = nav_mix.resample("YE").last().pct_change().dropna()
+    cal = {
+        "daily": {"dates": daily.index.date.astype(str).tolist(), "values": daily.astype(float).tolist()},
+        "monthly": {"dates": monthly.index.date.astype(str).tolist(), "values": monthly.astype(float).tolist()},
+        "yearly": {"dates": yearly.index.date.astype(str).tolist(), "values": yearly.astype(float).tolist()},
+    }
+
+    by_anchor = {
+        "mix": {
+            "meta": {"anchor_weekday": None, "label": "MIX", "rebalance_shift": shift, "price": "hfq_close"},
+            "dates": idx.date.astype(str).tolist(),
+            "nav": _tolist(nav_mix),
+            "ema252": _tolist(ema252),
+            "bb_upper": _tolist(bb_u),
+            "bb_lower": _tolist(bb_l),
+            "drawdown": _tolist(dd),
+            "rsi24": _tolist(rsi24),
+            "roll3y_return": _tolist(rr3y),
+            "roll3y_mdd": _tolist(rdd3y),
+            "metrics": metrics,
+            "attribution": attribution,
+            "correlation": corr_out,
+            "calendar": cal,
+        }
+    }
+    return {
+        "meta": {
+            "type": "baseline_weekly5_ew_dashboard_combo",
+            "codes": codes,
+            "start": payload.start,
+            "end": payload.end,
+            "common_start": common_start.date().strftime("%Y%m%d"),
+            "rebalance": "weekly",
+            "rebalance_shift": shift,
+            "price": "hfq_close",
+            "anchors": ["mix"],
+        },
+        "by_anchor": by_anchor,
+        "weekday_map": {"mix": "MIX"},
     }
 
 

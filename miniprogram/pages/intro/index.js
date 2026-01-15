@@ -1,6 +1,26 @@
 const KEY_SKIP = "intro_skip";
 const KEY_ACK_AT = "intro_ack_at";
 
+function defaultTabUrl() {
+  // JS Date.getDay(): 0=Sun..6=Sat
+  const d = new Date();
+  const wd = Number(d.getDay());
+  // weekend -> mix page
+  if (wd === 0 || wd === 6) return "/pages/mix/index";
+  // Mon..Fri -> wd0..wd4
+  return `/pages/wd${wd - 1}/index`;
+}
+
+function goDefault() {
+  const url = defaultTabUrl();
+  // tab pages must use switchTab
+  if (url.startsWith("/pages/wd")) {
+    wx.switchTab({ url });
+  } else {
+    wx.redirectTo({ url });
+  }
+}
+
 Page({
   data: {
     acknowledged: false,
@@ -10,7 +30,7 @@ Page({
   onLoad() {
     const skip = !!wx.getStorageSync(KEY_SKIP);
     if (skip) {
-      wx.switchTab({ url: "/pages/wd0/index" });
+      goDefault();
       return;
     }
   },
@@ -33,7 +53,7 @@ Page({
       wx.removeStorageSync(KEY_SKIP);
     }
     wx.setStorageSync(KEY_ACK_AT, Date.now());
-    wx.switchTab({ url: "/pages/wd0/index" });
+    goDefault();
   },
 });
 

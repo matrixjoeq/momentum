@@ -121,3 +121,10 @@
   pointer-events: none;
   z-index: 10;
 }
+
+/* single-line rows (truncate with ellipsis) */
+.line-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
