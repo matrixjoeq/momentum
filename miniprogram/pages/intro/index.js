@@ -13,12 +13,9 @@ function defaultTabUrl() {
 
 function goDefault() {
   const url = defaultTabUrl();
-  // tab pages must use switchTab
-  if (url.startsWith("/pages/wd")) {
-    wx.switchTab({ url });
-  } else {
-    wx.redirectTo({ url });
-  }
+  // We removed the native tabBar (needs 5 items max), so all pages are normal pages now.
+  // Use reLaunch to avoid leaving the intro page in navigation stack.
+  wx.reLaunch({ url });
 }
 
 Page({
