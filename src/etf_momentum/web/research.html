@@ -40,7 +40,8 @@
         #corrHeatmap,
         #trendChart, #trendDD,
         #mcEwHist, #mcRotHist, #mcExcessHist,
-        #mcEwQQ, #mcRotQQ, #mcExcessQQ {
+        #mcEwQQ, #mcRotQQ, #mcExcessQQ,
+        #mcRotPeriodHist, #mcExcessPeriodHist {
           height: 420px !important;
         }
       }
@@ -978,6 +979,24 @@
             </div>
           </div>
         </div>
+
+        <div style="margin-top: 14px;">
+          <div class="muted">
+            逐期收益分布（基于当前回测的 period_details；用于观察每个调仓周期的策略收益与超额收益的分布形态）
+          </div>
+          <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top: 8px;">
+            <div>
+              <div class="muted">策略逐期收益率（Period Return）</div>
+              <table id="mcRotPeriodStats"></table>
+              <div id="mcRotPeriodHist" style="width:100%; height:420px;"></div>
+            </div>
+            <div>
+              <div class="muted">逐期超额收益率（轮动-等权）</div>
+              <table id="mcExcessPeriodStats"></table>
+              <div id="mcExcessPeriodHist" style="width:100%; height:420px;"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1642,6 +1661,109 @@
           },
           { responsive: true }
         );
+      }
+
+      function _finiteNumArr(xs) {
+        const out = [];
+        for (const v of (xs || [])) {
+          const x = Number(v);
+          if (Number.isFinite(x)) out.push(x);
+        }
+        return out;
+      }
+
+      function _quantileSorted(sorted, q) {
+        const n = sorted.length;
+        if (!n) return NaN;
+        const qq = Math.max(0, Math.min(1, Number(q)));
+        const pos = (n - 1) * qq;
+        const lo = Math.floor(pos);
+        const hi = Math.ceil(pos);
+        if (lo === hi) return sorted[lo];
+        const w = pos - lo;
+        return sorted[lo] * (1 - w) + sorted[hi] * w;
+      }
+
+      function _basicStatsPct(xs) {
+        const arr = _finiteNumArr(xs);
+        if (!arr.length) {
+          return { count: 0, mean: NaN, std: NaN, p10: NaN, p50: NaN, p90: NaN, pos: NaN, min: NaN, max: NaN };
+        }
+        const n = arr.length;
+        const sorted = arr.slice().sort((a, b) => a - b);
+        const mean = arr.reduce((a, b) => a + b, 0) / n;
+        const var1 = arr.reduce((a, b) => a + (b - mean) * (b - mean), 0) / Math.max(1, n - 1);
+        const std = Math.sqrt(var1);
+        const pos = arr.filter((x) => x > 0).length / n;
+        return {
+          count: n,
+          mean,
+          std,
+          p10: _quantileSorted(sorted, 0.10),
+          p50: _quantileSorted(sorted, 0.50),
+          p90: _quantileSorted(sorted, 0.90),
+          pos,
+          min: sorted[0],
+          max: sorted[sorted.length - 1],
+        };
+      }
+
+      function _renderPeriodStatsTable(elId, st) {
+        const el = $(elId);
+        if (!el) return;
+        const f = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtPct(Number(x));
+        const n = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : String(x);
+        el.innerHTML =
+          "<tr><th>样本数</th><th>均值</th><th>Std</th><th>P10</th><th>P50</th><th>P90</th><th>正收益占比</th><th>最小</th><th>最大</th></tr>" +
+          `<tr><td>${n(st.count)}</td><td>${f(st.mean)}</td><td>${f(st.std)}</td><td>${f(st.p10)}</td><td>${f(st.p50)}</td><td>${f(st.p90)}</td><td>${f(st.pos)}</td><td>${f(st.min)}</td><td>${f(st.max)}</td></tr>`;
+      }
+
+      function _plotPeriodHist(divId, xs, title, color) {
+        const el = $(divId);
+        const arr = _finiteNumArr(xs);
+        if (!el) return;
+        if (!arr.length) {
+          el.innerHTML = "<div class='muted'>无逐期数据（请先运行一次轮动回测）</div>";
+          return;
+        }
+        Plotly.newPlot(
+          divId,
+          [{
+            x: arr,
+            type: "histogram",
+            marker: { color: color || "#4c78a8" },
+            hovertemplate: "%{x:.2%}<br>count=%{y}<extra></extra>",
+          }],
+          {
+            margin: { t: 26 },
+            title: { text: title || "", font: { size: 13 } },
+            xaxis: { tickformat: ".2%", title: "" },
+            yaxis: { title: "count" },
+            shapes: [
+              { type: "line", xref: "x", yref: "paper", x0: 0, x1: 0, y0: 0, y1: 1, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
+          },
+          { responsive: true }
+        );
+      }
+
+      function renderRotPeriodHistsForMc() {
+        // Use current rotation backtest "period_details" as the source.
+        const rows = (rotState && Array.isArray(rotState.rows)) ? rotState.rows : [];
+        const strat = [];
+        const excess = [];
+        for (const r of rows) {
+          const a = Number(r.strategy_return);
+          const e = Number(r.excess_return);
+          if (Number.isFinite(a)) strat.push(a);
+          if (Number.isFinite(e)) excess.push(e);
+        }
+        const st1 = _basicStatsPct(strat);
+        const st2 = _basicStatsPct(excess);
+        _renderPeriodStatsTable("mcRotPeriodStats", st1);
+        _renderPeriodStatsTable("mcExcessPeriodStats", st2);
+        _plotPeriodHist("mcRotPeriodHist", strat, "策略逐期收益率分布", "#4c78a8");
+        _plotPeriodHist("mcExcessPeriodHist", excess, "逐期超额收益率分布（轮动-等权）", "#f58518");
       }
 
       function renderFit(prefix, mc, metricKey) {
@@ -3336,6 +3458,8 @@
         rotState.rows = data.period_details || [];
         rotState.page = 1;
         renderRotPeriods();
+        // Update period-return histograms under Monte Carlo panel.
+        renderRotPeriodHistsForMc();
         // periodic returns tables
         rotPeriodTableState.weekly.rows = (data.period_returns && data.period_returns.weekly) ? data.period_returns.weekly : [];
         rotPeriodTableState.monthly.rows = (data.period_returns && data.period_returns.monthly) ? data.period_returns.monthly : [];
@@ -3924,6 +4048,8 @@
           plotMcHist("mcExcessHist", data.mc.excess, $("mcExcessMetric").value);
           renderFit("Rot", data.mc.strategy, $("mcRotMetric").value);
           renderFit("Excess", data.mc.excess, $("mcExcessMetric").value);
+          // Best-effort refresh (in case user ran MC without re-running rotation first).
+          renderRotPeriodHistsForMc();
         } finally {
           $("status").textContent = "";
           btn.disabled = false;
