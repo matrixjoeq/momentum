@@ -15,6 +15,9 @@
       <button size="mini" bindtap="setRange" data-k="all">全区间</button>
     </view>
     <view class="muted" style="margin-top: 8rpx;">{{status}}</view>
+    <view wx:if="{{pageKey==='mix'}}" class="muted" style="margin-top: 8rpx;">
+      说明：综合净值=周一~周五五个版本净值的逐日等权合成（每个调仓日各占20%资金），用于观察“平均执行”的运营效果；不是简单平均指标。
+    </view>
   </view>
 
   <view class="card">
