@@ -273,8 +273,9 @@
   <view class="card">
     <view class="title">轮动图表10：策略绩效指标（含超额）</view>
     <view class="muted">策略累计：{{rm.cumulative_return}}｜年化：{{rm.annualized_return}}｜波动：{{rm.annualized_volatility}}｜最大回撤：{{rm.max_drawdown}}</view>
-    <view class="muted">夏普：{{rm.sharpe_ratio}}｜索诺提：{{rm.sortino_ratio}}｜平均日换手：{{rm.avg_daily_turnover}}</view>
+    <view class="muted">最大回撤修复：{{rm.max_drawdown_recovery_days}}天｜夏普：{{rm.sharpe_ratio}}｜索诺提：{{rm.sortino_ratio}}｜平均日换手：{{rm.avg_daily_turnover}}</view>
     <view class="muted">累计超额：{{rm.excess_cum}}｜超额年化：{{rm.excess_ann}}｜信息比率：{{rm.excess_ir}}</view>
+    <view class="muted">超额最大回撤：{{rm.excess_max_drawdown}}｜超额回撤修复：{{rm.excess_max_drawdown_recovery_days}}天</view>
     <view class="muted">超额胜率：{{rm.excess_win_rate}}｜平均超额盈利：{{rm.excess_avg_win}}｜平均超额亏损：{{rm.excess_avg_loss}}</view>
   </view>
 

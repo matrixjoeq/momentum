@@ -1584,6 +1584,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
 
     ann_excess = _annualized_return(excess_nav)
     ir = _sharpe(active_ret, rf=0.0)  # same formula but zero rf; for consistency name it IR-style
+    ex_mdd = _max_drawdown(excess_nav)
+    ex_mdd_dur = _max_drawdown_duration_days(excess_nav)
 
     metrics = {
         "strategy": {
@@ -1605,6 +1607,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
             "annualized_return": float(ann_excess),
             "information_ratio": float(ir),
+            "max_drawdown": float(ex_mdd),
+            "max_drawdown_recovery_days": int(ex_mdd_dur),
         },
     }
 

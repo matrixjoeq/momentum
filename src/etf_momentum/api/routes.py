@@ -725,16 +725,23 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
     ann_ret = _annualized_return(s_rot, ann_factor=TRADING_DAYS_PER_YEAR)
     ann_vol = _annualized_vol(r_rot, ann_factor=TRADING_DAYS_PER_YEAR)
     mdd = _max_drawdown(s_rot)
+    mdd_dur = _max_drawdown_duration_days(s_rot)
     sharpe = _sharpe(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
     sortino = _sortino(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
     ann_excess = float(excess_ret.mean() * TRADING_DAYS_PER_YEAR) if len(excess_ret) else float("nan")
     ir = float(excess_ret.mean() / excess_ret.std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)) if float(excess_ret.std(ddof=1) or 0) > 0 else float("nan")
+    ex_nav = (1.0 + excess_ret.fillna(0.0)).cumprod()
+    if len(ex_nav):
+        ex_nav.iloc[0] = 1.0
+    ex_mdd = _max_drawdown(ex_nav) if len(ex_nav) else float("nan")
+    ex_mdd_dur = _max_drawdown_duration_days(ex_nav) if len(ex_nav) else float("nan")
     metrics = {
         "strategy": {
             "cumulative_return": float(s_rot.iloc[-1] / s_rot.iloc[0] - 1.0) if len(s_rot) else float("nan"),
             "annualized_return": float(ann_ret),
             "annualized_volatility": float(ann_vol),
             "max_drawdown": float(mdd),
+            "max_drawdown_recovery_days": int(mdd_dur) if np.isfinite(float(mdd_dur)) else None,
             "sharpe_ratio": float(sharpe),
             "sortino_ratio": float(sortino),
             "avg_daily_turnover": None,
@@ -744,6 +751,8 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
             "cumulative_return": float((s_rot.iloc[-1] / s_rot.iloc[0]) / (s_ew.iloc[-1] / s_ew.iloc[0]) - 1.0) if len(s_rot) and len(s_ew) else float("nan"),
             "annualized_return": float(ann_excess),
             "information_ratio": float(ir),
+            "max_drawdown": float(ex_mdd),
+            "max_drawdown_recovery_days": int(ex_mdd_dur) if np.isfinite(float(ex_mdd_dur)) else None,
         },
     }
 
