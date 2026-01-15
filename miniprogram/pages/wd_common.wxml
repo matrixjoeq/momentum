@@ -4,8 +4,13 @@
       <view class="title">{{title}}</view>
       <view class="muted">{{rangeLabel}}</view>
     </view>
-    <view class="row" style="margin-top: 10rpx; justify-content:flex-end;">
-      <button wx:if="{{anchor!=='mix'}}" size="mini" bindtap="goMix">综合</button>
+    <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
+      <button size="mini" type="{{pageKey==='mix'?'primary':'default'}}" bindtap="switchPage" data-p="mix">综合</button>
+      <button size="mini" type="{{pageKey==='wd0'?'primary':'default'}}" bindtap="switchPage" data-p="wd0">周一</button>
+      <button size="mini" type="{{pageKey==='wd1'?'primary':'default'}}" bindtap="switchPage" data-p="wd1">周二</button>
+      <button size="mini" type="{{pageKey==='wd2'?'primary':'default'}}" bindtap="switchPage" data-p="wd2">周三</button>
+      <button size="mini" type="{{pageKey==='wd3'?'primary':'default'}}" bindtap="switchPage" data-p="wd3">周四</button>
+      <button size="mini" type="{{pageKey==='wd4'?'primary':'default'}}" bindtap="switchPage" data-p="wd4">周五</button>
     </view>
     <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
       <button size="mini" bindtap="setRange" data-k="1m">近一月</button>
@@ -241,7 +246,17 @@
   </view>
 
   <view class="card">
-    <view class="title">轮动图表7：比值曲线 RSI(24)</view>
+    <view class="title">轮动图表7：超额回撤（基于 ROT/EW 比值）</view>
+    <view class="canvasWrap">
+      <canvas canvas-id="rExDD" id="rExDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
+      <view wx:if="{{tip.show && tip.id==='rExDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
+        <text>{{tip.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">轮动图表8：比值曲线 RSI(24)</view>
     <view class="canvasWrap">
       <canvas canvas-id="rRatioRSI" id="rRatioRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <view wx:if="{{tip.show && tip.id==='rRatioRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
@@ -251,7 +266,7 @@
   </view>
 
   <view class="card">
-    <view class="title">轮动图表8：40日收益差（策略 - 等权）</view>
+    <view class="title">轮动图表9：40日收益差（策略 - 等权）</view>
     <view class="canvasWrap">
       <canvas canvas-id="rDiff40" id="rDiff40" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <view wx:if="{{tip.show && tip.id==='rDiff40'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
@@ -261,7 +276,7 @@
   </view>
 
   <view class="card">
-    <view class="title">轮动图表9：策略绩效指标（含超额）</view>
+    <view class="title">轮动图表10：策略绩效指标（含超额）</view>
     <view class="muted">策略累计：{{rm.cumulative_return}}｜年化：{{rm.annualized_return}}｜波动：{{rm.annualized_volatility}}｜最大回撤：{{rm.max_drawdown}}</view>
     <view class="muted">夏普：{{rm.sharpe_ratio}}｜索诺提：{{rm.sortino_ratio}}｜平均日换手：{{rm.avg_daily_turnover}}</view>
     <view class="muted">累计超额：{{rm.excess_cum}}｜超额年化：{{rm.excess_ann}}｜信息比率：{{rm.excess_ir}}</view>
@@ -269,17 +284,17 @@
   </view>
 
   <view class="card">
-    <view class="title">轮动图表10：标的收益贡献</view>
+    <view class="title">轮动图表11：标的收益贡献</view>
     <canvas canvas-id="rRC" id="rRC" style="width: 100%; height: 220rpx;"></canvas>
   </view>
 
   <view class="card">
-    <view class="title">轮动图表11：标的风险贡献</view>
+    <view class="title">轮动图表12：标的风险贡献</view>
     <canvas canvas-id="rRiskC" id="rRiskC" style="width: 100%; height: 220rpx;"></canvas>
   </view>
 
   <view class="card">
-    <view class="title">轮动图表12：策略收益率日历（日/月/年）</view>
+    <view class="title">轮动图表13：策略收益率日历（日/月/年）</view>
     <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
       <button size="mini" bindtap="setRotCalMode" data-m="daily">日度</button>
       <button size="mini" bindtap="setRotCalMode" data-m="monthly">月度</button>
@@ -344,7 +359,7 @@
   </view>
 
   <view class="card">
-    <view class="title">轮动图表13：逐期收益对比（策略 vs 等权）</view>
+    <view class="title">轮动图表14：逐期收益对比（策略 vs 等权）</view>
     <view class="muted">{{rotPeriodPageText}}</view>
     <view class="row" style="justify-content:space-between; margin-top: 10rpx;">
       <button size="mini" bindtap="prevRotPeriodPage">上一页</button>
@@ -362,7 +377,7 @@
   </view>
 
   <view class="card">
-    <view class="title">轮动图表14：下一调仓日计划</view>
+    <view class="title">轮动图表15：下一调仓日计划</view>
     <view wx:if="{{nextPlan && nextPlan.rebalance_effective_next_day}}" class="muted">
       下一交易日（{{nextPlan.next_trading_day}}）为调仓执行日；计划持有：{{nextPlan.pick_name}}（{{nextPlan.pick_code}}）
     </view>

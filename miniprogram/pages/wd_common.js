@@ -429,10 +429,12 @@ async function drawAll(page, payload) {
 }
 
 function attachWeekdayPage({ anchor, title }) {
+  const pageKey = (String(anchor) === "mix") ? "mix" : `wd${Number(anchor)}`;
   return {
     data: {
       anchor,
       title,
+      pageKey,
       status: "",
       rangeKey: "all",
       rangeLabel: "全区间",
@@ -496,8 +498,19 @@ function attachWeekdayPage({ anchor, title }) {
       await this.loadRange(k);
     },
 
-    goMix() {
-      wx.navigateTo({ url: "/pages/mix/index" });
+    switchPage(e) {
+      const p = (e && e.currentTarget && e.currentTarget.dataset) ? String(e.currentTarget.dataset.p || "") : "";
+      if (!p || p === String(this.data.pageKey || "")) return;
+      if (p === "mix") {
+        wx.navigateTo({ url: "/pages/mix/index" });
+        return;
+      }
+      // weekday pages are tabBar pages
+      if (p === "wd0") return wx.switchTab({ url: "/pages/wd0/index" });
+      if (p === "wd1") return wx.switchTab({ url: "/pages/wd1/index" });
+      if (p === "wd2") return wx.switchTab({ url: "/pages/wd2/index" });
+      if (p === "wd3") return wx.switchTab({ url: "/pages/wd3/index" });
+      if (p === "wd4") return wx.switchTab({ url: "/pages/wd4/index" });
     },
 
     async loadRange(k) {
@@ -737,6 +750,12 @@ function attachWeekdayPage({ anchor, title }) {
 
       const ddRot = _drawdownFromNav(navRot);
       const ddEw = _drawdownFromNav(navEw);
+      const ddEx = _drawdownFromNav((navEx && navEx.length) ? navEx : (navRot.map((v, i) => {
+        const a = Number(v);
+        const b = Number(navEw[i]);
+        if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+        return a / b;
+      })));
       const rsiRot24 = (((rotFull.nav_rsi || {}).series || {}).ROTATION || {})["24"] || _rsiWilder(navRot, 24);
       const rr3y = _rollingReturn(navRot, 3 * 252);
       const rdd3y = _rollingMaxDrawdown(navRot, 3 * 252);
@@ -916,6 +935,12 @@ function attachWeekdayPage({ anchor, title }) {
         { name: "EMA252", y: ratioEma, color: "#ff7a00", width: 1.2, dash: true },
         { name: "BBU", y: ratioBbu, color: "#999", width: 1.0, dash: true },
         { name: "BBL", y: ratioBbl, color: "#999", width: 1.0, dash: true },
+      ]});
+
+      // 6.1) excess drawdown (based on ratio/excess nav)
+      const r6b = await measure("rExDD");
+      drawLineChart(wx.createCanvasContext("rExDD", this), { width: Math.floor(r6b.width || 320), height: Math.floor(r6b.height || 180), x: dates, yMode: "linear", title: "超额回撤（ROT/EW）", yLabelFmt: fmtPct, series: [
+        { name: "EX DD", y: ddEx, color: "#ad1457", width: 1.4 },
       ]});
 
       // 7) ratio rsi
@@ -1222,6 +1247,14 @@ function attachWeekdayPage({ anchor, title }) {
           const bbu = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) + 2 * Number(sd[i])) : null);
           const bbl = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) - 2 * Number(sd[i])) : null);
           lines = [`RATIO=${fmtNum(ratio[idx])}`, `EMA252=${fmtNum(ema[idx])}`, `BBU=${fmtNum(bbu[idx])}`, `BBL=${fmtNum(bbl[idx])}`];
+        } else if (id === "rExDD") {
+          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+          const ex = (s.EXCESS || []).length ? (s.EXCESS || []) : (s.ROTATION || []).map((v, i) => {
+            const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+            return a / b;
+          });
+          lines = [`EX_DD=${fmtPct(_drawdownFromNav(ex)[idx])}`];
         } else if (id === "rRatioRSI") {
           const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
           const ratio = (s.ROTATION || []).map((v, i) => {
