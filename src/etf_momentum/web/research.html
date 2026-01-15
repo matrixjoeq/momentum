@@ -378,6 +378,37 @@
         轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。
       </div>
 
+      <div class="panel no-print" style="margin-top: 10px;">
+        <h3 style="margin: 0 0 6px 0;">小程序同款：固定4ETF 周度轮动（周一~周五 + 综合）</h3>
+        <div class="muted">
+          固定参数：周频 / Top1 / 回看20 / skip=0 / 成本=0 / 无风控 / 成交价=open / 休市=prev；标的固定为 159915/511010/513100/518880。
+        </div>
+        <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+          <label style="margin:0;">方案：</label>
+          <button id="mpRotA_mix">综合</button>
+          <button id="mpRotA_0">周一</button>
+          <button id="mpRotA_1">周二</button>
+          <button id="mpRotA_2">周三</button>
+          <button id="mpRotA_3">周四</button>
+          <button id="mpRotA_4">周五</button>
+          <span class="muted" id="mpRotAnchorHint" style="margin-left:6px;"></span>
+        </div>
+        <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
+          <label style="margin:0;">区间：</label>
+          <button class="mpRotRange" data-k="1m">近一月</button>
+          <button class="mpRotRange" data-k="3m">近三月</button>
+          <button class="mpRotRange" data-k="6m">近半年</button>
+          <button class="mpRotRange" data-k="1y">近一年</button>
+          <button class="mpRotRange" data-k="3y">近三年</button>
+          <button class="mpRotRange" data-k="5y">近五年</button>
+          <button class="mpRotRange" data-k="10y">近十年</button>
+          <button class="mpRotRange" data-k="all">全区间</button>
+          <button id="runMpRot" style="margin-left:10px;">加载到下方轮动图表</button>
+          <span class="muted" id="mpRotStatus" style="margin-left:6px;"></span>
+        </div>
+        <div id="mpRotPlan" class="muted" style="margin-top:8px;"></div>
+      </div>
+
       <div class="panel no-print">
         <div class="tabs" id="rotTabs" role="tablist" aria-label="动量轮动参数">
           <button class="tabBtn active" data-tab="rotTabBase" role="tab" aria-selected="true">基础参数</button>
@@ -1788,6 +1819,139 @@
       let lastMcEw = null;
       let lastMcRot = null;
       let lastMcExcess = null;
+
+      // ---------------- Mini-program fixed rotation (weekly5-open) ----------------
+      const mpRotState = { anchor: "mix", rangeKey: "all", wideCache: null };
+      const MP_RANGE_MAP = {
+        "1m": { label: "近一月", days: 21 },
+        "3m": { label: "近三月", days: 63 },
+        "6m": { label: "近半年", days: 126 },
+        "1y": { label: "近一年", days: 252 },
+        "3y": { label: "近三年", days: 756 },
+        "5y": { label: "近五年", days: 1260 },
+        "10y": { label: "近十年", days: 2520 },
+        "all": { label: "全区间", days: null },
+      };
+      function _ymd(dIso) { return String(dIso || "").split("-").join(""); }
+      function _todayYmd() {
+        const d = new Date();
+        return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;
+      }
+      function _mpRotSetAnchor(a) {
+        mpRotState.anchor = String(a);
+        const keys = ["mix", "0", "1", "2", "3", "4"];
+        for (const k of keys) {
+          const el = $(`mpRotA_${k}`);
+          if (!el) continue;
+          el.style.fontWeight = (k === mpRotState.anchor) ? "700" : "400";
+          el.style.borderColor = (k === mpRotState.anchor) ? "#444" : "#bbb";
+        }
+        $("mpRotAnchorHint").textContent = (mpRotState.anchor === "mix") ? "MIX=周一~周五等权运营组合" : "";
+      }
+      function _mpRotSetStatus(s) { if ($("mpRotStatus")) $("mpRotStatus").textContent = s || ""; }
+      function _pickRange(datesIso, key) {
+        const ds = (datesIso || []).slice();
+        if (!ds.length) return { startIso: null, endIso: null, label: "-" };
+        const cfg = MP_RANGE_MAP[key] || MP_RANGE_MAP.all;
+        if (!cfg.days) return { startIso: ds[0], endIso: ds[ds.length - 1], label: cfg.label };
+        const i0 = Math.max(0, ds.length - cfg.days);
+        return { startIso: ds[i0], endIso: ds[ds.length - 1], label: cfg.label };
+      }
+
+      async function runMiniRotationToMain() {
+        const btn = $("runMpRot");
+        const oldTxt = btn ? btn.textContent : "";
+        if (btn) { btn.disabled = true; btn.textContent = "加载中..."; }
+        _mpRotSetStatus("加载中...");
+        setMsg("");
+        try {
+          const end0 = _todayYmd();
+          const start0 = "20000101";
+          const isMix = (mpRotState.anchor === "mix");
+          // Stage-1: lite wide range to get date axis for range slicing
+          const litePath = isMix ? "/analysis/rotation/weekly5-open-combo-lite" : "/analysis/rotation/weekly5-open-lite";
+          const fullPath = isMix ? "/analysis/rotation/weekly5-open-combo" : "/analysis/rotation/weekly5-open";
+          const liteReq = isMix
+            ? { start: start0, end: end0 }
+            : { start: start0, end: end0, anchor_weekday: Number(mpRotState.anchor) };
+          const respLite = await api(litePath, { method: "POST", body: JSON.stringify(liteReq) });
+          const textLite = await respLite.text();
+          if (!respLite.ok) return setMsg(textLite);
+          const dataLite = JSON.parse(textLite);
+          const anchorKey = isMix ? "mix" : String(Number(mpRotState.anchor));
+          const oneLite = (dataLite.by_anchor || {})[anchorKey] || {};
+          const navLite = oneLite.nav || {};
+          const datesIso = (navLite.dates || []);
+          const picked = _pickRange(datesIso, mpRotState.rangeKey);
+          if (!picked.startIso || !picked.endIso) return setMsg("小程序固定轮动：无可用日期轴（请先同步行情）");
+          const s1 = _ymd(picked.startIso);
+          const e1 = _ymd(picked.endIso);
+
+          _mpRotSetStatus(`加载 ${picked.label} (${picked.startIso} ~ ${picked.endIso})...`);
+          const fullReq = isMix
+            ? { start: s1, end: e1 }
+            : { start: s1, end: e1, anchor_weekday: Number(mpRotState.anchor) };
+          const respFull = await api(fullPath, { method: "POST", body: JSON.stringify(fullReq) });
+          const textFull = await respFull.text();
+          if (!respFull.ok) return setMsg(textFull);
+          const dataFull = JSON.parse(textFull);
+          const one = (dataFull.by_anchor || {})[anchorKey];
+          if (!one) return setMsg("小程序固定轮动：后端未返回该方案数据");
+
+          // Render into the existing rotation section (same as runRotation())
+          plotRotation(one);
+          renderRotationMetrics(one.metrics || {});
+          renderWinPayoff(one.win_payoff || {});
+          renderContributionTables("rot", one.attribution);
+          rotState.rows = one.period_details || [];
+          rotState.page = 1;
+          renderRotPeriods();
+          rotPeriodTableState.weekly.rows = (one.period_returns && one.period_returns.weekly) ? one.period_returns.weekly : [];
+          rotPeriodTableState.monthly.rows = (one.period_returns && one.period_returns.monthly) ? one.period_returns.monthly : [];
+          rotPeriodTableState.quarterly.rows = (one.period_returns && one.period_returns.quarterly) ? one.period_returns.quarterly : [];
+          rotPeriodTableState.yearly.rows = (one.period_returns && one.period_returns.yearly) ? one.period_returns.yearly : [];
+          rotPeriodTableState.weekly.page = 1;
+          rotPeriodTableState.monthly.page = 1;
+          rotPeriodTableState.quarterly.page = 1;
+          rotPeriodTableState.yearly.page = 1;
+          renderRotPeriodTable("weekly");
+          renderRotPeriodTable("monthly");
+          renderRotPeriodTable("quarterly");
+          renderRotPeriodTable("yearly");
+
+          // Next rebalance plan (mini-program semantics)
+          const lastIso = (one.nav && one.nav.dates && one.nav.dates.length) ? one.nav.dates[one.nav.dates.length - 1] : picked.endIso;
+          const asof = _ymd(lastIso);
+          try {
+            const planPath = isMix ? "/analysis/rotation/next-plan-auto" : "/analysis/rotation/next-plan";
+            const planReq = isMix ? { asof } : { anchor_weekday: Number(mpRotState.anchor), asof };
+            const respPlan = await api(planPath, { method: "POST", body: JSON.stringify(planReq) });
+            const textPlan = await respPlan.text();
+            if (respPlan.ok) {
+              const plan = JSON.parse(textPlan);
+              if (plan && plan.rebalance_effective_next_day) {
+                $("mpRotPlan").textContent = `下一交易日（${plan.next_trading_day}）为调仓执行日；计划持有：${plan.pick_name || "-"}（${plan.pick_code || "-"}）`;
+              } else if (plan) {
+                $("mpRotPlan").textContent = `下一交易日（${plan.next_trading_day || "-"}）非调仓执行日`;
+              } else {
+                $("mpRotPlan").textContent = "";
+              }
+            } else {
+              $("mpRotPlan").textContent = "";
+            }
+          } catch {
+            $("mpRotPlan").textContent = "";
+          }
+
+          _mpRotSetStatus("OK");
+        } catch (e) {
+          console.error(e);
+          setMsg(String(e && e.message ? e.message : e));
+          _mpRotSetStatus("失败");
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = oldTxt; }
+        }
+      }
       let lastBaseline = null; // latest baseline analysis payload (for client-side correlation re-slicing)
       let corrRangeKey = "all";
 
@@ -4019,6 +4183,19 @@
 
       $("runMcEw").addEventListener("click", runMcEw);
       $("runMcRot").addEventListener("click", runMcRot);
+
+      // mini-program fixed rotation wiring
+      if ($("mpRotA_mix")) $("mpRotA_mix").addEventListener("click", () => _mpRotSetAnchor("mix"));
+      if ($("mpRotA_0")) $("mpRotA_0").addEventListener("click", () => _mpRotSetAnchor("0"));
+      if ($("mpRotA_1")) $("mpRotA_1").addEventListener("click", () => _mpRotSetAnchor("1"));
+      if ($("mpRotA_2")) $("mpRotA_2").addEventListener("click", () => _mpRotSetAnchor("2"));
+      if ($("mpRotA_3")) $("mpRotA_3").addEventListener("click", () => _mpRotSetAnchor("3"));
+      if ($("mpRotA_4")) $("mpRotA_4").addEventListener("click", () => _mpRotSetAnchor("4"));
+      Array.from(document.querySelectorAll("button.mpRotRange[data-k]")).forEach((b) => {
+        b.addEventListener("click", () => { mpRotState.rangeKey = String(b.dataset.k || "all"); });
+      });
+      if ($("runMpRot")) $("runMpRot").addEventListener("click", runMiniRotationToMain);
+      _mpRotSetAnchor("mix");
 
       // Correlation range buttons (default full range; disable unavailable based on current backtest).
       const wireCorrBtn = (key, id) => {
