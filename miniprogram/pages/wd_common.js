@@ -501,16 +501,13 @@ function attachWeekdayPage({ anchor, title }) {
     switchPage(e) {
       const p = (e && e.currentTarget && e.currentTarget.dataset) ? String(e.currentTarget.dataset.p || "") : "";
       if (!p || p === String(this.data.pageKey || "")) return;
-      if (p === "mix") {
-        wx.navigateTo({ url: "/pages/mix/index" });
-        return;
-      }
-      // weekday pages are tabBar pages
-      if (p === "wd0") return wx.switchTab({ url: "/pages/wd0/index" });
-      if (p === "wd1") return wx.switchTab({ url: "/pages/wd1/index" });
-      if (p === "wd2") return wx.switchTab({ url: "/pages/wd2/index" });
-      if (p === "wd3") return wx.switchTab({ url: "/pages/wd3/index" });
-      if (p === "wd4") return wx.switchTab({ url: "/pages/wd4/index" });
+      // No tabBar now (we use a custom bottom nav); use redirectTo to avoid stacking history.
+      if (p === "mix") return wx.redirectTo({ url: "/pages/mix/index" });
+      if (p === "wd0") return wx.redirectTo({ url: "/pages/wd0/index" });
+      if (p === "wd1") return wx.redirectTo({ url: "/pages/wd1/index" });
+      if (p === "wd2") return wx.redirectTo({ url: "/pages/wd2/index" });
+      if (p === "wd3") return wx.redirectTo({ url: "/pages/wd3/index" });
+      if (p === "wd4") return wx.redirectTo({ url: "/pages/wd4/index" });
     },
 
     async loadRange(k) {

@@ -15,19 +15,6 @@
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
     "backgroundColor": "#ffffff"
-  },
-  "tabBar": {
-    "color": "#666666",
-    "selectedColor": "#1677ff",
-    "backgroundColor": "#ffffff",
-    "borderStyle": "black",
-    "list": [
-      { "pagePath": "pages/wd0/index", "text": "周一" },
-      { "pagePath": "pages/wd1/index", "text": "周二" },
-      { "pagePath": "pages/wd2/index", "text": "周三" },
-      { "pagePath": "pages/wd3/index", "text": "周四" },
-      { "pagePath": "pages/wd4/index", "text": "周五" }
-    ]
   }
 }
 

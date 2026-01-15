@@ -5,14 +5,6 @@
       <view class="muted">{{rangeLabel}}</view>
     </view>
     <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
-      <button size="mini" type="{{pageKey==='mix'?'primary':'default'}}" bindtap="switchPage" data-p="mix">综合</button>
-      <button size="mini" type="{{pageKey==='wd0'?'primary':'default'}}" bindtap="switchPage" data-p="wd0">周一</button>
-      <button size="mini" type="{{pageKey==='wd1'?'primary':'default'}}" bindtap="switchPage" data-p="wd1">周二</button>
-      <button size="mini" type="{{pageKey==='wd2'?'primary':'default'}}" bindtap="switchPage" data-p="wd2">周三</button>
-      <button size="mini" type="{{pageKey==='wd3'?'primary':'default'}}" bindtap="switchPage" data-p="wd3">周四</button>
-      <button size="mini" type="{{pageKey==='wd4'?'primary':'default'}}" bindtap="switchPage" data-p="wd4">周五</button>
-    </view>
-    <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
       <button size="mini" bindtap="setRange" data-k="1m">近一月</button>
       <button size="mini" bindtap="setRange" data-k="3m">近三月</button>
       <button size="mini" bindtap="setRange" data-k="6m">近半年</button>
@@ -385,6 +377,19 @@
       下一交易日（{{nextPlan.next_trading_day}}）非调仓执行日
     </view>
     <view wx:if="{{!nextPlan}}" class="muted">计划未加载</view>
+  </view>
+
+  <!-- spacer so bottom nav won't cover content -->
+  <view style="height: 140rpx;"></view>
+
+  <!-- Bottom navigation: 综合 + 周一~周五 -->
+  <view class="bottomNav">
+    <button size="mini" type="{{pageKey==='mix'?'primary':'default'}}" bindtap="switchPage" data-p="mix">综合</button>
+    <button size="mini" type="{{pageKey==='wd0'?'primary':'default'}}" bindtap="switchPage" data-p="wd0">周一</button>
+    <button size="mini" type="{{pageKey==='wd1'?'primary':'default'}}" bindtap="switchPage" data-p="wd1">周二</button>
+    <button size="mini" type="{{pageKey==='wd2'?'primary':'default'}}" bindtap="switchPage" data-p="wd2">周三</button>
+    <button size="mini" type="{{pageKey==='wd3'?'primary':'default'}}" bindtap="switchPage" data-p="wd3">周四</button>
+    <button size="mini" type="{{pageKey==='wd4'?'primary':'default'}}" bindtap="switchPage" data-p="wd4">周五</button>
   </view>
 </view>
 
