@@ -1907,8 +1907,11 @@ def baseline_montecarlo(payload: BaselineMonteCarloRequest, db: Session = Depend
     if payload.sample_window_days is not None:
         daily_ret = daily_ret.tail(int(payload.sample_window_days))
     cfg = MonteCarloConfig(n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed)
+    # For "period return" distribution, align with the same rebalance frequency selection (best-effort).
+    reb = (payload.rebalance or "weekly").strip().lower()
+    period_freq = {"weekly": "W-FRI", "monthly": "ME", "quarterly": "QE", "yearly": "YE", "daily": "B"}.get(reb, "W-FRI")
     try:
-        mc = bootstrap_metrics_from_daily_returns(daily_ret, rf=float(payload.risk_free_rate), cfg=cfg)
+        mc = bootstrap_metrics_from_daily_returns(daily_ret, rf=float(payload.risk_free_rate), cfg=cfg, period_freq=period_freq)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {
@@ -1939,9 +1942,11 @@ def rotation_montecarlo(payload: RotationMonteCarloRequest, db: Session = Depend
         daily_ret = daily_ret.tail(int(payload.sample_window_days))
         daily_excess = daily_excess.tail(int(payload.sample_window_days))
     cfg = MonteCarloConfig(n_sims=payload.n_sims, block_size=payload.block_size, seed=payload.seed)
+    reb = (payload.rebalance or "weekly").strip().lower()
+    period_freq = {"weekly": "W-FRI", "monthly": "ME", "quarterly": "QE", "yearly": "YE", "daily": "B"}.get(reb, "W-FRI")
     try:
-        mc_strategy = bootstrap_metrics_from_daily_returns(daily_ret, rf=float(payload.risk_free_rate), cfg=cfg)
-        mc_excess = bootstrap_metrics_from_daily_returns(daily_excess, rf=0.0, cfg=cfg)
+        mc_strategy = bootstrap_metrics_from_daily_returns(daily_ret, rf=float(payload.risk_free_rate), cfg=cfg, period_freq=period_freq)
+        mc_excess = bootstrap_metrics_from_daily_returns(daily_excess, rf=0.0, cfg=cfg, period_freq=period_freq)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {

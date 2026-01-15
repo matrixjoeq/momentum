@@ -87,6 +87,38 @@ def _histogram(samples: np.ndarray, *, bins: int = 40, clip_q: tuple[float, floa
     }
 
 
+def _stats(x: np.ndarray) -> dict[str, Any]:
+    xs = np.asarray(x, dtype=float)
+    xs = xs[np.isfinite(xs)]
+    if xs.size == 0:
+        return {
+            "count": 0,
+            "mean": float("nan"),
+            "std": float("nan"),
+            "p05": float("nan"),
+            "p10": float("nan"),
+            "p50": float("nan"),
+            "p90": float("nan"),
+            "p95": float("nan"),
+            "pos_ratio": float("nan"),
+            "min": float("nan"),
+            "max": float("nan"),
+        }
+    return {
+        "count": int(xs.size),
+        "mean": float(np.mean(xs)),
+        "std": float(np.std(xs, ddof=1)) if xs.size >= 2 else float("nan"),
+        "p05": float(np.quantile(xs, 0.05)),
+        "p10": float(np.quantile(xs, 0.10)),
+        "p50": float(np.quantile(xs, 0.50)),
+        "p90": float(np.quantile(xs, 0.90)),
+        "p95": float(np.quantile(xs, 0.95)),
+        "pos_ratio": float(np.mean(xs > 0.0)),
+        "min": float(np.min(xs)),
+        "max": float(np.max(xs)),
+    }
+
+
 def _anderson_darling_stat(x: np.ndarray, cdf: Callable[[np.ndarray], np.ndarray]) -> float:
     # Generic AD statistic (no p-value). Assumes continuous distribution.
     xs = np.asarray(x, dtype=float)
@@ -168,6 +200,7 @@ def bootstrap_metrics_from_daily_returns(
     cfg: MonteCarloConfig,
     ann_factor: int = TRADING_DAYS_PER_YEAR,
     extra_metrics: dict[str, Callable[[pd.Series, pd.Series], float]] | None = None,
+    period_freq: str | None = None,
 ) -> dict[str, Any]:
     """
     Monte Carlo via circular block bootstrap on daily returns.
@@ -180,6 +213,11 @@ def bootstrap_metrics_from_daily_returns(
         raise ValueError("block_size must be > 0")
 
     r = daily_ret.astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    # keep index if provided (for resample-based period returns)
+    try:
+        r.index = pd.to_datetime(r.index)
+    except Exception:  # pragma: no cover
+        pass
     # drop the first day if it's a synthetic 0 from pct_change
     if len(r) >= 2 and r.iloc[0] == 0.0:
         r = r.iloc[1:]
@@ -210,9 +248,10 @@ def bootstrap_metrics_from_daily_returns(
     seed_used = int(cfg.seed) if cfg.seed is not None else secrets.randbits(64)
     rng = np.random.default_rng(seed_used)
     sims: dict[str, list[float]] = {k: [] for k in obs.keys()}
+    period_samples: list[float] = []
     for _ in range(int(cfg.n_sims)):
         idx = _circular_block_bootstrap_indices(n, block_size=cfg.block_size, rng=rng)
-        rr = pd.Series(r.to_numpy(dtype=float)[idx])
+        rr = pd.Series(r.to_numpy(dtype=float)[idx], index=r.index)
         nav = (1.0 + rr).cumprod()
         nav.iloc[0] = 1.0
         sims["cumulative_return"].append(float(nav.iloc[-1] - 1.0))
@@ -225,6 +264,14 @@ def bootstrap_metrics_from_daily_returns(
                 sims[k].append(float(fn(rr, nav)))
             except (ValueError, TypeError):
                 sims[k].append(float("nan"))
+
+        if period_freq:
+            try:
+                pr = nav.resample(str(period_freq)).last().pct_change().dropna().to_numpy(dtype=float)
+                if pr.size:
+                    period_samples.extend([float(x) for x in pr if np.isfinite(float(x))])
+            except Exception:  # pragma: no cover
+                pass
 
     # Fit candidate distributions for each metric.
     candidates = ["normal", "t", "lognorm"]
@@ -256,6 +303,19 @@ def bootstrap_metrics_from_daily_returns(
             except (ValueError, TypeError, ZeroDivisionError, FloatingPointError):  # pragma: no cover
                 qq[d] = {"p": [], "emp": [], "theory": []}
         out[k]["fit"] = {"candidates": candidates, "best_by_bic": best, "dists": fits, "qq": qq}
+    period_out = None
+    if period_freq:
+        try:
+            obs_pr = nav_obs.resample(str(period_freq)).last().pct_change().dropna().to_numpy(dtype=float)
+        except Exception:  # pragma: no cover
+            obs_pr = np.asarray([], dtype=float)
+        period_out = {
+            "freq": str(period_freq),
+            "observed": _stats(obs_pr),
+            "simulated": _stats(np.asarray(period_samples, dtype=float)),
+            "hist": _histogram(np.asarray(period_samples, dtype=float), bins=60, clip_q=(0.01, 0.99)),
+        }
+
     return {
         "method": "circular_block_bootstrap",
         "n_sims": int(cfg.n_sims),
@@ -263,5 +323,6 @@ def bootstrap_metrics_from_daily_returns(
         "seed_provided": cfg.seed,
         "seed_used": int(seed_used),
         "metrics": out,
+        "period_return": period_out,
     }
 
