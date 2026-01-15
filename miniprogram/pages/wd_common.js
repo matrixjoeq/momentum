@@ -1018,20 +1018,33 @@ function attachWeekdayPage({ anchor, title }) {
       const view = rows.slice(start, end).map((r, i) => {
         const buys = Array.isArray(r.buys) ? r.buys : [];
         const sells = Array.isArray(r.sells) ? r.sells : [];
-        const fmtW = (x) => {
-          const v = Number(x);
-          if (!Number.isFinite(v)) return "-";
-          return (v * 100).toFixed(0) + "%";
+        const cashText = "空仓";
+        const normName = (code) => {
+          const c = String(code || "").trim();
+          return c ? dispCode(c) : cashText;
         };
-        const fmtLeg = (leg) => {
-          const code = String(leg.code || "");
-          const name = dispCode(code);
-          return `${name}(${fmtW(leg.from_weight)}→${fmtW(leg.to_weight)})`;
-        };
-        const buyTxt = buys.length ? ("买：" + buys.map(fmtLeg).join("，")) : "";
-        const sellTxt = sells.length ? ("卖：" + sells.map(fmtLeg).join("，")) : "";
-        const turnTxt = (r.turnover != null && Number.isFinite(Number(r.turnover))) ? `换手：${fmtW(r.turnover)}` : "";
-        const tradeTxt = [buyTxt, sellTxt, turnTxt].filter(Boolean).join(" ｜ ") || "无调仓";
+        // In this mini-program fixed strategy, turnover is effectively 0% or 100%.
+        // Show "无调仓" or "X->Y" only.
+        const hasTrade = buys.length > 0 || sells.length > 0;
+        let fromCode = null;
+        let toCode = null;
+        if (sells.length) {
+          // pick the main sold leg (largest previous weight)
+          let best = sells[0];
+          for (const leg of sells) {
+            if (Number(leg.from_weight || 0) > Number(best.from_weight || 0)) best = leg;
+          }
+          fromCode = best.code;
+        }
+        if (buys.length) {
+          // pick the main bought leg (largest target weight)
+          let best = buys[0];
+          for (const leg of buys) {
+            if (Number(leg.to_weight || 0) > Number(best.to_weight || 0)) best = leg;
+          }
+          toCode = best.code;
+        }
+        const tradeTxt = hasTrade ? `${normName(fromCode)}->${normName(toCode)}` : "无调仓";
         return {
         k: `${p}-${i}`,
         start_date: r.start_date,

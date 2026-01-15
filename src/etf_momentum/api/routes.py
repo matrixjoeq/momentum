@@ -581,16 +581,23 @@ def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(g
     except Exception:  # pragma: no cover
         next_td = asof
 
-    # Determine if asof is the decision day for the coming weekly anchor period.
-    # For weekly anchor weekday, the period end is the next occurrence of that weekday (>= asof),
-    # and decision_date is shifted to previous trading day if end is not a session ("prev").
-    delta = (anchor - asof.weekday()) % 7
-    anchor_date = asof + dt.timedelta(days=int(delta))
-    try:
-        decision_date = shift_to_trading_day(anchor_date, shift="prev", cal="XSHG")
-    except Exception:  # pragma: no cover
-        decision_date = anchor_date
-    rebalance_effective_next_day = bool(decision_date == asof)
+    # Mini-program semantics: each tab represents the *execution day* weekday (open execution).
+    # We only show a plan on the tab whose weekday matches the next trading day.
+    # (i.e., decision is made on asof close, executed on next trading day open).
+    rebalance_effective_next_day = bool(next_td > asof and int(next_td.weekday()) == int(anchor))
+
+    # If next trading day is not this tab's execution day, skip computing the pick to avoid
+    # misleading UI + unnecessary heavy computations.
+    if not rebalance_effective_next_day:
+        return {
+            "asof": asof.strftime("%Y%m%d"),
+            "next_trading_day": next_td.isoformat(),
+            "rebalance_effective_next_day": False,
+            "pick_code": None,
+            "pick_name": None,
+            "scores": {},
+            "meta": {"anchor_weekday": anchor, "rebalance_shift": "prev", "lookback_days": 20, "top_k": 1, "exec_price": "open"},
+        }
 
     codes = _FIXED_CODES[:]
     start = asof - dt.timedelta(days=90)
@@ -618,7 +625,7 @@ def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(g
     return {
         "asof": asof.strftime("%Y%m%d"),
         "next_trading_day": next_td.isoformat(),
-        "rebalance_effective_next_day": rebalance_effective_next_day,
+        "rebalance_effective_next_day": True,
         "pick_code": pick_code,
         "pick_name": pick_name,
         "scores": {c: float(scores[c]) for c in codes},
