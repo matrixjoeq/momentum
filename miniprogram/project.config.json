@@ -5,7 +5,7 @@
     "es6": false,
     "postcss": false,
     "compileWorklet": false,
-    "minified": false,
+    "minified": true,
     "uglifyFileName": false,
     "uploadWithSourceMap": true,
     "enhance": false,

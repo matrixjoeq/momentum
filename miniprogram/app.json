@@ -10,6 +10,7 @@
     "pages/variant/index",
     "pages/execute/index"
   ],
+  "lazyCodeLoading": "requiredComponents",
   "window": {
     "navigationBarTitleText": "ETF 周度轮动（模拟）",
     "navigationBarBackgroundColor": "#ffffff",
