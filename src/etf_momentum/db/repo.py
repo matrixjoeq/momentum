@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .models import EtfPool, EtfPrice, EtfPriceAudit, IngestionBatch, IngestionItem, ValidationPolicy
@@ -185,12 +186,23 @@ def mark_fetch_status(
     message: str | None = None,
     when: dt.datetime | None = None,
 ) -> None:
+    def _clip(x: str | None, max_len: int = 512) -> str | None:
+        if x is None:
+            return None
+        s = str(x)
+        if len(s) <= max_len:
+            return s
+        # keep within column size (MySQL VARCHAR enforces length)
+        suffix = "...(truncated)"
+        keep = max(0, max_len - len(suffix))
+        return (s[:keep] + suffix)[:max_len]
+
     obj = get_etf_pool_by_code(db, code)
     if obj is None:
         return
     obj.last_fetch_at = when or dt.datetime.now(dt.timezone.utc)
     obj.last_fetch_status = status
-    obj.last_fetch_message = message
+    obj.last_fetch_message = _clip(message, 512)
     db.flush()
 
 
@@ -222,24 +234,41 @@ def upsert_prices(db: Session, rows: list[PriceRow]) -> int:
     chunk_size = 1000
 
     total = 0
+    dialect = (db.get_bind().dialect.name if db.get_bind() is not None else "").lower()
     for i in range(0, len(values), chunk_size):
         chunk = values[i : i + chunk_size]
-        stmt = insert(EtfPrice).values(chunk)
-        # On conflict, update OHLCV/amount/source/adjust to latest ingested values.
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[EtfPrice.code, EtfPrice.trade_date, EtfPrice.adjust],
-            set_={
-                "open": stmt.excluded.open,
-                "high": stmt.excluded.high,
-                "low": stmt.excluded.low,
-                "close": stmt.excluded.close,
-                "volume": stmt.excluded.volume,
-                "amount": stmt.excluded.amount,
-                "source": stmt.excluded.source,
-                "adjust": stmt.excluded.adjust,
-                "ingested_at": dt.datetime.now(dt.timezone.utc),
-            },
-        )
+        if dialect == "mysql":
+            stmt = mysql_insert(EtfPrice).values(chunk)
+            stmt = stmt.on_duplicate_key_update(
+                {
+                    "open": stmt.inserted.open,
+                    "high": stmt.inserted.high,
+                    "low": stmt.inserted.low,
+                    "close": stmt.inserted.close,
+                    "volume": stmt.inserted.volume,
+                    "amount": stmt.inserted.amount,
+                    "source": stmt.inserted.source,
+                    "adjust": stmt.inserted.adjust,
+                    "ingested_at": dt.datetime.now(dt.timezone.utc),
+                }
+            )
+        else:
+            # Default: SQLite upsert (local dev / tests).
+            stmt = sqlite_insert(EtfPrice).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[EtfPrice.code, EtfPrice.trade_date, EtfPrice.adjust],
+                set_={
+                    "open": stmt.excluded.open,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "close": stmt.excluded.close,
+                    "volume": stmt.excluded.volume,
+                    "amount": stmt.excluded.amount,
+                    "source": stmt.excluded.source,
+                    "adjust": stmt.excluded.adjust,
+                    "ingested_at": dt.datetime.now(dt.timezone.utc),
+                },
+            )
         result = db.execute(stmt)
         total += int(getattr(result, "rowcount", 0) or 0)
 
@@ -325,10 +354,20 @@ def update_ingestion_batch(
     pre_fingerprint: str | None = None,
     post_fingerprint: str | None = None,
 ) -> None:
+    def _clip(x: str | None, max_len: int = 512) -> str | None:
+        if x is None:
+            return None
+        s = str(x)
+        if len(s) <= max_len:
+            return s
+        suffix = "...(truncated)"
+        keep = max(0, max_len - len(suffix))
+        return (s[:keep] + suffix)[:max_len]
+
     stmt = (
         update(IngestionBatch)
         .where(IngestionBatch.id == batch_id)
-        .values(status=status, message=message, pre_fingerprint=pre_fingerprint, post_fingerprint=post_fingerprint)
+        .values(status=status, message=_clip(message, 512), pre_fingerprint=pre_fingerprint, post_fingerprint=post_fingerprint)
     )
     db.execute(stmt)
 
