@@ -99,6 +99,27 @@ class SyncFixedPoolResponse(BaseModel):
     codes: dict
 
 
+class SyncJobTriggerResponse(BaseModel):
+    job_id: int
+    status: str
+    dedupe_key: str
+
+
+class SyncJobOut(BaseModel):
+    id: int
+    status: str
+    job_type: str
+    dedupe_key: str
+    run_date: str | None = None  # YYYY-MM-DD
+    full_refresh: bool
+    adjusts: list[str]
+    progress: dict | None = None
+    result: dict | None = None
+    error_message: str | None = None
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+
 class BaselineAnalysisRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")

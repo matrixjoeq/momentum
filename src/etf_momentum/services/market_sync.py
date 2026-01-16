@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from sqlalchemy.orm import Session
 
@@ -39,6 +39,7 @@ def sync_fixed_pool_prices(
     run_date: dt.date,
     adjusts: Iterable[str] | None = None,
     full_refresh: bool | None = None,
+    progress_cb: Callable[[dict], None] | None = None,
 ) -> dict[str, object]:
     """
     Sync the fixed 4-ETF pool prices into SQLite for the given date (inclusive).
@@ -71,6 +72,9 @@ def sync_fixed_pool_prices(
         if get_etf_pool_by_code(db, code) is None:
             upsert_etf_pool(db, code=code, name=FIXED_NAMES.get(code, code), start_date=None, end_date=None)
     db.flush()
+
+    step_total = len(FIXED_CODES) * max(1, len(adj_list))
+    step_done = 0
 
     for code in FIXED_CODES:
         code_out: dict[str, object] = {"ok": True, "adjusts": {}}
@@ -105,6 +109,22 @@ def sync_fixed_pool_prices(
                 code_out["adjusts"][adj] = {"skipped": False, "status": "failed", "error": str(e)}
                 code_out["ok"] = False
                 out["ok"] = False
+
+            step_done += 1
+            if progress_cb is not None:
+                try:
+                    progress_cb(
+                        {
+                            "phase": "sync",
+                            "code": code,
+                            "adjust": adj,
+                            "done": int(step_done),
+                            "total": int(step_total),
+                            "ok": bool(out.get("ok")),
+                        }
+                    )
+                except Exception:  # pylint: disable=broad-exception-caught  # pragma: no cover
+                    pass
 
         # update overall pool coverage range (any adjust)
         try:

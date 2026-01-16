@@ -1182,16 +1182,30 @@ function attachWeekdayPage({ anchor, title }) {
 
     onChartTouch(e) {
       try {
+        // If we scheduled auto-hide on touch end, cancel it when touching again.
+        if (this.__tipTimer) {
+          clearTimeout(this.__tipTimer);
+          this.__tipTimer = null;
+        }
         const id = e.currentTarget.id;
         const raw = (id && id.startsWith("r")) ? (this.__rot || {}) : (this.__raw || {});
         const dates = (raw.dates || (raw.nav && raw.nav.dates) || []);
         const n = dates.length;
         if (!id || !n) return;
         const rect = (this.__rects && this.__rects[id]) ? this.__rects[id] : null;
-        const touch = (e.touches && e.touches[0]) ? e.touches[0] : null;
+        const touch = (e.touches && e.touches[0]) ? e.touches[0] : ((e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null);
         if (!rect || !touch) return;
-        const absX = (touch.clientX != null) ? Number(touch.clientX) : ((touch.x != null) ? Number(touch.x) : NaN);
-        const absY = (touch.clientY != null) ? Number(touch.clientY) : ((touch.y != null) ? Number(touch.y) : NaN);
+        // Touch coordinate fields vary across devices/WeChat versions:
+        // - iOS/Android may provide pageX/pageY instead of clientX/clientY
+        // - some versions provide x/y
+        const absX =
+          (touch.clientX != null) ? Number(touch.clientX)
+          : ((touch.pageX != null) ? Number(touch.pageX)
+            : ((touch.x != null) ? Number(touch.x) : NaN));
+        const absY =
+          (touch.clientY != null) ? Number(touch.clientY)
+          : ((touch.pageY != null) ? Number(touch.pageY)
+            : ((touch.y != null) ? Number(touch.y) : NaN));
         const xRel = absX - Number(rect.left);
         const yRel = absY - Number(rect.top);
         const idx = lineIndexFromTouchX(xRel, Number(rect.width), n);
@@ -1298,7 +1312,14 @@ function attachWeekdayPage({ anchor, title }) {
 
     onChartTouchEnd() {
       const tip = this.data.tip || {};
-      if (tip.show) this.setData({ tip: { show: false, id: "", x: 0, y: 0, text: "" } });
+      // For taps, hiding immediately makes it look like "no tooltip".
+      // Keep it briefly so users can read it.
+      if (!tip.show) return;
+      if (this.__tipTimer) clearTimeout(this.__tipTimer);
+      this.__tipTimer = setTimeout(() => {
+        this.setData({ tip: { show: false, id: "", x: 0, y: 0, text: "" } });
+        this.__tipTimer = null;
+      }, 1200);
     },
   };
 }

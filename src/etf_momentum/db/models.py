@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from etf_momentum.db.base import Base
@@ -248,3 +248,29 @@ class SimPositionDaily(Base):
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+
+class SyncJob(Base):
+    """
+    Long-running admin jobs (e.g. market data sync) tracked in DB so callers can poll status.
+    """
+
+    __tablename__ = "sync_job"
+    __table_args__ = (UniqueConstraint("dedupe_key", name="uq_sync_job_dedupe_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False, default="sync_fixed_pool")
+    dedupe_key: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+
+    status: Mapped[str] = mapped_column(String(16), index=True, nullable=False, default="queued")  # queued|running|success|failed
+
+    run_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    full_refresh: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    adjusts: Mapped[str] = mapped_column(String(64), nullable=False, default="qfq,hfq,none")  # comma-separated
+
+    progress_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

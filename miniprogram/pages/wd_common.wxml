@@ -25,9 +25,8 @@
     <view class="canvasWrap">
       <!-- height +50% (300rpx -> 450rpx) -->
       <canvas canvas-id="cNav" id="cNav" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 450rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='cNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <!-- canvas is a native component; overlays must use cover-view on real devices -->
+      <cover-view wx:if="{{tip.show && tip.id==='cNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -35,9 +34,7 @@
     <view class="title">图表2：回撤</view>
     <view class="canvasWrap">
       <canvas canvas-id="cDD" id="cDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 240rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='cDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='cDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -45,9 +42,7 @@
     <view class="title">图表3：RSI(24)</view>
     <view class="canvasWrap">
       <canvas canvas-id="cRSI" id="cRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='cRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='cRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -55,9 +50,7 @@
     <view class="title">图表4：滚动三年收益率</view>
     <view class="canvasWrap">
       <canvas canvas-id="cRR3Y" id="cRR3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='cRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='cRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -65,9 +58,7 @@
     <view class="title">图表5：滚动三年回撤</view>
     <view class="canvasWrap">
       <canvas canvas-id="cRDD3Y" id="cRDD3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='cRDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='cRDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -184,9 +175,7 @@
     <view class="title">轮动图表1：策略净值 vs 等权净值</view>
     <view class="canvasWrap">
       <canvas canvas-id="rNav" id="rNav" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 450rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -194,9 +183,7 @@
     <view class="title">轮动图表2：回撤对比（策略 vs 等权）</view>
     <view class="canvasWrap">
       <canvas canvas-id="rDD" id="rDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 260rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -204,9 +191,7 @@
     <view class="title">轮动图表3：策略净值 RSI(24)</view>
     <view class="canvasWrap">
       <canvas canvas-id="rRSI" id="rRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -214,9 +199,7 @@
     <view class="title">轮动图表4：策略滚动三年收益率</view>
     <view class="canvasWrap">
       <canvas canvas-id="rRR3Y" id="rRR3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -224,9 +207,7 @@
     <view class="title">轮动图表5：策略滚动三年回撤</view>
     <view class="canvasWrap">
       <canvas canvas-id="rMDD3Y" id="rMDD3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rMDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rMDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -234,9 +215,7 @@
     <view class="title">轮动图表6：净值比值 ROT/EW + EMA252 + 布林带</view>
     <view class="canvasWrap">
       <canvas canvas-id="rRatio" id="rRatio" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 300rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rRatio'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rRatio'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -244,9 +223,7 @@
     <view class="title">轮动图表7：超额回撤（基于 ROT/EW 比值）</view>
     <view class="canvasWrap">
       <canvas canvas-id="rExDD" id="rExDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rExDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rExDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -254,9 +231,7 @@
     <view class="title">轮动图表8：比值曲线 RSI(24)</view>
     <view class="canvasWrap">
       <canvas canvas-id="rRatioRSI" id="rRatioRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rRatioRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rRatioRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -264,9 +239,7 @@
     <view class="title">轮动图表9：40日收益差（策略 - 等权）</view>
     <view class="canvasWrap">
       <canvas canvas-id="rDiff40" id="rDiff40" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
-      <view wx:if="{{tip.show && tip.id==='rDiff40'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">
-        <text>{{tip.text}}</text>
-      </view>
+      <cover-view wx:if="{{tip.show && tip.id==='rDiff40'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
 
@@ -387,13 +360,14 @@
   <view style="height: 140rpx;"></view>
 
   <!-- Bottom navigation: 综合 + 周一~周五 -->
-  <view class="bottomNav">
-    <button size="mini" type="{{pageKey==='mix'?'primary':'default'}}" bindtap="switchPage" data-p="mix">综合</button>
-    <button size="mini" type="{{pageKey==='wd0'?'primary':'default'}}" bindtap="switchPage" data-p="wd0">周一</button>
-    <button size="mini" type="{{pageKey==='wd1'?'primary':'default'}}" bindtap="switchPage" data-p="wd1">周二</button>
-    <button size="mini" type="{{pageKey==='wd2'?'primary':'default'}}" bindtap="switchPage" data-p="wd2">周三</button>
-    <button size="mini" type="{{pageKey==='wd3'?'primary':'default'}}" bindtap="switchPage" data-p="wd3">周四</button>
-    <button size="mini" type="{{pageKey==='wd4'?'primary':'default'}}" bindtap="switchPage" data-p="wd4">周五</button>
-  </view>
+  <!-- Use cover-view to stay above canvas (native component) on real devices -->
+  <cover-view class="bottomNav">
+    <cover-view class="navItem {{pageKey==='mix'?'navItemActive':''}}" bindtap="switchPage" data-p="mix" hover-class="navItemHover">综合</cover-view>
+    <cover-view class="navItem {{pageKey==='wd0'?'navItemActive':''}}" bindtap="switchPage" data-p="wd0" hover-class="navItemHover">周一</cover-view>
+    <cover-view class="navItem {{pageKey==='wd1'?'navItemActive':''}}" bindtap="switchPage" data-p="wd1" hover-class="navItemHover">周二</cover-view>
+    <cover-view class="navItem {{pageKey==='wd2'?'navItemActive':''}}" bindtap="switchPage" data-p="wd2" hover-class="navItemHover">周三</cover-view>
+    <cover-view class="navItem {{pageKey==='wd3'?'navItemActive':''}}" bindtap="switchPage" data-p="wd3" hover-class="navItemHover">周四</cover-view>
+    <cover-view class="navItem {{pageKey==='wd4'?'navItemActive':''}}" bindtap="switchPage" data-p="wd4" hover-class="navItemHover">周五</cover-view>
+  </cover-view>
 </view>
 

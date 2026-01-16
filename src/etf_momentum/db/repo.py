@@ -11,7 +11,7 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from .models import EtfPool, EtfPrice, EtfPriceAudit, IngestionBatch, IngestionItem, ValidationPolicy
+from .models import EtfPool, EtfPrice, EtfPriceAudit, IngestionBatch, IngestionItem, SyncJob, ValidationPolicy
 
 
 @dataclass(frozen=True)
@@ -451,5 +451,77 @@ def record_price_audit(
                 adjust=r.adjust,
             )
         )
+    db.flush()
+
+
+# -------------------- Sync job helpers (async admin tasks) --------------------
+
+
+def create_sync_job(
+    db: Session,
+    *,
+    dedupe_key: str,
+    run_date: dt.date | None,
+    full_refresh: bool,
+    adjusts: list[str],
+) -> SyncJob:
+    """
+    Create a sync job row. If an existing job with the same dedupe_key exists, return it.
+    """
+    existing = db.execute(select(SyncJob).where(SyncJob.dedupe_key == str(dedupe_key))).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    obj = SyncJob(
+        job_type="sync_fixed_pool",
+        dedupe_key=str(dedupe_key),
+        run_date=run_date,
+        full_refresh=bool(full_refresh),
+        adjusts=",".join([str(x).strip().lower() for x in (adjusts or []) if str(x).strip()]),
+        status="queued",
+        progress_json=None,
+        result_json=None,
+        error_message=None,
+    )
+    db.add(obj)
+    db.flush()
+    return obj
+
+
+def get_sync_job(db: Session, job_id: int) -> SyncJob | None:
+    return db.execute(select(SyncJob).where(SyncJob.id == int(job_id))).scalar_one_or_none()
+
+
+def update_sync_job(
+    db: Session,
+    *,
+    job_id: int,
+    status: str | None = None,
+    started_at: dt.datetime | None = None,
+    finished_at: dt.datetime | None = None,
+    progress: dict | None = None,
+    result: dict | None = None,
+    error_message: str | None = None,
+) -> None:
+    obj = get_sync_job(db, job_id)
+    if obj is None:
+        return
+    if status is not None:
+        obj.status = str(status)
+    if started_at is not None:
+        obj.started_at = started_at
+    if finished_at is not None:
+        obj.finished_at = finished_at
+    if progress is not None:
+        try:
+            obj.progress_json = json.dumps(progress, ensure_ascii=False)
+        except (TypeError, ValueError):
+            obj.progress_json = None
+    if result is not None:
+        try:
+            obj.result_json = json.dumps(result, ensure_ascii=False)
+        except (TypeError, ValueError):
+            obj.result_json = None
+    if error_message is not None:
+        obj.error_message = str(error_message)[:1024]
     db.flush()
 

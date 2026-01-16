@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import json
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 
 import datetime as dt
 
@@ -35,6 +37,8 @@ from .schemas import (
     IngestionBatchOut,
     SyncFixedPoolRequest,
     SyncFixedPoolResponse,
+    SyncJobOut,
+    SyncJobTriggerResponse,
     PriceOut,
     ValidationPolicyOut,
 )
@@ -63,11 +67,14 @@ from ..analysis.trend import TrendInputs, compute_trend_backtest
 from ..data.ingestion import ingest_one_etf
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..db.repo import (
+    create_sync_job,
     delete_etf_pool,
     delete_prices,
+    get_sync_job,
     get_etf_pool_by_code,
     get_price_date_range,
     get_ingestion_batch,
+    update_sync_job,
     get_validation_policy_by_id,
     get_validation_policy_by_name,
     list_ingestion_batches,
@@ -137,6 +144,113 @@ def _now_shanghai_date() -> dt.date:
     return (dt.datetime.utcnow() + dt.timedelta(hours=8)).date()
 
 
+def _dedupe_key_fixed_pool(run_date: dt.date, *, full_refresh: bool, adjusts: list[str]) -> str:
+    ad = ",".join([str(x).strip().lower() for x in (adjusts or []) if str(x).strip()])
+    return f"fixed_pool:{run_date.strftime('%Y%m%d')}:full={int(bool(full_refresh))}:adj={ad}"
+
+
+def _job_to_out(job) -> SyncJobOut:
+    def _loads(s: str | None) -> dict | None:
+        if not s:
+            return None
+        try:
+            return json.loads(s)
+        except Exception:
+            return None
+
+    adjusts = [x for x in str(getattr(job, "adjusts", "") or "").split(",") if x]
+    return SyncJobOut(
+        id=int(job.id),
+        status=str(job.status),
+        job_type=str(job.job_type),
+        dedupe_key=str(job.dedupe_key),
+        run_date=(job.run_date.isoformat() if getattr(job, "run_date", None) is not None else None),
+        full_refresh=bool(job.full_refresh),
+        adjusts=adjusts,
+        progress=_loads(getattr(job, "progress_json", None)),
+        result=_loads(getattr(job, "result_json", None)),
+        error_message=(str(job.error_message) if getattr(job, "error_message", None) else None),
+        created_at=job.created_at.isoformat(),
+        started_at=(job.started_at.isoformat() if getattr(job, "started_at", None) else None),
+        finished_at=(job.finished_at.isoformat() if getattr(job, "finished_at", None) else None),
+    )
+
+
+def _run_sync_job_fixed_pool(
+    session_factory: sessionmaker[Session],
+    *,
+    job_id: int,
+    run_date: dt.date,
+    adjusts: list[str],
+    full_refresh: bool | None,
+) -> None:
+    """
+    Background job runner (runs inside the cloud-run instance).
+    """
+    import akshare as ak  # local import to keep startup light
+
+    db = session_factory()
+    try:
+        update_sync_job(db, job_id=job_id, status="running", started_at=dt.datetime.now(dt.timezone.utc), progress={"phase": "starting"})
+        db.commit()
+
+        cal = getattr(get_settings(), "auto_sync_calendar", "XSHG")
+        if not is_trading_day(run_date, cal=cal):
+            update_sync_job(
+                db,
+                job_id=job_id,
+                status="success",
+                finished_at=dt.datetime.now(dt.timezone.utc),
+                result={"ok": True, "skipped": True, "reason": f"not_trading_day({cal})", "date": run_date.strftime("%Y%m%d")},
+            )
+            db.commit()
+            return
+
+        def _progress(p: dict) -> None:
+            # Write lightweight progress so pollers can show activity.
+            update_sync_job(db, job_id=job_id, progress=p)
+            db.commit()
+
+        res = sync_fixed_pool_prices(
+            db=db,
+            ak=ak,
+            run_date=run_date,
+            adjusts=adjusts,
+            full_refresh=full_refresh,
+            progress_cb=_progress,
+        )
+        # commit any data ingestion performed during sync
+        db.commit()
+
+        ok = bool(res.get("ok"))
+        update_sync_job(
+            db,
+            job_id=job_id,
+            status=("success" if ok else "failed"),
+            finished_at=dt.datetime.now(dt.timezone.utc),
+            result=dict(res),
+            error_message=(None if ok else "sync failed; see result.codes for details"),
+            progress={"phase": "done", "ok": ok},
+        )
+        db.commit()
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        try:
+            update_sync_job(
+                db,
+                job_id=job_id,
+                status="failed",
+                finished_at=dt.datetime.now(dt.timezone.utc),
+                error_message=str(e),
+                progress={"phase": "failed"},
+            )
+            db.commit()
+        except Exception:
+            pass
+        raise
+    finally:
+        db.close()
+
+
 @router.post("/admin/sync/fixed-pool", response_model=SyncFixedPoolResponse)
 def admin_sync_fixed_pool(
     payload: SyncFixedPoolRequest,
@@ -188,6 +302,53 @@ def admin_sync_fixed_pool(
         adjusts=list(res.get("adjusts") or []),
         codes=dict(res.get("codes") or {}),
     )
+
+
+@router.post("/admin/sync/fixed-pool/async", response_model=SyncJobTriggerResponse)
+def admin_sync_fixed_pool_async(
+    payload: SyncFixedPoolRequest,
+    request: Request,
+    background: BackgroundTasks,
+    db: Session = Depends(get_session),
+    x_momentum_token: str | None = Header(default=None, alias="X-Momentum-Token"),
+) -> SyncJobTriggerResponse:
+    """
+    Trigger a long-running sync job and return immediately with job_id.
+    Intended for cloud function triggers with short HTTP timeouts.
+    """
+    settings = get_settings()
+    expected = getattr(settings, "sync_token", None)
+    if expected:
+        provided = (payload.token or x_momentum_token or "").strip()
+        if (not provided) or (provided != expected):
+            raise HTTPException(status_code=403, detail="invalid sync token")
+
+    run_date = _now_shanghai_date() if not payload.date else _parse_yyyymmdd(payload.date)
+    adjusts = [str(x).strip().lower() for x in (payload.adjusts or []) if str(x).strip()]
+    if not adjusts:
+        adjusts = ["qfq", "hfq", "none"]
+    do_full = bool(settings.auto_sync_full_refresh if payload.full_refresh is None else payload.full_refresh)
+    dedupe = _dedupe_key_fixed_pool(run_date, full_refresh=do_full, adjusts=adjusts)
+
+    job = create_sync_job(db, dedupe_key=dedupe, run_date=run_date, full_refresh=do_full, adjusts=adjusts)
+    db.commit()
+
+    # If an identical job is already running/queued, don't spawn another.
+    if str(job.status) in {"queued", "running"} and job.started_at is not None:
+        return SyncJobTriggerResponse(job_id=int(job.id), status=str(job.status), dedupe_key=str(job.dedupe_key))
+
+    # Ensure app state exists (engine/session_factory) and schedule background runner.
+    sf: sessionmaker[Session] = request.app.state.session_factory
+    background.add_task(_run_sync_job_fixed_pool, sf, job_id=int(job.id), run_date=run_date, adjusts=adjusts, full_refresh=do_full)
+    return SyncJobTriggerResponse(job_id=int(job.id), status=str(job.status), dedupe_key=str(job.dedupe_key))
+
+
+@router.get("/admin/sync/jobs/{job_id}", response_model=SyncJobOut)
+def admin_sync_job_status(job_id: int, db: Session = Depends(get_session)) -> SyncJobOut:
+    job = get_sync_job(db, int(job_id))
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return _job_to_out(job)
 
 
 @router.post("/analysis/baseline")
