@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 
 from .api.routes import router as api_router
 from .api.deps import init_app_state
+from .scheduler import start_auto_sync, stop_auto_sync
 from .settings import get_settings
 
 
@@ -19,11 +20,13 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(fastapi_app: FastAPI):
         init_app_state(fastapi_app)
+        start_auto_sync(fastapi_app)
         yield
+        await stop_auto_sync(fastapi_app)
 
-    app = FastAPI(title="ETF Momentum - Pool & Data Service", version="0.1.0", lifespan=lifespan)
+    fastapi_app = FastAPI(title="ETF Momentum - Pool & Data Service", version="0.1.0", lifespan=lifespan)
 
-    @app.get("/")
+    @fastapi_app.get("/")
     def index():
         _ = get_settings()  # ensure data dirs exist
         path = Path(__file__).resolve().parent / "web" / "index.html"
@@ -33,7 +36,7 @@ def create_app() -> FastAPI:
             return RedirectResponse(url="/docs")
         return FileResponse(path)
 
-    @app.get("/research")
+    @fastapi_app.get("/research")
     def research():
         _ = get_settings()
         path = Path(__file__).resolve().parent / "web" / "research.html"
@@ -41,12 +44,12 @@ def create_app() -> FastAPI:
             return RedirectResponse(url="/docs")
         return FileResponse(path)
 
-    @app.get("/health")
+    @fastapi_app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    app.include_router(api_router, prefix="/api")
-    return app
+    fastapi_app.include_router(api_router, prefix="/api")
+    return fastapi_app
 
 
 app = create_app()

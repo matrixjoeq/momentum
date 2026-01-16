@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     auto_sync_tz: str = "Asia/Shanghai"
     auto_sync_calendar: str = "XSHG"
     auto_sync_hour: int = 15
-    auto_sync_minute: int = 10  # after close (15:00) with some buffer
+    auto_sync_minute: int = 15  # after close (15:00) with some buffer
     # For data consistency/completeness, refresh full history every run (qfq/hfq/none).
     # This is heavier than incremental mode but guarantees no stale history.
     auto_sync_full_refresh: bool = True

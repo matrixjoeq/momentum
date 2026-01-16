@@ -4,24 +4,20 @@ import asyncio
 import datetime as dt
 import logging
 import os
+from contextlib import contextmanager
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 
-from etf_momentum.api.deps import get_akshare
 from etf_momentum.calendar.trading_calendar import is_trading_day
-from etf_momentum.data.ingestion import ingest_one_etf
-from etf_momentum.db.repo import get_etf_pool_by_code, get_price_date_range, upsert_etf_pool, update_etf_pool_data_range
+from etf_momentum.db.repo import create_sync_job, update_sync_job
 from etf_momentum.db.session import session_scope
 from etf_momentum.settings import get_settings
+from etf_momentum.services.market_sync import sync_fixed_pool_prices
 
 logger = logging.getLogger(__name__)
 
 _ALL_ADJUSTS = ("qfq", "hfq", "none")
-
-# fixed mini-program pool
-_FIXED_CODES = ["159915", "511010", "513100", "518880"]
-_FIXED_NAMES = {"159915": "创业板ETF", "511010": "国债ETF", "513100": "纳指ETF", "518880": "黄金ETF"}
 
 
 def _ymd(d: dt.date) -> str:
@@ -45,58 +41,15 @@ def _compute_next_run(now: dt.datetime, *, hour: int, minute: int, tz: ZoneInfo)
     return target
 
 
-def _sync_fixed_pool_prices(*, app: FastAPI, run_date: dt.date) -> dict[str, object]:
-    """
-    Run one sync pass:
-    - If pool doesn't contain the fixed codes, auto-create them.
-    - For qfq/hfq/none: refresh full range for consistency (history can be revised).
-    """
-    settings = get_settings()
-    sf = app.state.session_factory
-    ak = get_akshare()
+def _dedupe_key(run_date: dt.date, *, full_refresh: bool, adjusts: list[str]) -> str:
+    ad = ",".join([str(x).strip().lower() for x in (adjusts or []) if str(x).strip()])
+    return f"auto_fixed_pool:{run_date.strftime('%Y%m%d')}:full={int(bool(full_refresh))}:adj={ad}"
 
-    out: dict[str, object] = {"date": _ymd(run_date), "codes": {}, "ok": True}
 
-    with session_scope(sf) as db:
-        # ensure pool entries exist
-        for code in _FIXED_CODES:
-            if get_etf_pool_by_code(db, code) is None:
-                upsert_etf_pool(db, code=code, name=_FIXED_NAMES.get(code, code), start_date=None, end_date=None)
-
-        for code in _FIXED_CODES:
-            code_out: dict[str, object] = {"adjusts": {}, "ok": True}
-            for adj in _ALL_ADJUSTS:
-                try:
-                    pool = get_etf_pool_by_code(db, code)
-                    pool_start = (pool.start_date if pool is not None and pool.start_date else None) or settings.default_start_date
-
-                    if bool(settings.auto_sync_full_refresh):
-                        start = pool_start
-                    else:
-                        _, last = get_price_date_range(db, code=code, adjust=adj)
-                        start = _next_day_ymd(last) if last else pool_start
-                    end = _ymd(run_date)
-                    if start > end:
-                        code_out["adjusts"][adj] = {"skipped": True, "reason": "up_to_date", "start": start, "end": end}
-                        continue
-                    res = ingest_one_etf(db, ak=ak, code=code, start_date=start, end_date=end, adjust=adj)
-                    code_out["adjusts"][adj] = {"skipped": False, "status": res.status, "upserted": int(res.upserted), "start": start, "end": end}
-                    if res.status != "success":
-                        code_out["ok"] = False
-                        out["ok"] = False
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    logger.exception("auto_sync failed: code=%s adj=%s", code, adj)
-                    code_out["adjusts"][adj] = {"skipped": False, "status": "failed", "error": str(e)}
-                    code_out["ok"] = False
-                    out["ok"] = False
-            # update overall pool coverage range (any adjust)
-            try:
-                update_etf_pool_data_range(db, code=code)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
-            out["codes"][code] = code_out
-
-    return out
+@contextmanager
+def _session_cm(sf):
+    # session_scope is a generator; wrap it as a proper context manager for this module.
+    yield from session_scope(sf)
 
 
 async def _market_sync_loop(app: FastAPI) -> None:
@@ -125,9 +78,62 @@ async def _market_sync_loop(app: FastAPI) -> None:
         async with lock:
             # run blocking ingestion in a thread (avoid blocking event loop)
             logger.info("auto_sync: start sync for %s", run_date.isoformat())
-            res = await asyncio.to_thread(_sync_fixed_pool_prices, app=app, run_date=run_date)
+            full_refresh = bool(settings.auto_sync_full_refresh)
+            adjusts = list(_ALL_ADJUSTS)
+            dedupe = _dedupe_key(run_date, full_refresh=full_refresh, adjusts=adjusts)
+
+            # Create/lookup job row (unique on dedupe_key).
+            sf = app.state.session_factory
+            with _session_cm(sf) as db:
+                job = create_sync_job(db, dedupe_key=dedupe, run_date=run_date, full_refresh=full_refresh, adjusts=adjusts)
+                # If already finished, skip (avoid duplicate runs if instance restarts within the window)
+                if job.finished_at is not None:
+                    logger.info("auto_sync: job already finished (job_id=%s status=%s); skip", int(job.id), job.status)
+                    continue
+                update_sync_job(
+                    db,
+                    job_id=int(job.id),
+                    status="running",
+                    started_at=dt.datetime.now(dt.timezone.utc),
+                    progress={"phase": "starting"},
+                )
+                db.commit()
+
+            # Run sync in a thread (blocking), update progress via DB.
+            def _progress(p: dict) -> None:
+                with _session_cm(sf) as db2:
+                    update_sync_job(db2, job_id=int(job.id), progress=p)
+                    db2.commit()
+
+            def _run() -> dict[str, object]:
+                # Use the same service implementation as the admin API.
+                with _session_cm(sf) as db3:
+                    ak = __import__("akshare")
+                    res = sync_fixed_pool_prices(
+                        db=db3,
+                        ak=ak,
+                        run_date=run_date,
+                        adjusts=adjusts,
+                        full_refresh=full_refresh,
+                        progress_cb=_progress,
+                    )
+                    db3.commit()
+                    return res
+
+            res = await asyncio.to_thread(_run)
             ok = bool(res.get("ok"))
-            logger.info("auto_sync: done sync for %s ok=%s", run_date.isoformat(), ok)
+            with _session_cm(sf) as db4:
+                update_sync_job(
+                    db4,
+                    job_id=int(job.id),
+                    status=("success" if ok else "failed"),
+                    finished_at=dt.datetime.now(dt.timezone.utc),
+                    result=dict(res),
+                    error_message=(None if ok else "auto_sync failed; see result.codes for details"),
+                    progress={"phase": "done", "ok": ok},
+                )
+                db4.commit()
+            logger.info("auto_sync: done sync for %s ok=%s job_id=%s", run_date.isoformat(), ok, int(job.id))
 
 
 def start_auto_sync(app: FastAPI) -> None:
