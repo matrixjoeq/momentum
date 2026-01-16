@@ -23,10 +23,21 @@ Page({
     this.onRefresh();
   },
 
+  async _ensurePid() {
+    const app = getApp();
+    if (app && typeof app.ensurePortfolioReady === "function") {
+      await app.ensurePortfolioReady();
+    } else if (app && app.globalData && app.globalData.portfolioReady) {
+      await app.globalData.portfolioReady;
+    }
+    return (app && app.globalData && app.globalData.portfolioId) || wx.getStorageSync("portfolio_id");
+  },
+
   async onRefresh() {
     try {
       this.setData({ statusText: "加载中..." });
-      const pid = getApp().globalData.portfolioId || wx.getStorageSync("portfolio_id");
+      const pid = await this._ensurePid();
+      if (!pid) throw new Error("初始化账户失败，请稍后重试");
       const vs = await request(`/sim/portfolio/${pid}/variants`);
       const items = vs.variants || [];
 
@@ -77,7 +88,8 @@ Page({
 
   async onGenerate() {
     try {
-      const pid = getApp().globalData.portfolioId || wx.getStorageSync("portfolio_id");
+      const pid = await this._ensurePid();
+      if (!pid) throw new Error("初始化账户失败，请稍后重试");
       const end = new Date();
       const start = new Date(end.getTime() - 365 * 24 * 3600 * 1000);
       const fmtYmd = (d) => {
