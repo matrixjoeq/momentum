@@ -515,7 +515,8 @@ function attachWeekdayPage({ anchor, title }) {
       try {
         const isMix = String(anchor) === "mix";
         this.setData({ status: "加载中...", rangeKey: k });
-        const cacheKey = `wd_dash_v1_${String(anchor)}_${String(k)}`;
+        // bump version when backend semantics/UI change to avoid stale cached rotations/period tables
+        const cacheKey = `wd_dash_v2_${String(anchor)}_${String(k)}`;
         try {
           const cached = wx.getStorageSync(cacheKey);
           if (cached && cached.base && cached.end0) {
