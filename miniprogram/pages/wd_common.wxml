@@ -27,7 +27,6 @@
       <canvas canvas-id="cNav" id="cNav" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 450rpx;"></canvas>
       <!-- canvas is a native component; overlays must use cover-view on real devices -->
       <cover-view wx:if="{{tip.show && tip.id==='cNav'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='cNav'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='cNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -37,7 +36,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="cDD" id="cDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 240rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='cDD'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='cDD'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='cDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -47,7 +45,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="cRSI" id="cRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='cRSI'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='cRSI'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='cRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -57,7 +54,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="cRR3Y" id="cRR3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='cRR3Y'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='cRR3Y'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='cRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -67,7 +63,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="cRDD3Y" id="cRDD3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='cRDD3Y'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='cRDD3Y'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='cRDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -186,7 +181,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rNav" id="rNav" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 450rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rNav'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rNav'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rNav'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -196,7 +190,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rDD" id="rDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 260rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rDD'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rDD'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -206,7 +199,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rRSI" id="rRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rRSI'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rRSI'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -216,7 +208,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rRR3Y" id="rRR3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rRR3Y'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rRR3Y'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rRR3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -226,7 +217,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rMDD3Y" id="rMDD3Y" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rMDD3Y'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rMDD3Y'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rMDD3Y'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -236,7 +226,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rRatio" id="rRatio" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 300rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rRatio'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rRatio'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rRatio'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -246,7 +235,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rExDD" id="rExDD" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rExDD'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rExDD'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rExDD'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -256,7 +244,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rRatioRSI" id="rRatioRSI" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rRatioRSI'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rRatioRSI'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rRatioRSI'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>
@@ -266,7 +253,6 @@
     <view class="canvasWrap">
       <canvas canvas-id="rDiff40" id="rDiff40" bindtouchstart="onChartTouch" bindtouchmove="onChartTouch" bindtouchend="onChartTouchEnd" style="width: 100%; height: 220rpx;"></canvas>
       <cover-view wx:if="{{tip.show && tip.id==='rDiff40'}}" class="crossV" style="left:{{tip.cx}}px; height:{{tip.ch}}px;"></cover-view>
-      <cover-view wx:if="{{tip.show && tip.id==='rDiff40'}}" class="crossH" style="top:{{tip.cy}}px; width:{{tip.cw}}px;"></cover-view>
       <cover-view wx:if="{{tip.show && tip.id==='rDiff40'}}" class="tip" style="left:{{tip.x}}px; top:{{tip.y}}px;">{{tip.text}}</cover-view>
     </view>
   </view>

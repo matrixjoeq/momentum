@@ -457,8 +457,8 @@ function attachWeekdayPage({ anchor, title }) {
       calYearlyPage: 1,
       calYearlyPageSize: 12,
       corrMapLines: IDX_MAP_LINES,
-      // tip: tooltip + crosshair (all px within canvasWrap)
-      tip: { show: false, id: "", x: 0, y: 0, text: "", cx: 0, cy: 0, cw: 0, ch: 0 },
+      // tip: tooltip + vertical guide line (all px within canvasWrap)
+      tip: { show: false, id: "", x: 0, y: 0, text: "", cx: 0, cw: 0, ch: 0 },
 
       // rotation section
       rot: null, // kept for backward-compat in data shape; large payloads are stored on page.__rot
@@ -494,6 +494,16 @@ function attachWeekdayPage({ anchor, title }) {
       if (!this.__raw) this.loadRange(this.data.rangeKey || "all");
     },
 
+    onUnload() {
+      // Prevent background async tasks from calling setData/draw after page is destroyed.
+      this.__unloaded = true;
+      this.__loadToken = (this.__loadToken || 0) + 1; // invalidate in-flight tasks
+      if (this.__tipTimer) {
+        clearTimeout(this.__tipTimer);
+        this.__tipTimer = null;
+      }
+    },
+
     async setRange(e) {
       const k = e.currentTarget.dataset.k;
       await this.loadRange(k);
@@ -513,6 +523,8 @@ function attachWeekdayPage({ anchor, title }) {
 
     async loadRange(k) {
       try {
+        this.__unloaded = false;
+        const token = (this.__loadToken = (this.__loadToken || 0) + 1);
         const isMix = String(anchor) === "mix";
         this.setData({ status: "加载中...", rangeKey: k });
         // bump version when backend semantics/UI change to avoid stale cached rotations/period tables
@@ -552,6 +564,7 @@ function attachWeekdayPage({ anchor, title }) {
               ? { start: start0, end: end0, rebalance_shift: "prev" }
               : { start: start0, end: end0, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
           });
+          if (this.__unloaded || token !== this.__loadToken) return;
           this.__fullBaseLite = baseLite;
         }
 
@@ -569,6 +582,7 @@ function attachWeekdayPage({ anchor, title }) {
               ? { start: ymd(picked.start), end: ymd(picked.end), rebalance_shift: "prev" }
               : { start: ymd(picked.start), end: ymd(picked.end), rebalance_shift: "prev", anchor_weekday: Number(anchor) },
           });
+          if (this.__unloaded || token !== this.__loadToken) return;
           dataLite = (resLite.by_anchor || {})[String(anchor)];
         }
 
@@ -579,11 +593,13 @@ function attachWeekdayPage({ anchor, title }) {
           let rotBaseLite = this.__fullRotLite;
           if (!rotBaseLite || !rotBaseLite.by_anchor || !(rotBaseLite.by_anchor[String(anchor)]) || !rotBaseLite.meta || rotBaseLite.meta.end !== end0 || rotBaseLite.meta.start !== start0) {
             rotBaseLite = await request(rotLitePath, { method: "POST", data: isMix ? { start: start0, end: end0 } : { start: start0, end: end0, anchor_weekday: Number(anchor) } });
+            if (this.__unloaded || token !== this.__loadToken) return;
             this.__fullRotLite = rotBaseLite;
           }
           rotFull = (rotBaseLite.by_anchor || {})[String(anchor)];
           if (picked.start && picked.end && k !== "all") {
             const rotRes = await request(rotLitePath, { method: "POST", data: isMix ? { start: ymd(picked.start), end: ymd(picked.end) } : { start: ymd(picked.start), end: ymd(picked.end), anchor_weekday: Number(anchor) } });
+            if (this.__unloaded || token !== this.__loadToken) return;
             rotFull = (rotRes.by_anchor || {})[String(anchor)];
           }
         } catch (e2) {
@@ -643,7 +659,9 @@ function attachWeekdayPage({ anchor, title }) {
           calYearlyPageSize: yearPageSize,
         });
 
+        if (this.__unloaded || token !== this.__loadToken) return;
         await drawAll(this, dataLite);
+        if (this.__unloaded || token !== this.__loadToken) return;
         await this._drawRotation(rotFull);
 
         // Stage 2 (full): fetch metrics/attribution/correlation/calendar in background and then redraw.
@@ -656,6 +674,7 @@ function attachWeekdayPage({ anchor, title }) {
               method: "POST",
               data: isMix ? { start: s1, end: e1, rebalance_shift: "prev" } : { start: s1, end: e1, rebalance_shift: "prev", anchor_weekday: Number(anchor) },
             });
+            if (this.__unloaded || token !== this.__loadToken) return;
             const dataFull = (fullRes.by_anchor || {})[String(anchor)];
             if (dataFull) {
               this.__raw = dataFull;
@@ -698,13 +717,16 @@ function attachWeekdayPage({ anchor, title }) {
                 calYearlyPage: yearPage2,
                 calYearlyPageSize: yearPageSize2,
               });
+              if (this.__unloaded || token !== this.__loadToken) return;
               await drawAll(this, dataFull);
             }
 
             const rotFullRes = await request(rotFullPath, { method: "POST", data: isMix ? { start: s1, end: e1 } : { start: s1, end: e1, anchor_weekday: Number(anchor) } });
+            if (this.__unloaded || token !== this.__loadToken) return;
             const rotDataFull = (rotFullRes.by_anchor || {})[String(anchor)];
             if (rotDataFull) {
               this.__rot = rotDataFull;
+              if (this.__unloaded || token !== this.__loadToken) return;
               await this._drawRotation(rotDataFull);
             }
 
@@ -727,8 +749,10 @@ function attachWeekdayPage({ anchor, title }) {
           const plan = isMix
             ? await request("/analysis/rotation/next-plan-auto", { method: "POST", data: { asof: end0 } })
             : await request("/analysis/rotation/next-plan", { method: "POST", data: { anchor_weekday: Number(anchor), asof: end0 } });
+          if (this.__unloaded || token !== this.__loadToken) return;
           this.setData({ nextPlan: plan || null });
         } catch (e3) {
+          if (this.__unloaded || token !== this.__loadToken) return;
           this.setData({ nextPlan: null });
         }
       } catch (e) {
@@ -1297,7 +1321,6 @@ function attachWeekdayPage({ anchor, title }) {
         const h = Number(rect.height || 0);
         const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
         const cx = clamp(Number(xRel), 0, Math.max(0, w));
-        const cy = clamp(Number(yRel), 0, Math.max(0, h));
         // Estimate tooltip box size to prevent overflow on right/bottom.
         const maxChars = Math.max(String(d || "").length, ...lines.map((s) => String(s || "").length));
         const estW = Math.max(120, Math.min(w * 0.8, 24 + maxChars * 7)); // px (rough)
@@ -1311,7 +1334,7 @@ function attachWeekdayPage({ anchor, title }) {
         // Prefer above the finger; if it would overflow, place below.
         const ty0 = (Number(yRel) - margin - estH >= 0) ? (Number(yRel) - margin - estH) : (Number(yRel) + margin);
         const ty = clamp(ty0, 0, Math.max(0, h - estH));
-        this.setData({ tip: { show: true, id, x: tx, y: ty, text: `${d}\n${lines.join("\n")}`, cx, cy, cw: w, ch: h } });
+        this.setData({ tip: { show: true, id, x: tx, y: ty, text: `${d}\n${lines.join("\n")}`, cx, cw: w, ch: h } });
       } catch (err) {
         // best effort
       }
@@ -1324,7 +1347,7 @@ function attachWeekdayPage({ anchor, title }) {
       if (!tip.show) return;
       if (this.__tipTimer) clearTimeout(this.__tipTimer);
       this.__tipTimer = setTimeout(() => {
-        this.setData({ tip: { show: false, id: "", x: 0, y: 0, text: "", cx: 0, cy: 0, cw: 0, ch: 0 } });
+        this.setData({ tip: { show: false, id: "", x: 0, y: 0, text: "", cx: 0, cw: 0, ch: 0 } });
         this.__tipTimer = null;
       }, 1200);
     },
