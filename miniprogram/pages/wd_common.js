@@ -457,7 +457,8 @@ function attachWeekdayPage({ anchor, title }) {
       calYearlyPage: 1,
       calYearlyPageSize: 12,
       corrMapLines: IDX_MAP_LINES,
-      tip: { show: false, id: "", x: 0, y: 0, text: "" },
+      // tip: tooltip + crosshair (all px within canvasWrap)
+      tip: { show: false, id: "", x: 0, y: 0, text: "", cx: 0, cy: 0, cw: 0, ch: 0 },
 
       // rotation section
       rot: null, // kept for backward-compat in data shape; large payloads are stored on page.__rot
@@ -717,16 +718,17 @@ function attachWeekdayPage({ anchor, title }) {
           }
         })();
 
-        // next rebalance plan: show only when we have a concrete asof date
-        if (picked.end) {
-          try {
-            const plan = isMix
-              ? await request("/analysis/rotation/next-plan-auto", { method: "POST", data: { asof: ymd(picked.end) } })
-              : await request("/analysis/rotation/next-plan", { method: "POST", data: { anchor_weekday: Number(anchor), asof: ymd(picked.end) } });
-            this.setData({ nextPlan: plan || null });
-          } catch (e3) {
-            this.setData({ nextPlan: null });
-          }
+        // next rebalance plan (real-time): use "today" as asof.
+        // Backend will map asof -> last available close <= asof, so:
+        // - before close: shows today's execution plan (decision from previous close)
+        // - after close: shows next trading day's plan (decision from today's close)
+        try {
+          const plan = isMix
+            ? await request("/analysis/rotation/next-plan-auto", { method: "POST", data: { asof: end0 } })
+            : await request("/analysis/rotation/next-plan", { method: "POST", data: { anchor_weekday: Number(anchor), asof: end0 } });
+          this.setData({ nextPlan: plan || null });
+        } catch (e3) {
+          this.setData({ nextPlan: null });
         }
       } catch (e) {
         console.error(e);
@@ -1291,6 +1293,8 @@ function attachWeekdayPage({ anchor, title }) {
         const w = Number(rect.width || 0);
         const h = Number(rect.height || 0);
         const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+        const cx = clamp(Number(xRel), 0, Math.max(0, w));
+        const cy = clamp(Number(yRel), 0, Math.max(0, h));
         // Estimate tooltip box size to prevent overflow on right/bottom.
         const maxChars = Math.max(String(d || "").length, ...lines.map((s) => String(s || "").length));
         const estW = Math.max(120, Math.min(w * 0.8, 24 + maxChars * 7)); // px (rough)
@@ -1304,7 +1308,7 @@ function attachWeekdayPage({ anchor, title }) {
         // Prefer above the finger; if it would overflow, place below.
         const ty0 = (Number(yRel) - margin - estH >= 0) ? (Number(yRel) - margin - estH) : (Number(yRel) + margin);
         const ty = clamp(ty0, 0, Math.max(0, h - estH));
-        this.setData({ tip: { show: true, id, x: tx, y: ty, text: `${d}\n${lines.join("\n")}` } });
+        this.setData({ tip: { show: true, id, x: tx, y: ty, text: `${d}\n${lines.join("\n")}`, cx, cy, cw: w, ch: h } });
       } catch (err) {
         // best effort
       }
@@ -1317,7 +1321,7 @@ function attachWeekdayPage({ anchor, title }) {
       if (!tip.show) return;
       if (this.__tipTimer) clearTimeout(this.__tipTimer);
       this.__tipTimer = setTimeout(() => {
-        this.setData({ tip: { show: false, id: "", x: 0, y: 0, text: "" } });
+        this.setData({ tip: { show: false, id: "", x: 0, y: 0, text: "", cx: 0, cy: 0, cw: 0, ch: 0 } });
         this.__tipTimer = null;
       }, 1200);
     },

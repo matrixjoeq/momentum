@@ -122,6 +122,25 @@
   z-index: 10;
 }
 
+/* --- Crosshair overlay for interactive charts --- */
+.crossV,
+.crossH {
+  position: absolute;
+  pointer-events: none;
+  z-index: 9;
+  background: rgba(255, 255, 255, 0.82);
+}
+.crossV {
+  top: 0;
+  width: 1px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.crossH {
+  left: 0;
+  height: 1px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
 /* single-line rows (truncate with ellipsis) */
 .line-ellipsis {
   white-space: nowrap;
