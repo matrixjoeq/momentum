@@ -597,7 +597,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 if i not in seen:
                     out.append(i)
                     seen.add(i)
-            return out
+            # Ensure chronological order; pd.unique(periods) order is not guaranteed.
+            return sorted(out)
 
         if r == "monthly":
             if anchor is None:
@@ -625,7 +626,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 if i not in seen:
                     out.append(i)
                     seen.add(i)
-            return out
+            return sorted(out)
 
         # quarterly/yearly
         if anchor is None:
@@ -1621,21 +1622,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     abs_pos: list[float] = []
     abs_neg: list[float] = []
     prev_weights = {c: 0.0 for c in codes}
-    # For weekly anchor strategies (0=Mon..4=Fri), the mini-program expects period rows to end on that weekday.
-    # This avoids showing "incomplete" trailing periods (e.g. Mon strategy ending at Fri when the range ends on Fri).
-    anchor_wd: int | None = None
-    try:
-        if (inp.rebalance or "").lower() == "weekly" and inp.rebalance_anchor is not None:
-            aw = int(inp.rebalance_anchor)
-            if aw in {0, 1, 2, 3, 4}:
-                anchor_wd = aw
-    except (TypeError, ValueError):  # pragma: no cover
-        anchor_wd = None
     for p in holdings["periods"]:
         s = pd.to_datetime(p["start_date"])
         e = pd.to_datetime(p["end_date"])
-        if anchor_wd is not None and int(e.weekday()) != int(anchor_wd):
-            continue
         # Timing sleep indicator for this holding period (based on exposure series).
         timing_ratio = None
         timing_sleep = False

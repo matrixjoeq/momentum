@@ -516,7 +516,7 @@ function attachWeekdayPage({ anchor, title }) {
         const isMix = String(anchor) === "mix";
         this.setData({ status: "加载中...", rangeKey: k });
         // bump version when backend semantics/UI change to avoid stale cached rotations/period tables
-        const cacheKey = `wd_dash_v2_${String(anchor)}_${String(k)}`;
+        const cacheKey = `wd_dash_v3_${String(anchor)}_${String(k)}`;
         try {
           const cached = wx.getStorageSync(cacheKey);
           if (cached && cached.base && cached.end0) {
@@ -1060,6 +1060,7 @@ function attachWeekdayPage({ anchor, title }) {
       const start = (p - 1) * ps;
       const end = Math.min(rows.length, start + ps);
       const view = rows.slice(start, end).map((r, i) => {
+        const execDate = String(r.start_date || r.end_date || "");
         const buys = Array.isArray(r.buys) ? r.buys : [];
         const sells = Array.isArray(r.sells) ? r.sells : [];
         const cashText = "空";
@@ -1099,6 +1100,7 @@ function attachWeekdayPage({ anchor, title }) {
         const tradeTxt = hasTrade ? `${abbr(fromCode)}->${abbr(toCode)}` : "无";
         return {
         k: `${p}-${i}`,
+        exec_date: execDate,
         start_date: r.start_date,
         end_date: r.end_date,
         strategy_return_text: pct(r.strategy_return),

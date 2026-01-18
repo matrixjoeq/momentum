@@ -604,8 +604,12 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
         # execution on open
         exec_price="open",
     )
-    one_anchor = payload.anchor_weekday
-    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
+    # Mini-program semantics: `anchor_weekday` refers to the *execution day* weekday (Mon..Fri),
+    # while the strategy engine's weekly rebalance anchor is the *decision day* weekday.
+    # With "open execution", decision is made on previous trading day close, executed on next trading day open.
+    # Therefore: decision_weekday = (exec_weekday - 1) mod 5 (Mon exec -> Fri decision).
+    one_exec = payload.anchor_weekday
+    anchors = [int(one_exec)] if one_exec is not None else [0, 1, 2, 3, 4]
     def _slim_for_miniprogram(x: dict) -> dict:
         # Keep only what the mini-program renders (avoid shipping large unused blobs like rolling series).
         keep = [
@@ -629,10 +633,24 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
         return {k: x.get(k) for k in keep if k in x}
 
     by_anchor: dict[str, dict] = {}
-    for a in anchors:
+    for exec_wd in anchors:
+        decision_wd = (int(exec_wd) - 1) % 5
         # pylint: disable=unexpected-keyword-arg
-        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
-        by_anchor[str(a)] = _slim_for_miniprogram(compute_rotation_backtest(db, inp))
+        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(decision_wd)})
+        out = _slim_for_miniprogram(compute_rotation_backtest(db, inp))
+        # Filter period_details to show only rows whose *execution date* (start_date) matches the tab weekday.
+        # This prevents cross-tab leakage (e.g. Fri rows showing in Mon tab) and aligns UI date semantics.
+        try:
+            pds = out.get("period_details") if isinstance(out, dict) else None
+            if isinstance(pds, list):
+                def _wd_of(s: str | None) -> int | None:
+                    if not s:
+                        return None
+                    return int(dt.date.fromisoformat(str(s)).weekday())
+                out["period_details"] = [r for r in pds if _wd_of(r.get("start_date")) == int(exec_wd)]
+        except Exception:  # pragma: no cover
+            pass
+        by_anchor[str(exec_wd)] = out
     return {
         "meta": {
             "type": "rotation_weekly5_open",
@@ -692,8 +710,8 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
         exec_price="open",
     )
 
-    one_anchor = payload.anchor_weekday
-    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
+    one_exec = payload.anchor_weekday
+    anchors = [int(one_exec)] if one_exec is not None else [0, 1, 2, 3, 4]
 
     def _lite(x: dict) -> dict:
         nav = x.get("nav") if isinstance(x, dict) else None
@@ -703,10 +721,11 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
         }
 
     by_anchor: dict[str, dict] = {}
-    for a in anchors:
+    for exec_wd in anchors:
+        decision_wd = (int(exec_wd) - 1) % 5
         # pylint: disable=unexpected-keyword-arg
-        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
-        by_anchor[str(a)] = _lite(compute_rotation_backtest(db, inp))
+        inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(decision_wd)})
+        by_anchor[str(exec_wd)] = _lite(compute_rotation_backtest(db, inp))
 
     return {
         "meta": {

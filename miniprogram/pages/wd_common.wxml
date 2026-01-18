@@ -366,7 +366,7 @@
       <block wx:for="{{rotPeriodsView}}" wx:key="k">
         <view style="margin: 10rpx 0;">
           <view class="muted line-ellipsis">
-            {{item.end_date}}｜策 {{item.strategy_return_text}} / 等 {{item.equal_weight_return_text}} / 超 {{item.excess_return_text}}｜{{item.trade_text}}
+            {{item.exec_date}}｜策 {{item.strategy_return_text}} / 等 {{item.equal_weight_return_text}} / 超 {{item.excess_return_text}}｜{{item.trade_text}}
           </view>
         </view>
       </block>
