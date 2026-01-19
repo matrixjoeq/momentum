@@ -51,7 +51,7 @@ from ..analysis.baseline import (
     _max_drawdown,
     _max_drawdown_duration_days,
     _rsi_wilder,
-    _rolling_max_drawdown,
+    _rolling_drawdown,
     _sharpe,
     _sortino,
     _ulcer_index,
@@ -1199,7 +1199,7 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
 
         win_3y = 3 * TRADING_DAYS_PER_YEAR
         rr3y = (ew_nav / ew_nav.shift(win_3y) - 1.0).astype(float)
-        rdd3y = _rolling_max_drawdown(ew_nav, win_3y).astype(float)
+        rdd3y = _rolling_drawdown(ew_nav, win_3y).astype(float)
 
         # metrics
         cum_ret = float(ew_nav.iloc[-1] / ew_nav.iloc[0] - 1.0) if len(ew_nav) else float("nan")
@@ -1260,6 +1260,8 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
+            # backward-compat (deprecated)
             "roll3y_mdd": _tolist(rdd3y),
             "metrics": metrics,
             "attribution": attribution,
@@ -1344,7 +1346,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
 
         win_3y = 3 * TRADING_DAYS_PER_YEAR
         rr3y = (ew_nav / ew_nav.shift(win_3y) - 1.0).astype(float)
-        rdd3y = _rolling_max_drawdown(ew_nav, win_3y).astype(float)
+        rdd3y = _rolling_drawdown(ew_nav, win_3y).astype(float)
 
         by_anchor[str(a)] = {
             "meta": {"anchor_weekday": int(a), "label": _WD_LABEL[int(a)], "rebalance_shift": shift, "price": "hfq_close"},
@@ -1356,6 +1358,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
         }
 
@@ -1434,7 +1437,7 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
     rsi24 = _rsi_wilder(nav_mix, window=24)
     win_3y = 3 * TRADING_DAYS_PER_YEAR
     rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
-    rdd3y = _rolling_max_drawdown(nav_mix, win_3y).astype(float)
+    rdd3y = _rolling_drawdown(nav_mix, win_3y).astype(float)
 
     by_anchor = {
         "mix": {
@@ -1447,6 +1450,7 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
         }
     }
@@ -1529,7 +1533,7 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
     rsi24 = _rsi_wilder(nav_mix, window=24)
     win_3y = 3 * TRADING_DAYS_PER_YEAR
     rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
-    rdd3y = _rolling_max_drawdown(nav_mix, win_3y).astype(float)
+    rdd3y = _rolling_drawdown(nav_mix, win_3y).astype(float)
 
     cum_ret = float(nav_mix.iloc[-1] / nav_mix.iloc[0] - 1.0) if len(nav_mix) else float("nan")
     ann_ret = _annualized_return(nav_mix, ann_factor=TRADING_DAYS_PER_YEAR)
@@ -1584,6 +1588,7 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
             "metrics": metrics,
             "attribution": attribution,

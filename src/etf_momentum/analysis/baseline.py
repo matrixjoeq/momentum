@@ -116,6 +116,16 @@ def _rolling_max_drawdown(nav: pd.Series, window: int) -> pd.Series:
     return nav.rolling(window=window, min_periods=window).apply(lambda x: f(x.to_numpy()), raw=False)
 
 
+def _rolling_drawdown(nav: pd.Series, window: int) -> pd.Series:
+    """
+    Rolling drawdown at each date, computed within the trailing window:
+      DD_t(window) = nav_t / max(nav_{t-window+1..t}) - 1
+    """
+    w = int(window)
+    peak = nav.rolling(window=w, min_periods=w).max()
+    dd = nav / peak - 1.0
+    return dd.astype(float)
+
 def _ulcer_index(nav: pd.Series, *, in_percent: bool = True) -> float:
     """
     Ulcer Index (UI): RMS of percentage drawdowns from prior peaks.
@@ -755,18 +765,22 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     }
 
     # rolling
-    rolling = {"returns": {}, "max_drawdown": {}}
+    rolling = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
     for weeks in inp.rolling_weeks or []:
         window = weeks * 5
         rolling["returns"][f"{weeks}w"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{weeks}w"] = _rolling_drawdown(ew_nav, window).dropna()
+        # backward-compat (deprecated): previously "rolling max drawdown"
         rolling["max_drawdown"][f"{weeks}w"] = _rolling_max_drawdown(ew_nav, window).dropna()
     for months in inp.rolling_months or []:
         window = months * 21
         rolling["returns"][f"{months}m"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{months}m"] = _rolling_drawdown(ew_nav, window).dropna()
         rolling["max_drawdown"][f"{months}m"] = _rolling_max_drawdown(ew_nav, window).dropna()
     for years in inp.rolling_years or []:
         window = years * 252
         rolling["returns"][f"{years}y"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{years}y"] = _rolling_drawdown(ew_nav, window).dropna()
         rolling["max_drawdown"][f"{years}y"] = _rolling_max_drawdown(ew_nav, window).dropna()
 
     # package series for UI (plotly expects arrays)
@@ -788,6 +802,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
 
     rolling_out = {
         "returns": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["returns"].items()},
+        "drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["drawdown"].items()},
+        # backward-compat (deprecated): this used to be rolling max drawdown
         "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
     }
 

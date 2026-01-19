@@ -1451,8 +1451,6 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     # We compute these earlier and also use the mask to apply HFQ fallback for NAV stability.
     ret_none = ret_none_close
     ret_hfq_all = ret_hfq_close
-    gross_none = gross_none_close
-    gross_hfq = gross_hfq_close
 
     # Daily holding return (hfq, configurable exec_price proxy).
     # Note: close-based hfq is still the default and remains the recommended "total return proxy".
@@ -1749,21 +1747,26 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     }
 
     # Rolling stats for strategy vs benchmark (defaults aligned with baseline UI)
-    rolling = {"returns": {}, "max_drawdown": {}}
+    # NOTE: "drawdown" is rolling drawdown; "max_drawdown" is kept for backward-compat (deprecated).
+    rolling = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
     for weeks in (4, 12, 52):
         window = weeks * 5
         rolling["returns"][f"{weeks}w"] = (port_nav_net / port_nav_net.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{weeks}w"] = (port_nav_net / port_nav_net.rolling(window=window, min_periods=window).max() - 1.0).dropna()
         rolling["max_drawdown"][f"{weeks}w"] = _rolling_max_drawdown(port_nav_net, window).dropna()
     for months in (3, 6, 12):
         window = months * 21
         rolling["returns"][f"{months}m"] = (port_nav_net / port_nav_net.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{months}m"] = (port_nav_net / port_nav_net.rolling(window=window, min_periods=window).max() - 1.0).dropna()
         rolling["max_drawdown"][f"{months}m"] = _rolling_max_drawdown(port_nav_net, window).dropna()
     for years in (1, 3):
         window = years * 252
         rolling["returns"][f"{years}y"] = (port_nav_net / port_nav_net.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{years}y"] = (port_nav_net / port_nav_net.rolling(window=window, min_periods=window).max() - 1.0).dropna()
         rolling["max_drawdown"][f"{years}y"] = _rolling_max_drawdown(port_nav_net, window).dropna()
     rolling_out = {
         "returns": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["returns"].items()},
+        "drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["drawdown"].items()},
         "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
     }
 

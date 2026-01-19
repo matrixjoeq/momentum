@@ -238,7 +238,7 @@
         <div id="rollingReturns"></div>
       </div>
       <div>
-        <h3>滚动最大回撤（等权组合）</h3>
+        <h3>滚动回撤（等权组合）</h3>
         <div id="rollingDD"></div>
       </div>
     </div>
@@ -2869,22 +2869,21 @@
           }
           return out;
         };
-        const _rollingMaxDrawdown = (nav, window) => {
+        const _rollingDrawdown = (nav, window) => {
           const w = Math.max(2, Number(window || 2));
           const out = new Array(nav.length).fill(null);
           for (let i = w - 1; i < nav.length; i++) {
             const start = i - w + 1;
             let peak = -Infinity;
-            let mdd = 0.0;
             let ok = true;
             for (let j = start; j <= i; j++) {
               const x = Number(nav[j]);
               if (!Number.isFinite(x) || x <= 0) { ok = false; break; }
               peak = Math.max(peak, x);
-              const dd = (peak > 0) ? (x / peak - 1.0) : 0.0;
-              if (dd < mdd) mdd = dd;
             }
-            out[i] = ok ? mdd : null;
+            const cur = Number(nav[i]);
+            if (!ok || !Number.isFinite(cur) || peak <= 0) { out[i] = null; continue; }
+            out[i] = (cur / peak) - 1.0;
           }
           return out;
         };
@@ -3021,7 +3020,7 @@
         const w1 = 252, w3 = 252 * 3, w5 = 252 * 5;
         const _plotRollingCombo = (divId, nav, titlePrefix) => {
           const r1 = _rollingReturn(nav, w1), r3 = _rollingReturn(nav, w3), r5 = _rollingReturn(nav, w5);
-          const d1 = _rollingMaxDrawdown(nav, w1), d3 = _rollingMaxDrawdown(nav, w3), d5 = _rollingMaxDrawdown(nav, w5);
+          const d1 = _rollingDrawdown(nav, w1), d3 = _rollingDrawdown(nav, w3), d5 = _rollingDrawdown(nav, w5);
           const c1 = "rgba(31,119,180,0.90)";
           const c3 = "rgba(44,160,44,0.90)";
           const c5 = "rgba(255,127,14,0.90)";
@@ -3059,7 +3058,7 @@
               // top panel: returns
               yaxis: { title: "Rolling Return", tickformat: ".0%", domain: [0.55, 1.0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
               // bottom panel: drawdowns
-              yaxis2: { title: "Rolling MDD", tickformat: ".0%", domain: [0.0, 0.45], range: [ddMin, 0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+              yaxis2: { title: "Rolling Drawdown", tickformat: ".0%", domain: [0.0, 0.45], range: [ddMin, 0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
             },
             { responsive: true }
           );
@@ -3809,7 +3808,7 @@
         refreshCorrelationForRange("all");
         // show percent with 0 decimals
         plotRolling("rollingReturns", "Rolling Returns", data.rolling.returns, ".0%");
-        plotRolling("rollingDD", "Rolling Max Drawdown", data.rolling.max_drawdown, ".0%");
+        plotRolling("rollingDD", "Rolling Drawdown", (data.rolling.drawdown || data.rolling.max_drawdown), ".0%");
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
       }

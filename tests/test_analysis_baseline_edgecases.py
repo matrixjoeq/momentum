@@ -70,9 +70,9 @@ def test_compute_baseline_rolling_and_missing_benchmark(session_factory):
     assert out["metrics"]["benchmark_code"] == "MISSING"
     assert "BENCH:MISSING" in out["nav"]["series"]
     assert out["rolling"]["returns"]["4w"]["values"]
-    assert out["rolling"]["max_drawdown"]["4w"]["values"]
+    assert out["rolling"]["drawdown"]["4w"]["values"]
     assert out["rolling"]["returns"]["3m"]["values"]
-    assert out["rolling"]["max_drawdown"]["3m"]["values"]
+    assert out["rolling"]["drawdown"]["3m"]["values"]
     assert out["rolling"]["returns"]["1y"]["values"]
-    assert out["rolling"]["max_drawdown"]["1y"]["values"]
+    assert out["rolling"]["drawdown"]["1y"]["values"]
 

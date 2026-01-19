@@ -119,6 +119,24 @@ function _rollingMaxDrawdown(nav, windowDays) {
   return out;
 }
 
+function _rollingDrawdown(nav, windowDays) {
+  const n = (nav || []).length;
+  const w = Math.max(2, Number(windowDays || 2));
+  const out = new Array(n).fill(null);
+  for (let i = w - 1; i < n; i++) {
+    let peak = -Infinity;
+    for (let j = i - w + 1; j <= i; j++) {
+      const x = Number(nav[j]);
+      if (!Number.isFinite(x) || x <= 0) { peak = NaN; break; }
+      if (x > peak) peak = x;
+    }
+    const cur = Number(nav[i]);
+    if (!Number.isFinite(cur) || !Number.isFinite(peak) || peak <= 0) { out[i] = null; continue; }
+    out[i] = cur / peak - 1;
+  }
+  return out;
+}
+
 function _rsiWilder(arr, window) {
   const n = (arr || []).length;
   const w = Math.max(2, Number(window || 14));
@@ -313,7 +331,7 @@ async function drawAll(page, payload) {
   const dd = payload.drawdown || [];
   const rsi = payload.rsi24 || [];
   const rr3y = payload.roll3y_return || [];
-  const rdd3y = payload.roll3y_mdd || [];
+  const rdd3y = payload.roll3y_dd || payload.roll3y_mdd || [];
 
   const rNav = await measure(page, "cNav");
   // store rects for touch interaction
@@ -376,7 +394,7 @@ async function drawAll(page, payload) {
     height: Math.floor(rRDD.height || 160),
     x: dates,
     yMode: "linear",
-    title: "Rolling 3Y MDD",
+    title: "Rolling 3Y DD",
     yLabelFmt: (v) => pct(v),
     series: [{ name: "DD3Y", y: rdd3y, color: "#ad1457", width: 1.4 }],
   });
@@ -782,7 +800,7 @@ function attachWeekdayPage({ anchor, title }) {
       })));
       const rsiRot24 = (((rotFull.nav_rsi || {}).series || {}).ROTATION || {})["24"] || _rsiWilder(navRot, 24);
       const rr3y = _rollingReturn(navRot, 3 * 252);
-      const rdd3y = _rollingMaxDrawdown(navRot, 3 * 252);
+      const rdd3y = _rollingDrawdown(navRot, 3 * 252);
 
       // ratio curve ROT / EW
       const ratio = navRot.map((v, i) => {
@@ -952,7 +970,7 @@ function attachWeekdayPage({ anchor, title }) {
       // 5) rolling 3y mdd
       const r5 = await measure("rMDD3Y");
       drawLineChart(wx.createCanvasContext("rMDD3Y", this), { width: Math.floor(r5.width || 320), height: Math.floor(r5.height || 180), x: dates, yMode: "linear", title: "策略滚动三年回撤", yLabelFmt: fmtPct, series: [
-        { name: "MDD3Y", y: rdd3y, color: "#ad1457", width: 1.4 },
+        { name: "DD3Y", y: rdd3y, color: "#ad1457", width: 1.4 },
       ]});
 
       // 6) ratio + EMA/BB
@@ -1262,7 +1280,8 @@ function attachWeekdayPage({ anchor, title }) {
         } else if (id === "cRR3Y") {
           lines = [`R3Y=${fmtPct((raw.roll3y_return || [])[idx])}`];
         } else if (id === "cRDD3Y") {
-          lines = [`MDD3Y=${fmtPct((raw.roll3y_mdd || [])[idx])}`];
+          const arr = (raw.roll3y_dd || raw.roll3y_mdd || []);
+          lines = [`DD3Y=${fmtPct(arr[idx])}`];
         } else if (id === "rNav") {
           const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
           lines = [`ROT=${fmtNum((s.ROTATION || [])[idx])}`, `EW=${fmtNum((s.EW_REBAL || [])[idx])}`];
@@ -1277,7 +1296,7 @@ function attachWeekdayPage({ anchor, title }) {
           lines = [`R3Y=${fmtPct(_rollingReturn(s.ROTATION || [], 3 * 252)[idx])}`];
         } else if (id === "rMDD3Y") {
           const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          lines = [`MDD3Y=${fmtPct(_rollingMaxDrawdown(s.ROTATION || [], 3 * 252)[idx])}`];
+          lines = [`DD3Y=${fmtPct(_rollingDrawdown(s.ROTATION || [], 3 * 252)[idx])}`];
         } else if (id === "rRatio") {
           const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
           const ratio = (s.ROTATION || []).map((v, i) => {
