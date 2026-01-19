@@ -17,6 +17,25 @@ const IDX_MAP_LINES = [
   "4=黄金(518880)",
 ];
 
+const THEME_MODE_KEY = "theme_mode_v1"; // "light" | "dark"
+
+function _safeGetStorage(key, fallback) {
+  try {
+    const v = wx.getStorageSync(key);
+    return v == null || v === "" ? fallback : v;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function _safeSetStorage(key, value) {
+  try {
+    wx.setStorageSync(key, value);
+  } catch (e) {
+    // ignore
+  }
+}
+
 function dispCode(code) {
   const c = String(code || "");
   return CODE_NAME[c] || c;
@@ -342,6 +361,7 @@ async function drawAll(page, payload) {
   const rsi = payload.rsi24 || [];
   const rr3y = payload.roll3y_return || [];
   const rdd3y = payload.roll3y_dd || payload.roll3y_mdd || [];
+  const theme = (page && page.data && page.data.theme) ? page.data.theme : "light";
 
   const rNav = await measure(page, "cNav");
   // store rects for touch interaction
@@ -353,6 +373,7 @@ async function drawAll(page, payload) {
     x: dates,
     yMode: "linear",
     title: "EW 净值",
+    theme,
     series: [
       { name: "NAV", y: nav, color: "#1677ff", width: 1.6 },
       { name: "EMA252", y: ema252, color: "#ff7a00", width: 1.2, dash: true },
@@ -370,6 +391,7 @@ async function drawAll(page, payload) {
     yMode: "linear",
     title: "Drawdown",
     yLabelFmt: (v) => pct(v),
+    theme,
     series: [{ name: "DD", y: dd, color: "#e53935", width: 1.4 }],
   });
 
@@ -382,6 +404,7 @@ async function drawAll(page, payload) {
     yMode: "linear",
     yFixed: [0, 100],
     title: "RSI24",
+    theme,
     series: [{ name: "RSI24", y: rsi, color: "#7b61ff", width: 1.4 }],
   });
 
@@ -394,6 +417,7 @@ async function drawAll(page, payload) {
     yMode: "linear",
     title: "Rolling 3Y Return",
     yLabelFmt: (v) => pct(v),
+    theme,
     series: [{ name: "R3Y", y: rr3y, color: "#2e7d32", width: 1.4 }],
   });
 
@@ -406,6 +430,7 @@ async function drawAll(page, payload) {
     yMode: "linear",
     title: "Rolling 3Y DD",
     yLabelFmt: (v) => pct(v),
+    theme,
     series: [{ name: "DD3Y", y: rdd3y, color: "#ad1457", width: 1.4 }],
   });
 
@@ -416,6 +441,7 @@ async function drawAll(page, payload) {
     width: Math.floor(rCorr.width || 320),
     height: Math.floor(rCorr.height || 220),
     title: "Correlation",
+    theme,
     labels: IDX_LABELS,
     matrix: corr.matrix || [],
   });
@@ -430,6 +456,7 @@ async function drawAll(page, payload) {
     width: Math.floor(rRC.width || 320),
     height: Math.floor(rRC.height || 180),
     title: "Return Share",
+    theme,
     labels: rcLabels,
     values: rcVals,
     colors: ["#1677ff", "#00bfa5", "#ff7a00", "#7b61ff"],
@@ -447,6 +474,7 @@ async function drawAll(page, payload) {
     width: Math.floor(rRisk.width || 320),
     height: Math.floor(rRisk.height || 180),
     title: "Risk Share",
+    theme,
     labels: rkLabels,
     values: rkVals,
     colors: ["#e53935", "#d81b60", "#8e24aa", "#3949ab"],
@@ -464,6 +492,9 @@ function attachWeekdayPage({ anchor, title }) {
       title,
       pageKey,
       status: "",
+      themeMode: "light",
+      theme: "light",
+      themeClass: "theme-light",
       rangeKey: "all",
       rangeLabel: "全区间",
       raw: null, // kept for backward-compat in data shape; large payloads are stored on page.__raw
@@ -517,7 +548,14 @@ function attachWeekdayPage({ anchor, title }) {
       nextPlan: null,
     },
 
+    onLoad() {
+      // init theme from cache
+      this.applyTheme();
+    },
+
     onShow() {
+      // keep in sync with cached mode
+      this.applyTheme();
       // default load
       if (!this.__raw) this.loadRange(this.data.rangeKey || "all");
     },
@@ -530,6 +568,47 @@ function attachWeekdayPage({ anchor, title }) {
         clearTimeout(this.__tipTimer);
         this.__tipTimer = null;
       }
+    },
+
+    applyTheme(nextMode) {
+      const modeRaw = String(nextMode || this.data.themeMode || _safeGetStorage(THEME_MODE_KEY, "light"));
+      const mode = (modeRaw === "dark") ? "dark" : "light";
+      const themeClass = mode === "dark" ? "theme-dark" : "theme-light";
+
+      const changed = (this.data.theme !== mode) || (this.data.themeMode !== mode);
+      this.setData({ themeMode: mode, theme: mode, themeClass });
+      _safeSetStorage(THEME_MODE_KEY, mode);
+
+      // Nav bar should match the theme for readability.
+      try {
+        wx.setNavigationBarColor({
+          backgroundColor: mode === "dark" ? "#0f1115" : "#ffffff",
+          frontColor: mode === "dark" ? "#ffffff" : "#000000",
+        });
+      } catch (e) {
+        // ignore older base libs
+      }
+
+      // Redraw charts with new palette.
+      if (changed) {
+        try {
+          if (this.__raw) drawAll(this, this.__raw);
+          if (this.__rot) this._drawRotation(this.__rot);
+        } catch (e3) {
+          // best effort
+        }
+      }
+    },
+
+    setThemeMode(e) {
+      const m = (e && e.currentTarget && e.currentTarget.dataset) ? String(e.currentTarget.dataset.m || "") : "light";
+      this.applyTheme(m);
+    },
+
+    toggleTheme() {
+      const cur = String(this.data.themeMode || "light");
+      const next = (cur === "dark") ? "light" : "dark";
+      this.applyTheme(next);
     },
 
     async setRange(e) {
@@ -978,39 +1057,39 @@ function attachWeekdayPage({ anchor, title }) {
 
       // 1) nav compare
       const r1 = await measure("rNav");
-      drawLineChart(wx.createCanvasContext("rNav", this), { width: Math.floor(r1.width || 320), height: Math.floor(r1.height || 220), x: dates, yMode: "linear", title: "轮动净值 vs 等权", series: [
+      drawLineChart(wx.createCanvasContext("rNav", this), { width: Math.floor(r1.width || 320), height: Math.floor(r1.height || 220), x: dates, yMode: "linear", title: "轮动净值 vs 等权", theme: this.data.theme, series: [
         { name: "ROT", y: navRot, color: "#1677ff", width: 1.6 },
         { name: "EW", y: navEw, color: "#ff7a00", width: 1.4, dash: true },
       ]});
 
       // 2) dd compare
       const r2 = await measure("rDD");
-      drawLineChart(wx.createCanvasContext("rDD", this), { width: Math.floor(r2.width || 320), height: Math.floor(r2.height || 200), x: dates, yMode: "linear", title: "回撤对比", yLabelFmt: fmtPct, series: [
+      drawLineChart(wx.createCanvasContext("rDD", this), { width: Math.floor(r2.width || 320), height: Math.floor(r2.height || 200), x: dates, yMode: "linear", title: "回撤对比", yLabelFmt: fmtPct, theme: this.data.theme, series: [
         { name: "ROT DD", y: ddRot, color: "#e53935", width: 1.4 },
         { name: "EW DD", y: ddEw, color: "#999", width: 1.2, dash: true },
       ]});
 
       // 3) RSI
       const r3 = await measure("rRSI");
-      drawLineChart(wx.createCanvasContext("rRSI", this), { width: Math.floor(r3.width || 320), height: Math.floor(r3.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "策略 RSI24", series: [
+      drawLineChart(wx.createCanvasContext("rRSI", this), { width: Math.floor(r3.width || 320), height: Math.floor(r3.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "策略 RSI24", theme: this.data.theme, series: [
         { name: "RSI24", y: rsiRot24, color: "#7b61ff", width: 1.4 },
       ]});
 
       // 4) rolling 3y return
       const r4 = await measure("rRR3Y");
-      drawLineChart(wx.createCanvasContext("rRR3Y", this), { width: Math.floor(r4.width || 320), height: Math.floor(r4.height || 180), x: dates, yMode: "linear", title: "策略滚动三年收益率", yLabelFmt: fmtPct, series: [
+      drawLineChart(wx.createCanvasContext("rRR3Y", this), { width: Math.floor(r4.width || 320), height: Math.floor(r4.height || 180), x: dates, yMode: "linear", title: "策略滚动三年收益率", yLabelFmt: fmtPct, theme: this.data.theme, series: [
         { name: "R3Y", y: rr3y, color: "#2e7d32", width: 1.4 },
       ]});
 
       // 5) rolling 3y mdd
       const r5 = await measure("rMDD3Y");
-      drawLineChart(wx.createCanvasContext("rMDD3Y", this), { width: Math.floor(r5.width || 320), height: Math.floor(r5.height || 180), x: dates, yMode: "linear", title: "策略滚动三年回撤", yLabelFmt: fmtPct, series: [
+      drawLineChart(wx.createCanvasContext("rMDD3Y", this), { width: Math.floor(r5.width || 320), height: Math.floor(r5.height || 180), x: dates, yMode: "linear", title: "策略滚动三年回撤", yLabelFmt: fmtPct, theme: this.data.theme, series: [
         { name: "DD3Y", y: rdd3y, color: "#ad1457", width: 1.4 },
       ]});
 
       // 6) ratio + EMA/BB
       const r6 = await measure("rRatio");
-      drawLineChart(wx.createCanvasContext("rRatio", this), { width: Math.floor(r6.width || 320), height: Math.floor(r6.height || 220), x: dates, yMode: "linear", title: "净值比值 ROT/EW + EMA/BB", series: [
+      drawLineChart(wx.createCanvasContext("rRatio", this), { width: Math.floor(r6.width || 320), height: Math.floor(r6.height || 220), x: dates, yMode: "linear", title: "净值比值 ROT/EW + EMA/BB", theme: this.data.theme, series: [
         { name: "RATIO", y: ratio, color: "#1677ff", width: 1.6 },
         { name: "EMA252", y: ratioEma, color: "#ff7a00", width: 1.2, dash: true },
         { name: "BBU", y: ratioBbu, color: "#999", width: 1.0, dash: true },
@@ -1019,20 +1098,20 @@ function attachWeekdayPage({ anchor, title }) {
 
       // 6.1) excess drawdown (based on ratio/excess nav)
       const r6b = await measure("rExDD");
-      drawLineChart(wx.createCanvasContext("rExDD", this), { width: Math.floor(r6b.width || 320), height: Math.floor(r6b.height || 180), x: dates, yMode: "linear", title: "超额回撤（ROT/EW）", yLabelFmt: fmtPct, series: [
+      drawLineChart(wx.createCanvasContext("rExDD", this), { width: Math.floor(r6b.width || 320), height: Math.floor(r6b.height || 180), x: dates, yMode: "linear", title: "超额回撤（ROT/EW）", yLabelFmt: fmtPct, theme: this.data.theme, series: [
         { name: "EX DD", y: ddEx, color: "#ad1457", width: 1.4 },
       ]});
 
       // 7) ratio rsi
       const r7 = await measure("rRatioRSI");
-      drawLineChart(wx.createCanvasContext("rRatioRSI", this), { width: Math.floor(r7.width || 320), height: Math.floor(r7.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "比值 RSI24", series: [
+      drawLineChart(wx.createCanvasContext("rRatioRSI", this), { width: Math.floor(r7.width || 320), height: Math.floor(r7.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "比值 RSI24", theme: this.data.theme, series: [
         { name: "RSI24", y: ratioRsi24, color: "#7b61ff", width: 1.4 },
       ]});
 
       // 8) 40d diff
       const r8 = await measure("rDiff40");
-      drawLineChart(wx.createCanvasContext("rDiff40", this), { width: Math.floor(r8.width || 320), height: Math.floor(r8.height || 180), x: dates, yMode: "linear", title: "40日收益差（ROT-EW）", yLabelFmt: fmtPct, series: [
-        { name: "DIFF40", y: diff40, color: "#111", width: 1.2 },
+      drawLineChart(wx.createCanvasContext("rDiff40", this), { width: Math.floor(r8.width || 320), height: Math.floor(r8.height || 180), x: dates, yMode: "linear", title: "40日收益差（ROT-EW）", yLabelFmt: fmtPct, theme: this.data.theme, series: [
+        { name: "DIFF40", y: diff40, color: "#1677ff", width: 1.2 },
       ]});
 
       // 10/11 attribution bars
@@ -1044,9 +1123,9 @@ function attachWeekdayPage({ anchor, title }) {
       const rkLabels = rkRows.map((x) => dispCode(x.code));
       const rkVals = rkRows.map((x) => (x.risk_share == null ? NaN : Number(x.risk_share)));
       const r10 = await measure("rRC");
-      drawBarChart(wx.createCanvasContext("rRC", this), { width: Math.floor(r10.width || 320), height: Math.floor(r10.height || 180), title: "收益贡献", labels: rcLabels, values: rcVals, colors: ["#1677ff", "#00bfa5", "#ff7a00", "#7b61ff"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
+      drawBarChart(wx.createCanvasContext("rRC", this), { width: Math.floor(r10.width || 320), height: Math.floor(r10.height || 180), title: "收益贡献", theme: this.data.theme, labels: rcLabels, values: rcVals, colors: ["#1677ff", "#00bfa5", "#ff7a00", "#7b61ff"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
       const r11 = await measure("rRiskC");
-      drawBarChart(wx.createCanvasContext("rRiskC", this), { width: Math.floor(r11.width || 320), height: Math.floor(r11.height || 180), title: "风险贡献", labels: rkLabels, values: rkVals, colors: ["#e53935", "#d81b60", "#8e24aa", "#3949ab"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
+      drawBarChart(wx.createCanvasContext("rRiskC", this), { width: Math.floor(r11.width || 320), height: Math.floor(r11.height || 180), title: "风险贡献", theme: this.data.theme, labels: rkLabels, values: rkVals, colors: ["#e53935", "#d81b60", "#8e24aa", "#3949ab"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
     },
 
     setCalMode(e) {

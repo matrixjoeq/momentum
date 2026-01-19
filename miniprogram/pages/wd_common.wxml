@@ -1,8 +1,13 @@
-<view class="page">
+<view class="page {{themeClass}}">
   <view class="card">
     <view class="row">
       <view class="title">{{title}}</view>
-      <view class="muted">{{rangeLabel}}</view>
+      <view class="rowRight">
+        <view class="muted">{{rangeLabel}}</view>
+        <view class="themeIcon" bindtap="toggleTheme" hover-class="themeIconHover" aria-label="切换主题">
+          {{theme==='dark' ? '☾' : '☀'}}
+        </view>
+      </view>
     </view>
     <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
       <button size="mini" bindtap="setRange" data-k="1m">近一月</button>

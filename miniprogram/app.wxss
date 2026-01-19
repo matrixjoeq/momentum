@@ -1,5 +1,6 @@
 .page {
   background: #f6f7fb;
+  color: #111;
 }
 
 .card {
@@ -17,6 +18,13 @@
   gap: 12rpx;
 }
 
+.rowRight {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12rpx;
+}
+
 .muted {
   color: #888;
   font-size: 24rpx;
@@ -29,6 +37,45 @@
 
 .btn {
   margin-top: 12rpx;
+}
+
+/* --- Theme toggle icon --- */
+.themeIcon {
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  text-align: center;
+  border-radius: 999px;
+  font-size: 30rpx;
+  color: #333;
+  background: rgba(0,0,0,0.06);
+}
+.themeIconHover {
+  opacity: 0.85;
+}
+
+/* --- Dark theme overrides --- */
+.page.theme-dark {
+  background: #0f1115;
+  color: #eaeaea;
+}
+.page.theme-dark .card {
+  background: #161a22;
+  box-shadow: 0 6rpx 18rpx rgba(0,0,0,0.25);
+}
+.page.theme-dark .muted {
+  color: #a8b0bd;
+}
+.page.theme-dark .title {
+  color: #eaeaea;
+}
+.page.theme-dark button {
+  background: #2a2f3a !important;
+  color: #eaeaea !important;
+}
+.page.theme-dark .themeIcon {
+  color: #eaeaea;
+  background: rgba(255,255,255,0.10);
 }
 
 /* --- Calendar styles (Chart 10) --- */
@@ -135,6 +182,15 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
 }
 
+.page.theme-dark .tip {
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+}
+.page.theme-dark .crossV {
+  background: rgba(138, 180, 255, 0.95);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65);
+}
+
 /* single-line rows (truncate with ellipsis) */
 .line-ellipsis {
   white-space: nowrap;
@@ -173,3 +229,29 @@
 .navItemHover {
   opacity: 0.85;
 }
+
+.page.theme-dark .bottomNav {
+  background: rgba(15, 17, 21, 0.98);
+  border-top: 1px solid rgba(255,255,255,0.10);
+}
+.page.theme-dark .navItem {
+  color: #eaeaea;
+  background: rgba(255,255,255,0.10);
+}
+.page.theme-dark .navItemActive {
+  color: #0f1115;
+  background: #8ab4ff;
+}
+
+/* Calendar dark theme */
+.page.theme-dark .cal-head { color: #a8b0bd; }
+.page.theme-dark .cal-cell { background: #1b2030; }
+.page.theme-dark .cal-cell.trade { background: #1b2a45; }
+.page.theme-dark .cal-day { color: #a8b0bd; }
+.page.theme-dark .cal-ret { color: #eaeaea; }
+.page.theme-dark .cal-cell.trade.pos .cal-ret { color: #ff6b6b; }
+.page.theme-dark .cal-cell.trade.neg .cal-ret { color: #6be6a6; }
+.page.theme-dark .mon-cell { background: #1b2030; }
+.page.theme-dark .mon-title { color: #eaeaea; }
+.page.theme-dark .yr-cell { background: #1b2030; }
+.page.theme-dark .yr-title { color: #eaeaea; }
