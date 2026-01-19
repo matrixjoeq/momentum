@@ -1576,12 +1576,14 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     mdd = _max_drawdown(port_nav_net)
     mdd_dur = _max_drawdown_duration_days(port_nav_net)
     sharpe = _sharpe(port_ret_net, rf=float(inp.risk_free_rate))
+    calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
     sortino = _sortino(port_ret_net, rf=float(inp.risk_free_rate))
     ui = _ulcer_index(port_nav_net, in_percent=True)
     ui_den = ui / 100.0
     upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
 
     ann_excess = _annualized_return(excess_nav)
+    ann_excess_vol = _annualized_vol(active_ret)
     ir = _sharpe(active_ret, rf=0.0)  # same formula but zero rf; for consistency name it IR-style
     ex_mdd = _max_drawdown(excess_nav)
     ex_mdd_dur = _max_drawdown_duration_days(excess_nav)
@@ -1594,6 +1596,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             "max_drawdown": float(mdd),
             "max_drawdown_recovery_days": int(mdd_dur),
             "sharpe_ratio": float(sharpe),
+            "calmar_ratio": float(calmar),
             "sortino_ratio": float(sortino),
             "ulcer_index": float(ui),
             "ulcer_performance_index": float(upi),
@@ -1605,6 +1608,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         "excess_vs_equal_weight": {
             "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
             "annualized_return": float(ann_excess),
+            "annualized_volatility": float(ann_excess_vol),
             "information_ratio": float(ir),
             "max_drawdown": float(ex_mdd),
             "max_drawdown_recovery_days": int(ex_mdd_dur),

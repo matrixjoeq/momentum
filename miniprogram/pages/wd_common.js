@@ -137,6 +137,16 @@ function _rollingDrawdown(nav, windowDays) {
   return out;
 }
 
+function lineXFromIndex(idx, width, n) {
+  const padL = 46, padR = 16;
+  const W = Number(width || 0);
+  const N = Number(n || 0);
+  if (!Number.isFinite(W) || !Number.isFinite(N) || N <= 1) return padL;
+  const plotW = W - padL - padR;
+  if (plotW <= 1) return padL;
+  return padL + (Number(idx) / (N - 1)) * plotW;
+}
+
 function _rsiWilder(arr, window) {
   const n = (arr || []).length;
   const w = Math.max(2, Number(window || 14));
@@ -820,10 +830,30 @@ function attachWeekdayPage({ anchor, title }) {
       const ew40 = _rollingReturn(navEw, 40);
       const diff40 = rot40.map((v, i) => (v == null || ew40[i] == null) ? null : (Number(v) - Number(ew40[i])));
 
+      // cache derived series for smooth hover interaction (avoid O(n*window) recomputation on touchmove)
+      this.__rotCache = {
+        dates,
+        navRot,
+        navEw,
+        navEx,
+        ddRot,
+        ddEw,
+        ddEx,
+        rr3y,
+        dd3y: rdd3y,
+        ratio,
+        ratioEma,
+        ratioBbu,
+        ratioBbl,
+        ratioRsi24,
+        diff40,
+      };
+
       // metrics text
       const ms = (rotFull.metrics || {}).strategy || {};
       const mex = (rotFull.metrics || {}).excess_vs_equal_weight || {};
       const wp = rotFull.win_payoff || {};
+      const annualTurnover = (ms.avg_daily_turnover == null) ? NaN : (Number(ms.avg_daily_turnover) * 252);
       const rm = {
         cumulative_return: pct(ms.cumulative_return),
         annualized_return: pct(ms.annualized_return),
@@ -832,9 +862,14 @@ function attachWeekdayPage({ anchor, title }) {
         max_drawdown_recovery_days: (ms.max_drawdown_recovery_days == null ? "-" : String(ms.max_drawdown_recovery_days)),
         sharpe_ratio: num(ms.sharpe_ratio),
         sortino_ratio: num(ms.sortino_ratio),
+        calmar_ratio: num(ms.calmar_ratio),
+        ulcer_index: num(ms.ulcer_index),
+        ulcer_performance_index: num(ms.ulcer_performance_index),
         avg_daily_turnover: pct(ms.avg_daily_turnover),
+        annual_turnover: pct(annualTurnover),
         excess_cum: pct(mex.cumulative_return),
         excess_ann: pct(mex.annualized_return),
+        excess_volatility: pct(mex.annualized_volatility),
         excess_ir: num(mex.information_ratio),
         excess_max_drawdown: pct(mex.max_drawdown),
         excess_max_drawdown_recovery_days: (mex.max_drawdown_recovery_days == null ? "-" : String(mex.max_drawdown_recovery_days)),
@@ -1257,6 +1292,11 @@ function attachWeekdayPage({ anchor, title }) {
         const yRel = absY - Number(rect.top);
         const idx = lineIndexFromTouchX(xRel, Number(rect.width), n);
         if (idx == null) return;
+        // Deduplicate updates: touchmove fires a lot; only update when data-index changes.
+        this.__tipLast = this.__tipLast || {};
+        if (this.__tipLast.id === id && this.__tipLast.idx === idx) return;
+        this.__tipLast = { id, idx };
+
         const d = String(dates[idx]);
         const fmtPct = (v) => pct(v);
         const fmtNum = (v) => {
@@ -1266,6 +1306,7 @@ function attachWeekdayPage({ anchor, title }) {
         };
 
         let lines = [];
+        const rotCache = this.__rotCache || null;
         if (id === "cNav") {
           lines = [
             `NAV=${fmtNum((raw.nav || [])[idx])}`,
@@ -1286,52 +1327,85 @@ function attachWeekdayPage({ anchor, title }) {
           const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
           lines = [`ROT=${fmtNum((s.ROTATION || [])[idx])}`, `EW=${fmtNum((s.EW_REBAL || [])[idx])}`];
         } else if (id === "rDD") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          lines = [`ROT_DD=${fmtPct(_drawdownFromNav(s.ROTATION || [])[idx])}`, `EW_DD=${fmtPct(_drawdownFromNav(s.EW_REBAL || [])[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ddRot) && Array.isArray(rotCache.ddEw)) {
+            lines = [`ROT_DD=${fmtPct(rotCache.ddRot[idx])}`, `EW_DD=${fmtPct(rotCache.ddEw[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            lines = [`ROT_DD=${fmtPct(_drawdownFromNav(s.ROTATION || [])[idx])}`, `EW_DD=${fmtPct(_drawdownFromNav(s.EW_REBAL || [])[idx])}`];
+          }
         } else if (id === "rRSI") {
           const rsiSeries = (((raw.nav_rsi || {}).series || {}).ROTATION || {})["24"] || [];
           lines = [`RSI24=${fmtNum(rsiSeries[idx])}`];
         } else if (id === "rRR3Y") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          lines = [`R3Y=${fmtPct(_rollingReturn(s.ROTATION || [], 3 * 252)[idx])}`];
+          if (rotCache && Array.isArray(rotCache.rr3y)) {
+            lines = [`R3Y=${fmtPct(rotCache.rr3y[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            lines = [`R3Y=${fmtPct(_rollingReturn(s.ROTATION || [], 3 * 252)[idx])}`];
+          }
         } else if (id === "rMDD3Y") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          lines = [`DD3Y=${fmtPct(_rollingDrawdown(s.ROTATION || [], 3 * 252)[idx])}`];
+          if (rotCache && Array.isArray(rotCache.dd3y)) {
+            lines = [`DD3Y=${fmtPct(rotCache.dd3y[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            lines = [`DD3Y=${fmtPct(_rollingDrawdown(s.ROTATION || [], 3 * 252)[idx])}`];
+          }
         } else if (id === "rRatio") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const ratio = (s.ROTATION || []).map((v, i) => {
-            const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
-            return a / b;
-          });
-          const ema = _emaArr(ratio, 252);
-          const sd = _rollingStdArr(ratio, 252);
-          const bbu = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) + 2 * Number(sd[i])) : null);
-          const bbl = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) - 2 * Number(sd[i])) : null);
-          lines = [`RATIO=${fmtNum(ratio[idx])}`, `EMA252=${fmtNum(ema[idx])}`, `BBU=${fmtNum(bbu[idx])}`, `BBL=${fmtNum(bbl[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ratio) && Array.isArray(rotCache.ratioEma)) {
+            lines = [
+              `RATIO=${fmtNum(rotCache.ratio[idx])}`,
+              `EMA252=${fmtNum(rotCache.ratioEma[idx])}`,
+              `BBU=${fmtNum((rotCache.ratioBbu || [])[idx])}`,
+              `BBL=${fmtNum((rotCache.ratioBbl || [])[idx])}`,
+            ];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const ratio = (s.ROTATION || []).map((v, i) => {
+              const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+              return a / b;
+            });
+            const ema = _emaArr(ratio, 252);
+            const sd = _rollingStdArr(ratio, 252);
+            const bbu = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) + 2 * Number(sd[i])) : null);
+            const bbl = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) - 2 * Number(sd[i])) : null);
+            lines = [`RATIO=${fmtNum(ratio[idx])}`, `EMA252=${fmtNum(ema[idx])}`, `BBU=${fmtNum(bbu[idx])}`, `BBL=${fmtNum(bbl[idx])}`];
+          }
         } else if (id === "rExDD") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const ex = (s.EXCESS || []).length ? (s.EXCESS || []) : (s.ROTATION || []).map((v, i) => {
-            const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
-            return a / b;
-          });
-          lines = [`EX_DD=${fmtPct(_drawdownFromNav(ex)[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ddEx)) {
+            lines = [`EX_DD=${fmtPct(rotCache.ddEx[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const ex = (s.EXCESS || []).length ? (s.EXCESS || []) : (s.ROTATION || []).map((v, i) => {
+              const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+              return a / b;
+            });
+            lines = [`EX_DD=${fmtPct(_drawdownFromNav(ex)[idx])}`];
+          }
         } else if (id === "rRatioRSI") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const ratio = (s.ROTATION || []).map((v, i) => {
-            const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return NaN;
-            return a / b;
-          });
-          const rsi = _rsiWilder(ratio, 24);
-          lines = [`RSI24=${fmtNum(rsi[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ratioRsi24)) {
+            lines = [`RSI24=${fmtNum(rotCache.ratioRsi24[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const ratio = (s.ROTATION || []).map((v, i) => {
+              const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return NaN;
+              return a / b;
+            });
+            const rsi = _rsiWilder(ratio, 24);
+            lines = [`RSI24=${fmtNum(rsi[idx])}`];
+          }
         } else if (id === "rDiff40") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const rot40 = _rollingReturn(s.ROTATION || [], 40);
-          const ew40 = _rollingReturn(s.EW_REBAL || [], 40);
-          const v = (rot40[idx] == null || ew40[idx] == null) ? null : (Number(rot40[idx]) - Number(ew40[idx]));
-          lines = [`DIFF40=${fmtPct(v)}`];
+          if (rotCache && Array.isArray(rotCache.diff40)) {
+            lines = [`DIFF40=${fmtPct(rotCache.diff40[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const rot40 = _rollingReturn(s.ROTATION || [], 40);
+            const ew40 = _rollingReturn(s.EW_REBAL || [], 40);
+            const v = (rot40[idx] == null || ew40[idx] == null) ? null : (Number(rot40[idx]) - Number(ew40[idx]));
+            lines = [`DIFF40=${fmtPct(v)}`];
+          }
         }
         if (!lines.length) return;
 
@@ -1339,7 +1413,7 @@ function attachWeekdayPage({ anchor, title }) {
         const w = Number(rect.width || 0);
         const h = Number(rect.height || 0);
         const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-        const cx = clamp(Number(xRel), 0, Math.max(0, w));
+        const cx = clamp(lineXFromIndex(idx, w, n), 0, Math.max(0, w));
         // Estimate tooltip box size to prevent overflow on right/bottom.
         const maxChars = Math.max(String(d || "").length, ...lines.map((s) => String(s || "").length));
         const estW = Math.max(120, Math.min(w * 0.8, 24 + maxChars * 7)); // px (rough)
