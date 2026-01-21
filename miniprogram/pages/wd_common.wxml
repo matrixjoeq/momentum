@@ -1,8 +1,13 @@
-<view class="page">
+<view class="page {{themeClass}}">
   <view class="card">
     <view class="row">
       <view class="title">{{title}}</view>
-      <view class="muted">{{rangeLabel}}</view>
+      <view class="rowRight">
+        <view class="muted">{{rangeLabel}}</view>
+        <view class="themeIcon" bindtap="toggleTheme" hover-class="themeIconHover" aria-label="切换主题">
+          {{theme==='dark' ? '☾' : '☀'}}
+        </view>
+      </view>
     </view>
     <view class="row" style="margin-top: 10rpx; flex-wrap: wrap; justify-content:flex-start;">
       <button size="mini" bindtap="setRange" data-k="1m">近一月</button>
@@ -259,11 +264,14 @@
 
   <view class="card">
     <view class="title">轮动图表10：策略绩效指标（含超额）</view>
-    <view class="muted">策略累计：{{rm.cumulative_return}}｜年化：{{rm.annualized_return}}｜波动：{{rm.annualized_volatility}}｜最大回撤：{{rm.max_drawdown}}</view>
-    <view class="muted">最大回撤修复：{{rm.max_drawdown_recovery_days}}天｜夏普：{{rm.sharpe_ratio}}｜索诺提：{{rm.sortino_ratio}}｜平均日换手：{{rm.avg_daily_turnover}}</view>
-    <view class="muted">累计超额：{{rm.excess_cum}}｜超额年化：{{rm.excess_ann}}｜信息比率：{{rm.excess_ir}}</view>
-    <view class="muted">超额最大回撤：{{rm.excess_max_drawdown}}｜超额回撤修复：{{rm.excess_max_drawdown_recovery_days}}天</view>
-    <view class="muted">超额胜率：{{rm.excess_win_rate}}｜平均超额盈利：{{rm.excess_avg_win}}｜平均超额亏损：{{rm.excess_avg_loss}}</view>
+    <view class="muted">累计收益：{{rm.cumulative_return}}｜年化收益：{{rm.annualized_return}}｜年化波动：{{rm.annualized_volatility}}</view>
+    <view class="muted">最大回撤：{{rm.max_drawdown}}｜修复时长：{{rm.max_drawdown_recovery_days}}天</view>
+    <view class="muted">夏普：{{rm.sharpe_ratio}}｜卡玛：{{rm.calmar_ratio}}｜索诺提：{{rm.sortino_ratio}}</view>
+    <view class="muted">溃疡：{{rm.ulcer_index}}｜溃疡绩效：{{rm.ulcer_performance_index}}</view>
+    <view class="muted">累积超额：{{rm.excess_cum}}｜超额年化：{{rm.excess_ann}}｜超额波动：{{rm.excess_volatility}}</view>
+    <view class="muted">超额最大回撤：{{rm.excess_max_drawdown}}｜超额修复时长：{{rm.excess_max_drawdown_recovery_days}}天</view>
+    <view class="muted">超额胜率：{{rm.excess_win_rate}}｜平均正超额：{{rm.excess_avg_win}}｜平均负超额：{{rm.excess_avg_loss}}</view>
+    <view class="muted">信息比率：{{rm.excess_ir}}｜年换手率：{{rm.annual_turnover}}</view>
   </view>
 
   <view class="card">

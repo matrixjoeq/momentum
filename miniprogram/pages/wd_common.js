@@ -17,6 +17,25 @@ const IDX_MAP_LINES = [
   "4=黄金(518880)",
 ];
 
+const THEME_MODE_KEY = "theme_mode_v1"; // "light" | "dark"
+
+function _safeGetStorage(key, fallback) {
+  try {
+    const v = wx.getStorageSync(key);
+    return v == null || v === "" ? fallback : v;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function _safeSetStorage(key, value) {
+  try {
+    wx.setStorageSync(key, value);
+  } catch (e) {
+    // ignore
+  }
+}
+
 function dispCode(code) {
   const c = String(code || "");
   return CODE_NAME[c] || c;
@@ -117,6 +136,34 @@ function _rollingMaxDrawdown(nav, windowDays) {
     out[i] = mdd;
   }
   return out;
+}
+
+function _rollingDrawdown(nav, windowDays) {
+  const n = (nav || []).length;
+  const w = Math.max(2, Number(windowDays || 2));
+  const out = new Array(n).fill(null);
+  for (let i = w - 1; i < n; i++) {
+    let peak = -Infinity;
+    for (let j = i - w + 1; j <= i; j++) {
+      const x = Number(nav[j]);
+      if (!Number.isFinite(x) || x <= 0) { peak = NaN; break; }
+      if (x > peak) peak = x;
+    }
+    const cur = Number(nav[i]);
+    if (!Number.isFinite(cur) || !Number.isFinite(peak) || peak <= 0) { out[i] = null; continue; }
+    out[i] = cur / peak - 1;
+  }
+  return out;
+}
+
+function lineXFromIndex(idx, width, n) {
+  const padL = 46, padR = 16;
+  const W = Number(width || 0);
+  const N = Number(n || 0);
+  if (!Number.isFinite(W) || !Number.isFinite(N) || N <= 1) return padL;
+  const plotW = W - padL - padR;
+  if (plotW <= 1) return padL;
+  return padL + (Number(idx) / (N - 1)) * plotW;
 }
 
 function _rsiWilder(arr, window) {
@@ -313,7 +360,8 @@ async function drawAll(page, payload) {
   const dd = payload.drawdown || [];
   const rsi = payload.rsi24 || [];
   const rr3y = payload.roll3y_return || [];
-  const rdd3y = payload.roll3y_mdd || [];
+  const rdd3y = payload.roll3y_dd || payload.roll3y_mdd || [];
+  const theme = (page && page.data && page.data.theme) ? page.data.theme : "light";
 
   const rNav = await measure(page, "cNav");
   // store rects for touch interaction
@@ -325,6 +373,7 @@ async function drawAll(page, payload) {
     x: dates,
     yMode: "linear",
     title: "EW 净值",
+    theme,
     series: [
       { name: "NAV", y: nav, color: "#1677ff", width: 1.6 },
       { name: "EMA252", y: ema252, color: "#ff7a00", width: 1.2, dash: true },
@@ -342,6 +391,7 @@ async function drawAll(page, payload) {
     yMode: "linear",
     title: "Drawdown",
     yLabelFmt: (v) => pct(v),
+    theme,
     series: [{ name: "DD", y: dd, color: "#e53935", width: 1.4 }],
   });
 
@@ -354,6 +404,7 @@ async function drawAll(page, payload) {
     yMode: "linear",
     yFixed: [0, 100],
     title: "RSI24",
+    theme,
     series: [{ name: "RSI24", y: rsi, color: "#7b61ff", width: 1.4 }],
   });
 
@@ -366,6 +417,7 @@ async function drawAll(page, payload) {
     yMode: "linear",
     title: "Rolling 3Y Return",
     yLabelFmt: (v) => pct(v),
+    theme,
     series: [{ name: "R3Y", y: rr3y, color: "#2e7d32", width: 1.4 }],
   });
 
@@ -376,8 +428,9 @@ async function drawAll(page, payload) {
     height: Math.floor(rRDD.height || 160),
     x: dates,
     yMode: "linear",
-    title: "Rolling 3Y MDD",
+    title: "Rolling 3Y DD",
     yLabelFmt: (v) => pct(v),
+    theme,
     series: [{ name: "DD3Y", y: rdd3y, color: "#ad1457", width: 1.4 }],
   });
 
@@ -388,6 +441,7 @@ async function drawAll(page, payload) {
     width: Math.floor(rCorr.width || 320),
     height: Math.floor(rCorr.height || 220),
     title: "Correlation",
+    theme,
     labels: IDX_LABELS,
     matrix: corr.matrix || [],
   });
@@ -402,6 +456,7 @@ async function drawAll(page, payload) {
     width: Math.floor(rRC.width || 320),
     height: Math.floor(rRC.height || 180),
     title: "Return Share",
+    theme,
     labels: rcLabels,
     values: rcVals,
     colors: ["#1677ff", "#00bfa5", "#ff7a00", "#7b61ff"],
@@ -419,6 +474,7 @@ async function drawAll(page, payload) {
     width: Math.floor(rRisk.width || 320),
     height: Math.floor(rRisk.height || 180),
     title: "Risk Share",
+    theme,
     labels: rkLabels,
     values: rkVals,
     colors: ["#e53935", "#d81b60", "#8e24aa", "#3949ab"],
@@ -436,6 +492,9 @@ function attachWeekdayPage({ anchor, title }) {
       title,
       pageKey,
       status: "",
+      themeMode: "light",
+      theme: "light",
+      themeClass: "theme-light",
       rangeKey: "all",
       rangeLabel: "全区间",
       raw: null, // kept for backward-compat in data shape; large payloads are stored on page.__raw
@@ -489,7 +548,14 @@ function attachWeekdayPage({ anchor, title }) {
       nextPlan: null,
     },
 
+    onLoad() {
+      // init theme from cache
+      this.applyTheme();
+    },
+
     onShow() {
+      // keep in sync with cached mode
+      this.applyTheme();
       // default load
       if (!this.__raw) this.loadRange(this.data.rangeKey || "all");
     },
@@ -502,6 +568,47 @@ function attachWeekdayPage({ anchor, title }) {
         clearTimeout(this.__tipTimer);
         this.__tipTimer = null;
       }
+    },
+
+    applyTheme(nextMode) {
+      const modeRaw = String(nextMode || this.data.themeMode || _safeGetStorage(THEME_MODE_KEY, "light"));
+      const mode = (modeRaw === "dark") ? "dark" : "light";
+      const themeClass = mode === "dark" ? "theme-dark" : "theme-light";
+
+      const changed = (this.data.theme !== mode) || (this.data.themeMode !== mode);
+      this.setData({ themeMode: mode, theme: mode, themeClass });
+      _safeSetStorage(THEME_MODE_KEY, mode);
+
+      // Nav bar should match the theme for readability.
+      try {
+        wx.setNavigationBarColor({
+          backgroundColor: mode === "dark" ? "#0f1115" : "#ffffff",
+          frontColor: mode === "dark" ? "#ffffff" : "#000000",
+        });
+      } catch (e) {
+        // ignore older base libs
+      }
+
+      // Redraw charts with new palette.
+      if (changed) {
+        try {
+          if (this.__raw) drawAll(this, this.__raw);
+          if (this.__rot) this._drawRotation(this.__rot);
+        } catch (e3) {
+          // best effort
+        }
+      }
+    },
+
+    setThemeMode(e) {
+      const m = (e && e.currentTarget && e.currentTarget.dataset) ? String(e.currentTarget.dataset.m || "") : "light";
+      this.applyTheme(m);
+    },
+
+    toggleTheme() {
+      const cur = String(this.data.themeMode || "light");
+      const next = (cur === "dark") ? "light" : "dark";
+      this.applyTheme(next);
     },
 
     async setRange(e) {
@@ -782,7 +889,7 @@ function attachWeekdayPage({ anchor, title }) {
       })));
       const rsiRot24 = (((rotFull.nav_rsi || {}).series || {}).ROTATION || {})["24"] || _rsiWilder(navRot, 24);
       const rr3y = _rollingReturn(navRot, 3 * 252);
-      const rdd3y = _rollingMaxDrawdown(navRot, 3 * 252);
+      const rdd3y = _rollingDrawdown(navRot, 3 * 252);
 
       // ratio curve ROT / EW
       const ratio = navRot.map((v, i) => {
@@ -802,10 +909,30 @@ function attachWeekdayPage({ anchor, title }) {
       const ew40 = _rollingReturn(navEw, 40);
       const diff40 = rot40.map((v, i) => (v == null || ew40[i] == null) ? null : (Number(v) - Number(ew40[i])));
 
+      // cache derived series for smooth hover interaction (avoid O(n*window) recomputation on touchmove)
+      this.__rotCache = {
+        dates,
+        navRot,
+        navEw,
+        navEx,
+        ddRot,
+        ddEw,
+        ddEx,
+        rr3y,
+        dd3y: rdd3y,
+        ratio,
+        ratioEma,
+        ratioBbu,
+        ratioBbl,
+        ratioRsi24,
+        diff40,
+      };
+
       // metrics text
       const ms = (rotFull.metrics || {}).strategy || {};
       const mex = (rotFull.metrics || {}).excess_vs_equal_weight || {};
       const wp = rotFull.win_payoff || {};
+      const annualTurnover = (ms.avg_daily_turnover == null) ? NaN : (Number(ms.avg_daily_turnover) * 252);
       const rm = {
         cumulative_return: pct(ms.cumulative_return),
         annualized_return: pct(ms.annualized_return),
@@ -814,9 +941,14 @@ function attachWeekdayPage({ anchor, title }) {
         max_drawdown_recovery_days: (ms.max_drawdown_recovery_days == null ? "-" : String(ms.max_drawdown_recovery_days)),
         sharpe_ratio: num(ms.sharpe_ratio),
         sortino_ratio: num(ms.sortino_ratio),
+        calmar_ratio: num(ms.calmar_ratio),
+        ulcer_index: num(ms.ulcer_index),
+        ulcer_performance_index: num(ms.ulcer_performance_index),
         avg_daily_turnover: pct(ms.avg_daily_turnover),
+        annual_turnover: pct(annualTurnover),
         excess_cum: pct(mex.cumulative_return),
         excess_ann: pct(mex.annualized_return),
+        excess_volatility: pct(mex.annualized_volatility),
         excess_ir: num(mex.information_ratio),
         excess_max_drawdown: pct(mex.max_drawdown),
         excess_max_drawdown_recovery_days: (mex.max_drawdown_recovery_days == null ? "-" : String(mex.max_drawdown_recovery_days)),
@@ -925,39 +1057,39 @@ function attachWeekdayPage({ anchor, title }) {
 
       // 1) nav compare
       const r1 = await measure("rNav");
-      drawLineChart(wx.createCanvasContext("rNav", this), { width: Math.floor(r1.width || 320), height: Math.floor(r1.height || 220), x: dates, yMode: "linear", title: "轮动净值 vs 等权", series: [
+      drawLineChart(wx.createCanvasContext("rNav", this), { width: Math.floor(r1.width || 320), height: Math.floor(r1.height || 220), x: dates, yMode: "linear", title: "轮动净值 vs 等权", theme: this.data.theme, series: [
         { name: "ROT", y: navRot, color: "#1677ff", width: 1.6 },
         { name: "EW", y: navEw, color: "#ff7a00", width: 1.4, dash: true },
       ]});
 
       // 2) dd compare
       const r2 = await measure("rDD");
-      drawLineChart(wx.createCanvasContext("rDD", this), { width: Math.floor(r2.width || 320), height: Math.floor(r2.height || 200), x: dates, yMode: "linear", title: "回撤对比", yLabelFmt: fmtPct, series: [
+      drawLineChart(wx.createCanvasContext("rDD", this), { width: Math.floor(r2.width || 320), height: Math.floor(r2.height || 200), x: dates, yMode: "linear", title: "回撤对比", yLabelFmt: fmtPct, theme: this.data.theme, series: [
         { name: "ROT DD", y: ddRot, color: "#e53935", width: 1.4 },
         { name: "EW DD", y: ddEw, color: "#999", width: 1.2, dash: true },
       ]});
 
       // 3) RSI
       const r3 = await measure("rRSI");
-      drawLineChart(wx.createCanvasContext("rRSI", this), { width: Math.floor(r3.width || 320), height: Math.floor(r3.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "策略 RSI24", series: [
+      drawLineChart(wx.createCanvasContext("rRSI", this), { width: Math.floor(r3.width || 320), height: Math.floor(r3.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "策略 RSI24", theme: this.data.theme, series: [
         { name: "RSI24", y: rsiRot24, color: "#7b61ff", width: 1.4 },
       ]});
 
       // 4) rolling 3y return
       const r4 = await measure("rRR3Y");
-      drawLineChart(wx.createCanvasContext("rRR3Y", this), { width: Math.floor(r4.width || 320), height: Math.floor(r4.height || 180), x: dates, yMode: "linear", title: "策略滚动三年收益率", yLabelFmt: fmtPct, series: [
+      drawLineChart(wx.createCanvasContext("rRR3Y", this), { width: Math.floor(r4.width || 320), height: Math.floor(r4.height || 180), x: dates, yMode: "linear", title: "策略滚动三年收益率", yLabelFmt: fmtPct, theme: this.data.theme, series: [
         { name: "R3Y", y: rr3y, color: "#2e7d32", width: 1.4 },
       ]});
 
       // 5) rolling 3y mdd
       const r5 = await measure("rMDD3Y");
-      drawLineChart(wx.createCanvasContext("rMDD3Y", this), { width: Math.floor(r5.width || 320), height: Math.floor(r5.height || 180), x: dates, yMode: "linear", title: "策略滚动三年回撤", yLabelFmt: fmtPct, series: [
-        { name: "MDD3Y", y: rdd3y, color: "#ad1457", width: 1.4 },
+      drawLineChart(wx.createCanvasContext("rMDD3Y", this), { width: Math.floor(r5.width || 320), height: Math.floor(r5.height || 180), x: dates, yMode: "linear", title: "策略滚动三年回撤", yLabelFmt: fmtPct, theme: this.data.theme, series: [
+        { name: "DD3Y", y: rdd3y, color: "#ad1457", width: 1.4 },
       ]});
 
       // 6) ratio + EMA/BB
       const r6 = await measure("rRatio");
-      drawLineChart(wx.createCanvasContext("rRatio", this), { width: Math.floor(r6.width || 320), height: Math.floor(r6.height || 220), x: dates, yMode: "linear", title: "净值比值 ROT/EW + EMA/BB", series: [
+      drawLineChart(wx.createCanvasContext("rRatio", this), { width: Math.floor(r6.width || 320), height: Math.floor(r6.height || 220), x: dates, yMode: "linear", title: "净值比值 ROT/EW + EMA/BB", theme: this.data.theme, series: [
         { name: "RATIO", y: ratio, color: "#1677ff", width: 1.6 },
         { name: "EMA252", y: ratioEma, color: "#ff7a00", width: 1.2, dash: true },
         { name: "BBU", y: ratioBbu, color: "#999", width: 1.0, dash: true },
@@ -966,20 +1098,20 @@ function attachWeekdayPage({ anchor, title }) {
 
       // 6.1) excess drawdown (based on ratio/excess nav)
       const r6b = await measure("rExDD");
-      drawLineChart(wx.createCanvasContext("rExDD", this), { width: Math.floor(r6b.width || 320), height: Math.floor(r6b.height || 180), x: dates, yMode: "linear", title: "超额回撤（ROT/EW）", yLabelFmt: fmtPct, series: [
+      drawLineChart(wx.createCanvasContext("rExDD", this), { width: Math.floor(r6b.width || 320), height: Math.floor(r6b.height || 180), x: dates, yMode: "linear", title: "超额回撤（ROT/EW）", yLabelFmt: fmtPct, theme: this.data.theme, series: [
         { name: "EX DD", y: ddEx, color: "#ad1457", width: 1.4 },
       ]});
 
       // 7) ratio rsi
       const r7 = await measure("rRatioRSI");
-      drawLineChart(wx.createCanvasContext("rRatioRSI", this), { width: Math.floor(r7.width || 320), height: Math.floor(r7.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "比值 RSI24", series: [
+      drawLineChart(wx.createCanvasContext("rRatioRSI", this), { width: Math.floor(r7.width || 320), height: Math.floor(r7.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "比值 RSI24", theme: this.data.theme, series: [
         { name: "RSI24", y: ratioRsi24, color: "#7b61ff", width: 1.4 },
       ]});
 
       // 8) 40d diff
       const r8 = await measure("rDiff40");
-      drawLineChart(wx.createCanvasContext("rDiff40", this), { width: Math.floor(r8.width || 320), height: Math.floor(r8.height || 180), x: dates, yMode: "linear", title: "40日收益差（ROT-EW）", yLabelFmt: fmtPct, series: [
-        { name: "DIFF40", y: diff40, color: "#111", width: 1.2 },
+      drawLineChart(wx.createCanvasContext("rDiff40", this), { width: Math.floor(r8.width || 320), height: Math.floor(r8.height || 180), x: dates, yMode: "linear", title: "40日收益差（ROT-EW）", yLabelFmt: fmtPct, theme: this.data.theme, series: [
+        { name: "DIFF40", y: diff40, color: "#1677ff", width: 1.2 },
       ]});
 
       // 10/11 attribution bars
@@ -991,9 +1123,9 @@ function attachWeekdayPage({ anchor, title }) {
       const rkLabels = rkRows.map((x) => dispCode(x.code));
       const rkVals = rkRows.map((x) => (x.risk_share == null ? NaN : Number(x.risk_share)));
       const r10 = await measure("rRC");
-      drawBarChart(wx.createCanvasContext("rRC", this), { width: Math.floor(r10.width || 320), height: Math.floor(r10.height || 180), title: "收益贡献", labels: rcLabels, values: rcVals, colors: ["#1677ff", "#00bfa5", "#ff7a00", "#7b61ff"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
+      drawBarChart(wx.createCanvasContext("rRC", this), { width: Math.floor(r10.width || 320), height: Math.floor(r10.height || 180), title: "收益贡献", theme: this.data.theme, labels: rcLabels, values: rcVals, colors: ["#1677ff", "#00bfa5", "#ff7a00", "#7b61ff"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
       const r11 = await measure("rRiskC");
-      drawBarChart(wx.createCanvasContext("rRiskC", this), { width: Math.floor(r11.width || 320), height: Math.floor(r11.height || 180), title: "风险贡献", labels: rkLabels, values: rkVals, colors: ["#e53935", "#d81b60", "#8e24aa", "#3949ab"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
+      drawBarChart(wx.createCanvasContext("rRiskC", this), { width: Math.floor(r11.width || 320), height: Math.floor(r11.height || 180), title: "风险贡献", theme: this.data.theme, labels: rkLabels, values: rkVals, colors: ["#e53935", "#d81b60", "#8e24aa", "#3949ab"], valueFmt: (x) => (x * 100).toFixed(1) + "%", vmin: 0, vmax: 1 });
     },
 
     setCalMode(e) {
@@ -1239,6 +1371,11 @@ function attachWeekdayPage({ anchor, title }) {
         const yRel = absY - Number(rect.top);
         const idx = lineIndexFromTouchX(xRel, Number(rect.width), n);
         if (idx == null) return;
+        // Deduplicate updates: touchmove fires a lot; only update when data-index changes.
+        this.__tipLast = this.__tipLast || {};
+        if (this.__tipLast.id === id && this.__tipLast.idx === idx) return;
+        this.__tipLast = { id, idx };
+
         const d = String(dates[idx]);
         const fmtPct = (v) => pct(v);
         const fmtNum = (v) => {
@@ -1248,6 +1385,7 @@ function attachWeekdayPage({ anchor, title }) {
         };
 
         let lines = [];
+        const rotCache = this.__rotCache || null;
         if (id === "cNav") {
           lines = [
             `NAV=${fmtNum((raw.nav || [])[idx])}`,
@@ -1262,57 +1400,91 @@ function attachWeekdayPage({ anchor, title }) {
         } else if (id === "cRR3Y") {
           lines = [`R3Y=${fmtPct((raw.roll3y_return || [])[idx])}`];
         } else if (id === "cRDD3Y") {
-          lines = [`MDD3Y=${fmtPct((raw.roll3y_mdd || [])[idx])}`];
+          const arr = (raw.roll3y_dd || raw.roll3y_mdd || []);
+          lines = [`DD3Y=${fmtPct(arr[idx])}`];
         } else if (id === "rNav") {
           const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
           lines = [`ROT=${fmtNum((s.ROTATION || [])[idx])}`, `EW=${fmtNum((s.EW_REBAL || [])[idx])}`];
         } else if (id === "rDD") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          lines = [`ROT_DD=${fmtPct(_drawdownFromNav(s.ROTATION || [])[idx])}`, `EW_DD=${fmtPct(_drawdownFromNav(s.EW_REBAL || [])[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ddRot) && Array.isArray(rotCache.ddEw)) {
+            lines = [`ROT_DD=${fmtPct(rotCache.ddRot[idx])}`, `EW_DD=${fmtPct(rotCache.ddEw[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            lines = [`ROT_DD=${fmtPct(_drawdownFromNav(s.ROTATION || [])[idx])}`, `EW_DD=${fmtPct(_drawdownFromNav(s.EW_REBAL || [])[idx])}`];
+          }
         } else if (id === "rRSI") {
           const rsiSeries = (((raw.nav_rsi || {}).series || {}).ROTATION || {})["24"] || [];
           lines = [`RSI24=${fmtNum(rsiSeries[idx])}`];
         } else if (id === "rRR3Y") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          lines = [`R3Y=${fmtPct(_rollingReturn(s.ROTATION || [], 3 * 252)[idx])}`];
+          if (rotCache && Array.isArray(rotCache.rr3y)) {
+            lines = [`R3Y=${fmtPct(rotCache.rr3y[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            lines = [`R3Y=${fmtPct(_rollingReturn(s.ROTATION || [], 3 * 252)[idx])}`];
+          }
         } else if (id === "rMDD3Y") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          lines = [`MDD3Y=${fmtPct(_rollingMaxDrawdown(s.ROTATION || [], 3 * 252)[idx])}`];
+          if (rotCache && Array.isArray(rotCache.dd3y)) {
+            lines = [`DD3Y=${fmtPct(rotCache.dd3y[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            lines = [`DD3Y=${fmtPct(_rollingDrawdown(s.ROTATION || [], 3 * 252)[idx])}`];
+          }
         } else if (id === "rRatio") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const ratio = (s.ROTATION || []).map((v, i) => {
-            const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
-            return a / b;
-          });
-          const ema = _emaArr(ratio, 252);
-          const sd = _rollingStdArr(ratio, 252);
-          const bbu = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) + 2 * Number(sd[i])) : null);
-          const bbl = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) - 2 * Number(sd[i])) : null);
-          lines = [`RATIO=${fmtNum(ratio[idx])}`, `EMA252=${fmtNum(ema[idx])}`, `BBU=${fmtNum(bbu[idx])}`, `BBL=${fmtNum(bbl[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ratio) && Array.isArray(rotCache.ratioEma)) {
+            lines = [
+              `RATIO=${fmtNum(rotCache.ratio[idx])}`,
+              `EMA252=${fmtNum(rotCache.ratioEma[idx])}`,
+              `BBU=${fmtNum((rotCache.ratioBbu || [])[idx])}`,
+              `BBL=${fmtNum((rotCache.ratioBbl || [])[idx])}`,
+            ];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const ratio = (s.ROTATION || []).map((v, i) => {
+              const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+              return a / b;
+            });
+            const ema = _emaArr(ratio, 252);
+            const sd = _rollingStdArr(ratio, 252);
+            const bbu = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) + 2 * Number(sd[i])) : null);
+            const bbl = ema.map((v, i) => (v != null && sd[i] != null) ? (Number(v) - 2 * Number(sd[i])) : null);
+            lines = [`RATIO=${fmtNum(ratio[idx])}`, `EMA252=${fmtNum(ema[idx])}`, `BBU=${fmtNum(bbu[idx])}`, `BBL=${fmtNum(bbl[idx])}`];
+          }
         } else if (id === "rExDD") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const ex = (s.EXCESS || []).length ? (s.EXCESS || []) : (s.ROTATION || []).map((v, i) => {
-            const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
-            return a / b;
-          });
-          lines = [`EX_DD=${fmtPct(_drawdownFromNav(ex)[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ddEx)) {
+            lines = [`EX_DD=${fmtPct(rotCache.ddEx[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const ex = (s.EXCESS || []).length ? (s.EXCESS || []) : (s.ROTATION || []).map((v, i) => {
+              const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+              return a / b;
+            });
+            lines = [`EX_DD=${fmtPct(_drawdownFromNav(ex)[idx])}`];
+          }
         } else if (id === "rRatioRSI") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const ratio = (s.ROTATION || []).map((v, i) => {
-            const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return NaN;
-            return a / b;
-          });
-          const rsi = _rsiWilder(ratio, 24);
-          lines = [`RSI24=${fmtNum(rsi[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ratioRsi24)) {
+            lines = [`RSI24=${fmtNum(rotCache.ratioRsi24[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const ratio = (s.ROTATION || []).map((v, i) => {
+              const a = Number(v), b = Number((s.EW_REBAL || [])[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return NaN;
+              return a / b;
+            });
+            const rsi = _rsiWilder(ratio, 24);
+            lines = [`RSI24=${fmtNum(rsi[idx])}`];
+          }
         } else if (id === "rDiff40") {
-          const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
-          const rot40 = _rollingReturn(s.ROTATION || [], 40);
-          const ew40 = _rollingReturn(s.EW_REBAL || [], 40);
-          const v = (rot40[idx] == null || ew40[idx] == null) ? null : (Number(rot40[idx]) - Number(ew40[idx]));
-          lines = [`DIFF40=${fmtPct(v)}`];
+          if (rotCache && Array.isArray(rotCache.diff40)) {
+            lines = [`DIFF40=${fmtPct(rotCache.diff40[idx])}`];
+          } else {
+            const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
+            const rot40 = _rollingReturn(s.ROTATION || [], 40);
+            const ew40 = _rollingReturn(s.EW_REBAL || [], 40);
+            const v = (rot40[idx] == null || ew40[idx] == null) ? null : (Number(rot40[idx]) - Number(ew40[idx]));
+            lines = [`DIFF40=${fmtPct(v)}`];
+          }
         }
         if (!lines.length) return;
 
@@ -1320,7 +1492,7 @@ function attachWeekdayPage({ anchor, title }) {
         const w = Number(rect.width || 0);
         const h = Number(rect.height || 0);
         const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-        const cx = clamp(Number(xRel), 0, Math.max(0, w));
+        const cx = clamp(lineXFromIndex(idx, w, n), 0, Math.max(0, w));
         // Estimate tooltip box size to prevent overflow on right/bottom.
         const maxChars = Math.max(String(d || "").length, ...lines.map((s) => String(s || "").length));
         const estW = Math.max(120, Math.min(w * 0.8, 24 + maxChars * 7)); // px (rough)

@@ -26,15 +26,36 @@ function _downsample(xs, maxN) {
   return { idx };
 }
 
-function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed = null, title = "", yLabelFmt = null }) {
+function _palette(theme) {
+  const t = String(theme || "light");
+  if (t === "dark") {
+    return {
+      bg: "#161a22",
+      text: "#eaeaea",
+      muted: "#a8b0bd",
+      grid: "#2a2f3a",
+      cellText: "#ffffff",
+    };
+  }
+  return {
+    bg: "#ffffff",
+    text: "#111111",
+    muted: "#666666",
+    grid: "#eeeeee",
+    cellText: "#111111",
+  };
+}
+
+function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed = null, title = "", yLabelFmt = null, theme = "light" }) {
   const padL = 46, padR = 16, padT = 18, padB = 22;
   const W = width, H = height;
+  const pal = _palette(theme);
   ctx.clearRect(0, 0, W, H);
-  ctx.setFillStyle("#ffffff");
+  ctx.setFillStyle(pal.bg);
   ctx.fillRect(0, 0, W, H);
 
   if (title) {
-    ctx.setFillStyle("#111");
+    ctx.setFillStyle(pal.text);
     ctx.setFontSize(12);
     ctx.fillText(title, padL, 14);
   }
@@ -67,7 +88,7 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
   }
 
   // grid
-  ctx.setStrokeStyle("#eee");
+  ctx.setStrokeStyle(pal.grid);
   ctx.setLineWidth(1);
   for (let k = 0; k <= 4; k++) {
     const yv = padT + (k / 4) * plotH;
@@ -78,7 +99,7 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
   }
 
   // axes labels (min/max)
-  ctx.setFillStyle("#666");
+  ctx.setFillStyle(pal.muted);
   ctx.setFontSize(10);
   const yMin = yr.min;
   const yMax = yr.max;
@@ -108,7 +129,7 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
 
   // x labels (first/last)
   if (n > 0) {
-    ctx.setFillStyle("#666");
+    ctx.setFillStyle(pal.muted);
     ctx.setFontSize(10);
     const first = String(x[0]);
     const last = String(x[n - 1]);
@@ -120,13 +141,14 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
   ctx.draw();
 }
 
-function drawHeatmap4(ctx, { width, height, title, labels, matrix }) {
+function drawHeatmap4(ctx, { width, height, title, labels, matrix, theme = "light" }) {
   const pad = 16;
   const W = width, H = height;
+  const pal = _palette(theme);
   ctx.clearRect(0, 0, W, H);
-  ctx.setFillStyle("#ffffff");
+  ctx.setFillStyle(pal.bg);
   ctx.fillRect(0, 0, W, H);
-  ctx.setFillStyle("#111");
+  ctx.setFillStyle(pal.text);
   ctx.setFontSize(12);
   ctx.fillText(title || "相关性", pad, 14);
 
@@ -144,7 +166,22 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix }) {
   function color(v) {
     const x = Math.max(-1, Math.min(1, Number(v)));
     // green(-1) -> white(0) -> red(+1) (avoid purple/blue tint)
-    if (!Number.isFinite(x)) return "rgb(240,240,240)";
+    if (!Number.isFinite(x)) return (theme === "dark") ? "rgb(45,45,45)" : "rgb(240,240,240)";
+    if (theme === "dark") {
+      // dark background: use deeper colors with dark center
+      if (x >= 0) {
+        const t = x;
+        const r = Math.round(60 + 170 * t);
+        const g = Math.round(60 * (1 - t));
+        const b = Math.round(60 * (1 - t));
+        return `rgb(${r},${g},${b})`;
+      }
+      const t = -x;
+      const r = Math.round(60 * (1 - t));
+      const g = Math.round(80 + 160 * t);
+      const b = Math.round(60 * (1 - t));
+      return `rgb(${r},${g},${b})`;
+    }
     if (x >= 0) {
       // 0..1 : white -> red
       const t = x;
@@ -162,7 +199,7 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix }) {
   }
 
   ctx.setFontSize(10);
-  ctx.setFillStyle("#666");
+  ctx.setFillStyle(pal.muted);
   for (let i = 0; i < n; i++) {
     const lab = String(labels[i]);
     ctx.fillText(lab, 2, gridTop + i * cell + cell * 0.65);
@@ -174,7 +211,7 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix }) {
       const v = matrix && matrix[i] ? matrix[i][j] : 0;
       ctx.setFillStyle(color(v));
       ctx.fillRect(gridLeft + j * cell, gridTop + i * cell, cell - 1, cell - 1);
-      ctx.setFillStyle("#111");
+      ctx.setFillStyle(pal.cellText);
       ctx.setFontSize(9);
       const txt = Number(v).toFixed(2);
       ctx.fillText(txt, gridLeft + j * cell + 2, gridTop + i * cell + cell * 0.65);
@@ -195,13 +232,14 @@ function lineIndexFromTouchX(xRel, width, n) {
   return Math.max(0, Math.min(n - 1, idx));
 }
 
-function drawBarChart(ctx, { width, height, title, labels, values, colors = [], valueFmt = (x) => String(x), vmin = null, vmax = null }) {
+function drawBarChart(ctx, { width, height, title, labels, values, colors = [], valueFmt = (x) => String(x), vmin = null, vmax = null, theme = "light" }) {
   const padL = 70, padR = 16, padT = 18, padB = 18;
   const W = width, H = height;
+  const pal = _palette(theme);
   ctx.clearRect(0, 0, W, H);
-  ctx.setFillStyle("#ffffff");
+  ctx.setFillStyle(pal.bg);
   ctx.fillRect(0, 0, W, H);
-  ctx.setFillStyle("#111");
+  ctx.setFillStyle(pal.text);
   ctx.setFontSize(12);
   ctx.fillText(title || "", padL, 14);
 
@@ -216,7 +254,7 @@ function drawBarChart(ctx, { width, height, title, labels, values, colors = [], 
   const rowH = (H - padT - padB) / n;
 
   ctx.setFontSize(10);
-  ctx.setFillStyle("#666");
+  ctx.setFillStyle(pal.muted);
   for (let i = 0; i < n; i++) {
     const lab = String(labels[i]);
     ctx.fillText(lab, 2, padT + i * rowH + rowH * 0.7);
@@ -231,7 +269,7 @@ function drawBarChart(ctx, { width, height, title, labels, values, colors = [], 
     const h = rowH * 0.64;
     ctx.setFillStyle(colors[i] || "#1677ff");
     ctx.fillRect(padL, y, w, h);
-    ctx.setFillStyle("#111");
+    ctx.setFillStyle(pal.text);
     ctx.setFontSize(10);
     ctx.fillText(ok ? valueFmt(v) : "-", padL + w + 6, y + h * 0.72);
   }

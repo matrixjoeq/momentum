@@ -1451,8 +1451,6 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     # We compute these earlier and also use the mask to apply HFQ fallback for NAV stability.
     ret_none = ret_none_close
     ret_hfq_all = ret_hfq_close
-    gross_none = gross_none_close
-    gross_hfq = gross_hfq_close
 
     # Daily holding return (hfq, configurable exec_price proxy).
     # Note: close-based hfq is still the default and remains the recommended "total return proxy".
@@ -1578,12 +1576,14 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     mdd = _max_drawdown(port_nav_net)
     mdd_dur = _max_drawdown_duration_days(port_nav_net)
     sharpe = _sharpe(port_ret_net, rf=float(inp.risk_free_rate))
+    calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
     sortino = _sortino(port_ret_net, rf=float(inp.risk_free_rate))
     ui = _ulcer_index(port_nav_net, in_percent=True)
     ui_den = ui / 100.0
     upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
 
     ann_excess = _annualized_return(excess_nav)
+    ann_excess_vol = _annualized_vol(active_ret)
     ir = _sharpe(active_ret, rf=0.0)  # same formula but zero rf; for consistency name it IR-style
     ex_mdd = _max_drawdown(excess_nav)
     ex_mdd_dur = _max_drawdown_duration_days(excess_nav)
@@ -1596,6 +1596,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             "max_drawdown": float(mdd),
             "max_drawdown_recovery_days": int(mdd_dur),
             "sharpe_ratio": float(sharpe),
+            "calmar_ratio": float(calmar),
             "sortino_ratio": float(sortino),
             "ulcer_index": float(ui),
             "ulcer_performance_index": float(upi),
@@ -1607,6 +1608,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         "excess_vs_equal_weight": {
             "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
             "annualized_return": float(ann_excess),
+            "annualized_volatility": float(ann_excess_vol),
             "information_ratio": float(ir),
             "max_drawdown": float(ex_mdd),
             "max_drawdown_recovery_days": int(ex_mdd_dur),
@@ -1749,21 +1751,26 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     }
 
     # Rolling stats for strategy vs benchmark (defaults aligned with baseline UI)
-    rolling = {"returns": {}, "max_drawdown": {}}
+    # NOTE: "drawdown" is rolling drawdown; "max_drawdown" is kept for backward-compat (deprecated).
+    rolling = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
     for weeks in (4, 12, 52):
         window = weeks * 5
         rolling["returns"][f"{weeks}w"] = (port_nav_net / port_nav_net.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{weeks}w"] = (port_nav_net / port_nav_net.rolling(window=window, min_periods=window).max() - 1.0).dropna()
         rolling["max_drawdown"][f"{weeks}w"] = _rolling_max_drawdown(port_nav_net, window).dropna()
     for months in (3, 6, 12):
         window = months * 21
         rolling["returns"][f"{months}m"] = (port_nav_net / port_nav_net.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{months}m"] = (port_nav_net / port_nav_net.rolling(window=window, min_periods=window).max() - 1.0).dropna()
         rolling["max_drawdown"][f"{months}m"] = _rolling_max_drawdown(port_nav_net, window).dropna()
     for years in (1, 3):
         window = years * 252
         rolling["returns"][f"{years}y"] = (port_nav_net / port_nav_net.shift(window) - 1.0).dropna()
+        rolling["drawdown"][f"{years}y"] = (port_nav_net / port_nav_net.rolling(window=window, min_periods=window).max() - 1.0).dropna()
         rolling["max_drawdown"][f"{years}y"] = _rolling_max_drawdown(port_nav_net, window).dropna()
     rolling_out = {
         "returns": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["returns"].items()},
+        "drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["drawdown"].items()},
         "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
     }
 

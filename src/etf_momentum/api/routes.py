@@ -51,7 +51,7 @@ from ..analysis.baseline import (
     _max_drawdown,
     _max_drawdown_duration_days,
     _rsi_wilder,
-    _rolling_max_drawdown,
+    _rolling_drawdown,
     _sharpe,
     _sortino,
     _ulcer_index,
@@ -879,6 +879,31 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
                 xs.append(fv)
         return float(np.mean(xs)) if xs else None
 
+    def _avg_metric(path: list[str]) -> float | None:
+        """
+        Average a numeric metric across 5 variants: out["metrics"][path[0]]...[path[n-1]].
+        Returns None if no finite values.
+        """
+        xs: list[float] = []
+        for o in outs:
+            cur: object = (o or {}).get("metrics") or {}
+            ok = True
+            for k in path:
+                if isinstance(cur, dict) and k in cur:
+                    cur = cur[k]
+                else:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            try:
+                fv = float(cur)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(fv):
+                xs.append(fv)
+        return float(np.mean(xs)) if xs else None
+
     outs: list[dict] = []
     for a in [0, 1, 2, 3, 4]:
         inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
@@ -908,7 +933,12 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
     mdd_dur = _max_drawdown_duration_days(s_rot)
     sharpe = _sharpe(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
     sortino = _sortino(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
+    calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
+    ui = _ulcer_index(s_rot, in_percent=True)
+    ui_den = ui / 100.0
+    upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
     ann_excess = float(excess_ret.mean() * TRADING_DAYS_PER_YEAR) if len(excess_ret) else float("nan")
+    ann_excess_vol = _annualized_vol(excess_ret, ann_factor=TRADING_DAYS_PER_YEAR)
     ir = float(excess_ret.mean() / excess_ret.std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)) if float(excess_ret.std(ddof=1) or 0) > 0 else float("nan")
     ex_nav = (1.0 + excess_ret.fillna(0.0)).cumprod()
     if len(ex_nav):
@@ -923,13 +953,18 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
             "max_drawdown": float(mdd),
             "max_drawdown_recovery_days": int(mdd_dur) if np.isfinite(float(mdd_dur)) else None,
             "sharpe_ratio": float(sharpe),
+            "calmar_ratio": float(calmar),
             "sortino_ratio": float(sortino),
-            "avg_daily_turnover": None,
+            "ulcer_index": float(ui),
+            "ulcer_performance_index": float(upi),
+            # composite turnover is not directly derivable from averaged NAV; approximate by averaging 5 variants
+            "avg_daily_turnover": _avg_metric(["strategy", "avg_daily_turnover"]),
         },
         "equal_weight": {"cumulative_return": float(s_ew.iloc[-1] / s_ew.iloc[0] - 1.0) if len(s_ew) else float("nan")},
         "excess_vs_equal_weight": {
             "cumulative_return": float((s_rot.iloc[-1] / s_rot.iloc[0]) / (s_ew.iloc[-1] / s_ew.iloc[0]) - 1.0) if len(s_rot) and len(s_ew) else float("nan"),
             "annualized_return": float(ann_excess),
+            "annualized_volatility": float(ann_excess_vol),
             "information_ratio": float(ir),
             "max_drawdown": float(ex_mdd),
             "max_drawdown_recovery_days": int(ex_mdd_dur) if np.isfinite(float(ex_mdd_dur)) else None,
@@ -1199,7 +1234,7 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
 
         win_3y = 3 * TRADING_DAYS_PER_YEAR
         rr3y = (ew_nav / ew_nav.shift(win_3y) - 1.0).astype(float)
-        rdd3y = _rolling_max_drawdown(ew_nav, win_3y).astype(float)
+        rdd3y = _rolling_drawdown(ew_nav, win_3y).astype(float)
 
         # metrics
         cum_ret = float(ew_nav.iloc[-1] / ew_nav.iloc[0] - 1.0) if len(ew_nav) else float("nan")
@@ -1260,6 +1295,8 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
+            # backward-compat (deprecated)
             "roll3y_mdd": _tolist(rdd3y),
             "metrics": metrics,
             "attribution": attribution,
@@ -1344,7 +1381,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
 
         win_3y = 3 * TRADING_DAYS_PER_YEAR
         rr3y = (ew_nav / ew_nav.shift(win_3y) - 1.0).astype(float)
-        rdd3y = _rolling_max_drawdown(ew_nav, win_3y).astype(float)
+        rdd3y = _rolling_drawdown(ew_nav, win_3y).astype(float)
 
         by_anchor[str(a)] = {
             "meta": {"anchor_weekday": int(a), "label": _WD_LABEL[int(a)], "rebalance_shift": shift, "price": "hfq_close"},
@@ -1356,6 +1393,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
         }
 
@@ -1434,7 +1472,7 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
     rsi24 = _rsi_wilder(nav_mix, window=24)
     win_3y = 3 * TRADING_DAYS_PER_YEAR
     rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
-    rdd3y = _rolling_max_drawdown(nav_mix, win_3y).astype(float)
+    rdd3y = _rolling_drawdown(nav_mix, win_3y).astype(float)
 
     by_anchor = {
         "mix": {
@@ -1447,6 +1485,7 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
         }
     }
@@ -1529,7 +1568,7 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
     rsi24 = _rsi_wilder(nav_mix, window=24)
     win_3y = 3 * TRADING_DAYS_PER_YEAR
     rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
-    rdd3y = _rolling_max_drawdown(nav_mix, win_3y).astype(float)
+    rdd3y = _rolling_drawdown(nav_mix, win_3y).astype(float)
 
     cum_ret = float(nav_mix.iloc[-1] / nav_mix.iloc[0] - 1.0) if len(nav_mix) else float("nan")
     ann_ret = _annualized_return(nav_mix, ann_factor=TRADING_DAYS_PER_YEAR)
@@ -1584,6 +1623,7 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
             "drawdown": _tolist(dd),
             "rsi24": _tolist(rsi24),
             "roll3y_return": _tolist(rr3y),
+            "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
             "metrics": metrics,
             "attribution": attribution,
