@@ -1,0 +1,46 @@
+[
+  {
+    "window": "w1",
+    "handler": "alpha158",
+    "model": "linear",
+    "strategy": "topk_1",
+    "recorder_name": "auto_w1_alpha158_linear_topk_1",
+    "metric": "sharpe",
+    "score": null,
+    "status": "failed",
+    "error": "alpha is only supported in `ridge`&`lasso`"
+  },
+  {
+    "window": "w1",
+    "handler": "alpha158",
+    "model": "linear",
+    "strategy": "topk_2",
+    "recorder_name": "auto_w1_alpha158_linear_topk_2",
+    "metric": "sharpe",
+    "score": null,
+    "status": "failed",
+    "error": "alpha is only supported in `ridge`&`lasso`"
+  },
+  {
+    "window": "w1",
+    "handler": "alpha158",
+    "model": "lgb",
+    "strategy": "topk_1",
+    "recorder_name": "auto_w1_alpha158_lgb_topk_1",
+    "metric": "sharpe",
+    "score": null,
+    "status": "failed",
+    "error": "index 3426 is out of bounds for axis 0 with size 3426"
+  },
+  {
+    "window": "w1",
+    "handler": "alpha158",
+    "model": "lgb",
+    "strategy": "topk_2",
+    "recorder_name": "auto_w1_alpha158_lgb_topk_2",
+    "metric": "sharpe",
+    "score": null,
+    "status": "failed",
+    "error": "index 3426 is out of bounds for axis 0 with size 3426"
+  }
+]

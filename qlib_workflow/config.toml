@@ -1,0 +1,132 @@
+[qlib]
+provider_uri = "C:/qlib/qlib_data/etf_momentum"
+region = "cn"
+
+[data_source]
+# Source DB with existing ETF prices (sqlite or mysql via SQLAlchemy URL)
+sqlite_path = "C:/xing/momentum/data/etf_momentum.sqlite3"
+adjust = "hfq"
+# Where to dump per-symbol CSVs before qlib bin conversion
+csv_dir = "C:/xing/momentum/qlib_workflow/csv"
+# Qlib bin output directory (provider_uri)
+qlib_dir = "C:/qlib/qlib_data/etf_momentum"
+# Mapping from DB code -> qlib instrument code
+symbol_map = { "159915" = "SZ159915", "518880" = "SH518880", "513100" = "SH513100", "511010" = "SH511010" }
+
+[universe]
+# Use qlib-style instrument codes. Examples:
+#   - "SZ159915" (创业板ETF)
+#   - "SH518880" (黄金ETF)
+#   - "SH513100" (纳指ETF)
+#   - "SH511010" (国债ETF)
+symbols = ["SZ159915", "SH518880", "SH513100", "SH511010"]
+
+[backtest]
+start = "2018-01-01"
+end = "2026-01-16"
+# 0=Mon .. 4=Fri, represents EXECUTION day
+rebalance_weekday = 0
+lookback_days = 20
+topk = 1
+# If you want to simulate different holding days (e.g. weekly=5)
+hold_days = 5
+risk_free = 0.0
+
+[optimize]
+metric = "sharpe"
+lookback_days = [10, 20, 40]
+topk = [1, 2]
+rebalance_weekday = [0, 1, 2, 3, 4]
+
+[ml_pipeline]
+experiment_name = "qlib_etf_rotation"
+recorder_name = "linear_alpha158"
+benchmark = "SZ159915"
+topk = 1
+drop = 0
+account = 1000000
+
+[ml_pipeline.segments]
+train = ["2018-01-01", "2022-12-31"]
+valid = ["2023-01-01", "2024-12-31"]
+test = ["2025-01-01", "2026-01-16"]
+
+[ml_pipeline.model]
+class = "LinearModel"
+module_path = "qlib.contrib.model.linear"
+
+[ml_pipeline.model.kwargs]
+alpha = 0.001
+fit_intercept = true
+
+[ml_pipeline.handler]
+class = "Alpha158"
+module_path = "qlib.contrib.data.handler"
+
+[ml_pipeline.handler.kwargs]
+start_time = "2018-01-01"
+end_time = "2026-01-16"
+fit_start_time = "2018-01-01"
+fit_end_time = "2024-12-31"
+# Alpha158 default label is next-day return; keep it explicit for clarity
+label = ["Ref($close, -1) / $close - 1"]
+
+[automl]
+experiment_name = "qlib_etf_rotation_automl"
+recorder_prefix = "auto"
+benchmark = "SZ159915"
+account = 1000000
+metric = "sharpe"
+baseline_anchor_weekday = 0
+
+[automl.segments]
+train = ["2018-01-01", "2022-12-31"]
+valid = ["2023-01-01", "2024-12-31"]
+test = ["2025-01-01", "2026-01-16"]
+
+# Optional rolling windows (each window defines its own train/valid/test)
+[[automl.windows]]
+name = "w1"
+train = ["2018-01-01", "2021-12-31"]
+valid = ["2022-01-01", "2023-12-31"]
+test = ["2024-01-01", "2026-01-16"]
+
+[[automl.models]]
+name = "linear"
+class = "LinearModel"
+module_path = "qlib.contrib.model.linear"
+[automl.models.kwargs]
+alpha = 0.001
+fit_intercept = true
+
+# Optional: LightGBM model (requires lightgbm installed)
+[[automl.models]]
+name = "lgb"
+class = "LGBModel"
+module_path = "qlib.contrib.model.gbdt"
+[automl.models.kwargs]
+loss = "mse"
+num_leaves = 31
+learning_rate = 0.05
+n_estimators = 200
+
+[[automl.handlers]]
+name = "alpha158"
+class = "Alpha158"
+module_path = "qlib.contrib.data.handler"
+[automl.handlers.kwargs]
+start_time = "2018-01-01"
+end_time = "2026-01-16"
+fit_start_time = "2018-01-01"
+fit_end_time = "2024-12-31"
+label = ["Ref($close, -1) / $close - 1"]
+
+[[automl.strategies]]
+name = "topk_1"
+topk = 1
+drop = 0
+
+[[automl.strategies]]
+name = "topk_2"
+topk = 2
+drop = 1

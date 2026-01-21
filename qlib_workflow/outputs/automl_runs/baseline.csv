@@ -1,0 +1,2 @@
+cumulative_return,annualized_return,annualized_volatility,max_drawdown,max_drawdown_recovery_days,sharpe_ratio,sortino_ratio,ulcer_index,ulcer_performance_index,avg_daily_turnover
+20.75811494530148,0.4885835780915073,0.27040223573926025,-0.25840179238237493,187,1.5089268801054154,2.856517648935424,7.229144202210971,6.412703428294102,0.06531762295081968
