@@ -288,6 +288,208 @@ def _fft_analysis(
     return out
 
 
+def _histogram_from_samples(samples: np.ndarray, *, bins: int = 40, clip_q: tuple[float, float] = (0.01, 0.99)) -> dict[str, Any]:
+    """
+    Compute histogram from samples, similar to montecarlo._histogram.
+    """
+    x = np.asarray(samples, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return {"bin_edges": [], "counts": [], "underflow": 0, "overflow": 0}
+    lo = float(np.quantile(x, clip_q[0]))
+    hi = float(np.quantile(x, clip_q[1]))
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        lo, hi = float(np.min(x)), float(np.max(x))
+    if lo == hi:
+        delta = max(1e-6, abs(lo) * 1e-9, 1e-12)
+        lo = lo - delta
+        hi = hi + delta
+    under = int(np.sum(x < lo))
+    over = int(np.sum(x > hi))
+    core = x[(x >= lo) & (x <= hi)]
+    counts, edges = np.histogram(core, bins=int(bins), range=(lo, hi))
+    return {
+        "bin_edges": edges.astype(float).tolist(),
+        "counts": counts.astype(int).tolist(),
+        "underflow": under,
+        "overflow": over,
+    }
+
+
+def _quantiles_from_samples(samples: np.ndarray, quantiles: list[float] | None = None) -> dict[str, float]:
+    """
+    Compute quantiles from samples.
+    """
+    if quantiles is None:
+        quantiles = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+    x = np.asarray(samples, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return {f"q{int(q*100):02d}": float("nan") for q in quantiles}
+    result = {}
+    for q in quantiles:
+        val = float(np.quantile(x, q))
+        result[f"q{int(q*100):02d}"] = val
+    return result
+
+
+def _compute_periodic_returns_and_volatility(
+    daily_ret: pd.DataFrame,
+    *,
+    codes: list[str],
+) -> dict[str, Any]:
+    """
+    Compute periodic returns and volatility for each code across different frequencies.
+    
+    Returns distributions and quantiles for:
+    - Daily returns
+    - Weekly returns (resampled)
+    - Monthly returns (resampled)
+    - Quarterly returns (resampled)
+    - Yearly returns (resampled)
+    - Daily volatility (rolling window)
+    - Weekly volatility (resampled)
+    - Monthly volatility (resampled)
+    - Quarterly volatility (resampled)
+    - Yearly volatility (resampled)
+    """
+    ret_df = daily_ret[codes].copy()
+    ret_df.index = pd.to_datetime(ret_df.index)
+    
+    result: dict[str, Any] = {}
+    
+    for code in codes:
+        if code not in ret_df.columns:
+            continue
+        
+        code_ret = ret_df[code].dropna()
+        if code_ret.empty:
+            continue
+        
+        code_result: dict[str, Any] = {}
+        
+        # Daily returns
+        daily_ret_vals = code_ret.values
+        code_result["daily_return"] = {
+            "hist": _histogram_from_samples(daily_ret_vals),
+            "quantiles": _quantiles_from_samples(daily_ret_vals),
+            "mean": float(np.mean(daily_ret_vals)),
+            "std": float(np.std(daily_ret_vals, ddof=1)),
+            "count": int(len(daily_ret_vals)),
+        }
+        
+        # Daily volatility (rolling 20-day window)
+        daily_vol = code_ret.rolling(window=20, min_periods=5).std(ddof=1).dropna()
+        if not daily_vol.empty:
+            daily_vol_vals = daily_vol.values
+            code_result["daily_volatility"] = {
+                "hist": _histogram_from_samples(daily_vol_vals),
+                "quantiles": _quantiles_from_samples(daily_vol_vals),
+                "mean": float(np.mean(daily_vol_vals)),
+                "std": float(np.std(daily_vol_vals, ddof=1)),
+                "count": int(len(daily_vol_vals)),
+            }
+        
+        # Weekly returns and volatility
+        weekly_nav = (1.0 + code_ret).resample("W-FRI").prod()
+        weekly_ret = weekly_nav.pct_change().dropna()
+        if not weekly_ret.empty:
+            weekly_ret_vals = weekly_ret.values
+            code_result["weekly_return"] = {
+                "hist": _histogram_from_samples(weekly_ret_vals),
+                "quantiles": _quantiles_from_samples(weekly_ret_vals),
+                "mean": float(np.mean(weekly_ret_vals)),
+                "std": float(np.std(weekly_ret_vals, ddof=1)),
+                "count": int(len(weekly_ret_vals)),
+            }
+            # Weekly volatility (rolling 4-week window)
+            weekly_vol = weekly_ret.rolling(window=4, min_periods=2).std(ddof=1).dropna()
+            if not weekly_vol.empty:
+                weekly_vol_vals = weekly_vol.values
+                code_result["weekly_volatility"] = {
+                    "hist": _histogram_from_samples(weekly_vol_vals),
+                    "quantiles": _quantiles_from_samples(weekly_vol_vals),
+                    "mean": float(np.mean(weekly_vol_vals)),
+                    "std": float(np.std(weekly_vol_vals, ddof=1)),
+                    "count": int(len(weekly_vol_vals)),
+                }
+        
+        # Monthly returns and volatility
+        monthly_nav = (1.0 + code_ret).resample("ME").prod()
+        monthly_ret = monthly_nav.pct_change().dropna()
+        if not monthly_ret.empty:
+            monthly_ret_vals = monthly_ret.values
+            code_result["monthly_return"] = {
+                "hist": _histogram_from_samples(monthly_ret_vals),
+                "quantiles": _quantiles_from_samples(monthly_ret_vals),
+                "mean": float(np.mean(monthly_ret_vals)),
+                "std": float(np.std(monthly_ret_vals, ddof=1)),
+                "count": int(len(monthly_ret_vals)),
+            }
+            # Monthly volatility (rolling 3-month window)
+            monthly_vol = monthly_ret.rolling(window=3, min_periods=2).std(ddof=1).dropna()
+            if not monthly_vol.empty:
+                monthly_vol_vals = monthly_vol.values
+                code_result["monthly_volatility"] = {
+                    "hist": _histogram_from_samples(monthly_vol_vals),
+                    "quantiles": _quantiles_from_samples(monthly_vol_vals),
+                    "mean": float(np.mean(monthly_vol_vals)),
+                    "std": float(np.std(monthly_vol_vals, ddof=1)),
+                    "count": int(len(monthly_vol_vals)),
+                }
+        
+        # Quarterly returns and volatility
+        quarterly_nav = (1.0 + code_ret).resample("QE").prod()
+        quarterly_ret = quarterly_nav.pct_change().dropna()
+        if not quarterly_ret.empty:
+            quarterly_ret_vals = quarterly_ret.values
+            code_result["quarterly_return"] = {
+                "hist": _histogram_from_samples(quarterly_ret_vals),
+                "quantiles": _quantiles_from_samples(quarterly_ret_vals),
+                "mean": float(np.mean(quarterly_ret_vals)),
+                "std": float(np.std(quarterly_ret_vals, ddof=1)),
+                "count": int(len(quarterly_ret_vals)),
+            }
+            # Quarterly volatility (rolling 2-quarter window)
+            quarterly_vol = quarterly_ret.rolling(window=2, min_periods=2).std(ddof=1).dropna()
+            if not quarterly_vol.empty:
+                quarterly_vol_vals = quarterly_vol.values
+                code_result["quarterly_volatility"] = {
+                    "hist": _histogram_from_samples(quarterly_vol_vals),
+                    "quantiles": _quantiles_from_samples(quarterly_vol_vals),
+                    "mean": float(np.mean(quarterly_vol_vals)),
+                    "std": float(np.std(quarterly_vol_vals, ddof=1)),
+                    "count": int(len(quarterly_vol_vals)),
+                }
+        
+        # Yearly returns and volatility
+        yearly_nav = (1.0 + code_ret).resample("YE").prod()
+        yearly_ret = yearly_nav.pct_change().dropna()
+        if not yearly_ret.empty:
+            yearly_ret_vals = yearly_ret.values
+            code_result["yearly_return"] = {
+                "hist": _histogram_from_samples(yearly_ret_vals),
+                "quantiles": _quantiles_from_samples(yearly_ret_vals),
+                "mean": float(np.mean(yearly_ret_vals)),
+                "std": float(np.std(yearly_ret_vals, ddof=1)),
+                "count": int(len(yearly_ret_vals)),
+            }
+            # Yearly volatility (use all available years)
+            if len(yearly_ret) >= 2:
+                yearly_vol_vals = yearly_ret.values
+                code_result["yearly_volatility"] = {
+                    "hist": _histogram_from_samples(yearly_vol_vals),
+                    "quantiles": _quantiles_from_samples(yearly_vol_vals),
+                    "mean": float(np.mean(yearly_vol_vals)),
+                    "std": float(np.std(yearly_vol_vals, ddof=1)),
+                    "count": int(len(yearly_vol_vals)),
+                }
+        
+        result[code] = code_result
+    
+    return result
+
+
 def _fft_roll_timeseries_from_returns(
     log_returns: pd.Series,
     *,
@@ -826,6 +1028,12 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             top_k=5,
         )
 
+    # Compute periodic returns and volatility distributions for each code
+    period_distributions = _compute_periodic_returns_and_volatility(
+        ret_common,
+        codes=codes,
+    )
+
     return {
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
         "codes": codes,
@@ -843,5 +1051,6 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "attribution": attribution,
         "fft": fft,
         "fft_roll": {"ew": fft_roll},
+        "period_distributions": period_distributions,
     }
 

@@ -277,6 +277,36 @@
     </div>
 
     <div class="panel">
+      <h3>各标的收益率与波动率分布统计</h3>
+      <div class="muted">统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率和波动率分布直方图与分位数。数据口径：hfq（后复权）。</div>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>选择标的</label>
+          <select id="distCodeSelect" style="min-width:180px;"></select>
+        </div>
+        <div>
+          <label>统计类型</label>
+          <select id="distTypeSelect" style="min-width:180px;">
+            <option value="return">收益率</option>
+            <option value="volatility">波动率</option>
+          </select>
+        </div>
+        <div>
+          <label>周期</label>
+          <select id="distPeriodSelect" style="min-width:180px;">
+            <option value="daily">日度</option>
+            <option value="weekly">周度</option>
+            <option value="monthly">月度</option>
+            <option value="quarterly">季度</option>
+            <option value="yearly">年度</option>
+          </select>
+        </div>
+      </div>
+      <div id="distHistogram" style="width:100%; height:420px; margin-top:12px;"></div>
+      <table id="distQuantiles" style="margin-top:12px;"></table>
+    </div>
+
+    <div class="panel">
       <h3>日历效应研究（等权 EW）</h3>
       <div class="muted">研究不同调仓周期下：调仓锚点（周度=周一~周五；月度=每月1~28号；季度/年度=当期第N个交易日）与成交价口径（开盘/收盘/OC均价）对组合表现的影响。此处参数与轮动策略研究互不影响。</div>
       <div class="row no-print" style="margin-top:8px; align-items:end;">
@@ -2758,6 +2788,122 @@
         );
       }
 
+      function renderPeriodDistributions(distributions) {
+        if (!distributions || typeof distributions !== "object") {
+          return;
+        }
+        
+        const codeSelect = $("distCodeSelect");
+        const typeSelect = $("distTypeSelect");
+        const periodSelect = $("distPeriodSelect");
+        
+        if (!codeSelect || !typeSelect || !periodSelect) return;
+        
+        // Populate code selector
+        const codes = Object.keys(distributions).sort();
+        codeSelect.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+        
+        if (codes.length === 0) {
+          $("distHistogram").innerHTML = "<div class='muted'>无分布数据</div>";
+          $("distQuantiles").innerHTML = "";
+          return;
+        }
+        
+        // Render function
+        const updateDisplay = () => {
+          const code = codeSelect.value;
+          const type = typeSelect.value; // "return" or "volatility"
+          const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
+          
+          if (!code || !distributions[code]) {
+            $("distHistogram").innerHTML = "<div class='muted'>请选择标的</div>";
+            $("distQuantiles").innerHTML = "";
+            return;
+          }
+          
+          const key = `${period}_${type}`;
+          const data = distributions[code][key];
+          
+          if (!data || !data.hist || !data.quantiles) {
+            $("distHistogram").innerHTML = `<div class='muted'>无${period}${type === "return" ? "收益率" : "波动率"}数据</div>`;
+            $("distQuantiles").innerHTML = "";
+            return;
+          }
+          
+          // Render histogram
+          const h = data.hist;
+          const edges = h.bin_edges || [];
+          const counts = h.counts || [];
+          
+          if (edges.length < 2 || counts.length < 1) {
+            $("distHistogram").innerHTML = "<div class='muted'>无直方图数据</div>";
+            $("distQuantiles").innerHTML = "";
+            return;
+          }
+          
+          const x = [];
+          for (let i = 0; i < counts.length; i++) {
+            x.push((edges[i] + edges[i + 1]) / 2);
+          }
+          
+          const isPct = true; // returns and volatility are percentages
+          const fmtX = ".2%";
+          const title = `${code} - ${period === "daily" ? "日度" : period === "weekly" ? "周度" : period === "monthly" ? "月度" : period === "quarterly" ? "季度" : "年度"}${type === "return" ? "收益率" : "波动率"}分布`;
+          
+          Plotly.newPlot(
+            "distHistogram",
+            [{
+              x,
+              y: counts,
+              type: "bar",
+              marker: { color: "#4c78a8" },
+              hovertemplate: `${fmtX}<br>count=%{y}<extra></extra>`,
+            }],
+            {
+              margin: { t: 40 },
+              title: { text: title, font: { size: 14 } },
+              xaxis: { tickformat: fmtX, title: type === "return" ? "收益率" : "波动率" },
+              yaxis: { title: "频数" },
+              annotations: [
+                {
+                  xref: "paper",
+                  yref: "paper",
+                  x: 0.01,
+                  y: 0.98,
+                  showarrow: false,
+                  text: `样本数=${data.count || 0} · 均值=${isPct ? fmtPct(data.mean) : fmtNum(data.mean)} · 标准差=${isPct ? fmtPct(data.std) : fmtNum(data.std)}<br>under=${h.underflow || 0}, over=${h.overflow || 0}`,
+                  font: { size: 11, color: "#666" },
+                },
+              ],
+            },
+            { responsive: true }
+          );
+          
+          // Render quantiles table
+          const q = data.quantiles || {};
+          const fmtQ = isPct ? fmtPct : fmtNum;
+          const quantileRows = [
+            ["分位数", "1%", "5%", "10%", "25%", "50%", "75%", "90%", "95%", "99%"],
+            ["数值", 
+             fmtQ(q.q01), fmtQ(q.q05), fmtQ(q.q10), fmtQ(q.q25), 
+             fmtQ(q.q50), fmtQ(q.q75), fmtQ(q.q90), fmtQ(q.q95), fmtQ(q.q99)
+            ],
+          ];
+          
+          $("distQuantiles").innerHTML =
+            `<tr>${quantileRows[0].map(h => `<th>${h}</th>`).join("")}</tr>` +
+            `<tr>${quantileRows[1].map(c => `<td>${c}</td>`).join("")}</tr>`;
+        };
+        
+        // Bind events
+        codeSelect.addEventListener("change", updateDisplay);
+        typeSelect.addEventListener("change", updateDisplay);
+        periodSelect.addEventListener("change", updateDisplay);
+        
+        // Initial render
+        updateDisplay();
+      }
+
       function plotCorrelation(corr) {
         const el = $("corrHeatmap");
         if (!corr || !corr.codes || !corr.matrix) {
@@ -3811,6 +3957,7 @@
         plotRolling("rollingDD", "Rolling Drawdown", (data.rolling.drawdown || data.rolling.max_drawdown), ".0%");
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
+        renderPeriodDistributions(data.period_distributions);
       }
 
       function initTabs(containerId) {
