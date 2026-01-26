@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from ..data.akshare_fetcher import FetchRequest, fetch_etf_daily_qfq
+from ..data.multi_source_fetcher import FetchRequest, fetch_etf_daily_with_fallback
 from ..db.models import EtfPool, IngestionBatch
 from ..db.repo import (
     PriceRow,
@@ -130,6 +130,7 @@ def ingest_one_etf(
         code=code,
         start_date=start,
         end_date=end,
+        source="auto",
         adjust=adj,
         snapshot_path=None,
         val_max_abs_return=policy_params.max_abs_return,
@@ -154,9 +155,25 @@ def ingest_one_etf(
 
         pre_fp = compute_price_fingerprint(db, code=code, start_date=start_d, end_date=end_d, adjust=adj)
 
-        # akshare uses "" for no-adjust; we store "none" in DB
-        ak_adjust = "" if adj == "none" else adj
-        rows = fetch_etf_daily_qfq(ak, FetchRequest(code=code, start_date=start, end_date=end, adjust=ak_adjust))
+        rows, fetch_meta = fetch_etf_daily_with_fallback(
+            ak=ak,
+            req=FetchRequest(code=code, start_date=start, end_date=end, adjust=adj),
+        )
+        if not rows:
+            # Avoid surfacing this as a generic validation error; provide fetch diagnostics.
+            raise ValueError(
+                "no price data fetched "
+                f"(code={code}, adjust={adj}, start={start}, end={end}); "
+                f"fetch_meta={fetch_meta}"
+            )
+        # record which source succeeded (best-effort)
+        try:
+            if rows:
+                batch.source = str(rows[0].source or "auto")
+            else:
+                batch.source = "auto"
+        except Exception:  # pragma: no cover
+            pass
         rows = [
             PriceRow(
                 code=r.code,
@@ -242,7 +259,10 @@ def ingest_one_etf(
         validate_price_series(merged_points, policy=policy_params)
 
         post_fp = compute_price_fingerprint(db, code=code, start_date=start_d, end_date=end_d, adjust=adj)
-        update_ingestion_batch(db, batch_id=batch.id, status="success", message=f"rows={len(rows)} upserted={n}", pre_fingerprint=pre_fp, post_fingerprint=post_fp)
+        # enrich message with fetch-meta (which source used)
+        used_src = (rows[0].source if rows else None)
+        msg = f"rows={len(rows)} upserted={n} source={used_src or 'auto'} fallback={bool(fetch_meta.get('fallback_used'))}"
+        update_ingestion_batch(db, batch_id=batch.id, status="success", message=msg, pre_fingerprint=pre_fp, post_fingerprint=post_fp)
         db.commit()
         _cleanup_snapshot_for_batch(db, batch_id=batch.id, snapshot_path=snapshot_path)
         return IngestResult(batch_id=batch.id, code=code, upserted=n, status="success")

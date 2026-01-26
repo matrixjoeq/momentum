@@ -2210,6 +2210,9 @@ def rotation_montecarlo(payload: RotationMonteCarloRequest, db: Session = Depend
         # For research UI: show observed (non-simulated) holding-period length distributions
         "observed_holding_len": {
             "nav_dates": (rot.get("nav") or {}).get("dates") or [],
+            # Prefer continuous holding streaks (merge unchanged holdings across rebalance periods).
+            "holding_streaks": rot.get("holding_streaks") or [],
+            # Backward-compat: decision-period holdings (bounded by rebalance schedule).
             "holdings": rot.get("holdings") or [],
         },
     }

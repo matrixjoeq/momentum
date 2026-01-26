@@ -1,0 +1,14 @@
+artifact_uri: file:C:\xing\momentum\mlruns/450571060023055828/09e1a6696e2c4ed8bc7ee0c2995e3e6d/artifacts
+end_time: 1769005382474
+entry_point_name: ''
+experiment_id: '450571060023055828'
+lifecycle_stage: active
+run_id: 09e1a6696e2c4ed8bc7ee0c2995e3e6d
+run_name: auto_w1_alpha158_lgb_topk_1
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1769005374356
+status: 4
+tags: []
+user_id: xqu

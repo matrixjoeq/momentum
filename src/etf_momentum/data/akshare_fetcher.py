@@ -4,6 +4,7 @@ import datetime as dt
 from dataclasses import dataclass
 
 import pandas as pd
+import time
 
 from ..db.repo import PriceRow
 
@@ -43,10 +44,22 @@ def fetch_etf_daily_qfq(
     symbol = req.code
     kwargs = {"symbol": symbol, "period": "daily", "adjust": req.adjust}
     df: pd.DataFrame
-    try:
-        df = ak.fund_etf_hist_em(**kwargs, start_date=req.start_date, end_date=req.end_date)
-    except TypeError:
-        df = ak.fund_etf_hist_em(**kwargs)
+    # Retry on transient network errors (eastmoney can intermittently reset connections).
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            try:
+                df = ak.fund_etf_hist_em(**kwargs, start_date=req.start_date, end_date=req.end_date)
+            except TypeError:
+                df = ak.fund_etf_hist_em(**kwargs)
+            last_err = None
+            break
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            last_err = e
+            if attempt < 2:
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            raise
 
     if df is None or df.empty:
         return []

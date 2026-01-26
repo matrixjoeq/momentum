@@ -836,7 +836,6 @@
             <select id="rotHoldLenCodeSelect" style="min-width:180px;"></select>
           </div>
         </div>
-        <div id="rotHoldLenSummary" style="width:100%; height:320px; margin-top:10px;"></div>
         <div id="rotHoldLenHist" style="width:100%; height:360px; margin-top:12px;"></div>
         <table id="rotHoldLenQuantiles" style="margin-top:12px;"></table>
       </div>
@@ -1175,7 +1174,6 @@
             <select id="mcRotHoldLenCodeSelect" style="min-width:180px;"></select>
           </div>
         </div>
-        <div id="mcRotHoldLenSummary" style="width:100%; height:300px; margin-top:8px;"></div>
         <div id="mcRotHoldLenHist" style="width:100%; height:340px; margin-top:10px;"></div>
         <table id="mcRotHoldLenQuantiles" style="margin-top:10px;"></table>
           <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top: 8px;">
@@ -3497,13 +3495,11 @@
         const sel = $("rotHoldLenCodeSelect");
         const div = $("rotHoldLenHist");
         const tbl = $("rotHoldLenQuantiles");
-        const sumDiv = $("rotHoldLenSummary");
         if (!sel || !div || !tbl) return;
         if (!Array.isArray(holdings) || !Array.isArray(navDates) || navDates.length === 0) {
           div.innerHTML = "<div class='muted'>请先运行轮动回测</div>";
           tbl.innerHTML = "";
           sel.innerHTML = "";
-          if (sumDiv) sumDiv.innerHTML = "";
           return;
         }
 
@@ -3531,28 +3527,7 @@
         if (codes.length === 0) {
           div.innerHTML = "<div class='muted'>无持仓周期数据（可能回测全程空仓）</div>";
           tbl.innerHTML = "";
-          if (sumDiv) sumDiv.innerHTML = "";
           return;
-        }
-
-        // Summary chart: boxplot per code + overall histogram (all samples)
-        if (sumDiv) {
-          const traces = [];
-          for (const c of codes) {
-            const arr = (samplesByCode[c] || []).filter(x => Number.isFinite(x)).map(x => Number(x));
-            traces.push({
-              type: "box",
-              name: c,
-              y: arr,
-              boxmean: "sd",
-              marker: { color: "#4c78a8" },
-            });
-          }
-          Plotly.newPlot("rotHoldLenSummary", traces, {
-            title: { text: "全标的持仓周期长度对比（箱线图，单位：交易日）", font: { size: 14 } },
-            margin: { t: 40, b: 40, l: 60, r: 20 },
-            yaxis: { title: "持仓长度（交易日）", gridcolor: "#eee" },
-          }, { responsive: true, displayModeBar: false });
         }
 
         const _histInt = (arr) => {
@@ -3647,7 +3622,6 @@
 
       function renderHoldingLenDistInto(prefix, holdings, navDates) {
         const sel = $(`${prefix}HoldLenCodeSelect`);
-        const sumDiv = $(`${prefix}HoldLenSummary`);
         const div = $(`${prefix}HoldLenHist`);
         const tbl = $(`${prefix}HoldLenQuantiles`);
         if (!sel || !div || !tbl) return;
@@ -3655,7 +3629,6 @@
           div.innerHTML = "<div class='muted'>无数据</div>";
           tbl.innerHTML = "";
           sel.innerHTML = "";
-          if (sumDiv) sumDiv.innerHTML = "";
           return;
         }
         const idxByDate = new Map(navDates.map((d, i) => [String(d), i]));
@@ -3681,20 +3654,7 @@
         if (codes.length === 0) {
           div.innerHTML = "<div class='muted'>无持仓周期数据</div>";
           tbl.innerHTML = "";
-          if (sumDiv) sumDiv.innerHTML = "";
           return;
-        }
-        if (sumDiv) {
-          const traces = [];
-          for (const c of codes) {
-            const arr = (samplesByCode[c] || []).filter(x => Number.isFinite(x)).map(x => Number(x));
-            traces.push({ type: "box", name: c, y: arr, boxmean: "sd", marker: { color: "#4c78a8" } });
-          }
-          Plotly.newPlot(`${prefix}HoldLenSummary`, traces, {
-            title: { text: "全标的持仓周期长度对比（箱线图，单位：交易日）", font: { size: 14 } },
-            margin: { t: 40, b: 40, l: 60, r: 20 },
-            yaxis: { title: "持仓长度（交易日）", gridcolor: "#eee" },
-          }, { responsive: true, displayModeBar: false });
         }
         const _histInt = (arr) => {
           const xs = arr.filter(x => Number.isFinite(x)).map(x => Math.floor(Number(x)));
@@ -4199,7 +4159,7 @@
         // held codes per date from rotation holdings
         const held = new Array(dates.length).fill(null).map(() => []);
         const idxByDate = new Map(dates.map((d, i) => [String(d), i]));
-        const periods = rot.holdings || [];
+        const periods = rot.holding_streaks || rot.holdings || [];
         for (const p of periods) {
           const s = String(p.start_date || "");
           const e = String(p.end_date || "");
@@ -5137,7 +5097,8 @@
         window.__lastRotationResult = data;
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
-        renderRotationHoldingPeriodLengthDistributions(data.holdings || [], (data.nav && data.nav.dates) ? data.nav.dates : []);
+        // Use continuous holding streaks (not per-rebalance periods) for holding-length distributions.
+        renderRotationHoldingPeriodLengthDistributions(data.holding_streaks || data.holdings || [], (data.nav && data.nav.dates) ? data.nav.dates : []);
         // optional: if rules already exist, allow one-click composite
         try { _rcInitAssetSelect(); _rcRenderRuleBook(); } catch (e) { /* ignore */ }
         renderWinPayoff(data.win_payoff || {});
@@ -5790,7 +5751,7 @@
           // Observed holding-period length distributions (per-code)
           try {
             const obs = (data.observed_holding_len || {});
-            renderHoldingLenDistInto("mcRot", obs.holdings || [], obs.nav_dates || []);
+            renderHoldingLenDistInto("mcRot", obs.holding_streaks || obs.holdings || [], obs.nav_dates || []);
           } catch (e) { /* ignore */ }
           // Monte Carlo period-return distributions (strategy & excess)
           _renderPeriodDistTable("mcRotPeriodStats", data.mc.strategy ? data.mc.strategy.period_return : null);

@@ -449,6 +449,59 @@ def _pick_assets(
     return picks, {"best_score": best, "risk_off_triggered": False, "mode": "risk_on"}
 
 
+def _holding_streaks_from_weights(
+    w: pd.DataFrame,
+    *,
+    codes: list[str],
+    eps: float = 1e-12,
+) -> list[dict[str, Any]]:
+    """
+    Build continuous holding "streak" segments from daily weights.
+
+    This is different from decision-period holdings:
+    - decision periods are bounded by the rebalance schedule, even if holdings don't change
+    - streaks merge consecutive days as long as the held-code set stays the same
+
+    Returns list of {start_date, end_date, picks}.
+    """
+    if w.empty:
+        return []
+    cols = [c for c in codes if c in w.columns]
+    if not cols:
+        return []
+    idx = pd.to_datetime(w.index)
+    arr = w[cols].astype(float).to_numpy(dtype=float)
+    out: list[dict[str, Any]] = []
+    cur_key: tuple[str, ...] | None = None
+    start_i = 0
+    for i in range(len(idx)):
+        picks = [str(cols[j]) for j in range(len(cols)) if float(arr[i, j]) > float(eps)]
+        key = tuple(sorted(picks))
+        if cur_key is None:
+            cur_key = key
+            start_i = i
+            continue
+        if key != cur_key:
+            out.append(
+                {
+                    "start_date": idx[start_i].date().isoformat(),
+                    "end_date": idx[i - 1].date().isoformat(),
+                    "picks": list(cur_key),
+                }
+            )
+            cur_key = key
+            start_i = i
+    if cur_key is not None:
+        out.append(
+            {
+                "start_date": idx[start_i].date().isoformat(),
+                "end_date": idx[-1].date().isoformat(),
+                "picks": list(cur_key),
+            }
+        )
+    return out
+
+
 def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     universe = list(dict.fromkeys(inp.codes))
     if not universe:
@@ -1594,6 +1647,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
 
     # Apply per-asset risk-control rules (daily exposure scaling) on final weights.
     asset_rc_meta = _apply_asset_rc_rules(w, close_hfq=close_hfq, rules=inp.asset_rc_rules)
+    # Continuous holding streaks (by actual daily weights, not rebalance schedule).
+    holding_streaks = _holding_streaks_from_weights(w, codes=codes, eps=1e-12)
     port_ret = (w * ret_exec).sum(axis=1)
     port_nav = (1.0 + port_ret).cumprod()
     port_nav.iloc[0] = 1.0
@@ -1984,6 +2039,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         "rolling": rolling_out,
         "period_details": period_stats,
         "holdings": holdings["periods"],
+        "holding_streaks": holding_streaks,
         "corporate_actions": corporate_actions,
     }
     # fill nav RSI series (avoid recomputing windows extraction twice)
