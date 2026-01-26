@@ -14,10 +14,10 @@ from ..analysis.baseline import (
     _max_drawdown,
     _max_drawdown_duration_days,
     _rolling_max_drawdown,
+    _rsi_wilder,
     _sharpe,
     _sortino,
     _ulcer_index,
-    _rsi_wilder,
 )
 from ..analysis.baseline import load_close_prices as _load_close_prices
 from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
@@ -104,6 +104,8 @@ class RotationInputs:
     # --- Execution price proxy (hfq, aligned to execution calendar) ---
     # Used to study open/close/OC(=avg(open,close)) calendar effects. Default "close" matches existing behavior.
     exec_price: str = "close"  # close | open | oc2
+    # --- Per-asset risk control (hfq close-based signals; daily weight scaling) ---
+    asset_rc_rules: list[dict[str, Any]] | None = None
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str, *, weekly_anchor: str = "FRI") -> pd.PeriodIndex:
@@ -284,6 +286,140 @@ def _adx(high: pd.DataFrame, low: pd.DataFrame, close: pd.DataFrame, *, window: 
     dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
     adx = dx.ewm(alpha=alpha, adjust=False, min_periods=n).mean()
     return adx.replace([np.inf, -np.inf], np.nan).astype(float)
+
+
+def _apply_asset_rc_rules(
+    w: pd.DataFrame,
+    *,
+    close_hfq: pd.DataFrame,
+    rules: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """
+    Apply per-asset risk-control rules by scaling weights daily (cash remainder).
+
+    Notes:
+    - Signals are computed on hfq close series (total-return proxy).
+    - Thresholds use full-sample percentiles (research convenience; may introduce look-ahead bias).
+    - Decision uses yesterday's signal to affect today's exposure (avoid look-ahead on the day itself).
+    """
+    if rules is None or len(rules) == 0 or w.empty:
+        return {"enabled": False, "rules": []}
+
+    idx = w.index
+    out_rules: list[dict[str, Any]] = []
+
+    def _pct(v: Any) -> float:
+        try:
+            x = float(v)
+        except Exception:
+            return float("nan")
+        return x
+
+    def _sig_series(px: pd.Series, *, sig_type: str, k: int) -> pd.Series:
+        s = px.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+        r = s.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        if sig_type == "return":
+            return (s / s.shift(int(k)) - 1.0).astype(float)
+        if sig_type == "volatility":
+            return r.rolling(window=int(k), min_periods=max(2, int(k) // 2)).std(ddof=1).astype(float)
+        if sig_type == "downside_vol":
+            # rolling std of negative returns within window
+            def f(x: np.ndarray) -> float:
+                xx = x[np.isfinite(x)]
+                xx = xx[xx < 0.0]
+                if xx.size < 2:
+                    return float("nan")
+                return float(np.std(xx, ddof=1))
+
+            return r.rolling(window=int(k), min_periods=max(2, int(k) // 2)).apply(lambda x: f(x.to_numpy(dtype=float)), raw=False)
+        if sig_type == "drawdown":
+            peak = s.rolling(window=int(k), min_periods=max(2, int(k) // 2)).max()
+            dd = s / peak - 1.0
+            return (-dd).astype(float)
+        return pd.Series(np.nan, index=s.index, dtype=float)
+
+    def _quantile(x: pd.Series, q: float) -> float:
+        v = x.replace([np.inf, -np.inf], np.nan).dropna().astype(float)
+        if v.empty:
+            return float("nan")
+        return float(np.quantile(v.to_numpy(dtype=float), q))
+
+    for r in rules:
+        code = str(r.get("code") or "")
+        if not code:
+            continue
+        if code not in w.columns or code not in close_hfq.columns:
+            continue
+        sig_type = str(r.get("sig_type") or "").strip().lower()
+        if sig_type not in {"return", "volatility", "downside_vol", "drawdown"}:
+            continue
+        k = int(max(2, int(float(r.get("k") or 20))))
+        p_in = _pct(r.get("p_in"))
+        if not np.isfinite(p_in) or p_in <= 0 or p_in >= 100:
+            continue
+        reduce_pct = _pct(r.get("reduce_pct"))
+        reduce_pct = float(np.clip(reduce_pct if np.isfinite(reduce_pct) else 0.0, 0.0, 100.0))
+        rec = str(r.get("recovery_mode") or "immediate").strip().lower()
+        if rec not in {"immediate", "hysteresis", "cooldown"}:
+            rec = "immediate"
+        p_out = _pct(r.get("p_out"))
+        if not np.isfinite(p_out):
+            p_out = float("nan")
+        cd = int(max(0, int(float(r.get("cooldown_days") or 0))))
+
+        px = close_hfq[code].reindex(idx).astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+        sig = _sig_series(px, sig_type=sig_type, k=k).reindex(idx)
+
+        is_low_tail = sig_type == "return"
+        q_in = (1.0 - p_in / 100.0) if is_low_tail else (p_in / 100.0)
+        thr_in = _quantile(sig, q_in)
+        thr_out = float("nan")
+        if rec == "hysteresis" and np.isfinite(p_out) and 0 < p_out < 100:
+            q_out = (1.0 - p_out / 100.0) if is_low_tail else (p_out / 100.0)
+            thr_out = _quantile(sig, q_out)
+
+        expo = np.ones(len(idx), dtype=float)
+        in_reduced = False
+        cd_left = 0
+        reduce = 1.0 - float(reduce_pct) / 100.0
+        for t in range(1, len(idx)):
+            s_prev = float(sig.iloc[t - 1]) if (t - 1) < len(sig) else float("nan")
+            trig_in = False
+            if np.isfinite(s_prev) and np.isfinite(thr_in):
+                trig_in = (s_prev <= thr_in) if is_low_tail else (s_prev >= thr_in)
+            if not in_reduced:
+                if trig_in:
+                    in_reduced = True
+                    cd_left = cd
+            else:
+                if cd_left > 0:
+                    cd_left -= 1
+                elif rec == "hysteresis" and np.isfinite(thr_out):
+                    trig_out = False
+                    if np.isfinite(s_prev):
+                        trig_out = (s_prev >= thr_out) if is_low_tail else (s_prev <= thr_out)
+                    if trig_out:
+                        in_reduced = False
+                else:
+                    if not trig_in:
+                        in_reduced = False
+            expo[t] = reduce if in_reduced else 1.0
+
+        w[code] = w[code].astype(float).to_numpy(dtype=float) * expo
+        out_rules.append(
+            {
+                "code": code,
+                "sig_type": sig_type,
+                "k": int(k),
+                "p_in": float(p_in),
+                "reduce_pct": float(reduce_pct),
+                "recovery_mode": rec,
+                "p_out": (None if not np.isfinite(p_out) else float(p_out)),
+                "cooldown_days": int(cd),
+            }
+        )
+
+    return {"enabled": bool(out_rules), "rules": out_rules}
 
 
 def _pick_assets(
@@ -1132,7 +1268,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                     try:
                         cur_s = float(scores.loc[d, cur_c])
                         new_s = float(scores.loc[d, new_c])
-                    except Exception:  # pragma: no cover (defensive)
+                    except (KeyError, TypeError, ValueError):  # pragma: no cover (defensive)
                         cur_s = float("nan")
                         new_s = float("nan")
                     if np.isfinite(cur_s) and np.isfinite(new_s):
@@ -1455,6 +1591,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     # Daily holding return (hfq, configurable exec_price proxy).
     # Note: close-based hfq is still the default and remains the recommended "total return proxy".
     ret_exec = ret_exec_all
+
+    # Apply per-asset risk-control rules (daily exposure scaling) on final weights.
+    asset_rc_meta = _apply_asset_rc_rules(w, close_hfq=close_hfq, rules=inp.asset_rc_rules)
     port_ret = (w * ret_exec).sum(axis=1)
     port_nav = (1.0 + port_ret).cumprod()
     port_nav.iloc[0] = 1.0
@@ -1538,6 +1677,8 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             if c in w_ew.columns and c in w_ew_full.columns:
                 w_ew_full[c] = w_ew[c].astype(float)
         w = (w.mul(expo, axis=0) + w_ew_full.mul(1.0 - expo, axis=0)).astype(float)
+        # Apply per-asset risk-control again on timed weights.
+        asset_rc_meta = _apply_asset_rc_rules(w, close_hfq=close_hfq, rules=inp.asset_rc_rules)
         # Recompute strategy return/cost/NAV on timed weights.
         port_ret = (w * ret_exec).sum(axis=1).astype(float)
         port_nav = (1.0 + port_ret).cumprod()
@@ -1819,6 +1960,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             "benchmark_nav": "hfq",
         },
         "timing": timing_meta,
+        "asset_rc": asset_rc_meta,
         "nav": {
             "dates": dates.date.astype(str).tolist(),
             "series": {

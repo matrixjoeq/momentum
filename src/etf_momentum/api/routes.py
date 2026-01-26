@@ -460,6 +460,7 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         chop_er_threshold=payload.chop_er_threshold,
         chop_adx_window=payload.chop_adx_window,
         chop_adx_threshold=payload.chop_adx_threshold,
+        asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
     )
     try:
         return compute_rotation_backtest(db, inp)
@@ -551,6 +552,7 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         chop_adx_window=payload.chop_adx_window,
         chop_adx_threshold=payload.chop_adx_threshold,
         rebalance_anchor=None,
+        asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
     )
     try:
         anchors = payload.anchors
@@ -603,6 +605,7 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
         timing_rsi_gate=False,
         # execution on open
         exec_price="open",
+        asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
     )
     # Mini-program semantics: `anchor_weekday` refers to the *execution day* weekday (Mon..Fri),
     # while the strategy engine's weekly rebalance anchor is the *decision day* weekday.
@@ -708,6 +711,7 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
         timing_rsi_gate=False,
         # execution on open
         exec_price="open",
+        asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
     )
 
     one_exec = payload.anchor_weekday
@@ -780,6 +784,7 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
         dd_control=False,
         timing_rsi_gate=False,
         exec_price="open",
+        asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
     )
 
     def _nav_arr(x: dict, key: str) -> np.ndarray:
@@ -858,6 +863,7 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
         dd_control=False,
         timing_rsi_gate=False,
         exec_price="open",
+        asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
     )
 
     def _nav_arr(x: dict, key: str) -> np.ndarray:
@@ -2201,6 +2207,11 @@ def rotation_montecarlo(payload: RotationMonteCarloRequest, db: Session = Depend
             "sample_window_days": payload.sample_window_days,
         },
         "mc": {"strategy": mc_strategy, "excess": mc_excess},
+        # For research UI: show observed (non-simulated) holding-period length distributions
+        "observed_holding_len": {
+            "nav_dates": (rot.get("nav") or {}).get("dates") or [],
+            "holdings": rot.get("holdings") or [],
+        },
     }
 
 

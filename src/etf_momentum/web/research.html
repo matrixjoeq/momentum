@@ -827,6 +827,127 @@
         </div>
       </div>
 
+      <div class="panel">
+        <h3>轮动策略：各标的持仓周期长度分布（交易日）</h3>
+        <div class="muted">统计每个标的在轮动策略中“实际被持有”的每段持仓区间长度（按交易日计数），并给出直方图与分位数。用于研究“持仓节奏/持有期长短”与回撤的关系。</div>
+        <div class="row no-print" style="margin-top:8px; align-items:end;">
+          <div>
+            <label>选择标的</label>
+            <select id="rotHoldLenCodeSelect" style="min-width:180px;"></select>
+          </div>
+        </div>
+        <div id="rotHoldLenSummary" style="width:100%; height:320px; margin-top:10px;"></div>
+        <div id="rotHoldLenHist" style="width:100%; height:360px; margin-top:12px;"></div>
+        <table id="rotHoldLenQuantiles" style="margin-top:12px;"></table>
+      </div>
+
+      <div class="panel">
+        <h3>逐标的风控研究（自动搜索）→ 复合风控（等权/轮动）</h3>
+        <div class="muted">先对每个标的做 buy&hold 的风控规则与参数搜索，形成“规则库”；再把规则库复合应用到等权组合与轮动策略上，比较风险调整后收益。</div>
+
+        <div class="row no-print" style="margin-top:8px; align-items:end; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <label>研究标的 <button class="helpBtn" data-metric="param_rc_asset" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <select id="rcAssetCode" style="min-width:180px;"></select>
+          </div>
+          <div>
+            <label>目标函数 <button class="helpBtn" data-metric="param_rc_objective" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <select id="rcObjective" style="min-width:160px;">
+              <option value="calmar_ratio" selected>最大化：卡玛</option>
+              <option value="sharpe_ratio">最大化：夏普</option>
+              <option value="min_mdd">最小化：最大回撤</option>
+              <option value="calmar_minus_hit">卡玛 - λ·风险命中率</option>
+              <option value="sharpe_minus_hit">夏普 - λ·风险命中率</option>
+            </select>
+          </div>
+          <div>
+            <label>风险权重λ <button class="helpBtn" data-metric="param_rc_lambda" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcLambda" value="1.0" style="min-width:90px;" title="用于把“风险事件命中率”纳入目标函数：score = Calmar(or Sharpe) - λ×hit。λ 越大越偏向降低风险事件发生概率。" />
+          </div>
+          <div>
+            <label>风险事件阈值X% <button class="helpBtn" data-metric="param_rc_event_thr" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcEventThr" value="10" style="min-width:120px;" title="可输入单值或逗号集合（用于自动搜索）：例如 5,10,15。定义风险事件：未来H日最大回撤 ≥ X%。" />
+          </div>
+          <div>
+            <label>未来窗口H(日) <button class="helpBtn" data-metric="param_rc_future_h" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcFutureH" value="20" style="min-width:120px;" title="可输入单值或逗号集合（用于自动搜索）：例如 10,20,40。在t时点观察信号后，统计未来H个交易日内的最大回撤。" />
+          </div>
+          <div>
+            <label>K窗口集合(日) <button class="helpBtn" data-metric="param_rc_k_list" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcKList" value="10,20,40,60" style="min-width:140px;" title="信号回看窗口集合（逗号分隔）。例如K=20表示用过去20个交易日计算波动率/下行波动/回撤/收益等信号。用于网格搜索。" />
+          </div>
+          <div>
+            <label>P集合(分位%) <button class="helpBtn" data-metric="param_rc_p_list" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcPList" value="70,80,90" style="min-width:140px;" title="触发阈值分位集合。对波动/下行波动/回撤：使用高分位(例如80%)触发降仓；对收益率信号：使用低分位触发（即会自动用 100-P 作为下尾分位）。" />
+          </div>
+          <div>
+            <label>降仓Y集合(%) <button class="helpBtn" data-metric="param_rc_reduce_list" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcReduceList" value="25,50,75,100" style="min-width:160px;" title="降仓比例集合（逗号分隔）。触发时 exposure = 1 - Y%。例如Y=50表示降为50%仓位；Y=100表示清仓。" />
+          </div>
+          <div style="min-width:360px;">
+            <label>候选信号 <button class="helpBtn" data-metric="param_rc_signals" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <div class="row" style="gap:10px; align-items:center;">
+              <label style="display:flex; gap:6px; align-items:center; margin:0;" title="过去K日收益率的标准差（以日收益计算）。默认用高分位触发：波动越高越倾向降仓。"><input type="checkbox" class="rcSig" value="volatility" checked />波动率</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;" title="过去K日负收益的标准差（只看下跌日）。更贴近“下行风险”。默认用高分位触发。"><input type="checkbox" class="rcSig" value="downside_vol" checked />下行波动率</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;" title="过去K日从局部峰值到当前的回撤幅度（取正值）。回撤越大越倾向降仓，默认高分位触发。"><input type="checkbox" class="rcSig" value="drawdown" checked />回撤幅度</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;" title="过去K日收益率（nav_t/nav_{t-K}-1）。该信号使用低分位触发：越差越倾向降仓（会自动用 100-P 作为下尾分位）。"><input type="checkbox" class="rcSig" value="return" />收益率(低分位触发)</label>
+            </div>
+          </div>
+          <div style="min-width:360px;">
+            <label>恢复策略 <button class="helpBtn" data-metric="param_rc_recovery" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <div class="row" style="gap:10px; align-items:center;">
+              <label style="display:flex; gap:6px; align-items:center; margin:0;" title="默认：不触发就立即恢复到100%。"><input type="checkbox" class="rcRec" value="immediate" checked />立即恢复</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;" title="滞回：触发用P_in，恢复用P_out（更宽松），可减少来回抖动。"><input type="checkbox" class="rcRec" value="hysteresis" checked />滞回恢复</label>
+              <label style="display:flex; gap:6px; align-items:center; margin:0;" title="冷却期：触发后至少保持降仓N天，再允许恢复。"><input type="checkbox" class="rcRec" value="cooldown" checked />冷却期</label>
+            </div>
+          </div>
+          <div>
+            <label>P_out集合(分位%) <button class="helpBtn" data-metric="param_rc_pout_list" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcPOutList" value="50,60,70" style="min-width:140px;" title="仅用于“滞回恢复”。高尾信号：恢复阈值用更低分位（例如触发80%，恢复60%）；收益率低尾信号则相反（恢复用更高分位）。" />
+          </div>
+          <div>
+            <label>冷却N集合(日) <button class="helpBtn" data-metric="param_rc_cooldown_list" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+            <input id="rcCooldownList" value="0,5,10,20" style="min-width:140px;" title="仅用于“冷却期”。触发后至少维持降仓N天（0表示不启用冷却）。" />
+          </div>
+          <button id="rcSearchOne" title="对当前标的执行网格搜索：遍历信号×K×P×降仓Y，按目标函数排序输出Top结果。">搜索当前标的</button>
+          <button id="rcSearchAll" title="对所有候选标的一键搜索，并把每个标的的Top1写入规则库（可再逐个标的微调）。">搜索全部标的</button>
+          <button id="rcApplyComposite" title="将规则库复合应用到等权与轮动：等权按权重漂移/周期再平衡模拟，轮动按持仓标的规则动态缩放收益暴露。">应用规则库→复合回测</button>
+        </div>
+
+        <div class="muted" style="margin-top:8px;">
+          说明：信号阈值采用分位数（P%）。对“波动/下行波动/回撤”使用<b>高分位触发</b>；对“收益率”使用<b>低分位触发</b>（自动用 100-P 的下尾分位）。
+          触发后从下一交易日起生效：exposure = 1 - Y%。本页的逐标的搜索基于等权分析返回的<b>全区间</b>单标的 NAV（buy&hold）。
+        </div>
+
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:12px; align-items:start;">
+          <div>
+            <h4 style="margin:0 0 6px 0;">单标的：Top 搜索结果（buy&hold 风控）</h4>
+            <table id="rcAssetTop"></table>
+            <div id="rcAssetChart" style="width:100%; height:320px; margin-top:10px;"></div>
+          </div>
+          <div>
+            <h4 style="margin:0 0 6px 0;">规则库（每个标的 1 条规则）</h4>
+            <table id="rcRuleBook"></table>
+            <div class="muted" style="margin-top:8px;">提示：先运行等权分析（上方“运行分析”）以获得各标的全区间序列；轮动复合回测需先运行轮动回测。</div>
+          </div>
+        </div>
+
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:14px;">
+          <div>
+            <h4 style="margin:0 0 6px 0;">等权：原策略 vs 复合风控</h4>
+            <div id="ewRiskChart" style="width:100%; height:320px;"></div>
+            <table id="ewRiskMetrics" style="margin-top:8px;"></table>
+            <table id="ewRiskSignalTable" style="margin-top:8px;"></table>
+          </div>
+          <div>
+            <h4 style="margin:0 0 6px 0;">轮动：原策略 vs 复合风控（按持仓标的规则）</h4>
+            <div id="rotRiskChart" style="width:100%; height:320px;"></div>
+            <table id="rotRiskMetrics" style="margin-top:8px;"></table>
+            <table id="rotRiskSignalTable" style="margin-top:8px;"></table>
+          </div>
+        </div>
+      </div>
+
       <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
         <div>
           <h3>收益贡献（轮动策略，全区间） <button class="helpBtn" data-metric="rot_return_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
@@ -1045,6 +1166,18 @@
           <div class="muted">
             逐期收益分布（蒙特卡洛模拟结果；按当前回测所选调仓频率聚合为“逐期”，并统计所有模拟路径上的逐期收益分布）
           </div>
+        <div class="muted" style="margin-top:10px;">
+          轮动策略持仓周期长度分布（Observed：基于当前轮动回测的持仓区间，按交易日计数）
+        </div>
+        <div class="row no-print" style="margin-top:6px; align-items:end;">
+          <div>
+            <label>选择标的</label>
+            <select id="mcRotHoldLenCodeSelect" style="min-width:180px;"></select>
+          </div>
+        </div>
+        <div id="mcRotHoldLenSummary" style="width:100%; height:300px; margin-top:8px;"></div>
+        <div id="mcRotHoldLenHist" style="width:100%; height:340px; margin-top:10px;"></div>
+        <table id="mcRotHoldLenQuantiles" style="margin-top:10px;"></table>
           <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top: 8px;">
             <div>
               <div class="muted">策略逐期收益率（Period Return）</div>
@@ -1504,6 +1637,110 @@
             <div style="margin-top:8px"><b>口径</b>：使用 <b>qfq（前复权）</b> close 序列计算。</div>
           `,
         },
+        param_rc_asset: {
+          title: "研究标的（逐标的风控）",
+          sub: "选择要做 buy&hold 风控参数搜索的标的。",
+          body: `
+            <div><b>口径</b>：使用上方“运行分析（等权）”返回的全区间 NAV 序列（每个标的单独 buy&hold）。</div>
+            <div style="margin-top:8px"><b>用途</b>：先为每个标的找到更适配的风控信号/窗口/阈值/降仓幅度，再把这些规则复合应用到等权组合与轮动策略。</div>
+          `,
+        },
+        param_rc_objective: {
+          title: "目标函数（自动搜索排序依据）",
+          sub: "决定“最优策略/参数”按什么指标挑选。",
+          body: `
+            <div><b>最大化：卡玛</b>：优先降低回撤并保持收益（适合“以回撤为核心”的分控研究）。</div>
+            <div style="margin-top:8px"><b>最大化：夏普</b>：偏向波动意义上的风险调整收益。</div>
+            <div style="margin-top:8px"><b>最小化：最大回撤</b>：只追求回撤最小（可能显著牺牲收益）。</div>
+          `,
+        },
+        param_rc_event_thr: {
+          title: "风险事件阈值 X%",
+          sub: "定义“未来回撤风险事件”，用于评价信号是否有前瞻性。",
+          body: `
+            <div><b>定义</b>：在每个时点 t，计算未来 H 个交易日内的最大回撤 \\(MDD_{t..t+H}\\)。若 \\(|MDD| \\ge X\\%\\)，视为“风险事件发生”。</div>
+            <div style="margin-top:8px"><b>输出</b>：分位组表中的“事件命中率” = 该分位组里事件发生比例。</div>
+            <div style="margin-top:8px"><b>输入</b>：支持百分比写法，例如 10 表示 10%。</div>
+          `,
+        },
+        param_rc_future_h: {
+          title: "未来窗口 H（日）",
+          sub: "评价信号的前瞻窗口长度。",
+          body: `
+            <div><b>含义</b>：用来计算“未来 H 日最大回撤”和风险事件命中率。</div>
+            <div style="margin-top:8px"><b>建议</b>：与实盘预警响应周期一致（例如想防“1个月内的大回撤”，可用 H≈20）。</div>
+          `,
+        },
+        param_rc_k_list: {
+          title: "K窗口集合（日）",
+          sub: "信号回看窗口的候选集合（网格搜索用）。",
+          body: `
+            <div><b>含义</b>：信号在 t 时点只用过去 K 个交易日数据计算，例如波动率=过去K日收益标准差。</div>
+            <div style="margin-top:8px"><b>建议</b>：可覆盖短/中/长三档，例如 10/20/60，观察最优参数是否稳定。</div>
+          `,
+        },
+        param_rc_p_list: {
+          title: "P集合（分位%）",
+          sub: "用历史分位确定触发阈值（网格搜索用）。",
+          body: `
+            <div><b>高分位触发</b>：对“波动/下行波动/回撤”，当信号 ≥ P 分位阈值时触发降仓。</div>
+            <div style="margin-top:8px"><b>低分位触发</b>：对“收益率”信号，使用下尾分位触发（自动用 100-P 分位）。</div>
+            <div style="margin-top:8px"><b>示例</b>：P=80：波动信号用 80% 分位触发；收益率信号用 20% 分位触发。</div>
+          `,
+        },
+        param_rc_reduce_list: {
+          title: "降仓 Y集合（%）",
+          sub: "触发时把仓位缩放到 (1-Y) 的候选集合。",
+          body: `
+            <div><b>规则</b>：触发后从下一交易日起 exposure = 1 - Y%。</div>
+            <div style="margin-top:8px"><b>示例</b>：Y=50 ⇒ 50%仓位；Y=100 ⇒ 清仓。</div>
+          `,
+        },
+        param_rc_signals: {
+          title: "候选信号（逐标的风控）",
+          sub: "决定“何时认为风险升高，需要降仓”。",
+          body: `
+            <div><b>波动率</b>：过去K日收益标准差（高分位触发）。</div>
+            <div style="margin-top:6px"><b>下行波动率</b>：过去K日负收益标准差（高分位触发，更关注下跌日）。</div>
+            <div style="margin-top:6px"><b>回撤幅度</b>：过去K日从局部峰值到当前的回撤（取正值，高分位触发）。</div>
+            <div style="margin-top:6px"><b>收益率</b>：过去K日累计收益（低分位触发，越差越降仓）。</div>
+            <div style="margin-top:8px"><b>提示</b>：同一标的可能对不同信号敏感度不同（例如商品/成长/债券），因此需要逐标的搜索最优规则。</div>
+          `,
+        },
+        param_rc_lambda: {
+          title: "风险权重 λ",
+          sub: "把“风险事件命中率”纳入目标函数时的权重。",
+          body: `
+            <div><b>用途</b>：当目标函数选“卡玛 - λ·风险命中率”或“夏普 - λ·风险命中率”时生效。</div>
+            <div style="margin-top:8px"><b>含义</b>：λ 越大，越偏向选择“风险事件命中率更低”的参数组合（可能牺牲收益/卡玛）。</div>
+          `,
+        },
+        param_rc_recovery: {
+          title: "恢复策略（触发后何时回到满仓）",
+          sub: "决定降仓后何时/如何恢复仓位（避免抖动是关键）。",
+          body: `
+            <div><b>立即恢复</b>：只要信号不再触发，就在下一交易日恢复到 100%。简单但容易来回切换。</div>
+            <div style="margin-top:8px"><b>滞回恢复</b>：触发用 P_in，恢复用更宽松的 P_out（不同阈值），可显著减少抖动。</div>
+            <div style="margin-top:8px"><b>冷却期</b>：触发后至少保持降仓 N 天，N 天后再允许恢复（用于过滤短期噪声）。</div>
+          `,
+        },
+        param_rc_pout_list: {
+          title: "P_out集合（分位%）",
+          sub: "滞回恢复的“恢复阈值”候选集合。",
+          body: `
+            <div><b>高尾信号</b>（波动/下行波动/回撤）：触发阈值 P_in 较高（如80%），恢复阈值 P_out 应更低（如60%）。</div>
+            <div style="margin-top:8px"><b>低尾信号</b>（收益率）：触发用低尾（内部用 100-P_in），恢复则用更高的 P_out（内部用 100-P_out）。</div>
+            <div style="margin-top:8px"><b>建议</b>：先用 P_out=50/60/70 三档观察是否稳定。</div>
+          `,
+        },
+        param_rc_cooldown_list: {
+          title: "冷却 N集合（日）",
+          sub: "冷却期恢复的“最短维持天数”候选集合。",
+          body: `
+            <div><b>含义</b>：触发后至少维持降仓 N 个交易日，期间即便信号回落也不立即恢复。</div>
+            <div style="margin-top:8px"><b>建议</b>：0/5/10/20 四档起步，避免参数空间过大。</div>
+          `,
+        },
         rot_cum: {
           title: "策略累积收益",
           sub: "轮动策略净值（none）在回测区间的总收益。",
@@ -1902,8 +2139,42 @@
           const litePath = isMix ? "/analysis/rotation/weekly5-open-combo-lite" : "/analysis/rotation/weekly5-open-lite";
           const fullPath = isMix ? "/analysis/rotation/weekly5-open-combo" : "/analysis/rotation/weekly5-open";
           const liteReq = isMix
-            ? { start: start0, end: end0 }
-            : { start: start0, end: end0, anchor_weekday: Number(mpRotState.anchor) };
+            ? { start: start0, end: end0, asset_rc_rules: (() => {
+              const rb = window.__riskRuleBook || {};
+              const out = [];
+              for (const [code, r] of Object.entries(rb)) {
+                if (!r) continue;
+                out.push({
+                  code,
+                  sig_type: r.sigType,
+                  k: Number(r.k),
+                  p_in: Number(r.p),
+                  reduce_pct: Number(r.reduce),
+                  recovery_mode: r.recoveryMode || "immediate",
+                  p_out: (r.pOut == null ? null : Number(r.pOut)),
+                  cooldown_days: Number(r.cooldownDays || 0),
+                });
+              }
+              return out.length ? out : null;
+            })() }
+            : { start: start0, end: end0, anchor_weekday: Number(mpRotState.anchor), asset_rc_rules: (() => {
+              const rb = window.__riskRuleBook || {};
+              const out = [];
+              for (const [code, r] of Object.entries(rb)) {
+                if (!r) continue;
+                out.push({
+                  code,
+                  sig_type: r.sigType,
+                  k: Number(r.k),
+                  p_in: Number(r.p),
+                  reduce_pct: Number(r.reduce),
+                  recovery_mode: r.recoveryMode || "immediate",
+                  p_out: (r.pOut == null ? null : Number(r.pOut)),
+                  cooldown_days: Number(r.cooldownDays || 0),
+                });
+              }
+              return out.length ? out : null;
+            })() };
           const respLite = await api(litePath, { method: "POST", body: JSON.stringify(liteReq) });
           const textLite = await respLite.text();
           if (!respLite.ok) return setMsg(textLite);
@@ -1919,8 +2190,42 @@
 
           _mpRotSetStatus(`加载 ${picked.label} (${picked.startIso} ~ ${picked.endIso})...`);
           const fullReq = isMix
-            ? { start: s1, end: e1 }
-            : { start: s1, end: e1, anchor_weekday: Number(mpRotState.anchor) };
+            ? { start: s1, end: e1, asset_rc_rules: (() => {
+              const rb = window.__riskRuleBook || {};
+              const out = [];
+              for (const [code, r] of Object.entries(rb)) {
+                if (!r) continue;
+                out.push({
+                  code,
+                  sig_type: r.sigType,
+                  k: Number(r.k),
+                  p_in: Number(r.p),
+                  reduce_pct: Number(r.reduce),
+                  recovery_mode: r.recoveryMode || "immediate",
+                  p_out: (r.pOut == null ? null : Number(r.pOut)),
+                  cooldown_days: Number(r.cooldownDays || 0),
+                });
+              }
+              return out.length ? out : null;
+            })() }
+            : { start: s1, end: e1, anchor_weekday: Number(mpRotState.anchor), asset_rc_rules: (() => {
+              const rb = window.__riskRuleBook || {};
+              const out = [];
+              for (const [code, r] of Object.entries(rb)) {
+                if (!r) continue;
+                out.push({
+                  code,
+                  sig_type: r.sigType,
+                  k: Number(r.k),
+                  p_in: Number(r.p),
+                  reduce_pct: Number(r.reduce),
+                  recovery_mode: r.recoveryMode || "immediate",
+                  p_out: (r.pOut == null ? null : Number(r.pOut)),
+                  cooldown_days: Number(r.cooldownDays || 0),
+                });
+              }
+              return out.length ? out : null;
+            })() };
           const respFull = await api(fullPath, { method: "POST", body: JSON.stringify(fullReq) });
           const textFull = await respFull.text();
           if (!respFull.ok) return setMsg(textFull);
@@ -1932,6 +2237,7 @@
           plotRotation(one);
           renderRotationMetrics(one.metrics || {});
           renderWinPayoff(one.win_payoff || {});
+          renderRotationHoldingPeriodLengthDistributions(one.holdings || [], (one.nav && one.nav.dates) ? one.nav.dates : []);
           renderContributionTables("rot", one.attribution);
           rotState.rows = one.period_details || [];
           rotState.page = 1;
@@ -2904,6 +3210,1096 @@
         updateDisplay();
       }
 
+      function _pctToDec(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return NaN;
+        return v > 1 ? v / 100.0 : v;
+      }
+
+      function _std(vals) {
+        const arr = vals.filter((x) => Number.isFinite(x));
+        if (arr.length < 2) return NaN;
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+        const v = arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (arr.length - 1);
+        return Math.sqrt(v);
+      }
+
+      function _percentile(vals, p) {
+        const arr = vals.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+        if (arr.length === 0) return NaN;
+        const pos = (Math.min(Math.max(p, 0), 100) / 100) * (arr.length - 1);
+        const lo = Math.floor(pos);
+        const hi = Math.ceil(pos);
+        if (lo === hi) return arr[lo];
+        return arr[lo] + (arr[hi] - arr[lo]) * (pos - lo);
+      }
+
+      function _calcMetricsFromNav(nav, rfAnnual) {
+        const n = nav.length;
+        if (n < 2) return {};
+        const rets = nav.map((v, i) => (i === 0 ? 0 : (v / nav[i - 1] - 1)));
+        const annRet = Math.pow(nav[n - 1] / nav[0], 252 / Math.max(1, n - 1)) - 1;
+        const vol = _std(rets.slice(1)) * Math.sqrt(252);
+        let peak = nav[0];
+        let mdd = 0;
+        for (let i = 0; i < n; i++) {
+          peak = Math.max(peak, nav[i]);
+          const dd = nav[i] / peak - 1;
+          if (dd < mdd) mdd = dd;
+        }
+        const rf = Number.isFinite(rfAnnual) ? rfAnnual : 0;
+        const ex = rets.slice(1).map(x => x - rf / 252);
+        const stdEx = _std(ex);
+        const sharpe = (Number.isFinite(stdEx) && stdEx > 0) ? (ex.reduce((a, b) => a + b, 0) / ex.length) / stdEx * Math.sqrt(252) : NaN;
+        const calmar = mdd < 0 ? annRet / Math.abs(mdd) : NaN;
+        return {
+          cumulative_return: nav[n - 1] / nav[0] - 1,
+          annualized_return: annRet,
+          annualized_volatility: vol,
+          max_drawdown: mdd,
+          sharpe_ratio: sharpe,
+          calmar_ratio: calmar,
+        };
+      }
+
+      function _calcSignal(nav, rets, t, window, type) {
+        const w = Math.max(2, Number(window) || 2);
+        if (t < w) return NaN;
+        const start = t - w;
+        if (type === "return") {
+          return nav[t] / nav[start] - 1;
+        }
+        if (type === "volatility") {
+          return _std(rets.slice(start + 1, t + 1));
+        }
+        if (type === "downside_vol") {
+          const downs = rets.slice(start + 1, t + 1).filter(x => x < 0);
+          return _std(downs);
+        }
+        if (type === "drawdown") {
+          let peak = nav[start];
+          for (let i = start; i <= t; i++) peak = Math.max(peak, nav[i]);
+          const dd = nav[t] / peak - 1;
+          return -dd;
+        }
+        return NaN;
+      }
+
+      function _futureMaxDrawdown(nav, t, horizon) {
+        const h = Math.max(1, Number(horizon) || 1);
+        const end = Math.min(nav.length - 1, t + h);
+        let peak = nav[t];
+        let mdd = 0;
+        for (let i = t + 1; i <= end; i++) {
+          if (nav[i] > peak) peak = nav[i];
+          const dd = nav[i] / peak - 1;
+          if (dd < mdd) mdd = dd;
+        }
+        return mdd;
+      }
+
+      function _computeExposureSeries({
+        nav,
+        sigType,
+        sigWindow,
+        pIn,
+        reducePct,
+        recoveryMode,
+        pOut,
+        cooldownDays,
+      }) {
+        const n = nav.length;
+        const rets = nav.map((v, i) => (i === 0 ? 0 : (v / nav[i - 1] - 1)));
+        const sig = new Array(n).fill(NaN);
+        for (let t = 0; t < n; t++) sig[t] = _calcSignal(nav, rets, t, sigWindow, sigType);
+
+        const isLowTail = (sigType === "return");
+        const pInEff = isLowTail ? (100 - Number(pIn)) : Number(pIn);
+        const thrIn = _percentile(sig, pInEff);
+        const pOutEff = (pOut == null || Number.isNaN(Number(pOut)))
+          ? null
+          : (isLowTail ? (100 - Number(pOut)) : Number(pOut));
+        const thrOut = (pOutEff == null) ? null : _percentile(sig, pOutEff);
+
+        const reduce = _pctToDec(reducePct);
+        const exposure = new Array(n).fill(1.0);
+        const rec = String(recoveryMode || "immediate");
+        const cd = Math.max(0, Math.floor(Number(cooldownDays || 0)));
+
+        let inReduced = false;
+        let cdLeft = 0;
+        for (let t = 1; t < n; t++) {
+          const s = sig[t - 1];
+          const trigIn = isLowTail ? (s <= thrIn) : (s >= thrIn);
+
+          if (!inReduced) {
+            if (Number.isFinite(s) && Number.isFinite(thrIn) && trigIn) {
+              inReduced = true;
+              cdLeft = cd;
+            }
+          } else {
+            if (cdLeft > 0) {
+              cdLeft -= 1;
+            } else if (rec === "hysteresis" && thrOut != null) {
+              // hysteresis exit condition (opposite direction)
+              const trigOut = isLowTail ? (s >= thrOut) : (s <= thrOut);
+              if (Number.isFinite(s) && Number.isFinite(thrOut) && trigOut) inReduced = false;
+            } else {
+              // immediate exit (or cooldown-only mode ends here): if not triggered, exit
+              if (!(Number.isFinite(s) && Number.isFinite(thrIn) && trigIn)) inReduced = false;
+            }
+          }
+
+          exposure[t] = inReduced ? (1.0 - reduce) : 1.0;
+        }
+
+        return { exposure, sig, thrIn, thrOut };
+      }
+
+      function _runRiskExperimentOnSeries({
+        name,
+        dates,
+        nav,
+        sigType,
+        sigWindow,
+        futureWindow,
+        eventThrPct,
+        sigPct,
+        reducePct,
+        rfAnnual,
+        recoveryMode = "immediate",
+        pOut = null,
+        cooldownDays = 0,
+      }) {
+        const n = nav.length;
+        if (n < 2) return null;
+        const rets = nav.map((v, i) => (i === 0 ? 0 : (v / nav[i - 1] - 1)));
+        const exp0 = _computeExposureSeries({
+          nav,
+          sigType,
+          sigWindow,
+          pIn: sigPct,
+          reducePct,
+          recoveryMode,
+          pOut,
+          cooldownDays,
+        });
+        const exposure = exp0.exposure;
+        const sig = exp0.sig;
+        const thrIn = exp0.thrIn;
+        const thrOut = exp0.thrOut;
+
+        const navAdj = new Array(n).fill(1.0);
+        for (let t = 1; t < n; t++) {
+          navAdj[t] = navAdj[t - 1] * (1.0 + rets[t] * exposure[t]);
+        }
+
+        const baseMetrics = _calcMetricsFromNav(nav, rfAnnual);
+        const adjMetrics = _calcMetricsFromNav(navAdj, rfAnnual);
+
+        const future = [];
+        const sigValid = [];
+        for (let t = 0; t < n - 1; t++) {
+          if (!Number.isFinite(sig[t])) continue;
+          const dd = _futureMaxDrawdown(nav, t, futureWindow);
+          future.push(dd);
+          sigValid.push(sig[t]);
+        }
+        const q20 = _percentile(sigValid, 20);
+        const q40 = _percentile(sigValid, 40);
+        const q60 = _percentile(sigValid, 60);
+        const q80 = _percentile(sigValid, 80);
+        const bins = [
+          { label: "Q1(<=P20)", vals: [] },
+          { label: "Q2(P20-40)", vals: [] },
+          { label: "Q3(P40-60)", vals: [] },
+          { label: "Q4(P60-80)", vals: [] },
+          { label: "Q5(>P80)", vals: [] },
+        ];
+        for (let i = 0; i < sigValid.length; i++) {
+          const s = sigValid[i];
+          const dd = future[i];
+          if (!Number.isFinite(dd)) continue;
+          if (s <= q20) bins[0].vals.push(dd);
+          else if (s <= q40) bins[1].vals.push(dd);
+          else if (s <= q60) bins[2].vals.push(dd);
+          else if (s <= q80) bins[3].vals.push(dd);
+          else bins[4].vals.push(dd);
+        }
+        const eventThr = -Math.abs(_pctToDec(eventThrPct));
+        const binStats = bins.map(b => {
+          const arr = b.vals;
+          const mean = arr.length ? (arr.reduce((a, x) => a + x, 0) / arr.length) : NaN;
+          const p10 = _percentile(arr, 10);
+          const p50 = _percentile(arr, 50);
+          const p90 = _percentile(arr, 90);
+          const hit = arr.length ? arr.filter(x => x <= eventThr).length / arr.length : NaN;
+          return { label: b.label, count: arr.length, mean, p10, p50, p90, hit };
+        });
+
+        const isLowTail = (sigType === "return");
+        const riskLabel = isLowTail ? "Q1(<=P20)" : "Q5(>P80)";
+        const riskRow = binStats.find(x => x.label === riskLabel) || null;
+        const hitRisk = riskRow ? Number(riskRow.hit) : NaN;
+
+        return {
+          name,
+          dates,
+          nav,
+          navAdj,
+          baseMetrics,
+          adjMetrics,
+          binStats,
+          thrIn,
+          thrOut,
+          hitRisk,
+          recoveryMode: String(recoveryMode || "immediate"),
+          pOut: (pOut == null ? null : Number(pOut)),
+          cooldownDays: Number(cooldownDays || 0),
+          futureWindow: Number(futureWindow),
+          eventThrPct: Number(eventThrPct),
+        };
+      }
+
+      function _renderRiskMetricsTable(elId, base, adj) {
+        const el = $(elId);
+        if (!el) return;
+        const row = (label, a, b, fmt) => `<tr><td>${label}</td><td>${fmt(a)}</td><td>${fmt(b)}</td></tr>`;
+        const fmtPct2 = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtPct(Number(x));
+        const fmtNum2 = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtNum(Number(x));
+        el.innerHTML =
+          `<tr><th>指标</th><th>原策略</th><th>信号降仓</th></tr>` +
+          row("累计收益", base.cumulative_return, adj.cumulative_return, fmtPct2) +
+          row("年化收益", base.annualized_return, adj.annualized_return, fmtPct2) +
+          row("年化波动", base.annualized_volatility, adj.annualized_volatility, fmtPct2) +
+          row("最大回撤", base.max_drawdown, adj.max_drawdown, fmtPct2) +
+          row("夏普", base.sharpe_ratio, adj.sharpe_ratio, fmtNum2) +
+          row("卡玛", base.calmar_ratio, adj.calmar_ratio, fmtNum2);
+      }
+
+      function _renderRiskSignalTable(elId, stats) {
+        const el = $(elId);
+        if (!el) return;
+        if (!stats || stats.length === 0) {
+          el.innerHTML = "";
+          return;
+        }
+        const fmtP = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtPct(Number(x));
+        const fmtN = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : String(x);
+        el.innerHTML =
+          `<tr><th>分位组</th><th>样本数</th><th>未来回撤均值</th><th>P10</th><th>P50</th><th>P90</th><th>事件命中率</th></tr>` +
+          stats.map(r =>
+            `<tr><td>${r.label}</td><td>${fmtN(r.count)}</td><td>${fmtP(r.mean)}</td><td>${fmtP(r.p10)}</td><td>${fmtP(r.p50)}</td><td>${fmtP(r.p90)}</td><td>${fmtP(r.hit)}</td></tr>`
+          ).join("");
+      }
+
+      function renderRotationHoldingPeriodLengthDistributions(holdings, navDates) {
+        const sel = $("rotHoldLenCodeSelect");
+        const div = $("rotHoldLenHist");
+        const tbl = $("rotHoldLenQuantiles");
+        const sumDiv = $("rotHoldLenSummary");
+        if (!sel || !div || !tbl) return;
+        if (!Array.isArray(holdings) || !Array.isArray(navDates) || navDates.length === 0) {
+          div.innerHTML = "<div class='muted'>请先运行轮动回测</div>";
+          tbl.innerHTML = "";
+          sel.innerHTML = "";
+          if (sumDiv) sumDiv.innerHTML = "";
+          return;
+        }
+
+        const idxByDate = new Map(navDates.map((d, i) => [String(d), i]));
+        const samplesByCode = {};
+        for (const p of holdings) {
+          const picks = (p && p.picks) ? p.picks : [];
+          if (!Array.isArray(picks) || picks.length === 0) continue;
+          const s = String(p.start_date || "");
+          const e = String(p.end_date || "");
+          const si = idxByDate.get(s);
+          const ei = idxByDate.get(e);
+          if (si == null || ei == null) continue;
+          const len = Number(ei) - Number(si) + 1;
+          if (!Number.isFinite(len) || len <= 0) continue;
+          for (const c0 of picks) {
+            const c = String(c0);
+            if (!samplesByCode[c]) samplesByCode[c] = [];
+            samplesByCode[c].push(len);
+          }
+        }
+
+        const codes = Object.keys(samplesByCode).sort();
+        sel.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+        if (codes.length === 0) {
+          div.innerHTML = "<div class='muted'>无持仓周期数据（可能回测全程空仓）</div>";
+          tbl.innerHTML = "";
+          if (sumDiv) sumDiv.innerHTML = "";
+          return;
+        }
+
+        // Summary chart: boxplot per code + overall histogram (all samples)
+        if (sumDiv) {
+          const traces = [];
+          for (const c of codes) {
+            const arr = (samplesByCode[c] || []).filter(x => Number.isFinite(x)).map(x => Number(x));
+            traces.push({
+              type: "box",
+              name: c,
+              y: arr,
+              boxmean: "sd",
+              marker: { color: "#4c78a8" },
+            });
+          }
+          Plotly.newPlot("rotHoldLenSummary", traces, {
+            title: { text: "全标的持仓周期长度对比（箱线图，单位：交易日）", font: { size: 14 } },
+            margin: { t: 40, b: 40, l: 60, r: 20 },
+            yaxis: { title: "持仓长度（交易日）", gridcolor: "#eee" },
+          }, { responsive: true, displayModeBar: false });
+        }
+
+        const _histInt = (arr) => {
+          const xs = arr.filter(x => Number.isFinite(x)).map(x => Math.floor(Number(x)));
+          if (xs.length === 0) return { x: [], y: [] };
+          const minv = Math.min(...xs);
+          const maxv = Math.max(...xs);
+          const range = maxv - minv + 1;
+          // If range is reasonable, show discrete bars per length; else bin into ~30 buckets.
+          if (range <= 120) {
+            const counts = new Array(range).fill(0);
+            for (const v of xs) counts[v - minv] += 1;
+            const x = [];
+            for (let i = 0; i < range; i++) x.push(minv + i);
+            return { x, y: counts };
+          }
+          const bins = 30;
+          const w = Math.max(1, Math.ceil(range / bins));
+          const nBins = Math.ceil(range / w);
+          const y = new Array(nBins).fill(0);
+          for (const v of xs) {
+            const k = Math.min(nBins - 1, Math.floor((v - minv) / w));
+            y[k] += 1;
+          }
+          const x = new Array(nBins).fill(0).map((_, i) => `${minv + i * w}~${Math.min(maxv, minv + (i + 1) * w - 1)}`);
+          return { x, y };
+        };
+
+        const _quantiles = (arr) => {
+          const xs = arr.filter(x => Number.isFinite(x)).map(x => Number(x));
+          const q = (p) => _percentile(xs, p);
+          return {
+            count: xs.length,
+            mean: xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN,
+            std: _std(xs),
+            q01: q(1),
+            q05: q(5),
+            q10: q(10),
+            q25: q(25),
+            q50: q(50),
+            q75: q(75),
+            q90: q(90),
+            q95: q(95),
+            q99: q(99),
+          };
+        };
+
+        const update = () => {
+          const code = sel.value;
+          const arr = samplesByCode[code] || [];
+          if (!arr.length) {
+            div.innerHTML = "<div class='muted'>无数据</div>";
+            tbl.innerHTML = "";
+            return;
+          }
+          const h = _histInt(arr);
+          Plotly.newPlot("rotHoldLenHist", [{
+            x: h.x,
+            y: h.y,
+            type: "bar",
+            marker: { color: "#4c78a8" },
+            hovertemplate: "len=%{x}<br>count=%{y}<extra></extra>",
+          }], {
+            title: { text: `${code} 持仓周期长度分布（交易日）`, font: { size: 14 } },
+            margin: { t: 40, b: 60 },
+            xaxis: { title: "持仓长度（交易日）", tickangle: (h.x.length > 24 ? -45 : 0) },
+            yaxis: { title: "频数" },
+          }, { responsive: true, displayModeBar: false });
+
+          const s = _quantiles(arr);
+          const fmtI = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : String(Math.round(Number(x)));
+          const fmtF = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtNum(Number(x));
+          tbl.innerHTML =
+            `<tr><th>统计</th><th>值</th></tr>` +
+            `<tr><td>样本数</td><td>${fmtI(s.count)}</td></tr>` +
+            `<tr><td>均值</td><td>${fmtF(s.mean)}</td></tr>` +
+            `<tr><td>标准差</td><td>${fmtF(s.std)}</td></tr>` +
+            `<tr><td>1%</td><td>${fmtI(s.q01)}</td></tr>` +
+            `<tr><td>5%</td><td>${fmtI(s.q05)}</td></tr>` +
+            `<tr><td>10%</td><td>${fmtI(s.q10)}</td></tr>` +
+            `<tr><td>25%</td><td>${fmtI(s.q25)}</td></tr>` +
+            `<tr><td>50%</td><td>${fmtI(s.q50)}</td></tr>` +
+            `<tr><td>75%</td><td>${fmtI(s.q75)}</td></tr>` +
+            `<tr><td>90%</td><td>${fmtI(s.q90)}</td></tr>` +
+            `<tr><td>95%</td><td>${fmtI(s.q95)}</td></tr>` +
+            `<tr><td>99%</td><td>${fmtI(s.q99)}</td></tr>`;
+        };
+
+        sel.onchange = update;
+        update();
+      }
+
+      function renderHoldingLenDistInto(prefix, holdings, navDates) {
+        const sel = $(`${prefix}HoldLenCodeSelect`);
+        const sumDiv = $(`${prefix}HoldLenSummary`);
+        const div = $(`${prefix}HoldLenHist`);
+        const tbl = $(`${prefix}HoldLenQuantiles`);
+        if (!sel || !div || !tbl) return;
+        if (!Array.isArray(holdings) || !Array.isArray(navDates) || navDates.length === 0) {
+          div.innerHTML = "<div class='muted'>无数据</div>";
+          tbl.innerHTML = "";
+          sel.innerHTML = "";
+          if (sumDiv) sumDiv.innerHTML = "";
+          return;
+        }
+        const idxByDate = new Map(navDates.map((d, i) => [String(d), i]));
+        const samplesByCode = {};
+        for (const p of holdings) {
+          const picks = (p && p.picks) ? p.picks : [];
+          if (!Array.isArray(picks) || picks.length === 0) continue;
+          const s = String(p.start_date || "");
+          const e = String(p.end_date || "");
+          const si = idxByDate.get(s);
+          const ei = idxByDate.get(e);
+          if (si == null || ei == null) continue;
+          const len = Number(ei) - Number(si) + 1;
+          if (!Number.isFinite(len) || len <= 0) continue;
+          for (const c0 of picks) {
+            const c = String(c0);
+            if (!samplesByCode[c]) samplesByCode[c] = [];
+            samplesByCode[c].push(len);
+          }
+        }
+        const codes = Object.keys(samplesByCode).sort();
+        sel.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+        if (codes.length === 0) {
+          div.innerHTML = "<div class='muted'>无持仓周期数据</div>";
+          tbl.innerHTML = "";
+          if (sumDiv) sumDiv.innerHTML = "";
+          return;
+        }
+        if (sumDiv) {
+          const traces = [];
+          for (const c of codes) {
+            const arr = (samplesByCode[c] || []).filter(x => Number.isFinite(x)).map(x => Number(x));
+            traces.push({ type: "box", name: c, y: arr, boxmean: "sd", marker: { color: "#4c78a8" } });
+          }
+          Plotly.newPlot(`${prefix}HoldLenSummary`, traces, {
+            title: { text: "全标的持仓周期长度对比（箱线图，单位：交易日）", font: { size: 14 } },
+            margin: { t: 40, b: 40, l: 60, r: 20 },
+            yaxis: { title: "持仓长度（交易日）", gridcolor: "#eee" },
+          }, { responsive: true, displayModeBar: false });
+        }
+        const _histInt = (arr) => {
+          const xs = arr.filter(x => Number.isFinite(x)).map(x => Math.floor(Number(x)));
+          if (xs.length === 0) return { x: [], y: [] };
+          const minv = Math.min(...xs);
+          const maxv = Math.max(...xs);
+          const range = maxv - minv + 1;
+          if (range <= 120) {
+            const counts = new Array(range).fill(0);
+            for (const v of xs) counts[v - minv] += 1;
+            const x = [];
+            for (let i = 0; i < range; i++) x.push(minv + i);
+            return { x, y: counts };
+          }
+          const bins = 30;
+          const w = Math.max(1, Math.ceil(range / bins));
+          const nBins = Math.ceil(range / w);
+          const y = new Array(nBins).fill(0);
+          for (const v of xs) {
+            const k = Math.min(nBins - 1, Math.floor((v - minv) / w));
+            y[k] += 1;
+          }
+          const x = new Array(nBins).fill(0).map((_, i) => `${minv + i * w}~${Math.min(maxv, minv + (i + 1) * w - 1)}`);
+          return { x, y };
+        };
+        const _quantiles = (arr) => {
+          const xs = arr.filter(x => Number.isFinite(x)).map(x => Number(x));
+          const q = (p) => _percentile(xs, p);
+          return {
+            count: xs.length,
+            mean: xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN,
+            std: _std(xs),
+            q01: q(1), q05: q(5), q10: q(10), q25: q(25), q50: q(50), q75: q(75), q90: q(90), q95: q(95), q99: q(99),
+          };
+        };
+        const update = () => {
+          const code = sel.value;
+          const arr = samplesByCode[code] || [];
+          if (!arr.length) {
+            div.innerHTML = "<div class='muted'>无数据</div>";
+            tbl.innerHTML = "";
+            return;
+          }
+          const h = _histInt(arr);
+          Plotly.newPlot(`${prefix}HoldLenHist`, [{
+            x: h.x, y: h.y, type: "bar",
+            marker: { color: "#4c78a8" },
+            hovertemplate: "len=%{x}<br>count=%{y}<extra></extra>",
+          }], {
+            title: { text: `${code} 持仓周期长度分布（交易日）`, font: { size: 14 } },
+            margin: { t: 40, b: 60 },
+            xaxis: { title: "持仓长度（交易日）", tickangle: (h.x.length > 24 ? -45 : 0) },
+            yaxis: { title: "频数" },
+          }, { responsive: true, displayModeBar: false });
+          const s = _quantiles(arr);
+          const fmtI = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : String(Math.round(Number(x)));
+          const fmtF = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtNum(Number(x));
+          tbl.innerHTML =
+            `<tr><th>统计</th><th>值</th></tr>` +
+            `<tr><td>样本数</td><td>${fmtI(s.count)}</td></tr>` +
+            `<tr><td>均值</td><td>${fmtF(s.mean)}</td></tr>` +
+            `<tr><td>标准差</td><td>${fmtF(s.std)}</td></tr>` +
+            `<tr><td>1%</td><td>${fmtI(s.q01)}</td></tr>` +
+            `<tr><td>5%</td><td>${fmtI(s.q05)}</td></tr>` +
+            `<tr><td>10%</td><td>${fmtI(s.q10)}</td></tr>` +
+            `<tr><td>25%</td><td>${fmtI(s.q25)}</td></tr>` +
+            `<tr><td>50%</td><td>${fmtI(s.q50)}</td></tr>` +
+            `<tr><td>75%</td><td>${fmtI(s.q75)}</td></tr>` +
+            `<tr><td>90%</td><td>${fmtI(s.q90)}</td></tr>` +
+            `<tr><td>95%</td><td>${fmtI(s.q95)}</td></tr>` +
+            `<tr><td>99%</td><td>${fmtI(s.q99)}</td></tr>`;
+        };
+        sel.onchange = update;
+        update();
+      }
+
+      // --- Rule-book based risk-control research ---
+      window.__riskRuleBook = window.__riskRuleBook || {}; // code -> { sigType, k, p, reduce }
+      window.__rcLastSearch = window.__rcLastSearch || {}; // code -> results[]
+
+      function _parseCsvNumsRaw(s) {
+        return String(s || "")
+          .split(",")
+          .map(x => x.trim())
+          .filter(Boolean)
+          .map(Number)
+          .filter(x => Number.isFinite(x));
+      }
+
+      function _rcGetBaseline() {
+        return window.__lastBaselineResult || lastBaseline || null;
+      }
+
+      function _rcInitAssetSelect() {
+        const b = _rcGetBaseline();
+        const sel = $("rcAssetCode");
+        if (!sel) return;
+        const prev = (sel.value || "").trim();
+        const codes = (b && b.codes) ? b.codes : Array.from(selected);
+        sel.innerHTML = (codes || []).map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+        // preserve selection if possible
+        if (prev && (codes || []).includes(prev)) {
+          sel.value = prev;
+        }
+      }
+
+      function _rcReadInputs() {
+        const rfRaw = ($("rf").value || "").trim();
+        let rf = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (rf > 1.0) rf = rf / 100.0;
+        const kList = _parseCsvNumsRaw(($("rcKList").value || "20").trim()).map(x => Math.max(2, Math.floor(x)));
+        const pList = _parseCsvNumsRaw(($("rcPList").value || "80").trim()).map(x => Math.min(99, Math.max(1, x)));
+        const pOutList = _parseCsvNumsRaw(($("rcPOutList") && $("rcPOutList").value ? $("rcPOutList").value : "").trim())
+          .map(x => Math.min(99, Math.max(1, x)));
+        const rList = _parseCsvNumsRaw(($("rcReduceList").value || "50").trim()).map(x => Math.min(100, Math.max(0, x)));
+        const sigTypes = Array.from(document.querySelectorAll("input.rcSig")).filter(x => x.checked).map(x => x.value);
+        const recModes = Array.from(document.querySelectorAll("input.rcRec")).filter(x => x.checked).map(x => x.value);
+        const cooldownList = _parseCsvNumsRaw(($("rcCooldownList") && $("rcCooldownList").value ? $("rcCooldownList").value : "0").trim())
+          .map(x => Math.max(0, Math.floor(x)));
+        const futureHListRaw = _parseCsvNumsRaw(($("rcFutureH").value || "20").trim());
+        const futureHList = (futureHListRaw.length ? futureHListRaw : [20]).map(x => Math.max(1, Math.floor(x)));
+        const eventThrListRaw = _parseCsvNumsRaw(($("rcEventThr").value || "10").trim());
+        const eventThrList = (eventThrListRaw.length ? eventThrListRaw : [10]);
+        const objective = ($("rcObjective").value || "calmar_ratio");
+        const lambda = Number(($("rcLambda") && $("rcLambda").value ? $("rcLambda").value : "1.0").trim());
+        return { rf, kList, pList, pOutList, rList, sigTypes, recModes, cooldownList, futureHList, eventThrList, objective, lambda };
+      }
+
+      function _rcObjectiveScore(objKey, exp, lambda) {
+        const metrics = exp ? exp.adjMetrics : null;
+        if (!metrics) return -Infinity;
+        const hit = (exp && Number.isFinite(Number(exp.hitRisk))) ? Number(exp.hitRisk) : NaN;
+        const lam = (Number.isFinite(Number(lambda)) ? Number(lambda) : 0);
+        if (objKey === "min_mdd") return -Number(metrics.max_drawdown); // smaller dd => larger score
+        if (objKey === "sharpe_ratio") return Number(metrics.sharpe_ratio);
+        if (objKey === "calmar_minus_hit") return Number(metrics.calmar_ratio) - lam * (Number.isFinite(hit) ? hit : 0);
+        if (objKey === "sharpe_minus_hit") return Number(metrics.sharpe_ratio) - lam * (Number.isFinite(hit) ? hit : 0);
+        return Number(metrics.calmar_ratio); // default
+      }
+
+      function _rcSearchOne(code) {
+        const b = _rcGetBaseline();
+        if (!b || !b.nav || !b.nav.series || !b.nav.dates) {
+          setMsg("请先运行等权分析（上方“运行分析”），再做逐标的风控搜索。");
+          return [];
+        }
+        const dates = b.nav.dates;
+        const nav = b.nav.series[code];
+        if (!nav || nav.length < 2) {
+          setMsg(`无标的 NAV 序列：${code}`);
+          return [];
+        }
+        const { rf, kList, pList, pOutList, rList, sigTypes, recModes, cooldownList, futureHList, eventThrList, objective, lambda } = _rcReadInputs();
+
+        const results = [];
+        for (const sigType of sigTypes) {
+          for (const k of kList) {
+            for (const p of pList) {
+              for (const reduce of rList) {
+                for (const futureH of futureHList) {
+                  for (const eventThr of eventThrList) {
+                    for (const recMode of recModes.length ? recModes : ["immediate"]) {
+                      const pOutCandidates = (recMode === "hysteresis") ? (pOutList.length ? pOutList : [Math.max(1, Math.min(99, Number(p) - 20))]) : [null];
+                      const cdCandidates = (recMode === "cooldown") ? (cooldownList.length ? cooldownList : [0]) : [0];
+                      for (const pOut of pOutCandidates) {
+                        for (const cd of cdCandidates) {
+                          const exp = _runRiskExperimentOnSeries({
+                            name: code,
+                            dates,
+                            nav,
+                            sigType,
+                            sigWindow: k,
+                            futureWindow: futureH,
+                            eventThrPct: eventThr,
+                            sigPct: p,
+                            reducePct: reduce,
+                            rfAnnual: rf,
+                            recoveryMode: recMode,
+                            pOut,
+                            cooldownDays: cd,
+                          });
+                          if (!exp || !exp.adjMetrics) continue;
+                          const score = _rcObjectiveScore(objective, exp, lambda);
+                          if (!Number.isFinite(score)) continue;
+                          results.push({
+                            code,
+                            sigType,
+                            k,
+                            p,
+                            pOut,
+                            cooldownDays: cd,
+                            recoveryMode: recMode,
+                            reduce,
+                            futureH,
+                            eventThr,
+                            thrIn: exp.thrIn,
+                            thrOut: exp.thrOut,
+                            hitRisk: exp.hitRisk,
+                            exp,
+                            score,
+                          });
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        results.sort((a, b) => (Number(b.score) - Number(a.score)));
+        window.__rcLastSearch[code] = results;
+        return results;
+      }
+
+      function _rcRenderAssetTop(code) {
+        const el = $("rcAssetTop");
+        if (!el) return;
+        const rows = (window.__rcLastSearch[code] || []).slice(0, 12);
+        if (rows.length === 0) {
+          el.innerHTML = `<tr><th>提示</th></tr><tr><td class="muted">暂无结果，请点击“搜索当前标的”。</td></tr>`;
+          return;
+        }
+        const fmtP = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtPct(Number(x));
+        const fmtN = (x) => (x == null || Number.isNaN(Number(x))) ? "-" : fmtNum(Number(x));
+        el.innerHTML =
+          `<tr><th>#</th><th>信号</th><th>K</th><th>P_in</th><th>恢复</th><th>P_out/N</th><th>降仓Y</th><th>H</th><th>X</th><th>风险命中率</th><th>年化</th><th>波动</th><th>MDD</th><th>夏普</th><th>卡玛</th><th>操作</th></tr>` +
+          rows.map((r, i) => {
+            const m = r.exp.adjMetrics || {};
+            const rec = String(r.recoveryMode || "immediate");
+            const recLabel = (rec === "hysteresis") ? "滞回" : (rec === "cooldown" ? "冷却" : "立即");
+            const pOutOrN = (rec === "hysteresis") ? (`Pout=${r.pOut==null? "-" : String(r.pOut)+"%"}`) : (`N=${String(r.cooldownDays || 0)}`);
+            return `<tr>
+              <td>${i + 1}</td>
+              <td>${esc(r.sigType)}</td>
+              <td>${esc(String(r.k))}</td>
+              <td>${esc(String(r.p))}%</td>
+              <td>${esc(recLabel)}</td>
+              <td>${esc(pOutOrN)}</td>
+              <td>${esc(String(r.reduce))}%</td>
+              <td>${esc(String(r.futureH || "-"))}</td>
+              <td>${esc(String(r.eventThr || "-"))}%</td>
+              <td>${fmtP(r.hitRisk)}</td>
+              <td>${fmtP(m.annualized_return)}</td>
+              <td>${fmtP(m.annualized_volatility)}</td>
+              <td>${fmtP(m.max_drawdown)}</td>
+              <td>${fmtN(m.sharpe_ratio)}</td>
+              <td>${fmtN(m.calmar_ratio)}</td>
+              <td><button class="rcSetRuleBtn" data-code="${esc(code)}" data-idx="${i}">设为规则</button></td>
+            </tr>`;
+          }).join("");
+      }
+
+      function _rcRenderRuleBook() {
+        const el = $("rcRuleBook");
+        if (!el) return;
+        const b = _rcGetBaseline();
+        const codes = (b && b.codes) ? b.codes : Array.from(selected);
+        const rb = window.__riskRuleBook || {};
+        el.innerHTML =
+          `<tr><th>标的</th><th>规则</th><th>参数</th><th>操作</th></tr>` +
+          (codes || []).map((c) => {
+            const r = rb[c];
+            if (!r) {
+              return `<tr><td>${esc(c)}</td><td class="muted">未设置</td><td class="muted">-</td><td class="muted">先做搜索</td></tr>`;
+            }
+            const ruleText = `${r.sigType}${r.sigType==="return" ? "(低分位触发)" : ""}`;
+            const rec = String(r.recoveryMode || "immediate");
+            const recLabel = (rec === "hysteresis") ? `滞回(Pout=${r.pOut==null? "-" : String(r.pOut)+"%"})` : (rec === "cooldown" ? `冷却(N=${String(r.cooldownDays||0)})` : "立即恢复");
+            const paramText = `K=${r.k}, Pin=${r.p}%, ${recLabel}, 降仓=${r.reduce}%`;
+            return `<tr><td>${esc(c)}</td><td>${esc(ruleText)}</td><td>${esc(paramText)}</td><td><button class="rcDelRuleBtn" data-code="${esc(c)}">删除</button></td></tr>`;
+          }).join("");
+      }
+
+      function _rcRenderAssetChart(code) {
+        const b = _rcGetBaseline();
+        if (!b || !b.nav || !b.nav.series) return;
+        const baseNav = b.nav.series[code] || [];
+        const dates = b.nav.dates || [];
+        const top = (window.__rcLastSearch[code] || [])[0];
+        if (!top) {
+          $("rcAssetChart").innerHTML = "<div class='muted'>暂无图表：请先搜索当前标的</div>";
+          return;
+        }
+        const navAdj = top.exp.navAdj || [];
+        Plotly.newPlot("rcAssetChart", [
+          { x: dates, y: baseNav, mode: "lines", name: `${code}-BH`, line: { width: 1.2, color: "#666" } },
+          { x: dates, y: navAdj, mode: "lines", name: `${code}-风控`, line: { width: 1.5, color: "#d62728" } },
+        ], { title: `单标的：${code} buy&hold vs 风控（Top1）`, margin: { t: 40 }, yaxis: { type: "log", tickformat: ".0f", gridcolor: "#eee" } }, { responsive: true, displayModeBar: false });
+      }
+
+      function _rcAttachAssetTopHandlers() {
+        const el = $("rcAssetTop");
+        if (!el) return;
+        el.addEventListener("click", (ev) => {
+          const t = ev.target;
+          if (!(t && t.classList && t.classList.contains("rcSetRuleBtn"))) return;
+          const code = t.dataset.code;
+          const idx = Number(t.dataset.idx || "0");
+          const rows = (window.__rcLastSearch[code] || []);
+          const row = rows[idx];
+          if (!row) return;
+          window.__riskRuleBook[code] = {
+            sigType: row.sigType,
+            k: row.k,
+            p: row.p,
+            reduce: row.reduce,
+            recoveryMode: row.recoveryMode || "immediate",
+            pOut: row.pOut == null ? null : Number(row.pOut),
+            cooldownDays: Number(row.cooldownDays || 0),
+          };
+          _rcRenderRuleBook();
+        });
+      }
+
+      function _rcAttachRuleBookHandlers() {
+        const el = $("rcRuleBook");
+        if (!el) return;
+        el.addEventListener("click", (ev) => {
+          const t = ev.target;
+          if (!(t && t.classList && t.classList.contains("rcDelRuleBtn"))) return;
+          const code = t.dataset.code;
+          if (code && window.__riskRuleBook) delete window.__riskRuleBook[code];
+          _rcRenderRuleBook();
+        });
+      }
+
+      function _rcBuildExposureByCode() {
+        const b = _rcGetBaseline();
+        if (!b || !b.nav || !b.nav.series) return null;
+        const { rf, futureHList, eventThrList } = _rcReadInputs();
+        const futureH = (futureHList && futureHList.length) ? Number(futureHList[0]) : 20;
+        const eventThr = (eventThrList && eventThrList.length) ? Number(eventThrList[0]) : 10;
+        const dates = b.nav.dates || [];
+        const out = {};
+        for (const code of (b.codes || [])) {
+          const rule = window.__riskRuleBook[code];
+          if (!rule) continue;
+          const nav = b.nav.series[code];
+          const exp = _runRiskExperimentOnSeries({
+            name: code,
+            dates,
+            nav,
+            sigType: rule.sigType,
+            sigWindow: rule.k,
+            futureWindow: futureH,
+            eventThrPct: eventThr,
+            sigPct: rule.p,
+            reducePct: rule.reduce,
+            rfAnnual: rf,
+            recoveryMode: rule.recoveryMode || "immediate",
+            pOut: rule.pOut == null ? null : Number(rule.pOut),
+            cooldownDays: Number(rule.cooldownDays || 0),
+          });
+          if (!exp) continue;
+          const exp2 = _computeExposureSeries({
+            nav,
+            sigType: rule.sigType,
+            sigWindow: rule.k,
+            pIn: rule.p,
+            reducePct: rule.reduce,
+            recoveryMode: rule.recoveryMode || "immediate",
+            pOut: rule.pOut == null ? null : Number(rule.pOut),
+            cooldownDays: Number(rule.cooldownDays || 0),
+          });
+          const exposure = exp2.exposure;
+          out[code] = { exposure, binStats: exp.binStats };
+        }
+        return { dates, byCode: out };
+      }
+
+      function _rcSimulateEwComposite() {
+        const b = _rcGetBaseline();
+        if (!b || !b.nav || !b.nav.series) return null;
+        const expoPack = _rcBuildExposureByCode();
+        if (!expoPack) return null;
+        const dates = b.nav.dates || [];
+        const codes = b.codes || [];
+        const reb = ($("rebalance").value || "yearly").toLowerCase();
+        const rfRaw = ($("rf").value || "").trim();
+        let rf = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (rf > 1.0) rf = rf / 100.0;
+
+        const navByCode = {};
+        const retByCode = {};
+        for (const c of codes) {
+          const nav = b.nav.series[c] || [];
+          navByCode[c] = nav;
+          retByCode[c] = nav.map((v, i) => (i === 0 ? 0 : (v / nav[i - 1] - 1)));
+        }
+
+        const n = dates.length;
+        const w = {};
+        for (const c of codes) w[c] = 1.0 / Math.max(1, codes.length);
+        const navBase = new Array(n).fill(1.0);
+        const navAdj = new Array(n).fill(1.0);
+
+        const keyOf = (ds) => {
+          const d = new Date(ds);
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          const q = Math.floor((m - 1) / 3) + 1;
+          const onejan = new Date(d.getFullYear(), 0, 1);
+          const day = Math.floor((d - onejan) / 86400000);
+          const wk = Math.floor((day + onejan.getDay()) / 7) + 1;
+          if (reb === "weekly") return `${y}-W${wk}`;
+          if (reb === "monthly") return `${y}-${m}`;
+          if (reb === "quarterly") return `${y}-Q${q}`;
+          if (reb === "yearly") return `${y}`;
+          if (reb === "daily") return `${y}-${m}-${d.getDate()}`;
+          return "all"; // none
+        };
+
+        for (let t = 1; t < n; t++) {
+          // portfolio return using yesterday weights (drift inside period)
+          let rBase = 0.0;
+          let rAdj = 0.0;
+          for (const c of codes) {
+            const wi = Number(w[c] || 0);
+            const ri = Number((retByCode[c] && retByCode[c][t]) || 0);
+            const expo = (expoPack.byCode[c] && expoPack.byCode[c].exposure) ? Number(expoPack.byCode[c].exposure[t]) : 1.0;
+            rBase += wi * ri;
+            rAdj += wi * (expo * ri);
+          }
+          navBase[t] = navBase[t - 1] * (1.0 + rBase);
+          navAdj[t] = navAdj[t - 1] * (1.0 + rAdj);
+
+          // drift weights by raw returns (not exposure) then renormalize
+          let sum = 0.0;
+          const wNew = {};
+          for (const c of codes) {
+            const wi = Number(w[c] || 0);
+            const ri = Number((retByCode[c] && retByCode[c][t]) || 0);
+            const v = wi * (1.0 + ri);
+            wNew[c] = v;
+            sum += v;
+          }
+          if (sum > 0) {
+            for (const c of codes) w[c] = wNew[c] / sum;
+          }
+
+          // rebalance at period boundary: if current key != next key, reset weights for next day
+          if (reb !== "none" && t < n - 1) {
+            const k1 = keyOf(dates[t]);
+            const k2 = keyOf(dates[t + 1]);
+            if (k1 !== k2) {
+              for (const c of codes) w[c] = 1.0 / Math.max(1, codes.length);
+            }
+          }
+        }
+
+        const mBase = _calcMetricsFromNav(navBase, rf);
+        const mAdj = _calcMetricsFromNav(navAdj, rf);
+
+        // Use average binStats across codes as a simple summary table
+        const stats = [];
+        const bins = ["Q1(<=P20)", "Q2(P20-40)", "Q3(P40-60)", "Q4(P60-80)", "Q5(>P80)"];
+        for (const bname of bins) {
+          const rows = [];
+          for (const c of codes) {
+            const bs = (expoPack.byCode[c] && expoPack.byCode[c].binStats) ? expoPack.byCode[c].binStats : null;
+            const one = bs ? bs.find(x => x.label === bname) : null;
+            if (one) rows.push(one);
+          }
+          const mean = rows.length ? rows.reduce((a, x) => a + Number(x.mean || 0), 0) / rows.length : NaN;
+          const hit = rows.length ? rows.reduce((a, x) => a + Number(x.hit || 0), 0) / rows.length : NaN;
+          stats.push({ label: bname, count: rows.length, mean, p10: NaN, p50: NaN, p90: NaN, hit });
+        }
+
+        return { dates, navBase, navAdj, mBase, mAdj, binStats: stats };
+      }
+
+      function _rcSimulateRotationComposite() {
+        const rot = window.__lastRotationResult || null;
+        const b = _rcGetBaseline();
+        if (!rot || !rot.nav || !rot.nav.series || !rot.nav.dates) return null;
+        if (!b || !b.nav || !b.nav.dates) return null;
+        const expoPack = _rcBuildExposureByCode();
+        if (!expoPack) return null;
+        const rfRaw = ($("rf").value || "").trim();
+        let rf = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (rf > 1.0) rf = rf / 100.0;
+
+        const dates = rot.nav.dates || [];
+        const nav = rot.nav.series.ROTATION || [];
+        if (nav.length < 2) return null;
+        const rets = nav.map((v, i) => (i === 0 ? 0 : (v / nav[i - 1] - 1)));
+
+        // map exposure by date for each code (baseline dates axis)
+        const expoByCodeByDate = {};
+        const idxByDateBase = new Map((expoPack.dates || []).map((d, i) => [String(d), i]));
+        for (const [c, pack] of Object.entries(expoPack.byCode || {})) {
+          const arr = pack.exposure || [];
+          expoByCodeByDate[c] = (ds) => {
+            const j = idxByDateBase.get(String(ds));
+            if (j == null) return 1.0;
+            const v = arr[j];
+            return Number.isFinite(Number(v)) ? Number(v) : 1.0;
+          };
+        }
+
+        // held codes per date from rotation holdings
+        const held = new Array(dates.length).fill(null).map(() => []);
+        const idxByDate = new Map(dates.map((d, i) => [String(d), i]));
+        const periods = rot.holdings || [];
+        for (const p of periods) {
+          const s = String(p.start_date || "");
+          const e = String(p.end_date || "");
+          const picks = (p.picks || []).map(String);
+          const si = idxByDate.get(s);
+          const ei = idxByDate.get(e);
+          if (si == null || ei == null) continue;
+          for (let i = si; i <= ei; i++) {
+            held[i] = picks;
+          }
+        }
+
+        const navAdj = new Array(nav.length).fill(1.0);
+        for (let t = 1; t < nav.length; t++) {
+          const codes = held[t] || [];
+          let expo = 0.0;
+          if (codes.length === 0) {
+            expo = 0.0;
+          } else {
+            let sum = 0.0;
+            let cnt = 0;
+            for (const c of codes) {
+              if (!expoByCodeByDate[c]) continue;
+              sum += expoByCodeByDate[c](dates[t]);
+              cnt += 1;
+            }
+            expo = cnt ? (sum / cnt) : 1.0;
+          }
+          navAdj[t] = navAdj[t - 1] * (1.0 + rets[t] * expo);
+        }
+        const mBase = _calcMetricsFromNav(nav, rf);
+        const mAdj = _calcMetricsFromNav(navAdj, rf);
+        return { dates, navBase: nav, navAdj, mBase, mAdj, binStats: [] };
+      }
+
+      function rcSearchCurrentAsset() {
+        const b = _rcGetBaseline();
+        if (!b) return;
+        // Do NOT reset selection here; only ensure options exist.
+        if (!$("rcAssetCode") || ($("rcAssetCode").options || []).length === 0) _rcInitAssetSelect();
+        const code = ($("rcAssetCode").value || "").trim();
+        if (!code) return;
+        $("status").textContent = `搜索中(${code})...`;
+        setTimeout(() => {
+          _rcSearchOne(code);
+          _rcRenderAssetTop(code);
+          _rcRenderAssetChart(code);
+          _rcRenderRuleBook();
+          $("status").textContent = "";
+        }, 10);
+      }
+
+      function rcSearchAllAssets() {
+        const b = _rcGetBaseline();
+        if (!b || !b.codes) return setMsg("请先运行等权分析。");
+        _rcInitAssetSelect();
+        const codes = b.codes || [];
+        $("status").textContent = "搜索中(全部标的)...";
+        setTimeout(() => {
+          for (const c of codes) {
+            const res = _rcSearchOne(c);
+            if (res && res[0]) {
+              window.__riskRuleBook[c] = { sigType: res[0].sigType, k: res[0].k, p: res[0].p, reduce: res[0].reduce };
+            }
+          }
+          const cur = ($("rcAssetCode").value || (codes[0] || "")).trim();
+          if (cur) {
+            _rcRenderAssetTop(cur);
+            _rcRenderAssetChart(cur);
+          }
+          _rcRenderRuleBook();
+          $("status").textContent = "";
+        }, 10);
+      }
+
+      function rcApplyComposite() {
+        const b = _rcGetBaseline();
+        if (!b) return setMsg("请先运行等权分析。");
+        const ew = _rcSimulateEwComposite();
+        if (ew) {
+          Plotly.newPlot("ewRiskChart", [
+            { x: ew.dates, y: ew.navBase, mode: "lines", name: "等权-原策略(sim)", line: { width: 1.2, color: "#2ca02c" } },
+            { x: ew.dates, y: ew.navAdj, mode: "lines", name: "等权-复合风控", line: { width: 1.4, color: "#ff7f0e" } },
+          ], { title: "等权：原策略 vs 复合风控", margin: { t: 40 }, yaxis: { type: "log", tickformat: ".0f", gridcolor: "#eee" } }, { responsive: true, displayModeBar: false });
+          _renderRiskMetricsTable("ewRiskMetrics", ew.mBase, ew.mAdj);
+          _renderRiskSignalTable("ewRiskSignalTable", ew.binStats);
+        }
+        const rot = _rcSimulateRotationComposite();
+        if (rot) {
+          Plotly.newPlot("rotRiskChart", [
+            { x: rot.dates, y: rot.navBase, mode: "lines", name: "轮动-原策略", line: { width: 1.2, color: "#1f77b4" } },
+            { x: rot.dates, y: rot.navAdj, mode: "lines", name: "轮动-复合风控", line: { width: 1.4, color: "#d62728" } },
+          ], { title: "轮动：原策略 vs 复合风控（按持仓标的规则）", margin: { t: 40 }, yaxis: { type: "log", tickformat: ".0f", gridcolor: "#eee" } }, { responsive: true, displayModeBar: false });
+          _renderRiskMetricsTable("rotRiskMetrics", rot.mBase, rot.mAdj);
+          _renderRiskSignalTable("rotRiskSignalTable", rot.binStats);
+        } else {
+          $("rotRiskChart").innerHTML = "<div class='muted'>提示：先运行轮动回测，才能计算轮动的复合风控效果。</div>";
+        }
+      }
+
       function plotCorrelation(corr) {
         const el = $("corrHeatmap");
         if (!corr || !corr.codes || !corr.matrix) {
@@ -3696,6 +5092,24 @@
         if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
         $("status").textContent = "回测中...";
         setMsg("");
+        const asset_rc_rules = (() => {
+          const rb = window.__riskRuleBook || {};
+          const out = [];
+          for (const [code, r] of Object.entries(rb)) {
+            if (!r) continue;
+            out.push({
+              code,
+              sig_type: r.sigType,
+              k: Number(r.k),
+              p_in: Number(r.p),
+              reduce_pct: Number(r.reduce),
+              recovery_mode: r.recoveryMode || "immediate",
+              p_out: (r.pOut == null ? null : Number(r.pOut)),
+              cooldown_days: Number(r.cooldownDays || 0),
+            });
+          }
+          return out.length ? out : null;
+        })();
         const resp = await api("/analysis/rotation", {
           method: "POST",
           body: JSON.stringify({
@@ -3713,14 +5127,19 @@
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
+            asset_rc_rules,
           }),
         });
         const text = await resp.text();
         $("status").textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
+        window.__lastRotationResult = data;
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
+        renderRotationHoldingPeriodLengthDistributions(data.holdings || [], (data.nav && data.nav.dates) ? data.nav.dates : []);
+        // optional: if rules already exist, allow one-click composite
+        try { _rcInitAssetSelect(); _rcRenderRuleBook(); } catch (e) { /* ignore */ }
         renderWinPayoff(data.win_payoff || {});
         renderContributionTables("rot", data.attribution);
         rotState.rows = data.period_details || [];
@@ -3875,6 +5294,24 @@
 
         $("status").textContent = "计算日历效应（轮动）...";
         setMsg("");
+        const asset_rc_rules = (() => {
+          const rb = window.__riskRuleBook || {};
+          const out = [];
+          for (const [code, r] of Object.entries(rb)) {
+            if (!r) continue;
+            out.push({
+              code,
+              sig_type: r.sigType,
+              k: Number(r.k),
+              p_in: Number(r.p),
+              reduce_pct: Number(r.reduce),
+              recovery_mode: r.recoveryMode || "immediate",
+              p_out: (r.pOut == null ? null : Number(r.pOut)),
+              cooldown_days: Number(r.cooldownDays || 0),
+            });
+          }
+          return out.length ? out : null;
+        })();
         const resp = await api("/analysis/rotation/calendar-effect", {
           method: "POST",
           body: JSON.stringify({
@@ -3891,6 +5328,7 @@
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
             anchors, exec_prices,
+            asset_rc_rules,
           }),
         });
         const text = await resp.text();
@@ -3933,6 +5371,7 @@
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         lastBaseline = data;
+        window.__lastBaselineResult = data;
         corrRangeKey = "all";
         plotNav(data.nav);
         renderMetrics(data.metrics);
@@ -3958,6 +5397,17 @@
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
         renderPeriodDistributions(data.period_distributions);
+        try {
+          _rcInitAssetSelect();
+          _rcRenderRuleBook();
+          if (!window.__rcHandlersAttached) {
+            _rcAttachAssetTopHandlers();
+            _rcAttachRuleBookHandlers();
+            window.__rcHandlersAttached = true;
+          }
+          const c0 = ($("rcAssetCode") && $("rcAssetCode").value) ? $("rcAssetCode").value : (data.codes && data.codes[0]);
+          if (c0) _rcRenderAssetTop(String(c0));
+        } catch (e) { /* best effort */ }
       }
 
       function initTabs(containerId) {
@@ -4013,6 +5463,9 @@
 
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+      if ($("rcSearchOne")) $("rcSearchOne").addEventListener("click", rcSearchCurrentAsset);
+      if ($("rcSearchAll")) $("rcSearchAll").addEventListener("click", rcSearchAllAssets);
+      if ($("rcApplyComposite")) $("rcApplyComposite").addEventListener("click", rcApplyComposite);
       async function runTrend() {
         const code = ($("trendCode") && $("trendCode").value) ? $("trendCode").value : "";
         if (!code) return setMsg("请先选择一个标的。");
@@ -4286,6 +5739,24 @@
         $("status").textContent = "蒙特卡洛模拟中...";
         setMsg("");
         try {
+          const asset_rc_rules = (() => {
+            const rb = window.__riskRuleBook || {};
+            const out = [];
+            for (const [code, r] of Object.entries(rb)) {
+              if (!r) continue;
+              out.push({
+                code,
+                sig_type: r.sigType,
+                k: Number(r.k),
+                p_in: Number(r.p),
+                reduce_pct: Number(r.reduce),
+                recovery_mode: r.recoveryMode || "immediate",
+                p_out: (r.pOut == null ? null : Number(r.pOut)),
+                cooldown_days: Number(r.cooldownDays || 0),
+              });
+            }
+            return out.length ? out : null;
+          })();
           const resp = await api("/analysis/rotation/montecarlo", {
             method: "POST",
             body: JSON.stringify({
@@ -4301,6 +5772,7 @@
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,
               chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
+              asset_rc_rules,
               n_sims, block_size, seed, sample_window_days
             }),
           });
@@ -4315,6 +5787,11 @@
           plotMcHist("mcExcessHist", data.mc.excess, $("mcExcessMetric").value);
           renderFit("Rot", data.mc.strategy, $("mcRotMetric").value);
           renderFit("Excess", data.mc.excess, $("mcExcessMetric").value);
+          // Observed holding-period length distributions (per-code)
+          try {
+            const obs = (data.observed_holding_len || {});
+            renderHoldingLenDistInto("mcRot", obs.holdings || [], obs.nav_dates || []);
+          } catch (e) { /* ignore */ }
           // Monte Carlo period-return distributions (strategy & excess)
           _renderPeriodDistTable("mcRotPeriodStats", data.mc.strategy ? data.mc.strategy.period_return : null);
           _renderPeriodDistTable("mcExcessPeriodStats", data.mc.excess ? data.mc.excess.period_return : null);

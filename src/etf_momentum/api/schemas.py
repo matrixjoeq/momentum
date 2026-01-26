@@ -162,6 +162,23 @@ class BaselineCalendarEffectRequest(BaseModel):
     exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
+class AssetRiskControlRule(BaseModel):
+    """
+    Per-asset risk-control rule applied to weights daily:
+    - signal is computed from the asset's own hfq close-based NAV proxy
+    - when triggered, scale that asset's weight by (1 - reduce_pct)
+    """
+
+    code: str = Field(min_length=1, description="ETF code")
+    sig_type: str = Field(description="return|volatility|downside_vol|drawdown")
+    k: int = Field(ge=2, le=2520, description="Signal lookback window in trading days")
+    p_in: float = Field(gt=0.0, lt=100.0, description="Trigger percentile (0-100). For return, low-tail is used (100-p_in).")
+    reduce_pct: float = Field(ge=0.0, le=100.0, description="Reduce percent on trigger: exposure = 1 - reduce_pct/100")
+    recovery_mode: str = Field(default="immediate", description="immediate|hysteresis|cooldown")
+    p_out: float | None = Field(default=None, gt=0.0, lt=100.0, description="Recovery percentile for hysteresis mode")
+    cooldown_days: int = Field(default=0, ge=0, le=2520, description="Minimum days to keep reduced exposure (cooldown mode)")
+
+
 class RotationBacktestRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
@@ -270,6 +287,11 @@ class RotationBacktestRequest(BaseModel):
     # Timing (strategy NAV RSI gate; uses shadow NAV that ignores this timing gate for RSI signal)
     timing_rsi_gate: bool = Field(default=False, description="Enable timing: sleep when strategy NAV RSI < 50, reactivate when >= 50 (signal from shadow NAV)")
     timing_rsi_window: int = Field(default=24, ge=2, description="RSI window (trading days) for timing gate; typical 6/12/24; default=24")
+    # Per-asset risk control rules (optional; applied daily to weights as exposure scaling)
+    asset_rc_rules: list[AssetRiskControlRule] | None = Field(
+        default=None,
+        description="Optional per-asset risk-control rules (signal on hfq close-based NAV; scales down weights when triggered).",
+    )
 
 
 class RotationCalendarEffectRequest(RotationBacktestRequest):
@@ -298,6 +320,10 @@ class RotationWeekly5OpenSimRequest(BaseModel):
         ge=0,
         le=4,
         description="Optional: if set, compute only one anchor weekday (0=Mon..4=Fri) to reduce payload/runtime.",
+    )
+    asset_rc_rules: list[AssetRiskControlRule] | None = Field(
+        default=None,
+        description="Optional per-asset risk-control rules to apply (same as rotation backtest).",
     )
 
 
