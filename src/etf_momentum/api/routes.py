@@ -223,13 +223,28 @@ def _run_sync_job_fixed_pool(
         db.commit()
 
         ok = bool(res.get("ok"))
+        # Summarize failures for quick visibility in job list.
+        err_summary: str | None = None
+        if not ok:
+            failed_pairs: list[str] = []
+            codes_obj = (res.get("codes") if isinstance(res, dict) else None) or {}
+            if isinstance(codes_obj, dict):
+                for code, co in codes_obj.items():
+                    ad = (co.get("adjusts") if isinstance(co, dict) else None) or {}
+                    if not isinstance(ad, dict):
+                        continue
+                    for adj, ao in ad.items():
+                        if isinstance(ao, dict) and str(ao.get("status")) != "success" and not bool(ao.get("skipped")):
+                            failed_pairs.append(f"{code}:{adj}")
+            if failed_pairs:
+                err_summary = "sync failed: " + ",".join(failed_pairs[:10]) + ("..." if len(failed_pairs) > 10 else "")
         update_sync_job(
             db,
             job_id=job_id,
             status=("success" if ok else "failed"),
             finished_at=dt.datetime.now(dt.timezone.utc),
             result=dict(res),
-            error_message=(None if ok else "sync failed; see result.codes for details"),
+            error_message=(None if ok else (err_summary or "sync failed; see result.codes for details")),
             progress={"phase": "done", "ok": ok},
         )
         db.commit()

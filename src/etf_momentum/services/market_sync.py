@@ -6,9 +6,14 @@ from typing import Any, Callable, Iterable
 
 from sqlalchemy.orm import Session
 
-from etf_momentum.data.ingestion import ingest_one_etf
-from etf_momentum.db.repo import get_etf_pool_by_code, get_price_date_range, upsert_etf_pool, update_etf_pool_data_range
-from etf_momentum.settings import get_settings
+from etf_momentum.data.ingestion import ingest_one_etf  # pylint: disable=import-error
+from etf_momentum.db.repo import (  # pylint: disable=import-error
+    get_etf_pool_by_code,
+    get_price_date_range,
+    upsert_etf_pool,
+    update_etf_pool_data_range,
+)
+from etf_momentum.settings import get_settings  # pylint: disable=import-error
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +105,19 @@ def sync_fixed_pool_prices(
                     "upserted": int(res.upserted),
                     "start": start,
                     "end": end,
+                    "batch_id": int(res.batch_id),
+                    "message": (str(res.message) if res.message else None),
                 }
                 if res.status != "success":
+                    # Critical: ingest_one_etf returns status="failed" without raising, so
+                    # we must log and surface the message; otherwise cloud logs look "silent".
+                    logger.warning(
+                        "sync_fixed_pool_prices ingest failed: code=%s adj=%s batch_id=%s msg=%s",
+                        code,
+                        adj,
+                        int(res.batch_id),
+                        (res.message or ""),
+                    )
                     code_out["ok"] = False
                     out["ok"] = False
             except Exception as e:  # pylint: disable=broad-exception-caught
