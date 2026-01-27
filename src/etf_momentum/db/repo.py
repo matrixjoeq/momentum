@@ -456,6 +456,31 @@ def record_price_audit(
 
 # -------------------- Sync job helpers (async admin tasks) --------------------
 
+def get_sync_job_by_dedupe_key(db: Session, dedupe_key: str) -> SyncJob | None:
+    return db.execute(select(SyncJob).where(SyncJob.dedupe_key == str(dedupe_key))).scalar_one_or_none()
+
+
+def _next_retry_dedupe_key(db: Session, base: str) -> str:
+    """
+    Generate a new unique dedupe_key for a retry attempt.
+
+    SyncJob has a UNIQUE constraint on dedupe_key, so we cannot reuse `base` once created.
+    We suffix with "#retryN" to create a new job while still keeping the base key readable.
+    """
+    base = str(base)
+    # Count existing retries (best-effort) to pick a starting N.
+    n = int(
+        db.execute(select(func.count()).select_from(SyncJob).where(SyncJob.dedupe_key.like(f"{base}#retry%"))).scalar()  # pylint: disable=not-callable
+        or 0
+    )
+    # Probe until unused (handles concurrent creators).
+    for k in range(max(1, n), max(1, n) + 50):
+        cand = f"{base}#retry{k}"
+        if get_sync_job_by_dedupe_key(db, cand) is None:
+            return cand
+    # last resort: include timestamp-ish suffix
+    return f"{base}#retry{n+50}"
+
 
 def create_sync_job(
     db: Session,
@@ -466,11 +491,18 @@ def create_sync_job(
     adjusts: list[str],
 ) -> SyncJob:
     """
-    Create a sync job row. If an existing job with the same dedupe_key exists, return it.
+    Create a sync job row.
+
+    Behavior:
+    - If an existing job with the same dedupe_key is queued/running: return it (dedupe).
+    - If an existing job with the same dedupe_key is finished (success/failed): create a new retry job
+      with a unique suffix, so manual retriggers get a new job_id.
     """
-    existing = db.execute(select(SyncJob).where(SyncJob.dedupe_key == str(dedupe_key))).scalar_one_or_none()
+    existing = get_sync_job_by_dedupe_key(db, str(dedupe_key))
     if existing is not None:
-        return existing
+        if str(existing.status) in {"queued", "running"}:
+            return existing
+        dedupe_key = _next_retry_dedupe_key(db, str(dedupe_key))
     obj = SyncJob(
         job_type="sync_fixed_pool",
         dedupe_key=str(dedupe_key),

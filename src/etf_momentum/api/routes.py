@@ -70,6 +70,7 @@ from ..db.repo import (
     create_sync_job,
     delete_etf_pool,
     delete_prices,
+    get_sync_job_by_dedupe_key,
     get_sync_job,
     get_etf_pool_by_code,
     get_price_date_range,
@@ -345,12 +346,13 @@ def admin_sync_fixed_pool_async(
     do_full = bool(settings.auto_sync_full_refresh if payload.full_refresh is None else payload.full_refresh)
     dedupe = _dedupe_key_fixed_pool(run_date, full_refresh=do_full, adjusts=adjusts)
 
+    # If an identical job is already queued/running, return it (dedupe).
+    existing = get_sync_job_by_dedupe_key(db, dedupe)
+    if existing is not None and str(existing.status) in {"queued", "running"}:
+        return SyncJobTriggerResponse(job_id=int(existing.id), status=str(existing.status), dedupe_key=str(existing.dedupe_key))
+
     job = create_sync_job(db, dedupe_key=dedupe, run_date=run_date, full_refresh=do_full, adjusts=adjusts)
     db.commit()
-
-    # If an identical job is already running/queued, don't spawn another.
-    if str(job.status) in {"queued", "running"} and job.started_at is not None:
-        return SyncJobTriggerResponse(job_id=int(job.id), status=str(job.status), dedupe_key=str(job.dedupe_key))
 
     # Ensure app state exists (engine/session_factory) and schedule background runner.
     sf: sessionmaker[Session] = request.app.state.session_factory
