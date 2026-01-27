@@ -30,6 +30,12 @@ from .schemas import (
     SimTradeConfirmRequest,
     SimTradePreviewRequest,
     TrendBacktestRequest,
+    LeadLagAnalysisRequest,
+    LeadLagAnalysisResponse,
+    VixNextActionRequest,
+    VixNextActionResponse,
+    VixSignalBacktestRequest,
+    VixSignalBacktestResponse,
     EtfPoolOut,
     EtfPoolUpsert,
     FetchResult,
@@ -64,8 +70,15 @@ from ..analysis.calendar_effect import _ew_nav_and_weights_by_decision_dates as 
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.trend import TrendInputs, compute_trend_backtest
+from ..analysis.leadlag import LeadLagInputs, compute_lead_lag
+from ..calendar.trading_calendar import shift_to_trading_day
+from ..data.cboe_fetcher import FetchRequest as CboeFetchRequest
+from ..data.cboe_fetcher import fetch_cboe_daily_close
+from ..strategy.vix_signal import VixSignalInputs, backtest_vix_next_day_signal, generate_next_action
 from ..data.ingestion import ingest_one_etf
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
+from ..data.yahoo_fetcher import FetchRequest as YahooFetchRequest
+from ..data.yahoo_fetcher import fetch_yahoo_daily_close_with_alias
 from ..db.repo import (
     create_sync_job,
     delete_etf_pool,
@@ -90,7 +103,7 @@ from ..db.repo import (
 )
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
-from ..calendar.trading_calendar import shift_to_trading_day, trading_days
+from ..calendar.trading_calendar import trading_days
 from ..db.models import EtfPrice, SimDecision, SimPortfolio, SimPositionDaily, SimStrategyConfig, SimTrade, SimVariant
 from ..calendar.trading_calendar import is_trading_day
 from ..services.market_sync import sync_fixed_pool_prices
@@ -100,6 +113,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _ALL_ADJUSTS = ("qfq", "hfq", "none")
+
+_YAHOO_ALIASES = {
+    # User wording sometimes uses "GVX"; Yahoo commonly uses "^GVZ" for CBOE Gold Volatility.
+    "GVX": ["^GVX", "^GVZ"],
+    "^GVX": ["^GVX", "^GVZ"],
+    "GVZ": ["^GVZ"],
+    "^GVZ": ["^GVZ"],
+}
+
+
+def _normalize_vol_index(sym: str) -> str | None:
+    s = str(sym or "").strip().upper()
+    if s.startswith("^"):
+        s = s[1:]
+    if s in {"VIX"}:
+        return "VIX"
+    if s in {"GVZ", "GVX"}:
+        return "GVZ"
+    return None
 
 
 def _adjust_ranges(db: Session, code: str) -> dict[str, tuple[str | None, str | None]]:
@@ -563,6 +595,229 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         return compute_trend_backtest(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/leadlag", response_model=LeadLagAnalysisResponse)
+def analysis_leadlag(
+    payload: LeadLagAnalysisRequest,
+    db: Session = Depends(get_session),
+) -> LeadLagAnalysisResponse:
+    """
+    Analyze lead/lag and Granger causality between:
+    - ETF daily close (from DB)
+    - Volatility index daily close (Cboe CSV preferred; Yahoo optional fallback)
+    """
+    start_d = _parse_yyyymmdd(payload.start)
+    end_d = _parse_yyyymmdd(payload.end)
+    adj = str(payload.adjust or "hfq").strip().lower()
+    code = str(payload.etf_code).strip()
+
+    rows = list_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adj, limit=1000000)
+    if not rows:
+        return LeadLagAnalysisResponse(ok=False, error="empty_etf_series")
+
+    etf = pd.Series(
+        data=[float(r.close) if r.close is not None else np.nan for r in rows],
+        index=[r.trade_date for r in rows],
+        dtype=float,
+    ).dropna()
+    if etf.empty:
+        return LeadLagAnalysisResponse(ok=False, error="empty_etf_close")
+
+    idx_provider = str(getattr(payload, "index_provider", "cboe") or "cboe").strip().lower()
+    idx_align = str(getattr(payload, "index_align", "cn_next_trading_day") or "cn_next_trading_day").strip().lower()
+    idx_sym = str(payload.index_symbol).strip()
+    idx_code = _normalize_vol_index(idx_sym)
+
+    idx: pd.Series
+    idx_meta: dict
+
+    # Prefer Cboe CSV for VIX/GVZ (stable).
+    use_cboe = idx_provider in {"cboe", "auto"} and idx_code in {"VIX", "GVZ"}
+    if use_cboe:
+        dfc = fetch_cboe_daily_close(CboeFetchRequest(index=idx_code, start_date=payload.start, end_date=payload.end))
+        if dfc is None or dfc.empty:
+            return LeadLagAnalysisResponse(ok=False, error="empty_cboe_series", meta={"cboe": {"index": idx_code}})
+        idx = pd.Series(data=dfc["close"].to_numpy(dtype=float), index=dfc["date"].to_list(), dtype=float).dropna()
+        idx_meta = {"provider": "cboe", "index": idx_code, "align": idx_align}
+    else:
+        # Yahoo fallback (may be blocked by network policy).
+        idx_df, ymeta = fetch_yahoo_daily_close_with_alias(
+            YahooFetchRequest(symbol=idx_sym, start_date=payload.start, end_date=payload.end),
+            aliases=_YAHOO_ALIASES,
+        )
+        if idx_df is None or idx_df.empty:
+            return LeadLagAnalysisResponse(ok=False, error="empty_yahoo_series", meta={"yahoo": ymeta})
+        idx = pd.Series(data=idx_df["close"].to_numpy(dtype=float), index=idx_df["date"].to_list(), dtype=float).dropna()
+        idx_meta = {"provider": "yahoo", "symbol": idx_sym, "align": idx_align, "yahoo": ymeta}
+
+    if idx.empty:
+        return LeadLagAnalysisResponse(ok=False, error="empty_index_close", meta=idx_meta)
+
+    res = compute_lead_lag(
+        LeadLagInputs(
+            etf_close=etf,
+            idx_close=idx,
+            max_lag=int(payload.max_lag),
+            granger_max_lag=int(payload.granger_max_lag),
+            alpha=float(payload.alpha),
+            index_align=idx_align,
+            trade_cost_bps=float(getattr(payload, "trade_cost_bps", 0.0) or 0.0),
+            rolling_window=int(getattr(payload, "rolling_window", 252) or 252),
+            enable_threshold=bool(getattr(payload, "enable_threshold", True)),
+            threshold_quantile=float(getattr(payload, "threshold_quantile", 0.80) or 0.80),
+            walk_forward=bool(getattr(payload, "walk_forward", True)),
+            train_ratio=float(getattr(payload, "train_ratio", 0.60) or 0.60),
+            walk_objective=str(getattr(payload, "walk_objective", "sharpe") or "sharpe"),
+        )
+    )
+    if not bool(res.get("ok")):
+        return LeadLagAnalysisResponse(ok=False, error=str(res.get("reason") or "analysis_failed"), meta=idx_meta)
+
+    meta = dict(res.get("meta") or {})
+    meta.update({"etf_code": code, "adjust": adj})
+    meta.update(idx_meta)
+    return LeadLagAnalysisResponse(
+        ok=True,
+        meta=meta,
+        series=res.get("series"),
+        corr=res.get("corr"),
+        granger=res.get("granger"),
+        trade=res.get("trade"),
+    )
+
+
+@router.post("/signal/vix-next-action", response_model=VixNextActionResponse)
+def signal_vix_next_action(payload: VixNextActionRequest) -> VixNextActionResponse:
+    """
+    Produce a next-CN-trading-day instruction using VIX/GVZ (Cboe).
+    Intended for real trading workflow: BUY / SELL / HOLD.
+    """
+    idx = str(payload.index or "VIX").strip().upper()
+    # Fetch a reasonably long history for threshold estimation (Cboe CSV is small).
+    start = "19900101" if idx == "VIX" else "20090101"
+    end = _now_shanghai_date().strftime("%Y%m%d")
+    df = fetch_cboe_daily_close(CboeFetchRequest(index=idx, start_date=start, end_date=end))
+    if df is None or df.empty:
+        return VixNextActionResponse(ok=False, error="empty_cboe_series")
+    s = pd.Series(df["close"].to_numpy(dtype=float), index=df["date"].to_list(), dtype=float).dropna()
+    if s.empty:
+        return VixNextActionResponse(ok=False, error="empty_index_close")
+
+    tgt = None
+    if payload.target_cn_trade_date:
+        try:
+            tgt = _parse_yyyymmdd(str(payload.target_cn_trade_date))
+        except Exception:  # pylint: disable=broad-exception-caught
+            return VixNextActionResponse(ok=False, error="invalid_target_cn_trade_date")
+    else:
+        mode = str(getattr(payload, "mode", "next_cn_day") or "next_cn_day").strip().lower()
+        if mode == "next_cn_day":
+            # This matches real trading workflow: you want a decision for the next CN trading session.
+            cal = str(payload.calendar or "XSHG")
+            today = _now_shanghai_date()
+            tgt = shift_to_trading_day(today + dt.timedelta(days=1), shift="next", cal=cal)
+
+    res = generate_next_action(
+        VixSignalInputs(
+            index_close_us=s,
+            index=idx,
+            index_align=str(payload.index_align or "cn_next_trading_day"),
+            current_position=str(payload.current_position or "unknown").strip().lower(),  # type: ignore[arg-type]
+            lookback_window=int(payload.lookback_window),
+            threshold_quantile=float(payload.threshold_quantile),
+            min_abs_ret=float(payload.min_abs_ret),
+            target_cn_trade_date=tgt,
+            calendar=str(payload.calendar or "XSHG"),
+        )
+    )
+    if not bool(res.get("ok")):
+        return VixNextActionResponse(
+            ok=False,
+            error=str(res.get("error") or "failed"),
+            action_date=(str(res.get("action_date")) if res.get("action_date") else None),
+            signal=dict(res.get("signal") or {}) if isinstance(res.get("signal"), dict) else None,
+        )
+    return VixNextActionResponse(
+        ok=True,
+        action_date=str(res.get("action_date")),
+        action=str(res.get("action")),
+        target_position=str(res.get("target_position")),
+        current_position=str(res.get("current_position")),
+        reason=str(res.get("reason")),
+        index=str(res.get("index")),
+        index_align=str(res.get("index_align")),
+        calendar=str(res.get("calendar")),
+        signal=dict(res.get("signal") or {}),
+    )
+
+
+@router.post("/analysis/vix-signal-backtest", response_model=VixSignalBacktestResponse)
+def analysis_vix_signal_backtest(payload: VixSignalBacktestRequest, db: Session = Depends(get_session)) -> VixSignalBacktestResponse:
+    """
+    Backtest the live-tradable VIX-next-day BUY/SELL/HOLD signal on historical data.
+    Returns:
+    - strategy vs buy&hold NAV curves
+    - performance metrics
+    - per-day signal/position log (sorted by date desc)
+    """
+    start_d = _parse_yyyymmdd(payload.start)
+    end_d = _parse_yyyymmdd(payload.end)
+    if end_d < start_d:
+        return VixSignalBacktestResponse(ok=False, error="end_before_start")
+
+    code = str(payload.etf_code).strip()
+    adj = str(payload.adjust or "hfq").strip().lower()
+    rows = list_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adj, limit=1000000)
+    if not rows:
+        return VixSignalBacktestResponse(ok=False, error="empty_etf_series")
+    etf_close = pd.Series(
+        data=[float(r.close) if r.close is not None else np.nan for r in rows],
+        index=[r.trade_date for r in rows],
+        dtype=float,
+    ).dropna()
+    if etf_close.empty:
+        return VixSignalBacktestResponse(ok=False, error="empty_etf_close")
+
+    idx = str(payload.index or "VIX").strip().upper()
+    # Expand index fetch window to cover threshold lookback (best-effort).
+    back_days = int(max(60, int(payload.lookback_window) * 3))
+    start_fetch = (start_d - dt.timedelta(days=back_days)).strftime("%Y%m%d")
+    end_fetch = end_d.strftime("%Y%m%d")
+    dfc = fetch_cboe_daily_close(CboeFetchRequest(index=idx, start_date=start_fetch, end_date=end_fetch))
+    if dfc is None or dfc.empty:
+        return VixSignalBacktestResponse(ok=False, error="empty_cboe_series")
+    idx_close_us = pd.Series(dfc["close"].to_numpy(dtype=float), index=dfc["date"].to_list(), dtype=float).dropna()
+    if idx_close_us.empty:
+        return VixSignalBacktestResponse(ok=False, error="empty_index_close")
+
+    res = backtest_vix_next_day_signal(
+        etf_close_cn=etf_close,
+        index_close_us=idx_close_us,
+        start=start_d,
+        end=end_d,
+        index=idx,
+        index_align=str(payload.index_align or "cn_next_trading_day"),
+        calendar=str(payload.calendar or "XSHG"),
+        lookback_window=int(payload.lookback_window),
+        threshold_quantile=float(payload.threshold_quantile),
+        min_abs_ret=float(payload.min_abs_ret),
+        trade_cost_bps=float(payload.trade_cost_bps),
+        initial_nav=float(payload.initial_nav),
+        initial_position=str(payload.initial_position or "long").strip().lower(),  # type: ignore[arg-type]
+    )
+    if not bool(res.get("ok")):
+        return VixSignalBacktestResponse(ok=False, error=str(res.get("error") or "failed"))
+
+    meta = dict(res.get("meta") or {})
+    meta.update({"etf_code": code, "adjust": adj})
+    return VixSignalBacktestResponse(
+        ok=True,
+        meta=meta,
+        series=dict(res.get("series") or {}),
+        metrics=dict(res.get("metrics") or {}),
+        trades=list(res.get("trades") or []),
+    )
 
 
 @router.post("/analysis/rotation/calendar-effect")

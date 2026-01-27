@@ -44,6 +44,22 @@ def create_app() -> FastAPI:
             return RedirectResponse(url="/docs")
         return FileResponse(path)
 
+    @fastapi_app.get("/research/gold-gvx")
+    def research_gold_gvx():
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "research_gold_gvx.html"
+        if not path.exists():
+            return RedirectResponse(url="/docs")
+        return FileResponse(path)
+
+    @fastapi_app.get("/research/nasdaq-vix")
+    def research_nasdaq_vix():
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "research_nasdaq_vix.html"
+        if not path.exists():
+            return RedirectResponse(url="/docs")
+        return FileResponse(path)
+
     @fastapi_app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

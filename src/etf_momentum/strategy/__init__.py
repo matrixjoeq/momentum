@@ -1,2 +1,2 @@
-__all__ = ["rotation"]
+__all__ = ["rotation", "vix_signal"]
 

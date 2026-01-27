@@ -146,6 +146,101 @@ class BaselineAnalysisRequest(BaseModel):
     fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
 
 
+class LeadLagAnalysisRequest(BaseModel):
+    """
+    Lead/lag and causality study between an ETF and a volatility index (VIX/GVZ).
+    """
+
+    etf_code: str = Field(min_length=1, description="ETF code, e.g. 518880")
+    index_symbol: str = Field(min_length=1, description="Index id, e.g. VIX/GVZ or ^VIX/^GVZ")
+    index_provider: str = Field(default="cboe", description="cboe|yahoo|auto")
+    index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
+    max_lag: int = Field(default=20, ge=0, le=252, description="Cross-correlation lag window (+/- trading days)")
+    granger_max_lag: int = Field(default=10, ge=1, le=60, description="Max lag order for Granger causality tests")
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0, description="Significance level")
+    # Trading usefulness evaluation
+    trade_cost_bps: float = Field(default=0.0, ge=0.0, description="Per-switch cost (bps) for the toy strategy")
+    rolling_window: int = Field(default=252, ge=20, le=2520, description="Rolling window for stability charts (trading days)")
+    enable_threshold: bool = Field(default=True, description="If true, add threshold-gated signal evaluation")
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_ret| to trigger signals")
+    walk_forward: bool = Field(default=True, description="If true, run walk-forward (train->test) parameter selection")
+    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9, description="Train split ratio for walk-forward")
+    walk_objective: str = Field(default="sharpe", description="Walk-forward objective: sharpe|cagr")
+
+
+class LeadLagAnalysisResponse(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    corr: dict | None = None
+    granger: dict | None = None
+    trade: dict | None = None
+    error: str | None = None
+
+
+class VixNextActionRequest(BaseModel):
+    """
+    Live-tradable next-day instruction for CN ETF using VIX/GVZ (Cboe).
+    """
+
+    etf_code: str = Field(default="513100", description="A-share ETF code (default: Nasdaq ETF)")
+    index: str = Field(default="VIX", description="Vol index: VIX|GVZ")
+    index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
+    calendar: str = Field(default="XSHG", description="Exchange calendar for CN trading days")
+    current_position: str = Field(default="unknown", description="long|cash|unknown")
+    lookback_window: int = Field(default=252, ge=20, le=2520, description="Lookback window for threshold estimation")
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_ret| (past window) to trigger trades")
+    min_abs_ret: float = Field(default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold")
+    mode: str = Field(
+        default="next_cn_day",
+        description="next_cn_day|latest_available. next_cn_day: return action for next CN trading day; "
+        "if signal not ready, return error.",
+    )
+    target_cn_trade_date: str | None = Field(default=None, description="Optional CN trade date YYYYMMDD; if null use latest available mapped date")
+
+
+class VixNextActionResponse(BaseModel):
+    ok: bool
+    action_date: str | None = None  # YYYY-MM-DD
+    action: str | None = None  # BUY/SELL/HOLD
+    target_position: str | None = None  # long/cash/unknown
+    current_position: str | None = None
+    reason: str | None = None
+    index: str | None = None
+    index_align: str | None = None
+    calendar: str | None = None
+    signal: dict | None = None
+    error: str | None = None
+
+
+class VixSignalBacktestRequest(BaseModel):
+    etf_code: str = Field(default="513100", description="A-share ETF code (default: Nasdaq ETF)")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
+    index: str = Field(default="VIX", description="Vol index: VIX|GVZ")
+    index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
+    calendar: str = Field(default="XSHG", description="Exchange calendar for CN trading days")
+    lookback_window: int = Field(default=252, ge=20, le=2520, description="Lookback window for threshold estimation")
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_log_ret| to trigger trades")
+    min_abs_ret: float = Field(default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold")
+    trade_cost_bps: float = Field(default=10.0, ge=0.0, description="Per-switch cost (bps) when position changes")
+    initial_position: str = Field(default="long", description="long|cash starting position at start date")
+    initial_nav: float = Field(default=1.0, gt=0.0, description="Initial NAV")
+
+
+class VixSignalBacktestResponse(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    metrics: dict | None = None
+    trades: list[dict] | None = None
+    error: str | None = None
+
+
 class BaselineCalendarEffectRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
