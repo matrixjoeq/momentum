@@ -15,7 +15,7 @@ def _get_calendar(name: str = "XSHG"):
     - This is intended for *live simulation scheduling* (pre-knowledge of weekends/holidays).
     - For historical backtests, the DB price calendar already reflects trading days.
     """
-    import exchange_calendars as xcals
+    import exchange_calendars as xcals  # pylint: disable=import-error
 
     # IMPORTANT:
     # Some exchange_calendars builds ship with limited precomputed date ranges for some calendars.
@@ -23,7 +23,14 @@ def _get_calendar(name: str = "XSHG"):
     # DateOutOfBounds for "future" dates (e.g., after year-end) and break background jobs.
     today = dt.date.today()
     end = today + dt.timedelta(days=365 * 20)
-    return xcals.get_calendar(name, start="1990-01-01", end=end.isoformat())
+    # XSHG holidays are only recorded back to 1991 in exchange_calendars.
+    # Trying to instantiate earlier will raise an exception and break cloud sync jobs.
+    start = "1991-01-01"
+    try:
+        return xcals.get_calendar(name, start=start, end=end.isoformat())
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Fallback to library defaults if explicit range is not supported for this calendar build.
+        return xcals.get_calendar(name)
 
 
 def is_trading_day(d: dt.date, *, cal: str = "XSHG") -> bool:
