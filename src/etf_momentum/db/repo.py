@@ -489,6 +489,7 @@ def create_sync_job(
     run_date: dt.date | None,
     full_refresh: bool,
     adjusts: list[str],
+    force_new: bool = False,
 ) -> SyncJob:
     """
     Create a sync job row.
@@ -500,7 +501,7 @@ def create_sync_job(
     """
     existing = get_sync_job_by_dedupe_key(db, str(dedupe_key))
     if existing is not None:
-        if str(existing.status) in {"queued", "running"}:
+        if (not force_new) and (str(existing.status) in {"queued", "running"}):
             return existing
         dedupe_key = _next_retry_dedupe_key(db, str(dedupe_key))
     obj = SyncJob(

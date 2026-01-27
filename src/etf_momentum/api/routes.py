@@ -348,10 +348,63 @@ def admin_sync_fixed_pool_async(
 
     # If an identical job is already queued/running, return it (dedupe).
     existing = get_sync_job_by_dedupe_key(db, dedupe)
-    if existing is not None and str(existing.status) in {"queued", "running"}:
-        return SyncJobTriggerResponse(job_id=int(existing.id), status=str(existing.status), dedupe_key=str(existing.dedupe_key))
+    if (not bool(payload.force_new)) and existing is not None and str(existing.status) in {"queued", "running"}:
+        # Reconcile "stuck" jobs:
+        # - Cloud-run instances can be restarted mid-job, leaving status=running forever.
+        # - Some older versions may have written finished_at/result but failed to flip status.
+        now = dt.datetime.now(dt.timezone.utc)
+        try:
+            if getattr(existing, "finished_at", None) is not None:
+                ok2: bool | None = None
+                try:
+                    if getattr(existing, "result_json", None):
+                        ok2 = bool((json.loads(str(existing.result_json)) or {}).get("ok"))
+                except Exception:  # pragma: no cover
+                    ok2 = None
+                update_sync_job(
+                    db,
+                    job_id=int(existing.id),
+                    status=("success" if ok2 else "failed"),
+                    error_message=(None if ok2 else (existing.error_message or "sync failed; see result.codes for details")),
+                )
+                db.commit()
+                existing = get_sync_job_by_dedupe_key(db, dedupe)
+            else:
+                # Stale timeout: if running for too long, mark as failed so a retry can be created.
+                # (Full refresh can be slow; keep this conservative.)
+                started_at = getattr(existing, "started_at", None)
+                created_at = getattr(existing, "created_at", None)
+                stale = False
+                if started_at is not None and (now - started_at) > dt.timedelta(minutes=60):
+                    stale = True
+                if started_at is None and created_at is not None and (now - created_at) > dt.timedelta(minutes=10):
+                    stale = True
+                if stale:
+                    update_sync_job(
+                        db,
+                        job_id=int(existing.id),
+                        status="failed",
+                        finished_at=now,
+                        error_message="stale job: previous instance likely restarted; please retry",
+                        progress={"phase": "stale"},
+                    )
+                    db.commit()
+                    existing = get_sync_job_by_dedupe_key(db, dedupe)
+        except Exception:  # pragma: no cover
+            # best-effort; fall through to normal dedupe behavior
+            pass
 
-    job = create_sync_job(db, dedupe_key=dedupe, run_date=run_date, full_refresh=do_full, adjusts=adjusts)
+        if existing is not None and str(existing.status) in {"queued", "running"}:
+            return SyncJobTriggerResponse(job_id=int(existing.id), status=str(existing.status), dedupe_key=str(existing.dedupe_key))
+
+    job = create_sync_job(
+        db,
+        dedupe_key=dedupe,
+        run_date=run_date,
+        full_refresh=do_full,
+        adjusts=adjusts,
+        force_new=bool(payload.force_new),
+    )
     db.commit()
 
     # Ensure app state exists (engine/session_factory) and schedule background runner.

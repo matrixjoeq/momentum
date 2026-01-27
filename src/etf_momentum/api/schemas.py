@@ -87,6 +87,10 @@ class SyncFixedPoolRequest(BaseModel):
     date: str | None = Field(default=None, description="YYYYMMDD; default=server today (Asia/Shanghai)")
     adjusts: list[str] = Field(default_factory=lambda: ["qfq", "hfq", "none"], description="Adjust list: subset of qfq/hfq/none")
     full_refresh: bool | None = Field(default=None, description="If true, refresh full history every run; if null, use server default.")
+    force_new: bool = Field(
+        default=False,
+        description="If true, always create a new job id (retry suffix) even if an identical job is already queued/running.",
+    )
 
 
 class SyncFixedPoolResponse(BaseModel):
