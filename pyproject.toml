@@ -22,10 +22,12 @@ dependencies = [
   "exchange-calendars>=4.12",
   # MySQL 8 support (cloud hosting): SQLAlchemy dialect driver
   "pymysql>=1.1.0",
-  "pyqlib>=0.9.7",
 ]
 
 [project.optional-dependencies]
+qlib = [
+  "pyqlib>=0.9.7",
+]
 dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",

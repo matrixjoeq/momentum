@@ -1,7 +1,9 @@
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
@@ -9,8 +11,8 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE /app/
 COPY src /app/src
 
-RUN python -m pip install -U pip && \
-    python -m pip install .
+RUN python3 -m pip install -U pip && \
+    python3 -m pip install .
 
 # WeChat Cloud Hosting usually provides PORT env var; default to 8080.
 EXPOSE 8080
