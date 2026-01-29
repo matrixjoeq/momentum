@@ -32,6 +32,16 @@ from .schemas import (
     TrendBacktestRequest,
     LeadLagAnalysisRequest,
     LeadLagAnalysisResponse,
+    MacroPairLeadLagRequest,
+    MacroPairLeadLagResponse,
+    MacroStep1Request,
+    MacroStep1Response,
+    MacroStep2Request,
+    MacroStep2Response,
+    MacroStep3Request,
+    MacroStep3Response,
+    MacroStep4Request,
+    MacroStep4Response,
     VixNextActionRequest,
     VixNextActionResponse,
     VixSignalBacktestRequest,
@@ -71,12 +81,17 @@ from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.trend import TrendInputs, compute_trend_backtest
 from ..analysis.leadlag import LeadLagInputs, compute_lead_lag
+from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
 from ..calendar.trading_calendar import shift_to_trading_day
 from ..data.cboe_fetcher import FetchRequest as CboeFetchRequest
 from ..data.cboe_fetcher import fetch_cboe_daily_close
+from ..data.fred_fetcher import FetchRequest as FredFetchRequest
+from ..data.fred_fetcher import fetch_fred_daily_close
 from ..strategy.vix_signal import VixSignalInputs, backtest_vix_next_day_signal, generate_next_action
 from ..data.ingestion import ingest_one_etf
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
+from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
+from ..data.stooq_fetcher import fetch_stooq_daily_close
 from ..data.yahoo_fetcher import FetchRequest as YahooFetchRequest
 from ..data.yahoo_fetcher import fetch_yahoo_daily_close_with_alias
 from ..db.repo import (
@@ -628,18 +643,79 @@ def analysis_leadlag(
     idx_align = str(getattr(payload, "index_align", "cn_next_trading_day") or "cn_next_trading_day").strip().lower()
     idx_sym = str(payload.index_symbol).strip()
     idx_code = _normalize_vol_index(idx_sym)
+    idx_sym_u = idx_sym.strip().upper()
 
     idx: pd.Series
     idx_meta: dict
 
-    # Prefer Cboe CSV for VIX/GVZ (stable).
-    use_cboe = idx_provider in {"cboe", "auto"} and idx_code in {"VIX", "GVZ"}
-    if use_cboe:
+    fred_known = {"DGS2", "DGS5", "DGS10", "DGS30"}
+    sina_known = {"DINIW"}
+    # Note: some Stooq symbols (notably certain futures like GC.F / DX.F) may require captcha on
+    # historical download pages and can return empty content from the CSV endpoint.
+    stooq_known = {"XAUUSD"}
+
+    # Provider selection:
+    # - cboe: VIX/GVZ only (preferred when available)
+    # - fred: FRED daily series (rates)
+    # - stooq: Stooq daily CSV (DXY / XAUUSD / GC)
+    # - yahoo: fallback for arbitrary symbols
+    # - auto: try in the above order based on symbol
+    if idx_provider == "auto":
+        if idx_code in {"VIX", "GVZ"}:
+            idx_provider_eff = "cboe"
+        elif idx_sym_u in fred_known:
+            idx_provider_eff = "fred"
+        elif idx_sym_u in sina_known:
+            idx_provider_eff = "sina"
+        elif idx_sym_u in stooq_known:
+            idx_provider_eff = "stooq"
+        else:
+            idx_provider_eff = "yahoo"
+    else:
+        idx_provider_eff = idx_provider
+
+    if idx_provider_eff == "cboe":
+        if idx_code not in {"VIX", "GVZ"}:
+            return LeadLagAnalysisResponse(ok=False, error="unsupported_cboe_index", meta={"provider": "cboe", "symbol": idx_sym})
         dfc = fetch_cboe_daily_close(CboeFetchRequest(index=idx_code, start_date=payload.start, end_date=payload.end))
         if dfc is None or dfc.empty:
             return LeadLagAnalysisResponse(ok=False, error="empty_cboe_series", meta={"cboe": {"index": idx_code}})
         idx = pd.Series(data=dfc["close"].to_numpy(dtype=float), index=dfc["date"].to_list(), dtype=float).dropna()
         idx_meta = {"provider": "cboe", "index": idx_code, "align": idx_align}
+    elif idx_provider_eff == "fred":
+        settings = get_settings()
+        df_fred, fmeta = fetch_fred_daily_close(
+            FredFetchRequest(series_id=idx_sym_u, start_date=payload.start, end_date=payload.end),
+            api_key=settings.fred_api_key,
+        )
+        if df_fred is None or df_fred.empty:
+            err = str((fmeta or {}).get("error") or "empty_fred_series")
+            return LeadLagAnalysisResponse(ok=False, error=err, meta={"fred": fmeta})
+        idx = pd.Series(data=df_fred["close"].to_numpy(dtype=float), index=df_fred["date"].to_list(), dtype=float).dropna()
+        idx_meta = {"provider": "fred", "series_id": idx_sym_u, "align": idx_align, "fred": fmeta}
+    elif idx_provider_eff == "stooq":
+        df_stooq, smeta = fetch_stooq_daily_close(
+            StooqFetchRequest(symbol=idx_sym, start_date=payload.start, end_date=payload.end)
+        )
+        if df_stooq is None or df_stooq.empty:
+            err = str((smeta or {}).get("error") or "empty_stooq_series")
+            return LeadLagAnalysisResponse(ok=False, error=err, meta={"stooq": smeta})
+        idx = pd.Series(data=df_stooq["close"].to_numpy(dtype=float), index=df_stooq["date"].to_list(), dtype=float).dropna()
+        idx_meta = {"provider": "stooq", "symbol": idx_sym, "align": idx_align, "stooq": smeta}
+    elif idx_provider_eff == "sina":
+        from ..data.sina_fetcher import (  # local import to keep optional dependency surface small
+            FetchRequest as SinaFetchRequest,
+            fetch_sina_forex_day_kline_daily_close,
+        )
+
+        df_sina, smeta = fetch_sina_forex_day_kline_daily_close(
+            SinaFetchRequest(symbol=idx_sym_u, start_date=payload.start, end_date=payload.end)
+        )
+        if df_sina is None or df_sina.empty:
+            err = str((smeta or {}).get("error") or "empty_sina_series")
+            return LeadLagAnalysisResponse(ok=False, error=err, meta={"sina": smeta})
+        idx = pd.Series(data=df_sina["close"].to_numpy(dtype=float), index=df_sina["date"].to_list(), dtype=float).dropna()
+        idx_meta = {"provider": "sina", "symbol": idx_sym_u, "align": idx_align, "sina": smeta}
     else:
         # Yahoo fallback (may be blocked by network policy).
         idx_df, ymeta = fetch_yahoo_daily_close_with_alias(
@@ -647,7 +723,7 @@ def analysis_leadlag(
             aliases=_YAHOO_ALIASES,
         )
         if idx_df is None or idx_df.empty:
-            return LeadLagAnalysisResponse(ok=False, error="empty_yahoo_series", meta={"yahoo": ymeta})
+            return LeadLagAnalysisResponse(ok=False, error="empty_yahoo_series", meta={"yahoo": ymeta, "provider_requested": idx_provider_eff})
         idx = pd.Series(data=idx_df["close"].to_numpy(dtype=float), index=idx_df["date"].to_list(), dtype=float).dropna()
         idx_meta = {"provider": "yahoo", "symbol": idx_sym, "align": idx_align, "yahoo": ymeta}
 
@@ -685,6 +761,284 @@ def analysis_leadlag(
         granger=res.get("granger"),
         trade=res.get("trade"),
     )
+
+
+@router.post("/analysis/macro/pair-leadlag", response_model=MacroPairLeadLagResponse)
+def analysis_macro_pair_leadlag(payload: MacroPairLeadLagRequest, db: Session = Depends(get_session)) -> MacroPairLeadLagResponse:
+    res = analyze_pair_leadlag(
+        db,
+        a_series_id=str(payload.a_series_id).strip(),
+        b_series_id=str(payload.b_series_id).strip(),
+        start=str(payload.start),
+        end=str(payload.end),
+        index_align=str(payload.index_align or "none"),
+        max_lag=int(payload.max_lag),
+        granger_max_lag=int(payload.granger_max_lag),
+        alpha=float(payload.alpha),
+        trade_cost_bps=float(payload.trade_cost_bps),
+        rolling_window=int(payload.rolling_window),
+        enable_threshold=bool(payload.enable_threshold),
+        threshold_quantile=float(payload.threshold_quantile),
+        walk_forward=bool(payload.walk_forward),
+        train_ratio=float(payload.train_ratio),
+        walk_objective=str(payload.walk_objective or "sharpe"),
+    )
+    if not bool(res.get("ok")):
+        return MacroPairLeadLagResponse(ok=False, error=str(res.get("reason") or "analysis_failed"), meta=dict(res))
+    return MacroPairLeadLagResponse(
+        ok=True,
+        meta=res.get("meta"),
+        series=res.get("series"),
+        corr=res.get("corr"),
+        granger=res.get("granger"),
+        trade=res.get("trade"),
+    )
+
+
+@router.post("/analysis/macro/step1", response_model=MacroStep1Response)
+def analysis_macro_step1(payload: MacroStep1Request, db: Session = Depends(get_session)) -> MacroStep1Response:
+    start = str(payload.start)
+    end = str(payload.end)
+    gold_spot_id = str(payload.gold_spot_series_id).strip()
+    dxy_id = str(payload.dxy_series_id).strip()
+    yld_id = str(payload.yield_series_id).strip()
+    gold_fut_id = str(payload.gold_fut_series_id).strip() if payload.gold_fut_series_id else None
+
+    series: dict[str, dict] = {}
+    for sid in [gold_spot_id, dxy_id, yld_id] + ([gold_fut_id] if gold_fut_id else []):
+        if not sid:
+            continue
+        s = load_macro_close_series(db, series_id=sid, start=start, end=end)
+        if s.empty:
+            return MacroStep1Response(ok=False, error=f"empty_series:{sid}")
+        series[sid] = {"dates": [d.isoformat() for d in s.index], "close": s.astype(float).tolist()}
+
+    pairs: dict[str, dict] = {}
+    common_kwargs = dict(
+        start=start,
+        end=end,
+        index_align=str(payload.index_align or "none"),
+        max_lag=int(payload.max_lag),
+        granger_max_lag=int(payload.granger_max_lag),
+        alpha=float(payload.alpha),
+        rolling_window=int(payload.rolling_window),
+        trade_cost_bps=float(payload.trade_cost_bps),
+        threshold_quantile=float(payload.threshold_quantile),
+        walk_forward=bool(payload.walk_forward),
+        train_ratio=float(payload.train_ratio),
+        walk_objective=str(payload.walk_objective or "sharpe"),
+    )
+
+    # spot vs dxy / yield
+    pairs[f"{gold_spot_id}__vs__{dxy_id}"] = analyze_pair_leadlag(db, a_series_id=gold_spot_id, b_series_id=dxy_id, **common_kwargs)
+    pairs[f"{gold_spot_id}__vs__{yld_id}"] = analyze_pair_leadlag(db, a_series_id=gold_spot_id, b_series_id=yld_id, **common_kwargs)
+
+    # fut (optional)
+    if gold_fut_id:
+        pairs[f"{gold_fut_id}__vs__{dxy_id}"] = analyze_pair_leadlag(db, a_series_id=gold_fut_id, b_series_id=dxy_id, **common_kwargs)
+        pairs[f"{gold_fut_id}__vs__{yld_id}"] = analyze_pair_leadlag(db, a_series_id=gold_fut_id, b_series_id=yld_id, **common_kwargs)
+
+    meta = {
+        "start": start,
+        "end": end,
+        "gold_spot_series_id": gold_spot_id,
+        "gold_fut_series_id": gold_fut_id,
+        "dxy_series_id": dxy_id,
+        "yield_series_id": yld_id,
+        "index_align": str(payload.index_align or "none"),
+    }
+    return MacroStep1Response(ok=True, meta=meta, series=series, pairs=pairs)
+
+
+@router.post("/analysis/macro/step2", response_model=MacroStep2Response)
+def analysis_macro_step2(payload: MacroStep2Request, db: Session = Depends(get_session)) -> MacroStep2Response:
+    start = str(payload.start)
+    end = str(payload.end)
+    cn_spot_id = str(payload.cn_spot_series_id).strip()
+    cnh_id = str(payload.cnh_series_id).strip()
+    yld_id = str(payload.yield_series_id).strip()
+    cn_fut_id = str(payload.cn_fut_series_id).strip() if payload.cn_fut_series_id else None
+
+    series: dict[str, dict] = {}
+    for sid in [cn_spot_id, cnh_id, yld_id] + ([cn_fut_id] if cn_fut_id else []):
+        if not sid:
+            continue
+        s = load_macro_close_series(db, series_id=sid, start=start, end=end)
+        if s.empty:
+            return MacroStep2Response(ok=False, error=f"empty_series:{sid}")
+        series[sid] = {"dates": [d.isoformat() for d in s.index], "close": s.astype(float).tolist()}
+
+    common_kwargs = dict(
+        start=start,
+        end=end,
+        index_align=str(payload.index_align or "none"),
+        max_lag=int(payload.max_lag),
+        granger_max_lag=int(payload.granger_max_lag),
+        alpha=float(payload.alpha),
+        rolling_window=int(payload.rolling_window),
+        trade_cost_bps=float(payload.trade_cost_bps),
+        threshold_quantile=float(payload.threshold_quantile),
+        walk_forward=bool(payload.walk_forward),
+        train_ratio=float(payload.train_ratio),
+        walk_objective=str(payload.walk_objective or "sharpe"),
+    )
+    pairs: dict[str, dict] = {}
+    pairs[f"{cn_spot_id}__vs__{cnh_id}"] = analyze_pair_leadlag(db, a_series_id=cn_spot_id, b_series_id=cnh_id, **common_kwargs)
+    pairs[f"{cn_spot_id}__vs__{yld_id}"] = analyze_pair_leadlag(db, a_series_id=cn_spot_id, b_series_id=yld_id, **common_kwargs)
+    pairs[f"{cnh_id}__vs__{yld_id}"] = analyze_pair_leadlag(db, a_series_id=cnh_id, b_series_id=yld_id, **common_kwargs)
+    if cn_fut_id:
+        pairs[f"{cn_fut_id}__vs__{cnh_id}"] = analyze_pair_leadlag(db, a_series_id=cn_fut_id, b_series_id=cnh_id, **common_kwargs)
+        pairs[f"{cn_fut_id}__vs__{yld_id}"] = analyze_pair_leadlag(db, a_series_id=cn_fut_id, b_series_id=yld_id, **common_kwargs)
+
+    meta = {
+        "start": start,
+        "end": end,
+        "cn_spot_series_id": cn_spot_id,
+        "cn_fut_series_id": cn_fut_id,
+        "cnh_series_id": cnh_id,
+        "yield_series_id": yld_id,
+        "index_align": str(payload.index_align or "none"),
+    }
+    return MacroStep2Response(ok=True, meta=meta, series=series, pairs=pairs)
+
+
+@router.post("/analysis/macro/step3", response_model=MacroStep3Response)
+def analysis_macro_step3(payload: MacroStep3Request, db: Session = Depends(get_session)) -> MacroStep3Response:
+    start = str(payload.start)
+    end = str(payload.end)
+    cn_id = str(payload.cn_gold_series_id).strip()
+    glb_id = str(payload.global_gold_series_id).strip()
+    fx_id = str(payload.fx_series_id).strip()
+
+    s_cn = load_macro_close_series(db, series_id=cn_id, start=start, end=end)
+    s_glb = load_macro_close_series(db, series_id=glb_id, start=start, end=end)
+    s_fx = load_macro_close_series(db, series_id=fx_id, start=start, end=end)
+    if s_cn.empty:
+        return MacroStep3Response(ok=False, error=f"empty_series:{cn_id}")
+    if s_glb.empty:
+        return MacroStep3Response(ok=False, error=f"empty_series:{glb_id}")
+    if s_fx.empty:
+        return MacroStep3Response(ok=False, error=f"empty_series:{fx_id}")
+
+    # Derived: global gold converted by FX (best-effort). Use overlap dates only.
+    df = pd.DataFrame({"glb": s_glb, "fx": s_fx}).dropna()
+    s_glb_fx = (df["glb"] * df["fx"]).dropna()
+
+    series: dict[str, dict] = {
+        cn_id: {"dates": [d.isoformat() for d in s_cn.index], "close": s_cn.astype(float).tolist()},
+        glb_id: {"dates": [d.isoformat() for d in s_glb.index], "close": s_glb.astype(float).tolist()},
+        fx_id: {"dates": [d.isoformat() for d in s_fx.index], "close": s_fx.astype(float).tolist()},
+        f"{glb_id}*{fx_id}": {"dates": [d.isoformat() for d in s_glb_fx.index], "close": s_glb_fx.astype(float).tolist()},
+    }
+
+    common_kwargs = dict(
+        start=start,
+        end=end,
+        index_align=str(payload.index_align or "none"),
+        max_lag=int(payload.max_lag),
+        granger_max_lag=int(payload.granger_max_lag),
+        alpha=float(payload.alpha),
+        rolling_window=int(payload.rolling_window),
+        trade_cost_bps=float(payload.trade_cost_bps),
+        threshold_quantile=float(payload.threshold_quantile),
+        walk_forward=bool(payload.walk_forward),
+        train_ratio=float(payload.train_ratio),
+        walk_objective=str(payload.walk_objective or "sharpe"),
+    )
+
+    pairs: dict[str, dict] = {}
+    pairs[f"{cn_id}__vs__{glb_id}"] = analyze_pair_leadlag(db, a_series_id=cn_id, b_series_id=glb_id, **common_kwargs)
+    pairs[f"{glb_id}__vs__{fx_id}"] = analyze_pair_leadlag(db, a_series_id=glb_id, b_series_id=fx_id, **common_kwargs)
+    # For derived series, compute lead/lag using in-memory series and compute_lead_lag directly.
+    res_glb_fx = compute_lead_lag(
+        LeadLagInputs(
+            etf_close=s_cn,
+            idx_close=s_glb_fx,
+            max_lag=int(payload.max_lag),
+            granger_max_lag=int(payload.granger_max_lag),
+            alpha=float(payload.alpha),
+            index_align=str(payload.index_align or "none"),
+            trade_cost_bps=float(payload.trade_cost_bps),
+            rolling_window=int(payload.rolling_window),
+            enable_threshold=True,
+            threshold_quantile=float(payload.threshold_quantile),
+            walk_forward=bool(payload.walk_forward),
+            train_ratio=float(payload.train_ratio),
+            walk_objective=str(payload.walk_objective or "sharpe"),
+        )
+    )
+    pairs[f"{cn_id}__vs__{glb_id}*{fx_id}"] = res_glb_fx if isinstance(res_glb_fx, dict) else {"ok": False, "reason": "analysis_failed"}
+
+    meta = {
+        "start": start,
+        "end": end,
+        "cn_gold_series_id": cn_id,
+        "global_gold_series_id": glb_id,
+        "fx_series_id": fx_id,
+        "index_align": str(payload.index_align or "none"),
+    }
+    return MacroStep3Response(ok=True, meta=meta, series=series, pairs=pairs)
+
+
+@router.post("/analysis/macro/step4", response_model=MacroStep4Response)
+def analysis_macro_step4(payload: MacroStep4Request, db: Session = Depends(get_session)) -> MacroStep4Response:
+    start_d = _parse_yyyymmdd(str(payload.start))
+    end_d = _parse_yyyymmdd(str(payload.end))
+    if end_d < start_d:
+        return MacroStep4Response(ok=False, error="end_before_start")
+
+    etf_code = str(payload.etf_code).strip()
+    adj = str(payload.adjust or "hfq").strip().lower()
+    spot_id = str(payload.cn_spot_series_id).strip()
+
+    rows = list_prices(db, code=etf_code, start_date=start_d, end_date=end_d, adjust=adj, limit=1000000)
+    if not rows:
+        return MacroStep4Response(ok=False, error="empty_etf_series")
+    etf = pd.Series(
+        data=[float(r.close) if r.close is not None else np.nan for r in rows],
+        index=[r.trade_date for r in rows],
+        dtype=float,
+    ).dropna()
+    if etf.empty:
+        return MacroStep4Response(ok=False, error="empty_etf_close")
+
+    spot = load_macro_close_series(db, series_id=spot_id, start=str(payload.start), end=str(payload.end))
+    if spot.empty:
+        return MacroStep4Response(ok=False, error=f"empty_series:{spot_id}")
+
+    res = compute_lead_lag(
+        LeadLagInputs(
+            etf_close=etf,
+            idx_close=spot,
+            max_lag=int(payload.max_lag),
+            granger_max_lag=int(payload.granger_max_lag),
+            alpha=float(payload.alpha),
+            index_align=str(payload.index_align or "none"),
+            trade_cost_bps=float(payload.trade_cost_bps),
+            rolling_window=int(payload.rolling_window),
+            enable_threshold=True,
+            threshold_quantile=float(payload.threshold_quantile),
+            walk_forward=bool(payload.walk_forward),
+            train_ratio=float(payload.train_ratio),
+            walk_objective=str(payload.walk_objective or "sharpe"),
+        )
+    )
+    if not bool(res.get("ok")):
+        return MacroStep4Response(ok=False, error=str(res.get("reason") or "analysis_failed"))
+
+    series = {
+        "etf": {"code": etf_code, "adjust": adj, "dates": [d.isoformat() for d in etf.index], "close": etf.astype(float).tolist()},
+        "spot": {"series_id": spot_id, "dates": [d.isoformat() for d in spot.index], "close": spot.astype(float).tolist()},
+    }
+    meta = {
+        "start": str(payload.start),
+        "end": str(payload.end),
+        "etf_code": etf_code,
+        "adjust": adj,
+        "cn_spot_series_id": spot_id,
+        "index_align": str(payload.index_align or "none"),
+    }
+    return MacroStep4Response(ok=True, meta=meta, series=series, pair=res)
 
 
 @router.post("/signal/vix-next-action", response_model=VixNextActionResponse)

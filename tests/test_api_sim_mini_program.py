@@ -9,7 +9,7 @@ from etf_momentum.db.session import session_scope
 
 
 @pytest.fixture()
-def sim_client(session_factory):
+def sim_client(session_factory, engine):
     """
     A TestClient with a seeded DB and NO external akshare calls.
     We seed enough hfq/none open/close data to run weekly5-open (lookback=20).
@@ -33,6 +33,9 @@ def sim_client(session_factory):
         db.commit()
 
     app = create_app()
+    # Prevent app lifespan from creating a MySQL engine during tests.
+    app.state.engine = engine
+    app.state.session_factory = sf
 
     def override_get_session():
         yield from session_scope(sf)

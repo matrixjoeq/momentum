@@ -152,8 +152,11 @@ class LeadLagAnalysisRequest(BaseModel):
     """
 
     etf_code: str = Field(min_length=1, description="ETF code, e.g. 518880")
-    index_symbol: str = Field(min_length=1, description="Index id, e.g. VIX/GVZ or ^VIX/^GVZ")
-    index_provider: str = Field(default="cboe", description="cboe|yahoo|auto")
+    index_symbol: str = Field(
+        min_length=1,
+        description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD (Stooq), GC=F (Yahoo).",
+    )
+    index_provider: str = Field(default="cboe", description="cboe|yahoo|fred|stooq|sina|auto")
     index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
@@ -180,6 +183,166 @@ class LeadLagAnalysisResponse(BaseModel):
     trade: dict | None = None
     error: str | None = None
 
+
+class MacroPairLeadLagRequest(BaseModel):
+    a_series_id: str = Field(min_length=1, description="Series A (target) id, e.g. XAUUSD")
+    b_series_id: str = Field(min_length=1, description="Series B (indicator) id, e.g. DGS10 or DINIW")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    index_align: str = Field(default="none", description="none|cn_next_trading_day")
+    max_lag: int = Field(default=20, ge=0, le=252)
+    granger_max_lag: int = Field(default=10, ge=1, le=60)
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    rolling_window: int = Field(default=252, ge=20, le=2520)
+    enable_threshold: bool = Field(default=True)
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
+    walk_forward: bool = Field(default=True)
+    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
+    walk_objective: str = Field(default="sharpe", description="sharpe|cagr")
+
+
+class MacroPairLeadLagResponse(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    corr: dict | None = None
+    granger: dict | None = None
+    trade: dict | None = None
+    error: str | None = None
+
+
+class MacroStep1Request(BaseModel):
+    """
+    Step 1: global gold (spot/fut), US yields, DXY relations.
+    This endpoint reads from local DB only; it does NOT trigger updates.
+    """
+
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+
+    gold_spot_series_id: str = Field(default="XAUUSD", min_length=1)
+    gold_fut_series_id: str | None = Field(default="GC_FUT", description="Optional, e.g. GC_FUT")
+    dxy_series_id: str = Field(default="DINIW", min_length=1)
+    yield_series_id: str = Field(default="DGS10", min_length=1, description="One tenor to focus on, e.g. DGS10")
+
+    index_align: str = Field(default="none", description="none|cn_next_trading_day")
+    max_lag: int = Field(default=20, ge=0, le=252)
+    granger_max_lag: int = Field(default=10, ge=1, le=60)
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    rolling_window: int = Field(default=252, ge=20, le=2520)
+    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
+    walk_forward: bool = Field(default=True)
+    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
+    walk_objective: str = Field(default="sharpe", description="sharpe|cagr")
+
+
+class MacroStep1Response(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    pairs: dict | None = None
+    error: str | None = None
+
+
+class MacroStep2Request(BaseModel):
+    """
+    Step 2: CN gold (spot/fut), CNH, CN yields relations.
+    Series ids are user-defined (depends on your ingestion naming).
+    """
+
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+
+    cn_spot_series_id: str = Field(default="SGE_AU9999", min_length=1)
+    cn_fut_series_id: str | None = Field(default="SHFE_AU", description="Optional")
+    cnh_series_id: str = Field(default="USDCNH", min_length=1)
+    yield_series_id: str = Field(default="CN10Y", min_length=1)
+
+    index_align: str = Field(default="none", description="none|cn_next_trading_day")
+    max_lag: int = Field(default=20, ge=0, le=252)
+    granger_max_lag: int = Field(default=10, ge=1, le=60)
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    rolling_window: int = Field(default=252, ge=20, le=2520)
+    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
+    walk_forward: bool = Field(default=True)
+    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
+    walk_objective: str = Field(default="sharpe", description="sharpe|cagr")
+
+
+class MacroStep2Response(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    pairs: dict | None = None
+    error: str | None = None
+
+
+class MacroStep3Request(BaseModel):
+    """
+    Step 3: CN gold vs global gold (optionally via FX conversion).
+    """
+
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+
+    cn_gold_series_id: str = Field(default="SGE_AU9999", min_length=1)
+    global_gold_series_id: str = Field(default="XAUUSD", min_length=1)
+    fx_series_id: str = Field(default="USDCNH", min_length=1, description="FX to convert global->CNY")
+
+    index_align: str = Field(default="none", description="none|cn_next_trading_day")
+    max_lag: int = Field(default=20, ge=0, le=252)
+    granger_max_lag: int = Field(default=10, ge=1, le=60)
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    rolling_window: int = Field(default=252, ge=20, le=2520)
+    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
+    walk_forward: bool = Field(default=True)
+    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
+    walk_objective: str = Field(default="sharpe", description="sharpe|cagr")
+
+
+class MacroStep3Response(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    pairs: dict | None = None
+    error: str | None = None
+
+
+class MacroStep4Request(BaseModel):
+    """
+    Step 4: CN gold ETF vs CN spot gold.
+    ETF comes from etf_prices; spot comes from macro_prices.
+    """
+
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+
+    etf_code: str = Field(default="518880", min_length=1, description="ETF code in etf_pool/etf_prices")
+    adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
+    cn_spot_series_id: str = Field(default="SGE_AU9999", min_length=1)
+
+    index_align: str = Field(default="none", description="none|cn_next_trading_day")
+    max_lag: int = Field(default=20, ge=0, le=252)
+    granger_max_lag: int = Field(default=10, ge=1, le=60)
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    rolling_window: int = Field(default=252, ge=20, le=2520)
+    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
+    walk_forward: bool = Field(default=True)
+    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
+    walk_objective: str = Field(default="sharpe", description="sharpe|cagr")
+
+
+class MacroStep4Response(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    pair: dict | None = None
+    error: str | None = None
 
 class VixNextActionRequest(BaseModel):
     """

@@ -274,3 +274,74 @@ class SyncJob(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MacroSeriesMeta(Base):
+    """
+    Macro series metadata registry.
+
+    Examples:
+    - series_id=DGS10 provider=fred provider_symbol=DGS10 unit=%
+    - series_id=DINIW provider=sina provider_symbol=DINIW unit=index
+    - series_id=XAUUSD provider=stooq provider_symbol=XAUUSD unit=USD/oz
+    - series_id=GC_FUT provider=yahoo provider_symbol=GC=F unit=USD/oz
+    """
+
+    __tablename__ = "macro_series_meta"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    series_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)  # rates|fx|gold_spot|gold_fut|...
+
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    calendar: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class MacroPrice(Base):
+    """
+    Unified daily macro series prices (OHLCV optional).
+    For rates/fx, typically only close is populated.
+    """
+
+    __tablename__ = "macro_prices"
+    __table_args__ = (UniqueConstraint("series_id", "trade_date", name="uq_macro_prices_series_id_trade_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    series_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+
+    open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MacroIngestionBatch(Base):
+    __tablename__ = "macro_ingestion_batch"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    series_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    start_date: Mapped[str] = mapped_column(String(8), nullable=False)  # YYYYMMDD
+    end_date: Mapped[str] = mapped_column(String(8), nullable=False)  # YYYYMMDD
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running|success|failed
+    message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

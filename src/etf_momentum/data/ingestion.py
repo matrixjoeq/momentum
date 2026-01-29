@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
-import os
-import shutil
 from dataclasses import dataclass
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from ..data.multi_source_fetcher import FetchRequest, fetch_etf_daily_with_fallback
-from ..db.models import EtfPool, IngestionBatch
+from ..db.models import EtfPool
 from ..db.repo import (
     PriceRow,
     compute_price_fingerprint,
@@ -55,40 +52,6 @@ def _policy_params_for_pool(db: Session, pool: EtfPool) -> ValidationPolicyParam
     )
 
 
-def make_sqlite_snapshot(sqlite_path: Path, *, batch_id: int) -> Path:
-    backups_dir = sqlite_path.parent / "backups"
-    backups_dir.mkdir(parents=True, exist_ok=True)
-    ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    snap = backups_dir / f"{sqlite_path.stem}_batch{batch_id}_{ts}{sqlite_path.suffix}"
-    shutil.copy2(sqlite_path, snap)
-    return snap
-
-
-def _cleanup_snapshot_for_batch(db: Session, *, batch_id: int, snapshot_path: Path | None) -> None:
-    """
-    Best-effort cleanup: remove snapshot file and clear snapshot_path in batch row.
-
-    Per product requirement, snapshots are ephemeral and should not accumulate.
-    """
-    if snapshot_path is None:
-        return
-    try:
-        if snapshot_path.exists():
-            snapshot_path.unlink()
-    except Exception:  # pylint: disable=broad-exception-caught
-        # If deletion fails, keep the file (best-effort).
-        return
-    try:
-        with Session(bind=db.get_bind()) as s2:
-            b2 = s2.get(IngestionBatch, batch_id)
-            if b2 is not None:
-                b2.snapshot_path = None
-            s2.commit()
-    except Exception:  # pylint: disable=broad-exception-caught
-        # best-effort
-        return
-
-
 def ingest_one_etf(
     db: Session,
     *,
@@ -100,7 +63,6 @@ def ingest_one_etf(
 ) -> IngestResult:
     """
     Batch ingestion with:
-    - snapshot (file)
     - pre/post fingerprint
     - audit (old values)
     - per-date ingestion items (insert/update)
@@ -117,13 +79,6 @@ def ingest_one_etf(
     policy_params = _policy_params_for_pool(db, pool)
 
     # Create a batch record first (committed) so failures are traceable.
-    sqlite_path = settings.sqlite_path
-    # ensure db file exists (sqlite creates on connect; but we snapshot only if exists)
-    if not sqlite_path.exists():
-        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        # touch
-        sqlite_path.touch(exist_ok=True)
-
     # Create batch record
     batch = create_ingestion_batch(
         db,
@@ -138,15 +93,6 @@ def ingest_one_etf(
         val_max_gap_days=policy_params.max_gap_days,
     )
     db.commit()
-
-    snapshot_path: Path | None = None
-    if sqlite_path.exists() and os.path.getsize(sqlite_path) > 0:
-        snapshot_path = make_sqlite_snapshot(sqlite_path, batch_id=batch.id)
-        with Session(bind=db.get_bind()) as s2:  # separate session to update snapshot path
-            b2 = s2.get(type(batch), batch.id)
-            if b2 is not None:
-                b2.snapshot_path = str(snapshot_path)
-            s2.commit()
 
     # Ingest in one transaction: any failure -> rollback -> data unchanged
     try:
@@ -264,7 +210,6 @@ def ingest_one_etf(
         msg = f"rows={len(rows)} upserted={n} source={used_src or 'auto'} fallback={bool(fetch_meta.get('fallback_used'))}"
         update_ingestion_batch(db, batch_id=batch.id, status="success", message=msg, pre_fingerprint=pre_fp, post_fingerprint=post_fp)
         db.commit()
-        _cleanup_snapshot_for_batch(db, batch_id=batch.id, snapshot_path=snapshot_path)
         return IngestResult(batch_id=batch.id, code=code, upserted=n, status="success")
     except Exception as e:  # pylint: disable=broad-exception-caught
         db.rollback()
@@ -272,6 +217,5 @@ def ingest_one_etf(
         msg = e.to_json() if isinstance(e, ValidationError) else str(e)
         update_ingestion_batch(db, batch_id=batch.id, status="failed", message=msg)
         db.commit()
-        _cleanup_snapshot_for_batch(db, batch_id=batch.id, snapshot_path=snapshot_path)
         return IngestResult(batch_id=batch.id, code=code, upserted=0, status="failed", message=msg)
 

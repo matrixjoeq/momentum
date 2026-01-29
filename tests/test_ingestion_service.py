@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import pathlib
 import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
@@ -18,9 +16,7 @@ class FakeAk:
         return self.df
 
 
-def test_ingest_success_creates_batch_items_and_prices(session_factory: sessionmaker, monkeypatch, sqlite_path) -> None:
-    monkeypatch.setenv("MOMENTUM_SQLITE_PATH", str(sqlite_path))
-
+def test_ingest_success_creates_batch_items_and_prices(session_factory: sessionmaker) -> None:
     df = pd.DataFrame(
         {
             "日期": ["2024-01-02", "2024-01-03"],
@@ -61,14 +57,8 @@ def test_ingest_success_creates_batch_items_and_prices(session_factory: sessionm
         audits = list(db.execute(select(EtfPriceAudit).where(EtfPriceAudit.batch_id == res.batch_id)).scalars().all())
         assert audits == []
 
-    backups_dir = pathlib.Path(sqlite_path).parent / "backups"
-    if backups_dir.exists():
-        assert list(backups_dir.glob("*.sqlite3")) == []
 
-
-def test_ingest_update_records_audit(session_factory: sessionmaker, monkeypatch, sqlite_path) -> None:
-    monkeypatch.setenv("MOMENTUM_SQLITE_PATH", str(sqlite_path))
-
+def test_ingest_update_records_audit(session_factory: sessionmaker) -> None:
     df1 = pd.DataFrame(
         {"日期": ["2024-01-02"], "开盘": [1.0], "最高": [1.05], "最低": [0.98], "收盘": [1.02]}
     )
@@ -98,9 +88,7 @@ def test_ingest_update_records_audit(session_factory: sessionmaker, monkeypatch,
         assert items[0].action == "update"
 
 
-def test_ingest_validation_failure_keeps_data_unchanged(session_factory: sessionmaker, monkeypatch, sqlite_path) -> None:
-    monkeypatch.setenv("MOMENTUM_SQLITE_PATH", str(sqlite_path))
-
+def test_ingest_validation_failure_keeps_data_unchanged(session_factory: sessionmaker) -> None:
     good = pd.DataFrame(
         {"日期": ["2024-01-02", "2024-01-03"], "开盘": [1.0, 1.0], "最高": [1.1, 1.1], "最低": [0.9, 0.9], "收盘": [1.0, 1.0]}
     )

@@ -1,40 +1,36 @@
 from __future__ import annotations
 
-import pathlib
-
 import pytest
 from fastapi.testclient import TestClient
 
 from etf_momentum.db.init_db import init_db
 from etf_momentum.db.seed import ensure_default_policies
-from etf_momentum.db.session import make_engine, make_session_factory
+from etf_momentum.db.session import make_session_factory, make_sqlite_engine
 
 
 @pytest.fixture()
-def sqlite_path(tmp_path: pathlib.Path) -> pathlib.Path:
-    return tmp_path / "test.sqlite3"
+def engine():
+    eng = make_sqlite_engine()
+    init_db(eng)
+    return eng
 
 
 @pytest.fixture()
-def session_factory(sqlite_path: pathlib.Path):
-    engine = make_engine(str(sqlite_path))
-    init_db(engine)
+def session_factory(engine):
     return make_session_factory(engine)
 
 
 @pytest.fixture()
-def api_client(sqlite_path: pathlib.Path):
+def api_client(engine):
     """
     API client isolated from local filesystem DB:
-    - uses tmp sqlite
+    - uses sqlite in-memory (tests only)
     - overrides FastAPI dependencies for get_session/get_akshare
     """
     from etf_momentum.app import create_app
     from etf_momentum.db.session import session_scope
     import etf_momentum.api.routes as routes
 
-    engine = make_engine(str(sqlite_path))
-    init_db(engine)
     sf = make_session_factory(engine)
     with sf() as db:
         ensure_default_policies(db)
@@ -57,6 +53,9 @@ def api_client(sqlite_path: pathlib.Path):
             )
 
     app = create_app()
+    # Prevent app lifespan from creating a MySQL engine during tests.
+    app.state.engine = engine
+    app.state.session_factory = sf
 
     def override_get_session():
         yield from session_scope(sf)

@@ -8,11 +8,10 @@ def test_api_rotation_next_plan_shows_on_execution_day_tab(tmp_path):
     from etf_momentum.app import create_app
     from etf_momentum.db.init_db import init_db
     from etf_momentum.db.seed import ensure_default_policies
-    from etf_momentum.db.session import make_engine, make_session_factory, session_scope
+    from etf_momentum.db.session import make_session_factory, make_sqlite_engine, session_scope
     import etf_momentum.api.routes as routes
 
-    sqlite_path = tmp_path / "test_next_plan.sqlite3"
-    engine = make_engine(str(sqlite_path))
+    engine = make_sqlite_engine()
     init_db(engine)
     sf = make_session_factory(engine)
     with sf() as db:
@@ -50,6 +49,9 @@ def test_api_rotation_next_plan_shows_on_execution_day_tab(tmp_path):
             )
 
     app = create_app()
+    # Prevent app lifespan from creating a MySQL engine during tests.
+    app.state.engine = engine
+    app.state.session_factory = sf
 
     def override_get_session():
         yield from session_scope(sf)

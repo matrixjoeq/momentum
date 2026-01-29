@@ -3,12 +3,12 @@ from __future__ import annotations
 from sqlalchemy import text
 
 from etf_momentum.db.schema import ensure_sqlite_schema
-from etf_momentum.db.session import make_engine
+from etf_momentum.db.session import make_sqlite_engine
 
 
 def test_schema_adds_ingestion_batch_validation_columns(tmp_path) -> None:
     sqlite_path = tmp_path / "legacy.sqlite3"
-    engine = make_engine(str(sqlite_path))
+    engine = make_sqlite_engine(f"sqlite+pysqlite:///{sqlite_path}")
 
     # Create legacy tables required by ensure_sqlite_schema
     with engine.begin() as conn:

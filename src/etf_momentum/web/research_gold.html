@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>研究：黄金（全球/国内/ETF）</title>
+    <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 24px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+      label { display: block; font-size: 12px; color: #444; margin-bottom: 4px; }
+      input, select { padding: 8px; min-width: 160px; }
+      button { padding: 8px 12px; cursor: pointer; }
+      .muted { color: #666; font-size: 12px; }
+      .panel { margin-top: 14px; }
+      .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
+      th { background: #f7f7f7; }
+      .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
+
+      .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+      .tabBtn { border: 1px solid #ddd; background: #fff; padding: 8px 10px; border-radius: 8px; }
+      .tabBtn.active { border-color: #111; background: #111; color: #fff; }
+      .tab { display: none; }
+      .tab.active { display: block; }
+
+      /* charts */
+      #etf_pxChart, #etf_retChart, #etf_xcorrChart { width: 100%; height: 360px; }
+      #etf_stratChart, #etf_rollingChart { width: 100%; height: 360px; }
+
+      #s1_pxChart, #s1_xcorrChart, #s1_rawPairChart, #s1_rollingChart,
+      #s2_pxChart, #s2_xcorrChart, #s2_rawPairChart, #s2_rollingChart,
+      #s3_pxChart, #s3_xcorrChart, #s3_rawPairChart, #s3_rollingChart,
+      #s4_pxChart, #s4_xcorrChart, #s4_rawPairChart, #s4_rollingChart { width: 100%; height: 380px; }
+    </style>
+  </head>
+  <body>
+    <h2>研究：黄金（ETF / 全球 / 国内）</h2>
+    <div class="muted">
+      <div>
+        <a href="/">返回候选池</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="/research">返回研究主页</a>
+      </div>
+      <div style="margin-top: 6px;">
+        说明：本页将原先的 Step1-4 研究页合并到同一页面；分析 API 仍保持不变。
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tabBtn" data-tab="etf" id="tabBtn_etf">ETF × 外盘指标（含GVZ等）</button>
+      <button class="tabBtn" data-tab="step1" id="tabBtn_step1">Step1：国际金价 × 美债 × DXY</button>
+      <button class="tabBtn" data-tab="step2" id="tabBtn_step2">Step2：国内金价 × CNH × 国债</button>
+      <button class="tabBtn" data-tab="step3" id="tabBtn_step3">Step3：国内金价 × 国际金价</button>
+      <button class="tabBtn" data-tab="step4" id="tabBtn_step4">Step4：黄金ETF × 国内现货金</button>
+    </div>
+
+    <!-- -------------------- TAB: ETF x 外盘指标（原 research_gold_gvx） -------------------- -->
+    <section class="tab" id="tab_etf">
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">ETF × 外盘指标（可选）</h3>
+        <div class="muted">
+          目标：检查 ETF 价格涨跌与“外盘指标”涨跌的相关性、领先/同步/滞后关系，以及 Granger 因果检验（收益率层面）。
+        </div>
+      </div>
+
+      <div class="panel">
+        <details>
+          <summary style="cursor:pointer; user-select:none;">结果解读说明（点击展开）</summary>
+          <div class="muted" style="margin-top: 8px; line-height: 1.65;">
+            <div><b>1) relation / best_lag / best_corr</b></div>
+            <div>
+              - 我们用“日收益率（log-ret）”做互相关。<br/>
+              - <b>best_lag=1</b> 表示：用 <b>指标 的 t-1</b> 去对齐 <b>ETF 的 t</b>，此时相关最强（=指标领先 1 个交易日）。<br/>
+              - <b>best_corr 为负</b>：指标上升往往对应 ETF 下跌/走弱；指标下降往往对应 ETF 上涨/走强（具体方向以结果为准）。<br/>
+              - pvalue 很小只说明“统计显著相关”，<b>不等于充要指标/稳定可交易</b>。
+            </div>
+            <div style="margin-top: 8px;"><b>2) Granger（因果检验）</b></div>
+            <div>
+              - idx→etf 显著：在“线性+滞后项”的模型下，加入指标的过去值能提升对 ETF 收益的预测（Granger 意义）。<br/>
+              - 若 etf→idx 也显著：更像是反馈/共同驱动，而非单向因果。
+            </div>
+            <div style="margin-top: 8px;"><b>3) 日期对齐（很重要）</b></div>
+            <div>
+              - 对于“美股/外盘收盘后发布”的指标，若你做 A 股 ETF 实盘，通常应选择 <b>“收盘顺延到中国下一交易日”</b>，更贴近可用信息集。<br/>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="panel row">
+        <div>
+          <label>开始日期</label>
+          <input id="etf_start" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>结束日期</label>
+          <input id="etf_end" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>ETF 复权</label>
+          <select id="etf_adjust">
+            <option value="hfq" selected>hfq（后复权）</option>
+            <option value="qfq">qfq（前复权）</option>
+            <option value="none">none（不复权）</option>
+          </select>
+        </div>
+        <div>
+          <label>指标预设</label>
+          <select id="etf_idxPreset" title="选择预设会自动填充 provider 和 symbol；也可选择 custom 自定义。">
+            <option value="cboe:GVZ" selected>GVZ（Cboe 黄金波动率）</option>
+            <option value="cboe:VIX">VIX（Cboe 恐慌指数）</option>
+            <option value="fred:DGS2">美债收益率 2Y（FRED: DGS2）</option>
+            <option value="fred:DGS5">美债收益率 5Y（FRED: DGS5）</option>
+            <option value="fred:DGS10">美债收益率 10Y（FRED: DGS10）</option>
+            <option value="fred:DGS30">美债收益率 30Y（FRED: DGS30）</option>
+            <option value="sina:DINIW">美元指数 DXY（Sina: DINIW）</option>
+            <option value="stooq:XAUUSD">伦敦现货黄金 XAUUSD（Stooq）</option>
+            <option value="yahoo:GC=F">纽约期货黄金 GC（Yahoo: GC=F）</option>
+            <option value="custom:">custom（自定义）</option>
+          </select>
+        </div>
+        <div>
+          <label>指标 symbol</label>
+          <input id="etf_idx" value="GVZ" />
+        </div>
+        <div>
+          <label>数据源 provider</label>
+          <select id="etf_idxProvider" title="auto 会根据 symbol 自动选择。FRED 需要设置 MOMENTUM_FRED_API_KEY。">
+            <option value="auto" selected>auto（自动）</option>
+            <option value="cboe">cboe</option>
+            <option value="fred">fred</option>
+            <option value="sina">sina</option>
+            <option value="stooq">stooq</option>
+            <option value="yahoo">yahoo</option>
+          </select>
+        </div>
+        <div>
+          <label>日期对齐</label>
+          <select id="etf_align">
+            <option value="cn_next_trading_day" selected>US 收盘顺延到中国下一交易日（推荐）</option>
+            <option value="none">不做顺延（原始日期）</option>
+          </select>
+        </div>
+        <div>
+          <label>互相关最大滞后（天）</label>
+          <input id="etf_maxLag" value="20" />
+        </div>
+        <div>
+          <label>Granger 最大阶数</label>
+          <input id="etf_grangerLag" value="10" />
+        </div>
+        <div>
+          <label>显著性 α</label>
+          <input id="etf_alpha" value="0.05" />
+        </div>
+        <div>
+          <label>成本（bps/换仓）</label>
+          <input id="etf_costBps" value="10" />
+        </div>
+        <div>
+          <label>阈值信号（|index_ret| 分位数）</label>
+          <input id="etf_thrQ" value="0.8" />
+        </div>
+        <div>
+          <label>Walk-forward 训练占比</label>
+          <input id="etf_trainRatio" value="0.6" />
+        </div>
+        <div>
+          <label>Walk-forward 目标</label>
+          <select id="etf_wfObj">
+            <option value="sharpe" selected>最大化 Sharpe</option>
+            <option value="cagr">最大化 CAGR</option>
+          </select>
+        </div>
+        <button id="etf_run">运行分析</button>
+      </div>
+
+      <div id="etf_msg" class="msg panel"></div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+          <div id="etf_pxChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">日收益率</h3>
+          <div id="etf_retChart"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">互相关（正滞后 = 指数领先 ETF）</h3>
+        <div id="etf_xcorrChart"></div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">互相关明细</h3>
+          <table id="etf_xcorrTable"></table>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">Granger 因果检验</h3>
+          <table id="etf_grangerTable"></table>
+        </div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">交易可用性：方向命中率/混淆矩阵</h3>
+          <table id="etf_tradeTable"></table>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">条件分布（按 指标 次日信号涨/跌分组）</h3>
+          <table id="etf_condTable"></table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">简单策略回测（risk-on/off，含换仓成本）</h3>
+        <div id="etf_stratChart"></div>
+        <div class="muted" id="etf_stratMetrics" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">滚动稳定性（窗口=252）</h3>
+        <div id="etf_rollingChart"></div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">Walk-forward（训练选参 → 测试验证）</h3>
+        <table id="etf_wfTable"></table>
+      </div>
+    </section>
+
+    <!-- -------------------- TAB: Step1 -------------------- -->
+    <section class="tab" id="tab_step1">
+      <div class="panel">
+        <h3 style="margin:0 0 6px 0;">Step 1：国际金价（现货/期货）× 美债收益率 × 美元指数</h3>
+        <div class="muted">说明：本页<strong>只读取本地数据库</strong>（macro_prices / etf_prices），不触发联网更新。</div>
+      </div>
+
+      <div class="panel row">
+        <div><label>开始日期</label><input id="s1_start" placeholder="YYYYMMDD" /></div>
+        <div><label>结束日期</label><input id="s1_end" placeholder="YYYYMMDD" /></div>
+        <div><label>现货金 series_id</label><input id="s1_goldSpot" value="XAUUSD" /></div>
+        <div><label>期货金 series_id（可选）</label><input id="s1_goldFut" value="GC_FUT" /></div>
+        <div><label>DXY series_id</label><input id="s1_dxy" value="DINIW" /></div>
+        <div>
+          <label>美债收益率 series_id</label>
+          <select id="s1_yld">
+            <option value="DGS2">DGS2 (2Y)</option>
+            <option value="DGS5">DGS5 (5Y)</option>
+            <option value="DGS10" selected>DGS10 (10Y)</option>
+            <option value="DGS30">DGS30 (30Y)</option>
+          </select>
+        </div>
+        <div>
+          <label>对齐</label>
+          <select id="s1_align">
+            <option value="none" selected>none</option>
+            <option value="cn_next_trading_day">cn_next_trading_day</option>
+          </select>
+        </div>
+        <div><label>max_lag</label><input id="s1_maxLag" value="20" /></div>
+        <div><label>Granger max_lag</label><input id="s1_grangerLag" value="10" /></div>
+        <button id="s1_run">运行分析</button>
+      </div>
+
+      <div id="s1_msg" class="msg panel"></div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <div id="s1_pxChart"></div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">选择查看的 pair</h3>
+          <select id="s1_pairSel" style="min-width: 360px;"></select>
+          <div class="muted" style="margin-top:6px;">互相关图：正滞后 = B 领先 A</div>
+          <div id="s1_xcorrChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">pair 摘要</h3>
+          <div id="s1_pairMsg" class="msg"></div>
+          <div class="panel">
+            <h3 style="margin: 10px 0 6px 0; font-size: 15px;">Granger（p-value）</h3>
+            <table id="s1_grangerTable"></table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
+          <div class="muted">用左右纵轴展示两条“原始 close”序列，避免归一化后某些变量看起来像一条直线。</div>
+          <div id="s1_rawPairChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <div id="s1_rollingChart"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- -------------------- TAB: Step2 -------------------- -->
+    <section class="tab" id="tab_step2">
+      <div class="panel">
+        <h3 style="margin:0 0 6px 0;">Step 2：国内金价（现货/期货）× CNH × 国债收益率</h3>
+        <div class="muted">说明：series_id 取决于你如何落库（macro_prices）。默认值可按需修改。</div>
+      </div>
+
+      <div class="panel row">
+        <div><label>开始日期</label><input id="s2_start" placeholder="YYYYMMDD" /></div>
+        <div><label>结束日期</label><input id="s2_end" placeholder="YYYYMMDD" /></div>
+        <div><label>国内现货金 series_id</label><input id="s2_cnSpot" value="SGE_AU9999" /></div>
+        <div><label>国内期货金 series_id（可选）</label><input id="s2_cnFut" value="SHFE_AU" /></div>
+        <div><label>CNH series_id</label><input id="s2_cnh" value="USDCNH" /></div>
+        <div><label>国债收益率 series_id</label><input id="s2_yld" value="CN10Y" /></div>
+        <div><label>max_lag</label><input id="s2_maxLag" value="20" /></div>
+        <div><label>Granger max_lag</label><input id="s2_grangerLag" value="10" /></div>
+        <button id="s2_run">运行分析</button>
+      </div>
+
+      <div id="s2_msg" class="msg panel"></div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <div id="s2_pxChart"></div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">选择查看的 pair</h3>
+          <select id="s2_pairSel" style="min-width: 360px;"></select>
+          <div id="s2_xcorrChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">pair 摘要</h3>
+          <div id="s2_pairMsg" class="msg"></div>
+        </div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
+          <div id="s2_rawPairChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <div id="s2_rollingChart"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- -------------------- TAB: Step3 -------------------- -->
+    <section class="tab" id="tab_step3">
+      <div class="panel">
+        <h3 style="margin:0 0 6px 0;">Step 3：国内金价 × 国际金价（可选：国际金价×汇率）</h3>
+        <div class="muted">说明：本页会额外计算一个派生序列 <code>global_gold * fx</code>（仅用于可视化与 pair 分析）。</div>
+      </div>
+
+      <div class="panel row">
+        <div><label>开始日期</label><input id="s3_start" placeholder="YYYYMMDD" /></div>
+        <div><label>结束日期</label><input id="s3_end" placeholder="YYYYMMDD" /></div>
+        <div><label>国内金 series_id</label><input id="s3_cn" value="SGE_AU9999" /></div>
+        <div><label>国际金 series_id</label><input id="s3_glb" value="XAUUSD" /></div>
+        <div><label>汇率 series_id</label><input id="s3_fx" value="USDCNH" /></div>
+        <button id="s3_run">运行分析</button>
+      </div>
+
+      <div id="s3_msg" class="msg panel"></div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <div id="s3_pxChart"></div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">选择查看的 pair</h3>
+          <select id="s3_pairSel" style="min-width: 360px;"></select>
+          <div id="s3_xcorrChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">pair 摘要</h3>
+          <div id="s3_pairMsg" class="msg"></div>
+        </div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
+          <div id="s3_rawPairChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <div id="s3_rollingChart"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- -------------------- TAB: Step4 -------------------- -->
+    <section class="tab" id="tab_step4">
+      <div class="panel">
+        <h3 style="margin:0 0 6px 0;">Step 4：国内黄金 ETF × 国内现货金</h3>
+        <div class="muted">说明：ETF 来自 <code>etf_prices</code>，现货金来自 <code>macro_prices</code>。</div>
+      </div>
+
+      <div class="panel row">
+        <div><label>开始日期</label><input id="s4_start" placeholder="YYYYMMDD" /></div>
+        <div><label>结束日期</label><input id="s4_end" placeholder="YYYYMMDD" /></div>
+        <div><label>ETF code</label><input id="s4_etf" value="518880" /></div>
+        <div>
+          <label>ETF 复权</label>
+          <select id="s4_adjust">
+            <option value="hfq" selected>hfq</option>
+            <option value="qfq">qfq</option>
+            <option value="none">none</option>
+          </select>
+        </div>
+        <div><label>国内现货金 series_id</label><input id="s4_spot" value="SGE_AU9999" /></div>
+        <div>
+          <label>对齐</label>
+          <select id="s4_align">
+            <option value="none" selected>none</option>
+            <option value="cn_next_trading_day">cn_next_trading_day</option>
+          </select>
+        </div>
+        <div><label>max_lag</label><input id="s4_maxLag" value="20" /></div>
+        <div><label>Granger max_lag</label><input id="s4_grangerLag" value="10" /></div>
+        <button id="s4_run">运行分析</button>
+      </div>
+
+      <div id="s4_msg" class="msg panel"></div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <div id="s4_pxChart"></div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">互相关（正滞后 = Spot 领先 ETF）</h3>
+          <div id="s4_xcorrChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">摘要</h3>
+          <div id="s4_pairMsg" class="msg"></div>
+        </div>
+      </div>
+
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
+          <div id="s4_rawPairChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <div id="s4_rollingChart"></div>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const $ = (id) => document.getElementById(id);
+
+      function ymdTodayMinus(days) {
+        const d = new Date(Date.now() - days * 86400 * 1000);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${y}${m}${dd}`;
+      }
+
+      function fmt(x, k=4) {
+        const n = Number(x);
+        if (!Number.isFinite(n)) return "";
+        return n.toFixed(k);
+      }
+
+      function norm(arr) {
+        if (!arr || arr.length === 0) return [];
+        const x0 = Number(arr[0] || 1);
+        return arr.map(v => Number(v) / x0);
+      }
+
+      function parsePairKey(key) {
+        const parts = String(key || "").split("__vs__");
+        return { a: (parts[0] || "A").trim(), b: (parts[1] || "B").trim() };
+      }
+
+      function inferTickFormat(arr) {
+        const xs = (arr || []).map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0);
+        if (!xs.length) return ",.2f";
+        const maxv = Math.max(...xs);
+        if (maxv < 20) return ".2f";
+        if (maxv < 200) return ".1f";
+        return ",.0f";
+      }
+
+      function formatTick(v, fmt) {
+        const s = String(fmt || "");
+        const dec = s.includes(".2f") ? 2 : (s.includes(".1f") ? 1 : 0);
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "";
+        return n.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
+      }
+
+      function buildLogTicks(arr, fmt) {
+        const xs = (arr || []).map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0);
+        if (!xs.length) return {};
+        const minv = Math.min(...xs);
+        const maxv = Math.max(...xs);
+        if (!(minv > 0) || !(maxv > 0)) return {};
+        const kmin = Math.floor(Math.log10(minv));
+        const kmax = Math.ceil(Math.log10(maxv));
+        const decades = Math.max(0, kmax - kmin);
+        const mults = decades <= 1 ? [1,2,3,4,5,6,7,8,9] : [1,2,5];
+        const tickvals = [];
+        const ticktext = [];
+        for (let k = kmin; k <= kmax; k++) {
+          for (const m of mults) {
+            const v = m * Math.pow(10, k);
+            if (v < minv * 0.999 || v > maxv * 1.001) continue;
+            tickvals.push(v);
+            ticktext.push(formatTick(v, fmt));
+          }
+        }
+        if (!tickvals.length) return {};
+        return { tickmode: "array", tickvals, ticktext };
+      }
+
+      function axisLogStyle(title, color, arr) {
+        const fmt = inferTickFormat(arr);
+        const ticks = buildLogTicks(arr, fmt);
+        return {
+          ...ticks,
+          title: { text: title || "", font: { color: color || "#111" } },
+          type: "log",
+          tickfont: { color: color || "#111" },
+          tickcolor: color || "#111",
+          linecolor: color || "#111",
+          ticks: "outside",
+          ticklen: 4,
+          showexponent: "none",
+          exponentformat: "none",
+        };
+      }
+
+      function renderRawDualAxis(divId, dates, aClose, aLabel, bClose, bLabel) {
+        const x = dates || [];
+        const y1 = (aClose || []).map(v => {
+          const n = Number(v);
+          if (!Number.isFinite(n) || n <= 0) return null; // log axis can't show non-positive values
+          return n;
+        });
+        const y2 = (bClose || []).map(v => {
+          const n = Number(v);
+          if (!Number.isFinite(n) || n <= 0) return null; // log axis can't show non-positive values
+          return n;
+        });
+        const c1 = "#1f77b4";
+        const c2 = "#ff7f0e";
+        Plotly.newPlot(divId, [
+          { x, y: y1, name: aLabel || "A", type: "scatter", mode: "lines", line: { color: c1 } },
+          { x, y: y2, name: bLabel || "B", type: "scatter", mode: "lines", yaxis: "y2", line: { color: c2 } },
+        ], {
+          margin: { t: 20 },
+          yaxis: axisLogStyle(aLabel || "A", c1, y1),
+          yaxis2: { ...axisLogStyle(bLabel || "B", c2, y2), overlaying: "y", side: "right" },
+        }, { displayModeBar: false });
+      }
+
+      function renderRollingStability(divId, rolling) {
+        if (!rolling || !Array.isArray(rolling.dates)) {
+          Plotly.newPlot(divId, [], { margin: { t: 20 } }, { displayModeBar: false });
+          return;
+        }
+        Plotly.newPlot(divId, [
+          { x: rolling.dates, y: (rolling.corr || []), name: "rolling corr", type: "scatter", mode: "lines" },
+          { x: rolling.dates, y: (rolling.hit_rate || []), name: "rolling hit_rate", yaxis: "y2", type: "scatter", mode: "lines" },
+        ], {
+          margin: { t: 20 },
+          yaxis: { title: "corr" },
+          yaxis2: { title: "hit_rate", overlaying: "y", side: "right" },
+        }, { displayModeBar: false });
+      }
+
+      function buildUnionSeries(aSeries, bSeries) {
+        const aDates = (aSeries && aSeries.dates) ? aSeries.dates : [];
+        const aClose = (aSeries && aSeries.close) ? aSeries.close : [];
+        const bDates = (bSeries && bSeries.dates) ? bSeries.dates : [];
+        const bClose = (bSeries && bSeries.close) ? bSeries.close : [];
+
+        const amap = new Map();
+        for (let i = 0; i < aDates.length; i++) amap.set(String(aDates[i]), aClose[i]);
+        const bmap = new Map();
+        for (let i = 0; i < bDates.length; i++) bmap.set(String(bDates[i]), bClose[i]);
+
+        const dset = new Set([...amap.keys(), ...bmap.keys()]);
+        const dates = Array.from(dset.values()).sort();
+        const av = dates.map(d => (amap.has(d) ? amap.get(d) : null));
+        const bv = dates.map(d => (bmap.has(d) ? bmap.get(d) : null));
+        return { dates, aClose: av, bClose: bv };
+      }
+
+      function setActiveTab(name) {
+        for (const el of document.querySelectorAll(".tab")) el.classList.remove("active");
+        for (const el of document.querySelectorAll(".tabBtn")) el.classList.remove("active");
+        const tab = $("tab_" + name);
+        const btn = $("tabBtn_" + name);
+        if (tab) tab.classList.add("active");
+        if (btn) btn.classList.add("active");
+        // keep hash stable for sharing/bookmark
+        const hash = "#" + name;
+        if (location.hash !== hash) history.replaceState(null, "", hash);
+      }
+
+      function initTabs() {
+        for (const btn of document.querySelectorAll(".tabBtn")) {
+          btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
+        }
+        const h = (location.hash || "").replace("#", "").trim().toLowerCase();
+        const initial = h && ["etf","step1","step2","step3","step4"].includes(h) ? h : "etf";
+        setActiveTab(initial);
+      }
+
+      // -------------------- ETF tab logic (copied from research_gold_gvx.html with prefixed ids) --------------------
+      (function initEtfTab() {
+        const setMsg = (t) => ($("etf_msg").textContent = t || "");
+        const idxLabel = (provider, symbol) => {
+          const p = String(provider || "").trim().toLowerCase();
+          const s = String(symbol || "").trim();
+          if (!s) return "";
+          if (p === "cboe") return s.toUpperCase();
+          if (p === "fred") return s.toUpperCase();
+          if (p === "stooq") return s.toUpperCase();
+          if (p === "yahoo") return s;
+          return s;
+        };
+
+        function renderTables(res) {
+          const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
+          const best = (res && res.corr && res.corr.best) ? res.corr.best : null;
+          const rel = (res && res.corr && res.corr.relation) ? res.corr.relation : "";
+          let html = "<tr><th>lag</th><th>corr</th><th>pvalue</th><th>n</th></tr>";
+          for (const r of xs) {
+            const isBest = best && Number(r.lag) === Number(best.lag);
+            html += `<tr${isBest ? ' style="background:#fff7e6"' : ""}><td>${r.lag}</td><td>${fmt(r.corr,4)}</td><td>${fmt(r.pvalue,4)}</td><td>${r.n}</td></tr>`;
+          }
+          $("etf_xcorrTable").innerHTML = html;
+
+          const g1 = (res && res.granger && res.granger.idx_to_etf) ? res.granger.idx_to_etf : [];
+          const g2 = (res && res.granger && res.granger.etf_to_idx) ? res.granger.etf_to_idx : [];
+          let ghtml = "<tr><th>p</th><th>idx→etf pvalue</th><th>etf→idx pvalue</th></tr>";
+          const n = Math.max(g1.length, g2.length);
+          for (let i = 0; i < n; i++) {
+            const a = g1[i] || {};
+            const b = g2[i] || {};
+            ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue,4)}</td><td>${fmt(b.pvalue,4)}</td></tr>`;
+          }
+          $("etf_grangerTable").innerHTML = ghtml;
+
+          const s = (res && res.granger && res.granger.summary) ? res.granger.summary : {};
+          setMsg(
+            `结论（粗略）：relation=${rel}\n` +
+            `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}\n` +
+            `granger idx→etf min_p=${fmt(s.idx_causes_etf_min_p,4)}; etf→idx min_p=${fmt(s.etf_causes_idx_min_p,4)} (alpha=${fmt(s.alpha,4)})`
+          );
+        }
+
+        function renderTrade(res) {
+          const t = (res && res.trade) ? res.trade : null;
+          if (!t) return;
+          const meta = (res && res.meta) ? res.meta : {};
+          const lab = idxLabel(meta.provider, meta.index || meta.series_id || meta.symbol || "");
+          const d = t.direction || {};
+          $("etf_tradeTable").innerHTML =
+            "<tr><th>样本数</th><th>命中率</th><th>TP</th><th>TN</th><th>FP</th><th>FN</th></tr>" +
+            `<tr><td>${d.n ?? ""}</td><td>${fmt(d.hit_rate,4)}</td><td>${d.tp ?? ""}</td><td>${d.tn ?? ""}</td><td>${d.fp ?? ""}</td><td>${d.fn ?? ""}</td></tr>`;
+
+          const c = t.conditional || {};
+          const up = c.idx_up || {};
+          const dn = c.idx_down || {};
+          $("etf_condTable").innerHTML =
+            "<tr><th>分组</th><th>n</th><th>mean</th><th>q5</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr>" +
+            `<tr><td>${lab}↑(信号日)</td><td>${up.n ?? ""}</td><td>${fmt(up.mean,6)}</td><td>${fmt(up.q5,6)}</td><td>${fmt(up.q25,6)}</td><td>${fmt(up.q50,6)}</td><td>${fmt(up.q75,6)}</td><td>${fmt(up.q95,6)}</td></tr>` +
+            `<tr><td>${lab}↓(信号日)</td><td>${dn.n ?? ""}</td><td>${fmt(dn.mean,6)}</td><td>${fmt(dn.q5,6)}</td><td>${fmt(dn.q25,6)}</td><td>${fmt(dn.q50,6)}</td><td>${fmt(dn.q75,6)}</td><td>${fmt(dn.q95,6)}</td></tr>`;
+
+          const s = t.strategy || {};
+          const dates = s.dates || [];
+          const navS = s.nav_strategy || [];
+          const navB = s.nav_buy_hold || [];
+          Plotly.newPlot("etf_stratChart", [
+            { x: dates, y: navS, name: "策略NAV", type: "scatter", mode: "lines" },
+            { x: dates, y: navB, name: "买入持有NAV", type: "scatter", mode: "lines" },
+          ], { margin: { t: 20 } }, { displayModeBar: false });
+
+          const m = (s.metrics || {});
+          const ms = (m.strategy || {});
+          const mb = (m.buy_hold || {});
+          const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+          $("etf_stratMetrics").textContent =
+            `策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
+            `买入持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe,2)} MDD=${fmtPct(mb.max_drawdown)}`;
+
+          const r = t.rolling || {};
+          const rd = r.dates || [];
+          Plotly.newPlot("etf_rollingChart", [
+            { x: rd, y: (r.corr || []), name: "rolling corr(etf_ret, idx_ret_lag)", type: "scatter", mode: "lines" },
+            { x: rd, y: (r.hit_rate || []), name: "rolling hit_rate", yaxis: "y2", type: "scatter", mode: "lines" },
+          ], { margin: { t: 20 }, yaxis: { title: "corr" }, yaxis2: { title: "hit", overlaying: "y", side: "right" } }, { displayModeBar: false });
+
+          const th = t.threshold || {};
+          const wf = t.walk_forward || {};
+          const thStrat = th.strategy ? th.strategy : null;
+          const thM = thStrat && thStrat.metrics ? thStrat.metrics.strategy : null;
+          const thLine = thStrat
+            ? `threshold(q=${fmt(th.quantile,2)} abs=${fmt(thStrat.threshold_abs,6)} active_rate=${fmt(thStrat.active_rate,3)}): ` +
+              `CAGR=${fmtPct(thM && thM.cagr)} Sharpe=${fmt(thM && thM.sharpe,2)} MDD=${fmtPct(thM && thM.max_drawdown)}`
+            : `threshold(q=${fmt(th.quantile,2)}): 无法计算（样本不足或缺失）`;
+
+          let wfHtml = "<tr><th>项</th><th>内容</th></tr>";
+          wfHtml += `<tr><td>阈值信号</td><td>${thLine}</td></tr>`;
+          if (wf && wf.ok) {
+            const ch = wf.chosen || {};
+            const trn = (wf.train && wf.train.strategy && wf.train.strategy.metrics && wf.train.strategy.metrics.strategy) ? wf.train.strategy.metrics.strategy : {};
+            const tst = (wf.test && wf.test.strategy && wf.test.strategy.metrics && wf.test.strategy.metrics.strategy) ? wf.test.strategy.metrics.strategy : {};
+            wfHtml += `<tr><td>Walk-forward 选参</td><td>objective=${wf.objective}, lag=${ch.lag}, thr_q=${ch.thr_q}, thr_abs=${fmt(ch.thr_abs,6)}, corr_train=${fmt(ch.corr_train,4)}</td></tr>`;
+            wfHtml += `<tr><td>训练段</td><td>${wf.train.start} ~ ${wf.train.end} | CAGR=${fmtPct(trn.cagr)} Sharpe=${fmt(trn.sharpe,2)} MDD=${fmtPct(trn.max_drawdown)}</td></tr>`;
+            wfHtml += `<tr><td>测试段</td><td>${wf.test.start} ~ ${wf.test.end} | CAGR=${fmtPct(tst.cagr)} Sharpe=${fmt(tst.sharpe,2)} MDD=${fmtPct(tst.max_drawdown)}</td></tr>`;
+          } else {
+            wfHtml += `<tr><td>Walk-forward</td><td>无法计算（${wf && wf.reason ? wf.reason : "样本不足"}）</td></tr>`;
+          }
+          $("etf_wfTable").innerHTML = wfHtml;
+        }
+
+        function renderCharts(res) {
+          const dates = (res && res.series && res.series.dates) ? res.series.dates : [];
+          const etfClose = (res && res.series && res.series.etf_close) ? res.series.etf_close : [];
+          const idxClose = (res && res.series && res.series.idx_close) ? res.series.idx_close : [];
+          const etfRet = (res && res.series && res.series.etf_ret) ? res.series.etf_ret : [];
+          const idxRet = (res && res.series && res.series.idx_ret) ? res.series.idx_ret : [];
+          const meta = (res && res.meta) ? res.meta : {};
+          const lab = idxLabel(meta.provider, meta.index || meta.series_id || meta.symbol || "");
+
+          const etf0 = Number(etfClose[0] || 1);
+          const idx0 = Number(idxClose[0] || 1);
+          const etfNorm = etfClose.map(v => Number(v) / etf0);
+          const idxNorm = idxClose.map(v => Number(v) / idx0);
+
+          Plotly.newPlot("etf_pxChart", [
+            { x: dates, y: etfNorm, name: "黄金ETF(518880) close(归一化)", type: "scatter", mode: "lines" },
+            { x: dates, y: idxNorm, name: `${lab} close(归一化)`, type: "scatter", mode: "lines" },
+          ], {
+            margin: { t: 20 },
+            yaxis: {
+              type: "log",
+              tickformat: ".2f",
+              showexponent: "none",
+              exponentformat: "none",
+            },
+          }, { displayModeBar: false });
+
+          Plotly.newPlot("etf_retChart", [
+            { x: dates, y: etfRet, name: "ETF log-ret", type: "scatter", mode: "lines" },
+            { x: dates, y: idxRet, name: "Index log-ret", type: "scatter", mode: "lines" },
+          ], { margin: { t: 20 } }, { displayModeBar: false });
+
+          const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
+          Plotly.newPlot("etf_xcorrChart", [
+            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
+          ], { margin: { t: 20 }, xaxis: { title: "lag (days)" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+        }
+
+        function applyPreset() {
+          const preset = ($("etf_idxPreset").value || "").trim();
+          if (!preset || preset === "custom:") return;
+          const parts = preset.split(":");
+          const p = (parts[0] || "auto").trim();
+          const s = parts.slice(1).join(":").trim();
+          $("etf_idxProvider").value = p;
+          $("etf_idx").value = s;
+        }
+
+        async function run() {
+          const start = ($("etf_start").value || "").trim();
+          const end = ($("etf_end").value || "").trim();
+          const adjust = ($("etf_adjust").value || "hfq").trim();
+          const preset = ($("etf_idxPreset").value || "cboe:GVZ").trim();
+          let index_symbol = ($("etf_idx").value || "GVZ").trim();
+          let index_provider = ($("etf_idxProvider").value || "auto").trim();
+          if (preset && preset !== "custom:") {
+            const parts = preset.split(":");
+            if (parts.length >= 2) {
+              index_provider = (parts[0] || "auto").trim();
+              index_symbol = parts.slice(1).join(":").trim();
+              $("etf_idxProvider").value = index_provider;
+              $("etf_idx").value = index_symbol;
+            }
+          }
+          const index_align = ($("etf_align").value || "cn_next_trading_day").trim();
+          const max_lag = Number(($("etf_maxLag").value || "20").trim());
+          const granger_max_lag = Number(($("etf_grangerLag").value || "10").trim());
+          const alpha = Number(($("etf_alpha").value || "0.05").trim());
+          const trade_cost_bps = Number(($("etf_costBps").value || "0").trim());
+          const threshold_quantile = Number(($("etf_thrQ").value || "0.8").trim());
+          const train_ratio = Number(($("etf_trainRatio").value || "0.6").trim());
+          const walk_objective = ($("etf_wfObj").value || "sharpe").trim();
+
+          setMsg("运行中...");
+          const resp = await api("/analysis/leadlag", {
+            method: "POST",
+            body: JSON.stringify({
+              etf_code: "518880",
+              index_symbol,
+              index_provider,
+              index_align,
+              start,
+              end,
+              adjust,
+              max_lag,
+              granger_max_lag,
+              alpha,
+              trade_cost_bps,
+              rolling_window: 252,
+              enable_threshold: true,
+              threshold_quantile,
+              walk_forward: true,
+              train_ratio,
+              walk_objective,
+            }),
+          });
+          const data = await resp.json();
+          if (!data || !data.ok) {
+            setMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+            return;
+          }
+          renderCharts(data);
+          renderTables(data);
+          renderTrade(data);
+        }
+
+        $("etf_end").value = ymdTodayMinus(0);
+        $("etf_start").value = ymdTodayMinus(365 * 5);
+        $("etf_idxPreset").addEventListener("change", applyPreset);
+        applyPreset();
+        $("etf_run").addEventListener("click", run);
+      })();
+
+      // -------------------- Step1 logic --------------------
+      (function initStep1() {
+        const setMsg = (t) => ($("s1_msg").textContent = t || "");
+        const setPairMsg = (t) => ($("s1_pairMsg").textContent = t || "");
+        let lastSeries = null;
+
+        function renderPrice(series) {
+          const traces = [];
+          for (const [sid, s] of Object.entries(series || {})) {
+            traces.push({ x: (s.dates || []), y: norm(s.close || []), name: sid, type: "scatter", mode: "lines" });
+          }
+          Plotly.newPlot("s1_pxChart", traces, {
+            margin: { t: 20 },
+            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
+          }, { displayModeBar: false });
+        }
+
+        function renderPair(key, pairs) {
+          const { a, b } = parsePairKey(key);
+          const res = pairs ? pairs[key] : null;
+          if (!res || !res.ok) {
+            setPairMsg(`pair=${key}\n失败：${res ? (res.reason || JSON.stringify(res)) : "empty"}`);
+            Plotly.newPlot("s1_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            $("s1_grangerTable").innerHTML = "";
+            Plotly.newPlot("s1_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot("s1_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            return;
+          }
+          const best = res.corr && res.corr.best ? res.corr.best : null;
+          const rel = res.corr && res.corr.relation ? res.corr.relation : "";
+          const gsum = res.granger && res.granger.summary ? res.granger.summary : {};
+          setPairMsg(
+            `pair=${key}\n` +
+            `relation=${rel}\n` +
+            `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}\n` +
+            `granger idx→a min_p=${fmt(gsum.idx_causes_etf_min_p,4)}; a→idx min_p=${fmt(gsum.etf_causes_idx_min_p,4)}`
+          );
+          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
+          Plotly.newPlot("s1_xcorrChart", [
+            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
+          ], { margin: { t: 20 }, xaxis: { title: "lag (days)" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+
+          const g1 = (res.granger && res.granger.idx_to_etf) ? res.granger.idx_to_etf : [];
+          const g2 = (res.granger && res.granger.etf_to_idx) ? res.granger.etf_to_idx : [];
+          let ghtml = "<tr><th>p</th><th>b→a pvalue</th><th>a→b pvalue</th></tr>";
+          const n = Math.max(g1.length, g2.length);
+          for (let i = 0; i < n; i++) {
+            const a = g1[i] || {};
+            const b = g2[i] || {};
+            ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue,4)}</td><td>${fmt(b.pvalue,4)}</td></tr>`;
+          }
+          $("s1_grangerTable").innerHTML = ghtml;
+
+          // 原始尺度：双纵轴（A=etf_close, B=idx_close）
+          if (lastSeries && lastSeries[a] && lastSeries[b]) {
+            const u = buildUnionSeries(lastSeries[a], lastSeries[b]);
+            renderRawDualAxis("s1_rawPairChart", u.dates, u.aClose, a, u.bClose, b);
+          } else {
+            Plotly.newPlot("s1_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+          }
+          // 滚动稳定性：直接复用后端计算结果（best_lag 对齐）
+          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          renderRollingStability("s1_rollingChart", roll);
+        }
+
+        async function run() {
+          const start = ($("s1_start").value || "").trim();
+          const end = ($("s1_end").value || "").trim();
+          const gold_spot_series_id = ($("s1_goldSpot").value || "").trim();
+          const gold_fut_series_id_raw = ($("s1_goldFut").value || "").trim();
+          const gold_fut_series_id = gold_fut_series_id_raw ? gold_fut_series_id_raw : null;
+          const dxy_series_id = ($("s1_dxy").value || "").trim();
+          const yield_series_id = ($("s1_yld").value || "DGS10").trim();
+          const index_align = ($("s1_align").value || "none").trim();
+          const max_lag = Number(($("s1_maxLag").value || "20").trim());
+          const granger_max_lag = Number(($("s1_grangerLag").value || "10").trim());
+
+          setMsg("运行中...");
+          const resp = await api("/analysis/macro/step1", {
+            method: "POST",
+            body: JSON.stringify({ start, end, gold_spot_series_id, gold_fut_series_id, dxy_series_id, yield_series_id, index_align, max_lag, granger_max_lag }),
+          });
+          const data = await resp.json();
+          if (!data || !data.ok) {
+            setMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+            return;
+          }
+          setMsg("完成。");
+          lastSeries = data.series || null;
+          renderPrice(data.series);
+          const keys = Object.keys(data.pairs || {});
+          $("s1_pairSel").innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+          if (keys.length) {
+            $("s1_pairSel").value = keys[0];
+            renderPair(keys[0], data.pairs);
+          }
+          $("s1_pairSel").onchange = () => renderPair(($("s1_pairSel").value || "").trim(), data.pairs);
+        }
+
+        $("s1_end").value = ymdTodayMinus(0);
+        $("s1_start").value = ymdTodayMinus(365 * 10);
+        $("s1_run").addEventListener("click", run);
+      })();
+
+      // -------------------- Step2 logic --------------------
+      (function initStep2() {
+        const setMsg = (t) => ($("s2_msg").textContent = t || "");
+        const setPairMsg = (t) => ($("s2_pairMsg").textContent = t || "");
+        let lastSeries = null;
+
+        function renderPrice(series) {
+          const traces = [];
+          for (const [sid, s] of Object.entries(series || {})) {
+            traces.push({ x: (s.dates || []), y: norm(s.close || []), name: sid, type: "scatter", mode: "lines" });
+          }
+          Plotly.newPlot("s2_pxChart", traces, {
+            margin: { t: 20 },
+            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
+          }, { displayModeBar: false });
+        }
+
+        function renderPair(key, pairs) {
+          const { a, b } = parsePairKey(key);
+          const res = pairs ? pairs[key] : null;
+          if (!res || !res.ok) {
+            setPairMsg(`pair=${key}\n失败：${res ? (res.reason || JSON.stringify(res)) : "empty"}`);
+            Plotly.newPlot("s2_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot("s2_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot("s2_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            return;
+          }
+          const best = res.corr && res.corr.best ? res.corr.best : null;
+          const rel = res.corr && res.corr.relation ? res.corr.relation : "";
+          setPairMsg(`pair=${key}\nrelation=${rel}\nbest_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}`);
+          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
+          Plotly.newPlot("s2_xcorrChart", [
+            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
+          ], { margin: { t: 20 } }, { displayModeBar: false });
+
+          if (lastSeries && lastSeries[a] && lastSeries[b]) {
+            const u = buildUnionSeries(lastSeries[a], lastSeries[b]);
+            renderRawDualAxis("s2_rawPairChart", u.dates, u.aClose, a, u.bClose, b);
+          } else {
+            Plotly.newPlot("s2_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+          }
+          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          renderRollingStability("s2_rollingChart", roll);
+        }
+
+        async function run() {
+          const start = ($("s2_start").value || "").trim();
+          const end = ($("s2_end").value || "").trim();
+          const cn_spot_series_id = ($("s2_cnSpot").value || "").trim();
+          const cn_fut_series_id_raw = ($("s2_cnFut").value || "").trim();
+          const cn_fut_series_id = cn_fut_series_id_raw ? cn_fut_series_id_raw : null;
+          const cnh_series_id = ($("s2_cnh").value || "").trim();
+          const yield_series_id = ($("s2_yld").value || "").trim();
+          const max_lag = Number(($("s2_maxLag").value || "20").trim());
+          const granger_max_lag = Number(($("s2_grangerLag").value || "10").trim());
+
+          setMsg("运行中...");
+          const resp = await api("/analysis/macro/step2", {
+            method: "POST",
+            body: JSON.stringify({ start, end, cn_spot_series_id, cn_fut_series_id, cnh_series_id, yield_series_id, max_lag, granger_max_lag }),
+          });
+          const data = await resp.json();
+          if (!data || !data.ok) {
+            setMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+            return;
+          }
+          setMsg("完成。");
+          lastSeries = data.series || null;
+          renderPrice(data.series);
+          const keys = Object.keys(data.pairs || {});
+          $("s2_pairSel").innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+          if (keys.length) {
+            $("s2_pairSel").value = keys[0];
+            renderPair(keys[0], data.pairs);
+          }
+          $("s2_pairSel").onchange = () => renderPair(($("s2_pairSel").value || "").trim(), data.pairs);
+        }
+
+        $("s2_end").value = ymdTodayMinus(0);
+        $("s2_start").value = ymdTodayMinus(365 * 10);
+        $("s2_run").addEventListener("click", run);
+      })();
+
+      // -------------------- Step3 logic --------------------
+      (function initStep3() {
+        const setMsg = (t) => ($("s3_msg").textContent = t || "");
+        const setPairMsg = (t) => ($("s3_pairMsg").textContent = t || "");
+        let lastSeries = null;
+
+        function renderPrice(series) {
+          const traces = [];
+          for (const [sid, s] of Object.entries(series || {})) {
+            traces.push({ x: (s.dates || []), y: norm(s.close || []), name: sid, type: "scatter", mode: "lines" });
+          }
+          Plotly.newPlot("s3_pxChart", traces, {
+            margin: { t: 20 },
+            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
+          }, { displayModeBar: false });
+        }
+
+        function renderPair(key, pairs) {
+          const { a, b } = parsePairKey(key);
+          const res = pairs ? pairs[key] : null;
+          if (!res || !res.ok) {
+            setPairMsg(`pair=${key}\n失败：${res ? (res.reason || JSON.stringify(res)) : "empty"}`);
+            Plotly.newPlot("s3_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot("s3_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot("s3_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            return;
+          }
+          const best = res.corr && res.corr.best ? res.corr.best : null;
+          const rel = res.corr && res.corr.relation ? res.corr.relation : "";
+          setPairMsg(`pair=${key}\nrelation=${rel}\nbest_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}`);
+          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
+          Plotly.newPlot("s3_xcorrChart", [
+            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
+          ], { margin: { t: 20 } }, { displayModeBar: false });
+
+          if (lastSeries && lastSeries[a] && lastSeries[b]) {
+            const u = buildUnionSeries(lastSeries[a], lastSeries[b]);
+            renderRawDualAxis("s3_rawPairChart", u.dates, u.aClose, a, u.bClose, b);
+          } else {
+            Plotly.newPlot("s3_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+          }
+          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          renderRollingStability("s3_rollingChart", roll);
+        }
+
+        async function run() {
+          const start = ($("s3_start").value || "").trim();
+          const end = ($("s3_end").value || "").trim();
+          const cn_gold_series_id = ($("s3_cn").value || "").trim();
+          const global_gold_series_id = ($("s3_glb").value || "").trim();
+          const fx_series_id = ($("s3_fx").value || "").trim();
+          setMsg("运行中...");
+          const resp = await api("/analysis/macro/step3", {
+            method: "POST",
+            body: JSON.stringify({ start, end, cn_gold_series_id, global_gold_series_id, fx_series_id }),
+          });
+          const data = await resp.json();
+          if (!data || !data.ok) {
+            setMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+            return;
+          }
+          setMsg("完成。");
+          lastSeries = data.series || null;
+          renderPrice(data.series);
+          const keys = Object.keys(data.pairs || {});
+          $("s3_pairSel").innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+          if (keys.length) {
+            $("s3_pairSel").value = keys[0];
+            renderPair(keys[0], data.pairs);
+          }
+          $("s3_pairSel").onchange = () => renderPair(($("s3_pairSel").value || "").trim(), data.pairs);
+        }
+
+        $("s3_end").value = ymdTodayMinus(0);
+        $("s3_start").value = ymdTodayMinus(365 * 10);
+        $("s3_run").addEventListener("click", run);
+      })();
+
+      // -------------------- Step4 logic --------------------
+      (function initStep4() {
+        const setMsg = (t) => ($("s4_msg").textContent = t || "");
+        const setPairMsg = (t) => ($("s4_pairMsg").textContent = t || "");
+        let lastEtfSeries = null;
+        let lastSpotSeries = null;
+
+        function renderPrice(etf, spot) {
+          Plotly.newPlot("s4_pxChart", [
+            { x: etf.dates || [], y: norm(etf.close || []), name: `ETF ${etf.code} (${etf.adjust})`, type: "scatter", mode: "lines" },
+            { x: spot.dates || [], y: norm(spot.close || []), name: `Spot ${spot.series_id}`, type: "scatter", mode: "lines" },
+          ], {
+            margin: { t: 20 },
+            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
+          }, { displayModeBar: false });
+        }
+
+        function renderPair(res) {
+          if (!res || !res.ok) {
+            setPairMsg(`失败：${res ? (res.error || JSON.stringify(res)) : "empty"}`);
+            Plotly.newPlot("s4_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot("s4_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot("s4_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            return;
+          }
+          const best = res.corr && res.corr.best ? res.corr.best : null;
+          const rel = res.corr && res.corr.relation ? res.corr.relation : "";
+          setPairMsg(
+            `relation=${rel}\n` +
+            `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}`
+          );
+          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
+          Plotly.newPlot("s4_xcorrChart", [
+            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
+          ], { margin: { t: 20 }, xaxis: { title: "lag" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+
+          // Step4: 原始尺度用“未对齐的原始 close”（union），保证峰值不会被交集过滤掉
+          const aLab = `ETF ${($("s4_etf").value || "").trim()}`;
+          const bLab = `Spot ${($("s4_spot").value || "").trim()}`;
+          if (lastEtfSeries && lastSpotSeries) {
+            const u = buildUnionSeries(lastEtfSeries, lastSpotSeries);
+            renderRawDualAxis("s4_rawPairChart", u.dates, u.aClose, aLab, u.bClose, bLab);
+          } else {
+            Plotly.newPlot("s4_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+          }
+          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          renderRollingStability("s4_rollingChart", roll);
+        }
+
+        async function run() {
+          const start = ($("s4_start").value || "").trim();
+          const end = ($("s4_end").value || "").trim();
+          const etf_code = ($("s4_etf").value || "").trim();
+          const adjust = ($("s4_adjust").value || "hfq").trim();
+          const cn_spot_series_id = ($("s4_spot").value || "").trim();
+          const index_align = ($("s4_align").value || "none").trim();
+          const max_lag = Number(($("s4_maxLag").value || "20").trim());
+          const granger_max_lag = Number(($("s4_grangerLag").value || "10").trim());
+
+          setMsg("运行中...");
+          const resp = await api("/analysis/macro/step4", {
+            method: "POST",
+            body: JSON.stringify({ start, end, etf_code, adjust, cn_spot_series_id, index_align, max_lag, granger_max_lag }),
+          });
+          const data = await resp.json();
+          if (!data || !data.ok) {
+            setMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+            return;
+          }
+          setMsg("完成。");
+          lastEtfSeries = data.series ? data.series.etf : null;
+          lastSpotSeries = data.series ? data.series.spot : null;
+          renderPrice(data.series.etf, data.series.spot);
+          renderPair(data.pair);
+        }
+
+        $("s4_end").value = ymdTodayMinus(0);
+        $("s4_start").value = ymdTodayMinus(365 * 10);
+        $("s4_run").addEventListener("click", run);
+      })();
+
+      // bootstrap
+      initTabs();
+      // if user lands on old per-step links, map them to the new tab names
+      window.addEventListener("hashchange", () => {
+        const h = (location.hash || "").replace("#", "").trim().toLowerCase();
+        if (h && ["etf","step1","step2","step3","step4"].includes(h)) setActiveTab(h);
+      });
+    </script>
+  </body>
+</html>
+

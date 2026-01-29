@@ -47,7 +47,13 @@ def create_app() -> FastAPI:
     @fastapi_app.get("/research/gold-gvx")
     def research_gold_gvx():
         _ = get_settings()
-        path = Path(__file__).resolve().parent / "web" / "research_gold_gvx.html"
+        # Backward-compatible redirect (page merged & renamed).
+        return RedirectResponse(url="/research/gold#etf")
+
+    @fastapi_app.get("/research/gold")
+    def research_gold():
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "research_gold.html"
         if not path.exists():
             return RedirectResponse(url="/docs")
         return FileResponse(path)
@@ -59,6 +65,26 @@ def create_app() -> FastAPI:
         if not path.exists():
             return RedirectResponse(url="/docs")
         return FileResponse(path)
+
+    @fastapi_app.get("/research/step1-global")
+    def research_step1_global():
+        _ = get_settings()
+        return RedirectResponse(url="/research/gold#step1")
+
+    @fastapi_app.get("/research/step2-cn")
+    def research_step2_cn():
+        _ = get_settings()
+        return RedirectResponse(url="/research/gold#step2")
+
+    @fastapi_app.get("/research/step3-cn-vs-global")
+    def research_step3_cn_vs_global():
+        _ = get_settings()
+        return RedirectResponse(url="/research/gold#step3")
+
+    @fastapi_app.get("/research/step4-etf-vs-spot")
+    def research_step4_etf_vs_spot():
+        _ = get_settings()
+        return RedirectResponse(url="/research/gold#step4")
 
     @fastapi_app.get("/health")
     def health() -> dict[str, str]:

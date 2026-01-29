@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,7 +12,18 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from .models import EtfPool, EtfPrice, EtfPriceAudit, IngestionBatch, IngestionItem, SyncJob, ValidationPolicy
+from .models import (
+    EtfPool,
+    EtfPrice,
+    EtfPriceAudit,
+    IngestionBatch,
+    IngestionItem,
+    MacroIngestionBatch,
+    MacroPrice,
+    MacroSeriesMeta,
+    SyncJob,
+    ValidationPolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +38,19 @@ class PriceRow:
     amount: float | None
     source: str = "eastmoney"
     adjust: str = "qfq"  # qfq/hfq/none
+
+
+@dataclass(frozen=True)
+class MacroPriceRow:
+    series_id: str
+    trade_date: dt.date
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume: float | None = None
+    open_interest: float | None = None
+    source: str = "unknown"
 
 
 def normalize_adjust(adjust: str | None) -> str:
@@ -452,6 +477,165 @@ def record_price_audit(
             )
         )
     db.flush()
+
+
+def upsert_macro_prices(db: Session, rows: list[MacroPriceRow]) -> int:
+    if not rows:
+        return 0
+
+    def _nan_to_none(x: float | None) -> float | None:
+        if x is None:
+            return None
+        # MySQL driver rejects NaN (pymysql.err.ProgrammingError: nan can not be used with MySQL)
+        if isinstance(x, float) and math.isnan(x):
+            return None
+        return x
+
+    values = [
+        dict(
+            series_id=r.series_id,
+            trade_date=r.trade_date,
+            open=_nan_to_none(r.open),
+            high=_nan_to_none(r.high),
+            low=_nan_to_none(r.low),
+            close=_nan_to_none(r.close),
+            volume=_nan_to_none(r.volume),
+            open_interest=_nan_to_none(r.open_interest),
+            source=r.source,
+        )
+        for r in rows
+    ]
+    chunk_size = 2000
+    total = 0
+    dialect = (db.get_bind().dialect.name if db.get_bind() is not None else "").lower()
+    for i in range(0, len(values), chunk_size):
+        chunk = values[i : i + chunk_size]
+        if dialect == "mysql":
+            stmt = mysql_insert(MacroPrice).values(chunk)
+            stmt = stmt.on_duplicate_key_update(
+                {
+                    "open": stmt.inserted.open,
+                    "high": stmt.inserted.high,
+                    "low": stmt.inserted.low,
+                    "close": stmt.inserted.close,
+                    "volume": stmt.inserted.volume,
+                    "open_interest": stmt.inserted.open_interest,
+                    "source": stmt.inserted.source,
+                    "ingested_at": dt.datetime.now(dt.timezone.utc),
+                }
+            )
+        else:
+            stmt = sqlite_insert(MacroPrice).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[MacroPrice.series_id, MacroPrice.trade_date],
+                set_={
+                    "open": stmt.excluded.open,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "close": stmt.excluded.close,
+                    "volume": stmt.excluded.volume,
+                    "open_interest": stmt.excluded.open_interest,
+                    "source": stmt.excluded.source,
+                    "ingested_at": dt.datetime.now(dt.timezone.utc),
+                },
+            )
+        result = db.execute(stmt)
+        total += int(getattr(result, "rowcount", 0) or 0)
+    return total
+
+
+def list_macro_prices(
+    db: Session,
+    *,
+    series_id: str,
+    start_date: dt.date | None = None,
+    end_date: dt.date | None = None,
+    limit: int = 200000,
+) -> list[MacroPrice]:
+    stmt = select(MacroPrice).where(MacroPrice.series_id == series_id)
+    if start_date is not None:
+        stmt = stmt.where(MacroPrice.trade_date >= start_date)
+    if end_date is not None:
+        stmt = stmt.where(MacroPrice.trade_date <= end_date)
+    stmt = stmt.order_by(MacroPrice.trade_date.asc()).limit(limit)
+    return list(db.execute(stmt).scalars().all())
+
+
+def get_macro_date_range(db: Session, *, series_id: str) -> tuple[str | None, str | None]:
+    start_d, end_d = db.execute(
+        select(func.min(MacroPrice.trade_date), func.max(MacroPrice.trade_date)).where(MacroPrice.series_id == series_id)
+    ).one()
+    if start_d is None or end_d is None:
+        return (None, None)
+    return (start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d"))
+
+
+def upsert_macro_series_meta(
+    db: Session,
+    *,
+    series_id: str,
+    provider: str,
+    provider_symbol: str,
+    name: str | None = None,
+    category: str | None = None,
+    unit: str | None = None,
+    timezone: str | None = None,
+    calendar: str | None = None,
+    notes: str | None = None,
+) -> MacroSeriesMeta:
+    obj = db.execute(select(MacroSeriesMeta).where(MacroSeriesMeta.series_id == series_id)).scalar_one_or_none()
+    if obj is None:
+        obj = MacroSeriesMeta(series_id=series_id, provider=provider, provider_symbol=provider_symbol)
+        db.add(obj)
+    obj.provider = provider
+    obj.provider_symbol = provider_symbol
+    obj.name = name
+    obj.category = category
+    obj.unit = unit
+    obj.timezone = timezone
+    obj.calendar = calendar
+    obj.notes = notes
+    db.flush()
+    return obj
+
+
+def create_macro_ingestion_batch(
+    db: Session,
+    *,
+    series_id: str,
+    provider: str,
+    start_date: str,
+    end_date: str,
+) -> MacroIngestionBatch:
+    b = MacroIngestionBatch(series_id=series_id, provider=provider, start_date=start_date, end_date=end_date, status="running")
+    db.add(b)
+    db.flush()
+    return b
+
+
+def update_macro_ingestion_batch(
+    db: Session,
+    *,
+    batch_id: int,
+    status: str,
+    message: str | None = None,
+) -> None:
+    def _clip(x: str | None, max_len: int = 1024) -> str | None:
+        if x is None:
+            return None
+        s = str(x)
+        if len(s) <= max_len:
+            return s
+        suffix = "...(truncated)"
+        keep = max(0, max_len - len(suffix))
+        return (s[:keep] + suffix)[:max_len]
+
+    stmt = (
+        update(MacroIngestionBatch)
+        .where(MacroIngestionBatch.id == batch_id)
+        .values(status=status, message=_clip(message, 1024), finished_at=dt.datetime.now(dt.timezone.utc) if status in {"success", "failed"} else None)
+    )
+    db.execute(stmt)
 
 
 # -------------------- Sync job helpers (async admin tasks) --------------------

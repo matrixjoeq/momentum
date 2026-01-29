@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,8 +10,6 @@ from sqlalchemy.orm import Session
 
 from ..db.models import EtfPrice, EtfPriceAudit, IngestionBatch, IngestionItem
 from ..db.repo import compute_price_fingerprint, get_ingestion_batch, list_prices, normalize_adjust, update_ingestion_batch
-from ..db.session import make_engine, make_session_factory
-from ..settings import get_settings
 from ..validation.price_validate import PricePoint, ValidationError, ValidationPolicyParams, validate_price_series
 
 
@@ -65,14 +62,6 @@ def logical_rollback_batch(db: Session, batch: IngestionBatch) -> None:
         row.source = a.source
         row.adjust = a.adjust
     db.flush()
-
-
-def restore_snapshot(sqlite_path: Path, snapshot_path: Path) -> None:
-    """
-    Restore sqlite database file from snapshot.
-    Caller must ensure no active connections.
-    """
-    shutil.copy2(snapshot_path, sqlite_path)
 
 
 def _delete_snapshot_if_exists(path_str: str | None) -> None:
@@ -131,7 +120,6 @@ def rollback_batch_with_fallback(
     Attempt logical rollback; if post-rollback fingerprint mismatch and snapshot exists,
     restore snapshot file (best-effort).
     """
-    settings = get_settings()
     batch = get_ingestion_batch(db, batch_id)
     if batch is None:
         return RollbackResult(batch_id=batch_id, status="failed", message="batch not found")
@@ -139,7 +127,6 @@ def rollback_batch_with_fallback(
     start_d = _parse_yyyymmdd(batch.start_date)
     end_d = _parse_yyyymmdd(batch.end_date)
     adj = normalize_adjust(batch.adjust)
-    sqlite_path = settings.sqlite_path
 
     pre_fp = batch.pre_fingerprint
     empty_fp = hashlib.sha256(b"[]").hexdigest()
@@ -179,57 +166,17 @@ def rollback_batch_with_fallback(
             needs_snapshot = True
 
     if not needs_snapshot:
-        # Requirement: snapshot file should not be kept after operation unless file-level rollback fails.
+        # MySQL runtime: no file snapshot fallback; always logical rollback only.
+        # Best-effort cleanup any legacy snapshot_path value.
         _delete_snapshot_if_exists(batch.snapshot_path)
-        # clear path in batch record (best-effort)
         b3 = db.get(IngestionBatch, batch.id)
         if b3 is not None:
             b3.snapshot_path = None
-        update_ingestion_batch(db, batch_id=batch.id, status="rolled_back", message="logical rollback (snapshot deleted)")
+        update_ingestion_batch(db, batch_id=batch.id, status="rolled_back", message="logical rollback")
         db.commit()
         return RollbackResult(batch_id=batch.id, status="success", message="rolled back (validated)")
 
-    # Fallback to snapshot restore if available
-    if batch.snapshot_path:
-        snap = Path(batch.snapshot_path)
-        # Close current engine connections by disposing if running under app; here we only best-effort
-        try:
-            bind = db.get_bind()
-            if bind is not None:
-                bind.dispose()
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
-        try:
-            restore_snapshot(sqlite_path, snap)
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            # Keep snapshot for investigation (requirement)
-            return RollbackResult(
-                batch_id=batch.id,
-                status="failed",
-                message=f"snapshot restore failed: {e}; kept_snapshot={snap}",
-            )
-
-        # Re-validate using a fresh engine/session after restoring the file.
-        engine = make_engine(str(sqlite_path))
-        sf = make_session_factory(engine)
-        with sf() as db2:
-            if validate_after:
-                _validate_db_prices(db2, code=batch.code, start_date=start_d, end_date=end_d, policy=policy, allow_empty=allow_empty, adjust=adj)
-            if pre_fp is not None:
-                fp2 = compute_price_fingerprint(db2, code=batch.code, start_date=start_d, end_date=end_d, adjust=adj)
-                if fp2 != pre_fp:
-                    return RollbackResult(batch_id=batch.id, status="failed", message="snapshot restored but fingerprint mismatch")
-            update_ingestion_batch(db2, batch_id=batch.id, status="snapshot_restored", message="snapshot restored after rollback validation/fingerprint mismatch")
-            db2.commit()
-            # snapshot restore succeeded -> delete snapshot (do not accumulate)
-            _delete_snapshot_if_exists(batch.snapshot_path)
-            b3 = db2.get(IngestionBatch, batch.id)
-            if b3 is not None:
-                b3.snapshot_path = None
-            db2.commit()
-        return RollbackResult(batch_id=batch.id, status="snapshot_restored", message="snapshot restored")
-
     if validation_exc is not None:
         return RollbackResult(batch_id=batch.id, status="failed", message=validation_exc.to_json())
-    return RollbackResult(batch_id=batch.id, status="failed", message="rollback validation/fingerprint mismatch and no snapshot")
+    return RollbackResult(batch_id=batch.id, status="failed", message="rollback validation/fingerprint mismatch")
 

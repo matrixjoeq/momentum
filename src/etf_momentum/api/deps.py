@@ -15,7 +15,7 @@ from ..settings import get_settings
 
 def build_engine() -> Engine:
     settings = get_settings()
-    engine = make_engine(db_url=settings.db_url, sqlite_path=str(settings.sqlite_path))
+    engine = make_engine(db_url=settings.db_url)
     init_db(engine)
     return engine
 

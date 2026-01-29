@@ -137,12 +137,19 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+.env.local
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Local app secrets / MySQL datadir
+data/.env.local
+data/mysql/
+data/*.sqlite3
+data/backups/
 
 # Spyder project settings
 .spyderproject
