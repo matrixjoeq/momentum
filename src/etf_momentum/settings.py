@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +38,9 @@ class Settings(BaseSettings):
     # FRED API key for US rates (e.g. DGS2/DGS5/DGS10/DGS30).
     # Set via environment variable: MOMENTUM_FRED_API_KEY
     fred_api_key: str | None = None
+    # Optional: proxy for Yahoo endpoints (e.g. http://10.224.0.110:3128).
+    # Note: currently applied only in yahoo_fetcher.
+    yahoo_proxy: str | None = None
 
     # --- Market data sync (Cloud trigger preferred) ---
     # Recommended: use WeChat Cloud scheduled trigger to call /api/admin/sync/fixed-pool.
@@ -60,7 +64,9 @@ def get_settings() -> Settings:
     if not s.db_url:
         # Local dev: construct DSN from mysql_* fields.
         # Use socket if provided, otherwise host/port.
-        if s.mysql_socket:
+        # NOTE: PyMySQL uses AF_UNIX for unix_socket which is not available on Windows.
+        is_windows = os.name == "nt"
+        if s.mysql_socket and not is_windows:
             s.db_url = (
                 f"mysql+pymysql://{s.mysql_user}:{s.mysql_password}"
                 f"@localhost/{s.mysql_db}?charset=utf8mb4&unix_socket={s.mysql_socket}"

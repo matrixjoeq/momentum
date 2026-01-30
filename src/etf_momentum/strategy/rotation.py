@@ -9,6 +9,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from ..analysis.baseline import (
+    TRADING_DAYS_PER_YEAR,
     _annualized_return,
     _annualized_vol,
     _max_drawdown,
@@ -1781,6 +1782,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     ann_excess = _annualized_return(excess_nav)
     ann_excess_vol = _annualized_vol(active_ret)
     ir = _sharpe(active_ret, rf=0.0)  # same formula but zero rf; for consistency name it IR-style
+    ann_excess_arith = float(active_ret.mean() * TRADING_DAYS_PER_YEAR) if len(active_ret) else float("nan")
     ex_mdd = _max_drawdown(excess_nav)
     ex_mdd_dur = _max_drawdown_duration_days(excess_nav)
 
@@ -1803,7 +1805,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         },
         "excess_vs_equal_weight": {
             "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
-            "annualized_return": float(ann_excess),
+            # annualized excess return (two complementary definitions)
+            # - geo: CAGR on excess NAV (compound-consistent, recommended)
+            # - arith: mean(active_ret)*252 (expected active return per year, not compound)
+            "annualized_return": float(ann_excess),  # backward compatible (geo)
+            "annualized_return_geo": float(ann_excess),
+            "annualized_return_arith": float(ann_excess_arith),
             "annualized_volatility": float(ann_excess_vol),
             "information_ratio": float(ir),
             "max_drawdown": float(ex_mdd),
@@ -1884,6 +1891,19 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     avg_win = float(np.mean(pos)) if pos else float("nan")
     avg_loss = float(np.mean(neg)) if neg else float("nan")
     payoff = float(avg_win / abs(avg_loss)) if (pos and neg and avg_loss != 0) else float("nan")
+    # geometric means for period returns (compound-friendly): exp(mean(log1p(r))) - 1
+    def _geo_mean_return(rs: list[float]) -> float:
+        if not rs:
+            return float("nan")
+        a = np.asarray(rs, dtype=float)
+        m = np.isfinite(a) & (a > -1.0 + 1e-12)
+        if not np.any(m):
+            return float("nan")
+        return float(np.exp(np.mean(np.log1p(a[m]))) - 1.0)
+
+    avg_win_geo = _geo_mean_return(pos)
+    avg_loss_geo = _geo_mean_return(neg)
+    payoff_geo = float(avg_win_geo / abs(avg_loss_geo)) if (np.isfinite(avg_win_geo) and np.isfinite(avg_loss_geo) and avg_loss_geo != 0) else float("nan")
     # Kelly fraction (binary approximation): f* = p - (1-p)/b, where b is payoff ratio
     if total_p and np.isfinite(win_rate) and np.isfinite(payoff) and payoff > 0:
         kelly = float(win_rate - (1.0 - win_rate) / payoff)
@@ -1894,6 +1914,9 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     abs_avg_win = float(np.mean(abs_pos)) if abs_pos else float("nan")
     abs_avg_loss = float(np.mean(abs_neg)) if abs_neg else float("nan")
     abs_payoff = float(abs_avg_win / abs(abs_avg_loss)) if (abs_pos and abs_neg and abs_avg_loss != 0) else float("nan")
+    abs_avg_win_geo = _geo_mean_return(abs_pos)
+    abs_avg_loss_geo = _geo_mean_return(abs_neg)
+    abs_payoff_geo = float(abs_avg_win_geo / abs(abs_avg_loss_geo)) if (np.isfinite(abs_avg_win_geo) and np.isfinite(abs_avg_loss_geo) and abs_avg_loss_geo != 0) else float("nan")
     if total_p and np.isfinite(abs_win_rate) and np.isfinite(abs_payoff) and abs_payoff > 0:
         abs_kelly = float(abs_win_rate - (1.0 - abs_win_rate) / abs_payoff)
     else:
@@ -1904,15 +1927,25 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         "periods": total_p,
         # relative vs equal-weight (excess)
         "win_rate": win_rate,
+        # arithmetic means (existing fields; kept for backward compatibility)
         "avg_win_excess": avg_win,
         "avg_loss_excess": avg_loss,
         "payoff_ratio": payoff,
+        # geometric means (new)
+        "avg_win_excess_geo": avg_win_geo,
+        "avg_loss_excess_geo": avg_loss_geo,
+        "payoff_ratio_geo": payoff_geo,
         "kelly_fraction": kelly,
         # absolute (strategy itself)
         "abs_win_rate": abs_win_rate,
+        # arithmetic means (existing fields; kept for backward compatibility)
         "abs_avg_win": abs_avg_win,
         "abs_avg_loss": abs_avg_loss,
         "abs_payoff_ratio": abs_payoff,
+        # geometric means (new)
+        "abs_avg_win_geo": abs_avg_win_geo,
+        "abs_avg_loss_geo": abs_avg_loss_geo,
+        "abs_payoff_ratio_geo": abs_payoff_geo,
         "abs_kelly_fraction": abs_kelly,
     }
 

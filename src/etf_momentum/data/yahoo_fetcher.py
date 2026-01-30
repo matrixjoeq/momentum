@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import io
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -78,6 +79,31 @@ def _extract_chart_series(payload: dict[str, Any]) -> pd.DataFrame:
     return df
 
 
+def _normalize_proxy_url(v: str | None) -> str | None:
+    """
+    Normalize proxy URL for httpx.
+
+    Accepts:
+    - "http://10.0.0.1:3128"
+    - "10.0.0.1:3128" (will be treated as http proxy)
+    """
+    if not v:
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
+    if "://" not in s:
+        s = f"http://{s}"
+    return s
+
+
+def _yahoo_proxy() -> str | None:
+    # Prefer a provider-specific proxy so we don't affect other providers.
+    # Standard HTTP(S)_PROXY env vars are still respected by httpx (trust_env=True),
+    # but this allows forcing a proxy only for Yahoo calls.
+    return _normalize_proxy_url(os.getenv("MOMENTUM_YAHOO_PROXY"))
+
+
 def fetch_yahoo_daily_close(
     req: FetchRequest,
     *,
@@ -118,7 +144,13 @@ def fetch_yahoo_daily_close(
                 "Accept-Language": "en-US,en;q=0.9",
                 "Referer": "https://finance.yahoo.com/",
             }
-            with httpx.Client(timeout=timeout_s, headers=headers, follow_redirects=True) as client:
+            proxy = _yahoo_proxy()
+            with httpx.Client(
+                timeout=timeout_s,
+                headers=headers,
+                follow_redirects=True,
+                proxy=proxy,
+            ) as client:
                 # Try chart API (two hosts).
                 for host in ("https://query2.finance.yahoo.com", "https://query1.finance.yahoo.com"):
                     url = f"{host}/v8/finance/chart/{sym_path}"

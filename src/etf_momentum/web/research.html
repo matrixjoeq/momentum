@@ -1817,7 +1817,20 @@
         rot_excess_ann: {
           title: "超额年化收益",
           sub: "超额净值的年化。",
-          body: `<div><b>计算</b>：对 EXCESS 序列做年化收益折算。</div>`,
+          body: `
+            <div><b>推荐口径(几何/CAGR)</b>：把超额看作一个“可复利”的相对财富过程。</div>
+            <div style="margin-top:6px"><b>计算</b>：EXCESS = ROTATION / EW_REBAL；annual_excess_geo = CAGR(EXCESS)。</div>
+            <div style="margin-top:6px" class="muted">提示：几何口径与长期复合增长一致，适合作为“策略相对基准的复合年化”。</div>
+          `,
+        },
+        rot_excess_ann_arith: {
+          title: "超额年化收益(算术)",
+          sub: "主动收益序列的年化期望近似（不是复合增长率）。",
+          body: `
+            <div><b>口径(算术)</b>：把超额定义为“主动收益序列”active_ret = r_rot - r_ew。</div>
+            <div style="margin-top:6px"><b>计算</b>：annual_excess_arith = mean(active_ret) × 252。</div>
+            <div style="margin-top:6px" class="muted">提示：该值更像“每年平均多赚多少百分点”的统计量，不等价于 EXCESS 净值的 CAGR。</div>
+          `,
         },
         rot_ir: {
           title: "超额信息比率(近似)",
@@ -1832,17 +1845,32 @@
         rot_wp_payoff: {
           title: "赔率(盈/亏)",
           sub: "平均盈利超额 / 平均亏损超额(绝对值)。",
-          body: `<div><b>计算</b>：payoff=mean(excess|>0)/abs(mean(excess|<0))。</div>`,
+          body: `<div><b>计算(算术)</b>：payoff=mean(excess|>0)/abs(mean(excess|<0))。</div>`,
+        },
+        rot_wp_payoff_geo: {
+          title: "赔率(盈/亏,几何)",
+          sub: "几何平均盈利超额 / 几何平均亏损超额(绝对值)。",
+          body: `<div><b>计算(几何)</b>：gm(r)=exp(mean(log(1+r)))-1；payoff_geo=gm(excess|>0)/abs(gm(excess|<0))。</div>`,
         },
         rot_wp_avg_win: {
           title: "平均盈利(超额)",
           sub: "所有胜出期（超额>0）的超额收益均值。",
-          body: `<div><b>计算</b>：mean(excess_return | excess_return>0)。</div>`,
+          body: `<div><b>计算(算术)</b>：mean(excess_return | excess_return>0)。</div>`,
+        },
+        rot_wp_avg_win_geo: {
+          title: "平均盈利(超额,几何)",
+          sub: "所有胜出期（超额>0）的超额收益几何均值。",
+          body: `<div><b>计算(几何)</b>：gm(excess_return | >0)=exp(mean(log(1+excess_return)))-1。</div>`,
         },
         rot_wp_avg_loss: {
           title: "平均亏损(超额)",
           sub: "所有亏损期（超额<0）的超额收益均值（为负数）。",
-          body: `<div><b>计算</b>：mean(excess_return | excess_return<0)。展示为负值。</div>`,
+          body: `<div><b>计算(算术)</b>：mean(excess_return | excess_return<0)。展示为负值。</div>`,
+        },
+        rot_wp_avg_loss_geo: {
+          title: "平均亏损(超额,几何)",
+          sub: "所有亏损期（超额<0）的超额收益几何均值（为负数）。",
+          body: `<div><b>计算(几何)</b>：gm(excess_return | <0)=exp(mean(log(1+excess_return)))-1（要求每期收益>-100%）。</div>`,
         },
         rot_wp_kelly: {
           title: "凯利比(近似)",
@@ -1857,7 +1885,32 @@
         rot_abs_payoff: {
           title: "绝对赔率(盈/亏)",
           sub: "策略自身：平均盈利期收益 / 平均亏损期收益(绝对值)。",
-          body: `<div><b>计算</b>：payoff_abs=mean(r|r>0)/abs(mean(r|r<0))。</div>`,
+          body: `<div><b>计算(算术)</b>：payoff_abs=mean(r|r>0)/abs(mean(r|r<0))。</div>`,
+        },
+        rot_abs_payoff_geo: {
+          title: "绝对赔率(盈/亏,几何)",
+          sub: "策略自身：几何平均盈利期收益 / 几何平均亏损期收益(绝对值)。",
+          body: `<div><b>计算(几何)</b>：gm(r)=exp(mean(log(1+r)))-1；payoff_abs_geo=gm(r|>0)/abs(gm(r|<0))。</div>`,
+        },
+        rot_abs_avg_win: {
+          title: "绝对平均盈利(算术)",
+          sub: "所有盈利期（期收益>0）的收益算术均值。",
+          body: `<div><b>计算</b>：mean(r | r>0)。</div>`,
+        },
+        rot_abs_avg_loss: {
+          title: "绝对平均亏损(算术)",
+          sub: "所有亏损期（期收益<0）的收益算术均值（为负数）。",
+          body: `<div><b>计算</b>：mean(r | r<0)。展示为负值。</div>`,
+        },
+        rot_abs_avg_win_geo: {
+          title: "绝对平均盈利(几何)",
+          sub: "所有盈利期（期收益>0）的收益几何均值。",
+          body: `<div><b>计算</b>：gm(r | r>0)=exp(mean(log(1+r)))-1。</div>`,
+        },
+        rot_abs_avg_loss_geo: {
+          title: "绝对平均亏损(几何)",
+          sub: "所有亏损期（期收益<0）的收益几何均值（为负数）。",
+          body: `<div><b>计算</b>：gm(r | r<0)=exp(mean(log(1+r)))-1（要求每期收益>-100%）。</div>`,
         },
         rot_abs_kelly: {
           title: "绝对凯利比(近似)",
@@ -4621,7 +4674,8 @@
           { key: "rot_upi", label: "溃疡绩效(UPI)", value: fmtNum(s.ulcer_performance_index) },
           { key: "rot_turnover", label: "平均日换手", value: fmtPct(s.avg_daily_turnover) },
           { key: "rot_excess_cum", label: "超额累积收益", value: fmtPct(ex.cumulative_return) },
-          { key: "rot_excess_ann", label: "超额年化收益", value: fmtPct(ex.annualized_return) },
+          { key: "rot_excess_ann", label: "超额年化收益(几何/CAGR)", value: fmtPct((ex.annualized_return_geo != null) ? ex.annualized_return_geo : ex.annualized_return) },
+          { key: "rot_excess_ann_arith", label: "超额年化收益(算术)", value: fmtPct(ex.annualized_return_arith) },
           { key: "rot_ir", label: "超额信息比率(近似)", value: fmtNum(ex.information_ratio) },
         ];
         $("rotMetrics").innerHTML =
@@ -4649,14 +4703,20 @@
           { key: null, label: "调仓频率", value: wp.rebalance || "-" },
           { key: null, label: "期数", value: wp.periods != null ? wp.periods : "-" },
           { key: "rot_wp_win", label: "胜率(超额>0)", value: wp.win_rate != null ? fmtPct(wp.win_rate) : "-" },
-          { key: "rot_wp_avg_win", label: "平均盈利(超额)", value: wp.avg_win_excess != null ? fmtPct(wp.avg_win_excess) : "-" },
-          { key: "rot_wp_avg_loss", label: "平均亏损(超额)", value: wp.avg_loss_excess != null ? fmtPct(wp.avg_loss_excess) : "-" },
-          { key: "rot_wp_payoff", label: "赔率(盈/亏)", value: wp.payoff_ratio != null ? fmtNum(wp.payoff_ratio) : "-" },
+          { key: "rot_wp_avg_win", label: "平均盈利(超额,算术)", value: wp.avg_win_excess != null ? fmtPct(wp.avg_win_excess) : "-" },
+          { key: "rot_wp_avg_win_geo", label: "平均盈利(超额,几何)", value: wp.avg_win_excess_geo != null ? fmtPct(wp.avg_win_excess_geo) : "-" },
+          { key: "rot_wp_avg_loss", label: "平均亏损(超额,算术)", value: wp.avg_loss_excess != null ? fmtPct(wp.avg_loss_excess) : "-" },
+          { key: "rot_wp_avg_loss_geo", label: "平均亏损(超额,几何)", value: wp.avg_loss_excess_geo != null ? fmtPct(wp.avg_loss_excess_geo) : "-" },
+          { key: "rot_wp_payoff", label: "赔率(盈/亏,算术)", value: wp.payoff_ratio != null ? fmtNum(wp.payoff_ratio) : "-" },
+          { key: "rot_wp_payoff_geo", label: "赔率(盈/亏,几何)", value: wp.payoff_ratio_geo != null ? fmtNum(wp.payoff_ratio_geo) : "-" },
           { key: "rot_wp_kelly", label: "凯利比(近似)", value: wp.kelly_fraction != null ? fmtPct(wp.kelly_fraction) : "-" },
           { key: "rot_abs_win", label: "绝对胜率(期收益>0)", value: wp.abs_win_rate != null ? fmtPct(wp.abs_win_rate) : "-" },
-          { key: null, label: "绝对平均盈利", value: wp.abs_avg_win != null ? fmtPct(wp.abs_avg_win) : "-" },
-          { key: null, label: "绝对平均亏损", value: wp.abs_avg_loss != null ? fmtPct(wp.abs_avg_loss) : "-" },
-          { key: "rot_abs_payoff", label: "绝对赔率(盈/亏)", value: wp.abs_payoff_ratio != null ? fmtNum(wp.abs_payoff_ratio) : "-" },
+          { key: "rot_abs_avg_win", label: "绝对平均盈利(算术)", value: wp.abs_avg_win != null ? fmtPct(wp.abs_avg_win) : "-" },
+          { key: "rot_abs_avg_win_geo", label: "绝对平均盈利(几何)", value: wp.abs_avg_win_geo != null ? fmtPct(wp.abs_avg_win_geo) : "-" },
+          { key: "rot_abs_avg_loss", label: "绝对平均亏损(算术)", value: wp.abs_avg_loss != null ? fmtPct(wp.abs_avg_loss) : "-" },
+          { key: "rot_abs_avg_loss_geo", label: "绝对平均亏损(几何)", value: wp.abs_avg_loss_geo != null ? fmtPct(wp.abs_avg_loss_geo) : "-" },
+          { key: "rot_abs_payoff", label: "绝对赔率(盈/亏,算术)", value: wp.abs_payoff_ratio != null ? fmtNum(wp.abs_payoff_ratio) : "-" },
+          { key: "rot_abs_payoff_geo", label: "绝对赔率(盈/亏,几何)", value: wp.abs_payoff_ratio_geo != null ? fmtNum(wp.abs_payoff_ratio_geo) : "-" },
           { key: "rot_abs_kelly", label: "绝对凯利比(近似)", value: wp.abs_kelly_fraction != null ? fmtPct(wp.abs_kelly_fraction) : "-" },
         ];
         $("rotWinPayoff").innerHTML =
@@ -5575,7 +5635,8 @@
           ["策略夏普", fmtNum(ms.sharpe_ratio), "买入持有夏普", fmtNum(mb.sharpe_ratio)],
           ["策略索诺提", fmtNum(ms.sortino_ratio), "买入持有索诺提", fmtNum(mb.sortino_ratio)],
           ["策略溃疡(UI)", fmtNum(ms.ulcer_index), "买入持有溃疡(UI)", fmtNum(mb.ulcer_index)],
-          ["平均日换手", fmtPct(ms.avg_daily_turnover), "超额年化收益", fmtPct(ex.annualized_return)],
+          ["平均日换手", fmtPct(ms.avg_daily_turnover), "超额年化收益(几何)", fmtPct((ex.annualized_return_geo != null) ? ex.annualized_return_geo : ex.annualized_return)],
+          ["", "", "超额年化收益(算术)", fmtPct(ex.annualized_return_arith)],
           ["超额累积收益", fmtPct(ex.cumulative_return), "信息比率(近似)", fmtNum(ex.information_ratio)],
         ];
         $("trendMetrics").innerHTML =

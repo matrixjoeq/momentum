@@ -1622,12 +1622,13 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
     ui = _ulcer_index(s_rot, in_percent=True)
     ui_den = ui / 100.0
     upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
-    ann_excess = float(excess_ret.mean() * TRADING_DAYS_PER_YEAR) if len(excess_ret) else float("nan")
+    ann_excess_arith = float(excess_ret.mean() * TRADING_DAYS_PER_YEAR) if len(excess_ret) else float("nan")
     ann_excess_vol = _annualized_vol(excess_ret, ann_factor=TRADING_DAYS_PER_YEAR)
     ir = float(excess_ret.mean() / excess_ret.std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)) if float(excess_ret.std(ddof=1) or 0) > 0 else float("nan")
     ex_nav = (1.0 + excess_ret.fillna(0.0)).cumprod()
     if len(ex_nav):
         ex_nav.iloc[0] = 1.0
+    ann_excess_geo = _annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR) if len(ex_nav) else float("nan")
     ex_mdd = _max_drawdown(ex_nav) if len(ex_nav) else float("nan")
     ex_mdd_dur = _max_drawdown_duration_days(ex_nav) if len(ex_nav) else float("nan")
     metrics = {
@@ -1648,7 +1649,12 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
         "equal_weight": {"cumulative_return": float(s_ew.iloc[-1] / s_ew.iloc[0] - 1.0) if len(s_ew) else float("nan")},
         "excess_vs_equal_weight": {
             "cumulative_return": float((s_rot.iloc[-1] / s_rot.iloc[0]) / (s_ew.iloc[-1] / s_ew.iloc[0]) - 1.0) if len(s_rot) and len(s_ew) else float("nan"),
-            "annualized_return": float(ann_excess),
+            # annualized excess return (two complementary definitions)
+            # - geo: CAGR on EXCESS nav (compound-consistent, recommended)
+            # - arith: mean(active_ret)*252 (expected active return per year, not compound)
+            "annualized_return": float(ann_excess_geo),  # backward compatible meaning: geo
+            "annualized_return_geo": float(ann_excess_geo),
+            "annualized_return_arith": float(ann_excess_arith),
             "annualized_volatility": float(ann_excess_vol),
             "information_ratio": float(ir),
             "max_drawdown": float(ex_mdd),
@@ -1694,13 +1700,30 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
     avg_win = float(np.mean(pos)) if pos else float("nan")
     avg_loss = float(np.mean(neg)) if neg else float("nan")
     payoff = float(avg_win / abs(avg_loss)) if (pos and neg and avg_loss != 0) else float("nan")
+    def _geo_mean_return(rs: list[float]) -> float:
+        if not rs:
+            return float("nan")
+        a = np.asarray(rs, dtype=float)
+        m = np.isfinite(a) & (a > -1.0 + 1e-12)
+        if not np.any(m):
+            return float("nan")
+        return float(np.exp(np.mean(np.log1p(a[m]))) - 1.0)
+
+    avg_win_geo = _geo_mean_return(pos)
+    avg_loss_geo = _geo_mean_return(neg)
+    payoff_geo = float(avg_win_geo / abs(avg_loss_geo)) if (np.isfinite(avg_win_geo) and np.isfinite(avg_loss_geo) and avg_loss_geo != 0) else float("nan")
     win_payoff = {
         "rebalance": "weekly",
         "periods": int(len(idx_w)),
         "win_rate": float(win_rate),
+        # arithmetic means (backward compatible)
         "avg_win_excess": float(avg_win),
         "avg_loss_excess": float(avg_loss),
         "payoff_ratio": float(payoff),
+        # geometric means (new)
+        "avg_win_excess_geo": float(avg_win_geo),
+        "avg_loss_excess_geo": float(avg_loss_geo),
+        "payoff_ratio_geo": float(payoff_geo),
         "kelly_fraction": float("nan"),
     }
 
