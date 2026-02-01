@@ -28,6 +28,7 @@
       /* charts */
       #etf_pxChart, #etf_retChart, #etf_xcorrChart { width: 100%; height: 360px; }
       #etf_stratChart, #etf_rollingChart { width: 100%; height: 360px; }
+      #etf_distCloseChart, #etf_distRetChart { width: 100%; height: 320px; }
 
       #s1_pxChart, #s1_xcorrChart, #s1_rawPairChart, #s1_rollingChart,
       #s2_pxChart, #s2_xcorrChart, #s2_rawPairChart, #s2_rollingChart,
@@ -117,7 +118,7 @@
             <option value="fred:DGS30">美债收益率 30Y（FRED: DGS30）</option>
             <option value="sina:DINIW">美元指数 DXY（Sina: DINIW）</option>
             <option value="stooq:XAUUSD">伦敦现货黄金 XAUUSD（Stooq）</option>
-            <option value="yahoo:GC=F">纽约期货黄金 GC（Yahoo: GC=F）</option>
+            <option value="stooq:GC.F">纽约期货黄金 GC（Stooq: GC.F）</option>
             <option value="custom:">custom（自定义）</option>
           </select>
         </div>
@@ -173,6 +174,24 @@
             <option value="sharpe" selected>最大化 Sharpe</option>
             <option value="cagr">最大化 CAGR</option>
           </select>
+        </div>
+        <div style="min-width: 220px;">
+          <label>波动率择时（按指标 level 分位数分段仓位）</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <label style="margin:0; font-size:12px; color:#444;">
+              <input type="checkbox" id="etf_volOn" />
+              启用
+            </label>
+            <span class="muted" title="示例：分位数=0.8,0.9；仓位=1,0.5,0.2（长度=分位数+1）">说明</span>
+          </div>
+        </div>
+        <div>
+          <label>level 分位数（逗号）</label>
+          <input id="etf_volQs" value="0.8,0.9" />
+        </div>
+        <div>
+          <label>分段仓位（逗号）</label>
+          <input id="etf_volExps" value="1,0.5,0.2" />
         </div>
         <button id="etf_run">运行分析</button>
       </div>
@@ -231,6 +250,42 @@
       <div class="panel">
         <h3 style="margin: 0 0 6px 0;">Walk-forward（训练选参 → 测试验证）</h3>
         <table id="etf_wfTable"></table>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">指数分布统计（GVZ / VXN）</h3>
+        <div class="row">
+          <div>
+            <label>指数</label>
+            <select id="etf_distSymbol">
+              <option value="GVZ" selected>GVZ</option>
+              <option value="VXN">VXN</option>
+            </select>
+          </div>
+          <div>
+            <label>区间</label>
+            <select id="etf_distWindow">
+              <option value="1y">近1年</option>
+              <option value="3y" selected>近3年</option>
+              <option value="5y">近5年</option>
+              <option value="10y">近10年</option>
+              <option value="all">全部</option>
+            </select>
+          </div>
+          <button id="etf_runDist">运行分布统计</button>
+        </div>
+        <div class="panel two">
+          <div>
+            <h3 style="margin: 0 0 6px 0;">指数水平分布（close）</h3>
+            <div id="etf_distCloseChart"></div>
+            <table id="etf_distCloseTable"></table>
+          </div>
+          <div>
+            <h3 style="margin: 0 0 6px 0;">日收益分布（log-ret）</h3>
+            <div id="etf_distRetChart"></div>
+            <table id="etf_distRetTable"></table>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -695,18 +750,32 @@
           const dates = s.dates || [];
           const navS = s.nav_strategy || [];
           const navB = s.nav_buy_hold || [];
-          Plotly.newPlot("etf_stratChart", [
-            { x: dates, y: navS, name: "策略NAV", type: "scatter", mode: "lines" },
+          const traces = [
+            { x: dates, y: navS, name: "信号策略NAV", type: "scatter", mode: "lines" },
             { x: dates, y: navB, name: "买入持有NAV", type: "scatter", mode: "lines" },
-          ], { margin: { t: 20 } }, { displayModeBar: false });
+          ];
+          const vt = t.vol_timing || null;
+          if (vt && vt.ok) {
+            const vDates = vt.dates || [];
+            const vNav = vt.nav_strategy || [];
+            traces.unshift({ x: vDates, y: vNav, name: "波动率择时NAV", type: "scatter", mode: "lines" });
+          }
+          Plotly.newPlot("etf_stratChart", traces, { margin: { t: 20 } }, { displayModeBar: false });
 
           const m = (s.metrics || {});
           const ms = (m.strategy || {});
           const mb = (m.buy_hold || {});
           const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
-          $("etf_stratMetrics").textContent =
-            `策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
+          let metricsLine =
+            `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
             `买入持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe,2)} MDD=${fmtPct(mb.max_drawdown)}`;
+          if (vt && vt.ok) {
+            const vms = (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {};
+            metricsLine =
+              `波动率择时：CAGR=${fmtPct(vms.cagr)} Vol=${fmtPct(vms.vol)} Sharpe=${fmt(vms.sharpe,2)} MDD=${fmtPct(vms.max_drawdown)} | ` +
+              metricsLine;
+          }
+          $("etf_stratMetrics").textContent = metricsLine;
 
           const r = t.rolling || {};
           const rd = r.dates || [];
@@ -726,6 +795,27 @@
 
           let wfHtml = "<tr><th>项</th><th>内容</th></tr>";
           wfHtml += `<tr><td>阈值信号</td><td>${thLine}</td></tr>`;
+          if (vt) {
+            if (vt.ok) {
+              const vms = (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {};
+              const thrAbs = (vt.thresholds_abs_train || vt.thresholds_abs || []).map(x => fmt(x, 6)).join(", ");
+              const exps = (vt.exposures || []).map(x => fmt(x, 3)).join(", ");
+              const rates = (vt.bucket_rates || []).map(x => fmt(x, 3)).join(", ");
+              wfHtml += `<tr><td>波动率择时(全样本)</td><td>quantiles=${(vt.quantiles || []).map(x => fmt(x, 2)).join(", ")}; thresholds_abs=[${thrAbs}]; exposures=[${exps}]; bucket_rates=[${rates}] | CAGR=${fmtPct(vms.cagr)} Sharpe=${fmt(vms.sharpe,2)} MDD=${fmtPct(vms.max_drawdown)}</td></tr>`;
+              const vwf = vt.walk_forward || null;
+              if (vwf && vwf.ok) {
+                const trn2 = (vwf.train && vwf.train.metrics && vwf.train.metrics.strategy) ? vwf.train.metrics.strategy : {};
+                const tst2 = (vwf.test && vwf.test.metrics && vwf.test.metrics.strategy) ? vwf.test.metrics.strategy : {};
+                wfHtml += `<tr><td>波动率择时(WF)</td><td>train_ratio=${fmt(vwf.train_ratio,2)}; thr_train=[${(vwf.thresholds_abs_train || []).map(x => fmt(x,6)).join(", ")}]</td></tr>`;
+                wfHtml += `<tr><td>WF训练段</td><td>CAGR=${fmtPct(trn2.cagr)} Sharpe=${fmt(trn2.sharpe,2)} MDD=${fmtPct(trn2.max_drawdown)}</td></tr>`;
+                wfHtml += `<tr><td>WF测试段</td><td>CAGR=${fmtPct(tst2.cagr)} Sharpe=${fmt(tst2.sharpe,2)} MDD=${fmtPct(tst2.max_drawdown)}</td></tr>`;
+              } else if (vwf) {
+                wfHtml += `<tr><td>波动率择时(WF)</td><td>无法计算（${vwf.reason || "样本不足"}）</td></tr>`;
+              }
+            } else {
+              wfHtml += `<tr><td>波动率择时</td><td>无法计算（${vt.error || "参数/样本不足"}）</td></tr>`;
+            }
+          }
           if (wf && wf.ok) {
             const ch = wf.chosen || {};
             const trn = (wf.train && wf.train.strategy && wf.train.strategy.metrics && wf.train.strategy.metrics.strategy) ? wf.train.strategy.metrics.strategy : {};
@@ -811,6 +901,14 @@
           const threshold_quantile = Number(($("etf_thrQ").value || "0.8").trim());
           const train_ratio = Number(($("etf_trainRatio").value || "0.6").trim());
           const walk_objective = ($("etf_wfObj").value || "sharpe").trim();
+          const vol_timing = Boolean($("etf_volOn").checked);
+          const parseNums = (s) =>
+            (String(s || "")
+              .split(",")
+              .map(x => Number(String(x).trim()))
+              .filter(x => Number.isFinite(x)));
+          const vol_level_quantiles = parseNums(($("etf_volQs").value || "").trim());
+          const vol_level_exposures = parseNums(($("etf_volExps").value || "").trim());
 
           setMsg("运行中...");
           const resp = await api("/analysis/leadlag", {
@@ -833,6 +931,9 @@
               walk_forward: true,
               train_ratio,
               walk_objective,
+              vol_timing,
+              vol_level_quantiles,
+              vol_level_exposures,
             }),
           });
           const data = await resp.json();
@@ -845,11 +946,62 @@
           renderTrade(data);
         }
 
+        function renderQuantTable(elId, q) {
+          const qs = q || {};
+          const keys = Object.keys(qs);
+          let html = "<tr><th>quantile</th><th>value</th></tr>";
+          for (const k of keys) {
+            html += `<tr><td>${k}</td><td>${fmt(qs[k], 6)}</td></tr>`;
+          }
+          $(elId).innerHTML = html;
+        }
+
+        function renderIndexDist(d) {
+          if (!d || !d.ok) return;
+          const m = d.meta || {};
+          const c = (d.close || {});
+          const r = (d.ret_log || {});
+          const ch = (c.hist || {});
+          const rh = (r.hist || {});
+
+          const cbins = ch.bins || [];
+          const ccounts = ch.counts || [];
+          const cx = cbins.slice(0, Math.max(0, cbins.length - 1));
+          Plotly.newPlot("etf_distCloseChart", [
+            { x: cx, y: ccounts, type: "bar", name: `${m.symbol || ""} close` },
+          ], { margin: { t: 20 }, xaxis: { title: "close" }, yaxis: { title: "count" } }, { displayModeBar: false });
+          renderQuantTable("etf_distCloseTable", c.quantiles || {});
+
+          const rbins = rh.bins || [];
+          const rcounts = rh.counts || [];
+          const rx = rbins.slice(0, Math.max(0, rbins.length - 1));
+          Plotly.newPlot("etf_distRetChart", [
+            { x: rx, y: rcounts, type: "bar", name: `${m.symbol || ""} log-ret` },
+          ], { margin: { t: 20 }, xaxis: { title: "log-ret" }, yaxis: { title: "count" } }, { displayModeBar: false });
+          renderQuantTable("etf_distRetTable", r.quantiles || {});
+        }
+
+        async function runDist() {
+          const symbol = ($("etf_distSymbol").value || "GVZ").trim();
+          const window = ($("etf_distWindow").value || "3y").trim();
+          const resp = await api("/analysis/index-distribution", {
+            method: "POST",
+            body: JSON.stringify({ symbol, window, bins: 60 }),
+          });
+          const data = await resp.json();
+          if (!data || !data.ok) {
+            setMsg(`分布统计失败：${data && (data.error || JSON.stringify(data))}`);
+            return;
+          }
+          renderIndexDist(data);
+        }
+
         $("etf_end").value = ymdTodayMinus(0);
         $("etf_start").value = ymdTodayMinus(365 * 5);
         $("etf_idxPreset").addEventListener("change", applyPreset);
         applyPreset();
         $("etf_run").addEventListener("click", run);
+        $("etf_runDist").addEventListener("click", runDist);
       })();
 
       // -------------------- Step1 logic --------------------

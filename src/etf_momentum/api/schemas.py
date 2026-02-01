@@ -151,10 +151,15 @@ class LeadLagAnalysisRequest(BaseModel):
     Lead/lag and causality study between an ETF and a volatility index (VIX/GVZ).
     """
 
-    etf_code: str = Field(min_length=1, description="ETF code, e.g. 518880")
+    etf_code: str = Field(min_length=1, description="ETF code (db mode) or a label for the asset (external mode), e.g. 518880")
+    asset_provider: str = Field(default="db", description="db|stooq|yahoo|auto (asset side)")
+    asset_symbol: str | None = Field(
+        default=None,
+        description="When asset_provider != db, the provider symbol to fetch as the asset close series, e.g. qqq.us or ^ndx",
+    )
     index_symbol: str = Field(
         min_length=1,
-        description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD (Stooq), GC=F (Yahoo).",
+        description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD (Stooq), GC.F (Stooq), GC=F (Yahoo).",
     )
     index_provider: str = Field(default="cboe", description="cboe|yahoo|fred|stooq|sina|auto")
     index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
@@ -172,6 +177,28 @@ class LeadLagAnalysisRequest(BaseModel):
     walk_forward: bool = Field(default=True, description="If true, run walk-forward (train->test) parameter selection")
     train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9, description="Train split ratio for walk-forward")
     walk_objective: str = Field(default="sharpe", description="Walk-forward objective: sharpe|cagr")
+
+    # Volatility-timing strategy (level-based, tiered exposure), e.g. GVZ high -> reduce exposure
+    vol_timing: bool = Field(default=False, description="If true, backtest tiered exposure based on index close level quantiles")
+    vol_level_quantiles: list[float] = Field(
+        default_factory=lambda: [0.8],
+        description="Quantile cut points on index close level, ascending. Example: [0.7,0.85,0.95]",
+    )
+    vol_level_exposures: list[float] = Field(
+        default_factory=lambda: [1.0, 0.5],
+        description="Tier exposures, length = len(vol_level_quantiles)+1. Example: [1.0,0.7,0.4,0.1]",
+    )
+
+    # Volatility-timing strategy (level-based, tiered exposure), e.g. GVZ high -> reduce exposure
+    vol_timing: bool = Field(default=False, description="If true, backtest tiered exposure based on index close level quantiles")
+    vol_level_quantiles: list[float] = Field(
+        default_factory=lambda: [0.8],
+        description="Quantile cut points on index close level, ascending. Example: [0.7,0.85,0.95]",
+    )
+    vol_level_exposures: list[float] = Field(
+        default_factory=lambda: [1.0, 0.5],
+        description="Tier exposures, length = len(vol_level_quantiles)+1. Example: [1.0,0.7,0.4,0.1]",
+    )
 
 
 class LeadLagAnalysisResponse(BaseModel):
@@ -401,6 +428,20 @@ class VixSignalBacktestResponse(BaseModel):
     series: dict | None = None
     metrics: dict | None = None
     trades: list[dict] | None = None
+    error: str | None = None
+
+
+class IndexDistributionRequest(BaseModel):
+    symbol: str = Field(description="Cboe symbol: GVZ|VXN|VIX")
+    window: str = Field(default="all", description="1y|3y|5y|10y|all")
+    bins: int = Field(default=60, ge=10, le=200)
+
+
+class IndexDistributionResponse(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    close: dict | None = None
+    ret_log: dict | None = None
     error: str | None = None
 
 

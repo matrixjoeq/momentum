@@ -46,6 +46,8 @@ from .schemas import (
     VixNextActionResponse,
     VixSignalBacktestRequest,
     VixSignalBacktestResponse,
+    IndexDistributionRequest,
+    IndexDistributionResponse,
     EtfPoolOut,
     EtfPoolUpsert,
     FetchResult,
@@ -58,6 +60,7 @@ from .schemas import (
     PriceOut,
     ValidationPolicyOut,
 )
+from ..api.index_distributions import IndexDistributionInputs, compute_cboe_index_distribution
 from ..analysis.baseline import (
     TRADING_DAYS_PER_YEAR,
     BaselineInputs,
@@ -135,6 +138,8 @@ _YAHOO_ALIASES = {
     "^GVX": ["^GVX", "^GVZ"],
     "GVZ": ["^GVZ"],
     "^GVZ": ["^GVZ"],
+    "VXN": ["^VXN"],
+    "^VXN": ["^VXN"],
 }
 
 
@@ -144,6 +149,8 @@ def _normalize_vol_index(sym: str) -> str | None:
         s = s[1:]
     if s in {"VIX"}:
         return "VIX"
+    if s in {"VXN"}:
+        return "VXN"
     if s in {"GVZ", "GVX"}:
         return "GVZ"
     return None
@@ -627,17 +634,53 @@ def analysis_leadlag(
     adj = str(payload.adjust or "hfq").strip().lower()
     code = str(payload.etf_code).strip()
 
-    rows = list_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adj, limit=1000000)
-    if not rows:
-        return LeadLagAnalysisResponse(ok=False, error="empty_etf_series")
+    asset_provider = str(getattr(payload, "asset_provider", "db") or "db").strip().lower()
+    asset_symbol = getattr(payload, "asset_symbol", None)
+    asset_symbol_s = str(asset_symbol).strip() if asset_symbol is not None else ""
 
-    etf = pd.Series(
-        data=[float(r.close) if r.close is not None else np.nan for r in rows],
-        index=[r.trade_date for r in rows],
-        dtype=float,
-    ).dropna()
-    if etf.empty:
-        return LeadLagAnalysisResponse(ok=False, error="empty_etf_close")
+    # Asset (left-hand series) selection:
+    # - db: load ETF closes from DB (needs etf_code + adjust)
+    # - stooq/yahoo: fetch closes externally (uses asset_symbol)
+    if asset_provider in {"", "db"}:
+        rows = list_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adj, limit=1000000)
+        if not rows:
+            return LeadLagAnalysisResponse(ok=False, error="empty_etf_series")
+        etf = pd.Series(
+            data=[float(r.close) if r.close is not None else np.nan for r in rows],
+            index=[r.trade_date for r in rows],
+            dtype=float,
+        ).dropna()
+        if etf.empty:
+            return LeadLagAnalysisResponse(ok=False, error="empty_etf_close")
+        asset_meta = {"asset_provider": "db", "etf_code": code, "adjust": adj}
+    else:
+        if not asset_symbol_s:
+            return LeadLagAnalysisResponse(ok=False, error="missing_asset_symbol", meta={"asset_provider": asset_provider})
+        if asset_provider == "auto":
+            # heuristic: prefer stooq for known stooq-style symbols (like qqq.us or ^ndx), else yahoo
+            ap = "stooq" if (".us" in asset_symbol_s.lower() or asset_symbol_s.startswith("^")) else "yahoo"
+        else:
+            ap = asset_provider
+
+        if ap == "stooq":
+            df_a, ameta = fetch_stooq_daily_close(StooqFetchRequest(symbol=asset_symbol_s, start_date=payload.start, end_date=payload.end))
+            if df_a is None or df_a.empty:
+                err = str((ameta or {}).get("error") or "empty_stooq_series")
+                return LeadLagAnalysisResponse(ok=False, error=err, meta={"asset_provider": "stooq", "stooq": ameta})
+            etf = pd.Series(data=df_a["close"].to_numpy(dtype=float), index=df_a["date"].to_list(), dtype=float).dropna()
+            asset_meta = {"asset_provider": "stooq", "asset_symbol": asset_symbol_s, "stooq": ameta}
+        else:
+            df_a, ameta = fetch_yahoo_daily_close_with_alias(
+                YahooFetchRequest(symbol=asset_symbol_s, start_date=payload.start, end_date=payload.end),
+                aliases=_YAHOO_ALIASES,
+            )
+            if df_a is None or df_a.empty:
+                return LeadLagAnalysisResponse(ok=False, error="empty_yahoo_series", meta={"asset_provider": ap, "yahoo": ameta})
+            etf = pd.Series(data=df_a["close"].to_numpy(dtype=float), index=df_a["date"].to_list(), dtype=float).dropna()
+            asset_meta = {"asset_provider": "yahoo", "asset_symbol": asset_symbol_s, "yahoo": ameta}
+
+        if etf.empty:
+            return LeadLagAnalysisResponse(ok=False, error="empty_asset_close", meta=asset_meta)
 
     idx_provider = str(getattr(payload, "index_provider", "cboe") or "cboe").strip().lower()
     idx_align = str(getattr(payload, "index_align", "cn_next_trading_day") or "cn_next_trading_day").strip().lower()
@@ -652,7 +695,7 @@ def analysis_leadlag(
     sina_known = {"DINIW"}
     # Note: some Stooq symbols (notably certain futures like GC.F / DX.F) may require captcha on
     # historical download pages and can return empty content from the CSV endpoint.
-    stooq_known = {"XAUUSD"}
+    stooq_known = {"XAUUSD", "GC.F"}
 
     # Provider selection:
     # - cboe: VIX/GVZ only (preferred when available)
@@ -661,7 +704,7 @@ def analysis_leadlag(
     # - yahoo: fallback for arbitrary symbols
     # - auto: try in the above order based on symbol
     if idx_provider == "auto":
-        if idx_code in {"VIX", "GVZ"}:
+        if idx_code in {"VIX", "GVZ", "VXN"}:
             idx_provider_eff = "cboe"
         elif idx_sym_u in fred_known:
             idx_provider_eff = "fred"
@@ -675,7 +718,7 @@ def analysis_leadlag(
         idx_provider_eff = idx_provider
 
     if idx_provider_eff == "cboe":
-        if idx_code not in {"VIX", "GVZ"}:
+        if idx_code not in {"VIX", "GVZ", "VXN"}:
             return LeadLagAnalysisResponse(ok=False, error="unsupported_cboe_index", meta={"provider": "cboe", "symbol": idx_sym})
         dfc = fetch_cboe_daily_close(CboeFetchRequest(index=idx_code, start_date=payload.start, end_date=payload.end))
         if dfc is None or dfc.empty:
@@ -745,13 +788,16 @@ def analysis_leadlag(
             walk_forward=bool(getattr(payload, "walk_forward", True)),
             train_ratio=float(getattr(payload, "train_ratio", 0.60) or 0.60),
             walk_objective=str(getattr(payload, "walk_objective", "sharpe") or "sharpe"),
+            vol_timing=bool(getattr(payload, "vol_timing", False)),
+            vol_level_quantiles=list(getattr(payload, "vol_level_quantiles", [0.8]) or [0.8]),
+            vol_level_exposures=list(getattr(payload, "vol_level_exposures", [1.0, 0.5]) or [1.0, 0.5]),
         )
     )
     if not bool(res.get("ok")):
         return LeadLagAnalysisResponse(ok=False, error=str(res.get("reason") or "analysis_failed"), meta=idx_meta)
 
     meta = dict(res.get("meta") or {})
-    meta.update({"etf_code": code, "adjust": adj})
+    meta.update(asset_meta)
     meta.update(idx_meta)
     return LeadLagAnalysisResponse(
         ok=True,
@@ -1171,6 +1217,24 @@ def analysis_vix_signal_backtest(payload: VixSignalBacktestRequest, db: Session 
         series=dict(res.get("series") or {}),
         metrics=dict(res.get("metrics") or {}),
         trades=list(res.get("trades") or []),
+    )
+
+
+@router.post("/analysis/index-distribution", response_model=IndexDistributionResponse)
+def analysis_index_distribution(payload: IndexDistributionRequest) -> IndexDistributionResponse:
+    w = str(payload.window or "all").strip().lower()
+    if w not in {"1y", "3y", "5y", "10y", "all"}:
+        return IndexDistributionResponse(ok=False, error="invalid_window", meta={"window": w})
+    res = compute_cboe_index_distribution(
+        IndexDistributionInputs(symbol=str(payload.symbol), window=w, bins=int(payload.bins))
+    )
+    if not bool(res.get("ok")):
+        return IndexDistributionResponse(ok=False, error=str(res.get("error") or "failed"), meta=dict(res.get("meta") or {}))
+    return IndexDistributionResponse(
+        ok=True,
+        meta=dict(res.get("meta") or {}),
+        close=dict(res.get("close") or {}),
+        ret_log=dict(res.get("ret_log") or {}),
     )
 
 

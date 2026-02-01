@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -29,6 +29,10 @@ class LeadLagInputs:
     walk_forward: bool = True
     train_ratio: float = 0.60
     walk_objective: str = "sharpe"  # sharpe|cagr
+    # Volatility-timing strategy (level-based tiered exposure): use idx_close level quantiles
+    vol_timing: bool = False
+    vol_level_quantiles: list[float] = field(default_factory=lambda: [0.8])
+    vol_level_exposures: list[float] = field(default_factory=lambda: [1.0, 0.5])
 
 
 def align_us_close_to_cn_next_trading_day(
@@ -101,12 +105,16 @@ def _trade_diagnostics(
     train_ratio: float,
     walk_objective: str,
     max_lag: int,
+    vol_timing: bool,
+    vol_level_quantiles: list[float],
+    vol_level_exposures: list[float],
 ) -> dict[str, Any]:
     """
     Best-effort "practical" diagnostics:
     - directional hit-rate (using index move to predict ETF move with lag)
     - conditional return distributions
     - simple risk-on/off strategy backtest (no leverage)
+    - volatility-timing strategy backtest (tiered exposure by index close level)
     - rolling stability metrics
     """
     lag = int(best_lag)
@@ -210,6 +218,77 @@ def _trade_diagnostics(
 
     strat = _strategy_for(df2, idx_sig, same_sign=same, thr=None)
 
+    def _vol_timing_for(
+        df_local: pd.DataFrame,
+        levels: pd.Series,
+        *,
+        thresholds_abs: list[float],
+        exposures: list[float],
+    ) -> dict[str, Any]:
+        th = [float(x) for x in (thresholds_abs or []) if x is not None and np.isfinite(float(x))]
+        th = sorted(th)
+        exps = [float(x) for x in (exposures or []) if x is not None and np.isfinite(float(x))]
+        if len(exps) != len(th) + 1:
+            return {"ok": False, "error": "bad_tier_exposures_len", "thresholds_abs": th, "exposures": exps}
+        if any((x < 0.0 or x > 1.0) for x in exps):
+            return {"ok": False, "error": "exposures_out_of_range", "thresholds_abs": th, "exposures": exps}
+        if any(th[i] > th[i + 1] for i in range(len(th) - 1)):
+            return {"ok": False, "error": "thresholds_not_sorted", "thresholds_abs": th, "exposures": exps}
+
+        x = pd.to_numeric(levels, errors="coerce")
+        xv = x.to_numpy(dtype=float)
+        th_arr = np.array(th, dtype=float)
+
+        exp = np.full(len(df_local), np.nan, dtype=float)
+        for i in range(len(df_local)):
+            if not np.isfinite(xv[i]):
+                exp[i] = np.nan
+                continue
+            # bucket index: count of thresholds <= level
+            # strict "above threshold" => values equal to threshold stay in lower bucket
+            j = int(np.searchsorted(th_arr, xv[i], side="left")) if th_arr.size else 0
+            exp[i] = float(exps[j])
+
+        r_etf = np.expm1(df_local["etf_ret"].to_numpy(dtype=float))
+        cost = float(cost_bps) / 10000.0
+        turn = np.zeros_like(exp)
+        turn[1:] = np.abs(exp[1:] - exp[:-1])
+        r_strat = exp * r_etf - turn * cost
+        ok2 = np.isfinite(r_strat) & np.isfinite(r_etf) & np.isfinite(exp)
+        r_strat_ok = r_strat[ok2]
+        r_etf_ok = r_etf[ok2]
+        nav_strat = np.cumprod(1.0 + r_strat_ok) if r_strat_ok.size else np.array([], dtype=float)
+        nav_etf = np.cumprod(1.0 + r_etf_ok) if r_etf_ok.size else np.array([], dtype=float)
+
+        strat_stats = _annualized_from_daily(r_strat_ok)
+        bh_stats = _annualized_from_daily(r_etf_ok)
+        strat_stats["max_drawdown"] = _max_drawdown(nav_strat)
+        bh_stats["max_drawdown"] = _max_drawdown(nav_etf)
+
+        bucket_counts: list[int] = [0 for _ in range(len(exps))]
+        bucket_total = 0
+        for i in range(len(df_local)):
+            if not np.isfinite(xv[i]):
+                continue
+            bucket_total += 1
+            j = int(np.searchsorted(th_arr, xv[i], side="left")) if th_arr.size else 0
+            bucket_counts[j] += 1
+        bucket_rates = [float(c) / float(bucket_total) if bucket_total > 0 else float("nan") for c in bucket_counts]
+
+        return {
+            "ok": True,
+            "thresholds_abs": th,
+            "exposures": exps,
+            "bucket_rates": bucket_rates,
+            "dates": [d.isoformat() for d in df_local.index[ok2]],
+            "nav_strategy": nav_strat.astype(float).tolist(),
+            "nav_buy_hold": nav_etf.astype(float).tolist(),
+            "exp": exp[ok2].astype(float).tolist(),
+            "ret_strategy": r_strat_ok.astype(float).tolist(),
+            "ret_buy_hold": r_etf_ok.astype(float).tolist(),
+            "metrics": {"strategy": strat_stats, "buy_hold": bh_stats},
+        }
+
     thr_abs: float | None = None
     strat_thr: dict[str, Any] | None = None
     if bool(enable_threshold):
@@ -273,6 +352,54 @@ def _trade_diagnostics(
         else:
             walk = {"ok": False, "reason": "no_valid_params"}
 
+    vol_out: dict[str, Any] | None = None
+    if bool(vol_timing):
+        qs_in = [float(q) for q in (vol_level_quantiles or []) if q is not None and np.isfinite(float(q))]
+        qs = sorted([float(min(max(q, 0.01), 0.99)) for q in qs_in])
+        lv = pd.to_numeric(df2["idx_close"], errors="coerce").to_numpy(dtype=float)
+        lv = lv[np.isfinite(lv)]
+        if len(qs) == 0:
+            vol_out = {"ok": False, "error": "empty_vol_level_quantiles"}
+        elif lv.size < 20:
+            vol_out = {"ok": False, "error": "insufficient_level_samples", "n": int(lv.size)}
+        else:
+            thr_abs = [float(np.quantile(lv, q)) for q in qs]
+            levels = pd.to_numeric(df2["idx_close"], errors="coerce")
+            vol_out = _vol_timing_for(df2, levels, thresholds_abs=thr_abs, exposures=vol_level_exposures)
+            vol_out["quantiles"] = qs
+            vol_out["thresholds_abs_train"] = thr_abs
+
+            vol_walk: dict[str, Any] | None = None
+            if bool(walk_forward) and len(df2) >= 80:
+                tr = float(min(max(train_ratio, 0.2), 0.85))
+                cut = int(max(20, min(len(df2) - 20, int(len(df2) * tr))))
+                train_df = df2.iloc[:cut].copy()
+                test_df = df2.iloc[cut:].copy()
+                lv_tr = pd.to_numeric(train_df["idx_close"], errors="coerce").to_numpy(dtype=float)
+                lv_tr = lv_tr[np.isfinite(lv_tr)]
+                if lv_tr.size >= 20:
+                    thr_tr = [float(np.quantile(lv_tr, q)) for q in qs]
+                    vol_walk = {
+                        "ok": True,
+                        "train_ratio": float(tr),
+                        "thresholds_abs_train": thr_tr,
+                        "train": _vol_timing_for(
+                            train_df,
+                            pd.to_numeric(train_df["idx_close"], errors="coerce"),
+                            thresholds_abs=thr_tr,
+                            exposures=vol_level_exposures,
+                        ),
+                        "test": _vol_timing_for(
+                            test_df,
+                            pd.to_numeric(test_df["idx_close"], errors="coerce"),
+                            thresholds_abs=thr_tr,
+                            exposures=vol_level_exposures,
+                        ),
+                    }
+                else:
+                    vol_walk = {"ok": False, "reason": "insufficient_train_level_samples", "n": int(lv_tr.size)}
+            vol_out["walk_forward"] = vol_walk
+
     # rolling stability (on aligned returns, not shifted simple returns)
     rw = int(max(20, rolling_window))
     # rolling corr of aligned log returns (etf_ret vs idx_sig_ret)
@@ -307,6 +434,7 @@ def _trade_diagnostics(
         "strategy": strat,
         "threshold": {"enabled": bool(enable_threshold), "quantile": float(threshold_quantile), "strategy": strat_thr} if bool(enable_threshold) else {"enabled": False},
         "walk_forward": walk,
+        "vol_timing": vol_out,
         "rolling": {
             "dates": [d.isoformat() for d in df2.index],
             "corr": roll_corr.astype(float).tolist(),
@@ -465,6 +593,9 @@ def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
         train_ratio=float(getattr(inputs, "train_ratio", 0.60) or 0.60),
         walk_objective=str(getattr(inputs, "walk_objective", "sharpe") or "sharpe"),
         max_lag=int(getattr(inputs, "max_lag", 20) or 20),
+        vol_timing=bool(getattr(inputs, "vol_timing", False)),
+        vol_level_quantiles=list(getattr(inputs, "vol_level_quantiles", [0.8]) or [0.8]),
+        vol_level_exposures=list(getattr(inputs, "vol_level_exposures", [1.0, 0.5]) or [1.0, 0.5]),
     )
 
     return {

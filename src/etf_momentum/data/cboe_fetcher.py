@@ -14,12 +14,13 @@ logger = logging.getLogger(__name__)
 _CBOE_CSV = {
     "VIX": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
     "GVZ": "https://cdn.cboe.com/api/global/us_indices/daily_prices/GVZ_History.csv",
+    "VXN": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VXN_History.csv",
 }
 
 
 @dataclass(frozen=True)
 class FetchRequest:
-    index: str  # VIX/GVZ
+    index: str  # VIX/GVZ/VXN
     start_date: str  # YYYYMMDD
     end_date: str  # YYYYMMDD
 

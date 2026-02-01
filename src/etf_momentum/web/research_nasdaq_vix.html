@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>研究：纳指ETF × VIX（Cboe）</title>
+    <title>研究：纳指（NDX/QQQ/513100）× VXN（Cboe）</title>
     <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
     <style>
       body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 24px; }
@@ -19,13 +19,14 @@
       th { background: #f7f7f7; }
       #pxChart, #retChart, #xcorrChart { width: 100%; height: 360px; }
       #stratChart, #vixBtChart, #rollingChart { width: 100%; height: 360px; }
+      #distCloseChart, #distRetChart { width: 100%; height: 320px; }
       .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
     </style>
   </head>
   <body>
-    <h2>研究：纳指ETF（513100）与 VIX（Cboe）</h2>
+    <h2>研究：纳指（NDX / QQQ / 513100）与 VXN（Cboe）</h2>
     <div class="muted">
-      目标：检查 ETF 价格涨跌与 VIX 指数涨跌的相关性、领先/同步/滞后关系，以及 Granger 因果检验（收益率层面）。
+      目标：检查“纳指资产”与 VXN（纳指恐慌指数）之间的相关性、领先/同步/滞后关系，以及 Granger 因果检验（收益率层面）。
       <div style="margin-top: 6px;">
         <a href="/">返回候选池</a>
         <span style="margin: 0 6px;">|</span>
@@ -83,6 +84,28 @@
         <input id="end" placeholder="YYYYMMDD" />
       </div>
       <div>
+        <label>资产预设</label>
+        <select id="assetPreset" title="选择预设会自动填充资产来源与symbol/代码。">
+          <option value="db:513100" selected>513100（A股纳指ETF，DB）</option>
+          <option value="stooq:qqq.us">QQQ（海外ETF，Stooq: qqq.us）</option>
+          <option value="stooq:^ndx">NDX（纳斯达克100指数，Stooq: ^ndx）</option>
+          <option value="custom:">custom（自定义）</option>
+        </select>
+      </div>
+      <div>
+        <label>资产 provider</label>
+        <select id="assetProvider">
+          <option value="db" selected>db</option>
+          <option value="stooq">stooq</option>
+          <option value="yahoo">yahoo</option>
+          <option value="auto">auto</option>
+        </select>
+      </div>
+      <div>
+        <label>资产 symbol（外盘）</label>
+        <input id="assetSymbol" value="" placeholder="例如 qqq.us 或 ^ndx" />
+      </div>
+      <div>
         <label>ETF 复权</label>
         <select id="adjust">
           <option value="hfq" selected>hfq（后复权）</option>
@@ -91,8 +114,26 @@
         </select>
       </div>
       <div>
-        <label>指数（Cboe）</label>
-        <input id="idx" value="VIX" />
+        <label>指数预设</label>
+        <select id="idxPreset" title="默认 VXN；也可自定义。">
+          <option value="cboe:VXN" selected>VXN（Cboe 纳指恐慌指数）</option>
+          <option value="cboe:VIX">VIX（Cboe 恐慌指数）</option>
+          <option value="cboe:GVZ">GVZ（Cboe 黄金波动率）</option>
+          <option value="custom:">custom（自定义）</option>
+        </select>
+      </div>
+      <div>
+        <label>指数 symbol</label>
+        <input id="idx" value="VXN" />
+      </div>
+      <div>
+        <label>数据源 provider</label>
+        <select id="idxProvider">
+          <option value="auto">auto</option>
+          <option value="cboe" selected>cboe</option>
+          <option value="stooq">stooq</option>
+          <option value="yahoo">yahoo</option>
+        </select>
       </div>
       <div>
         <label>日期对齐</label>
@@ -118,8 +159,8 @@
         <input id="costBps" value="10" title="简单策略每次仓位变化收取成本（bps）。" />
       </div>
       <div>
-        <label>阈值信号（|VIX_ret| 分位数）</label>
-        <input id="thrQ" value="0.8" title="只有当 |VIX 日收益| >= 该分位数阈值时才允许触发换仓。" />
+        <label>阈值信号（|index_ret| 分位数）</label>
+        <input id="thrQ" value="0.8" title="只有当 |指数 日收益| >= 该分位数阈值时才允许触发换仓。" />
       </div>
       <div>
         <label>Walk-forward 训练占比</label>
@@ -182,7 +223,7 @@
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">实盘信号回测（VIX 次日 BUY/SELL/HOLD）</h3>
+      <h3 style="margin: 0 0 6px 0;">实盘信号回测（VXN 次日 BUY/SELL/HOLD）</h3>
       <div class="row" style="margin-bottom: 8px;">
         <div>
           <label>初始仓位</label>
@@ -213,6 +254,42 @@
     <div class="panel">
       <h3 style="margin: 0 0 6px 0;">Walk-forward（训练选参 → 测试验证）</h3>
       <table id="wfTable"></table>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin: 0 0 6px 0;">指数分布统计（GVZ / VXN）</h3>
+      <div class="row">
+        <div>
+          <label>指数</label>
+          <select id="distSymbol">
+            <option value="VXN" selected>VXN</option>
+            <option value="GVZ">GVZ</option>
+          </select>
+        </div>
+        <div>
+          <label>区间</label>
+          <select id="distWindow">
+            <option value="1y">近1年</option>
+            <option value="3y" selected>近3年</option>
+            <option value="5y">近5年</option>
+            <option value="10y">近10年</option>
+            <option value="all">全部</option>
+          </select>
+        </div>
+        <button id="runDist">运行分布统计</button>
+      </div>
+      <div class="panel two">
+        <div>
+          <h3 style="margin: 0 0 6px 0;">指数水平分布（close）</h3>
+          <div id="distCloseChart"></div>
+          <table id="distCloseTable"></table>
+        </div>
+        <div>
+          <h3 style="margin: 0 0 6px 0;">日收益分布（log-ret）</h3>
+          <div id="distRetChart"></div>
+          <table id="distRetTable"></table>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -340,10 +417,12 @@
         const idx0 = Number(idxClose[0] || 1);
         const etfNorm = etfClose.map(v => Number(v) / etf0);
         const idxNorm = idxClose.map(v => Number(v) / idx0);
+        const assetName = (res && res.meta && (res.meta.asset_symbol || res.meta.etf_code)) ? (res.meta.asset_symbol || res.meta.etf_code) : "ASSET";
+        const idxName = (res && res.meta && (res.meta.index || res.meta.symbol || res.meta.series_id)) ? (res.meta.index || res.meta.symbol || res.meta.series_id) : "INDEX";
 
         Plotly.newPlot("pxChart", [
-          { x: dates, y: etfNorm, name: "纳指ETF(513100) close(归一化)", type: "scatter", mode: "lines" },
-          { x: dates, y: idxNorm, name: "VIX close(归一化)", type: "scatter", mode: "lines" },
+          { x: dates, y: etfNorm, name: `${assetName} close(归一化)`, type: "scatter", mode: "lines" },
+          { x: dates, y: idxNorm, name: `${idxName} close(归一化)`, type: "scatter", mode: "lines" },
         ], { margin: { t: 20 } }, { displayModeBar: false });
 
         Plotly.newPlot("retChart", [
@@ -355,6 +434,41 @@
         Plotly.newPlot("xcorrChart", [
           { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
         ], { margin: { t: 20 }, xaxis: { title: "lag (days)" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+      }
+
+      function _renderQuantTable(elId, q) {
+        const qs = q || {};
+        const keys = Object.keys(qs);
+        let html = "<tr><th>quantile</th><th>value</th></tr>";
+        for (const k of keys) {
+          html += `<tr><td>${k}</td><td>${fmt(qs[k], 6)}</td></tr>`;
+        }
+        $(elId).innerHTML = html;
+      }
+
+      function renderIndexDist(d) {
+        if (!d || !d.ok) return;
+        const m = d.meta || {};
+        const c = (d.close || {});
+        const r = (d.ret_log || {});
+        const ch = (c.hist || {});
+        const rh = (r.hist || {});
+
+        const cbins = ch.bins || [];
+        const ccounts = ch.counts || [];
+        const cx = cbins.slice(0, Math.max(0, cbins.length - 1));
+        Plotly.newPlot("distCloseChart", [
+          { x: cx, y: ccounts, type: "bar", name: `${m.symbol || ""} close` },
+        ], { margin: { t: 20 }, xaxis: { title: "close" }, yaxis: { title: "count" } }, { displayModeBar: false });
+        _renderQuantTable("distCloseTable", c.quantiles || {});
+
+        const rbins = rh.bins || [];
+        const rcounts = rh.counts || [];
+        const rx = rbins.slice(0, Math.max(0, rbins.length - 1));
+        Plotly.newPlot("distRetChart", [
+          { x: rx, y: rcounts, type: "bar", name: `${m.symbol || ""} log-ret` },
+        ], { margin: { t: 20 }, xaxis: { title: "log-ret" }, yaxis: { title: "count" } }, { displayModeBar: false });
+        _renderQuantTable("distRetTable", r.quantiles || {});
       }
 
       function renderVixBacktest(bt) {
@@ -379,7 +493,7 @@
         const trades = bt.trades || [];
         const lim = Math.max(1, Number(($("vixLogLimit").value || "300").trim()));
         const shown = trades.slice(0, lim);
-        let html = "<tr><th>date(CN)</th><th>action</th><th>pos</th><th>VIX_us_date</th><th>VIX_close</th><th>VIX_log_ret</th><th>thr</th><th>active</th><th>ETF_ret</th><th>NAV</th><th>BH_NAV</th></tr>";
+        let html = "<tr><th>date(CN)</th><th>action</th><th>pos</th><th>IDX_us_date</th><th>IDX_close</th><th>IDX_log_ret</th><th>thr</th><th>active</th><th>ETF_ret</th><th>NAV</th><th>BH_NAV</th></tr>";
         for (const r of shown) {
           const act = (r.action || "").toUpperCase();
           const bg = act === "BUY" ? "#e6fffb" : (act === "SELL" ? "#fff1f0" : "");
@@ -405,8 +519,8 @@
         const start = ($("start").value || "").trim();
         const end = ($("end").value || "").trim();
         const adjust = ($("adjust").value || "hfq").trim();
-        const index_symbol = ($("idx").value || "VIX").trim();
-        const index_provider = "cboe";
+        const index_symbol = ($("idx").value || "VXN").trim();
+        const index_provider = ($("idxProvider").value || "cboe").trim();
         const index_align = ($("align").value || "cn_next_trading_day").trim();
         const max_lag = Number(($("maxLag").value || "20").trim());
         const granger_max_lag = Number(($("grangerLag").value || "10").trim());
@@ -415,12 +529,18 @@
         const threshold_quantile = Number(($("thrQ").value || "0.8").trim());
         const train_ratio = Number(($("trainRatio").value || "0.6").trim());
         const walk_objective = ($("wfObj").value || "sharpe").trim();
+        const asset_provider = ($("assetProvider").value || "db").trim();
+        const asset_symbol = ($("assetSymbol").value || "").trim();
+        const preset = ($("assetPreset").value || "").trim();
+        const label = preset.includes("stooq:^ndx") ? "NDX" : (preset.includes("stooq:qqq.us") ? "QQQ" : "513100");
 
         setMsg("运行中...");
         const resp = await api("/analysis/leadlag", {
           method: "POST",
           body: JSON.stringify({
-            etf_code: "513100",
+            etf_code: label,
+            asset_provider,
+            asset_symbol: asset_provider === "db" ? null : asset_symbol,
             index_symbol,
             index_provider,
             index_align,
@@ -449,11 +569,55 @@
         renderTrade(data);
       }
 
+      async function runDist() {
+        const symbol = ($("distSymbol").value || "VXN").trim();
+        const window = ($("distWindow").value || "3y").trim();
+        const resp = await api("/analysis/index-distribution", {
+          method: "POST",
+          body: JSON.stringify({ symbol, window, bins: 60 }),
+        });
+        const data = await resp.json();
+        if (!data || !data.ok) {
+          setMsg(`分布统计失败：${data && (data.error || JSON.stringify(data))}`);
+          return;
+        }
+        renderIndexDist(data);
+      }
+
+      function _applyAssetPreset() {
+        const v = ($("assetPreset").value || "").trim();
+        const parts = v.split(":");
+        const p = (parts[0] || "db").trim();
+        const sym = (parts[1] || "").trim();
+        if (p === "db") {
+          $("assetProvider").value = "db";
+          $("assetSymbol").value = "";
+          $("adjust").disabled = false;
+          $("align").value = "cn_next_trading_day";
+        } else if (p === "stooq") {
+          $("assetProvider").value = "stooq";
+          $("assetSymbol").value = sym;
+          $("adjust").disabled = true;
+          $("align").value = "none";
+        }
+      }
+
+      function _applyIdxPreset() {
+        const v = ($("idxPreset").value || "").trim();
+        const parts = v.split(":");
+        const p = (parts[0] || "cboe").trim();
+        const sym = (parts[1] || "").trim();
+        if (p !== "custom") {
+          $("idxProvider").value = p;
+          $("idx").value = sym;
+        }
+      }
+
       async function runVixBt() {
         const start = ($("start").value || "").trim();
         const end = ($("end").value || "").trim();
         const adjust = ($("adjust").value || "hfq").trim();
-        const index = ($("idx").value || "VIX").trim();
+        const index = ($("idx").value || "VXN").trim();
         const index_align = ($("align").value || "cn_next_trading_day").trim();
         const trade_cost_bps = Number(($("costBps").value || "0").trim());
         const threshold_quantile = Number(($("thrQ").value || "0.8").trim());
@@ -491,6 +655,11 @@
       $("start").value = ymdTodayMinus(365 * 5);
       $("run").addEventListener("click", run);
       $("runVixBt").addEventListener("click", runVixBt);
+      $("runDist").addEventListener("click", runDist);
+      $("assetPreset").addEventListener("change", _applyAssetPreset);
+      $("idxPreset").addEventListener("change", _applyIdxPreset);
+      _applyAssetPreset();
+      _applyIdxPreset();
     </script>
   </body>
 </html>

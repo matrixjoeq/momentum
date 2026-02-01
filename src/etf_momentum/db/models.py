@@ -284,7 +284,7 @@ class MacroSeriesMeta(Base):
     - series_id=DGS10 provider=fred provider_symbol=DGS10 unit=%
     - series_id=DINIW provider=sina provider_symbol=DINIW unit=index
     - series_id=XAUUSD provider=stooq provider_symbol=XAUUSD unit=USD/oz
-    - series_id=GC_FUT provider=yahoo provider_symbol=GC=F unit=USD/oz
+    - series_id=GC_FUT provider=stooq provider_symbol=GC.F unit=USD/oz
     """
 
     __tablename__ = "macro_series_meta"

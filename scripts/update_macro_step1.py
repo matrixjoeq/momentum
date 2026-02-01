@@ -20,7 +20,7 @@ def _today_yyyymmdd() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Update macro series for Step 1 (global gold / US yields / DXY).")
-    ap.add_argument("--start", default="19900101", help="YYYYMMDD (default 19900101)")
+    ap.add_argument("--start", default="1985101", help="YYYYMMDD (default 1985101)")
     ap.add_argument("--end", default=_today_yyyymmdd(), help="YYYYMMDD (default today)")
     args = ap.parse_args(argv)
 

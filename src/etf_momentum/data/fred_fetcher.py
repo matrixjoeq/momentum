@@ -3,13 +3,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 import pandas as pd
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +70,13 @@ def fetch_fred_daily_close(
     last_err: Exception | None = None
     for attempt in range(max(1, int(retries) + 1)):
         try:
-            qs = urlencode(params)
-            req2 = Request(f"{url}?{qs}", headers={"User-Agent": "Mozilla/5.0"})  # noqa: S310
-            with urlopen(req2, timeout=float(timeout_s)) as resp:  # noqa: S310
-                raw = resp.read()
-            payload = {} if raw is None else json.loads(raw.decode("utf-8"))
+            timeout = httpx.Timeout(float(timeout_s), connect=float(timeout_s))
+            r = httpx.get(url, params=params, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+            payload = r.json()
+            if isinstance(payload, dict) and (payload.get("error_code") or payload.get("error_message")):
+                msg = str(payload.get("error_message") or payload.get("error_code") or "fred_error")
+                return pd.DataFrame(), {**meta, "error": msg}
             obs = payload.get("observations") if isinstance(payload, dict) else None
             if not isinstance(obs, list) or not obs:
                 return pd.DataFrame(), {**meta, "error": "empty_observations"}
@@ -105,9 +106,11 @@ def fetch_fred_daily_close(
             if df.empty:
                 return pd.DataFrame(), {**meta, "error": "empty_in_range"}
             return df[["date", "close"]], meta
-        except (HTTPError, URLError, ValueError, TypeError) as e:
+        except (httpx.HTTPError, TimeoutError, ValueError, TypeError, json.JSONDecodeError) as e:
             last_err = e
             if attempt < max(1, int(retries) + 1) - 1:
+                # light exponential backoff to avoid hammering FRED
+                time.sleep(min(2.0 ** attempt, 8.0))
                 continue
             logger.warning("fred fetch failed series_id=%s err=%s", series_id, e)
             break

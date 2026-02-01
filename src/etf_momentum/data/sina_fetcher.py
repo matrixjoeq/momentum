@@ -3,11 +3,11 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
+import httpx
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -60,9 +60,15 @@ def fetch_sina_forex_day_kline_daily_close(
     last_err: Exception | None = None
     for attempt in range(max(1, int(retries) + 1)):
         try:
-            req2 = Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})  # noqa: S310
-            with urlopen(req2, timeout=float(timeout_s)) as resp:  # noqa: S310
-                text = (resp.read() or b"").decode("utf-8", errors="replace")
+            timeout = httpx.Timeout(float(timeout_s), connect=float(timeout_s))
+            r = httpx.get(
+                url,
+                timeout=timeout,
+                follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"},
+            )
+            r.raise_for_status()
+            text = (r.content or b"").decode("utf-8", errors="replace")
 
             m = re.search(r'\(\s*"(?P<body>.*)"\s*\)\s*;?\s*$', text, flags=re.DOTALL)
             if not m:
@@ -104,9 +110,11 @@ def fetch_sina_forex_day_kline_daily_close(
             if df.empty:
                 return pd.DataFrame(), {**meta, "error": "empty_in_range"}
             return df[["date", "close"]], meta
-        except (HTTPError, URLError, ValueError, TypeError) as e:
+        except (httpx.HTTPError, TimeoutError, ValueError, TypeError) as e:
             last_err = e
             if attempt < max(1, int(retries) + 1) - 1:
+                # light exponential backoff to avoid hammering Sina
+                time.sleep(min(2.0 ** attempt, 8.0))
                 continue
             logger.warning("sina forex day kline fetch failed symbol=%s err=%s", sym, e)
             break

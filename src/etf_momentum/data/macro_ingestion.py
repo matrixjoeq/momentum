@@ -28,7 +28,7 @@ from ..settings import get_settings
 @dataclass(frozen=True)
 class MacroSeriesSpec:
     series_id: str
-    provider: str  # fred|stooq|yahoo
+    provider: str  # fred|stooq|yahoo|sina
     provider_symbol: str
     name: str | None = None
     category: str | None = None
@@ -45,8 +45,8 @@ DEFAULT_STEP1_SERIES: list[MacroSeriesSpec] = [
     # DXY / USDX: use Sina's DINIW which matches common quote conventions (e.g. ~96 not ~62).
     MacroSeriesSpec(series_id="DINIW", provider="sina", provider_symbol="DINIW", name="US Dollar Index (DXY)", category="fx", unit="index"),
     MacroSeriesSpec(series_id="XAUUSD", provider="stooq", provider_symbol="XAUUSD", name="Gold Spot (XAUUSD)", category="gold_spot", unit="USD/oz"),
-    # Gold futures: Yahoo fallback; may be blocked depending on network policy.
-    MacroSeriesSpec(series_id="GC_FUT", provider="yahoo", provider_symbol="GC=F", name="Gold Futures (GC=F)", category="gold_fut", unit="USD/oz"),
+    # Gold futures: Stooq is typically more stable than Yahoo in restricted networks.
+    MacroSeriesSpec(series_id="GC_FUT", provider="stooq", provider_symbol="GC.F", name="Gold Futures (GC.F)", category="gold_fut", unit="USD/oz"),
 ]
 
 
@@ -83,7 +83,13 @@ def fetch_macro_daily_close(
     sym = str(spec.provider_symbol).strip()
     if prov == "fred":
         settings = get_settings()
-        return fetch_fred_daily_close(FredFetchRequest(series_id=sym, start_date=start, end_date=end), api_key=settings.fred_api_key)
+        # FRED can be slow / chunked; use a larger timeout and retries to reduce flakiness.
+        return fetch_fred_daily_close(
+            FredFetchRequest(series_id=sym, start_date=start, end_date=end),
+            api_key=settings.fred_api_key,
+            timeout_s=30.0,
+            retries=4,
+        )
     if prov == "sina":
         return fetch_sina_forex_day_kline_daily_close(SinaFetchRequest(symbol=sym, start_date=start, end_date=end))
     if prov == "stooq":
