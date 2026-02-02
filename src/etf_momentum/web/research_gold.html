@@ -193,6 +193,46 @@
           <label>分段仓位（逗号）</label>
           <input id="etf_volExps" value="1,0.5,0.2" />
         </div>
+        <div>
+          <label>分位数窗口（用于 GVZ/现货波动 level）</label>
+          <select id="etf_volWindow" title="all=全样本分位数；1y/3y/5y/10y=滚动窗口分位数（按交易日近似）。">
+            <option value="all" selected>全区间（all）</option>
+            <option value="1y">近1年（1y）</option>
+            <option value="3y">近3年（3y）</option>
+            <option value="5y">近5年（5y）</option>
+            <option value="10y">近10年（10y）</option>
+          </select>
+        </div>
+        <div style="min-width: 260px;">
+          <label>同时对比：现货波动择时（仅用 ETF 价格）</label>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <label style="margin:0; font-size:12px; color:#444;">
+              <input type="checkbox" id="etf_proxyOn" checked />
+              启用对比
+            </label>
+            <label style="margin:0; font-size:12px; color:#444;">
+              <input type="checkbox" id="etf_proxy_rv20" checked />
+              RV20
+            </label>
+            <label style="margin:0; font-size:12px; color:#444;">
+              <input type="checkbox" id="etf_proxy_yz20" checked />
+              Yang-Zhang20
+            </label>
+            <label style="margin:0; font-size:12px; color:#444;">
+              <input type="checkbox" id="etf_proxy_gk20" />
+              Garman-Klass20
+            </label>
+            <label style="margin:0; font-size:12px; color:#444;">
+              <input type="checkbox" id="etf_proxy_ewma094" checked />
+              EWMA(0.94)
+            </label>
+            <label style="margin:0; font-size:12px; color:#444;">
+              <input type="checkbox" id="etf_proxy_har252" checked />
+              HAR(252)
+            </label>
+          </div>
+          <div class="muted" style="margin-top:6px;">说明：上述方法用 ETF 日线 OHLC 计算“年化波动 level”，再按同一组分位数/仓位做分段择时；用于与 GVZ 择时对比。</div>
+        </div>
         <button id="etf_run">运行分析</button>
       </div>
 
@@ -240,6 +280,11 @@
         <h3 style="margin: 0 0 6px 0;">简单策略回测（risk-on/off，含换仓成本）</h3>
         <div id="etf_stratChart"></div>
         <div class="muted" id="etf_stratMetrics" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">择时策略绩效对比（开启择时后）</h3>
+        <table id="etf_timingCompare"></table>
       </div>
 
       <div class="panel">
@@ -777,6 +822,116 @@
           }
           $("etf_stratMetrics").textContent = metricsLine;
 
+          // ---- timing compare table (GVZ + spot-vol proxies) ----
+          function renderTimingCompare(rows) {
+            const el = $("etf_timingCompare");
+            if (!el) return;
+            if (!rows || !rows.length) {
+              el.innerHTML = "<tr><td class='muted'>未启用择时或样本不足</td></tr>";
+              return;
+            }
+            let html = "<tr><th>策略</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>备注</th></tr>";
+            for (const r of rows) {
+              html += `<tr><td>${r.name}</td><td>${r.cagr}</td><td>${r.vol}</td><td>${r.sharpe}</td><td>${r.mdd}</td><td>${r.note || ""}</td></tr>`;
+            }
+            el.innerHTML = html;
+          }
+
+          function metricRow(name, ms, note) {
+            const fmtPct2 = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+            return {
+              name,
+              cagr: fmtPct2(ms && ms.cagr),
+              vol: fmtPct2(ms && ms.vol),
+              sharpe: fmt(ms && ms.sharpe, 2),
+              mdd: fmtPct2(ms && ms.max_drawdown),
+              note: note || "",
+            };
+          }
+
+          async function runProxyTimingCompare() {
+            const enabled = Boolean($("etf_volOn").checked) && Boolean($("etf_proxyOn").checked);
+            if (!enabled) {
+              renderTimingCompare([]);
+              return;
+            }
+            // implied-vol timing row (GVZ) from leadlag response (already computed)
+            const rows = [];
+            if (vt && vt.ok) {
+              rows.push(metricRow(`指数波动择时(${lab})`, (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {}, "index_level"));
+            }
+
+            const parseNums = (s) =>
+              (String(s || "")
+                .split(",")
+                .map(x => Number(String(x).trim()))
+                .filter(x => Number.isFinite(x)));
+            const level_quantiles = parseNums(($("etf_volQs").value || "").trim());
+            const level_exposures = parseNums(($("etf_volExps").value || "").trim());
+            const level_window = ($("etf_volWindow").value || "all").trim();
+            const trade_cost_bps = Number(($("etf_costBps").value || "0").trim());
+            const train_ratio = Number(($("etf_trainRatio").value || "0.6").trim());
+
+            const methods = [];
+            const add = (id, name, kind, extra={}) => {
+              if (!$(id) || !$(id).checked) return;
+              methods.push({ name, kind, window: 20, ann: 252, ...extra });
+            };
+            add("etf_proxy_rv20", "RV20", "rv_close");
+            add("etf_proxy_yz20", "YZ20", "yang_zhang");
+            add("etf_proxy_gk20", "GK20", "garman_klass");
+            add("etf_proxy_ewma094", "EWMA094", "ewma_close", { ewma_lambda: 0.94 });
+            add("etf_proxy_har252", "HAR252", "har_rv", { har_train_window: 252, har_horizons: [1,5,22] });
+
+            if (!methods.length) {
+              renderTimingCompare(rows);
+              return;
+            }
+            // show loading state
+            $("etf_timingCompare").innerHTML = "<tr><td class='muted'>现货波动择时计算中...</td></tr>";
+
+            try {
+              const resp2 = await api("/analysis/vol-proxy-timing", {
+                method: "POST",
+                body: JSON.stringify({
+                  etf_code: "518880",
+                  start: ($("etf_start").value || "").trim(),
+                  end: ($("etf_end").value || "").trim(),
+                  adjust: ($("etf_adjust").value || "hfq").trim(),
+                  methods,
+                  level_quantiles,
+                  level_exposures,
+                  level_window,
+                  trade_cost_bps,
+                  walk_forward: true,
+                  train_ratio,
+                }),
+              });
+              const d2 = await resp2.json();
+              if (!d2 || !d2.ok) {
+                rows.push({ name: "现货波动择时(ETFOHLC)", cagr: "", vol: "", sharpe: "", mdd: "", note: `失败：${d2 && (d2.error || "unknown")}` });
+                renderTimingCompare(rows);
+                return;
+              }
+              const ms = d2.methods || {};
+              for (const [k, v] of Object.entries(ms)) {
+                if (!v || !v.ok) {
+                  rows.push({ name: `现货波动择时(${k})`, cagr: "", vol: "", sharpe: "", mdd: "", note: `失败：${v && v.error ? v.error : "bad"}` });
+                  continue;
+                }
+                const mstr = (v.metrics && v.metrics.strategy) ? v.metrics.strategy : {};
+                rows.push(metricRow(`现货波动择时(${k})`, mstr, (v.thresholds_abs_train ? `thr=${(v.thresholds_abs_train || []).map(x => fmt(x,3)).join(",")}` : "")));
+              }
+              renderTimingCompare(rows);
+            } catch (e) {
+              rows.push({ name: "现货波动择时(ETFOHLC)", cagr: "", vol: "", sharpe: "", mdd: "", note: `异常：${e && e.message ? e.message : String(e)}` });
+              renderTimingCompare(rows);
+            }
+          }
+
+          // run compare async (do not block main render)
+          runProxyTimingCompare();
+
           const r = t.rolling || {};
           const rd = r.dates || [];
           Plotly.newPlot("etf_rollingChart", [
@@ -909,6 +1064,7 @@
               .filter(x => Number.isFinite(x)));
           const vol_level_quantiles = parseNums(($("etf_volQs").value || "").trim());
           const vol_level_exposures = parseNums(($("etf_volExps").value || "").trim());
+          const vol_level_window = ($("etf_volWindow").value || "all").trim();
 
           setMsg("运行中...");
           const resp = await api("/analysis/leadlag", {
@@ -934,6 +1090,7 @@
               vol_timing,
               vol_level_quantiles,
               vol_level_exposures,
+              vol_level_window,
             }),
           });
           const data = await resp.json();

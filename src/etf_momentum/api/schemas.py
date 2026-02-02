@@ -189,6 +189,11 @@ class LeadLagAnalysisRequest(BaseModel):
         description="Tier exposures, length = len(vol_level_quantiles)+1. Example: [1.0,0.7,0.4,0.1]",
     )
 
+    vol_level_window: str = Field(
+        default="all",
+        description="Quantile window for level-based vol timing: all|1y|3y|5y|10y (trailing trading days)",
+    )
+
     # Volatility-timing strategy (level-based, tiered exposure), e.g. GVZ high -> reduce exposure
     vol_timing: bool = Field(default=False, description="If true, backtest tiered exposure based on index close level quantiles")
     vol_level_quantiles: list[float] = Field(
@@ -442,6 +447,50 @@ class IndexDistributionResponse(BaseModel):
     meta: dict | None = None
     close: dict | None = None
     ret_log: dict | None = None
+    error: str | None = None
+
+
+class VolProxyMethod(BaseModel):
+    """
+    Volatility proxy computed from the ETF OHLC series.
+
+    Output level is annualized volatility (decimal), intended for level-based tier timing.
+    """
+
+    name: str = Field(min_length=1, description="Unique method name in response, e.g. rv20, yz20, har252")
+    kind: str = Field(
+        description="rv_close|ewma_close|parkinson|garman_klass|rogers_satchell|yang_zhang|har_rv"
+    )
+    window: int = Field(default=20, ge=2, le=2520, description="Rolling window (trading days)")
+    ann: int = Field(default=252, ge=50, le=400, description="Annualization factor")
+
+    ewma_lambda: float = Field(default=0.94, gt=0.0, lt=1.0, description="EWMA decay (ewma_close only)")
+    har_train_window: int = Field(default=252, ge=30, le=2520, description="Rolling train window (har_rv only)")
+    har_horizons: list[int] = Field(default_factory=lambda: [1, 5, 22], description="HAR horizons (har_rv only)")
+
+
+class VolProxyTimingRequest(BaseModel):
+    etf_code: str = Field(min_length=1, description="ETF code, e.g. 518880 / 513100")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
+
+    methods: list[VolProxyMethod] = Field(min_length=1, description="Vol proxy variants to compute and backtest")
+
+    # Tiering config (same semantics as leadlag vol_timing)
+    level_quantiles: list[float] = Field(default_factory=lambda: [0.8, 0.9], description="Quantiles on level (train)")
+    level_exposures: list[float] = Field(default_factory=lambda: [1.0, 0.5, 0.2], description="Tier exposures, len=quantiles+1")
+    level_window: str = Field(default="all", description="Quantile window for levels: all|1y|3y|5y|10y")
+    trade_cost_bps: float = Field(default=0.0, ge=0.0, description="Per-switch cost in bps")
+
+    walk_forward: bool = Field(default=True, description="If true, split train/test and apply train thresholds to test")
+    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9, description="Train ratio for walk-forward")
+
+
+class VolProxyTimingResponse(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    methods: dict | None = None
     error: str | None = None
 
 

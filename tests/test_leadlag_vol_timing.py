@@ -50,3 +50,34 @@ def test_vol_timing_tiered_exposure_by_level_quantile():
     tail = nav[first_zero:]
     assert max(abs(float(x) - float(tail[0])) for x in tail) < 1e-12
 
+
+def test_vol_timing_with_rolling_quantile_window_runs():
+    # keep it small but >= 120 to have enough history
+    dates = pd.date_range("2020-01-02", periods=260, freq="B").date
+    idx_level = np.linspace(50.0, 150.0, len(dates)).astype(float)
+    idx_close = pd.Series(idx_level, index=list(dates))
+    rng = np.random.default_rng(1)
+    ret = rng.normal(0.0002, 0.01, size=len(dates))
+    etf_close = pd.Series(np.exp(np.cumsum(ret)), index=list(dates))
+
+    out = compute_lead_lag(
+        LeadLagInputs(
+            etf_close=etf_close,
+            idx_close=idx_close,
+            max_lag=0,
+            granger_max_lag=1,
+            alpha=0.05,
+            trade_cost_bps=0.0,
+            enable_threshold=False,
+            walk_forward=False,  # rolling mode disables WF anyway; keep deterministic
+            vol_timing=True,
+            vol_level_quantiles=[0.8, 0.9],
+            vol_level_exposures=[1.0, 0.5, 0.2],
+            vol_level_window="1y",
+        )
+    )
+    assert out["ok"] is True
+    vt = (out.get("trade") or {}).get("vol_timing") or {}
+    assert vt.get("ok") is True
+    assert vt.get("vol_level_window") == "1y"
+

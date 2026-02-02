@@ -10,6 +10,7 @@ import pandas as pd
 from scipy import stats
 
 from ..calendar.trading_calendar import shift_to_trading_day
+from .vol_timing import backtest_tiered_exposure_by_level, backtest_tiered_exposure_by_level_rolling_quantiles
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class LeadLagInputs:
     vol_timing: bool = False
     vol_level_quantiles: list[float] = field(default_factory=lambda: [0.8])
     vol_level_exposures: list[float] = field(default_factory=lambda: [1.0, 0.5])
+    vol_level_window: str = "all"  # all|1y|3y|5y|10y
 
 
 def align_us_close_to_cn_next_trading_day(
@@ -108,6 +110,7 @@ def _trade_diagnostics(
     vol_timing: bool,
     vol_level_quantiles: list[float],
     vol_level_exposures: list[float],
+    vol_level_window: str,
 ) -> dict[str, Any]:
     """
     Best-effort "practical" diagnostics:
@@ -354,6 +357,20 @@ def _trade_diagnostics(
 
     vol_out: dict[str, Any] | None = None
     if bool(vol_timing):
+        def _vol_window_days(key: str) -> int | None:
+            k = str(key or "all").strip().lower()
+            if k in {"", "all"}:
+                return None
+            if k == "1y":
+                return 252
+            if k == "3y":
+                return 3 * 252
+            if k == "5y":
+                return 5 * 252
+            if k == "10y":
+                return 10 * 252
+            return None
+
         qs_in = [float(q) for q in (vol_level_quantiles or []) if q is not None and np.isfinite(float(q))]
         qs = sorted([float(min(max(q, 0.01), 0.99)) for q in qs_in])
         lv = pd.to_numeric(df2["idx_close"], errors="coerce").to_numpy(dtype=float)
@@ -363,14 +380,38 @@ def _trade_diagnostics(
         elif lv.size < 20:
             vol_out = {"ok": False, "error": "insufficient_level_samples", "n": int(lv.size)}
         else:
-            thr_abs = [float(np.quantile(lv, q)) for q in qs]
             levels = pd.to_numeric(df2["idx_close"], errors="coerce")
-            vol_out = _vol_timing_for(df2, levels, thresholds_abs=thr_abs, exposures=vol_level_exposures)
-            vol_out["quantiles"] = qs
-            vol_out["thresholds_abs_train"] = thr_abs
+            wdays = _vol_window_days(vol_level_window)
+            if wdays is None:
+                thr_abs = [float(np.quantile(lv, q)) for q in qs]
+                vol_out = backtest_tiered_exposure_by_level(
+                    df2,
+                    levels,
+                    thresholds_abs=thr_abs,
+                    exposures=vol_level_exposures,
+                    cost_bps=float(cost_bps),
+                    ann=252,
+                )
+                vol_out["quantiles"] = qs
+                vol_out["vol_level_window"] = "all"
+                vol_out["thresholds_abs_train"] = thr_abs
+            else:
+                vol_out = backtest_tiered_exposure_by_level_rolling_quantiles(
+                    df2,
+                    levels,
+                    quantiles=qs,
+                    window_days=int(wdays),
+                    exposures=vol_level_exposures,
+                    cost_bps=float(cost_bps),
+                    ann=252,
+                )
+                vol_out["vol_level_window"] = str(vol_level_window or "all")
+                # keep a compatible display field
+                if vol_out.get("thresholds_abs_last") is not None:
+                    vol_out["thresholds_abs_train"] = vol_out.get("thresholds_abs_last")
 
             vol_walk: dict[str, Any] | None = None
-            if bool(walk_forward) and len(df2) >= 80:
+            if bool(walk_forward) and len(df2) >= 80 and wdays is None:
                 tr = float(min(max(train_ratio, 0.2), 0.85))
                 cut = int(max(20, min(len(df2) - 20, int(len(df2) * tr))))
                 train_df = df2.iloc[:cut].copy()
@@ -398,6 +439,8 @@ def _trade_diagnostics(
                     }
                 else:
                     vol_walk = {"ok": False, "reason": "insufficient_train_level_samples", "n": int(lv_tr.size)}
+            elif bool(walk_forward) and wdays is not None:
+                vol_walk = {"ok": False, "reason": "rolling_window_mode"}
             vol_out["walk_forward"] = vol_walk
 
     # rolling stability (on aligned returns, not shifted simple returns)
@@ -596,6 +639,7 @@ def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
         vol_timing=bool(getattr(inputs, "vol_timing", False)),
         vol_level_quantiles=list(getattr(inputs, "vol_level_quantiles", [0.8]) or [0.8]),
         vol_level_exposures=list(getattr(inputs, "vol_level_exposures", [1.0, 0.5]) or [1.0, 0.5]),
+        vol_level_window=str(getattr(inputs, "vol_level_window", "all") or "all"),
     )
 
     return {

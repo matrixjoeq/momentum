@@ -48,6 +48,8 @@ from .schemas import (
     VixSignalBacktestResponse,
     IndexDistributionRequest,
     IndexDistributionResponse,
+    VolProxyTimingRequest,
+    VolProxyTimingResponse,
     EtfPoolOut,
     EtfPoolUpsert,
     FetchResult,
@@ -76,6 +78,7 @@ from ..analysis.baseline import (
     _ulcer_index,
     compute_baseline,
     load_close_prices,
+    load_ohlc_prices,
 )
 from ..analysis.calendar_effect import BaselineCalendarEffectInputs, compute_baseline_calendar_effect, compute_rotation_calendar_effect
 from ..analysis.calendar_effect import _decision_dates_for_rebalance as _cal_decision_dates_for_rebalance
@@ -85,6 +88,8 @@ from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtes
 from ..analysis.trend import TrendInputs, compute_trend_backtest
 from ..analysis.leadlag import LeadLagInputs, compute_lead_lag
 from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
+from ..analysis.vol_proxy import VolProxySpec, compute_vol_proxy_levels
+from ..analysis.vol_timing import backtest_tiered_exposure_by_level, backtest_tiered_exposure_by_level_rolling_quantiles
 from ..calendar.trading_calendar import shift_to_trading_day
 from ..data.cboe_fetcher import FetchRequest as CboeFetchRequest
 from ..data.cboe_fetcher import fetch_cboe_daily_close
@@ -791,6 +796,7 @@ def analysis_leadlag(
             vol_timing=bool(getattr(payload, "vol_timing", False)),
             vol_level_quantiles=list(getattr(payload, "vol_level_quantiles", [0.8]) or [0.8]),
             vol_level_exposures=list(getattr(payload, "vol_level_exposures", [1.0, 0.5]) or [1.0, 0.5]),
+            vol_level_window=str(getattr(payload, "vol_level_window", "all") or "all"),
         )
     )
     if not bool(res.get("ok")):
@@ -807,6 +813,183 @@ def analysis_leadlag(
         granger=res.get("granger"),
         trade=res.get("trade"),
     )
+
+
+@router.post("/analysis/vol-proxy-timing", response_model=VolProxyTimingResponse)
+def analysis_vol_proxy_timing(payload: VolProxyTimingRequest, db: Session = Depends(get_session)) -> VolProxyTimingResponse:
+    """
+    Volatility-timing backtests using volatility proxies computed from ETF OHLC only.
+
+    This is designed for comparing "no-options-data" alternatives (RV, range-based, EWMA, HAR forecast)
+    with implied-vol indices timing (GVZ/VXN) which is available via /analysis/leadlag.
+    """
+    start_d = _parse_yyyymmdd(payload.start)
+    end_d = _parse_yyyymmdd(payload.end)
+    adj = str(payload.adjust or "hfq").strip().lower()
+    code = str(payload.etf_code).strip()
+
+    ohlc_mat = load_ohlc_prices(db, codes=[code], start=start_d, end=end_d, adjust=adj)
+    close_df = ohlc_mat.get("close", pd.DataFrame())
+    if close_df is None or close_df.empty or code not in close_df.columns:
+        return VolProxyTimingResponse(ok=False, error="empty_etf_ohlc")
+
+    # per-code OHLC Series (best-effort; can be partially missing for some adjusts)
+    open_s = (ohlc_mat.get("open", pd.DataFrame())).get(code)
+    high_s = (ohlc_mat.get("high", pd.DataFrame())).get(code)
+    low_s = (ohlc_mat.get("low", pd.DataFrame())).get(code)
+    close_s = (ohlc_mat.get("close", pd.DataFrame())).get(code)
+    if close_s is None:
+        return VolProxyTimingResponse(ok=False, error="empty_etf_close")
+    ohlc = {"open": open_s, "high": high_s, "low": low_s, "close": close_s}
+
+    cnum = pd.to_numeric(close_s, errors="coerce")
+    etf_ret = np.log(cnum.where(cnum > 0)).diff()
+    df_ret = pd.DataFrame({"etf_ret": etf_ret}).dropna()
+    if df_ret.empty or len(df_ret) < 5:
+        return VolProxyTimingResponse(ok=False, error="insufficient_etf_returns")
+
+    qs_in = [float(q) for q in (payload.level_quantiles or []) if q is not None and np.isfinite(float(q))]
+    qs = sorted([float(min(max(q, 0.01), 0.99)) for q in qs_in])
+    exposures = [float(x) for x in (payload.level_exposures or []) if x is not None and np.isfinite(float(x))]
+    level_window = str(getattr(payload, "level_window", "all") or "all").strip().lower()
+
+    def _window_days(key: str) -> int | None:
+        k = str(key or "all").strip().lower()
+        if k in {"", "all"}:
+            return None
+        if k == "1y":
+            return 252
+        if k == "3y":
+            return 3 * 252
+        if k == "5y":
+            return 5 * 252
+        if k == "10y":
+            return 10 * 252
+        return None
+
+    wdays = _window_days(level_window)
+
+    results: dict[str, dict] = {}
+    for m in payload.methods:
+        name = str(m.name).strip()
+        if not name:
+            continue
+        kind = str(m.kind).strip()
+        try:
+            spec = VolProxySpec(
+                kind=kind,  # type: ignore[arg-type]
+                window=int(m.window),
+                ann=int(m.ann),
+                ewma_lambda=float(m.ewma_lambda),
+                har_train_window=int(m.har_train_window),
+                har_horizons=tuple(int(x) for x in (m.har_horizons or [1, 5, 22])),
+            )
+        except Exception as e:  # pragma: no cover
+            results[name] = {"ok": False, "error": f"bad_method_spec:{e}"}
+            continue
+
+        try:
+            lvl = compute_vol_proxy_levels(ohlc, spec=spec)
+        except Exception as e:
+            results[name] = {"ok": False, "error": f"compute_failed:{e}"}
+            continue
+
+        df2 = df_ret.join(pd.DataFrame({"idx_close": lvl}), how="inner").dropna()
+        lv = pd.to_numeric(df2["idx_close"], errors="coerce").to_numpy(dtype=float)
+        lv = lv[np.isfinite(lv)]
+        if len(qs) == 0:
+            results[name] = {"ok": False, "error": "empty_level_quantiles"}
+            continue
+        if lv.size < 20:
+            results[name] = {"ok": False, "error": "insufficient_level_samples", "n": int(lv.size)}
+            continue
+        if len(exposures) != len(qs) + 1:
+            results[name] = {
+                "ok": False,
+                "error": "bad_level_exposures_len",
+                "need": int(len(qs) + 1),
+                "got": int(len(exposures)),
+            }
+            continue
+
+        levels = pd.to_numeric(df2["idx_close"], errors="coerce")
+        if wdays is None:
+            thr_abs = [float(np.quantile(lv, q)) for q in qs]
+            out = backtest_tiered_exposure_by_level(
+                df2,
+                levels,
+                thresholds_abs=thr_abs,
+                exposures=exposures,
+                cost_bps=float(payload.trade_cost_bps or 0.0),
+                ann=int(m.ann),
+            )
+            out["quantiles"] = qs
+            out["level_window"] = "all"
+            out["thresholds_abs_train"] = thr_abs
+        else:
+            out = backtest_tiered_exposure_by_level_rolling_quantiles(
+                df2,
+                levels,
+                quantiles=qs,
+                window_days=int(wdays),
+                exposures=exposures,
+                cost_bps=float(payload.trade_cost_bps or 0.0),
+                ann=int(m.ann),
+            )
+            out["level_window"] = level_window
+            # keep a compatible display field
+            if out.get("thresholds_abs_last") is not None:
+                out["thresholds_abs_train"] = out.get("thresholds_abs_last")
+
+        # Walk-forward: thresholds learned on train only, applied to train/test.
+        vol_walk: dict | None = None
+        if bool(payload.walk_forward) and len(df2) >= 80 and wdays is None:
+            tr = float(min(max(payload.train_ratio, 0.2), 0.85))
+            cut = int(max(20, min(len(df2) - 20, int(len(df2) * tr))))
+            train_df = df2.iloc[:cut].copy()
+            test_df = df2.iloc[cut:].copy()
+            lv_tr = pd.to_numeric(train_df["idx_close"], errors="coerce").to_numpy(dtype=float)
+            lv_tr = lv_tr[np.isfinite(lv_tr)]
+            if lv_tr.size >= 20:
+                thr_tr = [float(np.quantile(lv_tr, q)) for q in qs]
+                vol_walk = {
+                    "ok": True,
+                    "train_ratio": float(tr),
+                    "thresholds_abs_train": thr_tr,
+                    "train": backtest_tiered_exposure_by_level(
+                        train_df,
+                        pd.to_numeric(train_df["idx_close"], errors="coerce"),
+                        thresholds_abs=thr_tr,
+                        exposures=exposures,
+                        cost_bps=float(payload.trade_cost_bps or 0.0),
+                        ann=int(m.ann),
+                    ),
+                    "test": backtest_tiered_exposure_by_level(
+                        test_df,
+                        pd.to_numeric(test_df["idx_close"], errors="coerce"),
+                        thresholds_abs=thr_tr,
+                        exposures=exposures,
+                        cost_bps=float(payload.trade_cost_bps or 0.0),
+                        ann=int(m.ann),
+                    ),
+                }
+            else:
+                vol_walk = {"ok": False, "reason": "insufficient_train_level_samples", "n": int(lv_tr.size)}
+        elif bool(payload.walk_forward) and wdays is not None:
+            vol_walk = {"ok": False, "reason": "rolling_window_mode"}
+        out["walk_forward"] = vol_walk
+
+        # Include the level series itself (aligned to df2 dates) for plotting/debugging.
+        out["level_series"] = {
+            "dates": [d.isoformat() for d in df2.index],
+            "level": pd.to_numeric(df2["idx_close"], errors="coerce").astype(float).tolist(),
+        }
+        results[name] = out
+
+    meta = {"etf_code": code, "adjust": adj, "start": payload.start, "end": payload.end}
+    if not results:
+        return VolProxyTimingResponse(ok=False, error="no_methods_computed", meta=meta)
+    return VolProxyTimingResponse(ok=True, meta=meta, methods=results)
 
 
 @router.post("/analysis/macro/pair-leadlag", response_model=MacroPairLeadLagResponse)
