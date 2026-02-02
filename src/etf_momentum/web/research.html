@@ -316,9 +316,27 @@
             <option value="yearly">年度</option>
           </select>
         </div>
+        <div>
+          <label>滚动年化波动窗口</label>
+          <select id="distRollVolWindow" style="min-width:180px;">
+            <option value="1D">1D</option>
+            <option value="1W">1W</option>
+            <option value="1M" selected>1M</option>
+            <option value="3M">3M</option>
+            <option value="6M">6M</option>
+            <option value="1Y">1Y</option>
+            <option value="2Y">2Y</option>
+            <option value="5Y">5Y</option>
+            <option value="10Y">10Y</option>
+            <option value="ALL">ALL</option>
+          </select>
+        </div>
       </div>
       <div id="distHistogram" style="width:100%; height:420px; margin-top:12px;"></div>
       <table id="distQuantiles" style="margin-top:12px;"></table>
+      <div class="muted" style="margin-top:10px;">滚动年化波动率分位数（基于日收益滚动 std 年化）</div>
+      <table id="distRollingAnnVolQuantiles" style="margin-top:8px;"></table>
+      <div id="distRollingAnnVol" style="width:100%; height:320px; margin-top:12px;"></div>
     </div>
 
     <div class="panel">
@@ -3178,8 +3196,10 @@
         const codeSelect = $("distCodeSelect");
         const typeSelect = $("distTypeSelect");
         const periodSelect = $("distPeriodSelect");
+        const rollWinSelect = $("distRollVolWindow");
+        const rollQTable = $("distRollingAnnVolQuantiles");
         
-        if (!codeSelect || !typeSelect || !periodSelect) return;
+        if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect) return;
         
         // Populate code selector
         const codes = Object.keys(distributions).sort();
@@ -3187,10 +3207,108 @@
         
         if (codes.length === 0) {
           $("distHistogram").innerHTML = "<div class='muted'>无分布数据</div>";
+          $("distRollingAnnVol").innerHTML = "<div class='muted'>无数据</div>";
+          if (rollQTable) rollQTable.innerHTML = "";
           $("distQuantiles").innerHTML = "";
           return;
         }
         
+        const _winToDays = (w) => {
+          const x = String(w || "").trim().toUpperCase();
+          if (x === "1D") return 1;
+          if (x === "1W") return 5;
+          if (x === "1M") return 21;
+          if (x === "3M") return 63;
+          if (x === "6M") return 126;
+          if (x === "1Y") return 252;
+          if (x === "2Y") return 504;
+          if (x === "5Y") return 1260;
+          if (x === "10Y") return 2520;
+          if (x === "ALL") return 0;
+          return 21; // default 1M
+        };
+        const _std = (arr) => {
+          const xs = arr.filter((v) => Number.isFinite(v));
+          if (xs.length < 2) return NaN;
+          const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+          const vv = xs.reduce((s, v) => s + (v - m) * (v - m), 0) / (xs.length - 1);
+          return Math.sqrt(vv);
+        };
+        const _plotRollingAnnVol = () => {
+          const code = codeSelect.value;
+          const wKey = rollWinSelect.value;
+          const w = _winToDays(wKey);
+          const boxId = "distRollingAnnVol";
+          if (!lastBaseline || !lastBaseline.nav || !lastBaseline.nav.series || !lastBaseline.nav.dates) {
+            $(boxId).innerHTML = "<div class='muted'>请先运行上方“运行分析（等权）”，再查看滚动年化波动率。</div>";
+            if (rollQTable) rollQTable.innerHTML = "";
+            return;
+          }
+          const dates = lastBaseline.nav.dates || [];
+          const nav = (lastBaseline.nav.series && lastBaseline.nav.series[code]) ? lastBaseline.nav.series[code] : [];
+          if (!Array.isArray(dates) || !Array.isArray(nav) || dates.length < 5 || nav.length !== dates.length) {
+            $(boxId).innerHTML = "<div class='muted'>无可用NAV序列，无法计算滚动年化波动率。</div>";
+            if (rollQTable) rollQTable.innerHTML = "";
+            return;
+          }
+          if (typeof Plotly === "undefined") {
+            $(boxId).innerHTML = "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+            if (rollQTable) rollQTable.innerHTML = "";
+            return;
+          }
+          const rets = nav.map((v, i) => (i === 0 ? NaN : (Number(v) / Number(nav[i - 1]) - 1)));
+          const ann = 252;
+          const vols = [];
+          for (let i = 0; i < rets.length; i++) {
+            if (i < 1) {
+              vols.push(NaN);
+              continue;
+            }
+            const start = (w <= 0) ? 1 : Math.max(1, i - w + 1);
+            const slice = rets.slice(start, i + 1);
+            const s = _std(slice);
+            vols.push(Number.isFinite(s) ? s * Math.sqrt(ann) : NaN);
+          }
+
+          // quantiles for rolling ann vol
+          if (rollQTable) {
+            const xs = vols.filter((v) => Number.isFinite(v));
+            if (xs.length >= 5 && typeof _percentile === "function") {
+              const q = {
+                q01: _percentile(xs, 1),
+                q05: _percentile(xs, 5),
+                q10: _percentile(xs, 10),
+                q25: _percentile(xs, 25),
+                q50: _percentile(xs, 50),
+                q75: _percentile(xs, 75),
+                q90: _percentile(xs, 90),
+                q95: _percentile(xs, 95),
+                q99: _percentile(xs, 99),
+              };
+              rollQTable.innerHTML =
+                `<tr>${["分位数","1%","5%","10%","25%","50%","75%","90%","95%","99%"].map(h => `<th>${h}</th>`).join("")}</tr>` +
+                `<tr>${["数值", fmtPct(q.q01), fmtPct(q.q05), fmtPct(q.q10), fmtPct(q.q25), fmtPct(q.q50), fmtPct(q.q75), fmtPct(q.q90), fmtPct(q.q95), fmtPct(q.q99)].map(c => `<td>${c}</td>`).join("")}</tr>`;
+            } else {
+              rollQTable.innerHTML = "<tr><td class='muted'>样本不足，无法计算分位数</td></tr>";
+            }
+          }
+
+          const title = `${code} - 滚动年化波动率（window=${wKey || "1M"}）`;
+          Plotly.newPlot(
+            boxId,
+            [{
+              x: dates,
+              y: vols,
+              type: "scatter",
+              mode: "lines",
+              name: "ann_vol",
+              hovertemplate: "%{x}<br>ann_vol=%{y:.2%}<extra></extra>",
+            }],
+            { margin: { t: 40 }, title: { text: title, font: { size: 14 } }, yaxis: { tickformat: ".0%", title: "年化波动率" } },
+            { responsive: true }
+          );
+        };
+
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
@@ -3199,6 +3317,7 @@
           
           if (!code || !distributions[code]) {
             $("distHistogram").innerHTML = "<div class='muted'>请选择标的</div>";
+            $("distRollingAnnVol").innerHTML = "<div class='muted'>请选择标的</div>";
             $("distQuantiles").innerHTML = "";
             return;
           }
@@ -3275,12 +3394,16 @@
           $("distQuantiles").innerHTML =
             `<tr>${quantileRows[0].map(h => `<th>${h}</th>`).join("")}</tr>` +
             `<tr>${quantileRows[1].map(c => `<td>${c}</td>`).join("")}</tr>`;
+
+          // Rolling annualized volatility chart (always based on daily NAV returns)
+          _plotRollingAnnVol();
         };
         
         // Bind events
         codeSelect.addEventListener("change", updateDisplay);
         typeSelect.addEventListener("change", updateDisplay);
         periodSelect.addEventListener("change", updateDisplay);
+        rollWinSelect.addEventListener("change", updateDisplay);
         
         // Initial render
         updateDisplay();

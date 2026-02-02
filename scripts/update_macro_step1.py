@@ -22,6 +22,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Update macro series for Step 1 (global gold / US yields / DXY).")
     ap.add_argument("--start", default="1985101", help="YYYYMMDD (default 1985101)")
     ap.add_argument("--end", default=_today_yyyymmdd(), help="YYYYMMDD (default today)")
+    ap.add_argument(
+        "--series",
+        action="append",
+        default=[],
+        help="Optional series_id(s) to update. Can be repeated or comma-separated, e.g. --series DGS10 --series DINIW,GC_FUT",
+    )
     args = ap.parse_args(argv)
 
     settings = get_settings()
@@ -29,9 +35,21 @@ def main(argv: list[str] | None = None) -> int:
     init_db(engine)
     sf = make_session_factory(engine)
 
+    # series filter (default: all)
+    raw = ",".join([str(x) for x in (args.series or [])])
+    chosen = [s.strip().upper() for s in raw.split(",") if s.strip()] if raw.strip() else []
+    if chosen:
+        by_id = {s.series_id.strip().upper(): s for s in DEFAULT_STEP1_SERIES}
+        missing = [sid for sid in chosen if sid not in by_id]
+        if missing:
+            raise SystemExit(f"Unknown --series: {missing}. Known: {sorted(by_id)}")
+        series_specs = [by_id[sid] for sid in chosen]
+    else:
+        series_specs = list(DEFAULT_STEP1_SERIES)
+
     ok = True
     with sf() as db:
-        for spec in DEFAULT_STEP1_SERIES:
+        for spec in series_specs:
             res = ingest_macro_series(db, spec=spec, start=str(args.start), end=str(args.end))
             print(res)
             ok = ok and bool(res.get("ok"))
