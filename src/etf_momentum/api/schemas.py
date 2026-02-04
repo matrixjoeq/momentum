@@ -191,7 +191,7 @@ class LeadLagAnalysisRequest(BaseModel):
 
     vol_level_window: str = Field(
         default="all",
-        description="Quantile window for level-based vol timing: all|1y|3y|5y|10y (trailing trading days)",
+        description="Quantile window for level-based vol timing: all(expanding,no-lookahead)|static_all(full-sample,lookahead)|1y|3y|5y|10y",
     )
 
     # Volatility-timing strategy (level-based, tiered exposure), e.g. GVZ high -> reduce exposure
@@ -480,7 +480,10 @@ class VolProxyTimingRequest(BaseModel):
     # Tiering config (same semantics as leadlag vol_timing)
     level_quantiles: list[float] = Field(default_factory=lambda: [0.8, 0.9], description="Quantiles on level (train)")
     level_exposures: list[float] = Field(default_factory=lambda: [1.0, 0.5, 0.2], description="Tier exposures, len=quantiles+1")
-    level_window: str = Field(default="all", description="Quantile window for levels: all|1y|3y|5y|10y")
+    level_window: str = Field(
+        default="all",
+        description="Quantile window for levels: all(expanding,no-lookahead)|static_all(full-sample,lookahead)|1y|3y|5y|10y",
+    )
     trade_cost_bps: float = Field(default=0.0, ge=0.0, description="Per-switch cost in bps")
 
     walk_forward: bool = Field(default=True, description="If true, split train/test and apply train thresholds to test")
@@ -529,6 +532,31 @@ class AssetRiskControlRule(BaseModel):
     recovery_mode: str = Field(default="immediate", description="immediate|hysteresis|cooldown")
     p_out: float | None = Field(default=None, gt=0.0, lt=100.0, description="Recovery percentile for hysteresis mode")
     cooldown_days: int = Field(default=0, ge=0, le=2520, description="Minimum days to keep reduced exposure (cooldown mode)")
+
+
+class AssetVolIndexTimingRule(BaseModel):
+    """
+    Per-asset volatility-index timing rule applied daily to weights:
+    - signal is the volatility index LEVEL (e.g. VIX/GVZ), expected aligned to CN next trading day
+    - thresholds are computed from rolling/expanding quantiles and shifted by 1 day (no lookahead)
+    - when triggered (higher-vol bucket), scale that asset's weight by the tier exposure (cash remainder)
+    """
+
+    code: str = Field(min_length=1, description="ETF code")
+    index: str = Field(description="Vol index code: VIX|GVZ (Cboe)")
+    level_window: str = Field(
+        default="all",
+        description="Quantile lookback window: 30d|90d|180d|1y|3y|5y|10y|all (all=expanding; non-static to avoid lookahead).",
+    )
+    level_quantiles: list[float] = Field(
+        default_factory=lambda: [0.8],
+        description="Ascending quantiles in (0,1). Example [0.8] means 'top 20%' bucket.",
+    )
+    level_exposures: list[float] = Field(
+        default_factory=lambda: [1.0, 0.5],
+        description="Tier exposures in [0,1], length must be len(level_quantiles)+1. Example [1.0,0.5].",
+    )
+    min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations before thresholds become active.")
 
 
 class RotationBacktestRequest(BaseModel):
@@ -644,6 +672,10 @@ class RotationBacktestRequest(BaseModel):
         default=None,
         description="Optional per-asset risk-control rules (signal on hfq close-based NAV; scales down weights when triggered).",
     )
+    asset_vol_index_rules: list[AssetVolIndexTimingRule] | None = Field(
+        default=None,
+        description="Optional per-asset vol-index timing rules (e.g. 518880->GVZ, 513100->VIX). Thresholds use rolling/expanding quantiles with shift(1) to avoid lookahead; scales weights daily (cash remainder).",
+    )
 
 
 class RotationCalendarEffectRequest(RotationBacktestRequest):
@@ -676,6 +708,10 @@ class RotationWeekly5OpenSimRequest(BaseModel):
     asset_rc_rules: list[AssetRiskControlRule] | None = Field(
         default=None,
         description="Optional per-asset risk-control rules to apply (same as rotation backtest).",
+    )
+    asset_vol_index_rules: list[AssetVolIndexTimingRule] | None = Field(
+        default=None,
+        description="Optional per-asset vol-index timing rules to apply (same as rotation backtest).",
     )
 
 

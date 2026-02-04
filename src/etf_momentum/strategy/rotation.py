@@ -107,6 +107,11 @@ class RotationInputs:
     exec_price: str = "close"  # close | open | oc2
     # --- Per-asset risk control (hfq close-based signals; daily weight scaling) ---
     asset_rc_rules: list[dict[str, Any]] | None = None
+    # --- Per-asset volatility-index timing (daily weight scaling; cash remainder) ---
+    # Rules define which vol index (e.g. VIX/GVZ) to use per ETF.
+    # Vol index levels are expected to be preloaded by caller (API layer) to avoid network dependency here.
+    asset_vol_index_rules: list[dict[str, Any]] | None = None
+    vol_index_close: dict[str, pd.Series] | None = None
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str, *, weekly_anchor: str = "FRI") -> pd.PeriodIndex:
@@ -312,7 +317,7 @@ def _apply_asset_rc_rules(
     def _pct(v: Any) -> float:
         try:
             x = float(v)
-        except Exception:
+        except (TypeError, ValueError):
             return float("nan")
         return x
 
@@ -417,6 +422,186 @@ def _apply_asset_rc_rules(
                 "recovery_mode": rec,
                 "p_out": (None if not np.isfinite(p_out) else float(p_out)),
                 "cooldown_days": int(cd),
+            }
+        )
+
+    return {"enabled": bool(out_rules), "rules": out_rules}
+
+
+def _vol_level_window_days(window: str) -> int | None:
+    """
+    Map window key to trading days. Supported:
+    - rolling: 30d/90d/180d/1y/3y/5y/10y
+    - expanding: all
+    """
+    w = str(window or "all").strip().lower()
+    if w in {"all", "expanding"}:
+        return None
+    if w.endswith("d"):
+        try:
+            return int(max(2, int(w[:-1])))
+        except (TypeError, ValueError):
+            return None
+    if w.endswith("y"):
+        try:
+            y = float(w[:-1])
+        except (TypeError, ValueError):
+            return None
+        return int(max(2, round(TRADING_DAYS_PER_YEAR * y)))
+    return None
+
+
+def _tiered_exposure_from_level_quantiles(
+    levels: pd.Series,
+    *,
+    level_window: str,
+    quantiles: list[float],
+    exposures: list[float],
+    min_periods: int = 20,
+) -> tuple[pd.Series, dict[str, Any]]:
+    """
+    Compute daily tiered exposure series from a "level" series using quantile thresholds.
+
+    No-lookahead guarantee:
+    - rolling/expanding quantile thresholds are computed from history and shifted by 1 day.
+
+    Exposure on day t uses:
+    - level_t (assumed observable by decision time; e.g. aligned US vol index close mapped to CN t)
+    - thresholds_{t-1} (computed without using level_t)
+    """
+    lvl = pd.to_numeric(levels, errors="coerce").astype(float)
+    qs = [float(q) for q in (quantiles or [])]
+    exps = [float(x) for x in (exposures or [])]
+    if len(exps) != len(qs) + 1:
+        raise ValueError("bad_tier_exposures_len (expected len(exposures)=len(quantiles)+1)")
+    if any((q <= 0.0 or q >= 1.0) for q in qs):
+        raise ValueError("quantiles_out_of_range (expected 0<q<1)")
+    if any((x < 0.0 or x > 1.0) for x in exps):
+        raise ValueError("exposures_out_of_range (expected 0<=x<=1)")
+
+    win_days = _vol_level_window_days(level_window)
+    mp = int(max(2, int(min_periods)))
+
+    if win_days is None:
+        thr_df = pd.DataFrame(
+            {f"q{int(q*10000)}": lvl.expanding(min_periods=mp).quantile(q) for q in qs},
+            index=lvl.index,
+        ).shift(1)
+        win_mode = "expanding"
+    else:
+        thr_df = pd.DataFrame(
+            {f"q{int(q*10000)}": lvl.rolling(window=int(win_days), min_periods=mp).quantile(q) for q in qs},
+            index=lvl.index,
+        ).shift(1)
+        win_mode = f"rolling_{int(win_days)}"
+
+    lv = lvl.to_numpy(dtype=float)
+    exp = np.ones(len(lvl), dtype=float)
+    bucket = np.full(len(lvl), -1, dtype=int)
+    thr_vals = thr_df.to_numpy(dtype=float)
+
+    for i in range(len(lvl)):
+        if not np.isfinite(lv[i]):
+            exp[i] = 1.0
+            bucket[i] = -1
+            continue
+        row = thr_vals[i, :]
+        row = row[np.isfinite(row)]
+        if row.size == 0:
+            # warm-up: keep full exposure until thresholds available
+            exp[i] = 1.0
+            bucket[i] = 0
+            continue
+        row_sorted = np.sort(row)
+        j = int(np.searchsorted(row_sorted, lv[i], side="left"))
+        j = int(max(0, min(len(exps) - 1, j)))
+        exp[i] = float(exps[j])
+        bucket[i] = j
+
+    okb = bucket >= 0
+    counts = [int(np.sum(bucket[okb] == j)) for j in range(len(exps))]
+    total = int(np.sum(okb))
+    bucket_rates = [float(c) / float(total) if total > 0 else float("nan") for c in counts]
+
+    meta = {
+        "window": str(level_window or "all"),
+        "window_mode": win_mode,
+        "quantiles": qs,
+        "exposures": exps,
+        "min_periods": int(mp),
+        "bucket_rates": bucket_rates,
+        "avg_exposure": float(np.nanmean(exp)) if exp.size else float("nan"),
+    }
+    return pd.Series(exp, index=lvl.index, dtype=float), meta
+
+
+def _apply_asset_vol_index_rules(
+    w: pd.DataFrame,
+    *,
+    rules: list[dict[str, Any]] | None,
+    vol_index_close: dict[str, pd.Series] | None,
+) -> dict[str, Any]:
+    """
+    Apply per-asset volatility-index timing by scaling weights daily (cash remainder).
+
+    Expected rule fields:
+      - code: ETF code
+      - index: vol index code, e.g. VIX / GVZ
+      - level_window: 30d/90d/180d/1y/3y/5y/10y/all (all means expanding)
+      - level_quantiles: list[float] (0..1)
+      - level_exposures: list[float] (len = len(quantiles)+1)
+      - min_periods: int (optional)
+
+    Caller should preload vol_index_close[index] as a pandas Series indexed by date (dt.date or Timestamp),
+    already aligned to the decision calendar (typically CN next trading day).
+    """
+    if rules is None or len(rules) == 0 or w.empty:
+        return {"enabled": False, "rules": []}
+    if vol_index_close is None or len(vol_index_close) == 0:
+        raise ValueError("asset_vol_index_rules set but vol_index_close missing")
+
+    idx = w.index
+    out_rules: list[dict[str, Any]] = []
+
+    for r in rules:
+        code = str(r.get("code") or "").strip()
+        if not code or code not in w.columns:
+            continue
+        index_code = str(r.get("index") or "").strip().upper()
+        if not index_code:
+            continue
+        level_window = str(r.get("level_window") or "all").strip().lower()
+        quantiles = r.get("level_quantiles") or [0.8]
+        exposures = r.get("level_exposures") or [1.0, 0.5]
+        min_periods = int(r.get("min_periods") or 20)
+
+        s_raw = vol_index_close.get(index_code)
+        if s_raw is None or getattr(s_raw, "empty", True):
+            raise ValueError(f"missing vol index close for {index_code}")
+        s_raw2 = pd.to_numeric(s_raw, errors="coerce").dropna().astype(float)
+        # normalize index to Timestamp for alignment with weight index
+        s_ts = s_raw2.copy()
+        if not isinstance(s_ts.index, pd.DatetimeIndex):
+            s_ts.index = pd.to_datetime(list(s_ts.index))
+        s = s_ts.reindex(idx).ffill()
+
+        expo, emeta = _tiered_exposure_from_level_quantiles(
+            s,
+            level_window=level_window,
+            quantiles=list(quantiles),
+            exposures=list(exposures),
+            min_periods=min_periods,
+        )
+        w[code] = w[code].astype(float).to_numpy(dtype=float) * expo.to_numpy(dtype=float)
+
+        out_rules.append(
+            {
+                "code": code,
+                "index": index_code,
+                **emeta,
+                "dates": idx.date.astype(str).tolist(),
+                "level": s.to_numpy(dtype=float).astype(float).tolist(),
+                "exp": expo.to_numpy(dtype=float).astype(float).tolist(),
             }
         )
 
@@ -1648,6 +1833,12 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
 
     # Apply per-asset risk-control rules (daily exposure scaling) on final weights.
     asset_rc_meta = _apply_asset_rc_rules(w, close_hfq=close_hfq, rules=inp.asset_rc_rules)
+    # Apply per-asset vol-index timing (daily exposure scaling) on final weights.
+    asset_vol_index_meta = _apply_asset_vol_index_rules(
+        w,
+        rules=inp.asset_vol_index_rules,
+        vol_index_close=inp.vol_index_close,
+    )
     # Continuous holding streaks (by actual daily weights, not rebalance schedule).
     holding_streaks = _holding_streaks_from_weights(w, codes=codes, eps=1e-12)
     port_ret = (w * ret_exec).sum(axis=1)
@@ -2049,6 +2240,7 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         },
         "timing": timing_meta,
         "asset_rc": asset_rc_meta,
+        "asset_vol_index_timing": asset_vol_index_meta,
         "nav": {
             "dates": dates.date.astype(str).tolist(),
             "series": {

@@ -77,6 +77,8 @@ class RotationAnalysisInputs:
     timing_rsi_gate: bool = False
     timing_rsi_window: int = 24
     asset_rc_rules: list[dict[str, Any]] | None = None
+    asset_vol_index_rules: list[dict[str, Any]] | None = None
+    vol_index_close: dict[str, Any] | None = None
 
 
 def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
@@ -147,6 +149,8 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             timing_rsi_window=inp.timing_rsi_window,
             exec_price=inp.exec_price,
             asset_rc_rules=inp.asset_rc_rules,
+            asset_vol_index_rules=inp.asset_vol_index_rules,
+            vol_index_close=inp.vol_index_close,
         ),
     )
 

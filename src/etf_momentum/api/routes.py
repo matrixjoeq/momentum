@@ -86,10 +86,13 @@ from ..analysis.calendar_effect import _ew_nav_and_weights_by_decision_dates as 
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.trend import TrendInputs, compute_trend_backtest
-from ..analysis.leadlag import LeadLagInputs, compute_lead_lag
+from ..analysis.leadlag import LeadLagInputs, compute_lead_lag, align_us_close_to_cn_next_trading_day
 from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
 from ..analysis.vol_proxy import VolProxySpec, compute_vol_proxy_levels
-from ..analysis.vol_timing import backtest_tiered_exposure_by_level, backtest_tiered_exposure_by_level_rolling_quantiles
+from ..analysis.vol_timing import (
+    backtest_tiered_exposure_by_level,
+    backtest_tiered_exposure_by_level_rolling_quantiles,
+)
 from ..calendar.trading_calendar import shift_to_trading_day
 from ..data.cboe_fetcher import FetchRequest as CboeFetchRequest
 from ..data.cboe_fetcher import fetch_cboe_daily_close
@@ -526,11 +529,43 @@ def baseline_calendar_effect(payload: BaselineCalendarEffectRequest, db: Session
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _load_vol_index_close_for_rotation_rules(
+    rules: list[dict] | None, *, end_yyyymmdd: str
+) -> dict[str, pd.Series] | None:
+    """
+    Preload Cboe vol index close series needed by rotation vol-index timing rules.
+
+    Returns dict[index_code -> aligned_series], where aligned_series maps US close date to CN next trading day.
+    """
+    if rules is None or len(rules) == 0:
+        return None
+    need = sorted({str(r.get("index") or "").strip().upper() for r in rules if str(r.get("index") or "").strip()})
+    if not need:
+        return None
+
+    out: dict[str, pd.Series] = {}
+    for idx_code in need:
+        if idx_code not in {"VIX", "GVZ"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unsupported vol index for rotation timing: {idx_code} (expected VIX/GVZ)",
+            )
+        start_fetch = "19900101" if idx_code == "VIX" else "20080101"
+        dfc = fetch_cboe_daily_close(CboeFetchRequest(index=idx_code, start_date=start_fetch, end_date=end_yyyymmdd))
+        if dfc is None or dfc.empty:
+            raise HTTPException(status_code=400, detail=f"empty Cboe series for {idx_code}")
+        s_us = pd.Series(data=dfc["close"].to_numpy(dtype=float), index=dfc["date"].to_list(), dtype=float).dropna()
+        out[idx_code] = align_us_close_to_cn_next_trading_day(s_us, cal="XSHG")
+    return out
+
+
 @router.post("/analysis/rotation")
 def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(get_session)) -> dict:
     # Pylint may resolve imported dataclasses from an installed package instead of workspace source,
     # which can lag during local dev. Keep behavior correct; suppress false-positive for new fields.
     # pylint: disable=unexpected-keyword-arg
+    asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
+    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
     inp = RotationAnalysisInputs(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
@@ -590,6 +625,8 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         chop_adx_window=payload.chop_adx_window,
         chop_adx_threshold=payload.chop_adx_threshold,
         asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
+        asset_vol_index_rules=asset_vol_rules,
+        vol_index_close=vol_index_close,
     )
     try:
         return compute_rotation_backtest(db, inp)
@@ -913,7 +950,8 @@ def analysis_vol_proxy_timing(payload: VolProxyTimingRequest, db: Session = Depe
             continue
 
         levels = pd.to_numeric(df2["idx_close"], errors="coerce")
-        if wdays is None:
+        if level_window == "static_all":
+            # Research mode: full-sample fixed thresholds (has lookahead bias).
             thr_abs = [float(np.quantile(lv, q)) for q in qs]
             out = backtest_tiered_exposure_by_level(
                 df2,
@@ -924,8 +962,21 @@ def analysis_vol_proxy_timing(payload: VolProxyTimingRequest, db: Session = Depe
                 ann=int(m.ann),
             )
             out["quantiles"] = qs
-            out["level_window"] = "all"
+            out["level_window"] = "static_all"
             out["thresholds_abs_train"] = thr_abs
+        elif wdays is None:
+            # Recommended "all": expanding quantiles + shift(1) (no lookahead).
+            out = backtest_tiered_exposure_by_level_expanding_quantiles(
+                df2,
+                levels,
+                quantiles=qs,
+                exposures=exposures,
+                cost_bps=float(payload.trade_cost_bps or 0.0),
+                ann=int(m.ann),
+            )
+            out["level_window"] = "all"
+            if out.get("thresholds_abs_last") is not None:
+                out["thresholds_abs_train"] = out.get("thresholds_abs_last")
         else:
             out = backtest_tiered_exposure_by_level_rolling_quantiles(
                 df2,
@@ -937,13 +988,12 @@ def analysis_vol_proxy_timing(payload: VolProxyTimingRequest, db: Session = Depe
                 ann=int(m.ann),
             )
             out["level_window"] = level_window
-            # keep a compatible display field
             if out.get("thresholds_abs_last") is not None:
                 out["thresholds_abs_train"] = out.get("thresholds_abs_last")
 
         # Walk-forward: thresholds learned on train only, applied to train/test.
         vol_walk: dict | None = None
-        if bool(payload.walk_forward) and len(df2) >= 80 and wdays is None:
+        if bool(payload.walk_forward) and len(df2) >= 80 and level_window == "static_all":
             tr = float(min(max(payload.train_ratio, 0.2), 0.85))
             cut = int(max(20, min(len(df2) - 20, int(len(df2) * tr))))
             train_df = df2.iloc[:cut].copy()
@@ -975,8 +1025,8 @@ def analysis_vol_proxy_timing(payload: VolProxyTimingRequest, db: Session = Depe
                 }
             else:
                 vol_walk = {"ok": False, "reason": "insufficient_train_level_samples", "n": int(lv_tr.size)}
-        elif bool(payload.walk_forward) and wdays is not None:
-            vol_walk = {"ok": False, "reason": "rolling_window_mode"}
+        elif bool(payload.walk_forward) and level_window != "static_all":
+            vol_walk = {"ok": False, "reason": f"{level_window}_window_mode"}
         out["walk_forward"] = vol_walk
 
         # Include the level series itself (aligned to df2 dates) for plotting/debugging.
@@ -1425,6 +1475,8 @@ def analysis_index_distribution(payload: IndexDistributionRequest) -> IndexDistr
 def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session = Depends(get_session)) -> dict:
     # Reuse all rotation params as the "base" strategy config for the grid; then vary weekday + exec_price.
     # pylint: disable=unexpected-keyword-arg
+    asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
+    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
     base = RotationAnalysisInputs(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
@@ -1479,6 +1531,8 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         chop_adx_threshold=payload.chop_adx_threshold,
         rebalance_anchor=None,
         asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
+        asset_vol_index_rules=asset_vol_rules,
+        vol_index_close=vol_index_close,
     )
     try:
         anchors = payload.anchors
@@ -1502,6 +1556,8 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
     codes = ["159915", "511010", "513100", "518880"]
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
+    asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
+    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
     base = RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1532,6 +1588,8 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
         # execution on open
         exec_price="open",
         asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
+        asset_vol_index_rules=asset_vol_rules,
+        vol_index_close=vol_index_close,
     )
     # Mini-program semantics: `anchor_weekday` refers to the *execution day* weekday (Mon..Fri),
     # while the strategy engine's weekly rebalance anchor is the *decision day* weekday.
@@ -1608,6 +1666,8 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
     codes = ["159915", "511010", "513100", "518880"]
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
+    asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
+    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
     base = RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1638,6 +1698,8 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
         # execution on open
         exec_price="open",
         asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
+        asset_vol_index_rules=asset_vol_rules,
+        vol_index_close=vol_index_close,
     )
 
     one_exec = payload.anchor_weekday
@@ -1682,6 +1744,8 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
     codes = ["159915", "511010", "513100", "518880"]
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
+    asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
+    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
     base = RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1711,6 +1775,8 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
         timing_rsi_gate=False,
         exec_price="open",
         asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
+        asset_vol_index_rules=asset_vol_rules,
+        vol_index_close=vol_index_close,
     )
 
     def _nav_arr(x: dict, key: str) -> np.ndarray:
@@ -1761,6 +1827,8 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
     codes = ["159915", "511010", "513100", "518880"]
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
+    asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
+    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
     base = RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1790,6 +1858,8 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
         timing_rsi_gate=False,
         exec_price="open",
         asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
+        asset_vol_index_rules=asset_vol_rules,
+        vol_index_close=vol_index_close,
     )
 
     def _nav_arr(x: dict, key: str) -> np.ndarray:

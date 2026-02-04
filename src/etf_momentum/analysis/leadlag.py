@@ -10,7 +10,11 @@ import pandas as pd
 from scipy import stats
 
 from ..calendar.trading_calendar import shift_to_trading_day
-from .vol_timing import backtest_tiered_exposure_by_level, backtest_tiered_exposure_by_level_rolling_quantiles
+from .vol_timing import (
+    backtest_tiered_exposure_by_level,
+    backtest_tiered_exposure_by_level_expanding_quantiles,
+    backtest_tiered_exposure_by_level_rolling_quantiles,
+)
 
 
 @dataclass(frozen=True)
@@ -34,7 +38,7 @@ class LeadLagInputs:
     vol_timing: bool = False
     vol_level_quantiles: list[float] = field(default_factory=lambda: [0.8])
     vol_level_exposures: list[float] = field(default_factory=lambda: [1.0, 0.5])
-    vol_level_window: str = "all"  # all|1y|3y|5y|10y
+    vol_level_window: str = "all"  # all|static_all|1y|3y|5y|10y
 
 
 def align_us_close_to_cn_next_trading_day(
@@ -359,6 +363,8 @@ def _trade_diagnostics(
     if bool(vol_timing):
         def _vol_window_days(key: str) -> int | None:
             k = str(key or "all").strip().lower()
+            if k == "static_all":
+                return None
             if k in {"", "all"}:
                 return None
             if k == "1y":
@@ -381,8 +387,11 @@ def _trade_diagnostics(
             vol_out = {"ok": False, "error": "insufficient_level_samples", "n": int(lv.size)}
         else:
             levels = pd.to_numeric(df2["idx_close"], errors="coerce")
-            wdays = _vol_window_days(vol_level_window)
-            if wdays is None:
+            win_key = str(vol_level_window or "all").strip().lower()
+            wdays = _vol_window_days(win_key)
+
+            if win_key == "static_all":
+                # Research mode: full-sample fixed thresholds (has lookahead bias).
                 thr_abs = [float(np.quantile(lv, q)) for q in qs]
                 vol_out = backtest_tiered_exposure_by_level(
                     df2,
@@ -393,9 +402,23 @@ def _trade_diagnostics(
                     ann=252,
                 )
                 vol_out["quantiles"] = qs
-                vol_out["vol_level_window"] = "all"
+                vol_out["vol_level_window"] = "static_all"
                 vol_out["thresholds_abs_train"] = thr_abs
+            elif wdays is None:
+                # Recommended "all": expanding quantiles + shift(1) (no lookahead).
+                vol_out = backtest_tiered_exposure_by_level_expanding_quantiles(
+                    df2,
+                    levels,
+                    quantiles=qs,
+                    exposures=vol_level_exposures,
+                    cost_bps=float(cost_bps),
+                    ann=252,
+                )
+                vol_out["vol_level_window"] = "all"
+                if vol_out.get("thresholds_abs_last") is not None:
+                    vol_out["thresholds_abs_train"] = vol_out.get("thresholds_abs_last")
             else:
+                # Rolling quantile window (no lookahead; thresholds are shifted by 1 internally).
                 vol_out = backtest_tiered_exposure_by_level_rolling_quantiles(
                     df2,
                     levels,
@@ -405,13 +428,12 @@ def _trade_diagnostics(
                     cost_bps=float(cost_bps),
                     ann=252,
                 )
-                vol_out["vol_level_window"] = str(vol_level_window or "all")
-                # keep a compatible display field
+                vol_out["vol_level_window"] = win_key
                 if vol_out.get("thresholds_abs_last") is not None:
                     vol_out["thresholds_abs_train"] = vol_out.get("thresholds_abs_last")
 
             vol_walk: dict[str, Any] | None = None
-            if bool(walk_forward) and len(df2) >= 80 and wdays is None:
+            if bool(walk_forward) and len(df2) >= 80 and win_key == "static_all":
                 tr = float(min(max(train_ratio, 0.2), 0.85))
                 cut = int(max(20, min(len(df2) - 20, int(len(df2) * tr))))
                 train_df = df2.iloc[:cut].copy()
@@ -439,8 +461,8 @@ def _trade_diagnostics(
                     }
                 else:
                     vol_walk = {"ok": False, "reason": "insufficient_train_level_samples", "n": int(lv_tr.size)}
-            elif bool(walk_forward) and wdays is not None:
-                vol_walk = {"ok": False, "reason": "rolling_window_mode"}
+            elif bool(walk_forward) and win_key != "static_all":
+                vol_walk = {"ok": False, "reason": f"{win_key}_window_mode"}
             vol_out["walk_forward"] = vol_walk
 
     # rolling stability (on aligned returns, not shifted simple returns)

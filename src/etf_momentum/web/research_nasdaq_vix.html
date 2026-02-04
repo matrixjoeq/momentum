@@ -193,8 +193,9 @@
       </div>
       <div>
         <label>分位数窗口（用于 VXN/现货波动 level）</label>
-        <select id="volWindow" title="all=全样本分位数；1y/3y/5y/10y=滚动窗口分位数（按交易日近似）。">
-          <option value="all" selected>全区间（all）</option>
+        <select id="volWindow" title="all=expanding分位数(无前视)；static_all=全样本固定阈值(有前视,研究口径)；1y/3y/5y/10y=滚动窗口分位数（按交易日近似）。">
+          <option value="all" selected>全区间（all，无前视/expanding）</option>
+          <option value="static_all">全样本固定（static_all，研究口径）</option>
           <option value="1y">近1年（1y）</option>
           <option value="3y">近3年（3y）</option>
           <option value="5y">近5年（5y）</option>
