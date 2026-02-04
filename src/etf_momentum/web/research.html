@@ -444,7 +444,8 @@
       <div class="panel no-print" style="margin-top: 10px;">
         <h3 style="margin: 0 0 6px 0;">小程序同款：固定4ETF 周度轮动（周一~周五 + 综合）</h3>
         <div class="muted">
-          固定参数：周频 / Top1 / 回看20 / skip=0 / 成本=0 / 无风控 / 成交价=open / 休市=prev；标的固定为 159915/511010/513100/518880。
+          固定标的：159915/511010/513100/518880；固定执行：周度（周一~周五）+ 成交价=open + 休市=prev。
+          其余参数（TopK/动量回看/过滤器/止盈止损/择时/回撤控制/VIX-GVZ择时等）使用下方“动量轮动参数”的当前设置。
         </div>
         <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
           <label style="margin:0;">方案：</label>
@@ -2270,43 +2271,129 @@
           // Stage-1: lite wide range to get date axis for range slicing
           const litePath = isMix ? "/analysis/rotation/weekly5-open-combo-lite" : "/analysis/rotation/weekly5-open-lite";
           const fullPath = isMix ? "/analysis/rotation/weekly5-open-combo" : "/analysis/rotation/weekly5-open";
-          const liteReq = isMix
-            ? { start: start0, end: end0, asset_rc_rules: (() => {
-              const rb = window.__riskRuleBook || {};
-              const out = [];
-              for (const [code, r] of Object.entries(rb)) {
-                if (!r) continue;
-                out.push({
-                  code,
-                  sig_type: r.sigType,
-                  k: Number(r.k),
-                  p_in: Number(r.p),
-                  reduce_pct: Number(r.reduce),
-                  recovery_mode: r.recoveryMode || "immediate",
-                  p_out: (r.pOut == null ? null : Number(r.pOut)),
-                  cooldown_days: Number(r.cooldownDays || 0),
-                });
-              }
-              return out.length ? out : null;
-            })() }
-            : { start: start0, end: end0, anchor_weekday: Number(mpRotState.anchor), asset_rc_rules: (() => {
-              const rb = window.__riskRuleBook || {};
-              const out = [];
-              for (const [code, r] of Object.entries(rb)) {
-                if (!r) continue;
-                out.push({
-                  code,
-                  sig_type: r.sigType,
-                  k: Number(r.k),
-                  p_in: Number(r.p),
-                  reduce_pct: Number(r.reduce),
-                  recovery_mode: r.recoveryMode || "immediate",
-                  p_out: (r.pOut == null ? null : Number(r.pOut)),
-                  cooldown_days: Number(r.cooldownDays || 0),
-                });
-              }
-              return out.length ? out : null;
-            })() };
+          const FIXED4 = ["159915", "511010", "513100", "518880"];
+          const _rbToRules = () => {
+            const rb = window.__riskRuleBook || {};
+            const out = [];
+            for (const [code, r] of Object.entries(rb)) {
+              if (!r) continue;
+              out.push({
+                code,
+                sig_type: r.sigType,
+                k: Number(r.k),
+                p_in: Number(r.p),
+                reduce_pct: Number(r.reduce),
+                recovery_mode: r.recoveryMode || "immediate",
+                p_out: (r.pOut == null ? null : Number(r.pOut)),
+                cooldown_days: Number(r.cooldownDays || 0),
+              });
+            }
+            return out.length ? out : null;
+          };
+          const _parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
+          const _buildVolIdxRules = () => {
+            const on = ($("rotVolIdxOn") && $("rotVolIdxOn").value === "true");
+            if (!on) return null;
+            const tbl = $("rotVolIdxRulesTable");
+            if (!tbl) return null;
+            const trs = Array.from(tbl.querySelectorAll("tr")).slice(1);
+            const out = [];
+            for (const tr of trs) {
+              const code = (tr.querySelector(".rotVolIdxCode") && tr.querySelector(".rotVolIdxCode").value) ? String(tr.querySelector(".rotVolIdxCode").value).trim() : "";
+              if (!code) continue;
+              const index = (tr.querySelector(".rotVolIdxIndex") && tr.querySelector(".rotVolIdxIndex").value) ? String(tr.querySelector(".rotVolIdxIndex").value).trim().toUpperCase() : "VIX";
+              const level_window = (tr.querySelector(".rotVolIdxWindow") && tr.querySelector(".rotVolIdxWindow").value) ? String(tr.querySelector(".rotVolIdxWindow").value).trim().toLowerCase() : "all";
+              let qs = _parseCsvNums((tr.querySelector(".rotVolIdxQs") && tr.querySelector(".rotVolIdxQs").value) ? tr.querySelector(".rotVolIdxQs").value : "");
+              let exps = _parseCsvNums((tr.querySelector(".rotVolIdxExps") && tr.querySelector(".rotVolIdxExps").value) ? tr.querySelector(".rotVolIdxExps").value : "");
+              const min_periods = Math.floor(Number((tr.querySelector(".rotVolIdxMinP") && tr.querySelector(".rotVolIdxMinP").value) ? tr.querySelector(".rotVolIdxMinP").value : "20"));
+              // allow percent-like inputs (80 => 0.8; 50 => 0.5)
+              qs = qs.map(x => (x > 1.0 ? x / 100.0 : x)).filter(x => Number.isFinite(x));
+              exps = exps.map(x => (x > 1.0 ? x / 100.0 : x)).filter(x => Number.isFinite(x));
+              if (!qs.length || !exps.length) continue;
+              out.push({ code, index, level_window, level_quantiles: qs, level_exposures: exps, min_periods: Number.isFinite(min_periods) ? min_periods : 20 });
+            }
+            return out.length ? out : null;
+          };
+          const _buildReq = (startYmd, endYmd, anchorWeekdayOrNull) => {
+            const rfRaw = ($("rf").value || "").trim();
+            let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+            if (Number.isFinite(risk_free_rate) && risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+            const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
+            const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
+            let dd_threshold = Number(($("rotDDThr").value || "10").trim());
+            if (Number.isFinite(dd_threshold) && dd_threshold > 1.0) dd_threshold = dd_threshold / 100.0;
+            let dd_reduce = Number(($("rotDDReduce").value || "100").trim());
+            if (Number.isFinite(dd_reduce) && dd_reduce > 1.0) dd_reduce = dd_reduce / 100.0;
+            const rr_sizing = ($("rotRROn").value === "true");
+            let rr_thresholds = null;
+            let rr_weights = null;
+            if (rr_sizing) {
+              rr_thresholds = _parseCsvNums(($("rotRRThr").value || "").trim()).map(x => (x > 1.0 ? x / 100.0 : x));
+              rr_weights = _parseCsvNums(($("rotRRWts").value || "").trim()).map(x => (x > 1.0 ? x / 100.0 : x));
+            }
+            const req = {
+              codes: FIXED4,
+              start: startYmd,
+              end: endYmd,
+              // weekly5-open fixed semantics
+              rebalance: "weekly",
+              rebalance_shift: "prev",
+              // apply current rotation parameters
+              top_k: Number(($("rotTopK").value || "1").trim()),
+              lookback_days: Number(($("rotLookback").value || "20").trim()),
+              skip_days: Number(($("rotSkip").value || "0").trim()),
+              cost_bps: Number(($("rotCost").value || "0").trim()),
+              risk_off: ($("rotRiskOff").value === "true"),
+              momentum_floor: Number(($("rotFloor").value || "0").trim()),
+              score_method: $("rotScoreMethod").value,
+              risk_free_rate: (Number.isFinite(risk_free_rate) ? risk_free_rate : 0.025),
+              // filters & controls
+              trend_filter: ($("rotTrendOn").value === "true"),
+              trend_mode: $("rotTrendMode").value,
+              trend_sma_window: Number(($("rotTrendSma").value || "20").trim()),
+              rsi_filter: ($("rotRsiOn").value === "true"),
+              rsi_window: Number(($("rotRsiWin").value || "20").trim()),
+              rsi_overbought: Number(($("rotRsiOver").value || "70").trim()),
+              rsi_oversold: Number(($("rotRsiUnder").value || "30").trim()),
+              vol_monitor: ($("rotVolOn").value === "true"),
+              vol_window: Number(($("rotVolWin").value || "20").trim()),
+              vol_target_ann: Number(($("rotVolTarget").value || "0.20").trim()),
+              vol_max_ann: Number(($("rotVolMax").value || "0.60").trim()),
+              chop_filter: ($("rotChopOn").value === "true"),
+              chop_mode: ($("rotChopMode").value || "er"),
+              chop_window: Number(($("rotChopWin").value || "20").trim()),
+              chop_er_threshold: Number(($("rotChopThr").value || "0.25").trim()),
+              chop_adx_window: Number(($("rotChopAdxWin").value || "20").trim()),
+              chop_adx_threshold: Number(($("rotChopAdxThr").value || "20").trim()),
+              corr_filter: ($("rotCorrOn").value === "true"),
+              corr_window: (($("rotCorrWindow").value || "").trim() === "" ? null : Number(($("rotCorrWindow").value || "").trim())),
+              corr_threshold: Number(($("rotCorrThr").value || "0.5").trim()),
+              inertia: ($("rotInertiaOn").value === "true"),
+              inertia_min_hold_periods: Number(($("rotInertiaMinHold").value || "0").trim()),
+              inertia_score_gap: Number(($("rotInertiaScoreGap").value || "0").trim()),
+              inertia_min_turnover: Number(($("rotInertiaMinTurnover").value || "0").trim()),
+              rr_sizing,
+              rr_years: Number(($("rotRRYears").value || "3").trim()),
+              rr_thresholds,
+              rr_weights,
+              tp_sl_mode: ($("rotTpSlMode").value || "none"),
+              atr_window,
+              atr_mult: Number(($("rotAtrMult").value || "2.0").trim()),
+              atr_step: Number(($("rotAtrStep").value || "0.5").trim()),
+              atr_min_mult: Number(($("rotAtrMinMult").value || "0.5").trim()),
+              timing_rsi_gate: ($("rotTimingOn").value === "true"),
+              timing_rsi_window: Number(($("rotTimingRsiWin").value || "24").trim()),
+              dd_control: ($("rotDDOn").value === "true"),
+              dd_threshold,
+              dd_reduce,
+              dd_sleep_days: Number(($("rotDDSleep").value || "20").trim()),
+              asset_rc_rules: _rbToRules(),
+              asset_vol_index_rules: _buildVolIdxRules(),
+            };
+            if (anchorWeekdayOrNull != null) req.anchor_weekday = Number(anchorWeekdayOrNull);
+            return req;
+          };
+          const liteReq = _buildReq(start0, end0, isMix ? null : Number(mpRotState.anchor));
           const respLite = await api(litePath, { method: "POST", body: JSON.stringify(liteReq) });
           const textLite = await respLite.text();
           if (!respLite.ok) return setMsg(textLite);
@@ -2321,43 +2408,7 @@
           const e1 = _ymd(picked.endIso);
 
           _mpRotSetStatus(`加载 ${picked.label} (${picked.startIso} ~ ${picked.endIso})...`);
-          const fullReq = isMix
-            ? { start: s1, end: e1, asset_rc_rules: (() => {
-              const rb = window.__riskRuleBook || {};
-              const out = [];
-              for (const [code, r] of Object.entries(rb)) {
-                if (!r) continue;
-                out.push({
-                  code,
-                  sig_type: r.sigType,
-                  k: Number(r.k),
-                  p_in: Number(r.p),
-                  reduce_pct: Number(r.reduce),
-                  recovery_mode: r.recoveryMode || "immediate",
-                  p_out: (r.pOut == null ? null : Number(r.pOut)),
-                  cooldown_days: Number(r.cooldownDays || 0),
-                });
-              }
-              return out.length ? out : null;
-            })() }
-            : { start: s1, end: e1, anchor_weekday: Number(mpRotState.anchor), asset_rc_rules: (() => {
-              const rb = window.__riskRuleBook || {};
-              const out = [];
-              for (const [code, r] of Object.entries(rb)) {
-                if (!r) continue;
-                out.push({
-                  code,
-                  sig_type: r.sigType,
-                  k: Number(r.k),
-                  p_in: Number(r.p),
-                  reduce_pct: Number(r.reduce),
-                  recovery_mode: r.recoveryMode || "immediate",
-                  p_out: (r.pOut == null ? null : Number(r.pOut)),
-                  cooldown_days: Number(r.cooldownDays || 0),
-                });
-              }
-              return out.length ? out : null;
-            })() };
+          const fullReq = _buildReq(s1, e1, isMix ? null : Number(mpRotState.anchor));
           const respFull = await api(fullPath, { method: "POST", body: JSON.stringify(fullReq) });
           const textFull = await respFull.text();
           if (!respFull.ok) return setMsg(textFull);

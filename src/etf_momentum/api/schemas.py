@@ -687,31 +687,27 @@ class RotationCalendarEffectRequest(RotationBacktestRequest):
     exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
-class RotationWeekly5OpenSimRequest(BaseModel):
+class RotationWeekly5OpenSimRequest(RotationBacktestRequest):
     """
-    Simplified weekly simulation used by the mini-program:
-    - weekly rebalance
-    - anchors fixed to Mon..Fri (0..4) in one call
-    - exec_price fixed to open
-    - all risk controls off
-    - cost_bps fixed to 0
+    Mini-program friendly weekly5-open simulation request.
+
+    Notes:
+    - Universe is fixed to 4 ETFs (159915/511010/513100/518880). The API will ignore provided codes.
+    - Execution is on open, and rebalance_shift is effectively forced to 'prev' due to open-exec semantics.
+    - All other rotation parameters (filters / sizing / timing / tp-sl / dd control / VIX-GVZ timing) are supported.
     """
 
-    start: str = Field(description="YYYYMMDD")
-    end: str = Field(description="YYYYMMDD")
+    # Keep backward compatibility: allow omitting codes in clients.
+    codes: list[str] = Field(
+        default_factory=lambda: ["159915", "511010", "513100", "518880"],
+        description="(Ignored by server) Fixed universe. Included for schema compatibility.",
+        min_length=1,
+    )
     anchor_weekday: int | None = Field(
         default=None,
         ge=0,
         le=4,
         description="Optional: if set, compute only one anchor weekday (0=Mon..4=Fri) to reduce payload/runtime.",
-    )
-    asset_rc_rules: list[AssetRiskControlRule] | None = Field(
-        default=None,
-        description="Optional per-asset risk-control rules to apply (same as rotation backtest).",
-    )
-    asset_vol_index_rules: list[AssetVolIndexTimingRule] | None = Field(
-        default=None,
-        description="Optional per-asset vol-index timing rules to apply (same as rotation backtest).",
     )
 
 
