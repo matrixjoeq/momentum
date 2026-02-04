@@ -485,6 +485,7 @@
           <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益率</button>
           <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
           <button class="tabBtn" data-tab="rotTabTiming" role="tab" aria-selected="false">择时</button>
+          <button class="tabBtn" data-tab="rotTabVolIndex" role="tab" aria-selected="false">VIX/GVZ择时</button>
           <button class="tabBtn" data-tab="rotTabDD" role="tab" aria-selected="false">回撤控制</button>
         </div>
 
@@ -785,6 +786,43 @@
           <div class="muted" style="margin-top:8px">
             规则：当“策略净值 RSI” ≤ 50 时切换为等权持有（EW_REBAL），当 RSI &gt; 50 时重新激活轮动策略。<br/>
             重要：RSI 信号使用 <b>不考虑择时休眠</b> 的“假想净值（shadow NAV）”计算，避免“休眠导致RSI变形”的自我反馈问题；择时只改变实际持仓与净值。
+          </div>
+        </div>
+
+        <div id="rotTabVolIndex" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>波动率指数择时开关</label>
+              <select id="rotVolIdxOn" style="min-width:160px;">
+                <option value="false" selected>关闭（默认）</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div class="muted" style="max-width: 760px;">
+              说明：对“当前持仓标的”按其对应的波动率指数（VIX/GVZ）分位数阈值分档缩放仓位（现金为剩余仓位）。<br/>
+              阈值使用滚动/扩展分位数，并在后端 <b>shift(1)</b> 避免前视；指数为美股收盘会自动对齐到 A 股下一交易日。
+            </div>
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotVolIdxAddRule">添加规则</button>
+              <button id="rotVolIdxResetDefault" title="重置为默认：518880->GVZ，513100->VIX">重置默认</button>
+              <span class="muted">每条规则可为不同标的设置不同回看窗口/阈值/仓位档位。</span>
+            </div>
+            <table id="rotVolIdxRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的code</th>
+                <th>指数</th>
+                <th>回看窗口</th>
+                <th>分位数阈值(%)</th>
+                <th>仓位档位(%)</th>
+                <th>min_periods</th>
+                <th>操作</th>
+              </tr>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:8px;">
+            示例：阈值=80，仓位=100,50 表示当指数 level 落在过去窗口的前 80% 时满仓，进入最高 20% 区间时降为 50%。
           </div>
         </div>
 
@@ -5291,6 +5329,53 @@
           }
           return out.length ? out : null;
         })();
+        const asset_vol_index_rules = (() => {
+          const on = ($("rotVolIdxOn") && $("rotVolIdxOn").value === "true");
+          if (!on) return null;
+          const tbl = $("rotVolIdxRulesTable");
+          if (!tbl) return null;
+          const trs = Array.from(tbl.querySelectorAll("tr")).slice(1);
+          const out = [];
+          const parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
+          for (const tr of trs) {
+            const code = (tr.querySelector(".rotVolIdxCode") && tr.querySelector(".rotVolIdxCode").value) ? String(tr.querySelector(".rotVolIdxCode").value).trim() : "";
+            if (!code) continue;
+            const index = (tr.querySelector(".rotVolIdxIndex") && tr.querySelector(".rotVolIdxIndex").value) ? String(tr.querySelector(".rotVolIdxIndex").value).trim().toUpperCase() : "VIX";
+            const level_window = (tr.querySelector(".rotVolIdxWindow") && tr.querySelector(".rotVolIdxWindow").value) ? String(tr.querySelector(".rotVolIdxWindow").value).trim().toLowerCase() : "all";
+            const qsRaw = (tr.querySelector(".rotVolIdxQs") && tr.querySelector(".rotVolIdxQs").value) ? String(tr.querySelector(".rotVolIdxQs").value).trim() : "";
+            const expsRaw = (tr.querySelector(".rotVolIdxExps") && tr.querySelector(".rotVolIdxExps").value) ? String(tr.querySelector(".rotVolIdxExps").value).trim() : "";
+            const minpRaw = (tr.querySelector(".rotVolIdxMinP") && tr.querySelector(".rotVolIdxMinP").value) ? String(tr.querySelector(".rotVolIdxMinP").value).trim() : "20";
+
+            if (!qsRaw) return { __error: `波动率指数择时：${code} 阈值不能为空（例如 80 或 80,90）` };
+            if (!expsRaw) return { __error: `波动率指数择时：${code} 仓位不能为空（例如 100,50）` };
+            let qs = parseCsvNums(qsRaw);
+            let exps = parseCsvNums(expsRaw);
+            if (qs.length === 0) return { __error: `波动率指数择时：${code} 阈值解析失败` };
+            if (exps.length === 0) return { __error: `波动率指数择时：${code} 仓位解析失败` };
+            if (qs.some(x => !Number.isFinite(x))) return { __error: `波动率指数择时：${code} 阈值必须是数字` };
+            if (exps.some(x => !Number.isFinite(x))) return { __error: `波动率指数择时：${code} 仓位必须是数字` };
+            // allow percent-like inputs
+            qs = qs.map(x => (x > 1.0 ? x / 100.0 : x));
+            exps = exps.map(x => (x > 1.0 ? x / 100.0 : x));
+            for (const q of qs) if (!(q > 0 && q < 1)) return { __error: `波动率指数择时：${code} 分位数需在 (0,1) 或 0~100%（如 0.8 或 80）` };
+            for (let i = 0; i + 1 < qs.length; i++) if (!(qs[i] < qs[i + 1])) return { __error: `波动率指数择时：${code} 分位数必须严格递增` };
+            if (exps.length !== qs.length + 1) return { __error: `波动率指数择时：${code} 仓位档位数量必须 = 阈值数量 + 1` };
+            for (const x of exps) if (x < 0 || x > 1) return { __error: `波动率指数择时：${code} 仓位需在 0~100%（或 0~1）` };
+            const min_periods = Number(minpRaw);
+            if (!Number.isFinite(min_periods) || min_periods < 2) return { __error: `波动率指数择时：${code} min_periods 必须>=2` };
+            out.push({
+              code,
+              index,
+              level_window,
+              level_quantiles: qs,
+              level_exposures: exps,
+              min_periods: Math.floor(min_periods),
+            });
+          }
+          if (out.length === 0) return { __error: "波动率指数择时已开启，但未配置任何规则（至少填写一条 code）" };
+          return out;
+        })();
+        if (asset_vol_index_rules && asset_vol_index_rules.__error) return setMsg(asset_vol_index_rules.__error);
         const resp = await api("/analysis/rotation", {
           method: "POST",
           body: JSON.stringify({
@@ -5309,6 +5394,7 @@
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
             asset_rc_rules,
+            asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
           }),
         });
         const text = await resp.text();
@@ -5632,6 +5718,80 @@
       $("rotChopMode").addEventListener("change", updateChopModeUI);
       updateChopModeUI();
 
+      // ---------------- Rotation: vol-index timing UI (VIX/GVZ) ----------------
+      function _rotVolIdxWindowOptionsHtml(selectedValue) {
+        const opts = [
+          ["30d", "近30天"],
+          ["90d", "近90天"],
+          ["180d", "近180天"],
+          ["1y", "近1年"],
+          ["3y", "近3年"],
+          ["5y", "近5年"],
+          ["10y", "近10年"],
+          ["all", "全区间扩展（expanding，无前视）"],
+        ];
+        return opts.map(([v, label]) => `<option value="${v}" ${String(selectedValue||"all")===v ? "selected" : ""}>${label}</option>`).join("");
+      }
+
+      function _rotVolIdxAddRuleRow(rule) {
+        const tbl = $("rotVolIdxRulesTable");
+        if (!tbl) return;
+        const r = rule || {};
+        const code = (r.code || "").toString();
+        const index = (r.index || "VIX").toString().toUpperCase();
+        const win = (r.level_window || "all").toString().toLowerCase();
+        const qs = (r.level_quantiles || "80").toString();
+        const exps = (r.level_exposures || "100,50").toString();
+        const minp = (r.min_periods == null ? 20 : r.min_periods).toString();
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="rotVolIdxCode" value="${code}" placeholder="如 518880" style="min-width:120px;" /></td>
+          <td>
+            <select class="rotVolIdxIndex" style="min-width:100px;">
+              <option value="VIX" ${index==="VIX" ? "selected" : ""}>VIX</option>
+              <option value="GVZ" ${index==="GVZ" ? "selected" : ""}>GVZ</option>
+            </select>
+          </td>
+          <td>
+            <select class="rotVolIdxWindow" style="min-width:220px;">
+              ${_rotVolIdxWindowOptionsHtml(win)}
+            </select>
+          </td>
+          <td><input class="rotVolIdxQs" value="${qs}" placeholder="如 80 或 80,90" style="min-width:160px;" /></td>
+          <td><input class="rotVolIdxExps" value="${exps}" placeholder="如 100,50 或 100,50,20" style="min-width:200px;" /></td>
+          <td><input class="rotVolIdxMinP" value="${minp}" placeholder="20" style="min-width:90px;" /></td>
+          <td><button class="rotVolIdxRemove">删除</button></td>
+        `;
+        tbl.appendChild(tr);
+        const btn = tr.querySelector(".rotVolIdxRemove");
+        if (btn) btn.addEventListener("click", () => tr.remove());
+      }
+
+      function _rotVolIdxClearRuleRows() {
+        const tbl = $("rotVolIdxRulesTable");
+        if (!tbl) return;
+        const trs = Array.from(tbl.querySelectorAll("tr"));
+        for (let i = 1; i < trs.length; i++) trs[i].remove();
+      }
+
+      function _rotVolIdxResetDefaultRules() {
+        _rotVolIdxClearRuleRows();
+        _rotVolIdxAddRuleRow({ code: "518880", index: "GVZ", level_window: "3y", level_quantiles: "80", level_exposures: "100,50", min_periods: 20 });
+        _rotVolIdxAddRuleRow({ code: "513100", index: "VIX", level_window: "3y", level_quantiles: "80", level_exposures: "100,50", min_periods: 20 });
+      }
+
+      function _rotVolIdxUpdateUiEnabled() {
+        const on = $("rotVolIdxOn") && $("rotVolIdxOn").value === "true";
+        const root = $("rotTabVolIndex");
+        if (!root) return;
+        Array.from(root.querySelectorAll("input, select, button")).forEach((el) => {
+          // keep the toggle itself enabled
+          if (el && el.id === "rotVolIdxOn") return;
+          el.disabled = !on;
+        });
+      }
+
       function updateTrendUi() {
         const mode = ($("trendStrategy") && $("trendStrategy").value) ? $("trendStrategy").value : "ma_filter";
         setBoxVisible("trendSmaBox", mode === "ma_filter" || mode === "ema_filter" || mode === "linreg_slope");
@@ -5645,6 +5805,11 @@
 
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+      if ($("rotVolIdxOn")) $("rotVolIdxOn").addEventListener("change", _rotVolIdxUpdateUiEnabled);
+      if ($("rotVolIdxAddRule")) $("rotVolIdxAddRule").addEventListener("click", () => _rotVolIdxAddRuleRow({}));
+      if ($("rotVolIdxResetDefault")) $("rotVolIdxResetDefault").addEventListener("click", _rotVolIdxResetDefaultRules);
+      // init defaults (rules table exists even when disabled)
+      try { _rotVolIdxResetDefaultRules(); _rotVolIdxUpdateUiEnabled(); } catch (e) { /* best effort */ }
       if ($("rcSearchOne")) $("rcSearchOne").addEventListener("click", rcSearchCurrentAsset);
       if ($("rcSearchAll")) $("rcSearchAll").addEventListener("click", rcSearchAllAssets);
       if ($("rcApplyComposite")) $("rcApplyComposite").addEventListener("click", rcApplyComposite);
