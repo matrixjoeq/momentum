@@ -45,8 +45,8 @@ DEFAULT_STEP1_SERIES: list[MacroSeriesSpec] = [
     # DXY / USDX: use Sina's DINIW which matches common quote conventions (e.g. ~96 not ~62).
     MacroSeriesSpec(series_id="DINIW", provider="sina", provider_symbol="DINIW", name="US Dollar Index (DXY)", category="fx", unit="index"),
     MacroSeriesSpec(series_id="XAUUSD", provider="stooq", provider_symbol="XAUUSD", name="Gold Spot (XAUUSD)", category="gold_spot", unit="USD/oz"),
-    # Gold futures: Stooq is typically more stable than Yahoo in restricted networks.
-    MacroSeriesSpec(series_id="GC_FUT", provider="stooq", provider_symbol="GC.F", name="Gold Futures (GC.F)", category="gold_fut", unit="USD/oz"),
+    # Gold futures: use Yahoo symbol "GC=F".
+    MacroSeriesSpec(series_id="GC_FUT", provider="yahoo", provider_symbol="GC=F", name="Gold Futures (GC=F)", category="gold_fut", unit="USD/oz"),
 ]
 
 
