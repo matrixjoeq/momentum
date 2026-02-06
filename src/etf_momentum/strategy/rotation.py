@@ -19,6 +19,7 @@ from ..analysis.baseline import (
     _sharpe,
     _sortino,
     _ulcer_index,
+    load_volume_amount as _load_volume_amount,
 )
 from ..analysis.baseline import load_close_prices as _load_close_prices
 from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
@@ -94,6 +95,10 @@ class RotationInputs:
     rr_years: float = 3.0
     rr_thresholds: list[float] | None = None  # max 5
     rr_weights: list[float] | None = None  # len = len(thresholds)+1
+    # --- "Rearview mirror" composite deviation-based exposure cap (universe-level, expanding percentiles) ---
+    mirror_control: bool = False
+    mirror_quantiles: list[float] | None = None  # in (0,1); default [0.9,0.95,0.99]
+    mirror_exposures: list[float] | None = None  # in [0,1], len = len(quantiles); default [0.8,0.5,0.2]
     # --- Drawdown control (strategy NAV) ---
     dd_control: bool = False
     dd_threshold: float = 0.10  # decimal, e.g. 0.10 = 10%
@@ -575,7 +580,13 @@ def _apply_asset_vol_index_rules(
         exposures = r.get("level_exposures") or [1.0, 0.5]
         min_periods = int(r.get("min_periods") or 20)
 
-        s_raw = vol_index_close.get(index_code)
+        s_raw = None
+        if index_code == "WAVOL":
+            # Per-asset weekly rolling annualized volatility (computed on the asset's own close series)
+            # is stored as a per-code entry.
+            s_raw = vol_index_close.get(f"WAVOL:{code}")
+        if s_raw is None:
+            s_raw = vol_index_close.get(index_code)
         if s_raw is None or getattr(s_raw, "empty", True):
             raise ValueError(f"missing vol index close for {index_code}")
         s_raw2 = pd.to_numeric(s_raw, errors="coerce").dropna().astype(float)
@@ -584,6 +595,10 @@ def _apply_asset_vol_index_rules(
         if not isinstance(s_ts.index, pd.DatetimeIndex):
             s_ts.index = pd.to_datetime(list(s_ts.index))
         s = s_ts.reindex(idx).ffill()
+        # WAVOL is derived from the asset's own prices; shift by 1 day to avoid
+        # using same-day close-derived volatility for same-day exposure scaling.
+        if index_code == "WAVOL":
+            s = s.shift(1)
 
         expo, emeta = _tiered_exposure_from_level_quantiles(
             s,
@@ -774,6 +789,26 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             raise ValueError("rr_weights must be finite")
         if any((float(x) < 0.0 or float(x) > 1.0) for x in rr_weights):
             raise ValueError("rr_weights must be within [0,1]")
+
+    # Mirror (composite deviation) exposure cap (optional)
+    mirror_enabled = bool(inp.mirror_control)
+    mirror_qs = inp.mirror_quantiles if inp.mirror_quantiles is not None else [0.90, 0.95, 0.99]
+    mirror_exps = inp.mirror_exposures if inp.mirror_exposures is not None else [0.80, 0.50, 0.20]
+    if mirror_enabled:
+        if not mirror_qs:
+            raise ValueError("mirror_quantiles cannot be empty when mirror_control=true")
+        if len(mirror_exps) != len(mirror_qs):
+            raise ValueError("mirror_exposures length must equal mirror_quantiles length")
+        if any((not np.isfinite(float(x))) for x in mirror_qs):
+            raise ValueError("mirror_quantiles must be finite")
+        if any((float(x) <= 0.0 or float(x) >= 1.0) for x in mirror_qs):
+            raise ValueError("mirror_quantiles must be within (0,1)")
+        if any(float(mirror_qs[i]) >= float(mirror_qs[i + 1]) for i in range(len(mirror_qs) - 1)):
+            raise ValueError("mirror_quantiles must be strictly increasing")
+        if any((not np.isfinite(float(x))) for x in mirror_exps):
+            raise ValueError("mirror_exposures must be finite")
+        if any((float(x) < 0.0 or float(x) > 1.0) for x in mirror_exps):
+            raise ValueError("mirror_exposures must be within [0,1]")
     if not (0.0 <= float(inp.rsi_oversold) <= 100.0) or not (0.0 <= float(inp.rsi_overbought) <= 100.0):
         raise ValueError("rsi thresholds must be within [0,100]")
     if float(inp.vol_target_ann) <= 0:
@@ -834,6 +869,75 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     close_none = _load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
+
+    # Mirror control signal (optional, universe-level):
+    # - build 3 deviation series (log return dev, log vol dev, log volume dev) per asset
+    # - cross-sectional aggregate per day (median across universe)
+    # - for each deviation, compute expanding percentile rank
+    # - composite score = mean of the 3 percentiles
+    # - composite percentile = expanding percentile rank of composite score
+    mirror_pct: pd.Series | None = None
+    if mirror_enabled:
+        try:
+            vol_df, amt_df = _load_volume_amount(db, codes=rank_codes, start=ext_start, end=inp.end, adjust="none")
+        except Exception:  # pragma: no cover (defensive)
+            vol_df, amt_df = pd.DataFrame(), pd.DataFrame()
+
+        act = pd.DataFrame(index=close_hfq.index, columns=rank_codes, dtype=float)
+        if vol_df is not None and (not vol_df.empty):
+            act = act.combine_first(vol_df.reindex(index=act.index, columns=rank_codes))
+        if amt_df is not None and (not amt_df.empty):
+            # fill remaining gaps with amount as fallback proxy
+            act = act.combine_first(amt_df.reindex(index=act.index, columns=rank_codes))
+
+        # Per-asset log-return dev (MA20 of log returns)
+        ret = close_hfq[rank_codes].pct_change().replace([np.inf, -np.inf], np.nan)
+        lr = np.log1p(ret).replace([np.inf, -np.inf], np.nan)
+        lr_ma = lr.rolling(window=20, min_periods=5).mean()
+        lr_dev = (lr - lr_ma).replace([np.inf, -np.inf], np.nan)
+
+        # Per-asset log-vol dev (MA20 of log realized vol)
+        std = ret.rolling(window=20, min_periods=10).std(ddof=1) * np.sqrt(252.0)
+        lv = np.log(std.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+        lv_ma = lv.rolling(window=20, min_periods=5).mean()
+        lv_dev = (lv - lv_ma).replace([np.inf, -np.inf], np.nan)
+
+        # Per-asset log-volume dev (MA20 of log activity)
+        la = np.log(act.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+        la_ma = la.rolling(window=20, min_periods=5).mean()
+        la_dev = (la - la_ma).replace([np.inf, -np.inf], np.nan)
+
+        # Aggregate to a single scalar per day (median across universe)
+        s_lr = lr_dev.median(axis=1, skipna=True)
+        s_lv = lv_dev.median(axis=1, skipna=True)
+        s_la = la_dev.median(axis=1, skipna=True)
+
+        def _expanding_pct_rank(s: pd.Series) -> pd.Series:
+            """
+            Expanding percentile rank without lookahead.
+            For ties, use mid-rank: (less + 0.5*equal) / n.
+            """
+            from bisect import bisect_left, bisect_right, insort
+
+            out = np.full(len(s), np.nan, dtype=float)
+            hist: list[float] = []
+            for i, v in enumerate(s.to_numpy(dtype=float, copy=False)):
+                if not np.isfinite(v):
+                    continue
+                # insert then compute rank among history inclusive
+                insort(hist, float(v))
+                n = len(hist)
+                lo = bisect_left(hist, float(v))
+                hi = bisect_right(hist, float(v))
+                out[i] = (float(lo) + 0.5 * float(hi - lo)) / float(n)
+            return pd.Series(out, index=s.index, dtype=float)
+
+        p_lr = _expanding_pct_rank(s_lr)
+        p_lv = _expanding_pct_rank(s_lv)
+        p_la = _expanding_pct_rank(s_la)
+        comp = (p_lr + p_lv + p_la) / 3.0
+        comp = comp.replace([np.inf, -np.inf], np.nan).dropna()
+        mirror_pct = _expanding_pct_rank(comp).reindex(close_hfq.index)
 
     # Execution return basis:
     # - Strategy NAV uses NONE prices (tradeable) by default, with HFQ fallback on corporate-action cliff days.
@@ -1599,6 +1703,66 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 for c in list(weight_map.keys()):
                     weight_map[c] = float(weight_map[c]) * float(rr_exposure)
                 exposure = float(exposure) * float(rr_exposure)
+
+            # Mirror composite-deviation exposure cap (cash remainder).
+            mirror_meta: dict[str, Any] = {
+                "enabled": bool(mirror_enabled),
+                "quantiles": [float(x) for x in mirror_qs],
+                "exposures": [float(x) for x in mirror_exps],
+            }
+            if mirror_enabled and weight_map and mirror_pct is not None:
+                try:
+                    p = float(mirror_pct.loc[d])
+                except Exception:  # pragma: no cover (defensive)
+                    p = float("nan")
+                mirror_meta["asof"] = d.date().isoformat()
+                mirror_meta["percentile"] = (None if (not np.isfinite(p)) else float(p))
+                target = 1.0
+                if np.isfinite(p):
+                    for thr, exp in zip(mirror_qs, mirror_exps):
+                        if float(p) > float(thr):
+                            target = float(exp)
+                mirror_meta["target_exposure"] = float(target)
+                if np.isfinite(p) and float(exposure) > float(target) + 1e-12:
+                    # Scale down all risk assets proportionally; keep defensive (if any) untouched.
+                    risk_keys = [c for c in weight_map.keys() if c in rank_codes]
+                    if risk_keys:
+                        factor = float(target) / float(exposure) if float(exposure) > 0 else 0.0
+                        for c in risk_keys:
+                            weight_map[c] = float(weight_map[c]) * float(factor)
+                        exposure = float(target)
+                        reasons.append(f"mirror_cap<{target:.3f}")
+                details["mirror_control"] = mirror_meta
+            else:
+                details["mirror_control"] = mirror_meta
+
+            # Mirror composite-deviation exposure cap (cash remainder).
+            mirror_meta: dict[str, Any] = {"enabled": bool(mirror_enabled), "quantiles": [float(x) for x in mirror_qs], "exposures": [float(x) for x in mirror_exps]}
+            if mirror_enabled and weight_map and mirror_pct is not None:
+                try:
+                    p = float(mirror_pct.loc[d])
+                except Exception:  # pragma: no cover (defensive)
+                    p = float("nan")
+                mirror_meta["asof"] = d.date().isoformat()
+                mirror_meta["percentile"] = (None if (not np.isfinite(p)) else float(p))
+                target = 1.0
+                if np.isfinite(p):
+                    for thr, exp in zip(mirror_qs, mirror_exps):
+                        if float(p) > float(thr):
+                            target = float(exp)
+                mirror_meta["target_exposure"] = float(target)
+                if np.isfinite(p) and float(exposure) > float(target) + 1e-12:
+                    # scale down all risk assets proportionally; keep defensive (if any) untouched
+                    risk_keys = [c for c in weight_map.keys() if c in rank_codes]
+                    if risk_keys:
+                        factor = float(target) / float(exposure) if float(exposure) > 0 else 0.0
+                        for c in risk_keys:
+                            weight_map[c] = float(weight_map[c]) * float(factor)
+                        exposure = float(target)
+                        reasons.append(f"mirror_cap<{target:.3f}")
+                details["mirror_control"] = mirror_meta
+            else:
+                details["mirror_control"] = {"enabled": bool(mirror_enabled), "quantiles": [float(x) for x in mirror_qs], "exposures": [float(x) for x in mirror_exps]}
 
             # Inertia: turnover threshold gate (applied after sizing determines final target weights).
             if inertia_enabled and float(inertia_min_turnover) > 0.0:

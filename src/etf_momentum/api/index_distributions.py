@@ -66,8 +66,17 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
         return {"ok": False, "error": "insufficient_window", "meta": {"symbol": sym, "window": inp.window}}
 
     close = s.to_numpy(dtype=float)
-    ret = np.diff(np.log(close))
-    ret = ret[np.isfinite(ret)]
+    close_dates = list(s.index)
+    close_current = float(close[-1])
+    close_current_date = max(s.index).isoformat()
+
+    # log returns aligned to the "to" date
+    ret_s = np.log(pd.Series(close, index=pd.to_datetime(close_dates))).diff()
+    ret_s.index = pd.to_datetime(close_dates)
+    ret_s = pd.to_numeric(ret_s, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    ret = ret_s.to_numpy(dtype=float)
+    ret_current = float(ret_s.iloc[-1]) if not ret_s.empty else float("nan")
+    ret_current_date = ret_s.index[-1].date().isoformat() if not ret_s.empty else None
 
     out = {
         "ok": True,
@@ -79,13 +88,21 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
             "n_close": int(len(close)),
             "n_ret": int(len(ret)),
         },
+        "series": {
+            "dates": [d.isoformat() for d in close_dates],
+            "close": close.astype(float).tolist(),
+        },
         "close": {
             "hist": _hist(close, bins=int(inp.bins)),
             "quantiles": _qs(close, inp.quantiles),
+            "current": close_current,
+            "current_date": close_current_date,
         },
         "ret_log": {
             "hist": _hist(ret, bins=int(inp.bins)),
             "quantiles": _qs(ret, inp.quantiles),
+            "current": ret_current,
+            "current_date": ret_current_date,
         },
     }
     return out

@@ -58,3 +58,33 @@ def test_apply_asset_vol_index_rules_scales_weights_daily():
     assert len(meta["rules"]) == 1
     assert np.allclose(w["AAA"].to_numpy(dtype=float), np.array([1.0, 1.0, 0.0], dtype=float))
 
+
+def test_apply_asset_vol_index_rules_supports_wavol_per_asset_key():
+    dates = pd.to_datetime(
+        [dt.date(2024, 1, 1), dt.date(2024, 1, 2), dt.date(2024, 1, 3), dt.date(2024, 1, 4)]
+    )
+    w = pd.DataFrame({"AAA": [1.0, 1.0, 1.0, 1.0]}, index=dates, dtype=float)
+
+    # Provide a per-asset WAVOL series (keyed by WAVOL:CODE).
+    wavol = pd.Series([1.0, 2.0, 3.0, 4.0], index=dates, dtype=float)
+    meta = _apply_asset_vol_index_rules(
+        w,
+        rules=[
+            {
+                "code": "AAA",
+                "index": "WAVOL",
+                "level_window": "30d",
+                "level_quantiles": [0.5],
+                "level_exposures": [1.0, 0.0],
+                "min_periods": 2,
+            }
+        ],
+        vol_index_close={"WAVOL:AAA": wavol},
+    )
+
+    assert meta["enabled"] is True
+    assert len(meta["rules"]) == 1
+    # WAVOL is shifted by 1 day in apply => the first day becomes NaN (full exposure),
+    # and thresholds are also shift(1) => warm-up keeps full exposure until day4.
+    assert np.allclose(w["AAA"].to_numpy(dtype=float), np.array([1.0, 1.0, 1.0, 0.0], dtype=float))
+

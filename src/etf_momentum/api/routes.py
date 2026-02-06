@@ -530,7 +530,11 @@ def baseline_calendar_effect(payload: BaselineCalendarEffectRequest, db: Session
 
 
 def _load_vol_index_close_for_rotation_rules(
-    rules: list[dict] | None, *, end_yyyymmdd: str
+    rules: list[dict] | None,
+    *,
+    db: Session,
+    start_yyyymmdd: str,
+    end_yyyymmdd: str,
 ) -> dict[str, pd.Series] | None:
     """
     Preload Cboe vol index close series needed by rotation vol-index timing rules.
@@ -544,18 +548,60 @@ def _load_vol_index_close_for_rotation_rules(
         return None
 
     out: dict[str, pd.Series] = {}
+    start_d = _parse_yyyymmdd(str(start_yyyymmdd))
+    end_d = _parse_yyyymmdd(str(end_yyyymmdd))
+
     for idx_code in need:
-        if idx_code not in {"VIX", "GVZ"}:
-            raise HTTPException(
-                status_code=400,
-                detail=f"unsupported vol index for rotation timing: {idx_code} (expected VIX/GVZ)",
+        if idx_code in {"VIX", "GVZ"}:
+            start_fetch = "19900101" if idx_code == "VIX" else "20080101"
+            dfc = fetch_cboe_daily_close(
+                CboeFetchRequest(index=idx_code, start_date=start_fetch, end_date=end_yyyymmdd)
             )
-        start_fetch = "19900101" if idx_code == "VIX" else "20080101"
-        dfc = fetch_cboe_daily_close(CboeFetchRequest(index=idx_code, start_date=start_fetch, end_date=end_yyyymmdd))
-        if dfc is None or dfc.empty:
-            raise HTTPException(status_code=400, detail=f"empty Cboe series for {idx_code}")
-        s_us = pd.Series(data=dfc["close"].to_numpy(dtype=float), index=dfc["date"].to_list(), dtype=float).dropna()
-        out[idx_code] = align_us_close_to_cn_next_trading_day(s_us, cal="XSHG")
+            if dfc is None or dfc.empty:
+                raise HTTPException(status_code=400, detail=f"empty Cboe series for {idx_code}")
+            s_us = pd.Series(
+                data=dfc["close"].to_numpy(dtype=float),
+                index=dfc["date"].to_list(),
+                dtype=float,
+            ).dropna()
+            out[idx_code] = align_us_close_to_cn_next_trading_day(s_us, cal="XSHG")
+            continue
+
+        if idx_code == "WAVOL":
+            # Per-asset weekly rolling annualized volatility (computed on the asset's own qfq close),
+            # used as an alternative "panic" level series.
+            wavol_codes = sorted(
+                {
+                    str(r.get("code") or "").strip()
+                    for r in (rules or [])
+                    if str(r.get("index") or "").strip().upper() == "WAVOL"
+                }
+            )
+            if not wavol_codes:
+                continue
+            close = load_close_prices(db, codes=wavol_codes, start=start_d, end=end_d, adjust="qfq")
+            if close is None or close.empty:
+                raise HTTPException(status_code=400, detail="empty close series for WAVOL")
+            close.index = pd.to_datetime(close.index)
+            for code in wavol_codes:
+                if code not in close.columns:
+                    continue
+                px = pd.to_numeric(close[code], errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+                if px.empty:
+                    continue
+                r = px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                weekly_nav = (1.0 + r).resample("W-FRI").prod()
+                weekly_ret = weekly_nav.pct_change().replace([np.inf, -np.inf], np.nan)
+                # 20-week rolling annualized vol (smoother "panic" proxy)
+                wv = weekly_ret.rolling(window=20, min_periods=10).std(ddof=1) * np.sqrt(52.0)
+                wv = pd.to_numeric(wv, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+                out[f"WAVOL:{code}"] = wv
+            continue
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported vol index for rotation timing: {idx_code} (expected VIX/GVZ/WAVOL)",
+        )
     return out
 
 
@@ -565,7 +611,12 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
     # which can lag during local dev. Keep behavior correct; suppress false-positive for new fields.
     # pylint: disable=unexpected-keyword-arg
     asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
-    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
+    vol_index_close = _load_vol_index_close_for_rotation_rules(
+        asset_vol_rules,
+        db=db,
+        start_yyyymmdd=payload.start,
+        end_yyyymmdd=payload.end,
+    )
     inp = RotationAnalysisInputs(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
@@ -599,6 +650,9 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         rr_years=payload.rr_years,
         rr_thresholds=payload.rr_thresholds,
         rr_weights=payload.rr_weights,
+        mirror_control=getattr(payload, "mirror_control", False),
+        mirror_quantiles=getattr(payload, "mirror_quantiles", None),
+        mirror_exposures=getattr(payload, "mirror_exposures", None),
         dd_control=payload.dd_control,
         dd_threshold=payload.dd_threshold,
         dd_reduce=payload.dd_reduce,
@@ -1466,6 +1520,7 @@ def analysis_index_distribution(payload: IndexDistributionRequest) -> IndexDistr
     return IndexDistributionResponse(
         ok=True,
         meta=dict(res.get("meta") or {}),
+        series=dict(res.get("series") or {}),
         close=dict(res.get("close") or {}),
         ret_log=dict(res.get("ret_log") or {}),
     )
@@ -1476,7 +1531,12 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
     # Reuse all rotation params as the "base" strategy config for the grid; then vary weekday + exec_price.
     # pylint: disable=unexpected-keyword-arg
     asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
-    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
+    vol_index_close = _load_vol_index_close_for_rotation_rules(
+        asset_vol_rules,
+        db=db,
+        start_yyyymmdd=payload.start,
+        end_yyyymmdd=payload.end,
+    )
     base = RotationAnalysisInputs(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
@@ -1502,14 +1562,23 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         corr_filter=payload.corr_filter,
         corr_window=payload.corr_window,
         corr_threshold=payload.corr_threshold,
+        inertia=payload.inertia,
+        inertia_min_hold_periods=payload.inertia_min_hold_periods,
+        inertia_score_gap=payload.inertia_score_gap,
+        inertia_min_turnover=payload.inertia_min_turnover,
         rr_sizing=payload.rr_sizing,
         rr_years=payload.rr_years,
         rr_thresholds=payload.rr_thresholds,
         rr_weights=payload.rr_weights,
+        mirror_control=getattr(payload, "mirror_control", False),
+        mirror_quantiles=getattr(payload, "mirror_quantiles", None),
+        mirror_exposures=getattr(payload, "mirror_exposures", None),
         dd_control=payload.dd_control,
         dd_threshold=payload.dd_threshold,
         dd_reduce=payload.dd_reduce,
         dd_sleep_days=payload.dd_sleep_days,
+        timing_rsi_gate=payload.timing_rsi_gate,
+        timing_rsi_window=payload.timing_rsi_window,
         trend_filter=payload.trend_filter,
         trend_mode=payload.trend_mode,
         trend_sma_window=payload.trend_sma_window,
@@ -1555,7 +1624,12 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
     """
     def _build_base(*, start: dt.date, end: dt.date) -> RotationAnalysisInputs:
         asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
-        vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
+        vol_index_close = _load_vol_index_close_for_rotation_rules(
+            asset_vol_rules,
+            db=db,
+            start_yyyymmdd=payload.start,
+            end_yyyymmdd=payload.end,
+        )
         return RotationAnalysisInputs(
             codes=codes,
             start=start,
@@ -1593,6 +1667,9 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
             rr_years=float(payload.rr_years),
             rr_thresholds=payload.rr_thresholds,
             rr_weights=payload.rr_weights,
+            mirror_control=bool(getattr(payload, "mirror_control", False)),
+            mirror_quantiles=getattr(payload, "mirror_quantiles", None),
+            mirror_exposures=getattr(payload, "mirror_exposures", None),
             dd_control=bool(payload.dd_control),
             dd_threshold=float(payload.dd_threshold),
             dd_reduce=float(payload.dd_reduce),
@@ -1709,7 +1786,12 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
     end = _parse_yyyymmdd(payload.end)
     # reuse the same config as the full endpoint, but return only nav
     asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
-    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
+    vol_index_close = _load_vol_index_close_for_rotation_rules(
+        asset_vol_rules,
+        db=db,
+        start_yyyymmdd=payload.start,
+        end_yyyymmdd=payload.end,
+    )
     base = RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1745,6 +1827,9 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
         rr_years=float(payload.rr_years),
         rr_thresholds=payload.rr_thresholds,
         rr_weights=payload.rr_weights,
+        mirror_control=bool(getattr(payload, "mirror_control", False)),
+        mirror_quantiles=getattr(payload, "mirror_quantiles", None),
+        mirror_exposures=getattr(payload, "mirror_exposures", None),
         dd_control=bool(payload.dd_control),
         dd_threshold=float(payload.dd_threshold),
         dd_reduce=float(payload.dd_reduce),
@@ -1818,7 +1903,12 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
     asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
-    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
+    vol_index_close = _load_vol_index_close_for_rotation_rules(
+        asset_vol_rules,
+        db=db,
+        start_yyyymmdd=payload.start,
+        end_yyyymmdd=payload.end,
+    )
     base = RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1854,6 +1944,9 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
         rr_years=float(payload.rr_years),
         rr_thresholds=payload.rr_thresholds,
         rr_weights=payload.rr_weights,
+        mirror_control=bool(getattr(payload, "mirror_control", False)),
+        mirror_quantiles=getattr(payload, "mirror_quantiles", None),
+        mirror_exposures=getattr(payload, "mirror_exposures", None),
         dd_control=bool(payload.dd_control),
         dd_threshold=float(payload.dd_threshold),
         dd_reduce=float(payload.dd_reduce),
@@ -1933,7 +2026,12 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
     asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
-    vol_index_close = _load_vol_index_close_for_rotation_rules(asset_vol_rules, end_yyyymmdd=payload.end)
+    vol_index_close = _load_vol_index_close_for_rotation_rules(
+        asset_vol_rules,
+        db=db,
+        start_yyyymmdd=payload.start,
+        end_yyyymmdd=payload.end,
+    )
     base = RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1969,6 +2067,9 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
         rr_years=float(payload.rr_years),
         rr_thresholds=payload.rr_thresholds,
         rr_weights=payload.rr_weights,
+        mirror_control=bool(getattr(payload, "mirror_control", False)),
+        mirror_quantiles=getattr(payload, "mirror_quantiles", None),
+        mirror_exposures=getattr(payload, "mirror_exposures", None),
         dd_control=bool(payload.dd_control),
         dd_threshold=float(payload.dd_threshold),
         dd_reduce=float(payload.dd_reduce),

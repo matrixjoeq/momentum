@@ -333,10 +333,37 @@ def _quantiles_from_samples(samples: np.ndarray, quantiles: list[float] | None =
     return result
 
 
+def _expanding_percentile_rank(s: pd.Series) -> pd.Series:
+    """
+    Expanding percentile rank without lookahead.
+
+    For each time t (iterating forward), compute the percentile rank of s[t] within
+    the history up to t inclusive. For ties, uses mid-rank:
+        (count(<v) + 0.5*count(==v)) / n
+    """
+    from bisect import bisect_left, bisect_right, insort
+
+    xs = pd.to_numeric(s, errors="coerce").astype(float)
+    out = np.full(len(xs), np.nan, dtype=float)
+    hist: list[float] = []
+    for i, v in enumerate(xs.to_numpy(dtype=float, copy=False)):
+        if not np.isfinite(v):
+            continue
+        insort(hist, float(v))
+        n = len(hist)
+        lo = bisect_left(hist, float(v))
+        hi = bisect_right(hist, float(v))
+        out[i] = (float(lo) + 0.5 * float(hi - lo)) / float(n)
+    return pd.Series(out, index=xs.index, dtype=float)
+
+
 def _compute_periodic_returns_and_volatility(
     daily_ret: pd.DataFrame,
     *,
     codes: list[str],
+    daily_close: pd.DataFrame | None = None,
+    daily_volume: pd.DataFrame | None = None,
+    daily_amount: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """
     Compute periodic returns and volatility for each code across different frequencies.
@@ -352,9 +379,35 @@ def _compute_periodic_returns_and_volatility(
     - Monthly volatility (resampled)
     - Quarterly volatility (resampled)
     - Yearly volatility (resampled)
+
+    Also supports (when `daily_close` is provided):
+    - Price deviation (BIAS) distributions (end-of-period), where
+        bias_t = close_t / MA252(close)_t - 1
+      This measures how far price deviates from a long-term trendline (252 trading days).
+
+    Also supports (when `daily_volume` or `daily_amount` is provided):
+    - "Activity" distributions (sum within period): use volume if available, otherwise fallback to amount.
+    - Relative activity (RVOL) distributions (mean within period), where
+        rvol_t = activity_t / rolling_mean(activity, 20)
+    - Log-activity deviation distributions (mean within period), where
+        dev_t = log(activity_t) - rolling_mean(log(activity), 20)
+
+    These are intended as "crowding" (拥挤度) proxies and do not require ETF shares data.
     """
     ret_df = daily_ret[codes].copy()
     ret_df.index = pd.to_datetime(ret_df.index)
+    close_df = None
+    if daily_close is not None and not daily_close.empty:
+        close_df = daily_close.copy()
+        close_df.index = pd.to_datetime(close_df.index)
+    vol_df = None
+    if daily_volume is not None and not daily_volume.empty:
+        vol_df = daily_volume.copy()
+        vol_df.index = pd.to_datetime(vol_df.index)
+    amt_df = None
+    if daily_amount is not None and not daily_amount.empty:
+        amt_df = daily_amount.copy()
+        amt_df.index = pd.to_datetime(amt_df.index)
     
     result: dict[str, Any] = {}
     
@@ -376,7 +429,25 @@ def _compute_periodic_returns_and_volatility(
             "mean": float(np.mean(daily_ret_vals)),
             "std": float(np.std(daily_ret_vals, ddof=1)),
             "count": int(len(daily_ret_vals)),
+            "current": float(code_ret.iloc[-1]),
+            "current_date": pd.to_datetime(code_ret.index[-1]).date().isoformat(),
         }
+        # Log-return deviation: log(1+r) - MA20(log(1+r))
+        lr = np.log1p(pd.to_numeric(code_ret, errors="coerce").astype(float))
+        lr = lr.replace([np.inf, -np.inf], np.nan).dropna()
+        if not lr.empty:
+            lr_dev = (lr - lr.rolling(window=20, min_periods=5).mean()).dropna()
+            if not lr_dev.empty:
+                vals = lr_dev.to_numpy(dtype=float)
+                code_result["daily_log_return_dev"] = {
+                    "hist": _histogram_from_samples(vals),
+                    "quantiles": _quantiles_from_samples(vals),
+                    "mean": float(np.mean(vals)),
+                    "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                    "count": int(len(vals)),
+                    "current": float(lr_dev.iloc[-1]),
+                    "current_date": pd.to_datetime(lr_dev.index[-1]).date().isoformat(),
+                }
         
         # Daily volatility (rolling 20-day window)
         daily_vol = code_ret.rolling(window=20, min_periods=5).std(ddof=1).dropna()
@@ -388,7 +459,37 @@ def _compute_periodic_returns_and_volatility(
                 "mean": float(np.mean(daily_vol_vals)),
                 "std": float(np.std(daily_vol_vals, ddof=1)),
                 "count": int(len(daily_vol_vals)),
+                "current": float(daily_vol.iloc[-1]),
+                "current_date": pd.to_datetime(daily_vol.index[-1]).date().isoformat(),
             }
+            # Log-volatility (often closer to normal)
+            lv = pd.to_numeric(daily_vol, errors="coerce").astype(float)
+            lv = lv[lv > 0].dropna()
+            if not lv.empty:
+                lv_vals = np.log(lv.to_numpy(dtype=float))
+                code_result["daily_log_volatility"] = {
+                    "hist": _histogram_from_samples(lv_vals),
+                    "quantiles": _quantiles_from_samples(lv_vals),
+                    "mean": float(np.mean(lv_vals)),
+                    "std": float(np.std(lv_vals, ddof=1)) if len(lv_vals) >= 2 else float("nan"),
+                    "count": int(len(lv_vals)),
+                    "current": float(np.log(float(lv.iloc[-1]))),
+                    "current_date": pd.to_datetime(lv.index[-1]).date().isoformat(),
+                }
+                # Log-vol deviation: log(vol) - MA20(log(vol))
+                lv_log = np.log(lv).replace([np.inf, -np.inf], np.nan).dropna()
+                lv_dev = (lv_log - lv_log.rolling(window=20, min_periods=5).mean()).dropna()
+                if not lv_dev.empty:
+                    vals = lv_dev.to_numpy(dtype=float)
+                    code_result["daily_log_vol_dev"] = {
+                        "hist": _histogram_from_samples(vals),
+                        "quantiles": _quantiles_from_samples(vals),
+                        "mean": float(np.mean(vals)),
+                        "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                        "count": int(len(vals)),
+                        "current": float(lv_dev.iloc[-1]),
+                        "current_date": pd.to_datetime(lv_dev.index[-1]).date().isoformat(),
+                    }
         
         # Weekly returns and volatility
         weekly_nav = (1.0 + code_ret).resample("W-FRI").prod()
@@ -401,7 +502,24 @@ def _compute_periodic_returns_and_volatility(
                 "mean": float(np.mean(weekly_ret_vals)),
                 "std": float(np.std(weekly_ret_vals, ddof=1)),
                 "count": int(len(weekly_ret_vals)),
+                "current": float(weekly_ret.iloc[-1]),
+                "current_date": pd.to_datetime(weekly_ret.index[-1]).date().isoformat(),
             }
+            wlr = np.log1p(pd.to_numeric(weekly_ret, errors="coerce").astype(float))
+            wlr = wlr.replace([np.inf, -np.inf], np.nan).dropna()
+            if not wlr.empty:
+                wlr_dev = (wlr - wlr.rolling(window=20, min_periods=5).mean()).dropna()
+                if not wlr_dev.empty:
+                    vals = wlr_dev.to_numpy(dtype=float)
+                    code_result["weekly_log_return_dev"] = {
+                        "hist": _histogram_from_samples(vals),
+                        "quantiles": _quantiles_from_samples(vals),
+                        "mean": float(np.mean(vals)),
+                        "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                        "count": int(len(vals)),
+                        "current": float(wlr_dev.iloc[-1]),
+                        "current_date": pd.to_datetime(wlr_dev.index[-1]).date().isoformat(),
+                    }
             # Weekly volatility (rolling 4-week window)
             weekly_vol = weekly_ret.rolling(window=4, min_periods=2).std(ddof=1).dropna()
             if not weekly_vol.empty:
@@ -412,7 +530,39 @@ def _compute_periodic_returns_and_volatility(
                     "mean": float(np.mean(weekly_vol_vals)),
                     "std": float(np.std(weekly_vol_vals, ddof=1)),
                     "count": int(len(weekly_vol_vals)),
+                    "current": float(weekly_vol.iloc[-1]),
+                    "current_date": pd.to_datetime(weekly_vol.index[-1]).date().isoformat(),
                 }
+                # Log-vol deviation: log(vol) - MA20(log(vol))
+                wlv = pd.to_numeric(weekly_vol, errors="coerce").astype(float)
+                wlv = wlv[wlv > 0].dropna()
+                if not wlv.empty:
+                    wlv_log = np.log(wlv)
+                    wlv_dev = (wlv_log - wlv_log.rolling(window=20, min_periods=5).mean()).dropna()
+                    if not wlv_dev.empty:
+                        vals = wlv_dev.to_numpy(dtype=float)
+                        code_result["weekly_log_vol_dev"] = {
+                            "hist": _histogram_from_samples(vals),
+                            "quantiles": _quantiles_from_samples(vals),
+                            "mean": float(np.mean(vals)),
+                            "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                            "count": int(len(vals)),
+                            "current": float(wlv_dev.iloc[-1]),
+                            "current_date": pd.to_datetime(wlv_dev.index[-1]).date().isoformat(),
+                        }
+                wv = pd.to_numeric(weekly_vol, errors="coerce").astype(float)
+                wv = wv[wv > 0].dropna()
+                if not wv.empty:
+                    wv_vals = np.log(wv.to_numpy(dtype=float))
+                    code_result["weekly_log_volatility"] = {
+                        "hist": _histogram_from_samples(wv_vals),
+                        "quantiles": _quantiles_from_samples(wv_vals),
+                        "mean": float(np.mean(wv_vals)),
+                        "std": float(np.std(wv_vals, ddof=1)) if len(wv_vals) >= 2 else float("nan"),
+                        "count": int(len(wv_vals)),
+                        "current": float(np.log(float(wv.iloc[-1]))),
+                        "current_date": pd.to_datetime(wv.index[-1]).date().isoformat(),
+                    }
         
         # Monthly returns and volatility
         monthly_nav = (1.0 + code_ret).resample("ME").prod()
@@ -425,7 +575,24 @@ def _compute_periodic_returns_and_volatility(
                 "mean": float(np.mean(monthly_ret_vals)),
                 "std": float(np.std(monthly_ret_vals, ddof=1)),
                 "count": int(len(monthly_ret_vals)),
+                "current": float(monthly_ret.iloc[-1]),
+                "current_date": pd.to_datetime(monthly_ret.index[-1]).date().isoformat(),
             }
+            mlr = np.log1p(pd.to_numeric(monthly_ret, errors="coerce").astype(float))
+            mlr = mlr.replace([np.inf, -np.inf], np.nan).dropna()
+            if not mlr.empty:
+                mlr_dev = (mlr - mlr.rolling(window=20, min_periods=5).mean()).dropna()
+                if not mlr_dev.empty:
+                    vals = mlr_dev.to_numpy(dtype=float)
+                    code_result["monthly_log_return_dev"] = {
+                        "hist": _histogram_from_samples(vals),
+                        "quantiles": _quantiles_from_samples(vals),
+                        "mean": float(np.mean(vals)),
+                        "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                        "count": int(len(vals)),
+                        "current": float(mlr_dev.iloc[-1]),
+                        "current_date": pd.to_datetime(mlr_dev.index[-1]).date().isoformat(),
+                    }
             # Monthly volatility (rolling 3-month window)
             monthly_vol = monthly_ret.rolling(window=3, min_periods=2).std(ddof=1).dropna()
             if not monthly_vol.empty:
@@ -436,7 +603,38 @@ def _compute_periodic_returns_and_volatility(
                     "mean": float(np.mean(monthly_vol_vals)),
                     "std": float(np.std(monthly_vol_vals, ddof=1)),
                     "count": int(len(monthly_vol_vals)),
+                    "current": float(monthly_vol.iloc[-1]),
+                    "current_date": pd.to_datetime(monthly_vol.index[-1]).date().isoformat(),
                 }
+                mlv = pd.to_numeric(monthly_vol, errors="coerce").astype(float)
+                mlv = mlv[mlv > 0].dropna()
+                if not mlv.empty:
+                    mlv_log = np.log(mlv)
+                    mlv_dev = (mlv_log - mlv_log.rolling(window=20, min_periods=5).mean()).dropna()
+                    if not mlv_dev.empty:
+                        vals = mlv_dev.to_numpy(dtype=float)
+                        code_result["monthly_log_vol_dev"] = {
+                            "hist": _histogram_from_samples(vals),
+                            "quantiles": _quantiles_from_samples(vals),
+                            "mean": float(np.mean(vals)),
+                            "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                            "count": int(len(vals)),
+                            "current": float(mlv_dev.iloc[-1]),
+                            "current_date": pd.to_datetime(mlv_dev.index[-1]).date().isoformat(),
+                        }
+                mv = pd.to_numeric(monthly_vol, errors="coerce").astype(float)
+                mv = mv[mv > 0].dropna()
+                if not mv.empty:
+                    mv_vals = np.log(mv.to_numpy(dtype=float))
+                    code_result["monthly_log_volatility"] = {
+                        "hist": _histogram_from_samples(mv_vals),
+                        "quantiles": _quantiles_from_samples(mv_vals),
+                        "mean": float(np.mean(mv_vals)),
+                        "std": float(np.std(mv_vals, ddof=1)) if len(mv_vals) >= 2 else float("nan"),
+                        "count": int(len(mv_vals)),
+                        "current": float(np.log(float(mv.iloc[-1]))),
+                        "current_date": pd.to_datetime(mv.index[-1]).date().isoformat(),
+                    }
         
         # Quarterly returns and volatility
         quarterly_nav = (1.0 + code_ret).resample("QE").prod()
@@ -449,7 +647,24 @@ def _compute_periodic_returns_and_volatility(
                 "mean": float(np.mean(quarterly_ret_vals)),
                 "std": float(np.std(quarterly_ret_vals, ddof=1)),
                 "count": int(len(quarterly_ret_vals)),
+                "current": float(quarterly_ret.iloc[-1]),
+                "current_date": pd.to_datetime(quarterly_ret.index[-1]).date().isoformat(),
             }
+            qlr = np.log1p(pd.to_numeric(quarterly_ret, errors="coerce").astype(float))
+            qlr = qlr.replace([np.inf, -np.inf], np.nan).dropna()
+            if not qlr.empty:
+                qlr_dev = (qlr - qlr.rolling(window=20, min_periods=5).mean()).dropna()
+                if not qlr_dev.empty:
+                    vals = qlr_dev.to_numpy(dtype=float)
+                    code_result["quarterly_log_return_dev"] = {
+                        "hist": _histogram_from_samples(vals),
+                        "quantiles": _quantiles_from_samples(vals),
+                        "mean": float(np.mean(vals)),
+                        "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                        "count": int(len(vals)),
+                        "current": float(qlr_dev.iloc[-1]),
+                        "current_date": pd.to_datetime(qlr_dev.index[-1]).date().isoformat(),
+                    }
             # Quarterly volatility (rolling 2-quarter window)
             quarterly_vol = quarterly_ret.rolling(window=2, min_periods=2).std(ddof=1).dropna()
             if not quarterly_vol.empty:
@@ -460,7 +675,38 @@ def _compute_periodic_returns_and_volatility(
                     "mean": float(np.mean(quarterly_vol_vals)),
                     "std": float(np.std(quarterly_vol_vals, ddof=1)),
                     "count": int(len(quarterly_vol_vals)),
+                    "current": float(quarterly_vol.iloc[-1]),
+                    "current_date": pd.to_datetime(quarterly_vol.index[-1]).date().isoformat(),
                 }
+                qlv = pd.to_numeric(quarterly_vol, errors="coerce").astype(float)
+                qlv = qlv[qlv > 0].dropna()
+                if not qlv.empty:
+                    qlv_log = np.log(qlv)
+                    qlv_dev = (qlv_log - qlv_log.rolling(window=20, min_periods=5).mean()).dropna()
+                    if not qlv_dev.empty:
+                        vals = qlv_dev.to_numpy(dtype=float)
+                        code_result["quarterly_log_vol_dev"] = {
+                            "hist": _histogram_from_samples(vals),
+                            "quantiles": _quantiles_from_samples(vals),
+                            "mean": float(np.mean(vals)),
+                            "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                            "count": int(len(vals)),
+                            "current": float(qlv_dev.iloc[-1]),
+                            "current_date": pd.to_datetime(qlv_dev.index[-1]).date().isoformat(),
+                        }
+                qv = pd.to_numeric(quarterly_vol, errors="coerce").astype(float)
+                qv = qv[qv > 0].dropna()
+                if not qv.empty:
+                    qv_vals = np.log(qv.to_numpy(dtype=float))
+                    code_result["quarterly_log_volatility"] = {
+                        "hist": _histogram_from_samples(qv_vals),
+                        "quantiles": _quantiles_from_samples(qv_vals),
+                        "mean": float(np.mean(qv_vals)),
+                        "std": float(np.std(qv_vals, ddof=1)) if len(qv_vals) >= 2 else float("nan"),
+                        "count": int(len(qv_vals)),
+                        "current": float(np.log(float(qv.iloc[-1]))),
+                        "current_date": pd.to_datetime(qv.index[-1]).date().isoformat(),
+                    }
         
         # Yearly returns and volatility
         yearly_nav = (1.0 + code_ret).resample("YE").prod()
@@ -473,6 +719,8 @@ def _compute_periodic_returns_and_volatility(
                 "mean": float(np.mean(yearly_ret_vals)),
                 "std": float(np.std(yearly_ret_vals, ddof=1)),
                 "count": int(len(yearly_ret_vals)),
+                "current": float(yearly_ret.iloc[-1]),
+                "current_date": pd.to_datetime(yearly_ret.index[-1]).date().isoformat(),
             }
             # Yearly volatility (use all available years)
             if len(yearly_ret) >= 2:
@@ -483,7 +731,154 @@ def _compute_periodic_returns_and_volatility(
                     "mean": float(np.mean(yearly_vol_vals)),
                     "std": float(np.std(yearly_vol_vals, ddof=1)),
                     "count": int(len(yearly_vol_vals)),
+                    "current": float(yearly_ret.iloc[-1]),
+                    "current_date": pd.to_datetime(yearly_ret.index[-1]).date().isoformat(),
                 }
+
+        # Price deviation (log-price deviation from long-term trendline), optional.
+        #
+        # Compute by frequency using end-of-period closes and frequency-specific windows:
+        # - daily: N=252
+        # - weekly: N=52
+        # - monthly: N=12
+        # - quarterly: N=4
+        # - yearly: N=3
+        #
+        # dev = log(P) - MA_N(log(P))  (equivalently log(P / GM_N(P)))
+        if close_df is not None and code in close_df.columns:
+            px = pd.to_numeric(close_df[code], errors="coerce").astype(float).dropna()
+            if not px.empty:
+                def _add_dev(kind: str, s: pd.Series) -> None:
+                    if s is None or s.empty:
+                        return
+                    xs = s.to_numpy(dtype=float)
+                    code_result[f"{kind}_price_dev"] = {
+                        "hist": _histogram_from_samples(xs),
+                        "quantiles": _quantiles_from_samples(xs),
+                        "mean": float(np.mean(xs)),
+                        "std": float(np.std(xs, ddof=1)) if len(xs) >= 2 else float("nan"),
+                        "count": int(len(xs)),
+                        "current": float(s.iloc[-1]),
+                        "current_date": pd.to_datetime(s.index[-1]).date().isoformat(),
+                    }
+
+                def _log_dev(s: pd.Series, *, n: int) -> pd.Series:
+                    s2 = pd.to_numeric(s, errors="coerce").astype(float).replace(0.0, np.nan)
+                    s2 = s2.replace([np.inf, -np.inf], np.nan).dropna()
+                    if s2.empty:
+                        return pd.Series([], dtype=float)
+                    lp = np.log(s2)
+                    mp = lp.rolling(window=int(n), min_periods=max(3, min(20, int(n)))).mean()
+                    out = (lp - mp).replace([np.inf, -np.inf], np.nan).dropna()
+                    return out
+
+                px_d = px
+                px_w = px.resample("W-FRI").last().dropna()
+                px_m = px.resample("ME").last().dropna()
+                px_q = px.resample("QE").last().dropna()
+                px_y = px.resample("YE").last().dropna()
+
+                _add_dev("daily", _log_dev(px_d, n=252))
+                _add_dev("weekly", _log_dev(px_w, n=52))
+                _add_dev("monthly", _log_dev(px_m, n=12))
+                _add_dev("quarterly", _log_dev(px_q, n=4))
+                _add_dev("yearly", _log_dev(px_y, n=3))
+
+        # Activity (volume/amount) and crowding proxies (optional)
+        act: pd.Series | None = None
+        act_src: str | None = None
+        if vol_df is not None and code in vol_df.columns:
+            s = pd.to_numeric(vol_df[code], errors="coerce").astype(float).dropna()
+            if not s.empty:
+                act = s
+                act_src = "volume"
+        if act is None and amt_df is not None and code in amt_df.columns:
+            s = pd.to_numeric(amt_df[code], errors="coerce").astype(float).dropna()
+            if not s.empty:
+                act = s
+                act_src = "amount"
+
+        if act is not None and act_src is not None:
+            def _resample_sum(s: pd.Series, freq: str) -> pd.Series:
+                out = s.resample(freq).sum(min_count=1)
+                return pd.to_numeric(out, errors="coerce").astype(float).dropna()
+
+            def _resample_mean(s: pd.Series, freq: str) -> pd.Series:
+                out = s.resample(freq).mean()
+                return pd.to_numeric(out, errors="coerce").astype(float).dropna()
+
+            # Activity distributions (sum within period)
+            for kind, ser in [
+                ("daily", act),
+                ("weekly", _resample_sum(act, "W-FRI")),
+                ("monthly", _resample_sum(act, "ME")),
+                ("quarterly", _resample_sum(act, "QE")),
+                ("yearly", _resample_sum(act, "YE")),
+            ]:
+                if ser is None or ser.empty:
+                    continue
+                xs = ser.to_numpy(dtype=float)
+                code_result[f"{kind}_volume"] = {
+                    "hist": _histogram_from_samples(xs),
+                    "quantiles": _quantiles_from_samples(xs),
+                    "mean": float(np.mean(xs)),
+                    "std": float(np.std(xs, ddof=1)) if len(xs) >= 2 else float("nan"),
+                    "count": int(len(xs)),
+                    "source": act_src,
+                    "current": float(ser.iloc[-1]),
+                    "current_date": pd.to_datetime(ser.index[-1]).date().isoformat(),
+                }
+
+            # Crowding proxy #1: RVOL on activity (mean within period = sustained crowding)
+            den = act.rolling(window=20, min_periods=5).mean()
+            rvol = (act / den).replace([np.inf, -np.inf], np.nan).dropna()
+            for kind, ser in [
+                ("daily", rvol),
+                ("weekly", _resample_mean(rvol, "W-FRI")),
+                ("monthly", _resample_mean(rvol, "ME")),
+                ("quarterly", _resample_mean(rvol, "QE")),
+                ("yearly", _resample_mean(rvol, "YE")),
+            ]:
+                if ser is None or ser.empty:
+                    continue
+                xs = ser.to_numpy(dtype=float)
+                code_result[f"{kind}_rvol"] = {
+                    "hist": _histogram_from_samples(xs),
+                    "quantiles": _quantiles_from_samples(xs),
+                    "mean": float(np.mean(xs)),
+                    "std": float(np.std(xs, ddof=1)) if len(xs) >= 2 else float("nan"),
+                    "count": int(len(xs)),
+                    "source": act_src,
+                    "current": float(ser.iloc[-1]),
+                    "current_date": pd.to_datetime(ser.index[-1]).date().isoformat(),
+                }
+
+            # Crowding proxy #2: log-activity deviation (mean within period = sustained crowding)
+            lv = np.log(act.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
+            if not lv.empty:
+                dev = (lv - lv.rolling(window=20, min_periods=5).mean()).replace(
+                    [np.inf, -np.inf], np.nan
+                ).dropna()
+                for kind, ser in [
+                    ("daily", dev),
+                    ("weekly", _resample_mean(dev, "W-FRI")),
+                    ("monthly", _resample_mean(dev, "ME")),
+                    ("quarterly", _resample_mean(dev, "QE")),
+                    ("yearly", _resample_mean(dev, "YE")),
+                ]:
+                    if ser is None or ser.empty:
+                        continue
+                    xs = ser.to_numpy(dtype=float)
+                    code_result[f"{kind}_vol_dev"] = {
+                        "hist": _histogram_from_samples(xs),
+                        "quantiles": _quantiles_from_samples(xs),
+                        "mean": float(np.mean(xs)),
+                        "std": float(np.std(xs, ddof=1)) if len(xs) >= 2 else float("nan"),
+                        "count": int(len(xs)),
+                        "source": act_src,
+                        "current": float(ser.iloc[-1]),
+                        "current_date": pd.to_datetime(ser.index[-1]).date().isoformat(),
+                    }
         
         result[code] = code_result
     
@@ -578,6 +973,38 @@ def load_close_prices(
     df["date"] = pd.to_datetime(df["date"])
     pivot = df.pivot_table(index="date", columns="code", values="close", aggfunc="last").sort_index()
     return pivot
+
+
+def load_volume_amount(
+    db: Session,
+    *,
+    codes: list[str],
+    start: dt.date,
+    end: dt.date,
+    adjust: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Load volume/amount matrices for each code.
+
+    Note: volume/amount are typically not adjusted; we still filter by `adjust` to
+    stay consistent with the price loaders.
+    """
+    stmt = (
+        select(EtfPrice.trade_date, EtfPrice.code, EtfPrice.volume, EtfPrice.amount)
+        .where(EtfPrice.code.in_(codes))
+        .where(EtfPrice.adjust == adjust)
+        .where(EtfPrice.trade_date >= start)
+        .where(EtfPrice.trade_date <= end)
+        .order_by(EtfPrice.trade_date.asc())
+    )
+    rows = db.execute(stmt).all()
+    if not rows:
+        return pd.DataFrame(), pd.DataFrame()
+    df = pd.DataFrame(rows, columns=["date", "code", "volume", "amount"])
+    df["date"] = pd.to_datetime(df["date"])
+    volume = df.pivot_table(index="date", columns="code", values="volume", aggfunc="last").sort_index()
+    amount = df.pivot_table(index="date", columns="code", values="amount", aggfunc="last").sort_index()
+    return volume, amount
 
 
 def load_high_low_prices(
@@ -867,6 +1294,24 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     nav_common = nav.loc[common_start:]
     ret_common = daily_ret.loc[common_start:].fillna(0.0)
 
+    # Activity (volume/amount) should reflect trading, not adjusted prices.
+    # Therefore always load it from `adjust="none"` (if available in DB).
+    volume, amount = load_volume_amount(
+        db,
+        codes=codes,
+        start=inp.start,
+        end=inp.end,
+        adjust="none",
+    )
+    volume_common: pd.DataFrame | None = None
+    if volume is not None and not volume.empty:
+        volume = volume.sort_index()
+        volume_common = volume.loc[common_start:]
+    amount_common: pd.DataFrame | None = None
+    if amount is not None and not amount.empty:
+        amount = amount.sort_index()
+        amount_common = amount.loc[common_start:]
+
     # correlation matrix (using full backtest range after common_start)
     corr_ret = ret_common[codes].astype(float)
     corr = corr_ret.corr(method="pearson")
@@ -1032,7 +1477,108 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     period_distributions = _compute_periodic_returns_and_volatility(
         ret_common,
         codes=codes,
+        daily_close=close_ff.loc[common_start:],
+        daily_volume=volume_common,
+        daily_amount=amount_common,
     )
+
+    # "Mirror" composite deviation indicator time-series (per asset, by period).
+    #
+    # This is used for UI visualization (distribution panel) and is deliberately "rearview":
+    # expanding percentiles only, no rolling-window quantiles (to avoid lookahead).
+    #
+    # For each selected period (daily/weekly/monthly/quarterly/yearly), build:
+    # - log_return_dev: log(1+r_period) - MA20(log(1+r_period))
+    # - log_vol_dev: log(vol_period) - MA20(log(vol_period)), where vol_period is a short rolling std on period returns
+    # - log_volume_dev: log(activity) - MA20(log(activity)), aggregated by mean within period
+    #
+    # Then:
+    # - percentile each deviation via expanding percentile rank
+    # - composite = mean of the 3 percentiles (requires all 3)
+    # - mirror = expanding percentile rank of composite
+    mirror_timeseries: dict[str, Any] = {}
+    close_m = close_ff.loc[common_start:, codes].copy()
+    close_m.index = pd.to_datetime(close_m.index)
+    vol_m = volume_common.copy() if (volume_common is not None and not volume_common.empty) else pd.DataFrame()
+    amt_m = amount_common.copy() if (amount_common is not None and not amount_common.empty) else pd.DataFrame()
+    if not vol_m.empty:
+        vol_m.index = pd.to_datetime(vol_m.index)
+    if not amt_m.empty:
+        amt_m.index = pd.to_datetime(amt_m.index)
+
+    def _pack_ts(s: pd.Series) -> dict[str, Any]:
+        s2 = pd.to_numeric(s, errors="coerce").astype(float)
+        return {"dates": s2.index.date.astype(str).tolist(), "values": s2.tolist()}
+
+    freq_by_period = {"daily": None, "weekly": "W-FRI", "monthly": "ME", "quarterly": "QE", "yearly": "YE"}
+    vol_win = {"daily": (20, 5), "weekly": (4, 2), "monthly": (3, 2), "quarterly": (2, 2), "yearly": (2, 2)}
+
+    for code in codes:
+        if code not in close_m.columns:
+            continue
+        px = pd.to_numeric(close_m[code], errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+        if px.empty:
+            continue
+        r = px.pct_change().replace([np.inf, -np.inf], np.nan)
+
+        act = pd.Series(index=px.index, dtype=float)
+        if (not vol_m.empty) and (code in vol_m.columns):
+            act = act.combine_first(pd.to_numeric(vol_m[code], errors="coerce").astype(float))
+        if (not amt_m.empty) and (code in amt_m.columns):
+            act = act.combine_first(pd.to_numeric(amt_m[code], errors="coerce").astype(float))
+        act = act.replace([np.inf, -np.inf], np.nan)
+        la = np.log(act.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+        la_dev_daily = (la - la.rolling(window=20, min_periods=5).mean()).replace([np.inf, -np.inf], np.nan)
+
+        out_by_period: dict[str, Any] = {}
+        gross = (1.0 + r).replace([np.inf, -np.inf], np.nan).fillna(1.0).astype(float)
+        for per, freq in freq_by_period.items():
+            # Period returns
+            if freq is None:
+                ret_p = pd.to_numeric(r, errors="coerce").astype(float)
+            else:
+                nav_p = gross.resample(freq).prod()
+                ret_p = nav_p.pct_change()
+            ret_p = ret_p.replace([np.inf, -np.inf], np.nan).dropna()
+            if ret_p.empty:
+                continue
+
+            # log-return deviation
+            lr_p = np.log1p(ret_p).replace([np.inf, -np.inf], np.nan).dropna()
+            lr_dev_p = (lr_p - lr_p.rolling(window=20, min_periods=5).mean()).replace([np.inf, -np.inf], np.nan).dropna()
+            if lr_dev_p.empty:
+                continue
+
+            # realized vol deviation (vol on period returns)
+            wv, mp = vol_win[per]
+            vol_p = ret_p.rolling(window=int(wv), min_periods=int(mp)).std(ddof=1).replace([np.inf, -np.inf], np.nan).dropna()
+            vol_p = pd.to_numeric(vol_p, errors="coerce").astype(float)
+            vol_p = vol_p[vol_p > 0].dropna()
+            lv_p = np.log(vol_p).replace([np.inf, -np.inf], np.nan).dropna()
+            lv_dev_p = (lv_p - lv_p.rolling(window=20, min_periods=5).mean()).replace([np.inf, -np.inf], np.nan).dropna()
+            if lv_dev_p.empty:
+                continue
+
+            # activity deviation aggregated by mean within period
+            if freq is None:
+                la_dev_p = la_dev_daily
+            else:
+                la_dev_p = la_dev_daily.resample(freq).mean()
+            la_dev_p = pd.to_numeric(la_dev_p, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+            if la_dev_p.empty:
+                continue
+
+            p1 = _expanding_percentile_rank(lr_dev_p)
+            p2 = _expanding_percentile_rank(lv_dev_p)
+            p3 = _expanding_percentile_rank(la_dev_p)
+            comp = pd.concat([p1, p2, p3], axis=1).mean(axis=1, skipna=False).replace([np.inf, -np.inf], np.nan).dropna()
+            if comp.empty:
+                continue
+            mirror = _expanding_percentile_rank(comp)
+            out_by_period[per] = _pack_ts(mirror)
+
+        if out_by_period:
+            mirror_timeseries[code] = out_by_period
 
     return {
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
@@ -1052,5 +1598,6 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "fft": fft,
         "fft_roll": {"ew": fft_roll},
         "period_distributions": period_distributions,
+        "mirror_timeseries": mirror_timeseries,
     }
 

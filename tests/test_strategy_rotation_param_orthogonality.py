@@ -199,6 +199,32 @@ def _assert_dd_control(out: dict, *, enabled: bool, expect_trigger: bool, expect
         assert n <= 2
 
 
+def _assert_mirror_control(out: dict, *, enabled: bool, expect_scaled: bool) -> None:
+    """
+    Mirror control is reported under per-period risk_controls.mirror_control.
+    When enabled, it may cap total risk-asset exposure (cash remainder).
+    """
+    metas = []
+    exposures = []
+    for p in out.get("holdings", []):
+        rc = (p.get("risk_controls") or {}).get("mirror_control")
+        if rc is None:
+            continue
+        assert isinstance(rc, dict)
+        assert rc.get("enabled") in {True, False}
+        metas.append(rc)
+        try:
+            exposures.append(float(p.get("exposure")))
+        except (TypeError, ValueError):  # pragma: no cover
+            pass
+
+    if enabled:
+        assert metas, "expected mirror_control metadata when enabled"
+        assert any(bool(m.get("enabled")) for m in metas)
+    if enabled and expect_scaled:
+        assert any((x < 0.999) for x in exposures), "expected at least one capped exposure < 1"
+
+
 CASES = [
     dict(
         name="base",
@@ -210,6 +236,8 @@ CASES = [
             corr_block=False,
             rr_enabled=False,
             rr_scaled=False,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -225,6 +253,8 @@ CASES = [
             corr_block=False,
             rr_enabled=False,
             rr_scaled=False,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -240,6 +270,8 @@ CASES = [
             corr_block=False,
             rr_enabled=False,
             rr_scaled=False,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -255,6 +287,8 @@ CASES = [
             corr_block=False,
             rr_enabled=False,
             rr_scaled=False,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -270,6 +304,8 @@ CASES = [
             corr_block=True,
             rr_enabled=False,
             rr_scaled=False,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -285,6 +321,25 @@ CASES = [
             corr_block=False,
             rr_enabled=True,
             rr_scaled=True,
+            mirror_enabled=False,
+            mirror_scaled=False,
+            dd_enabled=False,
+            dd_trigger=False,
+            dd_sleep=False,
+        ),
+    ),
+    dict(
+        name="mirror_caps_exposure",
+        seed="regime",
+        cfg=dict(mirror_control=True, mirror_quantiles=[0.1], mirror_exposures=[0.3]),
+        expect=dict(
+            tp_sl_mode="none",
+            corr_enabled=False,
+            corr_block=False,
+            rr_enabled=False,
+            rr_scaled=False,
+            mirror_enabled=True,
+            mirror_scaled=True,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -300,6 +355,8 @@ CASES = [
             corr_block=False,
             rr_enabled=False,
             rr_scaled=False,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=True,
             dd_trigger=True,
             dd_sleep=True,
@@ -326,6 +383,8 @@ CASES = [
             corr_block=False,
             rr_enabled=True,
             rr_scaled=True,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -355,6 +414,8 @@ CASES = [
             corr_block=False,
             rr_enabled=False,
             rr_scaled=False,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -398,6 +459,8 @@ CASES = [
             corr_block=False,
             rr_enabled=True,
             rr_scaled=True,
+            mirror_enabled=False,
+            mirror_scaled=False,
             dd_enabled=False,
             dd_trigger=False,
             dd_sleep=False,
@@ -482,5 +545,6 @@ def test_rotation_parameter_behavior_matrix(session_factory, case):
     _assert_tp_sl(out, expect["tp_sl_mode"])
     _assert_corr_gate(out, enabled=bool(expect["corr_enabled"]), expect_block=bool(expect["corr_block"]))
     _assert_rr_sizing(out, enabled=bool(expect["rr_enabled"]), expect_scaled=bool(expect["rr_scaled"]))
+    _assert_mirror_control(out, enabled=bool(expect["mirror_enabled"]), expect_scaled=bool(expect["mirror_scaled"]))
     _assert_dd_control(out, enabled=bool(expect["dd_enabled"]), expect_trigger=bool(expect["dd_trigger"]), expect_sleep=bool(expect["dd_sleep"]))
 

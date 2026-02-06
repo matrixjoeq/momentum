@@ -34,12 +34,18 @@ def fetch_etf_daily_tencent(
     req: FetchRequest,
 ) -> list[PriceRow]:
     """
-    Fetch daily OHLC+amount from Tencent via akshare.stock_zh_a_hist_tx.
+    Fetch daily OHLC + activity from Tencent via akshare.stock_zh_a_hist_tx.
 
     Notes:
     - For many ETFs, tencent's `adjust='qfq'` appears equivalent to `adjust=''` (none).
       We still pass through the requested adjust; if it errors, fallback to '' for qfq/none.
-    - Volume is not provided by this API; we keep volume=None and store amount.
+    - Empirically, this API's `amount` column behaves like **volume in lots (手)** for ETFs,
+      not monetary turnover (成交额). For example, for 159915 on 2026-02-05 we observed:
+      - stored amount=9,852,890 and close≈3.238, giving implied turnover ≈ 31.9 亿元
+        via amount*close*100, consistent with broker turnover (~32 亿元).
+      Therefore we map:
+      - `volume` <- df["amount"] (lots)
+      - `amount` <- None (unknown)
     """
     sym = _with_ex(req.code)
     adj = str(req.adjust or "none").strip().lower()
@@ -48,14 +54,14 @@ def fetch_etf_daily_tencent(
     df: pd.DataFrame
     try:
         df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=req.start_date, end_date=req.end_date, adjust=tx_adj)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         # fallback: qfq may fail or behave like none; retry with ""
         df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=req.start_date, end_date=req.end_date, adjust="")
 
     if df is None or df.empty:
         return []
 
-    # expected cols: date/open/close/high/low/amount
+    # expected cols: date/open/close/high/low/amount (but amount behaves like volume-lots for ETFs)
     if "date" not in df.columns or "open" not in df.columns or "close" not in df.columns:
         return []
 
@@ -68,6 +74,7 @@ def fetch_etf_daily_tencent(
 
     rows: list[PriceRow] = []
     for _, r in df2.iterrows():
+        v_lots = float(r["amount"]) if pd.notna(r.get("amount")) else None
         rows.append(
             PriceRow(
                 code=req.code,
@@ -76,8 +83,8 @@ def fetch_etf_daily_tencent(
                 high=float(r["high"]) if pd.notna(r.get("high")) else None,
                 low=float(r["low"]) if pd.notna(r.get("low")) else None,
                 close=float(r["close"]) if pd.notna(r.get("close")) else None,
-                volume=None,
-                amount=float(r["amount"]) if pd.notna(r.get("amount")) else None,
+                volume=v_lots,
+                amount=None,
                 source="tencent",
                 adjust=adj,
             )

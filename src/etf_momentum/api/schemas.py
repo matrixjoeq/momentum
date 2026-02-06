@@ -445,6 +445,7 @@ class IndexDistributionRequest(BaseModel):
 class IndexDistributionResponse(BaseModel):
     ok: bool
     meta: dict | None = None
+    series: dict | None = None
     close: dict | None = None
     ret_log: dict | None = None
     error: str | None = None
@@ -543,7 +544,7 @@ class AssetVolIndexTimingRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code")
-    index: str = Field(description="Vol index code: VIX|GVZ (Cboe)")
+    index: str = Field(description="Vol index code: VIX|GVZ (Cboe) | WAVOL (asset weekly rolling ann vol)")
     level_window: str = Field(
         default="all",
         description="Quantile lookback window: 30d|90d|180d|1y|3y|5y|10y|all (all=expanding; non-static to avoid lookahead).",
@@ -648,6 +649,19 @@ class RotationBacktestRequest(BaseModel):
     rr_weights: list[float] | None = Field(
         default=None,
         description="Optional exposure levels. If null, backend uses defaults when rr_sizing=true.",
+    )
+    # Mirror (rearview) composite-deviation exposure cap
+    mirror_control: bool = Field(
+        default=False,
+        description="Enable rearview-mirror risk control: composite of (log-return dev, log-vol dev, log-volume dev) with expanding-percentile mapping to exposure caps.",
+    )
+    mirror_quantiles: list[float] | None = Field(
+        default=None,
+        description="Ascending quantiles in (0,1) (or 0-100% accepted by UI) on the composite percentile to trigger exposure caps. If null, defaults to [0.90,0.95,0.99].",
+    )
+    mirror_exposures: list[float] | None = Field(
+        default=None,
+        description="Exposure caps in [0,1], length must equal mirror_quantiles. If null, defaults to [0.80,0.50,0.20].",
     )
     # Drawdown control (strategy NAV)
     dd_control: bool = Field(default=False, description="Enable drawdown control (based on strategy NAV drawdown).")
