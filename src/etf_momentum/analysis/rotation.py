@@ -79,6 +79,12 @@ class RotationAnalysisInputs:
     exec_price: str = "close"  # close|open|oc2
     timing_rsi_gate: bool = False
     timing_rsi_window: int = 24
+    # Phase-1 per-asset parameter rules (optional)
+    asset_momentum_floor_rules: list[dict[str, Any]] | None = None
+    asset_trend_rules: list[dict[str, Any]] | None = None
+    asset_rsi_rules: list[dict[str, Any]] | None = None
+    asset_chop_rules: list[dict[str, Any]] | None = None
+    asset_vol_monitor_rules: list[dict[str, Any]] | None = None
     asset_rc_rules: list[dict[str, Any]] | None = None
     asset_vol_index_rules: list[dict[str, Any]] | None = None
     vol_index_close: dict[str, Any] | None = None
@@ -154,6 +160,11 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             timing_rsi_gate=inp.timing_rsi_gate,
             timing_rsi_window=inp.timing_rsi_window,
             exec_price=inp.exec_price,
+            asset_momentum_floor_rules=inp.asset_momentum_floor_rules,
+            asset_trend_rules=inp.asset_trend_rules,
+            asset_rsi_rules=inp.asset_rsi_rules,
+            asset_chop_rules=inp.asset_chop_rules,
+            asset_vol_monitor_rules=inp.asset_vol_monitor_rules,
             asset_rc_rules=inp.asset_rc_rules,
             asset_vol_index_rules=inp.asset_vol_index_rules,
             vol_index_close=inp.vol_index_close,

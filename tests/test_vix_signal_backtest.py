@@ -29,6 +29,7 @@ def test_backtest_returns_desc_trades_and_nav_lengths():
 
     out = backtest_vix_next_day_signal(
         etf_close_cn=etf_close,
+        etf_open_cn=etf_close.copy(),
         index_close_us=vix_close,
         start=cn_dates[0],
         end=cn_dates[-1],
@@ -37,6 +38,7 @@ def test_backtest_returns_desc_trades_and_nav_lengths():
         threshold_quantile=0.01,  # allow trades
         trade_cost_bps=0.0,
         initial_position="long",
+        exec_model="open_open",
     )
     assert out["ok"] is True
     series = out["series"]

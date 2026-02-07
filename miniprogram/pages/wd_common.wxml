@@ -370,7 +370,7 @@
   <view class="card">
     <view class="title">轮动图表15：下一调仓日计划</view>
     <view wx:if="{{nextPlan && nextPlan.rebalance_effective_next_day}}" class="muted">
-      下一交易日（{{nextPlan.next_trading_day}}）为调仓执行日；计划持有：{{nextPlan.pick_name}}（{{nextPlan.pick_code}}）
+      下一交易日（{{nextPlan.next_trading_day}}）为调仓执行日；计划持有：{{nextPlan.pick_name}}（{{nextPlan.pick_code}}）<text wx:if="{{nextPlan.pick_exposure_text}}">；仓位：{{nextPlan.pick_exposure_text}}</text>
     </view>
     <view wx:if="{{nextPlan && !nextPlan.rebalance_effective_next_day}}" class="muted">
       下一交易日（{{nextPlan.next_trading_day}}）非调仓执行日

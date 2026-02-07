@@ -410,6 +410,41 @@
           <div id="s1_rollingChart"></div>
         </div>
       </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">两两比值曲线</h3>
+        <div class="muted">两种模式：<b>归一化</b>：ratio=(A/A0)/(B/B0)；<b>原始</b>：ratio=A/B。</div>
+        <div class="row" style="margin-top:8px;">
+          <div>
+            <label>A（分子）</label>
+            <select id="s1_ratioA"></select>
+          </div>
+          <div>
+            <label>B（分母）</label>
+            <select id="s1_ratioB"></select>
+          </div>
+          <div>
+            <label>比值模式</label>
+            <select id="s1_ratioMode">
+              <option value="normalized" selected>归一化（推荐）</option>
+              <option value="raw">原始值（A/B）</option>
+            </select>
+          </div>
+          <button id="s1_ratioRun">绘制比值</button>
+        </div>
+        <div id="s1_ratioMsg" class="msg panel"></div>
+        <div id="s1_ratioChart"></div>
+        <div class="panel two" style="margin-top: 10px;">
+          <div>
+            <h3 style="margin: 0 0 6px 0; font-size: 15px;">比值分布直方图（含分位数/现值标识）</h3>
+            <div id="s1_ratioHist"></div>
+          </div>
+          <div>
+            <h3 style="margin: 0 0 6px 0; font-size: 15px;">统计表</h3>
+            <table id="s1_ratioTable"></table>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- -------------------- TAB: Step2 -------------------- -->
@@ -1256,6 +1291,7 @@
       (function initStep1() {
         const setMsg = (t) => ($("s1_msg").textContent = t || "");
         const setPairMsg = (t) => ($("s1_pairMsg").textContent = t || "");
+        const setRatioMsg = (t) => ($("s1_ratioMsg").textContent = t || "");
         let lastSeries = null;
 
         function renderPrice(series) {
@@ -1351,9 +1387,236 @@
           $("s1_pairSel").onchange = () => renderPair(($("s1_pairSel").value || "").trim(), data.pairs);
         }
 
+        function _firstFinite(arr) {
+          for (const v of (arr || [])) {
+            const x = Number(v);
+            if (Number.isFinite(x) && x !== 0) return x;
+          }
+          return null;
+        }
+
+        function _alignedIntersection(aDates, aClose, bDates, bClose) {
+          const am = new Map();
+          for (let i = 0; i < (aDates || []).length; i++) {
+            const d = aDates[i];
+            const v = Number(aClose[i]);
+            if (!d) continue;
+            if (!Number.isFinite(v)) continue;
+            am.set(String(d), v);
+          }
+          const outDates = [];
+          const outA = [];
+          const outB = [];
+          for (let j = 0; j < (bDates || []).length; j++) {
+            const d = bDates[j];
+            const bv = Number(bClose[j]);
+            if (!d) continue;
+            if (!Number.isFinite(bv)) continue;
+            const av = am.get(String(d));
+            if (!Number.isFinite(av)) continue;
+            outDates.push(String(d));
+            outA.push(Number(av));
+            outB.push(Number(bv));
+          }
+          // ensure ascending by date string (YYYY-MM-DD)
+          const idx = outDates.map((d, i) => [d, i]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))).map(x => x[1]);
+          return {
+            dates: idx.map(i => outDates[i]),
+            a: idx.map(i => outA[i]),
+            b: idx.map(i => outB[i]),
+          };
+        }
+
+        function _quantileSorted(sorted, q) {
+          if (!sorted || sorted.length === 0) return null;
+          const n = sorted.length;
+          const p = Math.min(1, Math.max(0, Number(q)));
+          const idx = (n - 1) * p;
+          const lo = Math.floor(idx);
+          const hi = Math.ceil(idx);
+          if (lo === hi) return Number(sorted[lo]);
+          const a = Number(sorted[lo]);
+          const b = Number(sorted[hi]);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+          return a + (b - a) * (idx - lo);
+        }
+
+        function _ratioDistributionAndTable(values, currentValue) {
+          const xs = (values || []).map(v => Number(v)).filter(v => Number.isFinite(v));
+          xs.sort((a, b) => a - b);
+          const qs = [
+            { q: 0.01, label: "1%" , color: "rgba(214,39,40,0.95)" },
+            { q: 0.05, label: "5%" , color: "rgba(255,127,14,0.95)" },
+            { q: 0.10, label: "10%", color: "rgba(255,206,86,0.95)" },
+            { q: 0.25, label: "25%", color: "rgba(44,160,44,0.95)" },
+            { q: 0.50, label: "50%", color: "rgba(31,119,180,0.95)" },
+            { q: 0.75, label: "75%", color: "rgba(44,160,44,0.95)" },
+            { q: 0.90, label: "90%", color: "rgba(255,206,86,0.95)" },
+            { q: 0.95, label: "95%", color: "rgba(255,127,14,0.95)" },
+            { q: 0.99, label: "99%", color: "rgba(214,39,40,0.95)" },
+          ];
+          const qvals = qs.map(it => ({ ...it, value: _quantileSorted(xs, it.q) }));
+          const cur = Number(currentValue);
+          const curOk = Number.isFinite(cur);
+
+          // histogram
+          const shapes = [];
+          for (const it of qvals) {
+            if (!Number.isFinite(Number(it.value))) continue;
+            shapes.push({
+              type: "line",
+              xref: "x",
+              yref: "paper",
+              x0: Number(it.value),
+              x1: Number(it.value),
+              y0: 0,
+              y1: 1,
+              line: { color: it.color, width: 1.5, dash: "dot" },
+            });
+          }
+          if (curOk) {
+            shapes.push({
+              type: "line",
+              xref: "x",
+              yref: "paper",
+              x0: cur,
+              x1: cur,
+              y0: 0,
+              y1: 1,
+              line: { color: "rgba(17,17,17,0.95)", width: 2.0 },
+            });
+          }
+
+          // table
+          let html = "<tr><th>项</th><th>值</th></tr>";
+          html += `<tr><td>样本数</td><td>${xs.length}</td></tr>`;
+          if (curOk) html += `<tr><td><b>现值</b></td><td><b>${fmt(cur, 6)}</b></td></tr>`;
+          for (const it of qvals) {
+            html += `<tr><td>${it.label}</td><td>${fmt(it.value, 6)}</td></tr>`;
+          }
+          return { xs, qvals, shapes, tableHtml: html };
+        }
+
+        async function runRatio() {
+          const aId = ($("s1_ratioA").value || "").trim();
+          const bId = ($("s1_ratioB").value || "").trim();
+          const mode = ($("s1_ratioMode").value || "normalized").trim();
+          if (!aId || !bId) {
+            setRatioMsg("请选择 A/B。");
+            return;
+          }
+          if (aId === bId) {
+            setRatioMsg("A 与 B 不能相同。");
+            return;
+          }
+          setRatioMsg("加载中...");
+          try {
+            const resp = await api("/analysis/macro/series-batch", {
+              method: "POST",
+              // Auto use widest available overlap between A/B (backend uses full stored range when start/end omitted).
+              body: JSON.stringify({ series_ids: [aId, bId] }),
+            });
+            const data = await resp.json();
+            if (!data || !data.ok) {
+              setRatioMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+              Plotly.newPlot("s1_ratioChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+              return;
+            }
+            const sa = (data.series || {})[aId];
+            const sb = (data.series || {})[bId];
+            if (!sa || !sb) {
+              setRatioMsg("失败：后端未返回完整序列。");
+              return;
+            }
+            const u = _alignedIntersection(sa.dates || [], sa.close || [], sb.dates || [], sb.close || []);
+            if (!u.dates.length) {
+              setRatioMsg("失败：两序列无重叠日期。");
+              return;
+            }
+            let ratio = [];
+            let label = "";
+            if (mode === "raw") {
+              ratio = u.a.map((av, i) => {
+                const bv = Number(u.b[i]);
+                const a1 = Number(av);
+                if (!Number.isFinite(a1) || !Number.isFinite(bv) || bv === 0) return null;
+                return a1 / bv;
+              });
+              label = `${aId}/${bId}（原始）`;
+            } else {
+              const a0 = _firstFinite(u.a);
+              const b0 = _firstFinite(u.b);
+              if (!Number.isFinite(a0) || !Number.isFinite(b0) || a0 === 0 || b0 === 0) {
+                setRatioMsg("失败：无法归一化（首个有效值缺失/为0）。");
+                return;
+              }
+              const aN = u.a.map(v => Number(v) / Number(a0));
+              const bN = u.b.map(v => Number(v) / Number(b0));
+              ratio = aN.map((v, i) => (Number.isFinite(v) && Number.isFinite(bN[i]) && bN[i] !== 0) ? (v / bN[i]) : null);
+              label = `${aId}/${bId}（归一化）`;
+            }
+
+            // current value = last finite
+            let cur = null;
+            for (let i = ratio.length - 1; i >= 0; i--) {
+              const x = Number(ratio[i]);
+              if (Number.isFinite(x)) { cur = x; break; }
+            }
+
+            Plotly.newPlot("s1_ratioChart", [
+              { x: u.dates, y: ratio, name: label, type: "scatter", mode: "lines" },
+            ], {
+              margin: { t: 20 },
+              yaxis: { title: "ratio", tickformat: ".4f" },
+              xaxis: { title: "date" },
+            }, { displayModeBar: false });
+
+            // histogram + table (quantiles + current)
+            const dist = _ratioDistributionAndTable(ratio, cur);
+            Plotly.newPlot("s1_ratioHist", [
+              { x: dist.xs, type: "histogram", name: "ratio", opacity: 0.75 },
+            ], {
+              margin: { t: 20 },
+              shapes: dist.shapes,
+              xaxis: { title: "ratio" },
+              yaxis: { title: "count" },
+            }, { displayModeBar: false });
+            $("s1_ratioTable").innerHTML = dist.tableHtml;
+
+            const rng = `区间=${u.dates[0]}~${u.dates[u.dates.length - 1]}`;
+            setRatioMsg(`完成：A=${aId}, B=${bId}, mode=${mode}，样本数=${u.dates.length}，${rng}，现值=${(cur == null ? "" : fmt(cur, 6))}`);
+          } catch (e) {
+            setRatioMsg(`异常：${e && e.message ? e.message : String(e)}`);
+          }
+        }
+
         $("s1_end").value = ymdTodayMinus(0);
         $("s1_start").value = ymdTodayMinus(365 * 10);
         $("s1_run").addEventListener("click", run);
+
+        // Ratio selector options: Step1 +新增商品（均为 macro_prices series_id）
+        const ratioOpts = [
+          { id: "XAUUSD", name: "伦敦现货黄金 XAUUSD" },
+          { id: "GC_FUT", name: "纽约黄金期货 GC_FUT (GC=F)" },
+          { id: "XAGUSD", name: "伦敦现货白银 XAGUSD" },
+          { id: "SI_FUT", name: "纽约白银期货 SI_FUT (SI=F)" },
+          { id: "HG_FUT", name: "铜期货 HG_FUT (HG=F)" },
+          { id: "BRENT_FUT", name: "Brent 原油期货 BRENT_FUT (BZ=F)" },
+          { id: "WTI_FUT", name: "WTI 原油期货 WTI_FUT (CL=F)" },
+          { id: "DINIW", name: "美元指数 DINIW (DXY)" },
+          { id: "DGS2", name: "美债2Y DGS2" },
+          { id: "DGS5", name: "美债5Y DGS5" },
+          { id: "DGS10", name: "美债10Y DGS10" },
+          { id: "DGS30", name: "美债30Y DGS30" },
+        ];
+        $("s1_ratioA").innerHTML = ratioOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join("");
+        $("s1_ratioB").innerHTML = ratioOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join("");
+        $("s1_ratioA").value = "XAUUSD";
+        $("s1_ratioB").value = "DINIW";
+        $("s1_ratioRun").addEventListener("click", runRatio);
+        $("s1_ratioA").addEventListener("change", runRatio);
+        $("s1_ratioB").addEventListener("change", runRatio);
+        $("s1_ratioMode").addEventListener("change", runRatio);
       })();
 
       // -------------------- Step2 logic --------------------

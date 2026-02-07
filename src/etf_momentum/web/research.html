@@ -557,12 +557,25 @@
                 <option value="true">启用</option>
               </select>
             </div>
-            <div>
-              <label>动量阈值 <button class="helpBtn" data-metric="param_rot_floor" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-              <input id="rotFloor" value="0" />
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置动量阈值（使用打分序列）；支持 <code>*</code> 作为默认规则，单标的规则覆盖默认。
             </div>
           </div>
-          <div class="muted" style="margin-top:8px">说明：阈值触发后将进入空仓（现金）。</div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotFloorAddRule">添加规则</button>
+              <button id="rotFloorResetDefault">重置默认</button>
+              <span class="muted">每条规则可为不同标的设置不同动量阈值。</span>
+            </div>
+            <table id="rotFloorRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的code</th>
+                <th>动量阈值</th>
+                <th>操作</th>
+              </tr>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:8px">说明：启用后，若所有候选标的均被动量阈值过滤掉，则进入空仓（现金）。</div>
         </div>
 
         <div id="rotTabTrend" class="tabPanel" role="tabpanel">
@@ -574,17 +587,24 @@
                 <option value="true">开启</option>
               </select>
             </div>
-            <div>
-              <label>趋势过滤模式</label>
-              <select id="rotTrendMode" style="min-width:160px;">
-                <option value="each" selected>逐标的</option>
-                <option value="universe">全市场(候选均值)</option>
-              </select>
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置趋势过滤规则；支持 <code>*</code> 作为默认规则，单标的规则覆盖默认。
             </div>
-            <div>
-              <label>SMA窗口(交易日)</label>
-              <input id="rotTrendSma" value="20" />
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotTrendAddRule">添加规则</button>
+              <button id="rotTrendResetDefault">重置默认</button>
+              <span class="muted">每条规则可为不同标的设置不同模式/窗口。</span>
             </div>
+            <table id="rotTrendRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的code</th>
+                <th>模式</th>
+                <th>SMA窗口(交易日)</th>
+                <th>操作</th>
+              </tr>
+            </table>
           </div>
         </div>
 
@@ -597,42 +617,58 @@
                 <option value="true">开启</option>
               </select>
             </div>
-            <div>
-              <label>RSI窗口</label>
-              <input id="rotRsiWin" value="20" />
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置 RSI 窗口/阈值与是否屏蔽超买/超卖；支持 <code>*</code> 作为默认规则。
             </div>
-            <div>
-              <label>超买阈值</label>
-              <input id="rotRsiOver" value="70" />
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotRsiAddRule">添加规则</button>
+              <button id="rotRsiResetDefault">重置默认</button>
+              <span class="muted">单标的规则覆盖默认。</span>
             </div>
-            <div>
-              <label>超卖阈值</label>
-              <input id="rotRsiUnder" value="30" />
-            </div>
+            <table id="rotRsiRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的code</th>
+                <th>RSI窗口</th>
+                <th>超买阈值</th>
+                <th>超卖阈值</th>
+                <th>屏蔽超买</th>
+                <th>屏蔽超卖</th>
+                <th>操作</th>
+              </tr>
+            </table>
           </div>
         </div>
 
         <div id="rotTabVol" class="tabPanel" role="tabpanel">
           <div class="row">
             <div>
-              <label>波动率过滤开关 <button class="helpBtn" data-metric="param_rot_vol" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <label>波动率控制开关 <button class="helpBtn" data-metric="param_rot_vol" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
               <select id="rotVolOn" style="min-width:160px;">
                 <option value="false" selected>关闭</option>
                 <option value="true">开启</option>
               </select>
             </div>
-            <div>
-              <label>波动率窗口</label>
-              <input id="rotVolWin" value="20" />
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置“滚动年化波动率”仓位缩放；支持 <code>*</code> 默认规则。
             </div>
-            <div>
-              <label>目标年化波动率</label>
-              <input id="rotVolTarget" value="0.20" />
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotVolAddRule">添加规则</button>
+              <button id="rotVolResetDefault">重置默认</button>
+              <span class="muted">每条规则可设置窗口/目标/最大波动率。</span>
             </div>
-            <div>
-              <label>最大年化波动率</label>
-              <input id="rotVolMax" value="0.60" />
-            </div>
+            <table id="rotVolRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的code</th>
+                <th>窗口(交易日)</th>
+                <th>目标年化波动率</th>
+                <th>最大年化波动率</th>
+                <th>操作</th>
+              </tr>
+            </table>
           </div>
         </div>
 
@@ -645,29 +681,27 @@
                 <option value="true">开启</option>
               </select>
             </div>
-            <div>
-              <label>模式</label>
-              <select id="rotChopMode" style="min-width:160px;">
-                <option value="er" selected>ER（Efficiency Ratio）</option>
-                <option value="adx">ADX（Average Directional Index）</option>
-              </select>
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置 ER/ADX 震荡过滤；支持 <code>*</code> 默认规则。
             </div>
-            <div id="rotChopErBox">
-              <label>ER窗口</label>
-              <input id="rotChopWin" value="20" />
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotChopAddRule">添加规则</button>
+              <button id="rotChopResetDefault">重置默认</button>
+              <span class="muted">每条规则可单独选择 ER/ADX 及对应窗口/阈值。</span>
             </div>
-            <div id="rotChopErThrBox">
-              <label>ER阈值</label>
-              <input id="rotChopThr" value="0.25" />
-            </div>
-            <div id="rotChopAdxBox">
-              <label>ADX窗口</label>
-              <input id="rotChopAdxWin" value="20" />
-            </div>
-            <div id="rotChopAdxThrBox">
-              <label>ADX阈值</label>
-              <input id="rotChopAdxThr" value="20" />
-            </div>
+            <table id="rotChopRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的code</th>
+                <th>模式</th>
+                <th>ER窗口</th>
+                <th>ER阈值</th>
+                <th>ADX窗口</th>
+                <th>ADX阈值</th>
+                <th>操作</th>
+              </tr>
+            </table>
           </div>
         </div>
 
@@ -2097,6 +2131,14 @@
         }
         $("mpRotAnchorHint").textContent = (mpRotState.anchor === "mix") ? "MIX=周一~周五等权运营组合" : "";
       }
+      function _mpRotSetRange(k) {
+        mpRotState.rangeKey = String(k || "all");
+        Array.from(document.querySelectorAll("button.mpRotRange[data-k]")).forEach((b) => {
+          const on = (String(b.dataset.k || "all") === mpRotState.rangeKey);
+          b.style.fontWeight = on ? "700" : "400";
+          b.style.borderColor = on ? "#444" : "#bbb";
+        });
+      }
       function _mpRotSetStatus(s) { if ($("mpRotStatus")) $("mpRotStatus").textContent = s || ""; }
       function _pickRange(datesIso, key) {
         const ds = (datesIso || []).slice();
@@ -2145,6 +2187,22 @@
             }
             return out.length ? out : null;
           };
+          const _buildPhase1 = () => {
+            const a = _buildTrendRules(); if (a && a.__error) return a;
+            const b = _buildRsiRules(); if (b && b.__error) return b;
+            const c = _buildVolRules(); if (c && c.__error) return c;
+            const d = _buildChopRules(); if (d && d.__error) return d;
+            return {
+              asset_trend_rules: (a && a.__error ? null : a),
+              asset_rsi_rules: (b && b.__error ? null : b),
+              asset_vol_monitor_rules: (c && c.__error ? null : c),
+              asset_chop_rules: (d && d.__error ? null : d),
+              trend_default: _pickDefaultRule(a),
+              rsi_default: _pickDefaultRule(b),
+              vol_default: _pickDefaultRule(c),
+              chop_default: _pickDefaultRule(d),
+            };
+          };
           const _buildReq = (startYmd, endYmd, anchorWeekdayOrNull) => {
             const rfRaw = ($("rf").value || "").trim();
             let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
@@ -2170,6 +2228,15 @@
               mirror_exposures = _parseCsvNums(($("rotMirrorCaps").value || "").trim()).map(x => (x > 1.0 ? x / 100.0 : x)).filter(x => Number.isFinite(x));
               if (!mirror_quantiles.length || !mirror_exposures.length) { mirror_quantiles = null; mirror_exposures = null; }
             }
+            const p1 = _buildPhase1();
+            if (p1 && p1.__error) return p1;
+            const td = (p1 && p1.trend_default) ? p1.trend_default : { trend_mode: "each", trend_sma_window: 20 };
+            const rd = (p1 && p1.rsi_default) ? p1.rsi_default : { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+            const vd = (p1 && p1.vol_default) ? p1.vol_default : { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
+            const cd = (p1 && p1.chop_default) ? p1.chop_default : { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
+            const floorRules = _buildFloorRules();
+            if (floorRules && floorRules.__error) return floorRules;
+            const fd = _pickDefaultRule(floorRules) || { momentum_floor: 0.0 };
             const req = {
               codes: FIXED4,
               start: startYmd,
@@ -2183,27 +2250,30 @@
               skip_days: Number(($("rotSkip").value || "0").trim()),
               cost_bps: Number(($("rotCost").value || "0").trim()),
               risk_off: ($("rotRiskOff").value === "true"),
-              momentum_floor: Number(($("rotFloor").value || "0").trim()),
+              momentum_floor: Number(fd.momentum_floor),
+              asset_momentum_floor_rules: floorRules,
               score_method: $("rotScoreMethod").value,
               risk_free_rate: (Number.isFinite(risk_free_rate) ? risk_free_rate : 0.025),
               // filters & controls
               trend_filter: ($("rotTrendOn").value === "true"),
-              trend_mode: $("rotTrendMode").value,
-              trend_sma_window: Number(($("rotTrendSma").value || "20").trim()),
+              trend_mode: td.trend_mode,
+              trend_sma_window: Number(td.trend_sma_window),
               rsi_filter: ($("rotRsiOn").value === "true"),
-              rsi_window: Number(($("rotRsiWin").value || "20").trim()),
-              rsi_overbought: Number(($("rotRsiOver").value || "70").trim()),
-              rsi_oversold: Number(($("rotRsiUnder").value || "30").trim()),
+              rsi_window: Number(rd.rsi_window),
+              rsi_overbought: Number(rd.rsi_overbought),
+              rsi_oversold: Number(rd.rsi_oversold),
+              rsi_block_overbought: Boolean(rd.rsi_block_overbought),
+              rsi_block_oversold: Boolean(rd.rsi_block_oversold),
               vol_monitor: ($("rotVolOn").value === "true"),
-              vol_window: Number(($("rotVolWin").value || "20").trim()),
-              vol_target_ann: Number(($("rotVolTarget").value || "0.20").trim()),
-              vol_max_ann: Number(($("rotVolMax").value || "0.60").trim()),
+              vol_window: Number(vd.vol_window),
+              vol_target_ann: Number(vd.vol_target_ann),
+              vol_max_ann: Number(vd.vol_max_ann),
               chop_filter: ($("rotChopOn").value === "true"),
-              chop_mode: ($("rotChopMode").value || "er"),
-              chop_window: Number(($("rotChopWin").value || "20").trim()),
-              chop_er_threshold: Number(($("rotChopThr").value || "0.25").trim()),
-              chop_adx_window: Number(($("rotChopAdxWin").value || "20").trim()),
-              chop_adx_threshold: Number(($("rotChopAdxThr").value || "20").trim()),
+              chop_mode: cd.chop_mode,
+              chop_window: Number(cd.chop_window),
+              chop_er_threshold: Number(cd.chop_er_threshold),
+              chop_adx_window: Number(cd.chop_adx_window),
+              chop_adx_threshold: Number(cd.chop_adx_threshold),
               corr_filter: ($("rotCorrOn").value === "true"),
               corr_window: (($("rotCorrWindow").value || "").trim() === "" ? null : Number(($("rotCorrWindow").value || "").trim())),
               corr_threshold: Number(($("rotCorrThr").value || "0.5").trim()),
@@ -2229,6 +2299,10 @@
               dd_threshold,
               dd_reduce,
               dd_sleep_days: Number(($("rotDDSleep").value || "20").trim()),
+              asset_trend_rules: p1.asset_trend_rules,
+              asset_rsi_rules: p1.asset_rsi_rules,
+              asset_chop_rules: p1.asset_chop_rules,
+              asset_vol_monitor_rules: p1.asset_vol_monitor_rules,
               asset_rc_rules: null,
               asset_vol_index_rules: _buildVolIdxRules(),
             };
@@ -2285,13 +2359,18 @@
           const asof = _ymd(lastIso);
           try {
             const planPath = isMix ? "/analysis/rotation/next-plan-auto" : "/analysis/rotation/next-plan";
-            const planReq = isMix ? { asof } : { anchor_weekday: Number(mpRotState.anchor), asof };
+            // IMPORTANT: next-plan must apply the SAME rotation settings as weekly5-open.
+            // Send the full request payload (filters/sizing/timing/rules) and just add "asof".
+            const planReq = { ...(fullReq || {}), asof };
+            if (!isMix) planReq.anchor_weekday = Number(mpRotState.anchor);
             const respPlan = await api(planPath, { method: "POST", body: JSON.stringify(planReq) });
             const textPlan = await respPlan.text();
             if (respPlan.ok) {
               const plan = JSON.parse(textPlan);
               if (plan && plan.rebalance_effective_next_day) {
-                $("mpRotPlan").textContent = `下一交易日（${plan.next_trading_day}）为调仓执行日；计划持有：${plan.pick_name || "-"}（${plan.pick_code || "-"}）`;
+                const expo = (plan.pick_exposure == null || !Number.isFinite(Number(plan.pick_exposure))) ? null : Number(plan.pick_exposure);
+                const expoTxt = (expo == null) ? "" : `；仓位：${(expo * 100).toFixed(0)}%`;
+                $("mpRotPlan").textContent = `下一交易日（${plan.next_trading_day}）为调仓执行日；计划持有：${plan.pick_name || "-"}（${plan.pick_code || "-"}）${expoTxt}`;
               } else if (plan) {
                 $("mpRotPlan").textContent = `下一交易日（${plan.next_trading_day || "-"}）非调仓执行日`;
               } else {
@@ -2330,25 +2409,16 @@
 
       function exportPdfReport() {
         // Best-effort resize Plotly charts before printing.
+        // Use DOM-based discovery to avoid missing newly-added charts.
         try {
-          const ids = [
-            "chart", "rollingReturns", "rollingDD",
-            "corrHeatmap",
-            "ewCalHeatmap", "ewCalRollingChart",
-            "rotCalHeatmap", "rotCalRollingChart",
-            "rotChart", "rotDDCompare", "rotExcessChart", "rot40dDiffChart",
-            "rotRollingCombo", "rotExcessRollingCombo",
-            "mcEwHist", "mcEwQQ",
-            "mcRotHist", "mcRotQQ",
-            "mcExcessHist", "mcExcessQQ",
-          ];
-          for (const id of ids) {
-            const el = $(id);
-            if (el && window.Plotly && el.data) {
+          if (window.Plotly) {
+            const nodes = Array.from(document.querySelectorAll(".js-plotly-plot"));
+            for (const el of nodes) {
+              if (!el) continue;
               try { Plotly.Plots.resize(el); } catch (e) {}
             }
           }
-        } catch (e) {}
+        } catch (e) { /* ignore */ }
 
         const start = ($("start").value || "").trim();
         const end = ($("end").value || "").trim();
@@ -4879,7 +4949,10 @@
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
         const risk_off = ($("rotRiskOff").value === "true");
-        const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const floorRules = _buildFloorRules();
+        if (floorRules && floorRules.__error) return setMsg(floorRules.__error);
+        const fd = _pickDefaultRule(floorRules) || { momentum_floor: 0.0 };
+        const momentum_floor = Number(fd.momentum_floor);
         const score_method = $("rotScoreMethod").value;
         const tp_sl_mode = ($("rotTpSlMode").value || "none");
         const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
@@ -4892,22 +4965,38 @@
         const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
         if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
-        const trend_mode = $("rotTrendMode").value;
-        const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
         const rsi_filter = ($("rotRsiOn").value === "true");
-        const rsi_window = Number(($("rotRsiWin").value || "14").trim());
-        const rsi_overbought = Number(($("rotRsiOver").value || "70").trim());
-        const rsi_oversold = Number(($("rotRsiUnder").value || "30").trim());
         const vol_monitor = ($("rotVolOn").value === "true");
-        const vol_window = Number(($("rotVolWin").value || "20").trim());
-        const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
-        const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
         const chop_filter = ($("rotChopOn").value === "true");
-        const chop_mode = ($("rotChopMode").value || "er");
-        const chop_window = Number(($("rotChopWin").value || "20").trim());
-        const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
-        const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
-        const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
+        const asset_trend_rules = _buildTrendRules();
+        if (asset_trend_rules && asset_trend_rules.__error) return setMsg(asset_trend_rules.__error);
+        const asset_rsi_rules = _buildRsiRules();
+        if (asset_rsi_rules && asset_rsi_rules.__error) return setMsg(asset_rsi_rules.__error);
+        const asset_vol_monitor_rules = _buildVolRules();
+        if (asset_vol_monitor_rules && asset_vol_monitor_rules.__error) return setMsg(asset_vol_monitor_rules.__error);
+        const asset_chop_rules = _buildChopRules();
+        if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
+
+        const td = _pickDefaultRule(asset_trend_rules) || { trend_mode: "each", trend_sma_window: 20 };
+        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+        const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
+        const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
+
+        const trend_mode = String(td.trend_mode || "each");
+        const trend_sma_window = Number(td.trend_sma_window);
+        const rsi_window = Number(rd.rsi_window);
+        const rsi_overbought = Number(rd.rsi_overbought);
+        const rsi_oversold = Number(rd.rsi_oversold);
+        const rsi_block_overbought = Boolean(rd.rsi_block_overbought);
+        const rsi_block_oversold = Boolean(rd.rsi_block_oversold);
+        const vol_window = Number(vd.vol_window);
+        const vol_target_ann = Number(vd.vol_target_ann);
+        const vol_max_ann = Number(vd.vol_max_ann);
+        const chop_mode = String(cd.chop_mode || "er");
+        const chop_window = Number(cd.chop_window);
+        const chop_er_threshold = Number(cd.chop_er_threshold);
+        const chop_adx_window = Number(cd.chop_adx_window);
+        const chop_adx_threshold = Number(cd.chop_adx_threshold);
         const corr_filter = ($("rotCorrOn").value === "true");
         const corrWinRaw = ($("rotCorrWindow").value || "").trim();
         const corr_window = corrWinRaw === "" ? null : Number(corrWinRaw);
@@ -4980,17 +5069,7 @@
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
-        if (trend_filter && (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0)) return setMsg("趋势 SMA 窗口必须是正整数");
-        if (rsi_filter && (!Number.isFinite(rsi_window) || rsi_window <= 0)) return setMsg("RSI 窗口必须是正整数");
-        if (rsi_filter && (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100)) return setMsg("RSI 超买阈值需在 0~100");
-        if (rsi_filter && (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100)) return setMsg("RSI 超卖阈值需在 0~100");
-        if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
-        if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
-        if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
-        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_window) || chop_window <= 1)) return setMsg("ER窗口必须>=2");
-        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0)) return setMsg("ER阈值必须>0，例如 0.25");
-        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1)) return setMsg("ADX窗口必须>=2");
-        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
+        // phase-1 rules already validated by table parsers
         $("status").textContent = "回测中...";
         setMsg("");
         const asset_rc_rules = null;
@@ -5056,9 +5135,11 @@
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             timing_rsi_gate, timing_rsi_window,
             trend_filter, trend_mode, trend_sma_window,
-            rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
+            rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
+            asset_trend_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+            asset_momentum_floor_rules: floorRules,
             asset_rc_rules,
             asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
           }),
@@ -5135,7 +5216,10 @@
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
         const risk_off = ($("rotRiskOff").value === "true");
-        const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const floorRules = _buildFloorRules();
+        if (floorRules && floorRules.__error) return setMsg(floorRules.__error);
+        const fd = _pickDefaultRule(floorRules) || { momentum_floor: 0.0 };
+        const momentum_floor = Number(fd.momentum_floor);
         const score_method = $("rotScoreMethod").value;
         const tp_sl_mode = ($("rotTpSlMode").value || "none");
         const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
@@ -5148,22 +5232,38 @@
         const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
         if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
-        const trend_mode = $("rotTrendMode").value;
-        const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
         const rsi_filter = ($("rotRsiOn").value === "true");
-        const rsi_window = Number(($("rotRsiWin").value || "14").trim());
-        const rsi_overbought = Number(($("rotRsiOver").value || "70").trim());
-        const rsi_oversold = Number(($("rotRsiUnder").value || "30").trim());
         const vol_monitor = ($("rotVolOn").value === "true");
-        const vol_window = Number(($("rotVolWin").value || "20").trim());
-        const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
-        const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
         const chop_filter = ($("rotChopOn").value === "true");
-        const chop_mode = ($("rotChopMode").value || "er");
-        const chop_window = Number(($("rotChopWin").value || "20").trim());
-        const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
-        const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
-        const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
+        const asset_trend_rules = _buildTrendRules();
+        if (asset_trend_rules && asset_trend_rules.__error) return setMsg(asset_trend_rules.__error);
+        const asset_rsi_rules = _buildRsiRules();
+        if (asset_rsi_rules && asset_rsi_rules.__error) return setMsg(asset_rsi_rules.__error);
+        const asset_vol_monitor_rules = _buildVolRules();
+        if (asset_vol_monitor_rules && asset_vol_monitor_rules.__error) return setMsg(asset_vol_monitor_rules.__error);
+        const asset_chop_rules = _buildChopRules();
+        if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
+
+        const td = _pickDefaultRule(asset_trend_rules) || { trend_mode: "each", trend_sma_window: 20 };
+        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+        const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
+        const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
+
+        const trend_mode = String(td.trend_mode || "each");
+        const trend_sma_window = Number(td.trend_sma_window);
+        const rsi_window = Number(rd.rsi_window);
+        const rsi_overbought = Number(rd.rsi_overbought);
+        const rsi_oversold = Number(rd.rsi_oversold);
+        const rsi_block_overbought = Boolean(rd.rsi_block_overbought);
+        const rsi_block_oversold = Boolean(rd.rsi_block_oversold);
+        const vol_window = Number(vd.vol_window);
+        const vol_target_ann = Number(vd.vol_target_ann);
+        const vol_max_ann = Number(vd.vol_max_ann);
+        const chop_mode = String(cd.chop_mode || "er");
+        const chop_window = Number(cd.chop_window);
+        const chop_er_threshold = Number(cd.chop_er_threshold);
+        const chop_adx_window = Number(cd.chop_adx_window);
+        const chop_adx_threshold = Number(cd.chop_adx_threshold);
         const corr_filter = ($("rotCorrOn").value === "true");
         const corrWinRaw = ($("rotCorrWindow").value || "").trim();
         const corr_window = corrWinRaw === "" ? null : Number(corrWinRaw);
@@ -5230,17 +5330,7 @@
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
-        if (trend_filter && (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0)) return setMsg("趋势 SMA 窗口必须是正整数");
-        if (rsi_filter && (!Number.isFinite(rsi_window) || rsi_window <= 0)) return setMsg("RSI 窗口必须是正整数");
-        if (rsi_filter && (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100)) return setMsg("RSI 超买阈值需在 0~100");
-        if (rsi_filter && (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100)) return setMsg("RSI 超卖阈值需在 0~100");
-        if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
-        if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
-        if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
-        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_window) || chop_window <= 1)) return setMsg("ER窗口必须>=2");
-        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0)) return setMsg("ER阈值必须>0，例如 0.25");
-        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1)) return setMsg("ADX窗口必须>=2");
-        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
+        // phase-1 rules already validated by table parsers
         const parsed = parseCalendarAnchors("rot", rebalance);
         if (!parsed.ok) return setMsg(parsed.reason);
         const anchors = parsed.anchors;
@@ -5313,10 +5403,12 @@
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             timing_rsi_gate, timing_rsi_window,
             trend_filter, trend_mode, trend_sma_window,
-            rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
+            rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
+            asset_trend_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
             anchors, exec_prices,
+            asset_momentum_floor_rules: floorRules,
             asset_rc_rules,
             asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
           }),
@@ -5412,26 +5504,321 @@
       }
       initTabs("rotTabs");
 
-      function setBoxVisible(boxId, on) {
-        const el = $(boxId);
-        if (!el) return;
-        el.style.display = on ? "" : "none";
-        const inputs = Array.from(el.querySelectorAll("input, select"));
-        inputs.forEach((x) => { x.disabled = !on; });
+      // ---------------- Rotation: Phase-1 per-asset rule tables ----------------
+      const _parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
+      const _tableDataRows = (tblId) => {
+        const tbl = $(tblId);
+        if (!tbl) return [];
+        return Array.from(tbl.querySelectorAll("tr")).slice(1);
+      };
+      const _setTabEnabledByToggle = (tabId, toggleId) => {
+        const root = $(tabId);
+        const toggle = $(toggleId);
+        if (!root || !toggle) return;
+        const on = (toggle.value === "true");
+        Array.from(root.querySelectorAll("input, select, button")).forEach((el) => {
+          if (el && el.id === toggleId) return;
+          el.disabled = !on;
+        });
+      };
+
+      // ---- Momentum floor rules ----
+      function _rotFloorAddRuleRow(rule) {
+        const tbl = $("rotFloorRulesTable");
+        if (!tbl) return;
+        const r = rule || {};
+        const code = (r.code || "").toString();
+        const floor = (r.momentum_floor == null ? 0.0 : r.momentum_floor).toString();
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="rotFloorCode" value="${code}" placeholder="如 * 或 513100" style="min-width:120px;" /></td>
+          <td><input class="rotFloorVal" value="${floor}" placeholder="0" style="min-width:120px;" /></td>
+          <td><button class="rotFloorRemove">删除</button></td>
+        `;
+        tbl.appendChild(tr);
+        const btn = tr.querySelector(".rotFloorRemove");
+        if (btn) btn.addEventListener("click", () => tr.remove());
       }
-      function updateChopModeUI() {
-        const chopOn = ($("rotChopOn").value === "true");
-        const mode = ($("rotChopMode").value || "er");
-        const showEr = chopOn && mode === "er";
-        const showAdx = chopOn && mode === "adx";
-        setBoxVisible("rotChopErBox", showEr);
-        setBoxVisible("rotChopErThrBox", showEr);
-        setBoxVisible("rotChopAdxBox", showAdx);
-        setBoxVisible("rotChopAdxThrBox", showAdx);
+      function _rotFloorClearRuleRows() {
+        const tbl = $("rotFloorRulesTable");
+        if (!tbl) return;
+        const trs = Array.from(tbl.querySelectorAll("tr"));
+        for (let i = 1; i < trs.length; i++) trs[i].remove();
       }
-      $("rotChopOn").addEventListener("change", updateChopModeUI);
-      $("rotChopMode").addEventListener("change", updateChopModeUI);
-      updateChopModeUI();
+      function _rotFloorResetDefaultRules() {
+        _rotFloorClearRuleRows();
+        _rotFloorAddRuleRow({ code: "*", momentum_floor: 0.0 });
+      }
+      function _buildFloorRules() {
+        const on = ($("rotRiskOff") && $("rotRiskOff").value === "true");
+        if (!on) return null;
+        const out = [];
+        for (const tr of _tableDataRows("rotFloorRulesTable")) {
+          const code = (tr.querySelector(".rotFloorCode") && tr.querySelector(".rotFloorCode").value) ? String(tr.querySelector(".rotFloorCode").value).trim() : "";
+          if (!code) continue;
+          const floor = Number((tr.querySelector(".rotFloorVal") && tr.querySelector(".rotFloorVal").value) ? tr.querySelector(".rotFloorVal").value : "0");
+          if (!Number.isFinite(floor)) return { __error: "动量过滤：动量阈值必须是数字" };
+          out.push({ code, momentum_floor: floor });
+        }
+        return out.length ? out : null;
+      }
+
+      // ---- Trend rules ----
+      function _rotTrendAddRuleRow(rule) {
+        const tbl = $("rotTrendRulesTable");
+        if (!tbl) return;
+        const r = rule || {};
+        const code = (r.code || "").toString();
+        const mode = (r.trend_mode || "each").toString().toLowerCase();
+        const win = (r.trend_sma_window == null ? 20 : r.trend_sma_window).toString();
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="rotTrendCode" value="${code}" placeholder="如 * 或 518880" style="min-width:120px;" /></td>
+          <td>
+            <select class="rotTrendMode" style="min-width:160px;">
+              <option value="each" ${mode==="each" ? "selected" : ""}>逐标的(each)</option>
+              <option value="universe" ${mode==="universe" ? "selected" : ""}>全市场均值(universe)</option>
+            </select>
+          </td>
+          <td><input class="rotTrendWin" value="${win}" placeholder="20" style="min-width:120px;" /></td>
+          <td><button class="rotTrendRemove">删除</button></td>
+        `;
+        tbl.appendChild(tr);
+        const btn = tr.querySelector(".rotTrendRemove");
+        if (btn) btn.addEventListener("click", () => tr.remove());
+      }
+      function _rotTrendClearRuleRows() {
+        const tbl = $("rotTrendRulesTable");
+        if (!tbl) return;
+        const trs = Array.from(tbl.querySelectorAll("tr"));
+        for (let i = 1; i < trs.length; i++) trs[i].remove();
+      }
+      function _rotTrendResetDefaultRules() {
+        _rotTrendClearRuleRows();
+        _rotTrendAddRuleRow({ code: "*", trend_mode: "each", trend_sma_window: 20 });
+      }
+      function _buildTrendRules() {
+        const on = ($("rotTrendOn") && $("rotTrendOn").value === "true");
+        if (!on) return null;
+        const out = [];
+        for (const tr of _tableDataRows("rotTrendRulesTable")) {
+          const code = (tr.querySelector(".rotTrendCode") && tr.querySelector(".rotTrendCode").value) ? String(tr.querySelector(".rotTrendCode").value).trim() : "";
+          if (!code) continue;
+          const trend_mode = (tr.querySelector(".rotTrendMode") && tr.querySelector(".rotTrendMode").value) ? String(tr.querySelector(".rotTrendMode").value).trim().toLowerCase() : "each";
+          const winRaw = (tr.querySelector(".rotTrendWin") && tr.querySelector(".rotTrendWin").value) ? String(tr.querySelector(".rotTrendWin").value).trim() : "20";
+          const trend_sma_window = Math.floor(Number(winRaw));
+          if (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0) return { __error: "趋势过滤：SMA窗口必须是正整数" };
+          out.push({ code, trend_mode, trend_sma_window });
+        }
+        return out.length ? out : null;
+      }
+
+      // ---- RSI rules ----
+      function _rotRsiAddRuleRow(rule) {
+        const tbl = $("rotRsiRulesTable");
+        if (!tbl) return;
+        const r = rule || {};
+        const code = (r.code || "").toString();
+        const win = (r.rsi_window == null ? 20 : r.rsi_window).toString();
+        const ob = (r.rsi_overbought == null ? 70 : r.rsi_overbought).toString();
+        const os = (r.rsi_oversold == null ? 30 : r.rsi_oversold).toString();
+        const blkOb = (r.rsi_block_overbought == null ? true : Boolean(r.rsi_block_overbought));
+        const blkOs = (r.rsi_block_oversold == null ? false : Boolean(r.rsi_block_oversold));
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="rotRsiCode" value="${code}" placeholder="如 * 或 513100" style="min-width:120px;" /></td>
+          <td><input class="rotRsiWin" value="${win}" placeholder="20" style="min-width:90px;" /></td>
+          <td><input class="rotRsiOb" value="${ob}" placeholder="70" style="min-width:90px;" /></td>
+          <td><input class="rotRsiOs" value="${os}" placeholder="30" style="min-width:90px;" /></td>
+          <td>
+            <select class="rotRsiBlkOb" style="min-width:110px;">
+              <option value="true" ${blkOb ? "selected" : ""}>true</option>
+              <option value="false" ${!blkOb ? "selected" : ""}>false</option>
+            </select>
+          </td>
+          <td>
+            <select class="rotRsiBlkOs" style="min-width:110px;">
+              <option value="true" ${blkOs ? "selected" : ""}>true</option>
+              <option value="false" ${!blkOs ? "selected" : ""}>false</option>
+            </select>
+          </td>
+          <td><button class="rotRsiRemove">删除</button></td>
+        `;
+        tbl.appendChild(tr);
+        const btn = tr.querySelector(".rotRsiRemove");
+        if (btn) btn.addEventListener("click", () => tr.remove());
+      }
+      function _rotRsiClearRuleRows() {
+        const tbl = $("rotRsiRulesTable");
+        if (!tbl) return;
+        const trs = Array.from(tbl.querySelectorAll("tr"));
+        for (let i = 1; i < trs.length; i++) trs[i].remove();
+      }
+      function _rotRsiResetDefaultRules() {
+        _rotRsiClearRuleRows();
+        _rotRsiAddRuleRow({ code: "*", rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false });
+      }
+      function _buildRsiRules() {
+        const on = ($("rotRsiOn") && $("rotRsiOn").value === "true");
+        if (!on) return null;
+        const out = [];
+        for (const tr of _tableDataRows("rotRsiRulesTable")) {
+          const code = (tr.querySelector(".rotRsiCode") && tr.querySelector(".rotRsiCode").value) ? String(tr.querySelector(".rotRsiCode").value).trim() : "";
+          if (!code) continue;
+          const rsi_window = Math.floor(Number((tr.querySelector(".rotRsiWin") && tr.querySelector(".rotRsiWin").value) ? tr.querySelector(".rotRsiWin").value : "20"));
+          const rsi_overbought = Number((tr.querySelector(".rotRsiOb") && tr.querySelector(".rotRsiOb").value) ? tr.querySelector(".rotRsiOb").value : "70");
+          const rsi_oversold = Number((tr.querySelector(".rotRsiOs") && tr.querySelector(".rotRsiOs").value) ? tr.querySelector(".rotRsiOs").value : "30");
+          const rsi_block_overbought = ((tr.querySelector(".rotRsiBlkOb") && tr.querySelector(".rotRsiBlkOb").value) ? String(tr.querySelector(".rotRsiBlkOb").value) : "true") === "true";
+          const rsi_block_oversold = ((tr.querySelector(".rotRsiBlkOs") && tr.querySelector(".rotRsiBlkOs").value) ? String(tr.querySelector(".rotRsiBlkOs").value) : "false") === "true";
+          if (!Number.isFinite(rsi_window) || rsi_window <= 0) return { __error: "RSI过滤：窗口必须是正整数" };
+          if (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100) return { __error: "RSI过滤：超买阈值必须在[0,100]" };
+          if (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100) return { __error: "RSI过滤：超卖阈值必须在[0,100]" };
+          out.push({ code, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold });
+        }
+        return out.length ? out : null;
+      }
+
+      // ---- Vol monitor rules ----
+      function _rotVolAddRuleRow(rule) {
+        const tbl = $("rotVolRulesTable");
+        if (!tbl) return;
+        const r = rule || {};
+        const code = (r.code || "").toString();
+        const win = (r.vol_window == null ? 20 : r.vol_window).toString();
+        const tgt = (r.vol_target_ann == null ? 0.20 : r.vol_target_ann).toString();
+        const mx = (r.vol_max_ann == null ? 0.60 : r.vol_max_ann).toString();
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="rotVolCode" value="${code}" placeholder="如 * 或 159915" style="min-width:120px;" /></td>
+          <td><input class="rotVolWin" value="${win}" placeholder="20" style="min-width:110px;" /></td>
+          <td><input class="rotVolTarget" value="${tgt}" placeholder="0.20" style="min-width:130px;" /></td>
+          <td><input class="rotVolMax" value="${mx}" placeholder="0.60" style="min-width:130px;" /></td>
+          <td><button class="rotVolRemove">删除</button></td>
+        `;
+        tbl.appendChild(tr);
+        const btn = tr.querySelector(".rotVolRemove");
+        if (btn) btn.addEventListener("click", () => tr.remove());
+      }
+      function _rotVolClearRuleRows() {
+        const tbl = $("rotVolRulesTable");
+        if (!tbl) return;
+        const trs = Array.from(tbl.querySelectorAll("tr"));
+        for (let i = 1; i < trs.length; i++) trs[i].remove();
+      }
+      function _rotVolResetDefaultRules() {
+        _rotVolClearRuleRows();
+        _rotVolAddRuleRow({ code: "*", vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 });
+      }
+      function _buildVolRules() {
+        const on = ($("rotVolOn") && $("rotVolOn").value === "true");
+        if (!on) return null;
+        const out = [];
+        for (const tr of _tableDataRows("rotVolRulesTable")) {
+          const code = (tr.querySelector(".rotVolCode") && tr.querySelector(".rotVolCode").value) ? String(tr.querySelector(".rotVolCode").value).trim() : "";
+          if (!code) continue;
+          const vol_window = Math.floor(Number((tr.querySelector(".rotVolWin") && tr.querySelector(".rotVolWin").value) ? tr.querySelector(".rotVolWin").value : "20"));
+          const vol_target_ann = Number((tr.querySelector(".rotVolTarget") && tr.querySelector(".rotVolTarget").value) ? tr.querySelector(".rotVolTarget").value : "0.20");
+          const vol_max_ann = Number((tr.querySelector(".rotVolMax") && tr.querySelector(".rotVolMax").value) ? tr.querySelector(".rotVolMax").value : "0.60");
+          if (!Number.isFinite(vol_window) || vol_window <= 0) return { __error: "波动率控制：窗口必须是正整数" };
+          if (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0) return { __error: "波动率控制：目标年化波动率必须>0" };
+          if (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0) return { __error: "波动率控制：最大年化波动率必须>0" };
+          out.push({ code, vol_window, vol_target_ann, vol_max_ann });
+        }
+        return out.length ? out : null;
+      }
+
+      // ---- Chop rules ----
+      function _rotChopAddRuleRow(rule) {
+        const tbl = $("rotChopRulesTable");
+        if (!tbl) return;
+        const r = rule || {};
+        const code = (r.code || "").toString();
+        const mode = (r.chop_mode || "er").toString().toLowerCase();
+        const win = (r.chop_window == null ? 20 : r.chop_window).toString();
+        const thr = (r.chop_er_threshold == null ? 0.25 : r.chop_er_threshold).toString();
+        const aw = (r.chop_adx_window == null ? 20 : r.chop_adx_window).toString();
+        const at = (r.chop_adx_threshold == null ? 20 : r.chop_adx_threshold).toString();
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="rotChopCode" value="${code}" placeholder="如 * 或 518880" style="min-width:120px;" /></td>
+          <td>
+            <select class="rotChopMode" style="min-width:140px;">
+              <option value="er" ${mode==="er" ? "selected" : ""}>ER</option>
+              <option value="adx" ${mode==="adx" ? "selected" : ""}>ADX</option>
+            </select>
+          </td>
+          <td><input class="rotChopWin" value="${win}" placeholder="20" style="min-width:90px;" /></td>
+          <td><input class="rotChopThr" value="${thr}" placeholder="0.25" style="min-width:90px;" /></td>
+          <td><input class="rotChopAdxWin" value="${aw}" placeholder="20" style="min-width:90px;" /></td>
+          <td><input class="rotChopAdxThr" value="${at}" placeholder="20" style="min-width:90px;" /></td>
+          <td><button class="rotChopRemove">删除</button></td>
+        `;
+        tbl.appendChild(tr);
+        const btn = tr.querySelector(".rotChopRemove");
+        if (btn) btn.addEventListener("click", () => tr.remove());
+      }
+      function _rotChopClearRuleRows() {
+        const tbl = $("rotChopRulesTable");
+        if (!tbl) return;
+        const trs = Array.from(tbl.querySelectorAll("tr"));
+        for (let i = 1; i < trs.length; i++) trs[i].remove();
+      }
+      function _rotChopResetDefaultRules() {
+        _rotChopClearRuleRows();
+        _rotChopAddRuleRow({ code: "*", chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 });
+      }
+      function _buildChopRules() {
+        const on = ($("rotChopOn") && $("rotChopOn").value === "true");
+        if (!on) return null;
+        const out = [];
+        for (const tr of _tableDataRows("rotChopRulesTable")) {
+          const code = (tr.querySelector(".rotChopCode") && tr.querySelector(".rotChopCode").value) ? String(tr.querySelector(".rotChopCode").value).trim() : "";
+          if (!code) continue;
+          const chop_mode = (tr.querySelector(".rotChopMode") && tr.querySelector(".rotChopMode").value) ? String(tr.querySelector(".rotChopMode").value).trim().toLowerCase() : "er";
+          const chop_window = Math.floor(Number((tr.querySelector(".rotChopWin") && tr.querySelector(".rotChopWin").value) ? tr.querySelector(".rotChopWin").value : "20"));
+          const chop_er_threshold = Number((tr.querySelector(".rotChopThr") && tr.querySelector(".rotChopThr").value) ? tr.querySelector(".rotChopThr").value : "0.25");
+          const chop_adx_window = Math.floor(Number((tr.querySelector(".rotChopAdxWin") && tr.querySelector(".rotChopAdxWin").value) ? tr.querySelector(".rotChopAdxWin").value : "20"));
+          const chop_adx_threshold = Number((tr.querySelector(".rotChopAdxThr") && tr.querySelector(".rotChopAdxThr").value) ? tr.querySelector(".rotChopAdxThr").value : "20");
+          if (!Number.isFinite(chop_window) || chop_window <= 1) return { __error: "震荡过滤：ER窗口必须>1" };
+          if (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0) return { __error: "震荡过滤：ER阈值必须>0" };
+          if (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1) return { __error: "震荡过滤：ADX窗口必须>1" };
+          if (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0) return { __error: "震荡过滤：ADX阈值必须>0" };
+          out.push({ code, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold });
+        }
+        return out.length ? out : null;
+      }
+
+      const _pickDefaultRule = (rules) => {
+        if (!rules || !Array.isArray(rules)) return null;
+        const r = rules.find(x => x && String(x.code || "").trim() === "*");
+        return r || null;
+      };
+
+      function _initPhase1RuleTables() {
+        try { _rotFloorResetDefaultRules(); _setTabEnabledByToggle("rotTabFloor", "rotRiskOff"); } catch { /* ignore */ }
+        try { _rotTrendResetDefaultRules(); _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"); } catch { /* ignore */ }
+        try { _rotRsiResetDefaultRules(); _setTabEnabledByToggle("rotTabRsi", "rotRsiOn"); } catch { /* ignore */ }
+        try { _rotVolResetDefaultRules(); _setTabEnabledByToggle("rotTabVol", "rotVolOn"); } catch { /* ignore */ }
+        try { _rotChopResetDefaultRules(); _setTabEnabledByToggle("rotTabChop", "rotChopOn"); } catch { /* ignore */ }
+
+        if ($("rotRiskOff")) $("rotRiskOff").addEventListener("change", () => _setTabEnabledByToggle("rotTabFloor", "rotRiskOff"));
+        if ($("rotTrendOn")) $("rotTrendOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"));
+        if ($("rotRsiOn")) $("rotRsiOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabRsi", "rotRsiOn"));
+        if ($("rotVolOn")) $("rotVolOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabVol", "rotVolOn"));
+        if ($("rotChopOn")) $("rotChopOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabChop", "rotChopOn"));
+
+        if ($("rotFloorAddRule")) $("rotFloorAddRule").addEventListener("click", () => _rotFloorAddRuleRow({}));
+        if ($("rotFloorResetDefault")) $("rotFloorResetDefault").addEventListener("click", _rotFloorResetDefaultRules);
+        if ($("rotTrendAddRule")) $("rotTrendAddRule").addEventListener("click", () => _rotTrendAddRuleRow({}));
+        if ($("rotTrendResetDefault")) $("rotTrendResetDefault").addEventListener("click", _rotTrendResetDefaultRules);
+        if ($("rotRsiAddRule")) $("rotRsiAddRule").addEventListener("click", () => _rotRsiAddRuleRow({}));
+        if ($("rotRsiResetDefault")) $("rotRsiResetDefault").addEventListener("click", _rotRsiResetDefaultRules);
+        if ($("rotVolAddRule")) $("rotVolAddRule").addEventListener("click", () => _rotVolAddRuleRow({}));
+        if ($("rotVolResetDefault")) $("rotVolResetDefault").addEventListener("click", _rotVolResetDefaultRules);
+        if ($("rotChopAddRule")) $("rotChopAddRule").addEventListener("click", () => _rotChopAddRuleRow({}));
+        if ($("rotChopResetDefault")) $("rotChopResetDefault").addEventListener("click", _rotChopResetDefaultRules);
+      }
+      _initPhase1RuleTables();
 
       // ---------------- Rotation: vol-index timing UI (VIX/GVZ) ----------------
       function _rotVolIdxWindowOptionsHtml(selectedValue) {
@@ -5493,7 +5880,6 @@
 
       function _rotVolIdxResetDefaultRules() {
         _rotVolIdxClearRuleRows();
-        _rotVolIdxAddRuleRow({ code: "159915", index: "WAVOL", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
         _rotVolIdxAddRuleRow({ code: "513100", index: "VIX", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
         _rotVolIdxAddRuleRow({ code: "518880", index: "GVZ", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
       }
@@ -5584,7 +5970,10 @@
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
         const risk_off = ($("rotRiskOff").value === "true");
-        const momentum_floor = Number(($("rotFloor").value || "0").trim());
+        const floorRules = _buildFloorRules();
+        if (floorRules && floorRules.__error) return setMsg(floorRules.__error);
+        const fd = _pickDefaultRule(floorRules) || { momentum_floor: 0.0 };
+        const momentum_floor = Number(fd.momentum_floor);
         const score_method = $("rotScoreMethod").value;
         const tp_sl_mode = ($("rotTpSlMode").value || "none");
         const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
@@ -5597,22 +5986,38 @@
         const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
         if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
-        const trend_mode = $("rotTrendMode").value;
-        const trend_sma_window = Number(($("rotTrendSma").value || "200").trim());
         const rsi_filter = ($("rotRsiOn").value === "true");
-        const rsi_window = Number(($("rotRsiWin").value || "14").trim());
-        const rsi_overbought = Number(($("rotRsiOver").value || "70").trim());
-        const rsi_oversold = Number(($("rotRsiUnder").value || "30").trim());
         const vol_monitor = ($("rotVolOn").value === "true");
-        const vol_window = Number(($("rotVolWin").value || "20").trim());
-        const vol_target_ann = Number(($("rotVolTarget").value || "0.20").trim());
-        const vol_max_ann = Number(($("rotVolMax").value || "0.60").trim());
         const chop_filter = ($("rotChopOn").value === "true");
-        const chop_mode = ($("rotChopMode").value || "er");
-        const chop_window = Number(($("rotChopWin").value || "20").trim());
-        const chop_er_threshold = Number(($("rotChopThr").value || "0.25").trim());
-        const chop_adx_window = Number(($("rotChopAdxWin").value || "20").trim());
-        const chop_adx_threshold = Number(($("rotChopAdxThr").value || "20").trim());
+        const asset_trend_rules = _buildTrendRules();
+        if (asset_trend_rules && asset_trend_rules.__error) return setMsg(asset_trend_rules.__error);
+        const asset_rsi_rules = _buildRsiRules();
+        if (asset_rsi_rules && asset_rsi_rules.__error) return setMsg(asset_rsi_rules.__error);
+        const asset_vol_monitor_rules = _buildVolRules();
+        if (asset_vol_monitor_rules && asset_vol_monitor_rules.__error) return setMsg(asset_vol_monitor_rules.__error);
+        const asset_chop_rules = _buildChopRules();
+        if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
+
+        const td = _pickDefaultRule(asset_trend_rules) || { trend_mode: "each", trend_sma_window: 20 };
+        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+        const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
+        const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
+
+        const trend_mode = String(td.trend_mode || "each");
+        const trend_sma_window = Number(td.trend_sma_window);
+        const rsi_window = Number(rd.rsi_window);
+        const rsi_overbought = Number(rd.rsi_overbought);
+        const rsi_oversold = Number(rd.rsi_oversold);
+        const rsi_block_overbought = Boolean(rd.rsi_block_overbought);
+        const rsi_block_oversold = Boolean(rd.rsi_block_oversold);
+        const vol_window = Number(vd.vol_window);
+        const vol_target_ann = Number(vd.vol_target_ann);
+        const vol_max_ann = Number(vd.vol_max_ann);
+        const chop_mode = String(cd.chop_mode || "er");
+        const chop_window = Number(cd.chop_window);
+        const chop_er_threshold = Number(cd.chop_er_threshold);
+        const chop_adx_window = Number(cd.chop_adx_window);
+        const chop_adx_threshold = Number(cd.chop_adx_threshold);
         const corr_filter = ($("rotCorrOn").value === "true");
         const corrWinRaw = ($("rotCorrWindow").value || "").trim();
         const corr_window = corrWinRaw === "" ? null : Number(corrWinRaw);
@@ -5679,17 +6084,7 @@
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
-        if (trend_filter && (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0)) return setMsg("趋势 SMA 窗口必须是正整数");
-        if (rsi_filter && (!Number.isFinite(rsi_window) || rsi_window <= 0)) return setMsg("RSI 窗口必须是正整数");
-        if (rsi_filter && (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100)) return setMsg("RSI 超买阈值需在 0~100");
-        if (rsi_filter && (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100)) return setMsg("RSI 超卖阈值需在 0~100");
-        if (vol_monitor && (!Number.isFinite(vol_window) || vol_window <= 0)) return setMsg("Vol 窗口必须是正整数");
-        if (vol_monitor && (!Number.isFinite(vol_target_ann) || vol_target_ann <= 0)) return setMsg("目标年化Vol必须>0，例如 0.20");
-        if (vol_monitor && (!Number.isFinite(vol_max_ann) || vol_max_ann <= 0)) return setMsg("最大年化Vol必须>0，例如 0.60");
-        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_window) || chop_window <= 1)) return setMsg("ER窗口必须>=2");
-        if (chop_filter && chop_mode === "er" && (!Number.isFinite(chop_er_threshold) || chop_er_threshold <= 0)) return setMsg("ER阈值必须>0，例如 0.25");
-        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_window) || chop_adx_window <= 1)) return setMsg("ADX窗口必须>=2");
-        if (chop_filter && chop_mode === "adx" && (!Number.isFinite(chop_adx_threshold) || chop_adx_threshold <= 0)) return setMsg("ADX阈值必须>0，例如 20");
+        // phase-1 rules already validated by table parsers
         const n_sims = Number(($("mcN").value || "2000").trim());
         const block_size = Number(($("mcBlock").value || "5").trim());
         const winRaw = ($("mcWindow").value || "").trim();
@@ -5704,6 +6099,10 @@
         setMsg("");
         try {
           const asset_rc_rules = null;
+          const floorRules = _buildFloorRules();
+          if (floorRules && floorRules.__error) return setMsg(floorRules.__error);
+          const fd = _pickDefaultRule(floorRules) || { momentum_floor: 0.0 };
+          const momentum_floor = Number(fd.momentum_floor);
           const asset_vol_index_rules = (() => {
             const on = ($("rotVolIdxOn") && $("rotVolIdxOn").value === "true");
             if (!on) return null;
@@ -5746,9 +6145,11 @@
               dd_control, dd_threshold, dd_reduce, dd_sleep_days,
               timing_rsi_gate, timing_rsi_window,
               trend_filter, trend_mode, trend_sma_window,
-              rsi_filter, rsi_window, rsi_overbought, rsi_oversold,
+              rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,
               chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
+              asset_trend_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+              asset_momentum_floor_rules: floorRules,
               asset_rc_rules,
               asset_vol_index_rules,
               n_sims, block_size, seed, sample_window_days
@@ -5793,10 +6194,11 @@
       if ($("mpRotA_3")) $("mpRotA_3").addEventListener("click", () => _mpRotSetAnchor("3"));
       if ($("mpRotA_4")) $("mpRotA_4").addEventListener("click", () => _mpRotSetAnchor("4"));
       Array.from(document.querySelectorAll("button.mpRotRange[data-k]")).forEach((b) => {
-        b.addEventListener("click", () => { mpRotState.rangeKey = String(b.dataset.k || "all"); });
+        b.addEventListener("click", () => _mpRotSetRange(String(b.dataset.k || "all")));
       });
       if ($("runMpRot")) $("runMpRot").addEventListener("click", runMiniRotationToMain);
       _mpRotSetAnchor("mix");
+      _mpRotSetRange(mpRotState.rangeKey);
 
       // Correlation range buttons (default full range; disable unavailable based on current backtest).
       const wireCorrBtn = (key, id) => {

@@ -107,6 +107,13 @@ class RotationInputs:
     # --- Timing control (strategy NAV RSI gate; uses shadow NAV that ignores this timing gate) ---
     timing_rsi_gate: bool = False
     timing_rsi_window: int = 24  # typical choices: 6/12/24; default=24
+    # --- Phase-1 per-asset parameter rules (optional) ---
+    # These override the corresponding global params when provided.
+    asset_momentum_floor_rules: list[dict[str, Any]] | None = None
+    asset_trend_rules: list[dict[str, Any]] | None = None
+    asset_rsi_rules: list[dict[str, Any]] | None = None
+    asset_chop_rules: list[dict[str, Any]] | None = None
+    asset_vol_monitor_rules: list[dict[str, Any]] | None = None
     # --- Execution price proxy (hfq, aligned to execution calendar) ---
     # Used to study open/close/OC(=avg(open,close)) calendar effects. Default "close" matches existing behavior.
     exec_price: str = "close"  # close | open | oc2
@@ -297,6 +304,74 @@ def _adx(high: pd.DataFrame, low: pd.DataFrame, close: pd.DataFrame, *, window: 
     dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
     adx = dx.ewm(alpha=alpha, adjust=False, min_periods=n).mean()
     return adx.replace([np.inf, -np.inf], np.nan).astype(float)
+
+
+def _merge_rule(base: dict[str, Any] | None, override: dict[str, Any] | None) -> dict[str, Any]:
+    """
+    Field-level merge for per-asset rules.
+    - override keys with non-None values take precedence
+    - `code` is kept from override (or base)
+    """
+    out: dict[str, Any] = dict(base or {})
+    o = dict(override or {})
+    for k, v in o.items():
+        if k == "code":
+            continue
+        if v is not None:
+            out[k] = v
+    out["code"] = str(o.get("code") or out.get("code") or "*")
+    return out
+
+
+def _effective_rules_for_code(code: str, rules: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """
+    Resolve effective rule list for a given asset code.
+
+    Semantics:
+    - `code="*"` is the default rule (if present)
+    - any number of per-code rules may exist; each is merged with the default (field-level)
+    - if no per-code rule exists, fall back to default-only (if present)
+    """
+    if rules is None or len(rules) == 0:
+        return []
+    c = str(code or "").strip()
+    if not c:
+        return []
+    default_rule: dict[str, Any] | None = None
+    specifics: list[dict[str, Any]] = []
+    for r in rules:
+        rc = str((r or {}).get("code") or "").strip()
+        if rc == "*":
+            default_rule = dict(r or {})
+        elif rc == c:
+            specifics.append(dict(r or {}))
+    if specifics:
+        return [_merge_rule(default_rule, r) for r in specifics]
+    return [dict(default_rule)] if default_rule else []
+
+
+def _momentum_floor_for_code(
+    code: str, *, rules: list[dict[str, Any]] | None, fallback: float
+) -> float:
+    """
+    Conservative (worst-case) per-asset momentum floor:
+    - multiple matching rules => take max floor (most restrictive)
+    """
+    eff = _effective_rules_for_code(code, rules)
+    floors: list[float] = []
+    for r in eff:
+        v = (r or {}).get("momentum_floor")
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(f):
+            floors.append(float(f))
+    if floors:
+        return float(max(floors))
+    return float(fallback)
 
 
 def _apply_asset_rc_rules(
@@ -703,7 +778,13 @@ def _holding_streaks_from_weights(
     return out
 
 
-def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
+def backtest_rotation(
+    db: Session,
+    inp: RotationInputs,
+    *,
+    return_weights_end: bool = False,
+    allow_virtual_end: bool = False,
+) -> dict[str, Any]:
     universe = list(dict.fromkeys(inp.codes))
     if not universe:
         raise ValueError("codes is empty")
@@ -847,22 +928,89 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     # - hfq: momentum score + momentum_floor (as requested)
     # - qfq: technical analysis (trend/RSI/vol/chop filters)
     # - none: execution/trading price basis
-    # Need enough history for momentum + optional risk controls.
+    # Per-asset rules: if provided, override the corresponding global params.
+    use_floor_rules = bool(inp.asset_momentum_floor_rules)
+    use_trend_rules = bool(inp.trend_filter and inp.asset_trend_rules)
+    use_rsi_rules = bool(inp.rsi_filter and inp.asset_rsi_rules)
+    use_chop_rules = bool(inp.chop_filter and inp.asset_chop_rules)
+    use_vol_rules = bool(inp.vol_monitor and inp.asset_vol_monitor_rules)
+
+    trend_windows = [int(inp.trend_sma_window)]
+    trend_modes = {str(inp.trend_mode or "each").strip().lower()}
+    if use_trend_rules:
+        for r in inp.asset_trend_rules or []:
+            try:
+                w = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
+            except (TypeError, ValueError):
+                w = int(inp.trend_sma_window)
+            if w > 0:
+                trend_windows.append(w)
+            m = str((r or {}).get("trend_mode") or "").strip().lower()
+            if m:
+                trend_modes.add(m)
+
+    rsi_windows = [int(inp.rsi_window)]
+    if use_rsi_rules:
+        for r in inp.asset_rsi_rules or []:
+            try:
+                w = int((r or {}).get("rsi_window") or inp.rsi_window)
+            except (TypeError, ValueError):
+                w = int(inp.rsi_window)
+            if w > 0:
+                rsi_windows.append(w)
+
+    vol_windows = [int(inp.vol_window)]
+    if use_vol_rules:
+        for r in inp.asset_vol_monitor_rules or []:
+            try:
+                w = int((r or {}).get("vol_window") or inp.vol_window)
+            except (TypeError, ValueError):
+                w = int(inp.vol_window)
+            if w > 0:
+                vol_windows.append(w)
+
+    chop_modes = {str(cm)}
+    chop_er_windows = [int(inp.chop_window)]
+    chop_adx_windows = [int(inp.chop_adx_window)]
+    if use_chop_rules:
+        for r in inp.asset_chop_rules or []:
+            m = str((r or {}).get("chop_mode") or cm).strip().lower()
+            if m:
+                chop_modes.add(m)
+            if m == "adx":
+                try:
+                    w = int((r or {}).get("chop_adx_window") or inp.chop_adx_window)
+                except (TypeError, ValueError):
+                    w = int(inp.chop_adx_window)
+                if w > 1:
+                    chop_adx_windows.append(w)
+            else:
+                try:
+                    w = int((r or {}).get("chop_window") or inp.chop_window)
+                except (TypeError, ValueError):
+                    w = int(inp.chop_window)
+                if w > 1:
+                    chop_er_windows.append(w)
+
+    # Need enough history for momentum + optional risk controls (using max window).
     need_hist = inp.lookback_days + inp.skip_days + 60
     if inp.trend_filter:
-        need_hist = max(need_hist, int(inp.trend_sma_window) + 60)
+        need_hist = max(need_hist, int(max(trend_windows)) + 60)
     if inp.rsi_filter:
-        need_hist = max(need_hist, int(inp.rsi_window) + 60)
+        need_hist = max(need_hist, int(max(rsi_windows)) + 60)
     if inp.vol_monitor:
-        need_hist = max(need_hist, int(inp.vol_window) + 60)
+        need_hist = max(need_hist, int(max(vol_windows)) + 60)
     if inp.chop_filter:
-        need_hist = max(need_hist, (int(inp.chop_adx_window) if cm == "adx" else int(inp.chop_window)) + 60)
+        if "adx" in chop_modes:
+            need_hist = max(need_hist, int(max(chop_adx_windows)) + 60)
+        else:
+            need_hist = max(need_hist, int(max(chop_er_windows)) + 60)
     ext_start = inp.start - dt.timedelta(days=int(need_hist))
     close_hfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
     # Only load qfq when we actually need technical-analysis indicators.
     need_qfq = bool(inp.trend_filter or inp.rsi_filter or inp.vol_monitor or inp.chop_filter or tp_sl_mode != "none")
     close_qfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq else pd.DataFrame()
-    need_qfq_hl = bool(inp.chop_filter and cm == "adx")
+    need_qfq_hl = bool(inp.chop_filter and (("adx" in chop_modes) if use_chop_rules else (cm == "adx")))
     high_qfq, low_qfq = (
         _load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq_hl else (pd.DataFrame(), pd.DataFrame())
     )
@@ -954,6 +1102,24 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
 
     # Align calendars using execution dates; forward-fill hfq onto those dates.
     close_none = close_none.sort_index().ffill()
+    if bool(allow_virtual_end) and (not close_none.empty):
+        try:
+            # For "next-plan" style use-cases: we may want to compute the next execution day's weights
+            # even if the DB does not yet have prices for that future trading day. In that case,
+            # we extend the execution calendar to `inp.end` using forward-filled last known prices.
+            last_exec = close_none.index[-1].date()
+            if last_exec < inp.end:
+                from ..calendar.trading_calendar import trading_days as _trading_days
+
+                extra = _trading_days(last_exec, inp.end, cal="XSHG")
+                extra = [d for d in extra if d > last_exec]
+                if extra:
+                    extra_idx = pd.to_datetime(extra)
+                    new_idx = close_none.index.union(extra_idx)
+                    close_none = close_none.reindex(new_idx).ffill()
+        except (TypeError, ValueError, IndexError):  # pragma: no cover (defensive)
+            pass
+
     dates = close_none.index
     close_hfq = close_hfq.sort_index().reindex(dates).ffill()
     if need_hfq_ohlc:
@@ -1019,19 +1185,34 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
     # Pre-compute risk-control signals on hfq close (aligned to execution calendar).
     # IMPORTANT: per your rule, all TA uses qfq; only momentum scoring & momentum floor uses hfq.
     ta_close = close_qfq[rank_codes] if need_qfq else None
-    trend_ok_each = _trend_ok_each(ta_close, sma_window=int(inp.trend_sma_window)) if (inp.trend_filter and ta_close is not None) else None
-    rsi = _rsi(ta_close, window=int(inp.rsi_window)) if (inp.rsi_filter and ta_close is not None) else None
-    ann_vol = _ann_realized_vol_from_close(ta_close, window=int(inp.vol_window)) if (inp.vol_monitor and ta_close is not None) else None
-    er = _efficiency_ratio(ta_close, window=int(inp.chop_window)) if (inp.chop_filter and cm == "er" and ta_close is not None) else None
-    adx = _adx(high_qfq[rank_codes], low_qfq[rank_codes], ta_close, window=int(inp.chop_adx_window)) if (inp.chop_filter and cm == "adx" and ta_close is not None) else None
-    # Universe-level trend uses average price series across the selected universe.
-    if inp.trend_filter and inp.trend_mode == "universe":
-        if ta_close is None:  # pragma: no cover
-            raise ValueError("trend_filter requires qfq data")
-        uni_close = ta_close.mean(axis=1).to_frame("UNIVERSE")
-        uni_ok = _trend_ok_each(uni_close, sma_window=int(inp.trend_sma_window))["UNIVERSE"]
-    else:
-        uni_ok = None
+    trend_ok_each_by_window: dict[int, pd.DataFrame] = {}
+    trend_uni_ok_by_window: dict[int, pd.Series] = {}
+    rsi_by_window: dict[int, pd.DataFrame] = {}
+    ann_vol_by_window: dict[int, pd.DataFrame] = {}
+    er_by_window: dict[int, pd.DataFrame] = {}
+    adx_by_window: dict[int, pd.DataFrame] = {}
+
+    if ta_close is not None:
+        if inp.trend_filter:
+            for w in sorted(set(int(x) for x in trend_windows if int(x) > 0)):
+                trend_ok_each_by_window[w] = _trend_ok_each(ta_close, sma_window=int(w))
+            if "universe" in trend_modes:
+                uni_close = ta_close.mean(axis=1).to_frame("UNIVERSE")
+                for w in sorted(set(int(x) for x in trend_windows if int(x) > 0)):
+                    trend_uni_ok_by_window[w] = _trend_ok_each(uni_close, sma_window=int(w))["UNIVERSE"]
+        if inp.rsi_filter:
+            for w in sorted(set(int(x) for x in rsi_windows if int(x) > 0)):
+                rsi_by_window[w] = _rsi(ta_close, window=int(w))
+        if inp.vol_monitor:
+            for w in sorted(set(int(x) for x in vol_windows if int(x) > 0)):
+                ann_vol_by_window[w] = _ann_realized_vol_from_close(ta_close, window=int(w))
+        if inp.chop_filter:
+            if "er" in chop_modes:
+                for w in sorted(set(int(x) for x in chop_er_windows if int(x) > 1)):
+                    er_by_window[w] = _efficiency_ratio(ta_close, window=int(w))
+            if "adx" in chop_modes:
+                for w in sorted(set(int(x) for x in chop_adx_windows if int(x) > 1)):
+                    adx_by_window[w] = _adx(high_qfq[rank_codes], low_qfq[rank_codes], ta_close, window=int(w))
 
     def _decision_indices_for_rebalance(*, rebalance: str, anchor: int | None) -> list[int]:
         """
@@ -1442,8 +1623,28 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
             meta = {"best_score": None, "risk_off_triggered": True, "mode": "dd_sleep"}
         else:
             prev_w_row = w.iloc[start_i - 1].astype(float)
+            # Per-asset momentum floors: exclude assets whose score <= its configured floor.
+            scores_row = scores.loc[d]
+            if use_floor_rules:
+                s2 = scores_row.copy()
+                for c in list(s2.index):
+                    try:
+                        sc = float(s2.get(c))
+                    except (TypeError, ValueError):
+                        continue
+                    if not np.isfinite(sc):
+                        continue
+                    f = _momentum_floor_for_code(
+                        str(c),
+                        rules=inp.asset_momentum_floor_rules,
+                        fallback=float(inp.momentum_floor),
+                    )
+                    if np.isfinite(f) and float(sc) <= float(f):
+                        s2.loc[c] = np.nan
+                scores_row = s2
+
             picks, meta = _pick_assets(
-                scores.loc[d],
+                scores_row,
                 top_k=inp.top_k,
                 risk_off=inp.risk_off,
                 defensive_code=defensive,
@@ -1484,31 +1685,65 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         if risk_picks and (not dd_in_sleep):
             # 0) Choppiness filter (ER / ADX)
             if inp.chop_filter:
-                if cm == "er" and er is not None and d in er.index:
-                    er_map = {p: (None if pd.isna(er.loc[d, p]) else float(er.loc[d, p])) for p in risk_picks}
+                before = risk_picks[:]
+                er_map: dict[str, float | None] = {}
+                adx_map: dict[str, float | None] = {}
+                ok_map: dict[str, bool] = {}
+
+                for p in before:
+                    eff = _effective_rules_for_code(p, inp.asset_chop_rules) if use_chop_rules else []
+                    if not eff:
+                        eff = [
+                            {
+                                "chop_mode": cm,
+                                "chop_window": int(inp.chop_window),
+                                "chop_er_threshold": float(inp.chop_er_threshold),
+                                "chop_adx_window": int(inp.chop_adx_window),
+                                "chop_adx_threshold": float(inp.chop_adx_threshold),
+                            }
+                        ]
+
+                    oks: list[bool] = []
+                    for r in eff:
+                        m = str((r or {}).get("chop_mode") or cm).strip().lower()
+                        if m == "adx":
+                            win = int((r or {}).get("chop_adx_window") or inp.chop_adx_window)
+                            thr = float((r or {}).get("chop_adx_threshold") or inp.chop_adx_threshold)
+                            a = adx_by_window.get(int(win))
+                            if a is None or d not in a.index:
+                                continue
+                            v = None if pd.isna(a.loc[d, p]) else float(a.loc[d, p])
+                            adx_map[p] = v
+                            oks.append(bool(v is not None and np.isfinite(v) and float(v) >= float(thr)))
+                        else:
+                            win = int((r or {}).get("chop_window") or inp.chop_window)
+                            thr = float((r or {}).get("chop_er_threshold") or inp.chop_er_threshold)
+                            e = er_by_window.get(int(win))
+                            if e is None or d not in e.index:
+                                continue
+                            v = None if pd.isna(e.loc[d, p]) else float(e.loc[d, p])
+                            er_map[p] = v
+                            oks.append(bool(v is not None and np.isfinite(v) and float(v) >= float(thr)))
+
+                    # If indicators are not available on this day (warm-up), do not exclude.
+                    ok_map[p] = bool(all(oks)) if oks else True
+
+                if er_map:
                     details["er"] = er_map
-                    before = risk_picks[:]
-                    thr = float(inp.chop_er_threshold)
-                    risk_picks = [p for p in risk_picks if (er_map.get(p) is not None) and (er_map[p] >= thr)]
-                    removed = [p for p in before if p not in risk_picks]
-                    if removed:
-                        reasons.append(f"chop_er_exclude<{thr}:{','.join(removed)}")
-                        picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
-                if cm == "adx" and adx is not None and d in adx.index:
-                    adx_map = {p: (None if pd.isna(adx.loc[d, p]) else float(adx.loc[d, p])) for p in risk_picks}
+                if adx_map:
                     details["adx"] = adx_map
-                    before = risk_picks[:]
-                    thr = float(inp.chop_adx_threshold)
-                    risk_picks = [p for p in risk_picks if (adx_map.get(p) is not None) and (adx_map[p] >= thr)]
-                    removed = [p for p in before if p not in risk_picks]
-                    if removed:
-                        reasons.append(f"chop_adx_exclude<{thr}:{','.join(removed)}")
-                        picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
+
+                risk_picks = [p for p in before if ok_map.get(p, False)]
+                removed = [p for p in before if p not in risk_picks]
+                if removed:
+                    reasons.append(f"chop_exclude:{','.join(removed)}")
+                    picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
 
             # 1) Trend filter
             if inp.trend_filter:
-                if inp.trend_mode == "universe":
-                    ok = bool(uni_ok.loc[d]) if (uni_ok is not None and d in uni_ok.index) else False
+                if (not use_trend_rules) and (str(inp.trend_mode) == "universe"):
+                    s = trend_uni_ok_by_window.get(int(inp.trend_sma_window))
+                    ok = bool(s.loc[d]) if (s is not None and d in s.index) else False
                     details["trend_universe_ok"] = ok
                     if not ok:
                         reasons.append("trend_universe_block")
@@ -1521,27 +1756,79 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                             risk_picks = []
                             meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
                 else:
-                    ok_map = {}
-                    if trend_ok_each is not None and d in trend_ok_each.index:
-                        for p in risk_picks:
-                            ok_map[p] = bool(trend_ok_each.loc[d, p])
-                    details["trend_each_ok"] = ok_map
                     before = risk_picks[:]
-                    risk_picks = [p for p in risk_picks if ok_map.get(p, False)]
+                    ok_map: dict[str, bool] = {}
+                    for p in before:
+                        eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
+                        if not eff:
+                            eff = [{"trend_mode": str(inp.trend_mode), "trend_sma_window": int(inp.trend_sma_window)}]
+                        oks: list[bool] = []
+                        for r in eff:
+                            m = str((r or {}).get("trend_mode") or inp.trend_mode).strip().lower()
+                            win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
+                            if m == "universe":
+                                s = trend_uni_ok_by_window.get(int(win))
+                                if s is None or d not in s.index:
+                                    oks.append(False)
+                                else:
+                                    oks.append(bool(s.loc[d]))
+                            else:
+                                df = trend_ok_each_by_window.get(int(win))
+                                if df is None or d not in df.index:
+                                    oks.append(False)
+                                else:
+                                    oks.append(bool(df.loc[d, p]))
+                        ok_map[p] = bool(all(oks)) if oks else True
+                    details["trend_each_ok"] = ok_map
+                    risk_picks = [p for p in before if ok_map.get(p, False)]
                     removed = [p for p in before if p not in risk_picks]
                     if removed:
-                        reasons.append(f"trend_each_exclude:{','.join(removed)}")
+                        reasons.append(f"trend_exclude:{','.join(removed)}")
                         picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
 
             # 2) RSI filter
-            if risk_picks and inp.rsi_filter and rsi is not None and d in rsi.index:
-                rsi_map = {p: (None if pd.isna(rsi.loc[d, p]) else float(rsi.loc[d, p])) for p in risk_picks}
-                details["rsi"] = rsi_map
+            if risk_picks and inp.rsi_filter:
                 before = risk_picks[:]
-                if inp.rsi_block_overbought:
-                    risk_picks = [p for p in risk_picks if (rsi_map.get(p) is None) or (rsi_map[p] <= float(inp.rsi_overbought))]
-                if inp.rsi_block_oversold:
-                    risk_picks = [p for p in risk_picks if (rsi_map.get(p) is None) or (rsi_map[p] >= float(inp.rsi_oversold))]
+                rsi_map: dict[str, float | None] = {}
+                ok_map: dict[str, bool] = {}
+                for p in before:
+                    eff = _effective_rules_for_code(p, inp.asset_rsi_rules) if use_rsi_rules else []
+                    if not eff:
+                        eff = [
+                            {
+                                "rsi_window": int(inp.rsi_window),
+                                "rsi_overbought": float(inp.rsi_overbought),
+                                "rsi_oversold": float(inp.rsi_oversold),
+                                "rsi_block_overbought": bool(inp.rsi_block_overbought),
+                                "rsi_block_oversold": bool(inp.rsi_block_oversold),
+                            }
+                        ]
+                    oks: list[bool] = []
+                    for r in eff:
+                        win = int((r or {}).get("rsi_window") or inp.rsi_window)
+                        df = rsi_by_window.get(int(win))
+                        if df is None or d not in df.index:
+                            continue
+                        v = None if pd.isna(df.loc[d, p]) else float(df.loc[d, p])
+                        rsi_map[p] = v
+                        if v is None or (not np.isfinite(v)):
+                            # missing RSI: do not block
+                            oks.append(True)
+                            continue
+                        ob = float((r or {}).get("rsi_overbought") if (r or {}).get("rsi_overbought") is not None else inp.rsi_overbought)
+                        os = float((r or {}).get("rsi_oversold") if (r or {}).get("rsi_oversold") is not None else inp.rsi_oversold)
+                        blk_ob = bool((r or {}).get("rsi_block_overbought") if (r or {}).get("rsi_block_overbought") is not None else inp.rsi_block_overbought)
+                        blk_os = bool((r or {}).get("rsi_block_oversold") if (r or {}).get("rsi_block_oversold") is not None else inp.rsi_block_oversold)
+                        ok = True
+                        if blk_ob and float(v) > float(ob):
+                            ok = False
+                        if blk_os and float(v) < float(os):
+                            ok = False
+                        oks.append(bool(ok))
+                    ok_map[p] = bool(all(oks)) if oks else True
+                if rsi_map:
+                    details["rsi"] = rsi_map
+                risk_picks = [p for p in before if ok_map.get(p, False)]
                 removed = [p for p in before if p not in risk_picks]
                 if removed:
                     reasons.append(f"rsi_exclude:{','.join(removed)}")
@@ -1661,24 +1948,51 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
                 else:
                     # default equal-weight, full exposure
                     scales = {p: 1.0 for p in risk_picks}
-                    if inp.vol_monitor and ann_vol is not None and d in ann_vol.index:
-                        vol_map = {p: (None if pd.isna(ann_vol.loc[d, p]) else float(ann_vol.loc[d, p])) for p in risk_picks}
-                        details["ann_vol"] = vol_map
+                    if inp.vol_monitor and ta_close is not None:
+                        vol_map: dict[str, float | None] = {}
                         for p in risk_picks:
-                            v = vol_map.get(p)
-                            if v is None or (not np.isfinite(v)) or v <= 0:
-                                # If vol is missing/invalid, we conservatively skip this asset.
-                                # If vol is (near) zero (e.g. flat price in synthetic tests), it should not force
-                                # a "no-buy" decision; treat it as low-vol and cap scale to 1.
-                                if v is not None and np.isfinite(v) and v <= 0:
-                                    scales[p] = 1.0
+                            eff = _effective_rules_for_code(p, inp.asset_vol_monitor_rules) if use_vol_rules else []
+                            if not eff:
+                                eff = [
+                                    {
+                                        "vol_window": int(inp.vol_window),
+                                        "vol_target_ann": float(inp.vol_target_ann),
+                                        "vol_max_ann": float(inp.vol_max_ann),
+                                    }
+                                ]
+                            p_scales: list[float] = []
+                            p_vols: list[float] = []
+                            for r in eff:
+                                win = int((r or {}).get("vol_window") or inp.vol_window)
+                                df = ann_vol_by_window.get(int(win))
+                                if df is None or d not in df.index:
+                                    continue
+                                v = None if pd.isna(df.loc[d, p]) else float(df.loc[d, p])
+                                if v is None or (not np.isfinite(v)):
+                                    # missing vol: conservative block for this rule
+                                    p_scales.append(0.0)
+                                    continue
+                                p_vols.append(float(v))
+                                if float(v) <= 0:
+                                    p_scales.append(1.0)
+                                    continue
+                                vmax = float((r or {}).get("vol_max_ann") or inp.vol_max_ann)
+                                vtar = float((r or {}).get("vol_target_ann") or inp.vol_target_ann)
+                                if float(v) >= float(vmax):
+                                    p_scales.append(0.0)
                                 else:
-                                    scales[p] = 0.0
-                                continue
-                            if v >= float(inp.vol_max_ann):
-                                scales[p] = 0.0
-                                continue
-                            scales[p] = float(min(1.0, float(inp.vol_target_ann) / v))
+                                    p_scales.append(float(min(1.0, float(vtar) / float(v))))
+
+                            if p_scales:
+                                scales[p] = float(min(p_scales))
+                                vol_map[p] = float(p_vols[-1]) if p_vols else None
+                            else:
+                                # warm-up: keep scale=1 when indicators unavailable
+                                scales[p] = float(scales.get(p, 1.0))
+                                vol_map[p] = None
+
+                        if vol_map:
+                            details["ann_vol"] = vol_map
                     exposure = float(np.mean(list(scales.values()))) if scales else 0.0
                     per = 0.0 if not risk_picks else 1.0 / len(risk_picks)
                     for p in risk_picks:
@@ -2431,6 +2745,15 @@ def backtest_rotation(db: Session, inp: RotationInputs) -> dict[str, Any]:
         "holding_streaks": holding_streaks,
         "corporate_actions": corporate_actions,
     }
+    if return_weights_end:
+        try:
+            d_last = dates[-1]
+            out["weights_end"] = {
+                "date": d_last.date().isoformat(),
+                "weights": {str(c): float(w.loc[d_last, c]) for c in codes if c in w.columns},
+            }
+        except (KeyError, IndexError, TypeError, ValueError):  # pragma: no cover (defensive)
+            out["weights_end"] = {"date": None, "weights": {}}
     # fill nav RSI series (avoid recomputing windows extraction twice)
     for w in out["nav_rsi"]["windows"]:
         out["nav_rsi"]["series"]["ROTATION"][str(w)] = _rsi_wilder(port_nav_net, window=int(w)).astype(float).tolist()

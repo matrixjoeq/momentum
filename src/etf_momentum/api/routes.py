@@ -22,7 +22,6 @@ from .schemas import (
     RotationMonteCarloRequest,
     RotationBacktestRequest,
     RotationWeekly5OpenSimRequest,
-    RotationNextPlanRequest,
     SimDecisionGenerateRequest,
     SimInitFixedStrategyResponse,
     SimPortfolioCreateRequest,
@@ -36,6 +35,8 @@ from .schemas import (
     MacroPairLeadLagResponse,
     MacroStep1Request,
     MacroStep1Response,
+    MacroSeriesBatchRequest,
+    MacroSeriesBatchResponse,
     MacroStep2Request,
     MacroStep2Response,
     MacroStep3Request,
@@ -117,6 +118,7 @@ from ..db.repo import (
     update_sync_job,
     get_validation_policy_by_id,
     get_validation_policy_by_name,
+    get_macro_date_range,
     list_ingestion_batches,
     list_etf_pool,
     list_validation_policies,
@@ -659,6 +661,11 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         dd_sleep_days=payload.dd_sleep_days,
         timing_rsi_gate=payload.timing_rsi_gate,
         timing_rsi_window=payload.timing_rsi_window,
+        asset_momentum_floor_rules=[r.model_dump() for r in payload.asset_momentum_floor_rules] if getattr(payload, "asset_momentum_floor_rules", None) else None,
+        asset_trend_rules=[r.model_dump() for r in payload.asset_trend_rules] if payload.asset_trend_rules else None,
+        asset_rsi_rules=[r.model_dump() for r in payload.asset_rsi_rules] if payload.asset_rsi_rules else None,
+        asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
+        asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=payload.trend_filter,
         trend_mode=payload.trend_mode,
         trend_sma_window=payload.trend_sma_window,
@@ -1183,6 +1190,46 @@ def analysis_macro_step1(payload: MacroStep1Request, db: Session = Depends(get_s
     return MacroStep1Response(ok=True, meta=meta, series=series, pairs=pairs)
 
 
+@router.post("/analysis/macro/series-batch", response_model=MacroSeriesBatchResponse)
+def macro_series_batch(payload: MacroSeriesBatchRequest, db: Session = Depends(get_session)) -> MacroSeriesBatchResponse:
+    start_in = str(payload.start).strip() if payload.start else ""
+    end_in = str(payload.end).strip() if payload.end else ""
+    sids = [str(x).strip() for x in (payload.series_ids or []) if str(x).strip()]
+    if not sids:
+        return MacroSeriesBatchResponse(ok=False, error="empty_series_ids")
+
+    out: dict[str, dict] = {}
+    missing: list[str] = []
+    for sid in sids:
+        # If user didn't specify range, auto use the full stored range of each series.
+        if not start_in or not end_in:
+            s0, e0 = get_macro_date_range(db, series_id=sid)
+            if not s0 or not e0:
+                missing.append(sid)
+                continue
+            start_eff, end_eff = str(s0), str(e0)
+        else:
+            start_eff, end_eff = start_in, end_in
+
+        s = load_macro_close_series(db, series_id=sid, start=start_eff, end=end_eff)
+        if s.empty:
+            missing.append(sid)
+            continue
+        out[sid] = {"dates": [d.isoformat() for d in s.index], "close": s.astype(float).tolist()}
+
+    if missing:
+        return MacroSeriesBatchResponse(
+            ok=False,
+            error=f"empty_series:{missing}",
+            meta={"start": (start_in or None), "end": (end_in or None), "requested": sids, "auto_range": bool((not start_in) or (not end_in))},
+        )
+    return MacroSeriesBatchResponse(
+        ok=True,
+        meta={"start": (start_in or None), "end": (end_in or None), "requested": sids, "auto_range": bool((not start_in) or (not end_in))},
+        series=out,
+    )
+
+
 @router.post("/analysis/macro/step2", response_model=MacroStep2Response)
 def analysis_macro_step2(payload: MacroStep2Request, db: Session = Depends(get_session)) -> MacroStep2Response:
     start = str(payload.start)
@@ -1480,6 +1527,11 @@ def analysis_vix_signal_backtest(payload: VixSignalBacktestRequest, db: Session 
 
     res = backtest_vix_next_day_signal(
         etf_close_cn=etf_close,
+        etf_open_cn=pd.Series(
+            data=[float(r.open) if r.open is not None else np.nan for r in rows],
+            index=[r.trade_date for r in rows],
+            dtype=float,
+        ),
         index_close_us=idx_close_us,
         start=start_d,
         end=end_d,
@@ -1492,6 +1544,7 @@ def analysis_vix_signal_backtest(payload: VixSignalBacktestRequest, db: Session 
         trade_cost_bps=float(payload.trade_cost_bps),
         initial_nav=float(payload.initial_nav),
         initial_position=str(payload.initial_position or "long").strip().lower(),  # type: ignore[arg-type]
+        exec_model=str(getattr(payload, "exec_model", "open_open") or "open_open"),
     )
     if not bool(res.get("ok")):
         return VixSignalBacktestResponse(ok=False, error=str(res.get("error") or "failed"))
@@ -1503,6 +1556,8 @@ def analysis_vix_signal_backtest(payload: VixSignalBacktestRequest, db: Session 
         meta=meta,
         series=dict(res.get("series") or {}),
         metrics=dict(res.get("metrics") or {}),
+        period_returns=dict(res.get("period_returns") or {}),
+        distributions=dict(res.get("distributions") or {}),
         trades=list(res.get("trades") or []),
     )
 
@@ -1579,6 +1634,11 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         dd_sleep_days=payload.dd_sleep_days,
         timing_rsi_gate=payload.timing_rsi_gate,
         timing_rsi_window=payload.timing_rsi_window,
+        asset_momentum_floor_rules=[r.model_dump() for r in payload.asset_momentum_floor_rules] if getattr(payload, "asset_momentum_floor_rules", None) else None,
+        asset_trend_rules=[r.model_dump() for r in payload.asset_trend_rules] if payload.asset_trend_rules else None,
+        asset_rsi_rules=[r.model_dump() for r in payload.asset_rsi_rules] if payload.asset_rsi_rules else None,
+        asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
+        asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=payload.trend_filter,
         trend_mode=payload.trend_mode,
         trend_sma_window=payload.trend_sma_window,
@@ -1676,6 +1736,11 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
             dd_sleep_days=int(payload.dd_sleep_days),
             timing_rsi_gate=bool(payload.timing_rsi_gate),
             timing_rsi_window=int(payload.timing_rsi_window),
+            asset_momentum_floor_rules=[r.model_dump() for r in payload.asset_momentum_floor_rules] if getattr(payload, "asset_momentum_floor_rules", None) else None,
+            asset_trend_rules=[r.model_dump() for r in payload.asset_trend_rules] if payload.asset_trend_rules else None,
+            asset_rsi_rules=[r.model_dump() for r in payload.asset_rsi_rules] if payload.asset_rsi_rules else None,
+            asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
+            asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
             trend_filter=bool(payload.trend_filter),
             trend_mode=str(payload.trend_mode or "each"),
             trend_sma_window=int(payload.trend_sma_window),
@@ -1836,6 +1901,11 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
         dd_sleep_days=int(payload.dd_sleep_days),
         timing_rsi_gate=bool(payload.timing_rsi_gate),
         timing_rsi_window=int(payload.timing_rsi_window),
+        asset_momentum_floor_rules=[r.model_dump() for r in payload.asset_momentum_floor_rules] if getattr(payload, "asset_momentum_floor_rules", None) else None,
+        asset_trend_rules=[r.model_dump() for r in payload.asset_trend_rules] if payload.asset_trend_rules else None,
+        asset_rsi_rules=[r.model_dump() for r in payload.asset_rsi_rules] if payload.asset_rsi_rules else None,
+        asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
+        asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=bool(payload.trend_filter),
         trend_mode=str(payload.trend_mode or "each"),
         trend_sma_window=int(payload.trend_sma_window),
@@ -1953,6 +2023,11 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
         dd_sleep_days=int(payload.dd_sleep_days),
         timing_rsi_gate=bool(payload.timing_rsi_gate),
         timing_rsi_window=int(payload.timing_rsi_window),
+        asset_momentum_floor_rules=[r.model_dump() for r in payload.asset_momentum_floor_rules] if getattr(payload, "asset_momentum_floor_rules", None) else None,
+        asset_trend_rules=[r.model_dump() for r in payload.asset_trend_rules] if payload.asset_trend_rules else None,
+        asset_rsi_rules=[r.model_dump() for r in payload.asset_rsi_rules] if payload.asset_rsi_rules else None,
+        asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
+        asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=bool(payload.trend_filter),
         trend_mode=str(payload.trend_mode or "each"),
         trend_sma_window=int(payload.trend_sma_window),
@@ -2076,6 +2151,11 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
         dd_sleep_days=int(payload.dd_sleep_days),
         timing_rsi_gate=bool(payload.timing_rsi_gate),
         timing_rsi_window=int(payload.timing_rsi_window),
+        asset_momentum_floor_rules=[r.model_dump() for r in payload.asset_momentum_floor_rules] if getattr(payload, "asset_momentum_floor_rules", None) else None,
+        asset_trend_rules=[r.model_dump() for r in payload.asset_trend_rules] if payload.asset_trend_rules else None,
+        asset_rsi_rules=[r.model_dump() for r in payload.asset_rsi_rules] if payload.asset_rsi_rules else None,
+        asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
+        asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=bool(payload.trend_filter),
         trend_mode=str(payload.trend_mode or "each"),
         trend_sma_window=int(payload.trend_sma_window),
@@ -2326,13 +2406,14 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
 
 
 @router.post("/analysis/rotation/next-plan")
-def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(get_session)) -> dict:
+def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dict:
     """
     "Tomorrow plan" for the fixed mini-program rotation strategy.
     If the next trading day is a rebalance effective day (open execution), return the top pick based on asof close.
     """
-    requested_asof = _parse_yyyymmdd(payload.asof)
-    anchor = int(payload.anchor_weekday)
+    payload = payload or {}
+    requested_asof = _parse_yyyymmdd(str(payload.get("asof")))
+    anchor = int(payload.get("anchor_weekday"))
     if anchor not in {0, 1, 2, 3, 4}:
         raise HTTPException(status_code=400, detail="anchor_weekday must be 0..4")
 
@@ -2368,25 +2449,147 @@ def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(g
             "rebalance_effective_next_day": False,
             "pick_code": None,
             "pick_name": None,
+            "pick_exposure": None,
             "scores": {},
             "meta": {"anchor_weekday": anchor, "rebalance_shift": "prev", "lookback_days": 20, "top_k": 1, "exec_price": "open"},
         }
-    first_valid = {c: px[c].first_valid_index() for c in codes if c in px.columns}
-    common_start = max([d for d in first_valid.values() if d is not None])
-    px = px.loc[common_start:, codes]
-    if len(px) < 21:
-        raise HTTPException(status_code=400, detail="insufficient history for lookback_days=20")
+    try:
+        # Run the SAME strategy engine as weekly5-open, using the provided parameters (if any),
+        # and read the weights on the execution day (next trading day).
+        from etf_momentum.analysis.rotation import RotationAnalysisInputs
+        from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
 
-    last = px.iloc[-1]
-    prev = px.iloc[-21]
-    scores: dict[str, float] = {}
-    for c in codes:
-        a = float(last[c])
-        b = float(prev[c])
-        s = (a / b - 1.0) if (np.isfinite(a) and np.isfinite(b) and b > 0) else float("nan")
-        scores[c] = float(s)
-    pick_code = max(scores.keys(), key=lambda k: (scores.get(k) if np.isfinite(scores.get(k, float("nan"))) else -1e18))
-    pick_name = _FIXED_NAMES.get(pick_code, pick_code)
+        # Start/end default: long enough for most indicators; end must cover next_td.
+        # For next-plan we MUST include the execution day (next_td) in the backtest range,
+        # otherwise we cannot read the planned weights on that day.
+        start_yyyymmdd = str(payload.get("start") or (asof - dt.timedelta(days=3650)).strftime("%Y%m%d"))
+        end_yyyymmdd = next_td.strftime("%Y%m%d")
+
+        # Normalize into the weekly5-open request schema so ALL optional settings are supported.
+        # (Clients can send the same JSON as weekly5-open and simply add "asof".)
+        wk_req = RotationWeekly5OpenSimRequest.model_validate(
+            {
+                **payload,
+                "codes": codes,
+                "start": start_yyyymmdd,
+                "end": end_yyyymmdd,
+                "rebalance": "weekly",
+                "rebalance_shift": "prev",
+                "anchor_weekday": anchor,
+            }
+        )
+
+        # Mini-program semantics: anchor_weekday is the *execution day* weekday; decision is previous weekday.
+        decision_weekday = int((int(anchor) - 1) % 5)
+
+        vol_index_rules = [r.model_dump() for r in (wk_req.asset_vol_index_rules or [])] if wk_req.asset_vol_index_rules else None
+        vol_index_close = _load_vol_index_close_for_rotation_rules(
+            (vol_index_rules or []),
+            db=db,
+            start_yyyymmdd=wk_req.start,
+            end_yyyymmdd=wk_req.end,
+        ) if vol_index_rules else None
+
+        bt_inp = RotationAnalysisInputs(
+            codes=codes,
+            start=_parse_yyyymmdd(wk_req.start),
+            end=_parse_yyyymmdd(wk_req.end),
+            rebalance="weekly",
+            rebalance_shift="prev",
+            rebalance_anchor=decision_weekday,
+            top_k=int(wk_req.top_k),
+            lookback_days=int(wk_req.lookback_days),
+            skip_days=int(wk_req.skip_days),
+            risk_free_rate=float(wk_req.risk_free_rate),
+            cost_bps=float(wk_req.cost_bps),
+            risk_off=bool(wk_req.risk_off),
+            defensive_code=(str(wk_req.defensive_code) if wk_req.defensive_code else None),
+            momentum_floor=float(wk_req.momentum_floor),
+            score_method=str(wk_req.score_method),
+            score_lambda=float(wk_req.score_lambda),
+            score_vol_power=float(wk_req.score_vol_power),
+            trend_filter=bool(wk_req.trend_filter),
+            trend_mode=str(wk_req.trend_mode),
+            trend_sma_window=int(wk_req.trend_sma_window),
+            rsi_filter=bool(wk_req.rsi_filter),
+            rsi_window=int(wk_req.rsi_window),
+            rsi_overbought=float(wk_req.rsi_overbought),
+            rsi_oversold=float(wk_req.rsi_oversold),
+            rsi_block_overbought=bool(wk_req.rsi_block_overbought),
+            rsi_block_oversold=bool(wk_req.rsi_block_oversold),
+            vol_monitor=bool(wk_req.vol_monitor),
+            vol_window=int(wk_req.vol_window),
+            vol_target_ann=float(wk_req.vol_target_ann),
+            vol_max_ann=float(wk_req.vol_max_ann),
+            chop_filter=bool(wk_req.chop_filter),
+            chop_mode=str(wk_req.chop_mode),
+            chop_window=int(wk_req.chop_window),
+            chop_er_threshold=float(wk_req.chop_er_threshold),
+            chop_adx_window=int(wk_req.chop_adx_window),
+            chop_adx_threshold=float(wk_req.chop_adx_threshold),
+            tp_sl_mode=str(wk_req.tp_sl_mode),
+            atr_window=(int(wk_req.atr_window) if wk_req.atr_window is not None else None),
+            atr_mult=float(wk_req.atr_mult),
+            atr_step=float(wk_req.atr_step),
+            atr_min_mult=float(wk_req.atr_min_mult),
+            corr_filter=bool(wk_req.corr_filter),
+            corr_window=(int(wk_req.corr_window) if wk_req.corr_window is not None else None),
+            corr_threshold=float(wk_req.corr_threshold),
+            inertia=bool(wk_req.inertia),
+            inertia_min_hold_periods=int(wk_req.inertia_min_hold_periods),
+            inertia_score_gap=float(wk_req.inertia_score_gap),
+            inertia_min_turnover=float(wk_req.inertia_min_turnover),
+            rr_sizing=bool(wk_req.rr_sizing),
+            rr_years=float(wk_req.rr_years),
+            rr_thresholds=(list(wk_req.rr_thresholds) if wk_req.rr_thresholds else None),
+            rr_weights=(list(wk_req.rr_weights) if wk_req.rr_weights else None),
+            mirror_control=bool(wk_req.mirror_control),
+            mirror_quantiles=(list(wk_req.mirror_quantiles) if wk_req.mirror_quantiles else None),
+            mirror_exposures=(list(wk_req.mirror_exposures) if wk_req.mirror_exposures else None),
+            dd_control=bool(wk_req.dd_control),
+            dd_threshold=float(wk_req.dd_threshold),
+            dd_reduce=float(wk_req.dd_reduce),
+            dd_sleep_days=int(wk_req.dd_sleep_days),
+            timing_rsi_gate=bool(wk_req.timing_rsi_gate),
+            timing_rsi_window=int(wk_req.timing_rsi_window),
+            exec_price="open",
+            asset_momentum_floor_rules=[r.model_dump() for r in (wk_req.asset_momentum_floor_rules or [])] if wk_req.asset_momentum_floor_rules else None,
+            asset_trend_rules=[r.model_dump() for r in (wk_req.asset_trend_rules or [])] if wk_req.asset_trend_rules else None,
+            asset_rsi_rules=[r.model_dump() for r in (wk_req.asset_rsi_rules or [])] if wk_req.asset_rsi_rules else None,
+            asset_chop_rules=[r.model_dump() for r in (wk_req.asset_chop_rules or [])] if wk_req.asset_chop_rules else None,
+            asset_vol_monitor_rules=[r.model_dump() for r in (wk_req.asset_vol_monitor_rules or [])] if wk_req.asset_vol_monitor_rules else None,
+            asset_rc_rules=[r.model_dump() for r in (wk_req.asset_rc_rules or [])] if wk_req.asset_rc_rules else None,
+            asset_vol_index_rules=vol_index_rules,
+            vol_index_close=vol_index_close,
+        )
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(**bt_inp.__dict__),
+            return_weights_end=True,
+            allow_virtual_end=True,
+        )  # type: ignore[arg-type]
+        weights_end = (out.get("weights_end") or {}).get("weights") or {}
+        # exposure is total non-cash weight (weights already include all scaling rules)
+        pick_exposure = float(sum(float(v) for v in weights_end.values() if v is not None))
+        pick_code = None
+        pick_name = None
+        if pick_exposure <= 1e-12:
+            pick_code = None
+            pick_name = "现金"
+        elif weights_end:
+            pick_code = max(weights_end.keys(), key=lambda k: float(weights_end.get(k) or 0.0))
+            if float(weights_end.get(pick_code) or 0.0) <= 1e-12:
+                pick_code = None
+                pick_name = "现金"
+            else:
+                pick_code = str(pick_code)
+                pick_name = _FIXED_NAMES.get(pick_code, pick_code)
+        scores = {}
+    except HTTPException:
+        raise
+    except Exception as e:  # pragma: no cover (best-effort)
+        raise HTTPException(status_code=500, detail=f"next-plan compute failed: {e}") from e
 
     return {
         "asof": asof.strftime("%Y%m%d"),
@@ -2395,8 +2598,9 @@ def rotation_next_plan(payload: RotationNextPlanRequest, db: Session = Depends(g
         "rebalance_effective_next_day": True,
         "pick_code": pick_code,
         "pick_name": pick_name,
-        "scores": {c: float(scores[c]) for c in codes},
-        "meta": {"anchor_weekday": anchor, "rebalance_shift": "prev", "lookback_days": 20, "top_k": 1, "exec_price": "open"},
+        "pick_exposure": float(pick_exposure),
+        "scores": scores,
+        "meta": {"anchor_weekday": anchor, "rebalance_shift": "prev", "exec_price": "open"},
     }
 
 
@@ -2431,7 +2635,7 @@ def rotation_next_plan_auto(payload: dict, db: Session = Depends(get_session)) -
             "scores": {},
             "meta": {"anchor_weekday": wd, "rebalance_shift": "prev", "lookback_days": 20, "top_k": 1, "exec_price": "open"},
         }
-    return rotation_next_plan(RotationNextPlanRequest(anchor_weekday=wd, asof=asof.strftime("%Y%m%d")), db=db)
+    return rotation_next_plan({**(payload or {}), "anchor_weekday": wd, "asof": asof.strftime("%Y%m%d")}, db=db)
 
 
 @router.post("/analysis/baseline/weekly5-ew-dashboard")

@@ -857,6 +857,9 @@ function attachWeekdayPage({ anchor, title }) {
             ? await request("/analysis/rotation/next-plan-auto", { method: "POST", data: { asof: end0 } })
             : await request("/analysis/rotation/next-plan", { method: "POST", data: { anchor_weekday: Number(anchor), asof: end0 } });
           if (this.__unloaded || token !== this.__loadToken) return;
+          if (plan && plan.pick_exposure != null) {
+            plan.pick_exposure_text = pct(plan.pick_exposure);
+          }
           this.setData({ nextPlan: plan || null });
         } catch (e3) {
           if (this.__unloaded || token !== this.__loadToken) return;

@@ -305,6 +305,34 @@
       </div>
       <div id="vixBtChart"></div>
       <div class="muted" id="vixBtMetrics" style="margin-top:6px;"></div>
+      <div class="panel two" style="margin-top:10px;">
+        <div>
+          <h3 style="margin: 10px 0 6px 0; font-size: 15px;">双周对比（VXN vs NAV）</h3>
+          <div class="muted" style="margin-bottom:6px;">每约 10 个交易日抽样一次，便于直观对比 VXN 与策略/基准净值变化。</div>
+          <div id="vixBtBiweeklyChart"></div>
+        </div>
+        <div>
+          <h3 style="margin: 10px 0 6px 0; font-size: 15px;">分周期收益与分布（含超额）</h3>
+          <div class="row" style="margin-bottom:6px;">
+            <div>
+              <label>周期</label>
+              <select id="vixPerfFreq">
+                <option value="daily">日度</option>
+                <option value="weekly" selected>周度</option>
+                <option value="monthly">月度</option>
+                <option value="quarterly">季度</option>
+                <option value="yearly">年度</option>
+              </select>
+            </div>
+          </div>
+          <div id="vixPerfHist"></div>
+          <table id="vixPerfStats"></table>
+          <div class="panel" style="margin-top:10px;">
+            <h3 style="margin: 10px 0 6px 0; font-size: 14px;">分周期收益表（最近 200 条）</h3>
+            <table id="vixPerfTable"></table>
+          </div>
+        </div>
+      </div>
       <div class="panel">
         <h3 style="margin: 10px 0 6px 0; font-size: 15px;">信号/交易日志（日期倒序）</h3>
         <table id="vixBtTrades"></table>
@@ -782,23 +810,70 @@
         const dates = s.dates || [];
         const navS = s.nav_strategy || [];
         const navB = s.nav_buy_hold || [];
+        const navX = s.nav_excess || [];
+        const idxClose = s.idx_close || [];
         Plotly.newPlot("vixBtChart", [
           { x: dates, y: navS, name: "信号策略NAV", type: "scatter", mode: "lines" },
           { x: dates, y: navB, name: "买入并持有NAV", type: "scatter", mode: "lines" },
+          ...(navX && navX.length ? [{ x: dates, y: navX, name: "超额NAV", type: "scatter", mode: "lines", line: { dash: "dot" } }] : []),
         ], { margin: { t: 20 } }, { displayModeBar: false });
 
         const m = bt.metrics || {};
         const ms = m.strategy || {};
         const mb = m.buy_hold || {};
+        const mx = m.excess || {};
         const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+        const irTxt = (Number.isFinite(Number(mx.information_ratio)) ? fmt(mx.information_ratio, 2) : "");
         $("vixBtMetrics").textContent =
-          `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
-          `买入并持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe,2)} MDD=${fmtPct(mb.max_drawdown)}`;
+          `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} Sortino=${fmt(ms.sortino,2)} Calmar=${fmt(ms.calmar,2)} ` +
+          `MDD=${fmtPct(ms.max_drawdown)} UI=${fmt(ms.ulcer_index,2)} UPI=${fmt(ms.ulcer_performance_index,2)} | ` +
+          `买入并持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe,2)} MDD=${fmtPct(mb.max_drawdown)} | ` +
+          `超额：IR=${irTxt}`;
+
+        // Biweekly (approx) compare: sample every ~10 trading days
+        try {
+          const step = 10;
+          const bd = [];
+          const bNavS = [];
+          const bNavB = [];
+          const bIdx = [];
+          for (let i = 0; i < dates.length; i++) {
+            if (i === 0 || i === dates.length - 1 || (i % step === 0)) {
+              bd.push(dates[i]);
+              bNavS.push(navS[i]);
+              bNavB.push(navB[i]);
+              bIdx.push(idxClose[i]);
+            }
+          }
+          Plotly.newPlot("vixBtBiweeklyChart", [
+            { x: bd, y: bIdx, name: "VXN(level,对齐后)", type: "scatter", mode: "lines+markers", yaxis: "y2" },
+            { x: bd, y: bNavS, name: "策略NAV", type: "scatter", mode: "lines+markers" },
+            { x: bd, y: bNavB, name: "买入持有NAV", type: "scatter", mode: "lines+markers" },
+          ], {
+            margin: { t: 20 },
+            yaxis: { title: "NAV" },
+            yaxis2: { title: "VXN", overlaying: "y", side: "right" },
+          }, { displayModeBar: false });
+        } catch {
+          Plotly.newPlot("vixBtBiweeklyChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+        }
+
+        // Period return stats & distributions (strategy/buy_hold/excess)
+        window.__lastVixBt = bt;
+        const freqSel = $("vixPerfFreq");
+        if (freqSel) {
+          const onChg = () => {
+            const f = (freqSel.value || "weekly").trim();
+            renderVixPerf(bt, f);
+          };
+          freqSel.onchange = onChg;
+          onChg();
+        }
 
         const trades = bt.trades || [];
         const lim = Math.max(1, Number(($("vixLogLimit").value || "300").trim()));
         const shown = trades.slice(0, lim);
-        let html = "<tr><th>date(CN)</th><th>action</th><th>pos</th><th>IDX_us_date</th><th>IDX_close</th><th>IDX_log_ret</th><th>thr</th><th>active</th><th>ETF_ret</th><th>NAV</th><th>BH_NAV</th></tr>";
+        let html = "<tr><th>date(CN)</th><th>action</th><th>pos</th><th>IDX_us_date</th><th>IDX_close</th><th>IDX_log_ret</th><th>thr</th><th>active</th><th>ETF_open</th><th>ETF_ret(exec)</th><th>NAV</th><th>BH_NAV</th><th>EX_NAV</th></tr>";
         for (const r of shown) {
           const act = (r.action || "").toUpperCase();
           const bg = act === "BUY" ? "#e6fffb" : (act === "SELL" ? "#fff1f0" : "");
@@ -811,13 +886,65 @@
             `<td>${fmt(r.idx_log_ret,6)}</td>` +
             `<td>${fmt(r.thr_eff,6)}</td>` +
             `<td>${r.sig_active ? "Y" : ""}</td>` +
-            `<td>${fmt(r.etf_ret,6)}</td>` +
+            `<td>${fmt(r.etf_open,4)}</td>` +
+            `<td>${fmt(r.etf_ret_exec,6)}</td>` +
             `<td>${fmt(r.nav_strategy,4)}</td>` +
             `<td>${fmt(r.nav_buy_hold,4)}</td>` +
+            `<td>${fmt(r.nav_excess,4)}</td>` +
           `</tr>`;
         }
-        const note = `<tr><td colspan="11" class="muted">总记录=${trades.length}，当前显示前 ${shown.length} 条（按日期倒序）。</td></tr>`;
+        const note = `<tr><td colspan="13" class="muted">总记录=${trades.length}，当前显示前 ${shown.length} 条（按日期倒序）。</td></tr>`;
         $("vixBtTrades").innerHTML = html + note;
+      }
+
+      function renderVixPerf(bt, freq) {
+        const f = (freq || "weekly").trim();
+        const pr = bt.period_returns || {};
+        const dist = bt.distributions || {};
+        const one = pr[f] || {};
+        const d1 = dist[f] || {};
+
+        // histogram (overlay three)
+        try {
+          const s1 = (one.strategy || []).map(r => Number(r.return)).filter(Number.isFinite);
+          const b1 = (one.buy_hold || []).map(r => Number(r.return)).filter(Number.isFinite);
+          const x1 = (one.excess || []).map(r => Number(r.return)).filter(Number.isFinite);
+          Plotly.newPlot("vixPerfHist", [
+            { x: s1, type: "histogram", name: "策略", opacity: 0.55 },
+            { x: b1, type: "histogram", name: "买入持有", opacity: 0.45 },
+            { x: x1, type: "histogram", name: "超额", opacity: 0.45 },
+          ], { margin: { t: 20 }, barmode: "overlay", xaxis: { title: "return" }, yaxis: { title: "count" } }, { displayModeBar: false });
+        } catch {
+          Plotly.newPlot("vixPerfHist", [], { margin: { t: 20 } }, { displayModeBar: false });
+        }
+
+        // stats table
+        const keys = ["count","mean","std","min","p01","p05","p10","p25","p50","p75","p90","p95","p99","max","pos_ratio"];
+        function row(name, s) {
+          let tds = `<td>${name}</td>`;
+          for (const k of keys) tds += `<td>${fmt(s ? s[k] : null, 6)}</td>`;
+          return `<tr>${tds}</tr>`;
+        }
+        let html = "<tr><th>组</th>" + keys.map(k => `<th>${k}</th>`).join("") + "</tr>";
+        html += row("策略", d1.strategy || {});
+        html += row("买入持有", d1.buy_hold || {});
+        html += row("超额", d1.excess || {});
+        $("vixPerfStats").innerHTML = html;
+
+        // period return table (latest 200)
+        const lim = 200;
+        const rows = (one.strategy || []).slice(-lim).reverse();
+        const rowsB = (one.buy_hold || []).slice(-lim).reverse();
+        const rowsX = (one.excess || []).slice(-lim).reverse();
+        let h2 = "<tr><th>period_end</th><th>策略</th><th>买入持有</th><th>超额</th></tr>";
+        const n = Math.max(rows.length, rowsB.length, rowsX.length);
+        for (let i = 0; i < n; i++) {
+          const a = rows[i] || {};
+          const b = rowsB[i] || {};
+          const c = rowsX[i] || {};
+          h2 += `<tr><td>${a.period_end || b.period_end || c.period_end || ""}</td><td>${fmt(a.return, 6)}</td><td>${fmt(b.return, 6)}</td><td>${fmt(c.return, 6)}</td></tr>`;
+        }
+        $("vixPerfTable").innerHTML = h2;
       }
 
       async function run() {
@@ -952,6 +1079,7 @@
             index,
             index_align,
             calendar: "XSHG",
+            exec_model: "open_open",
             lookback_window: 252,
             threshold_quantile,
             min_abs_ret: 0.0,

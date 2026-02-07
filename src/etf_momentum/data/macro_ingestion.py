@@ -47,6 +47,12 @@ DEFAULT_STEP1_SERIES: list[MacroSeriesSpec] = [
     MacroSeriesSpec(series_id="XAUUSD", provider="stooq", provider_symbol="XAUUSD", name="Gold Spot (XAUUSD)", category="gold_spot", unit="USD/oz"),
     # Gold futures: use Yahoo symbol "GC=F".
     MacroSeriesSpec(series_id="GC_FUT", provider="yahoo", provider_symbol="GC=F", name="Gold Futures (GC=F)", category="gold_fut", unit="USD/oz"),
+    # Silver spot (London) and key global futures (Yahoo).
+    MacroSeriesSpec(series_id="XAGUSD", provider="stooq", provider_symbol="XAGUSD", name="Silver Spot (XAGUSD)", category="silver_spot", unit="USD/oz"),
+    MacroSeriesSpec(series_id="SI_FUT", provider="yahoo", provider_symbol="SI=F", name="Silver Futures (SI=F)", category="silver_fut", unit="USD/oz"),
+    MacroSeriesSpec(series_id="HG_FUT", provider="yahoo", provider_symbol="HG=F", name="Copper Futures (HG=F)", category="copper_fut", unit="USD/lb"),
+    MacroSeriesSpec(series_id="BRENT_FUT", provider="yahoo", provider_symbol="BZ=F", name="Brent Crude Oil Futures (BZ=F)", category="oil", unit="USD/bbl"),
+    MacroSeriesSpec(series_id="WTI_FUT", provider="yahoo", provider_symbol="CL=F", name="WTI Crude Oil Futures (CL=F)", category="oil", unit="USD/bbl"),
 ]
 
 

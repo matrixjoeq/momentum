@@ -88,3 +88,90 @@ def test_api_rotation_next_plan_shows_on_execution_day_tab(tmp_path):
     assert data_fri["rebalance_effective_next_day"] is True
     assert data_fri["pick_code"] is not None
 
+
+def test_api_rotation_next_plan_does_not_require_future_price_row(tmp_path):
+    """
+    Real-world behavior: when asking "tomorrow plan" intraday / after close,
+    the DB typically does NOT yet have any rows for the next trading day.
+
+    next-plan should still return a concrete pick (not empty) based on asof-close decision.
+    """
+    from fastapi.testclient import TestClient
+
+    from etf_momentum.app import create_app
+    from etf_momentum.db.init_db import init_db
+    from etf_momentum.db.seed import ensure_default_policies
+    from etf_momentum.db.session import make_session_factory, make_sqlite_engine, session_scope
+    import etf_momentum.api.routes as routes
+
+    engine = make_sqlite_engine()
+    init_db(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        ensure_default_policies(db)
+        db.commit()
+
+    class FakeAkRange:
+        def fund_etf_hist_em(self, **kwargs):
+            import pandas as pd
+
+            start_date = str(kwargs.get("start_date") or "20230101")
+            # IMPORTANT: only provide prices up to 2024-01-04 (no 2024-01-05)
+            end_date = str(kwargs.get("end_date") or "20240104")
+            start = pd.to_datetime(start_date)
+            end = pd.to_datetime(end_date)
+            ds = pd.date_range(start=start, end=end, freq="B")
+            n = len(ds)
+            base = pd.Series(range(n), dtype=float)
+            close = 1.0 + base * 0.001
+            open_ = close.shift(1).fillna(close.iloc[0]).astype(float)
+            high = (close * 1.01).astype(float)
+            low = (close * 0.99).astype(float)
+            vol = pd.Series([10.0] * n)
+            amt = pd.Series([100.0] * n)
+            return pd.DataFrame(
+                {
+                    "日期": ds.strftime("%Y-%m-%d"),
+                    "开盘": open_.to_numpy(),
+                    "最高": high.to_numpy(),
+                    "最低": low.to_numpy(),
+                    "收盘": close.to_numpy(),
+                    "成交量": vol.to_numpy(),
+                    "成交额": amt.to_numpy(),
+                }
+            )
+
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = sf
+
+    def override_get_session():
+        yield from session_scope(sf)
+
+    def override_get_akshare():
+        return FakeAkRange()
+
+    app.dependency_overrides[routes.get_session] = override_get_session
+    app.dependency_overrides[routes.get_akshare] = override_get_akshare
+
+    c = TestClient(app)
+    for code, name in [
+        ("159915", "创业板ETF"),
+        ("511010", "国债ETF"),
+        ("513100", "纳指ETF"),
+        ("518880", "黄金ETF"),
+    ]:
+        c.post("/api/etf", json={"code": code, "name": name, "start_date": "20231101", "end_date": "20240104"})
+        assert c.post(f"/api/etf/{code}/fetch").status_code == 200
+
+    # 2024-01-04 is Thu; next trading day is 2024-01-05 (Fri) in XSHG.
+    resp = c.post("/api/analysis/rotation/next-plan", json={"anchor_weekday": 4, "asof": "20240104"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["next_trading_day"] == "2024-01-05"
+    assert data["rebalance_effective_next_day"] is True
+    assert data["pick_code"] is not None
+    assert data["pick_name"] is not None
+    assert data["pick_exposure"] is not None
+    assert float(data["pick_exposure"]) >= 0.0
+

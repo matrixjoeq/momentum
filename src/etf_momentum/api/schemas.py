@@ -278,6 +278,20 @@ class MacroStep1Response(BaseModel):
     error: str | None = None
 
 
+class MacroSeriesBatchRequest(BaseModel):
+    # Optional: if omitted/null/empty, backend will auto-use each series' full stored date range.
+    start: str | None = Field(default=None, description="YYYYMMDD (optional)")
+    end: str | None = Field(default=None, description="YYYYMMDD (optional)")
+    series_ids: list[str] = Field(min_length=1, description="macro series_id list to fetch from macro_prices")
+
+
+class MacroSeriesBatchResponse(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    error: str | None = None
+
+
 class MacroStep2Request(BaseModel):
     """
     Step 2: CN gold (spot/fut), CNH, CN yields relations.
@@ -419,6 +433,7 @@ class VixSignalBacktestRequest(BaseModel):
     index: str = Field(default="VIX", description="Vol index: VIX|GVZ")
     index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
     calendar: str = Field(default="XSHG", description="Exchange calendar for CN trading days")
+    exec_model: str = Field(default="open_open", description="Execution/return model: open_open|close_close")
     lookback_window: int = Field(default=252, ge=20, le=2520, description="Lookback window for threshold estimation")
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_log_ret| to trigger trades")
     min_abs_ret: float = Field(default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold")
@@ -432,6 +447,8 @@ class VixSignalBacktestResponse(BaseModel):
     meta: dict | None = None
     series: dict | None = None
     metrics: dict | None = None
+    period_returns: dict | None = None
+    distributions: dict | None = None
     trades: list[dict] | None = None
     error: str | None = None
 
@@ -560,6 +577,64 @@ class AssetVolIndexTimingRule(BaseModel):
     min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations before thresholds become active.")
 
 
+class AssetTrendRule(BaseModel):
+    """
+    Per-asset trend filter rule (pre-trade; qfq close-based).
+    """
+
+    code: str = Field(min_length=1, description="ETF code or '*' for default rule")
+    trend_mode: str = Field(default="each", description="each|universe")
+    trend_sma_window: int = Field(default=20, ge=1, description="SMA window (trading days)")
+
+
+class AssetRsiRule(BaseModel):
+    """
+    Per-asset RSI filter rule (pre-trade; qfq close-based).
+    """
+
+    code: str = Field(min_length=1, description="ETF code or '*' for default rule")
+    rsi_window: int = Field(default=20, ge=1, description="RSI window (trading days)")
+    rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)
+    rsi_oversold: float = Field(default=30.0, ge=0.0, le=100.0)
+    rsi_block_overbought: bool = Field(default=True, description="If true, exclude assets with RSI > overbought")
+    rsi_block_oversold: bool = Field(default=False, description="If true, exclude assets with RSI < oversold")
+
+
+class AssetChopRule(BaseModel):
+    """
+    Per-asset choppiness filter rule (pre-trade; qfq close-based).
+    """
+
+    code: str = Field(min_length=1, description="ETF code or '*' for default rule")
+    chop_mode: str = Field(default="er", description="er|adx")
+    chop_window: int = Field(default=20, ge=2, description="Efficiency Ratio window (trading days)")
+    chop_er_threshold: float = Field(default=0.25, gt=0.0, description="ER < threshold => choppy => exclude")
+    chop_adx_window: int = Field(default=20, ge=2, description="ADX window (trading days)")
+    chop_adx_threshold: float = Field(default=20.0, gt=0.0, description="ADX < threshold => choppy => exclude")
+
+
+class AssetVolMonitorRule(BaseModel):
+    """
+    Per-asset volatility monitor (position sizing) rule (pre-trade; qfq close-based).
+    """
+
+    code: str = Field(min_length=1, description="ETF code or '*' for default rule")
+    vol_window: int = Field(default=20, ge=1, description="Realized vol window (trading days)")
+    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for sizing")
+    vol_max_ann: float = Field(default=0.60, gt=0.0, description="Annualized hard stop vol; above -> no risk position")
+
+
+class AssetMomentumFloorRule(BaseModel):
+    """
+    Per-asset momentum floor rule:
+    - compares the asset's momentum score to its configured floor
+    - if score <= floor, the asset is excluded from selection
+    """
+
+    code: str = Field(min_length=1, description="ETF code or '*' for default rule")
+    momentum_floor: float = Field(default=0.0, description="Momentum floor threshold for this asset")
+
+
 class RotationBacktestRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
@@ -681,6 +756,27 @@ class RotationBacktestRequest(BaseModel):
     # Timing (strategy NAV RSI gate; uses shadow NAV that ignores this timing gate for RSI signal)
     timing_rsi_gate: bool = Field(default=False, description="Enable timing: sleep when strategy NAV RSI < 50, reactivate when >= 50 (signal from shadow NAV)")
     timing_rsi_window: int = Field(default=24, ge=2, description="RSI window (trading days) for timing gate; typical 6/12/24; default=24")
+    # Phase-1: per-asset parameter rules (optional; if provided, override the corresponding global params)
+    asset_momentum_floor_rules: list[AssetMomentumFloorRule] | None = Field(
+        default=None,
+        description="Optional per-asset momentum-floor rules. Use code='*' as default rule.",
+    )
+    asset_trend_rules: list[AssetTrendRule] | None = Field(
+        default=None,
+        description="Optional per-asset trend filter rules (qfq close-based). Use code='*' as default rule.",
+    )
+    asset_rsi_rules: list[AssetRsiRule] | None = Field(
+        default=None,
+        description="Optional per-asset RSI filter rules (qfq close-based). Use code='*' as default rule.",
+    )
+    asset_chop_rules: list[AssetChopRule] | None = Field(
+        default=None,
+        description="Optional per-asset choppiness filter rules (qfq close-based). Use code='*' as default rule.",
+    )
+    asset_vol_monitor_rules: list[AssetVolMonitorRule] | None = Field(
+        default=None,
+        description="Optional per-asset vol-monitor sizing rules (qfq close-based). Use code='*' as default rule.",
+    )
     # Per-asset risk control rules (optional; applied daily to weights as exposure scaling)
     asset_rc_rules: list[AssetRiskControlRule] | None = Field(
         default=None,
