@@ -437,6 +437,15 @@
         <div class="panel two" style="margin-top: 10px;">
           <div>
             <h3 style="margin: 0 0 6px 0; font-size: 15px;">比值分布直方图（含分位数/现值标识）</h3>
+            <div class="row" style="margin: 6px 0 6px 0;">
+              <div>
+                <label>直方图模式</label>
+                <select id="s1_ratioHistMode" title="默认对数分布更接近对称、便于看尾部风险。">
+                  <option value="log" selected>比值对数（log(ratio)）</option>
+                  <option value="raw">比值原始值（ratio）</option>
+                </select>
+              </div>
+            </div>
             <div id="s1_ratioHist"></div>
           </div>
           <div>
@@ -1293,6 +1302,8 @@
         const setPairMsg = (t) => ($("s1_pairMsg").textContent = t || "");
         const setRatioMsg = (t) => ($("s1_ratioMsg").textContent = t || "");
         let lastSeries = null;
+        let lastRatioValues = null;
+        let lastRatioCurrent = null;
 
         function renderPrice(series) {
           const traces = [];
@@ -1441,8 +1452,11 @@
           return a + (b - a) * (idx - lo);
         }
 
-        function _ratioDistributionAndTable(values, currentValue) {
-          const xs = (values || []).map(v => Number(v)).filter(v => Number.isFinite(v));
+        function _ratioDistributionAndTable(values, currentValue, histMode) {
+          const hm = String(histMode || "log").trim().toLowerCase();
+          const isLog = hm === "log";
+          const xs0 = (values || []).map(v => Number(v)).filter(v => Number.isFinite(v));
+          const xs = isLog ? xs0.filter(v => v > 0).map(v => Math.log(v)) : xs0;
           xs.sort((a, b) => a - b);
           const qs = [
             { q: 0.01, label: "1%" , color: "rgba(214,39,40,0.95)" },
@@ -1456,7 +1470,8 @@
             { q: 0.99, label: "99%", color: "rgba(214,39,40,0.95)" },
           ];
           const qvals = qs.map(it => ({ ...it, value: _quantileSorted(xs, it.q) }));
-          const cur = Number(currentValue);
+          const cur0 = Number(currentValue);
+          const cur = isLog ? (cur0 > 0 ? Math.log(cur0) : Number("nan")) : cur0;
           const curOk = Number.isFinite(cur);
 
           // histogram
@@ -1495,6 +1510,23 @@
             html += `<tr><td>${it.label}</td><td>${fmt(it.value, 6)}</td></tr>`;
           }
           return { xs, qvals, shapes, tableHtml: html };
+        }
+
+        function renderRatioDist() {
+          const mode = ($("s1_ratioHistMode").value || "log").trim();
+          const ratio = lastRatioValues || [];
+          const cur = lastRatioCurrent;
+          const dist = _ratioDistributionAndTable(ratio, cur, mode);
+          const xTitle = mode === "log" ? "log(ratio)" : "ratio";
+          Plotly.newPlot("s1_ratioHist", [
+            { x: dist.xs, type: "histogram", name: xTitle, opacity: 0.75 },
+          ], {
+            margin: { t: 20 },
+            shapes: dist.shapes,
+            xaxis: { title: xTitle },
+            yaxis: { title: "count" },
+          }, { displayModeBar: false });
+          $("s1_ratioTable").innerHTML = dist.tableHtml;
         }
 
         async function runRatio() {
@@ -1562,6 +1594,8 @@
               const x = Number(ratio[i]);
               if (Number.isFinite(x)) { cur = x; break; }
             }
+            lastRatioValues = ratio;
+            lastRatioCurrent = cur;
 
             Plotly.newPlot("s1_ratioChart", [
               { x: u.dates, y: ratio, name: label, type: "scatter", mode: "lines" },
@@ -1571,17 +1605,8 @@
               xaxis: { title: "date" },
             }, { displayModeBar: false });
 
-            // histogram + table (quantiles + current)
-            const dist = _ratioDistributionAndTable(ratio, cur);
-            Plotly.newPlot("s1_ratioHist", [
-              { x: dist.xs, type: "histogram", name: "ratio", opacity: 0.75 },
-            ], {
-              margin: { t: 20 },
-              shapes: dist.shapes,
-              xaxis: { title: "ratio" },
-              yaxis: { title: "count" },
-            }, { displayModeBar: false });
-            $("s1_ratioTable").innerHTML = dist.tableHtml;
+            // histogram + table (quantiles + current), mode-controlled (raw vs log)
+            renderRatioDist();
 
             const rng = `区间=${u.dates[0]}~${u.dates[u.dates.length - 1]}`;
             setRatioMsg(`完成：A=${aId}, B=${bId}, mode=${mode}，样本数=${u.dates.length}，${rng}，现值=${(cur == null ? "" : fmt(cur, 6))}`);
@@ -1617,6 +1642,10 @@
         $("s1_ratioA").addEventListener("change", runRatio);
         $("s1_ratioB").addEventListener("change", runRatio);
         $("s1_ratioMode").addEventListener("change", runRatio);
+        $("s1_ratioHistMode").addEventListener("change", () => {
+          // Only re-render dist; no need to refetch series.
+          if (lastRatioValues && lastRatioValues.length) renderRatioDist();
+        });
       })();
 
       // -------------------- Step2 logic --------------------
