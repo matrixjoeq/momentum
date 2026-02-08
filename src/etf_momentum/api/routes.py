@@ -51,6 +51,10 @@ from .schemas import (
     IndexDistributionResponse,
     VolProxyTimingRequest,
     VolProxyTimingResponse,
+    SimGbmPhase1Request,
+    SimGbmPhase2Request,
+    SimGbmPhase3Request,
+    SimGbmPhase4Request,
     EtfPoolOut,
     EtfPoolUpsert,
     FetchResult,
@@ -89,6 +93,15 @@ from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtes
 from ..analysis.trend import TrendInputs, compute_trend_backtest
 from ..analysis.leadlag import LeadLagInputs, compute_lead_lag, align_us_close_to_cn_next_trading_day
 from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
+from ..analysis.sim_gbm import (
+    SimConfig as _SimCfg,
+    apply_position_sizing,
+    backtest_equal_weight_weekly,
+    backtest_risk_parity_inverse_vol,
+    backtest_rotation_basic,
+    montecarlo_rotation_vs_ew,
+    simulate_gbm_prices,
+)
 from ..analysis.vol_proxy import VolProxySpec, compute_vol_proxy_levels
 from ..analysis.vol_timing import (
     backtest_tiered_exposure_by_level,
@@ -113,6 +126,7 @@ from ..db.repo import (
     get_sync_job_by_dedupe_key,
     get_sync_job,
     get_etf_pool_by_code,
+    normalize_adjust,
     get_price_date_range,
     get_ingestion_batch,
     update_sync_job,
@@ -501,6 +515,7 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
         fft_windows=payload.fft_windows,
         fft_roll=payload.fft_roll,
         fft_roll_step=payload.fft_roll_step,
+        rp_window_days=getattr(payload, "rp_window_days", 60) or 60,
     )
     try:
         return compute_baseline(db, inp)
@@ -3679,6 +3694,117 @@ def rotation_montecarlo(payload: RotationMonteCarloRequest, db: Session = Depend
     }
 
 
+@router.post("/analysis/sim/gbm/phase1")
+def sim_gbm_phase1(payload: SimGbmPhase1Request) -> dict:
+    cfg = _SimCfg(
+        n_assets=int(payload.n_assets),
+        vol_low=float(payload.vol_low),
+        vol_high=float(payload.vol_high),
+        seed=(None if payload.seed is None else int(payload.seed)),
+    )
+    return simulate_gbm_prices(start=str(payload.start), end=(str(payload.end) if payload.end else None), cfg=cfg)
+
+
+@router.post("/analysis/sim/gbm/phase2")
+def sim_gbm_phase2(payload: SimGbmPhase2Request) -> dict:
+    cfg = _SimCfg(
+        n_assets=int(payload.n_assets),
+        vol_low=float(payload.vol_low),
+        vol_high=float(payload.vol_high),
+        seed=(None if payload.seed is None else int(payload.seed)),
+    )
+    base = simulate_gbm_prices(start=str(payload.start), end=(str(payload.end) if payload.end else None), cfg=cfg)
+    if not bool(base.get("ok")):
+        return base
+    dates = (base.get("series") or {}).get("dates") or []
+    close_map = (base.get("series") or {}).get("close") or {}
+    codes = (base.get("assets") or {}).get("codes") or []
+    if not dates or not close_map or not codes:
+        return {"ok": False, "error": "bad_series_payload"}
+    idx = pd.to_datetime(dates)
+    close = pd.DataFrame({c: close_map.get(c) for c in codes}, index=idx, dtype=float)
+    rot = backtest_rotation_basic(close, lookback_days=int(payload.lookback_days), top_k=1)
+    ew = backtest_equal_weight_weekly(close)
+    rp = backtest_risk_parity_inverse_vol(close, ann_vols=(base.get("assets") or {}).get("ann_vols") or {})
+    return {
+        "ok": True,
+        "meta": dict(base.get("meta") or {}),
+        "assets": base.get("assets"),
+        "corr": base.get("corr"),
+        "asset_metrics": (base.get("metrics") or {}).get("by_asset"),
+        "rotation": rot,
+        "equal_weight": ew,
+        "risk_parity": rp,
+    }
+
+
+@router.post("/analysis/sim/gbm/phase3")
+def sim_gbm_phase3(payload: SimGbmPhase3Request) -> dict:
+    return montecarlo_rotation_vs_ew(
+        start=str(payload.start),
+        end=(str(payload.end) if payload.end else None),
+        n_sims=int(payload.n_sims),
+        chunk_size=int(payload.chunk_size),
+        n_assets=int(payload.n_assets),
+        vol_low=float(payload.vol_low),
+        vol_high=float(payload.vol_high),
+        seed=(None if payload.seed is None else int(payload.seed)),
+        lookback_days=int(payload.lookback_days),
+    )
+
+
+@router.post("/analysis/sim/gbm/phase4")
+def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
+    # Run phase2 once (single sim) + apply position sizing; and also run MC distribution with ruin proxy stats.
+    cfg = _SimCfg(
+        n_assets=int(payload.n_assets),
+        vol_low=float(payload.vol_low),
+        vol_high=float(payload.vol_high),
+        seed=(None if payload.seed is None else int(payload.seed)),
+    )
+    base = simulate_gbm_prices(start=str(payload.start), end=(str(payload.end) if payload.end else None), cfg=cfg)
+    if not bool(base.get("ok")):
+        return base
+    dates = (base.get("series") or {}).get("dates") or []
+    close_map = (base.get("series") or {}).get("close") or {}
+    codes = (base.get("assets") or {}).get("codes") or []
+    idx = pd.to_datetime(dates)
+    close = pd.DataFrame({c: close_map.get(c) for c in codes}, index=idx, dtype=float)
+    rot = backtest_rotation_basic(close, lookback_days=int(payload.lookback_days), top_k=1)
+    ew = backtest_equal_weight_weekly(close)
+    rp = backtest_risk_parity_inverse_vol(close, ann_vols=(base.get("assets") or {}).get("ann_vols") or {})
+    if not bool(rot.get("ok")) or not bool(ew.get("ok")):
+        return {"ok": False, "error": "backtest_failed", "rotation": rot, "equal_weight": ew}
+    nav_rot = pd.Series((rot.get("series") or {}).get("nav") or [], index=idx, dtype=float)
+    nav_ew = pd.Series((ew.get("series") or {}).get("nav") or [], index=idx, dtype=float)
+    nav_rp = pd.Series((rp.get("series") or {}).get("nav") or [], index=idx, dtype=float)
+    sized_rot = apply_position_sizing(nav_rot, initial_cash=float(payload.initial_cash), position_pct=float(payload.position_pct))
+    sized_ew = apply_position_sizing(nav_ew, initial_cash=float(payload.initial_cash), position_pct=float(payload.position_pct))
+    sized_rp = apply_position_sizing(nav_rp, initial_cash=float(payload.initial_cash), position_pct=float(payload.position_pct))
+
+    # Quick MC: compute distribution of min equity ratio under sizing (approx, using cagr only is insufficient; do full paths in blocks).
+    mc = montecarlo_rotation_vs_ew(
+        start=str(payload.start),
+        end=(str(payload.end) if payload.end else None),
+        n_sims=int(payload.n_sims),
+        chunk_size=int(payload.chunk_size),
+        n_assets=int(payload.n_assets),
+        vol_low=float(payload.vol_low),
+        vol_high=float(payload.vol_high),
+        seed=(None if payload.seed is None else int(payload.seed)),
+        lookback_days=int(payload.lookback_days),
+    )
+    # Ruin (theoretical) for GBM with pos<=1 is 0; we still report a conservative check on min_equity_ratio using the single-path sized runs.
+    ruin = bool((sized_rot.get("stats") or {}).get("ruin")) or bool((sized_ew.get("stats") or {}).get("ruin"))
+    return {
+        "ok": True,
+        "meta": dict(base.get("meta") or {}),
+        "sizing": {"initial_cash": float(payload.initial_cash), "position_pct": float(payload.position_pct), "ruin": bool(ruin)},
+        "one": {"rotation": sized_rot, "equal_weight": sized_ew, "risk_parity": sized_rp},
+        "mc": mc,
+    }
+
+
 @router.get("/validation-policies", response_model=list[ValidationPolicyOut])
 def get_policies(db: Session = Depends(get_session)) -> list[ValidationPolicyOut]:
     items = list_validation_policies(db)
@@ -3697,14 +3823,15 @@ def get_policies(db: Session = Depends(get_session)) -> list[ValidationPolicyOut
 
 @router.get("/etf", response_model=list[EtfPoolOut])
 def get_etfs(adjust: str = "hfq", db: Session = Depends(get_session)) -> list[EtfPoolOut]:
+    try:
+        _ = normalize_adjust(adjust)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     items = list_etf_pool(db)
     out: list[EtfPoolOut] = []
     for i in items:
         p = get_validation_policy_by_id(db, i.validation_policy_id) if i.validation_policy_id else None
-        try:
-            rng = get_price_date_range(db, code=i.code, adjust=adjust)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+        rng = get_price_date_range(db, code=i.code, adjust=adjust)
         out.append(
             EtfPoolOut(
                 code=i.code,

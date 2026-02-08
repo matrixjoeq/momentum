@@ -30,6 +30,122 @@ class BaselineInputs:
     fft_windows: list[int] | None = None
     fft_roll: bool = True
     fft_roll_step: int = 5
+    # Risk parity (inverse-vol) portfolio config (used by research UI)
+    rp_window_days: int = 60
+
+
+def _inv_vol_weights(vol: pd.Series) -> pd.Series:
+    v = pd.Series(vol).astype(float).replace([np.inf, -np.inf], np.nan)
+    inv = 1.0 / v.replace(0.0, np.nan)
+    inv = inv.where(np.isfinite(inv), other=np.nan)
+    s = float(np.nansum(inv.to_numpy(dtype=float)))
+    if not np.isfinite(s) or s <= 0:
+        # fallback: equal weight over finite vols
+        m = np.isfinite(v.to_numpy(dtype=float)) & (v.to_numpy(dtype=float) > 0)
+        if not np.any(m):
+            return pd.Series(0.0, index=v.index, dtype=float)
+        w = np.zeros(len(v), dtype=float)
+        w[m] = 1.0 / float(np.sum(m))
+        return pd.Series(w, index=v.index, dtype=float)
+    return (inv / s).fillna(0.0).astype(float)
+
+
+def _compute_risk_parity_nav_and_weights(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+    window: int,
+    weekly_anchor: str = "FRI",
+) -> tuple[pd.Series, pd.DataFrame]:
+    """
+    Risk parity (inverse-vol) portfolio NAV and pre-return weights.
+
+    Implementation notes (no lookahead):
+    - We rebalance weights at the same schedule as EW (daily/weekly/monthly/quarterly/yearly/none).
+    - At each rebalance boundary, we estimate vol using *past* returns only (exclude current-day return).
+    - Weights are proportional to 1/vol (diagonal covariance approximation).
+    """
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+    if daily_ret.empty:
+        return pd.Series(dtype=float, name="RP"), pd.DataFrame()
+
+    r = daily_ret.astype(float).fillna(0.0)
+    cols = list(r.columns)
+    n = len(cols)
+    if n <= 0:
+        return pd.Series(dtype=float, name="RP"), pd.DataFrame()
+
+    w0 = np.full(n, 1.0 / n, dtype=float)
+    w_df = pd.DataFrame(index=r.index, columns=cols, dtype=float)
+
+    # none: buy-and-hold with initial inverse-vol weights estimated on the first window
+    win = max(2, int(window))
+    if reb == "none":
+        # use the earliest available window (excluding day0 return which is 0 by construction)
+        hist = r.iloc[1 : 1 + win] if len(r) >= 1 + win else r.iloc[1:]
+        vol = hist.std(ddof=1)
+        w_init = _inv_vol_weights(vol).reindex(cols).fillna(0.0).to_numpy(dtype=float)
+        if float(np.sum(w_init)) <= 0:
+            w_init = w0.copy()
+        indiv_nav = (1.0 + r).cumprod()
+        indiv_nav.iloc[0, :] = 1.0
+        nav = (indiv_nav * w_init.reshape(1, n)).sum(axis=1)
+        # weights drift with asset NAV
+        w = indiv_nav.mul(w_init, axis=1)
+        w = w.div(w.sum(axis=1), axis=0).fillna(0.0)
+        w_df.loc[:, :] = w.reindex(columns=cols).to_numpy(dtype=float)
+        if len(nav) > 0:
+            nav.iloc[0] = 1.0
+        return nav.rename("RP"), w_df
+
+    if reb == "daily":
+        # pre-return weights for day i use returns up to i-1
+        for i, t in enumerate(r.index):
+            hist = r.iloc[max(0, i - win) : i]
+            if len(hist) < win:
+                w_df.loc[t, :] = w0
+            else:
+                w_df.loc[t, :] = _inv_vol_weights(hist.std(ddof=1)).reindex(cols).fillna(0.0)
+        port_ret = (w_df * r).sum(axis=1)
+        nav = (1.0 + port_ret).cumprod()
+        if len(nav) > 0:
+            nav.iloc[0] = 1.0
+        return nav.rename("RP"), w_df
+
+    freq_map = {"weekly": f"W-{str(weekly_anchor).strip().upper()}", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
+    labels = r.index.to_period(freq_map[reb])
+    prev_label = None
+    nav = 1.0
+    w = w0.copy()
+    nav_out: list[float] = []
+    w_out: list[np.ndarray] = []
+    rmat = r.to_numpy(dtype=float)
+    for i, lab in enumerate(labels):
+        if prev_label is None or lab != prev_label:
+            hist = r.iloc[max(0, i - win) : i]
+            if len(hist) >= win:
+                ww = _inv_vol_weights(hist.std(ddof=1)).reindex(cols).fillna(0.0).to_numpy(dtype=float)
+                if float(np.sum(ww)) > 0:
+                    w = ww
+                else:
+                    w = w0.copy()
+            else:
+                w = w0.copy()
+        w_out.append(w.copy())
+        rr = rmat[i]
+        port_r = float(np.dot(w, rr))
+        nav *= (1.0 + port_r)
+        if 1.0 + port_r != 0.0:
+            w = w * (1.0 + rr) / (1.0 + port_r)
+        nav_out.append(nav)
+        prev_label = lab
+    nav_s = pd.Series(nav_out, index=r.index, name="RP")
+    if len(nav_s) > 0:
+        nav_s.iloc[0] = 1.0
+    w_df2 = pd.DataFrame(np.vstack(w_out), index=r.index, columns=cols, dtype=float)
+    return nav_s, w_df2
 
 
 def _to_date(x: str) -> dt.date:
@@ -1326,6 +1442,16 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes], rebalance=inp.rebalance)
     ew_ret = ew_nav.pct_change().fillna(0.0)
 
+    # risk parity (inverse-vol) portfolio with the same rebalancing schedule
+    rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
+    rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes], rebalance=inp.rebalance, window=rp_win)
+    rp_ret = rp_nav.pct_change().fillna(0.0)
+
+    # risk parity (inverse-vol) portfolio with the same rebalancing schedule
+    rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
+    rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes], rebalance=inp.rebalance, window=rp_win)
+    rp_ret = rp_nav.pct_change().fillna(0.0)
+
     # benchmark
     bench_code = inp.benchmark_code
     if bench_code is None:
@@ -1345,6 +1471,10 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     monthly = period_returns(ew_nav, "ME")
     quarterly = period_returns(ew_nav, "QE")
     yearly = period_returns(ew_nav, "YE")
+    weekly_rp = period_returns(rp_nav, "W-FRI")
+    monthly_rp = period_returns(rp_nav, "ME")
+    quarterly_rp = period_returns(rp_nav, "QE")
+    yearly_rp = period_returns(rp_nav, "YE")
 
     def _win_payoff_kelly(df: pd.DataFrame) -> dict[str, float]:
         r = pd.Series(df["return"].astype(float).to_numpy()) if (df is not None and not df.empty) else pd.Series([], dtype=float)
@@ -1366,74 +1496,105 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     monthly_wp = _win_payoff_kelly(monthly)
     quarterly_wp = _win_payoff_kelly(quarterly)
     yearly_wp = _win_payoff_kelly(yearly)
+    weekly_wp_rp = _win_payoff_kelly(weekly_rp)
+    monthly_wp_rp = _win_payoff_kelly(monthly_rp)
+    quarterly_wp_rp = _win_payoff_kelly(quarterly_rp)
+    yearly_wp_rp = _win_payoff_kelly(yearly_rp)
 
-    # metrics on ew
-    cum_ret = float(ew_nav.iloc[-1] / ew_nav.iloc[0] - 1.0)
-    ann_ret = _annualized_return(ew_nav)
-    ann_vol = _annualized_vol(ew_ret)
-    mdd = _max_drawdown(ew_nav)
-    mdd_dur = _max_drawdown_duration_days(ew_nav)
-    sharpe = _sharpe(ew_ret, rf=float(inp.risk_free_rate))
-    calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
-    sortino = _sortino(ew_ret, rf=float(inp.risk_free_rate))
-    ir = _information_ratio(ew_ret - bench_ret.fillna(0.0))
-    ui = _ulcer_index(ew_nav, in_percent=True)
-    ui_den = ui / 100.0
-    upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
+    def _metrics_from_nav(
+        nav_s: pd.Series,
+        nav_ret: pd.Series,
+        *,
+        wp_w: dict[str, float],
+        wp_m: dict[str, float],
+        wp_q: dict[str, float],
+        wp_y: dict[str, float],
+    ) -> dict[str, Any]:
+        cum_ret = float(nav_s.iloc[-1] / nav_s.iloc[0] - 1.0)
+        ann_ret = _annualized_return(nav_s)
+        ann_vol = _annualized_vol(nav_ret)
+        mdd = _max_drawdown(nav_s)
+        mdd_dur = _max_drawdown_duration_days(nav_s)
+        sharpe = _sharpe(nav_ret, rf=float(inp.risk_free_rate))
+        calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
+        sortino = _sortino(nav_ret, rf=float(inp.risk_free_rate))
+        ir = _information_ratio(nav_ret - bench_ret.fillna(0.0))
+        ui = _ulcer_index(nav_s, in_percent=True)
+        ui_den = ui / 100.0
+        upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
+        return {
+            "benchmark_code": bench_code,
+            "rebalance": inp.rebalance,
+            "risk_free_rate": float(inp.risk_free_rate),
+            "cumulative_return": cum_ret,
+            "annualized_return": ann_ret,
+            "annualized_volatility": ann_vol,
+            "max_drawdown": mdd,
+            "max_drawdown_recovery_days": mdd_dur,
+            "sharpe_ratio": sharpe,
+            "calmar_ratio": calmar,
+            "sortino_ratio": sortino,
+            "information_ratio": ir,
+            "ulcer_index": ui,
+            "ulcer_performance_index": upi,
+            # holding (absolute) win/payoff/kelly by period
+            "holding_weekly_win_rate": wp_w["win_rate"],
+            "holding_weekly_payoff_ratio": wp_w["payoff_ratio"],
+            "holding_weekly_kelly_fraction": wp_w["kelly_fraction"],
+            "holding_monthly_win_rate": wp_m["win_rate"],
+            "holding_monthly_payoff_ratio": wp_m["payoff_ratio"],
+            "holding_monthly_kelly_fraction": wp_m["kelly_fraction"],
+            "holding_quarterly_win_rate": wp_q["win_rate"],
+            "holding_quarterly_payoff_ratio": wp_q["payoff_ratio"],
+            "holding_quarterly_kelly_fraction": wp_q["kelly_fraction"],
+            "holding_yearly_win_rate": wp_y["win_rate"],
+            "holding_yearly_payoff_ratio": wp_y["payoff_ratio"],
+            "holding_yearly_kelly_fraction": wp_y["kelly_fraction"],
+        }
 
-    metrics = {
-        "benchmark_code": bench_code,
-        "rebalance": inp.rebalance,
-        "risk_free_rate": float(inp.risk_free_rate),
-        "cumulative_return": cum_ret,
-        "annualized_return": ann_ret,
-        "annualized_volatility": ann_vol,
-        "max_drawdown": mdd,
-        "max_drawdown_recovery_days": mdd_dur,
-        "sharpe_ratio": sharpe,
-        "calmar_ratio": calmar,
-        "sortino_ratio": sortino,
-        "information_ratio": ir,
-        "ulcer_index": ui,
-        "ulcer_performance_index": upi,
-        # holding (absolute) win/payoff/kelly by period
-        "holding_weekly_win_rate": weekly_wp["win_rate"],
-        "holding_weekly_payoff_ratio": weekly_wp["payoff_ratio"],
-        "holding_weekly_kelly_fraction": weekly_wp["kelly_fraction"],
-        "holding_monthly_win_rate": monthly_wp["win_rate"],
-        "holding_monthly_payoff_ratio": monthly_wp["payoff_ratio"],
-        "holding_monthly_kelly_fraction": monthly_wp["kelly_fraction"],
-        "holding_quarterly_win_rate": quarterly_wp["win_rate"],
-        "holding_quarterly_payoff_ratio": quarterly_wp["payoff_ratio"],
-        "holding_quarterly_kelly_fraction": quarterly_wp["kelly_fraction"],
-        "holding_yearly_win_rate": yearly_wp["win_rate"],
-        "holding_yearly_payoff_ratio": yearly_wp["payoff_ratio"],
-        "holding_yearly_kelly_fraction": yearly_wp["kelly_fraction"],
-    }
+    metrics_ew = _metrics_from_nav(ew_nav, ew_ret, wp_w=weekly_wp, wp_m=monthly_wp, wp_q=quarterly_wp, wp_y=yearly_wp)
+    metrics_rp = _metrics_from_nav(
+        rp_nav,
+        rp_ret,
+        wp_w=weekly_wp_rp,
+        wp_m=monthly_wp_rp,
+        wp_q=quarterly_wp_rp,
+        wp_y=yearly_wp_rp,
+    )
+    # Backward-compat: top-level metrics remains EW.
+    metrics = metrics_ew
 
-    # rolling
-    rolling = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
-    for weeks in inp.rolling_weeks or []:
-        window = weeks * 5
-        rolling["returns"][f"{weeks}w"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
-        rolling["drawdown"][f"{weeks}w"] = _rolling_drawdown(ew_nav, window).dropna()
-        # backward-compat (deprecated): previously "rolling max drawdown"
-        rolling["max_drawdown"][f"{weeks}w"] = _rolling_max_drawdown(ew_nav, window).dropna()
-    for months in inp.rolling_months or []:
-        window = months * 21
-        rolling["returns"][f"{months}m"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
-        rolling["drawdown"][f"{months}m"] = _rolling_drawdown(ew_nav, window).dropna()
-        rolling["max_drawdown"][f"{months}m"] = _rolling_max_drawdown(ew_nav, window).dropna()
-    for years in inp.rolling_years or []:
-        window = years * 252
-        rolling["returns"][f"{years}y"] = (ew_nav / ew_nav.shift(window) - 1.0).dropna()
-        rolling["drawdown"][f"{years}y"] = _rolling_drawdown(ew_nav, window).dropna()
-        rolling["max_drawdown"][f"{years}y"] = _rolling_max_drawdown(ew_nav, window).dropna()
+    def _rolling_pack(nav_s: pd.Series) -> dict[str, dict[str, Any]]:
+        rolling = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
+        for weeks in inp.rolling_weeks or []:
+            window = weeks * 5
+            rolling["returns"][f"{weeks}w"] = (nav_s / nav_s.shift(window) - 1.0).dropna()
+            rolling["drawdown"][f"{weeks}w"] = _rolling_drawdown(nav_s, window).dropna()
+            # backward-compat (deprecated): previously "rolling max drawdown"
+            rolling["max_drawdown"][f"{weeks}w"] = _rolling_max_drawdown(nav_s, window).dropna()
+        for months in inp.rolling_months or []:
+            window = months * 21
+            rolling["returns"][f"{months}m"] = (nav_s / nav_s.shift(window) - 1.0).dropna()
+            rolling["drawdown"][f"{months}m"] = _rolling_drawdown(nav_s, window).dropna()
+            rolling["max_drawdown"][f"{months}m"] = _rolling_max_drawdown(nav_s, window).dropna()
+        for years in inp.rolling_years or []:
+            window = years * 252
+            rolling["returns"][f"{years}y"] = (nav_s / nav_s.shift(window) - 1.0).dropna()
+            rolling["drawdown"][f"{years}y"] = _rolling_drawdown(nav_s, window).dropna()
+            rolling["max_drawdown"][f"{years}y"] = _rolling_max_drawdown(nav_s, window).dropna()
+        return {
+            "returns": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["returns"].items()},
+            "drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["drawdown"].items()},
+            "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
+        }
+
+    rolling_by_portfolio = {"EW": _rolling_pack(ew_nav), "RP": _rolling_pack(rp_nav)}
 
     # package series for UI (plotly expects arrays)
     dates = nav_common.index.date.astype(str).tolist()
     series = {c: nav_common[c].astype(float).fillna(np.nan).tolist() for c in codes if c in nav_common.columns}
     series["EW"] = ew_nav.astype(float).tolist()
+    series["RP"] = rp_nav.astype(float).tolist()
     series[f"BENCH:{bench_code}"] = bench_nav.astype(float).tolist()
 
     # NAV RSI (EW + benchmark), windows configurable
@@ -1443,22 +1604,23 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "dates": dates,
         "series": {
             "EW": {str(w): _rsi_wilder(ew_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
+            "RP": {str(w): _rsi_wilder(rp_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
             f"BENCH:{bench_code}": {str(w): _rsi_wilder(bench_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
         },
     }
+    rolling_out = rolling_by_portfolio["EW"]  # backward-compat
 
-    rolling_out = {
-        "returns": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["returns"].items()},
-        "drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["drawdown"].items()},
-        # backward-compat (deprecated): this used to be rolling max drawdown
-        "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
-    }
-
-    attribution = _compute_return_risk_contributions(
+    attribution_ew = _compute_return_risk_contributions(
         asset_ret=ret_common[codes],
         weights=ew_w[codes] if not ew_w.empty else pd.DataFrame(index=ret_common.index, columns=codes),
-        total_return=float(cum_ret),
+        total_return=float(metrics_ew["cumulative_return"]),
     )
+    attribution_rp = _compute_return_risk_contributions(
+        asset_ret=ret_common[codes],
+        weights=rp_w[codes] if not rp_w.empty else pd.DataFrame(index=ret_common.index, columns=codes),
+        total_return=float(metrics_rp["cumulative_return"]),
+    )
+    attribution = attribution_ew  # backward-compat
 
     # FFT analysis (on log returns, using the same adjustment basis as baseline close)
     fft = _fft_analysis(close_ff.loc[common_start:, codes], ew_nav=ew_nav, windows=inp.fft_windows)
@@ -1592,9 +1754,12 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "yearly": yearly.to_dict(orient="records"),
         },
         "metrics": metrics,
+        "metrics_by_portfolio": {"EW": metrics_ew, "RP": metrics_rp},
         "correlation": corr_out,
         "rolling": rolling_out,
+        "rolling_by_portfolio": rolling_by_portfolio,
         "attribution": attribution,
+        "attribution_by_portfolio": {"EW": attribution_ew, "RP": attribution_rp},
         "fft": fft,
         "fft_roll": {"ew": fft_roll},
         "period_distributions": period_distributions,

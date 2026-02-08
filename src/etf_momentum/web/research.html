@@ -89,6 +89,17 @@
         </select>
       </div>
       <div>
+        <label>组合模式</label>
+        <select id="baselineMode">
+          <option value="EW" selected>等权（EW）</option>
+          <option value="RP">风险平价（RP，inverse-vol）</option>
+        </select>
+      </div>
+      <div>
+        <label>RP 波动率窗口（交易日）</label>
+        <input id="baselineRpWin" value="60" />
+      </div>
+      <div>
         <label>基准标的（用于信息比率）</label>
         <select id="benchmark"></select>
       </div>
@@ -938,15 +949,27 @@
 
       <div class="panel two" style="grid-template-columns: 1fr 1fr;">
         <div>
-          <h3>净值曲线（轮动 vs 等权同频再平衡）</h3>
+          <div class="row no-print" style="justify-content:space-between; align-items:end;">
+            <div>
+              <h3 style="margin:0;">净值曲线（轮动 vs 基准）</h3>
+              <div class="muted" style="margin-top:4px;">基准可选：等权（EW_REBAL）或 风险平价（RP_REBAL，inverse-vol）。</div>
+            </div>
+            <div>
+              <label>轮动基准</label>
+              <select id="rotBenchMode" style="min-width:220px;">
+                <option value="EW_REBAL" selected>等权（EW_REBAL）</option>
+                <option value="RP_REBAL">风险平价（RP_REBAL）</option>
+              </select>
+            </div>
+          </div>
           <div id="rotChart" style="width:100%; height:520px;"></div>
-          <h3 style="margin-top:12px">回撤对比（轮动 vs 等权）</h3>
+          <h3 style="margin-top:12px">回撤对比（轮动 vs 基准）</h3>
           <div id="rotDDCompare" style="width:100%; height:260px;"></div>
         </div>
         <div>
-          <h3>超额净值（轮动 / 等权）</h3>
+          <h3>超额净值（轮动 / 基准）</h3>
           <div id="rotExcessChart" style="width:100%; height:520px;"></div>
-          <h3 style="margin-top:12px">40日收益差（轮动 - 等权）</h3>
+          <h3 style="margin-top:12px">40日收益差（轮动 - 基准）</h3>
           <div id="rot40dDiffChart" style="width:100%; height:260px;"></div>
         </div>
       </div>
@@ -1229,6 +1252,71 @@
               <div id="mcExcessPeriodHist" style="width:100%; height:420px;"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
+      <h3 style="margin: 0 0 6px 0;">随机资产模拟实验（GBM，无相关）</h3>
+      <div class="muted" style="margin-bottom: 10px;">
+        构造 4 个相互不相关的资产：每日 log(1+r) ~ N(0, σ)，年化波动率随机在 5%~30%。从 1990-01-01 起按 business day 构造到最近交易日，净值从 1 开始（无复权）。用于检验“基础轮动策略”在随机世界里是否存在统计优势，以及仓位管理下是否会半途破产。
+      </div>
+      <div class="row">
+        <div><label>开始日期</label><input id="simStart" value="19900101" /></div>
+        <div><label>结束日期（可空=最近工作日）</label><input id="simEnd" value="" /></div>
+        <div><label>资产数</label><input id="simN" value="4" /></div>
+        <div><label>年化波动率下限</label><input id="simVolLow" value="0.05" /></div>
+        <div><label>年化波动率上限</label><input id="simVolHigh" value="0.30" /></div>
+        <div><label>随机种子（可空）</label><input id="simSeed" value="" /></div>
+        <div><label>lookback_days</label><input id="simLb" value="20" /></div>
+        <div>
+          <label>模拟基准</label>
+          <select id="simBenchMode" style="min-width:220px;">
+            <option value="equal_weight" selected>等权（EW）</option>
+            <option value="risk_parity">风险平价（RP，inverse-vol）</option>
+          </select>
+        </div>
+        <div><label>重复次数（Phase3/4）</label><input id="simNSims" value="10000" /></div>
+        <div><label>chunk_size</label><input id="simChunk" value="200" /></div>
+        <div><label>初始资金（Phase4）</label><input id="simCash" value="1000000" /></div>
+        <div><label>仓位比例（Phase4）</label><input id="simPosPct" value="0.10" /></div>
+        <button id="simRun1">Phase1：生成资产</button>
+        <button id="simRun2">Phase2：轮动 vs 等权</button>
+        <button id="simRun3">Phase3：批量分布</button>
+        <button id="simRun4">Phase4：遍历性/破产</button>
+      </div>
+      <div id="simMsg" class="msg panel"></div>
+      <div class="panel two">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">资产净值（close，对数纵轴）</div>
+          <div id="simAssetNav" style="width:100%; height:420px;"></div>
+          <table id="simAssetMetrics" style="margin-top:10px;"></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">相关性矩阵（log-ret）</div>
+          <div id="simCorr" style="width:100%; height:420px;"></div>
+        </div>
+      </div>
+      <div class="panel two">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">策略净值对比（对数纵轴）</div>
+          <div id="simRotNav" style="width:100%; height:420px;"></div>
+          <table id="simRotMetrics" style="margin-top:10px;"></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">绩效分布（CAGR）</div>
+          <div id="simMcCagr" style="width:100%; height:420px;"></div>
+          <div class="muted" id="simMcNote" style="margin-top:6px;"></div>
+        </div>
+      </div>
+      <div class="panel two">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">仓位管理净值（单次，对数纵轴）</div>
+          <div id="simEq1" style="width:100%; height:420px;"></div>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">破产/最低权益（当前版本：GBM + 非杠杆仓位下理论上不会破产）</div>
+          <div id="simRuin" style="width:100%; height:420px;"></div>
         </div>
       </div>
     </div>
@@ -2755,7 +2843,11 @@
 
       async function loadPool() {
         const resp = await api(`/etf?adjust=${encodeURIComponent(ADJUST_USED)}`, { method: "GET" });
-        pool = await resp.json();
+        const data = await resp.json();
+        if (!Array.isArray(data)) {
+          throw new Error(`候选池接口返回异常（非数组）：${JSON.stringify(data).slice(0, 200)}`);
+        }
+        pool = data;
         // default select all
         for (const it of pool) selected.add(it.code);
         renderCodeList();
@@ -4408,9 +4500,12 @@
           return { mean, std };
         };
         const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
+        const benchKey = (($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
+        const excessKey = (benchKey === "RP_REBAL") ? "EXCESS_RP" : "EXCESS";
+        const benchNav = s[benchKey] || [];
         const traces = [
           { x: dates, y: s.ROTATION, mode: "lines", name: "ROTATION", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
-          { x: dates, y: s.EW_REBAL, mode: "lines", name: "EW_REBAL", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          { x: dates, y: benchNav, mode: "lines", name: benchKey, hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
         ];
         // RSI (strategy only) below NAV (same figure, separate panel)
         for (const w of rsiWins) {
@@ -4435,7 +4530,7 @@
           "rotDDCompare",
           [
             { x: dates, y: _drawdownFromNav(s.ROTATION), mode: "lines", name: "ROTATION DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
-            { x: dates, y: _drawdownFromNav(s.EW_REBAL), mode: "lines", name: "EW_REBAL DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+            { x: dates, y: _drawdownFromNav(benchNav), mode: "lines", name: `${benchKey} DD`, hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
           ],
           {
             margin: { t: 10, b: 30 },
@@ -4447,14 +4542,14 @@
         Plotly.newPlot(
           "rotExcessChart",
           (() => {
-            const ex = s.EXCESS || [];
+            const ex = s[excessKey] || [];
             const ms250 = _rollingMeanStd(ex, 250);
             const ma250 = ms250.mean;
             const sd250 = ms250.std;
             const upper = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m + 2.0 * sd250[i])));
             const lower = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m - 2.0 * sd250[i])));
             const out = [
-              { x: dates, y: ex, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+              { x: dates, y: ex, mode: "lines", name: excessKey, hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
               // Bollinger band (lower -> upper fill)
               { x: dates, y: lower, mode: "lines", name: "BB Lower(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, hoverinfo: "skip" },
               { x: dates, y: upper, mode: "lines", name: "BB Upper(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, fill: "tonexty", fillcolor: "rgba(31,119,180,0.10)", hoverinfo: "skip" },
@@ -4479,12 +4574,12 @@
           { responsive: true }
         );
 
-        // 40-day rolling return difference: ROTATION - EW_REBAL
+        // 40-day rolling return difference: ROTATION - benchmark
         const rot40 = _rollingReturn(s.ROTATION || [], 40);
-        const ew40 = _rollingReturn(s.EW_REBAL || [], 40);
+        const b40 = _rollingReturn(benchNav || [], 40);
         const diff40 = rot40.map((x, i) => {
           const a = Number(x);
-          const b = Number(ew40[i]);
+          const b = Number(b40[i]);
           if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
           return a - b;
         });
@@ -4551,12 +4646,13 @@
           );
         };
         _plotRollingCombo("rotRollingCombo", s.ROTATION || [], "ROT");
-        _plotRollingCombo("rotExcessRollingCombo", s.EXCESS || [], "EX");
+        _plotRollingCombo("rotExcessRollingCombo", (s[excessKey] || []), "EX");
       }
 
       function renderRotationMetrics(m) {
         const s = m.strategy || {};
-        const ex = m.excess_vs_equal_weight || {};
+        const benchKey = (($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
+        const ex = (benchKey === "RP_REBAL") ? (m.excess_vs_risk_parity || {}) : (m.excess_vs_equal_weight || {});
         const rows = [
           { key: "rot_cum", label: "策略累积收益", value: fmtPct(s.cumulative_return) },
           { key: "rot_ann", label: "策略年化收益", value: fmtPct(s.annualized_return) },
@@ -5445,9 +5541,12 @@
         const fft_roll = ($("fftRollOn").value === "true");
         const fft_roll_step = Math.max(1, Math.floor(Number(($("fftRollStep").value || "5").trim())));
         if (!Number.isFinite(fft_roll_step) || fft_roll_step < 1) return setMsg("滚动FFT步长必须是正整数，例如 5");
+        const baseline_mode = ($("baselineMode").value || "EW").trim().toUpperCase();
+        const rp_window_days = Math.max(2, Math.floor(Number(($("baselineRpWin").value || "60").trim())));
+        if (!Number.isFinite(rp_window_days) || rp_window_days < 2) return setMsg("RP 波动率窗口必须是 >=2 的整数交易日，例如 60");
         $("status").textContent = "计算中...";
         setMsg("");
-        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust: ADJUST_USED, rebalance, risk_free_rate, fft_windows, fft_roll, fft_roll_step }) });
+        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust: ADJUST_USED, rebalance, risk_free_rate, fft_windows, fft_roll, fft_roll_step, rp_window_days }) });
         const text = await resp.text();
         $("status").textContent = "";
         if (!resp.ok) return setMsg(text);
@@ -5459,9 +5558,21 @@
         window.__distBaselineCache = window.__distBaselineCache || {};
         window.__distBaselineCache[ADJUST_USED] = data;
         corrRangeKey = "all";
-        plotNav(data.nav);
-        renderMetrics(data.metrics);
-        renderContributionTables("ew", data.attribution);
+        const _pickBaselineMode = (m) => {
+          const by = (data.metrics_by_portfolio || {});
+          const mode = (m || "EW").toUpperCase();
+          return { mode, metrics: (by[mode] || data.metrics), rolling: ((data.rolling_by_portfolio || {})[mode] || data.rolling), attribution: ((data.attribution_by_portfolio || {})[mode] || data.attribution) };
+        };
+        const picked = _pickBaselineMode(baseline_mode);
+        const nav2 = { dates: (data.nav || {}).dates || [], series: {} };
+        // codes + selected portfolio + benchmark
+        for (const c of (data.codes || [])) nav2.series[c] = data.nav.series[c];
+        nav2.series[picked.mode] = data.nav.series[picked.mode];
+        // include benchmark line (if any)
+        for (const k of Object.keys(data.nav.series || {})) if (String(k).startsWith("BENCH:")) nav2.series[k] = data.nav.series[k];
+        plotNav(nav2);
+        renderMetrics(picked.metrics);
+        renderContributionTables("ew", picked.attribution);
         periodState.weekly.data = data.period_returns.weekly || [];
         periodState.monthly.data = data.period_returns.monthly || [];
         periodState.quarterly.data = data.period_returns.quarterly || [];
@@ -5478,12 +5589,31 @@
         // default: full backtest range (client-side recompute for consistency)
         refreshCorrelationForRange("all");
         // show percent with 0 decimals
-        plotRolling("rollingReturns", "Rolling Returns", data.rolling.returns, ".0%");
-        plotRolling("rollingDD", "Rolling Drawdown", (data.rolling.drawdown || data.rolling.max_drawdown), ".0%");
+        plotRolling("rollingReturns", "Rolling Returns", (picked.rolling.returns || {}), ".0%");
+        plotRolling("rollingDD", "Rolling Drawdown", (picked.rolling.drawdown || picked.rolling.max_drawdown || {}), ".0%");
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
         renderPeriodDistributions(data.period_distributions, data);
       }
+
+      // baseline mode toggle: re-render from lastBaseline (no re-fetch)
+      if ($("baselineMode")) $("baselineMode").addEventListener("change", () => {
+        if (!lastBaseline || !lastBaseline.nav) return;
+        const mode = ($("baselineMode").value || "EW").toUpperCase();
+        const by = (lastBaseline.metrics_by_portfolio || {});
+        const metrics = (by[mode] || lastBaseline.metrics);
+        const rolling = ((lastBaseline.rolling_by_portfolio || {})[mode] || lastBaseline.rolling);
+        const attribution = ((lastBaseline.attribution_by_portfolio || {})[mode] || lastBaseline.attribution);
+        const nav2 = { dates: (lastBaseline.nav || {}).dates || [], series: {} };
+        for (const c of (lastBaseline.codes || [])) nav2.series[c] = lastBaseline.nav.series[c];
+        nav2.series[mode] = lastBaseline.nav.series[mode];
+        for (const k of Object.keys(lastBaseline.nav.series || {})) if (String(k).startsWith("BENCH:")) nav2.series[k] = lastBaseline.nav.series[k];
+        plotNav(nav2);
+        renderMetrics(metrics);
+        renderContributionTables("ew", attribution);
+        plotRolling("rollingReturns", "Rolling Returns", (rolling.returns || {}), ".0%");
+        plotRolling("rollingDD", "Rolling Drawdown", (rolling.drawdown || rolling.max_drawdown || {}), ".0%");
+      });
 
       function initTabs(containerId) {
         const root = $(containerId);
@@ -5897,6 +6027,12 @@
 
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+      if ($("rotBenchMode")) $("rotBenchMode").addEventListener("change", () => {
+        const data = window.__lastRotationResult;
+        if (!data) return;
+        try { plotRotation(data); } catch (e) { /* best effort */ }
+        try { renderRotationMetrics(data.metrics || {}); } catch (e) { /* best effort */ }
+      });
       if ($("rotVolIdxOn")) $("rotVolIdxOn").addEventListener("change", _rotVolIdxUpdateUiEnabled);
       if ($("rotVolIdxAddRule")) $("rotVolIdxAddRule").addEventListener("click", () => _rotVolIdxAddRuleRow({}));
       if ($("rotVolIdxResetDefault")) $("rotVolIdxResetDefault").addEventListener("click", _rotVolIdxResetDefaultRules);
@@ -6288,6 +6424,206 @@
       $("range5y").addEventListener("click", () => { setMsg(""); applyQuickRange(5); });
       $("range10y").addEventListener("click", () => { setMsg(""); applyQuickRange(10); });
       $("rangeAll").addEventListener("click", () => { setMsg(""); applyQuickRange(null); });
+
+      // -------------------- Synthetic GBM simulation (Phase 1-4) --------------------
+      function _num(id, defVal=null) {
+        const el = $(id);
+        const v = String((el && el.value != null) ? el.value : "").trim();
+        if (!v) return defVal;
+        const x = Number(v);
+        return Number.isFinite(x) ? x : defVal;
+      }
+      function _str(id) {
+        const el = $(id);
+        return String((el && el.value != null) ? el.value : "").trim();
+      }
+      function _payloadBase() {
+        const seed = _str("simSeed");
+        return {
+          start: _str("simStart") || "19900101",
+          end: _str("simEnd") || null,
+          n_assets: Math.trunc(_num("simN", 4)),
+          vol_low: _num("simVolLow", 0.05),
+          vol_high: _num("simVolHigh", 0.30),
+          seed: seed ? Math.trunc(Number(seed)) : null,
+          lookback_days: Math.trunc(_num("simLb", 20)),
+        };
+      }
+      function _setSimMsg(t) { const el = $("simMsg"); if (el) el.textContent = t || ""; }
+
+      function _renderAssetCharts(res) {
+        const s = (res && res.series) ? res.series : {};
+        const dates = s.dates || [];
+        const close = s.close || {};
+        const traces = [];
+        for (const [k, arr] of Object.entries(close || {})) {
+          traces.push({ x: dates, y: arr, name: k, type: "scatter", mode: "lines" });
+        }
+        Plotly.newPlot("simAssetNav", traces, { margin: { t: 20 }, yaxis: { type: "log" } }, { displayModeBar: false });
+
+        const m = (res && res.metrics && res.metrics.by_asset) ? res.metrics.by_asset : {};
+        const vols = (res && res.assets && res.assets.ann_vols) ? res.assets.ann_vols : {};
+        let html = "<tr><th>asset</th><th>ann_vol(target)</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>Calmar</th></tr>";
+        for (const k of Object.keys(close || {})) {
+          const mm = m[k] || {};
+          html += `<tr><td>${esc(k)}</td><td>${(vols && vols[k] != null) ? Number(vols[k]).toFixed(3) : ""}</td>` +
+            `<td>${(mm.cagr==null)?"":fmtPct(Number(mm.cagr))}</td>` +
+            `<td>${(mm.vol==null)?"":fmtPct(Number(mm.vol))}</td>` +
+            `<td>${(mm.sharpe==null)?"":Number(mm.sharpe).toFixed(2)}</td>` +
+            `<td>${(mm.max_drawdown==null)?"":fmtPct(Number(mm.max_drawdown))}</td>` +
+            `<td>${(mm.calmar==null)?"":Number(mm.calmar).toFixed(2)}</td></tr>`;
+        }
+        const tEl = $("simAssetMetrics");
+        if (tEl) tEl.innerHTML = html;
+
+        const corr = (res && res.corr) ? res.corr : {};
+        const codes = corr.codes || [];
+        const mat = corr.matrix || [];
+        Plotly.newPlot("simCorr", [{ z: mat, x: codes, y: codes, type: "heatmap" }], { margin: { t: 20 } }, { displayModeBar: false });
+      }
+
+      function _renderRotCompare(out) {
+        const rot = out.rotation || {};
+        const benchMode = (($("simBenchMode") && $("simBenchMode").value) ? $("simBenchMode").value : "equal_weight");
+        const ew = out.equal_weight || {};
+        const rp = out.risk_parity || {};
+        const bench = (benchMode === "risk_parity") ? rp : ew;
+        const benchName = (benchMode === "risk_parity") ? "RP" : "EW";
+        const rS = (rot.series || {});
+        const eS = (bench.series || {});
+        Plotly.newPlot("simRotNav", [
+          { x: rS.dates || [], y: rS.nav || [], name: "ROTATION", type: "scatter", mode: "lines" },
+          { x: eS.dates || [], y: eS.nav || [], name: benchName, type: "scatter", mode: "lines" },
+        ], { margin: { t: 20 }, yaxis: { type: "log" } }, { displayModeBar: false });
+
+        const rm = rot.metrics || {};
+        const em = (bench.metrics || {});
+        let html = "<tr><th>策略</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>Calmar</th></tr>";
+        const row = (name, mm) => `<tr><td>${esc(name)}</td>` +
+          `<td>${(mm.cagr==null)?"":fmtPct(Number(mm.cagr))}</td>` +
+          `<td>${(mm.vol==null)?"":fmtPct(Number(mm.vol))}</td>` +
+          `<td>${(mm.sharpe==null)?"":Number(mm.sharpe).toFixed(2)}</td>` +
+          `<td>${(mm.max_drawdown==null)?"":fmtPct(Number(mm.max_drawdown))}</td>` +
+          `<td>${(mm.calmar==null)?"":Number(mm.calmar).toFixed(2)}</td></tr>`;
+        html += row("ROTATION", rm);
+        html += row(benchName, em);
+        const el = $("simRotMetrics");
+        if (el) el.innerHTML = html;
+      }
+
+      function _renderMcCagr(mc) {
+        const dist = (mc && mc.dist) ? mc.dist : {};
+        const a = (dist.rotation && dist.rotation.cagr) ? dist.rotation.cagr : [];
+        const benchMode = (($("simBenchMode") && $("simBenchMode").value) ? $("simBenchMode").value : "equal_weight");
+        const b = (benchMode === "risk_parity")
+          ? ((dist.risk_parity && dist.risk_parity.cagr) ? dist.risk_parity.cagr : [])
+          : ((dist.equal_weight && dist.equal_weight.cagr) ? dist.equal_weight.cagr : []);
+        const x = (benchMode === "risk_parity")
+          ? ((dist.excess_vs_risk_parity && dist.excess_vs_risk_parity.cagr) ? dist.excess_vs_risk_parity.cagr : [])
+          : ((dist.excess && dist.excess.cagr) ? dist.excess.cagr : []);
+        Plotly.newPlot("simMcCagr", [
+          { x: a, type: "histogram", name: "ROTATION", opacity: 0.55 },
+          { x: b, type: "histogram", name: (benchMode === "risk_parity" ? "RP" : "EW"), opacity: 0.45 },
+          { x: x, type: "histogram", name: "EXCESS", opacity: 0.45 },
+        ], { margin: { t: 20 }, barmode: "overlay", xaxis: { title: "CAGR" } }, { displayModeBar: false });
+        const meta = mc.meta || {};
+        const note = $("simMcNote");
+        if (note) note.textContent = `n_sims=${meta.n_sims || ""}, n_days=${meta.n_days || ""}, chunk=${meta.chunk_size || ""}, vol=[${meta.vol_low || ""},${meta.vol_high || ""}]`;
+      }
+
+      async function simRunPhase1() {
+        _setSimMsg("Phase1 运行中...");
+        const resp = await api("/analysis/sim/gbm/phase1", { method: "POST", body: JSON.stringify(_payloadBase()) });
+        const data = await resp.json();
+        if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+        _renderAssetCharts(data);
+        _setSimMsg("Phase1 完成。");
+      }
+      async function simRunPhase2() {
+        _setSimMsg("Phase2 运行中...");
+        const resp = await api("/analysis/sim/gbm/phase2", { method: "POST", body: JSON.stringify(_payloadBase()) });
+        const data = await resp.json();
+        if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+        window.__lastSimGbmPhase2 = data;
+        // Phase2 includes corr + per-asset metrics; keep them if provided.
+        if (data.assets && data.corr && data.asset_metrics) {
+          // show asset metrics table even though we don't ship asset close series here
+          const codes = (data.assets.codes || []);
+          const vols = (data.assets.ann_vols || {});
+          const by = (data.asset_metrics || {});
+          let html = "<tr><th>asset</th><th>ann_vol(target)</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>Calmar</th></tr>";
+          for (const k of codes) {
+            const mm = by[k] || {};
+            html += `<tr><td>${esc(k)}</td><td>${(vols && vols[k] != null) ? Number(vols[k]).toFixed(3) : ""}</td>` +
+              `<td>${(mm.cagr==null)?"":fmtPct(Number(mm.cagr))}</td>` +
+              `<td>${(mm.vol==null)?"":fmtPct(Number(mm.vol))}</td>` +
+              `<td>${(mm.sharpe==null)?"":Number(mm.sharpe).toFixed(2)}</td>` +
+              `<td>${(mm.max_drawdown==null)?"":fmtPct(Number(mm.max_drawdown))}</td>` +
+              `<td>${(mm.calmar==null)?"":Number(mm.calmar).toFixed(2)}</td></tr>`;
+          }
+          const tEl = $("simAssetMetrics"); if (tEl) tEl.innerHTML = html;
+          const corr = data.corr || {};
+          Plotly.newPlot("simCorr", [{ z: (corr.matrix || []), x: (corr.codes || []), y: (corr.codes || []), type: "heatmap" }], { margin: { t: 20 } }, { displayModeBar: false });
+        }
+        _renderRotCompare(data);
+        _setSimMsg("Phase2 完成。");
+      }
+      async function simRunPhase3() {
+        _setSimMsg("Phase3 运行中（可能较慢）...");
+        const p = _payloadBase();
+        p.n_sims = Math.trunc(_num("simNSims", 10000));
+        p.chunk_size = Math.trunc(_num("simChunk", 200));
+        const resp = await api("/analysis/sim/gbm/phase3", { method: "POST", body: JSON.stringify(p) });
+        const data = await resp.json();
+        if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+        window.__lastSimGbmMc = data;
+        _renderMcCagr(data);
+        _setSimMsg("Phase3 完成。");
+      }
+      async function simRunPhase4() {
+        _setSimMsg("Phase4 运行中（可能较慢）...");
+        const p = _payloadBase();
+        p.n_sims = Math.trunc(_num("simNSims", 10000));
+        p.chunk_size = Math.trunc(_num("simChunk", 200));
+        p.initial_cash = _num("simCash", 1000000);
+        p.position_pct = _num("simPosPct", 0.10);
+        const resp = await api("/analysis/sim/gbm/phase4", { method: "POST", body: JSON.stringify(p) });
+        const data = await resp.json();
+        if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+        if (data.mc && data.mc.ok) window.__lastSimGbmMc = data.mc;
+        const one = data.one || {};
+        const r = one.rotation || {};
+        const e = one.equal_weight || {};
+        const rp = one.risk_parity || {};
+        const benchMode = (($("simBenchMode") && $("simBenchMode").value) ? $("simBenchMode").value : "equal_weight");
+        const bench = (benchMode === "risk_parity") ? rp : e;
+        Plotly.newPlot("simEq1", [
+          { x: (r.series?.dates || []), y: (r.series?.equity || []), name: "ROTATION equity", type: "scatter", mode: "lines" },
+          { x: (bench.series?.dates || []), y: (bench.series?.equity || []), name: (benchMode === "risk_parity" ? "RP equity" : "EW equity"), type: "scatter", mode: "lines" },
+        ], { margin: { t: 20 }, yaxis: { type: "log" } }, { displayModeBar: false });
+
+        const sizing = data.sizing || {};
+        const txt = `ruin=${sizing.ruin ? "YES" : "NO"}, initial_cash=${sizing.initial_cash}, position_pct=${sizing.position_pct}`;
+        Plotly.newPlot("simRuin", [{ x: [0], y: [0], type: "scatter", mode: "text", text: [txt], textposition: "top left" }], { margin: { t: 20 }, xaxis: { visible: false }, yaxis: { visible: false } }, { displayModeBar: false });
+
+        if (data.mc && data.mc.ok) _renderMcCagr(data.mc);
+        _setSimMsg(`Phase4 完成。${txt}`);
+      }
+      if ($("simRun1")) $("simRun1").addEventListener("click", simRunPhase1);
+      if ($("simRun2")) $("simRun2").addEventListener("click", simRunPhase2);
+      if ($("simRun3")) $("simRun3").addEventListener("click", simRunPhase3);
+      if ($("simRun4")) $("simRun4").addEventListener("click", simRunPhase4);
+      if ($("simBenchMode")) $("simBenchMode").addEventListener("change", () => {
+        // Re-render MC histogram if present (phase3/4), and re-render compare table if phase2 already ran.
+        try {
+          const data = window.__lastSimGbmPhase2;
+          if (data) _renderRotCompare(data);
+        } catch (e) { /* ignore */ }
+        try {
+          const mc = window.__lastSimGbmMc;
+          if (mc) _renderMcCagr(mc);
+        } catch (e) { /* ignore */ }
+      });
 
       loadPool().catch(e => setMsg(String(e)));
     </script>

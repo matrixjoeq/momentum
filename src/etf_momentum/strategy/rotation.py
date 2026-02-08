@@ -2360,6 +2360,30 @@ def backtest_rotation(
     ew_nav = (1.0 + ew_ret).cumprod()
     ew_nav.iloc[0] = 1.0
 
+    # Risk parity (inverse-vol) benchmark with the same rebalance schedule as decision_dates.
+    # We estimate vol using past returns up to the decision date (inclusive) to avoid lookahead.
+    rp_window = int(max(20, int(inp.lookback_days or 20)))
+    w_rp = pd.DataFrame(0.0, index=dates, columns=bench_codes, dtype=float)
+    for i, d in enumerate(decision_dates):
+        di = dates.get_loc(d)
+        if di + 1 >= len(dates):
+            break
+        start_i = di + 1
+        next_di = (dates.get_loc(decision_dates[i + 1]) if i + 1 < len(decision_dates) else (len(dates) - 1))
+        end_i = min(len(dates) - 1, next_di)
+        hist = ret_hfq.iloc[max(0, di - rp_window + 1) : di + 1].astype(float).fillna(0.0)
+        vol = hist.std(ddof=1).replace(0.0, np.nan)
+        inv = (1.0 / vol).replace([np.inf, -np.inf], np.nan)
+        s = float(np.nansum(inv.to_numpy(dtype=float)))
+        if np.isfinite(s) and s > 0:
+            wv = (inv / s).fillna(0.0).astype(float)
+        else:
+            wv = pd.Series(w_eq, index=bench_codes, dtype=float)
+        w_rp.loc[dates[start_i] : dates[end_i], bench_codes] = wv.to_numpy(dtype=float)
+    rp_ret = (w_rp * ret_hfq).sum(axis=1).astype(float)
+    rp_nav = (1.0 + rp_ret).cumprod()
+    rp_nav.iloc[0] = 1.0
+
     # Simple turnover and cost: turnover = sum |w_t - w_{t-1}| / 2 ; cost applied to return.
     # NOTE: we first compute a "shadow" (ungated) NAV for timing signals, then optionally apply timing gating
     # to weights and recompute strategy NAV/metrics.
@@ -2430,6 +2454,10 @@ def backtest_rotation(
     excess_nav = (1.0 + active_ret).cumprod()
     excess_nav.iloc[0] = 1.0
 
+    active_ret_rp = port_ret_net - rp_ret
+    excess_nav_rp = (1.0 + active_ret_rp).cumprod()
+    excess_nav_rp.iloc[0] = 1.0
+
     attribution = _compute_return_risk_contributions(
         asset_ret=ret_exec[codes],
         weights=w[codes],
@@ -2454,6 +2482,13 @@ def backtest_rotation(
     ann_excess_arith = float(active_ret.mean() * TRADING_DAYS_PER_YEAR) if len(active_ret) else float("nan")
     ex_mdd = _max_drawdown(excess_nav)
     ex_mdd_dur = _max_drawdown_duration_days(excess_nav)
+
+    ann_excess_rp = _annualized_return(excess_nav_rp)
+    ann_excess_rp_vol = _annualized_vol(active_ret_rp)
+    ir_rp = _sharpe(active_ret_rp, rf=0.0)
+    ann_excess_rp_arith = float(active_ret_rp.mean() * TRADING_DAYS_PER_YEAR) if len(active_ret_rp) else float("nan")
+    ex_rp_mdd = _max_drawdown(excess_nav_rp)
+    ex_rp_mdd_dur = _max_drawdown_duration_days(excess_nav_rp)
 
     metrics = {
         "strategy": {
@@ -2485,6 +2520,21 @@ def backtest_rotation(
             "max_drawdown": float(ex_mdd),
             "max_drawdown_recovery_days": int(ex_mdd_dur),
         },
+        "risk_parity": {
+            "cumulative_return": float(rp_nav.iloc[-1] - 1.0),
+            "rp_window": int(rp_window),
+        },
+        "excess_vs_risk_parity": {
+            "cumulative_return": float(excess_nav_rp.iloc[-1] - 1.0),
+            "annualized_return": float(ann_excess_rp),
+            "annualized_return_geo": float(ann_excess_rp),
+            "annualized_return_arith": float(ann_excess_rp_arith),
+            "annualized_volatility": float(ann_excess_rp_vol),
+            "information_ratio": float(ir_rp),
+            "max_drawdown": float(ex_rp_mdd),
+            "max_drawdown_recovery_days": int(ex_rp_mdd_dur),
+            "rp_window": int(rp_window),
+        },
     }
 
     # Period details and win rate / payoff ratio by rebalance periods: compare period returns strategy vs ew.
@@ -2514,9 +2564,13 @@ def backtest_rotation(
         nav_e = float(port_nav_net.loc[e])
         ew_s = float(ew_nav.loc[s])
         ew_e = float(ew_nav.loc[e])
+        rp_s = float(rp_nav.loc[s])
+        rp_e = float(rp_nav.loc[e])
         r_s = nav_e / nav_s - 1.0
         r_ew = ew_e / ew_s - 1.0
+        r_rp = rp_e / rp_s - 1.0
         ex = float(r_s - r_ew)
+        ex_rp = float(r_s - r_rp)
         if ex > 0:
             wins += 1
             pos.append(ex)
@@ -2546,8 +2600,11 @@ def backtest_rotation(
                 "end_date": p["end_date"],
                 "strategy_return": float(r_s),
                 "equal_weight_return": float(r_ew),
+                "risk_parity_return": float(r_rp),
                 "excess_return": ex,
+                "excess_return_rp": ex_rp,
                 "win": ex > 0,
+                "win_rp": ex_rp > 0,
                 "timing_sleep": bool(timing_sleep),
                 "timing_active_ratio": timing_ratio,
                 "buys": buys,
@@ -2647,6 +2704,12 @@ def backtest_rotation(
         "quarterly": _period_returns(port_nav_net, ew_nav, "QE"),
         "yearly": _period_returns(port_nav_net, ew_nav, "YE"),
     }
+    periodic_rp = {
+        "weekly": _period_returns(port_nav_net, rp_nav, "W-FRI"),
+        "monthly": _period_returns(port_nav_net, rp_nav, "ME"),
+        "quarterly": _period_returns(port_nav_net, rp_nav, "QE"),
+        "yearly": _period_returns(port_nav_net, rp_nav, "YE"),
+    }
 
     # Rolling stats for strategy vs benchmark (defaults aligned with baseline UI)
     # NOTE: "drawdown" is rolling drawdown; "max_drawdown" is kept for backward-compat (deprecated).
@@ -2724,7 +2787,9 @@ def backtest_rotation(
             "series": {
                 "ROTATION": port_nav_net.astype(float).tolist(),
                 "EW_REBAL": ew_nav.astype(float).tolist(),
+                "RP_REBAL": rp_nav.astype(float).tolist(),
                 "EXCESS": excess_nav.astype(float).tolist(),
+                "EXCESS_RP": excess_nav_rp.astype(float).tolist(),
             },
         },
         "nav_rsi": {
@@ -2733,12 +2798,14 @@ def backtest_rotation(
             "series": {
                 "ROTATION": {},
                 "EW_REBAL": {},
+                "RP_REBAL": {},
             },
         },
         "attribution": attribution,
         "metrics": metrics,
         "win_payoff": stats,
         "period_returns": periodic,
+        "period_returns_rp": periodic_rp,
         "rolling": rolling_out,
         "period_details": period_stats,
         "holdings": holdings["periods"],
@@ -2758,5 +2825,6 @@ def backtest_rotation(
     for w in out["nav_rsi"]["windows"]:
         out["nav_rsi"]["series"]["ROTATION"][str(w)] = _rsi_wilder(port_nav_net, window=int(w)).astype(float).tolist()
         out["nav_rsi"]["series"]["EW_REBAL"][str(w)] = _rsi_wilder(ew_nav, window=int(w)).astype(float).tolist()
+        out["nav_rsi"]["series"]["RP_REBAL"][str(w)] = _rsi_wilder(rp_nav, window=int(w)).astype(float).tolist()
     return out
 

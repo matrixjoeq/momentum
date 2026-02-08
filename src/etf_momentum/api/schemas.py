@@ -144,6 +144,7 @@ class BaselineAnalysisRequest(BaseModel):
     )
     fft_roll: bool = Field(default=True, description="If true, compute rolling FFT time series for EW (downsampled by fft_roll_step)")
     fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
+    rp_window_days: int = Field(default=60, ge=2, le=2520, description="Risk parity (inverse-vol) volatility lookback window in trading days")
 
 
 class LeadLagAnalysisRequest(BaseModel):
@@ -290,6 +291,29 @@ class MacroSeriesBatchResponse(BaseModel):
     meta: dict | None = None
     series: dict | None = None
     error: str | None = None
+
+
+class SimGbmPhase1Request(BaseModel):
+    start: str = Field(default="19900101", description="YYYYMMDD")
+    end: str | None = Field(default=None, description="YYYYMMDD; default=last business day")
+    n_assets: int = Field(default=4, ge=2, le=20)
+    vol_low: float = Field(default=0.05, gt=0.0, lt=2.0)
+    vol_high: float = Field(default=0.30, gt=0.0, lt=2.0)
+    seed: int | None = Field(default=None)
+
+
+class SimGbmPhase2Request(SimGbmPhase1Request):
+    lookback_days: int = Field(default=20, ge=2, le=2520)
+
+
+class SimGbmPhase3Request(SimGbmPhase2Request):
+    n_sims: int = Field(default=10000, ge=100, le=50000)
+    chunk_size: int = Field(default=200, ge=1, le=2000)
+
+
+class SimGbmPhase4Request(SimGbmPhase3Request):
+    initial_cash: float = Field(default=1_000_000.0, gt=0.0)
+    position_pct: float = Field(default=0.10, ge=0.0, le=10.0)
 
 
 class MacroStep2Request(BaseModel):
