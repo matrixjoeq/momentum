@@ -342,6 +342,7 @@ def montecarlo_rotation_vs_ew(
     vol_high: float = 0.30,
     seed: int | None = None,
     lookback_days: int = 20,
+    selected_assets: list[int] | None = None,
 ) -> dict[str, Any]:
     end = str(end or _today_last_business_day_yyyymmdd())
     idx = business_days_index(start=start, end=end)
@@ -349,9 +350,20 @@ def montecarlo_rotation_vs_ew(
         return {"ok": False, "error": "insufficient_dates"}
     n_days = len(idx)
     n_assets = int(n_assets)
-    if n_assets != 4:
-        # keep it simple as requested; can generalize later
-        return {"ok": False, "error": "only_supports_n_assets_4"}
+    # Determine active asset indices (selected by Phase1 highlights) or all assets by default
+    all_indices = list(range(n_assets))
+    if selected_assets is not None:
+        try:
+            sel = sorted({int(x) for x in selected_assets})
+        except Exception:
+            return {"ok": False, "error": "invalid_selected_assets"}
+        sel = [i for i in sel if 0 <= i < n_assets]
+        asset_indices = sel
+    else:
+        asset_indices = all_indices
+    n_assets_eff = len(asset_indices)
+    if n_assets_eff <= 0 or n_assets_eff > 50:
+        return {"ok": False, "error": "invalid_n_assets", "meta": {"n_assets": n_assets_eff}}
 
     n_sims = int(n_sims)
     if n_sims <= 0 or n_sims > 50000:
@@ -391,10 +403,11 @@ def montecarlo_rotation_vs_ew(
     done = 0
     while done < n_sims:
         m = min(chunk_size, n_sims - done)
-        # Randomize vols per sim per asset.
-        ann_vols = rng.uniform(low=float(vol_low), high=float(vol_high), size=(m, n_assets)).astype(float)
+        # Randomize vols per sim per asset (respect selected assets)
+        ann_vols_all = rng.uniform(low=float(vol_low), high=float(vol_high), size=(m, n_assets)).astype(float)
+        ann_vols = ann_vols_all[:, asset_indices]
         sig_d = ann_vols / np.sqrt(float(TRADING_DAYS_PER_YEAR))
-        lr = rng.normal(loc=0.0, scale=sig_d[:, None, :], size=(m, n_days, n_assets)).astype(float)
+        lr = rng.normal(loc=0.0, scale=sig_d[:, None, :], size=(m, n_days, n_assets_eff)).astype(float)
         lr[:, 0, :] = 0.0
         logp = np.cumsum(lr, axis=1)
         # daily simple returns
@@ -404,7 +417,7 @@ def montecarlo_rotation_vs_ew(
         # score = exp(logp[t]-logp[t-lb]) - 1
         # gather logp at decision indices and (decision-lb)
         dec = np.array(decision_idx, dtype=int)
-        mom = np.exp(logp[:, dec, :] - logp[:, dec - lb, :]) - 1.0  # (m, n_dec, n_assets)
+        mom = np.exp(logp[:, dec, :] - logp[:, dec - lb, :]) - 1.0  # (m, n_dec, n_assets_eff)
         pick = np.argmax(np.where(np.isfinite(mom), mom, -1e18), axis=2).astype(int)  # (m, n_dec)
 
         # Build daily pick id for rotation
@@ -430,9 +443,9 @@ def montecarlo_rotation_vs_ew(
         ew_nav[:, 0] = 1.0
 
         # RP baseline: constant inverse-vol weights per simulation
-        inv = 1.0 / np.where((np.isfinite(ann_vols) & (ann_vols > 0)), ann_vols, np.nan)  # (m, n_assets)
+        inv = 1.0 / np.where((np.isfinite(ann_vols) & (ann_vols > 0)), ann_vols, np.nan)  # (m, n_assets_eff)
         inv_sum = np.nansum(inv, axis=1, keepdims=True)  # (m,1)
-        w_rp = np.where(np.isfinite(inv_sum) & (inv_sum > 0), inv / inv_sum, (1.0 / float(n_assets)))  # (m,n_assets)
+        w_rp = np.where(np.isfinite(inv_sum) & (inv_sum > 0), inv / inv_sum, (1.0 / float(n_assets_eff)))  # (m,n_assets_eff)
         # portfolio return
         rp_ret = np.sum(ret * w_rp[:, None, :], axis=2).astype(float)  # (m, n_days)
         rp_nav = np.cumprod(1.0 + rp_ret, axis=1).astype(float)

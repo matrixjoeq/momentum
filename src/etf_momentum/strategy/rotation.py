@@ -8,6 +8,16 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
+# Shared helper for rebalance date shifting (to avoid redefining inside blocks)
+def _shift_idx_by_rebalance(target: pd.Timestamp, dates: pd.DatetimeIndex, reb_shift: str) -> int:
+    t = pd.to_datetime(target).normalize()
+    if t in dates:
+        return int(dates.get_loc(t))
+    pos = int(dates.searchsorted(t))
+    if reb_shift == "next":
+        return int(min(pos, len(dates) - 1))
+    return int(max(pos - 1, 0))
+
 from ..analysis.baseline import (
     TRADING_DAYS_PER_YEAR,
     _annualized_return,
@@ -1240,20 +1250,13 @@ def backtest_rotation(
                     raise ValueError("weekly rebalance_anchor must be within [0..4] (Mon..Fri)")
                 labels_local = _rebalance_labels(dates, r, weekly_anchor=wd_map_local[int(anchor)])
             # If anchor calendar day is non-trading, choose prev/next trading day per rebalance_shift.
-            def _shift_idx(target: pd.Timestamp) -> int:
-                t = pd.to_datetime(target).normalize()
-                if t in dates:
-                    return int(dates.get_loc(t))
-                pos = int(dates.searchsorted(t))
-                if reb_shift == "next":
-                    return int(min(pos, len(dates) - 1))
-                return int(max(pos - 1, 0))
-
+            # Use shared helper to avoid redefinition across branches
+            
             out: list[int] = []
             seen: set[int] = set()
             for p in pd.unique(labels_local):
                 target = pd.Timestamp(p.end_time).normalize()
-                i = _shift_idx(target)
+                i = _shift_idx_by_rebalance(target, dates, reb_shift)
                 if i not in seen:
                     out.append(i)
                     seen.add(i)
@@ -1269,20 +1272,13 @@ def backtest_rotation(
                 raise ValueError("monthly rebalance_anchor must be within [1..28] (day-of-month)")
             labels_local = dates.to_period("M")
 
-            def _shift_idx(target: pd.Timestamp) -> int:
-                t = pd.to_datetime(target).normalize()
-                if t in dates:
-                    return int(dates.get_loc(t))
-                pos = int(dates.searchsorted(t))
-                if reb_shift == "next":
-                    return int(min(pos, len(dates) - 1))
-                return int(max(pos - 1, 0))
+            # _shift_idx moved to module-level helper _shift_idx_by_rebalance
 
             out: list[int] = []
             seen: set[int] = set()
             for p in pd.unique(labels_local):
                 target = pd.Timestamp(dt.date(int(p.year), int(p.month), dom))
-                i = _shift_idx(target)
+                i = _shift_idx_by_rebalance(target, dates, reb_shift)
                 if i not in seen:
                     out.append(i)
                     seen.add(i)

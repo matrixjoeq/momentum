@@ -106,6 +106,7 @@ from ..analysis.vol_proxy import VolProxySpec, compute_vol_proxy_levels
 from ..analysis.vol_timing import (
     backtest_tiered_exposure_by_level,
     backtest_tiered_exposure_by_level_rolling_quantiles,
+    backtest_tiered_exposure_by_level_expanding_quantiles,
 )
 from ..calendar.trading_calendar import shift_to_trading_day
 from ..data.cboe_fetcher import FetchRequest as CboeFetchRequest
