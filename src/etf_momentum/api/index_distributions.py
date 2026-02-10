@@ -16,11 +16,12 @@ Window = Literal["1y", "3y", "5y", "10y", "all"]
 
 @dataclass(frozen=True)
 class IndexDistributionInputs:
-    symbol: str  # VXN/GVZ/VIX
+    symbol: str  # VXN/GVZ/VIX/OVX
     window: Window = "all"
     end_date: dt.date | None = None
     bins: int = 60
     quantiles: tuple[float, ...] = (0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99)
+    mode: Literal["raw", "log"] = "raw"
 
 
 def _hist(samples: np.ndarray, *, bins: int) -> dict[str, Any]:
@@ -44,7 +45,7 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
     sym = str(inp.symbol or "").strip().upper()
     if sym.startswith("^"):
         sym = sym[1:]
-    if sym not in {"VIX", "GVZ", "VXN"}:
+    if sym not in {"VIX", "GVZ", "VXN", "OVX"}:
         return {"ok": False, "error": "unsupported_symbol", "meta": {"symbol": sym}}
 
     end = inp.end_date or dt.date.today()
@@ -78,6 +79,19 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
     ret_current = float(ret_s.iloc[-1]) if not ret_s.empty else float("nan")
     ret_current_date = ret_s.index[-1].date().isoformat() if not ret_s.empty else None
 
+    # Default output (raw mode)
+    hist_close = _hist(close, bins=int(inp.bins))
+    quant_close = _qs(close, inp.quantiles)
+    # For 'raw' mode these stay as-is; we'll override for 'log' mode below
+    if getattr(inp, "mode", "raw") == "log":
+        # compute histogram on log(close) values (positive only)
+        pos_mask = close > 0
+        log_close = np.log(close[pos_mask])
+        hist_close = _hist(log_close, bins=int(inp.bins))
+        quant_close = _qs(log_close, inp.quantiles)
+        close_current = float(np.log(close[-1])) if close[-1] > 0 else float("nan")
+        close_current_date = close_current_date
+
     out = {
         "ok": True,
         "meta": {
@@ -87,14 +101,15 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
             "end": max(s.index).isoformat(),
             "n_close": int(len(close)),
             "n_ret": int(len(ret)),
+            "mode": getattr(inp, "mode", "raw"),
         },
         "series": {
             "dates": [d.isoformat() for d in close_dates],
             "close": close.astype(float).tolist(),
         },
         "close": {
-            "hist": _hist(close, bins=int(inp.bins)),
-            "quantiles": _qs(close, inp.quantiles),
+            "hist": hist_close,
+            "quantiles": quant_close,
             "current": close_current,
             "current_date": close_current_date,
         },
@@ -106,4 +121,3 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
         },
     }
     return out
-

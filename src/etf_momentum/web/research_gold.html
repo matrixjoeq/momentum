@@ -112,7 +112,9 @@
           <label>指标预设</label>
           <select id="etf_idxPreset" title="选择预设会自动填充 provider 和 symbol；也可选择 custom 自定义。">
             <option value="cboe:GVZ" selected>GVZ（Cboe 黄金波动率）</option>
-            <option value="cboe:VIX">VIX（Cboe 恐慌指数）</option>
+            <option value="cboe:VXN">VXN（Cboe 恐慌指数）</option>
+            <option value="cboe:OVX">OVX（Cboe 原油波动率）</option>
+            <option value="cboe:VIX">VIX（Cboe 标普500恐慌）</option>
             <option value="fred:DGS2">美债收益率 2Y（FRED: DGS2）</option>
             <option value="fred:DGS5">美债收益率 5Y（FRED: DGS5）</option>
             <option value="fred:DGS10">美债收益率 10Y（FRED: DGS10）</option>
@@ -305,8 +307,10 @@
           <div>
             <label>指数</label>
             <select id="etf_distSymbol">
-              <option value="GVZ" selected>GVZ</option>
-              <option value="VXN">VXN</option>
+              <option value="GVZ" selected>GVZ (黄金波动率)</option>
+              <option value="VXN">VXN (恐慌指数)</option>
+              <option value="OVX">OVX (原油波动率)</option>
+              <option value="VIX">VIX (标普500恐慌)</option>
             </select>
           </div>
           <div>
@@ -317,6 +321,13 @@
               <option value="5y">近5年</option>
               <option value="10y">近10年</option>
               <option value="all">全部</option>
+            </select>
+          </div>
+          <div>
+            <label>模式</label>
+            <select id="etf_distMode" title="分布模式：原始值(raw)或对数值(log)；默认原始值。">
+              <option value="raw" selected>原始值</option>
+              <option value="log">对数值</option>
             </select>
           </div>
           <button id="etf_runDist">运行分布统计</button>
@@ -1154,17 +1165,50 @@
           renderTrade(data);
         }
 
-        function renderQuantTable(elId, q) {
+        function percentileFromQuantiles(value, quant) {
+          if (!Number.isFinite(Number(value)) || !quant) return null;
+          const map = [
+            { p: 1, key: "q1" }, { p: 5, key: "q5" },
+            { p: 10, key: "q10" }, { p: 25, key: "q25" },
+            { p: 50, key: "q50" }, { p: 75, key: "q75" },
+            { p: 90, key: "q90" }, { p: 95, key: "q95" },
+            { p: 99, key: "q99" },
+          ];
+          const pts = map.map(m => {
+            const v = quant[m.key];
+            return (typeof v === 'number' && Number.isFinite(v)) ? { p: m.p, v } : null;
+          }).filter(x => x);
+          if (!pts.length) return null;
+          const val = Number(value);
+          if (val <= pts[0].v) return pts[0].p;
+          for (let i = 1; i < pts.length; i++) {
+            if (val <= pts[i].v) {
+              const a = pts[i-1], b = pts[i];
+              const denom = (b.v - a.v) || 1e-12;
+              const t = (val - a.v) / denom;
+              return a.p + (b.p - a.p) * t;
+            }
+          }
+          return pts[pts.length-1].p;
+        }
+
+        function renderQuantTable(elId, q, currentValue) {
           const qs = q || {};
           const keys = Object.keys(qs);
           let html = "<tr><th>quantile</th><th>value</th></tr>";
           for (const k of keys) {
             html += `<tr><td>${k}</td><td>${fmt(qs[k], 6)}</td></tr>`;
           }
+          if (Number.isFinite(Number(currentValue))) {
+            html += `<tr><td>现值</td><td>${fmt(currentValue, 6)}</td></tr>`;
+            const p = percentileFromQuantiles(Number(currentValue), qs);
+            html += `<tr><td>现值百分位</td><td>${Number.isFinite(p) ? Math.round(p) + "%" : ""}</td></tr>`;
+          }
           $(elId).innerHTML = html;
         }
 
         function renderIndexDist(d) {
+          const mode = ((d && d.meta && d.meta.mode) ? String(d.meta.mode).toLowerCase() : "raw");
           if (!d || !d.ok) return;
           const m = d.meta || {};
           const s = d.series || {};
@@ -1206,15 +1250,16 @@
           const cbins = ch.bins || [];
           const ccounts = ch.counts || [];
           const cx = cbins.slice(0, Math.max(0, cbins.length - 1));
+          const xTitle = (mode === "log" ? "log(close)" : "close");
           Plotly.newPlot("etf_distCloseChart", [
             { x: cx, y: ccounts, type: "bar", name: `${m.symbol || ""} close` },
           ], {
             margin: { t: 20 },
-            xaxis: { title: "close" },
+            xaxis: { title: xTitle },
             yaxis: { title: "count" },
             shapes: _qShapes(c.quantiles || {}, c.current),
           }, { displayModeBar: false });
-          renderQuantTable("etf_distCloseTable", c.quantiles || {});
+          renderQuantTable("etf_distCloseTable", c.quantiles || {}, c.current);
 
           const rbins = rh.bins || [];
           const rcounts = rh.counts || [];
@@ -1227,7 +1272,7 @@
             yaxis: { title: "count" },
             shapes: _qShapes(r.quantiles || {}, r.current),
           }, { displayModeBar: false });
-          renderQuantTable("etf_distRetTable", r.quantiles || {});
+          renderQuantTable("etf_distRetTable", r.quantiles || {}, r.current);
 
           // log-scale close + Bollinger Bands (computed in log space)
           const dates = Array.isArray(s.dates) ? s.dates : [];
@@ -1276,9 +1321,10 @@
         async function runDist() {
           const symbol = ($("etf_distSymbol").value || "GVZ").trim();
           const window = ($("etf_distWindow").value || "3y").trim();
+          const mode = ($("etf_distMode").value || "raw").trim();
           const resp = await api("/analysis/index-distribution", {
             method: "POST",
-            body: JSON.stringify({ symbol, window, bins: 60 }),
+            body: JSON.stringify({ symbol, window, bins: 60, mode }),
           });
           const data = await resp.json();
           if (!data || !data.ok) {

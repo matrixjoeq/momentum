@@ -36,5 +36,5 @@ def test_seed_updates_existing_policy_fields(session_factory: sessionmaker) -> N
 
     with session_factory() as db:
         p = db.query(ValidationPolicy).filter(ValidationPolicy.name == "cn_stock_etf_10").one()
-        assert p.max_gap_days == 12
+        assert p.max_gap_days == 15
 

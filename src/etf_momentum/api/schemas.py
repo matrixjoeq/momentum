@@ -478,9 +478,10 @@ class VixSignalBacktestResponse(BaseModel):
 
 
 class IndexDistributionRequest(BaseModel):
-    symbol: str = Field(description="Cboe symbol: GVZ|VXN|VIX")
+    symbol: str = Field(description="Cboe symbol: GVZ|VXN|VIX|OVX")
     window: str = Field(default="all", description="1y|3y|5y|10y|all")
     bins: int = Field(default=60, ge=10, le=200)
+    mode: str = Field(default="raw", description="distribution mode: raw|log")
 
 
 class IndexDistributionResponse(BaseModel):

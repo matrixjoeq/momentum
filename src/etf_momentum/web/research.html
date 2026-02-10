@@ -894,7 +894,7 @@
           <div class="panel" style="margin-top:10px;">
             <div class="row" style="gap:10px; align-items:center;">
               <button id="rotVolIdxAddRule">添加规则</button>
-              <button id="rotVolIdxResetDefault" title="重置为默认：518880->GVZ，513100->VIX">重置默认</button>
+              <button id="rotVolIdxResetDefault" title="重置为默认：518880->GVZ，513100->VIX，160723->OVX">重置默认</button>
               <span class="muted">每条规则可为不同标的设置不同回看窗口/阈值/仓位档位。</span>
             </div>
             <table id="rotVolIdxRulesTable" style="margin-top:10px;">
@@ -5982,7 +5982,9 @@
           <td>
             <select class="rotVolIdxIndex" style="min-width:100px;">
               <option value="VIX" ${index==="VIX" ? "selected" : ""}>VIX</option>
+              <option value="VXN" ${index==="VXN" ? "selected" : ""}>VXN</option>
               <option value="GVZ" ${index==="GVZ" ? "selected" : ""}>GVZ</option>
+              <option value="OVX" ${index==="OVX" ? "selected" : ""}>OVX</option>
               <option value="WAVOL" ${index==="WAVOL" ? "selected" : ""}>WAVOL（标的周度滚动年化波动率）</option>
             </select>
           </td>
@@ -6010,8 +6012,9 @@
 
       function _rotVolIdxResetDefaultRules() {
         _rotVolIdxClearRuleRows();
-        _rotVolIdxAddRuleRow({ code: "513100", index: "VIX", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
+        _rotVolIdxAddRuleRow({ code: "513100", index: "VXN", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
         _rotVolIdxAddRuleRow({ code: "518880", index: "GVZ", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
+        _rotVolIdxAddRuleRow({ code: "160723", index: "OVX", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
       }
 
       function _rotVolIdxUpdateUiEnabled() {

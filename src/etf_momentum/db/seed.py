@@ -14,35 +14,35 @@ DEFAULT_POLICIES: list[dict] = [
         # Keep it only slightly relaxed to still catch true anomalies.
         "max_abs_return": 0.13,
         "max_hl_spread": 0.30,
-        "max_gap_days": 12,
+        "max_gap_days": 15,
     },
     {
         "name": "chinext_related_20",
         "description": "创业板相关ETF，20%涨跌幅，异常检测阈值略放宽。",
         "max_abs_return": 0.22,
         "max_hl_spread": 0.40,
-        "max_gap_days": 12,
+        "max_gap_days": 15,
     },
     {
         "name": "star_related_30",
         "description": "科创板相关ETF，30%涨跌幅，异常检测阈值略放宽。",
         "max_abs_return": 0.33,
         "max_hl_spread": 0.50,
-        "max_gap_days": 12,
+        "max_gap_days": 15,
     },
     {
         "name": "bond_10_strict",
         "description": "债券ETF，价格更平滑，收益跳变阈值更严格。",
         "max_abs_return": 0.08,
         "max_hl_spread": 0.15,
-        "max_gap_days": 12,
+        "max_gap_days": 15,
     },
     {
         "name": "qdii_commod_fx",
         "description": "QDII/商品/跨市资产，可能受汇率与跨市影响，阈值更宽。",
         "max_abs_return": 0.35,
         "max_hl_spread": 0.60,
-        "max_gap_days": 12,
+        "max_gap_days": 15,
     },
 ]
 

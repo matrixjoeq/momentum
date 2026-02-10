@@ -15,6 +15,7 @@ _CBOE_CSV = {
     "VIX": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
     "GVZ": "https://cdn.cboe.com/api/global/us_indices/daily_prices/GVZ_History.csv",
     "VXN": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VXN_History.csv",
+    "OVX": "https://cdn.cboe.com/api/global/us_indices/daily_prices/OVX_History.csv",
 }
 
 

@@ -165,6 +165,8 @@ _YAHOO_ALIASES = {
     "^GVZ": ["^GVZ"],
     "VXN": ["^VXN"],
     "^VXN": ["^VXN"],
+    "OVX": ["^OVX"],
+    "^OVX": ["^OVX"],
 }
 
 
@@ -176,6 +178,8 @@ def _normalize_vol_index(sym: str) -> str | None:
         return "VIX"
     if s in {"VXN"}:
         return "VXN"
+    if s in {"OVX"}:
+        return "OVX"
     if s in {"GVZ", "GVX"}:
         return "GVZ"
     return None
@@ -570,8 +574,8 @@ def _load_vol_index_close_for_rotation_rules(
     end_d = _parse_yyyymmdd(str(end_yyyymmdd))
 
     for idx_code in need:
-        if idx_code in {"VIX", "GVZ"}:
-            start_fetch = "19900101" if idx_code == "VIX" else "20080101"
+        if idx_code in {"VIX", "VXN", "GVZ", "OVX"}:
+            start_fetch = "19900101"
             dfc = fetch_cboe_daily_close(
                 CboeFetchRequest(index=idx_code, start_date=start_fetch, end_date=end_yyyymmdd)
             )
@@ -618,7 +622,7 @@ def _load_vol_index_close_for_rotation_rules(
 
         raise HTTPException(
             status_code=400,
-            detail=f"unsupported vol index for rotation timing: {idx_code} (expected VIX/GVZ/WAVOL)",
+            detail=f"unsupported vol index for rotation timing: {idx_code} (expected VIX/VXN/GVZ/OVX/WAVOL)",
         )
     return out
 
@@ -817,13 +821,13 @@ def analysis_leadlag(
     stooq_known = {"XAUUSD", "GC.F"}
 
     # Provider selection:
-    # - cboe: VIX/GVZ only (preferred when available)
+    # - cboe: VIX/VX/GVZ/OVX only (preferred when available)
     # - fred: FRED daily series (rates)
     # - stooq: Stooq daily CSV (DXY / XAUUSD / GC)
     # - yahoo: fallback for arbitrary symbols
     # - auto: try in the above order based on symbol
     if idx_provider == "auto":
-        if idx_code in {"VIX", "GVZ", "VXN"}:
+        if idx_code in {"VIX", "GVZ", "VXN", "OVX"}:
             idx_provider_eff = "cboe"
         elif idx_sym_u in fred_known:
             idx_provider_eff = "fred"
@@ -837,7 +841,7 @@ def analysis_leadlag(
         idx_provider_eff = idx_provider
 
     if idx_provider_eff == "cboe":
-        if idx_code not in {"VIX", "GVZ", "VXN"}:
+        if idx_code not in {"VIX", "GVZ", "VXN", "OVX"}:
             return LeadLagAnalysisResponse(ok=False, error="unsupported_cboe_index", meta={"provider": "cboe", "symbol": idx_sym})
         dfc = fetch_cboe_daily_close(CboeFetchRequest(index=idx_code, start_date=payload.start, end_date=payload.end))
         if dfc is None or dfc.empty:
@@ -935,7 +939,7 @@ def analysis_vol_proxy_timing(payload: VolProxyTimingRequest, db: Session = Depe
     Volatility-timing backtests using volatility proxies computed from ETF OHLC only.
 
     This is designed for comparing "no-options-data" alternatives (RV, range-based, EWMA, HAR forecast)
-    with implied-vol indices timing (GVZ/VXN) which is available via /analysis/leadlag.
+    with implied-vol indices timing (VIX/VXN/GVZ/OVX) which is available via /analysis/leadlag.
     """
     start_d = _parse_yyyymmdd(payload.start)
     end_d = _parse_yyyymmdd(payload.end)
@@ -1443,9 +1447,9 @@ def signal_vix_next_action(payload: VixNextActionRequest) -> VixNextActionRespon
     Produce a next-CN-trading-day instruction using VIX/GVZ (Cboe).
     Intended for real trading workflow: BUY / SELL / HOLD.
     """
-    idx = str(payload.index or "VIX").strip().upper()
+    idx = str(payload.index).strip().upper()
     # Fetch a reasonably long history for threshold estimation (Cboe CSV is small).
-    start = "19900101" if idx == "VIX" else "20090101"
+    start = "19900101"
     end = _now_shanghai_date().strftime("%Y%m%d")
     df = fetch_cboe_daily_close(CboeFetchRequest(index=idx, start_date=start, end_date=end))
     if df is None or df.empty:
@@ -1584,7 +1588,7 @@ def analysis_index_distribution(payload: IndexDistributionRequest) -> IndexDistr
     if w not in {"1y", "3y", "5y", "10y", "all"}:
         return IndexDistributionResponse(ok=False, error="invalid_window", meta={"window": w})
     res = compute_cboe_index_distribution(
-        IndexDistributionInputs(symbol=str(payload.symbol), window=w, bins=int(payload.bins))
+        IndexDistributionInputs(symbol=str(payload.symbol), window=w, bins=int(payload.bins), mode=str(payload.mode or "raw"))
     )
     if not bool(res.get("ok")):
         return IndexDistributionResponse(ok=False, error=str(res.get("error") or "failed"), meta=dict(res.get("meta") or {}))

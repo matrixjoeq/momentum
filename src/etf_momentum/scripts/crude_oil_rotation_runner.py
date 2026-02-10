@@ -64,10 +64,10 @@ CRUDE_OIL_CODES = [
     "501018",  # 南方原油
     "160723",  # 嘉实原油
     "161129",  # 易方达原油
-    "160416",  # 华安石油
+    #"160416",  # 华安石油
     "162719",  # 广发石油
     "163208",  # 诺安油气
-    "162411",  # 华宝油气
+    #"162411",  # 华宝油气
 ]
 
 
@@ -709,7 +709,8 @@ def main():
     init_db(engine)
     SessionFactory = make_session_factory(engine)
     
-    with session_scope(SessionFactory) as db:
+    db = SessionFactory()
+    try:
         start_date, end_date = get_common_date_range(db, CRUDE_OIL_CODES)
         
         close = fetch_crud_oil_data(db, CRUDE_OIL_CODES, start_date, end_date)
@@ -762,6 +763,8 @@ def main():
         
         logger.info("\nResults saved to: %s", OUTPUT_DIR)
         logger.info("Report: %s/crude_oil_rotation_report.md", OUTPUT_DIR)
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
