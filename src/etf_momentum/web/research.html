@@ -471,9 +471,9 @@
       </div>
 
       <div class="panel no-print" style="margin-top: 10px;">
-        <h3 style="margin: 0 0 6px 0;">小程序同款：固定4ETF 周度轮动（周一~周五 + 综合）</h3>
+        <h3 style="margin: 0 0 6px 0;">小程序同款：基于同样的标的池与回测范围的轮动（周度，周一~周五 + 综合）</h3>
         <div class="muted">
-          固定标的：159915/511010/513100/518880；固定执行：周度（周一~周五）+ 成交价=open + 休市=prev。
+          标的池：将使用等权/轮动组合同样的标的池，不再固定具体标的。固定执行：周度（周一~周五）+ 成交价=open + 休市=prev。
           其余参数（TopK/动量回看/过滤器/止盈止损/策略RSI择时/后视镜择时/恐慌择时/回撤控制等）使用下方“动量轮动参数”的当前设置。
         </div>
         <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
@@ -2250,7 +2250,7 @@
           // Stage-1: lite wide range to get date axis for range slicing
           const litePath = isMix ? "/analysis/rotation/weekly5-open-combo-lite" : "/analysis/rotation/weekly5-open-lite";
           const fullPath = isMix ? "/analysis/rotation/weekly5-open-combo" : "/analysis/rotation/weekly5-open";
-          const FIXED4 = ["159915", "511010", "513100", "518880"];
+          // dynamic code pool is used instead of fixed 4 ETFs
           const _parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
           const _buildVolIdxRules = () => {
             const on = ($("rotVolIdxOn") && $("rotVolIdxOn").value === "true");
@@ -2326,7 +2326,7 @@
             if (floorRules && floorRules.__error) return floorRules;
             const fd = _pickDefaultRule(floorRules) || { momentum_floor: 0.0 };
             const req = {
-              codes: FIXED4,
+              codes: Array.from(selected),
               start: startYmd,
               end: endYmd,
               // weekly5-open fixed semantics
