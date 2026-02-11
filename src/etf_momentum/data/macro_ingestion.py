@@ -37,7 +37,7 @@ class MacroSeriesSpec:
     calendar: str | None = None
 
 
-DEFAULT_STEP1_SERIES: list[MacroSeriesSpec] = [
+MACRO_SERIES: list[MacroSeriesSpec] = [
     MacroSeriesSpec(series_id="DGS2", provider="fred", provider_symbol="DGS2", name="US Treasury 2Y", category="rates", unit="%"),
     MacroSeriesSpec(series_id="DGS5", provider="fred", provider_symbol="DGS5", name="US Treasury 5Y", category="rates", unit="%"),
     MacroSeriesSpec(series_id="DGS10", provider="fred", provider_symbol="DGS10", name="US Treasury 10Y", category="rates", unit="%"),
