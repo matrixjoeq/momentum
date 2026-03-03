@@ -34,7 +34,7 @@ DEFAULT_POLICIES: list[dict] = [
         "name": "bond_10_strict",
         "description": "债券ETF，价格更平滑，收益跳变阈值更严格。",
         "max_abs_return": 0.08,
-        "max_hl_spread": 0.15,
+        "max_hl_spread": 0.30,
         "max_gap_days": 15,
     },
     {
