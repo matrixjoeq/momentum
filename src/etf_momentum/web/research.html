@@ -246,7 +246,7 @@
         <span id="corrRangeHint" class="muted" style="margin-left:6px;"></span>
       </div>
       <div id="corrLegend" class="muted" style="margin-top:6px;"></div>
-      <div id="corrHeatmap" style="width:100%; height:520px;"></div>
+      <div id="corrHeatmap" style="width:100%; height:1000px;"></div>
     </div>
 
     <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
@@ -3284,7 +3284,7 @@
         if (!distributions || typeof distributions !== "object") {
           return;
         }
-        
+
         const codeSelect = $("distCodeSelect");
         const adjustSelect = $("distAdjustSelect");
         const adjustHint = $("distAdjustHint");
@@ -3292,16 +3292,16 @@
         const periodSelect = $("distPeriodSelect");
         const rollWinSelect = $("distRollVolWindow");
         const rollQTable = $("distRollingAnnVolQuantiles");
-        
+
         if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect) return;
 
         // cache the baseline data for rolling ann-vol plot
         window.__distActiveBaseline = baselineData || window.__distActiveBaseline || null;
-        
+
         // Populate code selector
         const codes = Object.keys(distributions).sort();
         codeSelect.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
-        
+
         if (codes.length === 0) {
           $("distHistogram").innerHTML = "<div class='muted'>无分布数据</div>";
           $("distRollingAnnVol").innerHTML = "<div class='muted'>无数据</div>";
@@ -3309,7 +3309,7 @@
           $("distQuantiles").innerHTML = "";
           return;
         }
-        
+
         const _winToDays = (w) => {
           const x = String(w || "").trim().toUpperCase();
           if (x === "1D") return 1;
@@ -3575,7 +3575,7 @@
           const code = codeSelect.value;
           const type = typeSelect.value; // "return" | "volatility" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev"
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
-          
+
           if (!code || !distributions[code]) {
             $("distHistogram").innerHTML = "<div class='muted'>请选择标的</div>";
             $("distRollingAnnVol").innerHTML = "<div class='muted'>请选择标的</div>";
@@ -3586,10 +3586,10 @@
 
           // Mirror indicator time-series should be independent of the histogram selection.
           try { _plotMirrorTs(); } catch (e) { /* ignore */ }
-          
+
           const key = `${period}_${type}`;
           const data = distributions[code][key];
-          
+
           if (!data || !data.hist || !data.quantiles) {
             const typeLabel =
               (type === "return") ? "收益率"
@@ -3611,23 +3611,23 @@
             $("distQuantiles").innerHTML = "";
             return;
           }
-          
+
           // Render histogram
           const h = data.hist;
           const edges = h.bin_edges || [];
           const counts = h.counts || [];
-          
+
           if (edges.length < 2 || counts.length < 1) {
             $("distHistogram").innerHTML = "<div class='muted'>无直方图数据</div>";
             $("distQuantiles").innerHTML = "";
             return;
           }
-          
+
           const x = [];
           for (let i = 0; i < counts.length; i++) {
             x.push((edges[i] + edges[i + 1]) / 2);
           }
-          
+
           const isPct = (type === "return" || type === "volatility");
           const tickFmt =
             isPct ? ".2%"
@@ -3654,7 +3654,7 @@
             : (period === "quarterly") ? "季度"
             : "年度";
           const title = `${code} - ${periodLabel}${typeLabel}分布`;
-          
+
           Plotly.newPlot(
             "distHistogram",
             [{
@@ -3729,7 +3729,7 @@
             },
             { responsive: true }
           );
-          
+
           // Render quantiles table
           const q = data.quantiles || {};
           const fmtQ = (() => {
@@ -3745,8 +3745,8 @@
           })();
           const quantileRows = [
             ["分位数", "1%", "5%", "10%", "25%", "50%", "75%", "90%", "95%", "99%"],
-            ["数值", 
-             fmtQ(q.q01), fmtQ(q.q05), fmtQ(q.q10), fmtQ(q.q25), 
+            ["数值",
+             fmtQ(q.q01), fmtQ(q.q05), fmtQ(q.q10), fmtQ(q.q25),
              fmtQ(q.q50), fmtQ(q.q75), fmtQ(q.q90), fmtQ(q.q95), fmtQ(q.q99)
             ],
           ];
@@ -3766,7 +3766,7 @@
             const dateTxt = curDate ? `（${esc(curDate)}）` : "";
             quantileRows.push([`当前值${dateTxt}`, fmtCur(cur), "", "", "", "", "", "", "", ""]);
           }
-          
+
           $("distQuantiles").innerHTML =
             quantileRows.map((row, i) => {
               const tag = (i === 0) ? "th" : "td";
@@ -3776,7 +3776,7 @@
           // Rolling annualized volatility chart (always based on daily NAV returns)
           _plotRollingAnnVol();
         };
-        
+
         // Bind events (wire once)
         if (!window.__distHandlersAttached) {
           codeSelect.addEventListener("change", updateDisplay);
@@ -3809,7 +3809,7 @@
           const adj = String(adjustSelect.value || "hfq").trim().toLowerCase();
           adjustHint.innerHTML = `<b>${esc(adj)}</b>`;
         }
-        
+
         // Initial render
         updateDisplay();
       }
@@ -6041,7 +6041,7 @@
       if ($("rotVolIdxResetDefault")) $("rotVolIdxResetDefault").addEventListener("click", _rotVolIdxResetDefaultRules);
       // init defaults (rules table exists even when disabled)
       try { _rotVolIdxResetDefaultRules(); _rotVolIdxUpdateUiEnabled(); } catch (e) { /* best effort */ }
-      
+
       $("runEwCalendar").addEventListener("click", runEwCalendarEffect);
       $("runRotCalendar").addEventListener("click", runRotCalendarEffect);
       $("exportPdf").addEventListener("click", exportPdfReport);
