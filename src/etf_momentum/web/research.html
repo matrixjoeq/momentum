@@ -402,8 +402,8 @@
         <div>
           <label>扫描模式</label>
           <select id="distCalMode" style="min-width:150px;">
-            <option value="single" selected>单日</option>
-            <option value="all">全扫描 1~28</option>
+            <option value="single">单日</option>
+            <option value="all" selected>全扫描 1~28</option>
           </select>
         </div>
         <div>
@@ -413,15 +413,15 @@
         <div>
           <label>买入价</label>
           <select id="distCalEntryPx" style="min-width:120px;">
-            <option value="open" selected>open</option>
-            <option value="close">close</option>
+            <option value="open">open</option>
+            <option value="close" selected>close</option>
           </select>
         </div>
         <div>
           <label>卖出价</label>
           <select id="distCalExitPx" style="min-width:120px;">
-            <option value="open" selected>open</option>
-            <option value="close">close</option>
+            <option value="open">open</option>
+            <option value="close" selected>close</option>
           </select>
         </div>
         <div>
@@ -4319,17 +4319,17 @@
             const pMidNeg = pct(near, (v) => v > -0.02 && v < 0);
             const pMidPos = pct(near, (v) => v >= 0 && v < 0.02);
             tProb.innerHTML =
-              `<tr><th>预测项</th><th>结果</th></tr>` +
-              `<tr><td>条件样本数</td><td>${near.length} / ${xs.length}</td></tr>` +
-              `<tr><td>取样方式</td><td>${esc(modeTxt)}</td></tr>` +
-              `<tr><td>E[r]</td><td>${fmtPct(meanY)}</td></tr>` +
-              `<tr><td>P10 / P25 / P50 / P75 / P90</td><td>${fmtPct(p10)} / ${fmtPct(p25)} / ${fmtPct(p50)} / ${fmtPct(p75)} / ${fmtPct(p90)}</td></tr>` +
-              `<tr><td>P(r &lt; -2%)</td><td>${fmtPct(pNeg2)}</td></tr>` +
-              `<tr><td>P(-2% ≤ r &lt; 0)</td><td>${fmtPct(pMidNeg)}</td></tr>` +
-              `<tr><td>P(0 ≤ r &lt; 2%)</td><td>${fmtPct(pMidPos)}</td></tr>` +
-              `<tr><td>P(r ≥ 2%)</td><td>${fmtPct(pPos2)}</td></tr>` +
-              `<tr><td>P(r &gt; 0)</td><td>${fmtPct(pPos)}</td></tr>` +
-              `<tr><td>P(r &lt; 0)</td><td>${fmtPct(pNeg)}</td></tr>`;
+              `<tr><th>预测项</th><th>结果</th><th>说明</th></tr>` +
+              `<tr><td>条件样本数</td><td>${near.length} / ${xs.length}</td><td>用于当前指标值附近推断的样本量；占比越高、结果通常越稳定。</td></tr>` +
+              `<tr><td>取样方式</td><td>${esc(modeTxt)}</td><td>先用邻域带宽；样本不足时退化为 KNN 近邻，保证最少可用样本。</td></tr>` +
+              `<tr><td>E[r]</td><td>${fmtPct(meanY)}</td><td>条件期望收益；大于 0 越多通常越偏多，小于 0 说明当前指标对应的未来收益偏弱。</td></tr>` +
+              `<tr><td>P10 / P25 / P50 / P75 / P90</td><td>${fmtPct(p10)} / ${fmtPct(p25)} / ${fmtPct(p50)} / ${fmtPct(p75)} / ${fmtPct(p90)}</td><td>条件收益分布分位数；P10/P25 反映下行尾部，P75/P90 反映上行弹性，P50 为中位收益。</td></tr>` +
+              `<tr><td>P(r &lt; -2%)</td><td>${fmtPct(pNeg2)}</td><td>大幅回撤概率；越低越好，可用于止损风险评估。</td></tr>` +
+              `<tr><td>P(-2% ≤ r &lt; 0)</td><td>${fmtPct(pMidNeg)}</td><td>小幅亏损概率；与正收益区间对比可判断盈亏结构。</td></tr>` +
+              `<tr><td>P(0 ≤ r &lt; 2%)</td><td>${fmtPct(pMidPos)}</td><td>小幅盈利概率；代表偏稳健但弹性有限的收益区间。</td></tr>` +
+              `<tr><td>P(r ≥ 2%)</td><td>${fmtPct(pPos2)}</td><td>较强盈利概率；越高通常说明该指标区域的收益弹性更好。</td></tr>` +
+              `<tr><td>P(r &gt; 0)</td><td>${fmtPct(pPos)}</td><td>总体胜率；越高越偏向正收益。</td></tr>` +
+              `<tr><td>P(r &lt; 0)</td><td>${fmtPct(pNeg)}</td><td>总体亏损概率；与胜率互补（理想情况下两者之和约为 100%）。</td></tr>`;
           }
 
           if (tCausal) {
@@ -4344,24 +4344,23 @@
             const pval = reg ? reg.p[1] : NaN;
             const r2 = reg ? reg.r2 : NaN;
             tCausal.innerHTML =
-              `<tr><th>检验项</th><th>结果</th></tr>` +
-              `<tr><td>样本数</td><td>${xs.length}</td></tr>` +
-              `<tr><td>Pearson 相关</td><td>${Number.isFinite(pear) ? pear.toFixed(4) : "-"}</td></tr>` +
-              `<tr><td>Spearman 相关</td><td>${Number.isFinite(spea) ? spea.toFixed(4) : "-"}</td></tr>` +
-              `<tr><td>预测回归斜率 β</td><td>${Number.isFinite(slope) ? slope.toFixed(6) : "-"}</td></tr>` +
-              `<tr><td>预测回归 t 值 / p(正态近似)</td><td>${Number.isFinite(tval) ? tval.toFixed(3) : "-"} / ${fmtPval(pval)}</td></tr>` +
-              `<tr><td>预测回归 R²</td><td>${Number.isFinite(r2) ? r2.toFixed(4) : "-"}</td></tr>` +
-              `<tr><td>斜率置换检验 p 值</td><td>${fmtPval(permP)}</td></tr>` +
-              `<tr><td>Granger-like (lag=3) ΔR²</td><td>${gr && Number.isFinite(gr.delta_r2) ? gr.delta_r2.toFixed(5) : "-"}</td></tr>` +
-              `<tr><td>Granger-like 置换检验 p 值</td><td>${gr ? fmtPval(gr.p_perm) : "-"}</td></tr>` +
-              `<tr><td>解释</td><td class='muted'>p 值越小、|相关|越高、ΔR²越大，指标作为止盈止损触发信号的统计证据越强。该检验为研究辅助，不等同严格结构因果。</td></tr>`;
+              `<tr><th>检验项</th><th>结果</th><th>说明</th></tr>` +
+              `<tr><td>样本数</td><td>${xs.length}</td><td>用于相关性/回归检验的有效观测数；样本越多，统计结论通常越稳。</td></tr>` +
+              `<tr><td>Pearson 相关</td><td>${Number.isFinite(pear) ? pear.toFixed(4) : "-"}</td><td>线性相关强度，范围 [-1,1]；绝对值越大线性关系越强，正负表示方向。</td></tr>` +
+              `<tr><td>Spearman 相关</td><td>${Number.isFinite(spea) ? spea.toFixed(4) : "-"}</td><td>秩相关（单调关系）强度；对异常值更稳健，适合非线性但单调场景。</td></tr>` +
+              `<tr><td>预测回归斜率 β</td><td>${Number.isFinite(slope) ? slope.toFixed(6) : "-"}</td><td>指标每增加 1 单位时，条件期望收益变化量；符号给方向，绝对值给敏感度。</td></tr>` +
+              `<tr><td>预测回归 t 值 / p(正态近似)</td><td>${Number.isFinite(tval) ? tval.toFixed(3) : "-"} / ${fmtPval(pval)}</td><td>|t| 越大、p 越小，斜率显著偏离 0 的证据越强（常用阈值 p&lt;0.05）。</td></tr>` +
+              `<tr><td>预测回归 R²</td><td>${Number.isFinite(r2) ? r2.toFixed(4) : "-"}</td><td>线性模型解释比例；越大表示该指标对未来收益波动解释力越强，但不代表因果。</td></tr>` +
+              `<tr><td>斜率置换检验 p 值</td><td>${fmtPval(permP)}</td><td>通过随机打乱 y 评估“偶然相关”概率；越小越说明斜率不太可能由随机噪声产生。</td></tr>` +
+              `<tr><td>Granger-like (lag=3) ΔR²</td><td>${gr && Number.isFinite(gr.delta_r2) ? gr.delta_r2.toFixed(5) : "-"}</td><td>加入指标滞后项后对预测能力的增量；越大说明滞后信息更有价值。</td></tr>` +
+              `<tr><td>Granger-like 置换检验 p 值</td><td>${gr ? fmtPval(gr.p_perm) : "-"}</td><td>对 ΔR² 做置换检验；越小表示“预测增量并非偶然”的证据越强。</td></tr>`;
           }
         };
 
-        const _calendarStats = (arr) => {
+        const _calendarStats = (arr, holdDays = 1) => {
           const xs = (arr || []).map((x) => Number(x)).filter((x) => Number.isFinite(x));
           if (xs.length === 0) {
-            return { count: 0, mean: NaN, std: NaN, median: NaN, q10: NaN, q90: NaN, win_rate: NaN, sharpe: NaN };
+            return { count: 0, mean: NaN, std: NaN, median: NaN, q10: NaN, q90: NaN, win_rate: NaN, sharpe: NaN, sharpe_ann: NaN };
           }
           const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
           const std = _std(xs);
@@ -4370,7 +4369,9 @@
           const q90 = _percentile(xs, 90);
           const win = xs.filter((x) => x > 0).length / xs.length;
           const sharpe = (Number.isFinite(std) && std > 0) ? (mean / std) : NaN;
-          return { count: xs.length, mean, std, median, q10, q90, win_rate: win, sharpe };
+          const h = Math.max(1, Number(holdDays) || 1);
+          const sharpe_ann = Number.isFinite(sharpe) ? (sharpe * Math.sqrt(252 / h)) : NaN;
+          return { count: xs.length, mean, std, median, q10, q90, win_rate: win, sharpe, sharpe_ann };
         };
         const _computeMonthdayEffect = ({ openSeries, holdN, entryPx, exitPx, shift, mode, day }) => {
           const dates = (openSeries && Array.isArray(openSeries.dates)) ? openSeries.dates : [];
@@ -4422,7 +4423,7 @@
             }
           }
           const statsByDay = {};
-          for (const d of days) statsByDay[String(d)] = _calendarStats(out[String(d)].returns);
+          for (const d of days) statsByDay[String(d)] = _calendarStats(out[String(d)].returns, n);
           return { days, by_day: out, stats: statsByDay, hold_n: n, entry_px: pxE, exit_px: pxX, shift: sh };
         };
         const _renderMonthdayEffect = ({ code, openSeries }) => {
@@ -4531,7 +4532,7 @@
           }
           rows.sort((a, b) => a.d - b.d);
           tbl.innerHTML =
-            `<tr><th>d</th><th>样本数</th><th>均值</th><th>中位数</th><th>Std</th><th>P10</th><th>P90</th><th>胜率</th><th>夏普(非年化)</th></tr>` +
+            `<tr><th>d</th><th>样本数</th><th>均值</th><th>中位数</th><th>Std</th><th>P10</th><th>P90</th><th>胜率</th><th>夏普(非年化)</th><th>夏普(年化)</th></tr>` +
             rows.map((r) =>
               `<tr>
                 <td>${r.d}</td>
@@ -4543,6 +4544,7 @@
                 <td>${fmtPct(r.q90)}</td>
                 <td>${fmtPct(r.win_rate)}</td>
                 <td>${Number.isFinite(r.sharpe) ? Number(r.sharpe).toFixed(3) : "-"}</td>
+                <td>${Number.isFinite(r.sharpe_ann) ? Number(r.sharpe_ann).toFixed(3) : "-"}</td>
               </tr>`
             ).join("");
         };
