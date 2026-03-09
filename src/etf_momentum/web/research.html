@@ -296,7 +296,7 @@
     <div class="panel">
       <h3>各标的收益率与波动率分布统计</h3>
       <div class="muted">
-        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、成交活跃度与拥挤度指标分布直方图与分位数。<br/>
+        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、价格BIAS、成交活跃度与拥挤度指标分布直方图与分位数。<br/>
         价格口径：<span id="distAdjustHint"><b>hfq</b></span>（默认后复权；切换仅影响“价格类指标”）。成交活跃度/拥挤度始终使用 none 口径（真实成交）。<br/>
         拥挤度口径：
         RVOL=\( \frac{volume}{MA_{20}(volume)} \)；
@@ -323,6 +323,7 @@
             <!-- raw (original) values -->
             <option value="return">收益率</option>
             <option value="volatility">波动率</option>
+            <option value="bias">价格BIAS（close/MA20-1）</option>
             <option value="price_dev">价格偏离度（log价格-长期均值）</option>
             <option value="volume">成交活跃度（量/额）</option>
             <!-- variants / transforms -->
@@ -344,6 +345,27 @@
           </select>
         </div>
         <div>
+          <label>时间范围（当前标的）</label>
+          <select id="distRangeQuick" style="min-width:180px;">
+            <option value="all" selected>成立以来</option>
+            <option value="1y">近一年</option>
+            <option value="3y">近三年</option>
+            <option value="5y">近五年</option>
+            <option value="10y">近十年</option>
+          </select>
+        </div>
+        <div>
+          <label>开始日期</label>
+          <input id="distStart" placeholder="YYYYMMDD" style="min-width:140px;" />
+        </div>
+        <div>
+          <label>结束日期</label>
+          <input id="distEnd" placeholder="YYYYMMDD" style="min-width:140px;" />
+        </div>
+        <div>
+          <button id="distApplyRange">应用区间</button>
+        </div>
+        <div>
           <label>滚动年化波动窗口</label>
           <select id="distRollVolWindow" style="min-width:180px;">
             <option value="1D">1D</option>
@@ -359,6 +381,7 @@
           </select>
         </div>
       </div>
+      <div id="distRangeHint" class="muted" style="margin-top:8px;"></div>
       <div id="distHistogram" style="width:100%; height:420px; margin-top:12px;"></div>
       <table id="distQuantiles" style="margin-top:12px;"></table>
       <div class="muted" style="margin-top:10px;">滚动年化波动率分位数（基于日收益滚动 std 年化）</div>
@@ -3263,20 +3286,37 @@
         );
       }
 
-      async function _distEnsureBaseline(adjust) {
-        const adj = String(adjust || "hfq").trim().toLowerCase();
-        const cache = window.__distBaselineCache || {};
-        // Cache may contain older payloads from a previous UI version. If a new field is missing,
-        // refetch to avoid empty charts (e.g. mirror_timeseries).
-        if (cache[adj] && cache[adj].mirror_timeseries) return cache[adj];
-        const p = window.__distBaselinePayload;
-        if (!p) return null;
-        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ ...p, adjust: adj }) });
+      async function _distFetchBaselineByCode(params) {
+        const p = params || {};
+        const code = String(p.code || "").trim();
+        const start = String(p.start || "").trim();
+        const end = String(p.end || "").trim();
+        const adjust = String(p.adjust || "hfq").trim().toLowerCase();
+        if (!code || !start || !end) return null;
+        const cache = window.__distCodeBaselineCache || {};
+        const key = `${adjust}|${code}|${start}|${end}`;
+        if (cache[key] && cache[key].period_distributions) return cache[key];
+        const resp = await api("/analysis/baseline", {
+          method: "POST",
+          body: JSON.stringify({
+            codes: [code],
+            start,
+            end,
+            benchmark_code: code,
+            adjust,
+            rebalance: "yearly",
+            risk_free_rate: 0.025,
+            fft_windows: [252, 126],
+            fft_roll: false,
+            fft_roll_step: 5,
+            rp_window_days: 60,
+          }),
+        });
         const text = await resp.text();
         if (!resp.ok) throw new Error(text);
         const data = JSON.parse(text);
-        cache[adj] = data;
-        window.__distBaselineCache = cache;
+        cache[key] = data;
+        window.__distCodeBaselineCache = cache;
         return data;
       }
 
@@ -3292,15 +3332,42 @@
         const periodSelect = $("distPeriodSelect");
         const rollWinSelect = $("distRollVolWindow");
         const rollQTable = $("distRollingAnnVolQuantiles");
+        const rangeQuick = $("distRangeQuick");
+        const rangeStart = $("distStart");
+        const rangeEnd = $("distEnd");
+        const rangeApply = $("distApplyRange");
+        const rangeHint = $("distRangeHint");
 
         if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect) return;
 
-        // cache the baseline data for rolling ann-vol plot
-        window.__distActiveBaseline = baselineData || window.__distActiveBaseline || null;
+        // cache per-code distributions/baseline payloads
+        window.__distDistributionsByCode = window.__distDistributionsByCode || {};
+        window.__distBaselineByCode = window.__distBaselineByCode || {};
+        const distByCode = window.__distDistributionsByCode;
+        const baseByCode = window.__distBaselineByCode;
+        for (const [k, v] of Object.entries(distributions || {})) {
+          if (v && typeof v === "object") distByCode[k] = v;
+        }
+        if (baselineData && baselineData.period_distributions) {
+          for (const k of Object.keys(baselineData.period_distributions || {})) {
+            baseByCode[k] = baselineData;
+          }
+        }
 
-        // Populate code selector
-        const codes = Object.keys(distributions).sort();
-        codeSelect.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+        // Populate code selector once (prefer currently selected pool list)
+        const curCode = codeSelect.value;
+        const selectedCodes = Array.from(selected || []).map((x) => String(x));
+        const codes = (selectedCodes.length > 0 ? selectedCodes : Object.keys(distByCode)).sort();
+        const currentOptions = Array.from(codeSelect.options || []).map((o) => String(o.value));
+        const needResetOptions =
+          (!window.__distCodeSelectorInitialized) ||
+          (codeSelect.options.length === 0) ||
+          (currentOptions.join("|") !== codes.join("|"));
+        if (needResetOptions) {
+          codeSelect.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+          if (curCode && codes.includes(curCode)) codeSelect.value = curCode;
+          window.__distCodeSelectorInitialized = true;
+        }
 
         if (codes.length === 0) {
           $("distHistogram").innerHTML = "<div class='muted'>无分布数据</div>";
@@ -3309,6 +3376,58 @@
           $("distQuantiles").innerHTML = "";
           return;
         }
+
+        const _distCodePoolRange = (code) => {
+          const c = String(code || "").trim();
+          const it = (pool || []).find((x) => String(x.code || "").trim() === c);
+          const s = String((it && it.last_data_start_date) || "").trim();
+          const e = String((it && it.last_data_end_date) || "").trim();
+          return {
+            start: (ymdToNum(s) != null) ? s : "",
+            end: (ymdToNum(e) != null) ? e : "",
+          };
+        };
+        const _distClampRange = (code, sRaw, eRaw) => {
+          const avail = _distCodePoolRange(code);
+          const sIn = String(sRaw || "").trim();
+          const eIn = String(eRaw || "").trim();
+          if (!avail.start || !avail.end) {
+            return { start: sIn, end: eIn, availStart: "", availEnd: "" };
+          }
+          const availSn = ymdToNum(avail.start);
+          const availEn = ymdToNum(avail.end);
+          let s = (ymdToNum(sIn) != null) ? sIn : avail.start;
+          let e = (ymdToNum(eIn) != null) ? eIn : avail.end;
+          let sn = ymdToNum(s);
+          let en = ymdToNum(e);
+          if (sn == null || en == null) {
+            s = avail.start;
+            e = avail.end;
+            sn = ymdToNum(s);
+            en = ymdToNum(e);
+          }
+          if (sn < availSn) sn = availSn;
+          if (en > availEn) en = availEn;
+          if (sn > en) {
+            sn = availSn;
+            en = availEn;
+          }
+          return { start: numToYmd(sn), end: numToYmd(en), availStart: avail.start, availEnd: avail.end };
+        };
+        const _distRangeByQuick = (code, quick) => {
+          const q = String(quick || "all").toLowerCase();
+          const base = _distClampRange(code, "", "");
+          if (!base.start || !base.end) return base;
+          if (q === "all") return base;
+          const years = (q === "1y") ? 1 : (q === "3y") ? 3 : (q === "5y") ? 5 : (q === "10y") ? 10 : 0;
+          if (!years) return base;
+          const endDt = ymdToDate(base.end);
+          if (!endDt) return base;
+          const startDt = new Date(endDt.getTime());
+          startDt.setFullYear(startDt.getFullYear() - years);
+          const cand = dateToYmd(startDt);
+          return _distClampRange(code, cand, base.end);
+        };
 
         const _winToDays = (w) => {
           const x = String(w || "").trim().toUpperCase();
@@ -3336,9 +3455,9 @@
           const wKey = rollWinSelect.value;
           const w = _winToDays(wKey);
           const boxId = "distRollingAnnVol";
-          const b = window.__distActiveBaseline;
+          const b = (window.__distBaselineByCode || {})[code];
           if (!b || !b.nav || !b.nav.series || !b.nav.dates) {
-            $(boxId).innerHTML = "<div class='muted'>请先运行上方“运行分析（等权）”，再查看滚动年化波动率。</div>";
+            $(boxId).innerHTML = "<div class='muted'>该标的当前区间无可用NAV序列，请调整时间范围后重试。</div>";
             if (rollQTable) rollQTable.innerHTML = "";
             return;
           }
@@ -3492,10 +3611,10 @@
           const code = codeSelect.value;
           const period = periodSelect.value || "daily";
           const boxId = "distMirrorTs";
-          const b = window.__distActiveBaseline;
+          const b = (window.__distBaselineByCode || {})[code];
           if (!$(boxId)) return;
           if (!b || !b.mirror_timeseries) {
-            $(boxId).innerHTML = "<div class='muted'>后视镜指标未加载：请重新运行上方“运行分析（等权）”（或刷新页面后再运行）。</div>";
+            $(boxId).innerHTML = "<div class='muted'>后视镜指标未加载：请先为该标的加载时间范围数据。</div>";
             return;
           }
           const node = (b.mirror_timeseries && b.mirror_timeseries[code]) ? b.mirror_timeseries[code] : null;
@@ -3573,10 +3692,10 @@
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
-          const type = typeSelect.value; // "return" | "volatility" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev"
+          const type = typeSelect.value; // "return" | "volatility" | "bias" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev"
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
 
-          if (!code || !distributions[code]) {
+          if (!code || !distByCode[code]) {
             $("distHistogram").innerHTML = "<div class='muted'>请选择标的</div>";
             $("distRollingAnnVol").innerHTML = "<div class='muted'>请选择标的</div>";
             if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>请选择标的</div>";
@@ -3588,12 +3707,13 @@
           try { _plotMirrorTs(); } catch (e) { /* ignore */ }
 
           const key = `${period}_${type}`;
-          const data = distributions[code][key];
+          const data = distByCode[code][key];
 
           if (!data || !data.hist || !data.quantiles) {
             const typeLabel =
               (type === "return") ? "收益率"
               : (type === "volatility") ? "波动率"
+              : (type === "bias") ? "价格BIAS"
               : (type === "price_dev") ? "价格偏离度"
               : (type === "log_volatility") ? "对数波动率(log)"
               : (type === "log_return_dev") ? "对数收益偏离"
@@ -3628,7 +3748,7 @@
             x.push((edges[i] + edges[i + 1]) / 2);
           }
 
-          const isPct = (type === "return" || type === "volatility");
+          const isPct = (type === "return" || type === "volatility" || type === "bias");
           const tickFmt =
             isPct ? ".2%"
             : (type === "volume") ? ",.0f"
@@ -3640,6 +3760,7 @@
           const typeLabel =
             (type === "return") ? "收益率"
             : (type === "volatility") ? "波动率"
+            : (type === "bias") ? "价格BIAS"
             : (type === "price_dev") ? "价格偏离度"
             : (type === "log_volatility") ? "对数波动率(log)"
             : (type === "log_return_dev") ? "对数收益偏离"
@@ -3779,7 +3900,66 @@
 
         // Bind events (wire once)
         if (!window.__distHandlersAttached) {
-          codeSelect.addEventListener("change", updateDisplay);
+          const _setRangeHint = (txt) => {
+            if (!rangeHint) return;
+            rangeHint.textContent = String(txt || "");
+          };
+          const _fetchAndRenderCode = async (code) => {
+            const c = String(code || "").trim();
+            const adj = String((adjustSelect && adjustSelect.value) || "hfq").trim().toLowerCase();
+            const s = String((rangeStart && rangeStart.value) || "").trim();
+            const e = String((rangeEnd && rangeEnd.value) || "").trim();
+            if (!c || !s || !e) {
+              updateDisplay();
+              return;
+            }
+            try {
+              $("distHistogram").innerHTML = "<div class='muted'>加载该标的统计数据中...</div>";
+              const b = await _distFetchBaselineByCode({ code: c, start: s, end: e, adjust: adj });
+              if (!b || !b.period_distributions || !b.period_distributions[c]) {
+                $("distHistogram").innerHTML = "<div class='muted'>该区间无可用统计数据</div>";
+                $("distQuantiles").innerHTML = "";
+                $("distRollingAnnVol").innerHTML = "<div class='muted'>无数据</div>";
+                if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>无数据</div>";
+                return;
+              }
+              distByCode[c] = b.period_distributions[c];
+              baseByCode[c] = b;
+              updateDisplay();
+            } catch (e2) {
+              $("distHistogram").innerHTML = `<div class='muted'>加载失败：${esc(String(e2 && e2.message ? e2.message : e2))}</div>`;
+            }
+          };
+          const _syncRangeFromQuick = () => {
+            if (!rangeQuick || !rangeStart || !rangeEnd) return;
+            const code = codeSelect.value;
+            const r = _distRangeByQuick(code, rangeQuick.value || "all");
+            rangeStart.value = r.start || "";
+            rangeEnd.value = r.end || "";
+            const av = (r.availStart && r.availEnd) ? `可用区间 ${r.availStart}~${r.availEnd}` : "可用区间未知";
+            _setRangeHint(`${code || "-"} · ${av} · 当前区间 ${rangeStart.value || "-"}~${rangeEnd.value || "-"}`);
+          };
+          const _syncQuickFromManual = () => {
+            if (!rangeQuick || !rangeStart || !rangeEnd) return;
+            const code = codeSelect.value;
+            const all = _distRangeByQuick(code, "all");
+            if (rangeStart.value === all.start && rangeEnd.value === all.end) rangeQuick.value = "all";
+            const av = (all.availStart && all.availEnd) ? `可用区间 ${all.availStart}~${all.availEnd}` : "可用区间未知";
+            _setRangeHint(`${code || "-"} · ${av} · 当前区间 ${rangeStart.value || "-"}~${rangeEnd.value || "-"}`);
+          };
+          const _applyRangeAndFetch = async () => {
+            const code = codeSelect.value;
+            const clamped = _distClampRange(code, (rangeStart && rangeStart.value) || "", (rangeEnd && rangeEnd.value) || "");
+            if (rangeStart) rangeStart.value = clamped.start || "";
+            if (rangeEnd) rangeEnd.value = clamped.end || "";
+            _syncQuickFromManual();
+            await _fetchAndRenderCode(code);
+          };
+
+          codeSelect.addEventListener("change", async () => {
+            _syncRangeFromQuick();
+            await _fetchAndRenderCode(codeSelect.value);
+          });
           typeSelect.addEventListener("change", updateDisplay);
           periodSelect.addEventListener("change", updateDisplay);
           rollWinSelect.addEventListener("change", updateDisplay);
@@ -3787,19 +3967,25 @@
             adjustSelect.addEventListener("change", async () => {
               const adj = String(adjustSelect.value || "hfq").trim().toLowerCase();
               if (adjustHint) adjustHint.innerHTML = `<b>${esc(adj)}</b>`;
-              try {
-                $("distHistogram").innerHTML = "<div class='muted'>加载该复权口径的数据中...</div>";
-                const b = await _distEnsureBaseline(adj);
-                if (!b || !b.period_distributions) {
-                  $("distHistogram").innerHTML = "<div class='muted'>请先运行上方“运行分析（等权）”</div>";
-                  return;
-                }
-                window.__distActiveBaseline = b;
-                renderPeriodDistributions(b.period_distributions, b);
-              } catch (e) {
-                $("distHistogram").innerHTML = `<div class='muted'>加载失败：${esc(String(e && e.message ? e.message : e))}</div>`;
-              }
+              await _applyRangeAndFetch();
             });
+          }
+          if (rangeQuick) {
+            rangeQuick.addEventListener("change", async () => {
+              _syncRangeFromQuick();
+              await _fetchAndRenderCode(codeSelect.value);
+            });
+          }
+          if (rangeApply) {
+            rangeApply.addEventListener("click", async () => {
+              await _applyRangeAndFetch();
+            });
+          }
+          if (rangeStart) {
+            rangeStart.addEventListener("change", _syncQuickFromManual);
+          }
+          if (rangeEnd) {
+            rangeEnd.addEventListener("change", _syncQuickFromManual);
           }
           window.__distHandlersAttached = true;
         }
@@ -3810,8 +3996,28 @@
           adjustHint.innerHTML = `<b>${esc(adj)}</b>`;
         }
 
+        if (rangeQuick && !rangeQuick.value) rangeQuick.value = "all";
+        if (rangeStart && rangeEnd) {
+          const r0 = _distRangeByQuick(codeSelect.value, (rangeQuick && rangeQuick.value) || "all");
+          rangeStart.value = rangeStart.value || r0.start || "";
+          rangeEnd.value = rangeEnd.value || r0.end || "";
+          if (rangeHint) {
+            const av0 = (r0.availStart && r0.availEnd) ? `可用区间 ${r0.availStart}~${r0.availEnd}` : "可用区间未知";
+            rangeHint.textContent = `${codeSelect.value || "-"} · ${av0} · 当前区间 ${rangeStart.value || "-"}~${rangeEnd.value || "-"}`;
+          }
+        }
+
         // Initial render
         updateDisplay();
+        const _initCode = codeSelect.value;
+        if (_initCode && !window.__distInitedByCodeRange) {
+          window.__distInitedByCodeRange = true;
+          // fire-and-forget: replace baseline-range stats with per-code independent range (default = inception)
+          Promise.resolve().then(async () => {
+            const ev = new Event("click");
+            if (rangeApply) rangeApply.dispatchEvent(ev);
+          });
+        }
       }
 
       function _pctToDec(x) {
@@ -5593,6 +5799,7 @@
         plotRolling("rollingDD", "Rolling Drawdown", (picked.rolling.drawdown || picked.rolling.max_drawdown || {}), ".0%");
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
+        window.__distInitedByCodeRange = false;
         renderPeriodDistributions(data.period_distributions, data);
       }
 

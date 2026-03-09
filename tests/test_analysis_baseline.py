@@ -68,3 +68,45 @@ def test_compute_baseline_basic_metrics(session_factory):
     assert len(out["correlation"]["matrix"]) == 2
     assert len(out["correlation"]["matrix"][0]) == 2
 
+
+def test_compute_baseline_includes_price_bias_distribution(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(40)]
+        closes = [100.0 + float(i) for i in range(40)]
+        for d, c in zip(dates, closes, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(c),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+            ),
+        )
+
+    pdist = out["period_distributions"][code]
+    assert "daily_bias" in pdist
+    bias = pdist["daily_bias"]
+    assert bias["count"] > 0
+    assert bias["current_date"] == dates[-1].isoformat()
+    ma20_last = sum(closes[-20:]) / 20.0
+    expected = closes[-1] / ma20_last - 1.0
+    assert bias["current"] == pytest.approx(expected, rel=1e-12)
+

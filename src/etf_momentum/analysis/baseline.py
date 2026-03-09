@@ -500,6 +500,9 @@ def _compute_periodic_returns_and_volatility(
     - Price deviation (BIAS) distributions (end-of-period), where
         bias_t = close_t / MA252(close)_t - 1
       This measures how far price deviates from a long-term trendline (252 trading days).
+    - Price BIAS distributions (end-of-period), where
+        bias_t = close_t / MA20(close)_t - 1
+      This follows a short/medium-term MA(20) reference used by the research UI.
 
     Also supports (when `daily_volume` or `daily_amount` is provided):
     - "Activity" distributions (sum within period): use volume if available, otherwise fallback to amount.
@@ -899,6 +902,35 @@ def _compute_periodic_returns_and_volatility(
                 _add_dev("monthly", _log_dev(px_m, n=12))
                 _add_dev("quarterly", _log_dev(px_q, n=4))
                 _add_dev("yearly", _log_dev(px_y, n=3))
+
+                # Price BIAS: close / MA20(close) - 1
+                def _add_bias(kind: str, s: pd.Series) -> None:
+                    if s is None or s.empty:
+                        return
+                    xs = s.to_numpy(dtype=float)
+                    code_result[f"{kind}_bias"] = {
+                        "hist": _histogram_from_samples(xs),
+                        "quantiles": _quantiles_from_samples(xs),
+                        "mean": float(np.mean(xs)),
+                        "std": float(np.std(xs, ddof=1)) if len(xs) >= 2 else float("nan"),
+                        "count": int(len(xs)),
+                        "current": float(s.iloc[-1]),
+                        "current_date": pd.to_datetime(s.index[-1]).date().isoformat(),
+                    }
+
+                def _bias_ma20(s: pd.Series) -> pd.Series:
+                    s2 = pd.to_numeric(s, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+                    if s2.empty:
+                        return pd.Series([], dtype=float)
+                    ma20 = s2.rolling(window=20, min_periods=5).mean()
+                    out = (s2 / ma20 - 1.0).replace([np.inf, -np.inf], np.nan).dropna()
+                    return out
+
+                _add_bias("daily", _bias_ma20(px_d))
+                _add_bias("weekly", _bias_ma20(px_w))
+                _add_bias("monthly", _bias_ma20(px_m))
+                _add_bias("quarterly", _bias_ma20(px_q))
+                _add_bias("yearly", _bias_ma20(px_y))
 
         # Activity (volume/amount) and crowding proxies (optional)
         act: pd.Series | None = None
