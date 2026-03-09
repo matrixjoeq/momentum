@@ -393,6 +393,59 @@
       <table id="distFutureProbTable" style="margin-top:8px;"></table>
       <div class="muted" style="margin-top:10px;">相关性与因果检验（预测回归 + Granger-like）</div>
       <table id="distFutureCausalTable" style="margin-top:8px;"></table>
+      <div class="muted" style="margin-top:10px;">月内日历效应（单标的）</div>
+      <div class="row no-print" style="margin-top:6px; align-items:end;">
+        <div>
+          <label>月内日期 d（1~28）</label>
+          <input id="distCalDay" value="1" style="min-width:120px;" />
+        </div>
+        <div>
+          <label>扫描模式</label>
+          <select id="distCalMode" style="min-width:150px;">
+            <option value="single" selected>单日</option>
+            <option value="all">全扫描 1~28</option>
+          </select>
+        </div>
+        <div>
+          <label>持有 n（交易日）</label>
+          <input id="distCalHoldN" value="5" style="min-width:120px;" />
+        </div>
+        <div>
+          <label>买入价</label>
+          <select id="distCalEntryPx" style="min-width:120px;">
+            <option value="open" selected>open</option>
+            <option value="close">close</option>
+          </select>
+        </div>
+        <div>
+          <label>卖出价</label>
+          <select id="distCalExitPx" style="min-width:120px;">
+            <option value="open" selected>open</option>
+            <option value="close">close</option>
+          </select>
+        </div>
+        <div>
+          <label>非交易日处理</label>
+          <select id="distCalShift" style="min-width:140px;">
+            <option value="next" selected>next</option>
+            <option value="prev">prev</option>
+            <option value="skip">skip</option>
+          </select>
+        </div>
+        <div>
+          <label>热力图指标</label>
+          <select id="distCalMetric" style="min-width:160px;">
+            <option value="mean" selected>均值</option>
+            <option value="median">中位数</option>
+            <option value="win_rate">胜率</option>
+            <option value="sharpe">夏普（非年化）</option>
+          </select>
+        </div>
+      </div>
+      <div id="distCalHint" class="muted" style="margin-top:6px;"></div>
+      <div id="distCalHeatmap" style="width:100%; height:280px; margin-top:8px;"></div>
+      <div id="distCalHist" style="width:100%; height:280px; margin-top:8px;"></div>
+      <table id="distCalTable" style="margin-top:8px;"></table>
       <table id="distQuantiles" style="margin-top:12px;"></table>
       <div class="muted" style="margin-top:10px;">滚动年化波动率分位数（基于日收益滚动 std 年化）</div>
       <table id="distRollingAnnVolQuantiles" style="margin-top:8px;"></table>
@@ -3339,7 +3392,7 @@
         if (!code || !start || !end) return null;
         const cache = window.__distCodeOpenCache || {};
         const key = `${adjust}|${code}|${start}|${end}`;
-        if (cache[key] && Array.isArray(cache[key].dates) && Array.isArray(cache[key].open)) return cache[key];
+        if (cache[key] && Array.isArray(cache[key].dates) && Array.isArray(cache[key].open) && Array.isArray(cache[key].close)) return cache[key];
         const path = `/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=${encodeURIComponent(adjust)}&limit=1000000`;
         const resp = await api(path, { method: "GET" });
         const text = await resp.text();
@@ -3347,14 +3400,17 @@
         const rows = JSON.parse(text);
         const dates = [];
         const open = [];
+        const close = [];
         for (const r of (Array.isArray(rows) ? rows : [])) {
           const d = String(r && r.trade_date != null ? r.trade_date : "").trim();
           const o = Number(r && r.open != null ? r.open : NaN);
-          if (!d || !Number.isFinite(o) || o <= 0) continue;
+          const c = Number(r && r.close != null ? r.close : NaN);
+          if (!d || !Number.isFinite(o) || o <= 0 || !Number.isFinite(c) || c <= 0) continue;
           dates.push(d);
           open.push(o);
+          close.push(c);
         }
-        const out = { code, adjust, start, end, dates, open };
+        const out = { code, adjust, start, end, dates, open, close };
         cache[key] = out;
         window.__distCodeOpenCache = cache;
         return out;
@@ -3375,6 +3431,15 @@
         const futNInput = $("distFutureN");
         const futProbTable = $("distFutureProbTable");
         const futCausalTable = $("distFutureCausalTable");
+        const calDayInput = $("distCalDay");
+        const calModeSelect = $("distCalMode");
+        const calHoldNInput = $("distCalHoldN");
+        const calEntryPx = $("distCalEntryPx");
+        const calExitPx = $("distCalExitPx");
+        const calShift = $("distCalShift");
+        const calMetric = $("distCalMetric");
+        const calHint = $("distCalHint");
+        const calTable = $("distCalTable");
         const rangeQuick = $("distRangeQuick");
         const rangeStart = $("distStart");
         const rangeEnd = $("distEnd");
@@ -4282,6 +4347,195 @@
           }
         };
 
+        const _calendarStats = (arr) => {
+          const xs = (arr || []).map((x) => Number(x)).filter((x) => Number.isFinite(x));
+          if (xs.length === 0) {
+            return { count: 0, mean: NaN, std: NaN, median: NaN, q10: NaN, q90: NaN, win_rate: NaN, sharpe: NaN };
+          }
+          const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+          const std = _std(xs);
+          const median = _percentile(xs, 50);
+          const q10 = _percentile(xs, 10);
+          const q90 = _percentile(xs, 90);
+          const win = xs.filter((x) => x > 0).length / xs.length;
+          const sharpe = (Number.isFinite(std) && std > 0) ? (mean / std) : NaN;
+          return { count: xs.length, mean, std, median, q10, q90, win_rate: win, sharpe };
+        };
+        const _computeMonthdayEffect = ({ openSeries, holdN, entryPx, exitPx, shift, mode, day }) => {
+          const dates = (openSeries && Array.isArray(openSeries.dates)) ? openSeries.dates : [];
+          const opens = (openSeries && Array.isArray(openSeries.open)) ? openSeries.open : [];
+          const closes = (openSeries && Array.isArray(openSeries.close)) ? openSeries.close : [];
+          if (!dates.length || dates.length !== opens.length || dates.length !== closes.length) return null;
+          const n = Math.max(1, Math.floor(Number(holdN) || 5));
+          const pxE = String(entryPx || "open").toLowerCase();
+          const pxX = String(exitPx || "open").toLowerCase();
+          const sh = String(shift || "next").toLowerCase();
+          const m = String(mode || "single").toLowerCase();
+          const d0 = Math.max(1, Math.min(28, Math.floor(Number(day) || 1)));
+          const days = (m === "all") ? Array.from({ length: 28 }, (_, i) => i + 1) : [d0];
+          const byMonth = new Map();
+          for (let i = 0; i < dates.length; i++) {
+            const s = String(dates[i] || "");
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) continue;
+            const ym = s.slice(0, 7);
+            const dd = Number(s.slice(8, 10));
+            if (!byMonth.has(ym)) byMonth.set(ym, []);
+            byMonth.get(ym).push({ idx: i, day: dd, date: s });
+          }
+          const out = {};
+          for (const d of days) out[String(d)] = { returns: [], points: [] };
+          const pickIdx = (rows, d, shf) => {
+            const exact = rows.find((r) => r.day === d);
+            if (exact) return exact.idx;
+            if (shf === "skip") return null;
+            if (shf === "next") {
+              const nx = rows.find((r) => r.day > d);
+              return nx ? nx.idx : null;
+            }
+            const prevs = rows.filter((r) => r.day < d);
+            return prevs.length ? prevs[prevs.length - 1].idx : null;
+          };
+          for (const rows of byMonth.values()) {
+            rows.sort((a, b) => a.idx - b.idx);
+            for (const d of days) {
+              const i = pickIdx(rows, d, sh);
+              if (i == null) continue;
+              const j = i + n;
+              if (j >= dates.length) continue;
+              const e = (pxE === "close") ? Number(closes[i]) : Number(opens[i]);
+              const x = (pxX === "close") ? Number(closes[j]) : Number(opens[j]);
+              if (!Number.isFinite(e) || !Number.isFinite(x) || e <= 0) continue;
+              const r = x / e - 1.0;
+              out[String(d)].returns.push(r);
+              out[String(d)].points.push({ entry_date: dates[i], exit_date: dates[j], ret: r });
+            }
+          }
+          const statsByDay = {};
+          for (const d of days) statsByDay[String(d)] = _calendarStats(out[String(d)].returns);
+          return { days, by_day: out, stats: statsByDay, hold_n: n, entry_px: pxE, exit_px: pxX, shift: sh };
+        };
+        const _renderMonthdayEffect = ({ code, openSeries }) => {
+          const hDiv = $("distCalHeatmap");
+          const histDiv = $("distCalHist");
+          const tbl = calTable;
+          if (!hDiv || !histDiv || !tbl) return;
+          const mode = (calModeSelect && calModeSelect.value) ? calModeSelect.value : "single";
+          const day = Number((calDayInput && calDayInput.value) ? calDayInput.value : 1);
+          const holdN = Number((calHoldNInput && calHoldNInput.value) ? calHoldNInput.value : 5);
+          const entry = (calEntryPx && calEntryPx.value) ? calEntryPx.value : "open";
+          const exit = (calExitPx && calExitPx.value) ? calExitPx.value : "open";
+          const shift = (calShift && calShift.value) ? calShift.value : "next";
+          const metric = (calMetric && calMetric.value) ? calMetric.value : "mean";
+          const res = _computeMonthdayEffect({ openSeries, holdN, entryPx: entry, exitPx: exit, shift, mode, day });
+          if (!res) {
+            hDiv.innerHTML = "<div class='muted'>无可用开收盘数据，无法计算月内日历效应。</div>";
+            histDiv.innerHTML = "<div class='muted'>无数据</div>";
+            tbl.innerHTML = "";
+            if (calHint) calHint.textContent = "";
+            return;
+          }
+          const daysAll = Array.from({ length: 28 }, (_, i) => i + 1);
+          const z = daysAll.map((d) => {
+            const st = res.stats[String(d)];
+            const v = st ? Number(st[metric]) : NaN;
+            return Number.isFinite(v) ? v : null;
+          });
+          const tgtDay = (mode === "all") ? Math.max(1, Math.min(28, Math.floor(day || 1))) : res.days[0];
+          const picked = res.by_day[String(tgtDay)] || { returns: [], points: [] };
+          if (calHint) {
+            calHint.textContent = `${code} · ${entry.toUpperCase()}买入 -> 持有${res.hold_n}日 -> ${exit.toUpperCase()}卖出 · 非交易日处理=${res.shift} · 模式=${mode === "all" ? "全扫描" : `单日(d=${tgtDay})`}`;
+          }
+          Plotly.newPlot(
+            "distCalHeatmap",
+            [{
+              type: "heatmap",
+              x: daysAll,
+              y: [metric],
+              z: [z],
+              colorscale: "RdYlGn",
+              hovertemplate: "d=%{x}<br>metric=%{y}<br>value=%{z:.4f}<extra></extra>",
+            }],
+            {
+              margin: { t: 20, l: 60, r: 20, b: 40 },
+              xaxis: { title: "月内日期 d (1..28)" },
+              yaxis: { title: "" },
+              shapes: [{
+                type: "line",
+                xref: "x",
+                yref: "paper",
+                x0: tgtDay,
+                x1: tgtDay,
+                y0: 0,
+                y1: 1,
+                line: { color: "rgba(214,39,40,0.95)", width: 2.0 },
+              }],
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          // Click heatmap day -> update selected day and refresh histogram/table
+          const hmEl = $("distCalHeatmap");
+          if (hmEl && !hmEl.__distCalClickBound) {
+            hmEl.on("plotly_click", (ev) => {
+              try {
+                const p = (ev && ev.points && ev.points[0]) ? ev.points[0] : null;
+                const xRaw = p ? Number(p.x) : NaN;
+                if (!Number.isFinite(xRaw)) return;
+                const dSel = Math.max(1, Math.min(28, Math.floor(xRaw)));
+                if (calDayInput) {
+                  calDayInput.value = String(dSel);
+                  calDayInput.dispatchEvent(new Event("change"));
+                } else {
+                  updateDisplay();
+                }
+              } catch (_e) { /* ignore click parsing errors */ }
+            });
+            hmEl.__distCalClickBound = true;
+          }
+          if (!picked.returns || picked.returns.length === 0) {
+            histDiv.innerHTML = "<div class='muted'>当前 d 无有效样本。</div>";
+          } else {
+            Plotly.newPlot(
+              "distCalHist",
+              [{
+                x: picked.returns,
+                type: "histogram",
+                marker: { color: "#4c78a8" },
+                nbinsx: 36,
+                hovertemplate: "ret=%{x:.2%}<br>count=%{y}<extra></extra>",
+              }],
+              {
+                margin: { t: 30, l: 60, r: 20, b: 40 },
+                title: { text: `d=${tgtDay} 的收益率分布（n=${res.hold_n}）`, font: { size: 13 } },
+                xaxis: { tickformat: ".2%", title: "收益率" },
+                yaxis: { title: "频数" },
+              },
+              { responsive: true, displayModeBar: false }
+            );
+          }
+          const rows = [];
+          for (const d of daysAll) {
+            const st = res.stats[String(d)];
+            if (!st || !Number.isFinite(st.count) || st.count <= 0) continue;
+            rows.push({ d, ...st });
+          }
+          rows.sort((a, b) => a.d - b.d);
+          tbl.innerHTML =
+            `<tr><th>d</th><th>样本数</th><th>均值</th><th>中位数</th><th>Std</th><th>P10</th><th>P90</th><th>胜率</th><th>夏普(非年化)</th></tr>` +
+            rows.map((r) =>
+              `<tr>
+                <td>${r.d}</td>
+                <td>${r.count}</td>
+                <td>${fmtPct(r.mean)}</td>
+                <td>${fmtPct(r.median)}</td>
+                <td>${fmtPct(r.std)}</td>
+                <td>${fmtPct(r.q10)}</td>
+                <td>${fmtPct(r.q90)}</td>
+                <td>${fmtPct(r.win_rate)}</td>
+                <td>${Number.isFinite(r.sharpe) ? Number(r.sharpe).toFixed(3) : "-"}</td>
+              </tr>`
+            ).join("");
+        };
+
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
@@ -4293,6 +4547,10 @@
             if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>请选择标的</div>";
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
+            if ($("distCalHeatmap")) $("distCalHeatmap").innerHTML = "<div class='muted'>请选择标的</div>";
+            if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>请选择标的</div>";
+            if (calTable) calTable.innerHTML = "";
+            if (calHint) calHint.textContent = "";
             $("distRollingAnnVol").innerHTML = "<div class='muted'>请选择标的</div>";
             if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>请选择标的</div>";
             $("distQuantiles").innerHTML = "";
@@ -4327,6 +4585,10 @@
             if ($("distFutureScatter")) $("distFutureScatter").innerHTML = `<div class='muted'>无${periodLabel}${typeLabel}散点数据</div>`;
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
+            if ($("distCalHeatmap")) $("distCalHeatmap").innerHTML = "<div class='muted'>无日历效应数据</div>";
+            if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
+            if (calTable) calTable.innerHTML = "";
+            if (calHint) calHint.textContent = "";
             $("distQuantiles").innerHTML = "";
             return;
           }
@@ -4341,6 +4603,10 @@
             if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>无散点数据</div>";
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
+            if ($("distCalHeatmap")) $("distCalHeatmap").innerHTML = "<div class='muted'>无日历效应数据</div>";
+            if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
+            if (calTable) calTable.innerHTML = "";
+            if (calHint) calHint.textContent = "";
             $("distQuantiles").innerHTML = "";
             return;
           }
@@ -4513,6 +4779,14 @@
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
           }
+          try {
+            _renderMonthdayEffect({ code, openSeries: openByCode[code] });
+          } catch (eCal) {
+            if ($("distCalHeatmap")) $("distCalHeatmap").innerHTML = `<div class='muted'>日历效应计算失败：${esc(String(eCal && eCal.message ? eCal.message : eCal))}</div>`;
+            if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
+            if (calTable) calTable.innerHTML = "";
+            if (calHint) calHint.textContent = "";
+          }
 
           // Rolling annualized volatility chart (always based on daily NAV returns)
           _plotRollingAnnVol();
@@ -4546,6 +4820,10 @@
                 if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>无散点数据</div>";
                 if (futProbTable) futProbTable.innerHTML = "";
                 if (futCausalTable) futCausalTable.innerHTML = "";
+                if ($("distCalHeatmap")) $("distCalHeatmap").innerHTML = "<div class='muted'>无日历效应数据</div>";
+                if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
+                if (calTable) calTable.innerHTML = "";
+                if (calHint) calHint.textContent = "";
                 return;
               }
               distByCode[c] = b.period_distributions[c];
@@ -4557,6 +4835,10 @@
               if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>散点加载失败</div>";
               if (futProbTable) futProbTable.innerHTML = "";
               if (futCausalTable) futCausalTable.innerHTML = "";
+              if ($("distCalHeatmap")) $("distCalHeatmap").innerHTML = "<div class='muted'>日历效应加载失败</div>";
+              if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
+              if (calTable) calTable.innerHTML = "";
+              if (calHint) calHint.textContent = "";
             }
           };
           const _syncRangeFromQuick = () => {
@@ -4599,6 +4881,25 @@
               if (!v) return;
               const x = Number(v);
               if (Number.isFinite(x) && x >= 1) updateDisplay();
+            });
+          }
+          if (calModeSelect) calModeSelect.addEventListener("change", updateDisplay);
+          if (calMetric) calMetric.addEventListener("change", updateDisplay);
+          if (calEntryPx) calEntryPx.addEventListener("change", updateDisplay);
+          if (calExitPx) calExitPx.addEventListener("change", updateDisplay);
+          if (calShift) calShift.addEventListener("change", updateDisplay);
+          if (calDayInput) {
+            calDayInput.addEventListener("change", updateDisplay);
+            calDayInput.addEventListener("input", () => {
+              const v = Number(String(calDayInput.value || "").trim());
+              if (Number.isFinite(v) && v >= 1 && v <= 28) updateDisplay();
+            });
+          }
+          if (calHoldNInput) {
+            calHoldNInput.addEventListener("change", updateDisplay);
+            calHoldNInput.addEventListener("input", () => {
+              const v = Number(String(calHoldNInput.value || "").trim());
+              if (Number.isFinite(v) && v >= 1) updateDisplay();
             });
           }
           if (adjustSelect) {
