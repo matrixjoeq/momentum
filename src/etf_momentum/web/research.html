@@ -380,9 +380,19 @@
             <option value="ALL">ALL</option>
           </select>
         </div>
+        <div>
+          <label>未来收益预测窗口 n（日）</label>
+          <input id="distFutureN" value="5" style="min-width:140px;" />
+        </div>
       </div>
       <div id="distRangeHint" class="muted" style="margin-top:8px;"></div>
       <div id="distHistogram" style="width:100%; height:420px; margin-top:12px;"></div>
+      <div class="muted" style="margin-top:10px;">当前统计指标值 vs 未来 t+n 日收益率（散点）</div>
+      <div id="distFutureScatter" style="width:100%; height:380px; margin-top:8px;"></div>
+      <div class="muted" style="margin-top:10px;">基于散点邻域样本的条件概率预测（围绕当前指标值）</div>
+      <table id="distFutureProbTable" style="margin-top:8px;"></table>
+      <div class="muted" style="margin-top:10px;">相关性与因果检验（预测回归 + Granger-like）</div>
+      <table id="distFutureCausalTable" style="margin-top:8px;"></table>
       <table id="distQuantiles" style="margin-top:12px;"></table>
       <div class="muted" style="margin-top:10px;">滚动年化波动率分位数（基于日收益滚动 std 年化）</div>
       <table id="distRollingAnnVolQuantiles" style="margin-top:8px;"></table>
@@ -3320,6 +3330,36 @@
         return data;
       }
 
+      async function _distFetchOpenSeriesByCode(params) {
+        const p = params || {};
+        const code = String(p.code || "").trim();
+        const start = String(p.start || "").trim();
+        const end = String(p.end || "").trim();
+        const adjust = String(p.adjust || "hfq").trim().toLowerCase();
+        if (!code || !start || !end) return null;
+        const cache = window.__distCodeOpenCache || {};
+        const key = `${adjust}|${code}|${start}|${end}`;
+        if (cache[key] && Array.isArray(cache[key].dates) && Array.isArray(cache[key].open)) return cache[key];
+        const path = `/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=${encodeURIComponent(adjust)}&limit=1000000`;
+        const resp = await api(path, { method: "GET" });
+        const text = await resp.text();
+        if (!resp.ok) throw new Error(text);
+        const rows = JSON.parse(text);
+        const dates = [];
+        const open = [];
+        for (const r of (Array.isArray(rows) ? rows : [])) {
+          const d = String(r && r.trade_date != null ? r.trade_date : "").trim();
+          const o = Number(r && r.open != null ? r.open : NaN);
+          if (!d || !Number.isFinite(o) || o <= 0) continue;
+          dates.push(d);
+          open.push(o);
+        }
+        const out = { code, adjust, start, end, dates, open };
+        cache[key] = out;
+        window.__distCodeOpenCache = cache;
+        return out;
+      }
+
       function renderPeriodDistributions(distributions, baselineData) {
         if (!distributions || typeof distributions !== "object") {
           return;
@@ -3332,6 +3372,9 @@
         const periodSelect = $("distPeriodSelect");
         const rollWinSelect = $("distRollVolWindow");
         const rollQTable = $("distRollingAnnVolQuantiles");
+        const futNInput = $("distFutureN");
+        const futProbTable = $("distFutureProbTable");
+        const futCausalTable = $("distFutureCausalTable");
         const rangeQuick = $("distRangeQuick");
         const rangeStart = $("distStart");
         const rangeEnd = $("distEnd");
@@ -3343,8 +3386,10 @@
         // cache per-code distributions/baseline payloads
         window.__distDistributionsByCode = window.__distDistributionsByCode || {};
         window.__distBaselineByCode = window.__distBaselineByCode || {};
+        window.__distOpenByCode = window.__distOpenByCode || {};
         const distByCode = window.__distDistributionsByCode;
         const baseByCode = window.__distBaselineByCode;
+        const openByCode = window.__distOpenByCode;
         for (const [k, v] of Object.entries(distributions || {})) {
           if (v && typeof v === "object") distByCode[k] = v;
         }
@@ -3371,8 +3416,11 @@
 
         if (codes.length === 0) {
           $("distHistogram").innerHTML = "<div class='muted'>无分布数据</div>";
+          if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>无数据</div>";
           $("distRollingAnnVol").innerHTML = "<div class='muted'>无数据</div>";
           if (rollQTable) rollQTable.innerHTML = "";
+          if (futProbTable) futProbTable.innerHTML = "";
+          if (futCausalTable) futCausalTable.innerHTML = "";
           $("distQuantiles").innerHTML = "";
           return;
         }
@@ -3689,6 +3737,551 @@
           );
         };
 
+        const _parseIsoDay = (s) => {
+          const d = new Date(`${String(s)}T00:00:00`);
+          return Number.isNaN(d.getTime()) ? null : d;
+        };
+        const _periodKey = (dateStr, per) => {
+          const d = _parseIsoDay(dateStr);
+          if (!d) return null;
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          const dd = d.getDate();
+          if (per === "daily") return `${y}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+          if (per === "weekly") {
+            const fri = new Date(d.getTime());
+            const shift = (5 - fri.getDay() + 7) % 7; // Friday=5
+            fri.setDate(fri.getDate() + shift);
+            return `W-${fri.getFullYear()}-${String(fri.getMonth() + 1).padStart(2, "0")}-${String(fri.getDate()).padStart(2, "0")}`;
+          }
+          if (per === "monthly") return `M-${y}-${String(m).padStart(2, "0")}`;
+          if (per === "quarterly") return `Q-${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+          return `Y-${y}`;
+        };
+        const _buildMetricSeriesForDist = ({ dates, nav, type, period }) => {
+          if (!Array.isArray(dates) || !Array.isArray(nav) || dates.length !== nav.length || dates.length < 6) {
+            return { dates: [], values: [], unsupported: "样本不足" };
+          }
+          const idxByDate = new Map();
+          for (let i = 0; i < dates.length; i++) idxByDate.set(String(dates[i]), i);
+          const dailyRet = new Array(nav.length).fill(NaN);
+          for (let i = 1; i < nav.length; i++) {
+            const a = Number(nav[i - 1]);
+            const b = Number(nav[i]);
+            dailyRet[i] = (Number.isFinite(a) && Number.isFinite(b) && a > 0) ? (b / a - 1.0) : NaN;
+          }
+          const groups = new Map();
+          for (let i = 1; i < dates.length; i++) {
+            const ds = String(dates[i]);
+            const key = _periodKey(ds, period);
+            if (!key) continue;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(i);
+          }
+          const periodDates = [];
+          const periodClose = [];
+          const periodRet = [];
+          for (const arr of groups.values()) {
+            if (!arr || arr.length === 0) continue;
+            let gross = 1.0;
+            let nValid = 0;
+            for (const i of arr) {
+              const r = Number(dailyRet[i]);
+              if (!Number.isFinite(r)) continue;
+              gross *= (1.0 + r);
+              nValid += 1;
+            }
+            if (nValid <= 0) continue;
+            const ei = arr[arr.length - 1];
+            const c = Number(nav[ei]);
+            if (!Number.isFinite(c) || c <= 0) continue;
+            periodDates.push(String(dates[ei]));
+            periodClose.push(c);
+            periodRet.push(gross - 1.0);
+          }
+          const rollingStd = (arr, win, minp) => {
+            const out = new Array(arr.length).fill(NaN);
+            for (let i = 0; i < arr.length; i++) {
+              const s = Math.max(0, i - win + 1);
+              const xs = [];
+              for (let j = s; j <= i; j++) {
+                const v = Number(arr[j]);
+                if (Number.isFinite(v)) xs.push(v);
+              }
+              if (xs.length < minp) continue;
+              const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+              const v = xs.reduce((t, x) => t + (x - m) * (x - m), 0) / Math.max(1, xs.length - 1);
+              out[i] = Math.sqrt(v);
+            }
+            return out;
+          };
+          const rollingMean = (arr, win, minp) => {
+            const out = new Array(arr.length).fill(NaN);
+            for (let i = 0; i < arr.length; i++) {
+              const s = Math.max(0, i - win + 1);
+              const xs = [];
+              for (let j = s; j <= i; j++) {
+                const v = Number(arr[j]);
+                if (Number.isFinite(v)) xs.push(v);
+              }
+              if (xs.length < minp) continue;
+              out[i] = xs.reduce((a, b) => a + b, 0) / xs.length;
+            }
+            return out;
+          };
+          const pack = (vals) => {
+            const ds = [];
+            const xs = [];
+            for (let i = 0; i < vals.length; i++) {
+              const v = Number(vals[i]);
+              if (!Number.isFinite(v)) continue;
+              ds.push(periodDates[i]);
+              xs.push(v);
+            }
+            return { dates: ds, values: xs };
+          };
+          if (type === "volume" || type === "rvol" || type === "vol_dev") {
+            return { dates: [], values: [], unsupported: "当前口径缺少成交量/成交额时序，无法构建散点" };
+          }
+          if (type === "return") return pack(periodRet);
+          if (type === "log_return_dev") {
+            const lr = periodRet.map((r) => (1 + Number(r) > 0 ? Math.log(1 + Number(r)) : NaN));
+            const ma = rollingMean(lr, 20, 5);
+            return pack(lr.map((v, i) => (Number.isFinite(v) && Number.isFinite(ma[i]) ? v - ma[i] : NaN)));
+          }
+          if (type === "volatility") {
+            const cfg = (period === "daily") ? [20, 5]
+              : (period === "weekly") ? [4, 2]
+              : (period === "monthly") ? [3, 2]
+              : [2, 2];
+            const vol = rollingStd(periodRet, cfg[0], cfg[1]);
+            return pack(vol);
+          }
+          if (type === "log_volatility" || type === "log_vol_dev") {
+            const cfg = (period === "daily") ? [20, 5]
+              : (period === "weekly") ? [4, 2]
+              : (period === "monthly") ? [3, 2]
+              : [2, 2];
+            const vol = rollingStd(periodRet, cfg[0], cfg[1]);
+            const lv = vol.map((v) => (Number.isFinite(v) && v > 0 ? Math.log(v) : NaN));
+            if (type === "log_volatility") return pack(lv);
+            const ma = rollingMean(lv, 20, 5);
+            return pack(lv.map((v, i) => (Number.isFinite(v) && Number.isFinite(ma[i]) ? v - ma[i] : NaN)));
+          }
+          if (type === "bias") {
+            const ma = rollingMean(periodClose, 20, 5);
+            return pack(periodClose.map((v, i) => (Number.isFinite(v) && Number.isFinite(ma[i]) && ma[i] !== 0 ? v / ma[i] - 1.0 : NaN)));
+          }
+          if (type === "price_dev") {
+            const n = (period === "daily") ? 252
+              : (period === "weekly") ? 52
+              : (period === "monthly") ? 12
+              : (period === "quarterly") ? 4
+              : 3;
+            const lp = periodClose.map((v) => (Number.isFinite(v) && v > 0 ? Math.log(v) : NaN));
+            const ma = rollingMean(lp, n, Math.max(3, Math.min(20, n)));
+            return pack(lp.map((v, i) => (Number.isFinite(v) && Number.isFinite(ma[i]) ? v - ma[i] : NaN)));
+          }
+          return { dates: [], values: [], unsupported: "当前指标暂不支持该散点" };
+        };
+        const _rankAvg = (arr) => {
+          const n = arr.length;
+          const idx = Array.from({ length: n }, (_, i) => i);
+          idx.sort((a, b) => arr[a] - arr[b]);
+          const r = new Array(n).fill(NaN);
+          for (let i = 0; i < n;) {
+            let j = i + 1;
+            while (j < n && arr[idx[j]] === arr[idx[i]]) j += 1;
+            const rk = (i + j - 1) / 2 + 1;
+            for (let k = i; k < j; k++) r[idx[k]] = rk;
+            i = j;
+          }
+          return r;
+        };
+        const _pearson = (x, y) => {
+          if (!Array.isArray(x) || !Array.isArray(y) || x.length !== y.length || x.length < 3) return NaN;
+          const n = x.length;
+          const mx = x.reduce((a, b) => a + b, 0) / n;
+          const my = y.reduce((a, b) => a + b, 0) / n;
+          let sxx = 0;
+          let syy = 0;
+          let sxy = 0;
+          for (let i = 0; i < n; i++) {
+            const dx = x[i] - mx;
+            const dy = y[i] - my;
+            sxx += dx * dx;
+            syy += dy * dy;
+            sxy += dx * dy;
+          }
+          if (sxx <= 0 || syy <= 0) return NaN;
+          return sxy / Math.sqrt(sxx * syy);
+        };
+        const _normCdf = (z) => {
+          const x = Number(z);
+          if (!Number.isFinite(x)) return NaN;
+          const t = 1.0 / (1.0 + 0.2316419 * Math.abs(x));
+          const d = Math.exp(-0.5 * x * x) / Math.sqrt(2.0 * Math.PI);
+          const p = 1.0 - d * (((((1.330274429 * t - 1.821255978) * t + 1.781477937) * t - 0.356563782) * t + 0.319381530) * t);
+          return x >= 0 ? p : (1.0 - p);
+        };
+        const _pFromTNormal = (t) => {
+          const z = Math.abs(Number(t));
+          if (!Number.isFinite(z)) return NaN;
+          const c = _normCdf(z);
+          if (!Number.isFinite(c)) return NaN;
+          return Math.max(0, Math.min(1, 2 * (1 - c)));
+        };
+        const _solveLinear = (aIn, bIn) => {
+          const n = aIn.length;
+          const a = aIn.map((row) => row.slice());
+          const b = bIn.slice();
+          for (let i = 0; i < n; i++) {
+            let p = i;
+            for (let r = i + 1; r < n; r++) if (Math.abs(a[r][i]) > Math.abs(a[p][i])) p = r;
+            if (Math.abs(a[p][i]) < 1e-12) return null;
+            if (p !== i) {
+              const tr = a[i]; a[i] = a[p]; a[p] = tr;
+              const tb = b[i]; b[i] = b[p]; b[p] = tb;
+            }
+            const piv = a[i][i];
+            for (let j = i; j < n; j++) a[i][j] /= piv;
+            b[i] /= piv;
+            for (let r = 0; r < n; r++) {
+              if (r === i) continue;
+              const f = a[r][i];
+              if (f === 0) continue;
+              for (let j = i; j < n; j++) a[r][j] -= f * a[i][j];
+              b[r] -= f * b[i];
+            }
+          }
+          return b;
+        };
+        const _ols = (y, xRows) => {
+          const n = y.length;
+          if (!Array.isArray(xRows) || xRows.length !== n || n < 5) return null;
+          const k = xRows[0].length;
+          if (k < 1 || n <= k + 1) return null;
+          const xtx = Array.from({ length: k }, () => new Array(k).fill(0));
+          const xty = new Array(k).fill(0);
+          for (let i = 0; i < n; i++) {
+            const xi = xRows[i];
+            const yi = y[i];
+            for (let a = 0; a < k; a++) {
+              xty[a] += xi[a] * yi;
+              for (let b = 0; b < k; b++) xtx[a][b] += xi[a] * xi[b];
+            }
+          }
+          const beta = _solveLinear(xtx, xty);
+          if (!beta) return null;
+          let sse = 0;
+          let sst = 0;
+          const ym = y.reduce((a, b) => a + b, 0) / n;
+          const e = new Array(n).fill(0);
+          for (let i = 0; i < n; i++) {
+            let yp = 0;
+            for (let j = 0; j < k; j++) yp += xRows[i][j] * beta[j];
+            const err = y[i] - yp;
+            e[i] = err;
+            sse += err * err;
+            const dy = y[i] - ym;
+            sst += dy * dy;
+          }
+          const dof = n - k;
+          if (dof <= 0) return null;
+          const sigma2 = sse / dof;
+          const inv = _solveLinear(xtx, Array.from({ length: k }, (_, i) => (i === 0 ? 1 : 0)));
+          // Build full inverse by solving basis vectors
+          const xtxInv = Array.from({ length: k }, () => new Array(k).fill(NaN));
+          if (!inv) return null;
+          for (let c = 0; c < k; c++) {
+            const rhs = Array.from({ length: k }, (_, i) => (i === c ? 1 : 0));
+            const col = _solveLinear(xtx, rhs);
+            if (!col) return null;
+            for (let r = 0; r < k; r++) xtxInv[r][c] = col[r];
+          }
+          const se = new Array(k).fill(NaN);
+          const t = new Array(k).fill(NaN);
+          for (let i = 0; i < k; i++) {
+            const v = sigma2 * xtxInv[i][i];
+            if (!Number.isFinite(v) || v <= 0) continue;
+            se[i] = Math.sqrt(v);
+            t[i] = beta[i] / se[i];
+          }
+          return { n, k, beta, se, t, p: t.map(_pFromTNormal), sse, r2: (sst > 0 ? (1 - sse / sst) : NaN), y, xRows };
+        };
+        const _permPForSlope = (y, x, nPerm = 200) => {
+          if (x.length !== y.length || x.length < 20) return NaN;
+          const base = _ols(y, x.map((v) => [1, v]));
+          if (!base) return NaN;
+          const obs = Math.abs(base.beta[1]);
+          let ge = 0;
+          const yp = y.slice();
+          for (let b = 0; b < nPerm; b++) {
+            for (let i = yp.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              const t = yp[i]; yp[i] = yp[j]; yp[j] = t;
+            }
+            const fit = _ols(yp, x.map((v) => [1, v]));
+            if (fit && Math.abs(fit.beta[1]) >= obs) ge += 1;
+          }
+          return (ge + 1) / (nPerm + 1);
+        };
+        const _grangerLike = (x, y, lag = 3, nPerm = 200) => {
+          const n = Math.min(x.length, y.length);
+          const L = Math.max(1, Math.floor(lag));
+          if (n < (L * 6 + 20)) return null;
+          const yy = [];
+          const xr = [];
+          const xu = [];
+          for (let t = L; t < n; t++) {
+            const rowR = [1];
+            const rowU = [1];
+            let ok = Number.isFinite(y[t]);
+            for (let j = 1; j <= L; j++) {
+              const yl = y[t - j];
+              const xl = x[t - j];
+              if (!Number.isFinite(yl) || !Number.isFinite(xl)) ok = false;
+              rowR.push(yl);
+              rowU.push(yl);
+            }
+            for (let j = 1; j <= L; j++) rowU.push(x[t - j]);
+            if (!ok) continue;
+            yy.push(y[t]);
+            xr.push(rowR);
+            xu.push(rowU);
+          }
+          if (yy.length < (L * 4 + 20)) return null;
+          const fr = _ols(yy, xr);
+          const fu = _ols(yy, xu);
+          if (!fr || !fu) return null;
+          const obs = Math.max(0, fr.r2 - fu.r2); // usually <=0 since fu nested better
+          const obsGain = Math.max(0, fu.r2 - fr.r2);
+          let ge = 0;
+          const xp = x.slice();
+          for (let b = 0; b < nPerm; b++) {
+            for (let i = xp.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              const t = xp[i]; xp[i] = xp[j]; xp[j] = t;
+            }
+            const y2 = [];
+            const xr2 = [];
+            const xu2 = [];
+            for (let t = L; t < n; t++) {
+              const rowR = [1];
+              const rowU = [1];
+              let ok = Number.isFinite(y[t]);
+              for (let j = 1; j <= L; j++) {
+                const yl = y[t - j];
+                const xl = xp[t - j];
+                if (!Number.isFinite(yl) || !Number.isFinite(xl)) ok = false;
+                rowR.push(yl);
+                rowU.push(yl);
+              }
+              for (let j = 1; j <= L; j++) rowU.push(xp[t - j]);
+              if (!ok) continue;
+              y2.push(y[t]);
+              xr2.push(rowR);
+              xu2.push(rowU);
+            }
+            const rr = _ols(y2, xr2);
+            const uu = _ols(y2, xu2);
+            if (!rr || !uu) continue;
+            const gain = Math.max(0, uu.r2 - rr.r2);
+            if (gain >= obsGain) ge += 1;
+          }
+          return {
+            n: yy.length,
+            lag: L,
+            r2_restricted: fr.r2,
+            r2_unrestricted: fu.r2,
+            delta_r2: obsGain,
+            p_perm: (ge + 1) / (nPerm + 1),
+          };
+        };
+        const _renderFutureScatterAndProb = ({ code, type, period, data, baseline, openSeries }) => {
+          const boxId = "distFutureScatter";
+          const tProb = futProbTable;
+          const tCausal = futCausalTable;
+          if (!$(boxId)) return;
+          const nRaw = Number((futNInput && futNInput.value) ? futNInput.value : 5);
+          const nDays = Number.isFinite(nRaw) ? Math.max(1, Math.floor(nRaw)) : 5;
+          if (futNInput && String(futNInput.value || "").trim() === "") futNInput.value = "5";
+          const dates = (baseline && baseline.nav && baseline.nav.dates) ? baseline.nav.dates : [];
+          const nav = (baseline && baseline.nav && baseline.nav.series && baseline.nav.series[code]) ? baseline.nav.series[code] : [];
+          const openDates = (openSeries && Array.isArray(openSeries.dates)) ? openSeries.dates : [];
+          const openVals = (openSeries && Array.isArray(openSeries.open)) ? openSeries.open : [];
+          if (!Array.isArray(dates) || !Array.isArray(nav) || !Array.isArray(openDates) || !Array.isArray(openVals) || dates.length < (nDays + 12) || nav.length !== dates.length || openDates.length !== openVals.length) {
+            $(boxId).innerHTML = "<div class='muted'>样本不足，无法计算 t+1 开盘买入、t+1+n 开盘卖出的收益率散点。</div>";
+            if (tProb) tProb.innerHTML = "";
+            if (tCausal) tCausal.innerHTML = "";
+            return;
+          }
+          const metricSeries = _buildMetricSeriesForDist({ dates, nav, type, period });
+          if (metricSeries.unsupported) {
+            $(boxId).innerHTML = `<div class='muted'>${esc(metricSeries.unsupported)}</div>`;
+            if (tProb) tProb.innerHTML = `<tr><td class='muted'>${esc(metricSeries.unsupported)}</td></tr>`;
+            if (tCausal) tCausal.innerHTML = "";
+            return;
+          }
+          const openByDate = new Map();
+          for (let i = 0; i < openDates.length; i++) {
+            const d = String(openDates[i] || "");
+            const o = Number(openVals[i]);
+            if (!d || !Number.isFinite(o) || o <= 0) continue;
+            openByDate.set(d, o);
+          }
+          const idxByDate = new Map();
+          for (let i = 0; i < dates.length; i++) idxByDate.set(String(dates[i]), i);
+          const xs = [];
+          const ys = [];
+          const ds = [];
+          for (let k = 0; k < metricSeries.dates.length; k++) {
+            const d = String(metricSeries.dates[k]);
+            const m = Number(metricSeries.values[k]);
+            const i = idxByDate.get(d);
+            if (i == null || !Number.isFinite(m)) continue;
+            const entryI = Number(i) + 1;
+            const exitI = Number(i) + 1 + nDays;
+            if (exitI >= dates.length || entryI >= dates.length) continue;
+            const entryDate = String(dates[entryI]);
+            const exitDate = String(dates[exitI]);
+            const entryOpen = Number(openByDate.get(entryDate));
+            const exitOpen = Number(openByDate.get(exitDate));
+            if (!Number.isFinite(entryOpen) || !Number.isFinite(exitOpen) || entryOpen <= 0) continue;
+            xs.push(m);
+            ys.push(exitOpen / entryOpen - 1.0);
+            ds.push(d);
+          }
+          if (xs.length < 20) {
+            $(boxId).innerHTML = "<div class='muted'>有效配对样本不足（<20），请调整区间或 n。</div>";
+            if (tProb) tProb.innerHTML = "";
+            if (tCausal) tCausal.innerHTML = "";
+            return;
+          }
+          const curX0 = Number(data && data.current);
+          const curX = Number.isFinite(curX0) ? curX0 : Number(xs[xs.length - 1]);
+          const isPctX = (type === "return" || type === "volatility" || type === "bias");
+          const xTickFmt = isPctX ? ".2%" : ".3f";
+          const xHover = isPctX ? "%{x:.2%}" : "%{x:.4f}";
+          Plotly.newPlot(
+            boxId,
+            [
+              {
+                x: xs,
+                y: ys,
+                text: ds,
+                mode: "markers",
+                type: "scatter",
+                name: `t+1开买 -> t+1+${nDays}开卖`,
+                marker: { size: 6, color: "rgba(76,120,168,0.60)" },
+                hovertemplate: `signal_date=%{text}<br>x=${xHover}<br>ret=%{y:.2%}<extra></extra>`,
+              },
+            ],
+            {
+              margin: { t: 40 },
+              title: { text: `${code} - ${period} ${type} 与未来开盘收益散点（t信号）`, font: { size: 14 } },
+              xaxis: { title: "统计指标值（t收盘）", tickformat: xTickFmt },
+              yaxis: { title: `收益率：open(t+1+n)/open(t+1)-1，n=${nDays}`, tickformat: ".2%" },
+              shapes: Number.isFinite(curX) ? [{
+                type: "line",
+                xref: "x",
+                yref: "paper",
+                x0: curX,
+                x1: curX,
+                y0: 0,
+                y1: 1,
+                line: { color: "rgba(214,39,40,0.95)", width: 2.4, dash: "solid" },
+              }] : [],
+              annotations: Number.isFinite(curX) ? [{
+                xref: "x",
+                yref: "paper",
+                x: curX,
+                y: 1.04,
+                showarrow: false,
+                text: "当前指标值",
+                font: { size: 11, color: "#d62728" },
+              }] : [],
+            },
+            { responsive: true, displayModeBar: false }
+          );
+
+          if (!tProb) return;
+          const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+          const varX = xs.reduce((s, v) => s + (v - meanX) * (v - meanX), 0) / Math.max(1, xs.length - 1);
+          const stdX = Math.sqrt(varX);
+          const absDx = xs.map((v) => Math.abs(v - curX)).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+          const dxP20 = absDx.length ? absDx[Math.floor(0.2 * (absDx.length - 1))] : NaN;
+          const bw = Math.max(Number.isFinite(stdX) ? stdX * 0.35 : 0, Number.isFinite(dxP20) ? dxP20 : 0, 1e-9);
+          let near = ys.filter((_, i) => Math.abs(xs[i] - curX) <= bw);
+          let modeTxt = `邻域带宽=±${isPctX ? fmtPct(bw) : fmtNum(bw)}`;
+          if (near.length < 20) {
+            const k = Math.max(20, Math.min(xs.length, Math.floor(xs.length * 0.2)));
+            const pairs = xs.map((xv, i) => ({ d: Math.abs(xv - curX), y: ys[i] })).sort((a, b) => a.d - b.d).slice(0, k);
+            near = pairs.map((p) => p.y).filter((v) => Number.isFinite(v));
+            modeTxt = `KNN近邻=${near.length}`;
+          }
+          if (near.length < 8) {
+            tProb.innerHTML = "<tr><td class='muted'>邻域样本不足，无法给出稳定概率预测</td></tr>";
+          } else {
+            const pct = (arr, pred) => {
+              const n = arr.length;
+              if (n <= 0) return NaN;
+              let c = 0;
+              for (const v of arr) if (pred(v)) c += 1;
+              return c / n;
+            };
+            const meanY = near.reduce((a, b) => a + b, 0) / near.length;
+            const p10 = _percentile(near, 10);
+            const p25 = _percentile(near, 25);
+            const p50 = _percentile(near, 50);
+            const p75 = _percentile(near, 75);
+            const p90 = _percentile(near, 90);
+            const pNeg2 = pct(near, (v) => v <= -0.02);
+            const pNeg = pct(near, (v) => v < 0);
+            const pPos = pct(near, (v) => v > 0);
+            const pPos2 = pct(near, (v) => v >= 0.02);
+            const pMidNeg = pct(near, (v) => v > -0.02 && v < 0);
+            const pMidPos = pct(near, (v) => v >= 0 && v < 0.02);
+            tProb.innerHTML =
+              `<tr><th>预测项</th><th>结果</th></tr>` +
+              `<tr><td>条件样本数</td><td>${near.length} / ${xs.length}</td></tr>` +
+              `<tr><td>取样方式</td><td>${esc(modeTxt)}</td></tr>` +
+              `<tr><td>E[r]</td><td>${fmtPct(meanY)}</td></tr>` +
+              `<tr><td>P10 / P25 / P50 / P75 / P90</td><td>${fmtPct(p10)} / ${fmtPct(p25)} / ${fmtPct(p50)} / ${fmtPct(p75)} / ${fmtPct(p90)}</td></tr>` +
+              `<tr><td>P(r &lt; -2%)</td><td>${fmtPct(pNeg2)}</td></tr>` +
+              `<tr><td>P(-2% ≤ r &lt; 0)</td><td>${fmtPct(pMidNeg)}</td></tr>` +
+              `<tr><td>P(0 ≤ r &lt; 2%)</td><td>${fmtPct(pMidPos)}</td></tr>` +
+              `<tr><td>P(r ≥ 2%)</td><td>${fmtPct(pPos2)}</td></tr>` +
+              `<tr><td>P(r &gt; 0)</td><td>${fmtPct(pPos)}</td></tr>` +
+              `<tr><td>P(r &lt; 0)</td><td>${fmtPct(pNeg)}</td></tr>`;
+          }
+
+          if (tCausal) {
+            const pear = _pearson(xs, ys);
+            const spea = _pearson(_rankAvg(xs), _rankAvg(ys));
+            const reg = _ols(ys, xs.map((v) => [1, v]));
+            const permP = _permPForSlope(ys, xs, 200);
+            const gr = _grangerLike(xs, ys, 3, 200);
+            const fmtPval = (v) => (Number.isFinite(v) ? Number(v).toFixed(4) : "-");
+            const slope = reg ? reg.beta[1] : NaN;
+            const tval = reg ? reg.t[1] : NaN;
+            const pval = reg ? reg.p[1] : NaN;
+            const r2 = reg ? reg.r2 : NaN;
+            tCausal.innerHTML =
+              `<tr><th>检验项</th><th>结果</th></tr>` +
+              `<tr><td>样本数</td><td>${xs.length}</td></tr>` +
+              `<tr><td>Pearson 相关</td><td>${Number.isFinite(pear) ? pear.toFixed(4) : "-"}</td></tr>` +
+              `<tr><td>Spearman 相关</td><td>${Number.isFinite(spea) ? spea.toFixed(4) : "-"}</td></tr>` +
+              `<tr><td>预测回归斜率 β</td><td>${Number.isFinite(slope) ? slope.toFixed(6) : "-"}</td></tr>` +
+              `<tr><td>预测回归 t 值 / p(正态近似)</td><td>${Number.isFinite(tval) ? tval.toFixed(3) : "-"} / ${fmtPval(pval)}</td></tr>` +
+              `<tr><td>预测回归 R²</td><td>${Number.isFinite(r2) ? r2.toFixed(4) : "-"}</td></tr>` +
+              `<tr><td>斜率置换检验 p 值</td><td>${fmtPval(permP)}</td></tr>` +
+              `<tr><td>Granger-like (lag=3) ΔR²</td><td>${gr && Number.isFinite(gr.delta_r2) ? gr.delta_r2.toFixed(5) : "-"}</td></tr>` +
+              `<tr><td>Granger-like 置换检验 p 值</td><td>${gr ? fmtPval(gr.p_perm) : "-"}</td></tr>` +
+              `<tr><td>解释</td><td class='muted'>p 值越小、|相关|越高、ΔR²越大，指标作为止盈止损触发信号的统计证据越强。该检验为研究辅助，不等同严格结构因果。</td></tr>`;
+          }
+        };
+
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
@@ -3697,6 +4290,9 @@
 
           if (!code || !distByCode[code]) {
             $("distHistogram").innerHTML = "<div class='muted'>请选择标的</div>";
+            if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>请选择标的</div>";
+            if (futProbTable) futProbTable.innerHTML = "";
+            if (futCausalTable) futCausalTable.innerHTML = "";
             $("distRollingAnnVol").innerHTML = "<div class='muted'>请选择标的</div>";
             if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>请选择标的</div>";
             $("distQuantiles").innerHTML = "";
@@ -3728,6 +4324,9 @@
               : (period === "quarterly") ? "季度"
               : "年度";
             $("distHistogram").innerHTML = `<div class='muted'>无${periodLabel}${typeLabel}数据</div>`;
+            if ($("distFutureScatter")) $("distFutureScatter").innerHTML = `<div class='muted'>无${periodLabel}${typeLabel}散点数据</div>`;
+            if (futProbTable) futProbTable.innerHTML = "";
+            if (futCausalTable) futCausalTable.innerHTML = "";
             $("distQuantiles").innerHTML = "";
             return;
           }
@@ -3739,6 +4338,9 @@
 
           if (edges.length < 2 || counts.length < 1) {
             $("distHistogram").innerHTML = "<div class='muted'>无直方图数据</div>";
+            if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>无散点数据</div>";
+            if (futProbTable) futProbTable.innerHTML = "";
+            if (futCausalTable) futCausalTable.innerHTML = "";
             $("distQuantiles").innerHTML = "";
             return;
           }
@@ -3894,6 +4496,24 @@
               return `<tr>${row.map(c => `<${tag}>${c}</${tag}>`).join("")}</tr>`;
             }).join("");
 
+          // Future-return scatter + probability forecast
+          try {
+            _renderFutureScatterAndProb({
+              code,
+              type,
+              period,
+              data,
+              baseline: baseByCode[code],
+              openSeries: openByCode[code],
+            });
+          } catch (eScat) {
+            if ($("distFutureScatter")) {
+              $("distFutureScatter").innerHTML = `<div class='muted'>散点计算失败：${esc(String(eScat && eScat.message ? eScat.message : eScat))}</div>`;
+            }
+            if (futProbTable) futProbTable.innerHTML = "";
+            if (futCausalTable) futCausalTable.innerHTML = "";
+          }
+
           // Rolling annualized volatility chart (always based on daily NAV returns)
           _plotRollingAnnVol();
         };
@@ -3915,19 +4535,28 @@
             }
             try {
               $("distHistogram").innerHTML = "<div class='muted'>加载该标的统计数据中...</div>";
+              if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>加载开盘价与散点数据中...</div>";
               const b = await _distFetchBaselineByCode({ code: c, start: s, end: e, adjust: adj });
+              const o = await _distFetchOpenSeriesByCode({ code: c, start: s, end: e, adjust: adj });
               if (!b || !b.period_distributions || !b.period_distributions[c]) {
                 $("distHistogram").innerHTML = "<div class='muted'>该区间无可用统计数据</div>";
                 $("distQuantiles").innerHTML = "";
                 $("distRollingAnnVol").innerHTML = "<div class='muted'>无数据</div>";
                 if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>无数据</div>";
+                if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>无散点数据</div>";
+                if (futProbTable) futProbTable.innerHTML = "";
+                if (futCausalTable) futCausalTable.innerHTML = "";
                 return;
               }
               distByCode[c] = b.period_distributions[c];
               baseByCode[c] = b;
+              openByCode[c] = o;
               updateDisplay();
             } catch (e2) {
               $("distHistogram").innerHTML = `<div class='muted'>加载失败：${esc(String(e2 && e2.message ? e2.message : e2))}</div>`;
+              if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>散点加载失败</div>";
+              if (futProbTable) futProbTable.innerHTML = "";
+              if (futCausalTable) futCausalTable.innerHTML = "";
             }
           };
           const _syncRangeFromQuick = () => {
@@ -3963,6 +4592,15 @@
           typeSelect.addEventListener("change", updateDisplay);
           periodSelect.addEventListener("change", updateDisplay);
           rollWinSelect.addEventListener("change", updateDisplay);
+          if (futNInput) {
+            futNInput.addEventListener("change", updateDisplay);
+            futNInput.addEventListener("input", () => {
+              const v = String(futNInput.value || "").trim();
+              if (!v) return;
+              const x = Number(v);
+              if (Number.isFinite(x) && x >= 1) updateDisplay();
+            });
+          }
           if (adjustSelect) {
             adjustSelect.addEventListener("change", async () => {
               const adj = String(adjustSelect.value || "hfq").trim().toLowerCase();
