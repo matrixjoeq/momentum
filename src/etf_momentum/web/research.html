@@ -1459,6 +1459,17 @@
       const selected = new Set();
       const ADJUST_USED = "hfq"; // baseline research currently uses hfq only
       const ANN_FACTOR = 252;
+      function codeName(code) {
+        const c = String(code == null ? "" : code).trim();
+        if (!c || !Array.isArray(pool)) return "";
+        const it = pool.find((x) => String((x && x.code) || "").trim() === c);
+        return String((it && it.name) || "").trim();
+      }
+      function codeLabel(code) {
+        const c = String(code == null ? "" : code).trim();
+        const n = codeName(c);
+        return n ? `${c} ${n}` : c;
+      }
 
       const metricHelp = {
         benchmark_code: {
@@ -2921,7 +2932,7 @@
         for (const c of codes) {
           const opt = document.createElement("option");
           opt.value = c;
-          opt.textContent = c;
+          opt.textContent = codeLabel(c);
           sel.appendChild(opt);
         }
         if (codes.includes("510300")) sel.value = "510300";
@@ -2948,7 +2959,7 @@
 
       function renderMetrics(metrics) {
         const rows = [
-          { key: "benchmark_code", label: "基准标的", value: metrics.benchmark_code },
+          { key: "benchmark_code", label: "基准标的", value: codeLabel(metrics.benchmark_code || "") },
           { key: "rebalance", label: "再平衡周期", value: metrics.rebalance || "-" },
           { key: "risk_free_rate", label: "无风险收益率(年化)", value: metrics.risk_free_rate != null ? fmtPct(metrics.risk_free_rate) : "-" },
           { key: "cumulative_return", label: "累积收益率", value: fmtPct(metrics.cumulative_return) },
@@ -3258,7 +3269,7 @@
 
         addRowsFor("EW(等权)", fft.ew || {});
         const per = fft.per_code || {};
-        for (const code of Object.keys(per)) addRowsFor(code, per[code]);
+        for (const code of Object.keys(per)) addRowsFor(codeLabel(code), per[code]);
 
         if (sum) {
           const nCodes = Object.keys(per).length;
@@ -3474,7 +3485,7 @@
           (codeSelect.options.length === 0) ||
           (currentOptions.join("|") !== codes.join("|"));
         if (needResetOptions) {
-          codeSelect.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+          codeSelect.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
           if (curCode && codes.includes(curCode)) codeSelect.value = curCode;
           window.__distCodeSelectorInitialized = true;
         }
@@ -3638,7 +3649,7 @@
             }
           }
 
-          const title = `${code} - 滚动年化波动率（window=${wKey || "1M"}）`;
+          const title = `${codeLabel(code)} - 滚动年化波动率（window=${wKey || "1M"}）`;
           const xsOk = vols.filter((v) => Number.isFinite(v));
           const qRef = (xsOk.length >= 5 && typeof _percentile === "function") ? {
             q01: _percentile(xsOk, 1),
@@ -3795,7 +3806,7 @@
             ],
             {
               margin: { t: 30, b: 40, l: 60, r: 20 },
-              title: { text: `${code} - 后视镜综合偏离指标（${period}，expanding percentile；含 MA(5)）`, font: { size: 13 } },
+              title: { text: `${codeLabel(code)} - 后视镜综合偏离指标（${period}，expanding percentile；含 MA(5)）`, font: { size: 13 } },
               yaxis: { tickformat: ".0%", gridcolor: "#eee", zeroline: true, zerolinecolor: "#bbb", rangemode: "tozero" },
             },
             { responsive: true, displayModeBar: false }
@@ -4244,7 +4255,7 @@
             ],
             {
               margin: { t: 40 },
-              title: { text: `${code} - ${period} ${type} 与未来开盘收益散点（t信号）`, font: { size: 14 } },
+              title: { text: `${codeLabel(code)} - ${period} ${type} 与未来开盘收益散点（t信号）`, font: { size: 14 } },
               xaxis: { title: "统计指标值（t收盘）", tickformat: xTickFmt },
               yaxis: { title: `收益率：open(t+1+n)/open(t+1)-1，n=${nDays}`, tickformat: ".2%" },
               shapes: Number.isFinite(curX) ? [{
@@ -4443,7 +4454,7 @@
           const tgtDay = (mode === "all") ? Math.max(1, Math.min(28, Math.floor(day || 1))) : res.days[0];
           const picked = res.by_day[String(tgtDay)] || { returns: [], points: [] };
           if (calHint) {
-            calHint.textContent = `${code} · ${entry.toUpperCase()}买入 -> 持有${res.hold_n}日 -> ${exit.toUpperCase()}卖出 · 非交易日处理=${res.shift} · 模式=${mode === "all" ? "全扫描" : `单日(d=${tgtDay})`}`;
+            calHint.textContent = `${codeLabel(code)} · ${entry.toUpperCase()}买入 -> 持有${res.hold_n}日 -> ${exit.toUpperCase()}卖出 · 非交易日处理=${res.shift} · 模式=${mode === "all" ? "全扫描" : `单日(d=${tgtDay})`}`;
           }
           Plotly.newPlot(
             "distCalHeatmap",
@@ -4642,7 +4653,7 @@
             : (period === "monthly") ? "月度"
             : (period === "quarterly") ? "季度"
             : "年度";
-          const title = `${code} - ${periodLabel}${typeLabel}分布`;
+          const title = `${codeLabel(code)} - ${periodLabel}${typeLabel}分布`;
 
           Plotly.newPlot(
             "distHistogram",
@@ -5274,7 +5285,7 @@
         }
 
         const codes = Object.keys(samplesByCode).sort();
-        sel.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+        sel.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
         if (codes.length === 0) {
           div.innerHTML = "<div class='muted'>无持仓周期数据（可能回测全程空仓）</div>";
           tbl.innerHTML = "";
@@ -5342,7 +5353,7 @@
             marker: { color: "#4c78a8" },
             hovertemplate: "len=%{x}<br>count=%{y}<extra></extra>",
           }], {
-            title: { text: `${code} 持仓周期长度分布（交易日）`, font: { size: 14 } },
+            title: { text: `${codeLabel(code)} 持仓周期长度分布（交易日）`, font: { size: 14 } },
             margin: { t: 40, b: 60 },
             xaxis: { title: "持仓长度（交易日）", tickangle: (h.x.length > 24 ? -45 : 0) },
             yaxis: { title: "频数" },
@@ -5401,7 +5412,7 @@
           }
         }
         const codes = Object.keys(samplesByCode).sort();
-        sel.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+        sel.innerHTML = codes.map(c => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
         if (codes.length === 0) {
           div.innerHTML = "<div class='muted'>无持仓周期数据</div>";
           tbl.innerHTML = "";
@@ -5455,7 +5466,7 @@
             marker: { color: "#4c78a8" },
             hovertemplate: "len=%{x}<br>count=%{y}<extra></extra>",
           }], {
-            title: { text: `${code} 持仓周期长度分布（交易日）`, font: { size: 14 } },
+            title: { text: `${codeLabel(code)} 持仓周期长度分布（交易日）`, font: { size: 14 } },
             margin: { t: 40, b: 60 },
             xaxis: { title: "持仓长度（交易日）", tickangle: (h.x.length > 24 ? -45 : 0) },
             yaxis: { title: "频数" },
@@ -5899,8 +5910,8 @@
         rotState.page = Math.min(Math.max(1, rotState.page), totalPages);
         const startIdx = (rotState.page - 1) * pageSize;
         const pageRows = rows.slice(startIdx, startIdx + pageSize);
-        const fmtLegBuy = (xs) => (xs || []).map(x => `${x.code}:${fmtPct(x.delta_weight)}`).join(" ");
-        const fmtLegSell = (xs) => (xs || []).map(x => `${x.code}:${fmtPct(Math.abs(x.delta_weight))}`).join(" ");
+        const fmtLegBuy = (xs) => (xs || []).map(x => `${codeLabel(x.code)}:${fmtPct(x.delta_weight)}`).join(" ");
+        const fmtLegSell = (xs) => (xs || []).map(x => `${codeLabel(x.code)}:${fmtPct(Math.abs(x.delta_weight))}`).join(" ");
         $("rotPeriods").innerHTML =
           `<tr><th>开始</th><th>结束</th><th>轮动收益</th><th>等权收益</th><th>超额</th><th>胜</th><th>调入(Δw)</th><th>调出(Δw)</th></tr>` +
           pageRows.map(r => `<tr><td>${r.start_date}</td><td>${r.end_date}</td><td>${fmtPct(r.strategy_return)}</td><td>${fmtPct(r.equal_weight_return)}</td><td>${fmtPct(r.excess_return)}</td><td>${r.win ? "是" : "否"}</td><td>${fmtLegBuy(r.buys)}</td><td>${fmtLegSell(r.sells)}</td></tr>`).join("");
