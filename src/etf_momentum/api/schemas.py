@@ -725,6 +725,18 @@ class RotationBacktestRequest(BaseModel):
         description="Correlation lookback window (trading days) computed from hfq closes. None -> defaults to lookback_days.",
     )
     corr_threshold: float = Field(default=0.5, ge=-1.0, le=1.0, description="Block rebalance if corr > threshold.")
+    group_enforce: bool = Field(
+        default=False,
+        description="Enable hard group constraint: at most one selected asset per group.",
+    )
+    group_pick_policy: str = Field(
+        default="strongest_score",
+        description="Group winner policy: strongest_score | earliest_entry | lowest_vol",
+    )
+    asset_groups: dict[str, str] | None = Field(
+        default=None,
+        description="Optional mapping: asset code -> group_id. Missing codes default to independent groups.",
+    )
     # Inertia / dampening (avoid frequent rebalances)
     inertia: bool = Field(default=False, description="Enable inertia (dampening) to avoid frequent rebalances.")
     inertia_min_hold_periods: int = Field(default=0, ge=0, description="Minimum decision periods between holding changes (0 disables).")
@@ -919,7 +931,10 @@ class TrendBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
-    strategy: str = Field(default="ma_filter", description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias (long/cash)")
+    strategy: str = Field(
+        default="ma_filter",
+        description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v (long/cash)",
+    )
     # parameters (some are strategy-specific)
     sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
     fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")
@@ -933,6 +948,55 @@ class TrendBacktestRequest(BaseModel):
     bias_hot: float = Field(default=10.0, description="Take-profit exit when BIAS >= hot (percent)")
     bias_cold: float = Field(default=-2.0, description="Stop-loss exit when BIAS <= cold (percent)")
     bias_pos_mode: str = Field(default="binary", description="Position mode for BIAS strategy: binary|continuous")
+    macd_fast: int = Field(default=12, ge=2, description="MACD fast EMA window")
+    macd_slow: int = Field(default=26, ge=2, description="MACD slow EMA window")
+    macd_signal: int = Field(default=9, ge=2, description="MACD signal EMA window")
+    macd_v_atr_window: int = Field(default=26, ge=2, description="ATR window used by MACD-V normalization")
+    macd_v_scale: float = Field(default=100.0, gt=0.0, description="Scale factor for MACD-V")
+
+
+class TrendPortfolioBacktestRequest(BaseModel):
+    codes: list[str] = Field(min_length=1, description="Portfolio candidate codes")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    strategy: str = Field(
+        default="ma_filter",
+        description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v",
+    )
+    top_k: int = Field(default=3, ge=1, description="Top-K assets selected each day")
+    position_sizing: str = Field(default="equal", description="equal|vol_target")
+    vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
+    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling")
+    group_enforce: bool = Field(default=False, description="Enable one-asset-per-group hard constraint")
+    group_pick_policy: str = Field(default="strongest_score", description="strongest_score|earliest_entry|lowest_vol")
+    asset_groups: dict[str, str] | None = Field(default=None, description="Optional mapping: code -> group_id")
+    sma_window: int = Field(default=200, ge=2)
+    fast_window: int = Field(default=50, ge=2)
+    slow_window: int = Field(default=200, ge=2)
+    donchian_entry: int = Field(default=20, ge=2)
+    donchian_exit: int = Field(default=10, ge=2)
+    mom_lookback: int = Field(default=252, ge=2)
+    bias_ma_window: int = Field(default=20, ge=2)
+    bias_entry: float = Field(default=2.0)
+    bias_hot: float = Field(default=10.0)
+    bias_cold: float = Field(default=-2.0)
+    bias_pos_mode: str = Field(default="binary", description="binary|continuous")
+    macd_fast: int = Field(default=12, ge=2)
+    macd_slow: int = Field(default=26, ge=2)
+    macd_signal: int = Field(default=9, ge=2)
+    macd_v_atr_window: int = Field(default=26, ge=2)
+    macd_v_scale: float = Field(default=100.0, gt=0.0)
+
+
+class AssetGroupSuggestRequest(BaseModel):
+    codes: list[str] = Field(min_length=2, description="Candidate codes for auto grouping")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="hfq", description="Price adjust basis for correlation clustering")
+    lookback_days: int = Field(default=252, ge=20, description="Rolling lookback days for correlation matrix")
+    corr_threshold: float = Field(default=0.75, ge=0.0, le=0.99, description="Absolute correlation threshold for linking two assets")
 
 
 class MonteCarloRequest(BaseModel):

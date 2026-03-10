@@ -27,7 +27,7 @@ def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
 def test_trend_ma_filter_smoke(session_factory):
     sf = session_factory
     code = "AAA"
-    dates = pd.date_range("2024-01-01", "2024-06-30", freq="B").date  # type: ignore[attr-defined]
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
     with sf() as db:
         # up then down to create at least one regime change
         for i, d in enumerate(dates):
@@ -51,7 +51,7 @@ def test_trend_ma_filter_smoke(session_factory):
 def test_trend_ema_filter_smoke(session_factory):
     sf = session_factory
     code = "AAA"
-    dates = pd.date_range("2024-01-01", "2024-06-30", freq="B").date  # type: ignore[attr-defined]
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
     with sf() as db:
         for i, d in enumerate(dates):
             px = 100.0 + (i * 0.4 if i < 50 else (50 * 0.4) - (i - 50) * 0.6)
@@ -69,7 +69,7 @@ def test_trend_ema_filter_smoke(session_factory):
 def test_trend_linreg_slope_smoke(session_factory):
     sf = session_factory
     code = "AAA"
-    dates = pd.date_range("2024-01-01", "2024-06-30", freq="B").date  # type: ignore[attr-defined]
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
     with sf() as db:
         # Mostly upward drift so regression slope should be positive for many windows.
         for i, d in enumerate(dates):
@@ -87,7 +87,7 @@ def test_trend_linreg_slope_smoke(session_factory):
 def test_trend_bias_binary_and_continuous_modes(session_factory):
     sf = session_factory
     code = "AAA"
-    dates = pd.date_range("2024-01-01", "2024-06-30", freq="B").date  # type: ignore[attr-defined]
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
 
     # Build a step-wise series that guarantees:
     # - in_trend stays True (price well above long MA once regime starts)
@@ -154,7 +154,7 @@ def test_trend_bias_binary_and_continuous_modes(session_factory):
 def test_trend_nav_uses_none_with_hfq_fallback_on_corporate_action_cliff(session_factory):
     sf = session_factory
     code = "AAA"
-    dates = pd.date_range("2024-01-01", "2024-01-10", freq="B").date  # type: ignore[attr-defined]
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-01-10", freq="B")]
     # Build a fake split-like cliff in none price; hfq remains smooth; qfq used for signals remains smooth.
     none_px = [100, 101, 50, 51, 52, 53, 54, 55]
     hfq_px = [100, 101, 102, 103, 104, 105, 106, 107]
@@ -172,4 +172,32 @@ def test_trend_nav_uses_none_with_hfq_fallback_on_corporate_action_cliff(session
     nav = out["nav"]["series"]["STRAT"]
     # If none cliff was applied directly while long, nav would roughly halve; with hfq fallback it should not.
     assert min(nav) > 0.75
+
+
+def test_trend_macd_family_smoke(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            # trend with oscillation to trigger crossovers
+            px = 100.0 + i * 0.25 + (2.0 if (i % 10 < 5) else -2.0)
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out_cross = compute_trend_backtest(
+            db,
+            TrendInputs(code=code, start=dates[0], end=dates[-1], strategy="macd_cross", cost_bps=0.0),
+        )
+        out_zero = compute_trend_backtest(
+            db,
+            TrendInputs(code=code, start=dates[0], end=dates[-1], strategy="macd_zero_filter", cost_bps=0.0),
+        )
+        out_v = compute_trend_backtest(
+            db,
+            TrendInputs(code=code, start=dates[0], end=dates[-1], strategy="macd_v", cost_bps=0.0),
+        )
+    assert out_cross["meta"]["strategy"] == "macd_cross"
+    assert out_zero["meta"]["strategy"] == "macd_zero_filter"
+    assert out_v["meta"]["strategy"] == "macd_v"
+    assert len(out_v["signals"]["position"]) == len(out_v["nav"]["dates"])
 

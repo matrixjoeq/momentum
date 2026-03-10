@@ -642,6 +642,30 @@
               <label>交易成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
               <input id="rotCost" value="0" />
             </div>
+            <div>
+              <label>分组约束</label>
+              <select id="rotGroupEnforce" style="min-width:140px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
+              <label>组内选优</label>
+              <select id="rotGroupPolicy" style="min-width:180px;">
+                <option value="strongest_score" selected>得分最高</option>
+                <option value="earliest_entry">最早入场（优先当前持仓）</option>
+                <option value="lowest_vol">波动率最低</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:8px;">
+            <label>标的分组映射（code=group_id，每行一条）</label>
+            <textarea id="rotAssetGroups" rows="4" style="width:100%; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;" placeholder="159915=CN_EQ&#10;510300=CN_EQ&#10;513100=US_EQ"></textarea>
+            <div class="row" style="margin-top:6px; align-items:center; gap:8px;">
+              <button id="rotSuggestGroups">自动分组建议</button>
+              <span class="muted" id="rotSuggestGroupsHint"></span>
+            </div>
+            <div class="muted">未填写的标的默认视作独立组。</div>
           </div>
         </div>
 
@@ -1208,6 +1232,11 @@
       </div>
 
       <div class="panel">
+        <h3>分组约束可解释性（组内胜出/淘汰）</h3>
+        <table id="rotGroupExplain"></table>
+      </div>
+
+      <div class="panel">
         <h3>日历效应研究（轮动策略）</h3>
         <div class="muted">在保持轮动参数不变的前提下，批量回测不同调仓周期下的调仓锚点（周度/月度/季度/年度）与成交价口径（开盘/收盘/OC均价）对策略表现的影响。此处参数与等权研究互不影响。</div>
         <div class="row no-print" style="margin-top:8px; align-items:end;">
@@ -1405,6 +1434,70 @@
           <div id="simRuin" style="width:100%; height:420px;"></div>
         </div>
       </div>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
+      <h3 style="margin: 0 0 6px 0;">趋势策略研究（单标的/组合）</h3>
+      <div class="row" style="align-items:end;">
+        <div>
+          <label>模式</label>
+          <select id="trendMode" style="min-width:160px;">
+            <option value="single" selected>单标的</option>
+            <option value="portfolio">组合</option>
+          </select>
+        </div>
+        <div>
+          <label>策略</label>
+          <select id="trendStrategy" style="min-width:190px;">
+            <option value="ma_filter">ma_filter</option>
+            <option value="ema_filter">ema_filter</option>
+            <option value="ma_cross">ma_cross</option>
+            <option value="donchian">donchian</option>
+            <option value="tsmom">tsmom</option>
+            <option value="linreg_slope">linreg_slope</option>
+            <option value="bias">bias</option>
+            <option value="macd_cross">macd_cross</option>
+            <option value="macd_zero_filter">macd_zero_filter</option>
+            <option value="macd_v">macd_v</option>
+          </select>
+        </div>
+        <div><label>TopK（组合）</label><input id="trendTopK" value="3" /></div>
+        <div>
+          <label>仓位法（组合）</label>
+          <select id="trendSizing" style="min-width:140px;">
+            <option value="equal" selected>equal</option>
+            <option value="vol_target">vol_target</option>
+          </select>
+        </div>
+        <div><label>成本(bps)</label><input id="trendCost" value="0" /></div>
+        <button id="runTrendResearch">运行趋势回测</button>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div><label>SMA窗口</label><input id="trendSmaWin" value="200" /></div>
+        <div><label>快线窗口</label><input id="trendFastWin" value="50" /></div>
+        <div><label>慢线窗口</label><input id="trendSlowWin" value="200" /></div>
+        <div><label>Donchian 入场</label><input id="trendDonEntry" value="20" /></div>
+        <div><label>Donchian 出场</label><input id="trendDonExit" value="10" /></div>
+        <div><label>TSMOM回看</label><input id="trendMomLb" value="252" /></div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div><label>MACD fast</label><input id="trendMacdFast" value="12" /></div>
+        <div><label>MACD slow</label><input id="trendMacdSlow" value="26" /></div>
+        <div><label>MACD signal</label><input id="trendMacdSignal" value="9" /></div>
+        <div><label>MACD-V ATR窗口</label><input id="trendMacdVAtr" value="26" /></div>
+        <div><label>MACD-V scale</label><input id="trendMacdVScale" value="100" /></div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div><label>分组约束（组合）</label><select id="trendGroupEnforce"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
+        <div><label>组内选优</label><select id="trendGroupPolicy"><option value="strongest_score" selected>得分最高</option><option value="earliest_entry">最早入场</option><option value="lowest_vol">最低波动</option></select></div>
+      </div>
+      <div style="margin-top:8px;">
+        <label>趋势组合分组映射（code=group_id，每行一条）</label>
+        <textarea id="trendAssetGroups" rows="3" style="width:100%; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;" placeholder="159915=CN_EQ&#10;510300=CN_EQ&#10;513100=US_EQ"></textarea>
+      </div>
+      <div id="trendChart" style="width:100%; height:420px; margin-top:10px;"></div>
+      <table id="trendMetricsTable" style="margin-top:10px;"></table>
+      <table id="trendGroupTable" style="margin-top:10px;"></table>
     </div>
 
     <div class="panel msg" id="msg"></div>
@@ -2422,6 +2515,10 @@
             const floorRules = _buildFloorRules();
             if (floorRules && floorRules.__error) return floorRules;
             const fd = _pickDefaultRule(floorRules) || { momentum_floor: 0.0 };
+            const groupEnforce = ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true");
+            const groupPolicy = ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value).trim() : "strongest_score";
+            const groupsParsed = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
+            if (groupsParsed && groupsParsed.__error) return groupsParsed;
             const req = {
               codes: Array.from(selected),
               start: startYmd,
@@ -2435,6 +2532,9 @@
               skip_days: Number(($("rotSkip").value || "0").trim()),
               cost_bps: Number(($("rotCost").value || "0").trim()),
               risk_off: ($("rotRiskOff").value === "true"),
+              group_enforce: groupEnforce,
+              group_pick_policy: groupPolicy,
+              asset_groups: groupsParsed,
               momentum_floor: Number(fd.momentum_floor),
               asset_momentum_floor_rules: floorRules,
               score_method: $("rotScoreMethod").value,
@@ -2526,6 +2626,7 @@
           rotState.rows = one.period_details || [];
           rotState.page = 1;
           renderRotPeriods();
+          renderRotGroupExplain(one.holdings || []);
           rotPeriodTableState.weekly.rows = (one.period_returns && one.period_returns.weekly) ? one.period_returns.weekly : [];
           rotPeriodTableState.monthly.rows = (one.period_returns && one.period_returns.monthly) ? one.period_returns.monthly : [];
           rotPeriodTableState.quarterly.rows = (one.period_returns && one.period_returns.quarterly) ? one.period_returns.quarterly : [];
@@ -5920,6 +6021,31 @@
         $("rotPeriodPage").textContent = `${rotState.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
       }
 
+      function renderRotGroupExplain(holdings) {
+        const rows = Array.isArray(holdings) ? holdings : [];
+        const out = [];
+        for (const h of rows) {
+          const gf = (h && h.group_filter) ? h.group_filter : null;
+          if (!gf || !gf.enabled) continue;
+          const gw = gf.group_winners || {};
+          const ge = gf.group_eliminated || {};
+          const gids = Object.keys(gw);
+          for (const gid of gids) {
+            const winner = gw[gid] || "";
+            const eliminated = Array.isArray(ge[gid]) ? ge[gid] : [];
+            out.push({
+              d: h.decision_date || "",
+              gid,
+              winner,
+              eliminated,
+            });
+          }
+        }
+        $("rotGroupExplain").innerHTML =
+          `<tr><th>决策日</th><th>组ID</th><th>胜出</th><th>淘汰</th></tr>` +
+          out.slice(0, 500).map(r => `<tr><td>${esc(r.d)}</td><td>${esc(r.gid)}</td><td>${esc(codeLabel(r.winner))}</td><td>${(r.eliminated || []).map(codeLabel).join(", ")}</td></tr>`).join("");
+      }
+
       const rotPeriodTableState = {
         weekly: { page: 1, rows: [] },
         monthly: { page: 1, rows: [] },
@@ -5966,6 +6092,24 @@
 
       function _checkedValues(sel) {
         return Array.from(document.querySelectorAll(sel)).filter(x => x && x.checked).map(x => x.value);
+      }
+
+      function _parseAssetGroupsFromText(raw) {
+        const txt = String(raw || "").trim();
+        if (!txt) return {};
+        const out = {};
+        const lines = txt.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+          const line = String(lines[i] || "").trim();
+          if (!line || line.startsWith("#")) continue;
+          const p = line.indexOf("=");
+          if (p <= 0) return { __error: `分组映射第 ${i + 1} 行格式错误，需为 code=group_id` };
+          const code = line.slice(0, p).trim();
+          const gid = line.slice(p + 1).trim();
+          if (!code || !gid) return { __error: `分组映射第 ${i + 1} 行格式错误，需为 code=group_id` };
+          out[code] = gid;
+        }
+        return out;
       }
 
       function renderCalendarAnchorBox(prefix, rebalance) {
@@ -6257,6 +6401,11 @@
         if (corr_filter && corr_window != null && (!Number.isFinite(corr_window) || corr_window < 2)) return setMsg("相关性回看窗口必须>=2（或留空表示同步动量回看）");
         const corr_threshold = Number(($("rotCorrThr").value || "0.5").trim());
         if (corr_filter && (!Number.isFinite(corr_threshold) || corr_threshold < -1 || corr_threshold > 1)) return setMsg("相关性阈值需在 [-1,1]，例如 0.5");
+        const group_enforce = ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true");
+        const group_pick_policy = ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value).trim() : "strongest_score";
+        if (!["strongest_score", "earliest_entry", "lowest_vol"].includes(group_pick_policy)) return setMsg("组内选优策略不合法");
+        const asset_groups = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
+        if (asset_groups && asset_groups.__error) return setMsg(asset_groups.__error);
         const inertia = ($("rotInertiaOn").value === "true");
         const inertia_min_hold_periods = Number(($("rotInertiaMinHold").value || "0").trim());
         if (inertia && (!Number.isFinite(inertia_min_hold_periods) || inertia_min_hold_periods < 0)) return setMsg("最短持有期必须是 >=0 的整数，例如 2");
@@ -6383,6 +6532,7 @@
             tp_sl_mode,
             atr_window, atr_mult, atr_step, atr_min_mult,
             corr_filter, corr_window, corr_threshold,
+            group_enforce, group_pick_policy, asset_groups,
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             mirror_control, mirror_quantiles, mirror_exposures,
@@ -6412,6 +6562,7 @@
         rotState.rows = data.period_details || [];
         rotState.page = 1;
         renderRotPeriods();
+        renderRotGroupExplain(data.holdings || []);
         // periodic returns tables
         rotPeriodTableState.weekly.rows = (data.period_returns && data.period_returns.weekly) ? data.period_returns.weekly : [];
         rotPeriodTableState.monthly.rows = (data.period_returns && data.period_returns.monthly) ? data.period_returns.monthly : [];
@@ -6425,6 +6576,125 @@
         renderRotPeriodTable("monthly");
         renderRotPeriodTable("quarterly");
         renderRotPeriodTable("yearly");
+      }
+
+      async function runTrendResearch() {
+        const mode = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
+        const strategy = ($("trendStrategy") && $("trendStrategy").value) ? String($("trendStrategy").value) : "ma_filter";
+        const start = $("start").value.trim();
+        const end = $("end").value.trim();
+        const rfRaw = ($("rf").value || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
+        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        const cost_bps = Number(($("trendCost").value || "0").trim());
+        if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("趋势成本(bps)需为>=0数字");
+        const common = {
+          start,
+          end,
+          risk_free_rate,
+          cost_bps,
+          strategy,
+          sma_window: Number(($("trendSmaWin").value || "200").trim()),
+          fast_window: Number(($("trendFastWin").value || "50").trim()),
+          slow_window: Number(($("trendSlowWin").value || "200").trim()),
+          donchian_entry: Number(($("trendDonEntry").value || "20").trim()),
+          donchian_exit: Number(($("trendDonExit").value || "10").trim()),
+          mom_lookback: Number(($("trendMomLb").value || "252").trim()),
+          macd_fast: Number(($("trendMacdFast").value || "12").trim()),
+          macd_slow: Number(($("trendMacdSlow").value || "26").trim()),
+          macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
+          macd_v_atr_window: Number(($("trendMacdVAtr").value || "26").trim()),
+          macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
+        };
+        $("status").textContent = "趋势回测中...";
+        setMsg("");
+        let resp = null;
+        if (mode === "portfolio") {
+          const codes = Array.from(selected);
+          if (codes.length === 0) return setMsg("请先选择标的池");
+          const top_k = Number(($("trendTopK").value || "3").trim());
+          const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
+          const group_enforce = ($("trendGroupEnforce") && $("trendGroupEnforce").value === "true");
+          const group_pick_policy = ($("trendGroupPolicy") && $("trendGroupPolicy").value) ? String($("trendGroupPolicy").value) : "strongest_score";
+          const asset_groups = _parseAssetGroupsFromText(($("trendAssetGroups") && $("trendAssetGroups").value) ? $("trendAssetGroups").value : "");
+          if (asset_groups && asset_groups.__error) return setMsg(asset_groups.__error);
+          resp = await api("/analysis/trend/portfolio", {
+            method: "POST",
+            body: JSON.stringify({ codes, top_k, position_sizing, group_enforce, group_pick_policy, asset_groups, ...common }),
+          });
+        } else {
+          const codes = Array.from(selected);
+          const code = codes.length > 0 ? codes[0] : "";
+          if (!code) return setMsg("单标的模式请先勾选至少1个标的（默认取第一个）");
+          resp = await api("/analysis/trend", { method: "POST", body: JSON.stringify({ code, ...common }) });
+        }
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
+        const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
+        const dates = (data && data.nav && data.nav.dates) ? data.nav.dates : [];
+        const y1 = Array.isArray(nav.STRAT) ? nav.STRAT : [];
+        const y2 = Array.isArray(nav.BUY_HOLD) ? nav.BUY_HOLD : (Array.isArray(nav.BUY_HOLD_EW) ? nav.BUY_HOLD_EW : []);
+        const y3 = Array.isArray(nav.EXCESS) ? nav.EXCESS : [];
+        Plotly.newPlot("trendChart", [
+          { x: dates, y: y1, type: "scatter", mode: "lines", name: "STRAT" },
+          { x: dates, y: y2, type: "scatter", mode: "lines", name: "BENCH" },
+          { x: dates, y: y3, type: "scatter", mode: "lines", name: "EXCESS" },
+        ], { margin: { t: 30 }, title: `趋势回测 - ${esc(strategy)} (${mode})` });
+        const m = (data && data.metrics) ? data.metrics : {};
+        const rows = [];
+        for (const k of ["strategy", "benchmark", "excess"]) {
+          const obj = m[k] || {};
+          for (const kk of Object.keys(obj)) {
+            rows.push(`<tr><td>${esc(k)}</td><td>${esc(kk)}</td><td>${typeof obj[kk] === "number" ? Number(obj[kk]).toFixed(6) : esc(obj[kk])}</td></tr>`);
+          }
+        }
+        $("trendMetricsTable").innerHTML = `<tr><th>分组</th><th>指标</th><th>值</th></tr>${rows.join("")}`;
+        const hs = Array.isArray(data.holdings) ? data.holdings : [];
+        const gRows = [];
+        for (const h of hs.slice(0, 200)) {
+          const gf = h.group_filter || {};
+          if (!gf.enabled) continue;
+          const gw = gf.group_winners || {};
+          const ge = gf.group_eliminated || {};
+          for (const gid of Object.keys(gw)) {
+            gRows.push(`<tr><td>${esc(h.decision_date || "")}</td><td>${esc(gid)}</td><td>${esc(codeLabel(gw[gid]))}</td><td>${(Array.isArray(ge[gid]) ? ge[gid] : []).map(codeLabel).join(", ")}</td></tr>`);
+          }
+        }
+        $("trendGroupTable").innerHTML = `<tr><th>决策日</th><th>组ID</th><th>胜出</th><th>淘汰</th></tr>${gRows.join("")}`;
+      }
+
+      async function runSuggestGroups() {
+        const codes = Array.from(selected);
+        if (codes.length < 2) return setMsg("自动分组至少需要选择2个标的");
+        const start = $("start").value.trim();
+        const end = $("end").value.trim();
+        const hint = $("rotSuggestGroupsHint");
+        if (hint) hint.textContent = "计算中...";
+        const resp = await api("/analysis/groups/suggest", {
+          method: "POST",
+          body: JSON.stringify({
+            codes,
+            start,
+            end,
+            adjust: "hfq",
+            lookback_days: 252,
+            corr_threshold: 0.75,
+          }),
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          if (hint) hint.textContent = "";
+          return setMsg(text);
+        }
+        const data = JSON.parse(text);
+        const mp = (data && data.asset_groups) ? data.asset_groups : {};
+        const lines = Object.keys(mp).sort().map((c) => `${c}=${mp[c]}`);
+        if ($("rotAssetGroups")) $("rotAssetGroups").value = lines.join("\n");
+        if ($("trendAssetGroups")) $("trendAssetGroups").value = lines.join("\n");
+        if (hint) hint.textContent = `已生成 ${new Set(Object.values(mp)).size} 个分组建议`;
       }
 
       async function runEwCalendarEffect() {
@@ -6524,6 +6794,11 @@
         if (corr_filter && corr_window != null && (!Number.isFinite(corr_window) || corr_window < 2)) return setMsg("相关性回看窗口必须>=2（或留空表示同步动量回看）");
         const corr_threshold = Number(($("rotCorrThr").value || "0.5").trim());
         if (corr_filter && (!Number.isFinite(corr_threshold) || corr_threshold < -1 || corr_threshold > 1)) return setMsg("相关性阈值需在 [-1,1]，例如 0.5");
+        const group_enforce = ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true");
+        const group_pick_policy = ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value).trim() : "strongest_score";
+        if (!["strongest_score", "earliest_entry", "lowest_vol"].includes(group_pick_policy)) return setMsg("组内选优策略不合法");
+        const asset_groups = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
+        if (asset_groups && asset_groups.__error) return setMsg(asset_groups.__error);
         const inertia = ($("rotInertiaOn").value === "true");
         const inertia_min_hold_periods = Number(($("rotInertiaMinHold").value || "0").trim());
         const inertia_score_gap = Number(($("rotInertiaScoreGap").value || "0").trim());
@@ -6651,6 +6926,7 @@
             tp_sl_mode,
             atr_window, atr_mult, atr_step, atr_min_mult,
             corr_filter, corr_window, corr_threshold,
+            group_enforce, group_pick_policy, asset_groups,
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             mirror_control, mirror_quantiles, mirror_exposures,
@@ -7189,6 +7465,8 @@
 
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
+      if ($("runTrendResearch")) $("runTrendResearch").addEventListener("click", runTrendResearch);
+      if ($("rotSuggestGroups")) $("rotSuggestGroups").addEventListener("click", runSuggestGroups);
       if ($("rotBenchMode")) $("rotBenchMode").addEventListener("change", () => {
         const data = window.__lastRotationResult;
         if (!data) return;
@@ -7437,6 +7715,7 @@
               tp_sl_mode,
               atr_window, atr_mult, atr_step, atr_min_mult,
               corr_filter, corr_window, corr_threshold,
+              group_enforce, group_pick_policy, asset_groups,
               inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
               rr_sizing, rr_years, rr_thresholds, rr_weights,
               mirror_control, mirror_quantiles, mirror_exposures,

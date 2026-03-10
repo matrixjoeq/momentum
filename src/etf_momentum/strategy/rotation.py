@@ -95,6 +95,10 @@ class RotationInputs:
     corr_filter: bool = False
     corr_window: int | None = None  # None -> defaults to lookback_days
     corr_threshold: float = 0.5
+    # --- Group constraint (cross-strategy diversification) ---
+    group_enforce: bool = False
+    group_pick_policy: str = "strongest_score"  # strongest_score | earliest_entry | lowest_vol
+    asset_groups: dict[str, str] | None = None  # code -> group_id
     # --- Inertia / dampening (avoid frequent rebalances) ---
     inertia: bool = False
     inertia_min_hold_periods: int = 0  # minimum decision periods between holding changes (0 disables)
@@ -735,6 +739,90 @@ def _pick_assets(
     return picks, {"best_score": best, "risk_off_triggered": False, "mode": "risk_on"}
 
 
+def _reduce_scores_by_group(
+    scores_row: pd.Series,
+    *,
+    group_enforce: bool,
+    asset_groups: dict[str, str] | None,
+    policy: str,
+    current_holdings: set[str] | None = None,
+    vol_row: pd.Series | None = None,
+) -> tuple[pd.Series, dict[str, Any]]:
+    """
+    Apply cross-asset group hard constraint before Top-K:
+    each group can keep at most one candidate.
+
+    Supported policies:
+    - strongest_score: highest score in each group (default)
+    - earliest_entry: prefer currently held code in each group; fallback to strongest
+    - lowest_vol: pick lowest realized vol in each group; fallback to strongest
+    """
+    meta: dict[str, Any] = {
+        "enabled": bool(group_enforce),
+        "policy": str(policy or "strongest_score"),
+        "before": [],
+        "after": [],
+        "group_winners": {},
+        "group_eliminated": {},
+    }
+    s = scores_row.dropna()
+    if (not group_enforce) or s.empty:
+        meta["before"] = [str(c) for c in s.sort_values(ascending=False).index.tolist()]
+        meta["after"] = list(meta["before"])
+        return s, meta
+
+    policy2 = str(policy or "strongest_score").strip().lower()
+    if policy2 not in {"strongest_score", "earliest_entry", "lowest_vol"}:
+        raise ValueError(f"invalid group_pick_policy={policy}")
+
+    s = s.sort_values(ascending=False)
+    meta["before"] = [str(c) for c in s.index.tolist()]
+    groups = {str(k): str(v) for k, v in (asset_groups or {}).items()}
+    cur = set(str(x) for x in (current_holdings or set()))
+
+    bucket: dict[str, list[str]] = {}
+    for code in s.index.tolist():
+        c = str(code)
+        gid = str(groups.get(c) or c)
+        bucket.setdefault(gid, []).append(c)
+
+    winners: list[str] = []
+    eliminated: dict[str, list[str]] = {}
+    winner_map: dict[str, str] = {}
+
+    for gid, codes in bucket.items():
+        winner = codes[0]
+        if policy2 == "earliest_entry":
+            held = [c for c in codes if c in cur]
+            if held:
+                winner = held[0]
+        elif policy2 == "lowest_vol" and vol_row is not None:
+            vol_pairs: list[tuple[str, float]] = []
+            for c in codes:
+                v = vol_row.get(c) if c in vol_row.index else np.nan
+                try:
+                    vv = float(v)
+                except (TypeError, ValueError):
+                    vv = np.nan
+                if np.isfinite(vv):
+                    vol_pairs.append((c, vv))
+            if vol_pairs:
+                # Tie-break: lower vol -> higher score -> lexicographic code
+                vol_pairs = sorted(vol_pairs, key=lambda x: (float(x[1]), -float(s.get(x[0], np.nan)), str(x[0])))
+                winner = str(vol_pairs[0][0])
+
+        winners.append(winner)
+        winner_map[gid] = winner
+        eliminated[gid] = [c for c in codes if c != winner]
+
+    # Keep global ranking semantics after group reduction.
+    reduced = s.reindex(winners).dropna().sort_values(ascending=False)
+    meta["after"] = [str(c) for c in reduced.index.tolist()]
+    meta["group_winners"] = winner_map
+    meta["group_eliminated"] = eliminated
+    return reduced, meta
+
+
 def _holding_streaks_from_weights(
     w: pd.DataFrame,
     *,
@@ -926,9 +1014,17 @@ def backtest_rotation(
     if inp.rebalance_anchor is not None:
         if int(inp.rebalance_anchor) < 0:
             raise ValueError("rebalance_anchor must be >= 0")
+    group_policy = str(inp.group_pick_policy or "strongest_score").strip().lower()
+    if group_policy not in {"strongest_score", "earliest_entry", "lowest_vol"}:
+        raise ValueError(f"invalid group_pick_policy={inp.group_pick_policy}")
 
     codes = universe[:]  # may include defensive later for strategy holdings
     rank_codes = universe[:]  # ranking / filters apply to the original universe only
+    group_map: dict[str, str] = {}
+    for c in rank_codes:
+        cc = str(c)
+        gid = str((inp.asset_groups or {}).get(cc) or cc).strip() or cc
+        group_map[cc] = gid
     defensive = (inp.defensive_code or "").strip() or None
     if inp.risk_off and defensive:
         if defensive not in codes:
@@ -1617,6 +1713,14 @@ def backtest_rotation(
             held = [c for c in codes if float(prev_w_row.get(c, 0.0)) > 0.0]
             picks = [c for c in held if c in codes]
             meta = {"best_score": None, "risk_off_triggered": True, "mode": "dd_sleep"}
+            group_meta = {
+                "enabled": False,
+                "policy": group_policy,
+                "before": [],
+                "after": [],
+                "group_winners": {},
+                "group_eliminated": {},
+            }
         else:
             prev_w_row = w.iloc[start_i - 1].astype(float)
             # Per-asset momentum floors: exclude assets whose score <= its configured floor.
@@ -1639,8 +1743,22 @@ def backtest_rotation(
                         s2.loc[c] = np.nan
                 scores_row = s2
 
-            picks, meta = _pick_assets(
+            cur_holdings = {str(c) for c in rank_codes if float(prev_w_row.get(c, 0.0)) > 1e-12}
+            group_vol_row = None
+            if group_policy == "lowest_vol":
+                gv = ann_vol_by_window.get(int(inp.lookback_days))
+                if gv is not None and d in gv.index:
+                    group_vol_row = gv.loc[d]
+            reduced_scores, group_meta = _reduce_scores_by_group(
                 scores_row,
+                group_enforce=bool(inp.group_enforce),
+                asset_groups=group_map,
+                policy=group_policy,
+                current_holdings=cur_holdings,
+                vol_row=group_vol_row,
+            )
+            picks, meta = _pick_assets(
+                reduced_scores,
                 top_k=inp.top_k,
                 risk_off=inp.risk_off,
                 defensive_code=defensive,
@@ -2292,6 +2410,7 @@ def backtest_rotation(
                 "inertia": inertia_meta,
                 "rr_sizing": rr_meta,
                 "dd_control": dd_meta,
+                "group_filter": group_meta,
                 "risk_controls": {"reasons": reasons, **details},
             }
         )

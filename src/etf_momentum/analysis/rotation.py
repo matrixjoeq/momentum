@@ -59,6 +59,9 @@ class RotationAnalysisInputs:
     corr_filter: bool = False
     corr_window: int | None = None
     corr_threshold: float = 0.5
+    group_enforce: bool = False
+    group_pick_policy: str = "strongest_score"
+    asset_groups: dict[str, str] | None = None
     # Inertia / dampening (avoid frequent rebalances)
     inertia: bool = False
     inertia_min_hold_periods: int = 0
@@ -142,6 +145,9 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             corr_filter=inp.corr_filter,
             corr_window=inp.corr_window,
             corr_threshold=inp.corr_threshold,
+            group_enforce=inp.group_enforce,
+            group_pick_policy=inp.group_pick_policy,
+            asset_groups=inp.asset_groups,
             inertia=inp.inertia,
             inertia_min_hold_periods=inp.inertia_min_hold_periods,
             inertia_score_gap=inp.inertia_score_gap,

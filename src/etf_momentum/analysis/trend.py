@@ -12,12 +12,14 @@ from .baseline import (
     TRADING_DAYS_PER_YEAR,
     _annualized_return,
     _annualized_vol,
+    _information_ratio,
     _max_drawdown,
     _max_drawdown_duration_days,
     _sharpe,
     _sortino,
     _ulcer_index,
     load_close_prices,
+    load_high_low_prices,
 )
 
 
@@ -29,7 +31,7 @@ class TrendInputs:
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
     # strategy selection
-    strategy: str = "ma_filter"  # ma_filter | ema_filter | ma_cross | donchian | tsmom | linreg_slope | bias
+    strategy: str = "ma_filter"  # ma_filter | ema_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v
     # parameters
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
@@ -44,6 +46,46 @@ class TrendInputs:
     bias_hot: float = 10.0  # take-profit exit when BIAS >= hot (percent)
     bias_cold: float = -2.0  # stop-loss exit when BIAS <= cold (percent)
     bias_pos_mode: str = "binary"  # binary | continuous (default binary)
+    # MACD/MACD-V params
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    macd_v_atr_window: int = 26
+    macd_v_scale: float = 100.0
+
+
+@dataclass(frozen=True)
+class TrendPortfolioInputs:
+    codes: list[str]
+    start: dt.date
+    end: dt.date
+    risk_free_rate: float = 0.025
+    cost_bps: float = 0.0
+    strategy: str = "ma_filter"
+    top_k: int = 3
+    position_sizing: str = "equal"  # equal | vol_target
+    vol_window: int = 20
+    vol_target_ann: float = 0.20
+    group_enforce: bool = False
+    group_pick_policy: str = "strongest_score"  # strongest_score | earliest_entry | lowest_vol
+    asset_groups: dict[str, str] | None = None
+    # single-strategy params
+    sma_window: int = 200
+    fast_window: int = 50
+    slow_window: int = 200
+    donchian_entry: int = 20
+    donchian_exit: int = 10
+    mom_lookback: int = 252
+    bias_ma_window: int = 20
+    bias_entry: float = 2.0
+    bias_hot: float = 10.0
+    bias_cold: float = -2.0
+    bias_pos_mode: str = "binary"
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    macd_v_atr_window: int = 26
+    macd_v_scale: float = 100.0
 
 
 def _rolling_linreg_slope(y: np.ndarray) -> float:
@@ -99,6 +141,99 @@ def _pos_from_donchian(close: pd.Series, *, entry: int, exit_: int) -> pd.Series
     return pd.Series(pos, index=close.index, dtype=float)
 
 
+def _ema(s: pd.Series, window: int) -> pd.Series:
+    w = max(2, int(window))
+    return s.ewm(span=w, adjust=False, min_periods=max(2, w // 2)).mean()
+
+
+def _macd_core(close: pd.Series, *, fast: int, slow: int, signal: int) -> tuple[pd.Series, pd.Series, pd.Series]:
+    ema_fast = _ema(close, int(fast))
+    ema_slow = _ema(close, int(slow))
+    macd = (ema_fast - ema_slow).astype(float)
+    sig = _ema(macd, int(signal)).astype(float)
+    hist = (macd - sig).astype(float)
+    return macd, sig, hist
+
+
+def _atr_from_hlc(high: pd.Series, low: pd.Series, close: pd.Series, *, window: int) -> pd.Series:
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [
+            (high - low).abs(),
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    w = max(2, int(window))
+    return tr.rolling(window=w, min_periods=max(2, w // 2)).mean().astype(float)
+
+
+def _reduce_score_by_group_for_day(
+    scores_row: pd.Series,
+    *,
+    group_enforce: bool,
+    group_map: dict[str, str],
+    policy: str,
+    current_holdings: set[str] | None,
+    vol_row: pd.Series | None,
+) -> tuple[pd.Series, dict[str, Any]]:
+    s = scores_row.dropna().sort_values(ascending=False)
+    meta: dict[str, Any] = {
+        "enabled": bool(group_enforce),
+        "policy": str(policy or "strongest_score"),
+        "before": [str(c) for c in s.index.tolist()],
+        "after": [],
+        "group_winners": {},
+        "group_eliminated": {},
+    }
+    if (not group_enforce) or s.empty:
+        meta["after"] = list(meta["before"])
+        return s, meta
+
+    p = str(policy or "strongest_score").strip().lower()
+    if p not in {"strongest_score", "earliest_entry", "lowest_vol"}:
+        raise ValueError(f"invalid group_pick_policy={policy}")
+
+    cur = set(str(x) for x in (current_holdings or set()))
+    bucket: dict[str, list[str]] = {}
+    for c in s.index.tolist():
+        cc = str(c)
+        gid = str(group_map.get(cc) or cc)
+        bucket.setdefault(gid, []).append(cc)
+
+    winners: list[str] = []
+    group_winners: dict[str, str] = {}
+    group_eliminated: dict[str, list[str]] = {}
+    for gid, members in bucket.items():
+        winner = members[0]
+        if p == "earliest_entry":
+            held = [m for m in members if m in cur]
+            if held:
+                winner = held[0]
+        elif p == "lowest_vol" and vol_row is not None:
+            pairs: list[tuple[str, float]] = []
+            for m in members:
+                try:
+                    vv = float(vol_row.get(m))
+                except (TypeError, ValueError):
+                    vv = float("nan")
+                if np.isfinite(vv):
+                    pairs.append((m, vv))
+            if pairs:
+                pairs = sorted(pairs, key=lambda x: (float(x[1]), -float(s.get(x[0], np.nan)), str(x[0])))
+                winner = pairs[0][0]
+        winners.append(winner)
+        group_winners[gid] = winner
+        group_eliminated[gid] = [m for m in members if m != winner]
+
+    reduced = s.reindex(winners).dropna().sort_values(ascending=False)
+    meta["after"] = [str(c) for c in reduced.index.tolist()]
+    meta["group_winners"] = group_winners
+    meta["group_eliminated"] = group_eliminated
+    return reduced, meta
+
+
 def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     code = (inp.code or "").strip()
     if not code:
@@ -109,7 +244,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("risk_free_rate must be finite")
 
     strat = (inp.strategy or "ma_filter").strip().lower()
-    if strat not in {"ma_filter", "ema_filter", "ma_cross", "donchian", "tsmom", "linreg_slope", "bias"}:
+    if strat not in {
+        "ma_filter",
+        "ema_filter",
+        "ma_cross",
+        "donchian",
+        "tsmom",
+        "linreg_slope",
+        "bias",
+        "macd_cross",
+        "macd_zero_filter",
+        "macd_v",
+    }:
         raise ValueError(f"invalid strategy={inp.strategy}")
 
     # validate params
@@ -136,6 +282,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     bias_mode = (inp.bias_pos_mode or "binary").strip().lower()
     if bias_mode not in {"binary", "continuous"}:
         raise ValueError("bias_pos_mode must be binary|continuous")
+    if int(inp.macd_fast) < 2 or int(inp.macd_slow) < 2 or int(inp.macd_signal) < 2:
+        raise ValueError("macd_fast/macd_slow/macd_signal must be >= 2")
+    if int(inp.macd_fast) >= int(inp.macd_slow):
+        raise ValueError("macd_fast must be < macd_slow")
+    if int(inp.macd_v_atr_window) < 2:
+        raise ValueError("macd_v_atr_window must be >= 2")
+    if (not np.isfinite(float(inp.macd_v_scale))) or float(inp.macd_v_scale) <= 0:
+        raise ValueError("macd_v_scale must be finite and > 0")
 
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
@@ -168,6 +322,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
 
     if px_exec_none.dropna().empty or px_sig.dropna().empty or px_bh.dropna().empty:
         raise ValueError("no valid price series after alignment")
+
+    high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=[code], start=ext_start, end=inp.end, adjust="qfq")
+    high_qfq = (
+        high_qfq_df[code].astype(float).replace([np.inf, -np.inf], np.nan).reindex(dates).ffill()
+        if (not high_qfq_df.empty and code in high_qfq_df.columns)
+        else px_sig
+    )
+    low_qfq = (
+        low_qfq_df[code].astype(float).replace([np.inf, -np.inf], np.nan).reindex(dates).ffill()
+        if (not low_qfq_df.empty and code in low_qfq_df.columns)
+        else px_sig
+    )
 
     # Returns:
     # - strategy execution: primarily none returns, but on corporate-action days use hfq return
@@ -244,6 +410,33 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 pos[i] = float(np.clip(w, 0.0, 1.0))
 
         raw_pos = pd.Series(pos, index=px_sig.index, dtype=float)
+    elif strat == "macd_cross":
+        macd, sig, _ = _macd_core(
+            px_sig,
+            fast=int(inp.macd_fast),
+            slow=int(inp.macd_slow),
+            signal=int(inp.macd_signal),
+        )
+        raw_pos = (macd > sig).astype(float).fillna(0.0)
+    elif strat == "macd_zero_filter":
+        macd, _, _ = _macd_core(
+            px_sig,
+            fast=int(inp.macd_fast),
+            slow=int(inp.macd_slow),
+            signal=int(inp.macd_signal),
+        )
+        raw_pos = (macd > 0.0).astype(float).fillna(0.0)
+    elif strat == "macd_v":
+        macd, _, _ = _macd_core(
+            px_sig,
+            fast=int(inp.macd_fast),
+            slow=int(inp.macd_slow),
+            signal=int(inp.macd_signal),
+        )
+        atr = _atr_from_hlc(high_qfq, low_qfq, px_sig, window=int(inp.macd_v_atr_window))
+        macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
+        macd_v_sig = _ema(macd_v, int(inp.macd_signal))
+        raw_pos = (macd_v > macd_v_sig).astype(float).fillna(0.0)
     else:
         mom = px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0
         raw_pos = (mom > 0.0).astype(float).fillna(0.0)
@@ -318,6 +511,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "bias_hot": float(inp.bias_hot),
                 "bias_cold": float(inp.bias_cold),
                 "bias_pos_mode": bias_mode,
+                "macd_fast": int(inp.macd_fast),
+                "macd_slow": int(inp.macd_slow),
+                "macd_signal": int(inp.macd_signal),
+                "macd_v_atr_window": int(inp.macd_v_atr_window),
+                "macd_v_scale": float(inp.macd_v_scale),
                 "cost_bps": float(inp.cost_bps),
                 "risk_free_rate": float(inp.risk_free_rate),
             },
@@ -348,3 +546,272 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     }
     return out
 
+
+def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> dict[str, Any]:
+    codes = list(dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()]))
+    if not codes:
+        raise ValueError("codes is empty")
+    if int(inp.top_k) < 1:
+        raise ValueError("top_k must be >= 1")
+    if float(inp.cost_bps) < 0:
+        raise ValueError("cost_bps must be >= 0")
+    if not np.isfinite(float(inp.risk_free_rate)):
+        raise ValueError("risk_free_rate must be finite")
+    ps = str(inp.position_sizing or "equal").strip().lower()
+    if ps not in {"equal", "vol_target"}:
+        raise ValueError("position_sizing must be equal|vol_target")
+    if int(inp.vol_window) < 2:
+        raise ValueError("vol_window must be >= 2")
+    if (not np.isfinite(float(inp.vol_target_ann))) or float(inp.vol_target_ann) <= 0:
+        raise ValueError("vol_target_ann must be finite and > 0")
+    gp = str(inp.group_pick_policy or "strongest_score").strip().lower()
+    if gp not in {"strongest_score", "earliest_entry", "lowest_vol"}:
+        raise ValueError(f"invalid group_pick_policy={inp.group_pick_policy}")
+
+    sig_input = TrendInputs(
+        code=codes[0],
+        start=inp.start,
+        end=inp.end,
+        risk_free_rate=inp.risk_free_rate,
+        cost_bps=inp.cost_bps,
+        strategy=inp.strategy,
+        sma_window=inp.sma_window,
+        fast_window=inp.fast_window,
+        slow_window=inp.slow_window,
+        donchian_entry=inp.donchian_entry,
+        donchian_exit=inp.donchian_exit,
+        mom_lookback=inp.mom_lookback,
+        bias_ma_window=inp.bias_ma_window,
+        bias_entry=inp.bias_entry,
+        bias_hot=inp.bias_hot,
+        bias_cold=inp.bias_cold,
+        bias_pos_mode=inp.bias_pos_mode,
+        macd_fast=inp.macd_fast,
+        macd_slow=inp.macd_slow,
+        macd_signal=inp.macd_signal,
+        macd_v_atr_window=inp.macd_v_atr_window,
+        macd_v_scale=inp.macd_v_scale,
+    )
+
+    strat = str(inp.strategy or "ma_filter").strip().lower()
+    need_hist = max(int(inp.sma_window), int(inp.slow_window), int(inp.donchian_entry), int(inp.mom_lookback), int(inp.macd_slow), int(inp.macd_v_atr_window), 20) + 60
+    ext_start = inp.start - dt.timedelta(days=int(need_hist) * 2)
+    close_none = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none").sort_index().ffill()
+    close_qfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq").sort_index()
+    close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq").sort_index()
+    if close_none.empty:
+        raise ValueError("no execution price data for given range (none)")
+    dates = close_none.index
+    close_qfq = close_qfq.reindex(dates).ffill()
+    close_hfq = close_hfq.reindex(dates).ffill()
+    high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq")
+    high_qfq_df = high_qfq_df.sort_index().reindex(dates).ffill() if not high_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
+    low_qfq_df = low_qfq_df.sort_index().reindex(dates).ffill() if not low_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
+
+    ret_none = close_none[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_hfq = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    gross_none = 1.0 + ret_none
+    gross_hfq = 1.0 + ret_hfq
+    corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
+    ca_mask = ((corp_factor - 1.0).abs() > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
+    ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq).astype(float)
+
+    sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
+    sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
+    for c in codes:
+        px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+        if px.dropna().empty:
+            sig_pos[c] = 0.0
+            sig_score[c] = np.nan
+            continue
+        if strat == "ma_filter":
+            sma = px.rolling(window=int(inp.sma_window), min_periods=max(2, int(inp.sma_window) // 2)).mean()
+            pos = (px > sma).astype(float)
+            score = (px / sma - 1.0).astype(float)
+        elif strat == "ema_filter":
+            ema = _ema(px, int(inp.sma_window))
+            pos = (px > ema).astype(float)
+            score = (px / ema - 1.0).astype(float)
+        elif strat == "ma_cross":
+            fast = px.rolling(window=int(inp.fast_window), min_periods=max(2, int(inp.fast_window) // 2)).mean()
+            slow = px.rolling(window=int(inp.slow_window), min_periods=max(2, int(inp.slow_window) // 2)).mean()
+            pos = (fast > slow).astype(float)
+            score = (fast / slow - 1.0).astype(float)
+        elif strat == "donchian":
+            pos = _pos_from_donchian(px, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit))
+            hi = px.shift(1).rolling(window=max(2, int(inp.donchian_entry)), min_periods=max(2, int(inp.donchian_entry))).max()
+            score = (px / hi - 1.0).astype(float)
+        elif strat == "linreg_slope":
+            n = int(inp.sma_window)
+            y = np.log(px.clip(lower=1e-12).astype(float))
+            slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(_rolling_linreg_slope, raw=True)
+            pos = (slope > 0.0).astype(float)
+            score = slope.astype(float)
+        elif strat == "bias":
+            b_win = int(inp.bias_ma_window)
+            ema = _ema(px, b_win)
+            bias = (np.log(px.clip(lower=1e-12)) - np.log(ema.clip(lower=1e-12))) * 100.0
+            pos = (bias > float(inp.bias_entry)).astype(float)
+            score = bias.astype(float)
+        elif strat == "macd_cross":
+            macd, sig, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
+            pos = (macd > sig).astype(float)
+            score = (macd - sig).astype(float)
+        elif strat == "macd_zero_filter":
+            macd, _, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
+            pos = (macd > 0.0).astype(float)
+            score = macd.astype(float)
+        elif strat == "macd_v":
+            macd, _, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
+            h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
+            l = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+            atr = _atr_from_hlc(h.astype(float).fillna(px), l.astype(float).fillna(px), px, window=int(inp.macd_v_atr_window))
+            macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
+            macd_v_sig = _ema(macd_v, int(inp.macd_signal))
+            pos = (macd_v > macd_v_sig).astype(float)
+            score = (macd_v - macd_v_sig).astype(float)
+        else:
+            mom = px / px.shift(int(inp.mom_lookback)) - 1.0
+            pos = (mom > 0.0).astype(float)
+            score = mom.astype(float)
+        sig_pos[c] = pos.fillna(0.0)
+        sig_score[c] = score.replace([np.inf, -np.inf], np.nan)
+
+    vol_ann = ret_hfq.rolling(window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)).std(ddof=1) * np.sqrt(252.0)
+    group_map = {c: str((inp.asset_groups or {}).get(c) or c) for c in codes}
+    w_decision = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
+    holdings: list[dict[str, Any]] = []
+    prev_key: tuple[str, ...] | None = None
+    for d in dates:
+        active = sig_pos.loc[d]
+        scores = sig_score.loc[d].where(active > 0.0, other=np.nan)
+        reduced, gmeta = _reduce_score_by_group_for_day(
+            scores,
+            group_enforce=bool(inp.group_enforce),
+            group_map=group_map,
+            policy=gp,
+            current_holdings=set(prev_key or []),
+            vol_row=vol_ann.loc[d] if d in vol_ann.index else None,
+        )
+        picks = [str(x) for x in reduced.index[: max(1, int(inp.top_k))].tolist()]
+        if not picks:
+            w_row = pd.Series(0.0, index=codes, dtype=float)
+        elif ps == "equal":
+            per = 1.0 / float(len(picks))
+            w_row = pd.Series(0.0, index=codes, dtype=float)
+            for c in picks:
+                w_row.loc[c] = per
+        else:
+            inv: dict[str, float] = {}
+            for c in picks:
+                try:
+                    av = float(vol_ann.loc[d, c])
+                except (TypeError, ValueError, KeyError):
+                    av = float("nan")
+                if (not np.isfinite(av)) or av <= 0:
+                    inv[c] = 0.0
+                else:
+                    inv[c] = 1.0 / av
+            den = float(sum(inv.values()))
+            w_row = pd.Series(0.0, index=codes, dtype=float)
+            if den > 0:
+                raw = {c: float(v) / den for c, v in inv.items()}
+                # portfolio target-vol scalar
+                port_vol = float(np.sqrt(np.sum([(raw[c] ** 2) * ((float(vol_ann.loc[d, c]) if np.isfinite(float(vol_ann.loc[d, c])) else 0.0) ** 2) for c in picks])))
+                scale = 1.0 if port_vol <= 1e-12 else min(1.0, float(inp.vol_target_ann) / port_vol)
+                for c in picks:
+                    w_row.loc[c] = raw[c] * scale
+            else:
+                per = 1.0 / float(len(picks))
+                for c in picks:
+                    w_row.loc[c] = per
+        w_decision.loc[d] = w_row.to_numpy(dtype=float)
+        key = tuple(sorted([c for c in picks]))
+        if key != prev_key:
+            holdings.append(
+                {
+                    "decision_date": d.date().isoformat(),
+                    "picks": list(key),
+                    "scores": {c: (None if pd.isna(reduced.get(c)) else float(reduced.get(c))) for c in key},
+                    "group_filter": gmeta,
+                }
+            )
+            prev_key = key
+
+    # execute on next day
+    w = w_decision.shift(1).fillna(0.0).astype(float)
+    turnover = (w - w.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
+    cost = turnover * (float(inp.cost_bps) / 10000.0)
+    port_ret = (w * ret_exec).sum(axis=1) - cost
+    nav = (1.0 + port_ret).cumprod()
+    if len(nav) > 0:
+        nav.iloc[0] = 1.0
+
+    bench_ret = ret_hfq.mean(axis=1).fillna(0.0)
+    bench_nav = (1.0 + bench_ret).cumprod()
+    if len(bench_nav) > 0:
+        bench_nav.iloc[0] = 1.0
+    active = (port_ret - bench_ret).astype(float)
+    ex_nav = (1.0 + active).cumprod()
+    if len(ex_nav) > 0:
+        ex_nav.iloc[0] = 1.0
+
+    m_strat = {
+        "cumulative_return": float(nav.iloc[-1] - 1.0),
+        "annualized_return": float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_volatility": float(_annualized_vol(port_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "max_drawdown": float(_max_drawdown(nav)),
+        "max_drawdown_recovery_days": int(_max_drawdown_duration_days(nav)),
+        "sharpe_ratio": float(_sharpe(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sortino_ratio": float(_sortino(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "ulcer_index": float(_ulcer_index(nav, in_percent=True)),
+        "avg_daily_turnover": float(turnover.mean()),
+    }
+    m_bench = {
+        "cumulative_return": float(bench_nav.iloc[-1] - 1.0),
+        "annualized_return": float(_annualized_return(bench_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_volatility": float(_annualized_vol(bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "max_drawdown": float(_max_drawdown(bench_nav)),
+        "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bench_nav)),
+        "sharpe_ratio": float(_sharpe(bench_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sortino_ratio": float(_sortino(bench_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "ulcer_index": float(_ulcer_index(bench_nav, in_percent=True)),
+    }
+    m_ex = {
+        "cumulative_return": float(ex_nav.iloc[-1] - 1.0),
+        "annualized_return": float(_annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "information_ratio": float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)),
+    }
+
+    return {
+        "meta": {
+            "type": "trend_portfolio_backtest",
+            "codes": codes,
+            "start": inp.start.strftime("%Y%m%d"),
+            "end": inp.end.strftime("%Y%m%d"),
+            "strategy": strat,
+            "params": {
+                "top_k": int(inp.top_k),
+                "position_sizing": ps,
+                "vol_window": int(inp.vol_window),
+                "vol_target_ann": float(inp.vol_target_ann),
+                "group_enforce": bool(inp.group_enforce),
+                "group_pick_policy": gp,
+                "asset_groups": {k: v for k, v in group_map.items()},
+            },
+        },
+        "nav": {
+            "dates": nav.index.date.astype(str).tolist(),
+            "series": {
+                "STRAT": nav.astype(float).tolist(),
+                "BUY_HOLD_EW": bench_nav.astype(float).tolist(),
+                "EXCESS": ex_nav.astype(float).tolist(),
+            },
+        },
+        "weights": {
+            "dates": w.index.date.astype(str).tolist(),
+            "series": {c: w[c].astype(float).tolist() for c in codes},
+        },
+        "holdings": holdings,
+        "metrics": {"strategy": m_strat, "benchmark": m_bench, "excess": m_ex},
+    }

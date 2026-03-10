@@ -29,6 +29,8 @@ from .schemas import (
     SimTradeConfirmRequest,
     SimTradePreviewRequest,
     TrendBacktestRequest,
+    TrendPortfolioBacktestRequest,
+    AssetGroupSuggestRequest,
     LeadLagAnalysisRequest,
     LeadLagAnalysisResponse,
     MacroPairLeadLagRequest,
@@ -88,9 +90,10 @@ from ..analysis.baseline import (
 from ..analysis.calendar_effect import BaselineCalendarEffectInputs, compute_baseline_calendar_effect, compute_rotation_calendar_effect
 from ..analysis.calendar_effect import _decision_dates_for_rebalance as _cal_decision_dates_for_rebalance
 from ..analysis.calendar_effect import _ew_nav_and_weights_by_decision_dates as _cal_ew_nav_and_weights_by_decision_dates
+from ..analysis.grouping import AssetGroupSuggestInputs, suggest_asset_groups
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
-from ..analysis.trend import TrendInputs, compute_trend_backtest
+from ..analysis.trend import TrendInputs, TrendPortfolioInputs, compute_trend_backtest, compute_trend_portfolio_backtest
 from ..analysis.leadlag import LeadLagInputs, compute_lead_lag, align_us_close_to_cn_next_trading_day
 from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
 from ..analysis.sim_gbm import (
@@ -664,6 +667,9 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         corr_filter=payload.corr_filter,
         corr_window=payload.corr_window,
         corr_threshold=payload.corr_threshold,
+        group_enforce=payload.group_enforce,
+        group_pick_policy=payload.group_pick_policy,
+        asset_groups=payload.asset_groups,
         inertia=payload.inertia,
         inertia_min_hold_periods=payload.inertia_min_hold_periods,
         inertia_score_gap=payload.inertia_score_gap,
@@ -735,9 +741,69 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         bias_hot=payload.bias_hot,
         bias_cold=payload.bias_cold,
         bias_pos_mode=payload.bias_pos_mode,
+        macd_fast=payload.macd_fast,
+        macd_slow=payload.macd_slow,
+        macd_signal=payload.macd_signal,
+        macd_v_atr_window=payload.macd_v_atr_window,
+        macd_v_scale=payload.macd_v_scale,
     )
     try:
         return compute_trend_backtest(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/trend/portfolio")
+def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session = Depends(get_session)) -> dict:
+    inp = TrendPortfolioInputs(
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        risk_free_rate=payload.risk_free_rate,
+        cost_bps=payload.cost_bps,
+        strategy=payload.strategy,
+        top_k=payload.top_k,
+        position_sizing=payload.position_sizing,
+        vol_window=payload.vol_window,
+        vol_target_ann=payload.vol_target_ann,
+        group_enforce=payload.group_enforce,
+        group_pick_policy=payload.group_pick_policy,
+        asset_groups=payload.asset_groups,
+        sma_window=payload.sma_window,
+        fast_window=payload.fast_window,
+        slow_window=payload.slow_window,
+        donchian_entry=payload.donchian_entry,
+        donchian_exit=payload.donchian_exit,
+        mom_lookback=payload.mom_lookback,
+        bias_ma_window=payload.bias_ma_window,
+        bias_entry=payload.bias_entry,
+        bias_hot=payload.bias_hot,
+        bias_cold=payload.bias_cold,
+        bias_pos_mode=payload.bias_pos_mode,
+        macd_fast=payload.macd_fast,
+        macd_slow=payload.macd_slow,
+        macd_signal=payload.macd_signal,
+        macd_v_atr_window=payload.macd_v_atr_window,
+        macd_v_scale=payload.macd_v_scale,
+    )
+    try:
+        return compute_trend_portfolio_backtest(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/groups/suggest")
+def suggest_groups(payload: AssetGroupSuggestRequest, db: Session = Depends(get_session)) -> dict:
+    inp = AssetGroupSuggestInputs(
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        adjust=payload.adjust,
+        lookback_days=payload.lookback_days,
+        corr_threshold=payload.corr_threshold,
+    )
+    try:
+        return suggest_asset_groups(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
