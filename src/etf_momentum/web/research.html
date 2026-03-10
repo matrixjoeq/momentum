@@ -226,7 +226,7 @@
       </div>
     </div>
 
-    <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
+    <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start;">
       <div>
         <h3>收益贡献（等权组合，全区间） <button class="helpBtn" data-metric="ew_return_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
         <table id="ewReturnContrib"></table>
@@ -235,6 +235,32 @@
         <h3>风险贡献（等权组合，全区间） <button class="helpBtn" data-metric="ew_risk_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
         <table id="ewRiskContrib"></table>
       </div>
+      <div>
+        <h3>风险收益比（等权组合，全区间）</h3>
+        <table id="ewRiskReturnRatio"></table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>等权/风平组合：日度收益率分布统计</h3>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>组合</label>
+          <select id="baselineDailyRetSeries" style="min-width:180px;">
+            <option value="EW" selected>等权（EW）</option>
+            <option value="RP">风险平价（RP）</option>
+          </select>
+        </div>
+        <div>
+          <label>收益口径</label>
+          <select id="baselineDailyRetMode" style="min-width:180px;">
+            <option value="simple" selected>普通收益率</option>
+            <option value="log">对数收益率(log return)</option>
+          </select>
+        </div>
+      </div>
+      <div id="baselineDailyRetHist" style="width:100%; height:320px; margin-top:10px;"></div>
+      <table id="baselineDailyRetQuantiles" style="margin-top:10px;"></table>
     </div>
 
     <div class="panel">
@@ -1115,6 +1141,21 @@
       </div>
 
       <div class="panel">
+        <h3>轮动策略：日度收益率分布统计</h3>
+        <div class="row no-print" style="margin-top:8px; align-items:end;">
+          <div>
+            <label>收益口径</label>
+            <select id="rotDailyRetMode" style="min-width:180px;">
+              <option value="simple" selected>普通收益率</option>
+              <option value="log">对数收益率(log return)</option>
+            </select>
+          </div>
+        </div>
+        <div id="rotDailyRetHist" style="width:100%; height:320px; margin-top:10px;"></div>
+        <table id="rotDailyRetQuantiles" style="margin-top:10px;"></table>
+      </div>
+
+      <div class="panel">
         <h3>轮动策略：各标的持仓周期长度分布（交易日）</h3>
         <div class="muted">统计每个标的在轮动策略中“实际被持有”的每段持仓区间长度（按交易日计数），并给出直方图与分位数。用于研究“持仓节奏/持有期长短”与回撤的关系。</div>
         <div class="row no-print" style="margin-top:8px; align-items:end;">
@@ -1127,7 +1168,7 @@
         <table id="rotHoldLenQuantiles" style="margin-top:12px;"></table>
       </div>
 
-      <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
+      <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start;">
         <div>
           <h3>收益贡献（轮动策略，全区间） <button class="helpBtn" data-metric="rot_return_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
           <table id="rotReturnContrib"></table>
@@ -1135,6 +1176,10 @@
         <div>
           <h3>风险贡献（轮动策略，全区间） <button class="helpBtn" data-metric="rot_risk_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
           <table id="rotRiskContrib"></table>
+        </div>
+        <div>
+          <h3>风险收益比（轮动策略，全区间）</h3>
+          <table id="rotRiskReturnRatio"></table>
         </div>
       </div>
 
@@ -1491,12 +1536,27 @@
         <div><label>TSMOM回看</label><input id="trendMomLb" value="252" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
+        <div><label>BIAS MA窗口</label><input id="trendBiasMaWin" value="20" /></div>
+        <div><label>BIAS 入场阈值(%)</label><input id="trendBiasEntry" value="2.0" /></div>
+        <div><label>BIAS 过热止盈(%)</label><input id="trendBiasHot" value="10.0" /></div>
+        <div><label>BIAS 过冷止损(%)</label><input id="trendBiasCold" value="-2.0" /></div>
+        <div>
+          <label>BIAS 仓位模式</label>
+          <select id="trendBiasPosMode" style="min-width:140px;">
+            <option value="binary" selected>binary</option>
+            <option value="continuous">continuous</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>MACD fast</label><input id="trendMacdFast" value="12" /></div>
         <div><label>MACD slow</label><input id="trendMacdSlow" value="26" /></div>
         <div><label>MACD signal</label><input id="trendMacdSignal" value="9" /></div>
         <div><label>MACD-V ATR窗口</label><input id="trendMacdVAtr" value="26" /></div>
         <div><label>MACD-V scale</label><input id="trendMacdVScale" value="100" /></div>
       </div>
+      <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
+      <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>分组约束（组合）</label><select id="trendGroupEnforce"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
         <div><label>组内选优</label><select id="trendGroupPolicy"><option value="strongest_score" selected>得分最高</option><option value="earliest_entry">最早入场</option><option value="lowest_vol">最低波动</option></select></div>
@@ -1506,6 +1566,18 @@
         <textarea id="trendAssetGroups" rows="3" style="width:100%; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;" placeholder="159915=CN_EQ&#10;510300=CN_EQ&#10;513100=US_EQ"></textarea>
       </div>
       <div id="trendChart" style="width:100%; height:420px; margin-top:10px;"></div>
+      <h3 style="margin-top:12px;">趋势策略：日度收益率分布统计</h3>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>收益口径</label>
+          <select id="trendDailyRetMode" style="min-width:180px;">
+            <option value="simple" selected>普通收益率</option>
+            <option value="log">对数收益率(log return)</option>
+          </select>
+        </div>
+      </div>
+      <div id="trendDailyRetHist" style="width:100%; height:320px; margin-top:10px;"></div>
+      <table id="trendDailyRetQuantiles" style="margin-top:10px;"></table>
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
       <table id="trendGroupTable" style="margin-top:10px;"></table>
     </div>
@@ -2628,8 +2700,10 @@
           if (!one) return setMsg("小程序固定轮动：后端未返回该方案数据");
 
           // Render into the existing rotation section (same as runRotation())
+          window.__lastRotationResult = one;
           plotRotation(one);
           renderRotationMetrics(one.metrics || {});
+          renderRotationDailyReturnDist(one);
           renderWinPayoff(one.win_payoff || {});
           renderRotationHoldingPeriodLengthDistributions(one.holdings || [], (one.nav && one.nav.dates) ? one.nav.dates : []);
           renderContributionTables("rot", one.attribution);
@@ -2761,6 +2835,12 @@
         return x;
       }
 
+      function _shiftDays(d, days) {
+        const x = new Date(d.getTime());
+        x.setDate(x.getDate() + days);
+        return x;
+      }
+
       function _shiftYears(d, years) {
         const x = new Date(d.getTime());
         x.setFullYear(x.getFullYear() + years);
@@ -2769,7 +2849,9 @@
 
       function _corrRangeSpec(key) {
         const m = {
-          "1m": { label: "近一月", threshold: (end) => _shiftMonths(end, -1) },
+          // Use fixed 30D lookback for 1m to avoid month-end overflow artifacts
+          // from Date#setMonth (e.g. 03-31 -> 03-03 after -1 month).
+          "1m": { label: "近一月", threshold: (end) => _shiftDays(end, -30) },
           "3m": { label: "近三月", threshold: (end) => _shiftMonths(end, -3) },
           "6m": { label: "近六月", threshold: (end) => _shiftMonths(end, -6) },
           "1y": { label: "近一年", threshold: (end) => _shiftYears(end, -1) },
@@ -2870,7 +2952,10 @@
         const seriesByCode = {};
         for (const c of codes) seriesByCode[c] = lastBaseline.nav.series[c];
 
-        const minObs = (lastBaseline && lastBaseline.correlation && Number(lastBaseline.correlation.min_pair_obs)) || 20;
+        const minObsBase = (lastBaseline && lastBaseline.correlation && Number(lastBaseline.correlation.min_pair_obs)) || 20;
+        // For short windows (especially 1m), strict 20 obs can over-filter valid ranges
+        // when holidays reduce trading days.
+        const minObs = (key === "1m") ? Math.max(8, Math.min(minObsBase, 12)) : minObsBase;
         const calc = _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx, minObs);
         if (!calc.ok) return;
 
@@ -3078,6 +3163,86 @@
         else if (codes.length > 0) sel.value = codes[0];
       }
 
+      function updateTrendStrategyParamsUi() {
+        const strat = (($("trendStrategy") && $("trendStrategy").value) ? String($("trendStrategy").value) : "ma_filter").trim();
+        const descEl = $("trendStrategyDesc");
+        const pEl = $("trendParamDesc");
+        const allIds = [
+          "trendSmaWin",
+          "trendFastWin",
+          "trendSlowWin",
+          "trendDonEntry",
+          "trendDonExit",
+          "trendMomLb",
+          "trendBiasMaWin",
+          "trendBiasEntry",
+          "trendBiasHot",
+          "trendBiasCold",
+          "trendBiasPosMode",
+          "trendMacdFast",
+          "trendMacdSlow",
+          "trendMacdSignal",
+          "trendMacdVAtr",
+          "trendMacdVScale",
+        ];
+        const byStrat = {
+          ma_filter: ["trendSmaWin"],
+          ema_filter: ["trendSmaWin"],
+          ma_cross: ["trendFastWin", "trendSlowWin"],
+          donchian: ["trendDonEntry", "trendDonExit"],
+          tsmom: ["trendMomLb"],
+          linreg_slope: ["trendSmaWin"],
+          bias: ["trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode"],
+          macd_cross: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
+          macd_zero_filter: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
+          macd_v: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale"],
+        };
+        const enabled = new Set(byStrat[strat] || []);
+        for (const id of allIds) {
+          const el = $(id);
+          if (!el) continue;
+          const on = enabled.has(id);
+          el.disabled = !on;
+          el.style.opacity = on ? "1" : "0.55";
+        }
+
+        const stratDesc = {
+          ma_filter: "MA过滤：价格在均线之上持有，否则空仓。",
+          ema_filter: "EMA过滤：价格在指数均线之上持有，否则空仓。",
+          ma_cross: "双均线：快线上穿慢线入场，下穿离场。",
+          donchian: "唐奇安通道：突破上轨入场，跌破下轨离场。",
+          tsmom: "时序动量：回看期收益为正则持有，否则空仓。",
+          linreg_slope: "线性回归斜率：回看窗口斜率为正持有，否则空仓。",
+          bias: "BIAS策略：基于价格相对均线偏离度，按阈值做进出场与风控。",
+          macd_cross: "MACD金叉死叉：MACD线上穿信号线入场，下穿离场。",
+          macd_zero_filter: "MACD零轴过滤：MACD>0 持有，<=0 空仓。",
+          macd_v: "MACD-V：用ATR归一化的MACD强度进行择时。",
+        };
+        const paramDesc = {
+          trendSmaWin: "SMA窗口：均线/回归窗口长度（交易日）。",
+          trendFastWin: "快线窗口：短周期均线窗口。",
+          trendSlowWin: "慢线窗口：长周期均线窗口，需大于快线。",
+          trendDonEntry: "Donchian入场：上轨突破回看窗口。",
+          trendDonExit: "Donchian出场：下轨跌破回看窗口。",
+          trendMomLb: "TSMOM回看：动量收益计算窗口。",
+          trendBiasMaWin: "BIAS MA窗口：BIAS参考均线窗口。",
+          trendBiasEntry: "BIAS入场阈值：偏离超过该值入场。",
+          trendBiasHot: "BIAS过热止盈：偏离过高时止盈离场。",
+          trendBiasCold: "BIAS过冷止损：偏离过低时止损离场。",
+          trendBiasPosMode: "BIAS仓位模式：binary=二元持仓，continuous=连续仓位。",
+          trendMacdFast: "MACD fast：快速EMA窗口。",
+          trendMacdSlow: "MACD slow：慢速EMA窗口。",
+          trendMacdSignal: "MACD signal：信号线EMA窗口。",
+          trendMacdVAtr: "MACD-V ATR窗口：归一化波动窗口。",
+          trendMacdVScale: "MACD-V scale：归一化缩放系数。",
+        };
+        if (descEl) descEl.textContent = `策略说明：${stratDesc[strat] || "-"}`;
+        if (pEl) {
+          const lines = Array.from(enabled).map((id) => paramDesc[id]).filter(Boolean);
+          pEl.textContent = `参数作用：${lines.length ? lines.join("；") : "该策略无额外参数。"}`
+        }
+      }
+
       async function loadPool() {
         const resp = await api(`/etf?adjust=${encodeURIComponent(ADJUST_USED)}`, { method: "GET" });
         const data = await resp.json();
@@ -3152,11 +3317,13 @@
         const nameByCode = new Map((pool || []).map(x => [x.code, x.name]));
         const retEl = $(kind === "ew" ? "ewReturnContrib" : "rotReturnContrib");
         const riskEl = $(kind === "ew" ? "ewRiskContrib" : "rotRiskContrib");
-        if (!retEl || !riskEl) return;
+        const rrEl = $(kind === "ew" ? "ewRiskReturnRatio" : "rotRiskReturnRatio");
+        if (!retEl || !riskEl || !rrEl) return;
 
         if (!attribution || !attribution.return || !attribution.risk) {
           retEl.innerHTML = "<tr><th>标的</th><th>总收益贡献</th><th>贡献占比</th></tr>";
           riskEl.innerHTML = "<tr><th>标的</th><th>风险贡献占比</th></tr>";
+          rrEl.innerHTML = "<tr><th>标的</th><th>收益占比</th><th>风险占比</th><th>风险收益比</th></tr>";
           return;
         }
 
@@ -3186,6 +3353,35 @@
               const label = `${c}${nm ? " " + nm : ""}`;
               const share = (x.risk_share == null) ? "-" : (Number(x.risk_share) * 100).toFixed(2) + "%";
               return `<tr><td>${label}</td><td>${share}</td></tr>`;
+            })
+            .join("");
+
+        const retMap = new Map((attribution.return.by_code || []).map((x) => [String(x.code), Number(x.return_share)]));
+        const riskMap = new Map((attribution.risk.by_code || []).map((x) => [String(x.code), Number(x.risk_share)]));
+        const codes = Array.from(new Set([...retMap.keys(), ...riskMap.keys()]));
+        const rows = [];
+        for (const c of codes) {
+          const r = retMap.get(c);
+          const k = riskMap.get(c);
+          const ratio = (Number.isFinite(r) && Number.isFinite(k) && k > 0) ? (r / k) : NaN;
+          rows.push({ code: c, retShare: r, riskShare: k, ratio });
+        }
+        rows.sort((a, b) => {
+          const av = Number.isFinite(a.ratio) ? a.ratio : -Infinity;
+          const bv = Number.isFinite(b.ratio) ? b.ratio : -Infinity;
+          return bv - av;
+        });
+        rrEl.innerHTML =
+          `<tr><th>标的</th><th>收益占比</th><th>风险占比</th><th>风险收益比</th></tr>` +
+          rows
+            .map((x) => {
+              const c = x.code;
+              const nm = nameByCode.get(c) || "";
+              const label = `${c}${nm ? " " + nm : ""}`;
+              const retShare = Number.isFinite(x.retShare) ? (x.retShare * 100).toFixed(2) + "%" : "-";
+              const riskShare = Number.isFinite(x.riskShare) ? (x.riskShare * 100).toFixed(2) + "%" : "-";
+              const ratioTxt = Number.isFinite(x.ratio) ? Number(x.ratio).toFixed(3) : "-";
+              return `<tr><td>${label}</td><td>${retShare}</td><td>${riskShare}</td><td>${ratioTxt}</td></tr>`;
             })
             .join("");
       }
@@ -5137,6 +5333,153 @@
         return arr[lo] + (arr[hi] - arr[lo]) * (pos - lo);
       }
 
+      function _dailyReturnsFromNav(nav, dates) {
+        const outSimple = [];
+        const outLog = [];
+        let currentSimple = NaN;
+        let currentLog = NaN;
+        let currentDate = "";
+        if (!Array.isArray(nav) || nav.length < 2) {
+          return { simple: outSimple, log: outLog, currentSimple, currentLog, currentDate };
+        }
+        for (let i = 1; i < nav.length; i++) {
+          const a = Number(nav[i - 1]);
+          const b = Number(nav[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) continue;
+          const r = b / a - 1.0;
+          const lr = Math.log(b / a);
+          if (!Number.isFinite(r) || !Number.isFinite(lr)) continue;
+          outSimple.push(r);
+          outLog.push(lr);
+          currentSimple = r;
+          currentLog = lr;
+          if (Array.isArray(dates) && dates[i]) currentDate = String(dates[i]);
+        }
+        return { simple: outSimple, log: outLog, currentSimple, currentLog, currentDate };
+      }
+
+      function _renderDailyReturnDist(histId, tableId, payload, title, mode) {
+        const histEl = $(histId);
+        const tblEl = $(tableId);
+        if (!histEl || !tblEl) return;
+        const m = String(mode || "simple").toLowerCase();
+        const label = (m === "log") ? "对数收益率(log return)" : "普通收益率";
+        const xsRaw = (payload && Array.isArray(payload[m === "log" ? "log" : "simple"])) ? payload[m === "log" ? "log" : "simple"] : [];
+        const xs = xsRaw.filter((x) => Number.isFinite(Number(x))).map(Number);
+        const cur = Number(payload && (m === "log" ? payload.currentLog : payload.currentSimple));
+        const curDate = String((payload && payload.currentDate) || "");
+        if (xs.length < 2) {
+          histEl.innerHTML = "<div class='muted'>样本不足</div>";
+          tblEl.innerHTML = "";
+          return;
+        }
+        Plotly.newPlot(
+          histId,
+          [{
+            x: xs,
+            type: "histogram",
+            nbinsx: 60,
+            marker: { color: "#4c78a8" },
+            hovertemplate: "ret=%{x:.2%}<br>count=%{y}<extra></extra>",
+          }],
+          {
+            margin: { t: 40 },
+            title: { text: `${title}（${label}）`, font: { size: 14 } },
+            xaxis: { title: label, tickformat: ".2%" },
+            yaxis: { title: "频数" },
+            shapes: Number.isFinite(cur) ? [{
+              type: "line",
+              xref: "x",
+              yref: "paper",
+              x0: cur,
+              x1: cur,
+              y0: 0,
+              y1: 1,
+              line: { color: "rgba(214,39,40,0.95)", width: 2.4, dash: "solid" },
+            }] : [],
+            annotations: Number.isFinite(cur) ? [{
+              xref: "paper",
+              yref: "paper",
+              x: 0.01,
+              y: 0.98,
+              showarrow: false,
+              text: `当前值${curDate ? `（${esc(curDate)}）` : ""}：${fmtPct(cur)}`,
+              font: { size: 11, color: "#666" },
+            }] : [],
+          },
+          { responsive: true, displayModeBar: false }
+        );
+        const q = (p) => _percentile(xs, p);
+        const s = {
+          count: xs.length,
+          mean: xs.reduce((a, b) => a + b, 0) / xs.length,
+          std: _std(xs),
+          q01: q(1),
+          q05: q(5),
+          q10: q(10),
+          q25: q(25),
+          q50: q(50),
+          q75: q(75),
+          q90: q(90),
+          q95: q(95),
+          q99: q(99),
+        };
+        const curTxt = Number.isFinite(cur) ? fmtPct(cur) : "-";
+        tblEl.innerHTML =
+          `<tr><th>统计</th><th>值</th></tr>` +
+          `<tr><td>样本数</td><td>${s.count}</td></tr>` +
+          `<tr><td>均值</td><td>${fmtPct(s.mean)}</td></tr>` +
+          `<tr><td>标准差</td><td>${fmtPct(s.std)}</td></tr>` +
+          `<tr><td>1%</td><td>${fmtPct(s.q01)}</td></tr>` +
+          `<tr><td>5%</td><td>${fmtPct(s.q05)}</td></tr>` +
+          `<tr><td>10%</td><td>${fmtPct(s.q10)}</td></tr>` +
+          `<tr><td>25%</td><td>${fmtPct(s.q25)}</td></tr>` +
+          `<tr><td>50%</td><td>${fmtPct(s.q50)}</td></tr>` +
+          `<tr><td>75%</td><td>${fmtPct(s.q75)}</td></tr>` +
+          `<tr><td>90%</td><td>${fmtPct(s.q90)}</td></tr>` +
+          `<tr><td>95%</td><td>${fmtPct(s.q95)}</td></tr>` +
+          `<tr><td>99%</td><td>${fmtPct(s.q99)}</td></tr>` +
+          `<tr><td>当前值${curDate ? `（${esc(curDate)}）` : ""}</td><td>${curTxt}</td></tr>`;
+      }
+
+      function renderBaselineDailyReturnDist(data, defaultSeries) {
+        const sel = $("baselineDailyRetSeries");
+        const modeSel = $("baselineDailyRetMode");
+        const series = (data && data.nav && data.nav.series) ? data.nav.series : {};
+        if (!sel || !series) return;
+        const wanted = String(defaultSeries || sel.value || "EW").toUpperCase();
+        if (wanted === "EW" || wanted === "RP") sel.value = wanted;
+        const key = String(sel.value || "EW").toUpperCase();
+        const nav = Array.isArray(series[key]) ? series[key] : [];
+        const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
+        const payload = _dailyReturnsFromNav(nav, dates);
+        const label = (key === "RP") ? "风险平价（RP）" : "等权（EW）";
+        const mode = modeSel ? String(modeSel.value || "simple") : "simple";
+        _renderDailyReturnDist("baselineDailyRetHist", "baselineDailyRetQuantiles", payload, `${label} 日度收益率分布`, mode);
+      }
+
+      function renderRotationDailyReturnDist(result) {
+        const modeSel = $("rotDailyRetMode");
+        const nav = (result && result.nav && result.nav.series && Array.isArray(result.nav.series.ROTATION))
+          ? result.nav.series.ROTATION
+          : [];
+        const dates = (result && result.nav && Array.isArray(result.nav.dates)) ? result.nav.dates : [];
+        const payload = _dailyReturnsFromNav(nav, dates);
+        const mode = modeSel ? String(modeSel.value || "simple") : "simple";
+        _renderDailyReturnDist("rotDailyRetHist", "rotDailyRetQuantiles", payload, "轮动策略 日度收益率分布", mode);
+      }
+
+      function renderTrendDailyReturnDist(data) {
+        const modeSel = $("trendDailyRetMode");
+        const nav = (data && data.nav && data.nav.series && Array.isArray(data.nav.series.STRAT))
+          ? data.nav.series.STRAT
+          : [];
+        const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
+        const payload = _dailyReturnsFromNav(nav, dates);
+        const mode = modeSel ? String(modeSel.value || "simple") : "simple";
+        _renderDailyReturnDist("trendDailyRetHist", "trendDailyRetQuantiles", payload, "趋势策略 日度收益率分布", mode);
+      }
+
       function _calcMetricsFromNav(nav, rfAnnual) {
         const n = nav.length;
         if (n < 2) return {};
@@ -6595,6 +6938,7 @@
         window.__lastRotationResult = data;
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
+        renderRotationDailyReturnDist(data);
         // Use continuous holding streaks (not per-rebalance periods) for holding-length distributions.
         renderRotationHoldingPeriodLengthDistributions(data.holding_streaks || data.holdings || [], (data.nav && data.nav.dates) ? data.nav.dates : []);
         renderWinPayoff(data.win_payoff || {});
@@ -6641,6 +6985,11 @@
           donchian_entry: Number(($("trendDonEntry").value || "20").trim()),
           donchian_exit: Number(($("trendDonExit").value || "10").trim()),
           mom_lookback: Number(($("trendMomLb").value || "252").trim()),
+          bias_ma_window: Number(($("trendBiasMaWin").value || "20").trim()),
+          bias_entry: Number(($("trendBiasEntry").value || "2.0").trim()),
+          bias_hot: Number(($("trendBiasHot").value || "10.0").trim()),
+          bias_cold: Number(($("trendBiasCold").value || "-2.0").trim()),
+          bias_pos_mode: (($("trendBiasPosMode") && $("trendBiasPosMode").value) ? String($("trendBiasPosMode").value) : "binary"),
           macd_fast: Number(($("trendMacdFast").value || "12").trim()),
           macd_slow: Number(($("trendMacdSlow").value || "26").trim()),
           macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
@@ -6675,6 +7024,7 @@
         $("status").textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
+        window.__lastTrendResult = data;
         const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
         const dates = (data && data.nav && data.nav.dates) ? data.nav.dates : [];
         const y1 = Array.isArray(nav.STRAT) ? nav.STRAT : [];
@@ -6685,6 +7035,7 @@
           { x: dates, y: y2, type: "scatter", mode: "lines", name: "BENCH" },
           { x: dates, y: y3, type: "scatter", mode: "lines", name: "EXCESS" },
         ], { margin: { t: 30 }, title: `趋势回测 - ${esc(strategy)} (${mode})` });
+        renderTrendDailyReturnDist(data);
         const m = (data && data.metrics) ? data.metrics : {};
         const rows = [];
         for (const k of ["strategy", "benchmark", "excess"]) {
@@ -7079,6 +7430,7 @@
         for (const k of Object.keys(data.nav.series || {})) if (String(k).startsWith("BENCH:")) nav2.series[k] = data.nav.series[k];
         plotNav(nav2);
         renderMetrics(picked.metrics);
+        renderBaselineDailyReturnDist(data, picked.mode);
         renderContributionTables("ew", picked.attribution);
         periodState.weekly.data = data.period_returns.weekly || [];
         periodState.monthly.data = data.period_returns.monthly || [];
@@ -7118,9 +7470,26 @@
         for (const k of Object.keys(lastBaseline.nav.series || {})) if (String(k).startsWith("BENCH:")) nav2.series[k] = lastBaseline.nav.series[k];
         plotNav(nav2);
         renderMetrics(metrics);
+        renderBaselineDailyReturnDist(lastBaseline, mode);
         renderContributionTables("ew", attribution);
         plotRolling("rollingReturns", "Rolling Returns", (rolling.returns || {}), ".0%");
         plotRolling("rollingDD", "Rolling Drawdown", (rolling.drawdown || rolling.max_drawdown || {}), ".0%");
+      });
+      if ($("baselineDailyRetSeries")) $("baselineDailyRetSeries").addEventListener("change", () => {
+        if (!lastBaseline) return;
+        renderBaselineDailyReturnDist(lastBaseline);
+      });
+      if ($("baselineDailyRetMode")) $("baselineDailyRetMode").addEventListener("change", () => {
+        if (!lastBaseline) return;
+        renderBaselineDailyReturnDist(lastBaseline);
+      });
+      if ($("rotDailyRetMode")) $("rotDailyRetMode").addEventListener("change", () => {
+        if (!window.__lastRotationResult) return;
+        renderRotationDailyReturnDist(window.__lastRotationResult);
+      });
+      if ($("trendDailyRetMode")) $("trendDailyRetMode").addEventListener("change", () => {
+        if (!window.__lastTrendResult) return;
+        renderTrendDailyReturnDist(window.__lastTrendResult);
       });
 
       function initTabs(containerId) {
@@ -7539,6 +7908,9 @@
       $("run").addEventListener("click", runAnalysis);
       $("runRotation").addEventListener("click", runRotation);
       if ($("runTrendResearch")) $("runTrendResearch").addEventListener("click", runTrendResearch);
+      if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendStrategyParamsUi);
+      // Init trend strategy parameter enablement/description on page load.
+      updateTrendStrategyParamsUi();
       if ($("rotSuggestGroups")) $("rotSuggestGroups").addEventListener("click", runSuggestGroups);
       if ($("rotBenchMode")) $("rotBenchMode").addEventListener("change", () => {
         const data = window.__lastRotationResult;

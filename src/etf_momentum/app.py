@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import status
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from .api.routes import router as api_router
 from .api.deps import init_app_state
@@ -89,6 +90,15 @@ def create_app() -> FastAPI:
     @fastapi_app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @fastapi_app.get("/favicon.ico")
+    def favicon() -> Response:
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "favicon.ico"
+        if path.exists():
+            return FileResponse(path)
+        # Avoid browser default favicon probe polluting logs with 404.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     fastapi_app.include_router(api_router, prefix="/api")
     return fastapi_app
