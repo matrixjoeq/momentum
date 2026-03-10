@@ -69,6 +69,7 @@ class TrendPortfolioInputs:
     group_enforce: bool = False
     group_pick_policy: str = "strongest_score"  # strongest_score | earliest_entry | lowest_vol
     asset_groups: dict[str, str] | None = None
+    dynamic_universe: bool = False
     # single-strategy params
     sma_window: int = 200
     fast_window: int = 50
@@ -568,31 +569,6 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
     if gp not in {"strongest_score", "earliest_entry", "lowest_vol"}:
         raise ValueError(f"invalid group_pick_policy={inp.group_pick_policy}")
 
-    sig_input = TrendInputs(
-        code=codes[0],
-        start=inp.start,
-        end=inp.end,
-        risk_free_rate=inp.risk_free_rate,
-        cost_bps=inp.cost_bps,
-        strategy=inp.strategy,
-        sma_window=inp.sma_window,
-        fast_window=inp.fast_window,
-        slow_window=inp.slow_window,
-        donchian_entry=inp.donchian_entry,
-        donchian_exit=inp.donchian_exit,
-        mom_lookback=inp.mom_lookback,
-        bias_ma_window=inp.bias_ma_window,
-        bias_entry=inp.bias_entry,
-        bias_hot=inp.bias_hot,
-        bias_cold=inp.bias_cold,
-        bias_pos_mode=inp.bias_pos_mode,
-        macd_fast=inp.macd_fast,
-        macd_slow=inp.macd_slow,
-        macd_signal=inp.macd_signal,
-        macd_v_atr_window=inp.macd_v_atr_window,
-        macd_v_scale=inp.macd_v_scale,
-    )
-
     strat = str(inp.strategy or "ma_filter").strip().lower()
     need_hist = max(int(inp.sma_window), int(inp.slow_window), int(inp.donchian_entry), int(inp.mom_lookback), int(inp.macd_slow), int(inp.macd_v_atr_window), 20) + 60
     ext_start = inp.start - dt.timedelta(days=int(need_hist) * 2)
@@ -601,6 +577,17 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
     close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq").sort_index()
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
+    if not bool(getattr(inp, "dynamic_universe", False)):
+        miss = [c for c in codes if c not in close_none.columns or close_none[c].dropna().empty]
+        if miss:
+            raise ValueError(f"missing execution data (none) for: {miss}")
+        first_valid = [close_none[c].first_valid_index() for c in codes if close_none[c].first_valid_index() is not None]
+        if not first_valid:
+            raise ValueError("no valid first trading date for selected codes")
+        common_start = max(first_valid)
+        close_none = close_none.loc[common_start:]
+        close_qfq = close_qfq.loc[common_start:]
+        close_hfq = close_hfq.loc[common_start:]
     dates = close_none.index
     close_qfq = close_qfq.reindex(dates).ffill()
     close_hfq = close_hfq.reindex(dates).ffill()

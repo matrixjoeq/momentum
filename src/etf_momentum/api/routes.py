@@ -524,6 +524,8 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
         fft_roll=payload.fft_roll,
         fft_roll_step=payload.fft_roll_step,
         rp_window_days=getattr(payload, "rp_window_days", 60) or 60,
+        dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
+        corr_min_obs=int(getattr(payload, "corr_min_obs", 60) or 60),
     )
     try:
         return compute_baseline(db, inp)
@@ -670,6 +672,7 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         group_enforce=payload.group_enforce,
         group_pick_policy=payload.group_pick_policy,
         asset_groups=payload.asset_groups,
+        dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         inertia=payload.inertia,
         inertia_min_hold_periods=payload.inertia_min_hold_periods,
         inertia_score_gap=payload.inertia_score_gap,
@@ -769,6 +772,7 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         group_enforce=payload.group_enforce,
         group_pick_policy=payload.group_pick_policy,
         asset_groups=payload.asset_groups,
+        dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         sma_window=payload.sma_window,
         fast_window=payload.fast_window,
         slow_window=payload.slow_window,

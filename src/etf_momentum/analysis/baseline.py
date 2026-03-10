@@ -32,6 +32,12 @@ class BaselineInputs:
     fft_roll_step: int = 5
     # Risk parity (inverse-vol) portfolio config (used by research UI)
     rp_window_days: int = 60
+    # Dynamic universe mode:
+    # - False: legacy common-interval behavior (intersection)
+    # - True: dynamic candidates over union interval (per-day availability)
+    dynamic_universe: bool = False
+    # Pairwise minimum observations for correlation output (below -> null/"-")
+    corr_min_obs: int = 60
 
 
 def _inv_vol_weights(vol: pd.Series) -> pd.Series:
@@ -146,6 +152,178 @@ def _compute_risk_parity_nav_and_weights(
         nav_s.iloc[0] = 1.0
     w_df2 = pd.DataFrame(np.vstack(w_out), index=r.index, columns=cols, dtype=float)
     return nav_s, w_df2
+
+
+def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str, *, weekly_anchor: str = "FRI") -> pd.PeriodIndex:
+    r = (rebalance or "yearly").lower()
+    freq_map = {"daily": "D", "weekly": f"W-{str(weekly_anchor).strip().upper()}", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
+    if r not in freq_map:
+        raise ValueError(f"invalid rebalance={rebalance}")
+    return index.to_period(freq_map[r])
+
+
+def _compute_equal_weight_nav_and_weights_dynamic(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+    weekly_anchor: str = "FRI",
+) -> tuple[pd.Series, pd.DataFrame, pd.Series]:
+    """
+    Dynamic-universe equal-weight:
+    - each day only assets with finite return are considered active
+    - rebalance schedule applies on active set
+    - if no active assets on a day -> cash (0 return)
+    """
+    if daily_ret.empty:
+        idx = daily_ret.index
+        return pd.Series(dtype=float, name="EW"), pd.DataFrame(index=idx), pd.Series(dtype=float, name="active_count")
+    r = daily_ret.astype(float)
+    idx = r.index
+    cols = list(r.columns)
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+
+    labels = _rebalance_labels(idx, reb, weekly_anchor=weekly_anchor) if reb != "none" else None
+    prev_label = None
+    w_prev = pd.Series(0.0, index=cols, dtype=float)
+    nav = 1.0
+    nav_out: list[float] = []
+    w_out: list[np.ndarray] = []
+    active_n: list[int] = []
+
+    for i, d in enumerate(idx):
+        rr = r.loc[d]
+        active = rr.index[np.isfinite(rr.to_numpy(dtype=float))].tolist()
+        active_n.append(int(len(active)))
+        rebal_now = False
+        if reb == "none":
+            rebal_now = (i == 0) or (float(w_prev.sum()) <= 0.0)
+        elif reb == "daily":
+            rebal_now = True
+        else:
+            lab = labels[i]
+            rebal_now = (prev_label is None) or (lab != prev_label)
+            prev_label = lab
+
+        # restrict previous weights to active assets (inactive assets are dropped for the day)
+        w_day = pd.Series(0.0, index=cols, dtype=float)
+        if active:
+            if rebal_now:
+                per = 1.0 / float(len(active))
+                w_day.loc[active] = per
+            else:
+                prev_active = w_prev.loc[active].astype(float)
+                s = float(prev_active.sum())
+                if s > 1e-12:
+                    w_day.loc[active] = prev_active / s
+                else:
+                    per = 1.0 / float(len(active))
+                    w_day.loc[active] = per
+        port_r = float((w_day * rr.fillna(0.0)).sum()) if active else 0.0
+        nav *= (1.0 + port_r)
+        nav_out.append(float(nav))
+
+        # post-return drift on active assets only
+        w_next = pd.Series(0.0, index=cols, dtype=float)
+        if active:
+            gross = (1.0 + rr.loc[active].astype(float)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
+            w_act = (w_day.loc[active].astype(float) * gross).astype(float)
+            s = float(w_act.sum())
+            if s > 1e-12:
+                w_next.loc[active] = w_act / s
+            else:
+                per = 1.0 / float(len(active))
+                w_next.loc[active] = per
+        w_prev = w_next
+        w_out.append(w_day.to_numpy(dtype=float))
+
+    nav_s = pd.Series(nav_out, index=idx, name="EW")
+    if len(nav_s) > 0:
+        nav_s.iloc[0] = 1.0
+    w_df = pd.DataFrame(np.vstack(w_out), index=idx, columns=cols, dtype=float)
+    active_count = pd.Series(active_n, index=idx, dtype=int, name="active_count")
+    return nav_s, w_df, active_count
+
+
+def _compute_risk_parity_nav_and_weights_dynamic(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+    window: int,
+    weekly_anchor: str = "FRI",
+) -> tuple[pd.Series, pd.DataFrame]:
+    """
+    Dynamic-universe risk parity (inverse-vol) with active-asset filtering.
+    """
+    if daily_ret.empty:
+        return pd.Series(dtype=float, name="RP"), pd.DataFrame(index=daily_ret.index)
+    r = daily_ret.astype(float)
+    idx = r.index
+    cols = list(r.columns)
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+    labels = _rebalance_labels(idx, reb, weekly_anchor=weekly_anchor) if reb != "none" else None
+    prev_label = None
+    w_prev = pd.Series(0.0, index=cols, dtype=float)
+    nav = 1.0
+    nav_out: list[float] = []
+    w_out: list[np.ndarray] = []
+    win = max(2, int(window))
+
+    for i, d in enumerate(idx):
+        rr = r.loc[d]
+        active = rr.index[np.isfinite(rr.to_numpy(dtype=float))].tolist()
+        rebal_now = False
+        if reb == "none":
+            rebal_now = (i == 0) or (float(w_prev.sum()) <= 0.0)
+        elif reb == "daily":
+            rebal_now = True
+        else:
+            lab = labels[i]
+            rebal_now = (prev_label is None) or (lab != prev_label)
+            prev_label = lab
+
+        w_day = pd.Series(0.0, index=cols, dtype=float)
+        if active:
+            if rebal_now:
+                hist = r.iloc[max(0, i - win) : i, :][active]
+                vol = hist.std(ddof=1).replace([np.inf, -np.inf], np.nan)
+                vol = vol.where(hist.notna().sum() >= max(2, win // 2), other=np.nan)
+                ww = _inv_vol_weights(vol).reindex(active).fillna(0.0)
+                s = float(ww.sum())
+                if s <= 1e-12:
+                    ww = pd.Series(1.0 / float(len(active)), index=active, dtype=float)
+                w_day.loc[active] = ww.astype(float)
+            else:
+                prev_active = w_prev.loc[active].astype(float)
+                s = float(prev_active.sum())
+                if s > 1e-12:
+                    w_day.loc[active] = prev_active / s
+                else:
+                    w_day.loc[active] = 1.0 / float(len(active))
+
+        port_r = float((w_day * rr.fillna(0.0)).sum()) if active else 0.0
+        nav *= (1.0 + port_r)
+        nav_out.append(float(nav))
+        w_next = pd.Series(0.0, index=cols, dtype=float)
+        if active:
+            gross = (1.0 + rr.loc[active].astype(float)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
+            w_act = (w_day.loc[active].astype(float) * gross).astype(float)
+            s = float(w_act.sum())
+            if s > 1e-12:
+                w_next.loc[active] = w_act / s
+            else:
+                w_next.loc[active] = 1.0 / float(len(active))
+        w_prev = w_next
+        w_out.append(w_day.to_numpy(dtype=float))
+
+    nav_s = pd.Series(nav_out, index=idx, name="RP")
+    if len(nav_s) > 0:
+        nav_s.iloc[0] = 1.0
+    w_df = pd.DataFrame(np.vstack(w_out), index=idx, columns=cols, dtype=float)
+    return nav_s, w_df
 
 
 def _to_date(x: str) -> dt.date:
@@ -1427,20 +1605,44 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         raise ValueError("no price data for given range")
 
     close = close.sort_index()
+    dynamic_universe = bool(getattr(inp, "dynamic_universe", False))
+    corr_min_obs = max(3, int(getattr(inp, "corr_min_obs", 60) or 60))
     missing = [c for c in codes if c not in close.columns or close[c].dropna().empty]
-    if missing:
+    if missing and (not dynamic_universe):
         raise ValueError(f"missing data for adjust={inp.adjust}: {missing}")
-    # individual NAVs (forward-fill for plotting continuity)
-    close_ff = close.ffill()
-    daily_ret = close_ff.pct_change()
-    nav = (1.0 + daily_ret).cumprod()
-    nav.iloc[0, :] = 1.0
+    codes_eff = [c for c in codes if c in close.columns and close[c].dropna().size > 0]
+    if not codes_eff:
+        raise ValueError("no valid code with price data in selected range")
 
-    # common start where all selected have data after ffill (i.e. each has first valid close)
-    first_valid = {c: close[c].first_valid_index() for c in codes if c in close.columns}
+    # individual NAVs for plotting (do NOT fill pre-listing gaps in dynamic mode).
+    nav = pd.DataFrame(index=close.index, columns=codes, dtype=float)
+    for c in codes:
+        if c not in close.columns:
+            continue
+        s = pd.to_numeric(close[c], errors="coerce").astype(float)
+        fv = s.first_valid_index()
+        if fv is None:
+            continue
+        nav_c = (s / float(s.loc[fv])).astype(float)
+        nav.loc[:, c] = nav_c
+
+    # Legacy common-start alignment kept for non-dynamic mode.
+    first_valid = {c: close[c].first_valid_index() for c in codes_eff if c in close.columns}
     common_start = max([d for d in first_valid.values() if d is not None])
-    nav_common = nav.loc[common_start:]
-    ret_common = daily_ret.loc[common_start:].fillna(0.0)
+    if dynamic_universe:
+        start_idx = min([d for d in first_valid.values() if d is not None])
+    else:
+        start_idx = common_start
+    nav_common = nav.loc[start_idx:]
+    close_common = close.loc[start_idx:, codes_eff].copy()
+    close_ff_common = close_common.ffill()
+    if dynamic_universe:
+        # Keep NaN where raw price is NaN to preserve per-day participation.
+        daily_ret = close_common.pct_change().replace([np.inf, -np.inf], np.nan)
+        ret_common = daily_ret.copy()
+    else:
+        daily_ret = close_ff_common.pct_change().replace([np.inf, -np.inf], np.nan)
+        ret_common = daily_ret.fillna(0.0)
 
     # Activity (volume/amount) should reflect trading, not adjusted prices.
     # Therefore always load it from `adjust="none"` (if available in DB).
@@ -1454,41 +1656,47 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     volume_common: pd.DataFrame | None = None
     if volume is not None and not volume.empty:
         volume = volume.sort_index()
-        volume_common = volume.loc[common_start:]
+        volume_common = volume.loc[start_idx:]
     amount_common: pd.DataFrame | None = None
     if amount is not None and not amount.empty:
         amount = amount.sort_index()
-        amount_common = amount.loc[common_start:]
+        amount_common = amount.loc[start_idx:]
 
-    # correlation matrix (using full backtest range after common_start)
-    corr_ret = ret_common[codes].astype(float)
-    corr = corr_ret.corr(method="pearson")
+    # correlation matrix
+    corr_ret = ret_common[codes_eff].astype(float)
+    if dynamic_universe:
+        corr = corr_ret.corr(method="pearson", min_periods=corr_min_obs)
+    else:
+        corr = corr_ret.corr(method="pearson")
     corr_out = {
         "method": "pearson",
         "n_obs": int(len(corr_ret.index)),
-        "codes": [c for c in codes if c in corr.columns],
-        "matrix": corr.to_numpy(dtype=float).tolist(),
+        "min_pair_obs": int(corr_min_obs),
+        "codes": [c for c in codes_eff if c in corr.columns],
+        "matrix": [[(None if pd.isna(v) else float(v)) for v in row] for row in corr.to_numpy()],
     }
 
     # equal-weight with configurable rebalancing (also return weights for attribution)
-    ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes], rebalance=inp.rebalance)
+    if dynamic_universe:
+        ew_nav, ew_w, ew_active_count = _compute_equal_weight_nav_and_weights_dynamic(ret_common[codes_eff], rebalance=inp.rebalance)
+    else:
+        ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance)
+        ew_active_count = pd.Series(len(codes_eff), index=ret_common.index, dtype=int)
     ew_ret = ew_nav.pct_change().fillna(0.0)
 
     # risk parity (inverse-vol) portfolio with the same rebalancing schedule
     rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
-    rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes], rebalance=inp.rebalance, window=rp_win)
-    rp_ret = rp_nav.pct_change().fillna(0.0)
-
-    # risk parity (inverse-vol) portfolio with the same rebalancing schedule
-    rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
-    rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes], rebalance=inp.rebalance, window=rp_win)
+    if dynamic_universe:
+        rp_nav, rp_w = _compute_risk_parity_nav_and_weights_dynamic(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
+    else:
+        rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
     rp_ret = rp_nav.pct_change().fillna(0.0)
 
     # benchmark
     bench_code = inp.benchmark_code
     if bench_code is None:
         bench_code = "510300" if "510300" in codes else codes[0]
-    bench_ret = ret_common[bench_code] if bench_code in ret_common.columns else ew_ret * 0.0
+    bench_ret = ret_common[bench_code].fillna(0.0) if bench_code in ret_common.columns else ew_ret * 0.0
     bench_nav = (1.0 + bench_ret.fillna(0.0)).cumprod()
     bench_nav.iloc[0] = 1.0
 
@@ -1624,7 +1832,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
 
     # package series for UI (plotly expects arrays)
     dates = nav_common.index.date.astype(str).tolist()
-    series = {c: nav_common[c].astype(float).fillna(np.nan).tolist() for c in codes if c in nav_common.columns}
+    series = {c: nav_common[c].astype(float).tolist() for c in codes if c in nav_common.columns}
     series["EW"] = ew_nav.astype(float).tolist()
     series["RP"] = rp_nav.astype(float).tolist()
     series[f"BENCH:{bench_code}"] = bench_nav.astype(float).tolist()
@@ -1643,19 +1851,19 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     rolling_out = rolling_by_portfolio["EW"]  # backward-compat
 
     attribution_ew = _compute_return_risk_contributions(
-        asset_ret=ret_common[codes],
-        weights=ew_w[codes] if not ew_w.empty else pd.DataFrame(index=ret_common.index, columns=codes),
+        asset_ret=ret_common[codes_eff],
+        weights=ew_w[codes_eff] if not ew_w.empty else pd.DataFrame(index=ret_common.index, columns=codes_eff),
         total_return=float(metrics_ew["cumulative_return"]),
     )
     attribution_rp = _compute_return_risk_contributions(
-        asset_ret=ret_common[codes],
-        weights=rp_w[codes] if not rp_w.empty else pd.DataFrame(index=ret_common.index, columns=codes),
+        asset_ret=ret_common[codes_eff],
+        weights=rp_w[codes_eff] if not rp_w.empty else pd.DataFrame(index=ret_common.index, columns=codes_eff),
         total_return=float(metrics_rp["cumulative_return"]),
     )
     attribution = attribution_ew  # backward-compat
 
     # FFT analysis (on log returns, using the same adjustment basis as baseline close)
-    fft = _fft_analysis(close_ff.loc[common_start:, codes], ew_nav=ew_nav, windows=inp.fft_windows)
+    fft = _fft_analysis(close_common.ffill()[codes_eff], ew_nav=ew_nav, windows=inp.fft_windows)
     fft_roll = {"ok": False, "reason": "disabled", "windows": fft.get("windows", []), "step": int(inp.fft_roll_step), "series": {}}
     if bool(inp.fft_roll):
         ew = pd.Series(ew_nav).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
@@ -1670,8 +1878,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     # Compute periodic returns and volatility distributions for each code
     period_distributions = _compute_periodic_returns_and_volatility(
         ret_common,
-        codes=codes,
-        daily_close=close_ff.loc[common_start:],
+        codes=codes_eff,
+        daily_close=close_common.ffill(),
         daily_volume=volume_common,
         daily_amount=amount_common,
     )
@@ -1691,7 +1899,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     # - composite = mean of the 3 percentiles (requires all 3)
     # - mirror = expanding percentile rank of composite
     mirror_timeseries: dict[str, Any] = {}
-    close_m = close_ff.loc[common_start:, codes].copy()
+    close_m = close_common.ffill()[codes_eff].copy()
     close_m.index = pd.to_datetime(close_m.index)
     vol_m = volume_common.copy() if (volume_common is not None and not volume_common.empty) else pd.DataFrame()
     amt_m = amount_common.copy() if (amount_common is not None and not amount_common.empty) else pd.DataFrame()
@@ -1707,7 +1915,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     freq_by_period = {"daily": None, "weekly": "W-FRI", "monthly": "ME", "quarterly": "QE", "yearly": "YE"}
     vol_win = {"daily": (20, 5), "weekly": (4, 2), "monthly": (3, 2), "quarterly": (2, 2), "yearly": (2, 2)}
 
-    for code in codes:
+    for code in codes_eff:
         if code not in close_m.columns:
             continue
         px = pd.to_numeric(close_m[code], errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
@@ -1775,7 +1983,13 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             mirror_timeseries[code] = out_by_period
 
     return {
-        "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d"), "common_start": common_start.date().strftime("%Y%m%d")},
+        "date_range": {
+            "start": inp.start.strftime("%Y%m%d"),
+            "end": inp.end.strftime("%Y%m%d"),
+            "common_start": common_start.date().strftime("%Y%m%d"),
+            "mode_start": start_idx.date().strftime("%Y%m%d"),
+            "dynamic_universe": bool(dynamic_universe),
+        },
         "codes": codes,
         "nav": {"dates": dates, "series": series},
         "nav_rsi": nav_rsi,
@@ -1796,5 +2010,6 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "fft_roll": {"ew": fft_roll},
         "period_distributions": period_distributions,
         "mirror_timeseries": mirror_timeseries,
+        "active_count": {"dates": ew_active_count.index.date.astype(str).tolist(), "values": ew_active_count.astype(int).tolist()},
     }
 

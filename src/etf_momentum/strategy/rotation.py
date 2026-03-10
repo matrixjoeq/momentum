@@ -138,6 +138,8 @@ class RotationInputs:
     # Vol index levels are expected to be preloaded by caller (API layer) to avoid network dependency here.
     asset_vol_index_rules: list[dict[str, Any]] | None = None
     vol_index_close: dict[str, pd.Series] | None = None
+    # Dynamic universe over union interval.
+    dynamic_universe: bool = False
 
 
 def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str, *, weekly_anchor: str = "FRI") -> pd.PeriodIndex:
@@ -1240,23 +1242,23 @@ def backtest_rotation(
         high_qfq = high_qfq.sort_index().reindex(dates).ffill()
         low_qfq = low_qfq.sort_index().reindex(dates).ffill()
 
-    # Require each selected code has data
+    # Require each selected code has data (legacy mode only).
     miss_exec = [c for c in codes if c not in close_none.columns or close_none[c].dropna().empty]
-    if miss_exec:
+    if miss_exec and (not bool(getattr(inp, "dynamic_universe", False))):
         raise ValueError(f"missing execution data (none) for: {miss_exec}")
     miss_sig = [c for c in codes if c not in close_hfq.columns or close_hfq[c].dropna().empty]
-    if miss_sig:
+    if miss_sig and (not bool(getattr(inp, "dynamic_universe", False))):
         raise ValueError(f"missing signal data (hfq) for: {miss_sig}")
     # qfq is required for technical analysis features
     if need_qfq:
         miss_ta = [c for c in codes if c not in close_qfq.columns or close_qfq[c].dropna().empty]
-        if miss_ta:
+        if miss_ta and (not bool(getattr(inp, "dynamic_universe", False))):
             raise ValueError(f"missing technical-analysis data (qfq) for: {miss_ta}")
     if need_qfq_hl:
         miss_hi = [c for c in codes if c not in high_qfq.columns or high_qfq[c].dropna().empty]
         miss_lo = [c for c in codes if c not in low_qfq.columns or low_qfq[c].dropna().empty]
         miss_hl = sorted(set(miss_hi + miss_lo))
-        if miss_hl:
+        if miss_hl and (not bool(getattr(inp, "dynamic_universe", False))):
             raise ValueError(f"missing technical-analysis high/low data (qfq) for: {miss_hl}")
 
     if sm == "raw_mom":

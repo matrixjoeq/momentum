@@ -76,3 +76,32 @@ def test_compute_baseline_rolling_and_missing_benchmark(session_factory):
     assert out["rolling"]["returns"]["1y"]["values"]
     assert out["rolling"]["drawdown"]["1y"]["values"]
 
+
+def test_compute_baseline_dynamic_universe_uses_union_start(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code_a = "AAA"
+        code_b = "BBB"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(120)]
+        for i, d in enumerate(dates):
+            db.add(EtfPrice(code=code_a, trade_date=d, close=100.0 + i, source="eastmoney", adjust="qfq"))
+            # BBB starts later
+            if i >= 80:
+                db.add(EtfPrice(code=code_b, trade_date=d, close=50.0 + (i - 80) * 0.7, source="eastmoney", adjust="qfq"))
+        db.commit()
+
+        out_inter = compute_baseline(
+            db,
+            BaselineInputs(codes=[code_a, code_b], start=dates[0], end=dates[-1], adjust="qfq", dynamic_universe=False),
+        )
+        out_union = compute_baseline(
+            db,
+            BaselineInputs(codes=[code_a, code_b], start=dates[0], end=dates[-1], adjust="qfq", dynamic_universe=True),
+        )
+
+    assert out_inter["date_range"]["mode_start"] == out_inter["date_range"]["common_start"]
+    assert out_union["date_range"]["mode_start"] <= out_union["date_range"]["common_start"]
+    # In dynamic mode, early days only one asset is active.
+    vals = out_union["active_count"]["values"]
+    assert vals and max(vals) >= 2 and 1 in vals
+

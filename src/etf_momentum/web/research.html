@@ -20,7 +20,6 @@
       .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
       .code-list { max-height: 220px; overflow: auto; border: 1px solid #ddd; padding: 8px; min-width: 320px; }
       .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
-      .no-print { }
       .tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid #ddd; padding-bottom: 8px; margin-bottom: 12px; }
       .tabBtn { padding: 8px 12px; border: 1px solid #bbb; background: #fff; border-radius: 10px 10px 0 0; cursor: pointer; }
       .tabBtn.active { border-color: #444; font-weight: 600; }
@@ -66,14 +65,21 @@
         <label>结束日期</label>
         <input id="end" placeholder="YYYYMMDD" />
       </div>
+      <div>
+        <label>动态候选池</label>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <input id="dynamicUniverse" type="checkbox" />
+          <span class="muted">勾选=并集全区间；不勾选=交集全区间</span>
+        </div>
+      </div>
       <div style="min-width: 420px;">
-        <label>回测区间快捷选项（按勾选标的共同区间计算）</label>
+        <label>回测区间快捷选项（全区间含义由“动态候选池”决定）</label>
         <div class="row" style="gap:8px; align-items:center;">
-          <button id="range1y" title="近一年（按共同最大区间）">近一年</button>
-          <button id="range3y" title="近三年（按共同最大区间）">近三年</button>
-          <button id="range5y" title="近五年（按共同最大区间）">近五年</button>
-          <button id="range10y" title="近十年（按共同最大区间）">近十年</button>
-          <button id="rangeAll" title="成立以来（按共同最大区间）">成立以来</button>
+          <button id="range1y" title="近一年（基于当前区间口径）">近一年</button>
+          <button id="range3y" title="近三年（基于当前区间口径）">近三年</button>
+          <button id="range5y" title="近五年（基于当前区间口径）">近五年</button>
+          <button id="range10y" title="近十年（基于当前区间口径）">近十年</button>
+          <button id="rangeAll" title="全区间（并集或交集）">全区间</button>
           <span id="rangeHint" class="muted" style="margin-left:6px;"></span>
         </div>
       </div>
@@ -242,7 +248,7 @@
         <button id="corrRange3y">近三年</button>
         <button id="corrRange5y">近五年</button>
         <button id="corrRange10y">近十年</button>
-        <button id="corrRangeAll">全回测区间</button>
+        <button id="corrRangeAll">全区间</button>
         <span id="corrRangeHint" class="muted" style="margin-left:6px;"></span>
       </div>
       <div id="corrLegend" class="muted" style="margin-top:6px;"></div>
@@ -2766,7 +2772,7 @@
           "3y": { label: "近三年", threshold: (end) => _shiftYears(end, -3) },
           "5y": { label: "近五年", threshold: (end) => _shiftYears(end, -5) },
           "10y": { label: "近十年", threshold: (end) => _shiftYears(end, -10) },
-          all: { label: "全回测区间", threshold: null },
+          all: { label: "全区间", threshold: null },
         };
         return m[key] || m.all;
       }
@@ -2780,7 +2786,7 @@
         return dates.length; // not found
       }
 
-      function _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx) {
+      function _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx, minObs = 60) {
         const endIdx = dates.length - 1;
         const n = codes.length;
         if (startIdx >= endIdx) {
@@ -2812,7 +2818,7 @@
               sy += yi;
             }
           }
-          if (nObs < 3) return { nObs, value: null };
+          if (nObs < Math.max(3, Number(minObs || 60))) return { nObs, value: null };
           const mx = sx / nObs;
           const my = sy / nObs;
           let sxx = 0, syy = 0, sxy = 0;
@@ -2860,7 +2866,8 @@
         const seriesByCode = {};
         for (const c of codes) seriesByCode[c] = lastBaseline.nav.series[c];
 
-        const calc = _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx);
+        const minObs = (lastBaseline && lastBaseline.correlation && Number(lastBaseline.correlation.min_pair_obs)) || 60;
+        const calc = _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx, minObs);
         if (!calc.ok) return;
 
         const startDate = dates[startIdx];
@@ -2910,27 +2917,38 @@
         return String(y) + m + d;
       }
 
-      function computeAvailableRangeForSelection() {
+      function computeAvailableRangeForSelection(mode = "intersection") {
         const items = pool.filter(x => selected.has(x.code));
         const starts = items.map(x => x.last_data_start_date).filter(Boolean).sort();
         const ends = items.map(x => x.last_data_end_date).filter(Boolean).sort();
         if (!starts.length || !ends.length) return { start: null, end: null };
-        return { start: starts[starts.length - 1], end: ends[0] }; // max start, min end
+        if (mode === "union") return { start: starts[0], end: ends[ends.length - 1] };
+        return { start: starts[starts.length - 1], end: ends[0] }; // intersection
+      }
+
+      function isDynamicUniverseOn() {
+        return !!($("dynamicUniverse") && $("dynamicUniverse").checked);
+      }
+
+      function currentRangeMode() {
+        return isDynamicUniverseOn() ? "union" : "intersection";
       }
 
       function renderRangeHint() {
         const el = $("rangeHint");
         if (!el) return;
-        const avail = computeAvailableRangeForSelection();
-        if (!avail.start || !avail.end) {
-          el.textContent = "共同区间：无";
+        const inter = computeAvailableRangeForSelection("intersection");
+        const uni = computeAvailableRangeForSelection("union");
+        if (!inter.start || !inter.end || !uni.start || !uni.end) {
+          el.textContent = "交集区间：无；并集区间：无";
           return;
         }
-        el.textContent = `共同区间：${avail.start}~${avail.end}`;
+        const mode = currentRangeMode() === "union" ? "并集" : "交集";
+        el.textContent = `交集区间：${inter.start}~${inter.end}；并集区间：${uni.start}~${uni.end}；当前=${mode}`;
       }
 
       function applyQuickRange(years) {
-        const avail = computeAvailableRangeForSelection();
+        const avail = computeAvailableRangeForSelection(currentRangeMode());
         if (!avail.start || !avail.end) {
           setMsg("无法计算快捷区间：请先勾选至少一个且已抓取过数据的标的。");
           return;
@@ -2974,7 +2992,7 @@
       }
 
       function maybeAdjustBacktestRange() {
-        const avail = computeAvailableRangeForSelection();
+        const avail = computeAvailableRangeForSelection(currentRangeMode());
         if (!avail.start || !avail.end) return;
         const curS = ($("start").value || "").trim();
         const curE = ($("end").value || "").trim();
@@ -5606,7 +5624,7 @@
         const z = corr.matrix;
         const n = codes.length;
         const idx = Array.from({ length: n }, (_, i) => String(i + 1));
-        const text = z.map(row => row.map(v => (v == null || Number.isNaN(v)) ? "" : Number(v).toFixed(2)));
+        const text = z.map(row => row.map(v => (v == null || Number.isNaN(v)) ? "-" : Number(v).toFixed(2)));
 
         // legend: 1..N -> code + name
         const nameByCode = new Map((pool || []).map(x => [x.code, x.name]));
@@ -6532,7 +6550,7 @@
             tp_sl_mode,
             atr_window, atr_mult, atr_step, atr_min_mult,
             corr_filter, corr_window, corr_threshold,
-            group_enforce, group_pick_policy, asset_groups,
+            group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             mirror_control, mirror_quantiles, mirror_exposures,
@@ -6621,7 +6639,7 @@
           if (asset_groups && asset_groups.__error) return setMsg(asset_groups.__error);
           resp = await api("/analysis/trend/portfolio", {
             method: "POST",
-            body: JSON.stringify({ codes, top_k, position_sizing, group_enforce, group_pick_policy, asset_groups, ...common }),
+            body: JSON.stringify({ codes, top_k, position_sizing, group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(), ...common }),
           });
         } else {
           const codes = Array.from(selected);
@@ -6926,7 +6944,7 @@
             tp_sl_mode,
             atr_window, atr_mult, atr_step, atr_min_mult,
             corr_filter, corr_window, corr_threshold,
-            group_enforce, group_pick_policy, asset_groups,
+            group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             mirror_control, mirror_quantiles, mirror_exposures,
@@ -6978,9 +6996,28 @@
         const baseline_mode = ($("baselineMode").value || "EW").trim().toUpperCase();
         const rp_window_days = Math.max(2, Math.floor(Number(($("baselineRpWin").value || "60").trim())));
         if (!Number.isFinite(rp_window_days) || rp_window_days < 2) return setMsg("RP 波动率窗口必须是 >=2 的整数交易日，例如 60");
+        const dynamic_universe = isDynamicUniverseOn();
+        const corr_min_obs = 60;
         $("status").textContent = "计算中...";
         setMsg("");
-        const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify({ codes, start, end, benchmark_code, adjust: ADJUST_USED, rebalance, risk_free_rate, fft_windows, fft_roll, fft_roll_step, rp_window_days }) });
+        const resp = await api("/analysis/baseline", {
+          method: "POST",
+          body: JSON.stringify({
+            codes,
+            start,
+            end,
+            benchmark_code,
+            adjust: ADJUST_USED,
+            rebalance,
+            risk_free_rate,
+            fft_windows,
+            fft_roll,
+            fft_roll_step,
+            rp_window_days,
+            dynamic_universe,
+            corr_min_obs,
+          }),
+        });
         const text = await resp.text();
         $("status").textContent = "";
         if (!resp.ok) return setMsg(text);
@@ -6988,7 +7025,19 @@
         lastBaseline = data;
         window.__lastBaselineResult = data;
         // Save last baseline payload for distribution re-fetch (with different adjust).
-        window.__distBaselinePayload = { codes, start, end, benchmark_code, rebalance, risk_free_rate, fft_windows, fft_roll, fft_roll_step };
+        window.__distBaselinePayload = {
+          codes,
+          start,
+          end,
+          benchmark_code,
+          rebalance,
+          risk_free_rate,
+          fft_windows,
+          fft_roll,
+          fft_roll_step,
+          dynamic_universe,
+          corr_min_obs,
+        };
         window.__distBaselineCache = window.__distBaselineCache || {};
         window.__distBaselineCache[ADJUST_USED] = data;
         corrRangeKey = "all";
@@ -7715,7 +7764,7 @@
               tp_sl_mode,
               atr_window, atr_mult, atr_step, atr_min_mult,
               corr_filter, corr_window, corr_threshold,
-              group_enforce, group_pick_policy, asset_groups,
+              group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
               inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
               rr_sizing, rr_years, rr_thresholds, rr_weights,
               mirror_control, mirror_quantiles, mirror_exposures,
@@ -7859,6 +7908,12 @@
         selected.clear(); for (const c of next) selected.add(c);
         renderCodeList(); renderBenchmarkSelect(); maybeAdjustBacktestRange(); renderRangeHint();
       });
+      if ($("dynamicUniverse")) {
+        $("dynamicUniverse").addEventListener("change", () => {
+          applyQuickRange(null);
+          renderRangeHint();
+        });
+      }
 
       $("range1y").addEventListener("click", () => { setMsg(""); applyQuickRange(1); });
       $("range3y").addEventListener("click", () => { setMsg(""); applyQuickRange(3); });

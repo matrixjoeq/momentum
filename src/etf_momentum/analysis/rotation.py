@@ -62,6 +62,7 @@ class RotationAnalysisInputs:
     group_enforce: bool = False
     group_pick_policy: str = "strongest_score"
     asset_groups: dict[str, str] | None = None
+    dynamic_universe: bool = False
     # Inertia / dampening (avoid frequent rebalances)
     inertia: bool = False
     inertia_min_hold_periods: int = 0
@@ -148,6 +149,7 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             group_enforce=inp.group_enforce,
             group_pick_policy=inp.group_pick_policy,
             asset_groups=inp.asset_groups,
+            dynamic_universe=inp.dynamic_universe,
             inertia=inp.inertia,
             inertia_min_hold_periods=inp.inertia_min_hold_periods,
             inertia_score_gap=inp.inertia_score_gap,

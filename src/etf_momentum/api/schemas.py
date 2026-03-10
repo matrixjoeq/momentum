@@ -145,6 +145,15 @@ class BaselineAnalysisRequest(BaseModel):
     fft_roll: bool = Field(default=True, description="If true, compute rolling FFT time series for EW (downsampled by fft_roll_step)")
     fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
     rp_window_days: int = Field(default=60, ge=2, le=2520, description="Risk parity (inverse-vol) volatility lookback window in trading days")
+    dynamic_universe: bool = Field(
+        default=False,
+        description="If true, use dynamic universe over union interval; otherwise legacy common-interval (intersection).",
+    )
+    corr_min_obs: int = Field(
+        default=60,
+        ge=3,
+        description="Minimum pairwise observations for correlation; below threshold returns null ('-').",
+    )
 
 
 class LeadLagAnalysisRequest(BaseModel):
@@ -737,6 +746,10 @@ class RotationBacktestRequest(BaseModel):
         default=None,
         description="Optional mapping: asset code -> group_id. Missing codes default to independent groups.",
     )
+    dynamic_universe: bool = Field(
+        default=False,
+        description="If true, allow dynamic candidate pool by period over union interval.",
+    )
     # Inertia / dampening (avoid frequent rebalances)
     inertia: bool = Field(default=False, description="Enable inertia (dampening) to avoid frequent rebalances.")
     inertia_min_hold_periods: int = Field(default=0, ge=0, description="Minimum decision periods between holding changes (0 disables).")
@@ -972,6 +985,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     group_enforce: bool = Field(default=False, description="Enable one-asset-per-group hard constraint")
     group_pick_policy: str = Field(default="strongest_score", description="strongest_score|earliest_entry|lowest_vol")
     asset_groups: dict[str, str] | None = Field(default=None, description="Optional mapping: code -> group_id")
+    dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate pool by period over union interval")
     sma_window: int = Field(default=200, ge=2)
     fast_window: int = Field(default=50, ge=2)
     slow_window: int = Field(default=200, ge=2)
