@@ -1453,6 +1453,10 @@
           </select>
         </div>
         <div>
+          <label>单标的代码</label>
+          <select id="trendSingleCode" style="min-width:180px;"></select>
+        </div>
+        <div>
           <label>策略</label>
           <select id="trendStrategy" style="min-width:190px;">
             <option value="ma_filter">ma_filter</option>
@@ -2786,7 +2790,7 @@
         return dates.length; // not found
       }
 
-      function _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx, minObs = 60) {
+      function _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx, minObs = 20) {
         const endIdx = dates.length - 1;
         const n = codes.length;
         if (startIdx >= endIdx) {
@@ -2818,7 +2822,7 @@
               sy += yi;
             }
           }
-          if (nObs < Math.max(3, Number(minObs || 60))) return { nObs, value: null };
+          if (nObs < Math.max(3, Number(minObs || 20))) return { nObs, value: null };
           const mx = sx / nObs;
           const my = sy / nObs;
           let sxx = 0, syy = 0, sxy = 0;
@@ -2866,7 +2870,7 @@
         const seriesByCode = {};
         for (const c of codes) seriesByCode[c] = lastBaseline.nav.series[c];
 
-        const minObs = (lastBaseline && lastBaseline.correlation && Number(lastBaseline.correlation.min_pair_obs)) || 60;
+        const minObs = (lastBaseline && lastBaseline.correlation && Number(lastBaseline.correlation.min_pair_obs)) || 20;
         const calc = _corrMatrixFromNav({ dates, codes, seriesByCode }, startIdx, minObs);
         if (!calc.ok) return;
 
@@ -3038,6 +3042,7 @@
             const c = cb.getAttribute("data-code");
             if (cb.checked) selected.add(c); else selected.delete(c);
             renderBenchmarkSelect();
+            renderTrendSingleCodeSelect();
             maybeAdjustBacktestRange();
             renderRangeHint();
           });
@@ -3057,6 +3062,22 @@
         if (codes.includes("510300")) sel.value = "510300";
       }
 
+      function renderTrendSingleCodeSelect() {
+        const sel = $("trendSingleCode");
+        if (!sel) return;
+        const prev = sel.value;
+        const codes = Array.from(selected);
+        sel.innerHTML = "";
+        for (const c of codes) {
+          const opt = document.createElement("option");
+          opt.value = c;
+          opt.textContent = codeLabel(c);
+          sel.appendChild(opt);
+        }
+        if (codes.includes(prev)) sel.value = prev;
+        else if (codes.length > 0) sel.value = codes[0];
+      }
+
       async function loadPool() {
         const resp = await api(`/etf?adjust=${encodeURIComponent(ADJUST_USED)}`, { method: "GET" });
         const data = await resp.json();
@@ -3068,6 +3089,7 @@
         for (const it of pool) selected.add(it.code);
         renderCodeList();
         renderBenchmarkSelect();
+        renderTrendSingleCodeSelect();
         // default defensive ETF: keep empty as requested
         // Initialize or clamp backtest range to available intersection (only if needed)
         maybeAdjustBacktestRange();
@@ -6643,8 +6665,10 @@
           });
         } else {
           const codes = Array.from(selected);
-          const code = codes.length > 0 ? codes[0] : "";
-          if (!code) return setMsg("单标的模式请先勾选至少1个标的（默认取第一个）");
+          const singleSel = $("trendSingleCode");
+          const chosen = singleSel ? String(singleSel.value || "").trim() : "";
+          const code = (chosen && codes.includes(chosen)) ? chosen : (codes.length > 0 ? codes[0] : "");
+          if (!code) return setMsg("单标的模式请先勾选至少1个标的");
           resp = await api("/analysis/trend", { method: "POST", body: JSON.stringify({ code, ...common }) });
         }
         const text = await resp.text();
@@ -6997,7 +7021,7 @@
         const rp_window_days = Math.max(2, Math.floor(Number(($("baselineRpWin").value || "60").trim())));
         if (!Number.isFinite(rp_window_days) || rp_window_days < 2) return setMsg("RP 波动率窗口必须是 >=2 的整数交易日，例如 60");
         const dynamic_universe = isDynamicUniverseOn();
-        const corr_min_obs = 60;
+        const corr_min_obs = 20;
         $("status").textContent = "计算中...";
         setMsg("");
         const resp = await api("/analysis/baseline", {
@@ -7594,6 +7618,10 @@
         const lookback_days = Number(($("rotLookback").value || "20").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
+        const group_enforce = ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true");
+        const group_pick_policy = ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value) : "strongest_score";
+        const asset_groups = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
+        if (asset_groups && asset_groups.__error) return setMsg(asset_groups.__error);
         const risk_off = ($("rotRiskOff").value === "true");
         const floorRules = _buildFloorRules();
         if (floorRules && floorRules.__error) return setMsg(floorRules.__error);
@@ -7899,14 +7927,14 @@
       wireRotPeriodControls("monthly");
       wireRotPeriodControls("quarterly");
       wireRotPeriodControls("yearly");
-      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); });
+      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); });
       $("selAll").addEventListener("click", () => { maybeAdjustBacktestRange(); renderRangeHint(); });
-      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); maybeAdjustBacktestRange(); renderRangeHint(); });
+      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); });
       $("selInvert").addEventListener("click", () => {
         const next = new Set();
         for (const it of pool) if (!selected.has(it.code)) next.add(it.code);
         selected.clear(); for (const c of next) selected.add(c);
-        renderCodeList(); renderBenchmarkSelect(); maybeAdjustBacktestRange(); renderRangeHint();
+        renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint();
       });
       if ($("dynamicUniverse")) {
         $("dynamicUniverse").addEventListener("change", () => {

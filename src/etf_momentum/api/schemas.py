@@ -150,7 +150,7 @@ class BaselineAnalysisRequest(BaseModel):
         description="If true, use dynamic universe over union interval; otherwise legacy common-interval (intersection).",
     )
     corr_min_obs: int = Field(
-        default=60,
+        default=20,
         ge=3,
         description="Minimum pairwise observations for correlation; below threshold returns null ('-').",
     )

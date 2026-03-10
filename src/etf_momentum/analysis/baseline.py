@@ -37,7 +37,7 @@ class BaselineInputs:
     # - True: dynamic candidates over union interval (per-day availability)
     dynamic_universe: bool = False
     # Pairwise minimum observations for correlation output (below -> null/"-")
-    corr_min_obs: int = 60
+    corr_min_obs: int = 20
 
 
 def _inv_vol_weights(vol: pd.Series) -> pd.Series:
@@ -1041,7 +1041,7 @@ def _compute_periodic_returns_and_volatility(
         # - quarterly: N=4
         # - yearly: N=3
         #
-        # dev = log(P) - MA_N(log(P))  (equivalently log(P / GM_N(P)))
+        # dev = log(P) - log(EMA_N(P))
         if close_df is not None and code in close_df.columns:
             px = pd.to_numeric(close_df[code], errors="coerce").astype(float).dropna()
             if not px.empty:
@@ -1065,8 +1065,9 @@ def _compute_periodic_returns_and_volatility(
                     if s2.empty:
                         return pd.Series([], dtype=float)
                     lp = np.log(s2)
-                    mp = lp.rolling(window=int(n), min_periods=max(3, min(20, int(n)))).mean()
-                    out = (lp - mp).replace([np.inf, -np.inf], np.nan).dropna()
+                    ema = s2.ewm(span=int(n), adjust=False, min_periods=max(3, min(20, int(n)))).mean()
+                    le = np.log(ema.replace(0.0, np.nan))
+                    out = (lp - le).replace([np.inf, -np.inf], np.nan).dropna()
                     return out
 
                 px_d = px
