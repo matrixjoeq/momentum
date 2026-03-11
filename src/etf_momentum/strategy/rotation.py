@@ -65,8 +65,17 @@ class RotationInputs:
     # --- Pre-trade risk controls (drawdown prevention heuristics) ---
     # Trend filter: decide whether to buy at all, and/or exclude candidates that are not in trend.
     trend_filter: bool = False
+    trend_exit_filter: bool = False
     trend_sma_window: int = 20  # trading days (weekly use-case default)
     trend_ma_type: str = "sma"  # sma | ema
+    bias_filter: bool = False
+    bias_exit_filter: bool = False
+    bias_ma_window: int = 20
+    bias_level_window: str = "all"
+    bias_threshold_type: str = "quantile"  # quantile | fixed
+    bias_quantile: float = 95.0  # percent, e.g. 95
+    bias_fixed_value: float = 10.0  # percent, e.g. 10 means 10%
+    bias_min_periods: int = 20
     # RSI filter: avoid buying overbought / oversold assets.
     rsi_filter: bool = False
     rsi_window: int = 20
@@ -129,6 +138,7 @@ class RotationInputs:
     # These override the corresponding global params when provided.
     asset_momentum_floor_rules: list[dict[str, Any]] | None = None
     asset_trend_rules: list[dict[str, Any]] | None = None
+    asset_bias_rules: list[dict[str, Any]] | None = None
     asset_rsi_rules: list[dict[str, Any]] | None = None
     asset_chop_rules: list[dict[str, Any]] | None = None
     asset_vol_monitor_rules: list[dict[str, Any]] | None = None
@@ -240,7 +250,7 @@ def _risk_adjusted_scores(
     return safe_div(excess_mean, dd.astype(float))
 
 
-def _trend_ok_each(close: pd.DataFrame, *, ma_window: int, ma_type: str = "sma") -> pd.DataFrame:
+def _trend_ok_each(close: pd.DataFrame, *, ma_window: int, ma_type: str = "sma", op: str = ">") -> pd.DataFrame:
     """
     Simple trend filter: close > MA(close, window).
     Returns boolean DataFrame aligned to `close`.
@@ -251,7 +261,22 @@ def _trend_ok_each(close: pd.DataFrame, *, ma_window: int, ma_type: str = "sma")
         ma = close.ewm(span=w, adjust=False, min_periods=max(2, w // 2)).mean()
     else:
         ma = close.rolling(window=w, min_periods=max(2, w // 2)).mean()
-    return (close > ma).fillna(False)
+    o = _normalize_cmp_op(op)
+    if o == "gt":
+        out = close > ma
+    elif o == "lt":
+        out = close < ma
+    elif o == "ge":
+        out = close >= ma
+    elif o == "le":
+        out = close <= ma
+    elif o == "eq":
+        out = close == ma
+    elif o == "ne":
+        out = close != ma
+    else:
+        out = close > ma
+    return out.fillna(False)
 
 
 def _rsi(close: pd.DataFrame, *, window: int) -> pd.DataFrame:
@@ -723,6 +748,36 @@ def _tiered_exposure_from_level_quantiles(
     return pd.Series(exp, index=lvl.index, dtype=float), meta
 
 
+def _bias_series_from_close(close: pd.DataFrame, *, ma_window: int) -> pd.DataFrame:
+    w = max(2, int(ma_window))
+    ma = close.rolling(window=w, min_periods=max(2, w // 2)).mean()
+    return (close / ma - 1.0).replace([np.inf, -np.inf], np.nan).astype(float)
+
+
+def _bias_threshold_series(
+    bias_df: pd.DataFrame,
+    *,
+    level_window: str,
+    threshold_type: str,
+    quantile: float,
+    fixed_value: float,
+    min_periods: int,
+) -> pd.DataFrame:
+    tt = str(threshold_type or "quantile").strip().lower()
+    if tt == "fixed":
+        v = float(fixed_value) / 100.0
+        return pd.DataFrame(v, index=bias_df.index, columns=bias_df.columns, dtype=float)
+    q = float(quantile)
+    if q > 1.0:
+        q = q / 100.0
+    q = float(min(max(q, 1e-6), 1.0 - 1e-6))
+    mp = int(max(2, int(min_periods)))
+    win_days = _vol_level_window_days(level_window)
+    if win_days is None:
+        return bias_df.expanding(min_periods=mp).quantile(q).shift(1)
+    return bias_df.rolling(window=int(win_days), min_periods=mp).quantile(q).shift(1)
+
+
 def _apply_asset_vol_index_rules(
     w: pd.DataFrame,
     *,
@@ -1012,6 +1067,17 @@ def backtest_rotation(
     trend_ma_type = str(inp.trend_ma_type or "sma").strip().lower()
     if trend_ma_type not in {"sma", "ema"}:
         raise ValueError("trend_ma_type must be one of: sma|ema")
+    if int(inp.bias_ma_window) <= 1:
+        raise ValueError("bias_ma_window must be > 1")
+    b_thr_type = str(inp.bias_threshold_type or "quantile").strip().lower()
+    if b_thr_type not in {"quantile", "fixed"}:
+        raise ValueError("bias_threshold_type must be one of: quantile|fixed")
+    if not np.isfinite(float(inp.bias_quantile)) or float(inp.bias_quantile) <= 0.0 or float(inp.bias_quantile) >= 100.0:
+        raise ValueError("bias_quantile must be within (0,100)")
+    if not np.isfinite(float(inp.bias_fixed_value)) or float(inp.bias_fixed_value) < 0.0:
+        raise ValueError("bias_fixed_value must be >= 0")
+    if int(inp.bias_min_periods) < 2:
+        raise ValueError("bias_min_periods must be >= 2")
     if inp.rsi_window <= 0:
         raise ValueError("rsi_window must be > 0")
     if inp.vol_window <= 0:
@@ -1135,13 +1201,15 @@ def backtest_rotation(
     # - none: execution/trading price basis
     # Per-asset rules: if provided, override the corresponding global params.
     use_floor_rules = bool(inp.asset_momentum_floor_rules)
-    use_trend_rules = bool(inp.trend_filter and inp.asset_trend_rules)
+    use_trend_rules = bool((inp.trend_filter or inp.trend_exit_filter) and inp.asset_trend_rules)
+    use_bias_rules = bool((inp.bias_filter or inp.bias_exit_filter) and inp.asset_bias_rules)
     use_rsi_rules = bool(inp.rsi_filter and inp.asset_rsi_rules)
     use_chop_rules = bool(inp.chop_filter and inp.asset_chop_rules)
     use_vol_rules = bool(inp.vol_monitor and inp.asset_vol_monitor_rules)
 
     trend_windows = [int(inp.trend_sma_window)]
     trend_ma_types = {str(trend_ma_type)}
+    trend_ops = {_normalize_cmp_op(">")}
     if use_trend_rules:
         for r in inp.asset_trend_rules or []:
             try:
@@ -1153,6 +1221,36 @@ def backtest_rotation(
             mt = str((r or {}).get("trend_ma_type") or "").strip().lower()
             if mt in {"sma", "ema"}:
                 trend_ma_types.add(mt)
+            trend_ops.add(_normalize_cmp_op((r or {}).get("op") or ">"))
+
+    bias_windows = [int(inp.bias_ma_window)]
+    bias_rule_cfgs: set[tuple[int, str, str, float, float, int]] = {
+        (
+            int(inp.bias_ma_window),
+            str(inp.bias_level_window or "all").strip().lower(),
+            str(inp.bias_threshold_type or "quantile").strip().lower(),
+            float(inp.bias_quantile),
+            float(inp.bias_fixed_value),
+            int(inp.bias_min_periods),
+        )
+    }
+    if use_bias_rules:
+        for r in inp.asset_bias_rules or []:
+            try:
+                w = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
+            except (TypeError, ValueError):
+                w = int(inp.bias_ma_window)
+            if w > 1:
+                bias_windows.append(w)
+            cfg = (
+                int(max(2, w)),
+                str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower(),
+                str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower(),
+                float((r or {}).get("quantile") if (r or {}).get("quantile") is not None else inp.bias_quantile),
+                float((r or {}).get("fixed_value") if (r or {}).get("fixed_value") is not None else inp.bias_fixed_value),
+                int((r or {}).get("min_periods") if (r or {}).get("min_periods") is not None else inp.bias_min_periods),
+            )
+            bias_rule_cfgs.add(cfg)
 
     rsi_windows = [int(inp.rsi_window)]
     if use_rsi_rules:
@@ -1201,6 +1299,8 @@ def backtest_rotation(
     need_hist = inp.lookback_days + inp.skip_days + 60
     if inp.trend_filter:
         need_hist = max(need_hist, int(max(trend_windows)) + 60)
+    if inp.bias_filter or inp.bias_exit_filter:
+        need_hist = max(need_hist, int(max(bias_windows)) + 60)
     if inp.rsi_filter:
         need_hist = max(need_hist, int(max(rsi_windows)) + 60)
     if inp.vol_monitor:
@@ -1213,7 +1313,7 @@ def backtest_rotation(
     ext_start = inp.start - dt.timedelta(days=int(need_hist))
     close_hfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
     # Only load qfq when we actually need technical-analysis indicators.
-    need_qfq = bool(inp.trend_filter or inp.rsi_filter or inp.vol_monitor or inp.chop_filter or tp_sl_mode != "none")
+    need_qfq = bool(inp.trend_filter or inp.trend_exit_filter or inp.bias_filter or inp.bias_exit_filter or inp.rsi_filter or inp.vol_monitor or inp.chop_filter or tp_sl_mode != "none")
     close_qfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq else pd.DataFrame()
     need_qfq_hl = bool(inp.chop_filter and (("adx" in chop_modes) if use_chop_rules else (cm == "adx")))
     high_qfq, low_qfq = (
@@ -1390,17 +1490,41 @@ def backtest_rotation(
     # Pre-compute risk-control signals on hfq close (aligned to execution calendar).
     # IMPORTANT: per your rule, all TA uses qfq; only momentum scoring & momentum floor uses hfq.
     ta_close = close_qfq[rank_codes] if need_qfq else None
-    trend_ok_each_by_key: dict[tuple[int, str], pd.DataFrame] = {}
+    trend_ok_each_by_key: dict[tuple[int, str, str], pd.DataFrame] = {}
+    bias_by_ma_window: dict[int, pd.DataFrame] = {}
+    bias_thr_by_cfg: dict[tuple[int, str, str, float, float, int], pd.DataFrame] = {}
     rsi_by_window: dict[int, pd.DataFrame] = {}
     ann_vol_by_window: dict[int, pd.DataFrame] = {}
     er_by_window: dict[int, pd.DataFrame] = {}
     adx_by_window: dict[int, pd.DataFrame] = {}
 
     if ta_close is not None:
-        if inp.trend_filter:
+        if inp.trend_filter or inp.trend_exit_filter:
             for w in sorted(set(int(x) for x in trend_windows if int(x) > 0)):
                 for mt in sorted(set(str(x) for x in trend_ma_types if str(x) in {"sma", "ema"})):
-                    trend_ok_each_by_key[(int(w), str(mt))] = _trend_ok_each(ta_close, ma_window=int(w), ma_type=str(mt))
+                    for op in sorted(set(str(x) for x in trend_ops)):
+                        trend_ok_each_by_key[(int(w), str(mt), str(op))] = _trend_ok_each(
+                            ta_close,
+                            ma_window=int(w),
+                            ma_type=str(mt),
+                            op=str(op),
+                        )
+        if inp.bias_filter or inp.bias_exit_filter:
+            for w in sorted(set(int(x) for x in bias_windows if int(x) > 1)):
+                bias_by_ma_window[int(w)] = _bias_series_from_close(ta_close, ma_window=int(w))
+            for cfg in sorted(list(bias_rule_cfgs)):
+                w, lvw, tt, qv, fvv, mp = cfg
+                bdf = bias_by_ma_window.get(int(w))
+                if bdf is None:
+                    continue
+                bias_thr_by_cfg[cfg] = _bias_threshold_series(
+                    bdf,
+                    level_window=str(lvw),
+                    threshold_type=str(tt),
+                    quantile=float(qv),
+                    fixed_value=float(fvv),
+                    min_periods=int(mp),
+                )
         if inp.rsi_filter:
             for w in sorted(set(int(x) for x in rsi_windows if int(x) > 0)):
                 rsi_by_window[w] = _rsi(ta_close, window=int(w))
@@ -1998,7 +2122,7 @@ def backtest_rotation(
         elif candidate_scores is not None and hasattr(candidate_scores, "dropna"):
             candidate_ranked = [str(x) for x in candidate_scores.dropna().sort_values(ascending=False).index.tolist()]
 
-        entry_enabled_count = int(bool(inp.chop_filter)) + int(bool(inp.trend_filter)) + int(bool(inp.rsi_filter))
+        entry_enabled_count = int(bool(inp.chop_filter)) + int(bool(inp.trend_filter)) + int(bool(inp.bias_filter)) + int(bool(inp.rsi_filter))
         raw_entry_n = int(inp.entry_match_n or 0)
         if entry_enabled_count <= 0:
             entry_required = 0
@@ -2058,22 +2182,69 @@ def backtest_rotation(
             # Trend filter
             if inp.trend_filter:
                 enabled += 1
-                eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
+                eff = _momentum_rules_for_stage(
+                    str(p),
+                    rules=inp.asset_trend_rules,
+                    stage="entry",
+                ) if use_trend_rules else []
                 if not eff:
-                    eff = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type)}]
+                    eff = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type), "op": ">"}]
                 oks: list[bool] = []
                 for r in eff:
                     win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
                     mt = str((r or {}).get("trend_ma_type") or trend_ma_type).strip().lower()
                     if mt not in {"sma", "ema"}:
                         mt = str(trend_ma_type)
-                    df = trend_ok_each_by_key.get((int(win), str(mt)))
+                    op = _normalize_cmp_op((r or {}).get("op") or ">")
+                    df = trend_ok_each_by_key.get((int(win), str(mt), str(op)))
                     if df is None or asof_d not in df.index:
                         oks.append(False)
                     else:
                         oks.append(bool(df.loc[asof_d, p]))
                 ok_trend = (bool(all(oks)) if oks else True)
                 if ok_trend:
+                    passed += 1
+
+            # BIAS filter
+            if inp.bias_filter:
+                enabled += 1
+                eff = _momentum_rules_for_stage(
+                    str(p),
+                    rules=inp.asset_bias_rules,
+                    stage="entry",
+                ) if use_bias_rules else []
+                if not eff:
+                    eff = [{
+                        "bias_ma_window": int(inp.bias_ma_window),
+                        "level_window": str(inp.bias_level_window or "all"),
+                        "threshold_type": str(inp.bias_threshold_type or "quantile"),
+                        "quantile": float(inp.bias_quantile),
+                        "fixed_value": float(inp.bias_fixed_value),
+                        "min_periods": int(inp.bias_min_periods),
+                        "op": ">",
+                    }]
+                oks: list[bool] = []
+                for r in eff:
+                    win = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
+                    lvw = str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower()
+                    tt = str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower()
+                    qv = float((r or {}).get("quantile") if (r or {}).get("quantile") is not None else inp.bias_quantile)
+                    fvv = float((r or {}).get("fixed_value") if (r or {}).get("fixed_value") is not None else inp.bias_fixed_value)
+                    mp = int((r or {}).get("min_periods") if (r or {}).get("min_periods") is not None else inp.bias_min_periods)
+                    op = _normalize_cmp_op((r or {}).get("op") or ">")
+                    bdf = bias_by_ma_window.get(int(win))
+                    tdf = bias_thr_by_cfg.get((int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
+                    if bdf is None or tdf is None or asof_d not in bdf.index or asof_d not in tdf.index:
+                        oks.append(False)
+                        continue
+                    sig = None if pd.isna(bdf.loc[asof_d, p]) else float(bdf.loc[asof_d, p])
+                    thr = None if pd.isna(tdf.loc[asof_d, p]) else float(tdf.loc[asof_d, p])
+                    if sig is None or thr is None or (not np.isfinite(sig)) or (not np.isfinite(thr)):
+                        oks.append(False)
+                    else:
+                        oks.append(_compare_with_op(float(sig), float(thr), op))
+                ok_bias = (bool(all(oks)) if oks else True)
+                if ok_bias:
                     passed += 1
 
             # RSI filter
@@ -2179,16 +2350,21 @@ def backtest_rotation(
                 before = risk_picks[:]
                 ok_map: dict[str, bool] = {}
                 for p in before:
-                    eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
+                    eff = _momentum_rules_for_stage(
+                        str(p),
+                        rules=inp.asset_trend_rules,
+                        stage="entry",
+                    ) if use_trend_rules else []
                     if not eff:
-                        eff = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type)}]
+                        eff = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type), "op": ">"}]
                     oks: list[bool] = []
                     for r in eff:
                         win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
                         mt = str((r or {}).get("trend_ma_type") or trend_ma_type).strip().lower()
                         if mt not in {"sma", "ema"}:
                             mt = str(trend_ma_type)
-                        df = trend_ok_each_by_key.get((int(win), str(mt)))
+                        op = _normalize_cmp_op((r or {}).get("op") or ">")
+                        df = trend_ok_each_by_key.get((int(win), str(mt), str(op)))
                         if df is None or d not in df.index:
                             oks.append(False)
                         else:
@@ -2202,7 +2378,56 @@ def backtest_rotation(
                     reasons.append(f"trend_exclude:{','.join(removed)}")
                     picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
 
-            # 2) RSI filter
+            # 2) BIAS filter
+            if risk_picks and inp.bias_filter:
+                before = risk_picks[:]
+                ok_map: dict[str, bool] = {}
+                for p in before:
+                    eff = _momentum_rules_for_stage(
+                        str(p),
+                        rules=inp.asset_bias_rules,
+                        stage="entry",
+                    ) if use_bias_rules else []
+                    if not eff:
+                        eff = [{
+                            "bias_ma_window": int(inp.bias_ma_window),
+                            "level_window": str(inp.bias_level_window or "all"),
+                            "threshold_type": str(inp.bias_threshold_type or "quantile"),
+                            "quantile": float(inp.bias_quantile),
+                            "fixed_value": float(inp.bias_fixed_value),
+                            "min_periods": int(inp.bias_min_periods),
+                            "op": ">",
+                        }]
+                    oks: list[bool] = []
+                    for r in eff:
+                        win = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
+                        lvw = str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower()
+                        tt = str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower()
+                        qv = float((r or {}).get("quantile") if (r or {}).get("quantile") is not None else inp.bias_quantile)
+                        fvv = float((r or {}).get("fixed_value") if (r or {}).get("fixed_value") is not None else inp.bias_fixed_value)
+                        mp = int((r or {}).get("min_periods") if (r or {}).get("min_periods") is not None else inp.bias_min_periods)
+                        op = _normalize_cmp_op((r or {}).get("op") or ">")
+                        bdf = bias_by_ma_window.get(int(win))
+                        tdf = bias_thr_by_cfg.get((int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
+                        if bdf is None or tdf is None or d not in bdf.index or d not in tdf.index:
+                            oks.append(False)
+                            continue
+                        sig = None if pd.isna(bdf.loc[d, p]) else float(bdf.loc[d, p])
+                        thr = None if pd.isna(tdf.loc[d, p]) else float(tdf.loc[d, p])
+                        if sig is None or thr is None or (not np.isfinite(sig)) or (not np.isfinite(thr)):
+                            oks.append(False)
+                        else:
+                            oks.append(_compare_with_op(float(sig), float(thr), op))
+                    ok_map[p] = bool(all(oks)) if oks else True
+                details["bias_each_ok"] = ok_map
+                risk_picks = [p for p in before if ok_map.get(p, False)]
+                removed = [p for p in before if p not in risk_picks]
+                if removed:
+                    entry_rejected_codes.update([str(x) for x in removed])
+                    reasons.append(f"bias_exclude:{','.join(removed)}")
+                    picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
+
+            # 3) RSI filter
             if risk_picks and inp.rsi_filter:
                 before = risk_picks[:]
                 rsi_map: dict[str, float | None] = {}
@@ -2743,9 +2968,18 @@ def backtest_rotation(
                 tp_sl["triggered"] = False
             tp_sl["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
 
-        # Daily close decision for momentum exit rules; execute next trading day.
-        momentum_exit_meta: dict[str, Any] = {"enabled": bool(use_floor_rules), "triggered": False, "events": []}
-        if use_floor_rules and (not dd_in_sleep) and risk_picks:
+        # Daily close decision for exit controls; execute next trading day.
+        use_trend_exit = bool(inp.trend_exit_filter)
+        use_bias_exit = bool(inp.bias_exit_filter)
+        daily_exit_meta: dict[str, Any] = {
+            "enabled": bool(use_floor_rules or use_trend_exit or use_bias_exit),
+            "momentum_enabled": bool(use_floor_rules),
+            "trend_enabled": bool(use_trend_exit),
+            "bias_enabled": bool(use_bias_exit),
+            "triggered": False,
+            "events": [],
+        }
+        if (use_floor_rules or use_trend_exit or use_bias_exit) and (not dd_in_sleep) and risk_picks:
             cur_risk_set = {str(c) for c in risk_picks if c in rank_codes}
             for t in range(int(start_i), int(end_i)):
                 sig_d = dates[int(t)]
@@ -2753,47 +2987,129 @@ def backtest_rotation(
                 if not cur_risk_set:
                     break
                 for c in list(cur_risk_set):
-                    if c not in scores.columns:
-                        continue
-                    try:
-                        sc = float(scores.loc[sig_d, c])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if not np.isfinite(sc):
-                        continue
-                    exit_rules = _momentum_rules_for_stage(
-                        str(c),
-                        rules=inp.asset_momentum_floor_rules,
-                        stage="exit",
-                    )
-                    if not exit_rules:
-                        continue
-                    ok = _momentum_rules_pass(
-                        float(sc),
-                        rules=exit_rules,
-                        fallback_floor=float(inp.momentum_floor),
-                    )
-                    if ok:
-                        continue
                     prev_wt = float(w.loc[sig_d, c]) if c in w.columns else 0.0
                     if prev_wt <= 1e-12:
                         continue
+                    ev: dict[str, Any] | None = None
+                    # 1) momentum-based exit
+                    if use_floor_rules and c in scores.columns:
+                        try:
+                            sc = float(scores.loc[sig_d, c])
+                        except (KeyError, TypeError, ValueError):
+                            sc = float("nan")
+                        if np.isfinite(sc):
+                            exit_rules = _momentum_rules_for_stage(
+                                str(c),
+                                rules=inp.asset_momentum_floor_rules,
+                                stage="exit",
+                            )
+                            if exit_rules:
+                                ok = _momentum_rules_pass(
+                                    float(sc),
+                                    rules=exit_rules,
+                                    fallback_floor=float(inp.momentum_floor),
+                                )
+                                if not ok:
+                                    ev = {
+                                        "type": "momentum_rule",
+                                        "code": str(c),
+                                        "decision_date": sig_d.date().isoformat(),
+                                        "execution_date": exec_d.date().isoformat(),
+                                        "from_weight": float(prev_wt),
+                                        "to_weight": 0.0,
+                                        "delta_weight": float(-prev_wt),
+                                        "score": float(sc),
+                                    }
+                    # 2) trend-based exit (only if momentum exit didn't trigger first)
+                    if ev is None and use_trend_exit:
+                        trend_rules = _momentum_rules_for_stage(
+                            str(c),
+                            rules=inp.asset_trend_rules,
+                            stage="exit",
+                        ) if use_trend_rules else []
+                        if not trend_rules:
+                            trend_rules = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type), "op": ">"}]
+                        trend_ok = True
+                        for r in trend_rules:
+                            win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
+                            mt = str((r or {}).get("trend_ma_type") or trend_ma_type).strip().lower()
+                            if mt not in {"sma", "ema"}:
+                                mt = str(trend_ma_type)
+                            op = _normalize_cmp_op((r or {}).get("op") or ">")
+                            df = trend_ok_each_by_key.get((int(win), str(mt), str(op)))
+                            if df is None or sig_d not in df.index:
+                                trend_ok = False
+                                break
+                            if c not in df.columns or (not bool(df.loc[sig_d, c])):
+                                trend_ok = False
+                                break
+                        if not trend_ok:
+                            ev = {
+                                "type": "trend_rule",
+                                "code": str(c),
+                                "decision_date": sig_d.date().isoformat(),
+                                "execution_date": exec_d.date().isoformat(),
+                                "from_weight": float(prev_wt),
+                                "to_weight": 0.0,
+                                "delta_weight": float(-prev_wt),
+                            }
+                    # 3) bias-based exit
+                    if ev is None and use_bias_exit:
+                        bias_rules = _momentum_rules_for_stage(
+                            str(c),
+                            rules=inp.asset_bias_rules,
+                            stage="exit",
+                        ) if use_bias_rules else []
+                        if not bias_rules:
+                            bias_rules = [{
+                                "bias_ma_window": int(inp.bias_ma_window),
+                                "level_window": str(inp.bias_level_window or "all"),
+                                "threshold_type": str(inp.bias_threshold_type or "quantile"),
+                                "quantile": float(inp.bias_quantile),
+                                "fixed_value": float(inp.bias_fixed_value),
+                                "min_periods": int(inp.bias_min_periods),
+                                "op": ">",
+                            }]
+                        bias_ok = True
+                        for r in bias_rules:
+                            win = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
+                            lvw = str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower()
+                            tt = str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower()
+                            qv = float((r or {}).get("quantile") if (r or {}).get("quantile") is not None else inp.bias_quantile)
+                            fvv = float((r or {}).get("fixed_value") if (r or {}).get("fixed_value") is not None else inp.bias_fixed_value)
+                            mp = int((r or {}).get("min_periods") if (r or {}).get("min_periods") is not None else inp.bias_min_periods)
+                            op = _normalize_cmp_op((r or {}).get("op") or ">")
+                            bdf = bias_by_ma_window.get(int(win))
+                            tdf = bias_thr_by_cfg.get((int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
+                            if bdf is None or tdf is None or sig_d not in bdf.index or sig_d not in tdf.index:
+                                bias_ok = False
+                                break
+                            sig = None if pd.isna(bdf.loc[sig_d, c]) else float(bdf.loc[sig_d, c])
+                            thr = None if pd.isna(tdf.loc[sig_d, c]) else float(tdf.loc[sig_d, c])
+                            if sig is None or thr is None or (not np.isfinite(sig)) or (not np.isfinite(thr)):
+                                bias_ok = False
+                                break
+                            if not _compare_with_op(float(sig), float(thr), op):
+                                bias_ok = False
+                                break
+                        if not bias_ok:
+                            ev = {
+                                "type": "bias_rule",
+                                "code": str(c),
+                                "decision_date": sig_d.date().isoformat(),
+                                "execution_date": exec_d.date().isoformat(),
+                                "from_weight": float(prev_wt),
+                                "to_weight": 0.0,
+                                "delta_weight": float(-prev_wt),
+                            }
+                    if ev is None:
+                        continue
                     w.loc[exec_d : dates[end_i], c] = 0.0
-                    ev = {
-                        "type": "momentum_rule",
-                        "code": str(c),
-                        "decision_date": sig_d.date().isoformat(),
-                        "execution_date": exec_d.date().isoformat(),
-                        "from_weight": float(prev_wt),
-                        "to_weight": 0.0,
-                        "delta_weight": float(-prev_wt),
-                        "score": float(sc),
-                    }
-                    momentum_exit_meta["events"].append(ev)
+                    daily_exit_meta["events"].append(ev)
                     daily_exit_events.append(ev)
                     cur_risk_set.remove(c)
-            if momentum_exit_meta["events"]:
-                momentum_exit_meta["triggered"] = True
+            if daily_exit_meta["events"]:
+                daily_exit_meta["triggered"] = True
 
         # Carry forward for next rebalance decision (risk holdings only; stop-out means "cash" next decision).
         prev_picks_key = tuple(sorted([p for p in (risk_picks or []) if p in rank_codes])) if risk_picks else None
@@ -2839,7 +3155,7 @@ def backtest_rotation(
                     "added": [str(x) for x in backfill_added],
                     "rejected": sorted([str(x) for x in entry_rejected_codes]),
                 },
-                "daily_exit": momentum_exit_meta,
+                "daily_exit": daily_exit_meta,
                 "risk_controls": {"reasons": reasons, **details},
             }
         )
@@ -3195,6 +3511,27 @@ def backtest_rotation(
         abs_kelly = float(abs_win_rate - (1.0 - abs_win_rate) / abs_payoff)
     else:
         abs_kelly = float("nan")
+    # Robust variant-1: ignore near-zero period returns to reduce inactivity distortion.
+    nz_eps = 1e-10
+    abs_pos_nz = [x for x in abs_pos if np.isfinite(x) and abs(float(x)) > nz_eps]
+    abs_neg_nz = [x for x in abs_neg if np.isfinite(x) and abs(float(x)) > nz_eps]
+    total_p_nz = int(len(abs_pos_nz) + len(abs_neg_nz))
+    abs_win_rate_nz = float(len(abs_pos_nz) / total_p_nz) if total_p_nz > 0 else float("nan")
+    abs_avg_win_nz = float(np.mean(abs_pos_nz)) if abs_pos_nz else float("nan")
+    abs_avg_loss_nz = float(np.mean(abs_neg_nz)) if abs_neg_nz else float("nan")
+    abs_payoff_nz = float(abs_avg_win_nz / abs(abs_avg_loss_nz)) if (abs_pos_nz and abs_neg_nz and abs_avg_loss_nz != 0) else float("nan")
+    if total_p_nz > 0 and np.isfinite(abs_win_rate_nz) and np.isfinite(abs_payoff_nz) and abs_payoff_nz > 0:
+        abs_kelly_nonzero = float(abs_win_rate_nz - (1.0 - abs_win_rate_nz) / abs_payoff_nz)
+    else:
+        abs_kelly_nonzero = float("nan")
+    # Robust variant-2: daily mean-variance Kelly proxy (single risky asset approximation).
+    dret = pd.to_numeric(port_ret_net, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    d_mu = float(dret.mean()) if len(dret) else float("nan")
+    d_var = float(dret.var(ddof=1)) if len(dret) >= 2 else float("nan")
+    if np.isfinite(d_mu) and np.isfinite(d_var) and d_var > 0:
+        daily_mv_kelly_proxy = float(d_mu / d_var)
+    else:
+        daily_mv_kelly_proxy = float("nan")
 
     stats = {
         "rebalance": inp.rebalance,
@@ -3221,6 +3558,8 @@ def backtest_rotation(
         "abs_avg_loss_geo": abs_avg_loss_geo,
         "abs_payoff_ratio_geo": abs_payoff_geo,
         "abs_kelly_fraction": abs_kelly,
+        "abs_kelly_nonzero_fraction": abs_kelly_nonzero,
+        "daily_mv_kelly_proxy": daily_mv_kelly_proxy,
     }
 
     # Periodic returns for strategy (none) and benchmark (hfq), full lists

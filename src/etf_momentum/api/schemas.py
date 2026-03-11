@@ -617,8 +617,27 @@ class AssetTrendRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
+    op: str = Field(default=">", description="Comparison operator between close and MA: = | != | > | < | >= | <=")
+    stage: str = Field(default="entry", description="Rule stage: entry | exit | both")
     trend_sma_window: int = Field(default=20, ge=1, description="MA window (trading days, qfq close-based)")
     trend_ma_type: str = Field(default="sma", description="MA type: sma|ema (self close vs self MA)")
+
+
+class AssetBiasRule(BaseModel):
+    """
+    Per-asset BIAS filter rule (qfq close-based):
+    BIAS = close / MA(window) - 1.
+    """
+
+    code: str = Field(min_length=1, description="ETF code or '*' for default rule")
+    op: str = Field(default=">", description="Comparison operator: = | != | > | < | >= | <=")
+    stage: str = Field(default="entry", description="Rule stage: entry | exit | both")
+    bias_ma_window: int = Field(default=20, ge=2, description="MA window (trading days)")
+    level_window: str = Field(default="all", description="Threshold lookback window: 30d|90d|180d|1y|3y|5y|10y|all(expanding)")
+    threshold_type: str = Field(default="quantile", description="quantile|fixed")
+    quantile: float = Field(default=95.0, gt=0.0, lt=100.0, description="Percentile value when threshold_type=quantile, e.g. 95")
+    fixed_value: float = Field(default=10.0, ge=0.0, description="Fixed threshold (%) when threshold_type=fixed, e.g. 10 means 10%")
+    min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations before quantile threshold becomes active")
 
 
 class AssetRsiRule(BaseModel):
@@ -752,8 +771,17 @@ class RotationBacktestRequest(BaseModel):
     cost_bps: float = Field(default=0.0, ge=0.0)
     # Pre-trade risk controls (all optional; defaults keep previous behavior)
     trend_filter: bool = Field(default=False, description="Enable trend filter gating (pre-trade)")
+    trend_exit_filter: bool = Field(default=False, description="Enable trend-based daily exit gating (post-entry; next-day execution)")
     trend_sma_window: int = Field(default=20, ge=1, description="MA window for trend filter (trading days, qfq close-based)")
     trend_ma_type: str = Field(default="sma", description="Trend MA type: sma|ema (self close vs self MA)")
+    bias_filter: bool = Field(default=False, description="Enable BIAS filter gating (pre-trade)")
+    bias_exit_filter: bool = Field(default=False, description="Enable BIAS-based daily exit gating (post-entry; next-day execution)")
+    bias_ma_window: int = Field(default=20, ge=2, description="BIAS MA window (trading days)")
+    bias_level_window: str = Field(default="all", description="BIAS threshold lookback window: 30d|90d|180d|1y|3y|5y|10y|all")
+    bias_threshold_type: str = Field(default="quantile", description="BIAS threshold type: quantile|fixed")
+    bias_quantile: float = Field(default=95.0, gt=0.0, lt=100.0, description="BIAS percentile threshold (0,100), e.g. 95")
+    bias_fixed_value: float = Field(default=10.0, ge=0.0, description="BIAS fixed threshold in percent, e.g. 10 means 10%")
+    bias_min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations for BIAS quantile threshold")
     rsi_filter: bool = Field(default=False, description="Enable RSI filter gating (pre-trade)")
     rsi_window: int = Field(default=20, ge=1, description="RSI window (trading days)")
     rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)
@@ -872,6 +900,10 @@ class RotationBacktestRequest(BaseModel):
     asset_trend_rules: list[AssetTrendRule] | None = Field(
         default=None,
         description="Optional per-asset trend filter rules (qfq close-based). Use code='*' as default rule.",
+    )
+    asset_bias_rules: list[AssetBiasRule] | None = Field(
+        default=None,
+        description="Optional per-asset BIAS filter rules (qfq close-based). Use code='*' as default rule.",
     )
     asset_rsi_rules: list[AssetRsiRule] | None = Field(
         default=None,

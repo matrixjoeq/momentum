@@ -35,8 +35,17 @@ class RotationAnalysisInputs:
     score_vol_power: float = 1.0
     # Risk controls (defaults off)
     trend_filter: bool = False
+    trend_exit_filter: bool = False
     trend_sma_window: int = 20
     trend_ma_type: str = "sma"
+    bias_filter: bool = False
+    bias_exit_filter: bool = False
+    bias_ma_window: int = 20
+    bias_level_window: str = "all"
+    bias_threshold_type: str = "quantile"
+    bias_quantile: float = 95.0
+    bias_fixed_value: float = 10.0
+    bias_min_periods: int = 20
     rsi_filter: bool = False
     rsi_window: int = 20
     rsi_overbought: float = 70.0
@@ -90,6 +99,7 @@ class RotationAnalysisInputs:
     # Phase-1 per-asset parameter rules (optional)
     asset_momentum_floor_rules: list[dict[str, Any]] | None = None
     asset_trend_rules: list[dict[str, Any]] | None = None
+    asset_bias_rules: list[dict[str, Any]] | None = None
     asset_rsi_rules: list[dict[str, Any]] | None = None
     asset_chop_rules: list[dict[str, Any]] | None = None
     asset_vol_monitor_rules: list[dict[str, Any]] | None = None
@@ -128,8 +138,17 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             score_lambda=inp.score_lambda,
             score_vol_power=inp.score_vol_power,
             trend_filter=inp.trend_filter,
+            trend_exit_filter=inp.trend_exit_filter,
             trend_sma_window=inp.trend_sma_window,
             trend_ma_type=inp.trend_ma_type,
+            bias_filter=inp.bias_filter,
+            bias_exit_filter=inp.bias_exit_filter,
+            bias_ma_window=inp.bias_ma_window,
+            bias_level_window=inp.bias_level_window,
+            bias_threshold_type=inp.bias_threshold_type,
+            bias_quantile=inp.bias_quantile,
+            bias_fixed_value=inp.bias_fixed_value,
+            bias_min_periods=inp.bias_min_periods,
             rsi_filter=inp.rsi_filter,
             rsi_window=inp.rsi_window,
             rsi_overbought=inp.rsi_overbought,
@@ -178,6 +197,7 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             exec_price=inp.exec_price,
             asset_momentum_floor_rules=inp.asset_momentum_floor_rules,
             asset_trend_rules=inp.asset_trend_rules,
+            asset_bias_rules=inp.asset_bias_rules,
             asset_rsi_rules=inp.asset_rsi_rules,
             asset_chop_rules=inp.asset_chop_rules,
             asset_vol_monitor_rules=inp.asset_vol_monitor_rules,

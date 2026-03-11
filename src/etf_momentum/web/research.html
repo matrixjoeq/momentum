@@ -416,9 +416,17 @@
           <label>未来收益预测窗口 n（日）</label>
           <input id="distFutureN" value="5" style="min-width:140px;" />
         </div>
+        <div>
+          <label>拟合展示</label>
+          <label style="display:flex; align-items:center; gap:6px; margin:0;">
+            <input id="distFutureFitOn" type="checkbox" checked />
+            <span>显示线性拟合线 + 95%置信区间带</span>
+          </label>
+        </div>
       </div>
       <div id="distRangeHint" class="muted" style="margin-top:8px;"></div>
       <div id="distHistogram" style="width:100%; height:420px; margin-top:12px;"></div>
+      <table id="distQuantiles" style="margin-top:12px;"></table>
       <div class="muted" style="margin-top:10px;">当前统计指标值 vs 未来 t+n 日收益率（散点）</div>
       <div id="distFutureScatter" style="width:100%; height:380px; margin-top:8px;"></div>
       <div class="muted" style="margin-top:10px;">基于散点邻域样本的条件概率预测（围绕当前指标值）</div>
@@ -478,7 +486,6 @@
       <div id="distCalHeatmap" style="width:100%; height:280px; margin-top:8px;"></div>
       <div id="distCalHist" style="width:100%; height:280px; margin-top:8px;"></div>
       <table id="distCalTable" style="margin-top:8px;"></table>
-      <table id="distQuantiles" style="margin-top:12px;"></table>
       <div class="muted" style="margin-top:10px;">滚动年化波动率分位数（基于日收益滚动 std 年化）</div>
       <table id="distRollingAnnVolQuantiles" style="margin-top:8px;"></table>
       <div id="distRollingAnnVol" style="width:100%; height:320px; margin-top:12px;"></div>
@@ -642,12 +649,15 @@
           <button class="tabBtn active" data-tab="rotTabBase" role="tab" aria-selected="true">基础参数</button>
           <button class="tabBtn" data-tab="rotTabFloor" role="tab" aria-selected="false">动量过滤</button>
           <button class="tabBtn" data-tab="rotTabTrend" role="tab" aria-selected="false">趋势过滤</button>
+          <button class="tabBtn" data-tab="rotTabBias" role="tab" aria-selected="false">乖离率过滤</button>
           <button class="tabBtn" data-tab="rotTabRsi" role="tab" aria-selected="false">RSI过滤</button>
           <button class="tabBtn" data-tab="rotTabChop" role="tab" aria-selected="false">震荡过滤</button>
           <button class="tabBtn" data-tab="rotTabCorr" role="tab" aria-selected="false">相关性过滤</button>
           <button class="tabBtn" data-tab="rotTabInertia" role="tab" aria-selected="false">钝化</button>
           <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
           <button class="tabBtn" data-tab="rotTabFloorExit" role="tab" aria-selected="false">动量出场</button>
+          <button class="tabBtn" data-tab="rotTabTrendExit" role="tab" aria-selected="false">趋势出场</button>
+          <button class="tabBtn" data-tab="rotTabBiasExit" role="tab" aria-selected="false">乖离率出场</button>
           <button class="tabBtn" data-tab="rotTabVol" role="tab" aria-selected="false">波动率控制</button>
           <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益仓位</button>
           <button class="tabBtn" data-tab="rotTabDD" role="tab" aria-selected="false">回撤控制</button>
@@ -835,17 +845,119 @@
             <div class="row" style="gap:10px; align-items:center;">
               <button id="rotTrendAddRule">添加规则</button>
               <button id="rotTrendResetDefault">重置默认</button>
-              <span class="muted">每条规则可为不同标的设置均线类型/均线窗口（交易日）。</span>
+              <span class="muted">每条规则可设置判断条件、均线类型与均线窗口（交易日）。</span>
             </div>
             <table id="rotTrendRulesTable" style="margin-top:10px;">
               <tr>
                 <th>标的代码</th>
+                <th>判断条件</th>
                 <th>均线类型</th>
                 <th>均线窗口(交易日)</th>
                 <th>操作</th>
               </tr>
             </table>
           </div>
+        </div>
+
+        <div id="rotTabTrendExit" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>趋势出场开关</label>
+              <select id="rotExitTrendOn" style="min-width:160px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置趋势出场规则（自身收盘价 vs 自身均线）；持仓期间“每日收盘后决策、次日执行”。支持 <code>*</code> 默认规则，单标的规则覆盖默认。
+            </div>
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotTrendExitAddRule">添加规则</button>
+              <button id="rotTrendExitResetDefault">重置默认</button>
+              <span class="muted">每条规则可设置判断条件、均线类型与均线窗口（交易日）。</span>
+            </div>
+            <table id="rotTrendExitRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的代码</th>
+                <th>判断条件</th>
+                <th>均线类型</th>
+                <th>均线窗口(交易日)</th>
+                <th>操作</th>
+              </tr>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:8px">说明：仅用于出场条件，在持仓期间按日检查；触发后次日执行。</div>
+        </div>
+
+        <div id="rotTabBias" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>乖离率过滤开关</label>
+              <select id="rotBiasOn" style="min-width:160px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置 BIAS 过滤规则（BIAS = close/MA - 1，qfq 收盘价）。支持阈值类型：分位数或固定值；支持 <code>*</code> 默认规则。
+            </div>
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotBiasAddRule">添加规则</button>
+              <button id="rotBiasResetDefault">重置默认</button>
+              <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。仅在需要“个别标的覆盖默认”时才添加单标的规则。</span>
+            </div>
+            <table id="rotBiasRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的代码</th>
+                <th>判断条件</th>
+                <th>MA窗口</th>
+                <th>回看窗口</th>
+                <th>阈值类型</th>
+                <th>阈值</th>
+                <th>最小样本数</th>
+                <th>操作</th>
+              </tr>
+            </table>
+          </div>
+        </div>
+
+        <div id="rotTabBiasExit" class="tabPanel" role="tabpanel">
+          <div class="row">
+            <div>
+              <label>乖离率出场开关</label>
+              <select id="rotExitBiasOn" style="min-width:160px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div class="muted" style="max-width:760px;">
+              说明：按标的配置 BIAS 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95），固定值输入偏离百分比（如 10 表示 10%）。
+            </div>
+          </div>
+          <div class="panel" style="margin-top:10px;">
+            <div class="row" style="gap:10px; align-items:center;">
+              <button id="rotBiasExitAddRule">添加规则</button>
+              <button id="rotBiasExitResetDefault">重置默认</button>
+              <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。仅在需要“个别标的覆盖默认”时才添加单标的规则。</span>
+            </div>
+            <table id="rotBiasExitRulesTable" style="margin-top:10px;">
+              <tr>
+                <th>标的代码</th>
+                <th>判断条件</th>
+                <th>MA窗口</th>
+                <th>回看窗口</th>
+                <th>阈值类型</th>
+                <th>阈值</th>
+                <th>最小样本数</th>
+                <th>操作</th>
+              </tr>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:8px">说明：仅用于出场条件，在持仓期间按日检查；触发后次日执行。</div>
         </div>
 
         <div id="rotTabRsi" class="tabPanel" role="tabpanel">
@@ -2315,6 +2427,16 @@
           sub: "基于绝对胜率与绝对赔率的二项近似最优仓位比例。",
           body: `<div><b>计算</b>：f*_abs = p_abs - (1-p_abs)/b_abs。</div>`,
         },
+        rot_abs_kelly_nz: {
+          title: "绝对凯利比(稳健,剔零)",
+          sub: "先剔除绝对值接近0的期收益，再按二项近似计算凯利。",
+          body: `<div><b>计算</b>：仅在 |r|>eps 的调仓期上计算 p/b，再得 f*=p-(1-p)/b。</div><div style="margin-top:6px" class="muted">用途：降低“大量近零收益期”对凯利的扭曲。仍是近似指标，不等于最优实盘仓位。</div>`,
+        },
+        rot_daily_mv_kelly: {
+          title: "日度均值-方差凯利代理",
+          sub: "用日度收益的均值/方差近似单风险资产的凯利杠杆。",
+          body: `<div><b>计算</b>：f_mv ≈ mean(r_d)/var(r_d)（基于日度策略净收益序列）。</div><div style="margin-top:6px" class="muted">用途：与期胜率法互为校验。该值对尾部风险和非平稳敏感，建议结合回撤约束并做折扣使用。</div>`,
+        },
         mc_col_metric: {
           title: "指标",
           sub: "蒙特卡洛模拟输出的指标名称。",
@@ -2646,16 +2768,23 @@
             return out.length ? out : null;
           };
           const _buildPhase1 = () => {
-            const a = _buildTrendRules(); if (a && a.__error) return a;
+            const aEntry = _buildTrendRules("rotTrendOn", "rotTrendRulesTable", "entry"); if (aEntry && aEntry.__error) return aEntry;
+            const aExit = _buildTrendRules("rotExitTrendOn", "rotTrendExitRulesTable", "exit"); if (aExit && aExit.__error) return aExit;
+            const a = [...(aEntry || []), ...(aExit || [])];
+            const eEntry = _buildBiasRules("rotBiasOn", "rotBiasRulesTable", "entry"); if (eEntry && eEntry.__error) return eEntry;
+            const eExit = _buildBiasRules("rotExitBiasOn", "rotBiasExitRulesTable", "exit"); if (eExit && eExit.__error) return eExit;
+            const e = [...(eEntry || []), ...(eExit || [])];
             const b = _buildRsiRules(); if (b && b.__error) return b;
             const c = _buildVolRules(); if (c && c.__error) return c;
             const d = _buildChopRules(); if (d && d.__error) return d;
             return {
               asset_trend_rules: (a && a.__error ? null : a),
+              asset_bias_rules: (e && e.__error ? null : e),
               asset_rsi_rules: (b && b.__error ? null : b),
               asset_vol_monitor_rules: (c && c.__error ? null : c),
               asset_chop_rules: (d && d.__error ? null : d),
               trend_default: _pickDefaultRule(a),
+              bias_default: _pickDefaultRule(e),
               rsi_default: _pickDefaultRule(b),
               vol_default: _pickDefaultRule(c),
               chop_default: _pickDefaultRule(d),
@@ -2689,6 +2818,7 @@
             const p1 = _buildPhase1();
             if (p1 && p1.__error) return p1;
             const td = (p1 && p1.trend_default) ? p1.trend_default : { trend_sma_window: 20, trend_ma_type: "sma" };
+            const bd = (p1 && p1.bias_default) ? p1.bias_default : { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
             const rd = (p1 && p1.rsi_default) ? p1.rsi_default : { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
             const vd = (p1 && p1.vol_default) ? p1.vol_default : { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
             const cd = (p1 && p1.chop_default) ? p1.chop_default : { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
@@ -2724,8 +2854,17 @@
               risk_free_rate: (Number.isFinite(risk_free_rate) ? risk_free_rate : 0.025),
               // filters & controls
               trend_filter: ($("rotTrendOn").value === "true"),
+              trend_exit_filter: ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true"),
               trend_sma_window: Number(td.trend_sma_window),
               trend_ma_type: String(td.trend_ma_type || "sma"),
+              bias_filter: ($("rotBiasOn") && $("rotBiasOn").value === "true"),
+              bias_exit_filter: ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true"),
+              bias_ma_window: Number(bd.bias_ma_window || 20),
+              bias_level_window: String(bd.level_window || "all"),
+              bias_threshold_type: String(bd.threshold_type || "quantile"),
+              bias_quantile: Number(bd.quantile != null ? bd.quantile : 95),
+              bias_fixed_value: Number(bd.fixed_value != null ? bd.fixed_value : 10),
+              bias_min_periods: Number(bd.min_periods != null ? bd.min_periods : 20),
               rsi_filter: ($("rotRsiOn").value === "true"),
               rsi_window: Number(rd.rsi_window),
               rsi_overbought: Number(rd.rsi_overbought),
@@ -2768,6 +2907,7 @@
               dd_reduce,
               dd_sleep_days: Number(($("rotDDSleep").value || "20").trim()),
               asset_trend_rules: p1.asset_trend_rules,
+              asset_bias_rules: p1.asset_bias_rules,
               asset_rsi_rules: p1.asset_rsi_rules,
               asset_chop_rules: p1.asset_chop_rules,
               asset_vol_monitor_rules: p1.asset_vol_monitor_rules,
@@ -3878,6 +4018,7 @@
         const rollWinSelect = $("distRollVolWindow");
         const rollQTable = $("distRollingAnnVolQuantiles");
         const futNInput = $("distFutureN");
+        const futFitOn = $("distFutureFitOn");
         const futProbTable = $("distFutureProbTable");
         const futCausalTable = $("distFutureCausalTable");
         const calDayInput = $("distCalDay");
@@ -4677,6 +4818,44 @@
           const isPctX = (type === "return" || type === "volatility" || type === "bias");
           const xTickFmt = isPctX ? ".2%" : ".3f";
           const xHover = isPctX ? "%{x:.2%}" : "%{x:.4f}";
+          const showFit = !futFitOn || !!futFitOn.checked;
+          const regFit = _ols(ys, xs.map((v) => [1, v]));
+          const fitOk = !!(showFit && regFit && Array.isArray(regFit.beta) && regFit.beta.length >= 2 && Number.isFinite(regFit.beta[0]) && Number.isFinite(regFit.beta[1]));
+          const minX = xs.reduce((m, v) => (v < m ? v : m), xs[0]);
+          const maxX = xs.reduce((m, v) => (v > m ? v : m), xs[0]);
+          const fitX = fitOk
+            ? Array.from({ length: 80 }, (_, i) => minX + ((maxX - minX) * i) / 79.0)
+            : [];
+          const fitY = fitOk ? fitX.map((v) => regFit.beta[0] + regFit.beta[1] * v) : [];
+          let fitLower = [];
+          let fitUpper = [];
+          if (fitOk && xs.length >= 3) {
+            const n = xs.length;
+            const xMean = xs.reduce((a, b) => a + b, 0) / n;
+            const sxx = xs.reduce((s, v) => s + (v - xMean) * (v - xMean), 0);
+            if (Number.isFinite(sxx) && sxx > 0) {
+              const yHatAtX = xs.map((xv) => regFit.beta[0] + regFit.beta[1] * xv);
+              const sse = ys.reduce((s, yv, i) => s + Math.pow(yv - yHatAtX[i], 2), 0);
+              const mse = sse / Math.max(1, n - 2);
+              const z95 = 1.96;
+              fitLower = fitX.map((xv, i) => {
+                const seMean = Math.sqrt(mse * (1.0 / n + Math.pow(xv - xMean, 2) / sxx));
+                return fitY[i] - z95 * seMean;
+              });
+              fitUpper = fitX.map((xv, i) => {
+                const seMean = Math.sqrt(mse * (1.0 / n + Math.pow(xv - xMean, 2) / sxx));
+                return fitY[i] + z95 * seMean;
+              });
+            }
+          }
+          const hasCiBand = fitOk && fitLower.length === fitX.length && fitUpper.length === fitX.length && fitX.length > 1;
+          const _r2Interp = (v) => {
+            if (!Number.isFinite(v)) return "-";
+            if (v < 0.02) return "几乎无解释力";
+            if (v < 0.10) return "解释力较弱";
+            if (v < 0.30) return "解释力中等";
+            return "解释力较强";
+          };
           Plotly.newPlot(
             boxId,
             [
@@ -4690,6 +4869,35 @@
                 marker: { size: 6, color: "rgba(76,120,168,0.60)" },
                 hovertemplate: `signal_date=%{text}<br>x=${xHover}<br>ret=%{y:.2%}<extra></extra>`,
               },
+              ...(hasCiBand ? [{
+                x: fitX,
+                y: fitLower,
+                mode: "lines",
+                type: "scatter",
+                name: "95%CI下界",
+                line: { color: "rgba(255,127,14,0.0)", width: 0.5 },
+                hoverinfo: "skip",
+                showlegend: false,
+              }, {
+                x: fitX,
+                y: fitUpper,
+                mode: "lines",
+                type: "scatter",
+                name: "95%置信区间",
+                line: { color: "rgba(255,127,14,0.0)", width: 0.5 },
+                fill: "tonexty",
+                fillcolor: "rgba(255,127,14,0.12)",
+                hoverinfo: "skip",
+              }] : []),
+              ...(fitOk ? [{
+                x: fitX,
+                y: fitY,
+                mode: "lines",
+                type: "scatter",
+                name: "线性回归拟合",
+                line: { color: "rgba(255,127,14,0.95)", width: 2.0 },
+                hovertemplate: `fit y=%{y:.2%}<extra></extra>`,
+              }] : []),
             ],
             {
               margin: { t: 40 },
@@ -4706,7 +4914,7 @@
                 y1: 1,
                 line: { color: "rgba(214,39,40,0.95)", width: 2.4, dash: "solid" },
               }] : [],
-              annotations: Number.isFinite(curX) ? [{
+              annotations: (Number.isFinite(curX) ? [{
                 xref: "x",
                 yref: "paper",
                 x: curX,
@@ -4714,7 +4922,16 @@
                 showarrow: false,
                 text: "当前指标值",
                 font: { size: 11, color: "#d62728" },
-              }] : [],
+              }] : []).concat(fitOk ? [{
+                xref: "paper",
+                yref: "paper",
+                x: 0.99,
+                y: 0.98,
+                xanchor: "right",
+                showarrow: false,
+                text: `线性拟合: y=${regFit.beta[0].toFixed(4)}+${regFit.beta[1].toFixed(4)}x, R²=${Number(regFit.r2 || 0).toFixed(4)}（${_r2Interp(Number(regFit.r2 || NaN))}）`,
+                font: { size: 11, color: "#ff7f0e" },
+              }] : []),
             },
             { responsive: true, displayModeBar: false }
           );
@@ -4788,7 +5005,7 @@
               `<tr><td>Spearman 相关</td><td>${Number.isFinite(spea) ? spea.toFixed(4) : "-"}</td><td>秩相关（单调关系）强度；对异常值更稳健，适合非线性但单调场景。</td></tr>` +
               `<tr><td>预测回归斜率 β</td><td>${Number.isFinite(slope) ? slope.toFixed(6) : "-"}</td><td>指标每增加 1 单位时，条件期望收益变化量；符号给方向，绝对值给敏感度。</td></tr>` +
               `<tr><td>预测回归 t 值 / p(正态近似)</td><td>${Number.isFinite(tval) ? tval.toFixed(3) : "-"} / ${fmtPval(pval)}</td><td>|t| 越大、p 越小，斜率显著偏离 0 的证据越强（常用阈值 p&lt;0.05）。</td></tr>` +
-              `<tr><td>预测回归 R²</td><td>${Number.isFinite(r2) ? r2.toFixed(4) : "-"}</td><td>线性模型解释比例；越大表示该指标对未来收益波动解释力越强，但不代表因果。</td></tr>` +
+              `<tr><td>预测回归 R²</td><td>${Number.isFinite(r2) ? r2.toFixed(4) : "-"}</td><td>线性模型解释比例（${_r2Interp(Number(r2))}）；一般可粗略理解为：&lt;0.02 几乎无解释力，0.02~0.10 较弱，0.10~0.30 中等，&gt;0.30 较强。仅代表统计关联，不代表因果。</td></tr>` +
               `<tr><td>斜率置换检验 p 值</td><td>${fmtPval(permP)}</td><td>通过随机打乱 y 评估“偶然相关”概率；越小越说明斜率不太可能由随机噪声产生。</td></tr>` +
               `<tr><td>Granger-like (lag=3) ΔR²</td><td>${gr && Number.isFinite(gr.delta_r2) ? gr.delta_r2.toFixed(5) : "-"}</td><td>加入指标滞后项后对预测能力的增量；越大说明滞后信息更有价值。</td></tr>` +
               `<tr><td>Granger-like 置换检验 p 值</td><td>${gr ? fmtPval(gr.p_perm) : "-"}</td><td>对 ΔR² 做置换检验；越小表示“预测增量并非偶然”的证据越强。</td></tr>`;
@@ -5325,6 +5542,7 @@
           typeSelect.addEventListener("change", updateDisplay);
           periodSelect.addEventListener("change", updateDisplay);
           rollWinSelect.addEventListener("change", updateDisplay);
+          if (futFitOn) futFitOn.addEventListener("change", updateDisplay);
           if (futNInput) {
             futNInput.addEventListener("change", updateDisplay);
             futNInput.addEventListener("input", () => {
@@ -6451,6 +6669,8 @@
           { key: "rot_abs_payoff", label: "绝对赔率(盈/亏,算术)", value: wp.abs_payoff_ratio != null ? fmtNum(wp.abs_payoff_ratio) : "-" },
           { key: "rot_abs_payoff_geo", label: "绝对赔率(盈/亏,几何)", value: wp.abs_payoff_ratio_geo != null ? fmtNum(wp.abs_payoff_ratio_geo) : "-" },
           { key: "rot_abs_kelly", label: "绝对凯利比(近似)", value: wp.abs_kelly_fraction != null ? fmtPct(wp.abs_kelly_fraction) : "-" },
+          { key: "rot_abs_kelly_nz", label: "绝对凯利比(稳健,剔零)", value: wp.abs_kelly_nonzero_fraction != null ? fmtPct(wp.abs_kelly_nonzero_fraction) : "-" },
+          { key: "rot_daily_mv_kelly", label: "日度均值-方差凯利代理", value: wp.daily_mv_kelly_proxy != null ? fmtNum(wp.daily_mv_kelly_proxy) : "-" },
         ];
         $("rotWinPayoff").innerHTML =
           `<tr><th>指标</th><th>值</th></tr>` +
@@ -6943,11 +7163,22 @@
         const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
         if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
+        const trend_exit_filter = ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true");
+        const bias_filter = ($("rotBiasOn") && $("rotBiasOn").value === "true");
+        const bias_exit_filter = ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true");
         const rsi_filter = ($("rotRsiOn").value === "true");
         const vol_monitor = ($("rotVolOn").value === "true");
         const chop_filter = ($("rotChopOn").value === "true");
-        const asset_trend_rules = _buildTrendRules();
-        if (asset_trend_rules && asset_trend_rules.__error) return setMsg(asset_trend_rules.__error);
+        const trendEntryRules = _buildTrendRules("rotTrendOn", "rotTrendRulesTable", "entry");
+        if (trendEntryRules && trendEntryRules.__error) return setMsg(trendEntryRules.__error);
+        const trendExitRules = _buildTrendRules("rotExitTrendOn", "rotTrendExitRulesTable", "exit");
+        if (trendExitRules && trendExitRules.__error) return setMsg(trendExitRules.__error);
+        const asset_trend_rules = [...(trendEntryRules || []), ...(trendExitRules || [])];
+        const biasEntryRules = _buildBiasRules("rotBiasOn", "rotBiasRulesTable", "entry");
+        if (biasEntryRules && biasEntryRules.__error) return setMsg(biasEntryRules.__error);
+        const biasExitRules = _buildBiasRules("rotExitBiasOn", "rotBiasExitRulesTable", "exit");
+        if (biasExitRules && biasExitRules.__error) return setMsg(biasExitRules.__error);
+        const asset_bias_rules = [...(biasEntryRules || []), ...(biasExitRules || [])];
         const asset_rsi_rules = _buildRsiRules();
         if (asset_rsi_rules && asset_rsi_rules.__error) return setMsg(asset_rsi_rules.__error);
         const asset_vol_monitor_rules = _buildVolRules();
@@ -6956,12 +7187,19 @@
         if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
+        const bd = _pickDefaultRule(asset_bias_rules) || { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
         const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
 
         const trend_sma_window = Number(td.trend_sma_window);
         const trend_ma_type = String(td.trend_ma_type || "sma").toLowerCase();
+        const bias_ma_window = Number(bd.bias_ma_window || 20);
+        const bias_level_window = String(bd.level_window || "all").toLowerCase();
+        const bias_threshold_type = String(bd.threshold_type || "quantile").toLowerCase();
+        const bias_quantile = Number(bd.quantile != null ? bd.quantile : 95);
+        const bias_fixed_value = Number(bd.fixed_value != null ? bd.fixed_value : 10);
+        const bias_min_periods = Number(bd.min_periods != null ? bd.min_periods : 20);
         const rsi_window = Number(rd.rsi_window);
         const rsi_overbought = Number(rd.rsi_overbought);
         const rsi_oversold = Number(rd.rsi_oversold);
@@ -7116,11 +7354,12 @@
             mirror_control, mirror_quantiles, mirror_exposures,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             timing_rsi_gate, timing_rsi_window,
-            trend_filter, trend_sma_window, trend_ma_type,
+            trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
+            bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
-            asset_trend_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+            asset_trend_rules, asset_bias_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             asset_rc_rules,
             asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
@@ -7500,11 +7739,22 @@
         const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
         if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
+        const trend_exit_filter = ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true");
+        const bias_filter = ($("rotBiasOn") && $("rotBiasOn").value === "true");
+        const bias_exit_filter = ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true");
         const rsi_filter = ($("rotRsiOn").value === "true");
         const vol_monitor = ($("rotVolOn").value === "true");
         const chop_filter = ($("rotChopOn").value === "true");
-        const asset_trend_rules = _buildTrendRules();
-        if (asset_trend_rules && asset_trend_rules.__error) return setMsg(asset_trend_rules.__error);
+        const trendEntryRules = _buildTrendRules("rotTrendOn", "rotTrendRulesTable", "entry");
+        if (trendEntryRules && trendEntryRules.__error) return setMsg(trendEntryRules.__error);
+        const trendExitRules = _buildTrendRules("rotExitTrendOn", "rotTrendExitRulesTable", "exit");
+        if (trendExitRules && trendExitRules.__error) return setMsg(trendExitRules.__error);
+        const asset_trend_rules = [...(trendEntryRules || []), ...(trendExitRules || [])];
+        const biasEntryRules = _buildBiasRules("rotBiasOn", "rotBiasRulesTable", "entry");
+        if (biasEntryRules && biasEntryRules.__error) return setMsg(biasEntryRules.__error);
+        const biasExitRules = _buildBiasRules("rotExitBiasOn", "rotBiasExitRulesTable", "exit");
+        if (biasExitRules && biasExitRules.__error) return setMsg(biasExitRules.__error);
+        const asset_bias_rules = [...(biasEntryRules || []), ...(biasExitRules || [])];
         const asset_rsi_rules = _buildRsiRules();
         if (asset_rsi_rules && asset_rsi_rules.__error) return setMsg(asset_rsi_rules.__error);
         const asset_vol_monitor_rules = _buildVolRules();
@@ -7513,12 +7763,19 @@
         if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
+        const bd = _pickDefaultRule(asset_bias_rules) || { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
         const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
 
         const trend_sma_window = Number(td.trend_sma_window);
         const trend_ma_type = String(td.trend_ma_type || "sma").toLowerCase();
+        const bias_ma_window = Number(bd.bias_ma_window || 20);
+        const bias_level_window = String(bd.level_window || "all").toLowerCase();
+        const bias_threshold_type = String(bd.threshold_type || "quantile").toLowerCase();
+        const bias_quantile = Number(bd.quantile != null ? bd.quantile : 95);
+        const bias_fixed_value = Number(bd.fixed_value != null ? bd.fixed_value : 10);
+        const bias_min_periods = Number(bd.min_periods != null ? bd.min_periods : 20);
         const rsi_window = Number(rd.rsi_window);
         const rsi_overbought = Number(rd.rsi_overbought);
         const rsi_oversold = Number(rd.rsi_oversold);
@@ -7676,11 +7933,12 @@
             mirror_control, mirror_quantiles, mirror_exposures,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             timing_rsi_gate, timing_rsi_window,
-            trend_filter, trend_sma_window, trend_ma_type,
+            trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
+            bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
-            asset_trend_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+            asset_trend_rules, asset_bias_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
             anchors, exec_prices,
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             asset_rc_rules,
@@ -7869,13 +8127,14 @@
         const smallBtns = Array.from(small.querySelectorAll(".tabBtn[data-tab]"));
         const groups = {
           base: ["rotTabBase"],
-          entry: ["rotTabFloor", "rotTabTrend", "rotTabRsi", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabVol"],
-          exit: ["rotTabTpSl", "rotTabFloorExit", "rotTabRR", "rotTabDD", "rotTabTiming", "rotTabMirror", "rotTabVolIndex"],
+          entry: ["rotTabFloor", "rotTabTrend", "rotTabBias", "rotTabRsi", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabVol"],
+          exit: ["rotTabTpSl", "rotTabFloorExit", "rotTabTrendExit", "rotTabBiasExit", "rotTabRR", "rotTabDD", "rotTabTiming", "rotTabMirror", "rotTabVolIndex"],
         };
         const _entryEnabledCount = () => {
           let m = 0;
           if ($("rotRiskOff") && $("rotRiskOff").value === "true") m += 1;
           if ($("rotTrendOn") && $("rotTrendOn").value === "true") m += 1;
+          if ($("rotBiasOn") && $("rotBiasOn").value === "true") m += 1;
           if ($("rotRsiOn") && $("rotRsiOn").value === "true") m += 1;
           if ($("rotChopOn") && $("rotChopOn").value === "true") m += 1;
           return m;
@@ -7883,6 +8142,8 @@
         const _exitEnabledCount = () => {
           let m = 0;
           if ($("rotExitFloorOn") && $("rotExitFloorOn").value === "true") m += 1;
+          if ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true") m += 1;
+          if ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true") m += 1;
           if ($("rotTpSlMode") && String($("rotTpSlMode").value || "none") !== "none") m += 1;
           if ($("rotRROn") && $("rotRROn").value === "true") m += 1;
           if ($("rotDDOn") && $("rotDDOn").value === "true") m += 1;
@@ -7940,7 +8201,7 @@
           _syncMatchN();
         };
         grpBtns.forEach((b) => b.addEventListener("click", () => setGroup(String((b.dataset && b.dataset.rotGroup) || "base"))));
-        ["rotRiskOff", "rotTrendOn", "rotRsiOn", "rotChopOn", "rotExitFloorOn", "rotTpSlMode", "rotRROn", "rotDDOn", "rotTimingOn", "rotMirrorOn", "rotVolIdxOn"].forEach((id) => {
+        ["rotRiskOff", "rotTrendOn", "rotBiasOn", "rotRsiOn", "rotChopOn", "rotExitFloorOn", "rotExitTrendOn", "rotExitBiasOn", "rotTpSlMode", "rotRROn", "rotDDOn", "rotTimingOn", "rotMirrorOn", "rotVolIdxOn"].forEach((id) => {
           const el = $(id);
           if (el) el.addEventListener("change", _syncMatchN);
         });
@@ -8033,16 +8294,29 @@
       }
 
       // ---- Trend rules ----
-      function _rotTrendAddRuleRow(rule) {
-        const tbl = $("rotTrendRulesTable");
+      function _rotTrendAddRuleRow(rule, opts) {
+        const o = opts || {};
+        const tableId = String(o.tableId || "rotTrendRulesTable");
+        const tbl = $(tableId);
         if (!tbl) return;
         const r = rule || {};
         const code = (r.code || "").toString();
+        const op = (r.op || ">").toString();
         const maType = (r.trend_ma_type || "sma").toString().toLowerCase();
         const win = (r.trend_sma_window == null ? 20 : r.trend_sma_window).toString();
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td><input class="rotTrendCode" value="${code}" placeholder="如 * 或 518880" style="min-width:120px;" /></td>
+          <td>
+            <select class="rotTrendOp" style="min-width:120px;">
+              <option value=">" ${op===">" ? "selected" : ""}>&gt;</option>
+              <option value="<" ${op==="<" ? "selected" : ""}>&lt;</option>
+              <option value=">=" ${op===">=" ? "selected" : ""}>&gt;=</option>
+              <option value="<=" ${op==="<=" ? "selected" : ""}>&lt;=</option>
+              <option value="=" ${op==="=" ? "selected" : ""}>=</option>
+              <option value="!=" ${op==="!=" ? "selected" : ""}>!=</option>
+            </select>
+          </td>
           <td>
             <select class="rotTrendMaType" style="min-width:160px;">
               <option value="sma" ${maType==="sma" ? "selected" : ""}>SMA</option>
@@ -8056,29 +8330,31 @@
         const btn = tr.querySelector(".rotTrendRemove");
         if (btn) btn.addEventListener("click", () => tr.remove());
       }
-      function _rotTrendClearRuleRows() {
-        const tbl = $("rotTrendRulesTable");
+      function _rotTrendClearRuleRows(tableId) {
+        const tbl = $(String(tableId || "rotTrendRulesTable"));
         if (!tbl) return;
         const trs = Array.from(tbl.querySelectorAll("tr"));
         for (let i = 1; i < trs.length; i++) trs[i].remove();
       }
-      function _rotTrendResetDefaultRules() {
-        _rotTrendClearRuleRows();
-        _rotTrendAddRuleRow({ code: "*", trend_sma_window: 20, trend_ma_type: "sma" });
+      function _rotTrendResetDefaultRules(tableId) {
+        _rotTrendClearRuleRows(tableId);
+        _rotTrendAddRuleRow({ code: "*", op: ">", trend_sma_window: 20, trend_ma_type: "sma" }, { tableId });
       }
-      function _buildTrendRules() {
-        const on = ($("rotTrendOn") && $("rotTrendOn").value === "true");
+      function _buildTrendRules(toggleId, tableId, stageName) {
+        const on = ($(String(toggleId || "rotTrendOn")) && $(String(toggleId || "rotTrendOn")).value === "true");
         if (!on) return null;
         const out = [];
-        for (const tr of _tableDataRows("rotTrendRulesTable")) {
+        for (const tr of _tableDataRows(String(tableId || "rotTrendRulesTable"))) {
           const code = (tr.querySelector(".rotTrendCode") && tr.querySelector(".rotTrendCode").value) ? String(tr.querySelector(".rotTrendCode").value).trim() : "";
           if (!code) continue;
+          const op = (tr.querySelector(".rotTrendOp") && tr.querySelector(".rotTrendOp").value) ? String(tr.querySelector(".rotTrendOp").value).trim() : ">";
           const trend_ma_type = (tr.querySelector(".rotTrendMaType") && tr.querySelector(".rotTrendMaType").value) ? String(tr.querySelector(".rotTrendMaType").value).trim().toLowerCase() : "sma";
           const winRaw = (tr.querySelector(".rotTrendWin") && tr.querySelector(".rotTrendWin").value) ? String(tr.querySelector(".rotTrendWin").value).trim() : "20";
           const trend_sma_window = Math.floor(Number(winRaw));
           if (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0) return { __error: "趋势过滤：均线窗口必须是正整数" };
           if (!["sma", "ema"].includes(trend_ma_type)) return { __error: "趋势过滤：均线类型仅支持 SMA/EMA" };
-          out.push({ code, trend_sma_window, trend_ma_type });
+          if (!["=", "!=", ">", "<", ">=", "<="].includes(op)) return { __error: "趋势过滤：判断条件仅支持 = != > < >= <=" };
+          out.push({ code, stage: String(stageName || "entry"), op, trend_sma_window, trend_ma_type });
         }
         return out.length ? out : null;
       }
@@ -8267,7 +8543,10 @@
       function _initPhase1RuleTables() {
         try { _rotFloorResetDefaultRules("rotFloorRulesTable"); _setTabEnabledByToggle("rotTabFloor", "rotRiskOff"); } catch { /* ignore */ }
         try { _rotFloorResetDefaultRules("rotFloorExitRulesTable"); _setTabEnabledByToggle("rotTabFloorExit", "rotExitFloorOn"); } catch { /* ignore */ }
-        try { _rotTrendResetDefaultRules(); _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"); } catch { /* ignore */ }
+        try { _rotTrendResetDefaultRules("rotTrendRulesTable"); _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"); } catch { /* ignore */ }
+        try { _rotTrendResetDefaultRules("rotTrendExitRulesTable"); _setTabEnabledByToggle("rotTabTrendExit", "rotExitTrendOn"); } catch { /* ignore */ }
+        try { _rotBiasResetDefaultRules("rotBiasRulesTable"); _setTabEnabledByToggle("rotTabBias", "rotBiasOn"); } catch { /* ignore */ }
+        try { _rotBiasResetDefaultRules("rotBiasExitRulesTable"); _setTabEnabledByToggle("rotTabBiasExit", "rotExitBiasOn"); } catch { /* ignore */ }
         try { _rotRsiResetDefaultRules(); _setTabEnabledByToggle("rotTabRsi", "rotRsiOn"); } catch { /* ignore */ }
         try { _rotVolResetDefaultRules(); _setTabEnabledByToggle("rotTabVol", "rotVolOn"); } catch { /* ignore */ }
         try { _rotChopResetDefaultRules(); _setTabEnabledByToggle("rotTabChop", "rotChopOn"); } catch { /* ignore */ }
@@ -8275,6 +8554,9 @@
         if ($("rotRiskOff")) $("rotRiskOff").addEventListener("change", () => _setTabEnabledByToggle("rotTabFloor", "rotRiskOff"));
         if ($("rotExitFloorOn")) $("rotExitFloorOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabFloorExit", "rotExitFloorOn"));
         if ($("rotTrendOn")) $("rotTrendOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"));
+        if ($("rotExitTrendOn")) $("rotExitTrendOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabTrendExit", "rotExitTrendOn"));
+        if ($("rotBiasOn")) $("rotBiasOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabBias", "rotBiasOn"));
+        if ($("rotExitBiasOn")) $("rotExitBiasOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabBiasExit", "rotExitBiasOn"));
         if ($("rotRsiOn")) $("rotRsiOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabRsi", "rotRsiOn"));
         if ($("rotVolOn")) $("rotVolOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabVol", "rotVolOn"));
         if ($("rotChopOn")) $("rotChopOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabChop", "rotChopOn"));
@@ -8283,8 +8565,14 @@
         if ($("rotFloorResetDefault")) $("rotFloorResetDefault").addEventListener("click", () => _rotFloorResetDefaultRules("rotFloorRulesTable"));
         if ($("rotFloorExitAddRule")) $("rotFloorExitAddRule").addEventListener("click", () => _rotFloorAddRuleRow({}, { tableId: "rotFloorExitRulesTable" }));
         if ($("rotFloorExitResetDefault")) $("rotFloorExitResetDefault").addEventListener("click", () => _rotFloorResetDefaultRules("rotFloorExitRulesTable"));
-        if ($("rotTrendAddRule")) $("rotTrendAddRule").addEventListener("click", () => _rotTrendAddRuleRow({}));
-        if ($("rotTrendResetDefault")) $("rotTrendResetDefault").addEventListener("click", _rotTrendResetDefaultRules);
+        if ($("rotTrendAddRule")) $("rotTrendAddRule").addEventListener("click", () => _rotTrendAddRuleRow({}, { tableId: "rotTrendRulesTable" }));
+        if ($("rotTrendResetDefault")) $("rotTrendResetDefault").addEventListener("click", () => _rotTrendResetDefaultRules("rotTrendRulesTable"));
+        if ($("rotTrendExitAddRule")) $("rotTrendExitAddRule").addEventListener("click", () => _rotTrendAddRuleRow({}, { tableId: "rotTrendExitRulesTable" }));
+        if ($("rotTrendExitResetDefault")) $("rotTrendExitResetDefault").addEventListener("click", () => _rotTrendResetDefaultRules("rotTrendExitRulesTable"));
+        if ($("rotBiasAddRule")) $("rotBiasAddRule").addEventListener("click", () => _rotBiasAddRuleRow({}, { tableId: "rotBiasRulesTable" }));
+        if ($("rotBiasResetDefault")) $("rotBiasResetDefault").addEventListener("click", () => _rotBiasResetDefaultRules("rotBiasRulesTable"));
+        if ($("rotBiasExitAddRule")) $("rotBiasExitAddRule").addEventListener("click", () => _rotBiasAddRuleRow({}, { tableId: "rotBiasExitRulesTable" }));
+        if ($("rotBiasExitResetDefault")) $("rotBiasExitResetDefault").addEventListener("click", () => _rotBiasResetDefaultRules("rotBiasExitRulesTable"));
         if ($("rotRsiAddRule")) $("rotRsiAddRule").addEventListener("click", () => _rotRsiAddRuleRow({}));
         if ($("rotRsiResetDefault")) $("rotRsiResetDefault").addEventListener("click", _rotRsiResetDefaultRules);
         if ($("rotVolAddRule")) $("rotVolAddRule").addEventListener("click", () => _rotVolAddRuleRow({}));
@@ -8307,6 +8595,118 @@
           ["all", "全区间扩展（expanding，无前视）"],
         ];
         return opts.map(([v, label]) => `<option value="${v}" ${String(selectedValue||"all")===v ? "selected" : ""}>${label}</option>`).join("");
+      }
+
+      function _rotBiasThresholdTypeLabel(v) {
+        return String(v || "quantile").toLowerCase() === "fixed" ? "固定值(偏离%)" : "分位数(%)";
+      }
+      function _rotBiasUpdateTypeHint(tr) {
+        if (!tr) return;
+        const tSel = tr.querySelector(".rotBiasThrType");
+        const tHint = tr.querySelector(".rotBiasThrTypeHint");
+        if (!tSel || !tHint) return;
+        tHint.textContent = _rotBiasThresholdTypeLabel(tSel.value);
+      }
+      function _rotBiasAddRuleRow(rule, opts) {
+        const o = opts || {};
+        const tableId = String(o.tableId || "rotBiasRulesTable");
+        const tbl = $(tableId);
+        if (!tbl) return;
+        const r = rule || {};
+        const code = (r.code || "").toString();
+        const op = (r.op || ">").toString();
+        const maWin = (r.bias_ma_window == null ? 20 : r.bias_ma_window).toString();
+        const win = (r.level_window || "all").toString().toLowerCase();
+        const thrType = (r.threshold_type || "quantile").toString().toLowerCase();
+        const qv = (r.quantile == null ? 95 : r.quantile).toString();
+        const fv = (r.fixed_value == null ? 10 : r.fixed_value).toString();
+        const minp = (r.min_periods == null ? 20 : r.min_periods).toString();
+        const thrShow = (thrType === "fixed") ? fv : qv;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="rotBiasCode" value="${code}" placeholder="如 * 或 513100" style="min-width:120px;" /></td>
+          <td>
+            <select class="rotBiasOp" style="min-width:120px;">
+              <option value=">" ${op===">" ? "selected" : ""}>&gt;</option>
+              <option value="<" ${op==="<" ? "selected" : ""}>&lt;</option>
+              <option value=">=" ${op===">=" ? "selected" : ""}>&gt;=</option>
+              <option value="<=" ${op==="<=" ? "selected" : ""}>&lt;=</option>
+              <option value="=" ${op==="=" ? "selected" : ""}>=</option>
+              <option value="!=" ${op==="!=" ? "selected" : ""}>!=</option>
+            </select>
+          </td>
+          <td><input class="rotBiasMaWin" value="${maWin}" placeholder="20" style="min-width:100px;" /></td>
+          <td>
+            <select class="rotBiasWin" style="min-width:220px;">
+              ${_rotVolIdxWindowOptionsHtml(win)}
+            </select>
+          </td>
+          <td>
+            <select class="rotBiasThrType" style="min-width:140px;">
+              <option value="quantile" ${thrType==="quantile" ? "selected" : ""}>分位数</option>
+              <option value="fixed" ${thrType==="fixed" ? "selected" : ""}>固定值</option>
+            </select>
+          </td>
+          <td>
+            <input class="rotBiasThrVal" value="${thrShow}" placeholder="95 或 10" style="min-width:120px;" />
+            <div class="muted rotBiasThrTypeHint" style="font-size:11px; margin-top:2px;"></div>
+          </td>
+          <td><input class="rotBiasMinP" value="${minp}" placeholder="20" style="min-width:90px;" /></td>
+          <td><button class="rotBiasRemove">删除</button></td>
+        `;
+        tbl.appendChild(tr);
+        const btn = tr.querySelector(".rotBiasRemove");
+        if (btn) btn.addEventListener("click", () => tr.remove());
+        const sel = tr.querySelector(".rotBiasThrType");
+        if (sel) sel.addEventListener("change", () => _rotBiasUpdateTypeHint(tr));
+        _rotBiasUpdateTypeHint(tr);
+      }
+      function _rotBiasClearRuleRows(tableId) {
+        const tbl = $(String(tableId || "rotBiasRulesTable"));
+        if (!tbl) return;
+        const trs = Array.from(tbl.querySelectorAll("tr"));
+        for (let i = 1; i < trs.length; i++) trs[i].remove();
+      }
+      function _rotBiasResetDefaultRules(tableId) {
+        _rotBiasClearRuleRows(tableId);
+        _rotBiasAddRuleRow(
+          { code: "*", op: "<=", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 },
+          { tableId }
+        );
+      }
+      function _buildBiasRules(toggleId, tableId, stageName) {
+        const on = ($(String(toggleId || "rotBiasOn")) && $(String(toggleId || "rotBiasOn")).value === "true");
+        if (!on) return null;
+        const out = [];
+        for (const tr of _tableDataRows(String(tableId || "rotBiasRulesTable"))) {
+          const code = (tr.querySelector(".rotBiasCode") && tr.querySelector(".rotBiasCode").value) ? String(tr.querySelector(".rotBiasCode").value).trim() : "";
+          if (!code) continue;
+          const op = (tr.querySelector(".rotBiasOp") && tr.querySelector(".rotBiasOp").value) ? String(tr.querySelector(".rotBiasOp").value).trim() : ">";
+          const bias_ma_window = Math.floor(Number((tr.querySelector(".rotBiasMaWin") && tr.querySelector(".rotBiasMaWin").value) ? tr.querySelector(".rotBiasMaWin").value : "20"));
+          const level_window = (tr.querySelector(".rotBiasWin") && tr.querySelector(".rotBiasWin").value) ? String(tr.querySelector(".rotBiasWin").value).trim().toLowerCase() : "all";
+          const threshold_type = (tr.querySelector(".rotBiasThrType") && tr.querySelector(".rotBiasThrType").value) ? String(tr.querySelector(".rotBiasThrType").value).trim().toLowerCase() : "quantile";
+          const threshold_value = Number((tr.querySelector(".rotBiasThrVal") && tr.querySelector(".rotBiasThrVal").value) ? tr.querySelector(".rotBiasThrVal").value : "95");
+          const min_periods = Math.floor(Number((tr.querySelector(".rotBiasMinP") && tr.querySelector(".rotBiasMinP").value) ? tr.querySelector(".rotBiasMinP").value : "20"));
+          if (!Number.isFinite(bias_ma_window) || bias_ma_window <= 1) return { __error: "乖离率过滤：MA窗口必须>1" };
+          if (!["=", "!=", ">", "<", ">=", "<="].includes(op)) return { __error: "乖离率过滤：判断条件仅支持 = != > < >= <=" };
+          if (!["quantile", "fixed"].includes(threshold_type)) return { __error: "乖离率过滤：阈值类型仅支持 quantile/fixed" };
+          if (!Number.isFinite(threshold_value)) return { __error: "乖离率过滤：阈值必须是数字" };
+          if (threshold_type === "quantile" && (threshold_value <= 0 || threshold_value >= 100)) return { __error: "乖离率过滤：分位数阈值需在 (0,100) ，例如 95" };
+          if (threshold_type === "fixed" && threshold_value < 0) return { __error: "乖离率过滤：固定阈值(偏离%)必须 >= 0" };
+          if (!Number.isFinite(min_periods) || min_periods < 2) return { __error: "乖离率过滤：最小样本数必须 >= 2" };
+          out.push({
+            code,
+            stage: String(stageName || "entry"),
+            op,
+            bias_ma_window,
+            level_window,
+            threshold_type,
+            quantile: (threshold_type === "quantile" ? threshold_value : 95),
+            fixed_value: (threshold_type === "fixed" ? threshold_value : 10),
+            min_periods,
+          });
+        }
+        return out.length ? out : null;
       }
 
       function _rotVolIdxAddRuleRow(rule) {
@@ -8493,11 +8893,22 @@
         const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
         if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
         const trend_filter = ($("rotTrendOn").value === "true");
+        const trend_exit_filter = ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true");
+        const bias_filter = ($("rotBiasOn") && $("rotBiasOn").value === "true");
+        const bias_exit_filter = ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true");
         const rsi_filter = ($("rotRsiOn").value === "true");
         const vol_monitor = ($("rotVolOn").value === "true");
         const chop_filter = ($("rotChopOn").value === "true");
-        const asset_trend_rules = _buildTrendRules();
-        if (asset_trend_rules && asset_trend_rules.__error) return setMsg(asset_trend_rules.__error);
+        const trendEntryRules = _buildTrendRules("rotTrendOn", "rotTrendRulesTable", "entry");
+        if (trendEntryRules && trendEntryRules.__error) return setMsg(trendEntryRules.__error);
+        const trendExitRules = _buildTrendRules("rotExitTrendOn", "rotTrendExitRulesTable", "exit");
+        if (trendExitRules && trendExitRules.__error) return setMsg(trendExitRules.__error);
+        const asset_trend_rules = [...(trendEntryRules || []), ...(trendExitRules || [])];
+        const biasEntryRules = _buildBiasRules("rotBiasOn", "rotBiasRulesTable", "entry");
+        if (biasEntryRules && biasEntryRules.__error) return setMsg(biasEntryRules.__error);
+        const biasExitRules = _buildBiasRules("rotExitBiasOn", "rotBiasExitRulesTable", "exit");
+        if (biasExitRules && biasExitRules.__error) return setMsg(biasExitRules.__error);
+        const asset_bias_rules = [...(biasEntryRules || []), ...(biasExitRules || [])];
         const asset_rsi_rules = _buildRsiRules();
         if (asset_rsi_rules && asset_rsi_rules.__error) return setMsg(asset_rsi_rules.__error);
         const asset_vol_monitor_rules = _buildVolRules();
@@ -8506,12 +8917,19 @@
         if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
+        const bd = _pickDefaultRule(asset_bias_rules) || { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
         const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
 
         const trend_sma_window = Number(td.trend_sma_window);
         const trend_ma_type = String(td.trend_ma_type || "sma").toLowerCase();
+        const bias_ma_window = Number(bd.bias_ma_window || 20);
+        const bias_level_window = String(bd.level_window || "all").toLowerCase();
+        const bias_threshold_type = String(bd.threshold_type || "quantile").toLowerCase();
+        const bias_quantile = Number(bd.quantile != null ? bd.quantile : 95);
+        const bias_fixed_value = Number(bd.fixed_value != null ? bd.fixed_value : 10);
+        const bias_min_periods = Number(bd.min_periods != null ? bd.min_periods : 20);
         const rsi_window = Number(rd.rsi_window);
         const rsi_overbought = Number(rd.rsi_overbought);
         const rsi_oversold = Number(rd.rsi_oversold);
@@ -8657,11 +9075,12 @@
               mirror_control, mirror_quantiles, mirror_exposures,
               dd_control, dd_threshold, dd_reduce, dd_sleep_days,
               timing_rsi_gate, timing_rsi_window,
-              trend_filter, trend_sma_window, trend_ma_type,
+              trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
+              bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,
               chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
-              asset_trend_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+              asset_trend_rules, asset_bias_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
               asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
               asset_rc_rules,
               asset_vol_index_rules,
