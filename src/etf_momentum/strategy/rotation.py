@@ -65,8 +65,8 @@ class RotationInputs:
     # --- Pre-trade risk controls (drawdown prevention heuristics) ---
     # Trend filter: decide whether to buy at all, and/or exclude candidates that are not in trend.
     trend_filter: bool = False
-    trend_mode: str = "each"  # "each" | "universe"
     trend_sma_window: int = 20  # trading days (weekly use-case default)
+    trend_ma_type: str = "sma"  # sma | ema
     # RSI filter: avoid buying overbought / oversold assets.
     rsi_filter: bool = False
     rsi_window: int = 20
@@ -240,14 +240,18 @@ def _risk_adjusted_scores(
     return safe_div(excess_mean, dd.astype(float))
 
 
-def _trend_ok_each(close: pd.DataFrame, *, sma_window: int) -> pd.DataFrame:
+def _trend_ok_each(close: pd.DataFrame, *, ma_window: int, ma_type: str = "sma") -> pd.DataFrame:
     """
-    Simple trend filter: close > SMA(close, window).
+    Simple trend filter: close > MA(close, window).
     Returns boolean DataFrame aligned to `close`.
     """
-    w = max(1, int(sma_window))
-    sma = close.rolling(window=w, min_periods=max(2, w // 2)).mean()
-    return (close > sma).fillna(False)
+    w = max(1, int(ma_window))
+    mt = str(ma_type or "sma").strip().lower()
+    if mt == "ema":
+        ma = close.ewm(span=w, adjust=False, min_periods=max(2, w // 2)).mean()
+    else:
+        ma = close.rolling(window=w, min_periods=max(2, w // 2)).mean()
+    return (close > ma).fillna(False)
 
 
 def _rsi(close: pd.DataFrame, *, window: int) -> pd.DataFrame:
@@ -392,6 +396,90 @@ def _momentum_floor_for_code(
     if floors:
         return float(max(floors))
     return float(fallback)
+
+
+def _normalize_cmp_op(op: Any) -> str:
+    s = str(op or "").strip().lower()
+    mapping = {
+        ">": "gt",
+        "gt": "gt",
+        "greater": "gt",
+        "<": "lt",
+        "lt": "lt",
+        "less": "lt",
+        ">=": "ge",
+        "ge": "ge",
+        "=>": "ge",
+        "<=": "le",
+        "le": "le",
+        "=<": "le",
+        "==": "eq",
+        "=": "eq",
+        "eq": "eq",
+        "!=": "ne",
+        "<>": "ne",
+        "ne": "ne",
+    }
+    return mapping.get(s, "gt")
+
+
+def _compare_with_op(x: float, y: float, op: str) -> bool:
+    o = _normalize_cmp_op(op)
+    if o == "gt":
+        return bool(float(x) > float(y))
+    if o == "lt":
+        return bool(float(x) < float(y))
+    if o == "ge":
+        return bool(float(x) >= float(y))
+    if o == "le":
+        return bool(float(x) <= float(y))
+    if o == "eq":
+        return bool(float(x) == float(y))
+    if o == "ne":
+        return bool(float(x) != float(y))
+    return bool(float(x) > float(y))
+
+
+def _momentum_rule_threshold_raw(rule: dict[str, Any], fallback: float) -> float:
+    v = (rule or {}).get("threshold")
+    if v is None:
+        v = (rule or {}).get("momentum_floor")
+    if v is None:
+        v = fallback
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        x = float(fallback)
+    if not np.isfinite(x):
+        x = float(fallback)
+    unit = str((rule or {}).get("threshold_unit") or "raw").strip().lower()
+    if unit in {"pct", "percent", "%"}:
+        return float(x) / 100.0
+    return float(x)
+
+
+def _momentum_rules_for_stage(code: str, *, rules: list[dict[str, Any]] | None, stage: str) -> list[dict[str, Any]]:
+    eff = _effective_rules_for_code(code, rules)
+    out: list[dict[str, Any]] = []
+    st = str(stage or "entry").strip().lower()
+    for r in eff:
+        rs = str((r or {}).get("stage") or "entry").strip().lower()
+        if rs in {"both", st}:
+            out.append(dict(r or {}))
+    return out
+
+
+def _momentum_rules_pass(score: float, *, rules: list[dict[str, Any]], fallback_floor: float) -> bool:
+    if not np.isfinite(float(score)):
+        return False
+    if not rules:
+        return bool(float(score) > float(fallback_floor))
+    for r in rules:
+        op = _normalize_cmp_op((r or {}).get("op") or ">")
+        thr = _momentum_rule_threshold_raw(dict(r or {}), fallback=float(fallback_floor))
+        if not _compare_with_op(float(score), float(thr), op):
+            return False
+    return True
 
 
 def _apply_asset_rc_rules(
@@ -921,6 +1009,9 @@ def backtest_rotation(
         raise ValueError("score_vol_power must be finite")
     if inp.trend_sma_window <= 0:
         raise ValueError("trend_sma_window must be > 0")
+    trend_ma_type = str(inp.trend_ma_type or "sma").strip().lower()
+    if trend_ma_type not in {"sma", "ema"}:
+        raise ValueError("trend_ma_type must be one of: sma|ema")
     if inp.rsi_window <= 0:
         raise ValueError("rsi_window must be > 0")
     if inp.vol_window <= 0:
@@ -941,8 +1032,6 @@ def backtest_rotation(
             raise ValueError("chop_adx_threshold must be finite")
         if float(inp.chop_adx_threshold) <= 0:
             raise ValueError("chop_adx_threshold must be > 0")
-    if inp.trend_mode not in {"each", "universe"}:
-        raise ValueError(f"invalid trend_mode={inp.trend_mode}")
     tp_sl_mode = (inp.tp_sl_mode or "none").strip().lower()
     if tp_sl_mode not in {"none", "prev_week_low_stop", "atr_chandelier_fixed", "atr_chandelier_progressive"}:
         raise ValueError(f"invalid tp_sl_mode={inp.tp_sl_mode}")
@@ -1052,7 +1141,7 @@ def backtest_rotation(
     use_vol_rules = bool(inp.vol_monitor and inp.asset_vol_monitor_rules)
 
     trend_windows = [int(inp.trend_sma_window)]
-    trend_modes = {str(inp.trend_mode or "each").strip().lower()}
+    trend_ma_types = {str(trend_ma_type)}
     if use_trend_rules:
         for r in inp.asset_trend_rules or []:
             try:
@@ -1061,9 +1150,9 @@ def backtest_rotation(
                 w = int(inp.trend_sma_window)
             if w > 0:
                 trend_windows.append(w)
-            m = str((r or {}).get("trend_mode") or "").strip().lower()
-            if m:
-                trend_modes.add(m)
+            mt = str((r or {}).get("trend_ma_type") or "").strip().lower()
+            if mt in {"sma", "ema"}:
+                trend_ma_types.add(mt)
 
     rsi_windows = [int(inp.rsi_window)]
     if use_rsi_rules:
@@ -1301,8 +1390,7 @@ def backtest_rotation(
     # Pre-compute risk-control signals on hfq close (aligned to execution calendar).
     # IMPORTANT: per your rule, all TA uses qfq; only momentum scoring & momentum floor uses hfq.
     ta_close = close_qfq[rank_codes] if need_qfq else None
-    trend_ok_each_by_window: dict[int, pd.DataFrame] = {}
-    trend_uni_ok_by_window: dict[int, pd.Series] = {}
+    trend_ok_each_by_key: dict[tuple[int, str], pd.DataFrame] = {}
     rsi_by_window: dict[int, pd.DataFrame] = {}
     ann_vol_by_window: dict[int, pd.DataFrame] = {}
     er_by_window: dict[int, pd.DataFrame] = {}
@@ -1311,11 +1399,8 @@ def backtest_rotation(
     if ta_close is not None:
         if inp.trend_filter:
             for w in sorted(set(int(x) for x in trend_windows if int(x) > 0)):
-                trend_ok_each_by_window[w] = _trend_ok_each(ta_close, sma_window=int(w))
-            if "universe" in trend_modes:
-                uni_close = ta_close.mean(axis=1).to_frame("UNIVERSE")
-                for w in sorted(set(int(x) for x in trend_windows if int(x) > 0)):
-                    trend_uni_ok_by_window[w] = _trend_ok_each(uni_close, sma_window=int(w))["UNIVERSE"]
+                for mt in sorted(set(str(x) for x in trend_ma_types if str(x) in {"sma", "ema"})):
+                    trend_ok_each_by_key[(int(w), str(mt))] = _trend_ok_each(ta_close, ma_window=int(w), ma_type=str(mt))
         if inp.rsi_filter:
             for w in sorted(set(int(x) for x in rsi_windows if int(x) > 0)):
                 rsi_by_window[w] = _rsi(ta_close, window=int(w))
@@ -1558,6 +1643,7 @@ def backtest_rotation(
     # Build weights per date (apply from next trading day after decision date).
     w = pd.DataFrame(0.0, index=dates, columns=codes)
     holdings: dict[str, list[dict[str, Any]]] = {"periods": []}
+    daily_exit_events: list[dict[str, Any]] = []
     # Stop-loss carry: track prior picks and whether a stop-out occurred in the prior holding segment.
     prev_picks_key: tuple[str, ...] | None = None
     prev_segment_stopped_out: bool = False
@@ -1799,7 +1885,7 @@ def backtest_rotation(
             }
         else:
             prev_w_row = w.iloc[start_i - 1].astype(float)
-            # Per-asset momentum floors: exclude assets whose score <= its configured floor.
+            # Per-asset momentum entry rules on the scoring series.
             scores_row = scores.loc[d]
             if use_floor_rules:
                 s2 = scores_row.copy()
@@ -1810,12 +1896,20 @@ def backtest_rotation(
                         continue
                     if not np.isfinite(sc):
                         continue
-                    f = _momentum_floor_for_code(
+                    eff_rules_all = _effective_rules_for_code(str(c), inp.asset_momentum_floor_rules)
+                    entry_rules = _momentum_rules_for_stage(
                         str(c),
                         rules=inp.asset_momentum_floor_rules,
-                        fallback=float(inp.momentum_floor),
+                        stage="entry",
                     )
-                    if np.isfinite(f) and float(sc) <= float(f):
+                    if eff_rules_all and (not entry_rules):
+                        # This asset only has exit-stage momentum rules; do not apply entry filtering.
+                        continue
+                    if not _momentum_rules_pass(
+                        float(sc),
+                        rules=entry_rules,
+                        fallback_floor=float(inp.momentum_floor),
+                    ):
                         s2.loc[c] = np.nan
                 scores_row = s2
 
@@ -1964,34 +2058,23 @@ def backtest_rotation(
             # Trend filter
             if inp.trend_filter:
                 enabled += 1
-                if (not use_trend_rules) and (str(inp.trend_mode) == "universe"):
-                    s = trend_uni_ok_by_window.get(int(inp.trend_sma_window))
-                    ok = bool(s.loc[asof_d]) if (s is not None and asof_d in s.index) else False
-                    if ok:
-                        passed += 1
-                else:
-                    eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
-                    if not eff:
-                        eff = [{"trend_mode": str(inp.trend_mode), "trend_sma_window": int(inp.trend_sma_window)}]
-                    oks: list[bool] = []
-                    for r in eff:
-                        m = str((r or {}).get("trend_mode") or inp.trend_mode).strip().lower()
-                        win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
-                        if m == "universe":
-                            s = trend_uni_ok_by_window.get(int(win))
-                            if s is None or asof_d not in s.index:
-                                oks.append(False)
-                            else:
-                                oks.append(bool(s.loc[asof_d]))
-                        else:
-                            df = trend_ok_each_by_window.get(int(win))
-                            if df is None or asof_d not in df.index:
-                                oks.append(False)
-                            else:
-                                oks.append(bool(df.loc[asof_d, p]))
-                    ok_trend = (bool(all(oks)) if oks else True)
-                    if ok_trend:
-                        passed += 1
+                eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
+                if not eff:
+                    eff = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type)}]
+                oks: list[bool] = []
+                for r in eff:
+                    win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
+                    mt = str((r or {}).get("trend_ma_type") or trend_ma_type).strip().lower()
+                    if mt not in {"sma", "ema"}:
+                        mt = str(trend_ma_type)
+                    df = trend_ok_each_by_key.get((int(win), str(mt)))
+                    if df is None or asof_d not in df.index:
+                        oks.append(False)
+                    else:
+                        oks.append(bool(df.loc[asof_d, p]))
+                ok_trend = (bool(all(oks)) if oks else True)
+                if ok_trend:
+                    passed += 1
 
             # RSI filter
             if inp.rsi_filter:
@@ -2093,51 +2176,31 @@ def backtest_rotation(
 
             # 1) Trend filter
             if inp.trend_filter:
-                if (not use_trend_rules) and (str(inp.trend_mode) == "universe"):
-                    s = trend_uni_ok_by_window.get(int(inp.trend_sma_window))
-                    ok = bool(s.loc[d]) if (s is not None and d in s.index) else False
-                    details["trend_universe_ok"] = ok
-                    if not ok:
-                        reasons.append("trend_universe_block")
-                        if inp.risk_off and defensive:
-                            picks = [defensive]
-                            risk_picks = []
-                            meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "defensive"}
+                before = risk_picks[:]
+                ok_map: dict[str, bool] = {}
+                for p in before:
+                    eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
+                    if not eff:
+                        eff = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type)}]
+                    oks: list[bool] = []
+                    for r in eff:
+                        win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
+                        mt = str((r or {}).get("trend_ma_type") or trend_ma_type).strip().lower()
+                        if mt not in {"sma", "ema"}:
+                            mt = str(trend_ma_type)
+                        df = trend_ok_each_by_key.get((int(win), str(mt)))
+                        if df is None or d not in df.index:
+                            oks.append(False)
                         else:
-                            picks = []
-                            risk_picks = []
-                            meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
-                else:
-                    before = risk_picks[:]
-                    ok_map: dict[str, bool] = {}
-                    for p in before:
-                        eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
-                        if not eff:
-                            eff = [{"trend_mode": str(inp.trend_mode), "trend_sma_window": int(inp.trend_sma_window)}]
-                        oks: list[bool] = []
-                        for r in eff:
-                            m = str((r or {}).get("trend_mode") or inp.trend_mode).strip().lower()
-                            win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
-                            if m == "universe":
-                                s = trend_uni_ok_by_window.get(int(win))
-                                if s is None or d not in s.index:
-                                    oks.append(False)
-                                else:
-                                    oks.append(bool(s.loc[d]))
-                            else:
-                                df = trend_ok_each_by_window.get(int(win))
-                                if df is None or d not in df.index:
-                                    oks.append(False)
-                                else:
-                                    oks.append(bool(df.loc[d, p]))
-                        ok_map[p] = bool(all(oks)) if oks else True
-                    details["trend_each_ok"] = ok_map
-                    risk_picks = [p for p in before if ok_map.get(p, False)]
-                    removed = [p for p in before if p not in risk_picks]
-                    if removed:
-                        entry_rejected_codes.update([str(x) for x in removed])
-                        reasons.append(f"trend_exclude:{','.join(removed)}")
-                        picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
+                            oks.append(bool(df.loc[d, p]))
+                    ok_map[p] = bool(all(oks)) if oks else True
+                details["trend_each_ok"] = ok_map
+                risk_picks = [p for p in before if ok_map.get(p, False)]
+                removed = [p for p in before if p not in risk_picks]
+                if removed:
+                    entry_rejected_codes.update([str(x) for x in removed])
+                    reasons.append(f"trend_exclude:{','.join(removed)}")
+                    picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
 
             # 2) RSI filter
             if risk_picks and inp.rsi_filter:
@@ -2680,6 +2743,58 @@ def backtest_rotation(
                 tp_sl["triggered"] = False
             tp_sl["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
 
+        # Daily close decision for momentum exit rules; execute next trading day.
+        momentum_exit_meta: dict[str, Any] = {"enabled": bool(use_floor_rules), "triggered": False, "events": []}
+        if use_floor_rules and (not dd_in_sleep) and risk_picks:
+            cur_risk_set = {str(c) for c in risk_picks if c in rank_codes}
+            for t in range(int(start_i), int(end_i)):
+                sig_d = dates[int(t)]
+                exec_d = dates[int(t) + 1]
+                if not cur_risk_set:
+                    break
+                for c in list(cur_risk_set):
+                    if c not in scores.columns:
+                        continue
+                    try:
+                        sc = float(scores.loc[sig_d, c])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if not np.isfinite(sc):
+                        continue
+                    exit_rules = _momentum_rules_for_stage(
+                        str(c),
+                        rules=inp.asset_momentum_floor_rules,
+                        stage="exit",
+                    )
+                    if not exit_rules:
+                        continue
+                    ok = _momentum_rules_pass(
+                        float(sc),
+                        rules=exit_rules,
+                        fallback_floor=float(inp.momentum_floor),
+                    )
+                    if ok:
+                        continue
+                    prev_wt = float(w.loc[sig_d, c]) if c in w.columns else 0.0
+                    if prev_wt <= 1e-12:
+                        continue
+                    w.loc[exec_d : dates[end_i], c] = 0.0
+                    ev = {
+                        "type": "momentum_rule",
+                        "code": str(c),
+                        "decision_date": sig_d.date().isoformat(),
+                        "execution_date": exec_d.date().isoformat(),
+                        "from_weight": float(prev_wt),
+                        "to_weight": 0.0,
+                        "delta_weight": float(-prev_wt),
+                        "score": float(sc),
+                    }
+                    momentum_exit_meta["events"].append(ev)
+                    daily_exit_events.append(ev)
+                    cur_risk_set.remove(c)
+            if momentum_exit_meta["events"]:
+                momentum_exit_meta["triggered"] = True
+
         # Carry forward for next rebalance decision (risk holdings only; stop-out means "cash" next decision).
         prev_picks_key = tuple(sorted([p for p in (risk_picks or []) if p in rank_codes])) if risk_picks else None
         prev_segment_stopped_out = bool(stop_triggered)
@@ -2724,6 +2839,7 @@ def backtest_rotation(
                     "added": [str(x) for x in backfill_added],
                     "rejected": sorted([str(x) for x in entry_rejected_codes]),
                 },
+                "daily_exit": momentum_exit_meta,
                 "risk_controls": {"reasons": reasons, **details},
             }
         )
@@ -3247,6 +3363,7 @@ def backtest_rotation(
         "period_details": period_stats,
         "holdings": holdings["periods"],
         "holding_streaks": holding_streaks,
+        "daily_exit_events": daily_exit_events,
         "corporate_actions": corporate_actions,
     }
     if return_weights_end:

@@ -35,8 +35,8 @@ class RotationAnalysisInputs:
     score_vol_power: float = 1.0
     # Risk controls (defaults off)
     trend_filter: bool = False
-    trend_mode: str = "each"
     trend_sma_window: int = 20
+    trend_ma_type: str = "sma"
     rsi_filter: bool = False
     rsi_window: int = 20
     rsi_overbought: float = 70.0
@@ -128,8 +128,8 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             score_lambda=inp.score_lambda,
             score_vol_power=inp.score_vol_power,
             trend_filter=inp.trend_filter,
-            trend_mode=inp.trend_mode,
             trend_sma_window=inp.trend_sma_window,
+            trend_ma_type=inp.trend_ma_type,
             rsi_filter=inp.rsi_filter,
             rsi_window=inp.rsi_window,
             rsi_overbought=inp.rsi_overbought,

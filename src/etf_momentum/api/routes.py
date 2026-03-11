@@ -702,8 +702,8 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
         asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=payload.trend_filter,
-        trend_mode=payload.trend_mode,
         trend_sma_window=payload.trend_sma_window,
+        trend_ma_type=payload.trend_ma_type,
         rsi_filter=payload.rsi_filter,
         rsi_window=payload.rsi_window,
         rsi_overbought=payload.rsi_overbought,
@@ -1740,8 +1740,8 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
         asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=payload.trend_filter,
-        trend_mode=payload.trend_mode,
         trend_sma_window=payload.trend_sma_window,
+        trend_ma_type=payload.trend_ma_type,
         rsi_filter=payload.rsi_filter,
         rsi_window=payload.rsi_window,
         rsi_overbought=payload.rsi_overbought,
@@ -1846,8 +1846,8 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
             asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
             asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
             trend_filter=bool(payload.trend_filter),
-            trend_mode=str(payload.trend_mode or "each"),
             trend_sma_window=int(payload.trend_sma_window),
+            trend_ma_type=str(payload.trend_ma_type or "sma"),
             rsi_filter=bool(payload.rsi_filter),
             rsi_window=int(payload.rsi_window),
             rsi_overbought=float(payload.rsi_overbought),
@@ -2011,8 +2011,8 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
         asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
         asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=bool(payload.trend_filter),
-        trend_mode=str(payload.trend_mode or "each"),
         trend_sma_window=int(payload.trend_sma_window),
+        trend_ma_type=str(payload.trend_ma_type or "sma"),
         rsi_filter=bool(payload.rsi_filter),
         rsi_window=int(payload.rsi_window),
         rsi_overbought=float(payload.rsi_overbought),
@@ -2133,8 +2133,8 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
         asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
         asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=bool(payload.trend_filter),
-        trend_mode=str(payload.trend_mode or "each"),
         trend_sma_window=int(payload.trend_sma_window),
+        trend_ma_type=str(payload.trend_ma_type or "sma"),
         rsi_filter=bool(payload.rsi_filter),
         rsi_window=int(payload.rsi_window),
         rsi_overbought=float(payload.rsi_overbought),
@@ -2261,8 +2261,8 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
         asset_chop_rules=[r.model_dump() for r in payload.asset_chop_rules] if payload.asset_chop_rules else None,
         asset_vol_monitor_rules=[r.model_dump() for r in payload.asset_vol_monitor_rules] if payload.asset_vol_monitor_rules else None,
         trend_filter=bool(payload.trend_filter),
-        trend_mode=str(payload.trend_mode or "each"),
         trend_sma_window=int(payload.trend_sma_window),
+        trend_ma_type=str(payload.trend_ma_type or "sma"),
         rsi_filter=bool(payload.rsi_filter),
         rsi_window=int(payload.rsi_window),
         rsi_overbought=float(payload.rsi_overbought),
@@ -2617,8 +2617,8 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
             score_lambda=float(wk_req.score_lambda),
             score_vol_power=float(wk_req.score_vol_power),
             trend_filter=bool(wk_req.trend_filter),
-            trend_mode=str(wk_req.trend_mode),
             trend_sma_window=int(wk_req.trend_sma_window),
+            trend_ma_type=str(wk_req.trend_ma_type or "sma"),
             rsi_filter=bool(wk_req.rsi_filter),
             rsi_window=int(wk_req.rsi_window),
             rsi_overbought=float(wk_req.rsi_overbought),
@@ -2823,13 +2823,42 @@ def rotation_next_execution_plan(payload: dict, db: Session = Depends(get_sessio
     next_iso = next_td.isoformat()
     hold = next((x for x in (out.get("holdings") or []) if str(x.get("start_date")) == next_iso), None)
     per = next((x for x in (out.get("period_details") or []) if str(x.get("start_date")) == next_iso), None)
+    day_exit_events = [x for x in (out.get("daily_exit_events") or []) if str((x or {}).get("execution_date")) == next_iso]
     weights_end = (out.get("weights_end") or {}).get("weights") or {}
     target_weights = [{"code": str(k), "weight": float(v)} for k, v in weights_end.items() if float(v or 0.0) > 1e-12]
     target_weights.sort(key=lambda x: float(x["weight"]), reverse=True)
     exposure = float(sum(float(x["weight"]) for x in target_weights)) if target_weights else 0.0
-    has_exec = bool(hold is not None or per is not None)
+    has_exec = bool(hold is not None or per is not None or day_exit_events)
 
-    plan = {
+    if (hold is None and per is None) and day_exit_events:
+        sells = []
+        for ev in day_exit_events:
+            sells.append(
+                {
+                    "code": str(ev.get("code")),
+                    "from_weight": float(ev.get("from_weight") or 0.0),
+                    "to_weight": float(ev.get("to_weight") or 0.0),
+                    "delta_weight": float(ev.get("delta_weight") or 0.0),
+                }
+            )
+        plan = {
+            "decision_date": (day_exit_events[0] or {}).get("decision_date"),
+            "execution_date": next_iso,
+            "rebalance_target_date": None,
+            "rebalance_hit_mode": "daily_exit",
+            "mode": "daily_exit",
+            "picks": [],
+            "scores": {},
+            "buys": [],
+            "sells": sells,
+            "turnover": None,
+            "backfill_used": False,
+            "backfill": None,
+            "target_weights": target_weights,
+            "exposure": float(exposure),
+        }
+    else:
+        plan = {
         "decision_date": (hold or {}).get("decision_date"),
         "execution_date": next_iso,
         "rebalance_target_date": (hold or {}).get("rebalance_target_date"),
@@ -2844,7 +2873,7 @@ def rotation_next_execution_plan(payload: dict, db: Session = Depends(get_sessio
         "backfill": (hold or {}).get("backfill"),
         "target_weights": target_weights,
         "exposure": float(exposure),
-    }
+        }
     return {
         "asof": asof.strftime("%Y%m%d"),
         "asof_requested": requested_asof.strftime("%Y%m%d"),

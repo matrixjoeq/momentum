@@ -617,8 +617,8 @@ class AssetTrendRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
-    trend_mode: str = Field(default="each", description="each|universe")
-    trend_sma_window: int = Field(default=20, ge=1, description="SMA window (trading days)")
+    trend_sma_window: int = Field(default=20, ge=1, description="MA window (trading days, qfq close-based)")
+    trend_ma_type: str = Field(default="sma", description="MA type: sma|ema (self close vs self MA)")
 
 
 class AssetRsiRule(BaseModel):
@@ -660,13 +660,32 @@ class AssetVolMonitorRule(BaseModel):
 
 class AssetMomentumFloorRule(BaseModel):
     """
-    Per-asset momentum floor rule:
-    - compares the asset's momentum score to its configured floor
-    - if score <= floor, the asset is excluded from selection
+    Per-asset momentum condition rule (shared by entry/exit):
+    - compares momentum score to threshold with a configurable operator
+    - stage controls where the rule applies: entry | exit | both
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
-    momentum_floor: float = Field(default=0.0, description="Momentum floor threshold for this asset")
+    momentum_floor: float | None = Field(
+        default=None,
+        description="[legacy] momentum threshold in raw score units; used when threshold is not set.",
+    )
+    threshold: float | None = Field(
+        default=None,
+        description="Momentum threshold value (raw or pct based on threshold_unit).",
+    )
+    threshold_unit: str = Field(
+        default="raw",
+        description="Threshold unit: raw | pct. pct means threshold is percent (1 => 1% => 0.01).",
+    )
+    op: str = Field(
+        default=">",
+        description="Comparison operator: = | != | > | < | >= | <= .",
+    )
+    stage: str = Field(
+        default="entry",
+        description="Rule stage: entry | exit | both",
+    )
 
 
 class RotationBacktestRequest(BaseModel):
@@ -733,8 +752,8 @@ class RotationBacktestRequest(BaseModel):
     cost_bps: float = Field(default=0.0, ge=0.0)
     # Pre-trade risk controls (all optional; defaults keep previous behavior)
     trend_filter: bool = Field(default=False, description="Enable trend filter gating (pre-trade)")
-    trend_mode: str = Field(default="each", description="each|universe")
-    trend_sma_window: int = Field(default=20, ge=1, description="SMA window for trend filter (trading days)")
+    trend_sma_window: int = Field(default=20, ge=1, description="MA window for trend filter (trading days, qfq close-based)")
+    trend_ma_type: str = Field(default="sma", description="Trend MA type: sma|ema (self close vs self MA)")
     rsi_filter: bool = Field(default=False, description="Enable RSI filter gating (pre-trade)")
     rsi_window: int = Field(default=20, ge=1, description="RSI window (trading days)")
     rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)

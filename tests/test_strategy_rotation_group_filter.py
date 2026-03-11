@@ -237,7 +237,6 @@ def test_rotation_entry_match_n_can_relax_from_and_to_nofm(session_factory):
             top_k=1,
             lookback_days=20,
             trend_filter=True,
-            trend_mode="each",
             trend_sma_window=10,
             rsi_filter=True,
             rsi_window=14,
@@ -257,3 +256,36 @@ def test_rotation_entry_match_n_can_relax_from_and_to_nofm(session_factory):
     picks_nofm = [tuple(x.get("picks") or []) for x in out_nofm["holdings"]]
     assert ("A1",) not in picks_and
     assert ("A1",) in picks_nofm
+
+
+def test_rotation_momentum_exit_rule_generates_daily_exit_event(session_factory):
+    sf = session_factory
+    with sf() as db:
+        dates = [d.date() for d in pd.date_range("2024-01-01", "2024-03-31", freq="B")]
+        for i, d in enumerate(dates):
+            # A1 rises first, then weakens so momentum score can fall below threshold.
+            a = 100.0 + i * 1.2 if i < 35 else 142.0 + (i - 35) * 0.02
+            b = 100.0 + i * 0.2
+            _add_price(db, code="A1", day=d, close=a)
+            _add_price(db, code="B1", day=d, close=b)
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["A1", "B1"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="monthly",
+                top_k=1,
+                lookback_days=20,
+                asset_momentum_floor_rules=[
+                    {"code": "*", "stage": "entry", "op": ">", "threshold": 0.0, "threshold_unit": "raw"},
+                    {"code": "A1", "stage": "exit", "op": "<", "threshold": 0.02, "threshold_unit": "raw"},
+                ],
+            ),
+        )
+
+    events = out.get("daily_exit_events") or []
+    assert events
+    assert any(str(e.get("type")) == "momentum_rule" for e in events)

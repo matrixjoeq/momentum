@@ -29,7 +29,7 @@ def _seed_prices(db, *, code: str, dates: list[dt.date], closes: list[float]) ->
             )
 
 
-def test_trend_filter_universe_blocks_risk_and_goes_cash(session_factory):
+def test_trend_filter_self_ma_blocks_risk_and_goes_cash(session_factory):
     sf = session_factory
     with sf() as db:
         codes = ["AAA", "BBB"]
@@ -53,7 +53,6 @@ def test_trend_filter_universe_blocks_risk_and_goes_cash(session_factory):
                 lookback_days=10,
                 risk_off=False,  # key: trend filter alone should be able to block entry
                 trend_filter=True,
-                trend_mode="universe",
                 trend_sma_window=10,
                 cost_bps=0.0,
             ),
