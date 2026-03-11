@@ -621,6 +621,23 @@
       </div>
 
       <div class="panel no-print">
+        <div class="tabs" id="rotCtrlTabs" role="tablist" aria-label="轮动风控分组">
+          <button class="tabBtn active" data-rot-group="base" role="tab" aria-selected="true">基础参数</button>
+          <button class="tabBtn" data-rot-group="entry" role="tab" aria-selected="false">入场控制</button>
+          <button class="tabBtn" data-rot-group="exit" role="tab" aria-selected="false">出场控制</button>
+        </div>
+        <div class="row" style="margin-top:8px; align-items:end;">
+          <div id="rotCtrlEntryNBox" style="display:none;">
+            <label>入场满足任意 N 条（N-of-M）</label>
+            <input id="rotEntryMatchN" value="0" disabled />
+            <div class="muted" id="rotEntryMatchHint">当前启用项数 M=0，设置不可用。</div>
+          </div>
+          <div id="rotCtrlExitNBox" style="display:none;">
+            <label>出场满足任意 N 条（N-of-M）</label>
+            <input id="rotExitMatchN" value="0" disabled />
+            <div class="muted" id="rotExitMatchHint">当前启用项数 M=0，设置不可用。</div>
+          </div>
+        </div>
         <div class="tabs" id="rotTabs" role="tablist" aria-label="动量轮动参数">
           <button class="tabBtn active" data-tab="rotTabBase" role="tab" aria-selected="true">基础参数</button>
           <button class="tabBtn" data-tab="rotTabFloor" role="tab" aria-selected="false">动量过滤</button>
@@ -631,6 +648,7 @@
           <button class="tabBtn" data-tab="rotTabInertia" role="tab" aria-selected="false">钝化</button>
           <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
           <button class="tabBtn" data-tab="rotTabVol" role="tab" aria-selected="false">波动率控制</button>
+          <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益仓位</button>
           <button class="tabBtn" data-tab="rotTabDD" role="tab" aria-selected="false">回撤控制</button>
           <button class="tabBtn" data-tab="rotTabTiming" role="tab" aria-selected="false">策略RSI择时</button>
           <button class="tabBtn" data-tab="rotTabMirror" role="tab" aria-selected="false">后视镜择时</button>
@@ -672,6 +690,20 @@
             <div>
               <label>TopK <button class="helpBtn" data-metric="param_rot_topk" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
               <input id="rotTopK" value="1" />
+            </div>
+            <div>
+              <label>仓位比例模式</label>
+              <select id="rotPositionMode" style="min-width:170px;">
+                <option value="adaptive" selected>自适应等权</option>
+                <option value="fixed">固定 1/K</option>
+              </select>
+            </div>
+            <div>
+              <label>入场补位</label>
+              <select id="rotEntryBackfill" style="min-width:140px;">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
             </div>
             <div>
               <label>打分方式 <button class="helpBtn" data-metric="param_rot_score_method" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
@@ -6443,8 +6475,8 @@
           return `${m}${t && t !== "-" ? ` (${t})` : ""}`;
         };
         $("rotPeriods").innerHTML =
-          `<tr><th>决策日 (Decision Date)</th><th>命中方式 (Hit Mode)</th><th>开始 (Start)</th><th>结束 (End)</th><th>轮动收益 (Rotation)</th><th>等权收益 (EW)</th><th>超额 (Excess)</th><th>胜 (Win)</th><th>调入(Δw) (Buy)</th><th>调出(Δw) (Sell)</th></tr>` +
-          pageRows.map(r => `<tr><td>${r.decision_date || "-"}</td><td>${fmtHit(r)}</td><td>${r.start_date}</td><td>${r.end_date}</td><td>${fmtPct(r.strategy_return)}</td><td>${fmtPct(r.equal_weight_return)}</td><td>${fmtPct(r.excess_return)}</td><td>${r.win ? "是" : "否"}</td><td>${fmtLegBuy(r.buys)}</td><td>${fmtLegSell(r.sells)}</td></tr>`).join("");
+          `<tr><th>决策日 (Decision Date)</th><th>命中方式 (Hit Mode)</th><th>补位 (Backfill)</th><th>开始 (Start)</th><th>结束 (End)</th><th>轮动收益 (Rotation)</th><th>等权收益 (EW)</th><th>超额 (Excess)</th><th>胜 (Win)</th><th>调入(Δw) (Buy)</th><th>调出(Δw) (Sell)</th></tr>` +
+          pageRows.map(r => `<tr><td>${r.decision_date || "-"}</td><td>${fmtHit(r)}</td><td>${r.backfill_used ? "是" : "否"}</td><td>${r.start_date}</td><td>${r.end_date}</td><td>${fmtPct(r.strategy_return)}</td><td>${fmtPct(r.equal_weight_return)}</td><td>${fmtPct(r.excess_return)}</td><td>${r.win ? "是" : "否"}</td><td>${fmtLegBuy(r.buys)}</td><td>${fmtLegSell(r.sells)}</td></tr>`).join("");
         $("rotPeriodPage").textContent = `${rotState.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
       }
 
@@ -6840,6 +6872,13 @@
         const exec_price = ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open";
         if (!["open", "close", "oc2"].includes(exec_price)) return setMsg("成交价口径仅支持 open/close/oc2");
         const top_k = Number(($("rotTopK").value || "1").trim());
+        const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
+        if (!["adaptive", "fixed"].includes(position_mode)) return setMsg("仓位比例模式仅支持 adaptive/fixed");
+        const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
+        const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
+        const exit_match_n = Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0");
+        if (!Number.isFinite(entry_match_n) || entry_match_n < 0) return setMsg("入场满足任意N条需为>=0整数");
+        if (!Number.isFinite(exit_match_n) || exit_match_n < 0) return setMsg("出场满足任意N条需为>=0整数");
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
@@ -7021,7 +7060,7 @@
         })();
         if (asset_vol_index_rules && asset_vol_index_rules.__error) return setMsg(asset_vol_index_rules.__error);
         const reqPayload = {
-            codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, lookback_days, skip_days, cost_bps,
+            codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
             risk_off, momentum_floor, risk_free_rate,
             score_method,
             tp_sl_mode,
@@ -7198,6 +7237,10 @@
             rebalance_shift: rebCtl.rebalance_shift,
             exec_price: ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open",
             top_k: Number(($("rotTopK").value || "1").trim()),
+            position_mode: (($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive"),
+            entry_backfill: ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true"),
+            entry_match_n: Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0"),
+            exit_match_n: Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0"),
             lookback_days: Number(($("rotLookback").value || "20").trim()),
             skip_days: Number(($("rotSkip").value || "0").trim()),
             cost_bps: Number(($("rotCost").value || "0").trim()),
@@ -7235,6 +7278,7 @@
         cmdLines.push(`决策日 (Decision Date): ${p.decision_date || "-"}`);
         cmdLines.push(`命中方式 (Hit Mode): ${p.rebalance_hit_mode || "-"}${p.rebalance_target_date ? ` (${p.rebalance_target_date})` : ""}`);
         cmdLines.push(`计划总仓位 (Exposure): ${fmtPct(Number(p.exposure || 0))}`);
+        cmdLines.push(`补位 (Backfill): ${p.backfill_used ? "是" : "否"}`);
         cmdLines.push("");
         cmdLines.push("[调入指令 Buys]");
         if (buys.length) {
@@ -7269,6 +7313,7 @@
           `<div style="margin-top:4px;">命中方式 (Hit Mode)：${p.rebalance_hit_mode || "-"}${p.rebalance_target_date ? ` (${p.rebalance_target_date})` : ""}</div>` +
           `<div style="margin-top:4px;">计划持仓 (Planned Picks)：${(Array.isArray(p.picks) ? p.picks : []).map(codeLabel).join("，") || "现金"}</div>` +
           `<div style="margin-top:4px;">计划总仓位 (Exposure)：${fmtPct(Number(p.exposure || 0))}</div>` +
+          `<div style="margin-top:4px;">补位 (Backfill)：${p.backfill_used ? "是" : "否"}</div>` +
           `<div style="margin-top:4px;">调入 (Buys)：${fmtLeg(buys, "+") || "-"}</div>` +
           `<div style="margin-top:4px;">调出 (Sells)：${fmtLeg(sells, "-") || "-"}</div>` +
           `<div style="margin-top:8px;"><b>可复制交易指令 (Copyable Orders)</b></div>` +
@@ -7362,6 +7407,10 @@
         const rebalance = $("rotRebalance").value;
         const rebalance_shift = ($("rotCalShift") && $("rotCalShift").value) ? $("rotCalShift").value : "prev";
         const top_k = Number(($("rotTopK").value || "1").trim());
+        const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
+        const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
+        const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
+        const exit_match_n = Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0");
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
@@ -7546,7 +7595,7 @@
         const resp = await api("/analysis/rotation/calendar-effect", {
           method: "POST",
           body: JSON.stringify({
-            codes, start, end, rebalance, rebalance_shift, top_k, lookback_days, skip_days, cost_bps,
+            codes, start, end, rebalance, rebalance_shift, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
             risk_off, momentum_floor, risk_free_rate,
             score_method,
             tp_sl_mode,
@@ -7743,6 +7792,90 @@
         if (first) setActive(first);
       }
       initTabs("rotTabs");
+      function initRotationControlTabs() {
+        const root = $("rotCtrlTabs");
+        const small = $("rotTabs");
+        if (!root || !small) return;
+        const grpBtns = Array.from(root.querySelectorAll(".tabBtn[data-rot-group]"));
+        const smallBtns = Array.from(small.querySelectorAll(".tabBtn[data-tab]"));
+        const groups = {
+          base: ["rotTabBase"],
+          entry: ["rotTabFloor", "rotTabTrend", "rotTabRsi", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabVol"],
+          exit: ["rotTabTpSl", "rotTabRR", "rotTabDD", "rotTabTiming", "rotTabMirror", "rotTabVolIndex"],
+        };
+        const _entryEnabledCount = () => {
+          let m = 0;
+          if ($("rotTrendOn") && $("rotTrendOn").value === "true") m += 1;
+          if ($("rotRsiOn") && $("rotRsiOn").value === "true") m += 1;
+          if ($("rotChopOn") && $("rotChopOn").value === "true") m += 1;
+          return m;
+        };
+        const _exitEnabledCount = () => {
+          let m = 0;
+          if ($("rotTpSlMode") && String($("rotTpSlMode").value || "none") !== "none") m += 1;
+          if ($("rotRROn") && $("rotRROn").value === "true") m += 1;
+          if ($("rotDDOn") && $("rotDDOn").value === "true") m += 1;
+          if ($("rotTimingOn") && $("rotTimingOn").value === "true") m += 1;
+          if ($("rotMirrorOn") && $("rotMirrorOn").value === "true") m += 1;
+          if ($("rotVolIdxOn") && $("rotVolIdxOn").value === "true") m += 1;
+          return m;
+        };
+        const _syncMatchN = () => {
+          const en = _entryEnabledCount();
+          const ex = _exitEnabledCount();
+          const eIn = $("rotEntryMatchN");
+          const xIn = $("rotExitMatchN");
+          const eHint = $("rotEntryMatchHint");
+          const xHint = $("rotExitMatchHint");
+          if (eIn) {
+            eIn.disabled = (en <= 0);
+            if (en <= 0) eIn.value = "0";
+            const v = Number(eIn.value || "0");
+            if (Number.isFinite(v) && v > en) eIn.value = String(en);
+          }
+          if (xIn) {
+            xIn.disabled = (ex <= 0);
+            if (ex <= 0) xIn.value = "0";
+            const v = Number(xIn.value || "0");
+            if (Number.isFinite(v) && v > ex) xIn.value = String(ex);
+          }
+          if (eHint) eHint.textContent = `当前启用项数 M=${en}${en > 0 ? "，N=0 表示默认全满足（交集）" : "，设置不可用。"} `;
+          if (xHint) xHint.textContent = `当前启用项数 M=${ex}${ex > 0 ? "，N=0 表示保持当前行为" : "，设置不可用。"} `;
+        };
+        const clickSmall = (tabId) => {
+          const b = smallBtns.find(x => (x.dataset && x.dataset.tab === tabId));
+          if (b) b.click();
+        };
+        const setGroup = (g) => {
+          const ids = new Set(groups[g] || []);
+          grpBtns.forEach((b) => {
+            const on = (b.dataset.rotGroup === g);
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-selected", on ? "true" : "false");
+          });
+          smallBtns.forEach((b) => {
+            const show = ids.has(String((b.dataset && b.dataset.tab) || ""));
+            b.style.display = show ? "" : "none";
+          });
+          const activeSmall = smallBtns.find((b) => b.classList.contains("active") && ids.has(String((b.dataset && b.dataset.tab) || "")));
+          if (!activeSmall) {
+            const first = smallBtns.find((b) => ids.has(String((b.dataset && b.dataset.tab) || "")));
+            if (first) clickSmall(first.dataset.tab);
+          }
+          const eb = $("rotCtrlEntryNBox");
+          const xb = $("rotCtrlExitNBox");
+          if (eb) eb.style.display = (g === "entry") ? "" : "none";
+          if (xb) xb.style.display = (g === "exit") ? "" : "none";
+          _syncMatchN();
+        };
+        grpBtns.forEach((b) => b.addEventListener("click", () => setGroup(String((b.dataset && b.dataset.rotGroup) || "base"))));
+        ["rotTrendOn", "rotRsiOn", "rotChopOn", "rotTpSlMode", "rotRROn", "rotDDOn", "rotTimingOn", "rotMirrorOn", "rotVolIdxOn"].forEach((id) => {
+          const el = $(id);
+          if (el) el.addEventListener("change", _syncMatchN);
+        });
+        setGroup("base");
+      }
+      initRotationControlTabs();
 
       // ---------------- Rotation: Phase-1 per-asset rule tables ----------------
       const _parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
@@ -8228,6 +8361,10 @@
         const exec_price = ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open";
         if (!["open", "close", "oc2"].includes(exec_price)) return setMsg("成交价口径仅支持 open/close/oc2");
         const top_k = Number(($("rotTopK").value || "1").trim());
+        const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
+        const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
+        const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
+        const exit_match_n = Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0");
         const lookback_days = Number(($("rotLookback").value || "20").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
@@ -8400,6 +8537,7 @@
             method: "POST",
             body: JSON.stringify({
               codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
+              position_mode, entry_backfill, entry_match_n, exit_match_n,
               rebalance_anchor, rebalance_shift, exec_price,
               risk_off, momentum_floor, risk_free_rate,
               score_method,

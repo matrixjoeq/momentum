@@ -47,6 +47,10 @@ class RotationInputs:
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1
+    position_mode: str = "adaptive"  # adaptive | fixed (base sizing before other exposure controls)
+    entry_backfill: bool = False  # if true, refill from lower-ranked candidates when top_k entries are filtered out
+    entry_match_n: int = 0  # 0 => default AND(all enabled); otherwise require at least n entry filters
+    exit_match_n: int = 0  # reserved for exit-control aggregation
     lookback_days: int = 20
     skip_days: int = 0  # skip recent trading days (0 means no skip)
     risk_free_rate: float = 0.025
@@ -129,7 +133,7 @@ class RotationInputs:
     asset_chop_rules: list[dict[str, Any]] | None = None
     asset_vol_monitor_rules: list[dict[str, Any]] | None = None
     # --- Execution price proxy (hfq, aligned to execution calendar) ---
-    # Used to study open/close/OC(=avg(open,close)) calendar effects. Default "close" matches existing behavior.
+    # Used to study open/close/OC(=avg(open,close)) calendar effects.
     exec_price: str = "open"  # close | open | oc2
     # --- Per-asset risk control (hfq close-based signals; daily weight scaling) ---
     asset_rc_rules: list[dict[str, Any]] | None = None
@@ -890,8 +894,15 @@ def backtest_rotation(
         raise ValueError("codes is empty")
     if inp.top_k <= 0:
         raise ValueError("top_k must be >= 1")
+    pos_mode = str(inp.position_mode or "adaptive").strip().lower()
+    if pos_mode not in {"adaptive", "fixed"}:
+        raise ValueError("position_mode must be one of: adaptive|fixed")
     if inp.lookback_days <= 0:
         raise ValueError("lookback_days must be > 0")
+    if int(inp.entry_match_n) < 0:
+        raise ValueError("entry_match_n must be >= 0")
+    if int(inp.exit_match_n) < 0:
+        raise ValueError("exit_match_n must be >= 0")
     if inp.skip_days < 0:
         raise ValueError("skip_days must be >= 0")
     sm = (inp.score_method or "raw_mom").strip().lower()
@@ -1770,6 +1781,7 @@ def backtest_rotation(
             "trigger_drawdown": None,
         }
 
+        candidate_scores: pd.Series | None = None
         # Sleep branch: keep previous day's weights; skip new decisions.
         if dd_in_sleep:
             prev_w_row = w.iloc[start_i - 1].astype(float)
@@ -1882,6 +1894,145 @@ def backtest_rotation(
         stop_triggered = False
 
         # Apply pre-trade risk controls only when we are in risk-on mode (holding risk assets).
+        candidate_ranked: list[str] = []
+        entry_rejected_codes: set[str] = set()
+        backfill_used = False
+        backfill_added: list[str] = []
+        backfill_initial: list[str] = list(risk_picks)
+        if group_meta.get("after"):
+            candidate_ranked = [str(x) for x in list(group_meta.get("after") or [])]
+        elif candidate_scores is not None and hasattr(candidate_scores, "dropna"):
+            candidate_ranked = [str(x) for x in candidate_scores.dropna().sort_values(ascending=False).index.tolist()]
+
+        entry_enabled_count = int(bool(inp.chop_filter)) + int(bool(inp.trend_filter)) + int(bool(inp.rsi_filter))
+        raw_entry_n = int(inp.entry_match_n or 0)
+        if entry_enabled_count <= 0:
+            entry_required = 0
+        elif raw_entry_n <= 0:
+            entry_required = int(entry_enabled_count)  # default: all enabled filters must pass (AND)
+        else:
+            entry_required = int(min(entry_enabled_count, max(1, raw_entry_n)))
+        use_entry_nofm = bool(entry_enabled_count > 0 and entry_required < entry_enabled_count)
+        if entry_enabled_count > 0:
+            details["entry_gate"] = {
+                "enabled_count": int(entry_enabled_count),
+                "required": int(entry_required),
+                "mode": ("and" if int(entry_required) >= int(entry_enabled_count) else "n_of_m"),
+            }
+
+        def _entry_ok_for_code(code: str, asof_d: pd.Timestamp) -> tuple[bool, int, int]:
+            p = str(code)
+            passed = 0
+            enabled = 0
+            # Choppiness filter
+            if inp.chop_filter:
+                enabled += 1
+                eff = _effective_rules_for_code(p, inp.asset_chop_rules) if use_chop_rules else []
+                if not eff:
+                    eff = [
+                        {
+                            "chop_mode": cm,
+                            "chop_window": int(inp.chop_window),
+                            "chop_er_threshold": float(inp.chop_er_threshold),
+                            "chop_adx_window": int(inp.chop_adx_window),
+                            "chop_adx_threshold": float(inp.chop_adx_threshold),
+                        }
+                    ]
+                oks: list[bool] = []
+                for r in eff:
+                    m = str((r or {}).get("chop_mode") or cm).strip().lower()
+                    if m == "adx":
+                        win = int((r or {}).get("chop_adx_window") or inp.chop_adx_window)
+                        thr = float((r or {}).get("chop_adx_threshold") or inp.chop_adx_threshold)
+                        a = adx_by_window.get(int(win))
+                        if a is None or asof_d not in a.index:
+                            continue
+                        v = None if pd.isna(a.loc[asof_d, p]) else float(a.loc[asof_d, p])
+                        oks.append(bool(v is not None and np.isfinite(v) and float(v) >= float(thr)))
+                    else:
+                        win = int((r or {}).get("chop_window") or inp.chop_window)
+                        thr = float((r or {}).get("chop_er_threshold") or inp.chop_er_threshold)
+                        e = er_by_window.get(int(win))
+                        if e is None or asof_d not in e.index:
+                            continue
+                        v = None if pd.isna(e.loc[asof_d, p]) else float(e.loc[asof_d, p])
+                        oks.append(bool(v is not None and np.isfinite(v) and float(v) >= float(thr)))
+                ok_chop = (bool(all(oks)) if oks else True)
+                if ok_chop:
+                    passed += 1
+
+            # Trend filter
+            if inp.trend_filter:
+                enabled += 1
+                if (not use_trend_rules) and (str(inp.trend_mode) == "universe"):
+                    s = trend_uni_ok_by_window.get(int(inp.trend_sma_window))
+                    ok = bool(s.loc[asof_d]) if (s is not None and asof_d in s.index) else False
+                    if ok:
+                        passed += 1
+                else:
+                    eff = _effective_rules_for_code(p, inp.asset_trend_rules) if use_trend_rules else []
+                    if not eff:
+                        eff = [{"trend_mode": str(inp.trend_mode), "trend_sma_window": int(inp.trend_sma_window)}]
+                    oks: list[bool] = []
+                    for r in eff:
+                        m = str((r or {}).get("trend_mode") or inp.trend_mode).strip().lower()
+                        win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
+                        if m == "universe":
+                            s = trend_uni_ok_by_window.get(int(win))
+                            if s is None or asof_d not in s.index:
+                                oks.append(False)
+                            else:
+                                oks.append(bool(s.loc[asof_d]))
+                        else:
+                            df = trend_ok_each_by_window.get(int(win))
+                            if df is None or asof_d not in df.index:
+                                oks.append(False)
+                            else:
+                                oks.append(bool(df.loc[asof_d, p]))
+                    ok_trend = (bool(all(oks)) if oks else True)
+                    if ok_trend:
+                        passed += 1
+
+            # RSI filter
+            if inp.rsi_filter:
+                enabled += 1
+                eff = _effective_rules_for_code(p, inp.asset_rsi_rules) if use_rsi_rules else []
+                if not eff:
+                    eff = [
+                        {
+                            "rsi_window": int(inp.rsi_window),
+                            "rsi_overbought": float(inp.rsi_overbought),
+                            "rsi_oversold": float(inp.rsi_oversold),
+                            "rsi_block_overbought": bool(inp.rsi_block_overbought),
+                            "rsi_block_oversold": bool(inp.rsi_block_oversold),
+                        }
+                    ]
+                oks: list[bool] = []
+                for r in eff:
+                    win = int((r or {}).get("rsi_window") or inp.rsi_window)
+                    df = rsi_by_window.get(int(win))
+                    if df is None or asof_d not in df.index:
+                        continue
+                    v = None if pd.isna(df.loc[asof_d, p]) else float(df.loc[asof_d, p])
+                    if v is None or (not np.isfinite(v)):
+                        oks.append(True)
+                        continue
+                    ob = float((r or {}).get("rsi_overbought") if (r or {}).get("rsi_overbought") is not None else inp.rsi_overbought)
+                    os = float((r or {}).get("rsi_oversold") if (r or {}).get("rsi_oversold") is not None else inp.rsi_oversold)
+                    blk_ob = bool((r or {}).get("rsi_block_overbought") if (r or {}).get("rsi_block_overbought") is not None else inp.rsi_block_overbought)
+                    blk_os = bool((r or {}).get("rsi_block_oversold") if (r or {}).get("rsi_block_oversold") is not None else inp.rsi_block_oversold)
+                    ok = True
+                    if blk_ob and float(v) > float(ob):
+                        ok = False
+                    if blk_os and float(v) < float(os):
+                        ok = False
+                    oks.append(bool(ok))
+                ok_rsi = (bool(all(oks)) if oks else True)
+                if ok_rsi:
+                    passed += 1
+            ok_all = (passed >= enabled) if enabled > 0 else True
+            return ok_all, int(passed), int(enabled)
+
         if risk_picks and (not dd_in_sleep):
             # 0) Choppiness filter (ER / ADX)
             if inp.chop_filter:
@@ -1936,6 +2087,7 @@ def backtest_rotation(
                 risk_picks = [p for p in before if ok_map.get(p, False)]
                 removed = [p for p in before if p not in risk_picks]
                 if removed:
+                    entry_rejected_codes.update([str(x) for x in removed])
                     reasons.append(f"chop_exclude:{','.join(removed)}")
                     picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
 
@@ -1983,6 +2135,7 @@ def backtest_rotation(
                     risk_picks = [p for p in before if ok_map.get(p, False)]
                     removed = [p for p in before if p not in risk_picks]
                     if removed:
+                        entry_rejected_codes.update([str(x) for x in removed])
                         reasons.append(f"trend_exclude:{','.join(removed)}")
                         picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
 
@@ -2031,6 +2184,7 @@ def backtest_rotation(
                 risk_picks = [p for p in before if ok_map.get(p, False)]
                 removed = [p for p in before if p not in risk_picks]
                 if removed:
+                    entry_rejected_codes.update([str(x) for x in removed])
                     reasons.append(f"rsi_exclude:{','.join(removed)}")
                     picks = [p for p in picks if (p not in rank_codes) or (p in risk_picks)]
 
@@ -2043,6 +2197,61 @@ def backtest_rotation(
                 else:
                     picks = []
                     meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
+
+            # Optional n-of-m aggregation for entry filters (trend/rsi/chop):
+            # default n=0 keeps original AND behavior.
+            if use_entry_nofm and backfill_initial:
+                allowed_top: list[str] = []
+                pass_count_by_code: dict[str, int] = {}
+                for p in backfill_initial:
+                    _, pass_cnt, _ = _entry_ok_for_code(str(p), d)
+                    pass_count_by_code[str(p)] = int(pass_cnt)
+                    if int(pass_cnt) >= int(entry_required):
+                        allowed_top.append(str(p))
+                removed_top = [str(p) for p in backfill_initial if str(p) not in set(allowed_top)]
+                if removed_top:
+                    entry_rejected_codes.update(removed_top)
+                    reasons.append(f"entry_nofm_exclude:{','.join(removed_top)}")
+                details["entry_gate"] = {
+                    **(details.get("entry_gate") or {}),
+                    "pass_count_by_code": pass_count_by_code,
+                }
+                risk_picks = [p for p in allowed_top if p in rank_codes]
+                picks = [p for p in picks if p not in rank_codes] + risk_picks
+                if (not risk_picks) and (meta.get("mode") == "risk_on"):
+                    if inp.risk_off and defensive:
+                        picks = [defensive]
+                        meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "defensive"}
+                    else:
+                        picks = []
+                        meta = {"best_score": meta.get("best_score"), "risk_off_triggered": True, "mode": "cash"}
+
+            # Optional refill from lower-ranked candidates after entry filters.
+            # Only applies to risk-on branch (no defensive/cash replacement).
+            if bool(inp.entry_backfill) and (meta.get("mode") == "risk_on") and candidate_ranked and (len(risk_picks) < int(inp.top_k)):
+                current = [str(x) for x in risk_picks]
+                cur_set = set(current)
+                for c in candidate_ranked:
+                    cc = str(c)
+                    if cc in cur_set:
+                        continue
+                    ok_all, pass_cnt, enabled_cnt = _entry_ok_for_code(cc, d)
+                    need_n = int(enabled_cnt) if int(enabled_cnt) > 0 else 0
+                    if use_entry_nofm:
+                        need_n = int(entry_required)
+                    ok_entry = bool(ok_all) if (not use_entry_nofm) else (int(pass_cnt) >= int(need_n))
+                    if not ok_entry:
+                        continue
+                    current.append(cc)
+                    cur_set.add(cc)
+                    backfill_added.append(cc)
+                    if len(current) >= int(inp.top_k):
+                        break
+                if backfill_added:
+                    risk_picks = current[: int(inp.top_k)]
+                    picks = [p for p in picks if p not in rank_codes] + risk_picks
+                    backfill_used = True
+                    reasons.append(f"entry_backfill:{','.join(backfill_added)}")
 
         # Correlation gate (hfq): if new picks are too correlated with current holdings, skip rebalance this period.
         corr_meta: dict[str, Any] = {"enabled": bool(corr_enabled), "window": int(corr_window), "threshold": float(corr_threshold)}
@@ -2193,8 +2402,17 @@ def backtest_rotation(
 
                         if vol_map:
                             details["ann_vol"] = vol_map
-                    exposure = float(np.mean(list(scales.values()))) if scales else 0.0
-                    per = 0.0 if not risk_picks else 1.0 / len(risk_picks)
+                    if scales:
+                        den = float(max(1, int(inp.top_k))) if pos_mode == "fixed" else float(len(risk_picks))
+                        exposure = float(np.sum(list(scales.values())) / den) if den > 0 else 0.0
+                    else:
+                        exposure = 0.0
+                    if not risk_picks:
+                        per = 0.0
+                    elif pos_mode == "fixed":
+                        per = 1.0 / max(1, int(inp.top_k))
+                    else:
+                        per = 1.0 / len(risk_picks)
                     for p in risk_picks:
                         weight_map[p] = float(scales.get(p, 0.0) * per)
 
@@ -2499,6 +2717,13 @@ def backtest_rotation(
                 "rr_sizing": rr_meta,
                 "dd_control": dd_meta,
                 "group_filter": group_meta,
+                "backfill": {
+                    "enabled": bool(inp.entry_backfill),
+                    "used": bool(backfill_used),
+                    "initial_risk_picks": [str(x) for x in backfill_initial],
+                    "added": [str(x) for x in backfill_added],
+                    "rejected": sorted([str(x) for x in entry_rejected_codes]),
+                },
                 "risk_controls": {"reasons": reasons, **details},
             }
         )
@@ -2816,6 +3041,7 @@ def backtest_rotation(
                 "buys": buys,
                 "sells": sells,
                 "turnover": period_turnover,
+                "backfill_used": bool(((p.get("backfill") or {}).get("used"))),
             }
         )
     total_p = len(period_stats)
@@ -2986,6 +3212,10 @@ def backtest_rotation(
             "benchmark_nav": "hfq",
         },
         "exec_price": ep,
+        "position_mode": pos_mode,
+        "entry_backfill": bool(inp.entry_backfill),
+        "entry_match_n": int(inp.entry_match_n or 0),
+        "exit_match_n": int(inp.exit_match_n or 0),
         "timing": timing_meta,
         "asset_rc": asset_rc_meta,
         "asset_vol_index_timing": asset_vol_index_meta,

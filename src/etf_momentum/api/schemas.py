@@ -694,6 +694,30 @@ class RotationBacktestRequest(BaseModel):
         description="Execution price for rebalance trading: open|close|oc2 (open/close average).",
     )
     top_k: int = Field(default=1, ge=1)
+    position_mode: str = Field(
+        default="adaptive",
+        description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/top_k).",
+    )
+    entry_backfill: bool = Field(
+        default=False,
+        description="If true, refill from lower-ranked candidates when top_k assets are excluded by entry filters.",
+    )
+    entry_match_n: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Entry controls threshold: require at least N enabled entry filters to pass "
+            "(0 means default AND of all enabled filters)."
+        ),
+    )
+    exit_match_n: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Exit controls threshold (reserved): N-of-M setting for exit-control aggregation; "
+            "0 keeps current behavior."
+        ),
+    )
     lookback_days: int = Field(default=20, ge=1)
     skip_days: int = Field(default=0, ge=0)
     risk_off: bool = False
