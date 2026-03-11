@@ -15,9 +15,9 @@ class RotationAnalysisInputs:
     start: dt.date
     end: dt.date
     rebalance: str = "weekly"
-    rebalance_weekday: int | None = None  # legacy weekly-only anchor; prefer rebalance_anchor
-    rebalance_anchor: int | None = None  # weekly:0..4; monthly:1..28; quarterly/yearly:nth trading day (1..)
-    rebalance_shift: str = "prev"  # prev|next when anchor falls on non-trading day
+    rebalance_weekday: int | None = None  # legacy weekly-only anchor; 0..4 maps to Mon..Fri
+    rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
+    rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1
     lookback_days: int = 20
     skip_days: int = 0
@@ -80,7 +80,7 @@ class RotationAnalysisInputs:
     dd_threshold: float = 0.10
     dd_reduce: float = 1.0
     dd_sleep_days: int = 20
-    exec_price: str = "close"  # close|open|oc2
+    exec_price: str = "open"  # close|open|oc2
     timing_rsi_gate: bool = False
     timing_rsi_window: int = 24
     # Phase-1 per-asset parameter rules (optional)

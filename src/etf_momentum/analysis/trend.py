@@ -672,15 +672,33 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
     for d in dates:
         active = sig_pos.loc[d]
         scores = sig_score.loc[d].where(active > 0.0, other=np.nan)
-        reduced, gmeta = _reduce_score_by_group_for_day(
-            scores,
-            group_enforce=bool(inp.group_enforce),
-            group_map=group_map,
-            policy=gp,
-            current_holdings=set(prev_key or []),
-            vol_row=vol_ann.loc[d] if d in vol_ann.index else None,
-        )
-        picks = [str(x) for x in reduced.index[: max(1, int(inp.top_k))].tolist()]
+        candidate_scores = scores.dropna()
+        candidate_count = int(candidate_scores.shape[0])
+        min_required = int(inp.top_k) + 1
+        if candidate_count <= int(inp.top_k):
+            reduced = candidate_scores.sort_values(ascending=False)
+            gmeta = {
+                "enabled": bool(inp.group_enforce),
+                "policy": gp,
+                "before": [str(x) for x in reduced.index.tolist()],
+                "after": [],
+                "group_winners": {},
+                "group_eliminated": {},
+                "candidate_count": candidate_count,
+                "min_required": min_required,
+                "mode": "insufficient_candidates",
+            }
+            picks = []
+        else:
+            reduced, gmeta = _reduce_score_by_group_for_day(
+                scores,
+                group_enforce=bool(inp.group_enforce),
+                group_map=group_map,
+                policy=gp,
+                current_holdings=set(prev_key or []),
+                vol_row=vol_ann.loc[d] if d in vol_ann.index else None,
+            )
+            picks = [str(x) for x in reduced.index[: max(1, int(inp.top_k))].tolist()]
         if not picks:
             w_row = pd.Series(0.0, index=codes, dtype=float)
         elif ps == "equal":

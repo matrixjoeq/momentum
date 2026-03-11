@@ -674,9 +674,24 @@ class RotationBacktestRequest(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly")
+    rebalance_anchor: int | None = Field(
+        default=None,
+        description=(
+            "Rebalance anchor by frequency: weekly=1..5 (Mon..Fri), "
+            "monthly=1..28 (calendar day), quarterly=1..90 (day of quarter), "
+            "yearly=1..365 (day of year). daily ignores this."
+        ),
+    )
     rebalance_shift: str = Field(
         default="prev",
-        description="If anchor falls on non-trading day: prev -> shift to previous trading day (default); next -> shift to next trading day. Only used when rebalance_anchor is set (e.g. calendar-effect study).",
+        description=(
+            "If anchor falls on non-trading day: prev -> previous trading day (default), "
+            "next -> next trading day, skip -> skip this rebalance."
+        ),
+    )
+    exec_price: str = Field(
+        default="open",
+        description="Execution price for rebalance trading: open|close|oc2 (open/close average).",
     )
     top_k: int = Field(default=1, ge=1)
     lookback_days: int = Field(default=20, ge=1)

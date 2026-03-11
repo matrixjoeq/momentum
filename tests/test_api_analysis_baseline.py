@@ -88,3 +88,35 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert data["timing"]["threshold"] == 50.0
     assert "win_payoff" in data
 
+
+def test_api_rotation_next_execution_plan_happy_path(api_client):
+    c = api_client
+    c.post("/api/etf", json={"code": "510300", "name": "沪深300", "start_date": "20240102", "end_date": "20240103"})
+    c.post("/api/etf", json={"code": "511010", "name": "国债", "start_date": "20240102", "end_date": "20240103"})
+    assert c.post("/api/etf/510300/fetch").status_code == 200
+    assert c.post("/api/etf/511010/fetch").status_code == 200
+
+    resp = c.post(
+        "/api/analysis/rotation/next-execution-plan",
+        json={
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "asof": "20240102",
+            "rebalance": "weekly",
+            "rebalance_anchor": 2,  # 周二决策
+            "top_k": 1,
+            "lookback_days": 1,
+            "skip_days": 0,
+            "risk_off": False,
+            "exec_price": "open",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "next_trading_day" in data
+    assert "has_execution_plan" in data
+    assert "plan" in data
+    if data["has_execution_plan"]:
+        assert "target_weights" in data["plan"]
+

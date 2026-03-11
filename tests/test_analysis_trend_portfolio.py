@@ -55,3 +55,31 @@ def test_trend_portfolio_group_enforce_and_outputs(session_factory):
         assert "group_filter" in one
         assert one["group_filter"]["enabled"] is True
 
+
+def test_trend_portfolio_holds_cash_when_candidates_not_greater_than_topk(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-03-31", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 1.0)
+            _add_price(db, code="A2", day=d, close=100 + i * 0.9)
+        db.commit()
+
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                top_k=2,
+            ),
+        )
+
+    strat = out["nav"]["series"]["STRAT"]
+    assert strat
+    assert all(float(x) == 1.0 for x in strat)
+    assert out["holdings"]
+    assert all((h.get("picks") or []) == [] for h in out["holdings"])
+

@@ -166,13 +166,14 @@ def _compute_equal_weight_nav_and_weights_dynamic(
     daily_ret: pd.DataFrame,
     *,
     rebalance: str,
+    min_active: int = 2,
     weekly_anchor: str = "FRI",
 ) -> tuple[pd.Series, pd.DataFrame, pd.Series]:
     """
     Dynamic-universe equal-weight:
     - each day only assets with finite return are considered active
     - rebalance schedule applies on active set
-    - if no active assets on a day -> cash (0 return)
+    - if active assets <= min_active-1 on a day -> cash (0 return)
     """
     if daily_ret.empty:
         idx = daily_ret.index
@@ -208,7 +209,7 @@ def _compute_equal_weight_nav_and_weights_dynamic(
 
         # restrict previous weights to active assets (inactive assets are dropped for the day)
         w_day = pd.Series(0.0, index=cols, dtype=float)
-        if active:
+        if len(active) >= int(min_active):
             if rebal_now:
                 per = 1.0 / float(len(active))
                 w_day.loc[active] = per
@@ -220,13 +221,13 @@ def _compute_equal_weight_nav_and_weights_dynamic(
                 else:
                     per = 1.0 / float(len(active))
                     w_day.loc[active] = per
-        port_r = float((w_day * rr.fillna(0.0)).sum()) if active else 0.0
+        port_r = float((w_day * rr.fillna(0.0)).sum()) if len(active) >= int(min_active) else 0.0
         nav *= (1.0 + port_r)
         nav_out.append(float(nav))
 
         # post-return drift on active assets only
         w_next = pd.Series(0.0, index=cols, dtype=float)
-        if active:
+        if len(active) >= int(min_active):
             gross = (1.0 + rr.loc[active].astype(float)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
             w_act = (w_day.loc[active].astype(float) * gross).astype(float)
             s = float(w_act.sum())
@@ -251,6 +252,7 @@ def _compute_risk_parity_nav_and_weights_dynamic(
     *,
     rebalance: str,
     window: int,
+    min_active: int = 2,
     weekly_anchor: str = "FRI",
 ) -> tuple[pd.Series, pd.DataFrame]:
     """
@@ -286,7 +288,7 @@ def _compute_risk_parity_nav_and_weights_dynamic(
             prev_label = lab
 
         w_day = pd.Series(0.0, index=cols, dtype=float)
-        if active:
+        if len(active) >= int(min_active):
             if rebal_now:
                 hist = r.iloc[max(0, i - win) : i, :][active]
                 vol = hist.std(ddof=1).replace([np.inf, -np.inf], np.nan)
@@ -304,11 +306,11 @@ def _compute_risk_parity_nav_and_weights_dynamic(
                 else:
                     w_day.loc[active] = 1.0 / float(len(active))
 
-        port_r = float((w_day * rr.fillna(0.0)).sum()) if active else 0.0
+        port_r = float((w_day * rr.fillna(0.0)).sum()) if len(active) >= int(min_active) else 0.0
         nav *= (1.0 + port_r)
         nav_out.append(float(nav))
         w_next = pd.Series(0.0, index=cols, dtype=float)
-        if active:
+        if len(active) >= int(min_active):
             gross = (1.0 + rr.loc[active].astype(float)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
             w_act = (w_day.loc[active].astype(float) * gross).astype(float)
             s = float(w_act.sum())
@@ -1607,7 +1609,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
 
     close = close.sort_index()
     dynamic_universe = bool(getattr(inp, "dynamic_universe", False))
-    corr_min_obs = max(3, int(getattr(inp, "corr_min_obs", 60) or 60))
+    corr_min_obs = max(3, int(getattr(inp, "corr_min_obs", 20) or 20))
     missing = [c for c in codes if c not in close.columns or close[c].dropna().empty]
     if missing and (not dynamic_universe):
         raise ValueError(f"missing data for adjust={inp.adjust}: {missing}")
@@ -1678,19 +1680,39 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     }
 
     # equal-weight with configurable rebalancing (also return weights for attribution)
+    def _cash_portfolio(index: pd.DatetimeIndex, columns: list[str], name: str) -> tuple[pd.Series, pd.DataFrame]:
+        nav = pd.Series(1.0, index=index, dtype=float, name=name)
+        w = pd.DataFrame(0.0, index=index, columns=columns, dtype=float)
+        return nav, w
+
     if dynamic_universe:
-        ew_nav, ew_w, ew_active_count = _compute_equal_weight_nav_and_weights_dynamic(ret_common[codes_eff], rebalance=inp.rebalance)
+        ew_nav, ew_w, ew_active_count = _compute_equal_weight_nav_and_weights_dynamic(
+            ret_common[codes_eff],
+            rebalance=inp.rebalance,
+            min_active=2,
+        )
     else:
-        ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance)
+        if len(codes_eff) <= 1:
+            ew_nav, ew_w = _cash_portfolio(ret_common.index, codes_eff, "EW")
+        else:
+            ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance)
         ew_active_count = pd.Series(len(codes_eff), index=ret_common.index, dtype=int)
     ew_ret = ew_nav.pct_change().fillna(0.0)
 
     # risk parity (inverse-vol) portfolio with the same rebalancing schedule
     rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
     if dynamic_universe:
-        rp_nav, rp_w = _compute_risk_parity_nav_and_weights_dynamic(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
+        rp_nav, rp_w = _compute_risk_parity_nav_and_weights_dynamic(
+            ret_common[codes_eff],
+            rebalance=inp.rebalance,
+            window=rp_win,
+            min_active=2,
+        )
     else:
-        rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
+        if len(codes_eff) <= 1:
+            rp_nav, rp_w = _cash_portfolio(ret_common.index, codes_eff, "RP")
+        else:
+            rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
     rp_ret = rp_nav.pct_change().fillna(0.0)
 
     # benchmark

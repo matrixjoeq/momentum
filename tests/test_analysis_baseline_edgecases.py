@@ -105,3 +105,24 @@ def test_compute_baseline_dynamic_universe_uses_union_start(session_factory):
     vals = out_union["active_count"]["values"]
     assert vals and max(vals) >= 2 and 1 in vals
 
+
+def test_compute_baseline_single_asset_portfolios_hold_cash(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(60)]
+        for i, d in enumerate(dates):
+            db.add(EtfPrice(code=code, trade_date=d, close=100.0 + i, source="eastmoney", adjust="qfq"))
+        db.commit()
+
+        out = compute_baseline(
+            db,
+            BaselineInputs(codes=[code], start=dates[0], end=dates[-1], adjust="qfq", dynamic_universe=False),
+        )
+
+    ew = out["nav"]["series"]["EW"]
+    rp = out["nav"]["series"]["RP"]
+    assert ew and rp
+    assert all(float(x) == pytest.approx(1.0) for x in ew)
+    assert all(float(x) == pytest.approx(1.0) for x in rp)
+

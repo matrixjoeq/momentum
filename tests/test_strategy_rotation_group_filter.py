@@ -93,3 +93,29 @@ def test_group_enforce_earliest_entry_prefers_existing_holding(session_factory):
     assert seg2["group_filter"]["enabled"] is True
     assert seg2["group_filter"]["policy"] == "earliest_entry"
     assert seg2["picks"] == ["A1"]
+
+
+def test_rotation_holds_cash_when_candidates_not_greater_than_topk(session_factory):
+    sf = session_factory
+    with sf() as db:
+        dates = [d.date() for d in pd.date_range("2024-01-01", "2024-01-31", freq="B")]
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100.0 + i * 1.0)
+            _add_price(db, code="A2", day=d, close=100.0 + i * 0.8)
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                top_k=2,
+                lookback_days=3,
+                risk_off=False,
+            ),
+        )
+
+    assert out["holdings"]
+    assert all((h.get("picks") or []) == [] for h in out["holdings"])

@@ -649,7 +649,9 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         start=_parse_yyyymmdd(payload.start),
         end=_parse_yyyymmdd(payload.end),
         rebalance=payload.rebalance,
+        rebalance_anchor=payload.rebalance_anchor,
         rebalance_shift=payload.rebalance_shift,
+        exec_price=payload.exec_price,
         top_k=payload.top_k,
         lookback_days=payload.lookback_days,
         skip_days=payload.skip_days,
@@ -2728,6 +2730,120 @@ def rotation_next_plan_auto(payload: dict, db: Session = Depends(get_session)) -
     return rotation_next_plan({**(payload or {}), "anchor_weekday": wd, "asof": asof.strftime("%Y%m%d")}, db=db)
 
 
+@router.post("/analysis/rotation/next-execution-plan")
+def rotation_next_execution_plan(payload: dict, db: Session = Depends(get_session)) -> dict:
+    """
+    Generic "next execution plan" for the current rotation settings.
+    Returns whether the next trading day has execution, and if yes, the concrete plan.
+    """
+    payload = payload or {}
+    codes = [str(x).strip() for x in (payload.get("codes") or []) if str(x).strip()]
+    if not codes:
+        raise HTTPException(status_code=400, detail="codes is empty")
+
+    asof_raw = str(payload.get("asof") or payload.get("end") or dt.date.today().strftime("%Y%m%d"))
+    requested_asof = _parse_yyyymmdd(asof_raw)
+
+    # Align asof to the last available close <= requested_asof, so intraday calls are stable.
+    px = load_close_prices(
+        db,
+        codes=codes,
+        start=requested_asof - dt.timedelta(days=120),
+        end=requested_asof,
+        adjust="hfq",
+    )
+    if px.empty:
+        raise HTTPException(status_code=400, detail="no price data for selected codes/asof")
+    px = px.sort_index().ffill()
+    asof = px.index[-1].date()
+
+    try:
+        tds = trading_days(asof, asof + dt.timedelta(days=20), cal="XSHG")
+        next_td = next((d for d in tds if d > asof), asof)
+    except Exception:  # pragma: no cover
+        next_td = asof
+
+    # Build a validated request with defaults + caller overrides.
+    req_in = {
+        **payload,
+        "codes": codes,
+        "start": str(payload.get("start") or (asof - dt.timedelta(days=3650)).strftime("%Y%m%d")),
+        "end": next_td.strftime("%Y%m%d"),
+    }
+    req = RotationBacktestRequest.model_validate(req_in)
+
+    asset_vol_rules = [r.model_dump() for r in req.asset_vol_index_rules] if req.asset_vol_index_rules else None
+    vol_index_close = _load_vol_index_close_for_rotation_rules(
+        asset_vol_rules,
+        db=db,
+        start_yyyymmdd=req.start,
+        end_yyyymmdd=req.end,
+    )
+
+    try:
+        from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
+
+        inp = RotationInputs(
+            **{
+                **req.model_dump(),
+                "start": _parse_yyyymmdd(req.start),
+                "end": _parse_yyyymmdd(req.end),
+                "asset_momentum_floor_rules": [r.model_dump() for r in req.asset_momentum_floor_rules] if req.asset_momentum_floor_rules else None,
+                "asset_trend_rules": [r.model_dump() for r in req.asset_trend_rules] if req.asset_trend_rules else None,
+                "asset_rsi_rules": [r.model_dump() for r in req.asset_rsi_rules] if req.asset_rsi_rules else None,
+                "asset_chop_rules": [r.model_dump() for r in req.asset_chop_rules] if req.asset_chop_rules else None,
+                "asset_vol_monitor_rules": [r.model_dump() for r in req.asset_vol_monitor_rules] if req.asset_vol_monitor_rules else None,
+                "asset_rc_rules": [r.model_dump() for r in req.asset_rc_rules] if req.asset_rc_rules else None,
+                "asset_vol_index_rules": asset_vol_rules,
+                "vol_index_close": vol_index_close,
+            }
+        )
+        out = backtest_rotation(db, inp, return_weights_end=True, allow_virtual_end=True)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # pragma: no cover
+        raise HTTPException(status_code=500, detail=f"next-execution-plan compute failed: {e}") from e
+
+    next_iso = next_td.isoformat()
+    hold = next((x for x in (out.get("holdings") or []) if str(x.get("start_date")) == next_iso), None)
+    per = next((x for x in (out.get("period_details") or []) if str(x.get("start_date")) == next_iso), None)
+    weights_end = (out.get("weights_end") or {}).get("weights") or {}
+    target_weights = [{"code": str(k), "weight": float(v)} for k, v in weights_end.items() if float(v or 0.0) > 1e-12]
+    target_weights.sort(key=lambda x: float(x["weight"]), reverse=True)
+    exposure = float(sum(float(x["weight"]) for x in target_weights)) if target_weights else 0.0
+    has_exec = bool(hold is not None or per is not None)
+
+    plan = {
+        "decision_date": (hold or {}).get("decision_date"),
+        "execution_date": next_iso,
+        "rebalance_target_date": (hold or {}).get("rebalance_target_date"),
+        "rebalance_hit_mode": (hold or {}).get("rebalance_hit_mode"),
+        "mode": (hold or {}).get("mode"),
+        "picks": (hold or {}).get("picks") or [x["code"] for x in target_weights],
+        "scores": (hold or {}).get("scores") or {},
+        "buys": (per or {}).get("buys") or [],
+        "sells": (per or {}).get("sells") or [],
+        "turnover": (per or {}).get("turnover"),
+        "target_weights": target_weights,
+        "exposure": float(exposure),
+    }
+    return {
+        "asof": asof.strftime("%Y%m%d"),
+        "asof_requested": requested_asof.strftime("%Y%m%d"),
+        "next_trading_day": next_iso,
+        "has_execution_plan": bool(has_exec),
+        "plan": plan,
+        "meta": {
+            "rebalance": str(req.rebalance),
+            "rebalance_anchor": req.rebalance_anchor,
+            "rebalance_shift": str(req.rebalance_shift),
+            "exec_price": str(req.exec_price),
+            "top_k": int(req.top_k),
+            "lookback_days": int(req.lookback_days),
+        },
+    }
+
+
 @router.post("/analysis/baseline/weekly5-ew-dashboard")
 def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db: Session = Depends(get_session)) -> dict:
     """
@@ -2741,8 +2857,8 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
     end = _parse_yyyymmdd(payload.end)
     rf = float(payload.risk_free_rate)
     shift = (payload.rebalance_shift or "prev").strip().lower()
-    if shift not in {"prev", "next"}:
-        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next")
+    if shift not in {"prev", "next", "skip"}:
+        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next|skip")
 
     codes = _FIXED_CODES[:]
     close = load_close_prices(db, codes=codes, start=start, end=end, adjust="hfq")
@@ -2888,8 +3004,8 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
     shift = (payload.rebalance_shift or "prev").strip().lower()
-    if shift not in {"prev", "next"}:
-        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next")
+    if shift not in {"prev", "next", "skip"}:
+        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next|skip")
 
     codes = _FIXED_CODES[:]
     close = load_close_prices(db, codes=codes, start=start, end=end, adjust="hfq")
@@ -2980,8 +3096,8 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
     shift = (payload.rebalance_shift or "prev").strip().lower()
-    if shift not in {"prev", "next"}:
-        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next")
+    if shift not in {"prev", "next", "skip"}:
+        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next|skip")
 
     codes = _FIXED_CODES[:]
     close = load_close_prices(db, codes=codes, start=start, end=end, adjust="hfq")
@@ -3073,8 +3189,8 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
     end = _parse_yyyymmdd(payload.end)
     rf = float(payload.risk_free_rate)
     shift = (payload.rebalance_shift or "prev").strip().lower()
-    if shift not in {"prev", "next"}:
-        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next")
+    if shift not in {"prev", "next", "skip"}:
+        raise HTTPException(status_code=400, detail="rebalance_shift must be prev|next|skip")
 
     codes = _FIXED_CODES[:]
     close = load_close_prices(db, codes=codes, start=start, end=end, adjust="hfq")

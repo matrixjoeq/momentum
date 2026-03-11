@@ -43,9 +43,9 @@ class RotationInputs:
     start: dt.date
     end: dt.date
     rebalance: str = "weekly"  # daily/weekly/monthly/quarterly/yearly
-    rebalance_weekday: int | None = None  # only used when rebalance=weekly; 0=Mon..4=Fri; default Fri when None
-    rebalance_anchor: int | None = None  # weekly:0..4; monthly:1..28; quarterly/yearly:nth trading day (1..)
-    rebalance_shift: str = "prev"  # prev|next when anchor falls on non-trading day (used with rebalance_anchor)
+    rebalance_weekday: int | None = None  # legacy weekly-only anchor; 0=Mon..4=Fri (maps to 1..5)
+    rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
+    rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1
     lookback_days: int = 20
     skip_days: int = 0  # skip recent trading days (0 means no skip)
@@ -130,7 +130,7 @@ class RotationInputs:
     asset_vol_monitor_rules: list[dict[str, Any]] | None = None
     # --- Execution price proxy (hfq, aligned to execution calendar) ---
     # Used to study open/close/OC(=avg(open,close)) calendar effects. Default "close" matches existing behavior.
-    exec_price: str = "close"  # close | open | oc2
+    exec_price: str = "open"  # close | open | oc2
     # --- Per-asset risk control (hfq close-based signals; daily weight scaling) ---
     asset_rc_rules: list[dict[str, Any]] | None = None
     # --- Per-asset volatility-index timing (daily weight scaling; cash remainder) ---
@@ -1004,18 +1004,15 @@ def backtest_rotation(
         raise ValueError("dd_sleep_days must be >= 1")
     if int(inp.timing_rsi_window) < 2:
         raise ValueError("timing_rsi_window must be >= 2")
-    reb_shift = (inp.rebalance_shift or "next").strip().lower()
-    if reb_shift not in {"prev", "next"}:
-        raise ValueError("rebalance_shift must be one of: prev|next")
-    ep = (inp.exec_price or "close").strip().lower()
+    reb_shift = (inp.rebalance_shift or "prev").strip().lower()
+    if reb_shift not in {"prev", "next", "skip"}:
+        raise ValueError("rebalance_shift must be one of: prev|next|skip")
+    ep = (inp.exec_price or "open").strip().lower()
     if ep not in {"close", "open", "oc2"}:
         raise ValueError("exec_price must be one of: close|open|oc2")
     if inp.rebalance_weekday is not None:
         if int(inp.rebalance_weekday) < 0 or int(inp.rebalance_weekday) > 4:
             raise ValueError("rebalance_weekday must be within [0..4] (Mon..Fri)")
-    if inp.rebalance_anchor is not None:
-        if int(inp.rebalance_anchor) < 0:
-            raise ValueError("rebalance_anchor must be >= 0")
     group_policy = str(inp.group_pick_policy or "strongest_score").strip().lower()
     if group_policy not in {"strongest_score", "earliest_entry", "lowest_vol"}:
         raise ValueError(f"invalid group_pick_policy={inp.group_pick_policy}")
@@ -1322,14 +1319,18 @@ def backtest_rotation(
                 for w in sorted(set(int(x) for x in chop_adx_windows if int(x) > 1)):
                     adx_by_window[w] = _adx(high_qfq[rank_codes], low_qfq[rank_codes], ta_close, window=int(w))
 
+    decision_hit_mode: dict[int, str] = {}
+    decision_target_date: dict[int, str] = {}
+
     def _decision_indices_for_rebalance(*, rebalance: str, anchor: int | None) -> list[int]:
         """
         Decision dates are where we compute picks; holdings apply from the next trading day.
 
         anchor semantics:
-        - weekly: 0=Mon..4=Fri (week ending on that weekday; choose last trading day in that weekly period)
-        - monthly: day-of-month 1..28 (choose first trading day with day>=anchor in month; fallback month-end)
-        - quarterly/yearly: Nth trading day in period (1-indexed; fallback period-end)
+        - weekly: 1=Mon..5=Fri
+        - monthly: day-of-month 1..28
+        - quarterly: day-of-quarter 1..90
+        - yearly: day-of-year 1..365
         - if anchor is None: keep legacy behavior (period-end)
         """
         r = (rebalance or "monthly").lower()
@@ -1341,30 +1342,44 @@ def backtest_rotation(
         if r == "weekly":
             if anchor is None:
                 labels_local = _rebalance_labels(dates, r, weekly_anchor="FRI")
-                return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+                out = pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+                for i_local in out:
+                    decision_hit_mode[int(i_local)] = "period_end"
+                    decision_target_date[int(i_local)] = dates[int(i_local)].date().isoformat()
+                return out
             else:
-                wd_map_local = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
-                if int(anchor) not in wd_map_local:
-                    raise ValueError("weekly rebalance_anchor must be within [0..4] (Mon..Fri)")
-                labels_local = _rebalance_labels(dates, r, weekly_anchor=wd_map_local[int(anchor)])
-            # If anchor calendar day is non-trading, choose prev/next trading day per rebalance_shift.
-            # Use shared helper to avoid redefinition across branches
-            
+                wd_map_local = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI"}
+                wd = int(anchor)
+                if wd not in wd_map_local:
+                    raise ValueError("weekly rebalance_anchor must be within [1..5] (Mon..Fri)")
+                labels_local = _rebalance_labels(dates, r, weekly_anchor=wd_map_local[wd])
             out: list[int] = []
             seen: set[int] = set()
             for p in pd.unique(labels_local):
                 target = pd.Timestamp(p.end_time).normalize()
-                i = _shift_idx_by_rebalance(target, dates, reb_shift)
+                if reb_shift == "skip" and (target not in dates):
+                    continue
+                i = _shift_idx_by_rebalance(target, dates, ("prev" if reb_shift == "skip" else reb_shift))
                 if i not in seen:
                     out.append(i)
                     seen.add(i)
+                    if target in dates:
+                        hm = "exact"
+                    else:
+                        hm = "prev" if reb_shift == "prev" else "next"
+                    decision_hit_mode[int(i)] = hm
+                    decision_target_date[int(i)] = pd.to_datetime(target).date().isoformat()
             # Ensure chronological order; pd.unique(periods) order is not guaranteed.
             return sorted(out)
 
         if r == "monthly":
             if anchor is None:
                 labels_local = _rebalance_labels(dates, r, weekly_anchor="FRI")
-                return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+                out = pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+                for i_local in out:
+                    decision_hit_mode[int(i_local)] = "period_end"
+                    decision_target_date[int(i_local)] = dates[int(i_local)].date().isoformat()
+                return out
             dom = int(anchor)
             if dom < 1 or dom > 28:
                 raise ValueError("monthly rebalance_anchor must be within [1..28] (day-of-month)")
@@ -1376,26 +1391,72 @@ def backtest_rotation(
             seen: set[int] = set()
             for p in pd.unique(labels_local):
                 target = pd.Timestamp(dt.date(int(p.year), int(p.month), dom))
-                i = _shift_idx_by_rebalance(target, dates, reb_shift)
+                if reb_shift == "skip" and (target not in dates):
+                    continue
+                i = _shift_idx_by_rebalance(target, dates, ("prev" if reb_shift == "skip" else reb_shift))
                 if i not in seen:
                     out.append(i)
                     seen.add(i)
+                    if target in dates:
+                        hm = "exact"
+                    else:
+                        hm = "prev" if reb_shift == "prev" else "next"
+                    decision_hit_mode[int(i)] = hm
+                    decision_target_date[int(i)] = pd.to_datetime(target).date().isoformat()
             return sorted(out)
 
-        # quarterly/yearly
+        # quarterly/yearly use calendar day-of-period anchors.
         if anchor is None:
             labels_local = _rebalance_labels(dates, r, weekly_anchor="FRI")
-            return pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+            out = pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local).max().to_list()
+            for i_local in out:
+                decision_hit_mode[int(i_local)] = "period_end"
+                decision_target_date[int(i_local)] = dates[int(i_local)].date().isoformat()
+            return out
         n = int(anchor)
-        if n < 1:
-            raise ValueError("quarterly/yearly rebalance_anchor must be >= 1 (Nth trading day)")
-        labels_local = dates.to_period("Q" if r == "quarterly" else "Y")
-        out = []
-        for _, pos in pd.Series(np.arange(len(dates)), index=dates).groupby(labels_local):
-            arr = pos.to_numpy(dtype=int)
-            k = min(n - 1, len(arr) - 1)
-            out.append(int(arr[int(k)]))
-        return out
+        if r == "quarterly":
+            if n < 1 or n > 90:
+                raise ValueError("quarterly rebalance_anchor must be within [1..90] (day-of-quarter)")
+            labels_local = dates.to_period("Q")
+            out: list[int] = []
+            seen: set[int] = set()
+            for p in pd.unique(labels_local):
+                q_start = pd.Timestamp(p.start_time).normalize()
+                target = q_start + pd.Timedelta(days=int(n) - 1)
+                if reb_shift == "skip" and (target not in dates):
+                    continue
+                i = _shift_idx_by_rebalance(target, dates, ("prev" if reb_shift == "skip" else reb_shift))
+                if i not in seen:
+                    out.append(i)
+                    seen.add(i)
+                    if target in dates:
+                        hm = "exact"
+                    else:
+                        hm = "prev" if reb_shift == "prev" else "next"
+                    decision_hit_mode[int(i)] = hm
+                    decision_target_date[int(i)] = pd.to_datetime(target).date().isoformat()
+            return sorted(out)
+        if n < 1 or n > 365:
+            raise ValueError("yearly rebalance_anchor must be within [1..365] (day-of-year)")
+        labels_local = dates.to_period("Y")
+        out: list[int] = []
+        seen: set[int] = set()
+        for p in pd.unique(labels_local):
+            y_start = pd.Timestamp(dt.date(int(p.year), 1, 1))
+            target = y_start + pd.Timedelta(days=int(n) - 1)
+            if reb_shift == "skip" and (target not in dates):
+                continue
+            i = _shift_idx_by_rebalance(target, dates, ("prev" if reb_shift == "skip" else reb_shift))
+            if i not in seen:
+                out.append(i)
+                seen.add(i)
+                if target in dates:
+                    hm = "exact"
+                else:
+                    hm = "prev" if reb_shift == "prev" else "next"
+                decision_hit_mode[int(i)] = hm
+                decision_target_date[int(i)] = pd.to_datetime(target).date().isoformat()
+        return sorted(out)
 
     # Determine rebalance decision dates.
     # If we rebalance at close on decision_date, then returns on the NEXT trading day onward
@@ -1403,7 +1464,8 @@ def backtest_rotation(
     # the NEXT decision date (inclusive), to avoid "gaps" on decision dates.
     anchor_val = inp.rebalance_anchor
     if anchor_val is None and inp.rebalance_weekday is not None and (inp.rebalance or "weekly").lower() == "weekly":
-        anchor_val = int(inp.rebalance_weekday)
+        # Legacy field: 0..4 (Mon..Fri) -> new anchor 1..5.
+        anchor_val = int(inp.rebalance_weekday) + 1
     last_idx = _decision_indices_for_rebalance(rebalance=inp.rebalance, anchor=anchor_val)
     decision_dates = dates[last_idx]
 
@@ -1745,27 +1807,49 @@ def backtest_rotation(
                         s2.loc[c] = np.nan
                 scores_row = s2
 
-            cur_holdings = {str(c) for c in rank_codes if float(prev_w_row.get(c, 0.0)) > 1e-12}
-            group_vol_row = None
-            if group_policy == "lowest_vol":
-                gv = ann_vol_by_window.get(int(inp.lookback_days))
-                if gv is not None and d in gv.index:
-                    group_vol_row = gv.loc[d]
-            reduced_scores, group_meta = _reduce_scores_by_group(
-                scores_row,
-                group_enforce=bool(inp.group_enforce),
-                asset_groups=group_map,
-                policy=group_policy,
-                current_holdings=cur_holdings,
-                vol_row=group_vol_row,
-            )
-            picks, meta = _pick_assets(
-                reduced_scores,
-                top_k=inp.top_k,
-                risk_off=inp.risk_off,
-                defensive_code=defensive,
-                floor=inp.momentum_floor,
-            )
+            candidate_scores = scores_row.dropna()
+            candidate_count = int(candidate_scores.shape[0])
+            min_required = int(inp.top_k) + 1
+            if candidate_count <= int(inp.top_k):
+                picks = []
+                best = float(candidate_scores.max()) if candidate_count > 0 else None
+                meta = {
+                    "best_score": best,
+                    "risk_off_triggered": False,
+                    "mode": "insufficient_candidates",
+                    "candidate_count": candidate_count,
+                    "min_required": min_required,
+                }
+                group_meta = {
+                    "enabled": bool(inp.group_enforce),
+                    "policy": group_policy,
+                    "before": [str(x) for x in candidate_scores.index.tolist()],
+                    "after": [],
+                    "group_winners": {},
+                    "group_eliminated": {},
+                }
+            else:
+                cur_holdings = {str(c) for c in rank_codes if float(prev_w_row.get(c, 0.0)) > 1e-12}
+                group_vol_row = None
+                if group_policy == "lowest_vol":
+                    gv = ann_vol_by_window.get(int(inp.lookback_days))
+                    if gv is not None and d in gv.index:
+                        group_vol_row = gv.loc[d]
+                reduced_scores, group_meta = _reduce_scores_by_group(
+                    scores_row,
+                    group_enforce=bool(inp.group_enforce),
+                    asset_groups=group_map,
+                    policy=group_policy,
+                    current_holdings=cur_holdings,
+                    vol_row=group_vol_row,
+                )
+                picks, meta = _pick_assets(
+                    reduced_scores,
+                    top_k=inp.top_k,
+                    risk_off=inp.risk_off,
+                    defensive_code=defensive,
+                    floor=inp.momentum_floor,
+                )
         # Defensive/cash branch from momentum floor:
         # - picks == [defensive] => invest 100% in defensive (if provided)
         # - picks == [] => cash
@@ -2399,6 +2483,8 @@ def backtest_rotation(
         holdings["periods"].append(
             {
                 "decision_date": d.date().isoformat(),
+                "rebalance_target_date": decision_target_date.get(int(di), d.date().isoformat()),
+                "rebalance_hit_mode": decision_hit_mode.get(int(di), "period_end"),
                 "start_date": dates[start_i].date().isoformat(),
                 "end_date": dates[end_i].date().isoformat(),
                 "picks": picks,
@@ -2713,6 +2799,9 @@ def backtest_rotation(
         period_turnover = float(turnover.loc[s]) if s in turnover.index else None
         period_stats.append(
             {
+                "decision_date": p.get("decision_date"),
+                "rebalance_target_date": p.get("rebalance_target_date"),
+                "rebalance_hit_mode": p.get("rebalance_hit_mode"),
                 "start_date": p["start_date"],
                 "end_date": p["end_date"],
                 "strategy_return": float(r_s),
@@ -2893,9 +2982,10 @@ def backtest_rotation(
         "benchmark_codes": bench_codes,
         "price_basis": {
             "signal": "hfq",
-            "strategy_nav": "none execution + hfq-implied corporate action factor (total return proxy)",
+            "strategy_nav": f"none execution({ep}) + hfq-implied corporate action factor (total return proxy)",
             "benchmark_nav": "hfq",
         },
+        "exec_price": ep,
         "timing": timing_meta,
         "asset_rc": asset_rc_meta,
         "asset_vol_index_timing": asset_vol_index_meta,
