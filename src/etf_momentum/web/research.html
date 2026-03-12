@@ -25,6 +25,12 @@
       .tabBtn.active { border-color: #444; font-weight: 600; }
       .tabPanel { display: none; }
       .tabPanel.active { display: block; }
+      .reportCard { margin-top: 10px; border: 1px solid #e6e9ef; background: #f8fafc; border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.55; color: #334155; }
+      .reportCard:empty { display: none; }
+      .reportCard .reportTitle { font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+      .reportCard .reportSectionTitle { margin-top: 6px; font-weight: 600; color: #1e293b; }
+      .reportCard .reportList { margin: 6px 0 0 18px; }
+      .reportCard .reportNote { margin-top: 6px; color: #64748b; font-size: 12px; }
 
       @media print {
         body { margin: 12mm; }
@@ -157,6 +163,7 @@
         <div>
           <h3>等权组合指标</h3>
           <table id="metrics"></table>
+          <div id="baselineReport" class="reportCard"></div>
         </div>
 
         <div>
@@ -551,6 +558,7 @@
       <table id="ewCalTable" style="margin-top:6px;"></table>
       <div id="ewCalRollingChart" style="width:100%; height:360px; margin-top:12px;"></div>
       <table id="ewCalRollingStats" style="margin-top:6px;"></table>
+      <div id="ewCalReport" class="reportCard"></div>
     </div>
 
     <div class="panel">
@@ -600,6 +608,7 @@
           <div id="mcEwQQ" style="width:100%; height:420px;"></div>
         </div>
       </div>
+      <div id="mcEwReport" class="reportCard"></div>
     </div>
 
     <div class="panel">
@@ -1356,6 +1365,7 @@
         <div>
           <h3>轮动策略指标</h3>
           <table id="rotMetrics"></table>
+          <div id="rotReport" class="reportCard"></div>
         </div>
         <div>
           <h3>轮动策略胜率赔率（按调仓周期）</h3>
@@ -1547,6 +1557,7 @@
         <table id="rotCalTable" style="margin-top:6px;"></table>
         <div id="rotCalRollingChart" style="width:100%; height:360px; margin-top:12px;"></div>
         <table id="rotCalRollingStats" style="margin-top:6px;"></table>
+        <div id="rotCalReport" class="reportCard"></div>
       </div>
 
     <div class="panel">
@@ -1658,6 +1669,7 @@
             </div>
           </div>
         </div>
+        <div id="mcRotReport" class="reportCard"></div>
       </div>
     </div>
 
@@ -1667,6 +1679,7 @@
         构造 4 个相互不相关的资产：每日 log(1+r) ~ N(0, σ)，年化波动率随机在 5%~30%。从 1990-01-01 起按交易日构造到最近交易日，净值从 1 开始（无复权）。用于检验“基础轮动策略”在随机世界里是否存在统计优势，以及仓位管理下是否会半途破产。
       </div>
       <div class="row">
+        <div class="muted" style="flex-basis:100%;margin:0 0 4px 0;">【共享参数】以下参数同时用于基础GBM（Phase1-4）与A/B显著性检验</div>
         <div><label>开始日期</label><input id="simStart" value="19900101" /></div>
         <div><label>结束日期（可空=最近工作日）</label><input id="simEnd" value="" /></div>
         <div><label>资产数</label><input id="simN" value="4" /></div>
@@ -1689,6 +1702,7 @@
         <button id="simRun2">阶段2 (Phase 2)：轮动 vs 等权</button>
         <button id="simRun3">阶段3 (Phase 3)：批量分布</button>
         <button id="simRun4">阶段4 (Phase 4)：遍历性/破产</button>
+        <div class="muted" style="flex-basis:100%;margin:8px 0 4px 0;">【A/B专用参数】以下参数仅用于显著性检验</div>
         <div><label>A/B 世界数</label><input id="simAbWorlds" value="3000" /></div>
         <div><label>A/B 置换次数</label><input id="simAbPerm" value="5000" /></div>
         <div><label>A/B Bootstrap次数</label><input id="simAbBoot" value="3000" /></div>
@@ -1833,6 +1847,7 @@
       <table id="trendDailyRetQuantiles" style="margin-top:10px;"></table>
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
       <table id="trendGroupTable" style="margin-top:10px;"></table>
+      <div id="trendReport" class="reportCard"></div>
     </div>
 
     <div class="panel msg" id="msg"></div>
@@ -3861,6 +3876,76 @@
       }
 
       function setMsg(t) { $("msg").textContent = t || ""; }
+      function setReport(title, bullets, note) {
+        // Global msg keeps status/errors only; report cards are rendered in module-local areas.
+        void title; void bullets; void note;
+      }
+      function setReportTo(elId, title, bullets, note) {
+        const box = $(elId);
+        const bs = Array.isArray(bullets) ? bullets.filter(Boolean) : [];
+        const nt = String(note || "").trim();
+        if (!box) return;
+        const conclusion = bs.length ? esc(String(bs[0])) : "暂无结论（请先运行对应模块）";
+        const evidence = bs.slice(1);
+        box.innerHTML =
+          `<div class="reportTitle">${esc(title || "结果解读")}</div>` +
+          `<div class="reportSectionTitle">结论</div>` +
+          `<div>${conclusion}</div>` +
+          `<div class="reportSectionTitle">证据</div>` +
+          (evidence.length
+            ? `<ul class="reportList">${evidence.map((x) => `<li>${esc(String(x))}</li>`).join("")}</ul>`
+            : `<div class="muted">暂无补充证据条目。</div>`) +
+          `<div class="reportSectionTitle">风险提示</div>` +
+          `<div class="reportNote">${nt || "以上结论仅基于当前样本区间与参数设置，不构成未来收益保证。"}</div>`;
+      }
+      function _perfReportLines(name, m) {
+        const ann = Number(m && m.annualized_return);
+        const mdd = Number(m && m.max_drawdown);
+        const shp = Number(m && m.sharpe_ratio);
+        const cal = Number(m && m.calmar_ratio);
+        const lines = [];
+        lines.push(`${name}：年化 ${fmtPct(ann)}，最大回撤 ${fmtPct(mdd)}，夏普 ${fmtNum(shp)}，卡玛 ${fmtNum(cal)}。`);
+        if (Number.isFinite(ann) && Number.isFinite(shp)) {
+          if (ann > 0 && shp >= 1.0) lines.push(`${name} 风险调整后收益表现较强（夏普>=1）。`);
+          else if (ann > 0 && shp > 0) lines.push(`${name} 有正收益，但风险调整后优势一般。`);
+          else lines.push(`${name} 当前区间下收益质量偏弱，需结合参数和区间再验证。`);
+        }
+        if (Number.isFinite(mdd)) {
+          if (mdd <= -0.30) lines.push(`${name} 回撤偏大（<= -30%），风险承受要求较高。`);
+          else if (mdd <= -0.20) lines.push(`${name} 回撤中等（20%~30%）。`);
+          else lines.push(`${name} 回撤相对可控（>-20%）。`);
+        }
+        return lines;
+      }
+      function _mcReportLines(label, mc) {
+        const mm = (mc && mc.metrics) ? (mc.metrics.annualized_return || mc.metrics.cumulative_return || null) : null;
+        if (!mm) return [`${label}：未返回可用于解读的绩效分布。`];
+        const obs = Number(mm.observed);
+        const p50 = Number(mm.p50);
+        const p05 = Number(mm.p05);
+        const p95 = Number(mm.p95);
+        const pLose = Number(mm.p_value_le_0);
+        const out = [];
+        out.push(`${label}：实测 ${fmtPct(obs)}，分布中位数 ${fmtPct(p50)}，区间 [P05=${fmtPct(p05)}, P95=${fmtPct(p95)}]。`);
+        if (Number.isFinite(obs) && Number.isFinite(p50)) {
+          if (obs > p50) out.push(`实测结果高于分布中位数，处于历史重采样的偏上水平。`);
+          else out.push(`实测结果不高于分布中位数，结果更接近常态或偏弱场景。`);
+        }
+        if (Number.isFinite(pLose)) out.push(`经验亏损概率约为 ${fmtPct(pLose)}（该指标<=0 的模拟占比）。`);
+        return out;
+      }
+      function _calendarReportLines(prefix, data) {
+        const grid = Array.isArray(data && data.grid) ? data.grid.filter((x) => x && x.ok && x.metrics) : [];
+        if (!grid.length) return [`${prefix}：暂无可解读的网格结果。`];
+        const best = grid
+          .filter((x) => Number.isFinite(Number(x.metrics.annualized_return)))
+          .sort((a, b) => Number(b.metrics.annualized_return) - Number(a.metrics.annualized_return))[0];
+        if (!best) return [`${prefix}：暂无可解读的年化收益结果。`];
+        return [
+          `${prefix}：最佳组合为 锚点=${best.anchor}、成交价=${best.exec_price}。`,
+          `对应年化 ${fmtPct(best.metrics.annualized_return)}，回撤 ${fmtPct(best.metrics.max_drawdown)}，夏普 ${fmtNum(best.metrics.sharpe_ratio)}。`,
+        ];
+      }
 
       function renderMetrics(metrics) {
         const rows = [
@@ -7756,6 +7841,16 @@
         renderRotPeriodTable("monthly");
         renderRotPeriodTable("quarterly");
         renderRotPeriodTable("yearly");
+        const benchLabel = (benchKey => (benchKey === "RP_REBAL" ? "风险平价" : "等权基准"))(($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
+        const exObj = (($("rotBenchMode") && $("rotBenchMode").value) === "RP_REBAL")
+          ? ((data.metrics || {}).excess_vs_risk_parity || {})
+          : ((data.metrics || {}).excess_vs_equal_weight || {});
+        const bullets = [
+          ..._perfReportLines("轮动策略", (data.metrics || {}).strategy || {}),
+          `相对${benchLabel}：超额年化(几何) ${fmtPct((exObj.annualized_return_geo != null) ? exObj.annualized_return_geo : exObj.annualized_return)}，信息比率 ${fmtNum(exObj.information_ratio)}。`,
+        ];
+        setReport("轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
+        setReportTo("rotReport", "轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
       }
 
       async function runTrendResearch() {
@@ -7853,6 +7948,25 @@
           }
         }
         $("trendGroupTable").innerHTML = `<tr><th>决策日</th><th>组ID</th><th>胜出</th><th>淘汰</th></tr>${gRows.join("")}`;
+        const strategyM = (m && m.strategy) ? m.strategy : {};
+        const excessM = (m && m.excess) ? m.excess : {};
+        setReport(
+          "趋势研究报告式解读",
+          [
+            ..._perfReportLines("趋势策略", strategyM),
+            `相对基准：超额年化 ${fmtPct(excessM.annualized_return)}，超额回撤 ${fmtPct(excessM.max_drawdown)}，超额夏普 ${fmtNum(excessM.sharpe_ratio)}。`,
+          ],
+          "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
+        );
+        setReportTo(
+          "trendReport",
+          "趋势研究报告式解读",
+          [
+            ..._perfReportLines("趋势策略", strategyM),
+            `相对基准：超额年化 ${fmtPct(excessM.annualized_return)}，超额回撤 ${fmtPct(excessM.max_drawdown)}，超额夏普 ${fmtNum(excessM.sharpe_ratio)}。`,
+          ],
+          "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
+        );
       }
 
       async function runRotNextExecutionPlan() {
@@ -8060,6 +8174,9 @@
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         _renderCalendarTable("ewCalTable", data);
+        const bullets = _calendarReportLines("等权", data);
+        setReport("等权日历效应解读", bullets, "说明：最佳锚点仅针对当前样本区间与所选标的集合。");
+        setReportTo("ewCalReport", "等权日历效应解读", bullets, "说明：最佳锚点仅针对当前样本区间与所选标的集合。");
       }
 
       async function runRotCalendarEffect() {
@@ -8308,6 +8425,9 @@
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         _renderCalendarTable("rotCalTable", data);
+        const bullets = _calendarReportLines("轮动", data);
+        setReport("轮动日历效应解读", bullets, "说明：该结论仅反映当前参数下锚点与成交价口径的相对表现。");
+        setReportTo("rotCalReport", "轮动日历效应解读", bullets, "说明：该结论仅反映当前参数下锚点与成交价口径的相对表现。");
       }
 
       async function runAnalysis() {
@@ -8421,6 +8541,24 @@
         renderFftRoll(data.fft_roll);
         window.__distInitedByCodeRange = false;
         renderPeriodDistributions(data.period_distributions, data);
+        const benchName = benchmark_code ? codeLabel(benchmark_code) : "未设置基准";
+        setReport(
+          "基线分析报告式解读",
+          [
+            ..._perfReportLines(`组合(${picked.mode || "EW"})`, picked.metrics || {}),
+            `基准：${benchName}。信息比率 ${fmtNum((picked.metrics || {}).information_ratio)}，溃疡绩效(UPI) ${fmtNum((picked.metrics || {}).ulcer_performance_index)}。`,
+          ],
+          "说明：建议结合滚动收益/滚动回撤与相关性变化共同判断稳健性。"
+        );
+        setReportTo(
+          "baselineReport",
+          "基线分析报告式解读",
+          [
+            ..._perfReportLines(`组合(${picked.mode || "EW"})`, picked.metrics || {}),
+            `基准：${benchName}。信息比率 ${fmtNum((picked.metrics || {}).information_ratio)}，溃疡绩效(UPI) ${fmtNum((picked.metrics || {}).ulcer_performance_index)}。`,
+          ],
+          "说明：建议结合滚动收益/滚动回撤与相关性变化共同判断稳健性。"
+        );
       }
 
       // baseline mode toggle: re-render from lastBaseline (no re-fetch)
@@ -9330,6 +9468,9 @@
           renderMcTable("mcEwTable", data.mc);
           plotMcHist("mcEwHist", data.mc, $("mcEwMetric").value);
           renderFit("Ew", data.mc, $("mcEwMetric").value);
+          const bullets = _mcReportLines("等权组合", data.mc);
+          setReport("等权蒙特卡洛解读", bullets, "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。");
+          setReportTo("mcEwReport", "等权蒙特卡洛解读", bullets, "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。");
         } finally {
           $("status").textContent = "";
           btn.disabled = false;
@@ -9597,6 +9738,23 @@
           _renderPeriodDistTable("mcExcessPeriodStats", data.mc.excess ? data.mc.excess.period_return : null);
           _plotPeriodDistHist("mcRotPeriodHist", data.mc.strategy ? data.mc.strategy.period_return : null, "MC 策略逐期收益率分布", "#4c78a8");
           _plotPeriodDistHist("mcExcessPeriodHist", data.mc.excess ? data.mc.excess.period_return : null, "MC 逐期超额收益率分布（轮动-等权）", "#f58518");
+          setReport(
+            "轮动蒙特卡洛解读",
+            [
+              ..._mcReportLines("轮动策略", data.mc.strategy),
+              ..._mcReportLines("轮动超额", data.mc.excess),
+            ],
+            "说明：请同时关注策略分布与超额分布，避免只看单一高收益样本。"
+          );
+          setReportTo(
+            "mcRotReport",
+            "轮动蒙特卡洛解读",
+            [
+              ..._mcReportLines("轮动策略", data.mc.strategy),
+              ..._mcReportLines("轮动超额", data.mc.excess),
+            ],
+            "说明：请同时关注策略分布与超额分布，避免只看单一高收益样本。"
+          );
         } finally {
           $("status").textContent = "";
           btn.disabled = false;
@@ -9924,10 +10082,24 @@
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
         const st = data.stats || {};
         const ci = (st.bootstrap_ci_95 || {}).mean || [];
+        const pval = Number(st.pvalue_permutation_one_sided);
+        const meanDiff = Number(st.mean_diff);
+        const winRate = Number(st.win_rate);
+        const ciLow = Number(ci[0]);
+        const ciHigh = Number(ci[1]);
+        const sig = Number.isFinite(pval) && pval < 0.05;
+        let verdict = "结论：未达到统计显著（当前样本下不能认定 A 明显优于 B）。";
+        if (sig && Number.isFinite(ciLow) && ciLow > 0) {
+          verdict = "结论：A 显著优于 B（置换检验 p<0.05，且均值差95%CI整体大于0）。";
+        } else if (sig && Number.isFinite(ciHigh) && ciHigh < 0) {
+          verdict = "结论：A 显著劣于 B（置换检验 p<0.05，且均值差95%CI整体小于0）。";
+        }
         Plotly.newPlot("simMcCagr", [
           { x: (data.dist || {}).diff_a_minus_b || [], type: "histogram", name: "A-B", opacity: 0.7 },
         ], { margin: { t: 20 }, xaxis: { title: "Annualized Return Diff (A-B)" } }, { displayModeBar: false });
-        _setSimMsg(`A/B 完成：p=${Number(st.pvalue_permutation_one_sided).toFixed(4)}, meanΔ=${fmtPct(st.mean_diff)}, 95%CI=[${fmtPct(ci[0])}, ${fmtPct(ci[1])}], win=${fmtPct(st.win_rate)}`);
+        const note = $("simMcNote");
+        if (note) note.textContent = `${verdict} 说明：主检验为单侧配对置换检验（H1: A>B），置信区间为 mean(Δ=A-B) 的 bootstrap 95%CI。`;
+        _setSimMsg(`A/B 完成：p=${Number.isFinite(pval) ? pval.toFixed(4) : "-"}, meanΔ=${fmtPct(meanDiff)}, 95%CI=[${fmtPct(ciLow)}, ${fmtPct(ciHigh)}], win=${fmtPct(winRate)}。${verdict}`);
       }
       if ($("simRun1")) $("simRun1").addEventListener("click", simRunPhase1);
       if ($("simRun2")) $("simRun2").addEventListener("click", simRunPhase2);
