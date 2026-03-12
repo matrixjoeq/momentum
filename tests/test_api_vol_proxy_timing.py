@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+from tests.helpers.api_test_client import upsert_and_fetch_etfs
+from tests.helpers.rotation_case_data import post_json_ok
+
+
 def test_api_vol_proxy_timing_smoke(api_client) -> None:
     # Ensure ETF prices exist (fake AkShare provides 2 days only)
-    resp = api_client.post("/api/etf", json={"code": "510300", "name": "沪深300ETF", "start_date": "20240101", "end_date": "20240131"})
-    assert resp.status_code == 200
-    resp = api_client.post("/api/etf/510300/fetch", json={})
-    assert resp.status_code == 200
+    upsert_and_fetch_etfs(
+        api_client,
+        codes=["510300"],
+        names={"510300": "沪深300ETF"},
+        start_date="20240101",
+        end_date="20240131",
+    )
 
     # The series is too short for full timing, but endpoint should respond and not crash.
-    resp = api_client.post(
+    data = post_json_ok(
+        api_client,
         "/api/analysis/vol-proxy-timing",
-        json={
+        {
             "etf_code": "510300",
             "start": "20240101",
             "end": "20240131",
@@ -23,8 +31,6 @@ def test_api_vol_proxy_timing_smoke(api_client) -> None:
             "train_ratio": 0.6,
         },
     )
-    assert resp.status_code == 200
-    data = resp.json()
     # It may be ok=false due to insufficient samples, but must return a structured response.
     assert "ok" in data
     assert "error" in data or "methods" in data

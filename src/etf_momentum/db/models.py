@@ -194,7 +194,7 @@ class SimVariant(Base):
     portfolio_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_portfolio.id"), index=True, nullable=False)
     config_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_strategy_config.id"), index=True, nullable=False)
 
-    anchor_weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 0..4
+    anchor_weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 1..5
     label: Mapped[str] = mapped_column(String(8), nullable=False)  # MON..FRI
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0/1 for sqlite simplicity
 

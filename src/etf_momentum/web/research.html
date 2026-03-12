@@ -604,11 +604,11 @@
         <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
           <label style="margin:0;">方案：</label>
           <button id="mpRotA_mix">综合</button>
-          <button id="mpRotA_0">周一</button>
-          <button id="mpRotA_1">周二</button>
-          <button id="mpRotA_2">周三</button>
-          <button id="mpRotA_3">周四</button>
-          <button id="mpRotA_4">周五</button>
+          <button id="mpRotA_1">周一</button>
+          <button id="mpRotA_2">周二</button>
+          <button id="mpRotA_3">周三</button>
+          <button id="mpRotA_4">周四</button>
+          <button id="mpRotA_5">周五</button>
           <span class="muted" id="mpRotAnchorHint" style="margin-left:6px;"></span>
         </div>
         <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
@@ -2702,7 +2702,7 @@
       }
       function _mpRotSetAnchor(a) {
         mpRotState.anchor = String(a);
-        const keys = ["mix", "0", "1", "2", "3", "4"];
+        const keys = ["mix", "1", "2", "3", "4", "5"];
         for (const k of keys) {
           const el = $(`mpRotA_${k}`);
           if (!el) continue;
@@ -9120,11 +9120,11 @@
 
       // mini-program fixed rotation wiring
       if ($("mpRotA_mix")) $("mpRotA_mix").addEventListener("click", () => _mpRotSetAnchor("mix"));
-      if ($("mpRotA_0")) $("mpRotA_0").addEventListener("click", () => _mpRotSetAnchor("0"));
       if ($("mpRotA_1")) $("mpRotA_1").addEventListener("click", () => _mpRotSetAnchor("1"));
       if ($("mpRotA_2")) $("mpRotA_2").addEventListener("click", () => _mpRotSetAnchor("2"));
       if ($("mpRotA_3")) $("mpRotA_3").addEventListener("click", () => _mpRotSetAnchor("3"));
       if ($("mpRotA_4")) $("mpRotA_4").addEventListener("click", () => _mpRotSetAnchor("4"));
+      if ($("mpRotA_5")) $("mpRotA_5").addEventListener("click", () => _mpRotSetAnchor("5"));
       Array.from(document.querySelectorAll("button.mpRotRange[data-k]")).forEach((b) => {
         b.addEventListener("click", () => _mpRotSetRange(String(b.dataset.k || "all")));
       });

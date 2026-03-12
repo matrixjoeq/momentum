@@ -223,7 +223,7 @@ def _iso(d: dt.date | None) -> str | None:
 
 _FIXED_CODES = ["159915", "511010", "513100", "518880"]
 _FIXED_NAMES = {"159915": "创业板ETF", "511010": "国债ETF", "513100": "纳指ETF", "518880": "黄金ETF"}
-_WD_LABEL = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
+_WD_LABEL = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI"}
 
 
 def _now_shanghai_date() -> dt.date:
@@ -1800,7 +1800,7 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
     - weekly rebalance, TopK=1, lookback=20, skip=0
     - exec_price=open, rebalance_shift=prev
     - cost=0, all risk controls off
-    - run 5 variants for weekly anchor weekday Mon..Fri (0..4)
+    - run 5 variants for weekly execution weekday Mon..Fri (1..5)
     """
     def _build_base(*, start: dt.date, end: dt.date) -> RotationAnalysisInputs:
         asset_vol_rules = [r.model_dump() for r in payload.asset_vol_index_rules] if payload.asset_vol_index_rules else None
@@ -1903,12 +1903,12 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
     base = _build_base(start=start, end=end)
-    # Mini-program semantics: `anchor_weekday` refers to the *execution day* weekday (Mon..Fri),
+    # Mini-program semantics: `anchor_weekday` refers to the *execution day* weekday (Mon..Fri, 1..5),
     # while the strategy engine's weekly rebalance anchor is the *decision day* weekday.
     # With "open execution", decision is made on previous trading day close, executed on next trading day open.
     # Therefore: decision_weekday = (exec_weekday - 1) mod 5 (Mon exec -> Fri decision).
     one_exec = payload.anchor_weekday
-    anchors = [int(one_exec)] if one_exec is not None else [0, 1, 2, 3, 4]
+    anchors = [int(one_exec)] if one_exec is not None else [1, 2, 3, 4, 5]
     def _slim_for_miniprogram(x: dict) -> dict:
         # Keep only what the mini-program renders (avoid shipping large unused blobs like rolling series).
         keep = [
@@ -1933,7 +1933,8 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
 
     by_anchor: dict[str, dict] = {}
     for exec_wd in anchors:
-        decision_wd = (int(exec_wd) - 1) % 5
+        # same 1..5 range: execution weekday -> previous decision weekday
+        decision_wd = ((int(exec_wd) - 2) % 5) + 1
         # pylint: disable=unexpected-keyword-arg
         inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(decision_wd)})
         out = _slim_for_miniprogram(compute_rotation_backtest(db, inp))
@@ -1969,7 +1970,7 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
             },
         },
         "by_anchor": by_anchor,
-        "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+        "weekday_map": {"1": "MON", "2": "TUE", "3": "WED", "4": "THU", "5": "FRI"},
     }
 
 
@@ -2075,7 +2076,7 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
     )
 
     one_exec = payload.anchor_weekday
-    anchors = [int(one_exec)] if one_exec is not None else [0, 1, 2, 3, 4]
+    anchors = [int(one_exec)] if one_exec is not None else [1, 2, 3, 4, 5]
 
     def _lite(x: dict) -> dict:
         nav = x.get("nav") if isinstance(x, dict) else None
@@ -2086,7 +2087,8 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
 
     by_anchor: dict[str, dict] = {}
     for exec_wd in anchors:
-        decision_wd = (int(exec_wd) - 1) % 5
+        # same 1..5 range: execution weekday -> previous decision weekday
+        decision_wd = ((int(exec_wd) - 2) % 5) + 1
         # pylint: disable=unexpected-keyword-arg
         inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(decision_wd)})
         by_anchor[str(exec_wd)] = _lite(compute_rotation_backtest(db, inp))
@@ -2103,7 +2105,7 @@ def rotation_weekly5_open_sim_lite(payload: RotationWeekly5OpenSimRequest, db: S
             "anchors": anchors,
         },
         "by_anchor": by_anchor,
-        "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+        "weekday_map": {"1": "MON", "2": "TUE", "3": "WED", "4": "THU", "5": "FRI"},
     }
 
 
@@ -2212,7 +2214,7 @@ def rotation_weekly5_open_combo_lite(payload: RotationWeekly5OpenSimRequest, db:
         return np.asarray([float(v) for v in arr], dtype=float)
 
     outs: list[dict] = []
-    for a in [0, 1, 2, 3, 4]:
+    for a in [1, 2, 3, 4, 5]:
         inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
         outs.append(compute_rotation_backtest(db, inp))
     if not outs:
@@ -2389,7 +2391,7 @@ def rotation_weekly5_open_combo(payload: RotationWeekly5OpenSimRequest, db: Sess
         return float(np.mean(xs)) if xs else None
 
     outs: list[dict] = []
-    for a in [0, 1, 2, 3, 4]:
+    for a in [1, 2, 3, 4, 5]:
         inp = RotationAnalysisInputs(**{**base.__dict__, "rebalance_anchor": int(a)})
         outs.append(compute_rotation_backtest(db, inp))
     if not outs:
@@ -2578,8 +2580,8 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
     payload = payload or {}
     requested_asof = _parse_yyyymmdd(str(payload.get("asof")))
     anchor = int(payload.get("anchor_weekday"))
-    if anchor not in {0, 1, 2, 3, 4}:
-        raise HTTPException(status_code=400, detail="anchor_weekday must be 0..4")
+    if anchor not in {1, 2, 3, 4, 5}:
+        raise HTTPException(status_code=400, detail="anchor_weekday must be 1..5")
 
     codes = _FIXED_CODES[:]
     # Use "last available close <= requested_asof" as the effective decision date.
@@ -2601,7 +2603,7 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
     # Mini-program semantics: each tab represents the *execution day* weekday (open execution).
     # We only show a plan on the tab whose weekday matches the next trading day.
     # (i.e., decision is made on asof close, executed on next trading day open).
-    rebalance_effective_next_day = bool(next_td > asof and int(next_td.weekday()) == int(anchor))
+    rebalance_effective_next_day = bool(next_td > asof and (int(next_td.weekday()) + 1) == int(anchor))
 
     # If next trading day is not this tab's execution day, skip computing the pick to avoid
     # misleading UI + unnecessary heavy computations.
@@ -2644,7 +2646,7 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
         )
 
         # Mini-program semantics: anchor_weekday is the *execution day* weekday; decision is previous weekday.
-        decision_weekday = int((int(anchor) - 1) % 5)
+        decision_weekday = int(((int(anchor) - 2) % 5) + 1)
 
         vol_index_rules = [r.model_dump() for r in (wk_req.asset_vol_index_rules or [])] if wk_req.asset_vol_index_rules else None
         vol_index_close = _load_vol_index_close_for_rotation_rules(
@@ -2747,12 +2749,19 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
             return_weights_end=True,
             allow_virtual_end=True,
         )  # type: ignore[arg-type]
+        hold = next((x for x in (out.get("holdings") or []) if str(x.get("start_date")) == next_td.isoformat()), None)
+        hold_picks = (hold or {}).get("picks") if hold is not None else None
         weights_end = (out.get("weights_end") or {}).get("weights") or {}
         # exposure is total non-cash weight (weights already include all scaling rules)
         pick_exposure = float(sum(float(v) for v in weights_end.values() if v is not None))
         pick_code = None
         pick_name = None
-        if pick_exposure <= 1e-12:
+        # Keep explicit empty picks from strategy output (blocked entry / insufficient candidates).
+        if hold_picks is not None and isinstance(hold_picks, list) and len(hold_picks) == 0:
+            pick_exposure = 0.0
+            pick_code = None
+            pick_name = "现金"
+        elif pick_exposure <= 1e-12:
             pick_code = None
             pick_name = "现金"
         elif weights_end:
@@ -2802,8 +2811,8 @@ def rotation_next_plan_auto(payload: dict, db: Session = Depends(get_session)) -
         next_td = next((d for d in tds if d > asof), asof)
     except Exception:  # pragma: no cover
         next_td = asof
-    wd = int(next_td.weekday())
-    if wd not in {0, 1, 2, 3, 4}:
+    wd = int(next_td.weekday()) + 1
+    if wd not in {1, 2, 3, 4, 5}:
         return {
             "asof": asof.strftime("%Y%m%d"),
             "next_trading_day": next_td.isoformat(),
@@ -2929,13 +2938,16 @@ def rotation_next_execution_plan(payload: dict, db: Session = Depends(get_sessio
             "exposure": float(exposure),
         }
     else:
+        # Keep explicit empty picks from the strategy output (e.g. blocked/insufficient entry).
+        # Only fall back to target_weights when picks is truly absent.
+        hold_picks = (hold or {}).get("picks") if hold is not None else None
         plan = {
         "decision_date": (hold or {}).get("decision_date"),
         "execution_date": next_iso,
         "rebalance_target_date": (hold or {}).get("rebalance_target_date"),
         "rebalance_hit_mode": (hold or {}).get("rebalance_hit_mode"),
         "mode": (hold or {}).get("mode"),
-        "picks": (hold or {}).get("picks") or [x["code"] for x in target_weights],
+        "picks": (hold_picks if hold_picks is not None else [x["code"] for x in target_weights]),
         "scores": (hold or {}).get("scores") or {},
         "buys": (per or {}).get("buys") or [],
         "sells": (per or {}).get("sells") or [],
@@ -3011,10 +3023,10 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
         return (nav / peak - 1.0).astype(float)
 
     one_anchor = payload.anchor_weekday
-    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
+    anchors = [int(one_anchor)] if one_anchor is not None else [1, 2, 3, 4, 5]
     by_anchor: dict[str, dict] = {}
     for a in anchors:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
         ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
         ew_ret = ew_nav.pct_change().fillna(0.0).astype(float)
 
@@ -3112,7 +3124,7 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
             "anchors": anchors,
         },
         "by_anchor": by_anchor,
-        "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+        "weekday_map": {"1": "MON", "2": "TUE", "3": "WED", "4": "THU", "5": "FRI"},
     }
 
 
@@ -3160,10 +3172,10 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
         return [None if (pd.isna(x) or not np.isfinite(float(x))) else float(x) for x in s.to_numpy(dtype=float)]
 
     one_anchor = payload.anchor_weekday
-    anchors = [int(one_anchor)] if one_anchor is not None else [0, 1, 2, 3, 4]
+    anchors = [int(one_anchor)] if one_anchor is not None else [1, 2, 3, 4, 5]
     by_anchor: dict[str, dict] = {}
     for a in anchors:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
         ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
 
         ema252 = _ema(ew_nav, 252)
@@ -3205,7 +3217,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
             "anchors": anchors,
         },
         "by_anchor": by_anchor,
-        "weekday_map": {"0": "MON", "1": "TUE", "2": "WED", "3": "THU", "4": "FRI"},
+        "weekday_map": {"1": "MON", "2": "TUE", "3": "WED", "4": "THU", "5": "FRI"},
     }
 
 
@@ -3252,8 +3264,8 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
         return [None if (pd.isna(x) or not np.isfinite(float(x))) else float(x) for x in s.to_numpy(dtype=float)]
 
     navs = []
-    for a in [0, 1, 2, 3, 4]:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
+    for a in [1, 2, 3, 4, 5]:
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
         ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
         navs.append(ew_nav.astype(float))
     nav_df = pd.concat(navs, axis=1)
@@ -3346,8 +3358,8 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
 
     navs = []
     ws = []
-    for a in [0, 1, 2, 3, 4]:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
+    for a in [1, 2, 3, 4, 5]:
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
         ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
         navs.append(ew_nav.astype(float))
         ws.append(ew_w[codes].astype(float))
@@ -3488,13 +3500,13 @@ def sim_init_fixed_strategy(portfolio_id: int, db: Session = Depends(get_session
 
     # Create 5 variants (MON..FRI). Default active = MON.
     vids: list[int] = []
-    for wd in [0, 1, 2, 3, 4]:
+    for wd in [1, 2, 3, 4, 5]:
         v = SimVariant(
             portfolio_id=int(p.id),
             config_id=int(cfg.id),
             anchor_weekday=int(wd),
             label=_WD_LABEL[int(wd)],
-            is_active=1 if int(wd) == 0 else 0,
+            is_active=1 if int(wd) == 1 else 0,
         )
         db.add(v)
         db.flush()

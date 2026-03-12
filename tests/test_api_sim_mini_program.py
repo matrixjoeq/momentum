@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from etf_momentum.app import create_app
 from etf_momentum.db.models import EtfPrice
 from etf_momentum.db.session import session_scope
+from tests.helpers.rotation_case_data import get_json, post_json, request_json
 
 
 @pytest.fixture()
@@ -50,46 +51,33 @@ def test_sim_portfolio_init_generate_and_confirm_trade(sim_client):
     c = sim_client
 
     # 1) create portfolio
-    resp = c.post("/api/sim/portfolio", json={"name": "默认账户", "initial_cash": 1000000})
-    assert resp.status_code == 200
-    pid = resp.json()["id"]
+    pid = post_json(c, "/api/sim/portfolio", {"name": "默认账户", "initial_cash": 1000000})["id"]
 
     # 2) init fixed strategy + 5 variants
-    resp = c.post(f"/api/sim/portfolio/{pid}/init-fixed-strategy")
-    assert resp.status_code == 200
-    out = resp.json()
+    out = request_json(c, method="post", path=f"/api/sim/portfolio/{pid}/init-fixed-strategy")
     assert out["portfolio_id"] == pid
     assert len(out["variant_ids"]) == 5
     vid0 = out["variant_ids"][0]
 
     # 3) generate decisions from backtest periods
-    resp = c.post("/api/sim/decision/generate", json={"portfolio_id": pid, "start": "20240301", "end": "20240430"})
-    assert resp.status_code == 200
-    assert resp.json()["inserted"] > 0
+    assert post_json(c, "/api/sim/decision/generate", {"portfolio_id": pid, "start": "20240301", "end": "20240430"})[
+        "inserted"
+    ] > 0
 
     # 4) list decisions, preview + confirm first one
-    resp = c.get(f"/api/sim/variant/{vid0}/decisions?start=20240301&end=20240430")
-    assert resp.status_code == 200
-    decisions = resp.json()["decisions"]
+    decisions = get_json(c, f"/api/sim/variant/{vid0}/decisions?start=20240301&end=20240430")["decisions"]
     assert len(decisions) > 0
     d0 = decisions[0]
 
-    resp = c.post("/api/sim/trade/preview", json={"variant_id": vid0, "decision_id": d0["id"]})
-    assert resp.status_code == 200
-    prev = resp.json()
+    prev = post_json(c, "/api/sim/trade/preview", {"variant_id": vid0, "decision_id": d0["id"]})
     assert prev["decision_id"] == d0["id"]
 
-    resp = c.post("/api/sim/trade/confirm", json={"variant_id": vid0, "decision_id": d0["id"]})
-    assert resp.status_code == 200
-    assert resp.json()["ok"] is True
+    assert post_json(c, "/api/sim/trade/confirm", {"variant_id": vid0, "decision_id": d0["id"]})["ok"] is True
 
     # 5) mark-to-market for a short window and fetch nav
-    resp = c.post(f"/api/sim/mark-to-market?variant_id={vid0}&start=20240301&end=20240315")
-    assert resp.status_code == 200
+    request_json(c, method="post", path=f"/api/sim/mark-to-market?variant_id={vid0}&start=20240301&end=20240315")
 
-    resp = c.get(f"/api/sim/variant/{vid0}/nav?start=20240301&end=20240315")
-    assert resp.status_code == 200
-    nav = resp.json()
+    nav = get_json(c, f"/api/sim/variant/{vid0}/nav?start=20240301&end=20240315")
     assert len(nav["dates"]) > 0
     assert len(nav["dates"]) == len(nav["nav"])
 

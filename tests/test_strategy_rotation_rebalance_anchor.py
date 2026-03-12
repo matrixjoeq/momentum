@@ -5,22 +5,19 @@ import pytest
 
 from etf_momentum.db.models import EtfPrice
 from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
+from tests.helpers.price_seed import add_price_all_adjustments
 
 
 def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
-    for adj in ("none", "hfq", "qfq"):
-        db.add(
-            EtfPrice(
-                code=code,
-                trade_date=day,
-                open=float(close),
-                high=float(close),
-                low=float(close),
-                close=float(close),
-                source="eastmoney",
-                adjust=adj,
-            )
-        )
+    add_price_all_adjustments(
+        db,
+        code=code,
+        day=day,
+        close=float(close),
+        open_price=float(close),
+        high=float(close),
+        low=float(close),
+    )
 
 
 def _first_start_date(out: dict) -> str:

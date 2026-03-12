@@ -5,6 +5,7 @@ from etf_momentum.app import create_app
 from etf_momentum.db.init_db import init_db
 from etf_momentum.db.seed import ensure_default_policies
 from etf_momentum.db.session import make_session_factory, make_sqlite_engine, session_scope
+from tests.helpers.rotation_case_data import post_json_ok
 
 
 @pytest.fixture()
@@ -65,9 +66,10 @@ def client_with_seeded_prices(monkeypatch):
 
 def test_api_vix_signal_backtest_returns_extended_payload(client_with_seeded_prices):
     c = client_with_seeded_prices
-    resp = c.post(
+    data = post_json_ok(
+        c,
         "/api/analysis/vix-signal-backtest",
-        json={
+        {
             "etf_code": "513100",
             "start": "20240102",
             "end": "20240628",
@@ -84,8 +86,6 @@ def test_api_vix_signal_backtest_returns_extended_payload(client_with_seeded_pri
             "initial_nav": 1.0,
         },
     )
-    assert resp.status_code == 200
-    data = resp.json()
     assert data["ok"] is True
     assert "period_returns" in data
     assert "distributions" in data

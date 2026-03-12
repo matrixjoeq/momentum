@@ -1,12 +1,15 @@
 import pytest  # pylint: disable=import-error
 
+from tests.helpers.rotation_case_data import post_json_ok
+
 
 @pytest.mark.parametrize("path", ["/api/analysis/sim/gbm/phase1", "/api/analysis/sim/gbm/phase2"])
 def test_sim_gbm_phase1_and_phase2_ok(api_client, path):
     c = api_client
-    resp = c.post(
+    data = post_json_ok(
+        c,
         path,
-        json={
+        {
             "start": "19900101",
             "end": "19900330",
             "n_assets": 4,
@@ -16,16 +19,15 @@ def test_sim_gbm_phase1_and_phase2_ok(api_client, path):
             "lookback_days": 20,
         },
     )
-    assert resp.status_code == 200
-    data = resp.json()
     assert data["ok"] is True
 
 
 def test_sim_gbm_phase3_ok(api_client):
     c = api_client
-    resp = c.post(
+    data = post_json_ok(
+        c,
         "/api/analysis/sim/gbm/phase3",
-        json={
+        {
             "start": "19900101",
             "end": "19920331",
             "n_assets": 4,
@@ -37,8 +39,6 @@ def test_sim_gbm_phase3_ok(api_client):
             "chunk_size": 50,
         },
     )
-    assert resp.status_code == 200
-    data = resp.json()
     assert data["ok"] is True
     assert "dist" in data
     assert len(data["dist"]["rotation"]["cagr"]) == 200
@@ -47,9 +47,10 @@ def test_sim_gbm_phase3_ok(api_client):
 
 def test_sim_gbm_phase4_ok(api_client):
     c = api_client
-    resp = c.post(
+    data = post_json_ok(
+        c,
         "/api/analysis/sim/gbm/phase4",
-        json={
+        {
             "start": "19900101",
             "end": "19920331",
             "n_assets": 4,
@@ -63,8 +64,6 @@ def test_sim_gbm_phase4_ok(api_client):
             "position_pct": 0.10,
         },
     )
-    assert resp.status_code == 200
-    data = resp.json()
     assert data["ok"] is True
     assert "sizing" in data
     assert "one" in data

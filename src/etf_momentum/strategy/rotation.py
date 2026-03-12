@@ -50,7 +50,7 @@ class RotationInputs:
     position_mode: str = "adaptive"  # adaptive | fixed (base sizing before other exposure controls)
     entry_backfill: bool = False  # if true, refill from lower-ranked candidates when top_k entries are filtered out
     entry_match_n: int = 0  # 0 => default AND(all enabled); otherwise require at least n entry filters
-    exit_match_n: int = 0  # reserved for exit-control aggregation
+    exit_match_n: int = 0  # 0 => default AND(all enabled); otherwise require at least n exit filters
     lookback_days: int = 20
     skip_days: int = 0  # skip recent trading days (0 means no skip)
     risk_free_rate: float = 0.025
@@ -2971,11 +2971,24 @@ def backtest_rotation(
         # Daily close decision for exit controls; execute next trading day.
         use_trend_exit = bool(inp.trend_exit_filter)
         use_bias_exit = bool(inp.bias_exit_filter)
+        exit_enabled_count = int(bool(use_floor_rules)) + int(bool(use_trend_exit)) + int(bool(use_bias_exit))
+        raw_exit_n = int(inp.exit_match_n or 0)
+        if exit_enabled_count <= 0:
+            exit_required = 0
+        elif raw_exit_n <= 0:
+            exit_required = int(exit_enabled_count)  # default: all enabled exit filters must hit (AND)
+        else:
+            exit_required = int(min(exit_enabled_count, max(1, raw_exit_n)))
         daily_exit_meta: dict[str, Any] = {
             "enabled": bool(use_floor_rules or use_trend_exit or use_bias_exit),
             "momentum_enabled": bool(use_floor_rules),
             "trend_enabled": bool(use_trend_exit),
             "bias_enabled": bool(use_bias_exit),
+            "gate": {
+                "enabled_count": int(exit_enabled_count),
+                "required": int(exit_required),
+                "mode": ("and" if int(exit_required) >= int(exit_enabled_count) else "n_of_m"),
+            },
             "triggered": False,
             "events": [],
         }
@@ -2990,38 +3003,33 @@ def backtest_rotation(
                     prev_wt = float(w.loc[sig_d, c]) if c in w.columns else 0.0
                     if prev_wt <= 1e-12:
                         continue
-                    ev: dict[str, Any] | None = None
-                    # 1) momentum-based exit
+                    hit_map: dict[str, bool] = {}
+                    momentum_score: float | None = None
+
+                    # 1) momentum-based exit: condition hit => trigger candidate exit
                     if use_floor_rules and c in scores.columns:
                         try:
                             sc = float(scores.loc[sig_d, c])
                         except (KeyError, TypeError, ValueError):
                             sc = float("nan")
                         if np.isfinite(sc):
+                            momentum_score = float(sc)
                             exit_rules = _momentum_rules_for_stage(
                                 str(c),
                                 rules=inp.asset_momentum_floor_rules,
                                 stage="exit",
                             )
                             if exit_rules:
-                                ok = _momentum_rules_pass(
+                                hit_map["momentum_rule"] = bool(
+                                    _momentum_rules_pass(
                                     float(sc),
                                     rules=exit_rules,
                                     fallback_floor=float(inp.momentum_floor),
                                 )
-                                if not ok:
-                                    ev = {
-                                        "type": "momentum_rule",
-                                        "code": str(c),
-                                        "decision_date": sig_d.date().isoformat(),
-                                        "execution_date": exec_d.date().isoformat(),
-                                        "from_weight": float(prev_wt),
-                                        "to_weight": 0.0,
-                                        "delta_weight": float(-prev_wt),
-                                        "score": float(sc),
-                                    }
-                    # 2) trend-based exit (only if momentum exit didn't trigger first)
-                    if ev is None and use_trend_exit:
+                                )
+
+                    # 2) trend-based exit: condition hit => trigger candidate exit
+                    if use_trend_exit:
                         trend_rules = _momentum_rules_for_stage(
                             str(c),
                             rules=inp.asset_trend_rules,
@@ -3029,7 +3037,7 @@ def backtest_rotation(
                         ) if use_trend_rules else []
                         if not trend_rules:
                             trend_rules = [{"trend_sma_window": int(inp.trend_sma_window), "trend_ma_type": str(trend_ma_type), "op": ">"}]
-                        trend_ok = True
+                        trend_hit = True
                         for r in trend_rules:
                             win = int((r or {}).get("trend_sma_window") or inp.trend_sma_window)
                             mt = str((r or {}).get("trend_ma_type") or trend_ma_type).strip().lower()
@@ -3038,23 +3046,15 @@ def backtest_rotation(
                             op = _normalize_cmp_op((r or {}).get("op") or ">")
                             df = trend_ok_each_by_key.get((int(win), str(mt), str(op)))
                             if df is None or sig_d not in df.index:
-                                trend_ok = False
+                                trend_hit = False
                                 break
                             if c not in df.columns or (not bool(df.loc[sig_d, c])):
-                                trend_ok = False
+                                trend_hit = False
                                 break
-                        if not trend_ok:
-                            ev = {
-                                "type": "trend_rule",
-                                "code": str(c),
-                                "decision_date": sig_d.date().isoformat(),
-                                "execution_date": exec_d.date().isoformat(),
-                                "from_weight": float(prev_wt),
-                                "to_weight": 0.0,
-                                "delta_weight": float(-prev_wt),
-                            }
-                    # 3) bias-based exit
-                    if ev is None and use_bias_exit:
+                        hit_map["trend_rule"] = bool(trend_hit)
+
+                    # 3) bias-based exit: condition hit => trigger candidate exit
+                    if use_bias_exit:
                         bias_rules = _momentum_rules_for_stage(
                             str(c),
                             rules=inp.asset_bias_rules,
@@ -3070,7 +3070,7 @@ def backtest_rotation(
                                 "min_periods": int(inp.bias_min_periods),
                                 "op": ">",
                             }]
-                        bias_ok = True
+                        bias_hit = True
                         for r in bias_rules:
                             win = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
                             lvw = str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower()
@@ -3082,28 +3082,39 @@ def backtest_rotation(
                             bdf = bias_by_ma_window.get(int(win))
                             tdf = bias_thr_by_cfg.get((int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
                             if bdf is None or tdf is None or sig_d not in bdf.index or sig_d not in tdf.index:
-                                bias_ok = False
+                                bias_hit = False
                                 break
                             sig = None if pd.isna(bdf.loc[sig_d, c]) else float(bdf.loc[sig_d, c])
                             thr = None if pd.isna(tdf.loc[sig_d, c]) else float(tdf.loc[sig_d, c])
                             if sig is None or thr is None or (not np.isfinite(sig)) or (not np.isfinite(thr)):
-                                bias_ok = False
+                                bias_hit = False
                                 break
                             if not _compare_with_op(float(sig), float(thr), op):
-                                bias_ok = False
+                                bias_hit = False
                                 break
-                        if not bias_ok:
-                            ev = {
-                                "type": "bias_rule",
-                                "code": str(c),
-                                "decision_date": sig_d.date().isoformat(),
-                                "execution_date": exec_d.date().isoformat(),
-                                "from_weight": float(prev_wt),
-                                "to_weight": 0.0,
-                                "delta_weight": float(-prev_wt),
-                            }
-                    if ev is None:
+                        hit_map["bias_rule"] = bool(bias_hit)
+
+                    hit_count = int(sum(1 for v in hit_map.values() if bool(v)))
+                    if int(exit_required) <= 0 or hit_count < int(exit_required):
                         continue
+                    hit_conditions = [k for k, v in hit_map.items() if bool(v)]
+                    if not hit_conditions:
+                        continue
+                    primary_type = hit_conditions[0]
+                    ev: dict[str, Any] = {
+                        "type": str(primary_type),
+                        "code": str(c),
+                        "decision_date": sig_d.date().isoformat(),
+                        "execution_date": exec_d.date().isoformat(),
+                        "from_weight": float(prev_wt),
+                        "to_weight": 0.0,
+                        "delta_weight": float(-prev_wt),
+                        "hit_count": int(hit_count),
+                        "required": int(exit_required),
+                        "hit_conditions": [str(x) for x in hit_conditions],
+                    }
+                    if momentum_score is not None and np.isfinite(float(momentum_score)):
+                        ev["score"] = float(momentum_score)
                     w.loc[exec_d : dates[end_i], c] = 0.0
                     daily_exit_meta["events"].append(ev)
                     daily_exit_events.append(ev)

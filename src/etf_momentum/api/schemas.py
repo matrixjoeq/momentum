@@ -955,9 +955,9 @@ class RotationWeekly5OpenSimRequest(RotationBacktestRequest):
     )
     anchor_weekday: int | None = Field(
         default=None,
-        ge=0,
-        le=4,
-        description="Optional: if set, compute only one anchor weekday (0=Mon..4=Fri) to reduce payload/runtime.",
+        ge=1,
+        le=5,
+        description="Optional: if set, compute only one execution weekday (1=Mon..5=Fri) to reduce payload/runtime.",
     )
 
 
@@ -967,7 +967,7 @@ class RotationNextPlanRequest(BaseModel):
     Used by the mini-program to show "tomorrow plan" when tomorrow is a rebalance effective day.
     """
 
-    anchor_weekday: int = Field(ge=0, le=4, description="0=Mon..4=Fri")
+    anchor_weekday: int = Field(ge=1, le=5, description="1=Mon..5=Fri")
     asof: str = Field(description="YYYYMMDD (usually the latest available trading day in backtest range)")
 
 
@@ -1018,9 +1018,9 @@ class BaselineWeekly5EWDashboardRequest(BaseModel):
     rebalance_shift: str = Field(default="prev", description="prev|next when anchor falls on non-trading day")
     anchor_weekday: int | None = Field(
         default=None,
-        ge=0,
-        le=4,
-        description="Optional: if set, compute only one anchor weekday (0=Mon..4=Fri) to reduce payload/runtime.",
+        ge=1,
+        le=5,
+        description="Optional: if set, compute only one anchor weekday (1=Mon..5=Fri) to reduce payload/runtime.",
     )
 
 

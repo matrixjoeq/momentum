@@ -3,23 +3,12 @@ import datetime as dt
 import pandas as pd
 import pytest
 
-from etf_momentum.db.models import EtfPrice
 from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
+from tests.helpers.price_seed import add_price_all_adjustments
 
 
 def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
-    for adj in ("none", "hfq", "qfq"):
-        db.add(
-            EtfPrice(
-                code=code,
-                trade_date=day,
-                close=float(close),
-                low=float(close),
-                high=float(close),
-                source="eastmoney",
-                adjust=adj,
-            )
-        )
+    add_price_all_adjustments(db, code=code, day=day, close=float(close))
 
 
 def test_group_enforce_strongest_score_keeps_one_per_group(session_factory):
@@ -289,3 +278,96 @@ def test_rotation_momentum_exit_rule_generates_daily_exit_event(session_factory)
     events = out.get("daily_exit_events") or []
     assert events
     assert any(str(e.get("type")) == "momentum_rule" for e in events)
+
+
+def test_rotation_bias_exit_rule_triggers_when_condition_is_hit(session_factory):
+    sf = session_factory
+    with sf() as db:
+        dates = [d.date() for d in pd.date_range("2024-01-01", "2024-09-30", freq="B")]
+        for i, d in enumerate(dates):
+            # Build a mild trend then a sharp acceleration to create high positive BIAS.
+            px = 100.0 + i * 0.08
+            if i >= 120:
+                px += (i - 120) * 1.3
+            _add_price(db, code="A1", day=d, close=px)
+            _add_price(db, code="B1", day=d, close=100.0 + i * 0.03)
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["A1", "B1"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="monthly",
+                top_k=1,
+                lookback_days=20,
+                bias_exit_filter=True,
+                bias_ma_window=5,
+                bias_quantile=90.0,
+                bias_min_periods=5,
+                asset_bias_rules=[
+                    {
+                        "code": "*",
+                        "stage": "exit",
+                        "op": ">=",
+                        "bias_ma_window": 5,
+                        "threshold_type": "fixed",
+                        "fixed_value": 1.0,
+                        "min_periods": 5,
+                    }
+                ],
+            ),
+        )
+
+    events = out.get("daily_exit_events") or []
+    assert events
+    assert any(str(e.get("type")) == "bias_rule" for e in events)
+
+
+def test_rotation_exit_match_n_zero_is_and_over_enabled_exit_filters(session_factory):
+    sf = session_factory
+    with sf() as db:
+        dates = [d.date() for d in pd.date_range("2024-01-01", "2024-09-30", freq="B")]
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.08
+            if i >= 120:
+                px += (i - 120) * 1.3
+            _add_price(db, code="A1", day=d, close=px)
+            _add_price(db, code="B1", day=d, close=100.0 + i * 0.03)
+        db.commit()
+
+        base = RotationInputs(
+            codes=["A1", "B1"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="monthly",
+            top_k=1,
+            lookback_days=20,
+            # Enabled exit controls:
+            # - momentum exit: intentionally hard-to-hit, usually False
+            # - bias exit: should hit during late spike
+            asset_momentum_floor_rules=[
+                {"code": "*", "stage": "exit", "op": "<", "threshold": -0.99, "threshold_unit": "raw"}
+            ],
+            bias_exit_filter=True,
+            asset_bias_rules=[
+                {
+                    "code": "*",
+                    "stage": "exit",
+                    "op": ">=",
+                    "bias_ma_window": 5,
+                    "threshold_type": "fixed",
+                    "fixed_value": 1.0,
+                    "min_periods": 5,
+                }
+            ],
+        )
+
+        out_and = backtest_rotation(db, RotationInputs(**{**base.__dict__, "exit_match_n": 0}))
+        out_nofm = backtest_rotation(db, RotationInputs(**{**base.__dict__, "exit_match_n": 1}))
+
+    ev_and = out_and.get("daily_exit_events") or []
+    ev_nofm = out_nofm.get("daily_exit_events") or []
+    assert not ev_and, "n=0 should require all enabled exit controls (AND)"
+    assert ev_nofm, "n=1 should allow any one enabled exit control to trigger exit"

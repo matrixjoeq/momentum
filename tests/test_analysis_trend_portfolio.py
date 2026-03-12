@@ -3,25 +3,19 @@ import datetime as dt
 import pandas as pd
 
 from etf_momentum.analysis.trend import TrendPortfolioInputs, compute_trend_portfolio_backtest
-from etf_momentum.db.models import EtfPrice
+from tests.helpers.price_seed import add_price_all_adjustments
 
 
 def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
-    for adj in ("none", "hfq", "qfq"):
-        db.add(
-            EtfPrice(
-                code=code,
-                trade_date=day,
-                open=float(close),
-                high=float(close),
-                low=float(close),
-                close=float(close),
-                volume=1.0,
-                amount=1.0,
-                source="eastmoney",
-                adjust=adj,
-            )
-        )
+    add_price_all_adjustments(
+        db,
+        code=code,
+        day=day,
+        close=float(close),
+        open_price=float(close),
+        high=float(close),
+        low=float(close),
+    )
 
 
 def test_trend_portfolio_group_enforce_and_outputs(session_factory):

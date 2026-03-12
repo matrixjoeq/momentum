@@ -8,6 +8,7 @@ from etf_momentum.app import create_app
 from etf_momentum.db.init_db import init_db
 from etf_momentum.db.seed import ensure_default_policies
 from etf_momentum.db.session import make_session_factory, make_sqlite_engine, session_scope
+from tests.helpers.rotation_case_data import post_json_ok
 
 
 def test_fetch_selected_partial_failure_sets_failed_status(tmp_path: pathlib.Path):
@@ -67,9 +68,7 @@ def test_fetch_selected_partial_failure_sets_failed_status(tmp_path: pathlib.Pat
     with TestClient(app) as c:
         c.post("/api/etf", json={"code": "GOOD", "name": "GOOD", "start_date": "20240102", "end_date": "20240103"})
         c.post("/api/etf", json={"code": "BAD", "name": "BAD", "start_date": "20240102", "end_date": "20240103"})
-        resp = c.post("/api/fetch-selected", json={"codes": ["GOOD", "BAD"], "adjust": "hfq"})
-        assert resp.status_code == 200
-        out = resp.json()
+        out = post_json_ok(c, "/api/fetch-selected", {"codes": ["GOOD", "BAD"], "adjust": "hfq"})
         by_code = {x["code"]: x for x in out}
         assert by_code["GOOD"]["status"] == "success"
         assert by_code["BAD"]["status"] == "failed"
