@@ -33,9 +33,6 @@ class FactorParams:
     vol_lookback: int = 20
     sma_period: int = 50
     ema_period: int = 12
-    rsi_period: int = 14
-    rsi_oversold: float = 30.0
-    rsi_overbought: float = 70.0
 
 
 @dataclass
@@ -65,7 +62,6 @@ class RotationStrategyConfig:
     rebalance: str = "weekly"
     factors: FactorParams = field(default_factory=FactorParams)
     enable_trend_filter: bool = True
-    enable_rsi_filter: bool = True
     enable_vol_filter: bool = False
     vol_threshold: Optional[float] = None
     enable_cash_protection: bool = True
@@ -82,7 +78,7 @@ class RotationStrategyConfig:
             "top_k": self.top_k,
             "rebalance": self.rebalance,
             "factor_weights": {"momentum": self.mom_weight, "trend": self.trend_weight, "volatility": self.vol_weight},
-            "risk_control": {"trend": self.enable_trend_filter, "rsi": self.enable_rsi_filter},
+            "risk_control": {"trend": self.enable_trend_filter},
         }
 
 

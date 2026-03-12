@@ -1689,6 +1689,20 @@
         <button id="simRun2">阶段2 (Phase 2)：轮动 vs 等权</button>
         <button id="simRun3">阶段3 (Phase 3)：批量分布</button>
         <button id="simRun4">阶段4 (Phase 4)：遍历性/破产</button>
+        <div><label>A/B 世界数</label><input id="simAbWorlds" value="3000" /></div>
+        <div><label>A/B 置换次数</label><input id="simAbPerm" value="5000" /></div>
+        <div><label>A/B Bootstrap次数</label><input id="simAbBoot" value="3000" /></div>
+        <button id="simRunAb">A/B 显著性检验</button>
+      </div>
+      <div class="row">
+        <div style="min-width:480px;flex:1;">
+          <label>策略A参数(JSON)</label>
+          <textarea id="simAbA" style="min-height:140px;">{"rebalance":"weekly","top_k":1,"lookback_days":20,"trend_filter":true,"trend_sma_window":5,"trend_ma_type":"ema","bias_filter":false}</textarea>
+        </div>
+        <div style="min-width:480px;flex:1;">
+          <label>策略B参数(JSON)</label>
+          <textarea id="simAbB" style="min-height:140px;">{"rebalance":"weekly","top_k":1,"lookback_days":20,"trend_filter":false,"bias_filter":false}</textarea>
+        </div>
       </div>
       <div id="simMsg" class="msg panel"></div>
       <div class="panel two">
@@ -1893,11 +1907,7 @@
           "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotEntryBackfill",
           "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotEntryMatchN", "rotExitMatchN",
           "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
-          "rotRiskOff", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn", "rotRsiOn", "rotVolOn", "rotChopOn",
-          "rotCorrOn", "rotCorrWindow", "rotCorrThr", "rotInertiaOn", "rotInertiaMinHold", "rotInertiaScoreGap", "rotInertiaMinTurnover",
-          "rotRROn", "rotRRYears", "rotRRThr", "rotRRWts", "rotDDOn", "rotDDThr", "rotDDReduce", "rotDDSleep", "rotTimingOn", "rotTimingRsiWin",
-          "rotTpSlMode", "rotAtrWindow", "rotAtrMult", "rotAtrStep", "rotAtrMinMult",
-          "rotMirrorOn", "rotMirrorQs", "rotMirrorCaps",
+          "rotRiskOff", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn",
           "rotVolIdxOn", "rotPlanAsof",
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
@@ -1909,13 +1919,15 @@
         ],
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
-        sim: ["simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simSeed", "simLb", "simNSims", "simChunk", "simCash", "simPosPct"],
+        sim: ["simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simSeed", "simLb", "simNSims", "simChunk", "simCash", "simPosPct", "simAbWorlds", "simAbPerm", "simAbBoot", "simAbA", "simAbB"],
       };
       let _persistReady = false;
       let _persistDebounce = null;
       let _savedSelectedCodes = null;
       let _savedSelectedCodesReady = false;
+      let _savedGlobalSettings = null;
       let _initialDefaults = null;
+      const _YMD_FIELD_IDS = new Set(["start", "end", "ewCalStart", "ewCalEnd", "rotCalStart", "rotCalEnd", "simStart", "simEnd", "rotPlanAsof"]);
 
       function _settingsLoad(key) {
         try {
@@ -1933,17 +1945,29 @@
           // ignore storage failures (private mode/quota)
         }
       }
+      function _normalizeYmdValue(v) {
+        const raw = String(v == null ? "" : v).trim();
+        if (!raw) return "";
+        const digits = raw.replace(/\D/g, "");
+        return digits.slice(0, 8);
+      }
       function _readControlValue(id) {
         const el = $(id);
         if (!el) return undefined;
         if (el instanceof HTMLInputElement && el.type === "checkbox") return !!el.checked;
-        return String(el.value == null ? "" : el.value);
+        const raw = String(el.value == null ? "" : el.value);
+        if (_YMD_FIELD_IDS.has(String(id))) return _normalizeYmdValue(raw);
+        return raw;
       }
       function _applyControlValue(id, value) {
         const el = $(id);
         if (!el || value == null) return;
         if (el instanceof HTMLInputElement && el.type === "checkbox") {
           el.checked = !!value;
+          return;
+        }
+        if (_YMD_FIELD_IDS.has(String(id))) {
+          el.value = _normalizeYmdValue(value);
           return;
         }
         el.value = String(value);
@@ -2024,28 +2048,6 @@
           threshold_value: _tableInputValue(tr, ".rotBiasThrVal", "95"),
           min_periods: _tableInputValue(tr, ".rotBiasMinP", "20"),
         }));
-        const rsi = _tableRows("rotRsiRulesTable").map((tr) => ({
-          code: _tableInputValue(tr, ".rotRsiCode"),
-          rsi_window: _tableInputValue(tr, ".rotRsiWin", "20"),
-          rsi_overbought: _tableInputValue(tr, ".rotRsiOb", "70"),
-          rsi_oversold: _tableInputValue(tr, ".rotRsiOs", "30"),
-          rsi_block_overbought: _tableInputValue(tr, ".rotRsiBlkOb", "true"),
-          rsi_block_oversold: _tableInputValue(tr, ".rotRsiBlkOs", "false"),
-        }));
-        const vol = _tableRows("rotVolRulesTable").map((tr) => ({
-          code: _tableInputValue(tr, ".rotVolCode"),
-          vol_window: _tableInputValue(tr, ".rotVolWin", "20"),
-          vol_target_ann: _tableInputValue(tr, ".rotVolTarget", "0.20"),
-          vol_max_ann: _tableInputValue(tr, ".rotVolMax", "0.60"),
-        }));
-        const chop = _tableRows("rotChopRulesTable").map((tr) => ({
-          code: _tableInputValue(tr, ".rotChopCode"),
-          chop_mode: _tableInputValue(tr, ".rotChopMode", "er"),
-          chop_window: _tableInputValue(tr, ".rotChopWin", "20"),
-          chop_er_threshold: _tableInputValue(tr, ".rotChopThr", "0.25"),
-          chop_adx_window: _tableInputValue(tr, ".rotChopAdxWin", "20"),
-          chop_adx_threshold: _tableInputValue(tr, ".rotChopAdxThr", "20"),
-        }));
         const volIdx = _tableRows("rotVolIdxRulesTable").map((tr) => ({
           code: _tableInputValue(tr, ".rotVolIdxCode"),
           index: _tableInputValue(tr, ".rotVolIdxIndex", "VIX"),
@@ -2054,7 +2056,7 @@
           level_exposures: _tableInputValue(tr, ".rotVolIdxExps", "100,50,25,0"),
           min_periods: _tableInputValue(tr, ".rotVolIdxMinP", "20"),
         }));
-        return { floorEntry, floorExit, trendEntry, trendExit, biasEntry, biasExit, rsi, vol, chop, volIdx };
+        return { floorEntry, floorExit, trendEntry, trendExit, biasEntry, biasExit, volIdx };
       }
       function _restoreRotationRuleTables(data) {
         if (!data || typeof data !== "object") return;
@@ -2077,13 +2079,6 @@
           threshold_type: r.threshold_type, quantile: r.threshold_type === "quantile" ? r.threshold_value : 95,
           fixed_value: r.threshold_type === "fixed" ? r.threshold_value : 10, min_periods: r.min_periods,
         }, { tableId: "rotBiasExitRulesTable" }));
-        restore(data.rsi, _rotRsiClearRuleRows, (r) => _rotRsiAddRuleRow({
-          ...r,
-          rsi_block_overbought: String(r.rsi_block_overbought) === "true",
-          rsi_block_oversold: String(r.rsi_block_oversold) === "true",
-        }));
-        restore(data.vol, _rotVolClearRuleRows, (r) => _rotVolAddRuleRow(r));
-        restore(data.chop, _rotChopClearRuleRows, (r) => _rotChopAddRuleRow(r));
         restore(data.volIdx, _rotVolIdxClearRuleRows, (r) => _rotVolIdxAddRuleRow(r));
       }
       function _restoreCalendarSelections(saved, prefix) {
@@ -3155,20 +3150,11 @@
             const eEntry = _buildBiasRules("rotBiasOn", "rotBiasRulesTable", "entry"); if (eEntry && eEntry.__error) return eEntry;
             const eExit = _buildBiasRules("rotExitBiasOn", "rotBiasExitRulesTable", "exit"); if (eExit && eExit.__error) return eExit;
             const e = [...(eEntry || []), ...(eExit || [])];
-            const b = _buildRsiRules(); if (b && b.__error) return b;
-            const c = _buildVolRules(); if (c && c.__error) return c;
-            const d = _buildChopRules(); if (d && d.__error) return d;
             return {
               asset_trend_rules: (a && a.__error ? null : a),
               asset_bias_rules: (e && e.__error ? null : e),
-              asset_rsi_rules: (b && b.__error ? null : b),
-              asset_vol_monitor_rules: (c && c.__error ? null : c),
-              asset_chop_rules: (d && d.__error ? null : d),
               trend_default: _pickDefaultRule(a),
               bias_default: _pickDefaultRule(e),
-              rsi_default: _pickDefaultRule(b),
-              vol_default: _pickDefaultRule(c),
-              chop_default: _pickDefaultRule(d),
             };
           };
           const _buildReq = (startYmd, endYmd, anchorWeekdayOrNull) => {
@@ -3246,52 +3232,8 @@
               bias_quantile: Number(bd.quantile != null ? bd.quantile : 95),
               bias_fixed_value: Number(bd.fixed_value != null ? bd.fixed_value : 10),
               bias_min_periods: Number(bd.min_periods != null ? bd.min_periods : 20),
-              rsi_filter: ($("rotRsiOn").value === "true"),
-              rsi_window: Number(rd.rsi_window),
-              rsi_overbought: Number(rd.rsi_overbought),
-              rsi_oversold: Number(rd.rsi_oversold),
-              rsi_block_overbought: Boolean(rd.rsi_block_overbought),
-              rsi_block_oversold: Boolean(rd.rsi_block_oversold),
-              vol_monitor: ($("rotVolOn").value === "true"),
-              vol_window: Number(vd.vol_window),
-              vol_target_ann: Number(vd.vol_target_ann),
-              vol_max_ann: Number(vd.vol_max_ann),
-              chop_filter: ($("rotChopOn").value === "true"),
-              chop_mode: cd.chop_mode,
-              chop_window: Number(cd.chop_window),
-              chop_er_threshold: Number(cd.chop_er_threshold),
-              chop_adx_window: Number(cd.chop_adx_window),
-              chop_adx_threshold: Number(cd.chop_adx_threshold),
-              corr_filter: ($("rotCorrOn").value === "true"),
-              corr_window: (($("rotCorrWindow").value || "").trim() === "" ? null : Number(($("rotCorrWindow").value || "").trim())),
-              corr_threshold: Number(($("rotCorrThr").value || "0.5").trim()),
-              inertia: ($("rotInertiaOn").value === "true"),
-              inertia_min_hold_periods: Number(($("rotInertiaMinHold").value || "0").trim()),
-              inertia_score_gap: Number(($("rotInertiaScoreGap").value || "0").trim()),
-              inertia_min_turnover: Number(($("rotInertiaMinTurnover").value || "0").trim()),
-              rr_sizing,
-              rr_years: Number(($("rotRRYears").value || "3").trim()),
-              rr_thresholds,
-              rr_weights,
-              mirror_control,
-              mirror_quantiles,
-              mirror_exposures,
-              tp_sl_mode: ($("rotTpSlMode").value || "none"),
-              atr_window,
-              atr_mult: Number(($("rotAtrMult").value || "2.0").trim()),
-              atr_step: Number(($("rotAtrStep").value || "0.5").trim()),
-              atr_min_mult: Number(($("rotAtrMinMult").value || "0.5").trim()),
-              timing_rsi_gate: ($("rotTimingOn").value === "true"),
-              timing_rsi_window: Number(($("rotTimingRsiWin").value || "24").trim()),
-              dd_control: ($("rotDDOn").value === "true"),
-              dd_threshold,
-              dd_reduce,
-              dd_sleep_days: Number(($("rotDDSleep").value || "20").trim()),
               asset_trend_rules: p1.asset_trend_rules,
               asset_bias_rules: p1.asset_bias_rules,
-              asset_rsi_rules: p1.asset_rsi_rules,
-              asset_chop_rules: p1.asset_chop_rules,
-              asset_vol_monitor_rules: p1.asset_vol_monitor_rules,
               asset_rc_rules: null,
               asset_vol_index_rules: _buildVolIdxRules(),
             };
@@ -3424,8 +3366,9 @@
       }
 
       function ymdToNum(s) {
-        if (!s || s.length < 8) return null;
-        const n = Number(s.slice(0, 8));
+        const ymd = _normalizeYmdValue(s);
+        if (!ymd || ymd.length < 8) return null;
+        const n = Number(ymd.slice(0, 8));
         return Number.isFinite(n) ? n : null;
       }
 
@@ -3435,10 +3378,11 @@
       }
 
       function ymdToDate(s) {
-        if (!s || s.length < 8) return null;
-        const y = Number(s.slice(0, 4));
-        const m = Number(s.slice(4, 6));
-        const d = Number(s.slice(6, 8));
+        const ymd = _normalizeYmdValue(s);
+        if (!ymd || ymd.length < 8) return null;
+        const y = Number(ymd.slice(0, 4));
+        const m = Number(ymd.slice(4, 6));
+        const d = Number(ymd.slice(6, 8));
         if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
         // Use local time; we only care about YYYYMMDD arithmetic.
         return new Date(y, m - 1, d);
@@ -3888,10 +3832,31 @@
         }
         renderCodeList();
         renderBenchmarkSelect();
+        // Re-apply persisted benchmark after options are mounted.
+        // (Benchmark select options depend on selected codes and are rebuilt in renderBenchmarkSelect)
+        try {
+          const bm = (_savedGlobalSettings && _savedGlobalSettings.benchmark != null)
+            ? String(_savedGlobalSettings.benchmark).trim()
+            : "";
+          if (bm) {
+            const sel = $("benchmark");
+            const options = sel ? Array.from(sel.options).map((o) => String(o.value)) : [];
+            if (sel && options.includes(bm)) sel.value = bm;
+          }
+        } catch { /* ignore */ }
         renderTrendSingleCodeSelect();
         // default defensive ETF: keep empty as requested
-        // Initialize or clamp backtest range to available intersection (only if needed)
-        maybeAdjustBacktestRange();
+        // On initial load, honor persisted start/end range and avoid auto-clamping.
+        // Range clamping remains active for subsequent user-driven universe changes.
+        const hasPersistedRange = (() => {
+          const s = (_savedGlobalSettings && _savedGlobalSettings.start != null) ? ymdToNum(_savedGlobalSettings.start) : null;
+          const e = (_savedGlobalSettings && _savedGlobalSettings.end != null) ? ymdToNum(_savedGlobalSettings.end) : null;
+          return s != null && e != null;
+        })();
+        if (!hasPersistedRange) {
+          // Initialize or clamp backtest range to available intersection (only if needed)
+          maybeAdjustBacktestRange();
+        }
         renderRangeHint();
       }
 
@@ -7752,7 +7717,7 @@
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
-            asset_trend_rules, asset_bias_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+            asset_trend_rules, asset_bias_rules,
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             asset_rc_rules,
             asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
@@ -8331,7 +8296,7 @@
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
-            asset_trend_rules, asset_bias_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+            asset_trend_rules, asset_bias_rules,
             anchors, exec_prices,
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             asset_rc_rules,
@@ -8520,8 +8485,8 @@
         const smallBtns = Array.from(small.querySelectorAll(".tabBtn[data-tab]"));
         const groups = {
           base: ["rotTabBase"],
-          entry: ["rotTabFloor", "rotTabTrend", "rotTabBias", "rotTabRsi", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabVol"],
-          exit: ["rotTabTpSl", "rotTabFloorExit", "rotTabTrendExit", "rotTabBiasExit", "rotTabRR", "rotTabDD", "rotTabTiming", "rotTabMirror", "rotTabVolIndex"],
+          entry: ["rotTabFloor", "rotTabTrend", "rotTabBias"],
+          exit: ["rotTabFloorExit", "rotTabTrendExit", "rotTabBiasExit", "rotTabVolIndex"],
         };
         const _entryEnabledCount = () => {
           let m = 0;
@@ -8942,6 +8907,16 @@
       };
 
       function _initPhase1RuleTables() {
+        // 参数清理：隐藏未成熟控制项（保留 DOM 兼容旧配置，但不再展示）。
+        const _retiredTabs = ["rotTabRsi", "rotTabVol", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabTpSl", "rotTabRR", "rotTabDD", "rotTabTiming", "rotTabMirror"];
+        _retiredTabs.forEach((tabId) => {
+          try {
+            const panel = $(tabId);
+            if (panel) panel.style.display = "none";
+            const btn = document.querySelector(`.tabBtn[data-tab="${tabId}"]`);
+            if (btn && btn.parentElement) btn.parentElement.removeChild(btn);
+          } catch { /* ignore */ }
+        });
         try { _rotFloorResetDefaultRules("rotFloorRulesTable"); _setTabEnabledByToggle("rotTabFloor", "rotRiskOff"); } catch { /* ignore */ }
         try { _rotFloorResetDefaultRules("rotFloorExitRulesTable"); _setTabEnabledByToggle("rotTabFloorExit", "rotExitFloorOn"); } catch { /* ignore */ }
         try { _rotTrendResetDefaultRules("rotTrendRulesTable"); _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"); } catch { /* ignore */ }
@@ -9224,6 +9199,7 @@
           };
         }
         const globalSaved = _settingsLoad(SETTINGS_KEYS.global);
+        _savedGlobalSettings = (globalSaved && typeof globalSaved === "object") ? globalSaved : null;
         const distSaved = _settingsLoad(SETTINGS_KEYS.dist);
         const ewCalSaved = _settingsLoad(SETTINGS_KEYS.ewCal);
         const rotationSaved = _settingsLoad(SETTINGS_KEYS.rotation);
@@ -9261,6 +9237,17 @@
         _persistReady = true;
         document.addEventListener("change", () => _saveResearchSettingsDebounced());
         document.addEventListener("input", () => _saveResearchSettingsDebounced());
+        // Ensure latest values are persisted even if user refreshes immediately.
+        window.addEventListener("beforeunload", () => {
+          try { _saveResearchSettingsNow(); } catch { /* ignore */ }
+        });
+        // Critical range fields: persist immediately on committed edits.
+        ["start", "end"].forEach((id) => {
+          const el = $(id);
+          if (!el) return;
+          el.addEventListener("change", () => _saveResearchSettingsNow());
+          el.addEventListener("blur", () => _saveResearchSettingsNow());
+        });
         document.addEventListener("click", (e) => {
           const btn = e.target && e.target.closest ? e.target.closest("button") : null;
           if (!btn) return;
@@ -9582,7 +9569,7 @@
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,
               chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
-              asset_trend_rules, asset_bias_rules, asset_rsi_rules, asset_chop_rules, asset_vol_monitor_rules,
+              asset_trend_rules, asset_bias_rules,
               asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
               asset_rc_rules,
               asset_vol_index_rules,
@@ -9913,10 +9900,40 @@
         if (data.mc && data.mc.ok) _renderMcCagr(data.mc);
         _setSimMsg(`阶段4 (Phase 4) 完成。${txt}`);
       }
+      async function simRunAb() {
+        _setSimMsg("A/B 显著性检验运行中（可能较慢）...");
+        let strategyA = {};
+        let strategyB = {};
+        try { strategyA = JSON.parse(($("simAbA").value || "{}").trim() || "{}"); } catch { return _setSimMsg("策略A JSON 格式错误"); }
+        try { strategyB = JSON.parse(($("simAbB").value || "{}").trim() || "{}"); } catch { return _setSimMsg("策略B JSON 格式错误"); }
+        const p = {
+          start: _str("simStart") || "19900101",
+          end: _str("simEnd") || null,
+          n_worlds: Math.trunc(_num("simAbWorlds", 3000)),
+          n_assets: Math.trunc(_num("simN", 4)),
+          vol_low: _num("simVolLow", 0.05),
+          vol_high: _num("simVolHigh", 0.30),
+          seed: (($("simSeed").value || "").trim() === "" ? null : Math.trunc(_num("simSeed", 0))),
+          n_perm: Math.trunc(_num("simAbPerm", 5000)),
+          n_boot: Math.trunc(_num("simAbBoot", 3000)),
+          strategy_a: strategyA,
+          strategy_b: strategyB,
+        };
+        const resp = await api("/analysis/sim/gbm/ab-significance", { method: "POST", body: JSON.stringify(p) });
+        const data = await resp.json();
+        if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+        const st = data.stats || {};
+        const ci = (st.bootstrap_ci_95 || {}).mean || [];
+        Plotly.newPlot("simMcCagr", [
+          { x: (data.dist || {}).diff_a_minus_b || [], type: "histogram", name: "A-B", opacity: 0.7 },
+        ], { margin: { t: 20 }, xaxis: { title: "Annualized Return Diff (A-B)" } }, { displayModeBar: false });
+        _setSimMsg(`A/B 完成：p=${Number(st.pvalue_permutation_one_sided).toFixed(4)}, meanΔ=${fmtPct(st.mean_diff)}, 95%CI=[${fmtPct(ci[0])}, ${fmtPct(ci[1])}], win=${fmtPct(st.win_rate)}`);
+      }
       if ($("simRun1")) $("simRun1").addEventListener("click", simRunPhase1);
       if ($("simRun2")) $("simRun2").addEventListener("click", simRunPhase2);
       if ($("simRun3")) $("simRun3").addEventListener("click", simRunPhase3);
       if ($("simRun4")) $("simRun4").addEventListener("click", simRunPhase4);
+      if ($("simRunAb")) $("simRunAb").addEventListener("click", simRunAb);
       if ($("simBenchMode")) $("simBenchMode").addEventListener("change", () => {
         // Re-render MC histogram if present (phase3/4), and re-render compare table if phase2 already ran.
         try {

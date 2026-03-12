@@ -505,3 +505,132 @@ def montecarlo_rotation_vs_ew(
         },
     }
 
+
+def _extract_annualized_return(bt: dict[str, Any]) -> float:
+    m = (bt or {}).get("metrics") or {}
+    v = m.get("cagr")
+    return float(v) if v is not None and np.isfinite(float(v)) else float("nan")
+
+
+def _run_rotation_variant_on_sim(close: pd.DataFrame, strategy: dict[str, Any]) -> tuple[float, float]:
+    lookback_days = int(strategy.get("lookback_days", 20) or 20)
+    top_k = int(strategy.get("top_k", 1) or 1)
+    out = backtest_rotation_basic(close, lookback_days=lookback_days, top_k=top_k)
+    ann = _extract_annualized_return(out)
+    nav = ((out.get("series") or {}).get("nav") or [])
+    if len(nav) <= 1:
+        return ann, 0.0
+    nav_s = pd.Series([float(x) for x in nav], dtype=float)
+    ret = nav_s.pct_change().fillna(0.0).astype(float)
+    exposure = float(np.mean(np.abs(ret.to_numpy(dtype=float)) > 1e-15))
+    return ann, exposure
+
+
+def _paired_permutation_pvalue(diff: np.ndarray, *, n_perm: int, seed: int | None) -> float:
+    d = np.asarray(diff, dtype=float)
+    d = d[np.isfinite(d)]
+    if d.size == 0:
+        return float("nan")
+    obs = float(np.mean(d))
+    rng = np.random.default_rng(seed)
+    ge = 0
+    for _ in range(int(max(1000, n_perm))):
+        signs = rng.choice([-1.0, 1.0], size=d.size)
+        stat = float(np.mean(d * signs))
+        if stat >= obs:
+            ge += 1
+    return float((ge + 1) / (int(max(1000, n_perm)) + 1))
+
+
+def _bootstrap_ci(diff: np.ndarray, *, n_boot: int, seed: int | None) -> dict[str, list[float]]:
+    d = np.asarray(diff, dtype=float)
+    d = d[np.isfinite(d)]
+    if d.size == 0:
+        return {"mean": [float("nan"), float("nan")], "median": [float("nan"), float("nan")]}
+    rng = np.random.default_rng(seed)
+    m = np.empty(int(max(1000, n_boot)), dtype=float)
+    md = np.empty(int(max(1000, n_boot)), dtype=float)
+    n = d.size
+    for i in range(m.size):
+        samp = d[rng.integers(0, n, size=n)]
+        m[i] = float(np.mean(samp))
+        md[i] = float(np.median(samp))
+    return {
+        "mean": [float(np.percentile(m, 2.5)), float(np.percentile(m, 97.5))],
+        "median": [float(np.percentile(md, 2.5)), float(np.percentile(md, 97.5))],
+    }
+
+
+def gbm_ab_significance(
+    *,
+    start: str,
+    end: str | None,
+    n_worlds: int,
+    n_assets: int,
+    vol_low: float,
+    vol_high: float,
+    seed: int | None,
+    strategy_a: dict[str, Any],
+    strategy_b: dict[str, Any],
+    n_perm: int = 5000,
+    n_boot: int = 3000,
+) -> dict[str, Any]:
+    end = str(end or _today_last_business_day_yyyymmdd())
+    n_worlds = int(max(50, n_worlds))
+    rng = np.random.default_rng(seed)
+    a_vals: list[float] = []
+    b_vals: list[float] = []
+    exp_a: list[float] = []
+    exp_b: list[float] = []
+    for _ in range(n_worlds):
+        world_seed = int(rng.integers(0, 2**31 - 1))
+        sim = simulate_gbm_prices(
+            start=start,
+            end=end,
+            cfg=SimConfig(n_assets=int(n_assets), vol_low=float(vol_low), vol_high=float(vol_high), seed=world_seed),
+        )
+        if not bool(sim.get("ok")):
+            continue
+        dates = pd.to_datetime(((sim.get("series") or {}).get("dates") or []))
+        close_map = ((sim.get("series") or {}).get("close") or {})
+        close = pd.DataFrame({k: pd.Series(v, dtype=float) for k, v in close_map.items()}, index=dates, dtype=float)
+        aa, exa = _run_rotation_variant_on_sim(close, strategy_a or {})
+        bb, exb = _run_rotation_variant_on_sim(close, strategy_b or {})
+        if np.isfinite(aa) and np.isfinite(bb):
+            a_vals.append(float(aa))
+            b_vals.append(float(bb))
+            exp_a.append(float(exa))
+            exp_b.append(float(exb))
+    a_arr = np.asarray(a_vals, dtype=float)
+    b_arr = np.asarray(b_vals, dtype=float)
+    diff = a_arr - b_arr
+    p = _paired_permutation_pvalue(diff, n_perm=n_perm, seed=seed)
+    ci = _bootstrap_ci(diff, n_boot=n_boot, seed=(None if seed is None else int(seed) + 7))
+    return {
+        "ok": True,
+        "meta": {
+            "start": start,
+            "end": end,
+            "n_worlds": int(n_worlds),
+            "n_assets": int(n_assets),
+            "vol_low": float(vol_low),
+            "vol_high": float(vol_high),
+            "seed": seed,
+            "n_samples": int(diff.size),
+        },
+        "stats": {
+            "mean_diff": float(np.mean(diff)) if diff.size else float("nan"),
+            "median_diff": float(np.median(diff)) if diff.size else float("nan"),
+            "win_rate": float(np.mean(diff > 0.0)) if diff.size else float("nan"),
+            "pvalue_permutation_one_sided": float(p),
+            "bootstrap_ci_95": ci,
+            "avg_exposure_a": float(np.mean(np.asarray(exp_a, dtype=float))) if exp_a else float("nan"),
+            "avg_exposure_b": float(np.mean(np.asarray(exp_b, dtype=float))) if exp_b else float("nan"),
+        },
+        "dist": {
+            "annualized_return_a": [float(x) for x in a_vals],
+            "annualized_return_b": [float(x) for x in b_vals],
+            "diff_a_minus_b": [float(x) for x in diff.tolist()],
+        },
+    }
+

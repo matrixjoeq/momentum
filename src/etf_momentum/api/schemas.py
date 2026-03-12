@@ -325,6 +325,54 @@ class SimGbmPhase4Request(SimGbmPhase3Request):
     position_pct: float = Field(default=0.10, ge=0.0, le=10.0)
 
 
+class SimGbmAbStrategyParams(BaseModel):
+    rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly")
+    rebalance_anchor: int | None = Field(default=None)
+    rebalance_shift: str = Field(default="prev")
+    exec_price: str = Field(default="open", description="open|close|oc2")
+    top_k: int = Field(default=1, ge=1)
+    position_mode: str = Field(default="adaptive", description="adaptive|fixed")
+    entry_backfill: bool = Field(default=False)
+    entry_match_n: int = Field(default=0, ge=0)
+    exit_match_n: int = Field(default=0, ge=0)
+    lookback_days: int = Field(default=20, ge=1)
+    skip_days: int = Field(default=0, ge=0)
+    risk_off: bool = False
+    defensive_code: str | None = None
+    momentum_floor: float = 0.0
+    score_method: str = Field(default="raw_mom")
+    score_lambda: float = Field(default=0.0)
+    score_vol_power: float = Field(default=1.0)
+    risk_free_rate: float = Field(default=0.025)
+    cost_bps: float = Field(default=0.0, ge=0.0)
+    trend_filter: bool = Field(default=False)
+    trend_exit_filter: bool = Field(default=False)
+    trend_sma_window: int = Field(default=20, ge=1)
+    trend_ma_type: str = Field(default="sma", description="sma|ema")
+    bias_filter: bool = Field(default=False)
+    bias_exit_filter: bool = Field(default=False)
+    bias_ma_window: int = Field(default=20, ge=2)
+    bias_level_window: str = Field(default="all")
+    bias_threshold_type: str = Field(default="quantile", description="quantile|fixed")
+    bias_quantile: float = Field(default=95.0, gt=0.0, lt=100.0)
+    bias_fixed_value: float = Field(default=10.0, ge=0.0)
+    bias_min_periods: int = Field(default=20, ge=2, le=2520)
+
+
+class SimGbmAbSignificanceRequest(BaseModel):
+    start: str = Field(default="19900101", description="YYYYMMDD")
+    end: str | None = Field(default=None, description="YYYYMMDD; default=last business day")
+    n_worlds: int = Field(default=3000, ge=50, le=20000)
+    n_assets: int = Field(default=4, ge=2, le=20)
+    vol_low: float = Field(default=0.05, gt=0.0, lt=2.0)
+    vol_high: float = Field(default=0.30, gt=0.0, lt=2.0)
+    seed: int | None = Field(default=None)
+    n_perm: int = Field(default=5000, ge=1000, le=20000)
+    n_boot: int = Field(default=3000, ge=1000, le=20000)
+    strategy_a: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
+    strategy_b: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
+
+
 class MacroStep2Request(BaseModel):
     """
     Step 2: CN gold (spot/fut), CNH, CN yields relations.
@@ -782,44 +830,6 @@ class RotationBacktestRequest(BaseModel):
     bias_quantile: float = Field(default=95.0, gt=0.0, lt=100.0, description="BIAS percentile threshold (0,100), e.g. 95")
     bias_fixed_value: float = Field(default=10.0, ge=0.0, description="BIAS fixed threshold in percent, e.g. 10 means 10%")
     bias_min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations for BIAS quantile threshold")
-    rsi_filter: bool = Field(default=False, description="Enable RSI filter gating (pre-trade)")
-    rsi_window: int = Field(default=20, ge=1, description="RSI window (trading days)")
-    rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)
-    rsi_oversold: float = Field(default=30.0, ge=0.0, le=100.0)
-    rsi_block_overbought: bool = Field(default=True, description="If true, exclude assets with RSI > overbought")
-    rsi_block_oversold: bool = Field(default=False, description="If true, exclude assets with RSI < oversold")
-    vol_monitor: bool = Field(default=False, description="Enable volatility-based position sizing (pre-trade)")
-    vol_window: int = Field(default=20, ge=1, description="Realized vol window (trading days)")
-    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for sizing")
-    vol_max_ann: float = Field(default=0.60, gt=0.0, description="Annualized hard stop vol; above -> no risk position")
-    chop_filter: bool = Field(default=False, description="Enable choppiness filter (ER/ADX)")
-    chop_mode: str = Field(default="er", description="Choppiness mode: er|adx")
-    chop_window: int = Field(default=20, ge=2, description="Efficiency Ratio window (trading days)")
-    chop_er_threshold: float = Field(default=0.25, gt=0.0, description="ER < threshold => choppy => exclude")
-    chop_adx_window: int = Field(default=20, ge=2, description="ADX window (trading days)")
-    chop_adx_threshold: float = Field(default=20.0, gt=0.0, description="ADX < threshold => choppy => exclude")
-    # Take-profit / stop-loss (qfq)
-    tp_sl_mode: str = Field(
-        default="none",
-        description="Take-profit/stop-loss mode: none | prev_week_low_stop (qfq low-based stop-loss).",
-    )
-    # ATR chandelier (qfq close-based)
-    atr_window: int | None = Field(
-        default=None,
-        ge=2,
-        description="ATR lookback window (trading days) computed from qfq close. None -> defaults to lookback_days.",
-    )
-    atr_mult: float = Field(default=2.0, gt=0.0, description="ATR stop multiple (e.g. 2.0).")
-    atr_step: float = Field(default=0.5, gt=0.0, description="Progressive mode step in ATR units (e.g. 0.5).")
-    atr_min_mult: float = Field(default=0.5, gt=0.0, description="Progressive mode minimum distance multiple (e.g. 0.5).")
-    # Correlation filter (hfq)
-    corr_filter: bool = Field(default=False, description="Enable correlation gate between new pick and current holding (hfq).")
-    corr_window: int | None = Field(
-        default=None,
-        ge=2,
-        description="Correlation lookback window (trading days) computed from hfq closes. None -> defaults to lookback_days.",
-    )
-    corr_threshold: float = Field(default=0.5, ge=-1.0, le=1.0, description="Block rebalance if corr > threshold.")
     group_enforce: bool = Field(
         default=False,
         description="Enable hard group constraint: at most one selected asset per group.",
@@ -836,62 +846,6 @@ class RotationBacktestRequest(BaseModel):
         default=False,
         description="If true, allow dynamic candidate pool by period over union interval.",
     )
-    # Inertia / dampening (avoid frequent rebalances)
-    inertia: bool = Field(default=False, description="Enable inertia (dampening) to avoid frequent rebalances.")
-    inertia_min_hold_periods: int = Field(default=0, ge=0, description="Minimum decision periods between holding changes (0 disables).")
-    inertia_score_gap: float = Field(
-        default=0.0,
-        ge=0.0,
-        description="Only for top_k=1: require new_score - cur_score >= gap to switch (0 disables).",
-    )
-    inertia_min_turnover: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Skip rebalance if expected turnover < threshold (0 disables).",
-    )
-    # Rolling-return based position sizing (strategy trailing return)
-    rr_sizing: bool = Field(default=False, description="Enable rolling-return based exposure sizing at rebalance.")
-    rr_years: float = Field(default=3.0, gt=0.0, description="Trailing window length in years (approx 252*years trading days).")
-    rr_thresholds: list[float] | None = Field(
-        default=None,
-        description="Optional return thresholds (decimal). Max 5. If null, backend uses defaults when rr_sizing=true.",
-    )
-    rr_weights: list[float] | None = Field(
-        default=None,
-        description="Optional exposure levels. If null, backend uses defaults when rr_sizing=true.",
-    )
-    # Mirror (rearview) composite-deviation exposure cap
-    mirror_control: bool = Field(
-        default=False,
-        description="Enable rearview-mirror risk control: composite of (log-return dev, log-vol dev, log-volume dev) with expanding-percentile mapping to exposure caps.",
-    )
-    mirror_quantiles: list[float] | None = Field(
-        default=None,
-        description="Ascending quantiles in (0,1) (or 0-100% accepted by UI) on the composite percentile to trigger exposure caps. If null, defaults to [0.90,0.95,0.99].",
-    )
-    mirror_exposures: list[float] | None = Field(
-        default=None,
-        description="Exposure caps in [0,1], length must equal mirror_quantiles. If null, defaults to [0.80,0.50,0.20].",
-    )
-    # Drawdown control (strategy NAV)
-    dd_control: bool = Field(default=False, description="Enable drawdown control (based on strategy NAV drawdown).")
-    dd_threshold: float = Field(
-        default=0.10,
-        gt=0.0,
-        lt=1.0,
-        description="Trigger when drawdown >= threshold (decimal). Default 0.10 (=10%).",
-    )
-    dd_reduce: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description="Reduce position by this fraction on trigger (0..1). Default 1.0 (=reduce 100% -> cash).",
-    )
-    dd_sleep_days: int = Field(default=20, ge=1, description="Sleep days after trigger (trading days). Default 20.")
-    # Timing (strategy NAV RSI gate; uses shadow NAV that ignores this timing gate for RSI signal)
-    timing_rsi_gate: bool = Field(default=False, description="Enable timing: sleep when strategy NAV RSI < 50, reactivate when >= 50 (signal from shadow NAV)")
-    timing_rsi_window: int = Field(default=24, ge=2, description="RSI window (trading days) for timing gate; typical 6/12/24; default=24")
     # Phase-1: per-asset parameter rules (optional; if provided, override the corresponding global params)
     asset_momentum_floor_rules: list[AssetMomentumFloorRule] | None = Field(
         default=None,
@@ -904,18 +858,6 @@ class RotationBacktestRequest(BaseModel):
     asset_bias_rules: list[AssetBiasRule] | None = Field(
         default=None,
         description="Optional per-asset BIAS filter rules (qfq close-based). Use code='*' as default rule.",
-    )
-    asset_rsi_rules: list[AssetRsiRule] | None = Field(
-        default=None,
-        description="Optional per-asset RSI filter rules (qfq close-based). Use code='*' as default rule.",
-    )
-    asset_chop_rules: list[AssetChopRule] | None = Field(
-        default=None,
-        description="Optional per-asset choppiness filter rules (qfq close-based). Use code='*' as default rule.",
-    )
-    asset_vol_monitor_rules: list[AssetVolMonitorRule] | None = Field(
-        default=None,
-        description="Optional per-asset vol-monitor sizing rules (qfq close-based). Use code='*' as default rule.",
     )
     # Per-asset risk control rules (optional; applied daily to weights as exposure scaling)
     asset_rc_rules: list[AssetRiskControlRule] | None = Field(
@@ -944,7 +886,7 @@ class RotationWeekly5OpenSimRequest(RotationBacktestRequest):
     Notes:
     - Universe is fixed to 4 ETFs (159915/511010/513100/518880). The API will ignore provided codes.
     - Execution is on open, and rebalance_shift is effectively forced to 'prev' due to open-exec semantics.
-    - All other rotation parameters (filters / sizing / timing / tp-sl / dd control / VIX-GVZ timing) are supported.
+    - All retained rotation parameters（基础参数 + 动量/趋势/乖离 + 恐慌择时）均可用。
     """
 
     # Keep backward compatibility: allow omitting codes in clients.

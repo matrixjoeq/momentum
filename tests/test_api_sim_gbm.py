@@ -68,3 +68,31 @@ def test_sim_gbm_phase4_ok(api_client):
     assert "sizing" in data
     assert "one" in data
 
+
+def test_sim_gbm_ab_significance_ok(api_client):
+    c = api_client
+    data = post_json_ok(
+        c,
+        "/api/analysis/sim/gbm/ab-significance",
+        {
+            "start": "19900101",
+            "end": "19911231",
+            "n_worlds": 200,
+            "n_assets": 4,
+            "vol_low": 0.05,
+            "vol_high": 0.30,
+            "seed": 11,
+            "n_perm": 1200,
+            "n_boot": 1200,
+            "strategy_a": {"lookback_days": 20, "top_k": 1, "trend_filter": True, "trend_sma_window": 5, "trend_ma_type": "ema"},
+            "strategy_b": {"lookback_days": 20, "top_k": 1, "trend_filter": False},
+        },
+    )
+    assert data["ok"] is True
+    assert "stats" in data
+    assert "dist" in data
+    p = float(data["stats"]["pvalue_permutation_one_sided"])
+    assert 0.0 <= p <= 1.0
+    ci = data["stats"]["bootstrap_ci_95"]["mean"]
+    assert isinstance(ci, list) and len(ci) == 2
+

@@ -26,9 +26,6 @@ class FactorParams:
     vol_lookback: int = 20
     sma_period: int = 50
     ema_period: int = 12
-    rsi_period: int = 14
-    rsi_oversold: float = 30.0
-    rsi_overbought: float = 70.0
 
 
 @dataclass(frozen=True)
@@ -56,7 +53,6 @@ class CrudeOilRotationConfig:
     
     # 风险控制
     enable_trend_filter: bool = True
-    enable_rsi_filter: bool = True
     enable_vol_filter: bool = False
     vol_threshold: Optional[float] = None
     
