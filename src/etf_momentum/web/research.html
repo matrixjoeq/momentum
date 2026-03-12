@@ -1706,6 +1706,7 @@
         <div><label>A/B 世界数</label><input id="simAbWorlds" value="3000" /></div>
         <div><label>A/B 置换次数</label><input id="simAbPerm" value="5000" /></div>
         <div><label>A/B Bootstrap次数</label><input id="simAbBoot" value="3000" /></div>
+        <div><label>A/B 并行进程数(0=自动)</label><input id="simAbJobs" value="1" /></div>
         <button id="simRunAb">A/B 显著性检验</button>
       </div>
       <div class="row">
@@ -2246,7 +2247,7 @@
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
         sim: [
           "simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simSeed", "simLb", "simNSims", "simChunk", "simCash", "simPosPct",
-          "simAbWorlds", "simAbPerm", "simAbBoot",
+          "simAbWorlds", "simAbPerm", "simAbBoot", "simAbJobs",
           "simAbA_rebalance", "simAbA_anchor", "simAbA_shift", "simAbA_exec", "simAbA_topk", "simAbA_posMode", "simAbA_backfill", "simAbA_entryN", "simAbA_exitN", "simAbA_lb", "simAbA_skip", "simAbA_score", "simAbA_scoreLambda", "simAbA_scoreVolPower", "simAbA_rf", "simAbA_defensiveCode", "simAbA_cost",
           "simAbA_riskOff", "simAbA_floorOp", "simAbA_floor", "simAbA_floorUnit",
           "simAbA_exitFloorOn", "simAbA_exitFloorOp", "simAbA_exitFloor", "simAbA_exitFloorUnit",
@@ -10675,6 +10676,7 @@
           seed: (($("simSeed").value || "").trim() === "" ? null : Math.trunc(_num("simSeed", 0))),
           n_perm: Math.trunc(_num("simAbPerm", 5000)),
           n_boot: Math.trunc(_num("simAbBoot", 3000)),
+          n_jobs: Math.max(0, Math.trunc(_num("simAbJobs", 1))),
           strategy_a: strategyA,
           strategy_b: strategyB,
         };

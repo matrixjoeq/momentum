@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
+import sys
+import multiprocessing as mp
 from dataclasses import dataclass
 from contextlib import contextmanager
 from typing import Any
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 
 import numpy as np
 import pandas as pd
@@ -615,7 +620,14 @@ def _patched_rotation_loaders(
         _rot._load_volume_amount = old_vol_amt
 
 
-def _run_rotation_variant_on_sim(close: pd.DataFrame, strategy: dict[str, Any]) -> tuple[float, float]:
+def _run_rotation_variant_on_sim(
+    close: pd.DataFrame,
+    strategy: dict[str, Any],
+    *,
+    ohlc_hfq: dict[str, pd.DataFrame] | None = None,
+    ohlc_none: dict[str, pd.DataFrame] | None = None,
+    vol_index_close: dict[str, pd.Series] | None = None,
+) -> tuple[float, float]:
     close = close.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
     if close.empty:
         return float("nan"), 0.0
@@ -668,7 +680,7 @@ def _run_rotation_variant_on_sim(close: pd.DataFrame, strategy: dict[str, Any]) 
         asset_trend_rules=s.get("asset_trend_rules"),
         asset_bias_rules=s.get("asset_bias_rules"),
         asset_vol_index_rules=s.get("asset_vol_index_rules"),
-        vol_index_close=_sim_vol_index_proxy(close),
+        vol_index_close=(vol_index_close if vol_index_close is not None else _sim_vol_index_proxy(close)),
         dynamic_universe=True,
     )
     # Backward-compatible bridge: if caller still sends a single floor toggle/threshold,
@@ -676,8 +688,10 @@ def _run_rotation_variant_on_sim(close: pd.DataFrame, strategy: dict[str, Any]) 
     if not inp.asset_momentum_floor_rules and bool(s.get("risk_off", False)):
         inp = _rot.RotationInputs(**{**inp.__dict__, "asset_momentum_floor_rules": [{"code": "*", "stage": "entry", "op": ">", "threshold": float(s.get("momentum_floor", 0.0) or 0.0), "threshold_unit": "raw"}]})
 
-    ohlc_hfq = _sim_ohlc_from_close(close)
-    ohlc_none = _sim_ohlc_from_close(close)
+    if ohlc_hfq is None:
+        ohlc_hfq = _sim_ohlc_from_close(close)
+    if ohlc_none is None:
+        ohlc_none = ohlc_hfq
     with _patched_rotation_loaders(
         close_hfq=close,
         close_qfq=close,
@@ -685,16 +699,9 @@ def _run_rotation_variant_on_sim(close: pd.DataFrame, strategy: dict[str, Any]) 
         ohlc_hfq=ohlc_hfq,
         ohlc_none=ohlc_none,
     ):
-        out = _rot.backtest_rotation(None, inp)
+        out = _rot.backtest_rotation(None, inp, lightweight=True)
     ann = _extract_annualized_return(out)
-    hs = out.get("holdings") or []
-    ex_vals = []
-    for h in hs:
-        try:
-            ex_vals.append(float((h or {}).get("exposure")))
-        except (TypeError, ValueError):
-            continue
-    exposure = float(np.mean(np.asarray(ex_vals, dtype=float))) if ex_vals else 0.0
+    exposure = float(out.get("avg_exposure")) if out.get("avg_exposure") is not None else 0.0
     return ann, exposure
 
 
@@ -733,6 +740,48 @@ def _bootstrap_ci(diff: np.ndarray, *, n_boot: int, seed: int | None) -> dict[st
     }
 
 
+def _eval_ab_world(
+    *,
+    start: str,
+    end: str,
+    n_assets: int,
+    vol_low: float,
+    vol_high: float,
+    world_seed: int,
+    strategy_a: dict[str, Any],
+    strategy_b: dict[str, Any],
+) -> tuple[float, float, float, float] | None:
+    sim = simulate_gbm_prices(
+        start=start,
+        end=end,
+        cfg=SimConfig(n_assets=int(n_assets), vol_low=float(vol_low), vol_high=float(vol_high), seed=int(world_seed)),
+    )
+    if not bool(sim.get("ok")):
+        return None
+    dates = pd.to_datetime(((sim.get("series") or {}).get("dates") or []))
+    close_map = ((sim.get("series") or {}).get("close") or {})
+    close = pd.DataFrame(close_map, index=dates, dtype=float)
+    ohlc_hfq = _sim_ohlc_from_close(close)
+    vol_idx = _sim_vol_index_proxy(close)
+    aa, exa = _run_rotation_variant_on_sim(
+        close,
+        strategy_a or {},
+        ohlc_hfq=ohlc_hfq,
+        ohlc_none=ohlc_hfq,
+        vol_index_close=vol_idx,
+    )
+    bb, exb = _run_rotation_variant_on_sim(
+        close,
+        strategy_b or {},
+        ohlc_hfq=ohlc_hfq,
+        ohlc_none=ohlc_hfq,
+        vol_index_close=vol_idx,
+    )
+    if np.isfinite(aa) and np.isfinite(bb):
+        return float(aa), float(bb), float(exa), float(exb)
+    return None
+
+
 def gbm_ab_significance(
     *,
     start: str,
@@ -746,6 +795,7 @@ def gbm_ab_significance(
     strategy_b: dict[str, Any],
     n_perm: int = 5000,
     n_boot: int = 3000,
+    n_jobs: int = 1,
 ) -> dict[str, Any]:
     end = str(end or _today_last_business_day_yyyymmdd())
     n_worlds = int(max(2, n_worlds))
@@ -754,25 +804,85 @@ def gbm_ab_significance(
     b_vals: list[float] = []
     exp_a: list[float] = []
     exp_b: list[float] = []
-    for _ in range(n_worlds):
-        world_seed = int(rng.integers(0, 2**31 - 1))
-        sim = simulate_gbm_prices(
-            start=start,
-            end=end,
-            cfg=SimConfig(n_assets=int(n_assets), vol_low=float(vol_low), vol_high=float(vol_high), seed=world_seed),
-        )
-        if not bool(sim.get("ok")):
-            continue
-        dates = pd.to_datetime(((sim.get("series") or {}).get("dates") or []))
-        close_map = ((sim.get("series") or {}).get("close") or {})
-        close = pd.DataFrame(close_map, index=dates, dtype=float)
-        aa, exa = _run_rotation_variant_on_sim(close, strategy_a or {})
-        bb, exb = _run_rotation_variant_on_sim(close, strategy_b or {})
-        if np.isfinite(aa) and np.isfinite(bb):
+    world_seeds = [int(rng.integers(0, 2**31 - 1)) for _ in range(n_worlds)]
+    jobs = int(n_jobs)
+    if jobs <= 0:
+        jobs = max(1, int(os.cpu_count() or 1))
+    jobs = max(1, min(jobs, n_worlds))
+    jobs_effective = int(jobs)
+    if jobs == 1:
+        for ws in world_seeds:
+            one = _eval_ab_world(
+                start=start,
+                end=end,
+                n_assets=int(n_assets),
+                vol_low=float(vol_low),
+                vol_high=float(vol_high),
+                world_seed=int(ws),
+                strategy_a=strategy_a,
+                strategy_b=strategy_b,
+            )
+            if one is None:
+                continue
+            aa, bb, exa, exb = one
             a_vals.append(float(aa))
             b_vals.append(float(bb))
             exp_a.append(float(exa))
             exp_b.append(float(exb))
+    else:
+        try:
+            mp_ctx = None
+            if sys.platform != "win32":
+                try:
+                    mp_ctx = mp.get_context("fork")
+                except ValueError:
+                    mp_ctx = None
+            with ProcessPoolExecutor(max_workers=jobs, mp_context=mp_ctx) as ex:
+                futs = [
+                    ex.submit(
+                        _eval_ab_world,
+                        start=start,
+                        end=end,
+                        n_assets=int(n_assets),
+                        vol_low=float(vol_low),
+                        vol_high=float(vol_high),
+                        world_seed=int(ws),
+                        strategy_a=strategy_a,
+                        strategy_b=strategy_b,
+                    )
+                    for ws in world_seeds
+                ]
+                for f in futs:
+                    one = f.result()
+                    if one is None:
+                        continue
+                    aa, bb, exa, exb = one
+                    a_vals.append(float(aa))
+                    b_vals.append(float(bb))
+                    exp_a.append(float(exa))
+                    exp_b.append(float(exb))
+        except (BrokenProcessPool, RuntimeError, OSError, FileNotFoundError):
+            # Fallback to single-process mode when process pools are unavailable
+            # (e.g. interactive runtime / restricted environment).
+            jobs_effective = 1
+            for ws in world_seeds:
+                one = _eval_ab_world(
+                    start=start,
+                    end=end,
+                    n_assets=int(n_assets),
+                    vol_low=float(vol_low),
+                    vol_high=float(vol_high),
+                    world_seed=int(ws),
+                    strategy_a=strategy_a,
+                    strategy_b=strategy_b,
+                )
+                if one is None:
+                    continue
+                aa, bb, exa, exb = one
+                a_vals.append(float(aa))
+                b_vals.append(float(bb))
+                exp_a.append(float(exa))
+                exp_b.append(float(exb))
     a_arr = np.asarray(a_vals, dtype=float)
     b_arr = np.asarray(b_vals, dtype=float)
     diff = a_arr - b_arr
@@ -788,6 +898,7 @@ def gbm_ab_significance(
             "vol_low": float(vol_low),
             "vol_high": float(vol_high),
             "seed": seed,
+            "n_jobs": int(jobs_effective),
             "n_samples": int(diff.size),
         },
         "stats": {

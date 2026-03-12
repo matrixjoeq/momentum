@@ -1031,6 +1031,7 @@ def backtest_rotation(
     *,
     return_weights_end: bool = False,
     allow_virtual_end: bool = False,
+    lightweight: bool = False,
 ) -> dict[str, Any]:
     universe = list(dict.fromkeys(inp.codes))
     if not universe:
@@ -3328,6 +3329,28 @@ def backtest_rotation(
     active_ret_rp = port_ret_net - rp_ret
     excess_nav_rp = (1.0 + active_ret_rp).cumprod()
     excess_nav_rp.iloc[0] = 1.0
+
+    if bool(lightweight):
+        ann_ret = _annualized_return(port_nav_net)
+        mdd = _max_drawdown(port_nav_net)
+        expo_mean = float(np.mean(w.sum(axis=1).to_numpy(dtype=float))) if (not w.empty) else 0.0
+        out_lite: dict[str, Any] = {
+            "metrics": {
+                "strategy": {
+                    "annualized_return": float(ann_ret),
+                    "max_drawdown": float(mdd),
+                    "cumulative_return": float(port_nav_net.iloc[-1] - 1.0) if len(port_nav_net) else float("nan"),
+                }
+            },
+            "avg_exposure": expo_mean,
+        }
+        if return_weights_end:
+            if not w.empty:
+                last_w = w.iloc[-1].astype(float)
+                out_lite["weights_end"] = {str(k): float(v) for k, v in last_w.items() if np.isfinite(float(v))}
+            else:
+                out_lite["weights_end"] = {}
+        return out_lite
 
     attribution = _compute_return_risk_contributions(
         asset_ret=ret_exec[codes],

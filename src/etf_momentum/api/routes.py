@@ -3675,19 +3675,21 @@ def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
 
 @router.post("/analysis/sim/gbm/ab-significance")
 def sim_gbm_ab_significance(payload: SimGbmAbSignificanceRequest) -> dict:
-    return gbm_ab_significance(
-        start=str(payload.start),
-        end=(str(payload.end) if payload.end else None),
-        n_worlds=int(payload.n_worlds),
-        n_assets=int(payload.n_assets),
-        vol_low=float(payload.vol_low),
-        vol_high=float(payload.vol_high),
-        seed=(None if payload.seed is None else int(payload.seed)),
-        strategy_a=payload.strategy_a.model_dump(),
-        strategy_b=payload.strategy_b.model_dump(),
-        n_perm=int(payload.n_perm),
-        n_boot=int(payload.n_boot),
-    )
+    req = {
+        "start": str(payload.start),
+        "end": (str(payload.end) if payload.end else None),
+        "n_worlds": int(payload.n_worlds),
+        "n_assets": int(payload.n_assets),
+        "vol_low": float(payload.vol_low),
+        "vol_high": float(payload.vol_high),
+        "seed": (None if payload.seed is None else int(payload.seed)),
+        "strategy_a": payload.strategy_a.model_dump(),
+        "strategy_b": payload.strategy_b.model_dump(),
+        "n_perm": int(payload.n_perm),
+        "n_boot": int(payload.n_boot),
+        "n_jobs": int(payload.n_jobs),
+    }
+    return gbm_ab_significance(**req)
 
 
 @router.get("/validation-policies", response_model=list[ValidationPolicyOut])

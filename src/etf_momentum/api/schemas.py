@@ -377,6 +377,7 @@ class SimGbmAbSignificanceRequest(BaseModel):
     seed: int | None = Field(default=None)
     n_perm: int = Field(default=5000, ge=1000, le=20000)
     n_boot: int = Field(default=3000, ge=1000, le=20000)
+    n_jobs: int = Field(default=1, ge=0, le=64, description="Parallel workers for world evaluation; 0=auto")
     strategy_a: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
     strategy_b: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
 
