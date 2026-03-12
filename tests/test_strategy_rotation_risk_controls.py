@@ -190,7 +190,7 @@ def test_score_method_return_over_vol_prefers_stable_winner(session_factory):
 def test_chop_filter_adx_excludes_low_trend_asset(session_factory):
     sf = session_factory
     with sf() as db:
-        codes = ["AAA", "BBB"]
+        codes = ["AAA", "BBB", "CCC"]
         start = dt.date(2024, 1, 1)
         dates = [start + dt.timedelta(days=i) for i in range(140)]
         # AAA: choppy but slightly up overall (so momentum can rank it well)
@@ -199,8 +199,11 @@ def test_chop_filter_adx_excludes_low_trend_asset(session_factory):
             a.append(a[-1] * (1.01 if i % 2 == 0 else 0.99))
         # BBB: steadier uptrend
         b = [100.0 + i * 0.15 for i in range(len(dates))]
+        # CCC: another steady uptrend to keep candidate pool sufficient when AAA is filtered.
+        c = [100.0 + i * 0.12 for i in range(len(dates))]
         _seed_prices(db, code="AAA", dates=dates, closes=a)
         _seed_prices(db, code="BBB", dates=dates, closes=b)
+        _seed_prices(db, code="CCC", dates=dates, closes=c)
         db.commit()
 
         out = backtest_rotation(
@@ -210,7 +213,7 @@ def test_chop_filter_adx_excludes_low_trend_asset(session_factory):
                 start=start,
                 end=dates[-1],
                 rebalance="monthly",
-                top_k=2,
+                top_k=1,
                 lookback_days=20,
                 cost_bps=0.0,
                 chop_filter=True,
