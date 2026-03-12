@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from contextlib import contextmanager
 from typing import Any
 
 import numpy as np
@@ -14,6 +15,7 @@ from .baseline import (
     _max_drawdown,
     _sharpe,
 )
+from ..strategy import rotation as _rot
 
 
 def _parse_yyyymmdd(s: str) -> dt.date:
@@ -508,21 +510,191 @@ def montecarlo_rotation_vs_ew(
 
 def _extract_annualized_return(bt: dict[str, Any]) -> float:
     m = (bt or {}).get("metrics") or {}
-    v = m.get("cagr")
+    if isinstance(m.get("strategy"), dict):
+        v = m["strategy"].get("annualized_return")
+    else:
+        v = m.get("annualized_return")
+        if v is None:
+            v = m.get("cagr")
     return float(v) if v is not None and np.isfinite(float(v)) else float("nan")
 
 
+def _sim_ohlc_from_close(close: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    c = close.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    o = c.shift(1).ffill()
+    if not o.empty:
+        o.iloc[0, :] = c.iloc[0, :]
+    d = (c / o - 1.0).abs().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    pad = (0.002 + 0.5 * d).clip(lower=0.001, upper=0.08)
+    h = np.maximum(c, o) * (1.0 + pad)
+    l = np.minimum(c, o) * (1.0 - pad)
+    return {
+        "open": o.astype(float),
+        "high": h.astype(float),
+        "low": l.astype(float),
+        "close": c.astype(float),
+    }
+
+
+def _sim_vol_index_proxy(close: pd.DataFrame) -> dict[str, pd.Series]:
+    # Proxy a smooth "fear index" from cross-sectional realized vol to support
+    # vol-index timing rules in synthetic worlds.
+    ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
+    rv = ret.rolling(20, min_periods=5).std(ddof=1) * np.sqrt(252.0) * 100.0
+    lvl = rv.mean(axis=1, skipna=True).astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    if lvl.dropna().empty:
+        lvl = pd.Series(20.0, index=close.index, dtype=float)
+    return {
+        "VIX": lvl,
+        "VXN": lvl * 1.05,
+        "GVZ": lvl * 0.85,
+        "OVX": lvl * 1.10,
+        "WAVOL": lvl,
+    }
+
+
+@contextmanager
+def _patched_rotation_loaders(
+    close_hfq: pd.DataFrame,
+    close_qfq: pd.DataFrame,
+    close_none: pd.DataFrame,
+    ohlc_hfq: dict[str, pd.DataFrame],
+    ohlc_none: dict[str, pd.DataFrame],
+):
+    old_close = _rot._load_close_prices
+    old_hl = _rot._load_high_low_prices
+    old_ohlc = _rot._load_ohlc_prices
+    old_vol_amt = _rot._load_volume_amount
+
+    def _slice_df(df: pd.DataFrame, codes: list[str], start: dt.date, end: dt.date) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame()
+        idx = pd.to_datetime(df.index)
+        s = pd.to_datetime(start)
+        e = pd.to_datetime(end)
+        out = df.copy()
+        out.index = idx
+        out.columns = [str(c) for c in out.columns]
+        out = out.loc[(out.index >= s) & (out.index <= e)]
+        out = out.reindex(columns=[str(c) for c in codes])
+        return out.sort_index()
+
+    def _slice_ohlc(src: dict[str, pd.DataFrame], codes: list[str], start: dt.date, end: dt.date) -> dict[str, pd.DataFrame]:
+        return {k: _slice_df(v, codes, start, end) for k, v in src.items()}
+
+    def _load_close(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> pd.DataFrame:
+        a = str(adjust or "none").strip().lower()
+        if a == "hfq":
+            return _slice_df(close_hfq, codes, start, end)
+        if a == "qfq":
+            return _slice_df(close_qfq, codes, start, end)
+        return _slice_df(close_none, codes, start, end)
+
+    def _load_hl(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+        src = ohlc_hfq if str(adjust or "").strip().lower() == "qfq" else ohlc_none
+        d = _slice_ohlc(src, codes, start, end)
+        return d.get("high", pd.DataFrame()), d.get("low", pd.DataFrame())
+
+    def _load_ohlc(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> dict[str, pd.DataFrame]:
+        src = ohlc_hfq if str(adjust or "").strip().lower() == "hfq" else ohlc_none
+        return _slice_ohlc(src, codes, start, end)
+
+    def _load_vol_amt(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+        return pd.DataFrame(), pd.DataFrame()
+
+    _rot._load_close_prices = _load_close
+    _rot._load_high_low_prices = _load_hl
+    _rot._load_ohlc_prices = _load_ohlc
+    _rot._load_volume_amount = _load_vol_amt
+    try:
+        yield
+    finally:
+        _rot._load_close_prices = old_close
+        _rot._load_high_low_prices = old_hl
+        _rot._load_ohlc_prices = old_ohlc
+        _rot._load_volume_amount = old_vol_amt
+
+
 def _run_rotation_variant_on_sim(close: pd.DataFrame, strategy: dict[str, Any]) -> tuple[float, float]:
-    lookback_days = int(strategy.get("lookback_days", 20) or 20)
-    top_k = int(strategy.get("top_k", 1) or 1)
-    out = backtest_rotation_basic(close, lookback_days=lookback_days, top_k=top_k)
+    close = close.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    if close.empty:
+        return float("nan"), 0.0
+    s = dict(strategy or {})
+    start_d = pd.to_datetime(close.index.min()).date()
+    end_d = pd.to_datetime(close.index.max()).date()
+    codes = [str(c) for c in close.columns]
+    bt_type = str(s.get("bias_threshold_type", "quantile")).strip().lower()
+    if bt_type == "fixed_value":
+        bt_type = "fixed"
+    inp = _rot.RotationInputs(
+        codes=codes,
+        start=start_d,
+        end=end_d,
+        rebalance=str(s.get("rebalance", "weekly")),
+        rebalance_anchor=(None if s.get("rebalance_anchor") is None else int(s.get("rebalance_anchor"))),
+        rebalance_shift=str(s.get("rebalance_shift", "prev")),
+        exec_price=str(s.get("exec_price", "open")),
+        top_k=int(s.get("top_k", 1) or 1),
+        position_mode=str(s.get("position_mode", "adaptive")),
+        entry_backfill=bool(s.get("entry_backfill", False)),
+        entry_match_n=int(s.get("entry_match_n", 0) or 0),
+        exit_match_n=int(s.get("exit_match_n", 0) or 0),
+        lookback_days=int(s.get("lookback_days", 20) or 20),
+        skip_days=int(s.get("skip_days", 0) or 0),
+        risk_off=bool(s.get("risk_off", False)),
+        defensive_code=(None if not str(s.get("defensive_code", "")).strip() else str(s.get("defensive_code")).strip()),
+        momentum_floor=float(s.get("momentum_floor", 0.0) or 0.0),
+        score_method=str(s.get("score_method", "raw_mom")),
+        score_lambda=float(s.get("score_lambda", 0.0) or 0.0),
+        score_vol_power=float(s.get("score_vol_power", 1.0) or 1.0),
+        risk_free_rate=float(s.get("risk_free_rate", 0.025) or 0.025),
+        cost_bps=float(s.get("cost_bps", 0.0) or 0.0),
+        trend_filter=bool(s.get("trend_filter", False)),
+        trend_exit_filter=bool(s.get("trend_exit_filter", False)),
+        trend_sma_window=int(s.get("trend_sma_window", 20) or 20),
+        trend_ma_type=str(s.get("trend_ma_type", "sma")),
+        bias_filter=bool(s.get("bias_filter", False)),
+        bias_exit_filter=bool(s.get("bias_exit_filter", False)),
+        bias_ma_window=int(s.get("bias_ma_window", 20) or 20),
+        bias_level_window=str(s.get("bias_level_window", "all")),
+        bias_threshold_type=bt_type,
+        bias_quantile=float(s.get("bias_quantile", 95.0) or 95.0),
+        bias_fixed_value=float(s.get("bias_fixed_value", 10.0) or 10.0),
+        bias_min_periods=int(s.get("bias_min_periods", 20) or 20),
+        group_enforce=bool(s.get("group_enforce", False)),
+        group_pick_policy=str(s.get("group_pick_policy", "strongest_score")),
+        asset_groups=s.get("asset_groups"),
+        asset_momentum_floor_rules=s.get("asset_momentum_floor_rules"),
+        asset_trend_rules=s.get("asset_trend_rules"),
+        asset_bias_rules=s.get("asset_bias_rules"),
+        asset_vol_index_rules=s.get("asset_vol_index_rules"),
+        vol_index_close=_sim_vol_index_proxy(close),
+        dynamic_universe=True,
+    )
+    # Backward-compatible bridge: if caller still sends a single floor toggle/threshold,
+    # synthesize a default entry rule.
+    if not inp.asset_momentum_floor_rules and bool(s.get("risk_off", False)):
+        inp = _rot.RotationInputs(**{**inp.__dict__, "asset_momentum_floor_rules": [{"code": "*", "stage": "entry", "op": ">", "threshold": float(s.get("momentum_floor", 0.0) or 0.0), "threshold_unit": "raw"}]})
+
+    ohlc_hfq = _sim_ohlc_from_close(close)
+    ohlc_none = _sim_ohlc_from_close(close)
+    with _patched_rotation_loaders(
+        close_hfq=close,
+        close_qfq=close,
+        close_none=close,
+        ohlc_hfq=ohlc_hfq,
+        ohlc_none=ohlc_none,
+    ):
+        out = _rot.backtest_rotation(None, inp)
     ann = _extract_annualized_return(out)
-    nav = ((out.get("series") or {}).get("nav") or [])
-    if len(nav) <= 1:
-        return ann, 0.0
-    nav_s = pd.Series([float(x) for x in nav], dtype=float)
-    ret = nav_s.pct_change().fillna(0.0).astype(float)
-    exposure = float(np.mean(np.abs(ret.to_numpy(dtype=float)) > 1e-15))
+    hs = out.get("holdings") or []
+    ex_vals = []
+    for h in hs:
+        try:
+            ex_vals.append(float((h or {}).get("exposure")))
+        except (TypeError, ValueError):
+            continue
+    exposure = float(np.mean(np.asarray(ex_vals, dtype=float))) if ex_vals else 0.0
     return ann, exposure
 
 
@@ -576,7 +748,7 @@ def gbm_ab_significance(
     n_boot: int = 3000,
 ) -> dict[str, Any]:
     end = str(end or _today_last_business_day_yyyymmdd())
-    n_worlds = int(max(50, n_worlds))
+    n_worlds = int(max(2, n_worlds))
     rng = np.random.default_rng(seed)
     a_vals: list[float] = []
     b_vals: list[float] = []
@@ -593,7 +765,7 @@ def gbm_ab_significance(
             continue
         dates = pd.to_datetime(((sim.get("series") or {}).get("dates") or []))
         close_map = ((sim.get("series") or {}).get("close") or {})
-        close = pd.DataFrame({k: pd.Series(v, dtype=float) for k, v in close_map.items()}, index=dates, dtype=float)
+        close = pd.DataFrame(close_map, index=dates, dtype=float)
         aa, exa = _run_rotation_variant_on_sim(close, strategy_a or {})
         bb, exb = _run_rotation_variant_on_sim(close, strategy_b or {})
         if np.isfinite(aa) and np.isfinite(bb):

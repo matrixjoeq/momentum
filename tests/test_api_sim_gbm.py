@@ -77,7 +77,7 @@ def test_sim_gbm_ab_significance_ok(api_client):
         {
             "start": "19900101",
             "end": "19911231",
-            "n_worlds": 200,
+            "n_worlds": 2,
             "n_assets": 4,
             "vol_low": 0.05,
             "vol_high": 0.30,

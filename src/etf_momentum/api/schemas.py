@@ -357,12 +357,20 @@ class SimGbmAbStrategyParams(BaseModel):
     bias_quantile: float = Field(default=95.0, gt=0.0, lt=100.0)
     bias_fixed_value: float = Field(default=10.0, ge=0.0)
     bias_min_periods: int = Field(default=20, ge=2, le=2520)
+    group_enforce: bool = Field(default=False)
+    group_pick_policy: str = Field(default="strongest_score")
+    asset_groups: dict[str, str] | None = Field(default=None)
+    dynamic_universe: bool = Field(default=False)
+    asset_momentum_floor_rules: list[AssetMomentumFloorRule] | None = Field(default=None)
+    asset_trend_rules: list[AssetTrendRule] | None = Field(default=None)
+    asset_bias_rules: list[AssetBiasRule] | None = Field(default=None)
+    asset_vol_index_rules: list[AssetVolIndexTimingRule] | None = Field(default=None)
 
 
 class SimGbmAbSignificanceRequest(BaseModel):
     start: str = Field(default="19900101", description="YYYYMMDD")
     end: str | None = Field(default=None, description="YYYYMMDD; default=last business day")
-    n_worlds: int = Field(default=3000, ge=50, le=20000)
+    n_worlds: int = Field(default=3000, ge=2, le=20000)
     n_assets: int = Field(default=4, ge=2, le=20)
     vol_low: float = Field(default=0.05, gt=0.0, lt=2.0)
     vol_high: float = Field(default=0.30, gt=0.0, lt=2.0)

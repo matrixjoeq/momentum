@@ -1709,13 +1709,323 @@
         <button id="simRunAb">A/B 显著性检验</button>
       </div>
       <div class="row">
-        <div style="min-width:480px;flex:1;">
-          <label>策略A参数(JSON)</label>
-          <textarea id="simAbA" style="min-height:140px;">{"rebalance":"weekly","top_k":1,"lookback_days":20,"trend_filter":true,"trend_sma_window":5,"trend_ma_type":"ema","bias_filter":false}</textarea>
+        <div style="min-width:520px;flex:1;">
+          <label>策略A参数（同轮动结构）</label>
+          <div class="tabs" id="simAbACtrlTabs" role="tablist" aria-label="A参数分组" style="margin-top:6px;">
+            <button class="tabBtn active" data-ab-group="base" role="tab" aria-selected="true">基础参数</button>
+            <button class="tabBtn" data-ab-group="entry" role="tab" aria-selected="false">入场控制</button>
+            <button class="tabBtn" data-ab-group="exit" role="tab" aria-selected="false">出场控制</button>
+            <div id="simAbA_entryNBox" class="muted" style="margin-left:auto;display:none;">
+              入场满足任意N条：
+              <input id="simAbA_entryN" value="0" disabled />
+              <div class="muted" id="simAbA_entryHint">当前启用项数 M=0，设置不可用。</div>
+            </div>
+            <div id="simAbA_exitNBox" class="muted" style="margin-left:auto;display:none;">
+              出场满足任意N条：
+              <input id="simAbA_exitN" value="0" disabled />
+              <div class="muted" id="simAbA_exitHint">当前启用项数 M=0，设置不可用。</div>
+            </div>
+          </div>
+          <div class="tabs" id="simAbATabs" role="tablist" aria-label="A参数小标签">
+            <button class="tabBtn active" data-tab="simAbATabBase" role="tab" aria-selected="true">基础参数</button>
+            <button class="tabBtn" data-tab="simAbATabFloor" role="tab" aria-selected="false">动量过滤</button>
+            <button class="tabBtn" data-tab="simAbATabTrend" role="tab" aria-selected="false">趋势过滤</button>
+            <button class="tabBtn" data-tab="simAbATabBias" role="tab" aria-selected="false">乖离率过滤</button>
+            <button class="tabBtn" data-tab="simAbATabFloorExit" role="tab" aria-selected="false">动量出场</button>
+            <button class="tabBtn" data-tab="simAbATabTrendExit" role="tab" aria-selected="false">趋势出场</button>
+            <button class="tabBtn" data-tab="simAbATabBiasExit" role="tab" aria-selected="false">乖离率出场</button>
+            <button class="tabBtn" data-tab="simAbATabVolIndex" role="tab" aria-selected="false">恐慌择时</button>
+          </div>
+          <div id="simAbATabBase" class="tabPanel active" role="tabpanel">
+            <div class="row">
+              <div><label>调仓</label><select id="simAbA_rebalance"><option value="weekly" selected>weekly</option><option value="daily">daily</option><option value="monthly">monthly</option><option value="quarterly">quarterly</option><option value="yearly">yearly</option></select></div>
+              <div><label>锚点(可空)</label><input id="simAbA_anchor" placeholder="如 3" /></div>
+              <div><label>休市处理</label><select id="simAbA_shift"><option value="prev" selected>prev</option><option value="next">next</option><option value="skip">skip</option></select></div>
+              <div><label>成交价</label><select id="simAbA_exec"><option value="open" selected>open</option><option value="close">close</option><option value="oc2">oc2</option></select></div>
+              <div><label>TopK</label><input id="simAbA_topk" value="1" /></div>
+              <div><label>仓位模式</label><select id="simAbA_posMode"><option value="adaptive" selected>adaptive</option><option value="fixed">fixed</option></select></div>
+              <div><label>补位</label><select id="simAbA_backfill"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
+              <div><label>回看</label><input id="simAbA_lb" value="20" /></div>
+              <div><label>跳过</label><input id="simAbA_skip" value="0" /></div>
+              <div><label>打分</label><select id="simAbA_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option><option value="return_over_vol">return_over_vol</option><option value="mom_minus_lambda_vol">mom_minus_lambda_vol</option><option value="mom_over_vol_power">mom_over_vol_power</option></select></div>
+              <div><label>score_lambda</label><input id="simAbA_scoreLambda" value="0" /></div>
+              <div><label>score_vol_power</label><input id="simAbA_scoreVolPower" value="1" /></div>
+              <div><label>rf(年化)</label><input id="simAbA_rf" value="0.025" /></div>
+              <div><label>防守代码(可空)</label><input id="simAbA_defensiveCode" placeholder="如 511880" /></div>
+              <div><label>成本(bps)</label><input id="simAbA_cost" value="0" /></div>
+            </div>
+          </div>
+          <div id="simAbATabFloor" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>动量入场开关</label><select id="simAbA_riskOff"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置入场动量条件；阈值单位可选 raw 或 pct（1%=0.01）。支持 <code>*</code> 默认规则，单标的规则覆盖默认。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbAFloorAddRule">添加规则</button>
+                <button id="simAbAFloorResetDefault">重置默认</button>
+                <span class="muted">每条规则可配置比较符、阈值及单位。</span>
+              </div>
+              <table id="simAbAFloorRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>阈值</th><th>单位</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbATabTrend" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>趋势入场开关</label><select id="simAbA_trendOn"><option value="true" selected>true</option><option value="false">false</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置趋势过滤规则（始终比较“自身收盘价 vs 自身均线”）；判断使用决策当日前复权(qfq)收盘价与对应均线值。支持 <code>*</code> 作为默认规则，单标的规则覆盖默认。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbATrendAddRule">添加规则</button>
+                <button id="simAbATrendResetDefault">重置默认</button>
+                <span class="muted">每条规则可设置判断条件、均线类型与均线窗口（交易日）。</span>
+              </div>
+              <table id="simAbATrendRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>均线类型</th><th>均线窗口(交易日)</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbATabBias" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>BIAS入场开关</label><select id="simAbA_biasOn"><option value="false" selected>false</option><option value="true">true</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS 过滤规则（BIAS = close/MA - 1，qfq 收盘价）。支持阈值类型：分位数或固定值；支持 <code>*</code> 默认规则。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbABiasAddRule">添加规则</button>
+                <button id="simAbABiasResetDefault">重置默认</button>
+                <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
+              </div>
+              <table id="simAbABiasRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbATabFloorExit" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>动量出场开关</label><select id="simAbA_exitFloorOn"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置出场动量条件；持仓期间“每日收盘后决策、次日执行”。阈值单位可选 raw 或 pct（1%=0.01）。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbAFloorExitAddRule">添加规则</button>
+                <button id="simAbAFloorExitResetDefault">重置默认</button>
+                <span class="muted">每条规则可配置比较符、阈值及单位。</span>
+              </div>
+              <table id="simAbAFloorExitRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>阈值</th><th>单位</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbATabTrendExit" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>趋势出场开关</label><select id="simAbA_trendExit"><option value="false" selected>false</option><option value="true">true</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置趋势出场规则（自身收盘价 vs 自身均线）；持仓期间“每日收盘后决策、次日执行”。支持 <code>*</code> 默认规则。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbATrendExitAddRule">添加规则</button>
+                <button id="simAbATrendExitResetDefault">重置默认</button>
+                <span class="muted">每条规则可设置判断条件、均线类型与均线窗口（交易日）。</span>
+              </div>
+              <table id="simAbATrendExitRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>均线类型</th><th>均线窗口(交易日)</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbATabBiasExit" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>BIAS出场开关</label><select id="simAbA_biasExit"><option value="false" selected>false</option><option value="true">true</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95），固定值输入偏离百分比（如 10 表示 10%）。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbABiasExitAddRule">添加规则</button>
+                <button id="simAbABiasExitResetDefault">重置默认</button>
+                <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
+              </div>
+              <table id="simAbABiasExitRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbATabVolIndex" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>恐慌择时开关</label><select id="simAbA_volIdxOn"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：对“当前持仓标的”按其对应的波动率指数分位数阈值分档缩放仓位（现金为剩余仓位）。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbAVolIdxAddRule">添加规则</button>
+                <button id="simAbAVolIdxResetDefault">重置默认</button>
+                <span class="muted">每条规则可为不同标的设置不同回看窗口/阈值/仓位档位。</span>
+              </div>
+              <table id="simAbAVolIdxRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>指数</th><th>回看窗口</th><th>分位数阈值(%)</th><th>仓位档位(%)</th><th>最小样本数</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
         </div>
-        <div style="min-width:480px;flex:1;">
-          <label>策略B参数(JSON)</label>
-          <textarea id="simAbB" style="min-height:140px;">{"rebalance":"weekly","top_k":1,"lookback_days":20,"trend_filter":false,"bias_filter":false}</textarea>
+        <div style="min-width:520px;flex:1;">
+          <label>策略B参数（同轮动结构）</label>
+          <div class="tabs" id="simAbBCtrlTabs" role="tablist" aria-label="B参数分组" style="margin-top:6px;">
+            <button class="tabBtn active" data-ab-group="base" role="tab" aria-selected="true">基础参数</button>
+            <button class="tabBtn" data-ab-group="entry" role="tab" aria-selected="false">入场控制</button>
+            <button class="tabBtn" data-ab-group="exit" role="tab" aria-selected="false">出场控制</button>
+            <div id="simAbB_entryNBox" class="muted" style="margin-left:auto;display:none;">
+              入场满足任意N条：
+              <input id="simAbB_entryN" value="0" disabled />
+              <div class="muted" id="simAbB_entryHint">当前启用项数 M=0，设置不可用。</div>
+            </div>
+            <div id="simAbB_exitNBox" class="muted" style="margin-left:auto;display:none;">
+              出场满足任意N条：
+              <input id="simAbB_exitN" value="0" disabled />
+              <div class="muted" id="simAbB_exitHint">当前启用项数 M=0，设置不可用。</div>
+            </div>
+          </div>
+          <div class="tabs" id="simAbBTabs" role="tablist" aria-label="B参数小标签">
+            <button class="tabBtn active" data-tab="simAbBTabBase" role="tab" aria-selected="true">基础参数</button>
+            <button class="tabBtn" data-tab="simAbBTabFloor" role="tab" aria-selected="false">动量过滤</button>
+            <button class="tabBtn" data-tab="simAbBTabTrend" role="tab" aria-selected="false">趋势过滤</button>
+            <button class="tabBtn" data-tab="simAbBTabBias" role="tab" aria-selected="false">乖离率过滤</button>
+            <button class="tabBtn" data-tab="simAbBTabFloorExit" role="tab" aria-selected="false">动量出场</button>
+            <button class="tabBtn" data-tab="simAbBTabTrendExit" role="tab" aria-selected="false">趋势出场</button>
+            <button class="tabBtn" data-tab="simAbBTabBiasExit" role="tab" aria-selected="false">乖离率出场</button>
+            <button class="tabBtn" data-tab="simAbBTabVolIndex" role="tab" aria-selected="false">恐慌择时</button>
+          </div>
+          <div id="simAbBTabBase" class="tabPanel active" role="tabpanel">
+            <div class="row">
+              <div><label>调仓</label><select id="simAbB_rebalance"><option value="weekly" selected>weekly</option><option value="daily">daily</option><option value="monthly">monthly</option><option value="quarterly">quarterly</option><option value="yearly">yearly</option></select></div>
+              <div><label>锚点(可空)</label><input id="simAbB_anchor" placeholder="如 3" /></div>
+              <div><label>休市处理</label><select id="simAbB_shift"><option value="prev" selected>prev</option><option value="next">next</option><option value="skip">skip</option></select></div>
+              <div><label>成交价</label><select id="simAbB_exec"><option value="open" selected>open</option><option value="close">close</option><option value="oc2">oc2</option></select></div>
+              <div><label>TopK</label><input id="simAbB_topk" value="1" /></div>
+              <div><label>仓位模式</label><select id="simAbB_posMode"><option value="adaptive" selected>adaptive</option><option value="fixed">fixed</option></select></div>
+              <div><label>补位</label><select id="simAbB_backfill"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
+              <div><label>回看</label><input id="simAbB_lb" value="20" /></div>
+              <div><label>跳过</label><input id="simAbB_skip" value="0" /></div>
+              <div><label>打分</label><select id="simAbB_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option><option value="return_over_vol">return_over_vol</option><option value="mom_minus_lambda_vol">mom_minus_lambda_vol</option><option value="mom_over_vol_power">mom_over_vol_power</option></select></div>
+              <div><label>score_lambda</label><input id="simAbB_scoreLambda" value="0" /></div>
+              <div><label>score_vol_power</label><input id="simAbB_scoreVolPower" value="1" /></div>
+              <div><label>rf(年化)</label><input id="simAbB_rf" value="0.025" /></div>
+              <div><label>防守代码(可空)</label><input id="simAbB_defensiveCode" placeholder="如 511880" /></div>
+              <div><label>成本(bps)</label><input id="simAbB_cost" value="0" /></div>
+            </div>
+          </div>
+          <div id="simAbBTabFloor" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>动量入场开关</label><select id="simAbB_riskOff"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置入场动量条件；阈值单位可选 raw 或 pct（1%=0.01）。支持 <code>*</code> 默认规则，单标的规则覆盖默认。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbBFloorAddRule">添加规则</button>
+                <button id="simAbBFloorResetDefault">重置默认</button>
+                <span class="muted">每条规则可配置比较符、阈值及单位。</span>
+              </div>
+              <table id="simAbBFloorRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>阈值</th><th>单位</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbBTabTrend" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>趋势入场开关</label><select id="simAbB_trendOn"><option value="false" selected>false</option><option value="true">true</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置趋势过滤规则（始终比较“自身收盘价 vs 自身均线”）；判断使用决策当日前复权(qfq)收盘价与对应均线值。支持 <code>*</code> 作为默认规则，单标的规则覆盖默认。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbBTrendAddRule">添加规则</button>
+                <button id="simAbBTrendResetDefault">重置默认</button>
+                <span class="muted">每条规则可设置判断条件、均线类型与均线窗口（交易日）。</span>
+              </div>
+              <table id="simAbBTrendRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>均线类型</th><th>均线窗口(交易日)</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbBTabBias" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>BIAS入场开关</label><select id="simAbB_biasOn"><option value="false" selected>false</option><option value="true">true</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS 过滤规则（BIAS = close/MA - 1，qfq 收盘价）。支持阈值类型：分位数或固定值；支持 <code>*</code> 默认规则。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbBBiasAddRule">添加规则</button>
+                <button id="simAbBBiasResetDefault">重置默认</button>
+                <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
+              </div>
+              <table id="simAbBBiasRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbBTabFloorExit" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>动量出场开关</label><select id="simAbB_exitFloorOn"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置出场动量条件；持仓期间“每日收盘后决策、次日执行”。阈值单位可选 raw 或 pct（1%=0.01）。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbBFloorExitAddRule">添加规则</button>
+                <button id="simAbBFloorExitResetDefault">重置默认</button>
+                <span class="muted">每条规则可配置比较符、阈值及单位。</span>
+              </div>
+              <table id="simAbBFloorExitRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>阈值</th><th>单位</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbBTabTrendExit" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>趋势出场开关</label><select id="simAbB_trendExit"><option value="false" selected>false</option><option value="true">true</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置趋势出场规则（自身收盘价 vs 自身均线）；持仓期间“每日收盘后决策、次日执行”。支持 <code>*</code> 默认规则。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbBTrendExitAddRule">添加规则</button>
+                <button id="simAbBTrendExitResetDefault">重置默认</button>
+                <span class="muted">每条规则可设置判断条件、均线类型与均线窗口（交易日）。</span>
+              </div>
+              <table id="simAbBTrendExitRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>均线类型</th><th>均线窗口(交易日)</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbBTabBiasExit" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>BIAS出场开关</label><select id="simAbB_biasExit"><option value="false" selected>false</option><option value="true">true</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95），固定值输入偏离百分比（如 10 表示 10%）。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbBBiasExitAddRule">添加规则</button>
+                <button id="simAbBBiasExitResetDefault">重置默认</button>
+                <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
+              </div>
+              <table id="simAbBBiasExitRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
+          <div id="simAbBTabVolIndex" class="tabPanel" role="tabpanel">
+            <div class="row">
+              <div><label>恐慌择时开关</label><select id="simAbB_volIdxOn"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div class="muted" style="max-width:760px;">说明：对“当前持仓标的”按其对应的波动率指数分位数阈值分档缩放仓位（现金为剩余仓位）。</div>
+            </div>
+            <div class="panel" style="margin-top:10px;">
+              <div class="row" style="gap:10px; align-items:center;">
+                <button id="simAbBVolIdxAddRule">添加规则</button>
+                <button id="simAbBVolIdxResetDefault">重置默认</button>
+                <span class="muted">每条规则可为不同标的设置不同回看窗口/阈值/仓位档位。</span>
+              </div>
+              <table id="simAbBVolIdxRulesTable" style="margin-top:10px;">
+                <tr><th>标的代码</th><th>指数</th><th>回看窗口</th><th>分位数阈值(%)</th><th>仓位档位(%)</th><th>最小样本数</th><th>操作</th></tr>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
       <div id="simMsg" class="msg panel"></div>
@@ -1934,7 +2244,22 @@
         ],
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
-        sim: ["simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simSeed", "simLb", "simNSims", "simChunk", "simCash", "simPosPct", "simAbWorlds", "simAbPerm", "simAbBoot", "simAbA", "simAbB"],
+        sim: [
+          "simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simSeed", "simLb", "simNSims", "simChunk", "simCash", "simPosPct",
+          "simAbWorlds", "simAbPerm", "simAbBoot",
+          "simAbA_rebalance", "simAbA_anchor", "simAbA_shift", "simAbA_exec", "simAbA_topk", "simAbA_posMode", "simAbA_backfill", "simAbA_entryN", "simAbA_exitN", "simAbA_lb", "simAbA_skip", "simAbA_score", "simAbA_scoreLambda", "simAbA_scoreVolPower", "simAbA_rf", "simAbA_defensiveCode", "simAbA_cost",
+          "simAbA_riskOff", "simAbA_floorOp", "simAbA_floor", "simAbA_floorUnit",
+          "simAbA_exitFloorOn", "simAbA_exitFloorOp", "simAbA_exitFloor", "simAbA_exitFloorUnit",
+          "simAbA_trendOn", "simAbA_trendOp", "simAbA_trendExit", "simAbA_trendExitOp", "simAbA_trendWin", "simAbA_trendMa",
+          "simAbA_biasOn", "simAbA_biasOp", "simAbA_biasExit", "simAbA_biasExitOp", "simAbA_biasMa", "simAbA_biasWin", "simAbA_biasType", "simAbA_biasQ", "simAbA_biasFixed", "simAbA_biasMinP",
+          "simAbA_volIdxOn", "simAbA_volIdxIndex", "simAbA_volIdxWin", "simAbA_volIdxQs", "simAbA_volIdxExps", "simAbA_volIdxMinP",
+          "simAbB_rebalance", "simAbB_anchor", "simAbB_shift", "simAbB_exec", "simAbB_topk", "simAbB_posMode", "simAbB_backfill", "simAbB_entryN", "simAbB_exitN", "simAbB_lb", "simAbB_skip", "simAbB_score", "simAbB_scoreLambda", "simAbB_scoreVolPower", "simAbB_rf", "simAbB_defensiveCode", "simAbB_cost",
+          "simAbB_riskOff", "simAbB_floorOp", "simAbB_floor", "simAbB_floorUnit",
+          "simAbB_exitFloorOn", "simAbB_exitFloorOp", "simAbB_exitFloor", "simAbB_exitFloorUnit",
+          "simAbB_trendOn", "simAbB_trendOp", "simAbB_trendExit", "simAbB_trendExitOp", "simAbB_trendWin", "simAbB_trendMa",
+          "simAbB_biasOn", "simAbB_biasOp", "simAbB_biasExit", "simAbB_biasExitOp", "simAbB_biasMa", "simAbB_biasWin", "simAbB_biasType", "simAbB_biasQ", "simAbB_biasFixed", "simAbB_biasMinP",
+          "simAbB_volIdxOn", "simAbB_volIdxIndex", "simAbB_volIdxWin", "simAbB_volIdxQs", "simAbB_volIdxExps", "simAbB_volIdxMinP",
+        ],
       };
       let _persistReady = false;
       let _persistDebounce = null;
@@ -8704,6 +9029,149 @@
         setGroup("base");
       }
       initRotationControlTabs();
+      initTabs("simAbATabs");
+      initTabs("simAbBTabs");
+      function _syncAbTabEnabled(prefix) {
+        _setTabEnabledByToggle(`${prefix}TabFloor`, `${prefix}_riskOff`);
+        _setTabEnabledByToggle(`${prefix}TabFloorExit`, `${prefix}_exitFloorOn`);
+        _setTabEnabledByToggle(`${prefix}TabTrend`, `${prefix}_trendOn`);
+        _setTabEnabledByToggle(`${prefix}TabBias`, `${prefix}_biasOn`);
+        _setTabEnabledByToggle(`${prefix}TabTrendExit`, `${prefix}_trendExit`);
+        _setTabEnabledByToggle(`${prefix}TabBiasExit`, `${prefix}_biasExit`);
+        _setTabEnabledByToggle(`${prefix}TabVolIndex`, `${prefix}_volIdxOn`);
+      }
+      function _syncAbBiasLevelWindow(prefix) {
+        const typeSel = $(`${prefix}_biasType`);
+        const winSel = $(`${prefix}_biasWin`);
+        if (!typeSel || !winSel) return;
+        const isFixed = String(typeSel.value || "").trim().toLowerCase() === "fixed";
+        if (isFixed) winSel.dataset.lockDisabled = "true";
+        else delete winSel.dataset.lockDisabled;
+      }
+      function initAbControlTabs(rootId, smallId, prefix) {
+        const root = $(rootId);
+        const small = $(smallId);
+        if (!root || !small) return;
+        const grpBtns = Array.from(root.querySelectorAll(".tabBtn[data-ab-group]"));
+        const smallBtns = Array.from(small.querySelectorAll(".tabBtn[data-tab]"));
+        const groups = {
+          base: [`${prefix}TabBase`],
+          entry: [`${prefix}TabFloor`, `${prefix}TabTrend`, `${prefix}TabBias`],
+          exit: [`${prefix}TabFloorExit`, `${prefix}TabTrendExit`, `${prefix}TabBiasExit`, `${prefix}TabVolIndex`],
+        };
+        const _entryEnabledCount = () => {
+          let m = 0;
+          if ($(`${prefix}_riskOff`) && $(`${prefix}_riskOff`).value === "true") m += 1;
+          if ($(`${prefix}_trendOn`) && $(`${prefix}_trendOn`).value === "true") m += 1;
+          if ($(`${prefix}_biasOn`) && $(`${prefix}_biasOn`).value === "true") m += 1;
+          return m;
+        };
+        const _exitEnabledCount = () => {
+          let m = 0;
+          if ($(`${prefix}_exitFloorOn`) && $(`${prefix}_exitFloorOn`).value === "true") m += 1;
+          if ($(`${prefix}_trendExit`) && $(`${prefix}_trendExit`).value === "true") m += 1;
+          if ($(`${prefix}_biasExit`) && $(`${prefix}_biasExit`).value === "true") m += 1;
+          if ($(`${prefix}_volIdxOn`) && $(`${prefix}_volIdxOn`).value === "true") m += 1;
+          return m;
+        };
+        const _syncMatchN = () => {
+          const en = _entryEnabledCount();
+          const ex = _exitEnabledCount();
+          const eIn = $(`${prefix}_entryN`);
+          const xIn = $(`${prefix}_exitN`);
+          const eHint = $(`${prefix}_entryHint`);
+          const xHint = $(`${prefix}_exitHint`);
+          if (eIn) {
+            eIn.disabled = (en <= 0);
+            if (en <= 0) eIn.value = "0";
+            const v = Number(eIn.value || "0");
+            if (Number.isFinite(v) && v > en) eIn.value = String(en);
+          }
+          if (xIn) {
+            xIn.disabled = (ex <= 0);
+            if (ex <= 0) xIn.value = "0";
+            const v = Number(xIn.value || "0");
+            if (Number.isFinite(v) && v > ex) xIn.value = String(ex);
+          }
+          if (eHint) eHint.textContent = `当前启用项数 M=${en}${en > 0 ? "，N=0 表示默认全满足（交集）" : "，设置不可用。"} `;
+          if (xHint) xHint.textContent = `当前启用项数 M=${ex}${ex > 0 ? "，N=0 表示默认全满足（交集）" : "，设置不可用。"} `;
+        };
+        const clickSmall = (tabId) => {
+          const b = smallBtns.find(x => (x.dataset && x.dataset.tab === tabId));
+          if (b) b.click();
+        };
+        const setGroup = (g) => {
+          const ids = new Set(groups[g] || []);
+          grpBtns.forEach((b) => {
+            const on = (b.dataset.abGroup === g);
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-selected", on ? "true" : "false");
+          });
+          smallBtns.forEach((b) => {
+            const show = ids.has(String((b.dataset && b.dataset.tab) || ""));
+            b.style.display = show ? "" : "none";
+          });
+          const activeSmall = smallBtns.find((b) => b.classList.contains("active") && ids.has(String((b.dataset && b.dataset.tab) || "")));
+          if (!activeSmall) {
+            const first = smallBtns.find((b) => ids.has(String((b.dataset && b.dataset.tab) || "")));
+            if (first) clickSmall(first.dataset.tab);
+          }
+          const eb = $(`${prefix}_entryNBox`);
+          const xb = $(`${prefix}_exitNBox`);
+          if (eb) eb.style.display = (g === "entry") ? "" : "none";
+          if (xb) xb.style.display = (g === "exit") ? "" : "none";
+          _syncMatchN();
+        };
+        grpBtns.forEach((b) => b.addEventListener("click", () => setGroup(String((b.dataset && b.dataset.abGroup) || "base"))));
+        [`${prefix}_riskOff`, `${prefix}_exitFloorOn`, `${prefix}_trendOn`, `${prefix}_biasOn`, `${prefix}_trendExit`, `${prefix}_biasExit`, `${prefix}_volIdxOn`].forEach((id) => {
+          const el = $(id);
+          if (el) {
+            el.addEventListener("change", () => {
+              _syncAbBiasLevelWindow(prefix);
+              _syncAbTabEnabled(prefix);
+              _syncMatchN();
+            });
+          }
+        });
+        const t = $(`${prefix}_biasType`);
+        if (t) {
+          t.addEventListener("change", () => {
+            _syncAbBiasLevelWindow(prefix);
+            _syncAbTabEnabled(prefix);
+          });
+        }
+        _syncAbBiasLevelWindow(prefix);
+        _syncAbTabEnabled(prefix);
+        setGroup("base");
+      }
+      initAbControlTabs("simAbACtrlTabs", "simAbATabs", "simAbA");
+      initAbControlTabs("simAbBCtrlTabs", "simAbBTabs", "simAbB");
+      function _initAbRuleTables(prefix) {
+        if ($(`${prefix}FloorAddRule`)) $(`${prefix}FloorAddRule`).addEventListener("click", () => _rotFloorAddRuleRow({}, { tableId: `${prefix}FloorRulesTable` }));
+        if ($(`${prefix}FloorResetDefault`)) $(`${prefix}FloorResetDefault`).addEventListener("click", () => _rotFloorResetDefaultRules(`${prefix}FloorRulesTable`));
+        if ($(`${prefix}FloorExitAddRule`)) $(`${prefix}FloorExitAddRule`).addEventListener("click", () => _rotFloorAddRuleRow({}, { tableId: `${prefix}FloorExitRulesTable` }));
+        if ($(`${prefix}FloorExitResetDefault`)) $(`${prefix}FloorExitResetDefault`).addEventListener("click", () => _rotFloorResetDefaultRules(`${prefix}FloorExitRulesTable`));
+        if ($(`${prefix}TrendAddRule`)) $(`${prefix}TrendAddRule`).addEventListener("click", () => _rotTrendAddRuleRow({}, { tableId: `${prefix}TrendRulesTable` }));
+        if ($(`${prefix}TrendResetDefault`)) $(`${prefix}TrendResetDefault`).addEventListener("click", () => _rotTrendResetDefaultRules(`${prefix}TrendRulesTable`));
+        if ($(`${prefix}TrendExitAddRule`)) $(`${prefix}TrendExitAddRule`).addEventListener("click", () => _rotTrendAddRuleRow({}, { tableId: `${prefix}TrendExitRulesTable` }));
+        if ($(`${prefix}TrendExitResetDefault`)) $(`${prefix}TrendExitResetDefault`).addEventListener("click", () => _rotTrendResetDefaultRules(`${prefix}TrendExitRulesTable`));
+        if ($(`${prefix}BiasAddRule`)) $(`${prefix}BiasAddRule`).addEventListener("click", () => _rotBiasAddRuleRow({}, { tableId: `${prefix}BiasRulesTable` }));
+        if ($(`${prefix}BiasResetDefault`)) $(`${prefix}BiasResetDefault`).addEventListener("click", () => _rotBiasResetDefaultRules(`${prefix}BiasRulesTable`));
+        if ($(`${prefix}BiasExitAddRule`)) $(`${prefix}BiasExitAddRule`).addEventListener("click", () => _rotBiasAddRuleRow({}, { tableId: `${prefix}BiasExitRulesTable` }));
+        if ($(`${prefix}BiasExitResetDefault`)) $(`${prefix}BiasExitResetDefault`).addEventListener("click", () => _rotBiasResetDefaultRules(`${prefix}BiasExitRulesTable`));
+        if ($(`${prefix}VolIdxAddRule`)) $(`${prefix}VolIdxAddRule`).addEventListener("click", () => _rotVolIdxAddRuleRow({}, { tableId: `${prefix}VolIdxRulesTable` }));
+        if ($(`${prefix}VolIdxResetDefault`)) $(`${prefix}VolIdxResetDefault`).addEventListener("click", () => _rotVolIdxResetDefaultRules(`${prefix}VolIdxRulesTable`));
+
+        try { _rotFloorResetDefaultRules(`${prefix}FloorRulesTable`); } catch { /* ignore */ }
+        try { _rotFloorResetDefaultRules(`${prefix}FloorExitRulesTable`); } catch { /* ignore */ }
+        try { _rotTrendResetDefaultRules(`${prefix}TrendRulesTable`); } catch { /* ignore */ }
+        try { _rotTrendResetDefaultRules(`${prefix}TrendExitRulesTable`); } catch { /* ignore */ }
+        try { _rotBiasResetDefaultRules(`${prefix}BiasRulesTable`); } catch { /* ignore */ }
+        try { _rotBiasResetDefaultRules(`${prefix}BiasExitRulesTable`); } catch { /* ignore */ }
+        try { _rotVolIdxResetDefaultRules(`${prefix}VolIdxRulesTable`); } catch { /* ignore */ }
+      }
+      _initAbRuleTables("simAbA");
+      _initAbRuleTables("simAbB");
 
       // ---------------- Rotation: Phase-1 per-asset rule tables ----------------
       const _parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
@@ -8712,7 +9180,7 @@
         if (!tbl) return [];
         return Array.from(tbl.querySelectorAll("tr")).slice(1);
       };
-      const _setTabEnabledByToggle = (tabId, toggleId) => {
+      function _setTabEnabledByToggle(tabId, toggleId) {
         const root = $(tabId);
         const toggle = $(toggleId);
         if (!root || !toggle) return;
@@ -8729,7 +9197,7 @@
           }
           el.disabled = false;
         });
-      };
+      }
 
       // ---- Momentum condition rules (entry/exit) ----
       function _rotFloorAddRuleRow(rule, opts) {
@@ -9237,8 +9705,9 @@
         return out.length ? out : null;
       }
 
-      function _rotVolIdxAddRuleRow(rule) {
-        const tbl = $("rotVolIdxRulesTable");
+      function _rotVolIdxAddRuleRow(rule, opts) {
+        const o = opts || {};
+        const tbl = $(String(o.tableId || "rotVolIdxRulesTable"));
         if (!tbl) return;
         const r = rule || {};
         const code = (r.code || "").toString();
@@ -9275,18 +9744,18 @@
         if (btn) btn.addEventListener("click", () => tr.remove());
       }
 
-      function _rotVolIdxClearRuleRows() {
-        const tbl = $("rotVolIdxRulesTable");
+      function _rotVolIdxClearRuleRows(tableId) {
+        const tbl = $(String(tableId || "rotVolIdxRulesTable"));
         if (!tbl) return;
         const trs = Array.from(tbl.querySelectorAll("tr"));
         for (let i = 1; i < trs.length; i++) trs[i].remove();
       }
 
-      function _rotVolIdxResetDefaultRules() {
-        _rotVolIdxClearRuleRows();
-        _rotVolIdxAddRuleRow({ code: "513100", index: "VXN", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
-        _rotVolIdxAddRuleRow({ code: "518880", index: "GVZ", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
-        _rotVolIdxAddRuleRow({ code: "160723", index: "OVX", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 });
+      function _rotVolIdxResetDefaultRules(tableId) {
+        _rotVolIdxClearRuleRows(tableId);
+        _rotVolIdxAddRuleRow({ code: "513100", index: "VXN", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 }, { tableId });
+        _rotVolIdxAddRuleRow({ code: "518880", index: "GVZ", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 }, { tableId });
+        _rotVolIdxAddRuleRow({ code: "160723", index: "OVX", level_window: "all", level_quantiles: "90,95,99", level_exposures: "100,50,25,0", min_periods: 20 }, { tableId });
       }
 
       function _rotVolIdxUpdateUiEnabled() {
@@ -9298,6 +9767,44 @@
           if (el && el.id === "rotVolIdxOn") return;
           el.disabled = !on;
         });
+      }
+      function _buildVolIdxRulesFrom(toggleId, tableId, label) {
+        const on = ($(String(toggleId || "rotVolIdxOn")) && $(String(toggleId || "rotVolIdxOn")).value === "true");
+        if (!on) return null;
+        const tbl = $(String(tableId || "rotVolIdxRulesTable"));
+        if (!tbl) return null;
+        const trs = Array.from(tbl.querySelectorAll("tr")).slice(1);
+        const out = [];
+        const parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
+        const lbl = String(label || "波动率指数择时");
+        for (const tr of trs) {
+          const code = (tr.querySelector(".rotVolIdxCode") && tr.querySelector(".rotVolIdxCode").value) ? String(tr.querySelector(".rotVolIdxCode").value).trim() : "";
+          if (!code) continue;
+          const index = (tr.querySelector(".rotVolIdxIndex") && tr.querySelector(".rotVolIdxIndex").value) ? String(tr.querySelector(".rotVolIdxIndex").value).trim().toUpperCase() : "VIX";
+          const level_window = (tr.querySelector(".rotVolIdxWindow") && tr.querySelector(".rotVolIdxWindow").value) ? String(tr.querySelector(".rotVolIdxWindow").value).trim().toLowerCase() : "all";
+          const qsRaw = (tr.querySelector(".rotVolIdxQs") && tr.querySelector(".rotVolIdxQs").value) ? String(tr.querySelector(".rotVolIdxQs").value).trim() : "";
+          const expsRaw = (tr.querySelector(".rotVolIdxExps") && tr.querySelector(".rotVolIdxExps").value) ? String(tr.querySelector(".rotVolIdxExps").value).trim() : "";
+          const minpRaw = (tr.querySelector(".rotVolIdxMinP") && tr.querySelector(".rotVolIdxMinP").value) ? String(tr.querySelector(".rotVolIdxMinP").value).trim() : "20";
+          if (!qsRaw) return { __error: `${lbl}：${code} 阈值不能为空（例如 80 或 80,90）` };
+          if (!expsRaw) return { __error: `${lbl}：${code} 仓位不能为空（例如 100,50）` };
+          let qs = parseCsvNums(qsRaw);
+          let exps = parseCsvNums(expsRaw);
+          if (qs.length === 0) return { __error: `${lbl}：${code} 阈值解析失败` };
+          if (exps.length === 0) return { __error: `${lbl}：${code} 仓位解析失败` };
+          if (qs.some(x => !Number.isFinite(x))) return { __error: `${lbl}：${code} 阈值必须是数字` };
+          if (exps.some(x => !Number.isFinite(x))) return { __error: `${lbl}：${code} 仓位必须是数字` };
+          qs = qs.map(x => (x > 1.0 ? x / 100.0 : x));
+          exps = exps.map(x => (x > 1.0 ? x / 100.0 : x));
+          for (const q of qs) if (!(q > 0 && q < 1)) return { __error: `${lbl}：${code} 分位数需在 (0,1) 或 0~100%（如 0.8 或 80）` };
+          for (let i = 0; i + 1 < qs.length; i++) if (!(qs[i] < qs[i + 1])) return { __error: `${lbl}：${code} 分位数必须严格递增` };
+          if (exps.length !== qs.length + 1) return { __error: `${lbl}：${code} 仓位档位数量必须 = 阈值数量 + 1` };
+          for (const x of exps) if (x < 0 || x > 1) return { __error: `${lbl}：${code} 仓位需在 0~100%（或 0~1）` };
+          const min_periods = Number(minpRaw);
+          if (!Number.isFinite(min_periods) || min_periods < 2) return { __error: `${lbl}：${code} 最小样本数必须>=2` };
+          out.push({ code, index, level_window, level_quantiles: qs, level_exposures: exps, min_periods: Math.floor(min_periods) });
+        }
+        if (out.length === 0) return { __error: `${lbl}已开启，但未配置任何规则（至少填写一条 code）` };
+        return out;
       }
 
       $("run").addEventListener("click", runAnalysis);
@@ -10058,12 +10565,106 @@
         if (data.mc && data.mc.ok) _renderMcCagr(data.mc);
         _setSimMsg(`阶段4 (Phase 4) 完成。${txt}`);
       }
+      function _boolSel(id, fallback) {
+        const v = String(_str(id) || "").trim().toLowerCase();
+        if (v === "true") return true;
+        if (v === "false") return false;
+        return !!fallback;
+      }
+      function _numOrNull(id) {
+        const raw = String(_str(id) || "").trim();
+        if (!raw) return null;
+        const v = Number(raw);
+        return Number.isFinite(v) ? v : null;
+      }
+      function _buildAbStrategy(prefix) {
+        const p = `${prefix}_`;
+        const defensive = String(_str(`${p}defensiveCode`) || "").trim();
+        const out = {
+          rebalance: _str(`${p}rebalance`) || "weekly",
+          rebalance_shift: _str(`${p}shift`) || "prev",
+          exec_price: _str(`${p}exec`) || "open",
+          top_k: Math.max(1, Math.trunc(_num(`${p}topk`, 1))),
+          position_mode: _str(`${p}posMode`) || "adaptive",
+          entry_backfill: _boolSel(`${p}backfill`, false),
+          entry_match_n: Math.max(0, Math.trunc(_num(`${p}entryN`, 0))),
+          exit_match_n: Math.max(0, Math.trunc(_num(`${p}exitN`, 0))),
+          lookback_days: Math.max(1, Math.trunc(_num(`${p}lb`, 20))),
+          skip_days: Math.max(0, Math.trunc(_num(`${p}skip`, 0))),
+          score_method: _str(`${p}score`) || "raw_mom",
+          score_lambda: _num(`${p}scoreLambda`, 0),
+          score_vol_power: _num(`${p}scoreVolPower`, 1),
+          risk_free_rate: _num(`${p}rf`, 0.025),
+          cost_bps: _num(`${p}cost`, 0),
+          risk_off: _boolSel(`${p}riskOff`, false),
+          momentum_floor: 0.0,
+          trend_filter: _boolSel(`${p}trendOn`, false),
+          trend_exit_filter: _boolSel(`${p}trendExit`, false),
+          trend_sma_window: 20,
+          trend_ma_type: "sma",
+          bias_filter: _boolSel(`${p}biasOn`, false),
+          bias_exit_filter: _boolSel(`${p}biasExit`, false),
+          bias_ma_window: 20,
+          bias_level_window: "all",
+          bias_threshold_type: "quantile",
+          bias_quantile: 95.0,
+          bias_fixed_value: 10.0,
+          bias_min_periods: 20,
+        };
+        const floorEntryRules = _buildFloorRules(`${p}riskOff`, `${prefix}FloorRulesTable`, "entry");
+        if (floorEntryRules && floorEntryRules.__error) return floorEntryRules;
+        const floorExitRules = _buildFloorRules(`${p}exitFloorOn`, `${prefix}FloorExitRulesTable`, "exit");
+        if (floorExitRules && floorExitRules.__error) return floorExitRules;
+        const floorRules = [...(floorEntryRules || []), ...(floorExitRules || [])];
+        out.asset_momentum_floor_rules = floorRules.length ? floorRules : null;
+        out.risk_off = !!(floorEntryRules && floorEntryRules.length);
+
+        const trendEntryRules = _buildTrendRules(`${p}trendOn`, `${prefix}TrendRulesTable`, "entry");
+        if (trendEntryRules && trendEntryRules.__error) return trendEntryRules;
+        const trendExitRules = _buildTrendRules(`${p}trendExit`, `${prefix}TrendExitRulesTable`, "exit");
+        if (trendExitRules && trendExitRules.__error) return trendExitRules;
+        const trendRules = [...(trendEntryRules || []), ...(trendExitRules || [])];
+        out.asset_trend_rules = trendRules.length ? trendRules : null;
+        out.trend_filter = !!(trendEntryRules && trendEntryRules.length);
+        out.trend_exit_filter = !!(trendExitRules && trendExitRules.length);
+        if (trendRules.length) {
+          const d = trendRules.find((x) => String(x.code || "") === "*") || trendRules[0];
+          out.trend_sma_window = Number(d.trend_sma_window || 20);
+          out.trend_ma_type = String(d.trend_ma_type || "sma");
+        }
+
+        const biasEntryRules = _buildBiasRules(`${p}biasOn`, `${prefix}BiasRulesTable`, "entry");
+        if (biasEntryRules && biasEntryRules.__error) return biasEntryRules;
+        const biasExitRules = _buildBiasRules(`${p}biasExit`, `${prefix}BiasExitRulesTable`, "exit");
+        if (biasExitRules && biasExitRules.__error) return biasExitRules;
+        const biasRules = [...(biasEntryRules || []), ...(biasExitRules || [])];
+        out.asset_bias_rules = biasRules.length ? biasRules : null;
+        out.bias_filter = !!(biasEntryRules && biasEntryRules.length);
+        out.bias_exit_filter = !!(biasExitRules && biasExitRules.length);
+        if (biasRules.length) {
+          const d = biasRules.find((x) => String(x.code || "") === "*") || biasRules[0];
+          out.bias_ma_window = Number(d.bias_ma_window || 20);
+          out.bias_level_window = String(d.level_window || "all");
+          out.bias_threshold_type = String(d.threshold_type || "quantile");
+          out.bias_quantile = Number(d.quantile != null ? d.quantile : 95);
+          out.bias_fixed_value = Number(d.fixed_value != null ? d.fixed_value : 10);
+          out.bias_min_periods = Number(d.min_periods != null ? d.min_periods : 20);
+        }
+
+        const volIdxRules = _buildVolIdxRulesFrom(`${p}volIdxOn`, `${prefix}VolIdxRulesTable`, "波动率指数择时");
+        if (volIdxRules && volIdxRules.__error) return volIdxRules;
+        out.asset_vol_index_rules = volIdxRules;
+        if (defensive) out.defensive_code = defensive;
+        const anchor = _numOrNull(`${p}anchor`);
+        if (anchor != null) out.rebalance_anchor = Math.trunc(anchor);
+        return out;
+      }
       async function simRunAb() {
         _setSimMsg("A/B 显著性检验运行中（可能较慢）...");
-        let strategyA = {};
-        let strategyB = {};
-        try { strategyA = JSON.parse(($("simAbA").value || "{}").trim() || "{}"); } catch { return _setSimMsg("策略A JSON 格式错误"); }
-        try { strategyB = JSON.parse(($("simAbB").value || "{}").trim() || "{}"); } catch { return _setSimMsg("策略B JSON 格式错误"); }
+        const strategyA = _buildAbStrategy("simAbA");
+        const strategyB = _buildAbStrategy("simAbB");
+        if (strategyA && strategyA.__error) return _setSimMsg(strategyA.__error);
+        if (strategyB && strategyB.__error) return _setSimMsg(strategyB.__error);
         const p = {
           start: _str("simStart") || "19900101",
           end: _str("simEnd") || null,

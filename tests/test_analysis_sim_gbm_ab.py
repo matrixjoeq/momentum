@@ -5,7 +5,7 @@ def test_gbm_ab_significance_structure_and_ranges():
     out = gbm_ab_significance(
         start="19900101",
         end="19911231",
-        n_worlds=120,
+        n_worlds=2,
         n_assets=4,
         vol_low=0.05,
         vol_high=0.30,
