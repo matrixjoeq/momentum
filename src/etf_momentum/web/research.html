@@ -117,6 +117,19 @@
       <button id="exportPdf">导出PDF报告</button>
       <div id="status" class="muted"></div>
     </div>
+    <div class="panel row no-print" style="gap:8px;">
+      <span class="muted" style="align-self:center;">恢复默认：</span>
+      <button id="resetGlobalDefaults">全局</button>
+      <button id="resetDistDefaults">分布分析</button>
+      <button id="resetEwCalDefaults">日历效应EW</button>
+      <button id="resetRotationDefaults">轮动参数</button>
+      <button id="resetRotCalDefaults">日历效应轮动</button>
+      <button id="resetTrendDefaults">趋势研究</button>
+      <button id="resetMcEwDefaults">MC等权</button>
+      <button id="resetMcRotDefaults">MC轮动</button>
+      <button id="resetMiniRotDefaults">小程序同款</button>
+      <button id="resetSimDefaults">GBM模拟</button>
+    </div>
 
     <div class="panel no-print">
       <div class="row">
@@ -545,20 +558,21 @@
       <div class="row">
         <div>
           <label>模拟次数</label>
-          <input id="mcN" value="10000" />
+          <input id="mcEwN" value="10000" />
         </div>
         <div>
           <label>区块长度(交易日)</label>
-          <input id="mcBlock" value="5" />
+          <input id="mcEwBlock" value="5" />
         </div>
         <div>
           <label>滚动窗口(交易日，可空)</label>
-          <input id="mcWindow" placeholder="如 2520 表示近10年" />
+          <input id="mcEwWindow" placeholder="如 2520 表示近10年" />
         </div>
         <div>
           <label>随机种子(可空)</label>
-          <input id="mcSeed" placeholder="如 42" />
+          <input id="mcEwSeed" placeholder="如 42" />
         </div>
+        <button id="mcEwResetDefaults">恢复默认（等权MC）</button>
         <button id="runMcEw">运行蒙特卡洛（等权）</button>
       </div>
       <table id="mcEwTable"></table>
@@ -1538,7 +1552,23 @@
     <div class="panel">
         <h3>蒙特卡洛模拟（轮动策略）</h3>
         <div class="row">
-          <div class="muted">使用与等权相同的模拟次数/区块长度/种子配置。</div>
+          <div>
+            <label>模拟次数</label>
+            <input id="mcRotN" value="2000" />
+          </div>
+          <div>
+            <label>区块长度(交易日)</label>
+            <input id="mcRotBlock" value="5" />
+          </div>
+          <div>
+            <label>滚动窗口(交易日，可空)</label>
+            <input id="mcRotWindow" placeholder="如 2520 表示近10年" />
+          </div>
+          <div>
+            <label>随机种子(可空)</label>
+            <input id="mcRotSeed" placeholder="如 42" />
+          </div>
+          <button id="mcRotResetDefaults">恢复默认（轮动MC）</button>
           <button id="runMcRot">运行蒙特卡洛（轮动）</button>
         </div>
         <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:8px">
@@ -1841,6 +1871,357 @@
 
       let pool = [];
       const selected = new Set();
+      const SETTINGS_NS = "research.settings.v1";
+      const SETTINGS_KEYS = {
+        selectedCodes: `${SETTINGS_NS}.selected_codes`,
+        global: `${SETTINGS_NS}.global`,
+        dist: `${SETTINGS_NS}.dist`,
+        ewCal: `${SETTINGS_NS}.ew_calendar`,
+        rotation: `${SETTINGS_NS}.rotation`,
+        rotCal: `${SETTINGS_NS}.rotation_calendar`,
+        trend: `${SETTINGS_NS}.trend`,
+        mcEw: `${SETTINGS_NS}.mc_ew`,
+        mcRot: `${SETTINGS_NS}.mc_rot`,
+        miniRot: `${SETTINGS_NS}.mini_rotation`,
+        sim: `${SETTINGS_NS}.sim_gbm`,
+      };
+      const SETTINGS_FIELD_IDS = {
+        global: ["start", "end", "rebalance", "baselineMode", "baselineRpWin", "benchmark", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse"],
+        dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric"],
+        ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
+        rotation: [
+          "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotEntryBackfill",
+          "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotEntryMatchN", "rotExitMatchN",
+          "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
+          "rotRiskOff", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn", "rotRsiOn", "rotVolOn", "rotChopOn",
+          "rotCorrOn", "rotCorrWindow", "rotCorrThr", "rotInertiaOn", "rotInertiaMinHold", "rotInertiaScoreGap", "rotInertiaMinTurnover",
+          "rotRROn", "rotRRYears", "rotRRThr", "rotRRWts", "rotDDOn", "rotDDThr", "rotDDReduce", "rotDDSleep", "rotTimingOn", "rotTimingRsiWin",
+          "rotTpSlMode", "rotAtrWindow", "rotAtrMult", "rotAtrStep", "rotAtrMinMult",
+          "rotMirrorOn", "rotMirrorQs", "rotMirrorCaps",
+          "rotVolIdxOn", "rotPlanAsof",
+        ],
+        rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
+        trend: [
+          "trendMode", "trendStrategy", "trendCost", "trendTopK", "trendSizing", "trendGroupEnforce", "trendGroupPolicy", "trendAssetGroups", "trendSingleCode",
+          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendDonEntry", "trendDonExit", "trendMomLb",
+          "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
+          "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
+        ],
+        mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
+        mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
+        sim: ["simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simSeed", "simLb", "simNSims", "simChunk", "simCash", "simPosPct"],
+      };
+      let _persistReady = false;
+      let _persistDebounce = null;
+      let _savedSelectedCodes = null;
+      let _savedSelectedCodesReady = false;
+      let _initialDefaults = null;
+
+      function _settingsLoad(key) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) return null;
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+      function _settingsSave(key, data) {
+        try {
+          localStorage.setItem(key, JSON.stringify(data));
+        } catch {
+          // ignore storage failures (private mode/quota)
+        }
+      }
+      function _readControlValue(id) {
+        const el = $(id);
+        if (!el) return undefined;
+        if (el instanceof HTMLInputElement && el.type === "checkbox") return !!el.checked;
+        return String(el.value == null ? "" : el.value);
+      }
+      function _applyControlValue(id, value) {
+        const el = $(id);
+        if (!el || value == null) return;
+        if (el instanceof HTMLInputElement && el.type === "checkbox") {
+          el.checked = !!value;
+          return;
+        }
+        el.value = String(value);
+      }
+      function _readFields(ids) {
+        const out = {};
+        for (const id of ids) {
+          const v = _readControlValue(id);
+          if (v !== undefined) out[id] = v;
+        }
+        return out;
+      }
+      function _applyFields(ids, data) {
+        if (!data || typeof data !== "object") return;
+        for (const id of ids) _applyControlValue(id, data[id]);
+      }
+      function _setCheckedValues(selector, values) {
+        const want = new Set((Array.isArray(values) ? values : []).map((x) => String(x)));
+        let seen = 0;
+        Array.from(document.querySelectorAll(selector)).forEach((el) => {
+          if (!(el instanceof HTMLInputElement)) return;
+          el.checked = want.has(String(el.value));
+          seen += 1;
+        });
+        if (want.size && seen === 0) {
+          // dynamic inputs not mounted yet
+        }
+      }
+      function _tableRows(tableId) {
+        const tbl = $(tableId);
+        if (!tbl) return [];
+        return Array.from(tbl.querySelectorAll("tr")).slice(1);
+      }
+      function _tableInputValue(tr, selector, fallback = "") {
+        const el = tr.querySelector(selector);
+        return el ? String(el.value == null ? fallback : el.value) : fallback;
+      }
+      function _serializeRotationRuleTables() {
+        const floorEntry = _tableRows("rotFloorRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotFloorCode"),
+          op: _tableInputValue(tr, ".rotFloorOp", ">"),
+          threshold: _tableInputValue(tr, ".rotFloorVal", "0"),
+          threshold_unit: _tableInputValue(tr, ".rotFloorUnit", "raw"),
+        }));
+        const floorExit = _tableRows("rotFloorExitRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotFloorCode"),
+          op: _tableInputValue(tr, ".rotFloorOp", ">"),
+          threshold: _tableInputValue(tr, ".rotFloorVal", "0"),
+          threshold_unit: _tableInputValue(tr, ".rotFloorUnit", "raw"),
+        }));
+        const trendEntry = _tableRows("rotTrendRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotTrendCode"),
+          op: _tableInputValue(tr, ".rotTrendOp", ">"),
+          trend_ma_type: _tableInputValue(tr, ".rotTrendMaType", "sma"),
+          trend_sma_window: _tableInputValue(tr, ".rotTrendWin", "20"),
+        }));
+        const trendExit = _tableRows("rotTrendExitRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotTrendCode"),
+          op: _tableInputValue(tr, ".rotTrendOp", ">"),
+          trend_ma_type: _tableInputValue(tr, ".rotTrendMaType", "sma"),
+          trend_sma_window: _tableInputValue(tr, ".rotTrendWin", "20"),
+        }));
+        const biasEntry = _tableRows("rotBiasRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotBiasCode"),
+          op: _tableInputValue(tr, ".rotBiasOp", "<="),
+          bias_ma_window: _tableInputValue(tr, ".rotBiasMaWin", "20"),
+          level_window: _tableInputValue(tr, ".rotBiasWin", "all"),
+          threshold_type: _tableInputValue(tr, ".rotBiasThrType", "quantile"),
+          threshold_value: _tableInputValue(tr, ".rotBiasThrVal", "95"),
+          min_periods: _tableInputValue(tr, ".rotBiasMinP", "20"),
+        }));
+        const biasExit = _tableRows("rotBiasExitRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotBiasCode"),
+          op: _tableInputValue(tr, ".rotBiasOp", "<="),
+          bias_ma_window: _tableInputValue(tr, ".rotBiasMaWin", "20"),
+          level_window: _tableInputValue(tr, ".rotBiasWin", "all"),
+          threshold_type: _tableInputValue(tr, ".rotBiasThrType", "quantile"),
+          threshold_value: _tableInputValue(tr, ".rotBiasThrVal", "95"),
+          min_periods: _tableInputValue(tr, ".rotBiasMinP", "20"),
+        }));
+        const rsi = _tableRows("rotRsiRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotRsiCode"),
+          rsi_window: _tableInputValue(tr, ".rotRsiWin", "20"),
+          rsi_overbought: _tableInputValue(tr, ".rotRsiOb", "70"),
+          rsi_oversold: _tableInputValue(tr, ".rotRsiOs", "30"),
+          rsi_block_overbought: _tableInputValue(tr, ".rotRsiBlkOb", "true"),
+          rsi_block_oversold: _tableInputValue(tr, ".rotRsiBlkOs", "false"),
+        }));
+        const vol = _tableRows("rotVolRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotVolCode"),
+          vol_window: _tableInputValue(tr, ".rotVolWin", "20"),
+          vol_target_ann: _tableInputValue(tr, ".rotVolTarget", "0.20"),
+          vol_max_ann: _tableInputValue(tr, ".rotVolMax", "0.60"),
+        }));
+        const chop = _tableRows("rotChopRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotChopCode"),
+          chop_mode: _tableInputValue(tr, ".rotChopMode", "er"),
+          chop_window: _tableInputValue(tr, ".rotChopWin", "20"),
+          chop_er_threshold: _tableInputValue(tr, ".rotChopThr", "0.25"),
+          chop_adx_window: _tableInputValue(tr, ".rotChopAdxWin", "20"),
+          chop_adx_threshold: _tableInputValue(tr, ".rotChopAdxThr", "20"),
+        }));
+        const volIdx = _tableRows("rotVolIdxRulesTable").map((tr) => ({
+          code: _tableInputValue(tr, ".rotVolIdxCode"),
+          index: _tableInputValue(tr, ".rotVolIdxIndex", "VIX"),
+          level_window: _tableInputValue(tr, ".rotVolIdxWindow", "all"),
+          level_quantiles: _tableInputValue(tr, ".rotVolIdxQs", "90,95,99"),
+          level_exposures: _tableInputValue(tr, ".rotVolIdxExps", "100,50,25,0"),
+          min_periods: _tableInputValue(tr, ".rotVolIdxMinP", "20"),
+        }));
+        return { floorEntry, floorExit, trendEntry, trendExit, biasEntry, biasExit, rsi, vol, chop, volIdx };
+      }
+      function _restoreRotationRuleTables(data) {
+        if (!data || typeof data !== "object") return;
+        const restore = (rows, clearFn, addFn, mapFn = (x) => x) => {
+          if (!Array.isArray(rows) || rows.length === 0) return;
+          clearFn();
+          for (const row of rows) addFn(mapFn(row));
+        };
+        restore(data.floorEntry, () => _rotFloorClearRuleRows("rotFloorRulesTable"), (r) => _rotFloorAddRuleRow(r, { tableId: "rotFloorRulesTable" }));
+        restore(data.floorExit, () => _rotFloorClearRuleRows("rotFloorExitRulesTable"), (r) => _rotFloorAddRuleRow(r, { tableId: "rotFloorExitRulesTable" }));
+        restore(data.trendEntry, () => _rotTrendClearRuleRows("rotTrendRulesTable"), (r) => _rotTrendAddRuleRow(r, { tableId: "rotTrendRulesTable" }));
+        restore(data.trendExit, () => _rotTrendClearRuleRows("rotTrendExitRulesTable"), (r) => _rotTrendAddRuleRow(r, { tableId: "rotTrendExitRulesTable" }));
+        restore(data.biasEntry, () => _rotBiasClearRuleRows("rotBiasRulesTable"), (r) => _rotBiasAddRuleRow({
+          code: r.code, op: r.op, bias_ma_window: r.bias_ma_window, level_window: r.level_window,
+          threshold_type: r.threshold_type, quantile: r.threshold_type === "quantile" ? r.threshold_value : 95,
+          fixed_value: r.threshold_type === "fixed" ? r.threshold_value : 10, min_periods: r.min_periods,
+        }, { tableId: "rotBiasRulesTable" }));
+        restore(data.biasExit, () => _rotBiasClearRuleRows("rotBiasExitRulesTable"), (r) => _rotBiasAddRuleRow({
+          code: r.code, op: r.op, bias_ma_window: r.bias_ma_window, level_window: r.level_window,
+          threshold_type: r.threshold_type, quantile: r.threshold_type === "quantile" ? r.threshold_value : 95,
+          fixed_value: r.threshold_type === "fixed" ? r.threshold_value : 10, min_periods: r.min_periods,
+        }, { tableId: "rotBiasExitRulesTable" }));
+        restore(data.rsi, _rotRsiClearRuleRows, (r) => _rotRsiAddRuleRow({
+          ...r,
+          rsi_block_overbought: String(r.rsi_block_overbought) === "true",
+          rsi_block_oversold: String(r.rsi_block_oversold) === "true",
+        }));
+        restore(data.vol, _rotVolClearRuleRows, (r) => _rotVolAddRuleRow(r));
+        restore(data.chop, _rotChopClearRuleRows, (r) => _rotChopAddRuleRow(r));
+        restore(data.volIdx, _rotVolIdxClearRuleRows, (r) => _rotVolIdxAddRuleRow(r));
+      }
+      function _restoreCalendarSelections(saved, prefix) {
+        if (!saved || typeof saved !== "object") return;
+        const anchorSel = `input.${prefix}CalAnchor`;
+        if (Array.isArray(saved.anchors)) _setCheckedValues(anchorSel, saved.anchors);
+        const csvId = `${prefix}CalAnchorCsv`;
+        if (saved.anchor_csv != null && $(csvId)) $(csvId).value = String(saved.anchor_csv);
+        if (Array.isArray(saved.exec_prices)) _setCheckedValues(`input.${prefix}CalPx`, saved.exec_prices);
+      }
+      function _saveSelectedCodes() {
+        _settingsSave(SETTINGS_KEYS.selectedCodes, { codes: Array.from(selected) });
+      }
+      function _saveResearchSettingsNow() {
+        _settingsSave(SETTINGS_KEYS.global, _readFields(SETTINGS_FIELD_IDS.global));
+        _settingsSave(SETTINGS_KEYS.dist, _readFields(SETTINGS_FIELD_IDS.dist));
+        const ewCal = _readFields(SETTINGS_FIELD_IDS.ewCal);
+        ewCal.anchors = _checkedValues("input.ewCalAnchor");
+        ewCal.anchor_csv = $("ewCalAnchorCsv") ? $("ewCalAnchorCsv").value : "";
+        ewCal.exec_prices = _checkedValues("input.ewCalPx");
+        _settingsSave(SETTINGS_KEYS.ewCal, ewCal);
+        const rotation = _readFields(SETTINGS_FIELD_IDS.rotation);
+        rotation.rules = _serializeRotationRuleTables();
+        _settingsSave(SETTINGS_KEYS.rotation, rotation);
+        const rotCal = _readFields(SETTINGS_FIELD_IDS.rotCal);
+        rotCal.anchors = _checkedValues("input.rotCalAnchor");
+        rotCal.anchor_csv = $("rotCalAnchorCsv") ? $("rotCalAnchorCsv").value : "";
+        rotCal.exec_prices = _checkedValues("input.rotCalPx");
+        _settingsSave(SETTINGS_KEYS.rotCal, rotCal);
+        _settingsSave(SETTINGS_KEYS.trend, _readFields(SETTINGS_FIELD_IDS.trend));
+        _settingsSave(SETTINGS_KEYS.mcEw, _readFields(SETTINGS_FIELD_IDS.mcEw));
+        _settingsSave(SETTINGS_KEYS.mcRot, _readFields(SETTINGS_FIELD_IDS.mcRot));
+        _settingsSave(SETTINGS_KEYS.sim, _readFields(SETTINGS_FIELD_IDS.sim));
+        _settingsSave(SETTINGS_KEYS.miniRot, { anchor: mpRotState.anchor, rangeKey: mpRotState.rangeKey });
+        _saveSelectedCodes();
+      }
+      function _saveResearchSettingsDebounced() {
+        if (!_persistReady) return;
+        if (_persistDebounce) clearTimeout(_persistDebounce);
+        _persistDebounce = setTimeout(() => {
+          _saveResearchSettingsNow();
+        }, 180);
+      }
+      function _setAllChecked(selector, checked) {
+        Array.from(document.querySelectorAll(selector)).forEach((el) => {
+          if (el instanceof HTMLInputElement) el.checked = !!checked;
+        });
+      }
+      function _resetModuleDefaults(moduleKey) {
+        if (!_initialDefaults || !_initialDefaults[moduleKey]) return;
+        const fields = SETTINGS_FIELD_IDS[moduleKey];
+        if (Array.isArray(fields)) _applyFields(fields, _initialDefaults[moduleKey]);
+      }
+      function _resetCalendarDefaults(prefix, rebalanceValue) {
+        renderCalendarAnchorBox(prefix, rebalanceValue);
+        _setAllChecked(`input.${prefix}CalAnchor`, true);
+        _setAllChecked(`input.${prefix}CalPx`, true);
+      }
+      function _afterDefaultsApply() {
+        try { syncRotRebalanceAnchorUI(); } catch { /* ignore */ }
+        try { updateTrendStrategyParamsUi(); } catch { /* ignore */ }
+        try { updateAtrUi(); } catch { /* ignore */ }
+        try { _rotVolIdxUpdateUiEnabled(); } catch { /* ignore */ }
+        try {
+          _setTabEnabledByToggle("rotTabFloor", "rotRiskOff");
+          _setTabEnabledByToggle("rotTabFloorExit", "rotExitFloorOn");
+          _setTabEnabledByToggle("rotTabTrend", "rotTrendOn");
+          _setTabEnabledByToggle("rotTabTrendExit", "rotExitTrendOn");
+          _setTabEnabledByToggle("rotTabBias", "rotBiasOn");
+          _setTabEnabledByToggle("rotTabBiasExit", "rotExitBiasOn");
+          _setTabEnabledByToggle("rotTabRsi", "rotRsiOn");
+          _setTabEnabledByToggle("rotTabVol", "rotVolOn");
+          _setTabEnabledByToggle("rotTabChop", "rotChopOn");
+        } catch { /* ignore */ }
+      }
+      function _wireResetDefaultButtons() {
+        const bind = (id, fn) => { if ($(id)) $(id).addEventListener("click", fn); };
+        bind("resetGlobalDefaults", () => {
+          _resetModuleDefaults("global");
+          _saveResearchSettingsNow();
+        });
+        bind("resetDistDefaults", () => {
+          _resetModuleDefaults("dist");
+          _saveResearchSettingsNow();
+        });
+        bind("resetEwCalDefaults", () => {
+          _resetModuleDefaults("ewCal");
+          _resetCalendarDefaults("ew", ($("rebalance") && $("rebalance").value) ? $("rebalance").value : "weekly");
+          _saveResearchSettingsNow();
+        });
+        bind("resetRotationDefaults", () => {
+          _resetModuleDefaults("rotation");
+          try { _rotFloorResetDefaultRules("rotFloorRulesTable"); } catch { /* ignore */ }
+          try { _rotFloorResetDefaultRules("rotFloorExitRulesTable"); } catch { /* ignore */ }
+          try { _rotTrendResetDefaultRules("rotTrendRulesTable"); } catch { /* ignore */ }
+          try { _rotTrendResetDefaultRules("rotTrendExitRulesTable"); } catch { /* ignore */ }
+          try { _rotBiasResetDefaultRules("rotBiasRulesTable"); } catch { /* ignore */ }
+          try { _rotBiasResetDefaultRules("rotBiasExitRulesTable"); } catch { /* ignore */ }
+          try { _rotRsiResetDefaultRules(); } catch { /* ignore */ }
+          try { _rotVolResetDefaultRules(); } catch { /* ignore */ }
+          try { _rotChopResetDefaultRules(); } catch { /* ignore */ }
+          try { _rotVolIdxResetDefaultRules(); } catch { /* ignore */ }
+          _afterDefaultsApply();
+          _saveResearchSettingsNow();
+        });
+        bind("resetRotCalDefaults", () => {
+          _resetModuleDefaults("rotCal");
+          _resetCalendarDefaults("rot", ($("rotRebalance") && $("rotRebalance").value) ? $("rotRebalance").value : "weekly");
+          _saveResearchSettingsNow();
+        });
+        bind("resetTrendDefaults", () => {
+          _resetModuleDefaults("trend");
+          try { updateTrendStrategyParamsUi(); } catch { /* ignore */ }
+          _saveResearchSettingsNow();
+        });
+        const resetMcEw = () => {
+          _resetModuleDefaults("mcEw");
+          _saveResearchSettingsNow();
+        };
+        const resetMcRot = () => {
+          _resetModuleDefaults("mcRot");
+          _saveResearchSettingsNow();
+        };
+        bind("resetMcEwDefaults", resetMcEw);
+        bind("mcEwResetDefaults", resetMcEw);
+        bind("resetMcRotDefaults", resetMcRot);
+        bind("mcRotResetDefaults", resetMcRot);
+        bind("resetMiniRotDefaults", () => {
+          const d = (_initialDefaults && _initialDefaults.miniRot) ? _initialDefaults.miniRot : { anchor: "mix", rangeKey: "all" };
+          _mpRotSetAnchor(String(d.anchor || "mix"));
+          _mpRotSetRange(String(d.rangeKey || "all"));
+          _saveResearchSettingsNow();
+        });
+        bind("resetSimDefaults", () => {
+          _resetModuleDefaults("sim");
+          _saveResearchSettingsNow();
+        });
+      }
       const ADJUST_USED = "hfq"; // baseline research currently uses hfq only
       const ANN_FACTOR = 252;
       function codeName(code) {
@@ -3371,12 +3752,14 @@
             renderTrendSingleCodeSelect();
             maybeAdjustBacktestRange();
             renderRangeHint();
+            _saveSelectedCodes();
           });
         });
       }
 
       function renderBenchmarkSelect() {
         const sel = $("benchmark");
+        const prev = String((sel && sel.value) || "");
         const codes = Array.from(selected);
         sel.innerHTML = "";
         for (const c of codes) {
@@ -3385,7 +3768,8 @@
           opt.textContent = codeLabel(c);
           sel.appendChild(opt);
         }
-        if (codes.includes("510300")) sel.value = "510300";
+        if (prev && codes.includes(prev)) sel.value = prev;
+        else if (codes.includes("510300")) sel.value = "510300";
       }
 
       function renderTrendSingleCodeSelect() {
@@ -3491,8 +3875,17 @@
           throw new Error(`候选池接口返回异常（非数组）：${JSON.stringify(data).slice(0, 200)}`);
         }
         pool = data;
-        // default select all
-        for (const it of pool) selected.add(it.code);
+        selected.clear();
+        if (_savedSelectedCodesReady && Array.isArray(_savedSelectedCodes)) {
+          const valid = new Set(pool.map((x) => String(x.code)));
+          for (const c of _savedSelectedCodes) {
+            const code = String(c || "").trim();
+            if (valid.has(code)) selected.add(code);
+          }
+        } else {
+          // default select all
+          for (const it of pool) selected.add(it.code);
+        }
         renderCodeList();
         renderBenchmarkSelect();
         renderTrendSingleCodeSelect();
@@ -8223,7 +8616,15 @@
         const on = (toggle.value === "true");
         Array.from(root.querySelectorAll("input, select, button")).forEach((el) => {
           if (el && el.id === toggleId) return;
-          el.disabled = !on;
+          if (!on) {
+            el.disabled = true;
+            return;
+          }
+          if (el && el.dataset && String(el.dataset.lockDisabled || "") === "true") {
+            el.disabled = true;
+            return;
+          }
+          el.disabled = false;
         });
       };
 
@@ -8604,8 +9005,22 @@
         if (!tr) return;
         const tSel = tr.querySelector(".rotBiasThrType");
         const tHint = tr.querySelector(".rotBiasThrTypeHint");
+        const wSel = tr.querySelector(".rotBiasWin");
         if (!tSel || !tHint) return;
-        tHint.textContent = _rotBiasThresholdTypeLabel(tSel.value);
+        const tt = String(tSel.value || "quantile").toLowerCase();
+        tHint.textContent = _rotBiasThresholdTypeLabel(tt);
+        // 固定阈值模式下，回看窗口不参与阈值计算，禁用避免误导。
+        if (wSel) {
+          if (tt === "fixed") {
+            wSel.disabled = true;
+            wSel.dataset.lockDisabled = "true";
+            wSel.title = "固定阈值模式下，回看窗口无效";
+          } else {
+            wSel.disabled = false;
+            delete wSel.dataset.lockDisabled;
+            wSel.title = "";
+          }
+        }
       }
       function _rotBiasAddRuleRow(rule, opts) {
         const o = opts || {};
@@ -8792,6 +9207,93 @@
       // init defaults (rules table exists even when disabled)
       try { _rotVolIdxResetDefaultRules(); _rotVolIdxUpdateUiEnabled(); } catch (e) { /* best effort */ }
 
+      // ---------------- Settings persistence ----------------
+      (function initResearchSettingsPersistence() {
+        if (!_initialDefaults) {
+          _initialDefaults = {
+            global: _readFields(SETTINGS_FIELD_IDS.global),
+            dist: _readFields(SETTINGS_FIELD_IDS.dist),
+            ewCal: _readFields(SETTINGS_FIELD_IDS.ewCal),
+            rotation: _readFields(SETTINGS_FIELD_IDS.rotation),
+            rotCal: _readFields(SETTINGS_FIELD_IDS.rotCal),
+            trend: _readFields(SETTINGS_FIELD_IDS.trend),
+            mcEw: _readFields(SETTINGS_FIELD_IDS.mcEw),
+            mcRot: _readFields(SETTINGS_FIELD_IDS.mcRot),
+            sim: _readFields(SETTINGS_FIELD_IDS.sim),
+            miniRot: { anchor: mpRotState.anchor, rangeKey: mpRotState.rangeKey },
+          };
+        }
+        const globalSaved = _settingsLoad(SETTINGS_KEYS.global);
+        const distSaved = _settingsLoad(SETTINGS_KEYS.dist);
+        const ewCalSaved = _settingsLoad(SETTINGS_KEYS.ewCal);
+        const rotationSaved = _settingsLoad(SETTINGS_KEYS.rotation);
+        const rotCalSaved = _settingsLoad(SETTINGS_KEYS.rotCal);
+        const trendSaved = _settingsLoad(SETTINGS_KEYS.trend);
+        const mcLegacy = _settingsLoad(`${SETTINGS_NS}.mc`);
+        const mcEwSaved = _settingsLoad(SETTINGS_KEYS.mcEw) || mcLegacy;
+        const mcRotSaved = _settingsLoad(SETTINGS_KEYS.mcRot) || mcLegacy;
+        const simSaved = _settingsLoad(SETTINGS_KEYS.sim);
+        const miniSaved = _settingsLoad(SETTINGS_KEYS.miniRot);
+        const selSaved = _settingsLoad(SETTINGS_KEYS.selectedCodes);
+        _savedSelectedCodesReady = !!(selSaved && typeof selSaved === "object" && Array.isArray(selSaved.codes));
+        _savedSelectedCodes = _savedSelectedCodesReady ? selSaved.codes : null;
+
+        _applyFields(SETTINGS_FIELD_IDS.global, globalSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.dist, distSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.ewCal, ewCalSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.rotation, rotationSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.rotCal, rotCalSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.trend, trendSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.mcEw, mcEwSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.mcRot, mcRotSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.sim, simSaved || {});
+
+        if (rotationSaved && rotationSaved.rules) _restoreRotationRuleTables(rotationSaved.rules);
+        if (miniSaved && typeof miniSaved === "object") {
+          if (miniSaved.anchor != null) _mpRotSetAnchor(String(miniSaved.anchor));
+          if (miniSaved.rangeKey != null) _mpRotSetRange(String(miniSaved.rangeKey));
+        }
+        _restoreCalendarSelections(ewCalSaved, "ew");
+        _restoreCalendarSelections(rotCalSaved, "rot");
+
+        _afterDefaultsApply();
+
+        _persistReady = true;
+        document.addEventListener("change", () => _saveResearchSettingsDebounced());
+        document.addEventListener("input", () => _saveResearchSettingsDebounced());
+        document.addEventListener("click", (e) => {
+          const btn = e.target && e.target.closest ? e.target.closest("button") : null;
+          if (!btn) return;
+          if (btn.id && /ResetDefault|AddRule|Remove|selAll|selNone|selInvert/.test(btn.id)) {
+            setTimeout(() => _saveResearchSettingsDebounced(), 0);
+          }
+          if (btn.className && /Remove/.test(String(btn.className))) {
+            setTimeout(() => _saveResearchSettingsDebounced(), 0);
+          }
+        });
+        if ($("rebalance")) $("rebalance").addEventListener("change", () => {
+          setTimeout(() => {
+            const saved = _settingsLoad(SETTINGS_KEYS.ewCal);
+            _restoreCalendarSelections(saved, "ew");
+            _saveResearchSettingsDebounced();
+          }, 0);
+        });
+        if ($("rotRebalance")) $("rotRebalance").addEventListener("change", () => {
+          setTimeout(() => {
+            const saved = _settingsLoad(SETTINGS_KEYS.rotCal);
+            _restoreCalendarSelections(saved, "rot");
+            _saveResearchSettingsDebounced();
+          }, 0);
+        });
+        // Calendar anchor inputs are rendered after this initializer;
+        // defer one tick to restore anchor/exec-price selections.
+        setTimeout(() => {
+          _restoreCalendarSelections(_settingsLoad(SETTINGS_KEYS.ewCal), "ew");
+          _restoreCalendarSelections(_settingsLoad(SETTINGS_KEYS.rotCal), "rot");
+        }, 0);
+        _wireResetDefaultButtons();
+      })();
+
       $("runEwCalendar").addEventListener("click", runEwCalendarEffect);
       $("runRotCalendar").addEventListener("click", runRotCalendarEffect);
       $("exportPdf").addEventListener("click", exportPdfReport);
@@ -8817,12 +9319,12 @@
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
-        const n_sims = Number(($("mcN").value || "2000").trim());
-        const block_size = Number(($("mcBlock").value || "5").trim());
-        const winRaw = ($("mcWindow").value || "").trim();
+        const n_sims = Number(($("mcEwN").value || "10000").trim());
+        const block_size = Number(($("mcEwBlock").value || "5").trim());
+        const winRaw = ($("mcEwWindow").value || "").trim();
         const sample_window_days = winRaw === "" ? null : Number(winRaw);
         if (sample_window_days != null && !Number.isFinite(sample_window_days)) return setMsg("滚动窗口必须是整数交易日，例如 2520");
-        const seedRaw = ($("mcSeed").value || "").trim();
+        const seedRaw = ($("mcEwSeed").value || "").trim();
         const seed = seedRaw === "" ? null : Number(seedRaw);
         const oldTxt = btn.textContent;
         btn.disabled = true;
@@ -9010,12 +9512,12 @@
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         // phase-1 rules already validated by table parsers
-        const n_sims = Number(($("mcN").value || "2000").trim());
-        const block_size = Number(($("mcBlock").value || "5").trim());
-        const winRaw = ($("mcWindow").value || "").trim();
+        const n_sims = Number(($("mcRotN").value || "2000").trim());
+        const block_size = Number(($("mcRotBlock").value || "5").trim());
+        const winRaw = ($("mcRotWindow").value || "").trim();
         const sample_window_days = winRaw === "" ? null : Number(winRaw);
         if (sample_window_days != null && !Number.isFinite(sample_window_days)) return setMsg("滚动窗口必须是整数交易日，例如 2520");
-        const seedRaw = ($("mcSeed").value || "").trim();
+        const seedRaw = ($("mcRotSeed").value || "").trim();
         const seed = seedRaw === "" ? null : Number(seedRaw);
         const oldTxt = btn.textContent;
         btn.disabled = true;
@@ -9129,7 +9631,7 @@
         b.addEventListener("click", () => _mpRotSetRange(String(b.dataset.k || "all")));
       });
       if ($("runMpRot")) $("runMpRot").addEventListener("click", runMiniRotationToMain);
-      _mpRotSetAnchor("mix");
+      _mpRotSetAnchor(mpRotState.anchor);
       _mpRotSetRange(mpRotState.rangeKey);
 
       // Correlation range buttons (default full range; disable unavailable based on current backtest).
@@ -9205,14 +9707,14 @@
       wireRotPeriodControls("monthly");
       wireRotPeriodControls("quarterly");
       wireRotPeriodControls("yearly");
-      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); });
+      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); _saveSelectedCodes(); });
       $("selAll").addEventListener("click", () => { maybeAdjustBacktestRange(); renderRangeHint(); });
-      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); });
+      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes(); });
       $("selInvert").addEventListener("click", () => {
         const next = new Set();
         for (const it of pool) if (!selected.has(it.code)) next.add(it.code);
         selected.clear(); for (const c of next) selected.add(c);
-        renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint();
+        renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes();
       });
       if ($("dynamicUniverse")) {
         $("dynamicUniverse").addEventListener("change", () => {
