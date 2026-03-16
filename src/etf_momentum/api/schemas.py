@@ -180,7 +180,7 @@ class LeadLagAnalysisRequest(BaseModel):
     granger_max_lag: int = Field(default=10, ge=1, le=60, description="Max lag order for Granger causality tests")
     alpha: float = Field(default=0.05, gt=0.0, lt=1.0, description="Significance level")
     # Trading usefulness evaluation
-    trade_cost_bps: float = Field(default=0.0, ge=0.0, description="Per-switch cost (bps) for the toy strategy")
+    trade_cost_bps: float = Field(default=2.0, ge=0.0, description="Per-switch cost (bps) for the toy strategy")
     rolling_window: int = Field(default=252, ge=20, le=2520, description="Rolling window for stability charts (trading days)")
     enable_threshold: bool = Field(default=True, description="If true, add threshold-gated signal evaluation")
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_ret| to trigger signals")
@@ -235,7 +235,7 @@ class MacroPairLeadLagRequest(BaseModel):
     max_lag: int = Field(default=20, ge=0, le=252)
     granger_max_lag: int = Field(default=10, ge=1, le=60)
     alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
-    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    trade_cost_bps: float = Field(default=2.0, ge=0.0)
     rolling_window: int = Field(default=252, ge=20, le=2520)
     enable_threshold: bool = Field(default=True)
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
@@ -273,7 +273,7 @@ class MacroStep1Request(BaseModel):
     granger_max_lag: int = Field(default=10, ge=1, le=60)
     alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
     rolling_window: int = Field(default=252, ge=20, le=2520)
-    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    trade_cost_bps: float = Field(default=2.0, ge=0.0)
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
     walk_forward: bool = Field(default=True)
     train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
@@ -315,9 +315,21 @@ class SimGbmPhase1Request(BaseModel):
     seed: int | None = Field(default=None)
 
 
+class SimGbmHoldingStrategyParams(BaseModel):
+    rebalance: str = Field(default="weekly", description="daily|weekly|monthly|quarterly|yearly|none")
+    cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    rp_vol_window: int = Field(default=20, ge=2, le=2520, description="Rolling vol window for risk-parity allocation")
+
+
 class SimGbmPhase2Request(SimGbmPhase1Request):
     lookback_days: int = Field(default=20, ge=2, le=2520)
     strategy_a: dict | None = Field(default=None, description="Optional rotation strategy params (same semantics as A/B strategy A)")
+    strategy_b: dict | None = Field(default=None, description="Optional rotation strategy params for B variant")
+    target_a: str | None = Field(default=None, description="Compare target A: cash|equal_weight|risk_parity|rotation_a|rotation_b")
+    target_b: str | None = Field(default=None, description="Compare target B: cash|equal_weight|risk_parity|rotation_a|rotation_b")
+    holding_strategy: SimGbmHoldingStrategyParams = Field(default_factory=SimGbmHoldingStrategyParams)
+    holding_strategy_a: SimGbmHoldingStrategyParams | None = Field(default=None)
+    holding_strategy_b: SimGbmHoldingStrategyParams | None = Field(default=None)
     phase1_base: dict | None = Field(default=None, description="Optional phase1 payload to reuse generated GBM world directly")
 
 
@@ -346,7 +358,7 @@ class SimGbmAbStrategyParams(BaseModel):
     skip_days: int = Field(default=0, ge=0)
     score_method: str = Field(default="raw_mom")
     risk_free_rate: float = Field(default=0.025)
-    cost_bps: float = Field(default=0.0, ge=0.0)
+    cost_bps: float = Field(default=2.0, ge=0.0)
     trend_filter: bool = Field(default=False)
     trend_exit_filter: bool = Field(default=False)
     trend_sma_window: int = Field(default=20, ge=1)
@@ -400,6 +412,8 @@ class SimGbmAbSignificanceRequest(BaseModel):
     )
     strategy_a: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
     strategy_b: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
+    holding_strategy_a: SimGbmHoldingStrategyParams = Field(default_factory=SimGbmHoldingStrategyParams)
+    holding_strategy_b: SimGbmHoldingStrategyParams = Field(default_factory=SimGbmHoldingStrategyParams)
 
 
 class MacroStep2Request(BaseModel):
@@ -421,7 +435,7 @@ class MacroStep2Request(BaseModel):
     granger_max_lag: int = Field(default=10, ge=1, le=60)
     alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
     rolling_window: int = Field(default=252, ge=20, le=2520)
-    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    trade_cost_bps: float = Field(default=2.0, ge=0.0)
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
     walk_forward: bool = Field(default=True)
     train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
@@ -453,7 +467,7 @@ class MacroStep3Request(BaseModel):
     granger_max_lag: int = Field(default=10, ge=1, le=60)
     alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
     rolling_window: int = Field(default=252, ge=20, le=2520)
-    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    trade_cost_bps: float = Field(default=2.0, ge=0.0)
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
     walk_forward: bool = Field(default=True)
     train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
@@ -486,7 +500,7 @@ class MacroStep4Request(BaseModel):
     granger_max_lag: int = Field(default=10, ge=1, le=60)
     alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
     rolling_window: int = Field(default=252, ge=20, le=2520)
-    trade_cost_bps: float = Field(default=0.0, ge=0.0)
+    trade_cost_bps: float = Field(default=2.0, ge=0.0)
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0)
     walk_forward: bool = Field(default=True)
     train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9)
@@ -547,7 +561,7 @@ class VixSignalBacktestRequest(BaseModel):
     lookback_window: int = Field(default=252, ge=20, le=2520, description="Lookback window for threshold estimation")
     threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_log_ret| to trigger trades")
     min_abs_ret: float = Field(default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold")
-    trade_cost_bps: float = Field(default=10.0, ge=0.0, description="Per-switch cost (bps) when position changes")
+    trade_cost_bps: float = Field(default=2.0, ge=0.0, description="Per-switch cost (bps) when position changes")
     initial_position: str = Field(default="long", description="long|cash starting position at start date")
     initial_nav: float = Field(default=1.0, gt=0.0, description="Initial NAV")
 
@@ -613,7 +627,7 @@ class VolProxyTimingRequest(BaseModel):
         default="all",
         description="Quantile window for levels: all(expanding,no-lookahead)|static_all(full-sample,lookahead)|1y|3y|5y|10y",
     )
-    trade_cost_bps: float = Field(default=0.0, ge=0.0, description="Per-switch cost in bps")
+    trade_cost_bps: float = Field(default=2.0, ge=0.0, description="Per-switch cost in bps")
 
     walk_forward: bool = Field(default=True, description="If true, split train/test and apply train thresholds to test")
     train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9, description="Train ratio for walk-forward")
@@ -838,7 +852,7 @@ class RotationBacktestRequest(BaseModel):
         description="Ranking score: raw_mom | sharpe_mom | sortino_mom",
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    cost_bps: float = Field(default=0.0, ge=0.0)
+    cost_bps: float = Field(default=2.0, ge=0.0)
     # Pre-trade risk controls (all optional; defaults keep previous behavior)
     trend_filter: bool = Field(default=False, description="Enable trend filter gating (pre-trade)")
     trend_exit_filter: bool = Field(default=False, description="Enable trend-based daily exit gating (post-entry; next-day execution)")
@@ -996,7 +1010,7 @@ class TrendBacktestRequest(BaseModel):
         description="[deprecated] Trend research uses mixed basis like rotation: signal=qfq, nav=none with hfq fallback, benchmark=hfq.",
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
@@ -1028,7 +1042,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",

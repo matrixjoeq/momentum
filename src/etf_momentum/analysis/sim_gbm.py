@@ -315,6 +315,80 @@ def _weekly_decision_indices(dates: pd.DatetimeIndex) -> list[int]:
     return [i for i, d in enumerate(dates) if int(d.weekday()) == 4]
 
 
+def _decision_indices_by_rebalance(
+    dates: pd.DatetimeIndex,
+    *,
+    rebalance: str,
+) -> list[int]:
+    rb = str(rebalance or "weekly").strip().lower()
+    if rb == "daily":
+        return list(range(len(dates)))
+    if rb == "weekly":
+        return _weekly_decision_indices(dates)
+    if rb == "monthly":
+        p = dates.to_period("M")
+    elif rb == "quarterly":
+        p = dates.to_period("Q")
+    elif rb == "yearly":
+        p = dates.to_period("Y")
+    elif rb == "none":
+        return []
+    else:
+        return _weekly_decision_indices(dates)
+    out: list[int] = []
+    for i in range(len(dates)):
+        if i == len(dates) - 1 or p[i] != p[i + 1]:
+            out.append(i)
+    return out
+
+
+def _normalize_weights(w: np.ndarray, *, n: int) -> np.ndarray:
+    ww = np.asarray(w, dtype=float)
+    ww = np.where(np.isfinite(ww), ww, 0.0)
+    ww = np.where(ww > 0.0, ww, 0.0)
+    s = float(np.sum(ww))
+    if not np.isfinite(s) or s <= 0.0:
+        return np.full(n, 1.0 / max(1, n), dtype=float)
+    return ww / s
+
+
+def _decision_indices_by_rebalance(
+    dates: pd.DatetimeIndex,
+    *,
+    rebalance: str,
+) -> list[int]:
+    rb = str(rebalance or "weekly").strip().lower()
+    if rb == "daily":
+        return list(range(len(dates)))
+    if rb == "weekly":
+        return _weekly_decision_indices(dates)
+    if rb == "monthly":
+        p = dates.to_period("M")
+    elif rb == "quarterly":
+        p = dates.to_period("Q")
+    elif rb == "yearly":
+        p = dates.to_period("Y")
+    elif rb == "none":
+        return []
+    else:
+        return _weekly_decision_indices(dates)
+    out: list[int] = []
+    for i in range(len(dates)):
+        if i == len(dates) - 1 or p[i] != p[i + 1]:
+            out.append(i)
+    return out
+
+
+def _normalize_weights(w: np.ndarray, *, n: int) -> np.ndarray:
+    ww = np.asarray(w, dtype=float)
+    ww = np.where(np.isfinite(ww), ww, 0.0)
+    ww = np.where(ww > 0.0, ww, 0.0)
+    s = float(np.sum(ww))
+    if not np.isfinite(s) or s <= 0.0:
+        return np.full(n, 1.0 / max(1, n), dtype=float)
+    return ww / s
+
+
 def backtest_rotation_basic(
     close: pd.DataFrame,
     *,
@@ -393,7 +467,30 @@ def backtest_rotation_basic(
     }
 
 
-def backtest_equal_weight_weekly(close: pd.DataFrame) -> dict[str, Any]:
+def backtest_equal_weight_weekly(
+    close: pd.DataFrame,
+    *,
+    rebalance: str = "weekly",
+    cost_bps: float = 0.0,
+) -> dict[str, Any]:
+    return backtest_holding_rebalance(
+        close,
+        allocation="equal_weight",
+        rebalance=rebalance,
+        cost_bps=cost_bps,
+        ann_vols=None,
+    )
+
+
+def backtest_holding_rebalance(
+    close: pd.DataFrame,
+    *,
+    allocation: str = "equal_weight",
+    rebalance: str = "weekly",
+    cost_bps: float = 0.0,
+    ann_vols: dict[str, float] | None = None,
+    rp_vol_window: int = 20,
+) -> dict[str, Any]:
     if close is None or close.empty:
         return {"ok": False, "error": "empty_prices"}
     close = close.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
@@ -404,25 +501,56 @@ def backtest_equal_weight_weekly(close: pd.DataFrame) -> dict[str, Any]:
         return {"ok": False, "error": "empty_universe"}
 
     ret = close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    alloc = str(allocation or "equal_weight").strip().lower()
+    rb = str(rebalance or "weekly").strip().lower()
+    cost = float(cost_bps) if np.isfinite(float(cost_bps)) else 0.0
+    cost = max(0.0, cost)
+    rp_win = int(max(2, rp_vol_window))
+    decision_idx = _decision_indices_by_rebalance(dates, rebalance=rb)
     w = np.zeros((len(dates), n), dtype=float)
-    decision_idx = _weekly_decision_indices(dates)
+
+    def _target_w(di: int) -> np.ndarray:
+        if alloc == "equal_weight":
+            return np.full(n, 1.0 / n, dtype=float)
+        if alloc == "risk_parity":
+            hist = ret.iloc[: max(1, di + 1)]
+            rv = (
+                hist.rolling(rp_win, min_periods=min(5, rp_win))
+                .std(ddof=1)
+                .iloc[-1]
+                .to_numpy(dtype=float)
+            )
+            if not np.isfinite(rv).any():
+                rv = hist.std(ddof=1).to_numpy(dtype=float)
+            if not np.isfinite(rv).any() and ann_vols:
+                rv = np.asarray([float(ann_vols.get(c, np.nan)) for c in codes], dtype=float)
+            inv = np.where((np.isfinite(rv) & (rv > 0.0)), 1.0 / rv, 0.0)
+            return _normalize_weights(inv, n=n)
+        return np.full(n, 1.0 / n, dtype=float)
+
     if not decision_idx:
-        w[:, :] = 1.0 / n
+        w[:, :] = _target_w(0).reshape(1, -1)
     else:
+        first_di = int(decision_idx[0])
+        w[: first_di + 1, :] = _target_w(0).reshape(1, -1)
         for j, di in enumerate(decision_idx):
             start_i = di + 1
             if start_i >= len(dates):
                 break
             next_di = decision_idx[j + 1] if j + 1 < len(decision_idx) else (len(dates) - 1)
             end_i = min(len(dates) - 1, next_di)
-            w[start_i : end_i + 1, :] = 1.0 / n
-        # warm-up before first effective day: equal-weight
-        w[: decision_idx[0] + 1, :] = 1.0 / n
+            w[start_i : end_i + 1, :] = _target_w(int(di)).reshape(1, -1)
 
     w_df = pd.DataFrame(w, index=dates, columns=codes, dtype=float)
     ret_fwd = ret.shift(-1).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    port_ret = (w_df.to_numpy(dtype=float) * ret_fwd.to_numpy(dtype=float)).sum(axis=1).astype(float)
-    nav = np.cumprod(1.0 + port_ret).astype(float)
+    gross = (w_df.to_numpy(dtype=float) * ret_fwd.to_numpy(dtype=float)).sum(axis=1).astype(float)
+    w_prev = w_df.shift(1).fillna(0.0)
+    turnover = (
+        (w_df.to_numpy(dtype=float) - w_prev.to_numpy(dtype=float)).astype(float)
+    )
+    turnover = np.abs(turnover).sum(axis=1).astype(float)
+    net = gross - turnover * (cost / 10000.0)
+    nav = np.cumprod(1.0 + net).astype(float)
     nav[0] = 1.0
     nav_s = pd.Series(nav, index=dates, dtype=float)
     m = _metrics_from_nav(nav_s)
@@ -430,49 +558,41 @@ def backtest_equal_weight_weekly(close: pd.DataFrame) -> dict[str, Any]:
         "ok": True,
         "series": {"dates": pd.DatetimeIndex(dates).strftime("%Y-%m-%d").tolist(), "nav": nav_s.astype(float).tolist()},
         "metrics": m,
+        "holding": {
+            "allocation": alloc,
+            "rebalance": rb,
+            "cost_bps": float(cost),
+            "avg_turnover": float(np.mean(turnover)) if turnover.size else 0.0,
+        },
+        "weights_last": {c: float(v) for c, v in zip(codes, w_df.iloc[-1].to_numpy(dtype=float), strict=False)},
     }
 
 
-def backtest_risk_parity_inverse_vol(close: pd.DataFrame, *, ann_vols: dict[str, float]) -> dict[str, Any]:
+def backtest_risk_parity_inverse_vol(
+    close: pd.DataFrame,
+    *,
+    ann_vols: dict[str, float],
+    rebalance: str = "weekly",
+    cost_bps: float = 0.0,
+    rp_vol_window: int = 20,
+) -> dict[str, Any]:
     """
     Risk parity baseline (inverse-vol weights) for the synthetic GBM experiment.
 
     For the simulated assets, annual vol is constant per asset, so inverse-vol weights are constant.
     """
-    if close is None or close.empty:
-        return {"ok": False, "error": "empty_prices"}
-    close = close.astype(float).replace([np.inf, -np.inf], np.nan).ffill()
-    dates = pd.to_datetime(close.index)
-    codes = list(close.columns)
-    n = len(codes)
-    if n <= 0:
-        return {"ok": False, "error": "empty_universe"}
-
-    vols = np.asarray([float(ann_vols.get(c, np.nan)) for c in codes], dtype=float)
-    inv = 1.0 / np.where((np.isfinite(vols) & (vols > 0)), vols, np.nan)
-    s = float(np.nansum(inv))
-    if not np.isfinite(s) or s <= 0:
-        w = np.full(n, 1.0 / n, dtype=float)
-    else:
-        w = inv / s
-        w = np.where(np.isfinite(w), w, 0.0)
-        ss = float(np.sum(w))
-        w = (w / ss) if ss > 0 else np.full(n, 1.0 / n, dtype=float)
-
-    ret = close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    w_df = pd.DataFrame(np.repeat(w.reshape(1, -1), len(dates), axis=0), index=dates, columns=codes, dtype=float)
-    ret_fwd = ret.shift(-1).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    port_ret = (ret_fwd.to_numpy(dtype=float) * w_df.to_numpy(dtype=float)).sum(axis=1).astype(float)
-    nav = np.cumprod(1.0 + port_ret).astype(float)
-    nav[0] = 1.0
-    nav_s = pd.Series(nav, index=dates, dtype=float)
-    m = _metrics_from_nav(nav_s)
-    return {
-        "ok": True,
-        "series": {"dates": pd.DatetimeIndex(dates).strftime("%Y-%m-%d").tolist(), "nav": nav_s.astype(float).tolist()},
-        "metrics": m,
-        "weights": {c: float(wi) for c, wi in zip(codes, w, strict=False)},
-    }
+    out = backtest_holding_rebalance(
+        close,
+        allocation="risk_parity",
+        rebalance=rebalance,
+        cost_bps=cost_bps,
+        ann_vols=ann_vols,
+        rp_vol_window=rp_vol_window,
+    )
+    if not bool(out.get("ok")):
+        return out
+    out["weights"] = dict(out.get("weights_last") or {})
+    return out
 
 
 def apply_position_sizing(
@@ -528,6 +648,7 @@ def montecarlo_rotation_vs_ew(
     seed: int | None = None,
     lookback_days: int = 20,
     strategy_a: dict[str, Any] | None = None,
+    holding_strategy: dict[str, Any] | None = None,
     n_jobs: int = 0,
     selected_assets: list[int] | None = None,
 ) -> dict[str, Any]:
@@ -605,7 +726,7 @@ def montecarlo_rotation_vs_ew(
     out_mdd_ew: list[float] = []
     out_mdd_rp: list[float] = []
 
-    use_strategy_a = bool(strategy_a)
+    use_strategy_a = bool(strategy_a) or bool(holding_strategy)
     if use_strategy_a:
         sim_seeds = [int(rng.integers(0, 2**31 - 1)) for _ in range(n_sims)]
         jobs = int(n_jobs)
@@ -627,6 +748,7 @@ def montecarlo_rotation_vs_ew(
                     mu_high=(None if mu_high is None else float(mu_high)),
                     world_seed=int(s),
                     strategy_a=dict(strategy_a or {}),
+                    holding_strategy=dict(holding_strategy or {}),
                 )
                 if one is None:
                     continue
@@ -689,6 +811,7 @@ def montecarlo_rotation_vs_ew(
                         mu_high=(None if mu_high is None else float(mu_high)),
                         world_seed=int(s),
                         strategy_a=dict(strategy_a or {}),
+                        holding_strategy=dict(holding_strategy or {}),
                     )
                     if one is None:
                         continue
@@ -891,6 +1014,20 @@ def _resolve_ab_targets(
         ta, tb = _ab_mode_to_targets(comparison_mode)
     mode = _legacy_mode_from_targets(ta, tb)
     return ta, tb, mode, _AB_TARGET_LABELS[ta], _AB_TARGET_LABELS[tb]
+
+
+def _normalize_holding_strategy(
+    cfg: dict[str, Any] | None,
+) -> dict[str, Any]:
+    c = dict(cfg or {})
+    rb = str(c.get("rebalance", "weekly") or "weekly").strip().lower()
+    if rb not in {"daily", "weekly", "monthly", "quarterly", "yearly", "none"}:
+        rb = "weekly"
+    cb = float(c.get("cost_bps", 2.0) or 0.0)
+    cb = max(0.0, cb) if np.isfinite(cb) else 2.0
+    rpw = int(c.get("rp_vol_window", 20) or 20)
+    rpw = int(max(2, min(2520, rpw)))
+    return {"rebalance": rb, "cost_bps": float(cb), "rp_vol_window": int(rpw)}
 
 
 def _sim_ohlc_from_close(close: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -1324,6 +1461,8 @@ def _collect_ab_samples(
     mu_high: float | None,
     strategy_a: dict[str, Any],
     strategy_b: dict[str, Any],
+    holding_strategy_a: dict[str, Any] | None,
+    holding_strategy_b: dict[str, Any] | None,
     target_a: str,
     target_b: str,
     world_seeds: list[int],
@@ -1354,6 +1493,8 @@ def _collect_ab_samples(
                 world_seed=int(ws),
                 strategy_a=strategy_a,
                 strategy_b=strategy_b,
+                holding_strategy_a=holding_strategy_a,
+                holding_strategy_b=holding_strategy_b,
                 target_a=target_a,
                 target_b=target_b,
             )
@@ -1389,6 +1530,8 @@ def _collect_ab_samples(
                     world_seed=int(ws),
                     strategy_a=strategy_a,
                     strategy_b=strategy_b,
+                    holding_strategy_a=holding_strategy_a,
+                    holding_strategy_b=holding_strategy_b,
                     target_a=target_a,
                     target_b=target_b,
                 )
@@ -1419,6 +1562,8 @@ def _collect_ab_samples(
                 world_seed=int(ws),
                 strategy_a=strategy_a,
                 strategy_b=strategy_b,
+                holding_strategy_a=holding_strategy_a,
+                holding_strategy_b=holding_strategy_b,
                 target_a=target_a,
                 target_b=target_b,
             )
@@ -1445,6 +1590,7 @@ def _eval_mc_world(
     mu_high: float | None,
     world_seed: int,
     strategy_a: dict[str, Any],
+    holding_strategy: dict[str, Any] | None = None,
 ) -> tuple[float, float, float, float, float, float] | None:
     sim = simulate_gbm_prices(
         start=start,
@@ -1476,11 +1622,25 @@ def _eval_mc_world(
         ohlc_none=ohlc_hfq,
         vol_index_close=vol_idx,
     )
-    ew = backtest_equal_weight_weekly(close)
+    hold_cfg = _normalize_holding_strategy(holding_strategy)
+    ew = backtest_holding_rebalance(
+        close,
+        allocation="equal_weight",
+        rebalance=str(hold_cfg.get("rebalance", "weekly")),
+        cost_bps=float(hold_cfg.get("cost_bps", 2.0)),
+        ann_vols=None,
+    )
     cagr_ew = _extract_annualized_return(ew)
     mdd_ew = _extract_max_drawdown_from_bt(ew)
     ann_vols = (sim.get("assets") or {}).get("ann_vols") or {}
-    rp = backtest_risk_parity_inverse_vol(close, ann_vols=ann_vols)
+    rp = backtest_holding_rebalance(
+        close,
+        allocation="risk_parity",
+        rebalance=str(hold_cfg.get("rebalance", "weekly")),
+        cost_bps=float(hold_cfg.get("cost_bps", 2.0)),
+        ann_vols=ann_vols,
+        rp_vol_window=int(hold_cfg.get("rp_vol_window", 20)),
+    )
     cagr_rp = _extract_annualized_return(rp)
     mdd_rp = _extract_max_drawdown_from_bt(rp)
     vals = [cagr_rot, cagr_ew, cagr_rp, mdd_rot, mdd_ew, mdd_rp]
@@ -1501,6 +1661,8 @@ def _eval_ab_world(
     world_seed: int,
     strategy_a: dict[str, Any],
     strategy_b: dict[str, Any],
+    holding_strategy_a: dict[str, Any] | None = None,
+    holding_strategy_b: dict[str, Any] | None = None,
     target_a: str = "rotation_a",
     target_b: str = "rotation_b",
 ) -> tuple[float, float, float, float] | None:
@@ -1526,16 +1688,32 @@ def _eval_ab_world(
     ohlc_hfq = _sim_ohlc_from_close(close)
     vol_idx = _sim_vol_index_proxy(close)
     ann_vols = (sim.get("assets") or {}).get("ann_vols") or {}
+    hold_cfg_a = _normalize_holding_strategy(holding_strategy_a)
+    hold_cfg_b = _normalize_holding_strategy(holding_strategy_b)
 
-    def _eval_target(target: str) -> tuple[float, float]:
+    def _eval_target(target: str, *, is_a: bool) -> tuple[float, float]:
         t = _normalize_ab_target(target, fallback="rotation_a")
+        hold_cfg = hold_cfg_a if is_a else hold_cfg_b
         if t == "cash":
             return 0.0, 0.0
         if t == "equal_weight":
-            ew = backtest_equal_weight_weekly(close)
+            ew = backtest_holding_rebalance(
+                close,
+                allocation="equal_weight",
+                rebalance=str(hold_cfg.get("rebalance", "weekly")),
+                cost_bps=float(hold_cfg.get("cost_bps", 2.0)),
+                ann_vols=None,
+            )
             return _extract_annualized_return(ew), 1.0
         if t == "risk_parity":
-            rp = backtest_risk_parity_inverse_vol(close, ann_vols=ann_vols)
+            rp = backtest_holding_rebalance(
+                close,
+                allocation="risk_parity",
+                rebalance=str(hold_cfg.get("rebalance", "weekly")),
+                cost_bps=float(hold_cfg.get("cost_bps", 2.0)),
+                ann_vols=ann_vols,
+                rp_vol_window=int(hold_cfg.get("rp_vol_window", 20)),
+            )
             return _extract_annualized_return(rp), 1.0
         if t == "rotation_b":
             return _run_rotation_variant_on_sim(
@@ -1553,8 +1731,8 @@ def _eval_ab_world(
             vol_index_close=vol_idx,
         )
 
-    aa, exa = _eval_target(target_a)
-    bb, exb = _eval_target(target_b)
+    aa, exa = _eval_target(target_a, is_a=True)
+    bb, exb = _eval_target(target_b, is_a=False)
     if np.isfinite(aa) and np.isfinite(bb):
         return float(aa), float(bb), float(exa), float(exb)
     return None
@@ -1575,6 +1753,8 @@ def gbm_ab_significance(
     seed: int | None,
     strategy_a: dict[str, Any],
     strategy_b: dict[str, Any],
+    holding_strategy_a: dict[str, Any] | None = None,
+    holding_strategy_b: dict[str, Any] | None = None,
     n_perm: int = 5000,
     n_boot: int = 3000,
     n_jobs: int = 1,
@@ -1606,6 +1786,8 @@ def gbm_ab_significance(
         mu_high=(None if mu_high is None else float(mu_high)),
         strategy_a=strategy_a,
         strategy_b=strategy_b,
+        holding_strategy_a=holding_strategy_a,
+        holding_strategy_b=holding_strategy_b,
         target_a=ta,
         target_b=tb,
         world_seeds=world_seeds,
@@ -1645,6 +1827,8 @@ def gbm_ab_significance(
                 mu_high=(None if mu_high is None else float(mu_high)),
                 strategy_a=strategy_a,
                 strategy_b=strategy_b,
+                holding_strategy_a=holding_strategy_a,
+                holding_strategy_b=holding_strategy_b,
                 target_a=ta,
                 target_b=tb,
                 world_seeds=world_seeds_rep,
@@ -1688,6 +1872,7 @@ def gbm_ab_significance(
             "comparison_mode": mode,
             "comparison_target_a": ta,
             "comparison_target_b": tb,
+            "strategy_a_applied": bool(strategy_a),
         },
         "comparison": {
             "mode": mode,
@@ -1716,6 +1901,104 @@ def gbm_ab_significance(
             "annualized_return_a": [float(x) for x in a_vals],
             "annualized_return_b": [float(x) for x in b_vals],
             "diff_a_minus_b": [float(x) for x in diff.tolist()],
+        },
+    }
+
+
+def montecarlo_strategy_pair(
+    *,
+    start: str,
+    end: str | None,
+    n_sims: int,
+    n_assets: int,
+    vol_low: float,
+    vol_high: float,
+    corr_low: float | None = None,
+    corr_high: float | None = None,
+    mu_low: float | None = None,
+    mu_high: float | None = None,
+    seed: int | None,
+    target_a: str | None = None,
+    target_b: str | None = None,
+    strategy_a: dict[str, Any] | None = None,
+    strategy_b: dict[str, Any] | None = None,
+    holding_strategy_a: dict[str, Any] | None = None,
+    holding_strategy_b: dict[str, Any] | None = None,
+    n_jobs: int = 0,
+) -> dict[str, Any]:
+    ta, tb, mode, label_a, label_b = _resolve_ab_targets(
+        target_a=target_a,
+        target_b=target_b,
+        comparison_mode="custom_targets",
+    )
+    end_s = str(end or _today_last_business_day_yyyymmdd())
+    n_sims = int(max(2, n_sims))
+    rng = np.random.default_rng(seed)
+    world_seeds = [int(rng.integers(0, 2**31 - 1)) for _ in range(n_sims)]
+    a_vals, b_vals, _, _, jobs_effective = _collect_ab_samples(
+        start=str(start),
+        end=end_s,
+        n_worlds=int(n_sims),
+        n_assets=int(n_assets),
+        vol_low=float(vol_low),
+        vol_high=float(vol_high),
+        corr_low=(None if corr_low is None else float(corr_low)),
+        corr_high=(None if corr_high is None else float(corr_high)),
+        mu_low=(None if mu_low is None else float(mu_low)),
+        mu_high=(None if mu_high is None else float(mu_high)),
+        strategy_a=dict(strategy_a or {}),
+        strategy_b=dict(strategy_b or {}),
+        holding_strategy_a=dict(holding_strategy_a or {}),
+        holding_strategy_b=dict(holding_strategy_b or {}),
+        target_a=ta,
+        target_b=tb,
+        world_seeds=world_seeds,
+        n_jobs=int(n_jobs),
+    )
+    a = np.asarray(a_vals, dtype=float)
+    b = np.asarray(b_vals, dtype=float)
+    d = a - b
+    return {
+        "ok": True,
+        "meta": {
+            "start": str(start),
+            "end": end_s,
+            "n_sims": int(n_sims),
+            "n_assets": int(n_assets),
+            "vol_low": float(vol_low),
+            "vol_high": float(vol_high),
+            "corr_low": (None if corr_low is None else float(corr_low)),
+            "corr_high": (None if corr_high is None else float(corr_high)),
+            "mu_low": (None if mu_low is None else float(mu_low)),
+            "mu_high": (None if mu_high is None else float(mu_high)),
+            "seed": seed,
+            "n_jobs": int(jobs_effective),
+            "n_samples": int(d.size),
+            "comparison_mode": mode,
+            "comparison_target_a": ta,
+            "comparison_target_b": tb,
+            "strategy_a_applied": bool(strategy_a),
+        },
+        "comparison": {
+            "mode": mode,
+            "target_a": ta,
+            "target_b": tb,
+            "label_a": label_a,
+            "label_b": label_b,
+        },
+        "stats": {
+            "mean_diff": float(np.mean(d)) if d.size else float("nan"),
+            "median_diff": float(np.median(d)) if d.size else float("nan"),
+            "win_rate": float(np.mean(d > 0.0)) if d.size else float("nan"),
+        },
+        "dist": {
+            "annualized_return_a": [float(x) for x in a_vals],
+            "annualized_return_b": [float(x) for x in b_vals],
+            "diff_a_minus_b": [float(x) for x in d.tolist()],
+            # Legacy aliases for older consumers/tests.
+            "rotation": {"cagr": [float(x) for x in a_vals]},
+            "equal_weight": {"cagr": [float(x) for x in b_vals]},
+            "excess": {"cagr": [float(x) for x in d.tolist()]},
         },
     }
 

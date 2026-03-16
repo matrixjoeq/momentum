@@ -163,6 +163,30 @@ def test_gbm_ab_significance_independent_targets_rotation_b_vs_cash():
     assert int(out["meta"]["n_samples"]) > 0
 
 
+def test_gbm_ab_significance_accepts_holding_strategy_params():
+    out = gbm_ab_significance(
+        start="19900101",
+        end="19911231",
+        n_worlds=2,
+        n_assets=4,
+        vol_low=0.05,
+        vol_high=0.30,
+        seed=123,
+        strategy_a={"lookback_days": 20, "top_k": 1},
+        strategy_b={"lookback_days": 60, "top_k": 1},
+        target_a="equal_weight",
+        target_b="risk_parity",
+        holding_strategy_a={"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 10},
+        holding_strategy_b={"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 10},
+        n_perm=1000,
+        n_boot=1000,
+    )
+    assert out["ok"] is True
+    assert out["comparison"]["target_a"] == "equal_weight"
+    assert out["comparison"]["target_b"] == "risk_parity"
+    assert int(out["meta"]["n_samples"]) > 0
+
+
 def test_gbm_ab_significance_seed_stability_enabled():
     out = gbm_ab_significance(
         start="19900101",

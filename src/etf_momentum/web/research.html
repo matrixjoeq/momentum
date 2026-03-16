@@ -811,7 +811,7 @@
             </div>
             <div>
               <label>交易成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-              <input id="rotCost" value="0" />
+              <input id="rotCost" value="2" />
             </div>
             <div>
               <label>分组约束</label>
@@ -1724,21 +1724,35 @@
         <div><label>随机种子（可空）</label><input id="simSeed" value="" /></div>
         <div><label>回看天数 (Lookback Days)</label><input id="simLb" value="20" /></div>
         <div>
-          <label>模拟基准 (Benchmark)</label>
-          <select id="simBenchMode" style="min-width:220px;">
-            <option value="equal_weight" selected>等权（EW）</option>
-            <option value="risk_parity">风险平价（RP，inverse-vol）</option>
+          <label>持有策略A调仓周期</label>
+          <select id="simHoldRebalance" style="min-width:220px;">
+            <option value="daily">daily</option>
+            <option value="weekly" selected>weekly</option>
+            <option value="monthly">monthly</option>
+            <option value="quarterly">quarterly</option>
+            <option value="yearly">yearly</option>
+            <option value="none">none</option>
           </select>
         </div>
+        <div><label>持有策略A成本(bps)</label><input id="simHoldCost" value="2" /></div>
+        <div>
+          <label>持有策略B调仓周期</label>
+          <select id="simHoldBRebalance" style="min-width:220px;">
+            <option value="daily">daily</option>
+            <option value="weekly" selected>weekly</option>
+            <option value="monthly">monthly</option>
+            <option value="quarterly">quarterly</option>
+            <option value="yearly">yearly</option>
+            <option value="none">none</option>
+          </select>
+        </div>
+        <div><label>持有策略B成本(bps)</label><input id="simHoldBCost" value="2" /></div>
         <div><label>重复次数（阶段3/4）</label><input id="simNSims" value="10000" /></div>
         <div><label>分块大小 (Chunk Size)</label><input id="simChunk" value="200" /></div>
         <div><label>并行进程数（阶段3/4，0=自动）</label><input id="simMcJobs" value="0" /></div>
-        <div><label>初始资金（阶段4）</label><input id="simCash" value="1000000" /></div>
-        <div><label>仓位比例（阶段4）</label><input id="simPosPct" value="0.10" /></div>
         <button id="simRun1">阶段1 (Phase 1)：生成资产</button>
-        <button id="simRun2">阶段2 (Phase 2)：轮动 vs 等权（轮动参数=策略A）</button>
-        <button id="simRun3">阶段3 (Phase 3)：批量分布（轮动参数=策略A）</button>
-        <button id="simRun4">阶段4 (Phase 4)：遍历性/破产（轮动参数=策略A）</button>
+        <button id="simRun2">阶段2 (Phase 2)：轮动 vs 持有策略（EW/RP，轮动参数=策略A）</button>
+        <button id="simRun3">阶段3 (Phase 3)：批量分布（轮动参数=策略A，持有策略可配）</button>
         <div class="muted" style="flex-basis:100%;margin:8px 0 4px 0;">【A/B专用参数】以下参数仅用于显著性检验</div>
         <div><label>A/B 世界数</label><input id="simAbWorlds" value="3000" /></div>
         <div><label>A/B 置换次数</label><input id="simAbPerm" value="5000" /></div>
@@ -1813,7 +1827,7 @@
               <div><label>跳过</label><input id="simAbA_skip" value="0" /></div>
               <div><label>打分</label><select id="simAbA_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option></select></div>
               <div><label>rf(年化)</label><input id="simAbA_rf" value="0.025" /></div>
-              <div><label>成本(bps)</label><input id="simAbA_cost" value="0" /></div>
+              <div><label>成本(bps)</label><input id="simAbA_cost" value="2" /></div>
             </div>
           </div>
           <div id="simAbATabFloor" class="tabPanel" role="tabpanel">
@@ -1978,7 +1992,7 @@
               <div><label>跳过</label><input id="simAbB_skip" value="0" /></div>
               <div><label>打分</label><select id="simAbB_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option></select></div>
               <div><label>rf(年化)</label><input id="simAbB_rf" value="0.025" /></div>
-              <div><label>成本(bps)</label><input id="simAbB_cost" value="0" /></div>
+              <div><label>成本(bps)</label><input id="simAbB_cost" value="2" /></div>
             </div>
           </div>
           <div id="simAbBTabFloor" class="tabPanel" role="tabpanel">
@@ -2176,7 +2190,7 @@
             <option value="vol_target">目标波动率</option>
           </select>
         </div>
-        <div><label>成本(bps)</label><input id="trendCost" value="0" /></div>
+        <div><label>成本(bps)</label><input id="trendCost" value="2" /></div>
         <button id="runTrendResearch">运行趋势回测</button>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
@@ -2419,7 +2433,7 @@
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
         sim: [
-          "simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simCorrLow", "simCorrHigh", "simMuLow", "simMuHigh", "simSeed", "simLb", "simNSims", "simChunk", "simMcJobs", "simCash", "simPosPct",
+          "simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simCorrLow", "simCorrHigh", "simMuLow", "simMuHigh", "simSeed", "simLb", "simHoldRebalance", "simHoldCost", "simHoldBRebalance", "simHoldBCost", "simNSims", "simChunk", "simMcJobs",
           "simAbWorlds", "simAbPerm", "simAbBoot", "simAbJobs", "simAbTargetA", "simAbTargetB", "simAbStabOn", "simAbStabRuns", "simAbStabWorlds",
           "simAbA_rebalance", "simAbA_anchor", "simAbA_shift", "simAbA_exec", "simAbA_topk", "simAbA_posMode", "simAbA_backfill", "simAbA_entryN", "simAbA_exitN", "simAbA_lb", "simAbA_skip", "simAbA_score", "simAbA_rf", "simAbA_cost",
           "simAbA_floorOn", "simAbA_floorOp", "simAbA_floor", "simAbA_floorUnit",
@@ -3701,7 +3715,7 @@
               top_k: Number(($("rotTopK").value || "1").trim()),
               lookback_days: Number(($("rotLookback").value || "20").trim()),
               skip_days: Number(($("rotSkip").value || "0").trim()),
-              cost_bps: Number(($("rotCost").value || "0").trim()),
+              cost_bps: Number(($("rotCost").value || "2").trim()),
               group_enforce: groupEnforce,
               group_pick_policy: groupPolicy,
               asset_groups: groupsParsed,
@@ -8218,7 +8232,7 @@
         if (!Number.isFinite(exit_match_n) || exit_match_n < 0) return setMsg("出场满足任意N条需为>=0整数");
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
-        const cost_bps = Number(($("rotCost").value || "0").trim());
+        const cost_bps = Number(($("rotCost").value || "2").trim());
         const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
         if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
         const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
@@ -8488,7 +8502,7 @@
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
-        const cost_bps = Number(($("trendCost").value || "0").trim());
+        const cost_bps = Number(($("trendCost").value || "2").trim());
         if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("趋势成本(bps)需为>=0数字");
         const common = {
           start,
@@ -8630,7 +8644,7 @@
             exit_match_n: Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0"),
             lookback_days: Number(($("rotLookback").value || "20").trim()),
             skip_days: Number(($("rotSkip").value || "0").trim()),
-            cost_bps: Number(($("rotCost").value || "0").trim()),
+            cost_bps: Number(($("rotCost").value || "2").trim()),
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             score_method: ($("rotScoreMethod") && $("rotScoreMethod").value) ? String($("rotScoreMethod").value) : "raw_mom",
             group_enforce: ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true"),
@@ -8682,7 +8696,7 @@
           exit_match_n: Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0"),
           lookback_days: Number(($("rotLookback").value || "20").trim()),
           skip_days: Number(($("rotSkip").value || "0").trim()),
-          cost_bps: Number(($("rotCost").value || "0").trim()),
+          cost_bps: Number(($("rotCost").value || "2").trim()),
           score_method: ($("rotScoreMethod") && $("rotScoreMethod").value) ? String($("rotScoreMethod").value) : "raw_mom",
           asset_momentum_floor_rules: (floorRules2.length ? floorRules2 : null),
           trend_filter: ($("rotTrendOn") && $("rotTrendOn").value === "true"),
@@ -8999,7 +9013,7 @@
         const exit_match_n = Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0");
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
-        const cost_bps = Number(($("rotCost").value || "0").trim());
+        const cost_bps = Number(($("rotCost").value || "2").trim());
         const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
         if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
         const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
@@ -10496,7 +10510,7 @@
         const exit_match_n = Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0");
         const lookback_days = Number(($("rotLookback").value || "20").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
-        const cost_bps = Number(($("rotCost").value || "0").trim());
+        const cost_bps = Number(($("rotCost").value || "2").trim());
         const group_enforce = ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true");
         const group_pick_policy = ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value) : "strongest_score";
         const asset_groups = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
@@ -10914,6 +10928,16 @@
         const seed = _str("simSeed");
         const ranges = _parseSimRanges();
         if (ranges && ranges.__error) return { __error: ranges.__error };
+        const holding_strategy = {
+          rebalance: _str("simHoldRebalance") || "weekly",
+          cost_bps: Math.max(0, _num("simHoldCost", 2)),
+          rp_vol_window: 20,
+        };
+        const holding_strategy_b = {
+          rebalance: _str("simHoldBRebalance") || "weekly",
+          cost_bps: Math.max(0, _num("simHoldBCost", 2)),
+          rp_vol_window: 20,
+        };
         return {
           start: _str("simStart") || "19900101",
           end: _str("simEnd") || null,
@@ -10926,6 +10950,9 @@
           mu_high: ranges.mu_high,
           seed: seed ? Math.trunc(Number(seed)) : null,
           lookback_days: Math.trunc(_num("simLb", 20)),
+          holding_strategy,
+          holding_strategy_a: holding_strategy,
+          holding_strategy_b,
         };
       }
       function _updateSimCorrHint() {
@@ -11050,21 +11077,20 @@
       }
 
       function _renderRotCompare(out) {
-        const rot = out.rotation || {};
-        const benchMode = (($("simBenchMode") && $("simBenchMode").value) ? $("simBenchMode").value : "equal_weight");
-        const ew = out.equal_weight || {};
-        const rp = out.risk_parity || {};
-        const bench = (benchMode === "risk_parity") ? rp : ew;
-        const benchName = (benchMode === "risk_parity") ? "RP" : "EW";
-        const rS = (rot.series || {});
-        const eS = (bench.series || {});
+        const cmp = out.comparison || {};
+        const labelA = String(cmp.label_a || "A");
+        const labelB = String(cmp.label_b || "B");
+        const a = cmp.a || {};
+        const b = cmp.b || {};
+        const aS = (a.series || {});
+        const bS = (b.series || {});
         Plotly.newPlot("simRotNav", [
-          { x: rS.dates || [], y: rS.nav || [], name: "ROTATION", type: "scatter", mode: "lines" },
-          { x: eS.dates || [], y: eS.nav || [], name: benchName, type: "scatter", mode: "lines" },
+          { x: aS.dates || [], y: aS.nav || [], name: labelA, type: "scatter", mode: "lines" },
+          { x: bS.dates || [], y: bS.nav || [], name: labelB, type: "scatter", mode: "lines" },
         ], { margin: { t: 20 }, yaxis: { type: "log" } }, { displayModeBar: false });
 
-        const rm = rot.metrics || {};
-        const em = (bench.metrics || {});
+        const rm = a.metrics || {};
+        const em = b.metrics || {};
         let html = "<tr><th>策略 (Strategy)</th><th>年化收益 (CAGR)</th><th>波动率 (Vol)</th><th>夏普 (Sharpe)</th><th>最大回撤 (MDD)</th><th>卡玛 (Calmar)</th></tr>";
         const row = (name, mm) => `<tr><td>${esc(name)}</td>` +
           `<td>${(mm.cagr==null)?"":fmtPct(Number(mm.cagr))}</td>` +
@@ -11072,30 +11098,28 @@
           `<td>${(mm.sharpe==null)?"":Number(mm.sharpe).toFixed(2)}</td>` +
           `<td>${(mm.max_drawdown==null)?"":fmtPct(Number(mm.max_drawdown))}</td>` +
           `<td>${(mm.calmar==null)?"":Number(mm.calmar).toFixed(2)}</td></tr>`;
-        html += row("轮动 (ROTATION)", rm);
-        html += row(benchName, em);
+        html += row(labelA, rm);
+        html += row(labelB, em);
         const el = $("simRotMetrics");
         if (el) el.innerHTML = html;
       }
 
       function _renderMcCagr(mc) {
         const dist = (mc && mc.dist) ? mc.dist : {};
-        const a = (dist.rotation && dist.rotation.cagr) ? dist.rotation.cagr : [];
-        const benchMode = (($("simBenchMode") && $("simBenchMode").value) ? $("simBenchMode").value : "equal_weight");
-        const b = (benchMode === "risk_parity")
-          ? ((dist.risk_parity && dist.risk_parity.cagr) ? dist.risk_parity.cagr : [])
-          : ((dist.equal_weight && dist.equal_weight.cagr) ? dist.equal_weight.cagr : []);
-        const x = (benchMode === "risk_parity")
-          ? ((dist.excess_vs_risk_parity && dist.excess_vs_risk_parity.cagr) ? dist.excess_vs_risk_parity.cagr : [])
-          : ((dist.excess && dist.excess.cagr) ? dist.excess.cagr : []);
+        const cmp = (mc && mc.comparison) ? mc.comparison : {};
+        const labelA = String(cmp.label_a || "A");
+        const labelB = String(cmp.label_b || "B");
+        const a = Array.isArray(dist.annualized_return_a) ? dist.annualized_return_a : [];
+        const b = Array.isArray(dist.annualized_return_b) ? dist.annualized_return_b : [];
+        const x = Array.isArray(dist.diff_a_minus_b) ? dist.diff_a_minus_b : [];
         Plotly.newPlot("simMcCagr", [
-          { x: a, type: "histogram", name: "ROTATION", opacity: 0.55 },
-          { x: b, type: "histogram", name: (benchMode === "risk_parity" ? "RP" : "EW"), opacity: 0.45 },
-          { x: x, type: "histogram", name: "EXCESS", opacity: 0.45 },
-        ], { margin: { t: 20 }, barmode: "overlay", xaxis: { title: "CAGR" } }, { displayModeBar: false });
+          { x: a, type: "histogram", name: labelA, opacity: 0.55 },
+          { x: b, type: "histogram", name: labelB, opacity: 0.45 },
+          { x: x, type: "histogram", name: `${labelA}-${labelB}`, opacity: 0.45 },
+        ], { margin: { t: 20 }, barmode: "overlay", xaxis: { title: "Annualized Return" } }, { displayModeBar: false });
         const meta = mc.meta || {};
         const note = $("simMcNote");
-        if (note) note.textContent = `n_sims=${meta.n_sims || ""}, n_days=${meta.n_days || ""}, chunk=${meta.chunk_size || ""}, vol=[${meta.vol_low || ""},${meta.vol_high || ""}]`;
+        if (note) note.textContent = `n_sims=${meta.n_sims || meta.n_worlds || ""}, n_samples=${meta.n_samples || ""}, vol=[${meta.vol_low || ""},${meta.vol_high || ""}]`;
       }
 
       function _copyAbTableRules(fromPrefix, toPrefix) {
@@ -11245,10 +11269,19 @@
       async function simRunPhase2() {
         _setSimMsg("阶段2 (Phase 2) 运行中...");
         const strategyA = _buildAbStrategy("simAbA");
+        const strategyB = _buildAbStrategy("simAbB");
         if (strategyA && strategyA.__error) return _setSimMsg(`阶段2 参数错误：${strategyA.__error}`);
+        if (strategyB && strategyB.__error) return _setSimMsg(`阶段2 参数错误：${strategyB.__error}`);
         const base = _payloadBase();
         if (base && base.__error) return _setSimMsg(`阶段2 参数错误：${base.__error}`);
-        const p = { ...base, strategy_a: strategyA, phase1_base: (window.__lastSimGbmPhase1 || null) };
+        const p = {
+          ...base,
+          target_a: _str("simAbTargetA") || "rotation_a",
+          target_b: _str("simAbTargetB") || "equal_weight",
+          strategy_a: strategyA,
+          strategy_b: strategyB,
+          phase1_base: (window.__lastSimGbmPhase1 || null),
+        };
         const resp = await api("/analysis/sim/gbm/phase2", { method: "POST", body: JSON.stringify(p) });
         const data = await resp.json();
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
@@ -11280,13 +11313,18 @@
       async function simRunPhase3() {
         _setSimMsg("阶段3 (Phase 3) 运行中（可能较慢）...");
         const strategyA = _buildAbStrategy("simAbA");
+        const strategyB = _buildAbStrategy("simAbB");
         if (strategyA && strategyA.__error) return _setSimMsg(`阶段3 参数错误：${strategyA.__error}`);
+        if (strategyB && strategyB.__error) return _setSimMsg(`阶段3 参数错误：${strategyB.__error}`);
         const p = _payloadBase();
         if (p && p.__error) return _setSimMsg(`阶段3 参数错误：${p.__error}`);
         p.n_sims = Math.trunc(_num("simNSims", 10000));
         p.chunk_size = Math.trunc(_num("simChunk", 200));
         p.n_jobs = Math.max(0, Math.trunc(_num("simMcJobs", 0)));
         p.strategy_a = strategyA;
+        p.strategy_b = strategyB;
+        p.target_a = _str("simAbTargetA") || "rotation_a";
+        p.target_b = _str("simAbTargetB") || "equal_weight";
         const resp = await api("/analysis/sim/gbm/phase3", { method: "POST", body: JSON.stringify(p) });
         const data = await resp.json();
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
@@ -11355,7 +11393,7 @@
           skip_days: Math.max(0, Math.trunc(_num(`${p}skip`, 0))),
           score_method: _str(`${p}score`) || "raw_mom",
           risk_free_rate: _num(`${p}rf`, 0.025),
-          cost_bps: _num(`${p}cost`, 0),
+          cost_bps: _num(`${p}cost`, 2),
           trend_filter: _boolSel(`${p}trendOn`, false),
           trend_exit_filter: _boolSel(`${p}trendExit`, false),
           trend_sma_window: 20,
@@ -11447,6 +11485,16 @@
           target_b: targetB,
           strategy_a: strategyA,
           strategy_b: strategyB,
+          holding_strategy_a: {
+            rebalance: _str("simHoldRebalance") || "weekly",
+            cost_bps: Math.max(0, _num("simHoldCost", 2)),
+            rp_vol_window: 20,
+          },
+          holding_strategy_b: {
+            rebalance: _str("simHoldBRebalance") || "weekly",
+            cost_bps: Math.max(0, _num("simHoldBCost", 2)),
+            rp_vol_window: 20,
+          },
         };
         const resp = await api("/analysis/sim/gbm/ab-significance", { method: "POST", body: JSON.stringify(p) });
         const data = await resp.json();

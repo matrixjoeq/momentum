@@ -100,10 +100,10 @@ from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
 from ..analysis.sim_gbm import (
     SimConfig as _SimCfg,
     apply_position_sizing,
-    backtest_equal_weight_weekly,
-    backtest_risk_parity_inverse_vol,
+    backtest_holding_rebalance,
     _run_rotation_variant_with_series_on_sim,
     gbm_ab_significance,
+    montecarlo_strategy_pair,
     montecarlo_rotation_vs_ew,
     simulate_gbm_prices,
 )
@@ -3689,11 +3689,75 @@ def sim_gbm_phase2(payload: SimGbmPhase2Request) -> dict:
     idx = pd.to_datetime(dates)
     close = pd.DataFrame({c: close_map.get(c) for c in codes}, index=idx, dtype=float)
     strat_a = dict(payload.strategy_a or {})
+    strat_b = dict(payload.strategy_b or {})
     if not strat_a:
         strat_a = {"lookback_days": int(payload.lookback_days), "top_k": 1}
+    if not strat_b:
+        strat_b = {"lookback_days": int(payload.lookback_days), "top_k": 1}
+    hold_base = payload.holding_strategy.model_dump() if payload.holding_strategy is not None else {}
+    hold_a = (payload.holding_strategy_a.model_dump() if payload.holding_strategy_a is not None else dict(hold_base))
+    hold_b = (payload.holding_strategy_b.model_dump() if payload.holding_strategy_b is not None else dict(hold_base))
+
+    def _label_of(t: str) -> str:
+        m = {
+            "cash": "持有现金",
+            "equal_weight": "等权再平衡",
+            "risk_parity": "风险平价再平衡",
+            "rotation_a": "轮动策略A",
+            "rotation_b": "轮动策略B",
+        }
+        return m.get(str(t), str(t))
+
+    def _eval_target(t: str, is_a: bool) -> dict:
+        tt = str(t or "").strip().lower()
+        hs = hold_a if is_a else hold_b
+        hs_reb = str(hs.get("rebalance", "weekly") or "weekly")
+        hs_cost = float(hs.get("cost_bps", 2.0) or 0.0)
+        hs_rp = int(hs.get("rp_vol_window", 20) or 20)
+        if tt == "cash":
+            dates_s = pd.DatetimeIndex(idx).strftime("%Y-%m-%d").tolist()
+            nav = [1.0 for _ in dates_s]
+            return {"ok": True, "series": {"dates": dates_s, "nav": nav}, "metrics": {}}
+        if tt == "equal_weight":
+            return backtest_holding_rebalance(
+                close,
+                allocation="equal_weight",
+                rebalance=hs_reb,
+                cost_bps=hs_cost,
+            )
+        if tt == "risk_parity":
+            return backtest_holding_rebalance(
+                close,
+                allocation="risk_parity",
+                rebalance=hs_reb,
+                cost_bps=hs_cost,
+                ann_vols=(base.get("assets") or {}).get("ann_vols") or {},
+                rp_vol_window=hs_rp,
+            )
+        if tt == "rotation_b":
+            return _run_rotation_variant_with_series_on_sim(close, strat_b)
+        return _run_rotation_variant_with_series_on_sim(close, strat_a)
+
+    target_a = str(payload.target_a or "rotation_a")
+    target_b = str(payload.target_b or "equal_weight")
+    out_a = _eval_target(target_a, True)
+    out_b = _eval_target(target_b, False)
+
     rot = _run_rotation_variant_with_series_on_sim(close, strat_a)
-    ew = backtest_equal_weight_weekly(close)
-    rp = backtest_risk_parity_inverse_vol(close, ann_vols=(base.get("assets") or {}).get("ann_vols") or {})
+    ew = backtest_holding_rebalance(
+        close,
+        allocation="equal_weight",
+        rebalance=str(hold_base.get("rebalance", "weekly") or "weekly"),
+        cost_bps=float(hold_base.get("cost_bps", 2.0) or 0.0),
+    )
+    rp = backtest_holding_rebalance(
+        close,
+        allocation="risk_parity",
+        rebalance=str(hold_base.get("rebalance", "weekly") or "weekly"),
+        cost_bps=float(hold_base.get("cost_bps", 2.0) or 0.0),
+        ann_vols=(base.get("assets") or {}).get("ann_vols") or {},
+        rp_vol_window=int(hold_base.get("rp_vol_window", 20) or 20),
+    )
     return {
         "ok": True,
         "meta": {**dict(base.get("meta") or {}), "phase1_reused": bool(base_in.get("ok"))},
@@ -3703,16 +3767,23 @@ def sim_gbm_phase2(payload: SimGbmPhase2Request) -> dict:
         "rotation": rot,
         "equal_weight": ew,
         "risk_parity": rp,
+        "comparison": {
+            "target_a": target_a,
+            "target_b": target_b,
+            "label_a": _label_of(target_a),
+            "label_b": _label_of(target_b),
+            "a": out_a,
+            "b": out_b,
+        },
     }
 
 
 @router.post("/analysis/sim/gbm/phase3")
 def sim_gbm_phase3(payload: SimGbmPhase3Request) -> dict:
-    return montecarlo_rotation_vs_ew(
+    return montecarlo_strategy_pair(
         start=str(payload.start),
         end=(str(payload.end) if payload.end else None),
         n_sims=int(payload.n_sims),
-        chunk_size=int(payload.chunk_size),
         n_assets=int(payload.n_assets),
         vol_low=float(payload.vol_low),
         vol_high=float(payload.vol_high),
@@ -3721,8 +3792,12 @@ def sim_gbm_phase3(payload: SimGbmPhase3Request) -> dict:
         mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
         mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
         seed=(None if payload.seed is None else int(payload.seed)),
-        lookback_days=int(payload.lookback_days),
+        target_a=(None if payload.target_a is None else str(payload.target_a)),
+        target_b=(None if payload.target_b is None else str(payload.target_b)),
         strategy_a=(dict(payload.strategy_a or {}) if payload.strategy_a is not None else None),
+        strategy_b=(dict(payload.strategy_b or {}) if payload.strategy_b is not None else None),
+        holding_strategy_a=(payload.holding_strategy_a.model_dump() if payload.holding_strategy_a is not None else payload.holding_strategy.model_dump()),
+        holding_strategy_b=(payload.holding_strategy_b.model_dump() if payload.holding_strategy_b is not None else payload.holding_strategy.model_dump()),
         n_jobs=int(payload.n_jobs),
     )
 
@@ -3751,9 +3826,25 @@ def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
     strat_a = dict(payload.strategy_a or {})
     if not strat_a:
         strat_a = {"lookback_days": int(payload.lookback_days), "top_k": 1}
+    hold = payload.holding_strategy.model_dump() if payload.holding_strategy is not None else {}
+    hold_reb = str(hold.get("rebalance", "weekly") or "weekly")
+    hold_cost = float(hold.get("cost_bps", 2.0) or 0.0)
+    hold_rp_win = int(hold.get("rp_vol_window", 20) or 20)
     rot = _run_rotation_variant_with_series_on_sim(close, strat_a)
-    ew = backtest_equal_weight_weekly(close)
-    rp = backtest_risk_parity_inverse_vol(close, ann_vols=(base.get("assets") or {}).get("ann_vols") or {})
+    ew = backtest_holding_rebalance(
+        close,
+        allocation="equal_weight",
+        rebalance=hold_reb,
+        cost_bps=hold_cost,
+    )
+    rp = backtest_holding_rebalance(
+        close,
+        allocation="risk_parity",
+        rebalance=hold_reb,
+        cost_bps=hold_cost,
+        ann_vols=(base.get("assets") or {}).get("ann_vols") or {},
+        rp_vol_window=hold_rp_win,
+    )
     if not bool(rot.get("ok")) or not bool(ew.get("ok")):
         return {"ok": False, "error": "backtest_failed", "rotation": rot, "equal_weight": ew}
     nav_rot = pd.Series((rot.get("series") or {}).get("nav") or [], index=idx, dtype=float)
@@ -3779,6 +3870,7 @@ def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
         seed=(None if payload.seed is None else int(payload.seed)),
         lookback_days=int(payload.lookback_days),
         strategy_a=(dict(payload.strategy_a or {}) if payload.strategy_a is not None else None),
+        holding_strategy=(payload.holding_strategy.model_dump() if payload.holding_strategy is not None else None),
         n_jobs=int(payload.n_jobs),
     )
     # Ruin (theoretical) for GBM with pos<=1 is 0; we still report a conservative check on min_equity_ratio using the single-path sized runs.
@@ -3816,6 +3908,8 @@ def sim_gbm_ab_significance(payload: SimGbmAbSignificanceRequest) -> dict:
         "target_a": (None if payload.target_a is None else str(payload.target_a)),
         "target_b": (None if payload.target_b is None else str(payload.target_b)),
         "comparison_mode": str(payload.comparison_mode),
+        "holding_strategy_a": payload.holding_strategy_a.model_dump(),
+        "holding_strategy_b": payload.holding_strategy_b.model_dump(),
     }
     return gbm_ab_significance(**req)
 

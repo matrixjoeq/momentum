@@ -3,6 +3,7 @@ AGENTS.md
 Overview
 - This file documents how coding agents should build, lint, test, and style this codebase.
 - It also defines naming, error handling, and import conventions to keep the project coherent across contributors.
+- **Skill installation:** Any request to install a Skill must follow the mandatory “Installing Skills” workflow in § Security and secrets (vet → report → confirm → install only after approval).
 - Cursor rules and Copilot guidelines are included if present in the repository. If not, note their absence.
 
 Quick Start: local dev setup
@@ -93,7 +94,12 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 - Security and secrets
   - Do not embed credentials; use environment variables or vaults.
   - Validate inputs and guard against injection risks in SQL and templating.
-  - Skill installation safety policy:
+  - **Installing Skills (mandatory workflow — do not skip):**
+    1. **Vet first:** Before installing any Skill (SkillHub, GitHub, or other), run the `skill-vetter` protocol: review the skill’s source and all files for red flags, permissions, and risk level.
+    2. **Report:** Share the vetting report with the user (risk level, verdict, notes).
+    3. **Confirm:** Explicitly ask for user confirmation. Reject high-risk skills by default; only proceed if the user gives explicit approval.
+    4. **Install only after approval:** Run the install step only after the user has approved. Never install a skill before steps 1–3 are complete.
+  - Skill installation safety policy (summary):
     - Before installing any Skill, run `skill-vetter` for a security check first.
     - Share the vetting result with the user and explicitly ask for confirmation.
     - By default, reject high-risk Skills; only proceed when the user gives explicit special approval.

@@ -207,6 +207,32 @@ def test_sim_gbm_phase2_uses_strategy_a_payload(api_client):
     assert "rotation" in data and "equal_weight" in data
 
 
+def test_sim_gbm_phase2_holding_strategy_supports_rebalance_and_cost(api_client):
+    c = api_client
+    data = post_json_ok(
+        c,
+        "/api/analysis/sim/gbm/phase2",
+        {
+            "start": "19900101",
+            "end": "19900330",
+            "n_assets": 4,
+            "vol_low": 0.05,
+            "vol_high": 0.30,
+            "seed": 123,
+            "lookback_days": 20,
+            "holding_strategy": {"rebalance": "monthly", "cost_bps": 7.0, "rp_vol_window": 15},
+            "strategy_a": {"lookback_days": 20, "top_k": 1},
+        },
+    )
+    assert data["ok"] is True
+    ew_h = ((data.get("equal_weight") or {}).get("holding") or {})
+    rp_h = ((data.get("risk_parity") or {}).get("holding") or {})
+    assert ew_h.get("rebalance") == "monthly"
+    assert rp_h.get("rebalance") == "monthly"
+    assert ew_h.get("cost_bps") == pytest.approx(7.0)
+    assert rp_h.get("cost_bps") == pytest.approx(7.0)
+
+
 def test_sim_gbm_phase2_reuses_phase1_payload(api_client):
     c = api_client
     p1 = post_json_ok(
@@ -270,6 +296,34 @@ def test_sim_gbm_ab_significance_ok(api_client):
     assert 0.0 <= p_wil <= 1.0
     ci = data["stats"]["bootstrap_ci_95"]["mean"]
     assert isinstance(ci, list) and len(ci) == 2
+
+
+def test_sim_gbm_ab_significance_holding_strategy_params(api_client):
+    c = api_client
+    data = post_json_ok(
+        c,
+        "/api/analysis/sim/gbm/ab-significance",
+        {
+            "start": "19900101",
+            "end": "19911231",
+            "n_worlds": 2,
+            "n_assets": 4,
+            "vol_low": 0.05,
+            "vol_high": 0.30,
+            "seed": 11,
+            "n_perm": 1200,
+            "n_boot": 1200,
+            "target_a": "equal_weight",
+            "target_b": "risk_parity",
+            "holding_strategy_a": {"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 10},
+            "holding_strategy_b": {"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 10},
+            "strategy_a": {"lookback_days": 20, "top_k": 1},
+            "strategy_b": {"lookback_days": 60, "top_k": 1},
+        },
+    )
+    assert data["ok"] is True
+    assert data["comparison"]["target_a"] == "equal_weight"
+    assert data["comparison"]["target_b"] == "risk_parity"
 
 
 def test_sim_gbm_ab_significance_rotation_vs_equal_weight(api_client):
