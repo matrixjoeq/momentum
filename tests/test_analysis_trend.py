@@ -61,6 +61,33 @@ def test_trend_ema_filter_smoke(session_factory):
     assert any(x > 0 for x in out["signals"]["position"])
 
 
+def test_trend_ma_cross_supports_ema_type(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + (i * 0.35 if i < 55 else (55 * 0.35) - (i - 55) * 0.5)
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_cross",
+                fast_window=10,
+                slow_window=30,
+                ma_type="ema",
+                cost_bps=0.0,
+            ),
+        )
+    assert out["meta"]["strategy"] == "ma_cross"
+    assert out["meta"]["params"]["ma_type"] == "ema"
+    assert len(out["signals"]["position"]) == len(out["nav"]["dates"])
+
+
 def test_trend_linreg_slope_smoke(session_factory):
     sf = session_factory
     code = "AAA"

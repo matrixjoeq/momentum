@@ -167,6 +167,44 @@ def _sample_pairwise_corr_matrix(
     return best if best is not None else np.eye(n, dtype=float)
 
 
+def _enforce_mu_monotonic_with_vol(ann_vols: np.ndarray, ann_mus: np.ndarray) -> np.ndarray:
+    """
+    Enforce monotonic positive relation between annual vol and annual drift:
+    if vol_i < vol_j then mu_i <= mu_j.
+
+    Implemented via rank-matching:
+    - sort vols ascending to get asset rank
+    - sort mus ascending
+    - assign sorted mus back by vol rank
+    """
+    vol = np.asarray(ann_vols, dtype=float)
+    mu = np.asarray(ann_mus, dtype=float)
+    if vol.ndim != 1 or mu.ndim != 1 or vol.shape[0] != mu.shape[0]:
+        raise ValueError("invalid_mu_vol_shape")
+    if vol.size <= 1:
+        return mu.astype(float, copy=True)
+    vol_order = np.argsort(vol, kind="mergesort")
+    mu_sorted = np.sort(mu, kind="mergesort")
+    out = np.empty_like(mu_sorted, dtype=float)
+    out[vol_order] = mu_sorted
+    return out
+
+
+def _enforce_mu_monotonic_with_vol_batch(ann_vols: np.ndarray, ann_mus: np.ndarray) -> np.ndarray:
+    vol = np.asarray(ann_vols, dtype=float)
+    mu = np.asarray(ann_mus, dtype=float)
+    if vol.ndim != 2 or mu.ndim != 2 or vol.shape != mu.shape:
+        raise ValueError("invalid_mu_vol_shape")
+    if vol.shape[1] <= 1:
+        return mu.astype(float, copy=True)
+    vol_order = np.argsort(vol, axis=1, kind="mergesort")
+    mu_sorted = np.sort(mu, axis=1, kind="mergesort")
+    out = np.empty_like(mu_sorted, dtype=float)
+    rows = np.arange(vol.shape[0])[:, None]
+    out[rows, vol_order] = mu_sorted
+    return out
+
+
 def simulate_gbm_prices(
     *,
     start: str = "19900101",
@@ -206,6 +244,7 @@ def simulate_gbm_prices(
     rng = np.random.default_rng(None if cfg.seed is None else int(cfg.seed))
     ann_vols = rng.uniform(low=v0, high=v1, size=n).astype(float)
     ann_mus = rng.uniform(low=mu0, high=mu1, size=n).astype(float)
+    ann_mus = _enforce_mu_monotonic_with_vol(ann_vols, ann_mus)
     sig_d = ann_vols / np.sqrt(float(TRADING_DAYS_PER_YEAR))
     mu_d = ann_mus / float(TRADING_DAYS_PER_YEAR)
     if corr_range is None:
@@ -252,6 +291,7 @@ def simulate_gbm_prices(
             ),
             "mu_low": (None if cfg.mu_low is None else float(cfg.mu_low)),
             "mu_high": (None if cfg.mu_high is None else float(cfg.mu_high)),
+            "mu_vol_rule": "monotonic_rank",
             "seed": (None if cfg.seed is None else int(cfg.seed)),
             "calendar": "pandas_B",
             "return_model": "log1p(r) ~ Normal(mu_d, sigma_d), sigma_d=ann_vol/sqrt(252), mu_d=ann_mu/252",
@@ -666,6 +706,7 @@ def montecarlo_rotation_vs_ew(
             m = min(chunk_size, n_sims - done)
             ann_vols_all = rng.uniform(low=float(vol_low), high=float(vol_high), size=(m, n_assets)).astype(float)
             ann_mus_all = rng.uniform(low=float(mu0), high=float(mu1), size=(m, n_assets)).astype(float)
+            ann_mus_all = _enforce_mu_monotonic_with_vol_batch(ann_vols_all, ann_mus_all)
             ann_vols = ann_vols_all[:, asset_indices]
             ann_mus = ann_mus_all[:, asset_indices]
             sig_d = ann_vols / np.sqrt(float(TRADING_DAYS_PER_YEAR))
@@ -749,6 +790,7 @@ def montecarlo_rotation_vs_ew(
             "corr_high": (None if corr_high is None else float(corr_high)),
             "mu_low": (None if mu_low is None else float(mu_low)),
             "mu_high": (None if mu_high is None else float(mu_high)),
+            "mu_vol_rule": "monotonic_rank",
             "seed": (None if seed is None else int(seed)),
             "lookback_days": int(lookback_days),
             "strategy_a_applied": bool(use_strategy_a),
@@ -1639,6 +1681,7 @@ def gbm_ab_significance(
             "corr_high": (None if corr_high is None else float(corr_high)),
             "mu_low": (None if mu_low is None else float(mu_low)),
             "mu_high": (None if mu_high is None else float(mu_high)),
+            "mu_vol_rule": "monotonic_rank",
             "seed": seed,
             "n_jobs": int(jobs_effective),
             "n_samples": int(diff.size),

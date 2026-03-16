@@ -2133,6 +2133,13 @@
         <div><label>均线窗口(交易日)</label><input id="trendSmaWin" value="200" /></div>
         <div><label>快线窗口</label><input id="trendFastWin" value="50" /></div>
         <div><label>慢线窗口</label><input id="trendSlowWin" value="200" /></div>
+        <div>
+          <label>双均线类型</label>
+          <select id="trendMaType" style="min-width:120px;">
+            <option value="sma" selected>SMA</option>
+            <option value="ema">EMA</option>
+          </select>
+        </div>
         <div><label>唐奇安入场</label><input id="trendDonEntry" value="20" /></div>
         <div><label>唐奇安出场</label><input id="trendDonExit" value="10" /></div>
         <div><label>TSMOM回看</label><input id="trendMomLb" value="252" /></div>
@@ -2263,7 +2270,7 @@
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
           "trendMode", "trendStrategy", "trendCost", "trendTopK", "trendSizing", "trendGroupEnforce", "trendGroupPolicy", "trendAssetGroups", "trendSingleCode",
-          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendDonEntry", "trendDonExit", "trendMomLb",
+          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
         ],
@@ -4107,6 +4114,7 @@
           "trendSmaWin",
           "trendFastWin",
           "trendSlowWin",
+          "trendMaType",
           "trendDonEntry",
           "trendDonExit",
           "trendMomLb",
@@ -4124,7 +4132,7 @@
         const byStrat = {
           ma_filter: ["trendSmaWin"],
           ema_filter: ["trendSmaWin"],
-          ma_cross: ["trendFastWin", "trendSlowWin"],
+          ma_cross: ["trendFastWin", "trendSlowWin", "trendMaType"],
           donchian: ["trendDonEntry", "trendDonExit"],
           tsmom: ["trendMomLb"],
           linreg_slope: ["trendSmaWin"],
@@ -4158,6 +4166,7 @@
           trendSmaWin: "均线窗口：均线/回归窗口长度（交易日）。",
           trendFastWin: "快线窗口：短周期均线窗口。",
           trendSlowWin: "慢线窗口：长周期均线窗口，需大于快线。",
+          trendMaType: "双均线类型：ma_cross 使用的均线计算方式（SMA/EMA）。",
           trendDonEntry: "唐奇安入场：上轨突破回看窗口。",
           trendDonExit: "唐奇安出场：下轨跌破回看窗口。",
           trendMomLb: "TSMOM回看：动量收益计算窗口。",
@@ -8348,6 +8357,7 @@
           sma_window: Number(($("trendSmaWin").value || "200").trim()),
           fast_window: Number(($("trendFastWin").value || "50").trim()),
           slow_window: Number(($("trendSlowWin").value || "200").trim()),
+          ma_type: (($("trendMaType") && $("trendMaType").value) ? String($("trendMaType").value) : "sma"),
           donchian_entry: Number(($("trendDonEntry").value || "20").trim()),
           donchian_exit: Number(($("trendDonExit").value || "10").trim()),
           mom_lookback: Number(($("trendMomLb").value || "252").trim()),

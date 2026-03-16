@@ -39,6 +39,7 @@ class TrendInputs:
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
     slow_window: int = 200  # ma_cross
+    ma_type: str = "sma"  # ma_cross: sma | ema
     donchian_entry: int = 20  # donchian
     donchian_exit: int = 10  # donchian
     mom_lookback: int = 252  # tsmom
@@ -78,6 +79,7 @@ class TrendPortfolioInputs:
     sma_window: int = 200
     fast_window: int = 50
     slow_window: int = 200
+    ma_type: str = "sma"
     donchian_entry: int = 20
     donchian_exit: int = 10
     mom_lookback: int = 252
@@ -149,6 +151,14 @@ def _pos_from_donchian(close: pd.Series, *, entry: int, exit_: int) -> pd.Series
 def _ema(s: pd.Series, window: int) -> pd.Series:
     w = max(2, int(window))
     return s.ewm(span=w, adjust=False, min_periods=max(2, w // 2)).mean()
+
+
+def _moving_average(s: pd.Series, *, window: int, ma_type: str) -> pd.Series:
+    t = str(ma_type or "sma").strip().lower()
+    if t == "ema":
+        return _ema(s, int(window))
+    w = max(2, int(window))
+    return s.rolling(window=w, min_periods=max(2, w // 2)).mean()
 
 
 def _macd_core(close: pd.Series, *, fast: int, slow: int, signal: int) -> tuple[pd.Series, pd.Series, pd.Series]:
@@ -273,6 +283,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("fast_window/slow_window must be >= 2")
     if int(inp.fast_window) >= int(inp.slow_window):
         raise ValueError("fast_window must be < slow_window")
+    ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
+    if ma_type not in {"sma", "ema"}:
+        raise ValueError("ma_type must be one of: sma|ema")
     if int(inp.donchian_entry) < 2 or int(inp.donchian_exit) < 2:
         raise ValueError("donchian_entry/donchian_exit must be >= 2")
     if int(inp.mom_lookback) < 2:
@@ -394,8 +407,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         ema = px_sig.ewm(span=span, adjust=False, min_periods=max(2, span // 2)).mean()
         raw_pos = (px_sig > ema).astype(float).fillna(0.0)
     elif strat == "ma_cross":
-        fast = px_sig.rolling(window=int(inp.fast_window), min_periods=max(2, int(inp.fast_window) // 2)).mean()
-        slow = px_sig.rolling(window=int(inp.slow_window), min_periods=max(2, int(inp.slow_window) // 2)).mean()
+        fast = _moving_average(px_sig, window=int(inp.fast_window), ma_type=ma_type)
+        slow = _moving_average(px_sig, window=int(inp.slow_window), ma_type=ma_type)
         raw_pos = (fast > slow).astype(float).fillna(0.0)
     elif strat == "donchian":
         raw_pos = _pos_from_donchian(px_sig, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)).astype(float)
@@ -542,6 +555,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "sma_window": int(inp.sma_window),
                 "fast_window": int(inp.fast_window),
                 "slow_window": int(inp.slow_window),
+                "ma_type": ma_type,
                 "donchian_entry": int(inp.donchian_entry),
                 "donchian_exit": int(inp.donchian_exit),
                 "mom_lookback": int(inp.mom_lookback),
@@ -610,6 +624,9 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
     gp = str(inp.group_pick_policy or "strongest_score").strip().lower()
     if gp not in {"strongest_score", "earliest_entry", "lowest_vol"}:
         raise ValueError(f"invalid group_pick_policy={inp.group_pick_policy}")
+    ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
+    if ma_type not in {"sma", "ema"}:
+        raise ValueError("ma_type must be one of: sma|ema")
 
     strat = str(inp.strategy or "ma_filter").strip().lower()
     need_hist = max(int(inp.sma_window), int(inp.slow_window), int(inp.donchian_entry), int(inp.mom_lookback), int(inp.macd_slow), int(inp.macd_v_atr_window), 20) + 60
@@ -686,8 +703,8 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
             pos = (px > ema).astype(float)
             score = (px / ema - 1.0).astype(float)
         elif strat == "ma_cross":
-            fast = px.rolling(window=int(inp.fast_window), min_periods=max(2, int(inp.fast_window) // 2)).mean()
-            slow = px.rolling(window=int(inp.slow_window), min_periods=max(2, int(inp.slow_window) // 2)).mean()
+            fast = _moving_average(px, window=int(inp.fast_window), ma_type=ma_type)
+            slow = _moving_average(px, window=int(inp.slow_window), ma_type=ma_type)
             pos = (fast > slow).astype(float)
             score = (fast / slow - 1.0).astype(float)
         elif strat == "donchian":
@@ -870,6 +887,7 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
                 "group_enforce": bool(inp.group_enforce),
                 "group_pick_policy": gp,
                 "asset_groups": {k: v for k, v in group_map.items()},
+                "ma_type": ma_type,
                 "exec_price": str(ep),
             },
         },

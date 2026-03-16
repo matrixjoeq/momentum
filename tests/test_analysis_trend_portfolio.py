@@ -77,3 +77,28 @@ def test_trend_portfolio_holds_cash_when_candidates_not_greater_than_topk(sessio
     assert out["holdings"]
     assert all((h.get("picks") or []) == [] for h in out["holdings"])
 
+
+def test_trend_portfolio_ma_cross_supports_ema_type(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-03-31", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 1.0)
+            _add_price(db, code="B1", day=d, close=100 + i * 0.7)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "B1"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_cross",
+                fast_window=8,
+                slow_window=20,
+                ma_type="ema",
+                top_k=1,
+            ),
+        )
+    assert out["meta"]["strategy"] == "ma_cross"
+    assert ((out.get("meta") or {}).get("params") or {}).get("ma_type") == "ema"
+
