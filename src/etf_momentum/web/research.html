@@ -4,35 +4,85 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>基准分析（等权组合）</title>
+    <script>
+      (function () {
+        const key = `theme:${location.pathname}`;
+        let theme = "dark";
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved === "light" || saved === "dark") theme = saved;
+        } catch (_) {}
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
     <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 24px; }
+      :root {
+        --bg: #0b1220;
+        --surface: #121a2b;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --border: #334155;
+        --head: #1e293b;
+        --control-bg: #0f172a;
+        --link: #7dd3fc;
+        --plot-fg: #e5e7eb;
+        --plot-grid: #334155;
+        --plot-bg: #0f172a;
+      }
+      :root[data-theme="light"] {
+        --bg: #ffffff;
+        --surface: #ffffff;
+        --text: #111827;
+        --muted: #4b5563;
+        --border: #d1d5db;
+        --head: #f3f4f6;
+        --control-bg: #ffffff;
+        --link: #2563eb;
+        --plot-fg: #111827;
+        --plot-grid: #d1d5db;
+        --plot-bg: #ffffff;
+      }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 24px; background: var(--bg); color: var(--text); }
       .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
-      label { display: block; font-size: 12px; color: #444; margin-bottom: 4px; }
-      input, select { padding: 8px; min-width: 180px; }
-      button { padding: 8px 12px; cursor: pointer; }
-      .muted { color: #666; font-size: 12px; }
+      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+      input, select { padding: 8px; min-width: 180px; background: var(--control-bg); color: var(--text); border: 1px solid var(--border); }
+      button { padding: 8px 12px; cursor: pointer; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+      .muted { color: var(--muted); font-size: 12px; }
       .panel { margin-top: 16px; }
       table { border-collapse: collapse; width: 100%; }
-      th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
-      th { background: #f7f7f7; }
+      th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; font-size: 13px; }
+      th { background: var(--head); }
       #chart, #rollingReturns, #rollingDD { width: 100%; height: 520px; }
       .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-      .code-list { max-height: 220px; overflow: auto; border: 1px solid #ddd; padding: 8px; min-width: 320px; }
+      .code-list { max-height: 220px; overflow: auto; border: 1px solid var(--border); padding: 8px; min-width: 320px; }
       .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
-      .tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid #ddd; padding-bottom: 8px; margin-bottom: 12px; }
-      .tabBtn { padding: 8px 12px; border: 1px solid #bbb; background: #fff; border-radius: 10px 10px 0 0; cursor: pointer; }
-      .tabBtn.active { border-color: #444; font-weight: 600; }
+      .tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 12px; }
+      .tabBtn { padding: 8px 12px; border: 1px solid var(--border); background: var(--surface); border-radius: 10px 10px 0 0; cursor: pointer; color: var(--text); }
+      .tabBtn.active { border-color: var(--text); font-weight: 600; }
       .tabPanel { display: none; }
       .tabPanel.active { display: block; }
-      .reportCard { margin-top: 10px; border: 1px solid #e6e9ef; background: #f8fafc; border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.55; color: #334155; }
+      .reportCard { margin-top: 10px; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.55; color: var(--text); }
       .reportCard:empty { display: none; }
-      .reportCard .reportTitle { font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-      .reportCard .reportSectionTitle { margin-top: 6px; font-weight: 600; color: #1e293b; }
+      .reportCard .reportTitle { font-weight: 700; color: var(--text); margin-bottom: 4px; }
+      .reportCard .reportSectionTitle { margin-top: 6px; font-weight: 600; color: var(--text); }
       .reportCard .reportList { margin: 6px 0 0 18px; }
-      .reportCard .reportNote { margin-top: 6px; color: #64748b; font-size: 12px; }
+      .reportCard .reportNote { margin-top: 6px; color: var(--muted); font-size: 12px; }
       .abCol { min-width: 520px; flex: 1; min-inline-size: 0; }
       .abWideTableWrap { width: 100%; overflow-x: auto; }
+      [style*="color:#444"] { color: var(--muted) !important; }
+      .helpBtn { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
+      #metricModal > div { background: var(--surface) !important; color: var(--text); border: 1px solid var(--border); }
+      a { color: var(--link); }
+      .theme-toggle {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        z-index: 9999;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 12px;
+      }
 
       @media print {
         body { margin: 12mm; }
@@ -2208,6 +2258,98 @@
     </div>
 
     <script>
+      (function initThemeAndPlotly() {
+        const THEME_KEY = `theme:${location.pathname}`;
+        const html = document.documentElement;
+        const isLight = () => html.getAttribute("data-theme") === "light";
+        const setTheme = (theme) => {
+          html.setAttribute("data-theme", theme);
+          try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+          const btn = document.getElementById("themeToggle");
+          if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+          document.dispatchEvent(new CustomEvent("themechange"));
+        };
+        const cssVar = (name, fallback) => (getComputedStyle(html).getPropertyValue(name).trim() || fallback);
+        const plotTheme = () => ({
+          paper_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
+          plot_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
+          font: { color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb") },
+          legend: { font: { color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb") } },
+          axis: {
+            color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+            gridcolor: cssVar("--plot-grid", isLight() ? "#d1d5db" : "#334155"),
+            zerolinecolor: cssVar("--plot-grid", isLight() ? "#d1d5db" : "#334155"),
+          },
+        });
+        const patchBlack = (color) => {
+          if (!color || typeof color !== "string") return color;
+          const c = color.replace(/\s+/g, "").toLowerCase();
+          if (c === "#111" || c === "#111111" || c.startsWith("rgba(17,17,17")) {
+            return cssVar("--plot-fg", "#e5e7eb");
+          }
+          return color;
+        };
+        const themedData = (data) => (data || []).map((trace) => {
+          const t = { ...trace };
+          if (t.line && typeof t.line === "object") t.line = { ...t.line, color: patchBlack(t.line.color) };
+          if (t.marker && typeof t.marker === "object") t.marker = { ...t.marker, color: patchBlack(t.marker.color) };
+          if (typeof t.fillcolor === "string") t.fillcolor = patchBlack(t.fillcolor);
+          return t;
+        });
+        const themedLayout = (layout) => {
+          const base = plotTheme();
+          const next = { ...(layout || {}) };
+          next.paper_bgcolor = base.paper_bgcolor;
+          next.plot_bgcolor = base.plot_bgcolor;
+          next.font = { ...base.font, ...(next.font || {}) };
+          next.legend = { ...base.legend, ...(next.legend || {}) };
+          const keys = Object.keys(next).filter((k) => /^xaxis\d*$|^yaxis\d*$/.test(k));
+          const axisKeys = keys.length ? keys : ["xaxis", "yaxis"];
+          for (const k of axisKeys) next[k] = { ...base.axis, ...(next[k] || {}) };
+          return next;
+        };
+        const refreshPlotlyTheme = () => {
+          if (!window.Plotly) return;
+          const base = plotTheme();
+          for (const gd of document.querySelectorAll(".js-plotly-plot")) {
+            const patch = {
+              paper_bgcolor: base.paper_bgcolor,
+              plot_bgcolor: base.plot_bgcolor,
+              "font.color": base.font.color,
+              "legend.font.color": base.font.color,
+            };
+            const keys = Object.keys(gd.layout || {}).filter((k) => /^xaxis\d*$|^yaxis\d*$/.test(k));
+            for (const k of keys) {
+              patch[`${k}.color`] = base.axis.color;
+              patch[`${k}.gridcolor`] = base.axis.gridcolor;
+              patch[`${k}.zerolinecolor`] = base.axis.zerolinecolor;
+            }
+            Plotly.relayout(gd, patch);
+          }
+        };
+
+        document.addEventListener("DOMContentLoaded", () => {
+          const btn = document.createElement("button");
+          btn.id = "themeToggle";
+          btn.className = "theme-toggle no-print";
+          btn.type = "button";
+          btn.addEventListener("click", () => setTheme(isLight() ? "dark" : "light"));
+          document.body.appendChild(btn);
+          setTheme(html.getAttribute("data-theme") || "dark");
+
+          if (window.Plotly && !window.Plotly.__themePatched) {
+            const rawNewPlot = window.Plotly.newPlot.bind(window.Plotly);
+            const rawReact = window.Plotly.react.bind(window.Plotly);
+            window.Plotly.newPlot = (gd, data, layout, config) =>
+              rawNewPlot(gd, themedData(data), themedLayout(layout), config);
+            window.Plotly.react = (gd, data, layout, config) =>
+              rawReact(gd, themedData(data), themedLayout(layout), config);
+            window.Plotly.__themePatched = true;
+          }
+        });
+        document.addEventListener("themechange", refreshPlotlyTheme);
+      })();
+
       const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
       const $ = (id) => document.getElementById(id);
       const esc = (s) => String(s == null ? "" : s)

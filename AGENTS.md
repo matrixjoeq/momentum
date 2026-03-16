@@ -93,6 +93,11 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 - Security and secrets
   - Do not embed credentials; use environment variables or vaults.
   - Validate inputs and guard against injection risks in SQL and templating.
+  - Skill installation safety policy:
+    - Before installing any Skill, run `skill-vetter` for a security check first.
+    - Share the vetting result with the user and explicitly ask for confirmation.
+    - By default, reject high-risk Skills; only proceed when the user gives explicit special approval.
+    - Only install the Skill after the user explicitly approves.
 
 - Maintenance and evolves
   - Add/adjust unit tests when changing public interfaces.
