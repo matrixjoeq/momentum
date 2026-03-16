@@ -102,7 +102,7 @@ from ..analysis.sim_gbm import (
     apply_position_sizing,
     backtest_equal_weight_weekly,
     backtest_risk_parity_inverse_vol,
-    backtest_rotation_basic,
+    _run_rotation_variant_with_series_on_sim,
     gbm_ab_significance,
     montecarlo_rotation_vs_ew,
     simulate_gbm_prices,
@@ -537,10 +537,6 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
 
 @router.post("/analysis/baseline/calendar-effect")
 def baseline_calendar_effect(payload: BaselineCalendarEffectRequest, db: Session = Depends(get_session)) -> dict:
-    anchors = payload.anchors
-    # backward-compat for weekly-only payloads
-    if (payload.weekdays is not None) and (payload.anchors == [0, 1, 2, 3, 4]) and ((payload.rebalance or "weekly").lower() == "weekly"):
-        anchors = payload.weekdays
     inp = BaselineCalendarEffectInputs(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
@@ -549,7 +545,7 @@ def baseline_calendar_effect(payload: BaselineCalendarEffectRequest, db: Session
         risk_free_rate=payload.risk_free_rate,
         rebalance=payload.rebalance,
         rebalance_shift=payload.rebalance_shift,
-        anchors=anchors,
+        anchors=payload.anchors,
         exec_prices=payload.exec_prices,
     )
     try:
@@ -662,12 +658,7 @@ def _rotation_inputs_from_payload(
         exit_match_n=payload.exit_match_n,
         lookback_days=payload.lookback_days,
         skip_days=payload.skip_days,
-        risk_off=payload.risk_off,
-        defensive_code=payload.defensive_code,
-        momentum_floor=payload.momentum_floor,
         score_method=payload.score_method,
-        score_lambda=payload.score_lambda,
-        score_vol_power=payload.score_vol_power,
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
         group_enforce=payload.group_enforce,
@@ -729,6 +720,7 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         end=_parse_yyyymmdd(payload.end),
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
+        exec_price=payload.exec_price,
         strategy=payload.strategy,
         sma_window=payload.sma_window,
         fast_window=payload.fast_window,
@@ -761,6 +753,7 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         end=_parse_yyyymmdd(payload.end),
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
+        exec_price=payload.exec_price,
         strategy=payload.strategy,
         top_k=payload.top_k,
         position_sizing=payload.position_sizing,
@@ -1691,10 +1684,7 @@ def rotation_calendar_effect(payload: RotationCalendarEffectRequest, db: Session
         vol_index_close=vol_index_close,
     )
     try:
-        anchors = payload.anchors
-        if (payload.weekdays is not None) and (payload.anchors == [0, 1, 2, 3, 4]) and ((payload.rebalance or "weekly").lower() == "weekly"):
-            anchors = payload.weekdays
-        return compute_rotation_calendar_effect(db, base=base, anchors=anchors, exec_prices=payload.exec_prices)
+        return compute_rotation_calendar_effect(db, base=base, anchors=payload.anchors, exec_prices=payload.exec_prices)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1749,7 +1739,6 @@ def rotation_weekly5_open_sim(payload: RotationWeekly5OpenSimRequest, db: Sessio
             "codes",
             "benchmark_codes",
             "price_basis",
-            "timing",
             "nav",
             "nav_rsi",
             "attribution",
@@ -2447,6 +2436,21 @@ def rotation_next_execution_plan(payload: dict, db: Session = Depends(get_sessio
     hold = next((x for x in (out.get("holdings") or []) if str(x.get("start_date")) == next_iso), None)
     per = next((x for x in (out.get("period_details") or []) if str(x.get("start_date")) == next_iso), None)
     day_exit_events = [x for x in (out.get("daily_exit_events") or []) if str((x or {}).get("execution_date")) == next_iso]
+    day_exit_checks: list[dict[str, object]] = []
+    for h in (out.get("holdings") or []):
+        if not isinstance(h, dict):
+            continue
+        dm = (h.get("daily_exit") or {})
+        if not isinstance(dm, dict):
+            continue
+        for row in (dm.get("checks_by_day") or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("execution_date")) != next_iso:
+                continue
+            checks = row.get("checks") or []
+            if isinstance(checks, list):
+                day_exit_checks.extend([x for x in checks if isinstance(x, dict)])
     weights_end = (out.get("weights_end") or {}).get("weights") or {}
     target_weights = [{"code": str(k), "weight": float(v)} for k, v in weights_end.items() if float(v or 0.0) > 1e-12]
     target_weights.sort(key=lambda x: float(x["weight"]), reverse=True)
@@ -2500,6 +2504,77 @@ def rotation_next_execution_plan(payload: dict, db: Session = Depends(get_sessio
         "target_weights": target_weights,
         "exposure": float(exposure),
         }
+    rc = ((hold or {}).get("risk_controls") or {}) if isinstance(hold, dict) else {}
+    rc_details: dict[str, object] = {}
+    if isinstance(rc, dict):
+        nested = rc.get("details")
+        if isinstance(nested, dict):
+            rc_details.update(nested)
+        # Newer rotation trace stores details flat under `risk_controls`.
+        # Merge flat keys so next-plan debug stays backward/forward compatible.
+        for k, v in rc.items():
+            if k in {"reasons", "details"}:
+                continue
+            rc_details[k] = v
+    score_by_code = rc_details.get("score_by_code") if isinstance(rc_details, dict) else None
+    cand_ranked = rc_details.get("candidate_ranked") if isinstance(rc_details, dict) else None
+    entry_checks = rc_details.get("entry_checks_by_code") if isinstance(rc_details, dict) else None
+    plan["trace"] = {
+        "parameters": {
+            "codes": [str(x) for x in req.codes],
+            "rebalance": str(req.rebalance),
+            "rebalance_anchor": req.rebalance_anchor,
+            "rebalance_shift": str(req.rebalance_shift),
+            "exec_price": str(req.exec_price),
+            "top_k": int(req.top_k),
+            "position_mode": str(req.position_mode),
+            "lookback_days": int(req.lookback_days),
+            "skip_days": int(req.skip_days),
+            "score_method": str(req.score_method),
+            "cost_bps": float(req.cost_bps),
+            "entry_backfill": bool(req.entry_backfill),
+            "entry_match_n": int(req.entry_match_n),
+            "exit_match_n": int(req.exit_match_n),
+            "trend_filter": bool(req.trend_filter),
+            "trend_exit_filter": bool(req.trend_exit_filter),
+            "bias_filter": bool(req.bias_filter),
+            "bias_exit_filter": bool(req.bias_exit_filter),
+            "vol_index_timing_enabled": bool(asset_vol_rules),
+        },
+        "decision_context": {
+            "asof_requested": requested_asof.strftime("%Y%m%d"),
+            "asof_effective": asof.strftime("%Y%m%d"),
+            "next_trading_day": next_iso,
+            "decision_date": (hold or {}).get("decision_date"),
+            "execution_date": next_iso,
+            "has_execution_plan": bool(has_exec),
+            "mode": (hold or {}).get("mode"),
+            "rebalance_hit_mode": (hold or {}).get("rebalance_hit_mode"),
+            "rebalance_target_date": (hold or {}).get("rebalance_target_date"),
+        },
+        "momentum_scores": (score_by_code if isinstance(score_by_code, dict) else {}),
+        "candidate_ranking": ([str(x) for x in cand_ranked] if isinstance(cand_ranked, list) else []),
+        "entry_filtering": {
+            "entry_gate": (rc_details.get("entry_gate") if isinstance(rc_details, dict) else None),
+            "entry_checks_by_code": (entry_checks if isinstance(entry_checks, dict) else {}),
+            "rejected": (((hold or {}).get("backfill") or {}).get("rejected") if isinstance((hold or {}).get("backfill"), dict) else []),
+            "risk_control_reasons": (rc.get("reasons") if isinstance(rc, dict) else []),
+            "risk_control_details": (rc_details if isinstance(rc_details, dict) else {}),
+        },
+        "backfill_result": (((hold or {}).get("backfill") or {}) if isinstance((hold or {}).get("backfill"), dict) else {}),
+        "exit_checks": {
+            "daily_exit_meta": (((hold or {}).get("daily_exit") or {}) if isinstance((hold or {}).get("daily_exit"), dict) else {}),
+            "execution_day_events": [x for x in day_exit_events],
+            "execution_day_checks": [x for x in day_exit_checks],
+        },
+        "position_result": {
+            "target_weights": target_weights,
+            "exposure": float(exposure),
+            "turnover": (plan.get("turnover") if isinstance(plan, dict) else None),
+            "buys": (plan.get("buys") if isinstance(plan, dict) else []),
+            "sells": (plan.get("sells") if isinstance(plan, dict) else []),
+        },
+    }
     return {
         "asof": asof.strftime("%Y%m%d"),
         "asof_requested": requested_asof.strftime("%Y%m%d"),
@@ -2570,7 +2645,9 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
     by_anchor: dict[str, dict] = {}
     for a in anchors:
         decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
-        ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+        ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(
+            daily_ret[codes], decision_dates=decision_dates, exec_price="close"
+        )
         ew_ret = ew_nav.pct_change().fillna(0.0).astype(float)
 
         # overlays on EW NAV
@@ -2719,7 +2796,9 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
     by_anchor: dict[str, dict] = {}
     for a in anchors:
         decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
-        ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+        ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(
+            daily_ret[codes], decision_dates=decision_dates, exec_price="close"
+        )
 
         ema252 = _ema(ew_nav, 252)
         sd252 = _rolling_std(ew_nav, 252)
@@ -2809,7 +2888,9 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
     navs = []
     for a in [1, 2, 3, 4, 5]:
         decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
-        ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+        ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(
+            daily_ret[codes], decision_dates=decision_dates, exec_price="close"
+        )
         navs.append(ew_nav.astype(float))
     nav_df = pd.concat(navs, axis=1)
     nav_mix = nav_df.mean(axis=1).astype(float)
@@ -2903,7 +2984,9 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
     ws = []
     for a in [1, 2, 3, 4, 5]:
         decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
-        ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+        ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(
+            daily_ret[codes], decision_dates=decision_dates, exec_price="close"
+        )
         navs.append(ew_nav.astype(float))
         ws.append(ew_w[codes].astype(float))
     nav_mix = pd.concat(navs, axis=1).mean(axis=1).astype(float)
@@ -3165,7 +3248,7 @@ def sim_generate_decisions(payload: SimDecisionGenerateRequest, db: Session = De
             picks = per.get("picks") or []
             picked = str(picks[0]) if picks else None
             scores = per.get("scores") or {}
-            reason = {"mode": per.get("mode"), "risk_off_triggered": per.get("risk_off_triggered")}
+            reason = {"mode": per.get("mode")}
 
             # upsert (unique: variant_id + decision_date)
             existing = db.query(SimDecision).filter(SimDecision.variant_id == int(v.id), SimDecision.decision_date == d_date).one_or_none()
@@ -3568,6 +3651,10 @@ def sim_gbm_phase1(payload: SimGbmPhase1Request) -> dict:
         n_assets=int(payload.n_assets),
         vol_low=float(payload.vol_low),
         vol_high=float(payload.vol_high),
+        corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+        corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+        mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+        mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
         seed=(None if payload.seed is None else int(payload.seed)),
     )
     return simulate_gbm_prices(start=str(payload.start), end=(str(payload.end) if payload.end else None), cfg=cfg)
@@ -3575,15 +3662,23 @@ def sim_gbm_phase1(payload: SimGbmPhase1Request) -> dict:
 
 @router.post("/analysis/sim/gbm/phase2")
 def sim_gbm_phase2(payload: SimGbmPhase2Request) -> dict:
-    cfg = _SimCfg(
-        n_assets=int(payload.n_assets),
-        vol_low=float(payload.vol_low),
-        vol_high=float(payload.vol_high),
-        seed=(None if payload.seed is None else int(payload.seed)),
-    )
-    base = simulate_gbm_prices(start=str(payload.start), end=(str(payload.end) if payload.end else None), cfg=cfg)
-    if not bool(base.get("ok")):
-        return base
+    base_in = dict(payload.phase1_base or {})
+    if bool(base_in.get("ok")) and isinstance(base_in.get("series"), dict) and isinstance(base_in.get("assets"), dict):
+        base = base_in
+    else:
+        cfg = _SimCfg(
+            n_assets=int(payload.n_assets),
+            vol_low=float(payload.vol_low),
+            vol_high=float(payload.vol_high),
+            corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+            corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+            mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+            mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
+            seed=(None if payload.seed is None else int(payload.seed)),
+        )
+        base = simulate_gbm_prices(start=str(payload.start), end=(str(payload.end) if payload.end else None), cfg=cfg)
+        if not bool(base.get("ok")):
+            return base
     dates = (base.get("series") or {}).get("dates") or []
     close_map = (base.get("series") or {}).get("close") or {}
     codes = (base.get("assets") or {}).get("codes") or []
@@ -3591,12 +3686,15 @@ def sim_gbm_phase2(payload: SimGbmPhase2Request) -> dict:
         return {"ok": False, "error": "bad_series_payload"}
     idx = pd.to_datetime(dates)
     close = pd.DataFrame({c: close_map.get(c) for c in codes}, index=idx, dtype=float)
-    rot = backtest_rotation_basic(close, lookback_days=int(payload.lookback_days), top_k=1)
+    strat_a = dict(payload.strategy_a or {})
+    if not strat_a:
+        strat_a = {"lookback_days": int(payload.lookback_days), "top_k": 1}
+    rot = _run_rotation_variant_with_series_on_sim(close, strat_a)
     ew = backtest_equal_weight_weekly(close)
     rp = backtest_risk_parity_inverse_vol(close, ann_vols=(base.get("assets") or {}).get("ann_vols") or {})
     return {
         "ok": True,
-        "meta": dict(base.get("meta") or {}),
+        "meta": {**dict(base.get("meta") or {}), "phase1_reused": bool(base_in.get("ok"))},
         "assets": base.get("assets"),
         "corr": base.get("corr"),
         "asset_metrics": (base.get("metrics") or {}).get("by_asset"),
@@ -3616,8 +3714,14 @@ def sim_gbm_phase3(payload: SimGbmPhase3Request) -> dict:
         n_assets=int(payload.n_assets),
         vol_low=float(payload.vol_low),
         vol_high=float(payload.vol_high),
+        corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+        corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+        mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+        mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
         seed=(None if payload.seed is None else int(payload.seed)),
         lookback_days=int(payload.lookback_days),
+        strategy_a=(dict(payload.strategy_a or {}) if payload.strategy_a is not None else None),
+        n_jobs=int(payload.n_jobs),
     )
 
 
@@ -3628,6 +3732,10 @@ def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
         n_assets=int(payload.n_assets),
         vol_low=float(payload.vol_low),
         vol_high=float(payload.vol_high),
+        corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+        corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+        mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+        mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
         seed=(None if payload.seed is None else int(payload.seed)),
     )
     base = simulate_gbm_prices(start=str(payload.start), end=(str(payload.end) if payload.end else None), cfg=cfg)
@@ -3638,7 +3746,10 @@ def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
     codes = (base.get("assets") or {}).get("codes") or []
     idx = pd.to_datetime(dates)
     close = pd.DataFrame({c: close_map.get(c) for c in codes}, index=idx, dtype=float)
-    rot = backtest_rotation_basic(close, lookback_days=int(payload.lookback_days), top_k=1)
+    strat_a = dict(payload.strategy_a or {})
+    if not strat_a:
+        strat_a = {"lookback_days": int(payload.lookback_days), "top_k": 1}
+    rot = _run_rotation_variant_with_series_on_sim(close, strat_a)
     ew = backtest_equal_weight_weekly(close)
     rp = backtest_risk_parity_inverse_vol(close, ann_vols=(base.get("assets") or {}).get("ann_vols") or {})
     if not bool(rot.get("ok")) or not bool(ew.get("ok")):
@@ -3659,8 +3770,14 @@ def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
         n_assets=int(payload.n_assets),
         vol_low=float(payload.vol_low),
         vol_high=float(payload.vol_high),
+        corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+        corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+        mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+        mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
         seed=(None if payload.seed is None else int(payload.seed)),
         lookback_days=int(payload.lookback_days),
+        strategy_a=(dict(payload.strategy_a or {}) if payload.strategy_a is not None else None),
+        n_jobs=int(payload.n_jobs),
     )
     # Ruin (theoretical) for GBM with pos<=1 is 0; we still report a conservative check on min_equity_ratio using the single-path sized runs.
     ruin = bool((sized_rot.get("stats") or {}).get("ruin")) or bool((sized_ew.get("stats") or {}).get("ruin"))
@@ -3675,19 +3792,28 @@ def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
 
 @router.post("/analysis/sim/gbm/ab-significance")
 def sim_gbm_ab_significance(payload: SimGbmAbSignificanceRequest) -> dict:
-    req = {
+    req: dict[str, object] = {
         "start": str(payload.start),
         "end": (str(payload.end) if payload.end else None),
         "n_worlds": int(payload.n_worlds),
         "n_assets": int(payload.n_assets),
         "vol_low": float(payload.vol_low),
         "vol_high": float(payload.vol_high),
+        "corr_low": (None if payload.corr_low is None else float(payload.corr_low)),
+        "corr_high": (None if payload.corr_high is None else float(payload.corr_high)),
+        "mu_low": (None if payload.mu_low is None else float(payload.mu_low)),
+        "mu_high": (None if payload.mu_high is None else float(payload.mu_high)),
         "seed": (None if payload.seed is None else int(payload.seed)),
         "strategy_a": payload.strategy_a.model_dump(),
         "strategy_b": payload.strategy_b.model_dump(),
         "n_perm": int(payload.n_perm),
         "n_boot": int(payload.n_boot),
         "n_jobs": int(payload.n_jobs),
+        "stability_repeats": int(payload.stability_repeats),
+        "stability_worlds": int(payload.stability_worlds),
+        "target_a": (None if payload.target_a is None else str(payload.target_a)),
+        "target_b": (None if payload.target_b is None else str(payload.target_b)),
+        "comparison_mode": str(payload.comparison_mode),
     }
     return gbm_ab_significance(**req)
 
@@ -3715,6 +3841,32 @@ def get_etfs(adjust: str = "hfq", db: Session = Depends(get_session)) -> list[Et
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     items = list_etf_pool(db)
+    if not items:
+        # Fallback for databases that have price rows but no etf_pool metadata yet.
+        # Prefer requested adjust; if empty, fallback to all adjusts.
+        rows = db.query(EtfPrice.code).filter(EtfPrice.adjust == adjust).distinct().all()
+        if not rows:
+            rows = db.query(EtfPrice.code).distinct().all()
+        pseudo_codes = sorted({str(r[0]) for r in rows if r and r[0] is not None})
+        out_fallback: list[EtfPoolOut] = []
+        for code in pseudo_codes:
+            rng = get_price_date_range(db, code=code, adjust=adjust)
+            out_fallback.append(
+                EtfPoolOut(
+                    code=code,
+                    name=code,
+                    start_date=None,
+                    end_date=None,
+                    validation_policy=None,
+                    max_abs_return_override=None,
+                    max_abs_return_effective=None,
+                    last_fetch_status=None,
+                    last_fetch_message=None,
+                    last_data_start_date=rng[0],
+                    last_data_end_date=rng[1],
+                )
+            )
+        return out_fallback
     out: list[EtfPoolOut] = []
     for i in items:
         p = get_validation_policy_by_id(db, i.validation_policy_id) if i.validation_policy_id else None
@@ -3819,7 +3971,6 @@ def delete_etf(code: str, purge: bool = False, db: Session = Depends(get_session
 @router.post("/etf/{code}/fetch", response_model=FetchResult)
 def fetch_one(
     code: str,
-    adjust: str = "hfq",  # pylint: disable=unused-argument  # backward-compat; ignored (we always fetch all adjusts)
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> FetchResult:
@@ -3866,7 +4017,6 @@ def fetch_one(
 
 @router.post("/fetch-all", response_model=list[FetchResult])
 def fetch_all(
-    adjust: str = "hfq",  # pylint: disable=unused-argument  # backward-compat; ignored
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[FetchResult]:

@@ -308,16 +308,23 @@ class SimGbmPhase1Request(BaseModel):
     n_assets: int = Field(default=4, ge=2, le=20)
     vol_low: float = Field(default=0.05, gt=0.0, lt=2.0)
     vol_high: float = Field(default=0.30, gt=0.0, lt=2.0)
+    corr_low: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation lower bound; unset means uncorrelated")
+    corr_high: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation upper bound; unset means uncorrelated")
+    mu_low: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift lower bound; unset uses random default range")
+    mu_high: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift upper bound; unset uses random default range")
     seed: int | None = Field(default=None)
 
 
 class SimGbmPhase2Request(SimGbmPhase1Request):
     lookback_days: int = Field(default=20, ge=2, le=2520)
+    strategy_a: dict | None = Field(default=None, description="Optional rotation strategy params (same semantics as A/B strategy A)")
+    phase1_base: dict | None = Field(default=None, description="Optional phase1 payload to reuse generated GBM world directly")
 
 
 class SimGbmPhase3Request(SimGbmPhase2Request):
-    n_sims: int = Field(default=10000, ge=100, le=50000)
+    n_sims: int = Field(default=10000, ge=50, le=50000)
     chunk_size: int = Field(default=200, ge=1, le=2000)
+    n_jobs: int = Field(default=0, ge=0, le=64, description="Parallel workers for Monte Carlo runs; 0=auto")
 
 
 class SimGbmPhase4Request(SimGbmPhase3Request):
@@ -337,18 +344,13 @@ class SimGbmAbStrategyParams(BaseModel):
     exit_match_n: int = Field(default=0, ge=0)
     lookback_days: int = Field(default=20, ge=1)
     skip_days: int = Field(default=0, ge=0)
-    risk_off: bool = False
-    defensive_code: str | None = None
-    momentum_floor: float = 0.0
     score_method: str = Field(default="raw_mom")
-    score_lambda: float = Field(default=0.0)
-    score_vol_power: float = Field(default=1.0)
     risk_free_rate: float = Field(default=0.025)
     cost_bps: float = Field(default=0.0, ge=0.0)
     trend_filter: bool = Field(default=False)
     trend_exit_filter: bool = Field(default=False)
     trend_sma_window: int = Field(default=20, ge=1)
-    trend_ma_type: str = Field(default="sma", description="sma|ema")
+    trend_ma_type: str = Field(default="sma", description="sma|ema|vma(variable/adaptive)")
     bias_filter: bool = Field(default=False)
     bias_exit_filter: bool = Field(default=False)
     bias_ma_window: int = Field(default=20, ge=2)
@@ -374,10 +376,28 @@ class SimGbmAbSignificanceRequest(BaseModel):
     n_assets: int = Field(default=4, ge=2, le=20)
     vol_low: float = Field(default=0.05, gt=0.0, lt=2.0)
     vol_high: float = Field(default=0.30, gt=0.0, lt=2.0)
+    corr_low: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation lower bound; unset means uncorrelated")
+    corr_high: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation upper bound; unset means uncorrelated")
+    mu_low: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift lower bound; unset uses random default range")
+    mu_high: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift upper bound; unset uses random default range")
     seed: int | None = Field(default=None)
     n_perm: int = Field(default=5000, ge=1000, le=20000)
     n_boot: int = Field(default=3000, ge=1000, le=20000)
     n_jobs: int = Field(default=1, ge=0, le=64, description="Parallel workers for world evaluation; 0=auto")
+    stability_repeats: int = Field(default=0, ge=0, le=30, description="Seed stability repeats; 0 disables")
+    stability_worlds: int = Field(default=100, ge=2, le=2000, description="Worlds per seed stability repeat")
+    target_a: str | None = Field(
+        default=None,
+        description="A target: cash|equal_weight|risk_parity|rotation_a|rotation_b",
+    )
+    target_b: str | None = Field(
+        default=None,
+        description="B target: cash|equal_weight|risk_parity|rotation_a|rotation_b",
+    )
+    comparison_mode: str = Field(
+        default="custom_ab",
+        description="Deprecated compatibility mode: custom_ab|rotation_vs_equal_weight|risk_parity_vs_equal_weight|rotation_vs_risk_parity|equal_weight_vs_cash",
+    )
     strategy_a: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
     strategy_b: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
 
@@ -621,15 +641,13 @@ class BaselineCalendarEffectRequest(BaseModel):
         default_factory=lambda: [0, 1, 2, 3, 4],
         description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
     )
-    # Backward compatibility: old field name used by weekly-only UI/tests.
-    weekdays: list[int] | None = Field(default=None, description="[deprecated] same as anchors when rebalance=weekly")
     exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
 class AssetRiskControlRule(BaseModel):
     """
     Per-asset risk-control rule applied to weights daily:
-    - signal is computed from the asset's own hfq close-based NAV proxy
+    - signal is computed from the asset's own qfq close-based NAV proxy
     - when triggered, scale that asset's weight by (1 - reduce_pct)
     """
 
@@ -677,7 +695,7 @@ class AssetTrendRule(BaseModel):
     op: str = Field(default=">", description="Comparison operator between close and MA: = | != | > | < | >= | <=")
     stage: str = Field(default="entry", description="Rule stage: entry | exit | both")
     trend_sma_window: int = Field(default=20, ge=1, description="MA window (trading days, qfq close-based)")
-    trend_ma_type: str = Field(default="sma", description="MA type: sma|ema (self close vs self MA)")
+    trend_ma_type: str = Field(default="sma", description="MA type: sma|ema|vma(variable/adaptive) (self close vs self MA)")
 
 
 class AssetBiasRule(BaseModel):
@@ -815,22 +833,17 @@ class RotationBacktestRequest(BaseModel):
     )
     lookback_days: int = Field(default=20, ge=1)
     skip_days: int = Field(default=0, ge=0)
-    risk_off: bool = False
-    defensive_code: str | None = None
-    momentum_floor: float = 0.0
     score_method: str = Field(
         default="raw_mom",
-        description="Ranking score: raw_mom | sharpe_mom | sortino_mom | return_over_vol | mom_minus_lambda_vol | mom_over_vol_power",
+        description="Ranking score: raw_mom | sharpe_mom | sortino_mom",
     )
-    score_lambda: float = Field(default=0.0, description="Used by mom_minus_lambda_vol: score = mom - lambda * vol")
-    score_vol_power: float = Field(default=1.0, description="Used by mom_over_vol_power: score = mom / vol**power")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=0.0, ge=0.0)
     # Pre-trade risk controls (all optional; defaults keep previous behavior)
     trend_filter: bool = Field(default=False, description="Enable trend filter gating (pre-trade)")
     trend_exit_filter: bool = Field(default=False, description="Enable trend-based daily exit gating (post-entry; next-day execution)")
     trend_sma_window: int = Field(default=20, ge=1, description="MA window for trend filter (trading days, qfq close-based)")
-    trend_ma_type: str = Field(default="sma", description="Trend MA type: sma|ema (self close vs self MA)")
+    trend_ma_type: str = Field(default="sma", description="Trend MA type: sma|ema|vma(variable/adaptive) (self close vs self MA)")
     bias_filter: bool = Field(default=False, description="Enable BIAS filter gating (pre-trade)")
     bias_exit_filter: bool = Field(default=False, description="Enable BIAS-based daily exit gating (post-entry; next-day execution)")
     bias_ma_window: int = Field(default=20, ge=2, description="BIAS MA window (trading days)")
@@ -871,7 +884,7 @@ class RotationBacktestRequest(BaseModel):
     # Per-asset risk control rules (optional; applied daily to weights as exposure scaling)
     asset_rc_rules: list[AssetRiskControlRule] | None = Field(
         default=None,
-        description="Optional per-asset risk-control rules (signal on hfq close-based NAV; scales down weights when triggered).",
+        description="Optional per-asset risk-control rules (signal on qfq close-based NAV; scales down weights when triggered).",
     )
     asset_vol_index_rules: list[AssetVolIndexTimingRule] | None = Field(
         default=None,
@@ -884,7 +897,6 @@ class RotationCalendarEffectRequest(RotationBacktestRequest):
         default_factory=lambda: [0, 1, 2, 3, 4],
         description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
     )
-    weekdays: list[int] | None = Field(default=None, description="[deprecated] same as anchors when rebalance=weekly")
     exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
@@ -985,6 +997,7 @@ class TrendBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
         description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v (long/cash)",
@@ -1015,6 +1028,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=0.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
         description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v",
@@ -1055,7 +1069,7 @@ class AssetGroupSuggestRequest(BaseModel):
 
 
 class MonteCarloRequest(BaseModel):
-    n_sims: int = Field(default=10000, ge=100, le=50000, description="Number of Monte Carlo simulations")
+    n_sims: int = Field(default=10000, ge=50, le=50000, description="Number of Monte Carlo simulations")
     block_size: int = Field(default=5, ge=1, le=252, description="Circular block size in trading days")
     seed: int | None = Field(default=None, description="Optional RNG seed for reproducibility")
     sample_window_days: int | None = Field(

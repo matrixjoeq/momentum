@@ -31,6 +31,8 @@
       .reportCard .reportSectionTitle { margin-top: 6px; font-weight: 600; color: #1e293b; }
       .reportCard .reportList { margin: 6px 0 0 18px; }
       .reportCard .reportNote { margin-top: 6px; color: #64748b; font-size: 12px; }
+      .abCol { min-width: 520px; flex: 1; min-inline-size: 0; }
+      .abWideTableWrap { width: 100%; overflow-x: auto; }
 
       @media print {
         body { margin: 12mm; }
@@ -153,7 +155,7 @@
 
     <div class="panel">
       <div class="muted" id="dataNote">
-        数据口径：交易价格=none（不复权）；动量评分/动量门槛=hfq（后复权，总回报）；趋势/RSI/波动率/震荡过滤= qfq（前复权）。
+        数据口径：交易价格=none（不复权）；信号与风控过滤（动量/趋势/RSI/波动率/震荡等）=qfq（前复权）。
       </div>
       <div id="chart"></div>
     </div>
@@ -348,8 +350,8 @@
     <div class="panel">
       <h3>各标的收益率与波动率分布统计</h3>
       <div class="muted">
-        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、价格BIAS、成交活跃度与拥挤度指标分布直方图与分位数。<br/>
-        价格口径：<span id="distAdjustHint"><b>hfq</b></span>（默认后复权；切换仅影响“价格类指标”）。成交活跃度/拥挤度始终使用 none 口径（真实成交）。<br/>
+        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、价格BIAS、BIAS-V、成交活跃度与拥挤度指标分布直方图与分位数。<br/>
+        价格口径：<span id="distAdjustHint"><b>qfq</b></span>（默认前复权，可切换 qfq/hfq/none；切换仅影响“价格类指标”）。成交活跃度/拥挤度始终使用 none 口径（真实成交）。<br/>
         拥挤度口径：
         RVOL=\( \frac{volume}{MA_{20}(volume)} \)；
         成交量偏离=\( \log(volume)-MA_{20}(\log(volume)) \)。
@@ -364,8 +366,8 @@
         <div>
           <label>价格复权口径</label>
           <select id="distAdjustSelect" style="min-width:160px;">
-            <option value="hfq" selected>hfq（后复权）</option>
-            <option value="qfq">qfq（前复权）</option>
+            <option value="qfq" selected>qfq（前复权）</option>
+            <option value="hfq">hfq（后复权）</option>
             <option value="none">none（不复权）</option>
           </select>
         </div>
@@ -376,6 +378,7 @@
             <option value="return">收益率</option>
             <option value="volatility">波动率</option>
             <option value="bias">价格BIAS（close/MA20-1）</option>
+            <option value="bias_v">BIAS-V（(close-MA20)/ATR20）</option>
             <option value="price_dev">价格偏离度（log价格-长期均值）</option>
             <option value="volume">成交活跃度（量/额）</option>
             <!-- variants / transforms -->
@@ -384,6 +387,8 @@
             <option value="log_vol_dev">波动率对数偏离(log(vol)-MA20)</option>
             <option value="rvol">相对成交量(RVOL)</option>
             <option value="vol_dev">成交量偏离(log)</option>
+            <option value="macd_v_dif">MACD-V（DIF）</option>
+            <option value="macd_v_dea">MACD-V（DEA）</option>
           </select>
         </div>
         <div>
@@ -614,7 +619,7 @@
     <div class="panel">
       <h2 style="margin-top: 8px">动量轮动回测</h2>
       <div class="muted">
-        动量信号：hfq（后复权，总回报）；技术分析（趋势/RSI/波动率/震荡过滤）：qfq（前复权）；交易价格：none（不复权）。
+        动量信号与风控过滤：qfq（前复权）；交易价格：none（不复权）。
         轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。
       </div>
 
@@ -622,7 +627,7 @@
         <h3 style="margin: 0 0 6px 0;">小程序同款：基于同样的标的池与回测范围的轮动（周度，周一~周五 + 综合）</h3>
         <div class="muted">
           标的池：将使用等权/轮动组合同样的标的池，不再固定具体标的。固定执行：周度（周一~周五）+ 成交价=open + 休市=prev。
-          其余参数（TopK/动量回看/过滤器/止盈止损/策略RSI择时/后视镜择时/恐慌择时/回撤控制等）使用下方“动量轮动参数”的当前设置。
+          其余参数（TopK/动量回看/过滤器/止盈止损/后视镜择时/恐慌择时/回撤控制等）使用下方“动量轮动参数”的当前设置。
         </div>
         <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
           <label style="margin:0;">方案：</label>
@@ -684,7 +689,6 @@
           <button class="tabBtn" data-tab="rotTabVol" role="tab" aria-selected="false">波动率控制</button>
           <button class="tabBtn" data-tab="rotTabRR" role="tab" aria-selected="false">滚动收益仓位</button>
           <button class="tabBtn" data-tab="rotTabDD" role="tab" aria-selected="false">回撤控制</button>
-          <button class="tabBtn" data-tab="rotTabTiming" role="tab" aria-selected="false">策略RSI择时</button>
           <button class="tabBtn" data-tab="rotTabMirror" role="tab" aria-selected="false">后视镜择时</button>
           <button class="tabBtn" data-tab="rotTabVolIndex" role="tab" aria-selected="false">恐慌择时</button>
         </div>
@@ -743,7 +747,6 @@
               <label>打分方式 <button class="helpBtn" data-metric="param_rot_score_method" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
               <select id="rotScoreMethod" style="min-width:200px;">
                 <option value="raw_mom" selected>纯动量（raw）</option>
-                <option value="return_over_vol">收益/波动率</option>
                 <option value="sharpe_mom">夏普动量</option>
                 <option value="sortino_mom">索提诺动量</option>
               </select>
@@ -790,10 +793,10 @@
         <div id="rotTabFloor" class="tabPanel" role="tabpanel">
           <div class="row">
             <div>
-              <label>动量条件开关 <button class="helpBtn" data-metric="param_rot_riskoff" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
-              <select id="rotRiskOff">
-                <option value="false" selected>关闭（默认）</option>
-                <option value="true">启用</option>
+              <label>动量入场开关</label>
+              <select id="rotFloorOn">
+                <option value="true" selected>启用（默认）</option>
+                <option value="false">关闭</option>
               </select>
             </div>
             <div class="muted" style="max-width:760px;">
@@ -1083,7 +1086,7 @@
         <div id="rotTabCorr" class="tabPanel" role="tabpanel">
           <div class="row">
             <div>
-              <label>相关性过滤开关（hfq）</label>
+              <label>相关性过滤开关（qfq）</label>
               <select id="rotCorrOn" style="min-width:160px;">
                 <option value="false" selected>关闭（默认）</option>
                 <option value="true">开启</option>
@@ -1099,7 +1102,7 @@
             </div>
           </div>
           <div class="muted" style="margin-top:8px">
-            说明：若本期计划调入标的与当前持仓标的在回看窗口内的相关性（基于 hfq 收盘价日收益）大于阈值，则本期不调仓（保持原持仓）。
+            说明：若本期计划调入标的与当前持仓标的在回看窗口内的相关性（基于 qfq 收盘价日收益）大于阈值，则本期不调仓（保持原持仓）。
           </div>
         </div>
 
@@ -1214,30 +1217,6 @@
           </div>
           <div class="muted" style="margin-top:8px">
             说明：止损价与触发均使用前复权(qfq)收盘价 close。触发后从下一交易日起空仓，直到下一次调仓。支持周/月/季/年等所有调仓周期（“上一周期/本周期”以调仓周期划分）。
-          </div>
-        </div>
-
-        <div id="rotTabTiming" class="tabPanel" role="tabpanel">
-          <div class="row">
-            <div>
-              <label>择时开关</label>
-              <select id="rotTimingOn" style="min-width:160px;">
-                <option value="false" selected>关闭（默认）</option>
-                <option value="true">开启</option>
-              </select>
-            </div>
-            <div>
-              <label>RSI窗口(交易日)</label>
-              <select id="rotTimingRsiWin" style="min-width:160px;">
-                <option value="6">6</option>
-                <option value="12">12</option>
-                <option value="24" selected>24</option>
-              </select>
-            </div>
-          </div>
-          <div class="muted" style="margin-top:8px">
-            规则：当“策略净值 RSI” ≤ 50 时切换为等权持有（EW_REBAL），当 RSI &gt; 50 时重新激活轮动策略。<br/>
-            重要：RSI 信号使用 <b>不考虑择时休眠</b> 的“假想净值（shadow NAV）”计算，避免“休眠导致RSI变形”的自我反馈问题；择时只改变实际持仓与净值。
           </div>
         </div>
 
@@ -1676,7 +1655,7 @@
     <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
       <h3 style="margin: 0 0 6px 0;">随机资产模拟实验（GBM，无相关）</h3>
       <div class="muted" style="margin-bottom: 10px;">
-        构造 4 个相互不相关的资产：每日 log(1+r) ~ N(0, σ)，年化波动率随机在 5%~30%。从 1990-01-01 起按交易日构造到最近交易日，净值从 1 开始（无复权）。用于检验“基础轮动策略”在随机世界里是否存在统计优势，以及仓位管理下是否会半途破产。
+        构造 4 个随机资产：每日 log(1+r) ~ N(μ, σ)，年化波动率随机在 5%~30%。默认资产之间互不相关（可选相关性范围），长期年化收益默认随机（可选收益范围）。从 1990-01-01 起按交易日构造到最近交易日，净值从 1 开始（无复权）。用于检验“基础轮动策略”在随机世界里是否存在统计优势，以及仓位管理下是否会半途破产。
       </div>
       <div class="row">
         <div class="muted" style="flex-basis:100%;margin:0 0 4px 0;">【共享参数】以下参数同时用于基础GBM（Phase1-4）与A/B显著性检验</div>
@@ -1685,6 +1664,13 @@
         <div><label>资产数</label><input id="simN" value="4" /></div>
         <div><label>年化波动率下限</label><input id="simVolLow" value="0.05" /></div>
         <div><label>年化波动率上限</label><input id="simVolHigh" value="0.30" /></div>
+        <div><label>资产相关性下限（可空）</label><input id="simCorrLow" value="" placeholder="默认不相关，可填负值" /></div>
+        <div><label>资产相关性上限（可空）</label><input id="simCorrHigh" value="" placeholder="默认不相关，可填负值" /></div>
+        <div><label>长期年化收益下限（可空）</label><input id="simMuLow" value="" placeholder="如 -0.05（-5%）" /></div>
+        <div><label>长期年化收益上限（可空）</label><input id="simMuHigh" value="" placeholder="如 0.10（10%）" /></div>
+        <div id="simCorrHint" class="muted" style="flex-basis:100%;margin-top:2px;">
+          约束说明：相关性范围支持负值，且需满足 corr_low ≤ corr_high 且 corr_high &lt; 0.99；在 N 个资产下 corr_low 的理论下限为 -1/(N-1)。长期年化收益范围同样支持负值（可填写负收益）。
+        </div>
         <div><label>随机种子（可空）</label><input id="simSeed" value="" /></div>
         <div><label>回看天数 (Lookback Days)</label><input id="simLb" value="20" /></div>
         <div>
@@ -1696,21 +1682,48 @@
         </div>
         <div><label>重复次数（阶段3/4）</label><input id="simNSims" value="10000" /></div>
         <div><label>分块大小 (Chunk Size)</label><input id="simChunk" value="200" /></div>
+        <div><label>并行进程数（阶段3/4，0=自动）</label><input id="simMcJobs" value="0" /></div>
         <div><label>初始资金（阶段4）</label><input id="simCash" value="1000000" /></div>
         <div><label>仓位比例（阶段4）</label><input id="simPosPct" value="0.10" /></div>
         <button id="simRun1">阶段1 (Phase 1)：生成资产</button>
-        <button id="simRun2">阶段2 (Phase 2)：轮动 vs 等权</button>
-        <button id="simRun3">阶段3 (Phase 3)：批量分布</button>
-        <button id="simRun4">阶段4 (Phase 4)：遍历性/破产</button>
+        <button id="simRun2">阶段2 (Phase 2)：轮动 vs 等权（轮动参数=策略A）</button>
+        <button id="simRun3">阶段3 (Phase 3)：批量分布（轮动参数=策略A）</button>
+        <button id="simRun4">阶段4 (Phase 4)：遍历性/破产（轮动参数=策略A）</button>
         <div class="muted" style="flex-basis:100%;margin:8px 0 4px 0;">【A/B专用参数】以下参数仅用于显著性检验</div>
         <div><label>A/B 世界数</label><input id="simAbWorlds" value="3000" /></div>
         <div><label>A/B 置换次数</label><input id="simAbPerm" value="5000" /></div>
         <div><label>A/B Bootstrap次数</label><input id="simAbBoot" value="3000" /></div>
         <div><label>A/B 并行进程数(0=自动)</label><input id="simAbJobs" value="1" /></div>
+        <div>
+          <label>A 目标</label>
+          <select id="simAbTargetA" style="min-width:260px;">
+            <option value="rotation_a" selected>轮动策略A</option>
+            <option value="rotation_b">轮动策略B</option>
+            <option value="risk_parity">风险平价再平衡</option>
+            <option value="equal_weight">等权再平衡</option>
+            <option value="cash">持有现金</option>
+          </select>
+        </div>
+        <div>
+          <label>B 目标</label>
+          <select id="simAbTargetB" style="min-width:260px;">
+            <option value="rotation_b" selected>轮动策略B</option>
+            <option value="rotation_a">轮动策略A</option>
+            <option value="risk_parity">风险平价再平衡</option>
+            <option value="equal_weight">等权再平衡</option>
+            <option value="cash">持有现金</option>
+          </select>
+        </div>
+        <div><label>稳健性复验开关</label><select id="simAbStabOn"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
+        <div><label>稳健性复验次数(seed)</label><input id="simAbStabRuns" value="5" /></div>
+        <div><label>每次复验世界数</label><input id="simAbStabWorlds" value="100" /></div>
         <button id="simRunAb">A/B 显著性检验</button>
       </div>
       <div class="row">
-        <div style="min-width:520px;flex:1;">
+        <div class="abCol">
+          <div class="row" style="justify-content:flex-end; margin-bottom:6px;">
+            <button id="simAbCopyAToB">复制A参数到B</button>
+          </div>
           <label>策略A参数（同轮动结构）</label>
           <div class="tabs" id="simAbACtrlTabs" role="tablist" aria-label="A参数分组" style="margin-top:6px;">
             <button class="tabBtn active" data-ab-group="base" role="tab" aria-selected="true">基础参数</button>
@@ -1748,17 +1761,14 @@
               <div><label>补位</label><select id="simAbA_backfill"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
               <div><label>回看</label><input id="simAbA_lb" value="20" /></div>
               <div><label>跳过</label><input id="simAbA_skip" value="0" /></div>
-              <div><label>打分</label><select id="simAbA_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option><option value="return_over_vol">return_over_vol</option><option value="mom_minus_lambda_vol">mom_minus_lambda_vol</option><option value="mom_over_vol_power">mom_over_vol_power</option></select></div>
-              <div><label>score_lambda</label><input id="simAbA_scoreLambda" value="0" /></div>
-              <div><label>score_vol_power</label><input id="simAbA_scoreVolPower" value="1" /></div>
+              <div><label>打分</label><select id="simAbA_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option></select></div>
               <div><label>rf(年化)</label><input id="simAbA_rf" value="0.025" /></div>
-              <div><label>防守代码(可空)</label><input id="simAbA_defensiveCode" placeholder="如 511880" /></div>
               <div><label>成本(bps)</label><input id="simAbA_cost" value="0" /></div>
             </div>
           </div>
           <div id="simAbATabFloor" class="tabPanel" role="tabpanel">
             <div class="row">
-              <div><label>动量入场开关</label><select id="simAbA_riskOff"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div><label>动量入场开关</label><select id="simAbA_floorOn"><option value="true" selected>启用</option><option value="false">关闭</option></select></div>
               <div class="muted" style="max-width:760px;">说明：按标的配置入场动量条件；阈值单位可选 raw 或 pct（1%=0.01）。支持 <code>*</code> 默认规则，单标的规则覆盖默认。</div>
             </div>
             <div class="panel" style="margin-top:10px;">
@@ -1799,9 +1809,11 @@
                 <button id="simAbABiasResetDefault">重置默认</button>
                 <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
               </div>
-              <table id="simAbABiasRulesTable" style="margin-top:10px;">
-                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
-              </table>
+              <div class="abWideTableWrap">
+                <table id="simAbABiasRulesTable" style="margin-top:10px;">
+                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                </table>
+              </div>
             </div>
           </div>
           <div id="simAbATabFloorExit" class="tabPanel" role="tabpanel">
@@ -1847,9 +1859,11 @@
                 <button id="simAbABiasExitResetDefault">重置默认</button>
                 <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
               </div>
-              <table id="simAbABiasExitRulesTable" style="margin-top:10px;">
-                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
-              </table>
+              <div class="abWideTableWrap">
+                <table id="simAbABiasExitRulesTable" style="margin-top:10px;">
+                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                </table>
+              </div>
             </div>
           </div>
           <div id="simAbATabVolIndex" class="tabPanel" role="tabpanel">
@@ -1863,13 +1877,18 @@
                 <button id="simAbAVolIdxResetDefault">重置默认</button>
                 <span class="muted">每条规则可为不同标的设置不同回看窗口/阈值/仓位档位。</span>
               </div>
-              <table id="simAbAVolIdxRulesTable" style="margin-top:10px;">
-                <tr><th>标的代码</th><th>指数</th><th>回看窗口</th><th>分位数阈值(%)</th><th>仓位档位(%)</th><th>最小样本数</th><th>操作</th></tr>
-              </table>
+              <div class="abWideTableWrap">
+                <table id="simAbAVolIdxRulesTable" style="margin-top:10px;">
+                  <tr><th>标的代码</th><th>指数</th><th>回看窗口</th><th>分位数阈值(%)</th><th>仓位档位(%)</th><th>最小样本数</th><th>操作</th></tr>
+                </table>
+              </div>
             </div>
           </div>
         </div>
-        <div style="min-width:520px;flex:1;">
+        <div class="abCol">
+          <div class="row" style="justify-content:flex-end; margin-bottom:6px;">
+            <button id="simAbCopyBToA">复制B参数到A</button>
+          </div>
           <label>策略B参数（同轮动结构）</label>
           <div class="tabs" id="simAbBCtrlTabs" role="tablist" aria-label="B参数分组" style="margin-top:6px;">
             <button class="tabBtn active" data-ab-group="base" role="tab" aria-selected="true">基础参数</button>
@@ -1907,17 +1926,14 @@
               <div><label>补位</label><select id="simAbB_backfill"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
               <div><label>回看</label><input id="simAbB_lb" value="20" /></div>
               <div><label>跳过</label><input id="simAbB_skip" value="0" /></div>
-              <div><label>打分</label><select id="simAbB_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option><option value="return_over_vol">return_over_vol</option><option value="mom_minus_lambda_vol">mom_minus_lambda_vol</option><option value="mom_over_vol_power">mom_over_vol_power</option></select></div>
-              <div><label>score_lambda</label><input id="simAbB_scoreLambda" value="0" /></div>
-              <div><label>score_vol_power</label><input id="simAbB_scoreVolPower" value="1" /></div>
+              <div><label>打分</label><select id="simAbB_score"><option value="raw_mom" selected>raw_mom</option><option value="sharpe_mom">sharpe_mom</option><option value="sortino_mom">sortino_mom</option></select></div>
               <div><label>rf(年化)</label><input id="simAbB_rf" value="0.025" /></div>
-              <div><label>防守代码(可空)</label><input id="simAbB_defensiveCode" placeholder="如 511880" /></div>
               <div><label>成本(bps)</label><input id="simAbB_cost" value="0" /></div>
             </div>
           </div>
           <div id="simAbBTabFloor" class="tabPanel" role="tabpanel">
             <div class="row">
-              <div><label>动量入场开关</label><select id="simAbB_riskOff"><option value="false" selected>关闭</option><option value="true">启用</option></select></div>
+              <div><label>动量入场开关</label><select id="simAbB_floorOn"><option value="true" selected>启用</option><option value="false">关闭</option></select></div>
               <div class="muted" style="max-width:760px;">说明：按标的配置入场动量条件；阈值单位可选 raw 或 pct（1%=0.01）。支持 <code>*</code> 默认规则，单标的规则覆盖默认。</div>
             </div>
             <div class="panel" style="margin-top:10px;">
@@ -1958,9 +1974,11 @@
                 <button id="simAbBBiasResetDefault">重置默认</button>
                 <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
               </div>
-              <table id="simAbBBiasRulesTable" style="margin-top:10px;">
-                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
-              </table>
+              <div class="abWideTableWrap">
+                <table id="simAbBBiasRulesTable" style="margin-top:10px;">
+                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                </table>
+              </div>
             </div>
           </div>
           <div id="simAbBTabFloorExit" class="tabPanel" role="tabpanel">
@@ -2006,9 +2024,11 @@
                 <button id="simAbBBiasExitResetDefault">重置默认</button>
                 <span class="muted">默认规则（code=*）自动对所有标的生效；按分位数时对每个标的各自计算阈值。</span>
               </div>
-              <table id="simAbBBiasExitRulesTable" style="margin-top:10px;">
-                <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
-              </table>
+              <div class="abWideTableWrap">
+                <table id="simAbBBiasExitRulesTable" style="margin-top:10px;">
+                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                </table>
+              </div>
             </div>
           </div>
           <div id="simAbBTabVolIndex" class="tabPanel" role="tabpanel">
@@ -2022,9 +2042,11 @@
                 <button id="simAbBVolIdxResetDefault">重置默认</button>
                 <span class="muted">每条规则可为不同标的设置不同回看窗口/阈值/仓位档位。</span>
               </div>
-              <table id="simAbBVolIdxRulesTable" style="margin-top:10px;">
-                <tr><th>标的代码</th><th>指数</th><th>回看窗口</th><th>分位数阈值(%)</th><th>仓位档位(%)</th><th>最小样本数</th><th>操作</th></tr>
-              </table>
+              <div class="abWideTableWrap">
+                <table id="simAbBVolIdxRulesTable" style="margin-top:10px;">
+                  <tr><th>标的代码</th><th>指数</th><th>回看窗口</th><th>分位数阈值(%)</th><th>仓位档位(%)</th><th>最小样本数</th><th>操作</th></tr>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -2033,12 +2055,13 @@
       <div class="panel two">
         <div>
           <div class="muted" style="margin-bottom:6px;">资产净值（close，对数纵轴）</div>
-          <div id="simAssetNav" style="width:100%; height:420px;"></div>
+          <div id="simAssetNav" style="width:100%; height:840px;"></div>
           <table id="simAssetMetrics" style="margin-top:10px;"></table>
         </div>
         <div>
           <div class="muted" style="margin-bottom:6px;">相关性矩阵（log-ret）</div>
-          <div id="simCorr" style="width:100%; height:420px;"></div>
+          <div id="simCorr" style="width:100%; height:840px;"></div>
+          <table id="simCorrStats" style="margin-top:10px;"></table>
         </div>
       </div>
       <div class="panel two">
@@ -2051,6 +2074,7 @@
           <div class="muted" style="margin-bottom:6px;">绩效分布（年化收益）</div>
           <div id="simMcCagr" style="width:100%; height:420px;"></div>
           <div class="muted" id="simMcNote" style="margin-top:6px;"></div>
+          <table id="simAbRobustTable" style="margin-top:8px;"></table>
         </div>
       </div>
       <div class="panel two">
@@ -2233,7 +2257,7 @@
           "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotEntryBackfill",
           "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotEntryMatchN", "rotExitMatchN",
           "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
-          "rotRiskOff", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn",
+          "rotFloorOn", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn",
           "rotVolIdxOn", "rotPlanAsof",
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
@@ -2246,16 +2270,16 @@
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
         sim: [
-          "simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simSeed", "simLb", "simNSims", "simChunk", "simCash", "simPosPct",
-          "simAbWorlds", "simAbPerm", "simAbBoot", "simAbJobs",
-          "simAbA_rebalance", "simAbA_anchor", "simAbA_shift", "simAbA_exec", "simAbA_topk", "simAbA_posMode", "simAbA_backfill", "simAbA_entryN", "simAbA_exitN", "simAbA_lb", "simAbA_skip", "simAbA_score", "simAbA_scoreLambda", "simAbA_scoreVolPower", "simAbA_rf", "simAbA_defensiveCode", "simAbA_cost",
-          "simAbA_riskOff", "simAbA_floorOp", "simAbA_floor", "simAbA_floorUnit",
+          "simStart", "simEnd", "simN", "simVolLow", "simVolHigh", "simCorrLow", "simCorrHigh", "simMuLow", "simMuHigh", "simSeed", "simLb", "simNSims", "simChunk", "simMcJobs", "simCash", "simPosPct",
+          "simAbWorlds", "simAbPerm", "simAbBoot", "simAbJobs", "simAbTargetA", "simAbTargetB", "simAbStabOn", "simAbStabRuns", "simAbStabWorlds",
+          "simAbA_rebalance", "simAbA_anchor", "simAbA_shift", "simAbA_exec", "simAbA_topk", "simAbA_posMode", "simAbA_backfill", "simAbA_entryN", "simAbA_exitN", "simAbA_lb", "simAbA_skip", "simAbA_score", "simAbA_rf", "simAbA_cost",
+          "simAbA_floorOn", "simAbA_floorOp", "simAbA_floor", "simAbA_floorUnit",
           "simAbA_exitFloorOn", "simAbA_exitFloorOp", "simAbA_exitFloor", "simAbA_exitFloorUnit",
           "simAbA_trendOn", "simAbA_trendOp", "simAbA_trendExit", "simAbA_trendExitOp", "simAbA_trendWin", "simAbA_trendMa",
           "simAbA_biasOn", "simAbA_biasOp", "simAbA_biasExit", "simAbA_biasExitOp", "simAbA_biasMa", "simAbA_biasWin", "simAbA_biasType", "simAbA_biasQ", "simAbA_biasFixed", "simAbA_biasMinP",
           "simAbA_volIdxOn", "simAbA_volIdxIndex", "simAbA_volIdxWin", "simAbA_volIdxQs", "simAbA_volIdxExps", "simAbA_volIdxMinP",
-          "simAbB_rebalance", "simAbB_anchor", "simAbB_shift", "simAbB_exec", "simAbB_topk", "simAbB_posMode", "simAbB_backfill", "simAbB_entryN", "simAbB_exitN", "simAbB_lb", "simAbB_skip", "simAbB_score", "simAbB_scoreLambda", "simAbB_scoreVolPower", "simAbB_rf", "simAbB_defensiveCode", "simAbB_cost",
-          "simAbB_riskOff", "simAbB_floorOp", "simAbB_floor", "simAbB_floorUnit",
+          "simAbB_rebalance", "simAbB_anchor", "simAbB_shift", "simAbB_exec", "simAbB_topk", "simAbB_posMode", "simAbB_backfill", "simAbB_entryN", "simAbB_exitN", "simAbB_lb", "simAbB_skip", "simAbB_score", "simAbB_rf", "simAbB_cost",
+          "simAbB_floorOn", "simAbB_floorOp", "simAbB_floor", "simAbB_floorUnit",
           "simAbB_exitFloorOn", "simAbB_exitFloorOp", "simAbB_exitFloor", "simAbB_exitFloorUnit",
           "simAbB_trendOn", "simAbB_trendOp", "simAbB_trendExit", "simAbB_trendExitOp", "simAbB_trendWin", "simAbB_trendMa",
           "simAbB_biasOn", "simAbB_biasOp", "simAbB_biasExit", "simAbB_biasExitOp", "simAbB_biasMa", "simAbB_biasWin", "simAbB_biasType", "simAbB_biasQ", "simAbB_biasFixed", "simAbB_biasMinP",
@@ -2484,7 +2508,7 @@
         try { updateAtrUi(); } catch { /* ignore */ }
         try { _rotVolIdxUpdateUiEnabled(); } catch { /* ignore */ }
         try {
-          _setTabEnabledByToggle("rotTabFloor", "rotRiskOff");
+          _setTabEnabledByToggle("rotTabFloor", "rotFloorOn");
           _setTabEnabledByToggle("rotTabFloorExit", "rotExitFloorOn");
           _setTabEnabledByToggle("rotTabTrend", "rotTrendOn");
           _setTabEnabledByToggle("rotTabTrendExit", "rotExitTrendOn");
@@ -2558,7 +2582,7 @@
           _saveResearchSettingsNow();
         });
       }
-      const ADJUST_USED = "hfq"; // baseline research currently uses hfq only
+      const ADJUST_USED = "hfq"; // baseline research uses hfq for cross-module consistency
       const ANN_FACTOR = 252;
       function codeName(code) {
         const c = String(code == null ? "" : code).trim();
@@ -2816,33 +2840,11 @@
             <div style="margin-top:8px"><b>示例</b>：cost_bps=5 表示每 100% 换手扣 0.05%。</div>
           `,
         },
-        param_rot_riskoff: {
-          title: "动量阈值开关（risk_off）",
-          sub: "当动量不达标时不买入风险资产（进入空仓/现金）。",
-          body: `
-            <div><b>含义</b>：若当期最优动量 ≤ 动量阈值，则本期不买风险资产，进入<b>空仓(现金)</b>。</div>
-            <div style="margin-top:8px"><b>用途</b>：当市场/标的动量不足时降低暴露，减少“下行趋势里硬上车”。</div>
-            <div style="margin-top:8px"><b>范围</b>：true/false。</div>
-            <div style="margin-top:8px"><b>示例</b>：开启 risk_off，floor=0（动量≤0 就空仓）。</div>
-          `,
-        },
-        param_rot_floor: {
-          title: "动量阈值（momentum_floor）",
-          sub: "动量阈值触发条件（用动量分数判断）。",
-          body: `
-            <div><b>含义</b>：若最佳动量分数 ≤ 阈值，则本期进入<b>空仓(现金)</b>。</div>
-            <div style="margin-top:8px"><b>用途</b>：控制“什么时候认为风险资产不值得持有/不应买入”。</div>
-            <div style="margin-top:8px"><b>范围</b>：实数。常用：0（动量为负就避险）。</div>
-            <div style="margin-top:8px"><b>重要</b>：需开启“动量阈值开关”。</div>
-            <div style="margin-top:8px"><b>示例</b>：floor=0 表示只在动量为正时才持有风险资产。</div>
-          `,
-        },
         param_rot_score_method: {
           title: "打分方式（score_method）",
           sub: "决定“动量排序”用什么指标：偏向涨得猛 or 涨得稳。",
           body: `
             <div><b>raw_mom</b>：纯动量，score = close(t-skip)/close(t-skip-lookback) - 1。</div>
-            <div style="margin-top:8px"><b>return_over_vol</b>：过去收益 / 过去波动率（年化）。偏向“涨得稳”。</div>
             <div style="margin-top:8px"><b>sharpe_mom</b>：看过去窗口内的 Sharpe（用 rf 作为无风险）。</div>
             <div style="margin-top:8px"><b>sortino_mom</b>：看过去窗口内的 Sortino（只惩罚下行波动）。</div>
             <div style="margin-top:8px"><b>说明</b>：这些打分只影响“排序与选标”，不改变成交价格口径/回测结算逻辑。</div>
@@ -2853,7 +2855,7 @@
           sub: "用趋势条件决定是否允许进入风险资产（事前风控）。",
           body: `
             <div><b>判断口径</b>：对每个候选标的，仅比较“自身收盘价 vs 自身均线”；不再使用全市场均值模式。</div>
-            <div style="margin-top:8px"><b>均线类型</b>：支持 <code>SMA</code> 与 <code>EMA</code> 两种均线。</div>
+            <div style="margin-top:8px"><b>均线类型</b>：支持 <code>SMA</code>、<code>EMA</code> 与 <code>VMA</code>（变异/自适应）三种均线。</div>
             <div style="margin-top:8px"><b>数据口径</b>：收盘价与均线均使用决策当日的前复权（qfq）数据。</div>
             <div style="margin-top:8px"><b>目的</b>：在下行趋势中减少错误入场，降低大回撤。</div>
           `,
@@ -3530,12 +3532,11 @@
             const rd = (p1 && p1.rsi_default) ? p1.rsi_default : { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
             const vd = (p1 && p1.vol_default) ? p1.vol_default : { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
             const cd = (p1 && p1.chop_default) ? p1.chop_default : { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
-            const entryFloorRules = _buildFloorRules("rotRiskOff", "rotFloorRulesTable", "entry");
+            const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
             if (entryFloorRules && entryFloorRules.__error) return entryFloorRules;
             const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
             if (exitFloorRules && exitFloorRules.__error) return exitFloorRules;
             const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
-            const fd = _pickDefaultRule(entryFloorRules) || { threshold: 0.0, momentum_floor: 0.0 };
             const groupEnforce = ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true");
             const groupPolicy = ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value).trim() : "strongest_score";
             const groupsParsed = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
@@ -3552,11 +3553,9 @@
               lookback_days: Number(($("rotLookback").value || "20").trim()),
               skip_days: Number(($("rotSkip").value || "0").trim()),
               cost_bps: Number(($("rotCost").value || "0").trim()),
-              risk_off: ($("rotRiskOff").value === "true"),
               group_enforce: groupEnforce,
               group_pick_policy: groupPolicy,
               asset_groups: groupsParsed,
-              momentum_floor: Number((fd.threshold != null ? fd.threshold : fd.momentum_floor) || 0),
               asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
               score_method: $("rotScoreMethod").value,
               risk_free_rate: (Number.isFinite(risk_free_rate) ? risk_free_rate : 0.025),
@@ -4019,14 +4018,41 @@
 
       function renderCodeList() {
         const box = $("codes");
+        if (!box) {
+          setMsg("候选池渲染失败：未找到容器 #codes");
+          return;
+        }
         box.innerHTML = "";
         for (const it of pool) {
+          const code = String((it && it.code) || "").trim();
+          if (!code) continue;
+          const name = String((it && it.name) || code);
+          const rng = ((it && it.last_data_start_date) && (it && it.last_data_end_date))
+            ? `${it.last_data_start_date}~${it.last_data_end_date}`
+            : "没有";
+
           const div = document.createElement("div");
-          const checked = selected.has(it.code) ? "checked" : "";
-          div.innerHTML = `<label style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" data-code="${it.code}" ${checked}/>
-            <span>${it.code} ${it.name} <span class="muted">(${(it.last_data_start_date && it.last_data_end_date) ? (it.last_data_start_date + "~" + it.last_data_end_date) : "没有"})</span></span>
-          </label>`;
+          const label = document.createElement("label");
+          label.style.display = "flex";
+          label.style.gap = "8px";
+          label.style.alignItems = "center";
+
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.setAttribute("data-code", code);
+          cb.checked = selected.has(code);
+
+          const span = document.createElement("span");
+          span.textContent = `${code} ${name} `;
+
+          const muted = document.createElement("span");
+          muted.className = "muted";
+          muted.textContent = `(${rng})`;
+          span.appendChild(muted);
+
+          label.appendChild(cb);
+          label.appendChild(span);
+          div.appendChild(label);
           box.appendChild(div);
         }
         box.querySelectorAll("input[type=checkbox]").forEach(cb => {
@@ -4154,11 +4180,34 @@
       }
 
       async function loadPool() {
-        const resp = await api(`/etf?adjust=${encodeURIComponent(ADJUST_USED)}`, { method: "GET" });
-        const data = await resp.json();
-        if (!Array.isArray(data)) {
-          throw new Error(`候选池接口返回异常（非数组）：${JSON.stringify(data).slice(0, 200)}`);
+        const _fetchPoolByAdjust = async (adj) => {
+          const resp = await api(`/etf?adjust=${encodeURIComponent(adj)}`, { method: "GET" });
+          const data = await resp.json();
+          if (!Array.isArray(data)) {
+            throw new Error(`候选池接口返回异常（${adj} 非数组）：${JSON.stringify(data).slice(0, 200)}`);
+          }
+          return data;
+        };
+
+        let data = await _fetchPoolByAdjust(ADJUST_USED);
+        // Defensive fallback: when current adjust has no pool records, merge from all adjusts.
+        if (!data.length) {
+          const merged = new Map();
+          for (const adj of ["qfq", "hfq", "none"]) {
+            const arr = await _fetchPoolByAdjust(adj);
+            for (const it of arr) {
+              const code = String((it && it.code) || "").trim();
+              if (!code) continue;
+              if (!merged.has(code)) merged.set(code, it);
+            }
+          }
+          data = Array.from(merged.values());
+          if (!data.length) {
+            throw new Error(`候选池为空：adjust=${ADJUST_USED}，且 qfq/hfq/none 均无可用标的`);
+          }
+          setMsg(`提示：${ADJUST_USED} 口径候选池为空，已自动回退为多口径合并展示（${data.length} 个标的）`);
         }
+
         pool = data;
         selected.clear();
         if (_savedSelectedCodesReady && Array.isArray(_savedSelectedCodes)) {
@@ -4172,6 +4221,7 @@
           for (const it of pool) selected.add(it.code);
         }
         renderCodeList();
+        setMsg(`候选池已加载：${pool.length} 个标的`);
         renderBenchmarkSelect();
         // Re-apply persisted benchmark after options are mounted.
         // (Benchmark select options depend on selected codes and are rebuilt in renderBenchmarkSelect)
@@ -4186,7 +4236,7 @@
           }
         } catch { /* ignore */ }
         renderTrendSingleCodeSelect();
-        // default defensive ETF: keep empty as requested
+        // Defensive-asset fallback has been removed.
         // On initial load, honor persisted start/end range and avoid auto-clamping.
         // Range clamping remains active for subsequent user-driven universe changes.
         const hasPersistedRange = (() => {
@@ -4712,7 +4762,7 @@
         const code = String(p.code || "").trim();
         const start = String(p.start || "").trim();
         const end = String(p.end || "").trim();
-        const adjust = String(p.adjust || "hfq").trim().toLowerCase();
+        const adjust = String(p.adjust || "qfq").trim().toLowerCase();
         if (!code || !start || !end) return null;
         const cache = window.__distCodeBaselineCache || {};
         const key = `${adjust}|${code}|${start}|${end}`;
@@ -4746,7 +4796,7 @@
         const code = String(p.code || "").trim();
         const start = String(p.start || "").trim();
         const end = String(p.end || "").trim();
-        const adjust = String(p.adjust || "hfq").trim().toLowerCase();
+        const adjust = String(p.adjust || "qfq").trim().toLowerCase();
         if (!code || !start || !end) return null;
         const cache = window.__distCodeOpenCache || {};
         const key = `${adjust}|${code}|${start}|${end}`;
@@ -5266,6 +5316,53 @@
           };
           if (type === "volume" || type === "rvol" || type === "vol_dev") {
             return { dates: [], values: [], unsupported: "当前口径缺少成交量/成交额时序，无法构建散点" };
+          }
+          if (type === "macd_v_dif" || type === "macd_v_dea" || type === "bias_v") {
+            const ema = (arr, span, minPeriods = span) => {
+              const out = new Array(arr.length).fill(NaN);
+              const alpha = 2 / (Number(span) + 1);
+              let y = NaN;
+              let valid = 0;
+              for (let i = 0; i < arr.length; i++) {
+                const v = Number(arr[i]);
+                if (!Number.isFinite(v)) continue;
+                valid += 1;
+                y = Number.isFinite(y) ? (alpha * v + (1 - alpha) * y) : v;
+                if (valid >= Number(minPeriods)) out[i] = y;
+              }
+              return out;
+            };
+            const tr = periodClose.map((v, i) => {
+              const c = Number(v);
+              const p = (i > 0) ? Number(periodClose[i - 1]) : NaN;
+              if (!Number.isFinite(c) || !Number.isFinite(p)) return NaN;
+              return Math.abs(c - p);
+            });
+            const atr20 = rollingMean(tr, 20, 20);
+            if (type === "bias_v") {
+              const ma20 = rollingMean(periodClose, 20, 5);
+              const biasV = periodClose.map((v, i) => {
+                const c = Number(v);
+                const m = Number(ma20[i]);
+                const a = Number(atr20[i]);
+                if (!Number.isFinite(c) || !Number.isFinite(m) || !Number.isFinite(a) || a === 0) return NaN;
+                return (c - m) / a;
+              });
+              return pack(biasV);
+            }
+            const atr = rollingMean(tr, 26, 26);
+            const ema12 = ema(periodClose, 12, 12);
+            const ema26 = ema(periodClose, 26, 26);
+            const dif = periodClose.map((_, i) => {
+              const a = Number(ema12[i]);
+              const b = Number(ema26[i]);
+              const d = Number(atr[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(d) || d === 0) return NaN;
+              return (a - b) / d;
+            });
+            if (type === "macd_v_dif") return pack(dif);
+            const dea = ema(dif, 20, 20);
+            return pack(dea);
           }
           if (type === "return") return pack(periodRet);
           if (type === "log_return_dev") {
@@ -5820,6 +5917,20 @@
           }
           const out = {};
           for (const d of days) out[String(d)] = { returns: [], points: [] };
+          const _pxAt = (idx, px) => {
+            const i = Number(idx);
+            if (i < 0 || i >= dates.length) return NaN;
+            return (px === "close") ? Number(closes[i]) : Number(opens[i]);
+          };
+          // Strict tradable timing:
+          // entry at day i (open/close), exit at day j=i+N (open/close).
+          // This avoids including any pre-entry return segment.
+          const _tradeRet = (i, j, pxE0, pxX0) => {
+            const e0 = _pxAt(i, pxE0);
+            const x0 = _pxAt(j, pxX0);
+            if (!Number.isFinite(e0) || !Number.isFinite(x0) || e0 <= 0) return NaN;
+            return x0 / e0 - 1.0;
+          };
           const pickIdx = (rows, d, shf) => {
             const exact = rows.find((r) => r.day === d);
             if (exact) return exact.idx;
@@ -5838,10 +5949,8 @@
               if (i == null) continue;
               const j = i + n;
               if (j >= dates.length) continue;
-              const e = (pxE === "close") ? Number(closes[i]) : Number(opens[i]);
-              const x = (pxX === "close") ? Number(closes[j]) : Number(opens[j]);
-              if (!Number.isFinite(e) || !Number.isFinite(x) || e <= 0) continue;
-              const r = x / e - 1.0;
+              const r = _tradeRet(i, j, pxE, pxX);
+              if (!Number.isFinite(r)) continue;
               out[String(d)].returns.push(r);
               out[String(d)].points.push({ entry_date: dates[i], exit_date: dates[j], ret: r });
             }
@@ -5976,7 +6085,7 @@
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
-          const type = typeSelect.value; // "return" | "volatility" | "bias" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev"
+          const type = typeSelect.value; // "return" | "volatility" | "bias" | "bias_v" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev" | "macd_v_dif" | "macd_v_dea"
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
 
           if (!code || !distByCode[code]) {
@@ -6005,12 +6114,15 @@
               (type === "return") ? "收益率"
               : (type === "volatility") ? "波动率"
               : (type === "bias") ? "价格BIAS"
+              : (type === "bias_v") ? "BIAS-V"
               : (type === "price_dev") ? "价格偏离度"
               : (type === "log_volatility") ? "对数波动率(log)"
               : (type === "log_return_dev") ? "对数收益偏离"
               : (type === "log_vol_dev") ? "波动率对数偏离"
               : (type === "volume") ? "成交活跃度"
               : (type === "rvol") ? "相对成交量(RVOL)"
+              : (type === "macd_v_dif") ? "MACD-V（DIF）"
+              : (type === "macd_v_dea") ? "MACD-V（DEA）"
               : "成交量偏离(log)";
             const periodLabel =
               (period === "daily") ? "日度"
@@ -6066,12 +6178,15 @@
             (type === "return") ? "收益率"
             : (type === "volatility") ? "波动率"
             : (type === "bias") ? "价格BIAS"
+            : (type === "bias_v") ? "BIAS-V"
             : (type === "price_dev") ? "价格偏离度"
             : (type === "log_volatility") ? "对数波动率(log)"
             : (type === "log_return_dev") ? "对数收益偏离"
             : (type === "log_vol_dev") ? "波动率对数偏离"
             : (type === "volume") ? "成交活跃度"
             : (type === "rvol") ? "相对成交量(RVOL)"
+              : (type === "macd_v_dif") ? "MACD-V（DIF）"
+              : (type === "macd_v_dea") ? "MACD-V（DEA）"
             : "成交量偏离(log)";
           const periodLabel =
             (period === "daily") ? "日度"
@@ -6237,7 +6352,7 @@
           };
           const _fetchAndRenderCode = async (code) => {
             const c = String(code || "").trim();
-            const adj = String((adjustSelect && adjustSelect.value) || "hfq").trim().toLowerCase();
+            const adj = String((adjustSelect && adjustSelect.value) || "qfq").trim().toLowerCase();
             const s = String((rangeStart && rangeStart.value) || "").trim();
             const e = String((rangeEnd && rangeEnd.value) || "").trim();
             if (!c || !s || !e) {
@@ -6342,7 +6457,7 @@
           }
           if (adjustSelect) {
             adjustSelect.addEventListener("change", async () => {
-              const adj = String(adjustSelect.value || "hfq").trim().toLowerCase();
+              const adj = String(adjustSelect.value || "qfq").trim().toLowerCase();
               if (adjustHint) adjustHint.innerHTML = `<b>${esc(adj)}</b>`;
               await _applyRangeAndFetch();
             });
@@ -6369,7 +6484,7 @@
 
         // Init adjust hint
         if (adjustSelect && adjustHint) {
-          const adj = String(adjustSelect.value || "hfq").trim().toLowerCase();
+          const adj = String(adjustSelect.value || "qfq").trim().toLowerCase();
           adjustHint.innerHTML = `<b>${esc(adj)}</b>`;
         }
 
@@ -6409,6 +6524,43 @@
         const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
         const v = arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (arr.length - 1);
         return Math.sqrt(v);
+      }
+
+      function _skewness(vals) {
+        const arr = vals.filter((x) => Number.isFinite(x));
+        const n = arr.length;
+        if (n < 3) return NaN;
+        const mean = arr.reduce((a, b) => a + b, 0) / n;
+        let m2 = 0;
+        let m3 = 0;
+        for (const x of arr) {
+          const d = x - mean;
+          m2 += d * d;
+          m3 += d * d * d;
+        }
+        m2 /= n;
+        m3 /= n;
+        if (!Number.isFinite(m2) || m2 <= 0) return NaN;
+        return m3 / Math.pow(m2, 1.5);
+      }
+
+      function _kurtosisExcess(vals) {
+        const arr = vals.filter((x) => Number.isFinite(x));
+        const n = arr.length;
+        if (n < 4) return NaN;
+        const mean = arr.reduce((a, b) => a + b, 0) / n;
+        let m2 = 0;
+        let m4 = 0;
+        for (const x of arr) {
+          const d = x - mean;
+          const d2 = d * d;
+          m2 += d2;
+          m4 += d2 * d2;
+        }
+        m2 /= n;
+        m4 /= n;
+        if (!Number.isFinite(m2) || m2 <= 0) return NaN;
+        return m4 / (m2 * m2) - 3.0;
       }
 
       function _percentile(vals, p) {
@@ -6502,6 +6654,8 @@
           count: xs.length,
           mean: xs.reduce((a, b) => a + b, 0) / xs.length,
           std: _std(xs),
+          skew: _skewness(xs),
+          kurt_excess: _kurtosisExcess(xs),
           q01: q(1),
           q05: q(5),
           q10: q(10),
@@ -6518,6 +6672,8 @@
           `<tr><td>样本数</td><td>${s.count}</td></tr>` +
           `<tr><td>均值</td><td>${fmtPct(s.mean)}</td></tr>` +
           `<tr><td>标准差</td><td>${fmtPct(s.std)}</td></tr>` +
+          `<tr><td>偏度</td><td>${fmtNum(s.skew)}</td></tr>` +
+          `<tr><td>峰度(超额)</td><td>${fmtNum(s.kurt_excess)}</td></tr>` +
           `<tr><td>1%</td><td>${fmtPct(s.q01)}</td></tr>` +
           `<tr><td>5%</td><td>${fmtPct(s.q05)}</td></tr>` +
           `<tr><td>10%</td><td>${fmtPct(s.q10)}</td></tr>` +
@@ -7912,14 +8068,11 @@
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
-        const risk_off = ($("rotRiskOff").value === "true");
-        const entryFloorRules = _buildFloorRules("rotRiskOff", "rotFloorRulesTable", "entry");
+        const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
         if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
         const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
         if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
-        const fd = _pickDefaultRule(entryFloorRules) || { threshold: 0.0, momentum_floor: 0.0 };
-        const momentum_floor = Number((fd.threshold != null ? fd.threshold : fd.momentum_floor) || 0);
         const score_method = $("rotScoreMethod").value;
         const tp_sl_mode = ($("rotTpSlMode").value || "none");
         const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
@@ -8052,9 +8205,6 @@
         if (dd_control && (dd_reduce < 0 || dd_reduce > 1.0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
         const dd_sleep_days = Number(($("rotDDSleep").value || "20").trim());
         if (dd_control && (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)) return setMsg("休眠天数必须>=1，例如 20");
-        const timing_rsi_gate = ($("rotTimingOn").value === "true");
-        const timing_rsi_window = Number(($("rotTimingRsiWin").value || "24").trim());
-        if (timing_rsi_gate && (!Number.isFinite(timing_rsi_window) || timing_rsi_window < 2)) return setMsg("择时 RSI 窗口必须>=2");
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -8112,7 +8262,7 @@
         if (asset_vol_index_rules && asset_vol_index_rules.__error) return setMsg(asset_vol_index_rules.__error);
         const reqPayload = {
             codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
-            risk_off, momentum_floor, risk_free_rate,
+            risk_free_rate,
             score_method,
             tp_sl_mode,
             atr_window, atr_mult, atr_step, atr_min_mult,
@@ -8122,7 +8272,6 @@
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             mirror_control, mirror_quantiles, mirror_exposures,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
-            timing_rsi_gate, timing_rsi_window,
             trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
             bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
@@ -8309,12 +8458,11 @@
         } else {
           const rebCtl = _parseRotRebalanceControls();
           if (rebCtl && rebCtl.__error) return setMsg(rebCtl.__error);
-          const entryFloorRules = _buildFloorRules("rotRiskOff", "rotFloorRulesTable", "entry");
+          const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
           if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
           const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
           if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
           const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
-          const fd = _pickDefaultRule(entryFloorRules) || { threshold: 0.0, momentum_floor: 0.0 };
           payload = {
             codes,
             start: ($("start").value || "").trim(),
@@ -8331,8 +8479,6 @@
             lookback_days: Number(($("rotLookback").value || "20").trim()),
             skip_days: Number(($("rotSkip").value || "0").trim()),
             cost_bps: Number(($("rotCost").value || "0").trim()),
-            risk_off: ($("rotRiskOff").value === "true"),
-            momentum_floor: Number((fd.threshold != null ? fd.threshold : fd.momentum_floor) || 0),
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             score_method: ($("rotScoreMethod") && $("rotScoreMethod").value) ? String($("rotScoreMethod").value) : "raw_mom",
             group_enforce: ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true"),
@@ -8341,6 +8487,72 @@
             dynamic_universe: isDynamicUniverseOn(),
           };
         }
+        // Always refresh critical strategy/filter params from CURRENT UI.
+        // Do not rely on stale `window.__lastRotationPayload` values.
+        const entryFloorRules2 = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
+        if (entryFloorRules2 && entryFloorRules2.__error) return setMsg(entryFloorRules2.__error);
+        const exitFloorRules2 = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
+        if (exitFloorRules2 && exitFloorRules2.__error) return setMsg(exitFloorRules2.__error);
+        const floorRules2 = [...(entryFloorRules2 || []), ...(exitFloorRules2 || [])];
+        const trendEntryRules2 = _buildTrendRules("rotTrendOn", "rotTrendRulesTable", "entry");
+        if (trendEntryRules2 && trendEntryRules2.__error) return setMsg(trendEntryRules2.__error);
+        const trendExitRules2 = _buildTrendRules("rotExitTrendOn", "rotTrendExitRulesTable", "exit");
+        if (trendExitRules2 && trendExitRules2.__error) return setMsg(trendExitRules2.__error);
+        const asset_trend_rules2 = [...(trendEntryRules2 || []), ...(trendExitRules2 || [])];
+        const td2 = _pickDefaultRule(asset_trend_rules2) || { trend_sma_window: 20, trend_ma_type: "sma" };
+        const biasEntryRules2 = _buildBiasRules("rotBiasOn", "rotBiasRulesTable", "entry");
+        if (biasEntryRules2 && biasEntryRules2.__error) return setMsg(biasEntryRules2.__error);
+        const biasExitRules2 = _buildBiasRules("rotExitBiasOn", "rotBiasExitRulesTable", "exit");
+        if (biasExitRules2 && biasExitRules2.__error) return setMsg(biasExitRules2.__error);
+        const asset_bias_rules2 = [...(biasEntryRules2 || []), ...(biasExitRules2 || [])];
+        const bd2 = _pickDefaultRule(asset_bias_rules2) || {
+          bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20,
+        };
+        const rebCtl2 = _parseRotRebalanceControls();
+        if (rebCtl2 && rebCtl2.__error) return setMsg(rebCtl2.__error);
+        const grp2 = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
+        if (grp2 && grp2.__error) return setMsg(grp2.__error);
+        const volIdx2 = _buildVolIdxRulesFrom("rotVolIdxOn", "rotVolIdxRulesTable", "波动率指数择时");
+        if (volIdx2 && volIdx2.__error) return setMsg(volIdx2.__error);
+        payload = {
+          ...(payload || {}),
+          codes,
+          start: ($("start").value || "").trim(),
+          end: ($("end").value || "").trim(),
+          rebalance: rebCtl2.rebalance,
+          rebalance_anchor: rebCtl2.rebalance_anchor,
+          rebalance_shift: rebCtl2.rebalance_shift,
+          exec_price: ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open",
+          top_k: Number(($("rotTopK").value || "1").trim()),
+          position_mode: (($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive"),
+          entry_backfill: ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true"),
+          entry_match_n: Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0"),
+          exit_match_n: Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0"),
+          lookback_days: Number(($("rotLookback").value || "20").trim()),
+          skip_days: Number(($("rotSkip").value || "0").trim()),
+          cost_bps: Number(($("rotCost").value || "0").trim()),
+          score_method: ($("rotScoreMethod") && $("rotScoreMethod").value) ? String($("rotScoreMethod").value) : "raw_mom",
+          asset_momentum_floor_rules: (floorRules2.length ? floorRules2 : null),
+          trend_filter: ($("rotTrendOn") && $("rotTrendOn").value === "true"),
+          trend_exit_filter: ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true"),
+          trend_sma_window: Number(td2.trend_sma_window),
+          trend_ma_type: String(td2.trend_ma_type || "sma").toLowerCase(),
+          bias_filter: ($("rotBiasOn") && $("rotBiasOn").value === "true"),
+          bias_exit_filter: ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true"),
+          bias_ma_window: Number(bd2.bias_ma_window || 20),
+          bias_level_window: String(bd2.level_window || "all").toLowerCase(),
+          bias_threshold_type: String(bd2.threshold_type || "quantile").toLowerCase(),
+          bias_quantile: Number(bd2.quantile != null ? bd2.quantile : 95),
+          bias_fixed_value: Number(bd2.fixed_value != null ? bd2.fixed_value : 10),
+          bias_min_periods: Number(bd2.min_periods != null ? bd2.min_periods : 20),
+          group_enforce: ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true"),
+          group_pick_policy: ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value) : "strongest_score",
+          asset_groups: grp2,
+          dynamic_universe: isDynamicUniverseOn(),
+          asset_trend_rules: (asset_trend_rules2.length ? asset_trend_rules2 : null),
+          asset_bias_rules: (asset_bias_rules2.length ? asset_bias_rules2 : null),
+          asset_vol_index_rules: (volIdx2 && volIdx2.__error ? null : volIdx2),
+        };
         payload.asof = asof;
         const box = $("rotNextPlan");
         if (box) box.textContent = "查询中...";
@@ -8358,6 +8570,7 @@
           return;
         }
         const p = data.plan || {};
+        const trace = (p.trace || {});
         const rows = Array.isArray(p.target_weights) ? p.target_weights : [];
         const buys = Array.isArray(p.buys) ? p.buys : [];
         const sells = Array.isArray(p.sells) ? p.sells : [];
@@ -8376,6 +8589,103 @@
           return mMap[m0] || m0;
         };
         const hitModeText = `${hitModeLabel(p.rebalance_hit_mode)}${p.rebalance_target_date ? ` (${p.rebalance_target_date})` : ""}`;
+        const _kvRows = (obj) => Object.entries(obj || {}).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc((typeof v === "object") ? JSON.stringify(v) : String(v))}</td></tr>`).join("");
+        const _scoreRows = (() => {
+          const m = (trace.momentum_scores || {});
+          return Object.entries(m).map(([k, v]) => [k, Number(v)]).filter((x) => Number.isFinite(x[1])).sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => `<tr><td>${esc(codeLabel(k))}</td><td>${Number(v).toFixed(6)}</td></tr>`).join("");
+        })();
+        const _entryRows = (() => {
+          const m = (((trace.entry_filtering || {}).entry_checks_by_code) || {});
+          const uiEntryFilters = [
+            { id: "rotTrendOn", key: "trend", label: "Trend" },
+            { id: "rotBiasOn", key: "bias", label: "BIAS" },
+          ].filter((it) => ($(it.id) && String($(it.id).value) === "true"));
+          const hasMomRules = (() => {
+            const rs = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
+            return Array.isArray(rs) && rs.length > 0;
+          })();
+          if (hasMomRules) uiEntryFilters.unshift({ id: "__momentum_rule__", key: "momentum_rule", label: "动量" });
+          const entryCols = uiEntryFilters.map((it) => `<th>${it.label}</th>`).join("");
+          const mark = (v) => {
+            if (v === true) return "Y";
+            if (v === false) return "N";
+            return "-";
+          };
+          const rows = Object.entries(m).map(([k, it]) => {
+            const pCnt = Number((it || {}).pass_count || 0);
+            const eCnt = Number((it || {}).enabled_count || 0);
+            const reqN = Number((it || {}).required || 0);
+            const ok = !!((it || {}).ok_gate);
+            const bf = ((it || {}).by_filter) || {};
+            const byUi = uiEntryFilters.map((f) => `<td>${mark(((bf[f.key] || {}).ok))}</td>`).join("");
+            return `<tr><td>${esc(codeLabel(k))}</td>${byUi}<td>${pCnt}/${eCnt}</td><td>${reqN}</td><td>${ok ? "通过" : "不通过"}</td></tr>`;
+          }).join("");
+          const colSpan = 4 + uiEntryFilters.length;
+          if (!uiEntryFilters.length) {
+            return {
+              table: `<table style="margin-top:4px;"><tr><th>标的</th><th>通过计数</th><th>要求N</th><th>结论</th></tr>${Object.entries(m).map(([k, it]) => {
+                const pCnt = Number((it || {}).pass_count || 0);
+                const eCnt = Number((it || {}).enabled_count || 0);
+                const reqN = Number((it || {}).required || 0);
+                const ok = !!((it || {}).ok_gate);
+                return `<tr><td>${esc(codeLabel(k))}</td><td>${pCnt}/${eCnt}</td><td>${reqN}</td><td>${ok ? "通过" : "不通过"}</td></tr>`;
+              }).join("") || "<tr><td colspan='4' class='muted'>无</td></tr>"}</table>`,
+            };
+          }
+          return {
+            table: `<table style="margin-top:4px;"><tr><th>标的</th>${entryCols}<th>通过计数</th><th>要求N</th><th>结论</th></tr>${rows || `<tr><td colspan='${colSpan}' class='muted'>无</td></tr>`}</table>`,
+          };
+        })();
+        const _exitUi = (() => {
+          const uiExitFilters = [
+            { id: "rotExitFloorOn", key: "momentum_rule", label: "动量出场" },
+            { id: "rotExitTrendOn", key: "trend_rule", label: "趋势出场" },
+            { id: "rotExitBiasOn", key: "bias_rule", label: "BIAS出场" },
+            { id: "rotVolIdxOn", key: "vol_index_timing", label: "恐慌择时" },
+          ].filter((it) => ($(it.id) && String($(it.id).value) === "true"));
+          const ex = ((trace.exit_checks || {}).execution_day_events) || [];
+          const exChecks = ((trace.exit_checks || {}).execution_day_checks) || [];
+          const gate = (((trace.exit_checks || {}).daily_exit_meta || {}).gate) || {};
+          const mark = (v) => {
+            if (v === true) return "Y";
+            if (v === false) return "N";
+            return "-";
+          };
+          const header = uiExitFilters.map((x) => `<th>${x.label}</th>`).join("");
+          const rowsSrc = (Array.isArray(exChecks) && exChecks.length)
+            ? exChecks
+            : ex.map((ev) => ({
+              code: ev.code,
+              hit_count: ev.hit_count,
+              required: ev.required,
+              hit_conditions: ev.hit_conditions,
+              triggered: true,
+              by_filter: null,
+            }));
+          const rows = rowsSrc.map((ev) => {
+            const hs = Array.isArray(ev.hit_conditions) ? ev.hit_conditions : [];
+            const bf = (ev && ev.by_filter && typeof ev.by_filter === "object") ? ev.by_filter : {};
+            const byUi = uiExitFilters.map((f) => {
+              if (f.key === "vol_index_timing") {
+                return `<td>${mark(!!(((trace.parameters || {}).vol_index_timing_enabled)))}</td>`;
+              }
+              if (Object.prototype.hasOwnProperty.call(bf, f.key)) {
+                return `<td>${mark((bf[f.key]))}</td>`;
+              }
+              return `<td>${mark(hs.includes(f.key))}</td>`;
+            }).join("");
+            const trig = (ev && typeof ev.triggered === "boolean") ? ev.triggered : (hs.length > 0);
+            return `<tr><td>${esc(codeLabel(ev.code))}</td>${byUi}<td>${Number(ev.hit_count || 0)}</td><td>${Number(ev.required || 0)}</td><td>${trig ? "触发" : "未触发"}</td></tr>`;
+          }).join("");
+          const colSpan = 4 + uiExitFilters.length;
+          const gateTxt = (uiExitFilters.length ? `gate=${Number(gate.required || 0)}/${Number(gate.enabled_count || 0)} (${esc(String(gate.mode || "-"))})` : "UI未启用出场过滤器");
+          const table = uiExitFilters.length
+            ? `<table style="margin-top:4px;"><tr><th>标的</th>${header}<th>命中计数</th><th>要求N</th><th>结论</th></tr>${rows || `<tr><td colspan='${colSpan}' class='muted'>执行日无出场检查记录</td></tr>`}</table>`
+            : `<div class="muted">UI未启用出场过滤器。</div>`;
+          return { gateTxt, table };
+        })();
+        const _ranked = Array.isArray(trace.candidate_ranking) ? trace.candidate_ranking : [];
         const cmdLines = [];
         cmdLines.push(`下一执行日 (Execution Date): ${nextDay}`);
         cmdLines.push(`决策日 (Decision Date): ${p.decision_date || "-"}`);
@@ -8419,6 +8729,24 @@
           `<div style="margin-top:4px;">补位 (Backfill)：${p.backfill_used ? "是" : "否"}</div>` +
           `<div style="margin-top:4px;">调入 (Buys)：${fmtLeg(buys, "+") || "-"}</div>` +
           `<div style="margin-top:4px;">调出 (Sells)：${fmtLeg(sells, "-") || "-"}</div>` +
+          `<details style="margin-top:10px;"><summary><b>详细计算过程（Debug Trace）</b></summary>` +
+          `<div class="muted" style="margin-top:6px;">参数 / 候选动量分数 / 排序 / 过滤 / 补位 / 出场检查 / 仓位结果</div>` +
+          `<div style="margin-top:8px;"><b>计算参数</b></div>` +
+          `<table style="margin-top:4px;"><tr><th>参数</th><th>值</th></tr>${_kvRows(trace.parameters || {})}</table>` +
+          `<div style="margin-top:8px;"><b>候选池排序</b>：${_ranked.map(codeLabel).join("，") || "-"}</div>` +
+          `<div style="margin-top:8px;"><b>候选池动量分数</b></div>` +
+          `<table style="margin-top:4px;"><tr><th>标的</th><th>分数</th></tr>${_scoreRows || "<tr><td colspan='2' class='muted'>无</td></tr>"}</table>` +
+          `<div style="margin-top:8px;"><b>入场过滤检查</b></div>` +
+          `${_entryRows.table}` +
+          `<div style="margin-top:8px;"><b>过滤与补位摘要</b></div>` +
+          `<table style="margin-top:4px;"><tr><th>项</th><th>值</th></tr>` +
+          `<tr><td>过滤拒绝</td><td>${esc((((trace.entry_filtering || {}).rejected) || []).join(", ") || "-")}</td></tr>` +
+          `<tr><td>补位结果</td><td>${esc(JSON.stringify(trace.backfill_result || {}))}</td></tr>` +
+          `<tr><td>仓位结果</td><td>${esc(JSON.stringify(trace.position_result || {}))}</td></tr>` +
+          `</table>` +
+          `<div style="margin-top:8px;"><b>出场规则检查（仅UI启用项）</b>：${_exitUi.gateTxt}</div>` +
+          `${_exitUi.table}` +
+          `</details>` +
           `<div style="margin-top:8px;"><b>可复制交易指令 (Copyable Orders)</b></div>` +
           `<textarea id="rotPlanCmdText" readonly style="width:100%; min-height:180px; margin-top:6px;">${esc(cmdText)}</textarea>` +
           `<div class="row" style="margin-top:6px;"><button id="copyRotPlanCmd">复制交易指令</button><span id="copyRotPlanCmdMsg" class="muted"></span></div>` +
@@ -8520,14 +8848,11 @@
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "0").trim());
-        const risk_off = ($("rotRiskOff").value === "true");
-        const entryFloorRules = _buildFloorRules("rotRiskOff", "rotFloorRulesTable", "entry");
+        const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
         if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
         const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
         if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
-        const fd = _pickDefaultRule(entryFloorRules) || { threshold: 0.0, momentum_floor: 0.0 };
-        const momentum_floor = Number((fd.threshold != null ? fd.threshold : fd.momentum_floor) || 0);
         const score_method = $("rotScoreMethod").value;
         const tp_sl_mode = ($("rotTpSlMode").value || "none");
         const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
@@ -8655,8 +8980,6 @@
         if (dd_control && (dd_reduce < 0 || dd_reduce > 1.0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
         const dd_sleep_days = Number(($("rotDDSleep").value || "20").trim());
         if (dd_control && (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)) return setMsg("休眠天数必须>=1，例如 20");
-        const timing_rsi_gate = ($("rotTimingOn").value === "true");
-        const timing_rsi_window = Number(($("rotTimingRsiWin").value || "24").trim());
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -8723,7 +9046,7 @@
           method: "POST",
           body: JSON.stringify({
             codes, start, end, rebalance, rebalance_shift, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
-            risk_off, momentum_floor, risk_free_rate,
+            risk_free_rate,
             score_method,
             tp_sl_mode,
             atr_window, atr_mult, atr_step, atr_min_mult,
@@ -8733,7 +9056,6 @@
             rr_sizing, rr_years, rr_thresholds, rr_weights,
             mirror_control, mirror_quantiles, mirror_exposures,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
-            timing_rsi_gate, timing_rsi_window,
             trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
             bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
@@ -8954,7 +9276,10 @@
         };
         const _entryEnabledCount = () => {
           let m = 0;
-          if ($("rotRiskOff") && $("rotRiskOff").value === "true") m += 1;
+          {
+            const rs = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
+            if (Array.isArray(rs) && rs.length > 0) m += 1;
+          }
           if ($("rotTrendOn") && $("rotTrendOn").value === "true") m += 1;
           if ($("rotBiasOn") && $("rotBiasOn").value === "true") m += 1;
           if ($("rotRsiOn") && $("rotRsiOn").value === "true") m += 1;
@@ -8969,7 +9294,6 @@
           if ($("rotTpSlMode") && String($("rotTpSlMode").value || "none") !== "none") m += 1;
           if ($("rotRROn") && $("rotRROn").value === "true") m += 1;
           if ($("rotDDOn") && $("rotDDOn").value === "true") m += 1;
-          if ($("rotTimingOn") && $("rotTimingOn").value === "true") m += 1;
           if ($("rotMirrorOn") && $("rotMirrorOn").value === "true") m += 1;
           if ($("rotVolIdxOn") && $("rotVolIdxOn").value === "true") m += 1;
           return m;
@@ -9023,17 +9347,19 @@
           _syncMatchN();
         };
         grpBtns.forEach((b) => b.addEventListener("click", () => setGroup(String((b.dataset && b.dataset.rotGroup) || "base"))));
-        ["rotRiskOff", "rotTrendOn", "rotBiasOn", "rotRsiOn", "rotChopOn", "rotExitFloorOn", "rotExitTrendOn", "rotExitBiasOn", "rotTpSlMode", "rotRROn", "rotDDOn", "rotTimingOn", "rotMirrorOn", "rotVolIdxOn"].forEach((id) => {
+        ["rotFloorOn", "rotTrendOn", "rotBiasOn", "rotRsiOn", "rotChopOn", "rotExitFloorOn", "rotExitTrendOn", "rotExitBiasOn", "rotTpSlMode", "rotRROn", "rotDDOn", "rotMirrorOn", "rotVolIdxOn"].forEach((id) => {
           const el = $(id);
           if (el) el.addEventListener("change", _syncMatchN);
         });
+        // expose matcher sync for other initializers that run outside this scope
+        window.__rotSyncMatchN = _syncMatchN;
         setGroup("base");
       }
       initRotationControlTabs();
       initTabs("simAbATabs");
       initTabs("simAbBTabs");
       function _syncAbTabEnabled(prefix) {
-        _setTabEnabledByToggle(`${prefix}TabFloor`, `${prefix}_riskOff`);
+        _setTabEnabledByToggle(`${prefix}TabFloor`, `${prefix}_floorOn`);
         _setTabEnabledByToggle(`${prefix}TabFloorExit`, `${prefix}_exitFloorOn`);
         _setTabEnabledByToggle(`${prefix}TabTrend`, `${prefix}_trendOn`);
         _setTabEnabledByToggle(`${prefix}TabBias`, `${prefix}_biasOn`);
@@ -9062,7 +9388,10 @@
         };
         const _entryEnabledCount = () => {
           let m = 0;
-          if ($(`${prefix}_riskOff`) && $(`${prefix}_riskOff`).value === "true") m += 1;
+          {
+            const rs = _buildFloorRules(`${prefix}_floorOn`, `${prefix}FloorRulesTable`, "entry");
+            if (Array.isArray(rs) && rs.length > 0) m += 1;
+          }
           if ($(`${prefix}_trendOn`) && $(`${prefix}_trendOn`).value === "true") m += 1;
           if ($(`${prefix}_biasOn`) && $(`${prefix}_biasOn`).value === "true") m += 1;
           return m;
@@ -9124,7 +9453,7 @@
           _syncMatchN();
         };
         grpBtns.forEach((b) => b.addEventListener("click", () => setGroup(String((b.dataset && b.dataset.abGroup) || "base"))));
-        [`${prefix}_riskOff`, `${prefix}_exitFloorOn`, `${prefix}_trendOn`, `${prefix}_biasOn`, `${prefix}_trendExit`, `${prefix}_biasExit`, `${prefix}_volIdxOn`].forEach((id) => {
+        [`${prefix}_floorOn`, `${prefix}_exitFloorOn`, `${prefix}_trendOn`, `${prefix}_biasOn`, `${prefix}_trendExit`, `${prefix}_biasExit`, `${prefix}_volIdxOn`].forEach((id) => {
           const el = $(id);
           if (el) {
             el.addEventListener("change", () => {
@@ -9176,11 +9505,11 @@
 
       // ---------------- Rotation: Phase-1 per-asset rule tables ----------------
       const _parseCsvNums = (s) => String(s || "").split(",").map(x => x.trim()).filter(Boolean).map(Number);
-      const _tableDataRows = (tblId) => {
+      function _tableDataRows(tblId) {
         const tbl = $(tblId);
         if (!tbl) return [];
         return Array.from(tbl.querySelectorAll("tr")).slice(1);
-      };
+      }
       function _setTabEnabledByToggle(tabId, toggleId) {
         const root = $(tabId);
         const toggle = $(toggleId);
@@ -9249,7 +9578,9 @@
         _rotFloorAddRuleRow({ code: "*", op: ">", threshold: 0.0, threshold_unit: "raw" }, { tableId });
       }
       function _buildFloorRules(toggleId, tableId, stageName) {
-        const on = ($(String(toggleId || "rotRiskOff")) && $(String(toggleId || "rotRiskOff")).value === "true");
+        const tId = String(toggleId || "");
+        const toggle = tId ? $(tId) : null;
+        const on = toggle ? (toggle.value === "true") : true;
         if (!on) return null;
         const out = [];
         for (const tr of _tableDataRows(String(tableId || "rotFloorRulesTable"))) {
@@ -9294,6 +9625,7 @@
             <select class="rotTrendMaType" style="min-width:160px;">
               <option value="sma" ${maType==="sma" ? "selected" : ""}>SMA</option>
               <option value="ema" ${maType==="ema" ? "selected" : ""}>EMA</option>
+              <option value="vma" ${maType==="vma" ? "selected" : ""}>VMA</option>
             </select>
           </td>
           <td><input class="rotTrendWin" value="${win}" placeholder="20" style="min-width:120px;" /></td>
@@ -9325,7 +9657,7 @@
           const winRaw = (tr.querySelector(".rotTrendWin") && tr.querySelector(".rotTrendWin").value) ? String(tr.querySelector(".rotTrendWin").value).trim() : "20";
           const trend_sma_window = Math.floor(Number(winRaw));
           if (!Number.isFinite(trend_sma_window) || trend_sma_window <= 0) return { __error: "趋势过滤：均线窗口必须是正整数" };
-          if (!["sma", "ema"].includes(trend_ma_type)) return { __error: "趋势过滤：均线类型仅支持 SMA/EMA" };
+          if (!["sma", "ema", "vma"].includes(trend_ma_type)) return { __error: "趋势过滤：均线类型仅支持 SMA/EMA/VMA" };
           if (!["=", "!=", ">", "<", ">=", "<="].includes(op)) return { __error: "趋势过滤：判断条件仅支持 = != > < >= <=" };
           out.push({ code, stage: String(stageName || "entry"), op, trend_sma_window, trend_ma_type });
         }
@@ -9514,8 +9846,12 @@
       };
 
       function _initPhase1RuleTables() {
+        const _safeSyncMatchN = () => {
+          const fn = window.__rotSyncMatchN;
+          if (typeof fn === "function") fn();
+        };
         // 参数清理：隐藏未成熟控制项（保留 DOM 兼容旧配置，但不再展示）。
-        const _retiredTabs = ["rotTabRsi", "rotTabVol", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabTpSl", "rotTabRR", "rotTabDD", "rotTabTiming", "rotTabMirror"];
+        const _retiredTabs = ["rotTabRsi", "rotTabVol", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabTpSl", "rotTabRR", "rotTabDD", "rotTabMirror"];
         _retiredTabs.forEach((tabId) => {
           try {
             const panel = $(tabId);
@@ -9524,7 +9860,8 @@
             if (btn && btn.parentElement) btn.parentElement.removeChild(btn);
           } catch { /* ignore */ }
         });
-        try { _rotFloorResetDefaultRules("rotFloorRulesTable"); _setTabEnabledByToggle("rotTabFloor", "rotRiskOff"); } catch { /* ignore */ }
+        try { _rotFloorResetDefaultRules("rotFloorRulesTable"); } catch { /* ignore */ }
+        try { _setTabEnabledByToggle("rotTabFloor", "rotFloorOn"); } catch { /* ignore */ }
         try { _rotFloorResetDefaultRules("rotFloorExitRulesTable"); _setTabEnabledByToggle("rotTabFloorExit", "rotExitFloorOn"); } catch { /* ignore */ }
         try { _rotTrendResetDefaultRules("rotTrendRulesTable"); _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"); } catch { /* ignore */ }
         try { _rotTrendResetDefaultRules("rotTrendExitRulesTable"); _setTabEnabledByToggle("rotTabTrendExit", "rotExitTrendOn"); } catch { /* ignore */ }
@@ -9534,7 +9871,8 @@
         try { _rotVolResetDefaultRules(); _setTabEnabledByToggle("rotTabVol", "rotVolOn"); } catch { /* ignore */ }
         try { _rotChopResetDefaultRules(); _setTabEnabledByToggle("rotTabChop", "rotChopOn"); } catch { /* ignore */ }
 
-        if ($("rotRiskOff")) $("rotRiskOff").addEventListener("change", () => _setTabEnabledByToggle("rotTabFloor", "rotRiskOff"));
+        if ($("rotFloorRulesTable")) $("rotFloorRulesTable").addEventListener("change", _safeSyncMatchN);
+        if ($("rotFloorOn")) $("rotFloorOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabFloor", "rotFloorOn"));
         if ($("rotExitFloorOn")) $("rotExitFloorOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabFloorExit", "rotExitFloorOn"));
         if ($("rotTrendOn")) $("rotTrendOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabTrend", "rotTrendOn"));
         if ($("rotExitTrendOn")) $("rotExitTrendOn").addEventListener("change", () => _setTabEnabledByToggle("rotTabTrendExit", "rotExitTrendOn"));
@@ -10011,14 +10349,11 @@
         const group_pick_policy = ($("rotGroupPolicy") && $("rotGroupPolicy").value) ? String($("rotGroupPolicy").value) : "strongest_score";
         const asset_groups = _parseAssetGroupsFromText(($("rotAssetGroups") && $("rotAssetGroups").value) ? $("rotAssetGroups").value : "");
         if (asset_groups && asset_groups.__error) return setMsg(asset_groups.__error);
-        const risk_off = ($("rotRiskOff").value === "true");
-        const entryFloorRules = _buildFloorRules("rotRiskOff", "rotFloorRulesTable", "entry");
+        const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
         if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
         const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
         if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
-        const fd = _pickDefaultRule(entryFloorRules) || { threshold: 0.0, momentum_floor: 0.0 };
-        const momentum_floor = Number((fd.threshold != null ? fd.threshold : fd.momentum_floor) || 0);
         const score_method = $("rotScoreMethod").value;
         const tp_sl_mode = ($("rotTpSlMode").value || "none");
         const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
@@ -10141,8 +10476,6 @@
         if (dd_control && (dd_reduce < 0 || dd_reduce > 1.0)) return setMsg("减仓比例 Y 需在 0~100%，例如 100");
         const dd_sleep_days = Number(($("rotDDSleep").value || "20").trim());
         if (dd_control && (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)) return setMsg("休眠天数必须>=1，例如 20");
-        const timing_rsi_gate = ($("rotTimingOn").value === "true");
-        const timing_rsi_window = Number(($("rotTimingRsiWin").value || "24").trim());
         const rfRaw = ($("rf").value || "").trim();
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
@@ -10162,13 +10495,11 @@
         setMsg("");
         try {
           const asset_rc_rules = null;
-          const entryFloorRules = _buildFloorRules("rotRiskOff", "rotFloorRulesTable", "entry");
+          const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
           if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
           const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
           if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
           const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
-          const fd = _pickDefaultRule(entryFloorRules) || { threshold: 0.0, momentum_floor: 0.0 };
-          const momentum_floor = Number((fd.threshold != null ? fd.threshold : fd.momentum_floor) || 0);
           const asset_vol_index_rules = (() => {
             const on = ($("rotVolIdxOn") && $("rotVolIdxOn").value === "true");
             if (!on) return null;
@@ -10202,7 +10533,7 @@
               codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
               position_mode, entry_backfill, entry_match_n, exit_match_n,
               rebalance_anchor, rebalance_shift, exec_price,
-              risk_off, momentum_floor, risk_free_rate,
+              risk_free_rate,
               score_method,
               tp_sl_mode,
               atr_window, atr_mult, atr_step, atr_min_mult,
@@ -10212,7 +10543,6 @@
               rr_sizing, rr_years, rr_thresholds, rr_weights,
               mirror_control, mirror_quantiles, mirror_exposures,
               dd_control, dd_threshold, dd_reduce, dd_sleep_days,
-              timing_rsi_gate, timing_rsi_window,
               trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
               bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
@@ -10394,19 +10724,148 @@
         const el = $(id);
         return String((el && el.value != null) ? el.value : "").trim();
       }
+      function _parseSimRanges() {
+        const parseOpt = (id, label) => {
+          const raw = _str(id);
+          if (!raw) return { ok: true, value: null };
+          const v = Number(raw);
+          if (!Number.isFinite(v)) return { ok: false, error: `${label} 需填写原始小数值（如 0.2 / -0.1）` };
+          return { ok: true, value: v };
+        };
+        const c0 = parseOpt("simCorrLow", "相关性下限");
+        if (!c0.ok) return { __error: c0.error };
+        const c1 = parseOpt("simCorrHigh", "相关性上限");
+        if (!c1.ok) return { __error: c1.error };
+        const m0 = parseOpt("simMuLow", "长期年化收益下限");
+        if (!m0.ok) return { __error: m0.error };
+        const m1 = parseOpt("simMuHigh", "长期年化收益上限");
+        if (!m1.ok) return { __error: m1.error };
+        const corrLow = c0.value;
+        const corrHigh = c1.value;
+        const muLow = m0.value;
+        const muHigh = m1.value;
+        if ((corrLow == null) !== (corrHigh == null)) return { __error: "相关性范围需同时填写上下限，或同时留空" };
+        if ((muLow == null) !== (muHigh == null)) return { __error: "长期年化收益范围需同时填写上下限，或同时留空" };
+        const n = Math.trunc(_num("simN", 0));
+        if (corrLow != null && corrHigh != null) {
+          if (corrLow > corrHigh) return { __error: "相关性范围需满足：下限 <= 上限" };
+          if (corrHigh >= 0.99) return { __error: "相关性上限需小于 0.99" };
+          if (Number.isFinite(n) && n > 1) {
+            const floor = -1.0 / (n - 1.0);
+            if (corrLow < floor) return { __error: `当前 n=${n} 时，相关性下限不能小于 ${floor.toFixed(3)}` };
+          }
+        }
+        if (muLow != null && muHigh != null && muLow > muHigh) return { __error: "长期年化收益范围需满足：下限 <= 上限" };
+        return { corr_low: corrLow, corr_high: corrHigh, mu_low: muLow, mu_high: muHigh };
+      }
       function _payloadBase() {
         const seed = _str("simSeed");
+        const ranges = _parseSimRanges();
+        if (ranges && ranges.__error) return { __error: ranges.__error };
         return {
           start: _str("simStart") || "19900101",
           end: _str("simEnd") || null,
           n_assets: Math.trunc(_num("simN", 4)),
           vol_low: _num("simVolLow", 0.05),
           vol_high: _num("simVolHigh", 0.30),
+          corr_low: ranges.corr_low,
+          corr_high: ranges.corr_high,
+          mu_low: ranges.mu_low,
+          mu_high: ranges.mu_high,
           seed: seed ? Math.trunc(Number(seed)) : null,
           lookback_days: Math.trunc(_num("simLb", 20)),
         };
       }
+      function _updateSimCorrHint() {
+        const el = $("simCorrHint");
+        if (!el) return;
+        const rawN = String(_str("simN") || "").trim();
+        const n = Number(rawN);
+        const base = "约束说明：相关性范围支持负值，且需满足 corr_low ≤ corr_high 且 corr_high < 0.99；在 N 个资产下 corr_low 的理论下限为 -1/(N-1)";
+        const nInt = Math.trunc(n);
+        if (!rawN || !Number.isFinite(n) || nInt <= 1) {
+          el.textContent = `${base}。长期年化收益范围同样支持负值（可填写负收益）。`;
+          return;
+        }
+        const floor = -1.0 / (nInt - 1.0);
+        el.textContent = `${base}（当前 n=${nInt}，最小值约 ${floor.toFixed(3)}）。长期年化收益范围同样支持负值（可填写负收益）。`;
+      }
       function _setSimMsg(t) { const el = $("simMsg"); if (el) el.textContent = t || ""; }
+
+      function _renderSimCorrStats(corr) {
+        const el = $("simCorrStats");
+        if (!el) return;
+        const codes = (corr && corr.codes) ? corr.codes : [];
+        const mat = (corr && corr.matrix) ? corr.matrix : [];
+        const off = [];
+        for (let i = 0; i < codes.length; i++) {
+          for (let j = i + 1; j < codes.length; j++) {
+            const row = Array.isArray(mat[i]) ? mat[i] : [];
+            const v = Number(row[j]);
+            if (Number.isFinite(v)) off.push(v);
+          }
+        }
+        if (!off.length) {
+          el.innerHTML = "<tr><th>Pairwise Corr</th><th>min</th><th>mean</th><th>max</th><th>std</th><th>n_pairs</th></tr><tr><td colspan='6' class='muted'>暂无可用相关性统计</td></tr>";
+          return;
+        }
+        const n = off.length;
+        const minV = Math.min(...off);
+        const maxV = Math.max(...off);
+        const meanV = off.reduce((a, b) => a + b, 0) / n;
+        const varV = off.reduce((a, b) => a + (b - meanV) * (b - meanV), 0) / n;
+        const stdV = Math.sqrt(Math.max(0, varV));
+        el.innerHTML =
+          "<tr><th>Pairwise Corr</th><th>min</th><th>mean</th><th>max</th><th>std</th><th>n_pairs</th></tr>" +
+          `<tr><td>off-diagonal</td><td>${minV.toFixed(3)}</td><td>${meanV.toFixed(3)}</td><td>${maxV.toFixed(3)}</td><td>${stdV.toFixed(3)}</td><td>${n}</td></tr>`;
+      }
+
+      function _renderSimCorrHeatmap(corr) {
+        const codes = (corr && corr.codes) ? corr.codes : [];
+        const mat = (corr && corr.matrix) ? corr.matrix : [];
+        if (!codes.length || !mat.length) return;
+        const _simOrder = [...codes].sort((a, b) => {
+          const na = Number(String(a || "").replace(/^SIM/i, ""));
+          const nb = Number(String(b || "").replace(/^SIM/i, ""));
+          if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+          return String(a).localeCompare(String(b));
+        });
+        const _idx = new Map(codes.map((c, i) => [c, i]));
+        const _mat = _simOrder.map((r) => _simOrder.map((c) => {
+          const i = _idx.get(r);
+          const j = _idx.get(c);
+          const v = (i == null || j == null || !Array.isArray(mat[i])) ? null : mat[i][j];
+          return Number.isFinite(Number(v)) ? Number(v) : null;
+        }));
+        const _text = _mat.map((row) => row.map((v) => (v == null ? "-" : Number(v).toFixed(2))));
+        Plotly.newPlot(
+          "simCorr",
+          [{
+            type: "heatmap",
+            x: _simOrder,
+            y: _simOrder,
+            z: _mat,
+            zmin: -1,
+            zmax: 1,
+            colorscale: [
+              [0.0, "#2ca02c"],
+              [0.5, "#ffffff"],
+              [1.0, "#d62728"],
+            ],
+            text: _text,
+            texttemplate: "%{text}",
+            textfont: { color: "#000000" },
+            hovertemplate: "%{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>",
+            showscale: false,
+          }],
+          {
+            margin: { t: 20, l: 60, r: 20, b: 60 },
+            xaxis: { side: "top" },
+            yaxis: { autorange: "reversed", scaleanchor: "x", scaleratio: 1 },
+          },
+          { displayModeBar: false }
+        );
+      }
 
       function _renderAssetCharts(res) {
         const s = (res && res.series) ? res.series : {};
@@ -10434,9 +10893,8 @@
         if (tEl) tEl.innerHTML = html;
 
         const corr = (res && res.corr) ? res.corr : {};
-        const codes = corr.codes || [];
-        const mat = corr.matrix || [];
-        Plotly.newPlot("simCorr", [{ z: mat, x: codes, y: codes, type: "heatmap" }], { margin: { t: 20 } }, { displayModeBar: false });
+        _renderSimCorrHeatmap(corr);
+        _renderSimCorrStats(corr);
       }
 
       function _renderRotCompare(out) {
@@ -10488,17 +10946,158 @@
         if (note) note.textContent = `n_sims=${meta.n_sims || ""}, n_days=${meta.n_days || ""}, chunk=${meta.chunk_size || ""}, vol=[${meta.vol_low || ""},${meta.vol_high || ""}]`;
       }
 
+      function _copyAbTableRules(fromPrefix, toPrefix) {
+        const specs = [
+          {
+            name: "Floor",
+            clear: _rotFloorClearRuleRows,
+            add: _rotFloorAddRuleRow,
+            read: (tr) => ({
+              code: String((tr.querySelector(".rotFloorCode")?.value || "")).trim(),
+              op: String((tr.querySelector(".rotFloorOp")?.value || ">")).trim(),
+              threshold: Number(tr.querySelector(".rotFloorVal")?.value || "0"),
+              threshold_unit: String((tr.querySelector(".rotFloorUnit")?.value || "raw")).trim().toLowerCase(),
+            }),
+          },
+          {
+            name: "FloorExit",
+            clear: _rotFloorClearRuleRows,
+            add: _rotFloorAddRuleRow,
+            read: (tr) => ({
+              code: String((tr.querySelector(".rotFloorCode")?.value || "")).trim(),
+              op: String((tr.querySelector(".rotFloorOp")?.value || ">")).trim(),
+              threshold: Number(tr.querySelector(".rotFloorVal")?.value || "0"),
+              threshold_unit: String((tr.querySelector(".rotFloorUnit")?.value || "raw")).trim().toLowerCase(),
+            }),
+          },
+          {
+            name: "Trend",
+            clear: _rotTrendClearRuleRows,
+            add: _rotTrendAddRuleRow,
+            read: (tr) => ({
+              code: String((tr.querySelector(".rotTrendCode")?.value || "")).trim(),
+              op: String((tr.querySelector(".rotTrendOp")?.value || ">")).trim(),
+              trend_ma_type: String((tr.querySelector(".rotTrendMaType")?.value || "sma")).trim().toLowerCase(),
+              trend_sma_window: Number(tr.querySelector(".rotTrendWin")?.value || "20"),
+            }),
+          },
+          {
+            name: "TrendExit",
+            clear: _rotTrendClearRuleRows,
+            add: _rotTrendAddRuleRow,
+            read: (tr) => ({
+              code: String((tr.querySelector(".rotTrendCode")?.value || "")).trim(),
+              op: String((tr.querySelector(".rotTrendOp")?.value || ">")).trim(),
+              trend_ma_type: String((tr.querySelector(".rotTrendMaType")?.value || "sma")).trim().toLowerCase(),
+              trend_sma_window: Number(tr.querySelector(".rotTrendWin")?.value || "20"),
+            }),
+          },
+          {
+            name: "Bias",
+            clear: _rotBiasClearRuleRows,
+            add: _rotBiasAddRuleRow,
+            read: (tr) => ({
+              code: String((tr.querySelector(".rotBiasCode")?.value || "")).trim(),
+              op: String((tr.querySelector(".rotBiasOp")?.value || ">")).trim(),
+              bias_ma_window: Number(tr.querySelector(".rotBiasMaWin")?.value || "20"),
+              level_window: String((tr.querySelector(".rotBiasWin")?.value || "all")).trim().toLowerCase(),
+              threshold_type: String((tr.querySelector(".rotBiasThrType")?.value || "quantile")).trim().toLowerCase(),
+              quantile: Number(tr.querySelector(".rotBiasThrVal")?.value || "95"),
+              fixed_value: Number(tr.querySelector(".rotBiasThrVal")?.value || "10"),
+              min_periods: Number(tr.querySelector(".rotBiasMinP")?.value || "20"),
+            }),
+          },
+          {
+            name: "BiasExit",
+            clear: _rotBiasClearRuleRows,
+            add: _rotBiasAddRuleRow,
+            read: (tr) => ({
+              code: String((tr.querySelector(".rotBiasCode")?.value || "")).trim(),
+              op: String((tr.querySelector(".rotBiasOp")?.value || ">")).trim(),
+              bias_ma_window: Number(tr.querySelector(".rotBiasMaWin")?.value || "20"),
+              level_window: String((tr.querySelector(".rotBiasWin")?.value || "all")).trim().toLowerCase(),
+              threshold_type: String((tr.querySelector(".rotBiasThrType")?.value || "quantile")).trim().toLowerCase(),
+              quantile: Number(tr.querySelector(".rotBiasThrVal")?.value || "95"),
+              fixed_value: Number(tr.querySelector(".rotBiasThrVal")?.value || "10"),
+              min_periods: Number(tr.querySelector(".rotBiasMinP")?.value || "20"),
+            }),
+          },
+          {
+            name: "VolIdx",
+            clear: _rotVolIdxClearRuleRows,
+            add: _rotVolIdxAddRuleRow,
+            read: (tr) => ({
+              code: String((tr.querySelector(".rotVolIdxCode")?.value || "")).trim(),
+              index: String((tr.querySelector(".rotVolIdxIndex")?.value || "VIX")).trim().toUpperCase(),
+              level_window: String((tr.querySelector(".rotVolIdxWindow")?.value || "all")).trim().toLowerCase(),
+              level_quantiles: String((tr.querySelector(".rotVolIdxQs")?.value || "")).trim(),
+              level_exposures: String((tr.querySelector(".rotVolIdxExps")?.value || "")).trim(),
+              min_periods: Number(tr.querySelector(".rotVolIdxMinP")?.value || "20"),
+            }),
+          },
+        ];
+        for (const sp of specs) {
+          const fromTable = `${fromPrefix}${sp.name}RulesTable`;
+          const toTable = `${toPrefix}${sp.name}RulesTable`;
+          const srcRows = _tableDataRows(fromTable);
+          sp.clear(toTable);
+          for (const tr of srcRows) {
+            const r = sp.read(tr);
+            if (!r.code) continue;
+            sp.add(r, { tableId: toTable });
+          }
+        }
+      }
+
+      function _copyAbStrategyParams(fromPrefix, toPrefix) {
+        const srcEls = Array.from(document.querySelectorAll(`[id^="${fromPrefix}_"]`));
+        for (const src of srcEls) {
+          if (!src || !src.id) continue;
+          if (!(src instanceof HTMLInputElement || src instanceof HTMLSelectElement || src instanceof HTMLTextAreaElement)) continue;
+          const suffix = src.id.slice((`${fromPrefix}_`).length);
+          if (!suffix) continue;
+          const tgt = $(`${toPrefix}_${suffix}`);
+          if (!tgt) continue;
+          if (tgt instanceof HTMLInputElement) {
+            if (tgt.type === "checkbox" || tgt.type === "radio") tgt.checked = !!src.checked;
+            else tgt.value = src.value;
+          } else {
+            tgt.value = src.value;
+          }
+          tgt.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        _copyAbTableRules(fromPrefix, toPrefix);
+      }
+
+      function _copyAbAToB() {
+        _copyAbStrategyParams("simAbA", "simAbB");
+        _setSimMsg("已复制：A组参数 -> B组");
+      }
+
+      function _copyAbBToA() {
+        _copyAbStrategyParams("simAbB", "simAbA");
+        _setSimMsg("已复制：B组参数 -> A组");
+      }
+
       async function simRunPhase1() {
         _setSimMsg("阶段1 (Phase 1) 运行中...");
-        const resp = await api("/analysis/sim/gbm/phase1", { method: "POST", body: JSON.stringify(_payloadBase()) });
+        const p = _payloadBase();
+        if (p && p.__error) return _setSimMsg(`阶段1 参数错误：${p.__error}`);
+        const resp = await api("/analysis/sim/gbm/phase1", { method: "POST", body: JSON.stringify(p) });
         const data = await resp.json();
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
+        window.__lastSimGbmPhase1 = data;
         _renderAssetCharts(data);
         _setSimMsg("阶段1 (Phase 1) 完成。");
       }
       async function simRunPhase2() {
         _setSimMsg("阶段2 (Phase 2) 运行中...");
-        const resp = await api("/analysis/sim/gbm/phase2", { method: "POST", body: JSON.stringify(_payloadBase()) });
+        const strategyA = _buildAbStrategy("simAbA");
+        if (strategyA && strategyA.__error) return _setSimMsg(`阶段2 参数错误：${strategyA.__error}`);
+        const base = _payloadBase();
+        if (base && base.__error) return _setSimMsg(`阶段2 参数错误：${base.__error}`);
+        const p = { ...base, strategy_a: strategyA, phase1_base: (window.__lastSimGbmPhase1 || null) };
+        const resp = await api("/analysis/sim/gbm/phase2", { method: "POST", body: JSON.stringify(p) });
         const data = await resp.json();
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
         window.__lastSimGbmPhase2 = data;
@@ -10520,16 +11119,22 @@
           }
           const tEl = $("simAssetMetrics"); if (tEl) tEl.innerHTML = html;
           const corr = data.corr || {};
-          Plotly.newPlot("simCorr", [{ z: (corr.matrix || []), x: (corr.codes || []), y: (corr.codes || []), type: "heatmap" }], { margin: { t: 20 } }, { displayModeBar: false });
+          _renderSimCorrHeatmap(corr);
+          _renderSimCorrStats(corr);
         }
         _renderRotCompare(data);
         _setSimMsg("阶段2 (Phase 2) 完成。");
       }
       async function simRunPhase3() {
         _setSimMsg("阶段3 (Phase 3) 运行中（可能较慢）...");
+        const strategyA = _buildAbStrategy("simAbA");
+        if (strategyA && strategyA.__error) return _setSimMsg(`阶段3 参数错误：${strategyA.__error}`);
         const p = _payloadBase();
+        if (p && p.__error) return _setSimMsg(`阶段3 参数错误：${p.__error}`);
         p.n_sims = Math.trunc(_num("simNSims", 10000));
         p.chunk_size = Math.trunc(_num("simChunk", 200));
+        p.n_jobs = Math.max(0, Math.trunc(_num("simMcJobs", 0)));
+        p.strategy_a = strategyA;
         const resp = await api("/analysis/sim/gbm/phase3", { method: "POST", body: JSON.stringify(p) });
         const data = await resp.json();
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
@@ -10539,11 +11144,16 @@
       }
       async function simRunPhase4() {
         _setSimMsg("阶段4 (Phase 4) 运行中（可能较慢）...");
+        const strategyA = _buildAbStrategy("simAbA");
+        if (strategyA && strategyA.__error) return _setSimMsg(`阶段4 参数错误：${strategyA.__error}`);
         const p = _payloadBase();
+        if (p && p.__error) return _setSimMsg(`阶段4 参数错误：${p.__error}`);
         p.n_sims = Math.trunc(_num("simNSims", 10000));
         p.chunk_size = Math.trunc(_num("simChunk", 200));
+        p.n_jobs = Math.max(0, Math.trunc(_num("simMcJobs", 0)));
         p.initial_cash = _num("simCash", 1000000);
         p.position_pct = _num("simPosPct", 0.10);
+        p.strategy_a = strategyA;
         const resp = await api("/analysis/sim/gbm/phase4", { method: "POST", body: JSON.stringify(p) });
         const data = await resp.json();
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
@@ -10580,7 +11190,6 @@
       }
       function _buildAbStrategy(prefix) {
         const p = `${prefix}_`;
-        const defensive = String(_str(`${p}defensiveCode`) || "").trim();
         const out = {
           rebalance: _str(`${p}rebalance`) || "weekly",
           rebalance_shift: _str(`${p}shift`) || "prev",
@@ -10593,12 +11202,8 @@
           lookback_days: Math.max(1, Math.trunc(_num(`${p}lb`, 20))),
           skip_days: Math.max(0, Math.trunc(_num(`${p}skip`, 0))),
           score_method: _str(`${p}score`) || "raw_mom",
-          score_lambda: _num(`${p}scoreLambda`, 0),
-          score_vol_power: _num(`${p}scoreVolPower`, 1),
           risk_free_rate: _num(`${p}rf`, 0.025),
           cost_bps: _num(`${p}cost`, 0),
-          risk_off: _boolSel(`${p}riskOff`, false),
-          momentum_floor: 0.0,
           trend_filter: _boolSel(`${p}trendOn`, false),
           trend_exit_filter: _boolSel(`${p}trendExit`, false),
           trend_sma_window: 20,
@@ -10612,13 +11217,12 @@
           bias_fixed_value: 10.0,
           bias_min_periods: 20,
         };
-        const floorEntryRules = _buildFloorRules(`${p}riskOff`, `${prefix}FloorRulesTable`, "entry");
+        const floorEntryRules = _buildFloorRules(`${p}floorOn`, `${prefix}FloorRulesTable`, "entry");
         if (floorEntryRules && floorEntryRules.__error) return floorEntryRules;
         const floorExitRules = _buildFloorRules(`${p}exitFloorOn`, `${prefix}FloorExitRulesTable`, "exit");
         if (floorExitRules && floorExitRules.__error) return floorExitRules;
         const floorRules = [...(floorEntryRules || []), ...(floorExitRules || [])];
         out.asset_momentum_floor_rules = floorRules.length ? floorRules : null;
-        out.risk_off = !!(floorEntryRules && floorEntryRules.length);
 
         const trendEntryRules = _buildTrendRules(`${p}trendOn`, `${prefix}TrendRulesTable`, "entry");
         if (trendEntryRules && trendEntryRules.__error) return trendEntryRules;
@@ -10655,13 +11259,17 @@
         const volIdxRules = _buildVolIdxRulesFrom(`${p}volIdxOn`, `${prefix}VolIdxRulesTable`, "波动率指数择时");
         if (volIdxRules && volIdxRules.__error) return volIdxRules;
         out.asset_vol_index_rules = volIdxRules;
-        if (defensive) out.defensive_code = defensive;
         const anchor = _numOrNull(`${p}anchor`);
         if (anchor != null) out.rebalance_anchor = Math.trunc(anchor);
         return out;
       }
       async function simRunAb() {
         _setSimMsg("A/B 显著性检验运行中（可能较慢）...");
+        const targetA = _str("simAbTargetA") || "rotation_a";
+        const targetB = _str("simAbTargetB") || "rotation_b";
+        const stabOn = _boolSel("simAbStabOn", false);
+        const ranges = _parseSimRanges();
+        if (ranges && ranges.__error) return _setSimMsg(`A/B 参数错误：${ranges.__error}`);
         const strategyA = _buildAbStrategy("simAbA");
         const strategyB = _buildAbStrategy("simAbB");
         if (strategyA && strategyA.__error) return _setSimMsg(strategyA.__error);
@@ -10673,10 +11281,18 @@
           n_assets: Math.trunc(_num("simN", 4)),
           vol_low: _num("simVolLow", 0.05),
           vol_high: _num("simVolHigh", 0.30),
+          corr_low: ranges.corr_low,
+          corr_high: ranges.corr_high,
+          mu_low: ranges.mu_low,
+          mu_high: ranges.mu_high,
           seed: (($("simSeed").value || "").trim() === "" ? null : Math.trunc(_num("simSeed", 0))),
           n_perm: Math.trunc(_num("simAbPerm", 5000)),
           n_boot: Math.trunc(_num("simAbBoot", 3000)),
           n_jobs: Math.max(0, Math.trunc(_num("simAbJobs", 1))),
+          stability_repeats: (stabOn ? Math.max(1, Math.trunc(_num("simAbStabRuns", 5))) : 0),
+          stability_worlds: Math.max(2, Math.trunc(_num("simAbStabWorlds", 100))),
+          target_a: targetA,
+          target_b: targetB,
           strategy_a: strategyA,
           strategy_b: strategyB,
         };
@@ -10684,31 +11300,71 @@
         const data = await resp.json();
         if (!data || !data.ok) return _setSimMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
         const st = data.stats || {};
+        const cmp = data.comparison || {};
+        const labelA = String(cmp.label_a || "A");
+        const labelB = String(cmp.label_b || "B");
         const ci = (st.bootstrap_ci_95 || {}).mean || [];
         const pval = Number(st.pvalue_permutation_one_sided);
+        const pSign = Number(st.pvalue_sign_test_one_sided);
+        const pWil = Number(st.pvalue_wilcoxon_one_sided);
         const meanDiff = Number(st.mean_diff);
         const winRate = Number(st.win_rate);
         const ciLow = Number(ci[0]);
         const ciHigh = Number(ci[1]);
+        const stab = (((data || {}).robustness || {}).seed_stability || {});
+        const stabPosFrac = Number(stab.positive_mean_fraction);
+        const stabPermSigFrac = Number(stab.perm_sig_fraction);
         const sig = Number.isFinite(pval) && pval < 0.05;
-        let verdict = "结论：未达到统计显著（当前样本下不能认定 A 明显优于 B）。";
+        let verdict = `结论：未达到统计显著（当前样本下不能认定 ${labelA} 明显优于 ${labelB}）。`;
         if (sig && Number.isFinite(ciLow) && ciLow > 0) {
-          verdict = "结论：A 显著优于 B（置换检验 p<0.05，且均值差95%CI整体大于0）。";
+          verdict = `结论：${labelA} 显著优于 ${labelB}（置换检验 p<0.05，且均值差95%CI整体大于0）。`;
         } else if (sig && Number.isFinite(ciHigh) && ciHigh < 0) {
-          verdict = "结论：A 显著劣于 B（置换检验 p<0.05，且均值差95%CI整体小于0）。";
+          verdict = `结论：${labelA} 显著劣于 ${labelB}（置换检验 p<0.05，且均值差95%CI整体小于0）。`;
         }
         Plotly.newPlot("simMcCagr", [
-          { x: (data.dist || {}).diff_a_minus_b || [], type: "histogram", name: "A-B", opacity: 0.7 },
-        ], { margin: { t: 20 }, xaxis: { title: "Annualized Return Diff (A-B)" } }, { displayModeBar: false });
+          { x: (data.dist || {}).diff_a_minus_b || [], type: "histogram", name: `${labelA}-${labelB}`, opacity: 0.7 },
+        ], { margin: { t: 20 }, xaxis: { title: `Annualized Return Diff (${labelA}-${labelB})` } }, { displayModeBar: false });
         const note = $("simMcNote");
-        if (note) note.textContent = `${verdict} 说明：主检验为单侧配对置换检验（H1: A>B），置信区间为 mean(Δ=A-B) 的 bootstrap 95%CI。`;
-        _setSimMsg(`A/B 完成：p=${Number.isFinite(pval) ? pval.toFixed(4) : "-"}, meanΔ=${fmtPct(meanDiff)}, 95%CI=[${fmtPct(ciLow)}, ${fmtPct(ciHigh)}], win=${fmtPct(winRate)}。${verdict}`);
+        const robustTxt = `稳健性：sign-p=${Number.isFinite(pSign) ? pSign.toFixed(4) : "-"}, wilcoxon-p=${Number.isFinite(pWil) ? pWil.toFixed(4) : "-"}`;
+        const stabTxt = (stab && stab.enabled) ? `，多seed一致性：正向比例=${fmtPct(stabPosFrac)}，显著比例=${fmtPct(stabPermSigFrac)}` : "";
+        if (note) note.textContent = `${verdict} 说明：主检验为单侧配对置换检验（H1: ${labelA}>${labelB}），置信区间为 mean(Δ=${labelA}-${labelB}) 的 bootstrap 95%CI。${robustTxt}${stabTxt}`;
+        const robustTbl = $("simAbRobustTable");
+        if (robustTbl) {
+          const _tag = (lvl) => {
+            if (lvl === "green") return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#e8f5e9;color:#1b5e20;">通过</span>`;
+            if (lvl === "red") return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#ffebee;color:#b71c1c;">不通过</span>`;
+            return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#fff8e1;color:#8a6d3b;">观察</span>`;
+          };
+          const mainLvl = (Number.isFinite(pval) && pval < 0.05 && Number.isFinite(ciLow) && ciLow > 0) ? "green"
+            : ((Number.isFinite(pval) && pval < 0.05 && Number.isFinite(ciHigh) && ciHigh < 0) ? "red" : "yellow");
+          const signLvl = (Number.isFinite(pSign) && pSign < 0.05) ? "green" : "yellow";
+          const wilLvl = (Number.isFinite(pWil) && pWil < 0.05) ? "green" : "yellow";
+          const stabEnabled = !!(stab && stab.enabled);
+          const stabLvl = !stabEnabled ? "yellow"
+            : ((Number.isFinite(stabPosFrac) && Number.isFinite(stabPermSigFrac) && stabPosFrac >= 0.70 && stabPermSigFrac >= 0.60) ? "green"
+              : ((Number.isFinite(stabPosFrac) && stabPosFrac < 0.50) ? "red" : "yellow"));
+          const rows = [
+            { item: "主检验(置换+CI)", value: `p=${Number.isFinite(pval) ? pval.toFixed(4) : "-"}，CI=[${fmtPct(ciLow)}, ${fmtPct(ciHigh)}]`, judge: _tag(mainLvl), note: "以 p<0.05 且 CI整体>0 为优于证据" },
+            { item: "符号检验(Sign)", value: Number.isFinite(pSign) ? `p=${pSign.toFixed(4)}` : "-", judge: _tag(signLvl), note: "仅看方向一致性，抗异常值" },
+            { item: "Wilcoxon符号秩", value: Number.isFinite(pWil) ? `p=${pWil.toFixed(4)}` : "-", judge: _tag(wilLvl), note: "同时考虑方向与相对幅度" },
+            { item: "多seed一致性", value: stabEnabled ? `正向=${fmtPct(stabPosFrac)}，显著=${fmtPct(stabPermSigFrac)}` : "未启用", judge: _tag(stabLvl), note: "看结论对随机种子的稳定性" },
+          ];
+          robustTbl.innerHTML = `
+            <tr><th style="width:180px;">稳健性项</th><th>统计值</th><th style="width:90px;">结论</th><th>说明</th></tr>
+            ${rows.map((r) => `<tr><td>${r.item}</td><td>${r.value}</td><td>${r.judge}</td><td class="muted">${r.note}</td></tr>`).join("")}
+          `;
+        }
+        _setSimMsg(`A/B 完成（${labelA} vs ${labelB}）：p=${Number.isFinite(pval) ? pval.toFixed(4) : "-"}, meanΔ=${fmtPct(meanDiff)}, 95%CI=[${fmtPct(ciLow)}, ${fmtPct(ciHigh)}], win=${fmtPct(winRate)}；${robustTxt}${stabTxt}。${verdict}`);
       }
       if ($("simRun1")) $("simRun1").addEventListener("click", simRunPhase1);
       if ($("simRun2")) $("simRun2").addEventListener("click", simRunPhase2);
       if ($("simRun3")) $("simRun3").addEventListener("click", simRunPhase3);
       if ($("simRun4")) $("simRun4").addEventListener("click", simRunPhase4);
       if ($("simRunAb")) $("simRunAb").addEventListener("click", simRunAb);
+      if ($("simAbCopyAToB")) $("simAbCopyAToB").addEventListener("click", _copyAbAToB);
+      if ($("simAbCopyBToA")) $("simAbCopyBToA").addEventListener("click", _copyAbBToA);
+      if ($("simN")) $("simN").addEventListener("input", _updateSimCorrHint);
+      _updateSimCorrHint();
       if ($("simBenchMode")) $("simBenchMode").addEventListener("change", () => {
         // Re-render MC histogram if present (phase3/4), and re-render compare table if phase2 already ran.
         try {

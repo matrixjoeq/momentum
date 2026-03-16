@@ -103,7 +103,6 @@ def test_rotation_holds_cash_when_candidates_not_greater_than_topk(session_facto
                 rebalance="weekly",
                 top_k=2,
                 lookback_days=3,
-                risk_off=False,
             ),
         )
 

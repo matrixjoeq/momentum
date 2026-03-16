@@ -68,3 +68,22 @@ python3 -m venv .venv
 ```bash
 .venv/bin/python -m pytest
 ```
+
+### 时序回归测试清单
+
+用于验证执行时点与收益归属的一致性（含 `open/close/oc2` 以及日历效应 2x2 买卖价组合）：
+
+```bash
+.venv/bin/python -m pytest \
+  tests/test_strategy_execution_timing_regression.py \
+  tests/test_research_calendar_effect_2x2_timing.py \
+  tests/test_strategy_rotation_risk_controls.py \
+  tests/test_api_sim_gbm.py \
+  tests/test_analysis_sim_gbm_ab.py \
+  tests/test_analysis_baseline.py \
+  tests/test_api_analysis_baseline.py \
+  tests/test_api_calendar_effect.py \
+  tests/test_analysis_trend.py \
+  tests/test_analysis_trend_portfolio.py \
+  tests/test_sim_gbm_unit.py -q
+```

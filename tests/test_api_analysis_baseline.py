@@ -125,8 +125,6 @@ def test_api_rotation_backtest_happy_path(api_client):
             "risk_off": False,
             "risk_free_rate": 0.025,
             "cost_bps": 0.0,
-            "timing_rsi_gate": True,
-            "timing_rsi_window": 6,
         },
     )
     assert "nav" in data and "series" in data["nav"]
@@ -135,9 +133,6 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "EXCESS" in data["nav"]["series"]
     assert "nav_rsi" in data
     assert data["nav_rsi"]["windows"] == [6, 12, 24]
-    assert "timing" in data
-    assert data["timing"]["enabled"] is True
-    assert data["timing"]["threshold"] == 50.0
     assert "win_payoff" in data
 
 
@@ -340,6 +335,101 @@ def test_api_rotation_next_execution_plan_entry_backfill_recovers_slots(api_clie
     picks_on = (d_on.get("plan") or {}).get("picks") or []
     assert len(picks_on) >= len(picks_off)
     assert len(picks_on) > len(picks_off)
+
+
+def test_api_rotation_next_execution_plan_trace_includes_scores_and_entry_checks_with_default_rules(api_client, engine):
+    dates, series = build_rotation_case_series()
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        {
+            **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="daily"),
+            "asof": fmt_ymd(dates[-2]),
+            "exec_price": "open",
+            "trend_filter": True,
+            "trend_sma_window": 5,
+            # intentionally do not pass asset_trend_rules to test default-rule trace path
+        },
+    )
+    trace = (data.get("plan") or {}).get("trace") or {}
+    m = trace.get("momentum_scores") or {}
+    entry = ((trace.get("entry_filtering") or {}).get("entry_checks_by_code") or {})
+    assert m, "trace.momentum_scores should not be empty"
+    assert entry, "trace.entry_filtering.entry_checks_by_code should not be empty"
+    one = next(iter(entry.values()))
+    by_filter = (one.get("by_filter") or {}) if isinstance(one, dict) else {}
+    assert "trend" in by_filter
+    assert "ok_gate" in one
+
+
+def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_trigger_events(api_client, monkeypatch):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+
+    import etf_momentum.strategy.rotation as rot_mod
+
+    def _fake_backtest_rotation(*_args, **_kwargs):
+        return {
+            "holdings": [
+                {
+                    "start_date": "2024-01-03",
+                    "decision_date": "2024-01-02",
+                    "mode": "risk_on",
+                    "picks": ["510300"],
+                    "scores": {"510300": 0.02},
+                    "risk_controls": {"reasons": [], "score_by_code": {"510300": 0.02}, "candidate_ranked": ["510300"]},
+                    "daily_exit": {
+                        "gate": {"enabled_count": 2, "required": 2, "mode": "and"},
+                        "checks_by_day": [
+                            {
+                                "decision_date": "2024-01-02",
+                                "execution_date": "2024-01-03",
+                                "checks": [
+                                    {
+                                        "code": "510300",
+                                        "hit_count": 1,
+                                        "required": 2,
+                                        "hit_conditions": ["trend_rule"],
+                                        "triggered": False,
+                                        "by_filter": {"momentum_rule": False, "trend_rule": True, "bias_rule": False},
+                                    }
+                                ],
+                            }
+                        ],
+                        "events": [],
+                    },
+                }
+            ],
+            "period_details": [{"start_date": "2024-01-03", "buys": [], "sells": [], "turnover": 0.0}],
+            "daily_exit_events": [],
+            "weights_end": {"weights": {"510300": 1.0}},
+        }
+
+    monkeypatch.setattr(rot_mod, "backtest_rotation", _fake_backtest_rotation)
+
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        _make_next_execution_plan_payload(
+            codes=_BASELINE_CODES,
+            start="20240102",
+            end="20240103",
+            asof="20240102",
+        ),
+    )
+    checks = ((((data.get("plan") or {}).get("trace") or {}).get("exit_checks") or {}).get("execution_day_checks") or [])
+    assert checks
+    assert checks[0]["code"] == "510300"
+    assert checks[0]["triggered"] is False
 
 
 @pytest.mark.parametrize(

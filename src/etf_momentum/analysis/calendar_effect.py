@@ -21,6 +21,7 @@ from .baseline import (
     load_close_prices,
     load_ohlc_prices,
 )
+from .execution_timing import forward_align_returns
 from .rotation import RotationAnalysisInputs, compute_rotation_backtest
 
 
@@ -119,6 +120,7 @@ def _ew_nav_and_weights_by_decision_dates(
     daily_ret: pd.DataFrame,
     *,
     decision_dates: list[pd.Timestamp],
+    exec_price: str = "open",
 ) -> tuple[pd.Series, pd.DataFrame]:
     """
     Equal-weight portfolio with drifting weights and rebalancing to equal weights at decision dates (applied next trading day).
@@ -128,6 +130,7 @@ def _ew_nav_and_weights_by_decision_dates(
     """
     if daily_ret.empty:
         return pd.Series(dtype=float, name="EW"), pd.DataFrame()
+    _ = exec_price  # kept for API compatibility; timing now handled by forward-return alignment.
     cols = list(daily_ret.columns)
     n = len(cols)
     if n <= 0:
@@ -138,8 +141,6 @@ def _ew_nav_and_weights_by_decision_dates(
     decision_set = set(pd.to_datetime(decision_dates))
 
     w = np.full(n, 1.0 / n, dtype=float)
-    nav = 1.0
-    nav_out: list[float] = []
     w_out: list[np.ndarray] = []
 
     for i, _t in enumerate(idx):
@@ -149,15 +150,15 @@ def _ew_nav_and_weights_by_decision_dates(
         w_out.append(w.copy())
         ri = r[i]
         port_r = float(np.dot(w, ri))
-        nav *= (1.0 + port_r)
         if 1.0 + port_r != 0.0:
             w = w * (1.0 + ri) / (1.0 + port_r)
-        nav_out.append(nav)
 
-    s = pd.Series(nav_out, index=idx, name="EW")
+    w_df = pd.DataFrame(np.vstack(w_out), index=idx, columns=cols, dtype=float)
+    ret_fwd = forward_align_returns(daily_ret.astype(float).fillna(0.0))
+    port_ret = (w_df * ret_fwd).sum(axis=1).astype(float)
+    s = (1.0 + port_ret).cumprod().astype(float).rename("EW")
     if len(s) > 0:
         s.iloc[0] = 1.0
-    w_df = pd.DataFrame(np.vstack(w_out), index=idx, columns=cols, dtype=float)
     return s, w_df
 
 
@@ -264,13 +265,17 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             daily_ret = px_common.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
             decision_dates = _decision_dates_for_rebalance(px_common.index, rebalance=reb, anchor=int(a), shift=str(inp.rebalance_shift))
-            ew_nav, ew_w = _ew_nav_and_weights_by_decision_dates(daily_ret[codes], decision_dates=decision_dates)
+            ew_nav, ew_w = _ew_nav_and_weights_by_decision_dates(
+                daily_ret[codes], decision_dates=decision_dates, exec_price=str(ep)
+            )
             ew_ret = ew_nav.pct_change().fillna(0.0)
 
             # Benchmark EW NAV (hfq close) on the SAME trading calendar and SAME decision dates.
             bench_px = bench_close_hfq.sort_index().reindex(px_common.index).ffill()
             bench_ret = bench_px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-            bench_nav, _ = _ew_nav_and_weights_by_decision_dates(bench_ret[codes], decision_dates=decision_dates)
+            bench_nav, _ = _ew_nav_and_weights_by_decision_dates(
+                bench_ret[codes], decision_dates=decision_dates, exec_price=str(ep)
+            )
             bench_daily = bench_nav.pct_change().fillna(0.0)
             active_daily = (ew_ret - bench_daily).astype(float)
             info_ratio = _information_ratio(active_daily, ann_factor=TRADING_DAYS_PER_YEAR)
@@ -424,7 +429,11 @@ def compute_rotation_calendar_effect(
                     bench_px = bench_close_hfq.sort_index().reindex(idx).ffill()
                     bench_ret = bench_px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
                     decision_dates = _decision_dates_for_rebalance(idx, rebalance=reb, anchor=int(a), shift=str(getattr(base, "rebalance_shift", "next")))
-                    bench_nav, _ = _ew_nav_and_weights_by_decision_dates(bench_ret[list(dict.fromkeys(base.codes))], decision_dates=decision_dates)
+                    bench_nav, _ = _ew_nav_and_weights_by_decision_dates(
+                        bench_ret[list(dict.fromkeys(base.codes))],
+                        decision_dates=decision_dates,
+                        exec_price=str(ep),
+                    )
                     bench_daily = bench_nav.pct_change().fillna(0.0)
                     active = (strat_ret - bench_daily).astype(float)
                     info_ratio = _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)

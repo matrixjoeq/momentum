@@ -15,7 +15,6 @@ class RotationAnalysisInputs:
     start: dt.date
     end: dt.date
     rebalance: str = "weekly"
-    rebalance_weekday: int | None = None  # legacy weekly-only anchor; 0..4 maps to Mon..Fri
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1
@@ -27,12 +26,7 @@ class RotationAnalysisInputs:
     skip_days: int = 0
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
-    risk_off: bool = False
-    defensive_code: str | None = None
-    momentum_floor: float = 0.0
     score_method: str = "raw_mom"
-    score_lambda: float = 0.0
-    score_vol_power: float = 1.0
     # Risk controls (defaults off)
     trend_filter: bool = False
     trend_exit_filter: bool = False
@@ -71,7 +65,6 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             start=inp.start,
             end=inp.end,
             rebalance=inp.rebalance,
-            rebalance_weekday=inp.rebalance_weekday,
             rebalance_anchor=inp.rebalance_anchor,
             rebalance_shift=inp.rebalance_shift,
             top_k=inp.top_k,
@@ -83,12 +76,7 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             skip_days=inp.skip_days,
             risk_free_rate=inp.risk_free_rate,
             cost_bps=inp.cost_bps,
-            risk_off=inp.risk_off,
-            defensive_code=inp.defensive_code,
-            momentum_floor=inp.momentum_floor,
             score_method=inp.score_method,
-            score_lambda=inp.score_lambda,
-            score_vol_power=inp.score_vol_power,
             trend_filter=inp.trend_filter,
             trend_exit_filter=inp.trend_exit_filter,
             trend_sma_window=inp.trend_sma_window,

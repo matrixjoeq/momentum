@@ -133,7 +133,13 @@ def ingest_macro_series(
     )
     db.commit()
 
-    df, meta = fetch_macro_daily_close(spec, start=start, end=end)
+    try:
+        df, meta = fetch_macro_daily_close(spec, start=start, end=end)
+    except (TimeoutError, ValueError, TypeError, RuntimeError) as e:
+        err = str(e)
+        update_macro_ingestion_batch(db, batch_id=b.id, status="failed", message=err)
+        db.commit()
+        return {"ok": False, "batch_id": b.id, "series_id": spec.series_id, "error": err, "meta": {"provider": spec.provider, "symbol": spec.provider_symbol, "error": err}}
     if df is None or df.empty:
         err = str((meta or {}).get("error") or "empty_fetch")
         update_macro_ingestion_batch(db, batch_id=b.id, status="failed", message=err)

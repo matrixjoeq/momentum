@@ -177,8 +177,6 @@ def test_momentum_floor_asset_rule_excludes_specific_code(session_factory):
                 top_k=1,
                 lookback_days=20,
                 cost_bps=0.0,
-                risk_off=False,
-                momentum_floor=0.0,
                 asset_momentum_floor_rules=[
                     {"code": "*", "momentum_floor": -1.0},
                     # Exclude AAA by setting a very high floor.

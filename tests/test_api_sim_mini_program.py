@@ -29,7 +29,7 @@ def sim_client(session_factory, engine):
         for code in codes:
             for i, d in enumerate(days):
                 px = base + slopes[code] * i
-                for adj in ("hfq", "none"):
+                for adj in ("qfq", "hfq", "none"):
                     db.add(EtfPrice(code=code, trade_date=d, open=px, close=px, source="seed", adjust=adj))
         db.commit()
 

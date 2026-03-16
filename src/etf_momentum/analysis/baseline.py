@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import EtfPrice
+from .execution_timing import forward_align_returns
 
 
 TRADING_DAYS_PER_YEAR = 252
@@ -658,6 +659,8 @@ def _compute_periodic_returns_and_volatility(
     *,
     codes: list[str],
     daily_close: pd.DataFrame | None = None,
+    daily_high: pd.DataFrame | None = None,
+    daily_low: pd.DataFrame | None = None,
     daily_volume: pd.DataFrame | None = None,
     daily_amount: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
@@ -683,6 +686,12 @@ def _compute_periodic_returns_and_volatility(
     - Price BIAS distributions (end-of-period), where
         bias_t = close_t / MA20(close)_t - 1
       This follows a short/medium-term MA(20) reference used by the research UI.
+    - BIAS-V distributions (by frequency), where
+        BIAS-V_t = (close_t - MA20(close)_t) / ATR(20)_t
+      This standardizes MA20 deviation by ATR20 to support cross-asset comparability.
+    - MACD-V distributions (DIF/DEA, by frequency), where
+        DIF_t = (EMA(close, 12) - EMA(close, 26)) / ATR(26)
+        DEA_t = EMA(DIF, 20)
 
     Also supports (when `daily_volume` or `daily_amount` is provided):
     - "Activity" distributions (sum within period): use volume if available, otherwise fallback to amount.
@@ -699,6 +708,14 @@ def _compute_periodic_returns_and_volatility(
     if daily_close is not None and not daily_close.empty:
         close_df = daily_close.copy()
         close_df.index = pd.to_datetime(close_df.index)
+    high_df = None
+    if daily_high is not None and not daily_high.empty:
+        high_df = daily_high.copy()
+        high_df.index = pd.to_datetime(high_df.index)
+    low_df = None
+    if daily_low is not None and not daily_low.empty:
+        low_df = daily_low.copy()
+        low_df.index = pd.to_datetime(low_df.index)
     vol_df = None
     if daily_volume is not None and not daily_volume.empty:
         vol_df = daily_volume.copy()
@@ -1112,6 +1129,108 @@ def _compute_periodic_returns_and_volatility(
                 _add_bias("monthly", _bias_ma20(px_m))
                 _add_bias("quarterly", _bias_ma20(px_q))
                 _add_bias("yearly", _bias_ma20(px_y))
+
+                # BIAS-V: (close - MA20(close)) / ATR(20)
+                def _add_bias_v(kind: str, close_s: pd.Series, high_s: pd.Series, low_s: pd.Series) -> None:
+                    c = pd.to_numeric(close_s, errors="coerce").astype(float)
+                    h = pd.to_numeric(high_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
+                    l = pd.to_numeric(low_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
+                    c = c.replace([np.inf, -np.inf], np.nan).dropna()
+                    if c.empty:
+                        return
+                    h = h.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
+                    l = l.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
+                    ma20 = c.rolling(window=20, min_periods=5).mean()
+                    prev_c = c.shift(1)
+                    tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
+                    atr20 = tr.rolling(window=20, min_periods=20).mean()
+                    bias_v = ((c - ma20) / atr20.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
+                    if bias_v.empty:
+                        return
+                    vals = bias_v.to_numpy(dtype=float)
+                    code_result[f"{kind}_bias_v"] = {
+                        "hist": _histogram_from_samples(vals),
+                        "quantiles": _quantiles_from_samples(vals),
+                        "mean": float(np.mean(vals)),
+                        "std": float(np.std(vals, ddof=1)) if len(vals) >= 2 else float("nan"),
+                        "count": int(len(vals)),
+                        "current": float(bias_v.iloc[-1]),
+                        "current_date": pd.to_datetime(bias_v.index[-1]).date().isoformat(),
+                    }
+
+                # MACD-V:
+                # DIF = (EMA(close,12)-EMA(close,26))/ATR(26), DEA = EMA(DIF,20)
+                # ATR uses classic True Range with high/low/prev_close; if high/low is
+                # unavailable, fallback to close-based range.
+                hi_raw = pd.to_numeric(high_df[code], errors="coerce").astype(float) if (high_df is not None and code in high_df.columns) else px.copy()
+                lo_raw = pd.to_numeric(low_df[code], errors="coerce").astype(float) if (low_df is not None and code in low_df.columns) else px.copy()
+                hi_raw = hi_raw.reindex(px.index).combine_first(px)
+                lo_raw = lo_raw.reindex(px.index).combine_first(px)
+
+                def _add_macd_v(kind: str, close_s: pd.Series, high_s: pd.Series, low_s: pd.Series) -> None:
+                    c = pd.to_numeric(close_s, errors="coerce").astype(float)
+                    h = pd.to_numeric(high_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
+                    l = pd.to_numeric(low_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
+                    c = c.replace([np.inf, -np.inf], np.nan).dropna()
+                    if c.empty:
+                        return
+                    h = h.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
+                    l = l.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
+                    prev_c = c.shift(1)
+                    tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
+                    atr26 = tr.rolling(window=26, min_periods=26).mean()
+                    ema12 = c.ewm(span=12, adjust=False, min_periods=12).mean()
+                    ema26 = c.ewm(span=26, adjust=False, min_periods=26).mean()
+                    dif = ((ema12 - ema26) / atr26.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
+                    if dif.empty:
+                        return
+                    dea = dif.ewm(span=20, adjust=False, min_periods=20).mean().replace([np.inf, -np.inf], np.nan).dropna()
+                    dif = dif.reindex(dea.index).dropna()
+                    if dif.empty or dea.empty:
+                        return
+
+                    dif_vals = dif.to_numpy(dtype=float)
+                    dea_vals = dea.to_numpy(dtype=float)
+                    code_result[f"{kind}_macd_v_dif"] = {
+                        "hist": _histogram_from_samples(dif_vals),
+                        "quantiles": _quantiles_from_samples(dif_vals),
+                        "mean": float(np.mean(dif_vals)),
+                        "std": float(np.std(dif_vals, ddof=1)) if len(dif_vals) >= 2 else float("nan"),
+                        "count": int(len(dif_vals)),
+                        "current": float(dif.iloc[-1]),
+                        "current_date": pd.to_datetime(dif.index[-1]).date().isoformat(),
+                    }
+                    code_result[f"{kind}_macd_v_dea"] = {
+                        "hist": _histogram_from_samples(dea_vals),
+                        "quantiles": _quantiles_from_samples(dea_vals),
+                        "mean": float(np.mean(dea_vals)),
+                        "std": float(np.std(dea_vals, ddof=1)) if len(dea_vals) >= 2 else float("nan"),
+                        "count": int(len(dea_vals)),
+                        "current": float(dea.iloc[-1]),
+                        "current_date": pd.to_datetime(dea.index[-1]).date().isoformat(),
+                    }
+
+                hi_d = hi_raw
+                lo_d = lo_raw
+                hi_w = hi_raw.resample("W-FRI").max().dropna()
+                lo_w = lo_raw.resample("W-FRI").min().dropna()
+                hi_m = hi_raw.resample("ME").max().dropna()
+                lo_m = lo_raw.resample("ME").min().dropna()
+                hi_q = hi_raw.resample("QE").max().dropna()
+                lo_q = lo_raw.resample("QE").min().dropna()
+                hi_y = hi_raw.resample("YE").max().dropna()
+                lo_y = lo_raw.resample("YE").min().dropna()
+
+                _add_macd_v("daily", px_d, hi_d, lo_d)
+                _add_macd_v("weekly", px_w, hi_w, lo_w)
+                _add_macd_v("monthly", px_m, hi_m, lo_m)
+                _add_macd_v("quarterly", px_q, hi_q, lo_q)
+                _add_macd_v("yearly", px_y, hi_y, lo_y)
+                _add_bias_v("daily", px_d, hi_d, lo_d)
+                _add_bias_v("weekly", px_w, hi_w, lo_w)
+                _add_bias_v("monthly", px_m, hi_m, lo_m)
+                _add_bias_v("quarterly", px_q, hi_q, lo_q)
+                _add_bias_v("yearly", px_y, hi_y, lo_y)
 
         # Activity (volume/amount) and crowding proxies (optional)
         act: pd.Series | None = None
@@ -1639,6 +1758,15 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     nav_common = nav.loc[start_idx:]
     close_common = close.loc[start_idx:, codes_eff].copy()
     close_ff_common = close_common.ffill()
+    high, low = load_high_low_prices(db, codes=codes, start=inp.start, end=inp.end, adjust=inp.adjust)
+    high_common: pd.DataFrame | None = None
+    low_common: pd.DataFrame | None = None
+    if high is not None and not high.empty:
+        high = high.sort_index()
+        high_common = high.loc[start_idx:].reindex(columns=codes_eff).copy()
+    if low is not None and not low.empty:
+        low = low.sort_index()
+        low_common = low.loc[start_idx:].reindex(columns=codes_eff).copy()
     if dynamic_universe:
         # Keep NaN where raw price is NaN to preserve per-day participation.
         daily_ret = close_common.pct_change().replace([np.inf, -np.inf], np.nan)
@@ -1697,7 +1825,12 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         else:
             ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance)
         ew_active_count = pd.Series(len(codes_eff), index=ret_common.index, dtype=int)
-    ew_ret = ew_nav.pct_change().fillna(0.0)
+    # Baseline uses close execution timing: weights decided at t apply to t->t+1 return.
+    ret_fwd = forward_align_returns(ret_common[codes_eff].fillna(0.0))
+    ew_ret = (ew_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
+    ew_nav = (1.0 + ew_ret).cumprod().astype(float)
+    if len(ew_nav) > 0:
+        ew_nav.iloc[0] = 1.0
 
     # risk parity (inverse-vol) portfolio with the same rebalancing schedule
     rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
@@ -1713,7 +1846,10 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             rp_nav, rp_w = _cash_portfolio(ret_common.index, codes_eff, "RP")
         else:
             rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
-    rp_ret = rp_nav.pct_change().fillna(0.0)
+    rp_ret = (rp_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
+    rp_nav = (1.0 + rp_ret).cumprod().astype(float)
+    if len(rp_nav) > 0:
+        rp_nav.iloc[0] = 1.0
 
     # benchmark
     bench_code = inp.benchmark_code
@@ -1903,6 +2039,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         ret_common,
         codes=codes_eff,
         daily_close=close_common.ffill(),
+        daily_high=(high_common.ffill() if high_common is not None else None),
+        daily_low=(low_common.ffill() if low_common is not None else None),
         daily_volume=volume_common,
         daily_amount=amount_common,
     )

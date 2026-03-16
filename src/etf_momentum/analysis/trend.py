@@ -20,7 +20,9 @@ from .baseline import (
     _ulcer_index,
     load_close_prices,
     load_high_low_prices,
+    load_ohlc_prices,
 )
+from .execution_timing import forward_align_returns
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,7 @@ class TrendInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
+    exec_price: str = "open"  # open|close|oc2
     # strategy selection
     strategy: str = "ma_filter"  # ma_filter | ema_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v
     # parameters
@@ -61,6 +64,7 @@ class TrendPortfolioInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
+    exec_price: str = "open"  # open|close|oc2
     strategy: str = "ma_filter"
     top_k: int = 3
     position_sizing: str = "equal"  # equal | vol_target
@@ -241,6 +245,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("code is empty")
     if float(inp.cost_bps) < 0:
         raise ValueError("cost_bps must be >= 0")
+    ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
+    if ep not in {"open", "close", "oc2"}:
+        raise ValueError("exec_price must be one of: open|close|oc2")
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
 
@@ -337,8 +344,38 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
 
     # Returns:
-    # - strategy execution: primarily none returns, but on corporate-action days use hfq return
-    ret_none = px_exec_none.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    # - strategy execution: choose open/close/oc2 by exec_price, then apply none->hfq fallback on CA days
+    # - benchmark: hfq close
+    ohlc_none = load_ohlc_prices(db, codes=[code], start=inp.start, end=inp.end, adjust="none")
+    ohlc_hfq = load_ohlc_prices(db, codes=[code], start=inp.start, end=inp.end, adjust="hfq")
+
+    def _pick_series(ohlc: dict[str, pd.DataFrame], field: str, fallback: pd.Series) -> pd.Series:
+        df = ohlc.get(field, pd.DataFrame())
+        if df is None or df.empty or code not in df.columns:
+            return fallback.astype(float)
+        return pd.to_numeric(df[code], errors="coerce").astype(float).reindex(dates).ffill().combine_first(fallback.astype(float))
+
+    o_none = _pick_series(ohlc_none, "open", px_exec_none)
+    c_none = _pick_series(ohlc_none, "close", px_exec_none)
+    o_hfq = _pick_series(ohlc_hfq, "open", px_bh)
+    c_hfq = _pick_series(ohlc_hfq, "close", px_bh)
+    if ep == "open":
+        exec_none = o_none.combine_first(px_exec_none)
+        exec_hfq = o_hfq.combine_first(px_bh)
+        ret_none = exec_none.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_exec_hfq = exec_hfq.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    elif ep == "close":
+        exec_none = c_none.combine_first(px_exec_none)
+        exec_hfq = c_hfq.combine_first(px_bh)
+        ret_none = exec_none.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_exec_hfq = exec_hfq.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    else:
+        ret_open_none = o_none.combine_first(px_exec_none).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_close_none = c_none.combine_first(px_exec_none).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
+        ret_open_hfq = o_hfq.combine_first(px_bh).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_close_hfq = c_hfq.combine_first(px_bh).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_exec_hfq = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
     ret_hfq = px_bh.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq).astype(float)
@@ -346,7 +383,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     # same heuristic as rotation debug events: >2% or extreme ratios
     dev = (corp_factor - 1.0).abs()
     ca_mask = (dev > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
-    ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq).astype(float)
+    ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_exec_hfq).astype(float)
 
     if strat == "ma_filter":
         sma = px_sig.rolling(window=int(inp.sma_window), min_periods=max(2, int(inp.sma_window) // 2)).mean()
@@ -442,10 +479,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         mom = px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0
         raw_pos = (mom > 0.0).astype(float).fillna(0.0)
 
-    # apply signal from next trading day (avoid look-ahead)
+    # Weights become effective on execution day; return uses forward interval (t -> t+1).
     w = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
+    ret_exec_fwd = forward_align_returns(ret_exec.to_frame("r"))["r"].astype(float)
     cost = _turnover_cost_from_weights(w, cost_bps=float(inp.cost_bps))
-    strat_ret = (w * ret_exec - cost).astype(float)
+    strat_ret = (w * ret_exec_fwd - cost).astype(float)
 
     nav = (1.0 + strat_ret).cumprod()
     if len(nav) > 0:
@@ -517,6 +555,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "macd_signal": int(inp.macd_signal),
                 "macd_v_atr_window": int(inp.macd_v_atr_window),
                 "macd_v_scale": float(inp.macd_v_scale),
+                "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "risk_free_rate": float(inp.risk_free_rate),
             },
@@ -556,6 +595,9 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
         raise ValueError("top_k must be >= 1")
     if float(inp.cost_bps) < 0:
         raise ValueError("cost_bps must be >= 0")
+    ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
+    if ep not in {"open", "close", "oc2"}:
+        raise ValueError("exec_price must be one of: open|close|oc2")
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
     ps = str(inp.position_sizing or "equal").strip().lower()
@@ -595,13 +637,37 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
     high_qfq_df = high_qfq_df.sort_index().reindex(dates).ffill() if not high_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
     low_qfq_df = low_qfq_df.sort_index().reindex(dates).ffill() if not low_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
 
-    ret_none = close_none[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ohlc_none = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
+    ohlc_hfq = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="hfq")
+    open_none = ohlc_none.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+    close_none_exec = ohlc_none.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+    open_hfq = ohlc_hfq.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+    close_hfq_exec = ohlc_hfq.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+    close_none_f = close_none.reindex(columns=codes).astype(float)
+    close_hfq_f = close_hfq.reindex(columns=codes).astype(float)
+    if ep == "open":
+        px_none_exec = open_none.astype(float).combine_first(close_none_f)
+        px_hfq_exec = open_hfq.astype(float).combine_first(close_hfq_f)
+        ret_none = px_none_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_hfq_exec = px_hfq_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    elif ep == "close":
+        px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
+        px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
+        ret_none = px_none_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_hfq_exec = px_hfq_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    else:
+        ret_open_none = open_none.astype(float).combine_first(close_none_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_close_none = close_none_exec.astype(float).combine_first(close_none_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
+        ret_open_hfq = open_hfq.astype(float).combine_first(close_hfq_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_close_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_hfq_exec = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
     ret_hfq = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     gross_none = 1.0 + ret_none
     gross_hfq = 1.0 + ret_hfq
     corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
     ca_mask = ((corp_factor - 1.0).abs() > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
-    ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq).astype(float)
+    ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
@@ -743,11 +809,12 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
             )
             prev_key = key
 
-    # execute on next day
+    # Weights become effective on execution day; return uses forward interval (t -> t+1).
     w = w_decision.shift(1).fillna(0.0).astype(float)
+    ret_exec_fwd = forward_align_returns(ret_exec).astype(float)
     turnover = (w - w.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     cost = turnover * (float(inp.cost_bps) / 10000.0)
-    port_ret = (w * ret_exec).sum(axis=1) - cost
+    port_ret = (w * ret_exec_fwd).sum(axis=1) - cost
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -803,6 +870,7 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
                 "group_enforce": bool(inp.group_enforce),
                 "group_pick_policy": gp,
                 "asset_groups": {k: v for k, v in group_map.items()},
+                "exec_price": str(ep),
             },
         },
         "nav": {

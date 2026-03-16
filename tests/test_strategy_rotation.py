@@ -9,13 +9,13 @@ from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
 def test_backtest_rotation_basic_outputs(session_factory):
     sf = session_factory
     with sf() as db:
-        # create minimal none/hfq prices for two codes over 40 days
+        # create minimal none/hfq/qfq prices for two codes over 40 days
         codes = ["AAA", "BBB"]
         start = dt.date(2024, 1, 1)
         dates = [start + dt.timedelta(days=i) for i in range(50)]
         for i, d in enumerate(dates):
             # AAA trends up, BBB flat
-            for adj in ("hfq", "none"):
+            for adj in ("hfq", "qfq", "none"):
                 db.add(EtfPrice(code="AAA", trade_date=d, close=100 + i, source="eastmoney", adjust=adj))
                 db.add(EtfPrice(code="BBB", trade_date=d, close=100, source="eastmoney", adjust=adj))
         db.commit()
@@ -30,7 +30,6 @@ def test_backtest_rotation_basic_outputs(session_factory):
                 top_k=1,
                 lookback_days=10,
                 skip_days=0,
-                risk_off=False,
                 cost_bps=0.0,
             ),
         )
@@ -38,6 +37,7 @@ def test_backtest_rotation_basic_outputs(session_factory):
     assert out["nav"]["series"]["ROTATION"][0] == pytest.approx(1.0)
     assert "EW_REBAL" in out["nav"]["series"]
     assert "EXCESS" in out["nav"]["series"]
+    assert out["price_basis"]["signal"] == "qfq"
     assert "none" in out["price_basis"]["strategy_nav"]
     assert out["price_basis"]["benchmark_nav"] == "hfq"
     assert out["win_payoff"]["rebalance"] == "monthly"
