@@ -36,7 +36,7 @@ def test_api_baseline_calendar_effect(api_client):
             "adjust": "hfq",
             "risk_free_rate": 0.02,
             "rebalance": "weekly",
-            "anchors": [0, 4],
+            "anchors": [1, 5],
             "exec_prices": ["close"],
         },
     )
@@ -74,7 +74,7 @@ def test_api_rotation_calendar_effect(api_client):
             "risk_off": False,
             "risk_free_rate": 0.02,
             "cost_bps": 0.0,
-            "anchors": [0, 4],
+            "anchors": [1, 5],
             "exec_prices": ["close"],
         },
     )

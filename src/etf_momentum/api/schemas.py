@@ -156,6 +156,10 @@ class BaselineAnalysisRequest(BaseModel):
         ge=3,
         description="Minimum pairwise observations for correlation; below threshold returns null ('-').",
     )
+    exec_price: str = Field(
+        default="close",
+        description="等权组合成交价口径: open=执行日开盘价, close=执行日收盘价, oc2=OC均价",
+    )
 
 
 class LeadLagAnalysisRequest(BaseModel):
@@ -1122,5 +1126,28 @@ class RotationOosBootstrapRequest(BaseModel):
             "Optional param grid, e.g. {'lookback_days': [60,90,120], 'top_k': [1,2]}. "
             "If omitted, a default grid is used."
         ),
+    )
+
+
+class TrendOosBootstrapRequest(BaseModel):
+    """Request for out-of-sample bootstrap parameter optimisation for trend (portfolio) strategies."""
+
+    codes: list[str] = Field(min_length=1, description="Portfolio codes")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    oos_ratio: float = Field(default=0.3, gt=0.0, lt=1.0, description="Fraction of period for OOS (at end)")
+    n_bootstrap: int = Field(default=50, ge=5, le=500, description="Number of bootstrap resamples")
+    block_size: int = Field(default=21, ge=1, description="Block size for circular block bootstrap (trading days)")
+    seed: int | None = Field(default=None, description="Random seed for reproducibility")
+    strategy: str = Field(
+        default="ma_filter",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v",
+    )
+    cost_bps: float = Field(default=2.0, ge=0.0)
+    risk_free_rate: float = Field(default=0.025)
+    exec_price: str = Field(default="open", description="open|close|oc2")
+    param_grid: dict[str, list[Any]] | None = Field(
+        default=None,
+        description="Optional param grid per strategy; if omitted, a default grid is used.",
     )
 

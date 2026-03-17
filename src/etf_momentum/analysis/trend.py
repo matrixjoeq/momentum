@@ -321,6 +321,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         ret_none = exec_none.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_exec_hfq = exec_hfq.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     elif ep == "close":
+        # 成交价=收盘价时使用执行日（T+1）收盘价：ret_exec 经 forward_align 后为 close[t+1]/close[t]-1，执行日 t 入场价为 close[t]。
         exec_none = c_none.combine_first(px_exec_none)
         exec_hfq = c_hfq.combine_first(px_bh)
         ret_none = exec_none.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
@@ -540,7 +541,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     return out
 
 
-def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> dict[str, Any]:
+def compute_trend_portfolio_backtest(
+    db: Session,
+    inp: TrendPortfolioInputs,
+    data_override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Run trend portfolio backtest. When data_override is provided, db is not used
+    (can be None); used for OOS bootstrap with synthetic in-sample data.
+    """
     codes = list(dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()]))
     if not codes:
         raise ValueError("codes is empty")
@@ -563,62 +572,82 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
         raise ValueError("ma_type must be one of: sma|ema")
 
     strat = str(inp.strategy or "ma_filter").strip().lower()
-    need_hist = max(int(inp.sma_window), int(inp.slow_window), int(inp.donchian_entry), int(inp.mom_lookback), int(inp.macd_slow), int(inp.macd_v_atr_window), 20) + 60
-    ext_start = inp.start - dt.timedelta(days=int(need_hist) * 2)
-    close_none = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none").sort_index().ffill()
-    close_qfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq").sort_index()
-    close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq").sort_index()
-    if close_none.empty:
-        raise ValueError("no execution price data for given range (none)")
-    if not bool(getattr(inp, "dynamic_universe", False)):
-        miss = [c for c in codes if c not in close_none.columns or close_none[c].dropna().empty]
-        if miss:
-            raise ValueError(f"missing execution data (none) for: {miss}")
-        first_valid = [close_none[c].first_valid_index() for c in codes if close_none[c].first_valid_index() is not None]
-        if not first_valid:
-            raise ValueError("no valid first trading date for selected codes")
-        common_start = max(first_valid)
-        close_none = close_none.loc[common_start:]
-        close_qfq = close_qfq.loc[common_start:]
-        close_hfq = close_hfq.loc[common_start:]
-    dates = close_none.index
-    close_qfq = close_qfq.reindex(dates).ffill()
-    close_hfq = close_hfq.reindex(dates).ffill()
-    high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq")
-    high_qfq_df = high_qfq_df.sort_index().reindex(dates).ffill() if not high_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
-    low_qfq_df = low_qfq_df.sort_index().reindex(dates).ffill() if not low_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
 
-    ohlc_none = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
-    ohlc_hfq = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="hfq")
-    open_none = ohlc_none.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
-    close_none_exec = ohlc_none.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
-    open_hfq = ohlc_hfq.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
-    close_hfq_exec = ohlc_hfq.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
-    close_none_f = close_none.reindex(columns=codes).astype(float)
-    close_hfq_f = close_hfq.reindex(columns=codes).astype(float)
-    if ep == "open":
-        px_none_exec = open_none.astype(float).combine_first(close_none_f)
-        px_hfq_exec = open_hfq.astype(float).combine_first(close_hfq_f)
-        ret_none = px_none_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_hfq_exec = px_hfq_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    elif ep == "close":
-        px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
-        px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-        ret_none = px_none_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_hfq_exec = px_hfq_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    if data_override is not None:
+        dates = data_override["dates"]
+        close_qfq = data_override["close_qfq"].reindex(columns=codes).reindex(dates).ffill()
+        close_hfq = data_override["close_hfq"].reindex(columns=codes).reindex(dates).ffill()
+        high_qfq_df = data_override.get("high_qfq_df")
+        if high_qfq_df is None or high_qfq_df.empty:
+            high_qfq_df = pd.DataFrame(index=dates, columns=codes)
+        else:
+            high_qfq_df = high_qfq_df.reindex(columns=codes).reindex(dates).ffill()
+        low_qfq_df = data_override.get("low_qfq_df")
+        if low_qfq_df is None or low_qfq_df.empty:
+            low_qfq_df = pd.DataFrame(index=dates, columns=codes)
+        else:
+            low_qfq_df = low_qfq_df.reindex(columns=codes).reindex(dates).ffill()
+        ret_exec = data_override["ret_exec"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
+        ret_hfq = data_override["ret_hfq"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
     else:
-        ret_open_none = open_none.astype(float).combine_first(close_none_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_close_none = close_none_exec.astype(float).combine_first(close_none_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
-        ret_open_hfq = open_hfq.astype(float).combine_first(close_hfq_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_close_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_hfq_exec = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
-    ret_hfq = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    gross_none = 1.0 + ret_none
-    gross_hfq = 1.0 + ret_hfq
-    corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
-    ca_mask = ((corp_factor - 1.0).abs() > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
-    ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
+        if db is None:
+            raise ValueError("db is required when data_override is not set")
+        need_hist = max(int(inp.sma_window), int(inp.slow_window), int(inp.donchian_entry), int(inp.mom_lookback), int(inp.macd_slow), int(inp.macd_v_atr_window), 20) + 60
+        ext_start = inp.start - dt.timedelta(days=int(need_hist) * 2)
+        close_none = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none").sort_index().ffill()
+        close_qfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq").sort_index()
+        close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq").sort_index()
+        if close_none.empty:
+            raise ValueError("no execution price data for given range (none)")
+        if not bool(getattr(inp, "dynamic_universe", False)):
+            miss = [c for c in codes if c not in close_none.columns or close_none[c].dropna().empty]
+            if miss:
+                raise ValueError(f"missing execution data (none) for: {miss}")
+            first_valid = [close_none[c].first_valid_index() for c in codes if close_none[c].first_valid_index() is not None]
+            if not first_valid:
+                raise ValueError("no valid first trading date for selected codes")
+            common_start = max(first_valid)
+            close_none = close_none.loc[common_start:]
+            close_qfq = close_qfq.loc[common_start:]
+            close_hfq = close_hfq.loc[common_start:]
+        dates = close_none.index
+        close_qfq = close_qfq.reindex(dates).ffill()
+        close_hfq = close_hfq.reindex(dates).ffill()
+        high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq")
+        high_qfq_df = high_qfq_df.sort_index().reindex(dates).ffill() if not high_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
+        low_qfq_df = low_qfq_df.sort_index().reindex(dates).ffill() if not low_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
+
+        ohlc_none = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
+        ohlc_hfq = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="hfq")
+        open_none = ohlc_none.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+        close_none_exec = ohlc_none.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+        open_hfq = ohlc_hfq.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+        close_hfq_exec = ohlc_hfq.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+        close_none_f = close_none.reindex(columns=codes).astype(float)
+        close_hfq_f = close_hfq.reindex(columns=codes).astype(float)
+        if ep == "open":
+            px_none_exec = open_none.astype(float).combine_first(close_none_f)
+            px_hfq_exec = open_hfq.astype(float).combine_first(close_hfq_f)
+            ret_none = px_none_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_hfq_exec = px_hfq_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        elif ep == "close":
+            px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
+            px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
+            ret_none = px_none_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_hfq_exec = px_hfq_exec.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        else:
+            ret_open_none = open_none.astype(float).combine_first(close_none_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_close_none = close_none_exec.astype(float).combine_first(close_none_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
+            ret_open_hfq = open_hfq.astype(float).combine_first(close_hfq_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_close_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_hfq_exec = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
+        ret_hfq = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        gross_none = 1.0 + ret_none
+        gross_hfq = 1.0 + ret_hfq
+        corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
+        ca_mask = ((corp_factor - 1.0).abs() > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
+        ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)

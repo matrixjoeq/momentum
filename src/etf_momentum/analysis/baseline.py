@@ -39,6 +39,8 @@ class BaselineInputs:
     dynamic_universe: bool = False
     # Pairwise minimum observations for correlation output (below -> null/"-")
     corr_min_obs: int = 20
+    # 等权/风平组合成交价口径: open=执行日开盘价, close=执行日收盘价, oc2=OC均价
+    exec_price: str = "close"
 
 
 def _inv_vol_weights(vol: pd.Series) -> pd.Series:
@@ -1825,8 +1827,36 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         else:
             ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance)
         ew_active_count = pd.Series(len(codes_eff), index=ret_common.index, dtype=int)
-    # Baseline uses close execution timing: weights decided at t apply to t->t+1 return.
-    ret_fwd = forward_align_returns(ret_common[codes_eff].fillna(0.0))
+    # Execution timing: weights decided at t apply to return; exec_price controls which return.
+    # close: ret_fwd[t]=ret[t+1] (执行日收盘价); open: 执行日用当日 open->close; oc2: 执行日 0.5*open->close + 0.5*ret_fwd.
+    ep = (getattr(inp, "exec_price", None) or "close").strip().lower()
+    if ep not in {"open", "close", "oc2"}:
+        ep = "close"
+    ret_fwd = forward_align_returns(ret_common[codes_eff].fillna(0.0).astype(float)).astype(float)
+    if ep in {"open", "oc2"}:
+        ohlc = load_ohlc_prices(db, codes=codes_eff, start=inp.start, end=inp.end, adjust=inp.adjust)
+        oo = ohlc.get("open", pd.DataFrame())
+        cc = ohlc.get("close", pd.DataFrame())
+        if not oo.empty and not cc.empty and set(codes_eff).issubset(oo.columns) and set(codes_eff).issubset(cc.columns):
+            idx = ret_common.index
+            oo = oo[codes_eff].reindex(idx).ffill().astype(float).replace(0.0, np.nan)
+            cc = cc[codes_eff].reindex(idx).ffill().astype(float)
+            same_day = (cc / oo - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            reb = (inp.rebalance or "yearly").lower()
+            if reb == "none":
+                exec_mask = pd.Series(False, index=idx)
+                if len(idx) > 0:
+                    exec_mask.iloc[0] = True
+            elif reb == "daily":
+                exec_mask = pd.Series(True, index=idx)
+            else:
+                dt_idx = pd.DatetimeIndex(ret_common.index)
+                labels = _rebalance_labels(dt_idx, reb, weekly_anchor="FRI")
+                exec_mask = (labels != labels.shift(1)).reindex(ret_common.index).fillna(True)
+            if ep == "open":
+                ret_fwd.loc[exec_mask, codes_eff] = same_day.loc[exec_mask, codes_eff]
+            else:
+                ret_fwd.loc[exec_mask, codes_eff] = (0.5 * same_day.loc[exec_mask, codes_eff] + 0.5 * ret_fwd.loc[exec_mask, codes_eff]).astype(float)
     ew_ret = (ew_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
     ew_nav = (1.0 + ew_ret).cumprod().astype(float)
     if len(ew_nav) > 0:
@@ -2151,6 +2181,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "mode_start": start_idx.date().strftime("%Y%m%d"),
             "dynamic_universe": bool(dynamic_universe),
         },
+        "rebalance": inp.rebalance,
+        "exec_price": ep,
         "codes": codes,
         "nav": {"dates": dates, "series": series},
         "nav_rsi": nav_rsi,

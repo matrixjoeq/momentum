@@ -275,28 +275,151 @@ def run_rotation_oos_bootstrap(
     }
 
 
+def _load_trend_in_sample_data(
+    db: Any,
+    codes: List[str],
+    start_in: "datetime.date",
+    end_in: "datetime.date",
+    need_hist: int,
+) -> Optional[Dict[str, Any]]:
+    """Load close/high/low and returns for in-sample period for trend portfolio bootstrap."""
+    import datetime as _dt
+
+    from .baseline import load_close_prices, load_high_low_prices
+
+    ext_start = start_in - _dt.timedelta(days=int(need_hist) * 2)
+    close_qfq = load_close_prices(db, codes=codes, start=ext_start, end=end_in, adjust="qfq").sort_index()
+    close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=end_in, adjust="hfq").sort_index()
+    high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=end_in, adjust="qfq")
+    if close_qfq.empty or close_hfq.empty:
+        return None
+    common = close_qfq.index.intersection(close_hfq.index)
+    close_qfq = close_qfq.loc[common].reindex(columns=codes).ffill().bfill()
+    close_hfq = close_hfq.loc[common].reindex(columns=codes).ffill().bfill()
+    first_valid = close_qfq.first_valid_index()
+    if first_valid is None:
+        return None
+    close_qfq = close_qfq.loc[first_valid:]
+    close_hfq = close_hfq.loc[first_valid:]
+    in_mask = (close_qfq.index.date >= start_in) & (close_qfq.index.date <= end_in)
+    dates = close_qfq.index[in_mask]
+    if len(dates) < 30:
+        return None
+    close_qfq = close_qfq.loc[dates].reindex(columns=codes).ffill().bfill()
+    close_hfq = close_hfq.loc[dates].reindex(columns=codes).ffill().bfill()
+    returns_in = close_qfq.pct_change().fillna(0.0).astype(float)
+    if returns_in.empty or len(returns_in) < 20:
+        return None
+    high_qfq_df = high_qfq_df.sort_index().reindex(dates).reindex(columns=codes).ffill() if not high_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
+    low_qfq_df = low_qfq_df.sort_index().reindex(dates).reindex(columns=codes).ffill() if not low_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
+    return {
+        "dates": dates,
+        "close_qfq": close_qfq,
+        "close_hfq": close_hfq,
+        "high_qfq_df": high_qfq_df,
+        "low_qfq_df": low_qfq_df,
+        "returns_in": returns_in,
+    }
+
+
+def _trend_params_to_inputs(
+    codes: List[str],
+    start: "datetime.date",
+    end: "datetime.date",
+    strategy: str,
+    params: Dict[str, Any],
+    *,
+    risk_free_rate: float = 0.025,
+    cost_bps: float = 0.0,
+    exec_price: str = "open",
+    position_sizing: str = "equal",
+    vol_window: int = 20,
+    vol_target_ann: float = 0.20,
+) -> Any:
+    """Build TrendPortfolioInputs from strategy name and param dict (grid values)."""
+    from .trend import TrendPortfolioInputs
+
+    return TrendPortfolioInputs(
+        codes=codes,
+        start=start,
+        end=end,
+        risk_free_rate=risk_free_rate,
+        cost_bps=cost_bps,
+        exec_price=exec_price,
+        strategy=strategy,
+        position_sizing=position_sizing,
+        vol_window=vol_window,
+        vol_target_ann=vol_target_ann,
+        sma_window=int(params.get("sma_window", 200)),
+        fast_window=int(params.get("fast_window", 50)),
+        slow_window=int(params.get("slow_window", 200)),
+        ma_type=str(params.get("ma_type", "sma")),
+        donchian_entry=int(params.get("donchian_entry", 20)),
+        donchian_exit=int(params.get("donchian_exit", 10)),
+        mom_lookback=int(params.get("mom_lookback", 252)),
+        bias_ma_window=int(params.get("bias_ma_window", 20)),
+        bias_entry=float(params.get("bias_entry", 2.0)),
+        bias_hot=float(params.get("bias_hot", 10.0)),
+        bias_cold=float(params.get("bias_cold", -2.0)),
+        bias_pos_mode=str(params.get("bias_pos_mode", "binary")),
+        macd_fast=int(params.get("macd_fast", 12)),
+        macd_slow=int(params.get("macd_slow", 26)),
+        macd_signal=int(params.get("macd_signal", 9)),
+        macd_v_atr_window=int(params.get("macd_v_atr_window", 26)),
+        macd_v_scale=float(params.get("macd_v_scale", 100.0)),
+    )
+
+
+def _default_trend_param_grid(strategy: str) -> Dict[str, Sequence[Any]]:
+    """Default parameter grid per trend strategy for OOS bootstrap."""
+    if strategy == "ma_filter":
+        return {"sma_window": [100, 150, 200], "ma_type": ["sma", "ema"]}
+    if strategy == "ma_cross":
+        return {"fast_window": [50], "slow_window": [150, 200], "ma_type": ["sma", "ema"]}
+    if strategy == "donchian":
+        return {"donchian_entry": [20, 55], "donchian_exit": [10, 20]}
+    if strategy == "tsmom":
+        return {"mom_lookback": [126, 252]}
+    if strategy == "linreg_slope":
+        return {"sma_window": [100, 200]}
+    if strategy == "bias":
+        return {"bias_ma_window": [20], "bias_entry": [2.0], "bias_cold": [-2.0]}
+    if strategy in ("macd_cross", "macd_zero_filter"):
+        return {"macd_fast": [12], "macd_slow": [26], "macd_signal": [9]}
+    if strategy == "macd_v":
+        return {"macd_fast": [12], "macd_slow": [26], "macd_signal": [9], "macd_v_atr_window": [26]}
+    return {"sma_window": [100, 200], "ma_type": ["sma"]}
+
+
 def run_trend_oos_bootstrap(
     db: Any,
     codes: List[str],
     start: "datetime.date",
     end: "datetime.date",
-    param_grid: Dict[str, Sequence[Any]],
+    param_grid: Optional[Dict[str, Sequence[Any]]] = None,
     *,
     strategy: str = "ma_filter",
     config: Optional[OosBootstrapConfig] = None,
+    risk_free_rate: float = 0.025,
+    cost_bps: float = 0.0,
+    exec_price: str = "open",
 ) -> Dict[str, Any]:
     """
     Out-of-sample bootstrap parameter optimisation for trend (portfolio) strategy.
 
-    Splits [start, end] into in-sample and OOS. Runs grid search on in-sample,
-    then evaluates best params on OOS. Full bootstrap (resampling in-sample
-    returns) would require a trend backtest that runs on pre-loaded OHLC.
+    Splits [start, end] into in-sample and OOS. For each of n_bootstrap runs:
+    block-bootstraps in-sample returns, builds synthetic OHLC, runs grid search
+    on synthetic data, records best params. Aggregates params (median/mode), then
+    evaluates once on real OOS data.
     """
-    import datetime
+    from itertools import product
 
-    from .trend import TrendPortfolioInputs, compute_trend_portfolio_backtest
+    from .trend import compute_trend_portfolio_backtest
 
     cfg = config or OosBootstrapConfig()
+    codes = list(dict.fromkeys([str(c).strip() for c in codes if str(c).strip()]))
+    if not codes:
+        return {"error": "codes is empty"}
     dates = pd.date_range(start=start, end=end, freq="B")
     if len(dates) < 60:
         return {"error": "Period too short for split"}
@@ -306,78 +429,90 @@ def run_trend_oos_bootstrap(
     start_oos = oos_dates[0].date() if hasattr(oos_dates[0], "date") else oos_dates[0]
     end_oos = oos_dates[-1].date() if hasattr(oos_dates[-1], "date") else oos_dates[-1]
 
-    default_grid: Dict[str, Sequence[Any]] = {
-        "sma_window": [100, 200],
-        "fast_window": [50],
-        "slow_window": [200],
-        "ma_type": ["sma"],
-    }
-    grid = param_grid if param_grid else default_grid
-
-    # Single evaluation on OOS with median/mode params (no bootstrap if no synthetic runner)
-    # For full bootstrap we need: load returns for in_sample, block bootstrap, build synthetic
-    # close, run trend backtest on synthetic data. Trend module currently needs db and start/end.
-    # So we do a simple OOS split optimisation: grid search on in_sample period, then evaluate
-    # best params on OOS (no bootstrap for trend in this stub).
-    from itertools import product
-
-    keys = list(grid.keys())
-    grids = [grid[k] for k in keys]
-    best_metric: float = -np.inf if cfg.objective == "maximize" else np.inf
-    best_params: Dict[str, Any] = {}
-
-    for combo in product(*grids):
-        params = dict(zip(keys, combo))
-        inp = TrendPortfolioInputs(
-            codes=codes,
-            start=start_in,
-            end=end_in,
-            strategy=strategy,
-            sma_window=int(params.get("sma_window", 200)),
-            fast_window=int(params.get("fast_window", 50)),
-            slow_window=int(params.get("slow_window", 200)),
-            ma_type=str(params.get("ma_type", "sma")),
-        )
-        try:
-            out = compute_trend_portfolio_backtest(db, inp)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Trend backtest failed for %s: %s", params, e)
-            continue
-        stats = out.get("stats") or {}
-        m = stats.get(cfg.objective_metric)
-        if m is None or not np.isfinite(m):
-            continue
-        if cfg.objective == "maximize" and m > best_metric:
-            best_metric = m
-            best_params = params.copy()
-        elif cfg.objective == "minimize" and m < best_metric:
-            best_metric = m
-            best_params = params.copy()
-
-    if not best_params:
+    grid = param_grid if param_grid else _default_trend_param_grid(strategy)
+    need_hist = 400
+    data_in = _load_trend_in_sample_data(db, codes, start_in, end_in, need_hist)
+    if data_in is None:
         return {
-            "error": "No valid in-sample runs",
+            "error": "Insufficient in-sample price data",
+            "in_sample_end": end_in.isoformat(),
+            "oos_start": start_oos.isoformat(),
+        }
+    returns_in = data_in["returns_in"]
+    if len(returns_in) < 30:
+        return {"error": "Insufficient in-sample returns", "in_sample_days": len(returns_in)}
+
+    rng = np.random.default_rng(cfg.seed)
+    bootstrap_params: List[Dict[str, Any]] = []
+    keys = list(grid.keys())
+    grids = [list(grid[k]) for k in keys]
+
+    for b in range(cfg.n_bootstrap):
+        boot_idx = _circular_block_bootstrap_indices(len(returns_in), block_size=cfg.block_size, rng=rng)
+        ret_boot = returns_in.iloc[boot_idx].reset_index(drop=True)
+        close_boot = returns_to_close(ret_boot, initial=None)
+        idx = pd.date_range(start="2000-01-01", periods=len(close_boot), freq="B")
+        close_boot = close_boot.set_axis(idx)
+        high_boot = data_in["high_qfq_df"].iloc[boot_idx].reset_index(drop=True).set_axis(idx)
+        low_boot = data_in["low_qfq_df"].iloc[boot_idx].reset_index(drop=True).set_axis(idx)
+        ret_exec = ret_boot.set_axis(idx).reindex(idx).fillna(0.0).astype(float)
+        ret_hfq = ret_exec.copy()
+        syn_start = idx[0].date() if hasattr(idx[0], "date") else idx[0]
+        syn_end = idx[-1].date() if hasattr(idx[-1], "date") else idx[-1]
+        data_override = {
+            "dates": idx,
+            "close_qfq": close_boot.reindex(columns=codes).ffill().bfill(),
+            "close_hfq": close_boot.reindex(columns=codes).ffill().bfill(),
+            "high_qfq_df": high_boot.reindex(columns=codes).ffill().bfill(),
+            "low_qfq_df": low_boot.reindex(columns=codes).ffill().bfill(),
+            "ret_exec": ret_exec,
+            "ret_hfq": ret_hfq,
+        }
+        best_metric: float = -np.inf if cfg.objective == "maximize" else np.inf
+        best_params: Dict[str, Any] = {}
+        for combo in product(*grids):
+            params = dict(zip(keys, combo))
+            inp = _trend_params_to_inputs(codes, syn_start, syn_end, strategy, params, risk_free_rate=risk_free_rate, cost_bps=cost_bps, exec_price=exec_price)
+            try:
+                out = compute_trend_portfolio_backtest(None, inp, data_override=data_override)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Trend bootstrap backtest failed for %s: %s", params, e)
+                continue
+            metrics = out.get("metrics") or {}
+            m_dict = metrics.get("strategy") if isinstance(metrics.get("strategy"), dict) else {}
+            m = m_dict.get(cfg.objective_metric)
+            if m is None or not np.isfinite(m):
+                continue
+            if cfg.objective == "maximize" and m > best_metric:
+                best_metric = m
+                best_params = params.copy()
+            elif cfg.objective == "minimize" and m < best_metric:
+                best_metric = m
+                best_params = params.copy()
+        if best_params:
+            bootstrap_params.append(best_params)
+
+    if not bootstrap_params:
+        return {
+            "error": "No valid bootstrap runs",
             "in_sample_end": end_in.isoformat(),
             "oos_start": start_oos.isoformat(),
         }
 
-    inp_oos = TrendPortfolioInputs(
-        codes=codes,
-        start=start_oos,
-        end=end_oos,
-        strategy=strategy,
-        sma_window=int(best_params.get("sma_window", 200)),
-        fast_window=int(best_params.get("fast_window", 50)),
-        slow_window=int(best_params.get("slow_window", 200)),
-        ma_type=str(best_params.get("ma_type", "sma")),
-    )
+    chosen = _aggregate_params(bootstrap_params, grid, rng)
+    inp_oos = _trend_params_to_inputs(codes, start_oos, end_oos, strategy, chosen, risk_free_rate=risk_free_rate, cost_bps=cost_bps, exec_price=exec_price)
     out_oos = compute_trend_portfolio_backtest(db, inp_oos)
-    oos_metrics = (out_oos.get("stats") or {}) if isinstance(out_oos.get("stats"), dict) else {}
+    oos_metrics = (out_oos.get("metrics") or {}).get("strategy")
+    if not isinstance(oos_metrics, dict):
+        oos_metrics = {}
 
     return {
         "oos_metrics": oos_metrics,
-        "chosen_params": best_params,
+        "chosen_params": chosen,
+        "bootstrap_params": bootstrap_params,
         "in_sample_end": end_in.isoformat(),
         "oos_start": start_oos.isoformat(),
-        "note": "Trend OOS uses in-sample grid search then OOS evaluation; full bootstrap requires trend backtest on synthetic series.",
+        "n_bootstrap": cfg.n_bootstrap,
+        "oos_ratio": cfg.oos_ratio,
+        "strategy": strategy,
     }

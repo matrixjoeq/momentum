@@ -153,6 +153,15 @@
         </select>
       </div>
       <div>
+        <label>成交价口径</label>
+        <select id="baselineExecPrice">
+          <option value="open">开盘价</option>
+          <option value="close" selected>收盘价</option>
+          <option value="oc2">OC均价</option>
+        </select>
+        <span class="muted" style="margin-left:4px;">等权/风平组合执行价</span>
+      </div>
+      <div>
         <label>组合模式</label>
         <select id="baselineMode">
           <option value="EW" selected>等权（EW）</option>
@@ -570,7 +579,7 @@
 
     <div class="panel">
       <h3>日历效应研究（等权 EW）</h3>
-      <div class="muted">研究不同调仓周期下：调仓锚点（周度=周一~周五；月度=每月1~28号；季度=季内第N天；年度=年内第N天）与成交价口径（开盘/收盘/OC均价）对组合表现的影响。此处参数与轮动策略研究互不影响。</div>
+      <div class="muted">研究不同调仓周期下：调仓锚点（周度=周一~周五；月度=每月1~28号；季度=季内第N天；年度=年内第N天）与成交价口径（开盘/收盘/OC均价）对组合表现的影响。此处参数与轮动策略研究互不影响。<br>周度调仓日=决策日（信号触发日），1~5 对应周一~周五；执行日=调仓日的下一交易日，收益从执行日开始计算；开盘价可享受执行日当日收益，收盘价不享受。</div>
       <div class="row no-print" style="margin-top:8px; align-items:end;">
         <div>
           <label>开始日期（留空=沿用上方）</label>
@@ -1553,7 +1562,7 @@
 
       <div class="panel">
         <h3>日历效应研究（轮动策略）</h3>
-        <div class="muted">在保持轮动参数不变的前提下，批量回测不同调仓周期下的调仓锚点（周度/月度/季度/年度）与成交价口径（开盘/收盘/OC均价）对策略表现的影响。此处参数与等权研究互不影响。</div>
+        <div class="muted">在保持轮动参数不变的前提下，批量回测不同调仓周期下的调仓锚点（周度/月度/季度/年度）与成交价口径（开盘/收盘/OC均价）对策略表现的影响。此处参数与等权研究互不影响。<br>周度调仓日=决策日（信号触发日），1~5 对应周一~周五；执行日=调仓日的下一交易日，收益从执行日开始计算；开盘价可享受执行日当日收益，收盘价不享受。</div>
         <div class="row no-print" style="margin-top:8px; align-items:end;">
           <div>
             <label>开始日期（留空=沿用上方）</label>
@@ -1702,6 +1711,20 @@
         </div>
         <div id="mcRotReport" class="reportCard"></div>
       </div>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
+      <h3 style="margin: 0 0 6px 0;">样本外自举法参数优化（轮动）</h3>
+      <div class="muted" style="margin-bottom: 10px;">Carver 式：样本内区块自举得到稳健参数，在真实样本外区间评估一次。使用与上方轮动回测相同的标的池与起止日期。</div>
+      <div class="row">
+        <div><label>OOS 比例</label><input id="rotOosRatio" value="0.3" placeholder="0.3" /></div>
+        <div><label>自举次数</label><input id="rotOosN" value="50" /></div>
+        <div><label>区块长度(交易日)</label><input id="rotOosBlock" value="21" /></div>
+        <div><label>随机种子(可空)</label><input id="rotOosSeed" placeholder="如 42" /></div>
+        <div><label>成本(bps)</label><input id="rotOosCost" value="3" /></div>
+        <button id="runRotOosBootstrap">运行轮动 OOS Bootstrap</button>
+      </div>
+      <div id="rotOosBootstrapResult" class="reportCard" style="margin-top:10px; white-space:pre-wrap;"></div>
     </div>
 
     <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
@@ -2190,6 +2213,14 @@
             <option value="vol_target">目标波动率</option>
           </select>
         </div>
+        <div>
+          <label>成交价口径</label>
+          <select id="trendExecPrice" style="min-width:100px;">
+            <option value="open" selected>开盘</option>
+            <option value="close">收盘</option>
+            <option value="oc2">OC均价</option>
+          </select>
+        </div>
         <div><label>成本(bps)</label><input id="trendCost" value="2" /></div>
         <button id="runTrendResearch">运行趋势回测</button>
       </div>
@@ -2246,6 +2277,32 @@
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
       <table id="trendGroupTable" style="margin-top:10px;"></table>
       <div id="trendReport" class="reportCard"></div>
+
+      <h3 style="margin-top: 22px; margin-bottom: 6px;">样本外自举法参数优化（趋势组合）</h3>
+      <div class="muted" style="margin-bottom: 10px;">Carver 式：样本内区块自举得到稳健参数，在真实样本外区间评估一次。使用与上方趋势回测相同的标的池、起止日期与策略类型。</div>
+      <div class="row">
+        <div><label>OOS 比例</label><input id="trendOosRatio" value="0.3" placeholder="0.3" /></div>
+        <div><label>自举次数</label><input id="trendOosN" value="50" /></div>
+        <div><label>区块长度(交易日)</label><input id="trendOosBlock" value="21" /></div>
+        <div><label>随机种子(可空)</label><input id="trendOosSeed" placeholder="如 42" /></div>
+        <div>
+          <label>策略</label>
+          <select id="trendOosStrategy" style="min-width:160px;">
+            <option value="ma_filter" selected>ma_filter</option>
+            <option value="ma_cross">ma_cross</option>
+            <option value="donchian">donchian</option>
+            <option value="tsmom">tsmom</option>
+            <option value="linreg_slope">linreg_slope</option>
+            <option value="bias">bias</option>
+            <option value="macd_cross">macd_cross</option>
+            <option value="macd_zero_filter">macd_zero_filter</option>
+            <option value="macd_v">macd_v</option>
+          </select>
+        </div>
+        <div><label>成本(bps)</label><input id="trendOosCost" value="2" /></div>
+        <button id="runTrendOosBootstrap">运行趋势 OOS Bootstrap</button>
+      </div>
+      <div id="trendOosBootstrapResult" class="reportCard" style="margin-top:10px; white-space:pre-wrap;"></div>
     </div>
 
     <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
@@ -2444,7 +2501,7 @@
         sim: `${SETTINGS_NS}.sim_gbm`,
       };
       const SETTINGS_FIELD_IDS = {
-        global: ["start", "end", "rebalance", "baselineMode", "baselineRpWin", "benchmark", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse"],
+        global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "benchmark", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse"],
         dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric"],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
@@ -2456,7 +2513,7 @@
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendCost", "trendSizing", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSizing", "trendSingleCode",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
@@ -2645,7 +2702,13 @@
       function _restoreCalendarSelections(saved, prefix) {
         if (!saved || typeof saved !== "object") return;
         const anchorSel = `input.${prefix}CalAnchor`;
-        if (Array.isArray(saved.anchors)) _setCheckedValues(anchorSel, saved.anchors);
+        if (Array.isArray(saved.anchors)) {
+          let anchors = saved.anchors;
+          if (anchors.some((x) => Number(x) >= 0 && Number(x) <= 4)) {
+            anchors = anchors.map((x) => (Number(x) >= 0 && Number(x) <= 4 ? Number(x) + 1 : Number(x)));
+          }
+          _setCheckedValues(anchorSel, anchors);
+        }
         const csvId = `${prefix}CalAnchorCsv`;
         if (saved.anchor_csv != null && $(csvId)) $(csvId).value = String(saved.anchor_csv);
         if (Array.isArray(saved.exec_prices)) _setCheckedValues(`input.${prefix}CalPx`, saved.exec_prices);
@@ -8319,12 +8382,11 @@
         if (r === "weekly") {
           label.textContent = "调仓日（周度）";
           const cls = `${prefix}CalAnchor`;
+          // 调仓日=决策日 1~5（周一~周五）；等权与轮动日历效应统一
+          const wdVals = [1, 2, 3, 4, 5];
+          const wdLabels = ["周一", "周二", "周三", "周四", "周五"];
           box.innerHTML = `<div class="row" style="gap:10px; align-items:center; flex-wrap:wrap;">
-            ${mkCb(cls, 0, "周一")}
-            ${mkCb(cls, 1, "周二")}
-            ${mkCb(cls, 2, "周三")}
-            ${mkCb(cls, 3, "周四")}
-            ${mkCb(cls, 4, "周五")}
+            ${wdVals.map((v, i) => mkCb(cls, v, wdLabels[i], v === 5)).join("")}
           </div>`;
           return;
         }
@@ -8385,7 +8447,7 @@
         const anchorLabel = (a) => {
           const n = Number(a);
           if (reb === "weekly") {
-            const m = {0:"周一",1:"周二",2:"周三",3:"周四",4:"周五"};
+            const m = {1:"周一",2:"周二",3:"周三",4:"周四",5:"周五"};
             return m[n] || String(a);
           }
           if (reb === "monthly") return `${n}号`;
@@ -8822,11 +8884,13 @@
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const cost_bps = Number(($("trendCost").value || "2").trim());
         if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("趋势成本(bps)需为>=0数字");
+        const exec_price = ($("trendExecPrice") && $("trendExecPrice").value) ? String($("trendExecPrice").value) : "open";
         const common = {
           start,
           end,
           risk_free_rate,
           cost_bps,
+          exec_price,
           strategy,
           sma_window: Number(($("trendSmaWin").value || "200").trim()),
           fast_window: Number(($("trendFastWin").value || "50").trim()),
@@ -9589,6 +9653,8 @@
         if (!Number.isFinite(rp_window_days) || rp_window_days < 2) return setMsg("RP 波动率窗口必须是 >=2 的整数交易日，例如 60");
         const dynamic_universe = isDynamicUniverseOn();
         const corr_min_obs = 20;
+        const exec_price = ($("baselineExecPrice") && $("baselineExecPrice").value) ? String($("baselineExecPrice").value).trim().toLowerCase() : "close";
+        if (!["open", "close", "oc2"].includes(exec_price)) return setMsg("成交价口径仅支持 open/close/oc2");
         $("status").textContent = "计算中...";
         setMsg("");
         const resp = await api("/analysis/baseline", {
@@ -9600,6 +9666,7 @@
             benchmark_code,
             adjust: ADJUST_USED,
             rebalance,
+            exec_price,
             risk_free_rate,
             fft_windows,
             fft_roll,
@@ -9622,6 +9689,7 @@
           end,
           benchmark_code,
           rebalance,
+          exec_price,
           risk_free_rate,
           fft_windows,
           fft_roll,
@@ -11103,8 +11171,92 @@
         }
       }
 
+      async function runRotationOosBootstrap() {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = ($("start") && $("start").value) ? String($("start").value).trim() : "";
+        const end = ($("end") && $("end").value) ? String($("end").value).trim() : "";
+        if (!start || !end) return setMsg("请填写开始与结束日期(YYYYMMDD)。");
+        const oos_ratio = Number(($("rotOosRatio") && $("rotOosRatio").value) ? $("rotOosRatio").value : "0.3");
+        const n_bootstrap = Number(($("rotOosN") && $("rotOosN").value) ? $("rotOosN").value : "50");
+        const block_size = Number(($("rotOosBlock") && $("rotOosBlock").value) ? $("rotOosBlock").value : "21");
+        const seedRaw = ($("rotOosSeed") && $("rotOosSeed").value) ? String($("rotOosSeed").value).trim() : "";
+        const seed = seedRaw === "" ? null : Number(seedRaw);
+        const cost_bps = Number(($("rotOosCost") && $("rotOosCost").value) ? $("rotOosCost").value : "3");
+        const el = $("rotOosBootstrapResult");
+        if (el) el.textContent = "计算中...";
+        setMsg("");
+        try {
+          const resp = await api("/analysis/rotation/oos-bootstrap", {
+            method: "POST",
+            body: JSON.stringify({ codes, start, end, oos_ratio, n_bootstrap, block_size, seed, cost_bps }),
+          });
+          const text = await resp.text();
+          if (!resp.ok) { if (el) el.textContent = text; return setMsg(text); }
+          const data = JSON.parse(text);
+          if (data.error) { if (el) el.textContent = data.error; return setMsg(data.error); }
+          const lines = [
+            "样本外自举法（轮动）结果",
+            "样本内截止: " + (data.in_sample_end || "-"),
+            "样本外起始: " + (data.oos_start || "-"),
+            "自举次数: " + (data.n_bootstrap || "-"),
+            "OOS 比例: " + (data.oos_ratio != null ? data.oos_ratio : "-"),
+            "选用参数: " + JSON.stringify(data.chosen_params || {}, null, 2),
+            "样本外指标: " + JSON.stringify(data.oos_metrics || {}, null, 2),
+          ];
+          if (el) el.textContent = lines.join("\n");
+        } catch (e) {
+          if (el) el.textContent = String(e && e.message || e);
+          setMsg(String(e && e.message || e));
+        }
+      }
+
+      async function runTrendOosBootstrap() {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const start = ($("start") && $("start").value) ? String($("start").value).trim() : "";
+        const end = ($("end") && $("end").value) ? String($("end").value).trim() : "";
+        if (!start || !end) return setMsg("请填写开始与结束日期(YYYYMMDD)。");
+        const oos_ratio = Number(($("trendOosRatio") && $("trendOosRatio").value) ? $("trendOosRatio").value : "0.3");
+        const n_bootstrap = Number(($("trendOosN") && $("trendOosN").value) ? $("trendOosN").value : "50");
+        const block_size = Number(($("trendOosBlock") && $("trendOosBlock").value) ? $("trendOosBlock").value : "21");
+        const seedRaw = ($("trendOosSeed") && $("trendOosSeed").value) ? String($("trendOosSeed").value).trim() : "";
+        const seed = seedRaw === "" ? null : Number(seedRaw);
+        const strategy = ($("trendOosStrategy") && $("trendOosStrategy").value) ? String($("trendOosStrategy").value) : "ma_filter";
+        const cost_bps = Number(($("trendOosCost") && $("trendOosCost").value) ? $("trendOosCost").value : "2");
+        const el = $("trendOosBootstrapResult");
+        if (el) el.textContent = "计算中...";
+        setMsg("");
+        try {
+          const resp = await api("/analysis/trend/portfolio/oos-bootstrap", {
+            method: "POST",
+            body: JSON.stringify({ codes, start, end, oos_ratio, n_bootstrap, block_size, seed, strategy, cost_bps }),
+          });
+          const text = await resp.text();
+          if (!resp.ok) { if (el) el.textContent = text; return setMsg(text); }
+          const data = JSON.parse(text);
+          if (data.error) { if (el) el.textContent = data.error; return setMsg(data.error); }
+          const lines = [
+            "样本外自举法（趋势组合）结果",
+            "策略: " + (data.strategy || "-"),
+            "样本内截止: " + (data.in_sample_end || "-"),
+            "样本外起始: " + (data.oos_start || "-"),
+            "自举次数: " + (data.n_bootstrap || "-"),
+            "OOS 比例: " + (data.oos_ratio != null ? data.oos_ratio : "-"),
+            "选用参数: " + JSON.stringify(data.chosen_params || {}, null, 2),
+            "样本外指标: " + JSON.stringify(data.oos_metrics || {}, null, 2),
+          ];
+          if (el) el.textContent = lines.join("\n");
+        } catch (e) {
+          if (el) el.textContent = String(e && e.message || e);
+          setMsg(String(e && e.message || e));
+        }
+      }
+
       $("runMcEw").addEventListener("click", runMcEw);
       $("runMcRot").addEventListener("click", runMcRot);
+      if ($("runRotOosBootstrap")) $("runRotOosBootstrap").addEventListener("click", runRotationOosBootstrap);
+      if ($("runTrendOosBootstrap")) $("runTrendOosBootstrap").addEventListener("click", runTrendOosBootstrap);
 
       // mini-program fixed rotation wiring
       if ($("mpRotA_mix")) $("mpRotA_mix").addEventListener("click", () => _mpRotSetAnchor("mix"));

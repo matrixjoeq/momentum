@@ -52,7 +52,8 @@ def _seed_one(
 @pytest.mark.parametrize(
     ("exec_price", "expected_nav"),
     [
-        ("open", 8.0 / 9.0),
+        # open: 执行日使用当日 open->close 收益，故与仅 forward 时不同
+        ("open", 1.148989898989899),
         ("close", 7.0 / 9.0),
         ("oc2", 0.8565505482172148),
     ],

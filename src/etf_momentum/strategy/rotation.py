@@ -1544,6 +1544,7 @@ def backtest_rotation(
                     decision_target_date[int(i_local)] = dates[int(i_local)].date().isoformat()
                 return out
             else:
+                # 调仓日=决策日；1=Mon..5=Fri（周度仅接受 1-5；日历效应前端传 0-4 时由调用方转为 1-5）
                 wd_map_local = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI"}
                 wd = int(anchor)
                 if wd not in wd_map_local:
@@ -1667,7 +1668,7 @@ def backtest_rotation(
     # - weekly: use the same weekly anchor as the decision schedule (default FRI)
     # - monthly/quarterly/yearly: natural calendar periods
     if (inp.rebalance or "weekly").lower() == "weekly":
-        wd_map = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
+        wd_map = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI"}
         w_anchor = wd_map.get(int(anchor_val), "FRI") if anchor_val is not None else "FRI"
         labels = _rebalance_labels(dates, inp.rebalance, weekly_anchor=w_anchor)
     else:
@@ -1706,6 +1707,8 @@ def backtest_rotation(
         ret_exec_none = forward_returns(o_none)
         ret_exec_hfq = forward_returns(o_hfq)
     elif ep == "close":
+        # 成交价=收盘价时，使用执行日（调仓日后一交易日）的收盘价，非调仓日收盘价：
+        # ret[t]=close[t+1]/close[t]-1，权重从执行日 t 起生效，故入场价为 close[t]。
         ret_exec_none = forward_returns(c_none)
         ret_exec_hfq = forward_returns(c_hfq)
     else:
@@ -1731,6 +1734,26 @@ def backtest_rotation(
             if bool(m.any()):
                 ret_exec_all.loc[m, c] = ret_exec_hfq.loc[m, c]
     ret_exec_all = ret_exec_all.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
+    # 调仓日=决策日，执行日=下一交易日；收益从执行日开始计算。
+    # 开盘价可享受执行当日收益；收盘价不享受执行当日收益（保持 forward return）。
+    exec_day_indices = [i + 1 for i in last_idx if i + 1 < len(dates)]
+    if ep == "open" and exec_day_indices:
+        # Same-day return (open->close) on execution days; align to dates
+        _cn = c_none.reindex(dates).ffill()
+        _on = o_none.reindex(dates).ffill()
+        same_day_none = (_cn[codes] / _on[codes] - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        _ch = c_hfq.reindex(dates).ffill()
+        _oh = o_hfq.reindex(dates).ffill()
+        same_day_hfq = (_ch[codes] / _oh[codes] - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        for j in exec_day_indices:
+            for c in codes:
+                if c not in ret_exec_all.columns:
+                    continue
+                if c in corp_mask.columns and corp_mask[c].iloc[j]:
+                    ret_exec_all.loc[ret_exec_all.index[j], c] = float(same_day_hfq.loc[ret_exec_all.index[j], c])
+                else:
+                    ret_exec_all.loc[ret_exec_all.index[j], c] = float(same_day_none.loc[ret_exec_all.index[j], c])
 
     # Build weights per date (apply from next trading day after decision date).
     w = pd.DataFrame(0.0, index=dates, columns=codes)

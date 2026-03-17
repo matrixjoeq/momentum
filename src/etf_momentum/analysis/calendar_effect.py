@@ -27,11 +27,11 @@ from .rotation import RotationAnalysisInputs, compute_rotation_backtest
 
 def _weekly_anchor_from_weekday(weekday: int) -> str:
     """
-    weekday: 0=Mon .. 4=Fri
+    调仓日=决策日；1=Mon .. 5=Fri（等权/轮动日历效应统一 1-5）
     """
-    m = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI"}
+    m = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI"}
     if int(weekday) not in m:
-        raise ValueError("weekday must be within [0..4] (Mon..Fri)")
+        raise ValueError("weekday must be within [1..5] (Mon..Fri)")
     return m[int(weekday)]
 
 
@@ -46,7 +46,7 @@ def _decision_dates_for_rebalance(
     Compute rebalance decision dates on a trading-day calendar.
 
     anchor semantics:
-    - weekly: 0=Mon..4=Fri (week ending on that weekday; use last trading day in that weekly period)
+    - weekly: 1=Mon..5=Fri 调仓日=决策日（use last trading day in that weekly period）
     - monthly: day-of-month 1..28 (use first trading day with day >= anchor in that month; fallback to month-end)
     - quarterly/yearly: Nth trading day in the period (1-indexed; fallback to period-end)
     """
@@ -121,16 +121,17 @@ def _ew_nav_and_weights_by_decision_dates(
     *,
     decision_dates: list[pd.Timestamp],
     exec_price: str = "open",
+    ret_aligned: pd.DataFrame | None = None,
 ) -> tuple[pd.Series, pd.DataFrame]:
     """
     Equal-weight portfolio with drifting weights and rebalancing to equal weights at decision dates (applied next trading day).
 
-    Weights are aligned so that for date t, weights[t] apply to return r[t] (close[t]/close[t-1]-1).
-    Rebalance is assumed executed at close on decision_date, therefore new weights apply from the next trading day.
+    调仓日=决策日，执行日=下一交易日；收益从执行日开始计算。
+    成交价=收盘价时，使用执行日收盘价：ret_fwd=forward_align(daily_ret)，即 ret_fwd[t]=ret[t+1]，执行日 t 入场价为 close[t]。
+    If ret_aligned is provided, it is used as the return series (e.g. with execution-day same-day return for open).
     """
     if daily_ret.empty:
         return pd.Series(dtype=float, name="EW"), pd.DataFrame()
-    _ = exec_price  # kept for API compatibility; timing now handled by forward-return alignment.
     cols = list(daily_ret.columns)
     n = len(cols)
     if n <= 0:
@@ -154,7 +155,10 @@ def _ew_nav_and_weights_by_decision_dates(
             w = w * (1.0 + ri) / (1.0 + port_r)
 
     w_df = pd.DataFrame(np.vstack(w_out), index=idx, columns=cols, dtype=float)
-    ret_fwd = forward_align_returns(daily_ret.astype(float).fillna(0.0))
+    if ret_aligned is not None and not ret_aligned.empty:
+        ret_fwd = ret_aligned.reindex(index=idx, columns=cols).fillna(0.0).astype(float)
+    else:
+        ret_fwd = forward_align_returns(daily_ret.astype(float).fillna(0.0))
     port_ret = (w_df * ret_fwd).sum(axis=1).astype(float)
     s = (1.0 + port_ret).cumprod().astype(float).rename("EW")
     if len(s) > 0:
@@ -201,7 +205,7 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
         raise ValueError("codes is empty")
 
     reb = (inp.rebalance or "weekly").strip().lower()
-    anchors = inp.anchors or ([0, 1, 2, 3, 4] if reb == "weekly" else [1])
+    anchors = inp.anchors or ([1, 2, 3, 4, 5] if reb == "weekly" else [1])
     exec_prices = inp.exec_prices or ["open", "close", "oc2"]
 
     ohlc = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust=inp.adjust)
@@ -265,8 +269,27 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             daily_ret = px_common.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
             decision_dates = _decision_dates_for_rebalance(px_common.index, rebalance=reb, anchor=int(a), shift=str(inp.rebalance_shift))
+            ret_aligned: pd.DataFrame | None = None
+            if str(ep).strip().lower() == "open":
+                ret_fwd = forward_align_returns(daily_ret[codes].astype(float).fillna(0.0))
+                decision_set = set(pd.to_datetime(decision_dates))
+                idx = px_common.index
+                exec_day_positions = set()
+                for d in decision_dates:
+                    dt = pd.to_datetime(d)
+                    if dt in idx:
+                        pos = idx.get_loc(dt)
+                        if pos + 1 < len(idx):
+                            exec_day_positions.add(int(pos) + 1)
+                if exec_day_positions and "open" in ohlc and "close" in ohlc:
+                    co = ohlc["close"][codes].reindex(idx).ffill()
+                    oo = ohlc["open"][codes].reindex(idx).ffill()
+                    same_day = (co / oo - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+                    for j in exec_day_positions:
+                        ret_fwd.iloc[j] = same_day.iloc[j]
+                ret_aligned = ret_fwd
             ew_nav, ew_w = _ew_nav_and_weights_by_decision_dates(
-                daily_ret[codes], decision_dates=decision_dates, exec_price=str(ep)
+                daily_ret[codes], decision_dates=decision_dates, exec_price=str(ep), ret_aligned=ret_aligned
             )
             ew_ret = ew_nav.pct_change().fillna(0.0)
 
@@ -365,7 +388,7 @@ def compute_rotation_calendar_effect(
     This runs multiple backtests; keep candidate pool size and range reasonable.
     """
     reb = (base.rebalance or "weekly").strip().lower()
-    anchors = anchors or ([0, 1, 2, 3, 4] if reb == "weekly" else [1])
+    anchors = anchors or ([1, 2, 3, 4, 5] if reb == "weekly" else [1])
     exec_prices = exec_prices or ["open", "close", "oc2"]
 
     # Benchmark for information ratio: same-frequency EW rebalancing on hfq close (same anchor schedule).
@@ -399,6 +422,7 @@ def compute_rotation_calendar_effect(
             "pos_ratio": float(np.mean(arr > 0.0)),
         }
 
+    # 调仓日=决策日，1-5=周一~周五（轮动日历效应锚点统一为 1-5）
     for a in anchors:
         for ep in exec_prices:
             try:

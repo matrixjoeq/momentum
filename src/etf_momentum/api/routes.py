@@ -30,6 +30,7 @@ from .schemas import (
     SimTradeConfirmRequest,
     SimTradePreviewRequest,
     TrendBacktestRequest,
+    TrendOosBootstrapRequest,
     TrendPortfolioBacktestRequest,
     AssetGroupSuggestRequest,
     LeadLagAnalysisRequest,
@@ -95,6 +96,7 @@ from ..analysis.calendar_effect import _ew_nav_and_weights_by_decision_dates as 
 from ..analysis.grouping import AssetGroupSuggestInputs, suggest_asset_groups
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
+from ..analysis.oos_bootstrap import OosBootstrapConfig, run_trend_oos_bootstrap
 from ..analysis.trend import TrendInputs, TrendPortfolioInputs, compute_trend_backtest, compute_trend_portfolio_backtest
 from ..analysis.leadlag import LeadLagInputs, compute_lead_lag, align_us_close_to_cn_next_trading_day
 from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
@@ -529,6 +531,7 @@ def baseline_analysis(payload: BaselineAnalysisRequest, db: Session = Depends(ge
         rp_window_days=getattr(payload, "rp_window_days", 60) or 60,
         dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         corr_min_obs=int(getattr(payload, "corr_min_obs", 60) or 60),
+        exec_price=str(getattr(payload, "exec_price", "close") or "close"),
     )
     try:
         return compute_baseline(db, inp)
@@ -784,6 +787,39 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         return compute_trend_portfolio_backtest(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/trend/portfolio/oos-bootstrap")
+def trend_portfolio_oos_bootstrap(payload: TrendOosBootstrapRequest, db: Session = Depends(get_session)) -> dict:
+    """Out-of-sample bootstrap parameter optimisation for trend (portfolio) strategies (Carver-style)."""
+    import datetime as dt
+
+    try:
+        start_d = dt.datetime.strptime(payload.start, "%Y%m%d").date()
+        end_d = dt.datetime.strptime(payload.end, "%Y%m%d").date()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid start/end (use YYYYMMDD): {e}") from e
+    cfg = OosBootstrapConfig(
+        oos_ratio=payload.oos_ratio,
+        n_bootstrap=payload.n_bootstrap,
+        block_size=payload.block_size,
+        seed=payload.seed,
+        objective="maximize",
+        objective_metric="sharpe_ratio",
+    )
+    out = run_trend_oos_bootstrap(
+        db,
+        codes=payload.codes,
+        start=start_d,
+        end=end_d,
+        param_grid=payload.param_grid,
+        strategy=payload.strategy,
+        config=cfg,
+        risk_free_rate=payload.risk_free_rate,
+        cost_bps=payload.cost_bps,
+        exec_price=payload.exec_price,
+    )
+    return out
 
 
 @router.post("/analysis/groups/suggest")
@@ -2644,7 +2680,7 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
     anchors = [int(one_anchor)] if one_anchor is not None else [1, 2, 3, 4, 5]
     by_anchor: dict[str, dict] = {}
     for a in anchors:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
         ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(
             daily_ret[codes], decision_dates=decision_dates, exec_price="close"
         )
@@ -2795,7 +2831,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
     anchors = [int(one_anchor)] if one_anchor is not None else [1, 2, 3, 4, 5]
     by_anchor: dict[str, dict] = {}
     for a in anchors:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
         ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(
             daily_ret[codes], decision_dates=decision_dates, exec_price="close"
         )
@@ -2887,7 +2923,7 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
 
     navs = []
     for a in [1, 2, 3, 4, 5]:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
         ew_nav, _ew_w = _cal_ew_nav_and_weights_by_decision_dates(
             daily_ret[codes], decision_dates=decision_dates, exec_price="close"
         )
@@ -2983,7 +3019,7 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
     navs = []
     ws = []
     for a in [1, 2, 3, 4, 5]:
-        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a) - 1, shift=shift)
+        decision_dates = _cal_decision_dates_for_rebalance(idx, rebalance="weekly", anchor=int(a), shift=shift)
         ew_nav, ew_w = _cal_ew_nav_and_weights_by_decision_dates(
             daily_ret[codes], decision_dates=decision_dates, exec_price="close"
         )
