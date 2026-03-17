@@ -2172,9 +2172,8 @@
         <div>
           <label>策略</label>
           <select id="trendStrategy" style="min-width:190px;">
-            <option value="ma_filter">ma_filter</option>
-            <option value="ema_filter">EMA过滤</option>
-            <option value="ma_cross">ma_cross</option>
+            <option value="ma_filter">均线过滤</option>
+            <option value="ma_cross">均线交叉</option>
             <option value="donchian">唐奇安通道</option>
             <option value="tsmom">时序动量</option>
             <option value="linreg_slope">线性回归斜率</option>
@@ -2184,7 +2183,6 @@
             <option value="macd_v">MACD-V</option>
           </select>
         </div>
-        <div><label>前K名（组合）</label><input id="trendTopK" value="3" /></div>
         <div>
           <label>仓位法（组合）</label>
           <select id="trendSizing" style="min-width:140px;">
@@ -2232,14 +2230,6 @@
       </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
       <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
-      <div class="row" style="margin-top:8px; align-items:end;">
-        <div><label>分组约束（组合）</label><select id="trendGroupEnforce"><option value="false" selected>关闭</option><option value="true">开启</option></select></div>
-        <div><label>组内选优</label><select id="trendGroupPolicy"><option value="strongest_score" selected>得分最高</option><option value="earliest_entry">最早入场</option><option value="lowest_vol">最低波动</option></select></div>
-      </div>
-      <div style="margin-top:8px;">
-        <label>趋势组合分组映射（代码=组ID，每行一条）</label>
-        <textarea id="trendAssetGroups" rows="3" style="width:100%; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;" placeholder="159915=CN_EQ&#10;510300=CN_EQ&#10;513100=US_EQ"></textarea>
-      </div>
       <div id="trendChart" style="width:100%; height:420px; margin-top:10px;"></div>
       <h3 style="margin-top:12px;">趋势策略：日度收益率分布统计</h3>
       <div class="row no-print" style="margin-top:8px; align-items:end;">
@@ -2256,6 +2246,45 @@
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
       <table id="trendGroupTable" style="margin-top:10px;"></table>
       <div id="trendReport" class="reportCard"></div>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
+      <h3 style="margin: 0 0 6px 0;">三策略组合研究（持有+轮动+趋势）</h3>
+      <div class="row" style="align-items:end;">
+        <div><label>持有策略权重</label><input id="mixWBaseline" value="0.3333" /></div>
+        <div><label>轮动策略权重</label><input id="mixWRotation" value="0.3333" /></div>
+        <div><label>趋势策略权重</label><input id="mixWTrend" value="0.3334" /></div>
+        <button id="mixSetEqualWeights">等权</button>
+        <button id="mixSetInvVolWeights">按波动倒数</button>
+        <div><label>滚动窗口(交易日)</label><input id="mixRollWin" value="60" /></div>
+        <button id="runStrategyMix">生成组合分析</button>
+      </div>
+      <div class="muted" style="margin-top:8px;">
+        持有、轮动、趋势三条策略均使用<strong>候选池中勾选的标的</strong>（非全部标的）。使用最近一次“持有/轮动/趋势”回测结果，在共同区间按权重组合三条策略收益并分析相关性与绩效。
+      </div>
+      <div id="strategyMixChart" style="width:100%; height:420px; margin-top:10px;"></div>
+      <div class="panel two" style="margin-top:10px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">策略间相关性（日收益）</div>
+          <div id="strategyMixCorr" style="width:100%; height:320px;"></div>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">相关性矩阵数值</div>
+          <table id="strategyMixCorrTable"></table>
+        </div>
+      </div>
+      <div class="muted" id="strategyMixNote" style="margin-top:8px;"></div>
+      <table id="strategyMixMetricsTable" style="margin-top:10px;"></table>
+      <div class="panel two" style="margin-top:10px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">滚动相关性（窗口内日收益）</div>
+          <div id="strategyMixRollingCorr" style="width:100%; height:320px;"></div>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">滚动回撤（由净值推导）</div>
+          <div id="strategyMixRollingDD" style="width:100%; height:320px;"></div>
+        </div>
+      </div>
     </div>
 
     <div class="panel msg" id="msg"></div>
@@ -2427,7 +2456,7 @@
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendCost", "trendTopK", "trendSizing", "trendGroupEnforce", "trendGroupPolicy", "trendAssetGroups", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendCost", "trendSizing", "trendSingleCode",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
@@ -4291,8 +4320,7 @@
           "trendMacdVScale",
         ];
         const byStrat = {
-          ma_filter: ["trendSmaWin"],
-          ema_filter: ["trendSmaWin"],
+          ma_filter: ["trendSmaWin", "trendMaType"],
           ma_cross: ["trendFastWin", "trendSlowWin", "trendMaType"],
           donchian: ["trendDonEntry", "trendDonExit"],
           tsmom: ["trendMomLb"],
@@ -4312,8 +4340,7 @@
         }
 
         const stratDesc = {
-          ma_filter: "MA过滤：价格在均线之上持有，否则空仓。",
-          ema_filter: "EMA过滤：价格在指数均线之上持有，否则空仓。",
+          ma_filter: "均线过滤：价格在均线之上持有，否则空仓；均线类型可选 SMA 或 EMA。",
           ma_cross: "双均线：快线上穿慢线入场，下穿离场。",
           donchian: "唐奇安通道：突破上轨入场，跌破下轨离场。",
           tsmom: "时序动量：回看期收益为正则持有，否则空仓。",
@@ -4323,11 +4350,22 @@
           macd_zero_filter: "MACD零轴过滤：MACD>0 持有，<=0 空仓。",
           macd_v: "MACD-V：用ATR归一化的MACD强度进行择时。",
         };
+        const execDesc = {
+          ma_filter: "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          ma_cross: "信号在 T 日收盘后根据快慢线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          donchian: "信号在 T 日收盘后根据是否突破通道上轨/下轨确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          tsmom: "信号在 T 日收盘后根据回看期收益正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          linreg_slope: "信号在 T 日收盘后根据回看窗口线性回归斜率正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          bias: "信号在 T 日收盘后根据 BIAS 与进出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          macd_cross: "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          macd_zero_filter: "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          macd_v: "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+        };
         const paramDesc = {
           trendSmaWin: "均线窗口：均线/回归窗口长度（交易日）。",
           trendFastWin: "快线窗口：短周期均线窗口。",
           trendSlowWin: "慢线窗口：长周期均线窗口，需大于快线。",
-          trendMaType: "双均线类型：ma_cross 使用的均线计算方式（SMA/EMA）。",
+          trendMaType: "均线类型：均线过滤与双均线交叉使用的均线计算方式（SMA/EMA）。",
           trendDonEntry: "唐奇安入场：上轨突破回看窗口。",
           trendDonExit: "唐奇安出场：下轨跌破回看窗口。",
           trendMomLb: "TSMOM回看：动量收益计算窗口。",
@@ -4342,7 +4380,11 @@
           trendMacdVAtr: "MACD-V ATR窗口：归一化波动窗口。",
           trendMacdVScale: "MACD-V scale：归一化缩放系数。",
         };
-        if (descEl) descEl.textContent = `策略说明：${stratDesc[strat] || "-"}`;
+        if (descEl) {
+          const s = stratDesc[strat] || "-";
+          const e = execDesc[strat] || "";
+          descEl.innerHTML = `策略说明：${s}${e ? `<br/>执行说明：${e}` : ""}`;
+        }
         if (pEl) {
           const lines = Array.from(enabled).map((id) => paramDesc[id]).filter(Boolean);
           pEl.textContent = `参数作用：${lines.length ? lines.join("；") : "该策略无额外参数。"}`
@@ -4462,6 +4504,275 @@
           else lines.push(`${name} 回撤相对可控（>-20%）。`);
         }
         return lines;
+      }
+      function _seriesMapFromNav(result, preferredKeys) {
+        const dates = (result && result.nav && Array.isArray(result.nav.dates)) ? result.nav.dates : [];
+        const series = (result && result.nav && result.nav.series && typeof result.nav.series === "object") ? result.nav.series : {};
+        let nav = [];
+        const keys = Array.isArray(preferredKeys) ? preferredKeys : [];
+        for (const k of keys) {
+          if (Array.isArray(series[k]) && series[k].length) {
+            nav = series[k];
+            break;
+          }
+        }
+        if (!nav.length || !dates.length) return null;
+        const n = Math.min(dates.length, nav.length);
+        const retByDate = new Map();
+        for (let i = 1; i < n; i++) {
+          const d = String(dates[i] || "").trim();
+          const prev = Number(nav[i - 1]);
+          const cur = Number(nav[i]);
+          if (!d || !Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0) continue;
+          const r = cur / prev - 1.0;
+          if (Number.isFinite(r)) retByDate.set(d, r);
+        }
+        return retByDate;
+      }
+      function _normalizeWeights(ws) {
+        const arr = (Array.isArray(ws) ? ws : []).map((x) => Number(x)).map((x) => (Number.isFinite(x) && x > 0 ? x : 0));
+        const s = arr.reduce((a, b) => a + b, 0);
+        if (s <= 0) return null;
+        return arr.map((x) => x / s);
+      }
+      function _corr(a, b) {
+        const x = Array.isArray(a) ? a.map(Number) : [];
+        const y = Array.isArray(b) ? b.map(Number) : [];
+        const n = Math.min(x.length, y.length);
+        if (n < 2) return NaN;
+        const xx = x.slice(0, n);
+        const yy = y.slice(0, n);
+        const mx = xx.reduce((s, v) => s + v, 0) / n;
+        const my = yy.reduce((s, v) => s + v, 0) / n;
+        let cov = 0;
+        let vx = 0;
+        let vy = 0;
+        for (let i = 0; i < n; i++) {
+          const dx = xx[i] - mx;
+          const dy = yy[i] - my;
+          cov += dx * dy;
+          vx += dx * dx;
+          vy += dy * dy;
+        }
+        if (vx <= 0 || vy <= 0) return NaN;
+        return cov / Math.sqrt(vx * vy);
+      }
+      function _maxDrawdownFromNav(nav) {
+        const xs = Array.isArray(nav) ? nav.map(Number) : [];
+        if (!xs.length) return NaN;
+        let peak = xs[0];
+        let mdd = 0;
+        for (const v of xs) {
+          if (!Number.isFinite(v)) continue;
+          if (v > peak) peak = v;
+          if (peak > 0) mdd = Math.min(mdd, v / peak - 1.0);
+        }
+        return mdd;
+      }
+      function _rollingCorr(a, b, window) {
+        const x = Array.isArray(a) ? a.map(Number) : [];
+        const y = Array.isArray(b) ? b.map(Number) : [];
+        const n = Math.min(x.length, y.length);
+        const w = Math.max(5, Math.floor(Number(window) || 60));
+        const out = new Array(n).fill(null);
+        for (let i = w - 1; i < n; i++) {
+          const xs = x.slice(i - w + 1, i + 1);
+          const ys = y.slice(i - w + 1, i + 1);
+          out[i] = _corr(xs, ys);
+        }
+        return out;
+      }
+      function _drawdownSeries(nav) {
+        const xs = Array.isArray(nav) ? nav.map(Number) : [];
+        if (!xs.length) return [];
+        const out = [];
+        let peak = xs[0];
+        for (const v of xs) {
+          if (!Number.isFinite(v)) {
+            out.push(null);
+            continue;
+          }
+          if (v > peak) peak = v;
+          out.push((peak > 0) ? (v / peak - 1.0) : 0.0);
+        }
+        return out;
+      }
+      function _metricsFromReturns(rs, rfAnnual) {
+        const xs = (Array.isArray(rs) ? rs : []).map(Number).filter(Number.isFinite);
+        const n = xs.length;
+        if (!n) return null;
+        const nav = [];
+        let cur = 1.0;
+        for (const r of xs) {
+          cur *= (1.0 + r);
+          nav.push(cur);
+        }
+        const mean = xs.reduce((a, b) => a + b, 0) / n;
+        const var0 = (n > 1) ? (xs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1)) : 0.0;
+        const annVol = Math.sqrt(Math.max(0, var0)) * Math.sqrt(252);
+        const cumRet = nav[nav.length - 1] - 1.0;
+        const annRet = Math.pow(1.0 + cumRet, 252 / n) - 1.0;
+        const rf = Number.isFinite(Number(rfAnnual)) ? Number(rfAnnual) : 0.025;
+        const sharpe = (Number.isFinite(annVol) && annVol > 0) ? ((annRet - rf) / annVol) : NaN;
+        return {
+          sample_days: n,
+          cumulative_return: cumRet,
+          annualized_return: annRet,
+          annualized_volatility: annVol,
+          max_drawdown: _maxDrawdownFromNav(nav),
+          sharpe_ratio: sharpe,
+          nav,
+        };
+      }
+      function _getStrategyMixInputs() {
+        const baseline = window.__lastBaselineResult;
+        const rotation = window.__lastRotationResult;
+        const trend = window.__lastTrendResult;
+        if (!baseline || !rotation || !trend) return null;
+        const baseMode = (($("baselineMode") && $("baselineMode").value) ? String($("baselineMode").value) : "EW").toUpperCase();
+        const retBase = _seriesMapFromNav(baseline, [baseMode, "EW", "RP"]);
+        const retRot = _seriesMapFromNav(rotation, ["ROTATION", "STRAT"]);
+        const retTrend = _seriesMapFromNav(trend, ["STRAT"]);
+        if (!retBase || !retRot || !retTrend) return null;
+        const allDates = new Set([...retBase.keys(), ...retRot.keys(), ...retTrend.keys()]);
+        const dates = Array.from(allDates).sort().filter((d) => retBase.has(d) && retRot.has(d) && retTrend.has(d));
+        const rsBase = [];
+        const rsRot = [];
+        const rsTrend = [];
+        for (const d of dates) {
+          const b = Number(retBase.get(d));
+          const r = Number(retRot.get(d));
+          const t = Number(retTrend.get(d));
+          if (![b, r, t].every(Number.isFinite)) continue;
+          rsBase.push(b);
+          rsRot.push(r);
+          rsTrend.push(t);
+        }
+        if (rsBase.length < 20) return null;
+        return { baseMode, dates: dates.slice(dates.length - rsBase.length), rsBase, rsRot, rsTrend };
+      }
+      function setMixEqualWeights() {
+        if ($("mixWBaseline")) $("mixWBaseline").value = "0.3333";
+        if ($("mixWRotation")) $("mixWRotation").value = "0.3333";
+        if ($("mixWTrend")) $("mixWTrend").value = "0.3334";
+        runStrategyMix();
+      }
+      function setMixInvVolWeights() {
+        const inputs = _getStrategyMixInputs();
+        if (!inputs) return setMsg("请先完成三类回测，再按波动倒数自动设权重。");
+        const mBase = _metricsFromReturns(inputs.rsBase, 0.0);
+        const mRot = _metricsFromReturns(inputs.rsRot, 0.0);
+        const mTrend = _metricsFromReturns(inputs.rsTrend, 0.0);
+        const vols = [
+          Number(mBase && mBase.annualized_volatility),
+          Number(mRot && mRot.annualized_volatility),
+          Number(mTrend && mTrend.annualized_volatility),
+        ];
+        const inv = vols.map((v) => (Number.isFinite(v) && v > 0 ? (1.0 / v) : 0.0));
+        const ws = _normalizeWeights(inv);
+        if (!ws) return setMsg("无法根据波动率计算权重，请检查三策略结果。");
+        if ($("mixWBaseline")) $("mixWBaseline").value = ws[0].toFixed(4);
+        if ($("mixWRotation")) $("mixWRotation").value = ws[1].toFixed(4);
+        if ($("mixWTrend")) $("mixWTrend").value = ws[2].toFixed(4);
+        runStrategyMix();
+      }
+      function runStrategyMix() {
+        const inputs = _getStrategyMixInputs();
+        if (!inputs) {
+          return setMsg("请先分别完成一次持有、轮动、趋势回测，再生成三策略组合分析。");
+        }
+        const baseMode = inputs.baseMode;
+        const dates = inputs.dates;
+        const rsBase = inputs.rsBase;
+        const rsRot = inputs.rsRot;
+        const rsTrend = inputs.rsTrend;
+        const ws = _normalizeWeights([
+          Number(($("mixWBaseline") && $("mixWBaseline").value) ? $("mixWBaseline").value : "0"),
+          Number(($("mixWRotation") && $("mixWRotation").value) ? $("mixWRotation").value : "0"),
+          Number(($("mixWTrend") && $("mixWTrend").value) ? $("mixWTrend").value : "0"),
+        ]);
+        if (!ws) return setMsg("三策略权重至少有一个为正数。");
+        const rsMix = [];
+        for (let i = 0; i < rsBase.length; i++) {
+          rsMix.push(ws[0] * rsBase[i] + ws[1] * rsRot[i] + ws[2] * rsTrend[i]);
+        }
+        if (rsMix.length < 20) return setMsg("有效共同样本不足（<20日），请检查回测区间或策略结果。");
+        const rfRaw = ($("rf").value || "").trim();
+        let rf = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (!Number.isFinite(rf)) rf = 0.025;
+        if (rf > 1.0) rf = rf / 100.0;
+        const mBase = _metricsFromReturns(rsBase, rf);
+        const mRot = _metricsFromReturns(rsRot, rf);
+        const mTrend = _metricsFromReturns(rsTrend, rf);
+        const mMix = _metricsFromReturns(rsMix, rf);
+        if (!mBase || !mRot || !mTrend || !mMix) return setMsg("组合分析计算失败：策略收益序列无效。");
+        const navLen = mMix.nav.length;
+        const dts = dates.slice(dates.length - navLen);
+        const rollWin = Math.max(5, Math.floor(Number(($("mixRollWin") && $("mixRollWin").value) ? $("mixRollWin").value : "60")));
+        Plotly.newPlot("strategyMixChart", [
+          { x: dts, y: mMix.nav, type: "scatter", mode: "lines", name: "MIX" },
+          { x: dts, y: mBase.nav, type: "scatter", mode: "lines", name: `HOLD(${baseMode})` },
+          { x: dts, y: mRot.nav, type: "scatter", mode: "lines", name: "ROTATION" },
+          { x: dts, y: mTrend.nav, type: "scatter", mode: "lines", name: "TREND" },
+        ], { margin: { t: 30 }, title: "三策略组合净值（共同区间）" }, { responsive: true });
+
+        const names = [`HOLD(${baseMode})`, "ROTATION", "TREND"];
+        const arrs = [rsBase, rsRot, rsTrend];
+        const cm = [0, 1, 2].map((i) => [0, 1, 2].map((j) => _corr(arrs[i], arrs[j])));
+        const ctext = cm.map((row) => row.map((v) => (Number.isFinite(v) ? Number(v).toFixed(3) : "-")));
+        Plotly.newPlot("strategyMixCorr", [{
+          type: "heatmap",
+          x: names,
+          y: names,
+          z: cm,
+          zmin: -1,
+          zmax: 1,
+          colorscale: [[0.0, "#2ca02c"], [0.5, "#ffffff"], [1.0, "#d62728"]],
+          text: ctext,
+          texttemplate: "%{text}",
+          hovertemplate: "%{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>",
+          showscale: false,
+        }], { margin: { t: 20, b: 40 }, yaxis: { autorange: "reversed" } }, { responsive: true, displayModeBar: false });
+        const corrRows = [];
+        for (let i = 0; i < names.length; i++) {
+          for (let j = 0; j < names.length; j++) {
+            corrRows.push(`<tr><td>${esc(names[i])}</td><td>${esc(names[j])}</td><td>${Number.isFinite(cm[i][j]) ? Number(cm[i][j]).toFixed(4) : "-"}</td></tr>`);
+          }
+        }
+        $("strategyMixCorrTable").innerHTML = `<tr><th>策略A</th><th>策略B</th><th>相关系数</th></tr>${corrRows.join("")}`;
+        const rows = [
+          ["组合(MIX)", mMix],
+          [`持有(${baseMode})`, mBase],
+          ["轮动", mRot],
+          ["趋势", mTrend],
+        ].map(([k, m]) => `<tr><td>${esc(k)}</td><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${fmtNum(m.sharpe_ratio)}</td></tr>`);
+        $("strategyMixMetricsTable").innerHTML = `<tr><th>策略</th><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>夏普</th></tr>${rows.join("")}`;
+
+        const rcBR = _rollingCorr(rsBase, rsRot, rollWin);
+        const rcBT = _rollingCorr(rsBase, rsTrend, rollWin);
+        const rcRT = _rollingCorr(rsRot, rsTrend, rollWin);
+        Plotly.newPlot("strategyMixRollingCorr", [
+          { x: dts, y: rcBR, type: "scatter", mode: "lines", name: `Corr(HOLD,ROT)` },
+          { x: dts, y: rcBT, type: "scatter", mode: "lines", name: `Corr(HOLD,TREND)` },
+          { x: dts, y: rcRT, type: "scatter", mode: "lines", name: `Corr(ROT,TREND)` },
+        ], {
+          margin: { t: 20 },
+          yaxis: { title: "相关系数", range: [-1, 1] },
+          title: `滚动相关性（窗口=${rollWin}）`,
+        }, { responsive: true });
+
+        Plotly.newPlot("strategyMixRollingDD", [
+          { x: dts, y: _drawdownSeries(mMix.nav), type: "scatter", mode: "lines", name: "DD(MIX)" },
+          { x: dts, y: _drawdownSeries(mBase.nav), type: "scatter", mode: "lines", name: "DD(HOLD)" },
+          { x: dts, y: _drawdownSeries(mRot.nav), type: "scatter", mode: "lines", name: "DD(ROT)" },
+          { x: dts, y: _drawdownSeries(mTrend.nav), type: "scatter", mode: "lines", name: "DD(TREND)" },
+        ], {
+          margin: { t: 20 },
+          yaxis: { title: "回撤", tickformat: ".0%", autorange: true },
+          title: "滚动回撤（由净值推导）",
+        }, { responsive: true });
+
+        $("strategyMixNote").textContent = `权重归一后：持有=${fmtPct(ws[0])}，轮动=${fmtPct(ws[1])}，趋势=${fmtPct(ws[2])}；共同样本区间：${dts[0]} ~ ${dts[dts.length - 1]}（${dts.length}个交易日）；滚动窗口=${rollWin}。`;
       }
       function _mcReportLines(label, mc) {
         const mm = (mc && mc.metrics) ? (mc.metrics.annualized_return || mc.metrics.cumulative_return || null) : null;
@@ -8497,6 +8808,7 @@
         ];
         setReport("轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
         setReportTo("rotReport", "轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
+        try { if (window.__lastBaselineResult && window.__lastTrendResult) runStrategyMix(); } catch (e) { /* best effort */ }
       }
 
       async function runTrendResearch() {
@@ -8540,15 +8852,10 @@
         if (mode === "portfolio") {
           const codes = Array.from(selected);
           if (codes.length === 0) return setMsg("请先选择标的池");
-          const top_k = Number(($("trendTopK").value || "3").trim());
           const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
-          const group_enforce = ($("trendGroupEnforce") && $("trendGroupEnforce").value === "true");
-          const group_pick_policy = ($("trendGroupPolicy") && $("trendGroupPolicy").value) ? String($("trendGroupPolicy").value) : "strongest_score";
-          const asset_groups = _parseAssetGroupsFromText(($("trendAssetGroups") && $("trendAssetGroups").value) ? $("trendAssetGroups").value : "");
-          if (asset_groups && asset_groups.__error) return setMsg(asset_groups.__error);
           resp = await api("/analysis/trend/portfolio", {
             method: "POST",
-            body: JSON.stringify({ codes, top_k, position_sizing, group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(), ...common }),
+            body: JSON.stringify({ codes, position_sizing, dynamic_universe: isDynamicUniverseOn(), ...common }),
           });
         } else {
           const codes = Array.from(selected);
@@ -8614,6 +8921,7 @@
           ],
           "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
         );
+        try { if (window.__lastBaselineResult && window.__lastRotationResult) runStrategyMix(); } catch (e) { /* best effort */ }
       }
 
       async function runRotNextExecutionPlan() {
@@ -8968,7 +9276,6 @@
         const mp = (data && data.asset_groups) ? data.asset_groups : {};
         const lines = Object.keys(mp).sort().map((c) => `${c}=${mp[c]}`);
         if ($("rotAssetGroups")) $("rotAssetGroups").value = lines.join("\n");
-        if ($("trendAssetGroups")) $("trendAssetGroups").value = lines.join("\n");
         if (hint) hint.textContent = `已生成 ${new Set(Object.values(mp)).size} 个分组建议`;
       }
 
@@ -9361,6 +9668,7 @@
         plotRolling("rollingDD", "Rolling Drawdown", (picked.rolling.drawdown || picked.rolling.max_drawdown || {}), ".0%");
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
+        try { if (window.__lastRotationResult && window.__lastTrendResult) runStrategyMix(); } catch (e) { /* best effort */ }
         window.__distInitedByCodeRange = false;
         renderPeriodDistributions(data.period_distributions, data);
         const benchName = benchmark_code ? codeLabel(benchmark_code) : "未设置基准";
@@ -10341,6 +10649,9 @@
       $("runRotation").addEventListener("click", runRotation);
       if ($("runRotNextPlan")) $("runRotNextPlan").addEventListener("click", runRotNextExecutionPlan);
       if ($("runTrendResearch")) $("runTrendResearch").addEventListener("click", runTrendResearch);
+      if ($("runStrategyMix")) $("runStrategyMix").addEventListener("click", runStrategyMix);
+      if ($("mixSetEqualWeights")) $("mixSetEqualWeights").addEventListener("click", setMixEqualWeights);
+      if ($("mixSetInvVolWeights")) $("mixSetInvVolWeights").addEventListener("click", setMixInvVolWeights);
       if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendStrategyParamsUi);
       // Init trend strategy parameter enablement/description on page load.
       updateTrendStrategyParamsUi();

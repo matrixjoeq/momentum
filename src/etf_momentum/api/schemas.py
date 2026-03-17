@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -1017,13 +1019,13 @@ class TrendBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v (long/cash)",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v (long/cash); ma_filter uses ma_type sma|ema",
     )
     # parameters (some are strategy-specific)
     sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
     fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")
     slow_window: int = Field(default=200, ge=2, description="Slow MA window (trading days)")
-    ma_type: str = Field(default="sma", description="MA type for ma_cross: sma|ema")
+    ma_type: str = Field(default="sma", description="MA type for ma_filter and ma_cross: sma|ema")
     donchian_entry: int = Field(default=20, ge=2, description="Donchian entry window (trading days)")
     donchian_exit: int = Field(default=10, ge=2, description="Donchian exit window (trading days)")
     mom_lookback: int = Field(default=252, ge=2, description="TS momentum lookback (trading days)")
@@ -1049,20 +1051,16 @@ class TrendPortfolioBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ema_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v; ma_filter uses ma_type sma|ema",
     )
-    top_k: int = Field(default=3, ge=1, description="Top-K assets selected each day")
     position_sizing: str = Field(default="equal", description="equal|vol_target")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
     vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling")
-    group_enforce: bool = Field(default=False, description="Enable one-asset-per-group hard constraint")
-    group_pick_policy: str = Field(default="strongest_score", description="strongest_score|earliest_entry|lowest_vol")
-    asset_groups: dict[str, str] | None = Field(default=None, description="Optional mapping: code -> group_id")
     dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate pool by period over union interval")
     sma_window: int = Field(default=200, ge=2)
     fast_window: int = Field(default=50, ge=2)
     slow_window: int = Field(default=200, ge=2)
-    ma_type: str = Field(default="sma", description="MA type for ma_cross: sma|ema")
+    ma_type: str = Field(default="sma", description="MA type for ma_filter and ma_cross: sma|ema")
     donchian_entry: int = Field(default=20, ge=2)
     donchian_exit: int = Field(default=10, ge=2)
     mom_lookback: int = Field(default=252, ge=2)
@@ -1105,4 +1103,24 @@ class BaselineMonteCarloRequest(BaselineAnalysisRequest, MonteCarloRequest):
 
 class RotationMonteCarloRequest(RotationBacktestRequest, MonteCarloRequest):
     pass
+
+
+class RotationOosBootstrapRequest(BaseModel):
+    """Request for out-of-sample bootstrap parameter optimisation (Carver-style)."""
+
+    codes: list[str] = Field(min_length=1, description="Universe codes")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    oos_ratio: float = Field(default=0.3, gt=0.0, lt=1.0, description="Fraction of period for OOS (at end)")
+    n_bootstrap: int = Field(default=50, ge=5, le=500, description="Number of bootstrap resamples")
+    block_size: int = Field(default=21, ge=1, description="Block size for circular block bootstrap (trading days)")
+    seed: int | None = Field(default=None, description="Random seed for reproducibility")
+    cost_bps: float = Field(default=3.0, ge=0.0)
+    param_grid: dict[str, list[Any]] | None = Field(
+        default=None,
+        description=(
+            "Optional param grid, e.g. {'lookback_days': [60,90,120], 'top_k': [1,2]}. "
+            "If omitted, a default grid is used."
+        ),
+    )
 

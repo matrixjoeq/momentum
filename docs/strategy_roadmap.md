@@ -118,7 +118,7 @@
 
 ### 策略范围
 
-- 已有：`ma_filter`, `ema_filter`, `ma_cross`, `donchian`, `tsmom`, `linreg_slope`, `bias`
+- 已有：`ma_filter`（均线类型 SMA/EMA）, `ma_cross`, `donchian`, `tsmom`, `linreg_slope`, `bias`
 - 新增：`macd_cross`, `macd_zero_filter`, `macd_v`
 - 后续可扩展：`adx_filter`, `keltner_breakout`, `supertrend`, `pullback_trend`
 

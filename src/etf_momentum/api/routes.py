@@ -20,6 +20,7 @@ from .schemas import (
     BaselineWeekly5EWDashboardRequest,
     RotationCalendarEffectRequest,
     RotationMonteCarloRequest,
+    RotationOosBootstrapRequest,
     RotationBacktestRequest,
     RotationWeekly5OpenSimRequest,
     SimDecisionGenerateRequest,
@@ -757,13 +758,9 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         cost_bps=payload.cost_bps,
         exec_price=payload.exec_price,
         strategy=payload.strategy,
-        top_k=payload.top_k,
         position_sizing=payload.position_sizing,
         vol_window=payload.vol_window,
         vol_target_ann=payload.vol_target_ann,
-        group_enforce=payload.group_enforce,
-        group_pick_policy=payload.group_pick_policy,
-        asset_groups=payload.asset_groups,
         dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         sma_window=payload.sma_window,
         fast_window=payload.fast_window,
@@ -3602,6 +3599,35 @@ def baseline_montecarlo(payload: BaselineMonteCarloRequest, db: Session = Depend
         },
         "mc": mc,
     }
+
+
+@router.post("/analysis/rotation/oos-bootstrap")
+def rotation_oos_bootstrap(payload: RotationOosBootstrapRequest, db: Session = Depends(get_session)) -> dict:
+    """Out-of-sample bootstrap parameter optimisation for rotation (Carver-style)."""
+    import datetime as dt
+
+    from etf_momentum.strategy.rotation_research_config import UniverseConfig
+    from etf_momentum.scripts.rotation_research_runner import run_rotation_oos_bootstrap_research
+
+    try:
+        start_d = dt.datetime.strptime(payload.start, "%Y%m%d").date()
+        end_d = dt.datetime.strptime(payload.end, "%Y%m%d").date()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid start/end (use YYYYMMDD): {e}") from e
+    universe = UniverseConfig(name="Request", codes=payload.codes)
+    out = run_rotation_oos_bootstrap_research(
+        db,
+        universe,
+        cost_bps=payload.cost_bps,
+        oos_ratio=payload.oos_ratio,
+        n_bootstrap=payload.n_bootstrap,
+        block_size=payload.block_size,
+        seed=payload.seed,
+        param_grid=payload.param_grid,
+        start_date=start_d,
+        end_date=end_d,
+    )
+    return out
 
 
 @router.post("/analysis/rotation/montecarlo")

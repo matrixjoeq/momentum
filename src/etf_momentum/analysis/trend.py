@@ -24,6 +24,19 @@ from .baseline import (
 )
 from .execution_timing import forward_align_returns
 
+# 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
+TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
+    "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "ma_cross": "信号在 T 日收盘后根据快慢线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "donchian": "信号在 T 日收盘后根据是否突破通道上轨/下轨确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "tsmom": "信号在 T 日收盘后根据回看期收益正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "linreg_slope": "信号在 T 日收盘后根据回看窗口线性回归斜率正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "bias": "信号在 T 日收盘后根据 BIAS 与进出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "macd_cross": "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "macd_zero_filter": "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "macd_v": "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+}
+
 
 @dataclass(frozen=True)
 class TrendInputs:
@@ -34,7 +47,7 @@ class TrendInputs:
     cost_bps: float = 0.0
     exec_price: str = "open"  # open|close|oc2
     # strategy selection
-    strategy: str = "ma_filter"  # ma_filter | ema_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v
+    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v
     # parameters
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
@@ -67,13 +80,9 @@ class TrendPortfolioInputs:
     cost_bps: float = 0.0
     exec_price: str = "open"  # open|close|oc2
     strategy: str = "ma_filter"
-    top_k: int = 3
     position_sizing: str = "equal"  # equal | vol_target
     vol_window: int = 20
     vol_target_ann: float = 0.20
-    group_enforce: bool = False
-    group_pick_policy: str = "strongest_score"  # strongest_score | earliest_entry | lowest_vol
-    asset_groups: dict[str, str] | None = None
     dynamic_universe: bool = False
     # single-strategy params
     sma_window: int = 200
@@ -184,71 +193,6 @@ def _atr_from_hlc(high: pd.Series, low: pd.Series, close: pd.Series, *, window: 
     return tr.rolling(window=w, min_periods=max(2, w // 2)).mean().astype(float)
 
 
-def _reduce_score_by_group_for_day(
-    scores_row: pd.Series,
-    *,
-    group_enforce: bool,
-    group_map: dict[str, str],
-    policy: str,
-    current_holdings: set[str] | None,
-    vol_row: pd.Series | None,
-) -> tuple[pd.Series, dict[str, Any]]:
-    s = scores_row.dropna().sort_values(ascending=False)
-    meta: dict[str, Any] = {
-        "enabled": bool(group_enforce),
-        "policy": str(policy or "strongest_score"),
-        "before": [str(c) for c in s.index.tolist()],
-        "after": [],
-        "group_winners": {},
-        "group_eliminated": {},
-    }
-    if (not group_enforce) or s.empty:
-        meta["after"] = list(meta["before"])
-        return s, meta
-
-    p = str(policy or "strongest_score").strip().lower()
-    if p not in {"strongest_score", "earliest_entry", "lowest_vol"}:
-        raise ValueError(f"invalid group_pick_policy={policy}")
-
-    cur = set(str(x) for x in (current_holdings or set()))
-    bucket: dict[str, list[str]] = {}
-    for c in s.index.tolist():
-        cc = str(c)
-        gid = str(group_map.get(cc) or cc)
-        bucket.setdefault(gid, []).append(cc)
-
-    winners: list[str] = []
-    group_winners: dict[str, str] = {}
-    group_eliminated: dict[str, list[str]] = {}
-    for gid, members in bucket.items():
-        winner = members[0]
-        if p == "earliest_entry":
-            held = [m for m in members if m in cur]
-            if held:
-                winner = held[0]
-        elif p == "lowest_vol" and vol_row is not None:
-            pairs: list[tuple[str, float]] = []
-            for m in members:
-                try:
-                    vv = float(vol_row.get(m))
-                except (TypeError, ValueError):
-                    vv = float("nan")
-                if np.isfinite(vv):
-                    pairs.append((m, vv))
-            if pairs:
-                pairs = sorted(pairs, key=lambda x: (float(x[1]), -float(s.get(x[0], np.nan)), str(x[0])))
-                winner = pairs[0][0]
-        winners.append(winner)
-        group_winners[gid] = winner
-        group_eliminated[gid] = [m for m in members if m != winner]
-
-    reduced = s.reindex(winners).dropna().sort_values(ascending=False)
-    meta["after"] = [str(c) for c in reduced.index.tolist()]
-    meta["group_winners"] = group_winners
-    meta["group_eliminated"] = group_eliminated
-    return reduced, meta
-
-
 def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     code = (inp.code or "").strip()
     if not code:
@@ -264,7 +208,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     strat = (inp.strategy or "ma_filter").strip().lower()
     if strat not in {
         "ma_filter",
-        "ema_filter",
         "ma_cross",
         "donchian",
         "tsmom",
@@ -399,13 +342,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_exec_hfq).astype(float)
 
     if strat == "ma_filter":
-        sma = px_sig.rolling(window=int(inp.sma_window), min_periods=max(2, int(inp.sma_window) // 2)).mean()
-        raw_pos = (px_sig > sma).astype(float).fillna(0.0)
-    elif strat == "ema_filter":
-        # Use EMA on signal price basis (qfq close), applied with next-day execution.
-        span = int(inp.sma_window)
-        ema = px_sig.ewm(span=span, adjust=False, min_periods=max(2, span // 2)).mean()
-        raw_pos = (px_sig > ema).astype(float).fillna(0.0)
+        ma = _moving_average(px_sig, window=int(inp.sma_window), ma_type=ma_type)
+        raw_pos = (px_sig > ma).astype(float).fillna(0.0)
     elif strat == "ma_cross":
         fast = _moving_average(px_sig, window=int(inp.fast_window), ma_type=ma_type)
         slow = _moving_average(px_sig, window=int(inp.slow_window), ma_type=ma_type)
@@ -546,6 +484,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             "start": inp.start.strftime("%Y%m%d"),
             "end": inp.end.strftime("%Y%m%d"),
             "strategy": strat,
+            "strategy_execution_description": TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(strat, ""),
             "price_basis": {
                 "signal": "qfq close",
                 "strategy_nav": "none close preferred; hfq return fallback on corporate-action days",
@@ -605,8 +544,6 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
     codes = list(dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()]))
     if not codes:
         raise ValueError("codes is empty")
-    if int(inp.top_k) < 1:
-        raise ValueError("top_k must be >= 1")
     if float(inp.cost_bps) < 0:
         raise ValueError("cost_bps must be >= 0")
     ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
@@ -621,9 +558,6 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
         raise ValueError("vol_window must be >= 2")
     if (not np.isfinite(float(inp.vol_target_ann))) or float(inp.vol_target_ann) <= 0:
         raise ValueError("vol_target_ann must be finite and > 0")
-    gp = str(inp.group_pick_policy or "strongest_score").strip().lower()
-    if gp not in {"strongest_score", "earliest_entry", "lowest_vol"}:
-        raise ValueError(f"invalid group_pick_policy={inp.group_pick_policy}")
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema"}:
         raise ValueError("ma_type must be one of: sma|ema")
@@ -695,13 +629,9 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
             sig_score[c] = np.nan
             continue
         if strat == "ma_filter":
-            sma = px.rolling(window=int(inp.sma_window), min_periods=max(2, int(inp.sma_window) // 2)).mean()
-            pos = (px > sma).astype(float)
-            score = (px / sma - 1.0).astype(float)
-        elif strat == "ema_filter":
-            ema = _ema(px, int(inp.sma_window))
-            pos = (px > ema).astype(float)
-            score = (px / ema - 1.0).astype(float)
+            ma = _moving_average(px, window=int(inp.sma_window), ma_type=ma_type)
+            pos = (px > ma).astype(float)
+            score = (px / ma - 1.0).astype(float)
         elif strat == "ma_cross":
             fast = _moving_average(px, window=int(inp.fast_window), ma_type=ma_type)
             slow = _moving_average(px, window=int(inp.slow_window), ma_type=ma_type)
@@ -748,40 +678,14 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
         sig_score[c] = score.replace([np.inf, -np.inf], np.nan)
 
     vol_ann = ret_hfq.rolling(window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)).std(ddof=1) * np.sqrt(252.0)
-    group_map = {c: str((inp.asset_groups or {}).get(c) or c) for c in codes}
     w_decision = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
     holdings: list[dict[str, Any]] = []
     prev_key: tuple[str, ...] | None = None
     for d in dates:
         active = sig_pos.loc[d]
-        scores = sig_score.loc[d].where(active > 0.0, other=np.nan)
-        candidate_scores = scores.dropna()
-        candidate_count = int(candidate_scores.shape[0])
-        min_required = int(inp.top_k) + 1
-        if candidate_count <= int(inp.top_k):
-            reduced = candidate_scores.sort_values(ascending=False)
-            gmeta = {
-                "enabled": bool(inp.group_enforce),
-                "policy": gp,
-                "before": [str(x) for x in reduced.index.tolist()],
-                "after": [],
-                "group_winners": {},
-                "group_eliminated": {},
-                "candidate_count": candidate_count,
-                "min_required": min_required,
-                "mode": "insufficient_candidates",
-            }
-            picks = []
-        else:
-            reduced, gmeta = _reduce_score_by_group_for_day(
-                scores,
-                group_enforce=bool(inp.group_enforce),
-                group_map=group_map,
-                policy=gp,
-                current_holdings=set(prev_key or []),
-                vol_row=vol_ann.loc[d] if d in vol_ann.index else None,
-            )
-            picks = [str(x) for x in reduced.index[: max(1, int(inp.top_k))].tolist()]
+        scores = sig_score.loc[d].where(active > 0.0, other=np.nan).replace([np.inf, -np.inf], np.nan)
+        active_codes = [str(c) for c in scores.dropna().sort_values(ascending=False).index.tolist()]
+        picks = active_codes
         if not picks:
             w_row = pd.Series(0.0, index=codes, dtype=float)
         elif ps == "equal":
@@ -820,8 +724,7 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
                 {
                     "decision_date": d.date().isoformat(),
                     "picks": list(key),
-                    "scores": {c: (None if pd.isna(reduced.get(c)) else float(reduced.get(c))) for c in key},
-                    "group_filter": gmeta,
+                    "scores": {c: (None if pd.isna(scores.get(c)) else float(scores.get(c))) for c in key},
                 }
             )
             prev_key = key
@@ -879,14 +782,12 @@ def compute_trend_portfolio_backtest(db: Session, inp: TrendPortfolioInputs) -> 
             "start": inp.start.strftime("%Y%m%d"),
             "end": inp.end.strftime("%Y%m%d"),
             "strategy": strat,
+            "strategy_execution_description": TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(strat, ""),
             "params": {
-                "top_k": int(inp.top_k),
                 "position_sizing": ps,
                 "vol_window": int(inp.vol_window),
                 "vol_target_ann": float(inp.vol_target_ann),
-                "group_enforce": bool(inp.group_enforce),
-                "group_pick_policy": gp,
-                "asset_groups": {k: v for k, v in group_map.items()},
+                "selection_mode": "all_active_candidates",
                 "ma_type": ma_type,
                 "exec_price": str(ep),
             },

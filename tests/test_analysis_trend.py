@@ -43,7 +43,8 @@ def test_trend_ma_filter_smoke(session_factory):
     assert any(x > 0 for x in pos)
 
 
-def test_trend_ema_filter_smoke(session_factory):
+def test_trend_ma_filter_ema_smoke(session_factory):
+    """均线过滤策略使用 ma_type=ema 时行为与合并前的 ema_filter 一致。"""
     sf = session_factory
     code = "AAA"
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
@@ -54,10 +55,19 @@ def test_trend_ema_filter_smoke(session_factory):
         db.commit()
         out = compute_trend_backtest(
             db,
-            TrendInputs(code=code, start=dates[0], end=dates[-1], strategy="ema_filter", sma_window=20, cost_bps=0.0),
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="ema",
+                sma_window=20,
+                cost_bps=0.0,
+            ),
         )
     assert out["meta"]["params"]["sma_window"] == 20
-    assert out["meta"]["strategy"] == "ema_filter"
+    assert out["meta"]["params"]["ma_type"] == "ema"
+    assert out["meta"]["strategy"] == "ma_filter"
     assert any(x > 0 for x in out["signals"]["position"])
 
 
@@ -222,4 +232,49 @@ def test_trend_macd_family_smoke(session_factory):
     assert out_zero["meta"]["strategy"] == "macd_zero_filter"
     assert out_v["meta"]["strategy"] == "macd_v"
     assert len(out_v["signals"]["position"]) == len(out_v["nav"]["dates"])
+
+
+def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=8, freq="B")]
+    # Day index:
+    # d0=100, d1=100, d2=100, d3=200 (decision-day big jump), d4=200, d5=220, d6=220, d7=220
+    # If decision-day return were included after signal flip at d3, NAV would jump by ~100%.
+    pxs = [100.0, 100.0, 100.0, 200.0, 200.0, 220.0, 220.0, 220.0]
+    strategies = [
+        ("ma_filter", {"sma_window": 2}),
+        ("ma_cross", {"fast_window": 2, "slow_window": 3, "ma_type": "sma"}),
+        ("donchian", {"donchian_entry": 2, "donchian_exit": 2}),
+        ("tsmom", {"mom_lookback": 2}),
+        ("linreg_slope", {"sma_window": 3}),
+        ("bias", {"bias_ma_window": 2, "bias_entry": 1.0, "bias_hot": 50.0, "bias_cold": -10.0, "bias_pos_mode": "binary"}),
+        ("macd_cross", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
+        ("macd_zero_filter", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
+        ("macd_v", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "macd_v_atr_window": 2, "macd_v_scale": 100.0}),
+    ]
+    with sf() as db:
+        for d, p in zip(dates, pxs):
+            _add_price(db, code=code, day=d, close=p)
+        db.commit()
+
+        for strat, params in strategies:
+            out = compute_trend_backtest(
+                db,
+                TrendInputs(
+                    code=code,
+                    start=dates[0],
+                    end=dates[-1],
+                    strategy=strat,
+                    cost_bps=0.0,
+                    **params,
+                ),
+            )
+            nav = [float(x) for x in out["nav"]["series"]["STRAT"]]
+            pos = [float(x) for x in out["signals"]["position"]]
+            # Ensure there is at least one signal-on day so this test is meaningful.
+            assert any(x > 0 for x in pos), f"{strat} did not produce any long signal"
+            # The first post-jump NAV point must remain ~1.0 (decision-day return excluded).
+            # We allow tiny epsilon for float operations.
+            assert nav[3] <= 1.0000001, f"{strat} appears to include decision-day return"
 

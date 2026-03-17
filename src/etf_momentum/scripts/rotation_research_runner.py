@@ -432,6 +432,58 @@ def generate_report(analysis: Dict[str, Any], universe: UniverseConfig, output_d
     logger.info(f"Generated report: {filepath}")
 
 
+def run_rotation_oos_bootstrap_research(
+    db,
+    universe: UniverseConfig,
+    cost_bps: float = 3.0,
+    oos_ratio: float = 0.3,
+    n_bootstrap: int = 50,
+    block_size: int = 21,
+    seed: Optional[int] = None,
+    param_grid: Optional[Dict[str, List[Any]]] = None,
+    start_date: Optional[dt.date] = None,
+    end_date: Optional[dt.date] = None,
+) -> Dict[str, Any]:
+    """
+    Run out-of-sample bootstrap parameter optimisation for rotation strategy
+    (Carver-style: split in-sample/OOS, bootstrap in-sample, aggregate params, evaluate on OOS).
+    """
+    from etf_momentum.analysis.oos_bootstrap import (
+        OosBootstrapConfig,
+        run_rotation_oos_bootstrap,
+    )
+
+    if start_date is None or end_date is None:
+        start_date, end_date = get_date_range(db, universe.codes)
+    close = fetch_price_data(db, universe.codes, start_date, end_date)
+    if close.empty or len(close) < 252:
+        return {"error": "Insufficient price data (need at least ~1 year)"}
+
+    default_grid: Dict[str, List[Any]] = {
+        "score_method": ["raw_mom", "sharpe_mom"],
+        "lookback_days": [60, 90, 120],
+        "top_k": [1, 2],
+        "rebalance": ["weekly"],
+        "enable_trend_filter": [True],
+    }
+    grid = param_grid if param_grid is not None else default_grid
+    config = OosBootstrapConfig(
+        oos_ratio=oos_ratio,
+        n_bootstrap=n_bootstrap,
+        block_size=block_size,
+        seed=seed,
+        objective="maximize",
+        objective_metric="sharpe_ratio",
+    )
+    return run_rotation_oos_bootstrap(
+        close,
+        universe,
+        grid,
+        cost_bps=cost_bps,
+        config=config,
+    )
+
+
 def run_research(
     universe: UniverseConfig,
     db,
