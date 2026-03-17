@@ -324,6 +324,96 @@ def test_rotation_bias_exit_rule_triggers_when_condition_is_hit(session_factory)
     assert any(str(e.get("type")) == "bias_rule" for e in events)
 
 
+def test_rotation_bias_v_exit_rule_triggers_with_fixed_atr_multiple(session_factory):
+    sf = session_factory
+    with sf() as db:
+        dates = [d.date() for d in pd.date_range("2024-01-01", "2024-09-30", freq="B")]
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.08
+            if i >= 120:
+                px += (i - 120) * 1.3
+            _add_price(db, code="A1", day=d, close=px)
+            _add_price(db, code="B1", day=d, close=100.0 + i * 0.03)
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["A1", "B1"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="monthly",
+                top_k=1,
+                lookback_days=20,
+                bias_exit_filter=True,
+                bias_type="bias_v",
+                bias_ma_window=5,
+                bias_quantile=90.0,
+                bias_min_periods=5,
+                asset_bias_rules=[
+                    {
+                        "code": "*",
+                        "stage": "exit",
+                        "bias_type": "bias_v",
+                        "op": ">=",
+                        "bias_ma_window": 5,
+                        "threshold_type": "fixed",
+                        "fixed_value": 1.0,  # ATR multiple
+                        "min_periods": 5,
+                    }
+                ],
+            ),
+        )
+
+    events = out.get("daily_exit_events") or []
+    assert events
+    assert any(str(e.get("type")) == "bias_rule" for e in events)
+
+
+def test_rotation_bias_v_fixed_threshold_uses_atr_multiple_not_percent(session_factory):
+    sf = session_factory
+    with sf() as db:
+        dates = [d.date() for d in pd.date_range("2024-01-01", "2024-09-30", freq="B")]
+        for i, d in enumerate(dates):
+            # Mild trend only: BIAS-V should stay well below very high ATR-multiple threshold.
+            px = 100.0 + i * 0.06
+            _add_price(db, code="A1", day=d, close=px)
+            _add_price(db, code="B1", day=d, close=100.0 + i * 0.03)
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["A1", "B1"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="monthly",
+                top_k=1,
+                lookback_days=20,
+                bias_exit_filter=True,
+                bias_type="bias_v",
+                bias_ma_window=5,
+                bias_quantile=90.0,
+                bias_min_periods=5,
+                asset_bias_rules=[
+                    {
+                        "code": "*",
+                        "stage": "exit",
+                        "bias_type": "bias_v",
+                        "op": ">=",
+                        "bias_ma_window": 5,
+                        "threshold_type": "fixed",
+                        "fixed_value": 5.0,  # 5x ATR; should not trigger in mild trend
+                        "min_periods": 5,
+                    }
+                ],
+            ),
+        )
+
+    events = out.get("daily_exit_events") or []
+    assert not any(str(e.get("type")) == "bias_rule" for e in events)
+
+
 def test_rotation_exit_match_n_zero_is_and_over_enabled_exit_filters(session_factory):
     sf = session_factory
     with sf() as db:

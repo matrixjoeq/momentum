@@ -65,6 +65,7 @@ class RotationInputs:
     trend_ma_type: str = "sma"  # sma | ema | vma(variable/adaptive)
     bias_filter: bool = False
     bias_exit_filter: bool = False
+    bias_type: str = "bias"  # bias | bias_v
     bias_ma_window: int = 20
     bias_level_window: str = "all"
     bias_threshold_type: str = "quantile"  # quantile | fixed
@@ -728,9 +729,19 @@ def _tiered_exposure_from_level_quantiles(
     return pd.Series(exp, index=lvl.index, dtype=float), meta
 
 
-def _bias_series_from_close(close: pd.DataFrame, *, ma_window: int) -> pd.DataFrame:
+def _bias_series_from_close(
+    close: pd.DataFrame,
+    *,
+    ma_window: int,
+    bias_type: str = "bias",
+) -> pd.DataFrame:
     w = max(2, int(ma_window))
+    bt = str(bias_type or "bias").strip().lower()
     ma = close.rolling(window=w, min_periods=max(2, w // 2)).mean()
+    if bt == "bias_v":
+        # Close-only ATR proxy consistent with the rest of strategy internals.
+        atr = close.diff().abs().rolling(window=w, min_periods=max(2, w // 2)).mean()
+        return ((close - ma) / atr.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).astype(float)
     return (close / ma - 1.0).replace([np.inf, -np.inf], np.nan).astype(float)
 
 
@@ -745,7 +756,11 @@ def _bias_threshold_series(
 ) -> pd.DataFrame:
     tt = str(threshold_type or "quantile").strip().lower()
     if tt == "fixed":
-        v = float(fixed_value) / 100.0
+        bt = str(getattr(bias_df, "attrs", {}).get("bias_type", "bias") or "bias").strip().lower()
+        # fixed threshold semantics:
+        # - bias: percentage points => convert 10 to 0.10
+        # - bias_v: ATR multiples => use raw value (e.g., 1.5 means 1.5x ATR)
+        v = float(fixed_value) if bt == "bias_v" else (float(fixed_value) / 100.0)
         return pd.DataFrame(v, index=bias_df.index, columns=bias_df.columns, dtype=float)
     q = float(quantile)
     if q > 1.0:
@@ -1036,6 +1051,9 @@ def backtest_rotation(
         raise ValueError("trend_ma_type must be one of: sma|ema|vma")
     if int(inp.bias_ma_window) <= 1:
         raise ValueError("bias_ma_window must be > 1")
+    b_type = str(inp.bias_type or "bias").strip().lower()
+    if b_type not in {"bias", "bias_v"}:
+        raise ValueError("bias_type must be one of: bias|bias_v")
     b_thr_type = str(inp.bias_threshold_type or "quantile").strip().lower()
     if b_thr_type not in {"quantile", "fixed"}:
         raise ValueError("bias_threshold_type must be one of: quantile|fixed")
@@ -1188,8 +1206,9 @@ def backtest_rotation(
             trend_ops.add(_normalize_cmp_op((r or {}).get("op") or default_op))
 
     bias_windows = [int(inp.bias_ma_window)]
-    bias_rule_cfgs: set[tuple[int, str, str, float, float, int]] = {
+    bias_rule_cfgs: set[tuple[str, int, str, str, float, float, int]] = {
         (
+            str(b_type),
             int(inp.bias_ma_window),
             str(inp.bias_level_window or "all").strip().lower(),
             str(inp.bias_threshold_type or "quantile").strip().lower(),
@@ -1206,7 +1225,11 @@ def backtest_rotation(
                 w = int(inp.bias_ma_window)
             if w > 1:
                 bias_windows.append(w)
+            bt_rule = str((r or {}).get("bias_type") or b_type).strip().lower()
+            if bt_rule not in {"bias", "bias_v"}:
+                bt_rule = str(b_type)
             cfg = (
+                bt_rule,
                 int(max(2, w)),
                 str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower(),
                 str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower(),
@@ -1437,8 +1460,8 @@ def backtest_rotation(
     # Pre-compute risk-control signals on qfq close (aligned to execution calendar).
     ta_close = close_qfq[rank_codes] if need_qfq else None
     trend_ok_each_by_key: dict[tuple[int, str, str], pd.DataFrame] = {}
-    bias_by_ma_window: dict[int, pd.DataFrame] = {}
-    bias_thr_by_cfg: dict[tuple[int, str, str, float, float, int], pd.DataFrame] = {}
+    bias_by_key: dict[tuple[int, str], pd.DataFrame] = {}
+    bias_thr_by_cfg: dict[tuple[str, int, str, str, float, float, int], pd.DataFrame] = {}
     rsi_by_window: dict[int, pd.DataFrame] = {}
     ann_vol_by_window: dict[int, pd.DataFrame] = {}
     er_by_window: dict[int, pd.DataFrame] = {}
@@ -1456,11 +1479,18 @@ def backtest_rotation(
                             op=str(op),
                         )
         if inp.bias_filter or inp.bias_exit_filter:
+            all_bias_types = {str(b_type)}
+            if use_bias_rules:
+                for r in inp.asset_bias_rules or []:
+                    all_bias_types.add(str((r or {}).get("bias_type") or b_type).strip().lower())
             for w in sorted(set(int(x) for x in bias_windows if int(x) > 1)):
-                bias_by_ma_window[int(w)] = _bias_series_from_close(ta_close, ma_window=int(w))
+                for bt in sorted(x for x in all_bias_types if x in {"bias", "bias_v"}):
+                    bdf = _bias_series_from_close(ta_close, ma_window=int(w), bias_type=str(bt))
+                    bdf.attrs["bias_type"] = str(bt)
+                    bias_by_key[(int(w), str(bt))] = bdf
             for cfg in sorted(list(bias_rule_cfgs)):
-                w, lvw, tt, qv, fvv, mp = cfg
-                bdf = bias_by_ma_window.get(int(w))
+                bt, w, lvw, tt, qv, fvv, mp = cfg
+                bdf = bias_by_key.get((int(w), str(bt)))
                 if bdf is None:
                     continue
                 bias_thr_by_cfg[cfg] = _bias_threshold_series(
@@ -2197,6 +2227,7 @@ def backtest_rotation(
                 ) if use_bias_rules else []
                 if not eff:
                     eff = [{
+                        "bias_type": str(b_type),
                         "bias_ma_window": int(inp.bias_ma_window),
                         "level_window": str(inp.bias_level_window or "all"),
                         "threshold_type": str(inp.bias_threshold_type or "quantile"),
@@ -2207,6 +2238,9 @@ def backtest_rotation(
                     }]
                 oks: list[bool] = []
                 for r in eff:
+                    bty = str((r or {}).get("bias_type") or b_type).strip().lower()
+                    if bty not in {"bias", "bias_v"}:
+                        bty = str(b_type)
                     win = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
                     lvw = str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower()
                     tt = str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower()
@@ -2214,8 +2248,8 @@ def backtest_rotation(
                     fvv = float((r or {}).get("fixed_value") if (r or {}).get("fixed_value") is not None else inp.bias_fixed_value)
                     mp = int((r or {}).get("min_periods") if (r or {}).get("min_periods") is not None else inp.bias_min_periods)
                     op = _normalize_cmp_op((r or {}).get("op") or ">")
-                    bdf = bias_by_ma_window.get(int(win))
-                    tdf = bias_thr_by_cfg.get((int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
+                    bdf = bias_by_key.get((int(win), str(bty)))
+                    tdf = bias_thr_by_cfg.get((str(bty), int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
                     if bdf is None or tdf is None or asof_d not in bdf.index or asof_d not in tdf.index:
                         oks.append(False)
                         continue
@@ -2404,6 +2438,7 @@ def backtest_rotation(
                     ) if use_bias_rules else []
                     if not eff:
                         eff = [{
+                            "bias_type": str(b_type),
                             "bias_ma_window": int(inp.bias_ma_window),
                             "level_window": str(inp.bias_level_window or "all"),
                             "threshold_type": str(inp.bias_threshold_type or "quantile"),
@@ -2414,6 +2449,9 @@ def backtest_rotation(
                         }]
                     oks: list[bool] = []
                     for r in eff:
+                        bty = str((r or {}).get("bias_type") or b_type).strip().lower()
+                        if bty not in {"bias", "bias_v"}:
+                            bty = str(b_type)
                         win = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
                         lvw = str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower()
                         tt = str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower()
@@ -2421,8 +2459,8 @@ def backtest_rotation(
                         fvv = float((r or {}).get("fixed_value") if (r or {}).get("fixed_value") is not None else inp.bias_fixed_value)
                         mp = int((r or {}).get("min_periods") if (r or {}).get("min_periods") is not None else inp.bias_min_periods)
                         op = _normalize_cmp_op((r or {}).get("op") or ">")
-                        bdf = bias_by_ma_window.get(int(win))
-                        tdf = bias_thr_by_cfg.get((int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
+                        bdf = bias_by_key.get((int(win), str(bty)))
+                        tdf = bias_thr_by_cfg.get((str(bty), int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
                         if bdf is None or tdf is None or d not in bdf.index or d not in tdf.index:
                             oks.append(False)
                             continue
@@ -3060,6 +3098,7 @@ def backtest_rotation(
                         ) if use_bias_rules else []
                         if not bias_rules:
                             bias_rules = [{
+                                "bias_type": str(b_type),
                                 "bias_ma_window": int(inp.bias_ma_window),
                                 "level_window": str(inp.bias_level_window or "all"),
                                 "threshold_type": str(inp.bias_threshold_type or "quantile"),
@@ -3070,6 +3109,9 @@ def backtest_rotation(
                             }]
                         bias_hit = True
                         for r in bias_rules:
+                            bty = str((r or {}).get("bias_type") or b_type).strip().lower()
+                            if bty not in {"bias", "bias_v"}:
+                                bty = str(b_type)
                             win = int((r or {}).get("bias_ma_window") or inp.bias_ma_window)
                             lvw = str((r or {}).get("level_window") or inp.bias_level_window or "all").strip().lower()
                             tt = str((r or {}).get("threshold_type") or inp.bias_threshold_type or "quantile").strip().lower()
@@ -3077,8 +3119,8 @@ def backtest_rotation(
                             fvv = float((r or {}).get("fixed_value") if (r or {}).get("fixed_value") is not None else inp.bias_fixed_value)
                             mp = int((r or {}).get("min_periods") if (r or {}).get("min_periods") is not None else inp.bias_min_periods)
                             op = _normalize_cmp_op((r or {}).get("op") or ">")
-                            bdf = bias_by_ma_window.get(int(win))
-                            tdf = bias_thr_by_cfg.get((int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
+                            bdf = bias_by_key.get((int(win), str(bty)))
+                            tdf = bias_thr_by_cfg.get((str(bty), int(win), str(lvw), str(tt), float(qv), float(fvv), int(mp)))
                             if bdf is None or tdf is None or sig_d not in bdf.index or sig_d not in tdf.index:
                                 bias_hit = False
                                 break

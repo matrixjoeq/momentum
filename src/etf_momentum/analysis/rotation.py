@@ -34,6 +34,7 @@ class RotationAnalysisInputs:
     trend_ma_type: str = "sma"
     bias_filter: bool = False
     bias_exit_filter: bool = False
+    bias_type: str = "bias"
     bias_ma_window: int = 20
     bias_level_window: str = "all"
     bias_threshold_type: str = "quantile"
@@ -83,6 +84,7 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             trend_ma_type=inp.trend_ma_type,
             bias_filter=inp.bias_filter,
             bias_exit_filter=inp.bias_exit_filter,
+            bias_type=inp.bias_type,
             bias_ma_window=inp.bias_ma_window,
             bias_level_window=inp.bias_level_window,
             bias_threshold_type=inp.bias_threshold_type,

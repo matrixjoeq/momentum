@@ -428,7 +428,7 @@
             <option value="return">收益率</option>
             <option value="volatility">波动率</option>
             <option value="bias">价格BIAS（close/MA20-1）</option>
-            <option value="bias_v">BIAS-V（(close-MA20)/ATR20）</option>
+            <option value="bias_v">BIAS-V（(close-MA20)/ATR14）</option>
             <option value="price_dev">价格偏离度（log价格-长期均值）</option>
             <option value="volume">成交活跃度（量/额）</option>
             <!-- variants / transforms -->
@@ -862,6 +862,7 @@
             <table id="rotFloorRulesTable" style="margin-top:10px;">
               <tr>
                 <th>标的代码</th>
+                <th>类型</th>
                 <th>判断条件</th>
                 <th>阈值</th>
                 <th>单位</th>
@@ -894,6 +895,7 @@
             <table id="rotFloorExitRulesTable" style="margin-top:10px;">
               <tr>
                 <th>标的代码</th>
+                <th>类型</th>
                 <th>判断条件</th>
                 <th>阈值</th>
                 <th>单位</th>
@@ -1011,7 +1013,7 @@
               </select>
             </div>
             <div class="muted" style="max-width:760px;">
-              说明：按标的配置 BIAS 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95），固定值输入偏离百分比（如 10 表示 10%）。
+              说明：按标的配置 BIAS/BIAS-V 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95）；固定值在 BIAS 下表示偏离百分比（如 10=10%），在 BIAS-V 下表示 ATR 倍数（如 1.5=1.5x ATR）。
             </div>
           </div>
           <div class="panel" style="margin-top:10px;">
@@ -1875,7 +1877,7 @@
               </div>
               <div class="abWideTableWrap">
                 <table id="simAbABiasRulesTable" style="margin-top:10px;">
-                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                  <tr><th>标的代码</th><th>类型</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
                 </table>
               </div>
             </div>
@@ -1915,7 +1917,7 @@
           <div id="simAbATabBiasExit" class="tabPanel" role="tabpanel">
             <div class="row">
               <div><label>BIAS出场开关</label><select id="simAbA_biasExit"><option value="false" selected>false</option><option value="true">true</option></select></div>
-              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95），固定值输入偏离百分比（如 10 表示 10%）。</div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS/BIAS-V 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95）；固定值在 BIAS 下表示偏离百分比，在 BIAS-V 下表示 ATR 倍数。</div>
             </div>
             <div class="panel" style="margin-top:10px;">
               <div class="row" style="gap:10px; align-items:center;">
@@ -1925,7 +1927,7 @@
               </div>
               <div class="abWideTableWrap">
                 <table id="simAbABiasExitRulesTable" style="margin-top:10px;">
-                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                  <tr><th>标的代码</th><th>类型</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
                 </table>
               </div>
             </div>
@@ -2040,7 +2042,7 @@
               </div>
               <div class="abWideTableWrap">
                 <table id="simAbBBiasRulesTable" style="margin-top:10px;">
-                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                  <tr><th>标的代码</th><th>类型</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
                 </table>
               </div>
             </div>
@@ -2080,7 +2082,7 @@
           <div id="simAbBTabBiasExit" class="tabPanel" role="tabpanel">
             <div class="row">
               <div><label>BIAS出场开关</label><select id="simAbB_biasExit"><option value="false" selected>false</option><option value="true">true</option></select></div>
-              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95），固定值输入偏离百分比（如 10 表示 10%）。</div>
+              <div class="muted" style="max-width:760px;">说明：按标的配置 BIAS/BIAS-V 出场规则（收盘决策、次日执行）。分位数阈值输入百分位（如 95）；固定值在 BIAS 下表示偏离百分比，在 BIAS-V 下表示 ATR 倍数。</div>
             </div>
             <div class="panel" style="margin-top:10px;">
               <div class="row" style="gap:10px; align-items:center;">
@@ -2090,7 +2092,7 @@
               </div>
               <div class="abWideTableWrap">
                 <table id="simAbBBiasExitRulesTable" style="margin-top:10px;">
-                  <tr><th>标的代码</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
+                  <tr><th>标的代码</th><th>类型</th><th>判断条件</th><th>MA窗口</th><th>回看窗口</th><th>阈值类型</th><th>阈值</th><th>最小样本数</th><th>操作</th></tr>
                 </table>
               </div>
             </div>
@@ -2560,6 +2562,7 @@
         }));
         const biasEntry = _tableRows("rotBiasRulesTable").map((tr) => ({
           code: _tableInputValue(tr, ".rotBiasCode"),
+          bias_type: _tableInputValue(tr, ".rotBiasType", "bias"),
           op: _tableInputValue(tr, ".rotBiasOp", "<="),
           bias_ma_window: _tableInputValue(tr, ".rotBiasMaWin", "20"),
           level_window: _tableInputValue(tr, ".rotBiasWin", "all"),
@@ -2569,6 +2572,7 @@
         }));
         const biasExit = _tableRows("rotBiasExitRulesTable").map((tr) => ({
           code: _tableInputValue(tr, ".rotBiasCode"),
+          bias_type: _tableInputValue(tr, ".rotBiasType", "bias"),
           op: _tableInputValue(tr, ".rotBiasOp", "<="),
           bias_ma_window: _tableInputValue(tr, ".rotBiasMaWin", "20"),
           level_window: _tableInputValue(tr, ".rotBiasWin", "all"),
@@ -2598,12 +2602,12 @@
         restore(data.trendEntry, () => _rotTrendClearRuleRows("rotTrendRulesTable"), (r) => _rotTrendAddRuleRow(r, { tableId: "rotTrendRulesTable" }));
         restore(data.trendExit, () => _rotTrendClearRuleRows("rotTrendExitRulesTable"), (r) => _rotTrendAddRuleRow(r, { tableId: "rotTrendExitRulesTable" }));
         restore(data.biasEntry, () => _rotBiasClearRuleRows("rotBiasRulesTable"), (r) => _rotBiasAddRuleRow({
-          code: r.code, op: r.op, bias_ma_window: r.bias_ma_window, level_window: r.level_window,
+          code: r.code, bias_type: (r.bias_type || "bias"), op: r.op, bias_ma_window: r.bias_ma_window, level_window: r.level_window,
           threshold_type: r.threshold_type, quantile: r.threshold_type === "quantile" ? r.threshold_value : 95,
           fixed_value: r.threshold_type === "fixed" ? r.threshold_value : 10, min_periods: r.min_periods,
         }, { tableId: "rotBiasRulesTable" }));
         restore(data.biasExit, () => _rotBiasClearRuleRows("rotBiasExitRulesTable"), (r) => _rotBiasAddRuleRow({
-          code: r.code, op: r.op, bias_ma_window: r.bias_ma_window, level_window: r.level_window,
+          code: r.code, bias_type: (r.bias_type || "bias"), op: r.op, bias_ma_window: r.bias_ma_window, level_window: r.level_window,
           threshold_type: r.threshold_type, quantile: r.threshold_type === "quantile" ? r.threshold_value : 95,
           fixed_value: r.threshold_type === "fixed" ? r.threshold_value : 10, min_periods: r.min_periods,
         }, { tableId: "rotBiasExitRulesTable" }));
@@ -3729,6 +3733,7 @@
               trend_ma_type: String(td.trend_ma_type || "sma"),
               bias_filter: ($("rotBiasOn") && $("rotBiasOn").value === "true"),
               bias_exit_filter: ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true"),
+              bias_type: String(bd.bias_type || "bias").toLowerCase(),
               bias_ma_window: Number(bd.bias_ma_window || 20),
               bias_level_window: String(bd.level_window || "all"),
               bias_threshold_type: String(bd.threshold_type || "quantile"),
@@ -5503,13 +5508,13 @@
               if (!Number.isFinite(c) || !Number.isFinite(p)) return NaN;
               return Math.abs(c - p);
             });
-            const atr20 = rollingMean(tr, 20, 20);
+            const atr14 = rollingMean(tr, 14, 14);
             if (type === "bias_v") {
               const ma20 = rollingMean(periodClose, 20, 5);
               const biasV = periodClose.map((v, i) => {
                 const c = Number(v);
                 const m = Number(ma20[i]);
-                const a = Number(atr20[i]);
+                const a = Number(atr14[i]);
                 if (!Number.isFinite(c) || !Number.isFinite(m) || !Number.isFinite(a) || a === 0) return NaN;
                 return (c - m) / a;
               });
@@ -8274,7 +8279,7 @@
         if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
-        const bd = _pickDefaultRule(asset_bias_rules) || { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
+        const bd = _pickDefaultRule(asset_bias_rules) || { bias_type: "bias", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
         const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
@@ -8283,6 +8288,7 @@
         const trend_ma_type = String(td.trend_ma_type || "sma").toLowerCase();
         const bias_ma_window = Number(bd.bias_ma_window || 20);
         const bias_level_window = String(bd.level_window || "all").toLowerCase();
+        const bias_type = String(bd.bias_type || "bias").toLowerCase();
         const bias_threshold_type = String(bd.threshold_type || "quantile").toLowerCase();
         const bias_quantile = Number(bd.quantile != null ? bd.quantile : 95);
         const bias_fixed_value = Number(bd.fixed_value != null ? bd.fixed_value : 10);
@@ -8438,7 +8444,7 @@
             mirror_control, mirror_quantiles, mirror_exposures,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
-            bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
+            bias_filter, bias_exit_filter, bias_type, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
@@ -8672,7 +8678,7 @@
         if (biasExitRules2 && biasExitRules2.__error) return setMsg(biasExitRules2.__error);
         const asset_bias_rules2 = [...(biasEntryRules2 || []), ...(biasExitRules2 || [])];
         const bd2 = _pickDefaultRule(asset_bias_rules2) || {
-          bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20,
+          bias_type: "bias", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20,
         };
         const rebCtl2 = _parseRotRebalanceControls();
         if (rebCtl2 && rebCtl2.__error) return setMsg(rebCtl2.__error);
@@ -8707,6 +8713,7 @@
           bias_exit_filter: ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true"),
           bias_ma_window: Number(bd2.bias_ma_window || 20),
           bias_level_window: String(bd2.level_window || "all").toLowerCase(),
+          bias_type: String(bd2.bias_type || "bias").toLowerCase(),
           bias_threshold_type: String(bd2.threshold_type || "quantile").toLowerCase(),
           bias_quantile: Number(bd2.quantile != null ? bd2.quantile : 95),
           bias_fixed_value: Number(bd2.fixed_value != null ? bd2.fixed_value : 10),
@@ -9055,7 +9062,7 @@
         if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
-        const bd = _pickDefaultRule(asset_bias_rules) || { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
+        const bd = _pickDefaultRule(asset_bias_rules) || { bias_type: "bias", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
         const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
@@ -9064,6 +9071,7 @@
         const trend_ma_type = String(td.trend_ma_type || "sma").toLowerCase();
         const bias_ma_window = Number(bd.bias_ma_window || 20);
         const bias_level_window = String(bd.level_window || "all").toLowerCase();
+        const bias_type = String(bd.bias_type || "bias").toLowerCase();
         const bias_threshold_type = String(bd.threshold_type || "quantile").toLowerCase();
         const bias_quantile = Number(bd.quantile != null ? bd.quantile : 95);
         const bias_fixed_value = Number(bd.fixed_value != null ? bd.fixed_value : 10);
@@ -9223,7 +9231,7 @@
             mirror_control, mirror_quantiles, mirror_exposures,
             dd_control, dd_threshold, dd_reduce, dd_sleep_days,
             trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
-            bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
+            bias_filter, bias_exit_filter, bias_type, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
             rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
             vol_monitor, vol_window, vol_target_ann, vol_max_ann,
             chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
@@ -10084,17 +10092,22 @@
         return opts.map(([v, label]) => `<option value="${v}" ${String(selectedValue||"all")===v ? "selected" : ""}>${label}</option>`).join("");
       }
 
-      function _rotBiasThresholdTypeLabel(v) {
-        return String(v || "quantile").toLowerCase() === "fixed" ? "固定值(偏离%)" : "分位数(%)";
+      function _rotBiasThresholdTypeLabel(v, biasType) {
+        const tt = String(v || "quantile").toLowerCase();
+        const bt = String(biasType || "bias").toLowerCase();
+        if (tt !== "fixed") return "分位数(%)";
+        return bt === "bias_v" ? "固定值(ATR倍数)" : "固定值(偏离%)";
       }
       function _rotBiasUpdateTypeHint(tr) {
         if (!tr) return;
+        const bSel = tr.querySelector(".rotBiasType");
         const tSel = tr.querySelector(".rotBiasThrType");
         const tHint = tr.querySelector(".rotBiasThrTypeHint");
         const wSel = tr.querySelector(".rotBiasWin");
         if (!tSel || !tHint) return;
         const tt = String(tSel.value || "quantile").toLowerCase();
-        tHint.textContent = _rotBiasThresholdTypeLabel(tt);
+        const bt = String((bSel && bSel.value) || "bias").toLowerCase();
+        tHint.textContent = _rotBiasThresholdTypeLabel(tt, bt);
         // 固定阈值模式下，回看窗口不参与阈值计算，禁用避免误导。
         if (wSel) {
           if (tt === "fixed") {
@@ -10115,6 +10128,7 @@
         if (!tbl) return;
         const r = rule || {};
         const code = (r.code || "").toString();
+        const biasType = (r.bias_type || "bias").toString().toLowerCase();
         const op = (r.op || ">").toString();
         const maWin = (r.bias_ma_window == null ? 20 : r.bias_ma_window).toString();
         const win = (r.level_window || "all").toString().toLowerCase();
@@ -10126,6 +10140,12 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td><input class="rotBiasCode" value="${code}" placeholder="如 * 或 513100" style="min-width:120px;" /></td>
+          <td>
+            <select class="rotBiasType" style="min-width:120px;">
+              <option value="bias" ${biasType==="bias" ? "selected" : ""}>BIAS</option>
+              <option value="bias_v" ${biasType==="bias_v" ? "selected" : ""}>BIAS-V</option>
+            </select>
+          </td>
           <td>
             <select class="rotBiasOp" style="min-width:120px;">
               <option value=">" ${op===">" ? "selected" : ""}>&gt;</option>
@@ -10149,7 +10169,7 @@
             </select>
           </td>
           <td>
-            <input class="rotBiasThrVal" value="${thrShow}" placeholder="95 或 10" style="min-width:120px;" />
+            <input class="rotBiasThrVal" value="${thrShow}" placeholder="95 或 10/1.5" style="min-width:120px;" />
             <div class="muted rotBiasThrTypeHint" style="font-size:11px; margin-top:2px;"></div>
           </td>
           <td><input class="rotBiasMinP" value="${minp}" placeholder="20" style="min-width:90px;" /></td>
@@ -10158,7 +10178,9 @@
         tbl.appendChild(tr);
         const btn = tr.querySelector(".rotBiasRemove");
         if (btn) btn.addEventListener("click", () => tr.remove());
+        const bsel = tr.querySelector(".rotBiasType");
         const sel = tr.querySelector(".rotBiasThrType");
+        if (bsel) bsel.addEventListener("change", () => _rotBiasUpdateTypeHint(tr));
         if (sel) sel.addEventListener("change", () => _rotBiasUpdateTypeHint(tr));
         _rotBiasUpdateTypeHint(tr);
       }
@@ -10171,7 +10193,7 @@
       function _rotBiasResetDefaultRules(tableId) {
         _rotBiasClearRuleRows(tableId);
         _rotBiasAddRuleRow(
-          { code: "*", op: "<=", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 },
+          { code: "*", bias_type: "bias", op: "<=", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 },
           { tableId }
         );
       }
@@ -10182,6 +10204,7 @@
         for (const tr of _tableDataRows(String(tableId || "rotBiasRulesTable"))) {
           const code = (tr.querySelector(".rotBiasCode") && tr.querySelector(".rotBiasCode").value) ? String(tr.querySelector(".rotBiasCode").value).trim() : "";
           if (!code) continue;
+          const bias_type = (tr.querySelector(".rotBiasType") && tr.querySelector(".rotBiasType").value) ? String(tr.querySelector(".rotBiasType").value).trim().toLowerCase() : "bias";
           const op = (tr.querySelector(".rotBiasOp") && tr.querySelector(".rotBiasOp").value) ? String(tr.querySelector(".rotBiasOp").value).trim() : ">";
           const bias_ma_window = Math.floor(Number((tr.querySelector(".rotBiasMaWin") && tr.querySelector(".rotBiasMaWin").value) ? tr.querySelector(".rotBiasMaWin").value : "20"));
           const level_window = (tr.querySelector(".rotBiasWin") && tr.querySelector(".rotBiasWin").value) ? String(tr.querySelector(".rotBiasWin").value).trim().toLowerCase() : "all";
@@ -10190,13 +10213,15 @@
           const min_periods = Math.floor(Number((tr.querySelector(".rotBiasMinP") && tr.querySelector(".rotBiasMinP").value) ? tr.querySelector(".rotBiasMinP").value : "20"));
           if (!Number.isFinite(bias_ma_window) || bias_ma_window <= 1) return { __error: "乖离率过滤：MA窗口必须>1" };
           if (!["=", "!=", ">", "<", ">=", "<="].includes(op)) return { __error: "乖离率过滤：判断条件仅支持 = != > < >= <=" };
+          if (!["bias", "bias_v"].includes(bias_type)) return { __error: "乖离率过滤：类型仅支持 bias/bias_v" };
           if (!["quantile", "fixed"].includes(threshold_type)) return { __error: "乖离率过滤：阈值类型仅支持 quantile/fixed" };
           if (!Number.isFinite(threshold_value)) return { __error: "乖离率过滤：阈值必须是数字" };
           if (threshold_type === "quantile" && (threshold_value <= 0 || threshold_value >= 100)) return { __error: "乖离率过滤：分位数阈值需在 (0,100) ，例如 95" };
-          if (threshold_type === "fixed" && threshold_value < 0) return { __error: "乖离率过滤：固定阈值(偏离%)必须 >= 0" };
+          if (threshold_type === "fixed" && threshold_value < 0) return { __error: "乖离率过滤：固定阈值必须 >= 0（BIAS=偏离%，BIAS-V=ATR倍数）" };
           if (!Number.isFinite(min_periods) || min_periods < 2) return { __error: "乖离率过滤：最小样本数必须 >= 2" };
           out.push({
             code,
+            bias_type,
             stage: String(stageName || "entry"),
             op,
             bias_ma_window,
@@ -10556,7 +10581,7 @@
         if (asset_chop_rules && asset_chop_rules.__error) return setMsg(asset_chop_rules.__error);
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
-        const bd = _pickDefaultRule(asset_bias_rules) || { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
+        const bd = _pickDefaultRule(asset_bias_rules) || { bias_type: "bias", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
         const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
@@ -10565,6 +10590,7 @@
         const trend_ma_type = String(td.trend_ma_type || "sma").toLowerCase();
         const bias_ma_window = Number(bd.bias_ma_window || 20);
         const bias_level_window = String(bd.level_window || "all").toLowerCase();
+        const bias_type = String(bd.bias_type || "bias").toLowerCase();
         const bias_threshold_type = String(bd.threshold_type || "quantile").toLowerCase();
         const bias_quantile = Number(bd.quantile != null ? bd.quantile : 95);
         const bias_fixed_value = Number(bd.fixed_value != null ? bd.fixed_value : 10);
@@ -10710,7 +10736,7 @@
               mirror_control, mirror_quantiles, mirror_exposures,
               dd_control, dd_threshold, dd_reduce, dd_sleep_days,
               trend_filter, trend_exit_filter, trend_sma_window, trend_ma_type,
-              bias_filter, bias_exit_filter, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
+              bias_filter, bias_exit_filter, bias_type, bias_ma_window, bias_level_window, bias_threshold_type, bias_quantile, bias_fixed_value, bias_min_periods,
               rsi_filter, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold,
               vol_monitor, vol_window, vol_target_ann, vol_max_ann,
               chop_filter, chop_mode, chop_window, chop_er_threshold, chop_adx_window, chop_adx_threshold,
@@ -11400,6 +11426,7 @@
           trend_ma_type: "sma",
           bias_filter: _boolSel(`${p}biasOn`, false),
           bias_exit_filter: _boolSel(`${p}biasExit`, false),
+          bias_type: "bias",
           bias_ma_window: 20,
           bias_level_window: "all",
           bias_threshold_type: "quantile",
@@ -11438,6 +11465,7 @@
         out.bias_exit_filter = !!(biasExitRules && biasExitRules.length);
         if (biasRules.length) {
           const d = biasRules.find((x) => String(x.code || "") === "*") || biasRules[0];
+          out.bias_type = String(d.bias_type || "bias").toLowerCase();
           out.bias_ma_window = Number(d.bias_ma_window || 20);
           out.bias_level_window = String(d.level_window || "all");
           out.bias_threshold_type = String(d.threshold_type || "quantile");

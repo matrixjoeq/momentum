@@ -674,6 +674,7 @@ def _rotation_inputs_from_payload(
         trend_ma_type=payload.trend_ma_type,
         bias_filter=payload.bias_filter,
         bias_exit_filter=payload.bias_exit_filter,
+        bias_type=payload.bias_type,
         bias_ma_window=payload.bias_ma_window,
         bias_level_window=payload.bias_level_window,
         bias_threshold_type=payload.bias_threshold_type,
