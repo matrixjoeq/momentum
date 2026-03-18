@@ -357,6 +357,12 @@ def _trend_params_to_inputs(
         donchian_entry=int(params.get("donchian_entry", 20)),
         donchian_exit=int(params.get("donchian_exit", 10)),
         mom_lookback=int(params.get("mom_lookback", 252)),
+        tsmom_entry_threshold=float(params.get("tsmom_entry_threshold", 0.0)),
+        tsmom_exit_threshold=float(params.get("tsmom_exit_threshold", 0.0)),
+        atr_stop_mode=str(params.get("atr_stop_mode", "none")),
+        atr_stop_window=int(params.get("atr_stop_window", 14)),
+        atr_stop_n=float(params.get("atr_stop_n", 2.0)),
+        atr_stop_m=float(params.get("atr_stop_m", 0.5)),
         bias_ma_window=int(params.get("bias_ma_window", 20)),
         bias_entry=float(params.get("bias_entry", 2.0)),
         bias_hot=float(params.get("bias_hot", 10.0)),
@@ -379,7 +385,11 @@ def _default_trend_param_grid(strategy: str) -> Dict[str, Sequence[Any]]:
     if strategy == "donchian":
         return {"donchian_entry": [20, 55], "donchian_exit": [10, 20]}
     if strategy == "tsmom":
-        return {"mom_lookback": [126, 252]}
+        return {
+            "mom_lookback": [126, 252],
+            "tsmom_entry_threshold": [0.0],
+            "tsmom_exit_threshold": [0.0],
+        }
     if strategy == "linreg_slope":
         return {"sma_window": [100, 200]}
     if strategy == "bias":

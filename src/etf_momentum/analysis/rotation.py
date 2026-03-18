@@ -26,6 +26,10 @@ class RotationAnalysisInputs:
     skip_days: int = 0
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
+    atr_stop_mode: str = "none"
+    atr_stop_window: int = 14
+    atr_stop_n: float = 2.0
+    atr_stop_m: float = 0.5
     score_method: str = "raw_mom"
     # Risk controls (defaults off)
     trend_filter: bool = False
@@ -77,6 +81,10 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             skip_days=inp.skip_days,
             risk_free_rate=inp.risk_free_rate,
             cost_bps=inp.cost_bps,
+            atr_stop_mode=inp.atr_stop_mode,
+            atr_stop_window=inp.atr_stop_window,
+            atr_stop_n=inp.atr_stop_n,
+            atr_stop_m=inp.atr_stop_m,
             score_method=inp.score_method,
             trend_filter=inp.trend_filter,
             trend_exit_filter=inp.trend_exit_filter,

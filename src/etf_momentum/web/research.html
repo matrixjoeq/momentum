@@ -686,7 +686,7 @@
         <h3 style="margin: 0 0 6px 0;">小程序同款：基于同样的标的池与回测范围的轮动（周度，周一~周五 + 综合）</h3>
         <div class="muted">
           标的池：将使用等权/轮动组合同样的标的池，不再固定具体标的。固定执行：周度（周一~周五）+ 成交价=open + 休市=prev。
-          其余参数（TopK/动量回看/过滤器/止盈止损/后视镜择时/恐慌择时/回撤控制等）使用下方“动量轮动参数”的当前设置。
+          其余参数（TopK/动量回看/过滤器/后视镜择时/恐慌择时/回撤控制等）使用下方“动量轮动参数”的当前设置。
         </div>
         <div class="row" style="margin-top:8px; gap:8px; align-items:center;">
           <label style="margin:0;">方案：</label>
@@ -741,7 +741,6 @@
           <button class="tabBtn" data-tab="rotTabChop" role="tab" aria-selected="false">震荡过滤</button>
           <button class="tabBtn" data-tab="rotTabCorr" role="tab" aria-selected="false">相关性过滤</button>
           <button class="tabBtn" data-tab="rotTabInertia" role="tab" aria-selected="false">钝化</button>
-          <button class="tabBtn" data-tab="rotTabTpSl" role="tab" aria-selected="false">止盈止损</button>
           <button class="tabBtn" data-tab="rotTabFloorExit" role="tab" aria-selected="false">动量出场</button>
           <button class="tabBtn" data-tab="rotTabTrendExit" role="tab" aria-selected="false">趋势出场</button>
           <button class="tabBtn" data-tab="rotTabBiasExit" role="tab" aria-selected="false">乖离率出场</button>
@@ -821,6 +820,27 @@
             <div>
               <label>交易成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
               <input id="rotCost" value="2" />
+            </div>
+            <div>
+              <label>通用ATR止损模式</label>
+              <select id="rotAtrStopMode" style="min-width:140px;">
+                <option value="none" selected>关闭</option>
+                <option value="static">静态</option>
+                <option value="trailing">动态跟随</option>
+                <option value="tightening">动态收紧</option>
+              </select>
+            </div>
+            <div>
+              <label>ATR周期</label>
+              <input id="rotAtrStopWin" value="14" />
+            </div>
+            <div>
+              <label>止损倍数 n</label>
+              <input id="rotAtrStopN" value="2.0" />
+            </div>
+            <div>
+              <label>收紧步长 m</label>
+              <input id="rotAtrStopM" value="0.5" />
             </div>
             <div>
               <label>分组约束</label>
@@ -1245,39 +1265,6 @@
           <div class="muted" style="margin-top:8px">
             说明：将 <b>对数收益偏离</b>、<b>波动率对数偏离</b>、<b>成交量对数偏离</b> 三个指标分别做“全历史 expanding 分位数”（不滚动，不看未来），等权合成为一维综合指标，再对综合指标做 expanding 分位数。
             当综合分位数 &gt; X/Y/Z 时，将本期风险资产总仓位上限压到 A/B/C（现金为剩余仓位）。输入支持百分比（如 90 表示 0.90；80 表示 80%）。
-          </div>
-        </div>
-
-        <div id="rotTabTpSl" class="tabPanel" role="tabpanel">
-          <div class="row">
-            <div>
-              <label>止盈止损模式（qfq）</label>
-              <select id="rotTpSlMode" style="min-width:240px;">
-                <option value="none" selected>关闭（默认）</option>
-                <option value="prev_week_low_stop">上一周期最低止损（止损价=上一调仓周期 qfq 收盘最低；持仓不变则更新为本周期最低）</option>
-                <option value="atr_chandelier_fixed">ATR 吊灯止损（固定倍数）</option>
-                <option value="atr_chandelier_progressive">ATR 吊灯止损（渐进式倍数）</option>
-              </select>
-            </div>
-            <div>
-              <label>ATR窗口(交易日)</label>
-              <input id="rotAtrWindow" placeholder="空=同步动量回看" />
-            </div>
-            <div>
-              <label>ATR倍数</label>
-              <input id="rotAtrMult" value="2.0" />
-            </div>
-            <div id="rotAtrStepBox">
-              <label>渐进步长(ATR)</label>
-              <input id="rotAtrStep" value="0.5" />
-            </div>
-            <div id="rotAtrMinMultBox">
-              <label>最小倍数(ATR)</label>
-              <input id="rotAtrMinMult" value="0.5" />
-            </div>
-          </div>
-          <div class="muted" style="margin-top:8px">
-            说明：止损价与触发均使用前复权(qfq)收盘价 close。触发后从下一交易日起空仓，直到下一次调仓。支持周/月/季/年等所有调仓周期（“上一周期/本周期”以调仓周期划分）。
           </div>
         </div>
 
@@ -2238,6 +2225,8 @@
         <div><label>唐奇安入场</label><input id="trendDonEntry" value="20" /></div>
         <div><label>唐奇安出场</label><input id="trendDonExit" value="10" /></div>
         <div><label>TSMOM回看</label><input id="trendMomLb" value="252" /></div>
+        <div><label>TSMOM入场阈值</label><input id="trendMomEntryThr" value="0.0" /></div>
+        <div><label>TSMOM出场阈值</label><input id="trendMomExitThr" value="0.0" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>BIAS MA窗口</label><input id="trendBiasMaWin" value="20" /></div>
@@ -2258,6 +2247,20 @@
         <div><label>MACD 信号线</label><input id="trendMacdSignal" value="9" /></div>
         <div><label>MACD-V ATR窗口</label><input id="trendMacdVAtr" value="26" /></div>
         <div><label>MACD-V scale</label><input id="trendMacdVScale" value="100" /></div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>通用ATR止损模式</label>
+          <select id="trendAtrStopMode" style="min-width:140px;">
+            <option value="none" selected>关闭</option>
+            <option value="static">静态</option>
+            <option value="trailing">动态跟随</option>
+            <option value="tightening">动态收紧</option>
+          </select>
+        </div>
+        <div><label>ATR周期</label><input id="trendAtrStopWin" value="14" /></div>
+        <div><label>止损倍数 n</label><input id="trendAtrStopN" value="2.0" /></div>
+        <div><label>收紧步长 m</label><input id="trendAtrStopM" value="0.5" /></div>
       </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
       <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
@@ -2507,6 +2510,7 @@
         rotation: [
           "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotEntryBackfill",
           "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotEntryMatchN", "rotExitMatchN",
+          "rotAtrStopMode", "rotAtrStopWin", "rotAtrStopN", "rotAtrStopM",
           "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
           "rotFloorOn", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn",
           "rotVolIdxOn", "rotPlanAsof",
@@ -2514,7 +2518,8 @@
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
           "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSizing", "trendSingleCode",
-          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb",
+          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
+          "trendAtrStopMode", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
         ],
@@ -2764,7 +2769,6 @@
       function _afterDefaultsApply() {
         try { syncRotRebalanceAnchorUI(); } catch { /* ignore */ }
         try { updateTrendStrategyParamsUi(); } catch { /* ignore */ }
-        try { updateAtrUi(); } catch { /* ignore */ }
         try { _rotVolIdxUpdateUiEnabled(); } catch { /* ignore */ }
         try {
           _setTabEnabledByToggle("rotTabFloor", "rotFloorOn");
@@ -3763,8 +3767,6 @@
             const rfRaw = ($("rf").value || "").trim();
             let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
             if (Number.isFinite(risk_free_rate) && risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
-            const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
-            const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
             let dd_threshold = Number(($("rotDDThr").value || "10").trim());
             if (Number.isFinite(dd_threshold) && dd_threshold > 1.0) dd_threshold = dd_threshold / 100.0;
             let dd_reduce = Number(($("rotDDReduce").value || "100").trim());
@@ -4371,6 +4373,8 @@
           "trendDonEntry",
           "trendDonExit",
           "trendMomLb",
+          "trendMomEntryThr",
+          "trendMomExitThr",
           "trendBiasMaWin",
           "trendBiasEntry",
           "trendBiasHot",
@@ -4381,19 +4385,29 @@
           "trendMacdSignal",
           "trendMacdVAtr",
           "trendMacdVScale",
+          "trendAtrStopMode",
+          "trendAtrStopWin",
+          "trendAtrStopN",
+          "trendAtrStopM",
+        ];
+        const alwaysEnabledIds = [
+          "trendAtrStopMode",
+          "trendAtrStopWin",
+          "trendAtrStopN",
+          "trendAtrStopM",
         ];
         const byStrat = {
           ma_filter: ["trendSmaWin", "trendMaType"],
           ma_cross: ["trendFastWin", "trendSlowWin", "trendMaType"],
           donchian: ["trendDonEntry", "trendDonExit"],
-          tsmom: ["trendMomLb"],
+          tsmom: ["trendMomLb", "trendMomEntryThr", "trendMomExitThr"],
           linreg_slope: ["trendSmaWin"],
           bias: ["trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode"],
           macd_cross: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
           macd_zero_filter: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
           macd_v: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale"],
         };
-        const enabled = new Set(byStrat[strat] || []);
+        const enabled = new Set([...(byStrat[strat] || []), ...alwaysEnabledIds]);
         for (const id of allIds) {
           const el = $(id);
           if (!el) continue;
@@ -4406,7 +4420,7 @@
           ma_filter: "均线过滤：价格在均线之上持有，否则空仓；均线类型可选 SMA 或 EMA。",
           ma_cross: "双均线：快线上穿慢线入场，下穿离场。",
           donchian: "唐奇安通道：突破上轨入场，跌破下轨离场。",
-          tsmom: "时序动量：回看期收益为正则持有，否则空仓。",
+          tsmom: "时序动量：回看期收益与入/出场阈值共同决定仓位，支持阈值滞后区间。",
           linreg_slope: "线性回归斜率：回看窗口斜率为正持有，否则空仓。",
           bias: "BIAS策略：基于价格相对均线偏离度，按阈值做进出场与风控。",
           macd_cross: "MACD金叉死叉：MACD线上穿信号线入场，下穿离场。",
@@ -4417,7 +4431,7 @@
           ma_filter: "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           ma_cross: "信号在 T 日收盘后根据快慢线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           donchian: "信号在 T 日收盘后根据是否突破通道上轨/下轨确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
-          tsmom: "信号在 T 日收盘后根据回看期收益正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          tsmom: "信号在 T 日收盘后根据回看期收益与动量入/出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           linreg_slope: "信号在 T 日收盘后根据回看窗口线性回归斜率正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           bias: "信号在 T 日收盘后根据 BIAS 与进出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           macd_cross: "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -4432,6 +4446,8 @@
           trendDonEntry: "唐奇安入场：上轨突破回看窗口。",
           trendDonExit: "唐奇安出场：下轨跌破回看窗口。",
           trendMomLb: "TSMOM回看：动量收益计算窗口。",
+          trendMomEntryThr: "TSMOM入场阈值：动量 > 该值时入场。",
+          trendMomExitThr: "TSMOM出场阈值：动量 <= 该值时离场；建议不高于入场阈值。",
           trendBiasMaWin: "BIAS MA窗口：BIAS参考均线窗口。",
           trendBiasEntry: "BIAS入场阈值：偏离超过该值入场。",
           trendBiasHot: "BIAS过热止盈：偏离过高时止盈离场。",
@@ -4442,6 +4458,10 @@
           trendMacdSignal: "MACD信号线：信号EMA窗口。",
           trendMacdVAtr: "MACD-V ATR窗口：归一化波动窗口。",
           trendMacdVScale: "MACD-V scale：归一化缩放系数。",
+          trendAtrStopMode: "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。",
+          trendAtrStopWin: "ATR周期：用于止损距离计算的ATR窗口。",
+          trendAtrStopN: "止损倍数n：基础止损距离为 n*ATR。",
+          trendAtrStopM: "收紧步长m：动态收紧模式下每上涨 m*ATR 收紧一次，且需 n>m。",
         };
         if (descEl) {
           const s = stratDesc[strat] || "-";
@@ -8617,16 +8637,15 @@
         if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
         const score_method = $("rotScoreMethod").value;
-        const tp_sl_mode = ($("rotTpSlMode").value || "none");
-        const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
-        const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
-        if (atr_window != null && (!Number.isFinite(atr_window) || atr_window < 2)) return setMsg("ATR窗口必须>=2（或留空表示同步动量回看）");
-        const atr_mult = Number(($("rotAtrMult").value || "2.0").trim());
-        if (!Number.isFinite(atr_mult) || atr_mult <= 0) return setMsg("ATR倍数必须>0，例如 2");
-        const atr_step = Number(($("rotAtrStep").value || "0.5").trim());
-        if (!Number.isFinite(atr_step) || atr_step <= 0) return setMsg("渐进步长必须>0，例如 0.5");
-        const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
-        if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
+        const atr_stop_mode = (($("rotAtrStopMode") && $("rotAtrStopMode").value) ? String($("rotAtrStopMode").value) : "none");
+        const atr_stop_window = Number(($("rotAtrStopWin").value || "14").trim());
+        const atr_stop_n = Number(($("rotAtrStopN").value || "2.0").trim());
+        const atr_stop_m = Number(($("rotAtrStopM").value || "0.5").trim());
+        if (!["none", "static", "trailing", "tightening"].includes(atr_stop_mode)) return setMsg("通用ATR止损模式非法");
+        if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2) return setMsg("通用ATR止损周期需为>=2数字");
+        if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0) return setMsg("通用ATR止损倍数 n 需为>0数字");
+        if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0) return setMsg("通用ATR收紧步长 m 需为>0数字");
+        if (atr_stop_mode === "tightening" && !(atr_stop_n > atr_stop_m)) return setMsg("通用ATR动态收紧要求 n > m");
         const trend_filter = ($("rotTrendOn").value === "true");
         const trend_exit_filter = ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true");
         const bias_filter = ($("rotBiasOn") && $("rotBiasOn").value === "true");
@@ -8808,8 +8827,7 @@
             codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
             risk_free_rate,
             score_method,
-            tp_sl_mode,
-            atr_window, atr_mult, atr_step, atr_min_mult,
+            atr_stop_mode, atr_stop_window, atr_stop_n, atr_stop_m,
             corr_filter, corr_window, corr_threshold,
             group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
@@ -8899,6 +8917,8 @@
           donchian_entry: Number(($("trendDonEntry").value || "20").trim()),
           donchian_exit: Number(($("trendDonExit").value || "10").trim()),
           mom_lookback: Number(($("trendMomLb").value || "252").trim()),
+          tsmom_entry_threshold: Number(($("trendMomEntryThr").value || "0.0").trim()),
+          tsmom_exit_threshold: Number(($("trendMomExitThr").value || "0.0").trim()),
           bias_ma_window: Number(($("trendBiasMaWin").value || "20").trim()),
           bias_entry: Number(($("trendBiasEntry").value || "2.0").trim()),
           bias_hot: Number(($("trendBiasHot").value || "10.0").trim()),
@@ -8909,7 +8929,36 @@
           macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
           macd_v_atr_window: Number(($("trendMacdVAtr").value || "26").trim()),
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
+          atr_stop_mode: (($("trendAtrStopMode") && $("trendAtrStopMode").value) ? String($("trendAtrStopMode").value) : "none"),
+          atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
+          atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
+          atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
         };
+        if (!["none", "static", "trailing", "tightening"].includes(String(common.atr_stop_mode))) {
+          return setMsg("ATR止损模式非法，请选择 关闭/静态/动态跟随/动态收紧");
+        }
+        if (!Number.isFinite(common.atr_stop_window) || common.atr_stop_window < 2) {
+          return setMsg("ATR止损周期需为>=2的数字");
+        }
+        if (!Number.isFinite(common.atr_stop_n) || common.atr_stop_n <= 0) {
+          return setMsg("ATR止损倍数 n 需为>0数字");
+        }
+        if (!Number.isFinite(common.atr_stop_m) || common.atr_stop_m <= 0) {
+          return setMsg("ATR收紧步长 m 需为>0数字");
+        }
+        if (common.atr_stop_mode === "tightening" && !(common.atr_stop_n > common.atr_stop_m)) {
+          return setMsg("动态收紧模式要求 n > m");
+        }
+        if (strategy === "tsmom") {
+          const ent = Number(common.tsmom_entry_threshold);
+          const ex = Number(common.tsmom_exit_threshold);
+          if (!Number.isFinite(ent) || !Number.isFinite(ex)) {
+            return setMsg("TSMOM 入/出场阈值必须是数字");
+          }
+          if (ent < ex) {
+            return setMsg("TSMOM 参数要求：入场阈值需 >= 出场阈值");
+          }
+        }
         $("status").textContent = "趋势回测中...";
         setMsg("");
         let resp = null;
@@ -8943,7 +8992,11 @@
           { x: dates, y: y1, type: "scatter", mode: "lines", name: "STRAT" },
           { x: dates, y: y2, type: "scatter", mode: "lines", name: "BENCH" },
           { x: dates, y: y3, type: "scatter", mode: "lines", name: "EXCESS" },
-        ], { margin: { t: 30 }, title: `趋势回测 - ${esc(strategy)} (${mode})` });
+        ], {
+          margin: { t: 30 },
+          title: `趋势回测 - ${esc(strategy)} (${mode})`,
+          yaxis: { type: "log", title: "净值(对数)" },
+        });
         renderTrendDailyReturnDist(data);
         const m = (data && data.metrics) ? data.metrics : {};
         const rows = [];
@@ -8951,6 +9004,24 @@
           const obj = m[k] || {};
           for (const kk of Object.keys(obj)) {
             rows.push(`<tr><td>${esc(k)}</td><td>${esc(kk)}</td><td>${typeof obj[kk] === "number" ? Number(obj[kk]).toFixed(6) : esc(obj[kk])}</td></tr>`);
+          }
+        }
+        const atrStats = (((data || {}).risk_controls || {}).atr_stop) || null;
+        if (atrStats) {
+          const topPairs = [
+            ["enabled", atrStats.enabled],
+            ["mode", atrStats.mode],
+            ["trigger_count", atrStats.trigger_count],
+            ["trigger_days", atrStats.trigger_days],
+            ["entries", atrStats.entries],
+            ["exits", atrStats.exits],
+            ["trigger_exit_share", atrStats.trigger_exit_share],
+            ["first_trigger_date", atrStats.first_trigger_date],
+            ["last_trigger_date", atrStats.last_trigger_date],
+          ];
+          for (const [kk, vv] of topPairs) {
+            if (vv === undefined || vv === null) continue;
+            rows.push(`<tr><td>${esc("risk_controls.atr_stop")}</td><td>${esc(String(kk))}</td><td>${typeof vv === "number" ? Number(vv).toFixed(6) : esc(vv)}</td></tr>`);
           }
         }
         $("trendMetricsTable").innerHTML = `<tr><th>分组</th><th>指标</th><th>值</th></tr>${rows.join("")}`;
@@ -8968,11 +9039,15 @@
         $("trendGroupTable").innerHTML = `<tr><th>决策日</th><th>组ID</th><th>胜出</th><th>淘汰</th></tr>${gRows.join("")}`;
         const strategyM = (m && m.strategy) ? m.strategy : {};
         const excessM = (m && m.excess) ? m.excess : {};
+        const atrSummary = (atrStats && atrStats.enabled)
+          ? `ATR止损(${esc(atrStats.mode || "-")})触发 ${Number(atrStats.trigger_count || 0)} 次，触发占全部离场 ${fmtPct(Number(atrStats.trigger_exit_share || 0))}。`
+          : "ATR止损：未启用。";
         setReport(
           "趋势研究报告式解读",
           [
             ..._perfReportLines("趋势策略", strategyM),
             `相对基准：超额年化 ${fmtPct(excessM.annualized_return)}，超额回撤 ${fmtPct(excessM.max_drawdown)}，超额夏普 ${fmtNum(excessM.sharpe_ratio)}。`,
+            atrSummary,
           ],
           "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
         );
@@ -8982,6 +9057,7 @@
           [
             ..._perfReportLines("趋势策略", strategyM),
             `相对基准：超额年化 ${fmtPct(excessM.annualized_return)}，超额回撤 ${fmtPct(excessM.max_drawdown)}，超额夏普 ${fmtNum(excessM.sharpe_ratio)}。`,
+            atrSummary,
           ],
           "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
         );
@@ -9398,16 +9474,15 @@
         if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
         const score_method = $("rotScoreMethod").value;
-        const tp_sl_mode = ($("rotTpSlMode").value || "none");
-        const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
-        const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
-        if (atr_window != null && (!Number.isFinite(atr_window) || atr_window < 2)) return setMsg("ATR窗口必须>=2（或留空表示同步动量回看）");
-        const atr_mult = Number(($("rotAtrMult").value || "2.0").trim());
-        if (!Number.isFinite(atr_mult) || atr_mult <= 0) return setMsg("ATR倍数必须>0，例如 2");
-        const atr_step = Number(($("rotAtrStep").value || "0.5").trim());
-        if (!Number.isFinite(atr_step) || atr_step <= 0) return setMsg("渐进步长必须>0，例如 0.5");
-        const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
-        if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
+        const atr_stop_mode = (($("rotAtrStopMode") && $("rotAtrStopMode").value) ? String($("rotAtrStopMode").value) : "none");
+        const atr_stop_window = Number(($("rotAtrStopWin").value || "14").trim());
+        const atr_stop_n = Number(($("rotAtrStopN").value || "2.0").trim());
+        const atr_stop_m = Number(($("rotAtrStopM").value || "0.5").trim());
+        if (!["none", "static", "trailing", "tightening"].includes(atr_stop_mode)) return setMsg("通用ATR止损模式非法");
+        if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2) return setMsg("通用ATR止损周期需为>=2数字");
+        if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0) return setMsg("通用ATR止损倍数 n 需为>0数字");
+        if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0) return setMsg("通用ATR收紧步长 m 需为>0数字");
+        if (atr_stop_mode === "tightening" && !(atr_stop_n > atr_stop_m)) return setMsg("通用ATR动态收紧要求 n > m");
         const trend_filter = ($("rotTrendOn").value === "true");
         const trend_exit_filter = ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true");
         const bias_filter = ($("rotBiasOn") && $("rotBiasOn").value === "true");
@@ -9593,8 +9668,7 @@
             codes, start, end, rebalance, rebalance_shift, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
             risk_free_rate,
             score_method,
-            tp_sl_mode,
-            atr_window, atr_mult, atr_step, atr_min_mult,
+            atr_stop_mode, atr_stop_window, atr_stop_n, atr_stop_m,
             corr_filter, corr_window, corr_threshold,
             group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
@@ -9841,7 +9915,8 @@
           if ($("rotExitFloorOn") && $("rotExitFloorOn").value === "true") m += 1;
           if ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true") m += 1;
           if ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true") m += 1;
-          if ($("rotTpSlMode") && String($("rotTpSlMode").value || "none") !== "none") m += 1;
+          const atrStopOn = ($("rotAtrStopMode") && String($("rotAtrStopMode").value || "none") !== "none");
+          if (atrStopOn) m += 1;
           if ($("rotRROn") && $("rotRROn").value === "true") m += 1;
           if ($("rotDDOn") && $("rotDDOn").value === "true") m += 1;
           if ($("rotMirrorOn") && $("rotMirrorOn").value === "true") m += 1;
@@ -9897,7 +9972,7 @@
           _syncMatchN();
         };
         grpBtns.forEach((b) => b.addEventListener("click", () => setGroup(String((b.dataset && b.dataset.rotGroup) || "base"))));
-        ["rotFloorOn", "rotTrendOn", "rotBiasOn", "rotRsiOn", "rotChopOn", "rotExitFloorOn", "rotExitTrendOn", "rotExitBiasOn", "rotTpSlMode", "rotRROn", "rotDDOn", "rotMirrorOn", "rotVolIdxOn"].forEach((id) => {
+        ["rotFloorOn", "rotTrendOn", "rotBiasOn", "rotRsiOn", "rotChopOn", "rotExitFloorOn", "rotExitTrendOn", "rotExitBiasOn", "rotAtrStopMode", "rotRROn", "rotDDOn", "rotMirrorOn", "rotVolIdxOn"].forEach((id) => {
           const el = $(id);
           if (el) el.addEventListener("change", _syncMatchN);
         });
@@ -10401,7 +10476,7 @@
           if (typeof fn === "function") fn();
         };
         // 参数清理：隐藏未成熟控制项（保留 DOM 兼容旧配置，但不再展示）。
-        const _retiredTabs = ["rotTabRsi", "rotTabVol", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabTpSl", "rotTabRR", "rotTabDD", "rotTabMirror"];
+        const _retiredTabs = ["rotTabRsi", "rotTabVol", "rotTabChop", "rotTabCorr", "rotTabInertia", "rotTabRR", "rotTabDD", "rotTabMirror"];
         _retiredTabs.forEach((tabId) => {
           try {
             const panel = $(tabId);
@@ -10925,16 +11000,15 @@
         if (exitFloorRules && exitFloorRules.__error) return setMsg(exitFloorRules.__error);
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
         const score_method = $("rotScoreMethod").value;
-        const tp_sl_mode = ($("rotTpSlMode").value || "none");
-        const atrWindowRaw = ($("rotAtrWindow").value || "").trim();
-        const atr_window = atrWindowRaw === "" ? null : Number(atrWindowRaw);
-        if (atr_window != null && (!Number.isFinite(atr_window) || atr_window < 2)) return setMsg("ATR窗口必须>=2（或留空表示同步动量回看）");
-        const atr_mult = Number(($("rotAtrMult").value || "2.0").trim());
-        if (!Number.isFinite(atr_mult) || atr_mult <= 0) return setMsg("ATR倍数必须>0，例如 2");
-        const atr_step = Number(($("rotAtrStep").value || "0.5").trim());
-        if (!Number.isFinite(atr_step) || atr_step <= 0) return setMsg("渐进步长必须>0，例如 0.5");
-        const atr_min_mult = Number(($("rotAtrMinMult").value || "0.5").trim());
-        if (!Number.isFinite(atr_min_mult) || atr_min_mult <= 0) return setMsg("最小倍数必须>0，例如 0.5");
+        const atr_stop_mode = (($("rotAtrStopMode") && $("rotAtrStopMode").value) ? String($("rotAtrStopMode").value) : "none");
+        const atr_stop_window = Number(($("rotAtrStopWin").value || "14").trim());
+        const atr_stop_n = Number(($("rotAtrStopN").value || "2.0").trim());
+        const atr_stop_m = Number(($("rotAtrStopM").value || "0.5").trim());
+        if (!["none", "static", "trailing", "tightening"].includes(atr_stop_mode)) return setMsg("通用ATR止损模式非法");
+        if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2) return setMsg("通用ATR止损周期需为>=2数字");
+        if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0) return setMsg("通用ATR止损倍数 n 需为>0数字");
+        if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0) return setMsg("通用ATR收紧步长 m 需为>0数字");
+        if (atr_stop_mode === "tightening" && !(atr_stop_n > atr_stop_m)) return setMsg("通用ATR动态收紧要求 n > m");
         const trend_filter = ($("rotTrendOn").value === "true");
         const trend_exit_filter = ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true");
         const bias_filter = ($("rotBiasOn") && $("rotBiasOn").value === "true");
@@ -11106,8 +11180,7 @@
               rebalance_anchor, rebalance_shift, exec_price,
               risk_free_rate,
               score_method,
-              tp_sl_mode,
-              atr_window, atr_mult, atr_step, atr_min_mult,
+              atr_stop_mode, atr_stop_window, atr_stop_n, atr_stop_m,
               corr_filter, corr_window, corr_threshold,
               group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
               inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
@@ -11290,19 +11363,6 @@
       wireCorrBtn("10y", "corrRange10y");
       wireCorrBtn("all", "corrRangeAll");
 
-      function updateAtrUi() {
-        const mode = ($("rotTpSlMode").value || "none");
-        const isAtr = (mode === "atr_chandelier_fixed" || mode === "atr_chandelier_progressive");
-        const prog = (mode === "atr_chandelier_progressive");
-        $("rotAtrWindow").disabled = !isAtr;
-        $("rotAtrMult").disabled = !isAtr;
-        $("rotAtrStepBox").style.display = prog ? "" : "none";
-        $("rotAtrMinMultBox").style.display = prog ? "" : "none";
-        $("rotAtrStep").disabled = !prog;
-        $("rotAtrMinMult").disabled = !prog;
-      }
-      $("rotTpSlMode").addEventListener("change", updateAtrUi);
-      updateAtrUi();
 
       // Re-plot histograms when metric selection changes (if mc already rendered)
       $("mcEwMetric").addEventListener("change", () => {

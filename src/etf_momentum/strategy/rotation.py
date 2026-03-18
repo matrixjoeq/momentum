@@ -91,15 +91,12 @@ class RotationInputs:
     chop_er_threshold: float = 0.25  # ER < threshold => choppy => exclude
     chop_adx_window: int = 20
     chop_adx_threshold: float = 20.0  # ADX < threshold => choppy => exclude
-    # --- Take-profit / stop-loss (qfq price basis) ---
-    # Mode names are intentionally stringly-typed to keep API/UI flexible.
-    # - none: disabled
-    # - prev_week_low_stop: stop-loss based on last-week low (initial) and rolling update on rebalance
-    tp_sl_mode: str = "none"
-    atr_window: int | None = None  # None -> defaults to lookback_days
-    atr_mult: float = 2.0
-    atr_step: float = 0.5
-    atr_min_mult: float = 0.5
+    # --- Universal ATR stop-loss (qfq price basis; aligned with trend research) ---
+    # none | static | trailing | tightening
+    atr_stop_mode: str = "none"
+    atr_stop_window: int = 14
+    atr_stop_n: float = 2.0
+    atr_stop_m: float = 0.5
     # --- Correlation filter (qfq price basis) ---
     corr_filter: bool = False
     corr_window: int | None = None  # None -> defaults to lookback_days
@@ -1083,17 +1080,23 @@ def backtest_rotation(
             raise ValueError("chop_adx_threshold must be finite")
         if float(inp.chop_adx_threshold) <= 0:
             raise ValueError("chop_adx_threshold must be > 0")
-    tp_sl_mode = (inp.tp_sl_mode or "none").strip().lower()
-    if tp_sl_mode not in {"none", "prev_week_low_stop", "atr_chandelier_fixed", "atr_chandelier_progressive"}:
-        raise ValueError(f"invalid tp_sl_mode={inp.tp_sl_mode}")
-    if inp.atr_window is not None and int(inp.atr_window) < 2:
-        raise ValueError("atr_window must be >= 2")
-    if not np.isfinite(float(inp.atr_mult)) or float(inp.atr_mult) <= 0:
-        raise ValueError("atr_mult must be finite and > 0")
-    if not np.isfinite(float(inp.atr_step)) or float(inp.atr_step) <= 0:
-        raise ValueError("atr_step must be finite and > 0")
-    if not np.isfinite(float(inp.atr_min_mult)) or float(inp.atr_min_mult) <= 0:
-        raise ValueError("atr_min_mult must be finite and > 0")
+    atr_stop_mode = (inp.atr_stop_mode or "none").strip().lower()
+    if atr_stop_mode not in {"none", "static", "trailing", "tightening"}:
+        raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
+    if int(inp.atr_stop_window) < 2:
+        raise ValueError("atr_stop_window must be >= 2")
+    if not np.isfinite(float(inp.atr_stop_n)) or float(inp.atr_stop_n) <= 0:
+        raise ValueError("atr_stop_n must be finite and > 0")
+    if not np.isfinite(float(inp.atr_stop_m)) or float(inp.atr_stop_m) <= 0:
+        raise ValueError("atr_stop_m must be finite and > 0")
+    if atr_stop_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
+        raise ValueError("atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening")
+    atr_stop_exec_mode = {
+        "none": "none",
+        "static": "atr_stop_static",
+        "trailing": "atr_stop_trailing",
+        "tightening": "atr_stop_tightening",
+    }[atr_stop_mode]
     if inp.corr_window is not None and int(inp.corr_window) < 2:
         raise ValueError("corr_window must be >= 2")
     if not np.isfinite(float(inp.corr_threshold)) or float(inp.corr_threshold) < -1.0 or float(inp.corr_threshold) > 1.0:
@@ -1663,7 +1666,7 @@ def backtest_rotation(
     last_idx = _decision_indices_for_rebalance(rebalance=inp.rebalance, anchor=anchor_val)
     decision_dates = dates[last_idx]
 
-    # Period labels are used by some features (e.g. prev_week_low_stop) to aggregate within a rebalance period.
+    # Period labels are used by rebalance-period aggregation features.
     # Keep behavior backward-compatible:
     # - weekly: use the same weekly anchor as the decision schedule (default FRI)
     # - monthly/quarterly/yearly: natural calendar periods
@@ -1762,13 +1765,11 @@ def backtest_rotation(
     # Stop-loss carry: track prior picks and whether a stop-out occurred in the prior holding segment.
     prev_picks_key: tuple[str, ...] | None = None
     prev_segment_stopped_out: bool = False
-    period_min_close_qfq = (
-        close_qfq[rank_codes].astype(float).groupby(labels).min() if (tp_sl_mode == "prev_week_low_stop" and need_qfq) else pd.DataFrame()
-    )
     # ATR from qfq close only (close-to-close absolute range); aligned to execution calendar.
     # Note: classic ATR uses high/low/prev close; this is a close-only approximation per spec.
-    if tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"}:
-        w_atr = int(inp.atr_window) if inp.atr_window is not None else int(inp.lookback_days)
+    atr_style_mode = atr_stop_exec_mode in {"atr_stop_static", "atr_stop_trailing", "atr_stop_tightening"}
+    if atr_style_mode:
+        w_atr = int(inp.atr_stop_window)
         w_atr = max(2, w_atr)
         close_for_atr = close_qfq[rank_codes].astype(float)
         atr = close_for_atr.diff().abs().rolling(window=w_atr, min_periods=max(2, w_atr // 2)).mean()
@@ -2089,10 +2090,8 @@ def backtest_rotation(
             "expected_turnover": None,
         }
 
-        # Take-profit / stop-loss: initialized here, but stop levels are computed after the final picks
-        # are stabilized (risk controls / corr / inertia). This avoids mismatches when picks are modified.
-        tp_sl: dict[str, Any] = {"mode": tp_sl_mode}
-        stop_levels: dict[str, float] = {}
+        # Universal ATR stop-loss metadata.
+        atr_stop: dict[str, Any] = {"mode": atr_stop_mode}
         stop_trigger_date: str | None = None
         stop_triggered = False
 
@@ -2871,88 +2870,28 @@ def backtest_rotation(
             # weights already copied from previous day; compute exposure for reporting
             exposure = float(w.iloc[start_i].sum()) if start_i < len(dates) else 0.0
 
-        # Compute stop-loss / take-profit metadata AFTER final picks are fixed.
-        # IMPORTANT: per requirement, stop-loss uses qfq close for both stop level and trigger.
-        if tp_sl_mode == "prev_week_low_stop" and (not dd_in_sleep) and risk_picks:
-            picks_key = tuple(sorted([c for c in risk_picks if c in rank_codes]))
-            di2 = dates.get_loc(d)
-            cur_label = labels[di2]
-            prev_label = labels[dates.get_loc(decision_dates[i - 1])] if i - 1 >= 0 else None
-            for c in picks_key:
-                cur_min = None
-                prev_min = None
-                if not period_min_close_qfq.empty:
-                    if c in period_min_close_qfq.columns and cur_label in period_min_close_qfq.index:
-                        v = period_min_close_qfq.loc[cur_label, c]
-                        cur_min = (None if pd.isna(v) else float(v))
-                    if prev_label is not None and c in period_min_close_qfq.columns and prev_label in period_min_close_qfq.index:
-                        v = period_min_close_qfq.loc[prev_label, c]
-                        prev_min = (None if pd.isna(v) else float(v))
+        # Compute ATR stop-loss metadata AFTER final picks are fixed.
+        # IMPORTANT: stop-loss uses qfq close for both stop level and trigger.
+        if atr_stop_exec_mode in {"atr_stop_static", "atr_stop_trailing", "atr_stop_tightening"} and (not dd_in_sleep) and risk_picks:
+            atr_stop["atr_window_used"] = int(w_atr) if w_atr is not None else None
+            atr_stop["atr_stop_n"] = float(inp.atr_stop_n)
+            atr_stop["atr_stop_m"] = float(inp.atr_stop_m)
+            atr_stop["atr_stop_min_distance_mult"] = float(inp.atr_stop_m)
+            atr_stop["atr_stop_mode"] = str(atr_stop_mode)
 
-                # base stop: new entry uses prev_min; hold-unchanged uses cur_min
-                if (prev_picks_key == picks_key) and (not prev_segment_stopped_out):
-                    base = cur_min
-                else:
-                    base = prev_min if prev_min is not None else cur_min
-
-                # special rule: if decision-day close already below prev_min -> use cur_min
-                if prev_min is not None:
-                    try:
-                        d_close = float(close_qfq.loc[d, c])
-                    except (KeyError, TypeError, ValueError):  # pragma: no cover
-                        d_close = float("nan")
-                    if np.isfinite(d_close) and d_close < float(prev_min) and (cur_min is not None):
-                        base = cur_min
-
-                if base is not None and np.isfinite(float(base)):
-                    stop_levels[c] = float(base)
-            tp_sl["stop_loss_level_by_code"] = {k: float(v) for k, v in stop_levels.items()}
-        elif tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"} and (not dd_in_sleep) and risk_picks:
-            tp_sl["atr_window_used"] = int(w_atr) if w_atr is not None else None
-            tp_sl["atr_mult"] = float(inp.atr_mult)
-            tp_sl["atr_step"] = float(inp.atr_step)
-            tp_sl["atr_min_mult"] = float(inp.atr_min_mult)
-
-        # In-segment stop-loss check (after weights are written for the segment).
+        # In-segment ATR stop-loss check (after weights are written for the segment).
         # We approximate execution as: hold through close on trigger day, then go cash from next trading day.
-        if tp_sl_mode == "prev_week_low_stop" and risk_picks and stop_levels:
-            seg_dates = dates[start_i : end_i + 1]
-            # Find earliest trigger among held assets.
-            trig_idx: int | None = None
-            trig_code: str | None = None
-            for j, day in enumerate(seg_dates):
-                for c in risk_picks:
-                    sl = stop_levels.get(c)
-                    if sl is None:
-                        continue
-                    try:
-                        px = float(close_qfq.loc[day, c])
-                    except (KeyError, TypeError, ValueError):  # pragma: no cover
-                        continue
-                    if np.isfinite(px) and px < float(sl):
-                        trig_idx = j
-                        trig_code = c
-                        break
-                if trig_idx is not None:
-                    break
-
-            if trig_idx is not None:
-                stop_triggered = True
-                stop_trigger_date = seg_dates[trig_idx].date().isoformat()
-                tp_sl["triggered"] = True
-                tp_sl["trigger_date"] = stop_trigger_date
-                tp_sl["trigger_code"] = trig_code
-                # go cash from next trading day after trigger date, until segment end
-                if trig_idx + 1 < len(seg_dates):
-                    w.loc[seg_dates[trig_idx + 1] : seg_dates[-1], :] = 0.0
-            else:
-                tp_sl["triggered"] = False
-        elif tp_sl_mode in {"atr_chandelier_fixed", "atr_chandelier_progressive"} and risk_picks:
+        if atr_stop_exec_mode in {"atr_stop_static", "atr_stop_trailing", "atr_stop_tightening"} and risk_picks:
             seg_dates = dates[start_i : end_i + 1]
             # Build/initialize per-asset state at segment start.
             # We maintain a trailing stop that never decreases.
             entry_px: dict[str, float] = {}
+            entry_atr: dict[str, float] = {}
+            prev_close: dict[str, float] = {}
             stop: dict[str, float] = {}
+            atr_n = float(inp.atr_stop_n)
+            atr_m = float(inp.atr_stop_m)
+            atr_min = float(inp.atr_stop_m)
             for c in risk_picks:
                 try:
                     p0 = float(close_qfq.loc[seg_dates[0], c])
@@ -2962,9 +2901,11 @@ def backtest_rotation(
                 if not (np.isfinite(p0) and np.isfinite(a0) and a0 > 0):
                     continue
                 entry_px[c] = p0
-                stop[c] = p0 - float(inp.atr_mult) * a0
-            tp_sl["entry_price_by_code"] = {k: float(v) for k, v in entry_px.items()}
-            tp_sl["initial_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+                entry_atr[c] = a0
+                prev_close[c] = p0
+                stop[c] = p0 - float(atr_n) * a0
+            atr_stop["entry_price_by_code"] = {k: float(v) for k, v in entry_px.items()}
+            atr_stop["initial_stop_by_code"] = {k: float(v) for k, v in stop.items()}
 
             trig_idx: int | None = None
             trig_code: str | None = None
@@ -2985,7 +2926,7 @@ def backtest_rotation(
                 if trig_idx is not None:
                     break
 
-                # 2) update trailing stop using today's close and today's ATR (for next day)
+                # 2) update stop using today's close and today's ATR (for next day)
                 for c in risk_picks:
                     if c not in stop:
                         continue
@@ -2997,33 +2938,43 @@ def backtest_rotation(
                     if not (np.isfinite(px) and np.isfinite(a) and a > 0):
                         continue
 
-                    if tp_sl_mode == "atr_chandelier_fixed":
-                        dist_mult = float(inp.atr_mult)
-                    else:
-                        # progressive distance reduction:
-                        # distance_mult = max(min_mult, atr_mult - floor(gain/step)*step)
-                        # gain is measured in ATR units using current ATR.
+                    should_update = True
+                    if atr_stop_exec_mode == "atr_stop_static":
+                        should_update = False
+                        dist_mult = float(atr_n)
+                    elif atr_stop_exec_mode == "atr_stop_trailing":
+                        dist_mult = float(atr_n)
                         ep = float(entry_px.get(c, px))
-                        gain_units = (px - ep) / a
-                        steps = int(np.floor(gain_units / float(inp.atr_step))) if np.isfinite(gain_units) else 0
-                        dist_mult = float(inp.atr_mult) - float(steps) * float(inp.atr_step)
-                        dist_mult = float(max(float(inp.atr_min_mult), dist_mult))
+                        pc = float(prev_close.get(c, px))
+                        should_update = bool((px > ep) or (px > pc))
+                    else:
+                        # tightening distance reduction
+                        ep = float(entry_px.get(c, px))
+                        ea = float(entry_atr.get(c, a))
+                        gain_units = (px - ep) / max(ea, 1e-12)
+                        steps = int(np.floor(gain_units / float(atr_m))) if np.isfinite(gain_units) else 0
+                        dist_mult = float(atr_n) - float(steps) * float(atr_m)
+                        dist_mult = float(max(float(atr_min), dist_mult))
+                        pc = float(prev_close.get(c, px))
+                        should_update = bool((px > ep) or (px > pc))
 
-                    cand = px - dist_mult * a
-                    # chandelier stop never decreases
-                    stop[c] = float(max(float(stop[c]), float(cand)))
+                    if should_update:
+                        cand = px - dist_mult * a
+                        # stop never decreases
+                        stop[c] = float(max(float(stop[c]), float(cand)))
+                    prev_close[c] = px
 
             if trig_idx is not None:
                 stop_triggered = True
                 stop_trigger_date = seg_dates[trig_idx].date().isoformat()
-                tp_sl["triggered"] = True
-                tp_sl["trigger_date"] = stop_trigger_date
-                tp_sl["trigger_code"] = trig_code
+                atr_stop["triggered"] = True
+                atr_stop["trigger_date"] = stop_trigger_date
+                atr_stop["trigger_code"] = trig_code
                 if trig_idx + 1 < len(seg_dates):
                     w.loc[seg_dates[trig_idx + 1] : seg_dates[-1], :] = 0.0
             else:
-                tp_sl["triggered"] = False
-            tp_sl["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+                atr_stop["triggered"] = False
+            atr_stop["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
 
         # Daily close decision for exit controls; execute next trading day.
         use_trend_exit = bool(inp.trend_exit_filter)
@@ -3241,7 +3192,7 @@ def backtest_rotation(
                 "best_score": meta.get("best_score"),
                 "mode": meta.get("mode"),
                 "exposure": float(exposure),
-                "tp_sl": tp_sl,
+                "atr_stop": atr_stop,
                 "corr_filter": corr_meta,
                 "inertia": inertia_meta,
                 "rr_sizing": rr_meta,
@@ -3717,7 +3668,7 @@ def backtest_rotation(
     out = {
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d")},
         "score_method": (inp.score_method or "raw_mom"),
-        "tp_sl_mode": tp_sl_mode,
+        "atr_stop_mode": atr_stop_mode,
         "codes": codes,
         "benchmark_codes": bench_codes,
         "price_basis": {

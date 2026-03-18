@@ -29,7 +29,7 @@ TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "ma_cross": "信号在 T 日收盘后根据快慢线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "donchian": "信号在 T 日收盘后根据是否突破通道上轨/下轨确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
-    "tsmom": "信号在 T 日收盘后根据回看期收益正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "tsmom": "信号在 T 日收盘后根据回看期收益与动量入/出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "linreg_slope": "信号在 T 日收盘后根据回看窗口线性回归斜率正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "bias": "信号在 T 日收盘后根据 BIAS 与进出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_cross": "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -56,6 +56,12 @@ class TrendInputs:
     donchian_entry: int = 20  # donchian
     donchian_exit: int = 10  # donchian
     mom_lookback: int = 252  # tsmom
+    tsmom_entry_threshold: float = 0.0  # tsmom: enter when momentum > this value
+    tsmom_exit_threshold: float = 0.0  # tsmom: exit when momentum <= this value
+    atr_stop_mode: str = "none"  # none | static | trailing | tightening
+    atr_stop_window: int = 14  # ATR lookback window
+    atr_stop_n: float = 2.0  # stop distance multiplier by ATR
+    atr_stop_m: float = 0.5  # tightening step in ATR multiples
     # bias (deviation from EMA) trend-following
     # BIAS = (LN(C) - LN(EMA(C,N))) * 100  (percent)
     bias_ma_window: int = 20  # EMA(C,N) window in trading days
@@ -92,6 +98,12 @@ class TrendPortfolioInputs:
     donchian_entry: int = 20
     donchian_exit: int = 10
     mom_lookback: int = 252
+    tsmom_entry_threshold: float = 0.0
+    tsmom_exit_threshold: float = 0.0
+    atr_stop_mode: str = "none"
+    atr_stop_window: int = 14
+    atr_stop_n: float = 2.0
+    atr_stop_m: float = 0.5
     bias_ma_window: int = 20
     bias_entry: float = 2.0
     bias_hot: float = 10.0
@@ -170,6 +182,155 @@ def _moving_average(s: pd.Series, *, window: int, ma_type: str) -> pd.Series:
     return s.rolling(window=w, min_periods=max(2, w // 2)).mean()
 
 
+def _pos_from_tsmom(
+    mom: pd.Series,
+    *,
+    entry_threshold: float,
+    exit_threshold: float,
+) -> pd.Series:
+    """
+    Long/cash TSMOM with configurable hysteresis thresholds:
+    - enter long when momentum > entry_threshold
+    - exit to cash when momentum <= exit_threshold
+    """
+    ent = float(entry_threshold)
+    ex = float(exit_threshold)
+    pos = np.zeros(len(mom), dtype=float)
+    in_pos = False
+    for i, v in enumerate(mom.to_numpy(dtype=float)):
+        if not np.isfinite(v):
+            in_pos = False
+            pos[i] = 0.0
+            continue
+        if not in_pos:
+            if v > ent:
+                in_pos = True
+        elif v <= ex:
+            in_pos = False
+        pos[i] = 1.0 if in_pos else 0.0
+    return pd.Series(pos, index=mom.index, dtype=float)
+
+
+def _apply_atr_stop(
+    base_pos: pd.Series,
+    *,
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    mode: str,
+    atr_window: int,
+    n_mult: float,
+    m_step: float,
+) -> tuple[pd.Series, dict[str, Any]]:
+    """
+    Apply universal ATR stop-loss overlay on top of base strategy position:
+    - static: stop = entry_price - n * ATR(entry), fixed after entry
+    - trailing: if close rises (vs entry or prior close), move stop upward to close - n * ATR(today)
+    - tightening: trailing + tighten stop distance by m ATR for each +m ATR rise from entry,
+      with minimum distance floored at m ATR.
+    Stop trigger rule: when today's close < stop, exit is decided today and executes next day.
+    """
+    mode_v = str(mode or "none").strip().lower()
+    if mode_v == "none":
+        out_none = base_pos.fillna(0.0).astype(float)
+        return out_none, {
+            "enabled": False,
+            "mode": "none",
+            "trigger_count": 0,
+            "trigger_dates": [],
+            "first_trigger_date": None,
+            "last_trigger_date": None,
+            "entries": int(((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()),
+            "exits": int(((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()),
+            "trigger_exit_share": 0.0,
+        }
+
+    atr = _atr_from_hlc(high.astype(float), low.astype(float), close.astype(float), window=int(atr_window)).astype(float)
+    bp = base_pos.astype(float).fillna(0.0)
+    cl = close.astype(float)
+
+    out = np.zeros(len(bp), dtype=float)
+    in_pos = False
+    stop_px = float("nan")
+    entry_px = float("nan")
+    entry_atr = float("nan")
+    prev_close = float("nan")
+    trigger_dates: list[str] = []
+
+    for i in range(len(bp)):
+        b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
+        c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
+        a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
+
+        if not in_pos:
+            if b <= 0.0 or (not np.isfinite(c)) or (not np.isfinite(a)) or a <= 0.0:
+                out[i] = 0.0
+                continue
+            in_pos = True
+            entry_px = c
+            entry_atr = a
+            prev_close = c
+            stop_px = entry_px - float(n_mult) * entry_atr
+            out[i] = b
+            continue
+
+        # If base strategy already exits, clear stop state directly.
+        if b <= 0.0:
+            in_pos = False
+            out[i] = 0.0
+            stop_px = float("nan")
+            entry_px = float("nan")
+            entry_atr = float("nan")
+            prev_close = float("nan")
+            continue
+
+        # Stop trigger check uses the current effective stop; avoid applying updates
+        # first to prevent masking a real stop hit on this close.
+        if np.isfinite(c) and np.isfinite(stop_px) and (c < stop_px):
+            in_pos = False
+            out[i] = 0.0
+            d = bp.index[i]
+            trigger_dates.append((d.date().isoformat() if hasattr(d, "date") else str(d)))
+            stop_px = float("nan")
+            entry_px = float("nan")
+            entry_atr = float("nan")
+            prev_close = float("nan")
+            continue
+
+        if mode_v in {"trailing", "tightening"} and np.isfinite(c) and np.isfinite(a) and a > 0.0:
+            should_follow = (c > entry_px) or (np.isfinite(prev_close) and c > prev_close)
+            if should_follow:
+                dist_mult = float(n_mult)
+                if mode_v == "tightening":
+                    ent_atr = float(entry_atr) if (np.isfinite(entry_atr) and entry_atr > 0.0) else a
+                    rise_in_atr = max(0.0, (c - entry_px) / max(ent_atr, 1e-12))
+                    steps = int(np.floor(rise_in_atr / float(m_step))) if float(m_step) > 0 else 0
+                    dist_mult = max(float(m_step), float(n_mult) - steps * float(m_step))
+                stop_candidate = c - dist_mult * a
+                if (not np.isfinite(stop_px)) or (stop_candidate > stop_px):
+                    stop_px = stop_candidate
+
+        out[i] = b
+        prev_close = c
+
+    out_s = pd.Series(out, index=base_pos.index, dtype=float)
+    entries = int(((out_s > 0.0) & (out_s.shift(1).fillna(0.0) <= 0.0)).sum())
+    exits = int(((out_s <= 0.0) & (out_s.shift(1).fillna(0.0) > 0.0)).sum())
+    trigger_count = int(len(trigger_dates))
+    stats = {
+        "enabled": True,
+        "mode": mode_v,
+        "trigger_count": trigger_count,
+        "trigger_dates": trigger_dates[:200],
+        "first_trigger_date": (trigger_dates[0] if trigger_dates else None),
+        "last_trigger_date": (trigger_dates[-1] if trigger_dates else None),
+        "entries": entries,
+        "exits": exits,
+        "trigger_exit_share": (float(trigger_count) / float(exits) if exits > 0 else 0.0),
+    }
+    return out_s, stats
+
+
 def _macd_core(close: pd.Series, *, fast: int, slow: int, signal: int) -> tuple[pd.Series, pd.Series, pd.Series]:
     ema_fast = _ema(close, int(fast))
     ema_slow = _ema(close, int(slow))
@@ -229,6 +390,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema"}:
         raise ValueError("ma_type must be one of: sma|ema")
+    if not np.isfinite(float(inp.tsmom_entry_threshold)):
+        raise ValueError("tsmom_entry_threshold must be finite")
+    if not np.isfinite(float(inp.tsmom_exit_threshold)):
+        raise ValueError("tsmom_exit_threshold must be finite")
+    if float(inp.tsmom_entry_threshold) < float(inp.tsmom_exit_threshold):
+        raise ValueError("tsmom thresholds must satisfy: entry >= exit")
+    atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
+    if atr_mode not in {"none", "static", "trailing", "tightening"}:
+        raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
+    if int(inp.atr_stop_window) < 2:
+        raise ValueError("atr_stop_window must be >= 2")
+    if (not np.isfinite(float(inp.atr_stop_n))) or float(inp.atr_stop_n) <= 0:
+        raise ValueError("atr_stop_n must be finite and > 0")
+    if (not np.isfinite(float(inp.atr_stop_m))) or float(inp.atr_stop_m) <= 0:
+        raise ValueError("atr_stop_m must be finite and > 0")
+    if atr_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
+        raise ValueError("atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening")
     if int(inp.donchian_entry) < 2 or int(inp.donchian_exit) < 2:
         raise ValueError("donchian_entry/donchian_exit must be >= 2")
     if int(inp.mom_lookback) < 2:
@@ -429,7 +607,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raw_pos = (macd_v > macd_v_sig).astype(float).fillna(0.0)
     else:
         mom = px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0
-        raw_pos = (mom > 0.0).astype(float).fillna(0.0)
+        raw_pos = _pos_from_tsmom(
+            mom,
+            entry_threshold=float(inp.tsmom_entry_threshold),
+            exit_threshold=float(inp.tsmom_exit_threshold),
+        ).astype(float)
+
+    raw_pos, atr_stop_stats = _apply_atr_stop(
+        raw_pos,
+        close=px_sig,
+        high=high_qfq,
+        low=low_qfq,
+        mode=atr_mode,
+        atr_window=int(inp.atr_stop_window),
+        n_mult=float(inp.atr_stop_n),
+        m_step=float(inp.atr_stop_m),
+    )
+    raw_pos = raw_pos.astype(float)
 
     # Weights become effective on execution day; return uses forward interval (t -> t+1).
     w = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
@@ -499,6 +693,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "donchian_entry": int(inp.donchian_entry),
                 "donchian_exit": int(inp.donchian_exit),
                 "mom_lookback": int(inp.mom_lookback),
+                "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
+                "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
+                "atr_stop_mode": str(atr_mode),
+                "atr_stop_window": int(inp.atr_stop_window),
+                "atr_stop_n": float(inp.atr_stop_n),
+                "atr_stop_m": float(inp.atr_stop_m),
                 "bias_ma_window": int(inp.bias_ma_window),
                 "bias_entry": float(inp.bias_entry),
                 "bias_hot": float(inp.bias_hot),
@@ -526,6 +726,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             "position": raw_pos.reindex(nav.index).astype(float).tolist(),
         },
         "metrics": {"strategy": m_strat, "benchmark": m_bh, "excess": m_ex},
+        "risk_controls": {"atr_stop": atr_stop_stats},
         "corporate_actions": (
             [
                 {
@@ -570,6 +771,23 @@ def compute_trend_portfolio_backtest(
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema"}:
         raise ValueError("ma_type must be one of: sma|ema")
+    atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
+    if atr_mode not in {"none", "static", "trailing", "tightening"}:
+        raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
+    if int(inp.atr_stop_window) < 2:
+        raise ValueError("atr_stop_window must be >= 2")
+    if (not np.isfinite(float(inp.atr_stop_n))) or float(inp.atr_stop_n) <= 0:
+        raise ValueError("atr_stop_n must be finite and > 0")
+    if (not np.isfinite(float(inp.atr_stop_m))) or float(inp.atr_stop_m) <= 0:
+        raise ValueError("atr_stop_m must be finite and > 0")
+    if atr_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
+        raise ValueError("atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening")
+    if not np.isfinite(float(inp.tsmom_entry_threshold)):
+        raise ValueError("tsmom_entry_threshold must be finite")
+    if not np.isfinite(float(inp.tsmom_exit_threshold)):
+        raise ValueError("tsmom_exit_threshold must be finite")
+    if float(inp.tsmom_entry_threshold) < float(inp.tsmom_exit_threshold):
+        raise ValueError("tsmom thresholds must satisfy: entry >= exit")
 
     strat = str(inp.strategy or "ma_filter").strip().lower()
 
@@ -651,6 +869,7 @@ def compute_trend_portfolio_backtest(
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
+    atr_stop_by_asset: dict[str, dict[str, Any]] = {}
     for c in codes:
         px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
         if px.dropna().empty:
@@ -701,10 +920,27 @@ def compute_trend_portfolio_backtest(
             score = (macd_v - macd_v_sig).astype(float)
         else:
             mom = px / px.shift(int(inp.mom_lookback)) - 1.0
-            pos = (mom > 0.0).astype(float)
+            pos = _pos_from_tsmom(
+                mom,
+                entry_threshold=float(inp.tsmom_entry_threshold),
+                exit_threshold=float(inp.tsmom_exit_threshold),
+            )
             score = mom.astype(float)
+        h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
+        l = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+        pos, one_stop_stats = _apply_atr_stop(
+            pos.fillna(0.0).astype(float),
+            close=px,
+            high=h.astype(float).fillna(px),
+            low=l.astype(float).fillna(px),
+            mode=atr_mode,
+            atr_window=int(inp.atr_stop_window),
+            n_mult=float(inp.atr_stop_n),
+            m_step=float(inp.atr_stop_m),
+        )
         sig_pos[c] = pos.fillna(0.0)
         sig_score[c] = score.replace([np.inf, -np.inf], np.nan)
+        atr_stop_by_asset[str(c)] = one_stop_stats
 
     vol_ann = ret_hfq.rolling(window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)).std(ddof=1) * np.sqrt(252.0)
     w_decision = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
@@ -804,6 +1040,16 @@ def compute_trend_portfolio_backtest(
         "information_ratio": float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)),
     }
 
+    total_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in atr_stop_by_asset.values()))
+    uniq_trigger_dates = sorted(
+        {
+            str(d)
+            for v in atr_stop_by_asset.values()
+            for d in (v or {}).get("trigger_dates", [])
+            if str(d).strip()
+        }
+    )
+
     return {
         "meta": {
             "type": "trend_portfolio_backtest",
@@ -818,6 +1064,13 @@ def compute_trend_portfolio_backtest(
                 "vol_target_ann": float(inp.vol_target_ann),
                 "selection_mode": "all_active_candidates",
                 "ma_type": ma_type,
+                "mom_lookback": int(inp.mom_lookback),
+                "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
+                "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
+                "atr_stop_mode": str(atr_mode),
+                "atr_stop_window": int(inp.atr_stop_window),
+                "atr_stop_n": float(inp.atr_stop_n),
+                "atr_stop_m": float(inp.atr_stop_m),
                 "exec_price": str(ep),
             },
         },
@@ -835,4 +1088,16 @@ def compute_trend_portfolio_backtest(
         },
         "holdings": holdings,
         "metrics": {"strategy": m_strat, "benchmark": m_bench, "excess": m_ex},
+        "risk_controls": {
+            "atr_stop": {
+                "enabled": bool(atr_mode != "none"),
+                "mode": str(atr_mode),
+                "trigger_count": total_triggers,
+                "trigger_days": int(len(uniq_trigger_dates)),
+                "first_trigger_date": (uniq_trigger_dates[0] if uniq_trigger_dates else None),
+                "last_trigger_date": (uniq_trigger_dates[-1] if uniq_trigger_dates else None),
+                "trigger_dates": uniq_trigger_dates[:200],
+                "by_asset": atr_stop_by_asset,
+            }
+        },
     }
