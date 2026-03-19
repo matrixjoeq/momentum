@@ -33,6 +33,10 @@ class BaselineInputs:
     fft_roll_step: int = 5
     # Risk parity (inverse-vol) portfolio config (used by research UI)
     rp_window_days: int = 60
+    # Holding strategy mode: EW | RP | CUSTOM
+    holding_mode: str = "EW"
+    # CUSTOM target weights by code (decimal); leftover to cash.
+    custom_weights: dict[str, float] | None = None
     # Dynamic universe mode:
     # - False: legacy common-interval behavior (intersection)
     # - True: dynamic candidates over union interval (per-day availability)
@@ -1653,6 +1657,65 @@ def _compute_equal_weight_nav_and_weights(
     return nav_s, w_df
 
 
+def _compute_custom_weight_nav_and_weights(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+    target_weights: pd.Series,
+    weekly_anchor: str = "FRI",
+) -> tuple[pd.Series, pd.DataFrame]:
+    """
+    Fixed custom-weight holding strategy with optional periodic rebalancing.
+    Unallocated portion (1 - sum(weights)) is treated as cash.
+    """
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+    if daily_ret.empty:
+        return pd.Series(dtype=float, name="CUSTOM"), pd.DataFrame()
+
+    cols = list(daily_ret.columns)
+    n = len(cols)
+    if n <= 0:
+        return pd.Series(dtype=float, name="CUSTOM"), pd.DataFrame()
+
+    tw = pd.Series(target_weights, index=cols, dtype=float).fillna(0.0).clip(lower=0.0)
+    tw_sum = float(tw.sum())
+    if tw_sum > 1.0 + 1e-12:
+        raise ValueError("custom_weights sum must be <= 1.0")
+
+    rmat = daily_ret.fillna(0.0).to_numpy(dtype=float)
+    labels = _rebalance_labels(pd.DatetimeIndex(daily_ret.index), reb, weekly_anchor=weekly_anchor)
+    change = labels != labels.shift(1)
+    change.iloc[0] = True
+
+    cash_amt = float(max(0.0, 1.0 - tw_sum))
+    asset_amt = tw.to_numpy(dtype=float).copy()
+    nav_out: list[float] = []
+    w_out: list[np.ndarray] = []
+
+    for i in range(len(daily_ret.index)):
+        if bool(change.iloc[i]):
+            cur_total = float(cash_amt + float(np.nansum(asset_amt)))
+            cash_amt = float(max(0.0, 1.0 - tw_sum)) * cur_total
+            asset_amt = tw.to_numpy(dtype=float) * cur_total
+
+        total_before = float(cash_amt + float(np.nansum(asset_amt)))
+        if not np.isfinite(total_before) or total_before <= 0:
+            total_before = 1.0
+        w_out.append(asset_amt / total_before)
+
+        r = rmat[i]
+        asset_amt = asset_amt * (1.0 + r)
+        nav_out.append(float(cash_amt + float(np.nansum(asset_amt))))
+
+    nav_s = pd.Series(nav_out, index=daily_ret.index, name="CUSTOM")
+    if len(nav_s) > 0:
+        nav_s.iloc[0] = 1.0
+    w_df = pd.DataFrame(np.vstack(w_out), index=daily_ret.index, columns=cols, dtype=float)
+    return nav_s.astype(float), w_df.astype(float)
+
+
 def _compute_return_risk_contributions(
     *,
     asset_ret: pd.DataFrame,
@@ -1667,6 +1730,9 @@ def _compute_return_risk_contributions(
     """
     r = asset_ret.astype(float).fillna(0.0)
     w = weights.reindex(index=r.index, columns=r.columns).astype(float).fillna(0.0)
+    n_obs = int(len(r.index))
+    min_obs_for_ann = 252
+    ann_applicable = bool(n_obs >= min_obs_for_ann)
     # log-return attribution (scaled)
     log_r = np.log1p(r.clip(lower=-0.999999))
     log_contrib = (w * log_r).sum(axis=0).astype(float)
@@ -1677,6 +1743,16 @@ def _compute_return_risk_contributions(
     else:
         share = (log_contrib / approx_port_log).astype(float)
         contrib = (share * float(total_return)).astype(float)
+    ann_total_return = float("nan")
+    ann_contrib = pd.Series(index=r.columns, dtype=float)
+    if ann_applicable:
+        try:
+            if np.isfinite(float(total_return)) and float(total_return) > -1.0:
+                ann_total_return = float(np.power(1.0 + float(total_return), 252.0 / float(max(1, n_obs))) - 1.0)
+        except (TypeError, ValueError, OverflowError):
+            ann_total_return = float("nan")
+        if np.isfinite(ann_total_return):
+            ann_contrib = (share * ann_total_return).astype(float)
 
     return_rows = []
     for c in r.columns:
@@ -1684,6 +1760,11 @@ def _compute_return_risk_contributions(
             {
                 "code": str(c),
                 "return_contribution": (None if pd.isna(contrib.get(c)) else float(contrib.get(c))),
+                "return_contribution_annualized": (
+                    None
+                    if (not ann_applicable) or pd.isna(ann_contrib.get(c))
+                    else float(ann_contrib.get(c))
+                ),
                 "return_share": (None if pd.isna(share.get(c)) else float(share.get(c))),
             }
         )
@@ -1694,26 +1775,45 @@ def _compute_return_risk_contributions(
     w_vec = w_bar.reindex(cov.index).fillna(0.0).to_numpy(dtype=float)
     cov_mat = cov.to_numpy(dtype=float)
     port_var = float(w_vec.T @ cov_mat @ w_vec) if len(w_vec) else float("nan")
+    port_vol_ann = float("nan")
+    if ann_applicable and np.isfinite(port_var) and port_var > 0.0:
+        port_vol_ann = float(np.sqrt(port_var) * np.sqrt(252.0))
     if port_var == 0.0 or np.isnan(port_var):
         risk_rows = [{"code": str(c), "risk_share": None} for c in cov.index]
     else:
         m = cov_mat @ w_vec  # marginal contribution to variance
         rc = w_vec * m
         rc_share = rc / port_var
+        rc_vol_ann = np.full_like(rc_share, np.nan, dtype=float)
+        if ann_applicable and np.isfinite(port_var) and port_var > 0.0:
+            rc_vol = rc / np.sqrt(port_var)  # contribution to daily vol, sums to daily vol
+            rc_vol_ann = rc_vol * np.sqrt(252.0)
         risk_rows = []
         for i, c in enumerate(cov.index):
-            risk_rows.append({"code": str(c), "risk_share": float(rc_share[i])})
+            risk_rows.append(
+                {
+                    "code": str(c),
+                    "risk_share": float(rc_share[i]),
+                    "risk_contribution_annualized": (
+                        None if (not ann_applicable) or (not np.isfinite(float(rc_vol_ann[i]))) else float(rc_vol_ann[i])
+                    ),
+                }
+            )
 
     return {
         "return": {
             "method": "log_scaled",
             "total_return": float(total_return),
+            "annualized_total_return": (None if (not ann_applicable) or (not np.isfinite(ann_total_return)) else float(ann_total_return)),
             "approx_port_log": approx_port_log,
+            "annualization": {"applicable": bool(ann_applicable), "n_obs": int(n_obs), "min_obs": int(min_obs_for_ann)},
             "by_code": return_rows,
         },
         "risk": {
             "method": "variance_share",
             "portfolio_variance": port_var,
+            "annualized_portfolio_volatility": (None if (not ann_applicable) or (not np.isfinite(port_vol_ann)) else float(port_vol_ann)),
+            "annualization": {"applicable": bool(ann_applicable), "n_obs": int(n_obs), "min_obs": int(min_obs_for_ann)},
             "by_code": risk_rows,
         },
     }
@@ -1857,10 +1957,16 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
                 ret_fwd.loc[exec_mask, codes_eff] = same_day.loc[exec_mask, codes_eff]
             else:
                 ret_fwd.loc[exec_mask, codes_eff] = (0.5 * same_day.loc[exec_mask, codes_eff] + 0.5 * ret_fwd.loc[exec_mask, codes_eff]).astype(float)
-    ew_ret = (ew_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
-    ew_nav = (1.0 + ew_ret).cumprod().astype(float)
-    if len(ew_nav) > 0:
-        ew_nav.iloc[0] = 1.0
+    reb_mode = (inp.rebalance or "yearly").strip().lower()
+    if reb_mode == "none":
+        # Keep buy-and-hold semantics for no-rebalance mode.
+        ew_nav = ew_nav.astype(float)
+        ew_ret = ew_nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    else:
+        ew_ret = (ew_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
+        ew_nav = (1.0 + ew_ret).cumprod().astype(float)
+        if len(ew_nav) > 0:
+            ew_nav.iloc[0] = 1.0
 
     # risk parity (inverse-vol) portfolio with the same rebalancing schedule
     rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
@@ -1876,10 +1982,50 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             rp_nav, rp_w = _cash_portfolio(ret_common.index, codes_eff, "RP")
         else:
             rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
-    rp_ret = (rp_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
-    rp_nav = (1.0 + rp_ret).cumprod().astype(float)
-    if len(rp_nav) > 0:
-        rp_nav.iloc[0] = 1.0
+    if reb_mode == "none":
+        rp_nav = rp_nav.astype(float)
+        rp_ret = rp_nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    else:
+        rp_ret = (rp_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
+        rp_nav = (1.0 + rp_ret).cumprod().astype(float)
+        if len(rp_nav) > 0:
+            rp_nav.iloc[0] = 1.0
+
+    # custom-weight holding strategy (fixed target weights with optional periodic rebalance).
+    mode = str(getattr(inp, "holding_mode", "EW") or "EW").strip().upper()
+    if mode not in {"EW", "RP", "CUSTOM"}:
+        raise ValueError("holding_mode must be one of: EW|RP|CUSTOM")
+    cw_raw = dict(getattr(inp, "custom_weights", None) or {})
+    cw = pd.Series(0.0, index=codes_eff, dtype=float)
+    for k, v in cw_raw.items():
+        kk = str(k).strip()
+        if kk in cw.index:
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(fv) and fv >= 0.0:
+                cw.loc[kk] = fv
+    if float(cw.sum()) > 1.0 + 1e-12:
+        raise ValueError("custom_weights sum must be <= 1.0")
+    if mode == "CUSTOM" and float(cw.sum()) <= 0.0:
+        raise ValueError("holding_mode=CUSTOM requires at least one positive custom weight")
+    if float(cw.sum()) <= 0.0:
+        custom_nav, custom_w = _cash_portfolio(ret_common.index, codes_eff, "CUSTOM")
+    else:
+        custom_nav, custom_w = _compute_custom_weight_nav_and_weights(
+            ret_common[codes_eff],
+            rebalance=inp.rebalance,
+            target_weights=cw,
+        )
+    if reb_mode == "none":
+        custom_nav = custom_nav.astype(float)
+        custom_ret = custom_nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    else:
+        custom_ret = (custom_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
+        custom_nav = (1.0 + custom_ret).cumprod().astype(float)
+        if len(custom_nav) > 0:
+            custom_nav.iloc[0] = 1.0
 
     # benchmark
     bench_code = inp.benchmark_code
@@ -1896,14 +2042,24 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         r = s.resample(freq).last().pct_change().dropna()
         return pd.DataFrame({"period_end": r.index.date.astype(str), "return": r.values})
 
-    weekly = period_returns(ew_nav, "W-FRI")
-    monthly = period_returns(ew_nav, "ME")
-    quarterly = period_returns(ew_nav, "QE")
-    yearly = period_returns(ew_nav, "YE")
+    nav_by_mode = {"EW": ew_nav, "RP": rp_nav, "CUSTOM": custom_nav}
+    selected_nav = nav_by_mode.get(mode, ew_nav)
+    weekly = period_returns(selected_nav, "W-FRI")
+    monthly = period_returns(selected_nav, "ME")
+    quarterly = period_returns(selected_nav, "QE")
+    yearly = period_returns(selected_nav, "YE")
+    weekly_ew = period_returns(ew_nav, "W-FRI")
+    monthly_ew = period_returns(ew_nav, "ME")
+    quarterly_ew = period_returns(ew_nav, "QE")
+    yearly_ew = period_returns(ew_nav, "YE")
     weekly_rp = period_returns(rp_nav, "W-FRI")
     monthly_rp = period_returns(rp_nav, "ME")
     quarterly_rp = period_returns(rp_nav, "QE")
     yearly_rp = period_returns(rp_nav, "YE")
+    weekly_custom = period_returns(custom_nav, "W-FRI")
+    monthly_custom = period_returns(custom_nav, "ME")
+    quarterly_custom = period_returns(custom_nav, "QE")
+    yearly_custom = period_returns(custom_nav, "YE")
 
     def _win_payoff_kelly(df: pd.DataFrame) -> dict[str, float]:
         r = pd.Series(df["return"].astype(float).to_numpy()) if (df is not None and not df.empty) else pd.Series([], dtype=float)
@@ -1921,14 +2077,18 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             kelly = float("nan")
         return {"win_rate": win_rate, "payoff_ratio": payoff, "kelly_fraction": kelly}
 
-    weekly_wp = _win_payoff_kelly(weekly)
-    monthly_wp = _win_payoff_kelly(monthly)
-    quarterly_wp = _win_payoff_kelly(quarterly)
-    yearly_wp = _win_payoff_kelly(yearly)
+    weekly_wp = _win_payoff_kelly(weekly_ew)
+    monthly_wp = _win_payoff_kelly(monthly_ew)
+    quarterly_wp = _win_payoff_kelly(quarterly_ew)
+    yearly_wp = _win_payoff_kelly(yearly_ew)
     weekly_wp_rp = _win_payoff_kelly(weekly_rp)
     monthly_wp_rp = _win_payoff_kelly(monthly_rp)
     quarterly_wp_rp = _win_payoff_kelly(quarterly_rp)
     yearly_wp_rp = _win_payoff_kelly(yearly_rp)
+    weekly_wp_custom = _win_payoff_kelly(weekly_custom)
+    monthly_wp_custom = _win_payoff_kelly(monthly_custom)
+    quarterly_wp_custom = _win_payoff_kelly(quarterly_custom)
+    yearly_wp_custom = _win_payoff_kelly(yearly_custom)
 
     def _metrics_from_nav(
         nav_s: pd.Series,
@@ -1990,8 +2150,16 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         wp_q=quarterly_wp_rp,
         wp_y=yearly_wp_rp,
     )
-    # Backward-compat: top-level metrics remains EW.
-    metrics = metrics_ew
+    metrics_custom = _metrics_from_nav(
+        custom_nav,
+        custom_ret,
+        wp_w=weekly_wp_custom,
+        wp_m=monthly_wp_custom,
+        wp_q=quarterly_wp_custom,
+        wp_y=yearly_wp_custom,
+    )
+    metrics_by_portfolio = {"EW": metrics_ew, "RP": metrics_rp, "CUSTOM": metrics_custom}
+    metrics = metrics_by_portfolio.get(mode, metrics_ew)
 
     def _rolling_pack(nav_s: pd.Series) -> dict[str, dict[str, Any]]:
         rolling = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
@@ -2017,13 +2185,14 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
         }
 
-    rolling_by_portfolio = {"EW": _rolling_pack(ew_nav), "RP": _rolling_pack(rp_nav)}
+    rolling_by_portfolio = {"EW": _rolling_pack(ew_nav), "RP": _rolling_pack(rp_nav), "CUSTOM": _rolling_pack(custom_nav)}
 
     # package series for UI (plotly expects arrays)
     dates = nav_common.index.date.astype(str).tolist()
     series = {c: nav_common[c].astype(float).tolist() for c in codes if c in nav_common.columns}
     series["EW"] = ew_nav.astype(float).tolist()
     series["RP"] = rp_nav.astype(float).tolist()
+    series["CUSTOM"] = custom_nav.astype(float).tolist()
     series[f"BENCH:{bench_code}"] = bench_nav.astype(float).tolist()
 
     # NAV RSI (EW + benchmark), windows configurable
@@ -2034,10 +2203,11 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "series": {
             "EW": {str(w): _rsi_wilder(ew_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
             "RP": {str(w): _rsi_wilder(rp_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
+            "CUSTOM": {str(w): _rsi_wilder(custom_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
             f"BENCH:{bench_code}": {str(w): _rsi_wilder(bench_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
         },
     }
-    rolling_out = rolling_by_portfolio["EW"]  # backward-compat
+    rolling_out = rolling_by_portfolio.get(mode, rolling_by_portfolio["EW"])
 
     attribution_ew = _compute_return_risk_contributions(
         asset_ret=ret_common[codes_eff],
@@ -2049,7 +2219,13 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         weights=rp_w[codes_eff] if not rp_w.empty else pd.DataFrame(index=ret_common.index, columns=codes_eff),
         total_return=float(metrics_rp["cumulative_return"]),
     )
-    attribution = attribution_ew  # backward-compat
+    attribution_custom = _compute_return_risk_contributions(
+        asset_ret=ret_common[codes_eff],
+        weights=custom_w[codes_eff] if not custom_w.empty else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+        total_return=float(metrics_custom["cumulative_return"]),
+    )
+    attribution_by_portfolio = {"EW": attribution_ew, "RP": attribution_rp, "CUSTOM": attribution_custom}
+    attribution = attribution_by_portfolio.get(mode, attribution_ew)
 
     # FFT analysis (on log returns, using the same adjustment basis as baseline close)
     fft = _fft_analysis(close_common.ffill()[codes_eff], ew_nav=ew_nav, windows=inp.fft_windows)
@@ -2182,6 +2358,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "dynamic_universe": bool(dynamic_universe),
         },
         "rebalance": inp.rebalance,
+        "holding_mode": mode,
         "exec_price": ep,
         "codes": codes,
         "nav": {"dates": dates, "series": series},
@@ -2193,12 +2370,12 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "yearly": yearly.to_dict(orient="records"),
         },
         "metrics": metrics,
-        "metrics_by_portfolio": {"EW": metrics_ew, "RP": metrics_rp},
+        "metrics_by_portfolio": metrics_by_portfolio,
         "correlation": corr_out,
         "rolling": rolling_out,
         "rolling_by_portfolio": rolling_by_portfolio,
         "attribution": attribution,
-        "attribution_by_portfolio": {"EW": attribution_ew, "RP": attribution_rp},
+        "attribution_by_portfolio": attribution_by_portfolio,
         "fft": fft,
         "fft_roll": {"ew": fft_roll},
         "period_distributions": period_distributions,

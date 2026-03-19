@@ -94,6 +94,8 @@ class RotationInputs:
     # --- Universal ATR stop-loss (qfq price basis; aligned with trend research) ---
     # none | static | trailing | tightening
     atr_stop_mode: str = "none"
+    atr_stop_atr_basis: str = "latest"  # entry | latest (for trailing/tightening)
+    atr_stop_reentry_mode: str = "reenter"  # reenter | wait_next_entry (reserved for parity with trend)
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
@@ -1083,6 +1085,12 @@ def backtest_rotation(
     atr_stop_mode = (inp.atr_stop_mode or "none").strip().lower()
     if atr_stop_mode not in {"none", "static", "trailing", "tightening"}:
         raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
+    atr_stop_atr_basis = (inp.atr_stop_atr_basis or "latest").strip().lower()
+    if atr_stop_atr_basis not in {"entry", "latest"}:
+        raise ValueError("atr_stop_atr_basis must be one of: entry|latest")
+    atr_stop_reentry_mode = (getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter").strip().lower()
+    if atr_stop_reentry_mode not in {"reenter", "wait_next_entry"}:
+        raise ValueError("atr_stop_reentry_mode must be one of: reenter|wait_next_entry")
     if int(inp.atr_stop_window) < 2:
         raise ValueError("atr_stop_window must be >= 2")
     if not np.isfinite(float(inp.atr_stop_n)) or float(inp.atr_stop_n) <= 0:
@@ -2091,7 +2099,7 @@ def backtest_rotation(
         }
 
         # Universal ATR stop-loss metadata.
-        atr_stop: dict[str, Any] = {"mode": atr_stop_mode}
+        atr_stop: dict[str, Any] = {"mode": atr_stop_mode, "atr_stop_atr_basis": atr_stop_atr_basis}
         stop_trigger_date: str | None = None
         stop_triggered = False
 
@@ -2878,6 +2886,7 @@ def backtest_rotation(
             atr_stop["atr_stop_m"] = float(inp.atr_stop_m)
             atr_stop["atr_stop_min_distance_mult"] = float(inp.atr_stop_m)
             atr_stop["atr_stop_mode"] = str(atr_stop_mode)
+            atr_stop["atr_stop_atr_basis"] = str(atr_stop_atr_basis)
 
         # In-segment ATR stop-loss check (after weights are written for the segment).
         # We approximate execution as: hold through close on trigger day, then go cash from next trading day.
@@ -2948,10 +2957,10 @@ def backtest_rotation(
                         pc = float(prev_close.get(c, px))
                         should_update = bool((px > ep) or (px > pc))
                     else:
-                        # tightening distance reduction
+                        # Tightening ATR basis: entry or latest, based on atr_stop_atr_basis.
                         ep = float(entry_px.get(c, px))
-                        ea = float(entry_atr.get(c, a))
-                        gain_units = (px - ep) / max(ea, 1e-12)
+                        a_ref = float(entry_atr.get(c, a)) if atr_stop_atr_basis == "entry" else float(a)
+                        gain_units = (px - ep) / max(a_ref, 1e-12)
                         steps = int(np.floor(gain_units / float(atr_m))) if np.isfinite(gain_units) else 0
                         dist_mult = float(atr_n) - float(steps) * float(atr_m)
                         dist_mult = float(max(float(atr_min), dist_mult))
@@ -2959,7 +2968,8 @@ def backtest_rotation(
                         should_update = bool((px > ep) or (px > pc))
 
                     if should_update:
-                        cand = px - dist_mult * a
+                        a_ref = float(entry_atr.get(c, a)) if atr_stop_atr_basis == "entry" else float(a)
+                        cand = px - dist_mult * a_ref
                         # stop never decreases
                         stop[c] = float(max(float(stop[c]), float(cand)))
                     prev_close[c] = px
@@ -3669,6 +3679,8 @@ def backtest_rotation(
         "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d")},
         "score_method": (inp.score_method or "raw_mom"),
         "atr_stop_mode": atr_stop_mode,
+        "atr_stop_atr_basis": atr_stop_atr_basis,
+        "atr_stop_reentry_mode": atr_stop_reentry_mode,
         "codes": codes,
         "benchmark_codes": bench_codes,
         "price_basis": {

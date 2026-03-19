@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>基准分析（等权组合）</title>
+    <title>基准分析（持有策略）</title>
     <script>
       (function () {
         const key = `theme:${location.pathname}`;
@@ -68,6 +68,8 @@
       .reportCard .reportSectionTitle { margin-top: 6px; font-weight: 600; color: var(--text); }
       .reportCard .reportList { margin: 6px 0 0 18px; }
       .reportCard .reportNote { margin-top: 6px; color: var(--muted); font-size: 12px; }
+      .mixStrategyRow.dragging { opacity: 0.55; background: rgba(148, 163, 184, 0.12); }
+      .mixStrategyRow.drag-over { outline: 2px dashed var(--link); background: rgba(125, 211, 252, 0.18); }
       .abCol { min-width: 520px; flex: 1; min-inline-size: 0; }
       .abWideTableWrap { width: 100%; overflow-x: auto; }
       [style*="color:#444"] { color: var(--muted) !important; }
@@ -103,9 +105,9 @@
       }
     </style>
   </head>
-  <body>
-    <h2>基准分析：等权持有组合</h2>
-    <div class="muted">用于动量轮动研究的基准数据：标的净值、等权组合净值、绩效指标与滚动统计。</div>
+  <body id="pageTop">
+    <h2 id="section-hold">基准分析：持有策略</h2>
+    <div class="muted">用于动量轮动研究的基准数据：标的净值、持有策略净值、绩效指标与滚动统计。</div>
     <div class="muted" style="margin-top: 6px;">
       <a href="/">返回候选池</a>
       <span style="margin: 0 6px;">|</span>
@@ -113,6 +115,19 @@
       <span style="margin: 0 6px;">|</span>
       <a href="/research/nasdaq-vix">研究：纳指ETF × VIX（Cboe）</a>
     </div>
+    <div class="panel no-print" style="margin-top:10px;">
+      <div class="muted">
+        快捷跳转：
+        <a href="#section-hold">持有策略</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-rotation">轮动策略</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-trend">趋势策略</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-mix">多策略组合</a>
+      </div>
+    </div>
+    <div class="muted no-print" style="margin-top:6px;"><a href="#pageTop">返回顶部</a></div>
 
     <div class="panel row no-print">
       <div>
@@ -142,7 +157,7 @@
         </div>
       </div>
       <div>
-        <label>等权再平衡周期</label>
+        <label>持有策略再平衡周期</label>
         <select id="rebalance">
           <option value="daily">日度</option>
           <option value="weekly" selected>周度（默认）</option>
@@ -159,18 +174,24 @@
           <option value="close" selected>收盘价</option>
           <option value="oc2">OC均价</option>
         </select>
-        <span class="muted" style="margin-left:4px;">等权/风平组合执行价</span>
+        <span class="muted" style="margin-left:4px;">持有策略执行价</span>
       </div>
       <div>
-        <label>组合模式</label>
+        <label>持有策略仓位比例</label>
         <select id="baselineMode">
           <option value="EW" selected>等权（EW）</option>
           <option value="RP">风险平价（RP，inverse-vol）</option>
+          <option value="CUSTOM">自定义</option>
         </select>
       </div>
       <div>
-        <label>RP 波动率窗口（交易日）</label>
+        <label>风险平价波动率窗口（交易日）</label>
         <input id="baselineRpWin" value="60" />
+      </div>
+      <div id="baselineCustomWeightsWrap" style="min-width: 320px; display:none;">
+        <label>自定义仓位（每行：代码=比例，支持 %）</label>
+        <textarea id="baselineCustomWeights" rows="4" placeholder="510300=40%\n513100=35%\n518880=15%"></textarea>
+        <div class="muted">若总和不足 100%，剩余自动计为现金仓位。</div>
       </div>
       <div>
         <label>基准标的（用于信息比率）</label>
@@ -199,10 +220,38 @@
     </div>
 
     <div class="panel no-print">
+      <div class="row" style="margin-bottom:10px; gap:10px; align-items:end;">
+        <div>
+          <label>编辑候选池分组</label>
+          <select id="groupEditorSelect" style="min-width:180px;"></select>
+        </div>
+        <div>
+          <label>分组名称</label>
+          <input id="groupNameInput" placeholder="例如：防御组/进攻组" style="min-width:180px;" />
+        </div>
+        <div class="row" style="gap:8px;">
+          <button id="groupSaveBtn">保存为分组</button>
+          <button id="groupDeleteBtn">删除分组</button>
+        </div>
+      </div>
+      <div class="row" style="margin-bottom:10px; gap:10px; align-items:end;">
+        <div>
+          <label>持有策略分组</label>
+          <select id="baselineGroupPreset" style="min-width:180px;"></select>
+        </div>
+        <div>
+          <label>轮动策略分组</label>
+          <select id="rotationGroupPreset" style="min-width:180px;"></select>
+        </div>
+        <div>
+          <label>趋势策略分组</label>
+          <select id="trendGroupPreset" style="min-width:180px;"></select>
+        </div>
+      </div>
       <div class="row">
         <div class="code-list" id="codes"></div>
         <div class="muted">
-          勾选候选池中的标的组成组合。图例可点击隐藏/显示曲线。
+          勾选候选池中的标的组成当前编辑分组。持有/轮动/趋势可分别选择不同分组进行回测。
           <div style="margin-top:8px">
             <button id="selAll">全选</button>
             <button id="selNone">取消全选</button>
@@ -222,13 +271,13 @@
     <div class="panel">
       <div class="two" style="grid-template-columns: 1.05fr 1.95fr; align-items:start;">
         <div>
-          <h3>等权组合指标</h3>
+          <h3>持有策略指标</h3>
           <table id="metrics"></table>
           <div id="baselineReport" class="reportCard"></div>
         </div>
 
         <div>
-          <h3>周期收益率（等权组合）</h3>
+          <h3>周期收益率（持有策略）</h3>
 
           <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start;">
             <div>
@@ -309,27 +358,28 @@
 
     <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start;">
       <div>
-        <h3>收益贡献（等权组合，全区间） <button class="helpBtn" data-metric="ew_return_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
+        <h3>收益贡献（持有策略，全区间） <button class="helpBtn" data-metric="ew_return_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
         <table id="ewReturnContrib"></table>
       </div>
       <div>
-        <h3>风险贡献（等权组合，全区间） <button class="helpBtn" data-metric="ew_risk_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
+        <h3>风险贡献（持有策略，全区间） <button class="helpBtn" data-metric="ew_risk_contrib" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></h3>
         <table id="ewRiskContrib"></table>
       </div>
       <div>
-        <h3>风险收益比（等权组合，全区间）</h3>
+        <h3>风险收益比（持有策略，全区间）</h3>
         <table id="ewRiskReturnRatio"></table>
       </div>
     </div>
 
     <div class="panel">
-      <h3>等权/风平组合：日度收益率分布统计</h3>
+      <h3>持有策略：日度收益率分布统计</h3>
       <div class="row no-print" style="margin-top:8px; align-items:end;">
         <div>
           <label>组合</label>
           <select id="baselineDailyRetSeries" style="min-width:180px;">
             <option value="EW" selected>等权（EW）</option>
             <option value="RP">风险平价（RP）</option>
+            <option value="CUSTOM">自定义</option>
           </select>
         </div>
         <div>
@@ -675,8 +725,9 @@
       <div id="mcEwReport" class="reportCard"></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="section-rotation">
       <h2 style="margin-top: 8px">动量轮动回测</h2>
+      <div class="muted no-print" style="margin-top:4px;"><a href="#pageTop">返回顶部</a></div>
       <div class="muted">
         动量信号与风控过滤：qfq（前复权）；交易价格：none（不复权）。
         轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。
@@ -828,6 +879,13 @@
                 <option value="static">静态</option>
                 <option value="trailing">动态跟随</option>
                 <option value="tightening">动态收紧</option>
+              </select>
+            </div>
+            <div>
+              <label>ATR基准</label>
+              <select id="rotAtrStopBasis" style="min-width:120px;">
+                <option value="latest" selected>最新</option>
+                <option value="entry">入场</option>
               </select>
             </div>
             <div>
@@ -2165,8 +2223,9 @@
       </div>
     </div>
 
-    <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
+    <div class="panel no-print" id="section-trend" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
       <h3 style="margin: 0 0 6px 0;">趋势策略研究（单标的/组合）</h3>
+      <div class="muted no-print" style="margin-top:4px;"><a href="#pageTop">返回顶部</a></div>
       <div class="row" style="align-items:end;">
         <div>
           <label>模式</label>
@@ -2199,6 +2258,22 @@
           <select id="trendSizing" style="min-width:140px;">
             <option value="equal" selected>等权</option>
             <option value="vol_target">目标波动率</option>
+            <option value="fixed_ratio">固定比例</option>
+          </select>
+        </div>
+        <div>
+          <label>固定比例</label>
+          <input id="trendFixedPosRatio" value="0.04" />
+        </div>
+        <div>
+          <label>持仓标的上限</label>
+          <input id="trendFixedMaxHoldings" value="10" />
+        </div>
+        <div>
+          <label>超额策略</label>
+          <select id="trendFixedOvercapPolicy" style="min-width:120px;">
+            <option value="skip" selected>跳过</option>
+            <option value="extend">扩展</option>
           </select>
         </div>
         <div>
@@ -2259,6 +2334,20 @@
             <option value="tightening">动态收紧</option>
           </select>
         </div>
+        <div>
+          <label>ATR基准</label>
+          <select id="trendAtrStopBasis" style="min-width:120px;">
+            <option value="latest" selected>最新</option>
+            <option value="entry">入场</option>
+          </select>
+        </div>
+        <div>
+          <label>止损后重入</label>
+          <select id="trendAtrStopReentry" style="min-width:150px;">
+            <option value="reenter" selected>允许重返</option>
+            <option value="wait_next_entry">等待下一次入场</option>
+          </select>
+        </div>
         <div><label>ATR周期</label><input id="trendAtrStopWin" value="14" /></div>
         <div><label>止损倍数 n</label><input id="trendAtrStopN" value="2.0" /></div>
         <div><label>收紧步长 m</label><input id="trendAtrStopM" value="0.5" /></div>
@@ -2301,13 +2390,89 @@
       </div>
       <div class="panel two" style="margin-top:10px;">
         <div>
-          <h3>周期收益率（趋势）</h3>
-          <table id="trendPeriodTable"></table>
+          <h3>滚动收益率（趋势）</h3>
+          <div id="trendRollingReturns" style="width:100%; height:300px;"></div>
         </div>
         <div>
-          <h3>滚动收益率 / 回撤（趋势）</h3>
-          <div id="trendRollingReturns" style="width:100%; height:300px;"></div>
-          <div id="trendRollingDD" style="width:100%; height:300px; margin-top:8px;"></div>
+          <h3>滚动回撤（趋势）</h3>
+          <div id="trendRollingDD" style="width:100%; height:300px;"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div>
+          <h3>趋势策略周期收益率</h3>
+          <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:8px">
+            <div>
+              <div class="muted">周度</div>
+              <div class="row" style="gap:8px; margin:6px 0;">
+                <select id="trendWeeklySortKey" style="min-width:120px;">
+                  <option value="date">日期</option>
+                  <option value="return">收益</option>
+                </select>
+                <select id="trendWeeklySortDir" style="min-width:120px;">
+                  <option value="desc">递减</option>
+                  <option value="asc">递增</option>
+                </select>
+                <button id="trendWeeklyPrev">上一页</button>
+                <button id="trendWeeklyNext">下一页</button>
+                <span class="muted" id="trendWeeklyPage"></span>
+              </div>
+              <table id="trendWeekly"></table>
+            </div>
+            <div>
+              <div class="muted">月度</div>
+              <div class="row" style="gap:8px; margin:6px 0;">
+                <select id="trendMonthlySortKey" style="min-width:120px;">
+                  <option value="date">日期</option>
+                  <option value="return">收益</option>
+                </select>
+                <select id="trendMonthlySortDir" style="min-width:120px;">
+                  <option value="desc">递减</option>
+                  <option value="asc">递增</option>
+                </select>
+                <button id="trendMonthlyPrev">上一页</button>
+                <button id="trendMonthlyNext">下一页</button>
+                <span class="muted" id="trendMonthlyPage"></span>
+              </div>
+              <table id="trendMonthly"></table>
+            </div>
+          </div>
+          <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:12px">
+            <div>
+              <div class="muted">季度</div>
+              <div class="row" style="gap:8px; margin:6px 0;">
+                <select id="trendQuarterlySortKey" style="min-width:120px;">
+                  <option value="date">日期</option>
+                  <option value="return">收益</option>
+                </select>
+                <select id="trendQuarterlySortDir" style="min-width:120px;">
+                  <option value="desc">递减</option>
+                  <option value="asc">递增</option>
+                </select>
+                <button id="trendQuarterlyPrev">上一页</button>
+                <button id="trendQuarterlyNext">下一页</button>
+                <span class="muted" id="trendQuarterlyPage"></span>
+              </div>
+              <table id="trendQuarterly"></table>
+            </div>
+            <div>
+              <div class="muted">年度</div>
+              <div class="row" style="gap:8px; margin:6px 0;">
+                <select id="trendYearlySortKey" style="min-width:120px;">
+                  <option value="date">日期</option>
+                  <option value="return">收益</option>
+                </select>
+                <select id="trendYearlySortDir" style="min-width:120px;">
+                  <option value="desc">递减</option>
+                  <option value="asc">递增</option>
+                </select>
+                <button id="trendYearlyPrev">上一页</button>
+                <button id="trendYearlyNext">下一页</button>
+                <span class="muted" id="trendYearlyPage"></span>
+              </div>
+              <table id="trendYearly"></table>
+            </div>
+          </div>
         </div>
       </div>
       <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:10px;">
@@ -2320,6 +2485,28 @@
           <div id="trendNextPlanDate" class="muted" style="margin-bottom:6px;"></div>
           <table id="trendNextBuyTable"></table>
           <table id="trendNextSellTable" style="margin-top:8px;"></table>
+          <details id="trendNextTraceWrap" style="margin-top:8px;">
+            <summary><b>详细计算过程（Debug Trace）</b></summary>
+            <div class="row no-print" style="margin-top:6px; align-items:end;">
+              <div>
+                <label>显示最近N条</label>
+                <select id="trendTraceN" style="min-width:100px;">
+                  <option value="1">1</option>
+                  <option value="5">5</option>
+                  <option value="10">10</option>
+                  <option value="20" selected>20</option>
+                </select>
+              </div>
+              <div>
+                <label>组合视图</label>
+                <select id="trendTraceView" style="min-width:130px;">
+                  <option value="by_date" selected>按日期</option>
+                  <option value="by_asset">按标的</option>
+                </select>
+              </div>
+            </div>
+            <div id="trendNextPlanTrace" class="muted" style="margin-top:6px;"></div>
+          </details>
         </div>
       </div>
       <table id="trendGroupTable" style="margin-top:10px;"></table>
@@ -2353,20 +2540,56 @@
       <div id="trendOosBootstrapResult" class="reportCard" style="margin-top:10px; white-space:pre-wrap;"></div>
     </div>
 
-    <div class="panel no-print" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
-      <h3 style="margin: 0 0 6px 0;">三策略组合研究（持有+轮动+趋势）</h3>
+    <div class="panel no-print" id="section-mix" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
+      <h3 style="margin: 0 0 6px 0;">固定策略库与多策略组合</h3>
+      <div class="muted no-print" style="margin-top:4px;"><a href="#pageTop">返回顶部</a></div>
       <div class="row" style="align-items:end;">
-        <div><label>持有策略权重</label><input id="mixWBaseline" value="0.3333" /></div>
-        <div><label>轮动策略权重</label><input id="mixWRotation" value="0.3333" /></div>
-        <div><label>趋势策略权重</label><input id="mixWTrend" value="0.3334" /></div>
+        <div>
+          <label>策略类型</label>
+          <select id="fixedStrategyType">
+            <option value="baseline" selected>持有策略</option>
+            <option value="rotation">轮动策略</option>
+            <option value="trend">趋势策略</option>
+          </select>
+        </div>
+        <div><label>策略名称</label><input id="fixedStrategyName" placeholder="例如：防御持有A / 趋势突破1" /></div>
+        <button id="saveFixedStrategy">保存当前回测为固定策略</button>
+        <div>
+          <label>已保存策略</label>
+          <select id="fixedStrategyLoadSelect" style="min-width:260px;"></select>
+        </div>
+        <button id="loadFixedStrategy">手动加载</button>
+        <button id="deleteFixedStrategy">删除</button>
+      </div>
+      <div class="muted" style="margin-top:8px;">
+        固定策略会保存：策略参数、候选池分组选择、最近一次回测结果（用于组合分析）。
+      </div>
+      <table id="fixedStrategyTable" style="margin-top:8px;"></table>
+      <h3 style="margin: 12px 0 6px 0;">任意策略组合研究</h3>
+      <div class="row" style="align-items:end;">
+        <div>
+          <label>组合权重模式</label>
+          <select id="mixWeightMode">
+            <option value="equal" selected>等权</option>
+            <option value="risk_parity">风险平价</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+        <div>
+          <label>添加策略到组合</label>
+          <select id="mixStrategyAddSelect" style="min-width:260px;"></select>
+        </div>
+        <button id="mixAddStrategy">添加</button>
+        <button id="mixClearStrategies">清空组合</button>
         <div><label>交易账户金额(元)</label><input id="mixAccountAmount" placeholder="可空，例如 1000000" /></div>
         <button id="mixSetEqualWeights">等权</button>
-        <button id="mixSetInvVolWeights">按波动倒数</button>
+        <button id="mixSetInvVolWeights">风险平价</button>
         <div><label>滚动窗口(交易日)</label><input id="mixRollWin" value="60" /></div>
         <button id="runStrategyMix">生成组合分析</button>
       </div>
+      <table id="mixStrategyListTable" style="margin-top:8px;"></table>
       <div class="muted" style="margin-top:8px;">
-        持有、轮动、趋势三条策略均使用<strong>候选池中勾选的标的</strong>（非全部标的）。使用最近一次“持有/轮动/趋势”回测结果，在共同区间按权重组合三条策略收益并分析相关性与绩效。
+        组合支持任意已保存固定策略。可手动加载策略到对应模块，也可直接添加到组合中分析。
       </div>
       <div id="strategyMixChart" style="width:100%; height:420px; margin-top:10px;"></div>
       <div class="panel two" style="margin-top:10px;">
@@ -2592,9 +2815,212 @@
 
       let pool = [];
       const selected = new Set();
+      const DEFAULT_GROUP_NAME = "默认分组";
+      let candidateGroups = {};
+      let activeGroupName = DEFAULT_GROUP_NAME;
+
+      function _uniq(arr) { return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean))); }
+      function _poolCodeSet() { return new Set((pool || []).map((x) => String((x && x.code) || "").trim()).filter(Boolean)); }
+      function _validCodes(codes) {
+        const valid = _poolCodeSet();
+        return _uniq(codes).filter((c) => valid.has(c));
+      }
+      function _sanitizeGroupName(name) {
+        const n = String(name || "").trim();
+        if (!n) return "";
+        return n.slice(0, 40);
+      }
+      function _saveCandidateGroups() {
+        _settingsSave(SETTINGS_KEYS.candidateGroups, {
+          groups: candidateGroups,
+          active_group: activeGroupName,
+        });
+      }
+      function _ensureCandidateGroups() {
+        if (!candidateGroups || typeof candidateGroups !== "object") candidateGroups = {};
+        const names = Object.keys(candidateGroups);
+        if (names.length === 0) {
+          candidateGroups[DEFAULT_GROUP_NAME] = [];
+        }
+        for (const k of Object.keys(candidateGroups)) {
+          candidateGroups[k] = _validCodes(candidateGroups[k]);
+          if (!k.trim()) delete candidateGroups[k];
+        }
+        if (!candidateGroups[DEFAULT_GROUP_NAME]) candidateGroups[DEFAULT_GROUP_NAME] = [];
+        if (!candidateGroups[activeGroupName]) activeGroupName = Object.keys(candidateGroups)[0] || DEFAULT_GROUP_NAME;
+      }
+      function _getGroupCodes(name) {
+        const nm = String(name || "").trim();
+        if (!nm || !candidateGroups[nm]) return _validCodes(Array.from(selected));
+        return _validCodes(candidateGroups[nm]);
+      }
+      function _setSelectedFromGroup(name) {
+        const codes = _getGroupCodes(name);
+        selected.clear();
+        for (const c of codes) selected.add(c);
+      }
+      function _upsertCurrentGroupFromSelected() {
+        _ensureCandidateGroups();
+        candidateGroups[activeGroupName] = _validCodes(Array.from(selected));
+        _saveCandidateGroups();
+      }
+      function _codesForStrategy(kind) {
+        const idByKind = {
+          baseline: "baselineGroupPreset",
+          rotation: "rotationGroupPreset",
+          trend: "trendGroupPreset",
+        };
+        const selId = idByKind[String(kind || "").trim()];
+        const pick = selId && $(selId) ? String($(selId).value || "").trim() : "";
+        const codes = _getGroupCodes(pick || activeGroupName);
+        return codes;
+      }
+      function _strategyTypeLabel(tp) {
+        const t = String(tp || "").trim().toLowerCase();
+        if (t === "baseline") return "持有";
+        if (t === "rotation") return "轮动";
+        if (t === "trend") return "趋势";
+        return t || "-";
+      }
+      function _saveFixedStrategies() {
+        _settingsSave(SETTINGS_KEYS.fixedStrategies, { items: fixedStrategies });
+      }
+      function _saveMixSelection() {
+        _settingsSave(SETTINGS_KEYS.mixSelection, {
+          strategy_ids: mixSelectedStrategyIds,
+          weight_mode: (($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal"),
+        });
+      }
+      function _findFixedStrategy(id) {
+        const sid = String(id || "").trim();
+        return fixedStrategies.find((x) => String(x && x.id) === sid) || null;
+      }
+      function _sanitizeFixedStrategy(item) {
+        if (!item || typeof item !== "object") return null;
+        const id = String(item.id || "").trim();
+        const name = String(item.name || "").trim();
+        const type = String(item.type || "").trim().toLowerCase();
+        if (!id || !name || !["baseline", "rotation", "trend"].includes(type)) return null;
+        return {
+          id,
+          name: name.slice(0, 60),
+          type,
+          group_name: String(item.group_name || "").trim(),
+          fields: (item.fields && typeof item.fields === "object") ? item.fields : {},
+          payload: (item.payload && typeof item.payload === "object") ? item.payload : null,
+          result: (item.result && typeof item.result === "object") ? item.result : null,
+          next_plan: (item.next_plan && typeof item.next_plan === "object") ? item.next_plan : null,
+          saved_at: String(item.saved_at || ""),
+        };
+      }
+      function _renderFixedStrategyControls() {
+        const sel = $("fixedStrategyLoadSelect");
+        const addSel = $("mixStrategyAddSelect");
+        const table = $("fixedStrategyTable");
+        const items = (fixedStrategies || []).slice();
+        const fillSelect = (el, includeBlank) => {
+          if (!el) return;
+          const prev = String(el.value || "");
+          el.innerHTML = "";
+          if (includeBlank) {
+            const o0 = document.createElement("option");
+            o0.value = "";
+            o0.textContent = "(请选择)";
+            el.appendChild(o0);
+          }
+          for (const s of items) {
+            const opt = document.createElement("option");
+            opt.value = String(s.id);
+            const g = s.group_name ? ` | 分组:${s.group_name}` : "";
+            opt.textContent = `${s.name} [${_strategyTypeLabel(s.type)}]${g}`;
+            el.appendChild(opt);
+          }
+          if (prev && Array.from(el.options).some((o) => String(o.value) === prev)) el.value = prev;
+        };
+        fillSelect(sel, true);
+        fillSelect(addSel, true);
+        if (table) {
+          const rows = items.map((s) => {
+            const dt = s.saved_at ? String(s.saved_at).replace("T", " ").slice(0, 19) : "-";
+            return (
+              `<tr>` +
+              `<td>${esc(s.name)}</td>` +
+              `<td>${esc(_strategyTypeLabel(s.type))}</td>` +
+              `<td>${esc(s.group_name || "-")}</td>` +
+              `<td>${esc(dt)}</td>` +
+              `<td><button class="fixedCloneStrategyBtn" data-strategy-id="${esc(String(s.id))}">克隆</button></td>` +
+              `</tr>`
+            );
+          });
+          table.innerHTML = `<tr><th>名称</th><th>类型</th><th>候选分组</th><th>保存时间</th><th>操作</th></tr>${rows.length ? rows.join("") : `<tr><td colspan="5" class="muted">暂无固定策略</td></tr>`}`;
+          table.querySelectorAll(".fixedCloneStrategyBtn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const id = String(btn.getAttribute("data-strategy-id") || "").trim();
+              const src = _findFixedStrategy(id);
+              if (!src) return;
+              const cloned = _sanitizeFixedStrategy({
+                ...src,
+                id: `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+                name: `${String(src.name || "").slice(0, 50)}_副本`,
+                saved_at: new Date().toISOString(),
+                fields: JSON.parse(JSON.stringify(src.fields || {})),
+                payload: src.payload ? JSON.parse(JSON.stringify(src.payload)) : null,
+                result: src.result ? JSON.parse(JSON.stringify(src.result)) : null,
+                next_plan: src.next_plan ? JSON.parse(JSON.stringify(src.next_plan)) : null,
+              });
+              if (!cloned) return;
+              fixedStrategies.push(cloned);
+              _saveFixedStrategies();
+              _renderFixedStrategyControls();
+              setMsg(`已克隆固定策略：${src.name}`);
+            });
+          });
+        }
+      }
+      function _readFixedStrategyFields(type) {
+        const t = String(type || "").trim().toLowerCase();
+        if (t === "baseline") {
+          const ids = ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "baselineCustomWeights", "benchmark", "baselineGroupPreset", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse"];
+          return _readFields(ids);
+        }
+        if (t === "rotation") {
+          const ids = ["start", "end", "rotationGroupPreset", ...SETTINGS_FIELD_IDS.rotation];
+          return _readFields(ids);
+        }
+        if (t === "trend") {
+          const ids = ["start", "end", "trendGroupPreset", ...SETTINGS_FIELD_IDS.trend];
+          return _readFields(ids);
+        }
+        return {};
+      }
+      function _applyFixedStrategyFields(type, fields) {
+        const t = String(type || "").trim().toLowerCase();
+        if (t === "baseline") {
+          const ids = ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "baselineCustomWeights", "benchmark", "baselineGroupPreset", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse"];
+          _applyFields(ids, fields || {});
+          renderBenchmarkSelect();
+          updateBaselineHoldingUi();
+          return;
+        }
+        if (t === "rotation") {
+          const ids = ["start", "end", "rotationGroupPreset", ...SETTINGS_FIELD_IDS.rotation];
+          _applyFields(ids, fields || {});
+          syncRotRebalanceAnchorUI();
+          return;
+        }
+        if (t === "trend") {
+          const ids = ["start", "end", "trendGroupPreset", ...SETTINGS_FIELD_IDS.trend];
+          _applyFields(ids, fields || {});
+          renderTrendSingleCodeSelect();
+          updateTrendStrategyParamsUi();
+        }
+      }
       const SETTINGS_NS = "research.settings.v1";
       const SETTINGS_KEYS = {
         selectedCodes: `${SETTINGS_NS}.selected_codes`,
+        candidateGroups: `${SETTINGS_NS}.candidate_groups`,
+        fixedStrategies: `${SETTINGS_NS}.fixed_strategies`,
+        mixSelection: `${SETTINGS_NS}.mix_selection`,
         global: `${SETTINGS_NS}.global`,
         dist: `${SETTINGS_NS}.dist`,
         ewCal: `${SETTINGS_NS}.ew_calendar`,
@@ -2607,22 +3033,22 @@
         sim: `${SETTINGS_NS}.sim_gbm`,
       };
       const SETTINGS_FIELD_IDS = {
-        global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "benchmark", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse", "mixAccountAmount"],
+        global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "baselineCustomWeights", "benchmark", "baselineGroupPreset", "rotationGroupPreset", "trendGroupPreset", "groupEditorSelect", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse", "mixAccountAmount", "mixWeightMode", "fixedStrategyType"],
         dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric"],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
           "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotEntryBackfill",
           "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotEntryMatchN", "rotExitMatchN",
-          "rotAtrStopMode", "rotAtrStopWin", "rotAtrStopN", "rotAtrStopM",
+          "rotAtrStopMode", "rotAtrStopBasis", "rotAtrStopWin", "rotAtrStopN", "rotAtrStopM",
           "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
           "rotFloorOn", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn",
           "rotVolIdxOn", "rotPlanAsof",
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSizing", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendSingleCode",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
-          "trendAtrStopMode", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
+          "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
           "trendHybridEntryN", "trendHybridExitM",
@@ -2650,8 +3076,15 @@
       let _persistDebounce = null;
       let _savedSelectedCodes = null;
       let _savedSelectedCodesReady = false;
+      let _savedCandidateGroups = null;
+      let _savedCandidateGroupsReady = false;
+      let _savedFixedStrategies = null;
+      let _savedFixedStrategiesReady = false;
       let _savedGlobalSettings = null;
       let _initialDefaults = null;
+      let fixedStrategies = [];
+      let mixSelectedStrategyIds = [];
+      let _groupEditorLastSynced = "";
       const _YMD_FIELD_IDS = new Set(["start", "end", "ewCalStart", "ewCalEnd", "rotCalStart", "rotCalEnd", "simStart", "simEnd", "rotPlanAsof"]);
 
       function _settingsLoad(key) {
@@ -2824,6 +3257,7 @@
       }
       function _saveSelectedCodes() {
         _settingsSave(SETTINGS_KEYS.selectedCodes, { codes: Array.from(selected) });
+        _upsertCurrentGroupFromSelected();
       }
       function _saveResearchSettingsNow() {
         _settingsSave(SETTINGS_KEYS.global, _readFields(SETTINGS_FIELD_IDS.global));
@@ -2872,7 +3306,10 @@
       }
       function _afterDefaultsApply() {
         try { syncRotRebalanceAnchorUI(); } catch { /* ignore */ }
+        try { updateBaselineHoldingUi(); } catch { /* ignore */ }
         try { updateTrendStrategyParamsUi(); } catch { /* ignore */ }
+        try { updateTrendSizingUi(); } catch { /* ignore */ }
+        try { _syncAtrStopParamsUi("rot"); } catch { /* ignore */ }
         try { _rotVolIdxUpdateUiEnabled(); } catch { /* ignore */ }
         try {
           _setTabEnabledByToggle("rotTabFloor", "rotFloorOn");
@@ -4425,6 +4862,8 @@
           cb.addEventListener("change", () => {
             const c = cb.getAttribute("data-code");
             if (cb.checked) selected.add(c); else selected.delete(c);
+            _upsertCurrentGroupFromSelected();
+            renderCandidateGroupControls();
             renderBenchmarkSelect();
             renderTrendSingleCodeSelect();
             maybeAdjustBacktestRange();
@@ -4434,10 +4873,45 @@
         });
       }
 
-      function renderBenchmarkSelect() {
+      function renderCandidateGroupControls() {
+        _ensureCandidateGroups();
+        const names = Object.keys(candidateGroups).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+        const editor = $("groupEditorSelect");
+        const bSel = $("baselineGroupPreset");
+        const rSel = $("rotationGroupPreset");
+        const tSel = $("trendGroupPreset");
+        const fill = (el, prev) => {
+          if (!el) return;
+          const old = String(prev != null ? prev : (el.value || "")).trim();
+          el.innerHTML = "";
+          for (const name of names) {
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = `${name} (${_getGroupCodes(name).length})`;
+            el.appendChild(opt);
+          }
+          if (old && names.includes(old)) el.value = old;
+          else if (names.includes(activeGroupName)) el.value = activeGroupName;
+          else if (names.length > 0) el.value = names[0];
+        };
+        const prevEditor = editor ? String(editor.value || "").trim() : "";
+        fill(editor);
+        fill(bSel);
+        fill(rSel);
+        fill(tSel);
+        const curEditor = editor ? String(editor.value || "").trim() : "";
+        if (curEditor) activeGroupName = curEditor;
+        // Only sync name input when the editor selection actually changes.
+        if ($("groupNameInput") && curEditor && (curEditor !== _groupEditorLastSynced || curEditor !== prevEditor)) {
+          $("groupNameInput").value = curEditor;
+          _groupEditorLastSynced = curEditor;
+        }
+      }
+
+      function renderBenchmarkSelect(codesOverride = null) {
         const sel = $("benchmark");
         const prev = String((sel && sel.value) || "");
-        const codes = Array.from(selected);
+        const codes = Array.isArray(codesOverride) ? _validCodes(codesOverride) : _codesForStrategy("baseline");
         sel.innerHTML = "";
         for (const c of codes) {
           const opt = document.createElement("option");
@@ -4449,11 +4923,11 @@
         else if (codes.includes("510300")) sel.value = "510300";
       }
 
-      function renderTrendSingleCodeSelect() {
+      function renderTrendSingleCodeSelect(codesOverride = null) {
         const sel = $("trendSingleCode");
         if (!sel) return;
         const prev = sel.value;
-        const codes = Array.from(selected);
+        const codes = Array.isArray(codesOverride) ? _validCodes(codesOverride) : _codesForStrategy("trend");
         sel.innerHTML = "";
         for (const c of codes) {
           const opt = document.createElement("option");
@@ -4463,6 +4937,51 @@
         }
         if (codes.includes(prev)) sel.value = prev;
         else if (codes.length > 0) sel.value = codes[0];
+      }
+
+      function _syncAtrStopParamsUi(prefix) {
+        const modeEl = $(`${prefix}AtrStopMode`);
+        const basisEl = $(`${prefix}AtrStopBasis`);
+        const reentryEl = $(`${prefix}AtrStopReentry`);
+        const winEl = $(`${prefix}AtrStopWin`);
+        const nEl = $(`${prefix}AtrStopN`);
+        const mEl = $(`${prefix}AtrStopM`);
+        if (!modeEl) return;
+        const mode = String(modeEl.value || "none").trim().toLowerCase();
+        const isStatic = (mode === "static");
+        const isDynamic = (mode === "trailing" || mode === "tightening");
+        const canEditWinN = isStatic || isDynamic;
+        const canEditAll = isDynamic;
+        const setEnabled = (el, on) => {
+          if (!el) return;
+          el.disabled = !on;
+          el.style.opacity = on ? "1" : "0.55";
+        };
+        setEnabled(winEl, canEditWinN);
+        setEnabled(nEl, canEditWinN);
+        setEnabled(reentryEl, canEditWinN);
+        setEnabled(basisEl, canEditAll);
+        setEnabled(mEl, canEditAll);
+      }
+      function updateTrendSizingUi() {
+        const mode = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
+        const sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
+        const isFixed = (mode === "portfolio" && sizing === "fixed_ratio");
+        const ratioEl = $("trendFixedPosRatio");
+        const policyEl = $("trendFixedOvercapPolicy");
+        const maxHoldEl = $("trendFixedMaxHoldings");
+        if (ratioEl) {
+          ratioEl.disabled = !isFixed;
+          ratioEl.style.opacity = isFixed ? "1" : "0.55";
+        }
+        if (policyEl) {
+          policyEl.disabled = !isFixed;
+          policyEl.style.opacity = isFixed ? "1" : "0.55";
+        }
+        if (maxHoldEl) {
+          maxHoldEl.disabled = !isFixed;
+          maxHoldEl.style.opacity = isFixed ? "1" : "0.55";
+        }
       }
 
       function updateTrendStrategyParamsUi() {
@@ -4492,12 +5011,16 @@
           "trendHybridEntryN",
           "trendHybridExitM",
           "trendAtrStopMode",
+          "trendAtrStopBasis",
+          "trendAtrStopReentry",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
         ];
         const alwaysEnabledIds = [
           "trendAtrStopMode",
+          "trendAtrStopBasis",
+          "trendAtrStopReentry",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
@@ -4537,6 +5060,7 @@
           el.disabled = !on;
           el.style.opacity = on ? "1" : "0.55";
         }
+        _syncAtrStopParamsUi("trend");
 
         const stratDesc = {
           ma_filter: "均线过滤：价格在均线之上持有，否则空仓；均线类型可选 SMA 或 EMA。",
@@ -4585,6 +5109,8 @@
           trendHybridEntryN: "混合策略入场阈值 n：当天至少 n 个子策略触发入场信号才入场。",
           trendHybridExitM: "混合策略离场阈值 m：当天至少 m 个子策略触发离场信号才离场。",
           trendAtrStopMode: "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。",
+          trendAtrStopBasis: "ATR基准：动态跟随/动态收紧时，按入场ATR或最新ATR计算止损距离与收紧步长。",
+          trendAtrStopReentry: "止损后重入：允许重返=只要基础信号为持有即可重入；等待下一次入场=必须等基础信号再次出现入场事件。",
           trendAtrStopWin: "ATR周期：用于止损距离计算的ATR窗口。",
           trendAtrStopN: "止损倍数n：基础止损距离为 n*ATR。",
           trendAtrStopM: "收紧步长m：动态收紧模式下每上涨 m*ATR 收紧一次，且需 n>m。",
@@ -4631,16 +5157,30 @@
 
         pool = data;
         selected.clear();
-        if (_savedSelectedCodesReady && Array.isArray(_savedSelectedCodes)) {
-          const valid = new Set(pool.map((x) => String(x.code)));
-          for (const c of _savedSelectedCodes) {
-            const code = String(c || "").trim();
-            if (valid.has(code)) selected.add(code);
+        if (_savedCandidateGroupsReady && _savedCandidateGroups && typeof _savedCandidateGroups === "object") {
+          const g = (_savedCandidateGroups.groups && typeof _savedCandidateGroups.groups === "object")
+            ? _savedCandidateGroups.groups
+            : {};
+          candidateGroups = {};
+          for (const [k, vv] of Object.entries(g)) {
+            const name = _sanitizeGroupName(k);
+            if (!name) continue;
+            candidateGroups[name] = _validCodes(Array.isArray(vv) ? vv : []);
           }
+          activeGroupName = _sanitizeGroupName(_savedCandidateGroups.active_group || "") || DEFAULT_GROUP_NAME;
         } else {
-          // default select all
-          for (const it of pool) selected.add(it.code);
+          candidateGroups = {};
+          if (_savedSelectedCodesReady && Array.isArray(_savedSelectedCodes)) {
+            candidateGroups[DEFAULT_GROUP_NAME] = _validCodes(_savedSelectedCodes);
+          } else {
+            candidateGroups[DEFAULT_GROUP_NAME] = _validCodes(pool.map((it) => it.code));
+          }
+          activeGroupName = DEFAULT_GROUP_NAME;
         }
+        _ensureCandidateGroups();
+        _groupEditorLastSynced = activeGroupName;
+        _setSelectedFromGroup(activeGroupName);
+        renderCandidateGroupControls();
         renderCodeList();
         setMsg(`候选池已加载：${pool.length} 个标的`);
         renderBenchmarkSelect();
@@ -4995,11 +5535,138 @@
         buyEl.innerHTML = `<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th></tr>${buyRows.length ? buyRows.join("") : `<tr><td colspan="3" class="muted">无买入计划</td></tr>`}`;
         sellEl.innerHTML = `<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th></tr>${sellRows.length ? sellRows.join("") : `<tr><td colspan="3" class="muted">无卖出计划</td></tr>`}`;
       }
+      function _renderTrendNextPlanTrace(data, mode) {
+        const wrapEl = $("trendNextTraceWrap");
+        const boxEl = $("trendNextPlanTrace");
+        if (!wrapEl || !boxEl) return;
+        const nSel = $("trendTraceN");
+        const viewSel = $("trendTraceView");
+        const nVal = Number((nSel && nSel.value) ? nSel.value : "20");
+        const traceN = [1, 5, 10, 20].includes(nVal) ? nVal : 20;
+        const isPortfolio = String(mode || "single") === "portfolio";
+        if (viewSel) {
+          viewSel.disabled = !isPortfolio;
+          viewSel.style.opacity = isPortfolio ? "1" : "0.55";
+        }
+        const traceView = isPortfolio
+          ? ((viewSel && viewSel.value) ? String(viewSel.value) : "by_date")
+          : "single";
+        const np = (((data || {}).next_plan || {}));
+        const tr = ((np && np.trace) || {});
+        const atr = ((tr && tr.atr_stop) || {});
+        const rows = Array.isArray(atr.trace_last_rows) ? atr.trace_last_rows : [];
+        const _eventLabel = (x) => {
+          const v = String(x || "").trim().toLowerCase();
+          if (v === "entry") return "入场";
+          if (v === "exit") return "出场";
+          return "-";
+        };
+        const _reasonLabel = (x) => {
+          const v = String(x || "").trim().toLowerCase();
+          if (v === "base_entry_signal") return "基础信号入场";
+          if (v === "stop_reentry") return "止损后重返";
+          if (v === "base_exit_signal") return "基础信号出场";
+          if (v === "atr_stop") return "ATR止损出场";
+          return "-";
+        };
+        let traceHtml = "";
+        if (!isPortfolio) {
+          const shortRows = rows.slice(-traceN);
+          const rowHtml = shortRows.length
+            ? shortRows.map((r) => `<tr>
+                <td>${esc(r.date || "-")}</td>
+                <td>${esc(_eventLabel(r.event_type))}</td>
+                <td>${esc(_reasonLabel(r.event_reason))}</td>
+                <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
+                <td>${r.base_entry_event ? "是" : "否"}</td>
+                <td>${r.stop_triggered ? "是" : "否"}</td>
+                <td>${fmtNum(r.stop_before)}</td>
+                <td>${fmtNum(r.stop_after)}</td>
+                <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
+                <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
+              </tr>`).join("")
+            : `<tr><td colspan="10" class="muted">无可用 trace 数据</td></tr>`;
+          traceHtml =
+            `<div style="margin-top:8px;"><b>最近决策轨迹（近${shortRows.length}条）</b></div>` +
+            `<table style="margin-top:4px;"><tr><th>日期</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>触发前止损价</th><th>触发后止损价</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+        } else {
+          const byAsset = ((((data || {}).risk_controls || {}).atr_stop || {}).by_asset || {});
+          if (traceView === "by_asset") {
+            const codes = Object.keys(byAsset).sort();
+            const blocks = codes.map((code) => {
+              const oneRows = Array.isArray(((byAsset[code] || {}).trace_last_rows)) ? (byAsset[code] || {}).trace_last_rows : [];
+              const shortRows = oneRows.slice(-traceN);
+              const rowHtml = shortRows.length
+                ? shortRows.map((r) => `<tr>
+                    <td>${esc(r.date || "-")}</td>
+                    <td>${esc(_eventLabel(r.event_type))}</td>
+                    <td>${esc(_reasonLabel(r.event_reason))}</td>
+                    <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
+                    <td>${r.base_entry_event ? "是" : "否"}</td>
+                    <td>${r.stop_triggered ? "是" : "否"}</td>
+                    <td>${fmtNum(r.stop_before)}</td>
+                    <td>${fmtNum(r.stop_after)}</td>
+                    <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
+                    <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
+                  </tr>`).join("")
+                : `<tr><td colspan="10" class="muted">无</td></tr>`;
+              return `<div style="margin-top:8px;"><b>${esc(codeLabel(code))}（近${shortRows.length}条）</b></div>` +
+                `<table style="margin-top:4px;"><tr><th>日期</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>触发前止损价</th><th>触发后止损价</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+            });
+            traceHtml = blocks.length ? blocks.join("") : `<div class="muted" style="margin-top:8px;">无可用 trace 数据</div>`;
+          } else {
+            const merged = [];
+            for (const [code, one] of Object.entries(byAsset || {})) {
+              const oneRows = Array.isArray((one || {}).trace_last_rows) ? (one || {}).trace_last_rows : [];
+              for (const r of oneRows) merged.push({ code, ...(r || {}) });
+            }
+            merged.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(a.code || "").localeCompare(String(b.code || "")));
+            const shortRows = merged.slice(0, traceN);
+            const rowHtml = shortRows.length
+              ? shortRows.map((r) => `<tr>
+                  <td>${esc(codeLabel(r.code || ""))}</td>
+                  <td>${esc(r.date || "-")}</td>
+                  <td>${esc(_eventLabel(r.event_type))}</td>
+                  <td>${esc(_reasonLabel(r.event_reason))}</td>
+                  <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
+                  <td>${r.base_entry_event ? "是" : "否"}</td>
+                  <td>${r.stop_triggered ? "是" : "否"}</td>
+                  <td>${fmtNum(r.stop_before)}</td>
+                  <td>${fmtNum(r.stop_after)}</td>
+                  <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
+                  <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
+                </tr>`).join("")
+              : `<tr><td colspan="11" class="muted">无可用 trace 数据</td></tr>`;
+            traceHtml =
+              `<div style="margin-top:8px;"><b>最近决策轨迹（按日期，全局近${shortRows.length}条）</b></div>` +
+              `<table style="margin-top:4px;"><tr><th>标的</th><th>日期</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>触发前止损价</th><th>触发后止损价</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+          }
+        }
+        const topRows = [
+          ["模式", String(mode || "-")],
+          ["策略", String(tr.strategy || (((data || {}).meta || {}).strategy || "-"))],
+          ["ATR止损模式", String(tr.atr_stop_mode || (((data || {}).risk_controls || {}).atr_stop || {}).mode || "-")],
+          ["ATR基准", String(tr.atr_stop_atr_basis || (((data || {}).risk_controls || {}).atr_stop || {}).atr_basis || "-")],
+          ["止损后重入", String(tr.atr_stop_reentry_mode || (((data || {}).risk_controls || {}).atr_stop || {}).reentry_mode || "-")],
+          ["基础信号(当日/前日)", `${fmtNum(Number(tr.base_signal_today || 0), 0)} / ${fmtNum(Number(tr.base_signal_prev || 0), 0)}`],
+          ["基础入场事件(当日)", tr.base_entry_event_today ? "是" : "否"],
+          ["当前有效仓位/目标仓位", `${fmtPct(Number(np.current_effective_weight || 0))} / ${fmtPct(Number(np.target_weight || 0))}`],
+          ["止损触发次数", String(Number(atr.trigger_count || (((data || {}).risk_controls || {}).atr_stop || {}).trigger_count || 0))],
+          ["最近触发日", String(atr.last_trigger_date || (((data || {}).risk_controls || {}).atr_stop || {}).last_trigger_date || "-")],
+          ["锁定等待下一次入场", (atr.wait_next_entry_lock_active ? "是" : "否")],
+          ["最新止损价", (Number.isFinite(Number(atr.latest_stop_price)) ? fmtNum(Number(atr.latest_stop_price)) : "-")],
+        ];
+        boxEl.innerHTML =
+          `<div class="muted">用于排查“止损后重入”与“下一交易日计划”是否符合预期。</div>` +
+          `<table style="margin-top:6px;"><tr><th>项</th><th>值</th></tr>${topRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(String(v))}</td></tr>`).join("")}</table>` +
+          traceHtml;
+      }
       function renderTrendPositionPlan(data, mode) {
         const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
         const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
         if (!dates.length) {
           _renderTrendPlanTables({ dates: [] });
+          _renderTrendNextPlanTrace({}, mode);
           return;
         }
         if (String(mode || "single") === "portfolio") {
@@ -5014,6 +5681,7 @@
             decisionByCode: wDec,
             assetNavByCode: assetNav,
           });
+          _renderTrendNextPlanTrace(data, mode);
           return;
         }
         const code = String((((data || {}).meta || {}).code) || (($("trendSingleCode") && $("trendSingleCode").value) || "")).trim();
@@ -5031,6 +5699,7 @@
           decisionByCode: code ? { [code]: posDec } : {},
           assetNavByCode: code ? { [code]: bh } : {},
         });
+        _renderTrendNextPlanTrace(data, mode);
       }
       function _alignSeriesByDates(srcDates, values, tgtDates) {
         const d0 = Array.isArray(srcDates) ? srcDates.map((x) => String(x || "")) : [];
@@ -5557,144 +6226,323 @@
         }
         t.innerHTML = `<tr><th>周期</th><th>期末</th><th>收益</th></tr>${rows.join("")}`;
       }
-      function _getStrategyMixInputs() {
-        const baseline = window.__lastBaselineResult;
-        const rotation = window.__lastRotationResult;
-        const trend = window.__lastTrendResult;
-        if (!baseline || !rotation || !trend) return null;
-        const baseMode = (($("baselineMode") && $("baselineMode").value) ? String($("baselineMode").value) : "EW").toUpperCase();
-        const retBase = _seriesMapFromNav(baseline, [baseMode, "EW", "RP"]);
-        const retRot = _seriesMapFromNav(rotation, ["ROTATION", "STRAT"]);
-        const retTrend = _seriesMapFromNav(trend, ["STRAT"]);
-        if (!retBase || !retRot || !retTrend) return null;
-        const allDates = new Set([...retBase.keys(), ...retRot.keys(), ...retTrend.keys()]);
-        const dates = Array.from(allDates).sort().filter((d) => retBase.has(d) && retRot.has(d) && retTrend.has(d));
-        const rsBase = [];
-        const rsRot = [];
-        const rsTrend = [];
-        for (const d of dates) {
-          const b = Number(retBase.get(d));
-          const r = Number(retRot.get(d));
-          const t = Number(retTrend.get(d));
-          if (![b, r, t].every(Number.isFinite)) continue;
-          rsBase.push(b);
-          rsRot.push(r);
-          rsTrend.push(t);
+      function _extractFixedStrategyReturnMap(s) {
+        if (!s || !s.result || typeof s.result !== "object") return null;
+        if (s.type === "baseline") {
+          const hm = String((s.payload && s.payload.holding_mode) || (s.fields && s.fields.baselineMode) || (s.result && s.result.holding_mode) || "EW").toUpperCase();
+          return _seriesMapFromNav(s.result, [hm, "EW", "RP", "CUSTOM"]);
         }
-        if (rsBase.length < 20) return null;
-        return { baseMode, dates: dates.slice(dates.length - rsBase.length), rsBase, rsRot, rsTrend };
+        if (s.type === "rotation") return _seriesMapFromNav(s.result, ["ROTATION", "STRAT"]);
+        if (s.type === "trend") return _seriesMapFromNav(s.result, ["STRAT"]);
+        return null;
+      }
+      function _renderMixStrategyListTable() {
+        const t = $("mixStrategyListTable");
+        if (!t) return;
+        const mode = ($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal";
+        const rows = [];
+        for (const id of (mixSelectedStrategyIds || [])) {
+          const s = _findFixedStrategy(id);
+          if (!s) continue;
+          const customId = `mixWCustom_${String(s.id).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+          rows.push(
+            `<tr class="mixStrategyRow" draggable="true" data-strategy-id="${esc(String(s.id))}">` +
+              `<td title="拖拽排序" style="cursor:grab;">↕</td>` +
+              `<td>${esc(s.name)}</td>` +
+              `<td>${esc(_strategyTypeLabel(s.type))}</td>` +
+              `<td>${esc(s.group_name || "-")}</td>` +
+              `<td><input id="${customId}" class="mixCustomWeight" data-strategy-id="${esc(String(s.id))}" value="1" ${mode === "custom" ? "" : "disabled"} /></td>` +
+              `<td><button class="mixRemoveStrategyBtn" data-strategy-id="${esc(String(s.id))}">移除</button></td>` +
+            `</tr>`
+          );
+        }
+        t.innerHTML = `<tr><th>排序</th><th>策略名称</th><th>类型</th><th>分组</th><th>自定义权重</th><th>操作</th></tr>${rows.length ? rows.join("") : `<tr><td colspan="6" class="muted">请先添加固定策略到组合</td></tr>`}`;
+        t.querySelectorAll(".mixRemoveStrategyBtn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const id = String(btn.getAttribute("data-strategy-id") || "").trim();
+            mixSelectedStrategyIds = (mixSelectedStrategyIds || []).filter((x) => String(x) !== id);
+            _renderMixStrategyListTable();
+            _saveMixSelection();
+          });
+        });
+        let draggingId = "";
+        const _clearDragOver = () => {
+          t.querySelectorAll("tr.mixStrategyRow.drag-over").forEach((r) => r.classList.remove("drag-over"));
+        };
+        t.querySelectorAll("tr.mixStrategyRow[data-strategy-id]").forEach((row) => {
+          row.addEventListener("dragstart", (e) => {
+            draggingId = String(row.getAttribute("data-strategy-id") || "").trim();
+            row.classList.add("dragging");
+            try { if (e && e.dataTransfer) e.dataTransfer.effectAllowed = "move"; } catch { /* ignore */ }
+          });
+          row.addEventListener("dragend", () => {
+            draggingId = "";
+            row.classList.remove("dragging");
+            _clearDragOver();
+          });
+          row.addEventListener("dragover", (e) => {
+            if (!draggingId) return;
+            e.preventDefault();
+            _clearDragOver();
+            row.classList.add("drag-over");
+            try { if (e && e.dataTransfer) e.dataTransfer.dropEffect = "move"; } catch { /* ignore */ }
+          });
+          row.addEventListener("dragleave", () => {
+            row.classList.remove("drag-over");
+          });
+          row.addEventListener("drop", (e) => {
+            e.preventDefault();
+            row.classList.remove("drag-over");
+            const targetId = String(row.getAttribute("data-strategy-id") || "").trim();
+            if (!draggingId || !targetId || draggingId === targetId) return;
+            const cur = (mixSelectedStrategyIds || []).slice();
+            const from = cur.findIndex((x) => String(x) === draggingId);
+            const to = cur.findIndex((x) => String(x) === targetId);
+            if (from < 0 || to < 0) return;
+            const [mv] = cur.splice(from, 1);
+            cur.splice(to, 0, mv);
+            mixSelectedStrategyIds = cur;
+            _renderMixStrategyListTable();
+            _saveMixSelection();
+            try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
+          });
+        });
+        t.querySelectorAll("input.mixCustomWeight[data-strategy-id]").forEach((el) => {
+          el.addEventListener("change", () => {
+            if ((($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal") !== "custom") return;
+            _saveMixSelection();
+            try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
+          });
+        });
+      }
+      function _collectMixStrategies() {
+        const out = [];
+        for (const id of (mixSelectedStrategyIds || [])) {
+          const s = _findFixedStrategy(id);
+          if (!s) continue;
+          const retMap = _extractFixedStrategyReturnMap(s);
+          if (!retMap) continue;
+          out.push({ ...s, retMap, displayName: String(s.name || `${_strategyTypeLabel(s.type)}策略`) });
+        }
+        return out;
+      }
+      function _readCustomMixWeightMap() {
+        const mp = {};
+        document.querySelectorAll("input.mixCustomWeight[data-strategy-id]").forEach((el) => {
+          const id = String(el.getAttribute("data-strategy-id") || "").trim();
+          const v = Number(String(el.value || "").trim());
+          if (id && Number.isFinite(v) && v > 0) mp[id] = v;
+        });
+        return mp;
+      }
+      function _mixWeightsByMode(entries, mode) {
+        const arr = entries || [];
+        if (!arr.length) return null;
+        const m = String(mode || "equal").trim().toLowerCase();
+        if (m === "custom") {
+          const raw = arr.map((x) => Number((_readCustomMixWeightMap() || {})[x.id] || 0));
+          return _normalizeWeights(raw);
+        }
+        if (m === "risk_parity") {
+          const vols = arr.map((x) => {
+            const map = x.retMap || new Map();
+            const rs = Array.from(map.values()).map(Number).filter(Number.isFinite);
+            const mm = _metricsFromReturns(rs, 0.0);
+            return Number(mm && mm.annualized_volatility);
+          });
+          const inv = vols.map((v) => (Number.isFinite(v) && v > 0 ? 1.0 / v : 0.0));
+          return _normalizeWeights(inv);
+        }
+        return _normalizeWeights(arr.map(() => 1.0));
       }
       function setMixEqualWeights() {
-        if ($("mixWBaseline")) $("mixWBaseline").value = "0.3333";
-        if ($("mixWRotation")) $("mixWRotation").value = "0.3333";
-        if ($("mixWTrend")) $("mixWTrend").value = "0.3334";
-        runStrategyMix();
+        if ($("mixWeightMode")) $("mixWeightMode").value = "equal";
+        _renderMixStrategyListTable();
+        _saveMixSelection();
+        try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
       }
       function setMixInvVolWeights() {
-        const inputs = _getStrategyMixInputs();
-        if (!inputs) return setMsg("请先完成三类回测，再按波动倒数自动设权重。");
-        const mBase = _metricsFromReturns(inputs.rsBase, 0.0);
-        const mRot = _metricsFromReturns(inputs.rsRot, 0.0);
-        const mTrend = _metricsFromReturns(inputs.rsTrend, 0.0);
-        const vols = [
-          Number(mBase && mBase.annualized_volatility),
-          Number(mRot && mRot.annualized_volatility),
-          Number(mTrend && mTrend.annualized_volatility),
-        ];
-        const inv = vols.map((v) => (Number.isFinite(v) && v > 0 ? (1.0 / v) : 0.0));
-        const ws = _normalizeWeights(inv);
-        if (!ws) return setMsg("无法根据波动率计算权重，请检查三策略结果。");
-        if ($("mixWBaseline")) $("mixWBaseline").value = ws[0].toFixed(4);
-        if ($("mixWRotation")) $("mixWRotation").value = ws[1].toFixed(4);
-        if ($("mixWTrend")) $("mixWTrend").value = ws[2].toFixed(4);
-        runStrategyMix();
+        if ($("mixWeightMode")) $("mixWeightMode").value = "risk_parity";
+        _renderMixStrategyListTable();
+        _saveMixSelection();
+        try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
+      }
+      function _buildMixPositionContextFromFixed(dts, entries, ws) {
+        const n = Math.min((entries || []).length, (ws || []).length);
+        const sub = {};
+        const subCapitalWeights = {};
+        const totalHist = {};
+        const totalTgtRaw = {};
+        const assetNavByCode = {};
+        const mkConstHist = (mp) => {
+          const out = {};
+          for (const [c, w] of Object.entries(mp || {})) out[c] = new Array(dts.length).fill(Number(w || 0));
+          return out;
+        };
+        const normLast = (hist) => {
+          const out = {};
+          for (const c of Object.keys(hist || {})) {
+            const arr = hist[c] || [];
+            const v = arr.length ? Number(arr[arr.length - 1]) : 0;
+            if (v > 1e-12) out[c] = v;
+          }
+          return _normalizeWeightMap(out);
+        };
+        for (let i = 0; i < n; i++) {
+          const s = entries[i];
+          const wSub = Number(ws[i] || 0);
+          const sid = String(s.id || `S${i + 1}`);
+          const one = { name: s.displayName, current: {}, target: {}, history: {}, assetNavByCode: {}, stopByCode: {} };
+          if (s.type === "baseline") {
+            const gCodes = _validCodes(_getGroupCodes(s.group_name));
+            const hm = String((s.payload && s.payload.holding_mode) || (s.fields && s.fields.baselineMode) || "EW").toUpperCase();
+            let cur = {};
+            if (hm === "CUSTOM") {
+              cur = _normalizeWeightMap((s.payload && s.payload.custom_weights) || {});
+            } else if (gCodes.length) {
+              const per = 1.0 / gCodes.length;
+              for (const c of gCodes) cur[c] = per;
+            }
+            one.current = _normalizeWeightMap(cur);
+            one.target = { ...one.current };
+            one.history = mkConstHist(one.current);
+            const bNav = (((s.result || {}).nav || {}).series || {});
+            const bDates = (((s.result || {}).nav || {}).dates || []);
+            for (const c of Object.keys(one.current)) {
+              if (Array.isArray(bNav[c])) one.assetNavByCode[c] = _alignSeriesByDates(bDates, bNav[c], dts);
+            }
+          } else if (s.type === "rotation") {
+            const hist = _rotationHistoryFromPeriods((s.result || {}), dts);
+            one.history = hist;
+            one.current = normLast(hist);
+            const t = {};
+            const tRows = (((s.next_plan || {}).plan || {}).target_weights || []);
+            for (const it of (Array.isArray(tRows) ? tRows : [])) {
+              const c = String((it && it.code) || "").trim();
+              const ww = Number((it && (it.target_weight != null ? it.target_weight : it.weight)));
+              if (c && Number.isFinite(ww) && ww > 1e-12) t[c] = ww;
+            }
+            one.target = Object.keys(t).length ? _normalizeWeightMap(t) : { ...one.current };
+            one.stopByCode = _rotationLatestStopMapFromPeriods((s.result || {}), dts);
+          } else if (s.type === "trend") {
+            const tr = s.result || {};
+            const trDates = ((tr.nav || {}).dates || []);
+            const trHist = {};
+            const trCur = {};
+            const trTgt = {};
+            if (tr && tr.weights && tr.weights.series) {
+              for (const c of Object.keys(tr.weights.series || {})) {
+                trHist[c] = _alignSeriesByDates((tr.weights || {}).dates || trDates, tr.weights.series[c], dts);
+                const cur = trHist[c].length ? Number(trHist[c][trHist[c].length - 1]) : 0;
+                if (cur > 1e-12) trCur[c] = cur;
+                const ds = (((tr.weights_decision || {}).series || {})[c]);
+                const dec = Array.isArray(ds) ? _alignSeriesByDates((tr.weights_decision || {}).dates || trDates, ds, dts) : trHist[c];
+                const tgt = dec.length ? Number(dec[dec.length - 1]) : cur;
+                if (tgt > 1e-12) trTgt[c] = tgt;
+              }
+              const an = (((tr.asset_nav_exec || {}).series || {}));
+              for (const c of Object.keys(an || {})) one.assetNavByCode[c] = _alignSeriesByDates(((tr.asset_nav_exec || {}).dates || trDates), an[c], dts);
+            }
+            one.history = trHist;
+            one.current = _normalizeWeightMap(trCur);
+            one.target = _normalizeWeightMap(Object.keys(trTgt).length ? trTgt : trCur);
+          }
+          sub[sid] = one;
+          subCapitalWeights[sid] = wSub;
+          for (const c of Object.keys(one.history || {})) {
+            const arr = (one.history[c] || []).map(Number);
+            if (!totalHist[c]) totalHist[c] = new Array(arr.length).fill(0);
+            for (let k = 0; k < arr.length; k++) totalHist[c][k] += wSub * Number(arr[k] || 0);
+          }
+          for (const c of Object.keys(one.target || {})) {
+            totalTgtRaw[c] = Number(totalTgtRaw[c] || 0) + wSub * Number(one.target[c] || 0);
+          }
+          for (const [c, nav] of Object.entries(one.assetNavByCode || {})) {
+            if (!assetNavByCode[c] && Array.isArray(nav)) assetNavByCode[c] = nav;
+          }
+        }
+        const totalCur = {};
+        for (const c of Object.keys(totalHist || {})) {
+          const h = totalHist[c] || [];
+          const v = h.length ? Number(h[h.length - 1]) : 0;
+          if (v > 1e-12) totalCur[c] = v;
+        }
+        return {
+          dates: dts,
+          sub,
+          totalHist,
+          totalCur: _normalizeWeightMap(totalCur),
+          totalTgt: _normalizeWeightMap(totalTgtRaw),
+          assetNavByCode,
+          hasRotationWeekdayBreakdown: false,
+          subCapitalWeights,
+        };
       }
       function runStrategyMix() {
-        const inputs = _getStrategyMixInputs();
-        if (!inputs) {
-          return setMsg("请先分别完成一次持有、轮动、趋势回测，再生成三策略组合分析。");
+        const entries = _collectMixStrategies();
+        if (entries.length < 1) return setMsg("请先添加至少一个固定策略到组合。");
+        const allDates = new Set();
+        for (const s of entries) for (const d of (s.retMap ? s.retMap.keys() : [])) allDates.add(d);
+        let dates = Array.from(allDates).sort();
+        for (const s of entries) dates = dates.filter((d) => s.retMap.has(d));
+        const arrById = {};
+        for (const s of entries) arrById[s.id] = [];
+        const validDates = [];
+        for (const d of dates) {
+          const vals = entries.map((s) => Number(s.retMap.get(d)));
+          if (!vals.every(Number.isFinite)) continue;
+          validDates.push(d);
+          for (let i = 0; i < entries.length; i++) arrById[entries[i].id].push(vals[i]);
         }
-        const baseMode = inputs.baseMode;
-        const dates = inputs.dates;
-        const rsBase = inputs.rsBase;
-        const rsRot = inputs.rsRot;
-        const rsTrend = inputs.rsTrend;
-        const ws = _normalizeWeights([
-          Number(($("mixWBaseline") && $("mixWBaseline").value) ? $("mixWBaseline").value : "0"),
-          Number(($("mixWRotation") && $("mixWRotation").value) ? $("mixWRotation").value : "0"),
-          Number(($("mixWTrend") && $("mixWTrend").value) ? $("mixWTrend").value : "0"),
-        ]);
-        if (!ws) return setMsg("三策略权重至少有一个为正数。");
-        const mixAmtRaw = ($("mixAccountAmount") && $("mixAccountAmount").value != null) ? String($("mixAccountAmount").value).replaceAll(",", "").trim() : "";
-        if (mixAmtRaw !== "") {
-          const mixAmt = Number(mixAmtRaw);
-          if (!Number.isFinite(mixAmt) || mixAmt <= 0) return setMsg("交易账户金额需为>0数字，留空则不计算金额和份数。");
-        }
-        const rsMix = [];
-        for (let i = 0; i < rsBase.length; i++) {
-          rsMix.push(ws[0] * rsBase[i] + ws[1] * rsRot[i] + ws[2] * rsTrend[i]);
-        }
-        if (rsMix.length < 20) return setMsg("有效共同样本不足（<20日），请检查回测区间或策略结果。");
+        if (validDates.length < 20) return setMsg("有效共同样本不足（<20日），请检查策略结果区间。");
+        const mode = ($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal";
+        const ws = _mixWeightsByMode(entries, mode);
+        if (!ws) return setMsg("组合权重无效，请检查权重模式与自定义权重。");
+        const wById = {};
+        for (let i = 0; i < entries.length; i++) wById[entries[i].id] = Number(ws[i] || 0);
+        const rsMix = validDates.map((_, i) => entries.reduce((a, s, j) => a + Number(ws[j] || 0) * Number(arrById[s.id][i] || 0), 0));
         const rfRaw = ($("rf").value || "").trim();
         let rf = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(rf)) rf = 0.025;
         if (rf > 1.0) rf = rf / 100.0;
-        const mBase = _metricsFromReturns(rsBase, rf);
-        const mRot = _metricsFromReturns(rsRot, rf);
-        const mTrend = _metricsFromReturns(rsTrend, rf);
         const mMix = _metricsFromReturns(rsMix, rf);
-        if (!mBase || !mRot || !mTrend || !mMix) return setMsg("组合分析计算失败：策略收益序列无效。");
-        const navLen = mMix.nav.length;
-        const dts = dates.slice(dates.length - navLen);
+        if (!mMix) return setMsg("组合分析失败：收益序列无效。");
+        const mById = {};
+        for (const s of entries) mById[s.id] = _metricsFromReturns(arrById[s.id], rf);
+        const dts = validDates.slice(validDates.length - mMix.nav.length);
         const rollWin = Math.max(5, Math.floor(Number(($("mixRollWin") && $("mixRollWin").value) ? $("mixRollWin").value : "60")));
-        Plotly.newPlot("strategyMixChart", [
-          { x: dts, y: mMix.nav, type: "scatter", mode: "lines", name: "MIX" },
-          { x: dts, y: mBase.nav, type: "scatter", mode: "lines", name: `HOLD(${baseMode})` },
-          { x: dts, y: mRot.nav, type: "scatter", mode: "lines", name: "ROTATION" },
-          { x: dts, y: mTrend.nav, type: "scatter", mode: "lines", name: "TREND" },
-        ], { margin: { t: 30 }, title: "三策略组合净值（共同区间）" }, { responsive: true });
+        const traces = [{ x: dts, y: mMix.nav, type: "scatter", mode: "lines", name: "MIX" }];
+        for (const s of entries) traces.push({ x: dts, y: (mById[s.id] || {}).nav || [], type: "scatter", mode: "lines", name: s.displayName });
+        Plotly.newPlot("strategyMixChart", traces, { margin: { t: 30 }, title: "任意策略组合净值（共同区间）" }, { responsive: true });
 
-        const names = [`HOLD(${baseMode})`, "ROTATION", "TREND"];
-        const arrs = [rsBase, rsRot, rsTrend];
-        const cm = [0, 1, 2].map((i) => [0, 1, 2].map((j) => _corr(arrs[i], arrs[j])));
+        const names = entries.map((s) => s.displayName);
+        const arrs = entries.map((s) => arrById[s.id] || []);
+        const cm = names.map((_, i) => names.map((__, j) => _corr(arrs[i], arrs[j])));
         const ctext = cm.map((row) => row.map((v) => (Number.isFinite(v) ? Number(v).toFixed(3) : "-")));
         Plotly.newPlot("strategyMixCorr", [{
-          type: "heatmap",
-          x: names,
-          y: names,
-          z: cm,
-          zmin: -1,
-          zmax: 1,
+          type: "heatmap", x: names, y: names, z: cm, zmin: -1, zmax: 1,
           colorscale: [[0.0, "#2ca02c"], [0.5, "#ffffff"], [1.0, "#d62728"]],
-          text: ctext,
-          texttemplate: "%{text}",
-          hovertemplate: "%{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>",
-          showscale: false,
+          text: ctext, texttemplate: "%{text}", hovertemplate: "%{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>", showscale: false,
         }], { margin: { t: 20, b: 40 }, yaxis: { autorange: "reversed" } }, { responsive: true, displayModeBar: false });
         const corrRows = [];
-        for (let i = 0; i < names.length; i++) {
-          for (let j = 0; j < names.length; j++) {
-            corrRows.push(`<tr><td>${esc(names[i])}</td><td>${esc(names[j])}</td><td>${Number.isFinite(cm[i][j]) ? Number(cm[i][j]).toFixed(4) : "-"}</td></tr>`);
-          }
-        }
+        for (let i = 0; i < names.length; i++) for (let j = 0; j < names.length; j++) corrRows.push(`<tr><td>${esc(names[i])}</td><td>${esc(names[j])}</td><td>${Number.isFinite(cm[i][j]) ? Number(cm[i][j]).toFixed(4) : "-"}</td></tr>`);
         $("strategyMixCorrTable").innerHTML = `<tr><th>策略A</th><th>策略B</th><th>相关系数</th></tr>${corrRows.join("")}`;
-        const rows = [
-          ["组合(MIX)", mMix],
-          [`持有(${baseMode})`, mBase],
-          ["轮动", mRot],
-          ["趋势", mTrend],
-        ].map(([k, m]) => `<tr><td>${esc(k)}</td><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${fmtNum(m.sharpe_ratio)}</td></tr>`);
+
+        const rows = [`<tr><td>组合(MIX)</td><td>${mMix.sample_days}</td><td>${fmtPct(mMix.cumulative_return)}</td><td>${fmtPct(mMix.annualized_return)}</td><td>${fmtPct(mMix.annualized_volatility)}</td><td>${fmtPct(mMix.max_drawdown)}</td><td>${fmtNum(mMix.sharpe_ratio)}</td></tr>`];
+        for (const s of entries) {
+          const mm = mById[s.id];
+          if (!mm) continue;
+          rows.push(`<tr><td>${esc(s.displayName)}</td><td>${mm.sample_days}</td><td>${fmtPct(mm.cumulative_return)}</td><td>${fmtPct(mm.annualized_return)}</td><td>${fmtPct(mm.annualized_volatility)}</td><td>${fmtPct(mm.max_drawdown)}</td><td>${fmtNum(mm.sharpe_ratio)}</td></tr>`);
+        }
         $("strategyMixMetricsTable").innerHTML = `<tr><th>策略</th><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>夏普</th></tr>${rows.join("")}`;
-        const mixAttr = _buildAttributionBySeries(
-          {
-            HOLD: rsBase.map(Number),
-            ROTATION: rsRot.map(Number),
-            TREND: rsTrend.map(Number),
-          },
-          Number(mMix.cumulative_return),
-          { HOLD: ws[0], ROTATION: ws[1], TREND: ws[2] }
-        );
-        renderContributionTables("mix", mixAttr, { HOLD: `持有(${baseMode})`, ROTATION: "轮动", TREND: "趋势" });
+        const parts = {};
+        const lbl = {};
+        for (const s of entries) {
+          parts[s.id] = (arrById[s.id] || []).map(Number);
+          lbl[s.id] = s.displayName;
+        }
+        const mixAttr = _buildAttributionBySeries(parts, Number(mMix.cumulative_return), wById);
+        renderContributionTables("mix", mixAttr, lbl);
         const mixPeriods = {
           weekly: _periodReturnsFromNav(dts, mMix.nav, "weekly"),
           monthly: _periodReturnsFromNav(dts, mMix.nav, "monthly"),
@@ -5704,39 +6552,88 @@
         renderSimplePeriodTable("mixPeriodTable", mixPeriods);
         const mixRolling = _rollingPackFromNav(dts, mMix.nav);
         plotRolling("strategyMixRollingReturns", "Strategy Mix Rolling Returns", (mixRolling.returns || {}), ".0%");
-        try {
-          const mixPosCtx = _buildMixPositionContext(dts, ws, baseMode);
-          _renderMixPositionPlan(mixPosCtx);
-        } catch (_) { /* ignore */ }
+        try { _renderMixPositionPlan(_buildMixPositionContextFromFixed(dts, entries, ws)); } catch (_) { /* ignore */ }
 
-        const rcBR = _rollingCorr(rsBase, rsRot, rollWin);
-        const rcBT = _rollingCorr(rsBase, rsTrend, rollWin);
-        const rcRT = _rollingCorr(rsRot, rsTrend, rollWin);
-        Plotly.newPlot("strategyMixRollingCorr", [
-          { x: dts, y: rcBR, type: "scatter", mode: "lines", name: `Corr(HOLD,ROT)` },
-          { x: dts, y: rcBT, type: "scatter", mode: "lines", name: `Corr(HOLD,TREND)` },
-          { x: dts, y: rcRT, type: "scatter", mode: "lines", name: `Corr(ROT,TREND)` },
-        ], {
-          margin: { t: 20 },
-          yaxis: { title: "相关系数", range: [-1, 1] },
-          title: `滚动相关性（窗口=${rollWin}）`,
-        }, { responsive: true });
+        const rcTraces = [];
+        for (let i = 0; i < entries.length; i++) {
+          for (let j = i + 1; j < entries.length; j++) {
+            rcTraces.push({ x: dts, y: _rollingCorr(arrById[entries[i].id], arrById[entries[j].id], rollWin), type: "scatter", mode: "lines", name: `Corr(${entries[i].displayName},${entries[j].displayName})` });
+          }
+        }
+        Plotly.newPlot("strategyMixRollingCorr", rcTraces, { margin: { t: 20 }, yaxis: { title: "相关系数", range: [-1, 1] }, title: `滚动相关性（窗口=${rollWin}）` }, { responsive: true });
+        const ddTraces = [{ x: dts, y: _drawdownSeries(mMix.nav), type: "scatter", mode: "lines", name: "DD(MIX)" }];
+        for (const s of entries) ddTraces.push({ x: dts, y: _drawdownSeries((mById[s.id] || {}).nav || []), type: "scatter", mode: "lines", name: `DD(${s.displayName})` });
+        Plotly.newPlot("strategyMixRollingDD", ddTraces, { margin: { t: 20 }, yaxis: { title: "回撤", tickformat: ".0%", autorange: true }, title: "滚动回撤（由净值推导）" }, { responsive: true });
 
-        Plotly.newPlot("strategyMixRollingDD", [
-          { x: dts, y: _drawdownSeries(mMix.nav), type: "scatter", mode: "lines", name: "DD(MIX)" },
-          { x: dts, y: _drawdownSeries(mBase.nav), type: "scatter", mode: "lines", name: "DD(HOLD)" },
-          { x: dts, y: _drawdownSeries(mRot.nav), type: "scatter", mode: "lines", name: "DD(ROT)" },
-          { x: dts, y: _drawdownSeries(mTrend.nav), type: "scatter", mode: "lines", name: "DD(TREND)" },
-        ], {
-          margin: { t: 20 },
-          yaxis: { title: "回撤", tickformat: ".0%", autorange: true },
-          title: "滚动回撤（由净值推导）",
-        }, { responsive: true });
-
-        const mixAmtTxt = (mixAmtRaw !== "" && Number.isFinite(Number(mixAmtRaw)) && Number(mixAmtRaw) > 0)
-          ? `；交易账户金额=${fmtMoney(Number(mixAmtRaw))}元`
-          : "；交易账户金额未设置";
-        $("strategyMixNote").textContent = `权重归一后：持有=${fmtPct(ws[0])}，轮动=${fmtPct(ws[1])}，趋势=${fmtPct(ws[2])}；共同样本区间：${dts[0]} ~ ${dts[dts.length - 1]}（${dts.length}个交易日）；滚动窗口=${rollWin}${mixAmtTxt}。`;
+        const mixAmtRaw = ($("mixAccountAmount") && $("mixAccountAmount").value != null) ? String($("mixAccountAmount").value).replaceAll(",", "").trim() : "";
+        const modeTxt = (mode === "custom") ? "自定义" : (mode === "risk_parity" ? "风险平价" : "等权");
+        const mixAmtTxt = (mixAmtRaw !== "" && Number.isFinite(Number(mixAmtRaw)) && Number(mixAmtRaw) > 0) ? `；交易账户金额=${fmtMoney(Number(mixAmtRaw))}元` : "；交易账户金额未设置";
+        const wTxt = entries.map((s, i) => `${s.displayName}=${fmtPct(ws[i])}`).join("，");
+        $("strategyMixNote").textContent = `权重模式=${modeTxt}（归一后：${wTxt}）；共同样本区间：${dts[0]} ~ ${dts[dts.length - 1]}（${dts.length}个交易日）；滚动窗口=${rollWin}${mixAmtTxt}。`;
+      }
+      function saveCurrentFixedStrategy() {
+        const type = ($("fixedStrategyType") && $("fixedStrategyType").value) ? String($("fixedStrategyType").value) : "baseline";
+        const nameRaw = ($("fixedStrategyName") && $("fixedStrategyName").value) ? String($("fixedStrategyName").value) : "";
+        const name = nameRaw.trim();
+        if (!name) return setMsg("请先填写策略名称。");
+        let result = null;
+        let payload = null;
+        let nextPlan = null;
+        let groupName = "";
+        if (type === "baseline") {
+          result = window.__lastBaselineResult || null;
+          payload = window.__lastBaselinePayload || window.__distBaselinePayload || null;
+          groupName = String(($("baselineGroupPreset") && $("baselineGroupPreset").value) || "").trim();
+        } else if (type === "rotation") {
+          result = window.__lastRotationResult || null;
+          payload = window.__lastRotationPayload || null;
+          nextPlan = window.__lastRotationNextExecutionPlan || null;
+          groupName = String(($("rotationGroupPreset") && $("rotationGroupPreset").value) || "").trim();
+        } else {
+          result = window.__lastTrendResult || null;
+          payload = window.__lastTrendPayload || null;
+          groupName = String(($("trendGroupPreset") && $("trendGroupPreset").value) || "").trim();
+        }
+        if (!result || typeof result !== "object") return setMsg("该类型尚无可保存的回测结果，请先运行回测。");
+        const fields = _readFixedStrategyFields(type);
+        const now = new Date().toISOString();
+        const id = `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+        const item = {
+          id,
+          name: name.slice(0, 60),
+          type,
+          group_name: groupName,
+          fields,
+          payload,
+          result,
+          next_plan: nextPlan,
+          saved_at: now,
+        };
+        fixedStrategies.push(item);
+        _saveFixedStrategies();
+        _renderFixedStrategyControls();
+        setMsg(`固定策略已保存：${item.name}`);
+      }
+      function loadFixedStrategyById(id) {
+        const s = _findFixedStrategy(id);
+        if (!s) return setMsg("未找到该固定策略。");
+        _applyFixedStrategyFields(s.type, s.fields || {});
+        if (s.type === "baseline") {
+          window.__lastBaselineResult = s.result;
+          window.__lastBaselinePayload = s.payload;
+          lastBaseline = s.result;
+        } else if (s.type === "rotation") {
+          window.__lastRotationResult = s.result;
+          window.__lastRotationPayload = s.payload;
+          window.__lastRotationNextExecutionPlan = s.next_plan;
+        } else if (s.type === "trend") {
+          window.__lastTrendResult = s.result;
+          window.__lastTrendPayload = s.payload;
+        }
+        renderBenchmarkSelect();
+        renderTrendSingleCodeSelect();
+        _renderFixedStrategyControls();
+        setMsg(`已加载固定策略：${s.name}`);
       }
       function _mcReportLines(label, mc) {
         const mm = (mc && mc.metrics) ? (mc.metrics.annualized_return || mc.metrics.cumulative_return || null) : null;
@@ -5840,48 +6737,55 @@
         if (!retEl || !riskEl || !rrEl) return;
 
         if (!attribution || !attribution.return || !attribution.risk) {
-          retEl.innerHTML = "<tr><th>标的</th><th>总收益贡献</th><th>贡献占比</th></tr>";
-          riskEl.innerHTML = "<tr><th>标的</th><th>风险贡献占比</th></tr>";
-          rrEl.innerHTML = "<tr><th>标的</th><th>收益占比</th><th>风险占比</th><th>风险收益比</th></tr>";
+          retEl.innerHTML = "<tr><th>标的</th><th>总收益贡献</th><th>年化收益贡献</th><th>贡献占比</th></tr>";
+          riskEl.innerHTML = "<tr><th>标的</th><th>风险贡献占比</th><th>年化风险贡献</th></tr>";
+          rrEl.innerHTML = "<tr><th>标的</th><th>收益占比</th><th>风险占比</th><th>风险收益比</th><th>年化风险收益比</th></tr>";
           return;
         }
 
         const rrows = (attribution.return.by_code || []).slice();
         rrows.sort((a, b) => (Number(b.return_contribution || 0) - Number(a.return_contribution || 0)));
         retEl.innerHTML =
-          `<tr><th>标的</th><th>总收益贡献</th><th>贡献占比</th></tr>` +
+          `<tr><th>标的</th><th>总收益贡献</th><th>年化收益贡献</th><th>贡献占比</th></tr>` +
           rrows
             .map((x) => {
               const c = String(x.code || "");
               const label = _labelOf(c);
               const contrib = (x.return_contribution == null) ? "-" : fmtPct(Number(x.return_contribution));
+              const annContrib = (x.return_contribution_annualized == null) ? "不适用(<1年)" : fmtPct(Number(x.return_contribution_annualized));
               const share = (x.return_share == null) ? "-" : (Number(x.return_share) * 100).toFixed(2) + "%";
-              return `<tr><td>${label}</td><td>${contrib}</td><td>${share}</td></tr>`;
+              return `<tr><td>${label}</td><td>${contrib}</td><td>${annContrib}</td><td>${share}</td></tr>`;
             })
             .join("");
 
         const kRisk = (attribution.risk.by_code || []).slice();
         kRisk.sort((a, b) => (Number(b.risk_share || 0) - Number(a.risk_share || 0)));
         riskEl.innerHTML =
-          `<tr><th>标的</th><th>风险贡献占比</th></tr>` +
+          `<tr><th>标的</th><th>风险贡献占比</th><th>年化风险贡献</th></tr>` +
           kRisk
             .map((x) => {
               const c = String(x.code || "");
               const label = _labelOf(c);
               const share = (x.risk_share == null) ? "-" : (Number(x.risk_share) * 100).toFixed(2) + "%";
-              return `<tr><td>${label}</td><td>${share}</td></tr>`;
+              const annRisk = (x.risk_contribution_annualized == null) ? "不适用(<1年)" : fmtPct(Number(x.risk_contribution_annualized));
+              return `<tr><td>${label}</td><td>${share}</td><td>${annRisk}</td></tr>`;
             })
             .join("");
 
         const retMap = new Map((attribution.return.by_code || []).map((x) => [String(x.code), Number(x.return_share)]));
         const riskMap = new Map((attribution.risk.by_code || []).map((x) => [String(x.code), Number(x.risk_share)]));
+        const retAnnMap = new Map((attribution.return.by_code || []).map((x) => [String(x.code), Number(x.return_contribution_annualized)]));
+        const riskAnnMap = new Map((attribution.risk.by_code || []).map((x) => [String(x.code), Number(x.risk_contribution_annualized)]));
         const codes = Array.from(new Set([...retMap.keys(), ...riskMap.keys()]));
         const rows = [];
         for (const c of codes) {
           const r = retMap.get(c);
           const k = riskMap.get(c);
+          const ra = retAnnMap.get(c);
+          const ka = riskAnnMap.get(c);
           const ratio = (Number.isFinite(r) && Number.isFinite(k) && k > 0) ? (r / k) : NaN;
-          rows.push({ code: c, retShare: r, riskShare: k, ratio });
+          const ratioAnn = (Number.isFinite(ra) && Number.isFinite(ka) && ka > 0) ? (ra / ka) : NaN;
+          rows.push({ code: c, retShare: r, riskShare: k, ratio, ratioAnn });
         }
         rows.sort((a, b) => {
           const av = Number.isFinite(a.ratio) ? a.ratio : -Infinity;
@@ -5889,7 +6793,7 @@
           return bv - av;
         });
         rrEl.innerHTML =
-          `<tr><th>标的</th><th>收益占比</th><th>风险占比</th><th>风险收益比</th></tr>` +
+          `<tr><th>标的</th><th>收益占比</th><th>风险占比</th><th>风险收益比</th><th>年化风险收益比</th></tr>` +
           rows
             .map((x) => {
               const c = String(x.code || "");
@@ -5897,7 +6801,8 @@
               const retShare = Number.isFinite(x.retShare) ? (x.retShare * 100).toFixed(2) + "%" : "-";
               const riskShare = Number.isFinite(x.riskShare) ? (x.riskShare * 100).toFixed(2) + "%" : "-";
               const ratioTxt = Number.isFinite(x.ratio) ? Number(x.ratio).toFixed(3) : "-";
-              return `<tr><td>${label}</td><td>${retShare}</td><td>${riskShare}</td><td>${ratioTxt}</td></tr>`;
+              const ratioAnnTxt = Number.isFinite(x.ratioAnn) ? Number(x.ratioAnn).toFixed(3) : "不适用(<1年)";
+              return `<tr><td>${label}</td><td>${retShare}</td><td>${riskShare}</td><td>${ratioTxt}</td><td>${ratioAnnTxt}</td></tr>`;
             })
             .join("");
       }
@@ -8148,12 +9053,12 @@
         const series = (data && data.nav && data.nav.series) ? data.nav.series : {};
         if (!sel || !series) return;
         const wanted = String(defaultSeries || sel.value || "EW").toUpperCase();
-        if (wanted === "EW" || wanted === "RP") sel.value = wanted;
+        if (wanted === "EW" || wanted === "RP" || wanted === "CUSTOM") sel.value = wanted;
         const key = String(sel.value || "EW").toUpperCase();
         const nav = Array.isArray(series[key]) ? series[key] : [];
         const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
         const payload = _dailyReturnsFromNav(nav, dates);
-        const label = (key === "RP") ? "风险平价（RP）" : "等权（EW）";
+        const label = (key === "RP") ? "风险平价（RP）" : ((key === "CUSTOM") ? "自定义（CUSTOM）" : "等权（EW）");
         const mode = modeSel ? String(modeSel.value || "simple") : "simple";
         _renderDailyReturnDist("baselineDailyRetHist", "baselineDailyRetQuantiles", payload, `${label} 日度收益率分布`, mode);
       }
@@ -9168,6 +10073,12 @@
         quarterly: { page: 1, rows: [] },
         yearly: { page: 1, rows: [] },
       };
+      const trendPeriodTableState = {
+        weekly: { page: 1, rows: [] },
+        monthly: { page: 1, rows: [] },
+        quarterly: { page: 1, rows: [] },
+        yearly: { page: 1, rows: [] },
+      };
       function _sortedRotPeriodRows(rows, sortKey, sortDir) {
         const arr = (rows || []).slice();
         let k = "period_end";
@@ -9204,6 +10115,29 @@
         $(`rot${cap}SortDir`).addEventListener("change", () => { rotPeriodTableState[kind].page = 1; renderRotPeriodTable(kind); });
         $(`rot${cap}Prev`).addEventListener("click", () => { rotPeriodTableState[kind].page -= 1; renderRotPeriodTable(kind); });
         $(`rot${cap}Next`).addEventListener("click", () => { rotPeriodTableState[kind].page += 1; renderRotPeriodTable(kind); });
+      }
+      function renderTrendPeriodTable(kind) {
+        const st = trendPeriodTableState[kind];
+        const cap = kind[0].toUpperCase() + kind.slice(1);
+        const sortKey = $(`trend${cap}SortKey`).value;
+        const sortDir = $(`trend${cap}SortDir`).value;
+        const rows = _sortedPeriodRows(st.rows || [], sortKey, sortDir);
+        const total = rows.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        st.page = Math.min(Math.max(1, st.page), totalPages);
+        const startIdx = (st.page - 1) * pageSize;
+        const pageRows = rows.slice(startIdx, startIdx + pageSize);
+        $(`trend${cap}`).innerHTML =
+          `<tr><th>期末</th><th>收益</th></tr>` +
+          pageRows.map((x) => `<tr><td>${x.period_end}</td><td>${fmtPct(Number(x.return))}</td></tr>`).join("");
+        $(`trend${cap}Page`).textContent = `${st.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+      function wireTrendPeriodControls(kind) {
+        const cap = kind[0].toUpperCase() + kind.slice(1);
+        $(`trend${cap}SortKey`).addEventListener("change", () => { trendPeriodTableState[kind].page = 1; renderTrendPeriodTable(kind); });
+        $(`trend${cap}SortDir`).addEventListener("change", () => { trendPeriodTableState[kind].page = 1; renderTrendPeriodTable(kind); });
+        $(`trend${cap}Prev`).addEventListener("click", () => { trendPeriodTableState[kind].page -= 1; renderTrendPeriodTable(kind); });
+        $(`trend${cap}Next`).addEventListener("click", () => { trendPeriodTableState[kind].page += 1; renderTrendPeriodTable(kind); });
       }
 
       function _checkedValues(sel) {
@@ -9590,7 +10524,7 @@
       }
 
       async function runRotation() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = $("start").value.trim();
         const end = $("end").value.trim();
@@ -9619,10 +10553,12 @@
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
         const score_method = $("rotScoreMethod").value;
         const atr_stop_mode = (($("rotAtrStopMode") && $("rotAtrStopMode").value) ? String($("rotAtrStopMode").value) : "none");
+        const atr_stop_atr_basis = (($("rotAtrStopBasis") && $("rotAtrStopBasis").value) ? String($("rotAtrStopBasis").value) : "latest");
         const atr_stop_window = Number(($("rotAtrStopWin").value || "14").trim());
         const atr_stop_n = Number(($("rotAtrStopN").value || "2.0").trim());
         const atr_stop_m = Number(($("rotAtrStopM").value || "0.5").trim());
         if (!["none", "static", "trailing", "tightening"].includes(atr_stop_mode)) return setMsg("通用ATR止损模式非法");
+        if (!["entry", "latest"].includes(atr_stop_atr_basis)) return setMsg("通用ATR基准非法（仅支持入场/最新）");
         if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2) return setMsg("通用ATR止损周期需为>=2数字");
         if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0) return setMsg("通用ATR止损倍数 n 需为>0数字");
         if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0) return setMsg("通用ATR收紧步长 m 需为>0数字");
@@ -9808,7 +10744,7 @@
             codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
             risk_free_rate,
             score_method,
-            atr_stop_mode, atr_stop_window, atr_stop_n, atr_stop_m,
+            atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
             corr_filter, corr_window, corr_threshold,
             group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
@@ -9919,7 +10855,7 @@
         ];
         setReport("轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
         setReportTo("rotReport", "轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
-        try { if (window.__lastBaselineResult && window.__lastTrendResult) runStrategyMix(); } catch (e) { /* best effort */ }
+        try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }
       }
 
       async function runTrendResearch() {
@@ -9963,9 +10899,14 @@
           hybrid_entry_n: Number(($("trendHybridEntryN").value || "1").trim()),
           hybrid_exit_m: Number(($("trendHybridExitM").value || "1").trim()),
           atr_stop_mode: (($("trendAtrStopMode") && $("trendAtrStopMode").value) ? String($("trendAtrStopMode").value) : "none"),
+          atr_stop_atr_basis: (($("trendAtrStopBasis") && $("trendAtrStopBasis").value) ? String($("trendAtrStopBasis").value) : "latest"),
+          atr_stop_reentry_mode: (($("trendAtrStopReentry") && $("trendAtrStopReentry").value) ? String($("trendAtrStopReentry").value) : "reenter"),
           atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
           atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
           atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
+          fixed_pos_ratio: Number(($("trendFixedPosRatio") && $("trendFixedPosRatio").value ? $("trendFixedPosRatio").value : "0.04").trim()),
+          fixed_overcap_policy: (($("trendFixedOvercapPolicy") && $("trendFixedOvercapPolicy").value) ? String($("trendFixedOvercapPolicy").value) : "skip"),
+          fixed_max_holdings: Number(($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value ? $("trendFixedMaxHoldings").value : "10").trim()),
         };
         if (!Number.isFinite(common.hybrid_entry_n) || common.hybrid_entry_n < 1) {
           return setMsg("混合策略入场阈值 n 需为>=1数字");
@@ -9977,6 +10918,12 @@
         common.hybrid_exit_m = Math.floor(common.hybrid_exit_m);
         if (!["none", "static", "trailing", "tightening"].includes(String(common.atr_stop_mode))) {
           return setMsg("ATR止损模式非法，请选择 关闭/静态/动态跟随/动态收紧");
+        }
+        if (!["entry", "latest"].includes(String(common.atr_stop_atr_basis))) {
+          return setMsg("ATR基准非法，请选择 入场/最新");
+        }
+        if (!["reenter", "wait_next_entry"].includes(String(common.atr_stop_reentry_mode))) {
+          return setMsg("止损后重入模式非法，请选择 允许重返/等待下一次入场");
         }
         if (!Number.isFinite(common.atr_stop_window) || common.atr_stop_window < 2) {
           return setMsg("ATR止损周期需为>=2的数字");
@@ -9990,6 +10937,16 @@
         if (common.atr_stop_mode === "tightening" && !(common.atr_stop_n > common.atr_stop_m)) {
           return setMsg("动态收紧模式要求 n > m");
         }
+        if (!["skip", "extend"].includes(String(common.fixed_overcap_policy))) {
+          return setMsg("固定比例超额策略非法，请选择 跳过/扩展");
+        }
+        if (!Number.isFinite(common.fixed_pos_ratio) || common.fixed_pos_ratio <= 0) {
+          return setMsg("固定比例需为>0数字（例如 0.04 代表 4%）");
+        }
+        if (!Number.isFinite(common.fixed_max_holdings) || common.fixed_max_holdings < 1) {
+          return setMsg("持仓标的上限需为>=1数字");
+        }
+        common.fixed_max_holdings = Math.floor(common.fixed_max_holdings);
         if (strategy === "tsmom" || strategy === "hybrid_trend") {
           const ent = Number(common.tsmom_entry_threshold);
           const ex = Number(common.tsmom_exit_threshold);
@@ -10004,19 +10961,25 @@
         setMsg("");
         let resp = null;
         if (mode === "portfolio") {
-          const codes = Array.from(selected);
+          const codes = _codesForStrategy("trend");
           if (codes.length === 0) return setMsg("请先选择标的池");
           const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
+          if (!["equal", "vol_target", "fixed_ratio"].includes(position_sizing)) return setMsg("组合仓位法仅支持 等权/目标波动率/固定比例");
+          if (position_sizing === "fixed_ratio" && common.fixed_pos_ratio > 1) {
+            return setMsg("固定比例建议不超过1（100%）");
+          }
+          window.__lastTrendPayload = { mode, codes, position_sizing, dynamic_universe: isDynamicUniverseOn(), ...common };
           resp = await api("/analysis/trend/portfolio", {
             method: "POST",
             body: JSON.stringify({ codes, position_sizing, dynamic_universe: isDynamicUniverseOn(), ...common }),
           });
         } else {
-          const codes = Array.from(selected);
+          const codes = _codesForStrategy("trend");
           const singleSel = $("trendSingleCode");
           const chosen = singleSel ? String(singleSel.value || "").trim() : "";
           const code = (chosen && codes.includes(chosen)) ? chosen : (codes.length > 0 ? codes[0] : "");
           if (!code) return setMsg("单标的模式请先勾选至少1个标的");
+          window.__lastTrendPayload = { mode, code, ...common };
           resp = await api("/analysis/trend", { method: "POST", body: JSON.stringify({ code, ...common }) });
         }
         const text = await resp.text();
@@ -10071,6 +11034,8 @@
           }
         }
         const atrStats = (((data || {}).risk_controls || {}).atr_stop) || null;
+        const extStats = (((data || {}).risk_controls || {}).position_extension) || null;
+        const usageStats = (((data || {}).risk_controls || {}).position_usage) || null;
         if (atrStats) {
           const topPairs = [
             ["enabled", atrStats.enabled],
@@ -10088,6 +11053,46 @@
             rows.push(`<tr><td>${esc("risk_controls.atr_stop")}</td><td>${esc(String(kk))}</td><td>${typeof vv === "number" ? Number(vv).toFixed(6) : esc(vv)}</td></tr>`);
           }
         }
+        if (extStats) {
+          const extPairs = [
+            ["enabled", extStats.enabled],
+            ["position_sizing", extStats.position_sizing],
+            ["fixed_pos_ratio", extStats.fixed_pos_ratio],
+            ["overcap_policy", extStats.overcap_policy],
+            ["extension_count", extStats.extension_count],
+            ["extension_days", extStats.extension_days],
+            ["first_extension_date", extStats.first_extension_date],
+            ["last_extension_date", extStats.last_extension_date],
+            ["skipped_count", extStats.skipped_count],
+            ["skipped_days", extStats.skipped_days],
+          ];
+          for (const [kk, vv] of extPairs) {
+            if (vv === undefined || vv === null) continue;
+            rows.push(`<tr><td>${esc("risk_controls.position_extension")}</td><td>${esc(String(kk))}</td><td>${typeof vv === "number" ? Number(vv).toFixed(6) : esc(vv)}</td></tr>`);
+          }
+        }
+        if (usageStats) {
+          const usagePairs = [
+            ["enabled", usageStats.enabled],
+            ["position_sizing", usageStats.position_sizing],
+            ["cash_as_residual", usageStats.cash_as_residual],
+            ["min_exposure", usageStats.min_exposure],
+            ["max_exposure", usageStats.max_exposure],
+            ["mean_exposure", usageStats.mean_exposure],
+            ["over_100pct_days", usageStats.over_100pct_days],
+            ["under_100pct_days", usageStats.under_100pct_days],
+          ];
+          for (const [kk, vv] of usagePairs) {
+            if (vv === undefined || vv === null) continue;
+            rows.push(`<tr><td>${esc("risk_controls.position_usage")}</td><td>${esc(String(kk))}</td><td>${typeof vv === "number" ? Number(vv).toFixed(6) : esc(vv)}</td></tr>`);
+          }
+          const q = (usageStats && usageStats.quantiles) ? usageStats.quantiles : {};
+          for (const k of ["p05", "p25", "p50", "p75", "p95"]) {
+            const vv = q[k];
+            if (vv === undefined || vv === null) continue;
+            rows.push(`<tr><td>${esc("risk_controls.position_usage.quantiles")}</td><td>${esc(String(k))}</td><td>${typeof vv === "number" ? Number(vv).toFixed(6) : esc(vv)}</td></tr>`);
+          }
+        }
         $("trendMetricsTable").innerHTML = `<tr><th>分组</th><th>指标</th><th>值</th></tr>${rows.join("")}`;
         try {
           renderContributionTables("trend", data.attribution || null);
@@ -10099,7 +11104,18 @@
             quarterly: _periodReturnsFromNav(dates, y1, "quarterly"),
             yearly: _periodReturnsFromNav(dates, y1, "yearly"),
           };
-          renderSimplePeriodTable("trendPeriodTable", pr);
+          trendPeriodTableState.weekly.rows = pr.weekly || [];
+          trendPeriodTableState.monthly.rows = pr.monthly || [];
+          trendPeriodTableState.quarterly.rows = pr.quarterly || [];
+          trendPeriodTableState.yearly.rows = pr.yearly || [];
+          trendPeriodTableState.weekly.page = 1;
+          trendPeriodTableState.monthly.page = 1;
+          trendPeriodTableState.quarterly.page = 1;
+          trendPeriodTableState.yearly.page = 1;
+          renderTrendPeriodTable("weekly");
+          renderTrendPeriodTable("monthly");
+          renderTrendPeriodTable("quarterly");
+          renderTrendPeriodTable("yearly");
         } catch (_) { /* ignore */ }
         try {
           const roll = (data && data.rolling) ? data.rolling : _rollingPackFromNav(dates, y1);
@@ -10123,12 +11139,24 @@
         const atrSummary = (atrStats && atrStats.enabled)
           ? `ATR止损(${esc(atrStats.mode || "-")})触发 ${Number(atrStats.trigger_count || 0)} 次，触发占全部离场 ${fmtPct(Number(atrStats.trigger_exit_share || 0))}。`
           : "ATR止损：未启用。";
+        const extSummary = (extStats && extStats.enabled)
+          ? `固定比例超额策略=扩展：触发 ${Number(extStats.extension_count || 0)} 次（${Number(extStats.extension_days || 0)} 天），其中仓位超100% ${Number(extStats.extension_over_weight_count || 0)} 次、持仓数超上限 ${Number(extStats.extension_over_count_count || 0)} 次。`
+          : (
+            (extStats && String(extStats.position_sizing || "") === "fixed_ratio" && String(extStats.overcap_policy || "") === "skip")
+              ? `固定比例超额策略=跳过：共跳过 ${Number(extStats.skipped_count || 0)} 笔，其中仓位超100% ${Number(extStats.skipped_over_weight_count || 0)} 笔、持仓数超上限 ${Number(extStats.skipped_over_count_count || 0)} 笔。`
+              : "固定比例扩展仓位：未启用。"
+          );
+        const usageSummary = (usageStats && usageStats.enabled)
+          ? `固定比例资金利用率：均值 ${fmtPct(Number(usageStats.mean_exposure || 0))}，最低 ${fmtPct(Number(usageStats.min_exposure || 0))}，最高 ${fmtPct(Number(usageStats.max_exposure || 0))}，分位数 P05/P25/P50/P75/P95 = ${fmtPct(Number((((usageStats.quantiles || {}).p05) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p25) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p50) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p75) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p95) || 0)))}。`
+          : "固定比例资金利用率：不适用。";
         setReport(
           "趋势研究报告式解读",
           [
             ..._perfReportLines("趋势策略", strategyM),
             `相对基准：超额年化 ${fmtPct(excessM.annualized_return)}，超额回撤 ${fmtPct(excessM.max_drawdown)}，超额夏普 ${fmtNum(excessM.sharpe_ratio)}。`,
             atrSummary,
+            extSummary,
+            usageSummary,
           ],
           "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
         );
@@ -10142,11 +11170,11 @@
           ],
           "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
         );
-        try { if (window.__lastBaselineResult && window.__lastRotationResult) runStrategyMix(); } catch (e) { /* best effort */ }
+        try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }
       }
 
       async function runRotNextExecutionPlan() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const asofRaw = ($("rotPlanAsof") && $("rotPlanAsof").value) ? String($("rotPlanAsof").value).trim() : "";
         const endRaw = ($("end") && $("end").value) ? String($("end").value).trim() : "";
@@ -10504,7 +11532,7 @@
       }
 
       async function runSuggestGroups() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("rotation");
         if (codes.length < 2) return setMsg("自动分组至少需要选择2个标的");
         const start = $("start").value.trim();
         const end = $("end").value.trim();
@@ -10534,7 +11562,7 @@
       }
 
       async function runEwCalendarEffect() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("baseline");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = (($("ewCalStart").value || "").trim()) || $("start").value.trim();
         const end = (($("ewCalEnd").value || "").trim()) || $("end").value.trim();
@@ -10568,7 +11596,7 @@
       }
 
       async function runRotCalendarEffect() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = (($("rotCalStart").value || "").trim()) || $("start").value.trim();
         const end = (($("rotCalEnd").value || "").trim()) || $("end").value.trim();
@@ -10589,10 +11617,12 @@
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
         const score_method = $("rotScoreMethod").value;
         const atr_stop_mode = (($("rotAtrStopMode") && $("rotAtrStopMode").value) ? String($("rotAtrStopMode").value) : "none");
+        const atr_stop_atr_basis = (($("rotAtrStopBasis") && $("rotAtrStopBasis").value) ? String($("rotAtrStopBasis").value) : "latest");
         const atr_stop_window = Number(($("rotAtrStopWin").value || "14").trim());
         const atr_stop_n = Number(($("rotAtrStopN").value || "2.0").trim());
         const atr_stop_m = Number(($("rotAtrStopM").value || "0.5").trim());
         if (!["none", "static", "trailing", "tightening"].includes(atr_stop_mode)) return setMsg("通用ATR止损模式非法");
+        if (!["entry", "latest"].includes(atr_stop_atr_basis)) return setMsg("通用ATR基准非法（仅支持入场/最新）");
         if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2) return setMsg("通用ATR止损周期需为>=2数字");
         if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0) return setMsg("通用ATR止损倍数 n 需为>0数字");
         if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0) return setMsg("通用ATR收紧步长 m 需为>0数字");
@@ -10782,7 +11812,7 @@
             codes, start, end, rebalance, rebalance_shift, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
             risk_free_rate,
             score_method,
-            atr_stop_mode, atr_stop_window, atr_stop_n, atr_stop_m,
+            atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
             corr_filter, corr_window, corr_threshold,
             group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
             inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
@@ -10812,7 +11842,7 @@
       }
 
       async function runAnalysis() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("baseline");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = $("start").value.trim();
         const end = $("end").value.trim();
@@ -10837,6 +11867,46 @@
         const fft_roll_step = Math.max(1, Math.floor(Number(($("fftRollStep").value || "5").trim())));
         if (!Number.isFinite(fft_roll_step) || fft_roll_step < 1) return setMsg("滚动FFT步长必须是正整数，例如 5");
         const baseline_mode = ($("baselineMode").value || "EW").trim().toUpperCase();
+        const _parseCustomWeights = (rawText, allowedCodes) => {
+          const txt = String(rawText || "").trim();
+          const out = {};
+          if (!txt) return { weights: out, sum: 0.0 };
+          const codeSet = new Set((allowedCodes || []).map((x) => String(x || "").trim()));
+          const lines = txt.split(/\r?\n/);
+          for (const ln of lines) {
+            const s = String(ln || "").trim();
+            if (!s || s.startsWith("#")) continue;
+            const parts = s
+              .split(/[=,:;\s]+/)
+              .map((x) => String(x || "").trim())
+              .filter(Boolean);
+            if (parts.length < 2) return { error: `自定义仓位格式错误：${s}` };
+            const code = parts[0];
+            if (!codeSet.has(code)) return { error: `自定义仓位包含未勾选标的：${code}` };
+            let wRaw = parts[1];
+            let w;
+            if (wRaw.endsWith("%")) {
+              w = Number(wRaw.slice(0, -1)) / 100.0;
+            } else {
+              w = Number(wRaw);
+              if (Number.isFinite(w) && w > 1.0 && w <= 100.0) w = w / 100.0;
+            }
+            if (!Number.isFinite(w) || w < 0) return { error: `自定义仓位必须为非负数字：${s}` };
+            out[code] = (Number(out[code] || 0) + Number(w));
+          }
+          const sum = Object.values(out).reduce((a, b) => a + Number(b || 0), 0.0);
+          if (!Number.isFinite(sum) || sum > 1.0 + 1e-9) {
+            return { error: `自定义仓位总和不能超过100%，当前约 ${fmtPct(sum)}` };
+          }
+          return { weights: out, sum };
+        };
+        let custom_weights = null;
+        if (baseline_mode === "CUSTOM") {
+          const parsed = _parseCustomWeights(($("baselineCustomWeights") && $("baselineCustomWeights").value) || "", codes);
+          if (parsed.error) return setMsg(parsed.error);
+          if (!(parsed.sum > 0)) return setMsg("自定义仓位模式至少需要一条正权重配置。");
+          custom_weights = parsed.weights;
+        }
         const rp_window_days = Math.max(2, Math.floor(Number(($("baselineRpWin").value || "60").trim())));
         if (!Number.isFinite(rp_window_days) || rp_window_days < 2) return setMsg("RP 波动率窗口必须是 >=2 的整数交易日，例如 60");
         const dynamic_universe = isDynamicUniverseOn();
@@ -10860,6 +11930,8 @@
             fft_roll,
             fft_roll_step,
             rp_window_days,
+            holding_mode: baseline_mode,
+            custom_weights,
             dynamic_universe,
             corr_min_obs,
           }),
@@ -10870,6 +11942,24 @@
         const data = JSON.parse(text);
         lastBaseline = data;
         window.__lastBaselineResult = data;
+        window.__lastBaselinePayload = {
+          codes,
+          start,
+          end,
+          benchmark_code,
+          adjust: ADJUST_USED,
+          rebalance,
+          exec_price,
+          risk_free_rate,
+          fft_windows,
+          fft_roll,
+          fft_roll_step,
+          rp_window_days,
+          holding_mode: baseline_mode,
+          custom_weights,
+          dynamic_universe,
+          corr_min_obs,
+        };
         // Save last baseline payload for distribution re-fetch (with different adjust).
         window.__distBaselinePayload = {
           codes,
@@ -10924,7 +12014,7 @@
         plotRolling("rollingDD", "Rolling Drawdown", (picked.rolling.drawdown || picked.rolling.max_drawdown || {}), ".0%");
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
-        try { if (window.__lastRotationResult && window.__lastTrendResult) runStrategyMix(); } catch (e) { /* best effort */ }
+        try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }
         window.__distInitedByCodeRange = false;
         renderPeriodDistributions(data.period_distributions, data);
         const benchName = benchmark_code ? codeLabel(benchmark_code) : "未设置基准";
@@ -10948,7 +12038,13 @@
       }
 
       // baseline mode toggle: re-render from lastBaseline (no re-fetch)
+      function updateBaselineHoldingUi() {
+        const mode = ($("baselineMode") && $("baselineMode").value ? String($("baselineMode").value) : "EW").toUpperCase();
+        if ($("baselineRpWin")) $("baselineRpWin").disabled = (mode !== "RP");
+        if ($("baselineCustomWeightsWrap")) $("baselineCustomWeightsWrap").style.display = (mode === "CUSTOM" ? "" : "none");
+      }
       if ($("baselineMode")) $("baselineMode").addEventListener("change", () => {
+        updateBaselineHoldingUi();
         if (!lastBaseline || !lastBaseline.nav) return;
         const mode = ($("baselineMode").value || "EW").toUpperCase();
         const by = (lastBaseline.metrics_by_portfolio || {});
@@ -11909,16 +13005,72 @@
       if ($("runStrategyMix")) $("runStrategyMix").addEventListener("click", runStrategyMix);
       if ($("mixSetEqualWeights")) $("mixSetEqualWeights").addEventListener("click", setMixEqualWeights);
       if ($("mixSetInvVolWeights")) $("mixSetInvVolWeights").addEventListener("click", setMixInvVolWeights);
+      if ($("mixWeightMode")) $("mixWeightMode").addEventListener("change", () => {
+        _renderMixStrategyListTable();
+        _saveMixSelection();
+      });
+      if ($("saveFixedStrategy")) $("saveFixedStrategy").addEventListener("click", saveCurrentFixedStrategy);
+      if ($("loadFixedStrategy")) $("loadFixedStrategy").addEventListener("click", () => {
+        const id = ($("fixedStrategyLoadSelect") && $("fixedStrategyLoadSelect").value) ? String($("fixedStrategyLoadSelect").value) : "";
+        if (!id) return setMsg("请先选择要加载的固定策略。");
+        loadFixedStrategyById(id);
+      });
+      if ($("deleteFixedStrategy")) $("deleteFixedStrategy").addEventListener("click", () => {
+        const id = ($("fixedStrategyLoadSelect") && $("fixedStrategyLoadSelect").value) ? String($("fixedStrategyLoadSelect").value) : "";
+        if (!id) return setMsg("请先选择要删除的固定策略。");
+        const s = _findFixedStrategy(id);
+        fixedStrategies = fixedStrategies.filter((x) => String(x.id) !== String(id));
+        mixSelectedStrategyIds = (mixSelectedStrategyIds || []).filter((x) => String(x) !== String(id));
+        _saveFixedStrategies();
+        _saveMixSelection();
+        _renderFixedStrategyControls();
+        _renderMixStrategyListTable();
+        setMsg(`已删除固定策略：${s ? s.name : id}`);
+      });
+      if ($("mixAddStrategy")) $("mixAddStrategy").addEventListener("click", () => {
+        const id = ($("mixStrategyAddSelect") && $("mixStrategyAddSelect").value) ? String($("mixStrategyAddSelect").value) : "";
+        if (!id) return setMsg("请先选择要加入组合的固定策略。");
+        if (!mixSelectedStrategyIds.includes(id)) mixSelectedStrategyIds.push(id);
+        _renderMixStrategyListTable();
+        _saveMixSelection();
+      });
+      if ($("mixClearStrategies")) $("mixClearStrategies").addEventListener("click", () => {
+        mixSelectedStrategyIds = [];
+        _renderMixStrategyListTable();
+        _saveMixSelection();
+      });
       if ($("mixAccountAmount")) {
         $("mixAccountAmount").addEventListener("change", () => {
           try {
-            if (window.__lastBaselineResult && window.__lastRotationResult && window.__lastTrendResult) runStrategyMix();
+            if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix();
           } catch (_) { /* ignore */ }
         });
       }
       if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendStrategyParamsUi);
+      if ($("trendMode")) $("trendMode").addEventListener("change", updateTrendSizingUi);
+      if ($("trendSizing")) $("trendSizing").addEventListener("change", updateTrendSizingUi);
+      if ($("trendAtrStopMode")) $("trendAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("trend"));
+      if ($("rotAtrStopMode")) $("rotAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("rot"));
+      if ($("trendTraceN")) $("trendTraceN").addEventListener("change", () => {
+        try {
+          if (window.__lastTrendResult) {
+            const m = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
+            renderTrendPositionPlan(window.__lastTrendResult, m);
+          }
+        } catch (_) { /* ignore */ }
+      });
+      if ($("trendTraceView")) $("trendTraceView").addEventListener("change", () => {
+        try {
+          if (window.__lastTrendResult) {
+            const m = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
+            renderTrendPositionPlan(window.__lastTrendResult, m);
+          }
+        } catch (_) { /* ignore */ }
+      });
       // Init trend strategy parameter enablement/description on page load.
       updateTrendStrategyParamsUi();
+      updateTrendSizingUi();
+      _syncAtrStopParamsUi("rot");
       if ($("rotSuggestGroups")) $("rotSuggestGroups").addEventListener("click", runSuggestGroups);
       if ($("rotBenchMode")) $("rotBenchMode").addEventListener("change", () => {
         const data = window.__lastRotationResult;
@@ -11961,8 +13113,15 @@
         const simSaved = _settingsLoad(SETTINGS_KEYS.sim);
         const miniSaved = _settingsLoad(SETTINGS_KEYS.miniRot);
         const selSaved = _settingsLoad(SETTINGS_KEYS.selectedCodes);
+        const groupSaved = _settingsLoad(SETTINGS_KEYS.candidateGroups);
+        const fixedSaved = _settingsLoad(SETTINGS_KEYS.fixedStrategies);
+        const mixSelSaved = _settingsLoad(SETTINGS_KEYS.mixSelection);
         _savedSelectedCodesReady = !!(selSaved && typeof selSaved === "object" && Array.isArray(selSaved.codes));
         _savedSelectedCodes = _savedSelectedCodesReady ? selSaved.codes : null;
+        _savedCandidateGroupsReady = !!(groupSaved && typeof groupSaved === "object");
+        _savedCandidateGroups = _savedCandidateGroupsReady ? groupSaved : null;
+        _savedFixedStrategiesReady = !!(fixedSaved && typeof fixedSaved === "object");
+        _savedFixedStrategies = _savedFixedStrategiesReady ? fixedSaved : null;
 
         _applyFields(SETTINGS_FIELD_IDS.global, globalSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.dist, distSaved || {});
@@ -11981,6 +13140,21 @@
         }
         _restoreCalendarSelections(ewCalSaved, "ew");
         _restoreCalendarSelections(rotCalSaved, "rot");
+        if (_savedFixedStrategies && Array.isArray(_savedFixedStrategies.items)) {
+          fixedStrategies = _savedFixedStrategies.items.map(_sanitizeFixedStrategy).filter(Boolean);
+        } else {
+          fixedStrategies = [];
+        }
+        if (mixSelSaved && Array.isArray(mixSelSaved.strategy_ids)) {
+          mixSelectedStrategyIds = mixSelSaved.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean);
+        } else {
+          mixSelectedStrategyIds = [];
+        }
+        if (mixSelSaved && mixSelSaved.weight_mode && $("mixWeightMode")) {
+          $("mixWeightMode").value = String(mixSelSaved.weight_mode);
+        }
+        _renderFixedStrategyControls();
+        _renderMixStrategyListTable();
 
         _afterDefaultsApply();
 
@@ -12046,7 +13220,7 @@
 
       async function runMcEw() {
         const btn = $("runMcEw");
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("baseline");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = $("start").value.trim();
         const end = $("end").value.trim();
@@ -12092,7 +13266,7 @@
 
       async function runMcRot() {
         const btn = $("runMcRot");
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = $("start").value.trim();
         const end = $("end").value.trim();
@@ -12122,10 +13296,12 @@
         const floorRules = [...(entryFloorRules || []), ...(exitFloorRules || [])];
         const score_method = $("rotScoreMethod").value;
         const atr_stop_mode = (($("rotAtrStopMode") && $("rotAtrStopMode").value) ? String($("rotAtrStopMode").value) : "none");
+        const atr_stop_atr_basis = (($("rotAtrStopBasis") && $("rotAtrStopBasis").value) ? String($("rotAtrStopBasis").value) : "latest");
         const atr_stop_window = Number(($("rotAtrStopWin").value || "14").trim());
         const atr_stop_n = Number(($("rotAtrStopN").value || "2.0").trim());
         const atr_stop_m = Number(($("rotAtrStopM").value || "0.5").trim());
         if (!["none", "static", "trailing", "tightening"].includes(atr_stop_mode)) return setMsg("通用ATR止损模式非法");
+        if (!["entry", "latest"].includes(atr_stop_atr_basis)) return setMsg("通用ATR基准非法（仅支持入场/最新）");
         if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2) return setMsg("通用ATR止损周期需为>=2数字");
         if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0) return setMsg("通用ATR止损倍数 n 需为>0数字");
         if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0) return setMsg("通用ATR收紧步长 m 需为>0数字");
@@ -12301,7 +13477,7 @@
               rebalance_anchor, rebalance_shift, exec_price,
               risk_free_rate,
               score_method,
-              atr_stop_mode, atr_stop_window, atr_stop_n, atr_stop_m,
+              atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
               corr_filter, corr_window, corr_threshold,
               group_enforce, group_pick_policy, asset_groups, dynamic_universe: isDynamicUniverseOn(),
               inertia, inertia_min_hold_periods, inertia_score_gap, inertia_min_turnover,
@@ -12366,7 +13542,7 @@
       }
 
       async function runRotationOosBootstrap() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = ($("start") && $("start").value) ? String($("start").value).trim() : "";
         const end = ($("end") && $("end").value) ? String($("end").value).trim() : "";
@@ -12406,7 +13582,7 @@
       }
 
       async function runTrendOosBootstrap() {
-        const codes = Array.from(selected);
+        const codes = _codesForStrategy("trend");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = ($("start") && $("start").value) ? String($("start").value).trim() : "";
         const end = ($("end") && $("end").value) ? String($("end").value).trim() : "";
@@ -12526,14 +13702,66 @@
       wireRotPeriodControls("monthly");
       wireRotPeriodControls("quarterly");
       wireRotPeriodControls("yearly");
-      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); _saveSelectedCodes(); });
+      wireTrendPeriodControls("weekly");
+      wireTrendPeriodControls("monthly");
+      wireTrendPeriodControls("quarterly");
+      wireTrendPeriodControls("yearly");
+      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); _saveSelectedCodes(); });
       $("selAll").addEventListener("click", () => { maybeAdjustBacktestRange(); renderRangeHint(); });
-      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes(); });
+      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes(); });
       $("selInvert").addEventListener("click", () => {
         const next = new Set();
         for (const it of pool) if (!selected.has(it.code)) next.add(it.code);
         selected.clear(); for (const c of next) selected.add(c);
-        renderCodeList(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes();
+        renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes();
+      });
+      if ($("groupEditorSelect")) $("groupEditorSelect").addEventListener("change", () => {
+        const nm = _sanitizeGroupName($("groupEditorSelect").value);
+        if (!nm || !candidateGroups[nm]) return;
+        activeGroupName = nm;
+        _groupEditorLastSynced = nm;
+        if ($("groupNameInput")) $("groupNameInput").value = nm;
+        _setSelectedFromGroup(activeGroupName);
+        renderCandidateGroupControls();
+        renderCodeList();
+        renderBenchmarkSelect();
+        renderTrendSingleCodeSelect();
+        maybeAdjustBacktestRange();
+        renderRangeHint();
+        _saveCandidateGroups();
+      });
+      if ($("groupSaveBtn")) $("groupSaveBtn").addEventListener("click", () => {
+        const input = $("groupNameInput");
+        const nm = _sanitizeGroupName(input ? input.value : "");
+        if (!nm) return setMsg("分组名称不能为空。");
+        candidateGroups[nm] = _validCodes(Array.from(selected));
+        activeGroupName = nm;
+        _groupEditorLastSynced = nm;
+        renderCandidateGroupControls();
+        _saveCandidateGroups();
+        setMsg(`分组已保存：${nm}（${candidateGroups[nm].length}个标的）`);
+      });
+      if ($("groupDeleteBtn")) $("groupDeleteBtn").addEventListener("click", () => {
+        const editor = $("groupEditorSelect");
+        const nm = _sanitizeGroupName(editor ? editor.value : "");
+        if (!nm || !candidateGroups[nm]) return;
+        if (nm === DEFAULT_GROUP_NAME) return setMsg("默认分组不能删除。");
+        delete candidateGroups[nm];
+        _ensureCandidateGroups();
+        activeGroupName = DEFAULT_GROUP_NAME;
+        _setSelectedFromGroup(activeGroupName);
+        renderCandidateGroupControls();
+        renderCodeList();
+        renderBenchmarkSelect();
+        renderTrendSingleCodeSelect();
+        _saveCandidateGroups();
+        setMsg(`已删除分组：${nm}`);
+      });
+      if ($("baselineGroupPreset")) $("baselineGroupPreset").addEventListener("change", () => {
+        renderBenchmarkSelect();
+      });
+      if ($("trendGroupPreset")) $("trendGroupPreset").addEventListener("change", () => {
+        renderTrendSingleCodeSelect();
       });
       if ($("dynamicUniverse")) {
         $("dynamicUniverse").addEventListener("change", () => {

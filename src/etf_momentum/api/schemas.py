@@ -147,6 +147,11 @@ class BaselineAnalysisRequest(BaseModel):
     fft_roll: bool = Field(default=True, description="If true, compute rolling FFT time series for EW (downsampled by fft_roll_step)")
     fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
     rp_window_days: int = Field(default=60, ge=2, le=2520, description="Risk parity (inverse-vol) volatility lookback window in trading days")
+    holding_mode: str = Field(default="EW", description="Holding strategy mode: EW|RP|CUSTOM")
+    custom_weights: dict[str, float] | None = Field(
+        default=None,
+        description="Custom target weights by code in decimal (e.g. {'510300':0.4,'518880':0.3}); leftover to cash.",
+    )
     dynamic_universe: bool = Field(
         default=False,
         description="If true, use dynamic universe over union interval; otherwise legacy common-interval (intersection).",
@@ -862,6 +867,8 @@ class RotationBacktestRequest(BaseModel):
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0)
     atr_stop_mode: str = Field(default="none", description="Universal ATR stop mode: none|static|trailing|tightening")
+    atr_stop_atr_basis: str = Field(default="latest", description="ATR basis for dynamic modes: entry|latest")
+    atr_stop_reentry_mode: str = Field(default="reenter", description="Re-entry after ATR stop: reenter|wait_next_entry")
     atr_stop_window: int = Field(default=14, ge=2, description="ATR window for universal stop")
     atr_stop_n: float = Field(default=2.0, gt=0.0, description="ATR stop distance multiplier n")
     atr_stop_m: float = Field(default=0.5, gt=0.0, description="ATR tightening step m (used by tightening mode)")
@@ -1040,6 +1047,7 @@ class TrendBacktestRequest(BaseModel):
     tsmom_entry_threshold: float = Field(default=0.0, description="TSMOM entry threshold on momentum score; enter when score > threshold")
     tsmom_exit_threshold: float = Field(default=0.0, description="TSMOM exit threshold on momentum score; exit when score <= threshold")
     atr_stop_mode: str = Field(default="none", description="Universal ATR stop mode: none|static|trailing|tightening")
+    atr_stop_atr_basis: str = Field(default="latest", description="ATR basis for dynamic modes: entry|latest")
     atr_stop_window: int = Field(default=14, ge=2, description="ATR window for universal stop")
     atr_stop_n: float = Field(default=2.0, gt=0.0, description="ATR stop distance multiplier n")
     atr_stop_m: float = Field(default=0.5, gt=0.0, description="ATR tightening step m (used by tightening mode)")
@@ -1069,9 +1077,12 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend; ma_filter uses ma_type sma|ema",
     )
-    position_sizing: str = Field(default="equal", description="equal|vol_target")
+    position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
     vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling")
+    fixed_pos_ratio: float = Field(default=0.04, gt=0.0, description="Fixed position ratio per active asset when position_sizing=fixed_ratio")
+    fixed_overcap_policy: str = Field(default="skip", description="When fixed-ratio entry exceeds constraints: skip|extend")
+    fixed_max_holdings: int = Field(default=10, ge=1, description="Max number of held assets when position_sizing=fixed_ratio")
     dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate pool by period over union interval")
     sma_window: int = Field(default=200, ge=2)
     fast_window: int = Field(default=50, ge=2)
@@ -1083,6 +1094,8 @@ class TrendPortfolioBacktestRequest(BaseModel):
     tsmom_entry_threshold: float = Field(default=0.0)
     tsmom_exit_threshold: float = Field(default=0.0)
     atr_stop_mode: str = Field(default="none", description="none|static|trailing|tightening")
+    atr_stop_atr_basis: str = Field(default="latest", description="entry|latest")
+    atr_stop_reentry_mode: str = Field(default="reenter", description="reenter|wait_next_entry")
     atr_stop_window: int = Field(default=14, ge=2)
     atr_stop_n: float = Field(default=2.0, gt=0.0)
     atr_stop_m: float = Field(default=0.5, gt=0.0)

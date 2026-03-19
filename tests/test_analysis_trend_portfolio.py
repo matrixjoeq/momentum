@@ -63,6 +63,7 @@ def test_trend_portfolio_invests_when_candidates_are_active(session_factory):
                 end=dates[-1],
                 strategy="ma_filter",
                 sma_window=10,
+                exec_price="close",
             ),
         )
 
@@ -95,6 +96,79 @@ def test_trend_portfolio_ma_cross_supports_ema_type(session_factory):
         )
     assert out["meta"]["strategy"] == "ma_cross"
     assert ((out.get("meta") or {}).get("params") or {}).get("ma_type") == "ema"
+
+
+def test_trend_portfolio_fixed_ratio_skip_respects_weight_and_holding_caps(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-02-29", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 1.2)
+            _add_price(db, code="A2", day=d, close=100 + i * 1.0)
+            _add_price(db, code="A3", day=d, close=100 + i * 0.8)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2", "A3"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=6,
+                position_sizing="fixed_ratio",
+                fixed_pos_ratio=0.4,
+                fixed_max_holdings=2,
+                fixed_overcap_policy="skip",
+                cost_bps=0.0,
+            ),
+        )
+    ext = ((out.get("risk_controls") or {}).get("position_extension") or {})
+    assert ext.get("position_sizing") == "fixed_ratio"
+    assert int(ext.get("skipped_count") or 0) > 0
+    assert int(ext.get("skipped_over_weight_count") or 0) > 0
+    assert int(ext.get("skipped_over_count_count") or 0) > 0
+    # Skip policy should keep effective holding count within cap.
+    w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
+    if not w.empty:
+        max_cnt = int((w > 1e-12).sum(axis=1).max())
+        assert max_cnt <= 2
+
+
+def test_trend_portfolio_fixed_ratio_extend_allows_weight_and_holding_overcaps(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-02-29", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 1.2)
+            _add_price(db, code="A2", day=d, close=100 + i * 1.0)
+            _add_price(db, code="A3", day=d, close=100 + i * 0.8)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2", "A3"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=6,
+                position_sizing="fixed_ratio",
+                fixed_pos_ratio=0.6,
+                fixed_max_holdings=2,
+                fixed_overcap_policy="extend",
+                cost_bps=0.0,
+            ),
+        )
+    ext = ((out.get("risk_controls") or {}).get("position_extension") or {})
+    usage = ((out.get("risk_controls") or {}).get("position_usage") or {})
+    assert int(ext.get("extension_count") or 0) > 0
+    assert int(ext.get("extension_over_weight_count") or 0) > 0
+    assert int(ext.get("extension_over_count_count") or 0) > 0
+    # Extend policy allows >100% and >holding-cap states.
+    assert int(usage.get("over_100pct_days") or 0) > 0
+    w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
+    if not w.empty:
+        max_cnt = int((w > 1e-12).sum(axis=1).max())
+        assert max_cnt > 2
 
 
 def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(session_factory):

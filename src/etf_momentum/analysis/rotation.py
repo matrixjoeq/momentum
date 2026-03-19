@@ -27,6 +27,8 @@ class RotationAnalysisInputs:
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
     atr_stop_mode: str = "none"
+    atr_stop_atr_basis: str = "latest"
+    atr_stop_reentry_mode: str = "reenter"
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
@@ -82,6 +84,8 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             risk_free_rate=inp.risk_free_rate,
             cost_bps=inp.cost_bps,
             atr_stop_mode=inp.atr_stop_mode,
+            atr_stop_atr_basis=inp.atr_stop_atr_basis,
+            atr_stop_reentry_mode=inp.atr_stop_reentry_mode,
             atr_stop_window=inp.atr_stop_window,
             atr_stop_n=inp.atr_stop_n,
             atr_stop_m=inp.atr_stop_m,

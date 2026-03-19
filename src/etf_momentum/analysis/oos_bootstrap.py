@@ -360,6 +360,8 @@ def _trend_params_to_inputs(
         tsmom_entry_threshold=float(params.get("tsmom_entry_threshold", 0.0)),
         tsmom_exit_threshold=float(params.get("tsmom_exit_threshold", 0.0)),
         atr_stop_mode=str(params.get("atr_stop_mode", "none")),
+        atr_stop_atr_basis=str(params.get("atr_stop_atr_basis", "latest")),
+        atr_stop_reentry_mode=str(params.get("atr_stop_reentry_mode", "reenter")),
         atr_stop_window=int(params.get("atr_stop_window", 14)),
         atr_stop_n=float(params.get("atr_stop_n", 2.0)),
         atr_stop_m=float(params.get("atr_stop_m", 0.5)),
