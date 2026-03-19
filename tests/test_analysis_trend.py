@@ -234,6 +234,44 @@ def test_trend_macd_family_smoke(session_factory):
     assert len(out_v["signals"]["position"]) == len(out_v["nav"]["dates"])
 
 
+def test_trend_hybrid_strategy_thresholds(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.4 + (1.5 if (i % 12 < 6) else -1.0)
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="hybrid_trend",
+                hybrid_entry_n=1,
+                hybrid_exit_m=1,
+                cost_bps=0.0,
+            ),
+        )
+        out_no_entry = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="hybrid_trend",
+                hybrid_entry_n=6,  # larger than number of sub-strategies, so no entry
+                hybrid_exit_m=1,
+                cost_bps=0.0,
+            ),
+        )
+    assert out["meta"]["strategy"] == "hybrid_trend"
+    assert any(x > 0 for x in out["signals"]["position"])
+    assert all(x == 0 for x in out_no_entry["signals"]["position"])
+
+
 def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
     sf = session_factory
     code = "AAA"
@@ -252,6 +290,7 @@ def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
         ("macd_cross", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
         ("macd_zero_filter", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
         ("macd_v", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "macd_v_atr_window": 2, "macd_v_scale": 100.0}),
+        ("hybrid_trend", {"fast_window": 2, "slow_window": 3, "donchian_entry": 2, "donchian_exit": 2, "mom_lookback": 2, "macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "sma_window": 3, "hybrid_entry_n": 1, "hybrid_exit_m": 1}),
     ]
     with sf() as db:
         for d, p in zip(dates, pxs):

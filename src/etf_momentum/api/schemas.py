@@ -1027,7 +1027,7 @@ class TrendBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v (long/cash); ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend (long/cash); ma_filter uses ma_type sma|ema",
     )
     # parameters (some are strategy-specific)
     sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
@@ -1054,6 +1054,8 @@ class TrendBacktestRequest(BaseModel):
     macd_signal: int = Field(default=9, ge=2, description="MACD signal EMA window")
     macd_v_atr_window: int = Field(default=26, ge=2, description="ATR window used by MACD-V normalization")
     macd_v_scale: float = Field(default=100.0, gt=0.0, description="Scale factor for MACD-V")
+    hybrid_entry_n: int = Field(default=1, ge=1, description="Hybrid trend: minimum number of sub-strategy entry signals to enter")
+    hybrid_exit_m: int = Field(default=1, ge=1, description="Hybrid trend: minimum number of sub-strategy exit signals to exit")
 
 
 class TrendPortfolioBacktestRequest(BaseModel):
@@ -1065,7 +1067,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v; ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend; ma_filter uses ma_type sma|ema",
     )
     position_sizing: str = Field(default="equal", description="equal|vol_target")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
@@ -1094,6 +1096,8 @@ class TrendPortfolioBacktestRequest(BaseModel):
     macd_signal: int = Field(default=9, ge=2)
     macd_v_atr_window: int = Field(default=26, ge=2)
     macd_v_scale: float = Field(default=100.0, gt=0.0)
+    hybrid_entry_n: int = Field(default=1, ge=1)
+    hybrid_exit_m: int = Field(default=1, ge=1)
 
 
 class AssetGroupSuggestRequest(BaseModel):
@@ -1157,7 +1161,7 @@ class TrendOosBootstrapRequest(BaseModel):
     seed: int | None = Field(default=None, description="Random seed for reproducibility")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend",
     )
     cost_bps: float = Field(default=2.0, ge=0.0)
     risk_free_rate: float = Field(default=0.025)

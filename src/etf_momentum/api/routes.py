@@ -754,6 +754,8 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         macd_signal=payload.macd_signal,
         macd_v_atr_window=payload.macd_v_atr_window,
         macd_v_scale=payload.macd_v_scale,
+        hybrid_entry_n=payload.hybrid_entry_n,
+        hybrid_exit_m=payload.hybrid_exit_m,
     )
     try:
         return compute_trend_backtest(db, inp)
@@ -798,6 +800,8 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         macd_signal=payload.macd_signal,
         macd_v_atr_window=payload.macd_v_atr_window,
         macd_v_scale=payload.macd_v_scale,
+        hybrid_entry_n=payload.hybrid_entry_n,
+        hybrid_exit_m=payload.hybrid_exit_m,
     )
     try:
         return compute_trend_portfolio_backtest(db, inp)

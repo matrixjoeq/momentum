@@ -113,6 +113,7 @@ def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(session
         ("macd_cross", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
         ("macd_zero_filter", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
         ("macd_v", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "macd_v_atr_window": 2, "macd_v_scale": 100.0}),
+        ("hybrid_trend", {"fast_window": 2, "slow_window": 3, "donchian_entry": 2, "donchian_exit": 2, "mom_lookback": 2, "macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "sma_window": 3, "hybrid_entry_n": 1, "hybrid_exit_m": 1}),
     ]
 
     with sf() as db:

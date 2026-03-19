@@ -764,7 +764,7 @@
               </select>
             </div>
             <div>
-              <label id="rotRebalanceAnchorLabel">调仓日（周度 1~5）</label>
+              <label id="rotRebalanceAnchorLabel">调仓日（周度 0~5；0=周一到周五等权）</label>
               <input id="rotRebalanceAnchor" value="5" />
             </div>
             <div>
@@ -2191,6 +2191,7 @@
             <option value="macd_cross">MACD金叉死叉</option>
             <option value="macd_zero_filter">MACD零轴过滤</option>
             <option value="macd_v">MACD-V</option>
+            <option value="hybrid_trend">混合趋势（5策略共振）</option>
           </select>
         </div>
         <div>
@@ -2262,9 +2263,15 @@
         <div><label>止损倍数 n</label><input id="trendAtrStopN" value="2.0" /></div>
         <div><label>收紧步长 m</label><input id="trendAtrStopM" value="0.5" /></div>
       </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div><label>混合策略入场阈值 n</label><input id="trendHybridEntryN" value="1" /></div>
+        <div><label>混合策略离场阈值 m</label><input id="trendHybridExitM" value="1" /></div>
+      </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
       <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
       <div id="trendChart" style="width:100%; height:420px; margin-top:10px;"></div>
+      <h3 style="margin-top:12px;">趋势策略：与基准比较的40日收益差</h3>
+      <div id="trend40dExcessChart" style="width:100%; height:320px; margin-top:8px;"></div>
       <h3 style="margin-top:12px;">趋势策略：日度收益率分布统计</h3>
       <div class="row no-print" style="margin-top:8px; align-items:end;">
         <div>
@@ -2278,6 +2285,43 @@
       <div id="trendDailyRetHist" style="width:100%; height:320px; margin-top:10px;"></div>
       <table id="trendDailyRetQuantiles" style="margin-top:10px;"></table>
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start; margin-top:10px;">
+        <div>
+          <h3>收益贡献（趋势）</h3>
+          <table id="trendReturnContrib"></table>
+        </div>
+        <div>
+          <h3>风险贡献（趋势）</h3>
+          <table id="trendRiskContrib"></table>
+        </div>
+        <div>
+          <h3>风险收益比（趋势）</h3>
+          <table id="trendRiskReturnRatio"></table>
+        </div>
+      </div>
+      <div class="panel two" style="margin-top:10px;">
+        <div>
+          <h3>周期收益率（趋势）</h3>
+          <table id="trendPeriodTable"></table>
+        </div>
+        <div>
+          <h3>滚动收益率 / 回撤（趋势）</h3>
+          <div id="trendRollingReturns" style="width:100%; height:300px;"></div>
+          <div id="trendRollingDD" style="width:100%; height:300px; margin-top:8px;"></div>
+        </div>
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:10px;">
+        <div>
+          <h3>当前持仓标的列表</h3>
+          <table id="trendCurrentHoldingsTable"></table>
+        </div>
+        <div>
+          <h3>下一交易日交易计划</h3>
+          <div id="trendNextPlanDate" class="muted" style="margin-bottom:6px;"></div>
+          <table id="trendNextBuyTable"></table>
+          <table id="trendNextSellTable" style="margin-top:8px;"></table>
+        </div>
+      </div>
       <table id="trendGroupTable" style="margin-top:10px;"></table>
       <div id="trendReport" class="reportCard"></div>
 
@@ -2300,6 +2344,7 @@
             <option value="macd_cross">macd_cross</option>
             <option value="macd_zero_filter">macd_zero_filter</option>
             <option value="macd_v">macd_v</option>
+            <option value="hybrid_trend">hybrid_trend</option>
           </select>
         </div>
         <div><label>成本(bps)</label><input id="trendOosCost" value="2" /></div>
@@ -2314,6 +2359,7 @@
         <div><label>持有策略权重</label><input id="mixWBaseline" value="0.3333" /></div>
         <div><label>轮动策略权重</label><input id="mixWRotation" value="0.3333" /></div>
         <div><label>趋势策略权重</label><input id="mixWTrend" value="0.3334" /></div>
+        <div><label>交易账户金额(元)</label><input id="mixAccountAmount" placeholder="可空，例如 1000000" /></div>
         <button id="mixSetEqualWeights">等权</button>
         <button id="mixSetInvVolWeights">按波动倒数</button>
         <div><label>滚动窗口(交易日)</label><input id="mixRollWin" value="60" /></div>
@@ -2335,6 +2381,53 @@
       </div>
       <div class="muted" id="strategyMixNote" style="margin-top:8px;"></div>
       <table id="strategyMixMetricsTable" style="margin-top:10px;"></table>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:10px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">总策略层：当前持仓</div>
+          <table id="mixCurrentHoldingsTable"></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">总策略层：下一交易日交易计划</div>
+          <div id="mixNextPlanDate" class="muted" style="margin-bottom:6px;"></div>
+          <table id="mixNextBuyTable"></table>
+          <table id="mixNextSellTable" style="margin-top:8px;"></table>
+        </div>
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:10px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">子策略层：当前持仓（持有/轮动/趋势）</div>
+          <table id="mixSubCurrentHoldingsTable"></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">子策略层：下一交易日交易计划（持有/轮动/趋势）</div>
+          <table id="mixSubNextBuyTable"></table>
+          <table id="mixSubNextSellTable" style="margin-top:8px;"></table>
+        </div>
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start; margin-top:10px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">收益贡献（按策略）</div>
+          <table id="mixReturnContrib"></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">风险贡献（按策略）</div>
+          <table id="mixRiskContrib"></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">风险收益比（按策略）</div>
+          <table id="mixRiskReturnRatio"></table>
+        </div>
+      </div>
+      <div class="panel two" style="margin-top:10px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">周期收益率（MIX）</div>
+          <table id="mixPeriodTable"></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">滚动收益率（MIX）</div>
+          <div id="strategyMixRollingReturns" style="width:100%; height:320px;"></div>
+        </div>
+      </div>
       <div class="panel two" style="margin-top:10px;">
         <div>
           <div class="muted" style="margin-bottom:6px;">滚动相关性（窗口内日收益）</div>
@@ -2486,6 +2579,16 @@
         if (x == null || Number.isNaN(x)) return "-";
         return Number(x).toFixed(4);
       }
+      function fmtMoney(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return "-";
+        return v.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+      function fmtShares(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return "-";
+        return v.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
 
       let pool = [];
       const selected = new Set();
@@ -2504,7 +2607,7 @@
         sim: `${SETTINGS_NS}.sim_gbm`,
       };
       const SETTINGS_FIELD_IDS = {
-        global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "benchmark", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse"],
+        global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "benchmark", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse", "mixAccountAmount"],
         dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric"],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
@@ -2522,6 +2625,7 @@
           "trendAtrStopMode", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
+          "trendHybridEntryN", "trendHybridExitM",
         ],
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
@@ -4385,6 +4489,8 @@
           "trendMacdSignal",
           "trendMacdVAtr",
           "trendMacdVScale",
+          "trendHybridEntryN",
+          "trendHybridExitM",
           "trendAtrStopMode",
           "trendAtrStopWin",
           "trendAtrStopN",
@@ -4406,6 +4512,22 @@
           macd_cross: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
           macd_zero_filter: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
           macd_v: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale"],
+          hybrid_trend: [
+            "trendFastWin",
+            "trendSlowWin",
+            "trendMaType",
+            "trendDonEntry",
+            "trendDonExit",
+            "trendMomLb",
+            "trendMomEntryThr",
+            "trendMomExitThr",
+            "trendMacdFast",
+            "trendMacdSlow",
+            "trendMacdSignal",
+            "trendSmaWin",
+            "trendHybridEntryN",
+            "trendHybridExitM",
+          ],
         };
         const enabled = new Set([...(byStrat[strat] || []), ...alwaysEnabledIds]);
         for (const id of allIds) {
@@ -4426,6 +4548,7 @@
           macd_cross: "MACD金叉死叉：MACD线上穿信号线入场，下穿离场。",
           macd_zero_filter: "MACD零轴过滤：MACD>0 持有，<=0 空仓。",
           macd_v: "MACD-V：用ATR归一化的MACD强度进行择时。",
+          hybrid_trend: "混合趋势：融合均线交叉、唐奇安、时序动量、MACD金叉死叉、线性回归，按 N 入场 / M 离场阈值聚合触发。",
         };
         const execDesc = {
           ma_filter: "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -4437,6 +4560,7 @@
           macd_cross: "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           macd_zero_filter: "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           macd_v: "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          hybrid_trend: "信号在 T 日收盘后统计五个子策略当日入场/离场触发数量；入场数量>=n 则入场，离场数量>=m 则离场，均在 T+1 执行；策略收益不包含决策日(T日)当日收益。",
         };
         const paramDesc = {
           trendSmaWin: "均线窗口：均线/回归窗口长度（交易日）。",
@@ -4458,6 +4582,8 @@
           trendMacdSignal: "MACD信号线：信号EMA窗口。",
           trendMacdVAtr: "MACD-V ATR窗口：归一化波动窗口。",
           trendMacdVScale: "MACD-V scale：归一化缩放系数。",
+          trendHybridEntryN: "混合策略入场阈值 n：当天至少 n 个子策略触发入场信号才入场。",
+          trendHybridExitM: "混合策略离场阈值 m：当天至少 m 个子策略触发离场信号才离场。",
           trendAtrStopMode: "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。",
           trendAtrStopWin: "ATR周期：用于止损距离计算的ATR窗口。",
           trendAtrStopN: "止损倍数n：基础止损距离为 n*ATR。",
@@ -4707,6 +4833,730 @@
           nav,
         };
       }
+      function _periodKeyByFreq(dateStr, freq) {
+        const d = new Date(`${dateStr}T00:00:00`);
+        if (!Number.isFinite(d.getTime())) return null;
+        const y = d.getUTCFullYear();
+        const m = d.getUTCMonth() + 1;
+        const day = d.getUTCDate();
+        if (freq === "weekly") {
+          const dayNum = d.getUTCDay() || 7; // 1..7 (Mon..Sun)
+          const monday = new Date(d);
+          monday.setUTCDate(day - (dayNum - 1));
+          const y0 = monday.getUTCFullYear();
+          const start = new Date(Date.UTC(y0, 0, 1));
+          const week = Math.floor((monday - start) / (7 * 24 * 3600 * 1000)) + 1;
+          return `${y0}-W${String(week).padStart(2, "0")}`;
+        }
+        if (freq === "monthly") return `${y}-${String(m).padStart(2, "0")}`;
+        if (freq === "quarterly") return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+        if (freq === "yearly") return `${y}`;
+        return null;
+      }
+      function _periodReturnsFromNav(dates, nav, freq) {
+        const ds = Array.isArray(dates) ? dates.map((x) => String(x || "")) : [];
+        const nv = Array.isArray(nav) ? nav.map(Number) : [];
+        const n = Math.min(ds.length, nv.length);
+        if (n < 2) return [];
+        const rows = [];
+        let curKey = null;
+        let startNav = null;
+        let endNav = null;
+        let endDate = null;
+        for (let i = 0; i < n; i++) {
+          const d = ds[i];
+          const v = nv[i];
+          if (!d || !Number.isFinite(v) || v <= 0) continue;
+          const key = _periodKeyByFreq(d, freq);
+          if (!key) continue;
+          if (curKey == null) {
+            curKey = key;
+            startNav = v;
+            endNav = v;
+            endDate = d;
+            continue;
+          }
+          if (key !== curKey) {
+            if (Number.isFinite(startNav) && Number.isFinite(endNav) && startNav > 0) {
+              rows.push({ period_end: endDate, return: endNav / startNav - 1.0 });
+            }
+            curKey = key;
+            startNav = v;
+            endNav = v;
+            endDate = d;
+          } else {
+            endNav = v;
+            endDate = d;
+          }
+        }
+        if (Number.isFinite(startNav) && Number.isFinite(endNav) && startNav > 0 && endDate) {
+          rows.push({ period_end: endDate, return: endNav / startNav - 1.0 });
+        }
+        return rows.slice(1); // align with pct_change-style output
+      }
+      function _rollingReturnDiff(dates, navA, navB, windowDays) {
+        const ds = Array.isArray(dates) ? dates.map((x) => String(x || "")) : [];
+        const a = Array.isArray(navA) ? navA.map(Number) : [];
+        const b = Array.isArray(navB) ? navB.map(Number) : [];
+        const n = Math.min(ds.length, a.length, b.length);
+        const w = Math.max(2, Math.floor(Number(windowDays) || 40));
+        const outDates = [];
+        const outVals = [];
+        for (let i = w; i < n; i++) {
+          const d = ds[i];
+          const a0 = Number(a[i - w]);
+          const a1 = Number(a[i]);
+          const b0 = Number(b[i - w]);
+          const b1 = Number(b[i]);
+          if (!d || !Number.isFinite(a0) || !Number.isFinite(a1) || !Number.isFinite(b0) || !Number.isFinite(b1)) continue;
+          if (a0 <= 0 || b0 <= 0) continue;
+          const ra = a1 / a0 - 1.0;
+          const rb = b1 / b0 - 1.0;
+          if (!Number.isFinite(ra) || !Number.isFinite(rb)) continue;
+          outDates.push(d);
+          outVals.push(ra - rb);
+        }
+        return { dates: outDates, values: outVals, window: w };
+      }
+      function _nextBusinessDate(isoDate) {
+        const d = new Date(`${String(isoDate || "")}T00:00:00`);
+        if (!Number.isFinite(d.getTime())) return "";
+        const n = new Date(d);
+        do {
+          n.setDate(n.getDate() + 1);
+        } while (n.getDay() === 0 || n.getDay() === 6);
+        const y = n.getFullYear();
+        const m = String(n.getMonth() + 1).padStart(2, "0");
+        const dd = String(n.getDate()).padStart(2, "0");
+        return `${y}-${m}-${dd}`;
+      }
+      function _lastEntryIndex(weightSeries, lastIdx) {
+        const xs = Array.isArray(weightSeries) ? weightSeries.map(Number) : [];
+        let entry = -1;
+        for (let i = 0; i <= lastIdx && i < xs.length; i++) {
+          const cur = Number(xs[i]);
+          const prev = (i > 0) ? Number(xs[i - 1]) : 0.0;
+          if (Number.isFinite(cur) && Number.isFinite(prev) && cur > 1e-12 && prev <= 1e-12) entry = i;
+        }
+        return entry;
+      }
+      function _renderTrendPlanTables(ctx) {
+        const holdEl = $("trendCurrentHoldingsTable");
+        const buyEl = $("trendNextBuyTable");
+        const sellEl = $("trendNextSellTable");
+        const dateEl = $("trendNextPlanDate");
+        if (!holdEl || !buyEl || !sellEl || !dateEl) return;
+        const dates = Array.isArray(ctx && ctx.dates) ? ctx.dates : [];
+        if (!dates.length) {
+          holdEl.innerHTML = "<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th></tr>";
+          buyEl.innerHTML = "<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th></tr>";
+          sellEl.innerHTML = "<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th></tr>";
+          dateEl.textContent = "";
+          return;
+        }
+        const lastIdx = dates.length - 1;
+        const lastDate = dates[lastIdx];
+        const nextDate = _nextBusinessDate(lastDate);
+        dateEl.textContent = nextDate ? `计划执行日（下一交易日，估算）：${nextDate}` : "";
+
+        const codeList = Array.isArray(ctx.codes) ? ctx.codes : [];
+        const effectiveByCode = ctx.effectiveByCode || {};
+        const decisionByCode = ctx.decisionByCode || {};
+        const assetNavByCode = ctx.assetNavByCode || {};
+        const curRows = [];
+        const buyRows = [];
+        const sellRows = [];
+        for (const code of codeList) {
+          const eff = Array.isArray(effectiveByCode[code]) ? effectiveByCode[code].map(Number) : [];
+          const dec = Array.isArray(decisionByCode[code]) ? decisionByCode[code].map(Number) : [];
+          const anav = Array.isArray(assetNavByCode[code]) ? assetNavByCode[code].map(Number) : [];
+          const curW = (lastIdx < eff.length && Number.isFinite(eff[lastIdx])) ? Number(eff[lastIdx]) : 0.0;
+          const tgtW = (lastIdx < dec.length && Number.isFinite(dec[lastIdx])) ? Number(dec[lastIdx]) : curW;
+          if (curW > 1e-12) {
+            const entryIdx = _lastEntryIndex(eff, lastIdx);
+            const entryDate = (entryIdx >= 0 && entryIdx < dates.length) ? dates[entryIdx] : "-";
+            const holdDays = (entryIdx >= 0) ? (lastIdx - entryIdx + 1) : 0;
+            let holdRet = NaN;
+            if (entryIdx >= 0 && entryIdx < anav.length && lastIdx < anav.length) {
+              const n0 = Number(anav[entryIdx]);
+              const n1 = Number(anav[lastIdx]);
+              if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
+            }
+            curRows.push(`<tr><td>${esc(codeLabel(code))}</td><td>${esc(entryDate)}</td><td>${holdDays}</td><td>${fmtPct(curW)}</td><td>${Number.isFinite(holdRet) ? fmtPct(holdRet) : "-"}</td></tr>`);
+          }
+          const delta = tgtW - curW;
+          if (delta > 1e-12) {
+            buyRows.push(`<tr><td>${esc(codeLabel(code))}</td><td>${fmtPct(tgtW)}</td><td>${fmtPct(delta)}</td></tr>`);
+          } else if (delta < -1e-12) {
+            sellRows.push(`<tr><td>${esc(codeLabel(code))}</td><td>${fmtPct(curW)}</td><td>${fmtPct(-delta)}</td></tr>`);
+          }
+        }
+        holdEl.innerHTML = `<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th></tr>${curRows.length ? curRows.join("") : `<tr><td colspan="5" class="muted">当前空仓</td></tr>`}`;
+        buyEl.innerHTML = `<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th></tr>${buyRows.length ? buyRows.join("") : `<tr><td colspan="3" class="muted">无买入计划</td></tr>`}`;
+        sellEl.innerHTML = `<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th></tr>${sellRows.length ? sellRows.join("") : `<tr><td colspan="3" class="muted">无卖出计划</td></tr>`}`;
+      }
+      function renderTrendPositionPlan(data, mode) {
+        const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
+        const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
+        if (!dates.length) {
+          _renderTrendPlanTables({ dates: [] });
+          return;
+        }
+        if (String(mode || "single") === "portfolio") {
+          const wEff = (data && data.weights && data.weights.series) ? data.weights.series : {};
+          const wDec = (data && data.weights_decision && data.weights_decision.series) ? data.weights_decision.series : wEff;
+          const assetNav = (data && data.asset_nav_exec && data.asset_nav_exec.series) ? data.asset_nav_exec.series : {};
+          const codes = Object.keys(wEff || {});
+          _renderTrendPlanTables({
+            dates,
+            codes,
+            effectiveByCode: wEff,
+            decisionByCode: wDec,
+            assetNavByCode: assetNav,
+          });
+          return;
+        }
+        const code = String((((data || {}).meta || {}).code) || (($("trendSingleCode") && $("trendSingleCode").value) || "")).trim();
+        const posEff = (data && data.signals && Array.isArray(data.signals.position_effective))
+          ? data.signals.position_effective
+          : (Array.isArray((data && data.signals && data.signals.position) || []) ? [0].concat(data.signals.position.slice(0, -1)) : []);
+        const posDec = (data && data.signals && Array.isArray(data.signals.position))
+          ? data.signals.position
+          : posEff;
+        const bh = Array.isArray(nav.BUY_HOLD) ? nav.BUY_HOLD : [];
+        _renderTrendPlanTables({
+          dates,
+          codes: code ? [code] : [],
+          effectiveByCode: code ? { [code]: posEff } : {},
+          decisionByCode: code ? { [code]: posDec } : {},
+          assetNavByCode: code ? { [code]: bh } : {},
+        });
+      }
+      function _alignSeriesByDates(srcDates, values, tgtDates) {
+        const d0 = Array.isArray(srcDates) ? srcDates.map((x) => String(x || "")) : [];
+        const v0 = Array.isArray(values) ? values.map(Number) : [];
+        const mp = new Map();
+        const n = Math.min(d0.length, v0.length);
+        for (let i = 0; i < n; i++) {
+          const d = d0[i];
+          const v = v0[i];
+          if (!d || !Number.isFinite(v)) continue;
+          mp.set(d, v);
+        }
+        return (Array.isArray(tgtDates) ? tgtDates : []).map((d) => {
+          const x = mp.get(String(d || ""));
+          return Number.isFinite(x) ? x : 0.0;
+        });
+      }
+      function _rotationHistoryFromPeriods(rotation, dts) {
+        const out = {};
+        const idxByDate = new Map((Array.isArray(dts) ? dts : []).map((d, i) => [String(d || ""), i]));
+        const periods = Array.isArray(rotation && rotation.holdings) ? rotation.holdings : [];
+        for (const p of periods) {
+          const s = idxByDate.get(String((p && p.start_date) || ""));
+          const e = idxByDate.get(String((p && p.end_date) || ""));
+          if (!Number.isFinite(s) || !Number.isFinite(e) || s > e) continue;
+          const picks = Array.isArray(p && p.picks) ? p.picks.map((x) => String(x || "")).filter(Boolean) : [];
+          const expo = Number((p && p.exposure) || 0);
+          const per = (picks.length > 0 && Number.isFinite(expo) && expo > 0) ? (expo / picks.length) : 0.0;
+          for (const c of picks) {
+            if (!out[c]) out[c] = new Array(dts.length).fill(0.0);
+            for (let i = s; i <= e; i++) out[c][i] = per;
+          }
+        }
+        return out;
+      }
+      function _rotationLatestStopMapFromPeriods(rotation, dts) {
+        const periods = Array.isArray(rotation && rotation.holdings) ? rotation.holdings : [];
+        if (!periods.length || !Array.isArray(dts) || !dts.length) return {};
+        const lastDate = String(dts[dts.length - 1] || "");
+        const inRange = periods.filter((p) => {
+          const s = String((p && p.start_date) || "");
+          const e = String((p && p.end_date) || "");
+          return !!s && !!e && s <= lastDate && lastDate <= e;
+        });
+        const src = inRange.length ? inRange : [periods[periods.length - 1]];
+        const out = {};
+        for (const p of src) {
+          const atr = ((p && p.atr_stop) || {});
+          const fs = (atr && atr.final_stop_by_code) ? atr.final_stop_by_code : {};
+          for (const [c0, v0] of Object.entries(fs || {})) {
+            const c = String(c0 || "").trim();
+            const v = Number(v0);
+            if (!c || !Number.isFinite(v) || v <= 0) continue;
+            out[c] = v;
+          }
+        }
+        return out;
+      }
+      function _normalizeWeightMap(mp) {
+        const out = {};
+        let s = 0.0;
+        for (const k of Object.keys(mp || {})) {
+          const v = Number(mp[k]);
+          if (!Number.isFinite(v) || v <= 1e-12) continue;
+          out[String(k)] = v;
+          s += v;
+        }
+        if (s <= 1e-12) return {};
+        for (const k of Object.keys(out)) out[k] = out[k] / s;
+        return out;
+      }
+      function _renderMixPositionPlan(ctx) {
+        const curEl = $("mixCurrentHoldingsTable");
+        const buyEl = $("mixNextBuyTable");
+        const sellEl = $("mixNextSellTable");
+        const dateEl = $("mixNextPlanDate");
+        const subCurEl = $("mixSubCurrentHoldingsTable");
+        const subBuyEl = $("mixSubNextBuyTable");
+        const subSellEl = $("mixSubNextSellTable");
+        if (!curEl || !buyEl || !sellEl || !dateEl || !subCurEl || !subBuyEl || !subSellEl) return;
+        const dts = Array.isArray(ctx && ctx.dates) ? ctx.dates : [];
+        if (!dts.length) return;
+        const lastIdx = dts.length - 1;
+        const d0 = _nextBusinessDate(dts[lastIdx]);
+        const extra = (ctx && ctx.hasRotationWeekdayBreakdown) ? "；轮动子策略已按周一~周五分别列示" : "";
+        const rawAmt = ($("mixAccountAmount") && $("mixAccountAmount").value != null) ? String($("mixAccountAmount").value).replaceAll(",", "").trim() : "";
+        const accountAmount = (rawAmt === "") ? null : Number(rawAmt);
+        const useAmount = Number.isFinite(accountAmount) && accountAmount > 0;
+        const amountHint = useAmount ? `；账户金额：${fmtMoney(accountAmount)} 元` : "；账户金额未设置";
+        const calcHint = useAmount ? "；份数按最新净值序列末值估算" : "";
+        dateEl.textContent = `计划执行日（下一交易日，估算）：${d0}${extra}${amountHint}${calcHint}`;
+        const _lastPx = (series) => {
+          const arr = Array.isArray(series) ? series : [];
+          for (let i = arr.length - 1; i >= 0; i--) {
+            const v = Number(arr[i]);
+            if (Number.isFinite(v) && v > 0) return v;
+          }
+          return NaN;
+        };
+        const _amtByWeight = (w, cap) => (useAmount ? (Number(w) * Number(cap)) : NaN);
+        const _shares = (amt, px) => (Number.isFinite(amt) && Number.isFinite(px) && px > 0 ? (amt / px) : NaN);
+        const _subStops = (ctx && ctx.sub) ? ctx.sub : {};
+        const _stopTextByCode = (code) => {
+          const items = [];
+          for (const sk of Object.keys(_subStops || {})) {
+            if (ctx && ctx.hasRotationWeekdayBreakdown && sk === "ROTATION") continue;
+            const one = _subStops[sk] || {};
+            const mp = one.stopByCode || {};
+            const v = Number(mp[code]);
+            if (!Number.isFinite(v) || v <= 0) continue;
+            items.push(`${String(one.name || sk)}:${fmtNum(v)}`);
+          }
+          return items.length ? items.join("；") : "-";
+        };
+        const totalHist = ctx.totalHist || {};
+        const totalCur = ctx.totalCur || {};
+        const totalTgt = ctx.totalTgt || {};
+        const navByCode = ctx.assetNavByCode || {};
+        const totalCodes = Object.keys(totalCur).filter((c) => Number(totalCur[c]) > 1e-12).sort();
+        const tRows = totalCodes.map((c) => {
+          const h = Array.isArray(totalHist[c]) ? totalHist[c] : [];
+          const entryIdx = _lastEntryIndex(h, lastIdx);
+          const entryDate = (entryIdx >= 0 && entryIdx < dts.length) ? dts[entryIdx] : "-";
+          const holdDays = (entryIdx >= 0) ? (lastIdx - entryIdx + 1) : 0;
+          const nv = Array.isArray(navByCode[c]) ? navByCode[c] : [];
+          let holdRet = NaN;
+          if (entryIdx >= 0 && entryIdx < nv.length && lastIdx < nv.length) {
+            const n0 = Number(nv[entryIdx]);
+            const n1 = Number(nv[lastIdx]);
+            if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
+          }
+          const curW = Number(totalCur[c] || 0);
+          const px = _lastPx(nv);
+          const amt = _amtByWeight(curW, accountAmount);
+          const sh = _shares(amt, px);
+          const stopTxt = _stopTextByCode(c);
+          return `<tr><td>${esc(codeLabel(c))}</td><td>${esc(entryDate)}</td><td>${holdDays}</td><td>${fmtPct(curW)}</td><td>${Number.isFinite(holdRet) ? fmtPct(holdRet) : "-"}</td><td>${esc(stopTxt)}</td><td>${Number.isFinite(amt) ? fmtMoney(amt) : "-"}</td><td>${Number.isFinite(sh) ? fmtShares(sh) : "-"}</td></tr>`;
+        });
+        curEl.innerHTML = `<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>最新止损价</th><th>金额(元)</th><th>份数(估算)</th></tr>${tRows.length ? tRows.join("") : `<tr><td colspan="8" class="muted">当前空仓</td></tr>`}`;
+        const tBuy = [];
+        const tSell = [];
+        for (const c of Array.from(new Set([...Object.keys(totalCur), ...Object.keys(totalTgt)]))) {
+          const cur = Number(totalCur[c] || 0);
+          const tgt = Number(totalTgt[c] || 0);
+          const d = tgt - cur;
+          const nv = Array.isArray(navByCode[c]) ? navByCode[c] : [];
+          const px = _lastPx(nv);
+          if (d > 1e-12) {
+            const tgtAmt = _amtByWeight(tgt, accountAmount);
+            const buyAmt = _amtByWeight(d, accountAmount);
+            const buySh = _shares(buyAmt, px);
+            tBuy.push(`<tr><td>${esc(codeLabel(c))}</td><td>${fmtPct(tgt)}</td><td>${fmtPct(d)}</td><td>${Number.isFinite(tgtAmt) ? fmtMoney(tgtAmt) : "-"}</td><td>${Number.isFinite(buyAmt) ? fmtMoney(buyAmt) : "-"}</td><td>${Number.isFinite(buySh) ? fmtShares(buySh) : "-"}</td></tr>`);
+          } else if (d < -1e-12) {
+            const curAmt = _amtByWeight(cur, accountAmount);
+            const sellAmt = _amtByWeight(-d, accountAmount);
+            const sellSh = _shares(sellAmt, px);
+            tSell.push(`<tr><td>${esc(codeLabel(c))}</td><td>${fmtPct(cur)}</td><td>${fmtPct(-d)}</td><td>${Number.isFinite(curAmt) ? fmtMoney(curAmt) : "-"}</td><td>${Number.isFinite(sellAmt) ? fmtMoney(sellAmt) : "-"}</td><td>${Number.isFinite(sellSh) ? fmtShares(sellSh) : "-"}</td></tr>`);
+          }
+        }
+        buyEl.innerHTML = `<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th><th>目标金额(元)</th><th>买入金额(元)</th><th>买入份数(估算)</th></tr>${tBuy.length ? tBuy.join("") : `<tr><td colspan="6" class="muted">无买入计划</td></tr>`}`;
+        sellEl.innerHTML = `<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th><th>当前金额(元)</th><th>卖出金额(元)</th><th>卖出份数(估算)</th></tr>${tSell.length ? tSell.join("") : `<tr><td colspan="6" class="muted">无卖出计划</td></tr>`}`;
+
+        const subCurrentRows = [];
+        const subBuyRows = [];
+        const subSellRows = [];
+        const subCap = (ctx && ctx.subCapitalWeights) ? ctx.subCapitalWeights : {};
+        for (const sk of Object.keys(ctx.sub || {})) {
+          if (ctx && ctx.hasRotationWeekdayBreakdown && sk === "ROTATION") continue;
+          const one = ctx.sub[sk] || {};
+          const curMap = one.current || {};
+          const tgtMap = one.target || {};
+          const hist = one.history || {};
+          const sNav = one.assetNavByCode || {};
+          const sStop = one.stopByCode || {};
+          const name = String(one.name || sk);
+          const capW = Number(subCap[sk]);
+          const cap = Number.isFinite(capW) && capW > 0 ? (Number(accountAmount) * capW) : NaN;
+          for (const c of Object.keys(curMap).filter((x) => Number(curMap[x]) > 1e-12)) {
+            const h = Array.isArray(hist[c]) ? hist[c] : [];
+            const entryIdx = _lastEntryIndex(h, lastIdx);
+            const entryDate = (entryIdx >= 0 && entryIdx < dts.length) ? dts[entryIdx] : "-";
+            const holdDays = (entryIdx >= 0) ? (lastIdx - entryIdx + 1) : 0;
+            const nv = Array.isArray(sNav[c]) ? sNav[c] : [];
+            let holdRet = NaN;
+            if (entryIdx >= 0 && entryIdx < nv.length && lastIdx < nv.length) {
+              const n0 = Number(nv[entryIdx]);
+              const n1 = Number(nv[lastIdx]);
+              if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
+            }
+            const curW = Number(curMap[c] || 0);
+            const px = _lastPx(nv);
+            const amt = _amtByWeight(curW, cap);
+            const sh = _shares(amt, px);
+            const stopPx = Number(sStop[c]);
+            subCurrentRows.push(`<tr><td>${esc(name)}</td><td>${esc(codeLabel(c))}</td><td>${esc(entryDate)}</td><td>${holdDays}</td><td>${fmtPct(curW)}</td><td>${Number.isFinite(holdRet) ? fmtPct(holdRet) : "-"}</td><td>${Number.isFinite(stopPx) && stopPx > 0 ? fmtNum(stopPx) : "-"}</td><td>${Number.isFinite(amt) ? fmtMoney(amt) : "-"}</td><td>${Number.isFinite(sh) ? fmtShares(sh) : "-"}</td></tr>`);
+          }
+          for (const c of Array.from(new Set([...Object.keys(curMap), ...Object.keys(tgtMap)]))) {
+            const cur = Number(curMap[c] || 0);
+            const tgt = Number(tgtMap[c] || 0);
+            const d = tgt - cur;
+            const nv = Array.isArray(sNav[c]) ? sNav[c] : [];
+            const px = _lastPx(nv);
+            if (d > 1e-12) {
+              const tgtAmt = _amtByWeight(tgt, cap);
+              const buyAmt = _amtByWeight(d, cap);
+              const buySh = _shares(buyAmt, px);
+              subBuyRows.push(`<tr><td>${esc(name)}</td><td>${esc(codeLabel(c))}</td><td>${fmtPct(tgt)}</td><td>${fmtPct(d)}</td><td>${Number.isFinite(tgtAmt) ? fmtMoney(tgtAmt) : "-"}</td><td>${Number.isFinite(buyAmt) ? fmtMoney(buyAmt) : "-"}</td><td>${Number.isFinite(buySh) ? fmtShares(buySh) : "-"}</td></tr>`);
+            } else if (d < -1e-12) {
+              const curAmt = _amtByWeight(cur, cap);
+              const sellAmt = _amtByWeight(-d, cap);
+              const sellSh = _shares(sellAmt, px);
+              subSellRows.push(`<tr><td>${esc(name)}</td><td>${esc(codeLabel(c))}</td><td>${fmtPct(cur)}</td><td>${fmtPct(-d)}</td><td>${Number.isFinite(curAmt) ? fmtMoney(curAmt) : "-"}</td><td>${Number.isFinite(sellAmt) ? fmtMoney(sellAmt) : "-"}</td><td>${Number.isFinite(sellSh) ? fmtShares(sellSh) : "-"}</td></tr>`);
+            }
+          }
+        }
+        subCurEl.innerHTML = `<tr><th>子策略</th><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>最新止损价</th><th>金额(元)</th><th>份数(估算)</th></tr>${subCurrentRows.length ? subCurrentRows.join("") : `<tr><td colspan="9" class="muted">当前空仓</td></tr>`}`;
+        subBuyEl.innerHTML = `<tr><th>子策略</th><th>买入标的</th><th>目标比例</th><th>买入比例</th><th>目标金额(元)</th><th>买入金额(元)</th><th>买入份数(估算)</th></tr>${subBuyRows.length ? subBuyRows.join("") : `<tr><td colspan="7" class="muted">无买入计划</td></tr>`}`;
+        subSellEl.innerHTML = `<tr><th>子策略</th><th>卖出标的</th><th>当前比例</th><th>卖出比例</th><th>当前金额(元)</th><th>卖出金额(元)</th><th>卖出份数(估算)</th></tr>${subSellRows.length ? subSellRows.join("") : `<tr><td colspan="7" class="muted">无卖出计划</td></tr>`}`;
+      }
+      function _buildMixPositionContext(dts, ws, baseMode) {
+        const baseline = window.__lastBaselineResult || {};
+        const rotation = window.__lastRotationResult || {};
+        const trend = window.__lastTrendResult || {};
+        const selectedCodes = Array.from(selected || []);
+        const holdMap = {};
+        const nSel = selectedCodes.length;
+        if (nSel > 0) {
+          const per = 1.0 / nSel;
+          for (const c of selectedCodes) holdMap[String(c)] = per;
+        }
+        const holdHist = {};
+        for (const c of Object.keys(holdMap)) holdHist[c] = new Array(dts.length).fill(Number(holdMap[c] || 0));
+        const baseNavSeries = ((baseline.nav || {}).series || {});
+        const holdAssetNav = {};
+        for (const c of selectedCodes) {
+          if (Array.isArray(baseNavSeries[c])) holdAssetNav[String(c)] = _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+        }
+
+        const rotByAnchor = window.__lastRotationByAnchor;
+        const hasRotByAnchor = !!(rotByAnchor && ["1", "2", "3", "4", "5"].some((k) => rotByAnchor[k]));
+        const _normMapFromHist = (hist) => {
+          const out = {};
+          for (const c of Object.keys(hist || {})) {
+            const arr = hist[c];
+            const v = (arr && arr.length) ? Number(arr[arr.length - 1]) : 0;
+            if (v > 1e-12) out[c] = v;
+          }
+          return _normalizeWeightMap(out);
+        };
+        const _targetFromPlan = (planObj, fallback) => {
+          let out = { ...(fallback || {}) };
+          if (planObj && planObj.has_execution_plan && planObj.plan && Array.isArray(planObj.plan.target_weights)) {
+            const t = {};
+            for (const it of planObj.plan.target_weights) {
+              const c = String((it && it.code) || "").trim();
+              const w = Number(it && it.target_weight);
+              if (c && Number.isFinite(w) && w > 1e-12) t[c] = w;
+            }
+            out = _normalizeWeightMap(t);
+          }
+          return out;
+        };
+        let rotHist = {};
+        let rotCur = {};
+        let rotTgt = {};
+        const rotAssetNav = {};
+        let rotStop = {};
+        const rotSubByWeekday = {};
+        if (hasRotByAnchor) {
+          const planByAnchor = window.__lastRotationNextExecutionPlanByAnchor || {};
+          for (const k of ["1", "2", "3", "4", "5"]) {
+            const one = rotByAnchor[k];
+            if (!one) continue;
+            const h = _rotationHistoryFromPeriods(one, dts);
+            const cur = _normMapFromHist(h);
+            const tgt = _targetFromPlan(planByAnchor[k], cur);
+            const stp = _rotationLatestStopMapFromPeriods(one, dts);
+            const nm = `轮动(${_weekdayLabelByAnchor(k)})`;
+            rotSubByWeekday[`ROTATION_${k}`] = { name: nm, current: cur, target: tgt, history: h, assetNavByCode: {}, stopByCode: stp };
+            for (const c of Object.keys(h)) {
+              if (Array.isArray(baseNavSeries[c])) {
+                rotSubByWeekday[`ROTATION_${k}`].assetNavByCode[c] = _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+              }
+            }
+          }
+          // Aggregate rotation leg as equal-weight of weekday anchors.
+          for (const rk of Object.keys(rotSubByWeekday)) {
+            const one = rotSubByWeekday[rk];
+            for (const c of Object.keys(one.history || {})) {
+              const src = (one.history[c] || []).map(Number);
+              if (!rotHist[c]) rotHist[c] = new Array(src.length).fill(0);
+              for (let i = 0; i < src.length; i++) rotHist[c][i] += (Number(src[i]) || 0) / Math.max(1, Object.keys(rotSubByWeekday).length);
+            }
+          }
+          rotCur = _normMapFromHist(rotHist);
+          const rotStopRaw = {};
+          for (const rk of Object.keys(rotSubByWeekday)) {
+            const one = rotSubByWeekday[rk];
+            for (const [c, v] of Object.entries(one.stopByCode || {})) {
+              const x = Number(v);
+              if (!Number.isFinite(x) || x <= 0) continue;
+              if (!Number.isFinite(rotStopRaw[c])) rotStopRaw[c] = x;
+              else rotStopRaw[c] = Math.max(rotStopRaw[c], x);
+            }
+          }
+          rotStop = rotStopRaw;
+          const rotTgtRaw = {};
+          for (const rk of Object.keys(rotSubByWeekday)) {
+            const one = rotSubByWeekday[rk];
+            for (const c of Object.keys(one.target || {})) rotTgtRaw[c] = Number(rotTgtRaw[c] || 0) + Number(one.target[c] || 0) / Math.max(1, Object.keys(rotSubByWeekday).length);
+          }
+          rotTgt = _normalizeWeightMap(rotTgtRaw);
+          for (const c of Object.keys(rotHist)) {
+            if (Array.isArray(baseNavSeries[c])) rotAssetNav[c] = _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+          }
+        } else {
+          rotHist = _rotationHistoryFromPeriods(rotation, dts);
+          rotCur = _normMapFromHist(rotHist);
+          rotTgt = _targetFromPlan(window.__lastRotationNextExecutionPlan, rotCur);
+          rotStop = _rotationLatestStopMapFromPeriods(rotation, dts);
+          for (const c of Object.keys(rotHist)) {
+            if (Array.isArray(baseNavSeries[c])) rotAssetNav[c] = _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+          }
+        }
+
+        const trendDates = ((trend.nav || {}).dates || []);
+        const trendCur = {};
+        const trendTgt = {};
+        const trendHist = {};
+        const trendAssetNav = {};
+        const trendStop = {};
+        if (trend && trend.weights && trend.weights.series) {
+          for (const c of Object.keys(trend.weights.series || {})) {
+            trendHist[c] = _alignSeriesByDates((trend.weights || {}).dates || trendDates, trend.weights.series[c], dts);
+            const cur = trendHist[c].length ? Number(trendHist[c][trendHist[c].length - 1]) : 0;
+            if (cur > 1e-12) trendCur[c] = cur;
+            const decSer = ((trend.weights_decision || {}).series || {})[c];
+            const dec = Array.isArray(decSer) ? _alignSeriesByDates((trend.weights_decision || {}).dates || trendDates, decSer, dts) : trendHist[c];
+            const tgt = dec.length ? Number(dec[dec.length - 1]) : cur;
+            if (tgt > 1e-12) trendTgt[c] = tgt;
+          }
+          const an = ((trend.asset_nav_exec || {}).series || {});
+          for (const c of Object.keys(an || {})) trendAssetNav[c] = _alignSeriesByDates(((trend.asset_nav_exec || {}).dates || trendDates), an[c], dts);
+          const byAsset = ((((trend.risk_controls || {}).atr_stop || {}).by_asset) || {});
+          for (const [c0, it] of Object.entries(byAsset || {})) {
+            const c = String(c0 || "").trim();
+            const v = Number((it || {}).latest_stop_price);
+            if (c && Number.isFinite(v) && v > 0) trendStop[c] = v;
+          }
+        } else {
+          const code = String((((trend.meta || {}).code) || (($("trendSingleCode") && $("trendSingleCode").value) || ""))).trim();
+          const posEff = (trend.signals && Array.isArray(trend.signals.position_effective)) ? trend.signals.position_effective : [];
+          const posDec = (trend.signals && Array.isArray(trend.signals.position)) ? trend.signals.position : posEff;
+          if (code) {
+            trendHist[code] = _alignSeriesByDates(trendDates, posEff, dts);
+            const cur = trendHist[code].length ? Number(trendHist[code][trendHist[code].length - 1]) : 0;
+            if (cur > 1e-12) trendCur[code] = cur;
+            const tArr = _alignSeriesByDates(trendDates, posDec, dts);
+            const tgt = tArr.length ? Number(tArr[tArr.length - 1]) : cur;
+            if (tgt > 1e-12) trendTgt[code] = tgt;
+            const bh = (((trend.nav || {}).series || {}).BUY_HOLD || []);
+            trendAssetNav[code] = _alignSeriesByDates(trendDates, bh, dts);
+            const one = (((trend.risk_controls || {}).atr_stop) || {});
+            const v = Number(one.latest_stop_price);
+            if (Number.isFinite(v) && v > 0) trendStop[code] = v;
+          }
+        }
+
+        const sub = {
+          HOLD: { name: `持有(${String(baseMode || "EW")})`, current: _normalizeWeightMap(holdMap), target: _normalizeWeightMap(holdMap), history: holdHist, assetNavByCode: holdAssetNav, stopByCode: {} },
+          ROTATION: { name: "轮动", current: _normalizeWeightMap(rotCur), target: _normalizeWeightMap(rotTgt), history: rotHist, assetNavByCode: rotAssetNav, stopByCode: rotStop },
+          TREND: { name: "趋势", current: _normalizeWeightMap(trendCur), target: _normalizeWeightMap(trendTgt), history: trendHist, assetNavByCode: trendAssetNav, stopByCode: trendStop },
+        };
+        const subCapitalWeights = { HOLD: Number(ws[0] || 0), ROTATION: Number(ws[1] || 0), TREND: Number(ws[2] || 0) };
+        if (hasRotByAnchor) {
+          const rotKeys = Object.keys(rotSubByWeekday);
+          const per = rotKeys.length > 0 ? (Number(ws[1] || 0) / rotKeys.length) : 0.0;
+          for (const rk of rotKeys) {
+            sub[rk] = rotSubByWeekday[rk];
+            subCapitalWeights[rk] = per;
+          }
+        }
+        const totalHist = {};
+        const allCodes = new Set([
+          ...Object.keys(sub.HOLD.history || {}),
+          ...Object.keys(sub.ROTATION.history || {}),
+          ...Object.keys(sub.TREND.history || {}),
+        ]);
+        for (const c of allCodes) {
+          const a = (sub.HOLD.history[c] || new Array(dts.length).fill(0)).map(Number);
+          const b = (sub.ROTATION.history[c] || new Array(dts.length).fill(0)).map(Number);
+          const t = (sub.TREND.history[c] || new Array(dts.length).fill(0)).map(Number);
+          totalHist[c] = a.map((_, i) => ws[0] * (a[i] || 0) + ws[1] * (b[i] || 0) + ws[2] * (t[i] || 0));
+        }
+        const totalCur = {};
+        const totalTgtRaw = {};
+        for (const c of allCodes) {
+          const h = totalHist[c] || [];
+          const cur = h.length ? Number(h[h.length - 1]) : 0;
+          if (cur > 1e-12) totalCur[c] = cur;
+          const tgt = ws[0] * Number(sub.HOLD.target[c] || 0) + ws[1] * Number(sub.ROTATION.target[c] || 0) + ws[2] * Number(sub.TREND.target[c] || 0);
+          if (tgt > 1e-12) totalTgtRaw[c] = tgt;
+        }
+        const totalTgt = _normalizeWeightMap(totalTgtRaw);
+        const assetNavByCode = {};
+        for (const c of allCodes) {
+          if (sub.TREND.assetNavByCode[c]) assetNavByCode[c] = sub.TREND.assetNavByCode[c];
+          else if (sub.ROTATION.assetNavByCode[c]) assetNavByCode[c] = sub.ROTATION.assetNavByCode[c];
+          else if (sub.HOLD.assetNavByCode[c]) assetNavByCode[c] = sub.HOLD.assetNavByCode[c];
+        }
+        return { dates: dts, sub, totalHist, totalCur: _normalizeWeightMap(totalCur), totalTgt, assetNavByCode, hasRotationWeekdayBreakdown: hasRotByAnchor, subCapitalWeights };
+      }
+      function _rollingPackFromNav(dates, nav) {
+        const ds = Array.isArray(dates) ? dates.map((x) => String(x || "")) : [];
+        const nv = Array.isArray(nav) ? nav.map(Number) : [];
+        const n = Math.min(ds.length, nv.length);
+        const out = { returns: {}, drawdown: {}, max_drawdown: {} };
+        const add = (k, w) => {
+          const rrDates = [];
+          const rrVals = [];
+          const ddDates = [];
+          const ddVals = [];
+          for (let i = 0; i < n; i++) {
+            const d = ds[i];
+            const v = nv[i];
+            if (!d || !Number.isFinite(v) || v <= 0) continue;
+            if (i >= w && Number.isFinite(nv[i - w]) && nv[i - w] > 0) {
+              rrDates.push(d);
+              rrVals.push(v / nv[i - w] - 1.0);
+            }
+            if (i >= w - 1) {
+              const seg = nv.slice(i - w + 1, i + 1).filter((x) => Number.isFinite(x) && x > 0);
+              if (seg.length === w) {
+                const peak = Math.max(...seg);
+                ddDates.push(d);
+                ddVals.push(peak > 0 ? (v / peak - 1.0) : 0.0);
+              }
+            }
+          }
+          out.returns[k] = { dates: rrDates, values: rrVals };
+          out.drawdown[k] = { dates: ddDates, values: ddVals };
+          out.max_drawdown[k] = { dates: ddDates, values: ddVals };
+        };
+        add("4w", 20);
+        add("12w", 60);
+        add("52w", 260);
+        add("3m", 63);
+        add("6m", 126);
+        add("12m", 252);
+        add("1y", 252);
+        add("3y", 756);
+        return out;
+      }
+      function _buildAttributionBySeries(parts, totalReturn, weightsByCode) {
+        const keys = Object.keys(parts || {});
+        if (!keys.length) return null;
+        const logParts = {};
+        for (const k of keys) {
+          const arr = Array.isArray(parts[k]) ? parts[k].map(Number).filter(Number.isFinite) : [];
+          const wk = (weightsByCode && Number.isFinite(Number(weightsByCode[k]))) ? Number(weightsByCode[k]) : (1.0 / Math.max(1, keys.length));
+          let s = 0.0;
+          for (const r of arr) s += Math.log1p(Math.max(-0.999999, wk * r));
+          logParts[k] = s;
+        }
+        const totalLog = keys.reduce((a, k) => a + (Number(logParts[k]) || 0), 0);
+        const retRows = keys.map((k) => {
+          if (!Number.isFinite(totalLog) || Math.abs(totalLog) <= 1e-12) {
+            return { code: k, return_contribution: null, return_share: null };
+          }
+          const share = Number(logParts[k]) / totalLog;
+          return { code: k, return_contribution: share * Number(totalReturn || 0), return_share: share };
+        });
+        const means = keys.map((k) => {
+          const arr = Array.isArray(parts[k]) ? parts[k].map(Number).filter(Number.isFinite) : [];
+          return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+        });
+        const n = means.length;
+        const cov = Array.from({ length: n }, () => Array.from({ length: n }, () => 0));
+        const m = Math.min(...keys.map((k) => (Array.isArray(parts[k]) ? parts[k].length : 0)));
+        for (let i = 0; i < n; i++) {
+          for (let j = 0; j < n; j++) {
+            let s = 0.0;
+            let cnt = 0;
+            for (let t = 0; t < m; t++) {
+              const xi = Number(parts[keys[i]][t]);
+              const xj = Number(parts[keys[j]][t]);
+              if (!Number.isFinite(xi) || !Number.isFinite(xj)) continue;
+              s += (xi - means[i]) * (xj - means[j]);
+              cnt += 1;
+            }
+            cov[i][j] = cnt > 1 ? s / (cnt - 1) : 0.0;
+          }
+        }
+        const w = keys.map((k) => {
+          const v = (weightsByCode && Number.isFinite(Number(weightsByCode[k]))) ? Number(weightsByCode[k]) : (1.0 / Math.max(1, n));
+          return v > 0 ? v : 0.0;
+        });
+        const mc = new Array(n).fill(0.0);
+        for (let i = 0; i < n; i++) {
+          let v = 0.0;
+          for (let j = 0; j < n; j++) v += cov[i][j] * w[j];
+          mc[i] = v;
+        }
+        let pvar = 0.0;
+        for (let i = 0; i < n; i++) pvar += w[i] * mc[i];
+        const riskRows = keys.map((k, i) => ({ code: k, risk_share: (pvar > 1e-12 ? (w[i] * mc[i]) / pvar : null) }));
+        return {
+          return: { method: "log_scaled", total_return: Number(totalReturn || 0), approx_port_log: totalLog, by_code: retRows },
+          risk: { method: "variance_share", portfolio_variance: pvar, by_code: riskRows },
+        };
+      }
+      function renderSimplePeriodTable(tableId, periodReturns) {
+        const t = $(tableId);
+        if (!t) return;
+        const blocks = [
+          ["周度", (periodReturns && periodReturns.weekly) ? periodReturns.weekly : []],
+          ["月度", (periodReturns && periodReturns.monthly) ? periodReturns.monthly : []],
+          ["季度", (periodReturns && periodReturns.quarterly) ? periodReturns.quarterly : []],
+          ["年度", (periodReturns && periodReturns.yearly) ? periodReturns.yearly : []],
+        ];
+        const rows = [];
+        for (const [name, arr] of blocks) {
+          for (const x of (arr || []).slice(-24)) rows.push(`<tr><td>${esc(name)}</td><td>${esc(x.period_end || "-")}</td><td>${fmtPct(Number(x.return))}</td></tr>`);
+        }
+        t.innerHTML = `<tr><th>周期</th><th>期末</th><th>收益</th></tr>${rows.join("")}`;
+      }
       function _getStrategyMixInputs() {
         const baseline = window.__lastBaselineResult;
         const rotation = window.__lastRotationResult;
@@ -4775,6 +5625,11 @@
           Number(($("mixWTrend") && $("mixWTrend").value) ? $("mixWTrend").value : "0"),
         ]);
         if (!ws) return setMsg("三策略权重至少有一个为正数。");
+        const mixAmtRaw = ($("mixAccountAmount") && $("mixAccountAmount").value != null) ? String($("mixAccountAmount").value).replaceAll(",", "").trim() : "";
+        if (mixAmtRaw !== "") {
+          const mixAmt = Number(mixAmtRaw);
+          if (!Number.isFinite(mixAmt) || mixAmt <= 0) return setMsg("交易账户金额需为>0数字，留空则不计算金额和份数。");
+        }
         const rsMix = [];
         for (let i = 0; i < rsBase.length; i++) {
           rsMix.push(ws[0] * rsBase[i] + ws[1] * rsRot[i] + ws[2] * rsTrend[i]);
@@ -4830,6 +5685,29 @@
           ["趋势", mTrend],
         ].map(([k, m]) => `<tr><td>${esc(k)}</td><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${fmtNum(m.sharpe_ratio)}</td></tr>`);
         $("strategyMixMetricsTable").innerHTML = `<tr><th>策略</th><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>夏普</th></tr>${rows.join("")}`;
+        const mixAttr = _buildAttributionBySeries(
+          {
+            HOLD: rsBase.map(Number),
+            ROTATION: rsRot.map(Number),
+            TREND: rsTrend.map(Number),
+          },
+          Number(mMix.cumulative_return),
+          { HOLD: ws[0], ROTATION: ws[1], TREND: ws[2] }
+        );
+        renderContributionTables("mix", mixAttr, { HOLD: `持有(${baseMode})`, ROTATION: "轮动", TREND: "趋势" });
+        const mixPeriods = {
+          weekly: _periodReturnsFromNav(dts, mMix.nav, "weekly"),
+          monthly: _periodReturnsFromNav(dts, mMix.nav, "monthly"),
+          quarterly: _periodReturnsFromNav(dts, mMix.nav, "quarterly"),
+          yearly: _periodReturnsFromNav(dts, mMix.nav, "yearly"),
+        };
+        renderSimplePeriodTable("mixPeriodTable", mixPeriods);
+        const mixRolling = _rollingPackFromNav(dts, mMix.nav);
+        plotRolling("strategyMixRollingReturns", "Strategy Mix Rolling Returns", (mixRolling.returns || {}), ".0%");
+        try {
+          const mixPosCtx = _buildMixPositionContext(dts, ws, baseMode);
+          _renderMixPositionPlan(mixPosCtx);
+        } catch (_) { /* ignore */ }
 
         const rcBR = _rollingCorr(rsBase, rsRot, rollWin);
         const rcBT = _rollingCorr(rsBase, rsTrend, rollWin);
@@ -4855,7 +5733,10 @@
           title: "滚动回撤（由净值推导）",
         }, { responsive: true });
 
-        $("strategyMixNote").textContent = `权重归一后：持有=${fmtPct(ws[0])}，轮动=${fmtPct(ws[1])}，趋势=${fmtPct(ws[2])}；共同样本区间：${dts[0]} ~ ${dts[dts.length - 1]}（${dts.length}个交易日）；滚动窗口=${rollWin}。`;
+        const mixAmtTxt = (mixAmtRaw !== "" && Number.isFinite(Number(mixAmtRaw)) && Number(mixAmtRaw) > 0)
+          ? `；交易账户金额=${fmtMoney(Number(mixAmtRaw))}元`
+          : "；交易账户金额未设置";
+        $("strategyMixNote").textContent = `权重归一后：持有=${fmtPct(ws[0])}，轮动=${fmtPct(ws[1])}，趋势=${fmtPct(ws[2])}；共同样本区间：${dts[0]} ~ ${dts[dts.length - 1]}（${dts.length}个交易日）；滚动窗口=${rollWin}${mixAmtTxt}。`;
       }
       function _mcReportLines(label, mc) {
         const mm = (mc && mc.metrics) ? (mc.metrics.annualized_return || mc.metrics.cumulative_return || null) : null;
@@ -4937,11 +5818,25 @@
             .join("");
       }
 
-      function renderContributionTables(kind, attribution) {
+      function renderContributionTables(kind, attribution, labelMap) {
         const nameByCode = new Map((pool || []).map(x => [x.code, x.name]));
-        const retEl = $(kind === "ew" ? "ewReturnContrib" : "rotReturnContrib");
-        const riskEl = $(kind === "ew" ? "ewRiskContrib" : "rotRiskContrib");
-        const rrEl = $(kind === "ew" ? "ewRiskReturnRatio" : "rotRiskReturnRatio");
+        const tableIdByKind = {
+          ew: { ret: "ewReturnContrib", risk: "ewRiskContrib", rr: "ewRiskReturnRatio" },
+          rot: { ret: "rotReturnContrib", risk: "rotRiskContrib", rr: "rotRiskReturnRatio" },
+          trend: { ret: "trendReturnContrib", risk: "trendRiskContrib", rr: "trendRiskReturnRatio" },
+          mix: { ret: "mixReturnContrib", risk: "mixRiskContrib", rr: "mixRiskReturnRatio" },
+        };
+        const ids = tableIdByKind[String(kind || "")];
+        if (!ids) return;
+        const _labelOf = (code) => {
+          const c = String(code || "");
+          if (labelMap && Object.prototype.hasOwnProperty.call(labelMap, c)) return String(labelMap[c] || c);
+          const nm = nameByCode.get(c) || "";
+          return `${c}${nm ? " " + nm : ""}`;
+        };
+        const retEl = $(ids.ret);
+        const riskEl = $(ids.risk);
+        const rrEl = $(ids.rr);
         if (!retEl || !riskEl || !rrEl) return;
 
         if (!attribution || !attribution.return || !attribution.risk) {
@@ -4957,9 +5852,8 @@
           `<tr><th>标的</th><th>总收益贡献</th><th>贡献占比</th></tr>` +
           rrows
             .map((x) => {
-              const c = x.code;
-              const nm = nameByCode.get(c) || "";
-              const label = `${c}${nm ? " " + nm : ""}`;
+              const c = String(x.code || "");
+              const label = _labelOf(c);
               const contrib = (x.return_contribution == null) ? "-" : fmtPct(Number(x.return_contribution));
               const share = (x.return_share == null) ? "-" : (Number(x.return_share) * 100).toFixed(2) + "%";
               return `<tr><td>${label}</td><td>${contrib}</td><td>${share}</td></tr>`;
@@ -4972,9 +5866,8 @@
           `<tr><th>标的</th><th>风险贡献占比</th></tr>` +
           kRisk
             .map((x) => {
-              const c = x.code;
-              const nm = nameByCode.get(c) || "";
-              const label = `${c}${nm ? " " + nm : ""}`;
+              const c = String(x.code || "");
+              const label = _labelOf(c);
               const share = (x.risk_share == null) ? "-" : (Number(x.risk_share) * 100).toFixed(2) + "%";
               return `<tr><td>${label}</td><td>${share}</td></tr>`;
             })
@@ -4999,9 +5892,8 @@
           `<tr><th>标的</th><th>收益占比</th><th>风险占比</th><th>风险收益比</th></tr>` +
           rows
             .map((x) => {
-              const c = x.code;
-              const nm = nameByCode.get(c) || "";
-              const label = `${c}${nm ? " " + nm : ""}`;
+              const c = String(x.code || "");
+              const label = _labelOf(c);
               const retShare = Number.isFinite(x.retShare) ? (x.retShare * 100).toFixed(2) + "%" : "-";
               const riskShare = Number.isFinite(x.riskShare) ? (x.riskShare * 100).toFixed(2) + "%" : "-";
               const ratioTxt = Number.isFinite(x.ratio) ? Number(x.ratio).toFixed(3) : "-";
@@ -8339,7 +9231,7 @@
       function _rotAnchorRangeByRebalance(rebalance) {
         const r = String(rebalance || "weekly").toLowerCase();
         if (r === "daily") return null;
-        if (r === "weekly") return { min: 1, max: 5, label: "调仓日（周度 1~5，对应周一~周五）", def: 5 };
+        if (r === "weekly") return { min: 0, max: 5, label: "调仓日（周度 0~5；0=周一到周五等权组合）", def: 5 };
         if (r === "monthly") return { min: 1, max: 28, label: "调仓日（月度 1~28，月内第几天）", def: 1 };
         if (r === "quarterly") return { min: 1, max: 90, label: "调仓日（季度 1~90，季内第几天）", def: 1 };
         if (r === "yearly") return { min: 1, max: 365, label: "调仓日（年度 1~365，年内第几天）", def: 1 };
@@ -8383,6 +9275,95 @@
           rebalance_anchor = v;
         }
         return { rebalance, rebalance_shift: shift, rebalance_anchor };
+      }
+
+      function _weekdayLabelByAnchor(a) {
+        const m = { "1": "周一", "2": "周二", "3": "周三", "4": "周四", "5": "周五" };
+        return m[String(a)] || String(a);
+      }
+
+      function _combineRotationWeeklyMix(byAnchor, rfAnnual) {
+        const anchors = ["1", "2", "3", "4", "5"].filter((k) => byAnchor && byAnchor[k] && byAnchor[k].nav && byAnchor[k].nav.series);
+        if (!anchors.length) return null;
+        const base = byAnchor[anchors[0]];
+        const dates = (((base || {}).nav || {}).dates || []).slice();
+        const keys = Object.keys((((base || {}).nav || {}).series || {}));
+        const series = {};
+        const _combineNavByKey = (key) => {
+          const arrs = anchors.map((k) => ((((byAnchor[k] || {}).nav || {}).series || {})[key] || []).map(Number));
+          const n = Math.min(...arrs.map((x) => x.length), dates.length);
+          if (!Number.isFinite(n) || n <= 0) return [];
+          const nav = new Array(n).fill(1.0);
+          for (let i = 1; i < n; i++) {
+            let s = 0.0;
+            let c = 0;
+            for (const a of arrs) {
+              const p0 = Number(a[i - 1]);
+              const p1 = Number(a[i]);
+              if (!Number.isFinite(p0) || !Number.isFinite(p1) || p0 <= 0) continue;
+              s += (p1 / p0 - 1.0);
+              c += 1;
+            }
+            const r = (c > 0) ? (s / c) : 0.0;
+            nav[i] = nav[i - 1] * (1.0 + r);
+          }
+          return nav;
+        };
+        for (const k of keys) series[k] = _combineNavByKey(k);
+        const nDates = dates.slice(0, Math.min(dates.length, ...(Object.values(series).map((x) => x.length))));
+        const _s = (k) => Array.isArray(series[k]) ? series[k] : [];
+        const mStrat = _calcMetricsFromNav(_s("ROTATION"), Number(rfAnnual));
+        const mEw = _calcMetricsFromNav(_s("EW_REBAL"), Number(rfAnnual));
+        const mRp = _calcMetricsFromNav(_s("RP_REBAL"), Number(rfAnnual));
+        const mEx = _calcMetricsFromNav(_s("EXCESS"), 0.0);
+        const mExRp = _calcMetricsFromNav(_s("EXCESS_RP"), 0.0);
+        const _mkEx = (m) => ({
+          cumulative_return: Number(m.cumulative_return),
+          annualized_return: Number(m.annualized_return),
+          annualized_return_geo: Number(m.annualized_return),
+          annualized_return_arith: Number(m.annualized_return),
+          information_ratio: Number(m.sharpe_ratio),
+        });
+        const _pickRet = (navArr, freq) => _periodReturnsFromNav(nDates, navArr, freq);
+        const _mkPeriod = (freq) => {
+          const a = _pickRet(_s("ROTATION"), freq);
+          const b = _pickRet(_s("EW_REBAL"), freq);
+          const m = Math.min(a.length, b.length);
+          const out = [];
+          for (let i = 0; i < m; i++) {
+            const sr = Number(a[i].return);
+            const br = Number(b[i].return);
+            out.push({
+              period_end: a[i].period_end || b[i].period_end,
+              strategy_return: sr,
+              benchmark_return: br,
+              excess_return: (Number.isFinite(sr) && Number.isFinite(br)) ? (sr - br) : NaN,
+            });
+          }
+          return out;
+        };
+        return {
+          ...base,
+          anchor_mode: "weekly_mix_0",
+          by_anchor: byAnchor,
+          nav: { dates: nDates, series },
+          metrics: {
+            strategy: mStrat,
+            benchmark_equal_weight: mEw,
+            benchmark_risk_parity: mRp,
+            excess_vs_equal_weight: _mkEx(mEx),
+            excess_vs_risk_parity: _mkEx(mExRp),
+          },
+          period_returns: {
+            weekly: _mkPeriod("weekly"),
+            monthly: _mkPeriod("monthly"),
+            quarterly: _mkPeriod("quarterly"),
+            yearly: _mkPeriod("yearly"),
+          },
+          rolling: _rollingPackFromNav(nDates, _s("ROTATION")),
+          holdings: [],
+          holding_streaks: [],
+        };
       }
 
       function renderCalendarAnchorBox(prefix, rebalance) {
@@ -8845,14 +9826,64 @@
             asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
         };
         window.__lastRotationPayload = { ...reqPayload };
-        const resp = await api("/analysis/rotation", {
-          method: "POST",
-          body: JSON.stringify(reqPayload),
-        });
-        const text = await resp.text();
+        let data = null;
+        let byAnchor = null;
+        const isWeeklyMix0 = (String(rebalance || "").toLowerCase() === "weekly" && Number(rebalance_anchor) === 0);
+        if (isWeeklyMix0) {
+          $("status").textContent = "回测中（周一~周五等权组合）...";
+          const anchors = [1, 2, 3, 4, 5];
+          const reqs = anchors.map((a) => api("/analysis/rotation", {
+            method: "POST",
+            body: JSON.stringify({ ...reqPayload, rebalance_anchor: a }),
+          }));
+          const resps = await Promise.all(reqs);
+          const texts = await Promise.all(resps.map((r) => r.text()));
+          for (let i = 0; i < resps.length; i++) {
+            if (!resps[i].ok) {
+              $("status").textContent = "";
+              return setMsg(texts[i]);
+            }
+          }
+          byAnchor = {};
+          for (let i = 0; i < anchors.length; i++) byAnchor[String(anchors[i])] = JSON.parse(texts[i]);
+          data = _combineRotationWeeklyMix(byAnchor, risk_free_rate);
+          if (!data) {
+            $("status").textContent = "";
+            return setMsg("周度调仓日=0（周一到周五等权）组合失败");
+          }
+          window.__lastRotationByAnchor = byAnchor;
+          window.__lastRotationNextExecutionPlan = null;
+          // Best effort: prefetch next-execution-plan for each weekday anchor.
+          try {
+            const asof = String((((data || {}).nav || {}).dates || []).slice(-1)[0] || "").replaceAll("-", "");
+            if (asof) {
+              const planReqs = anchors.map((a) => api("/analysis/rotation/next-execution-plan", {
+                method: "POST",
+                body: JSON.stringify({ ...reqPayload, rebalance_anchor: a, asof }),
+              }));
+              const planResps = await Promise.all(planReqs);
+              const planTexts = await Promise.all(planResps.map((r) => r.text()));
+              const planByAnchor = {};
+              for (let i = 0; i < anchors.length; i++) {
+                if (!planResps[i].ok) continue;
+                try { planByAnchor[String(anchors[i])] = JSON.parse(planTexts[i]); } catch (_) { /* ignore */ }
+              }
+              window.__lastRotationNextExecutionPlanByAnchor = planByAnchor;
+            }
+          } catch (_) { /* ignore */ }
+        } else {
+          window.__lastRotationByAnchor = null;
+          window.__lastRotationNextExecutionPlanByAnchor = null;
+          const resp = await api("/analysis/rotation", {
+            method: "POST",
+            body: JSON.stringify(reqPayload),
+          });
+          const text = await resp.text();
+          $("status").textContent = "";
+          if (!resp.ok) return setMsg(text);
+          data = JSON.parse(text);
+        }
         $("status").textContent = "";
-        if (!resp.ok) return setMsg(text);
-        const data = JSON.parse(text);
         window.__lastRotationResult = data;
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
@@ -8929,11 +9960,21 @@
           macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
           macd_v_atr_window: Number(($("trendMacdVAtr").value || "26").trim()),
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
+          hybrid_entry_n: Number(($("trendHybridEntryN").value || "1").trim()),
+          hybrid_exit_m: Number(($("trendHybridExitM").value || "1").trim()),
           atr_stop_mode: (($("trendAtrStopMode") && $("trendAtrStopMode").value) ? String($("trendAtrStopMode").value) : "none"),
           atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
           atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
           atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
         };
+        if (!Number.isFinite(common.hybrid_entry_n) || common.hybrid_entry_n < 1) {
+          return setMsg("混合策略入场阈值 n 需为>=1数字");
+        }
+        if (!Number.isFinite(common.hybrid_exit_m) || common.hybrid_exit_m < 1) {
+          return setMsg("混合策略离场阈值 m 需为>=1数字");
+        }
+        common.hybrid_entry_n = Math.floor(common.hybrid_entry_n);
+        common.hybrid_exit_m = Math.floor(common.hybrid_exit_m);
         if (!["none", "static", "trailing", "tightening"].includes(String(common.atr_stop_mode))) {
           return setMsg("ATR止损模式非法，请选择 关闭/静态/动态跟随/动态收紧");
         }
@@ -8949,7 +9990,7 @@
         if (common.atr_stop_mode === "tightening" && !(common.atr_stop_n > common.atr_stop_m)) {
           return setMsg("动态收紧模式要求 n > m");
         }
-        if (strategy === "tsmom") {
+        if (strategy === "tsmom" || strategy === "hybrid_trend") {
           const ent = Number(common.tsmom_entry_threshold);
           const ex = Number(common.tsmom_exit_threshold);
           if (!Number.isFinite(ent) || !Number.isFinite(ex)) {
@@ -8997,7 +10038,30 @@
           title: `趋势回测 - ${esc(strategy)} (${mode})`,
           yaxis: { type: "log", title: "净值(对数)" },
         });
+        try {
+          const rr40 = _rollingReturnDiff(dates, y1, y2, 40);
+          Plotly.newPlot("trend40dExcessChart", [
+            { x: rr40.dates, y: rr40.values, type: "scatter", mode: "lines", name: "40日收益差(策略-基准)" },
+          ], {
+            margin: { t: 30 },
+            title: (mode === "single")
+              ? "40日收益差：策略 vs 标的自身买入持有"
+              : "40日收益差：策略 vs 等权持有组合",
+            yaxis: { title: "收益差", tickformat: ".1%" },
+            shapes: [{
+              type: "line",
+              xref: "paper",
+              x0: 0,
+              x1: 1,
+              yref: "y",
+              y0: 0,
+              y1: 0,
+              line: { color: "#999", width: 1, dash: "dot" },
+            }],
+          }, { responsive: true, displayModeBar: false });
+        } catch (_) { /* ignore */ }
         renderTrendDailyReturnDist(data);
+        try { renderTrendPositionPlan(data, mode); } catch (_) { /* ignore */ }
         const m = (data && data.metrics) ? data.metrics : {};
         const rows = [];
         for (const k of ["strategy", "benchmark", "excess"]) {
@@ -9025,6 +10089,23 @@
           }
         }
         $("trendMetricsTable").innerHTML = `<tr><th>分组</th><th>指标</th><th>值</th></tr>${rows.join("")}`;
+        try {
+          renderContributionTables("trend", data.attribution || null);
+        } catch (_) { /* ignore */ }
+        try {
+          const pr = (data && data.period_returns) ? data.period_returns : {
+            weekly: _periodReturnsFromNav(dates, y1, "weekly"),
+            monthly: _periodReturnsFromNav(dates, y1, "monthly"),
+            quarterly: _periodReturnsFromNav(dates, y1, "quarterly"),
+            yearly: _periodReturnsFromNav(dates, y1, "yearly"),
+          };
+          renderSimplePeriodTable("trendPeriodTable", pr);
+        } catch (_) { /* ignore */ }
+        try {
+          const roll = (data && data.rolling) ? data.rolling : _rollingPackFromNav(dates, y1);
+          plotRolling("trendRollingReturns", "Trend Rolling Returns", (roll.returns || {}), ".0%");
+          plotRolling("trendRollingDD", "Trend Rolling Drawdown", (roll.drawdown || roll.max_drawdown || {}), ".0%");
+        } catch (_) { /* ignore */ }
         const hs = Array.isArray(data.holdings) ? data.holdings : [];
         const gRows = [];
         for (const h of hs.slice(0, 200)) {
@@ -9177,6 +10258,37 @@
         payload.asof = asof;
         const box = $("rotNextPlan");
         if (box) box.textContent = "查询中...";
+        const isWeeklyMix0 = (String(payload.rebalance || "").toLowerCase() === "weekly" && Number(payload.rebalance_anchor) === 0);
+        if (isWeeklyMix0) {
+          const anchors = [1, 2, 3, 4, 5];
+          const reqs = anchors.map((a) => api("/analysis/rotation/next-execution-plan", {
+            method: "POST",
+            body: JSON.stringify({ ...payload, rebalance_anchor: a }),
+          }));
+          const resps = await Promise.all(reqs);
+          const texts = await Promise.all(resps.map((r) => r.text()));
+          for (let i = 0; i < resps.length; i++) {
+            if (!resps[i].ok) return setMsg(texts[i]);
+          }
+          const plans = {};
+          for (let i = 0; i < anchors.length; i++) plans[String(anchors[i])] = JSON.parse(texts[i]);
+          window.__lastRotationNextExecutionPlan = null;
+          window.__lastRotationNextExecutionPlanByAnchor = plans;
+          if (box) {
+            const rows = anchors.map((a) => {
+              const p = plans[String(a)] || {};
+              const d = p.next_trading_day || "-";
+              if (!p.has_execution_plan || !p.plan) return `<tr><td>${_weekdayLabelByAnchor(a)}</td><td>${esc(d)}</td><td>无执行计划</td></tr>`;
+              const tw = Array.isArray(p.plan.target_weights) ? p.plan.target_weights : [];
+              const picks = tw.filter((x) => Number(x && x.target_weight) > 1e-12)
+                .map((x) => `${esc(codeLabel(x.code))} ${fmtPct(Number(x.target_weight))}`)
+                .join("，");
+              return `<tr><td>${_weekdayLabelByAnchor(a)}</td><td>${esc(d)}</td><td>${picks || "-"}</td></tr>`;
+            });
+            box.innerHTML = `<div class="muted" style="margin-bottom:6px;">主轮动调仓日=0（周一到周五等权）下，各锚点下一交易日计划：</div><table><tr><th>锚点</th><th>下一交易日</th><th>目标持仓</th></tr>${rows.join("")}</table>`;
+          }
+          return;
+        }
         const resp = await api("/analysis/rotation/next-execution-plan", {
           method: "POST",
           body: JSON.stringify(payload),
@@ -9184,6 +10296,8 @@
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
+        window.__lastRotationNextExecutionPlanByAnchor = null;
+        window.__lastRotationNextExecutionPlan = data;
         if (!box) return;
         const nextDay = data.next_trading_day || "-";
         if (!data.has_execution_plan) {
@@ -10795,6 +11909,13 @@
       if ($("runStrategyMix")) $("runStrategyMix").addEventListener("click", runStrategyMix);
       if ($("mixSetEqualWeights")) $("mixSetEqualWeights").addEventListener("click", setMixEqualWeights);
       if ($("mixSetInvVolWeights")) $("mixSetInvVolWeights").addEventListener("click", setMixInvVolWeights);
+      if ($("mixAccountAmount")) {
+        $("mixAccountAmount").addEventListener("change", () => {
+          try {
+            if (window.__lastBaselineResult && window.__lastRotationResult && window.__lastTrendResult) runStrategyMix();
+          } catch (_) { /* ignore */ }
+        });
+      }
       if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendStrategyParamsUi);
       // Init trend strategy parameter enablement/description on page load.
       updateTrendStrategyParamsUi();

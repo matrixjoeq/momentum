@@ -12,9 +12,11 @@ from .baseline import (
     TRADING_DAYS_PER_YEAR,
     _annualized_return,
     _annualized_vol,
+    _compute_return_risk_contributions,
     _information_ratio,
     _max_drawdown,
     _max_drawdown_duration_days,
+    _rolling_drawdown,
     _sharpe,
     _sortino,
     _ulcer_index,
@@ -35,6 +37,7 @@ TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "macd_cross": "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_zero_filter": "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_v": "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "hybrid_trend": "信号在 T 日收盘后聚合五个子策略（均线交叉/唐奇安/时序动量/MACD金叉死叉/线性回归）的入场/退场触发计数；入场计数>=n 则入场、退场计数>=m 则离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
 }
 
 
@@ -47,7 +50,7 @@ class TrendInputs:
     cost_bps: float = 0.0
     exec_price: str = "open"  # open|close|oc2
     # strategy selection
-    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v
+    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | hybrid_trend
     # parameters
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
@@ -75,6 +78,8 @@ class TrendInputs:
     macd_signal: int = 9
     macd_v_atr_window: int = 26
     macd_v_scale: float = 100.0
+    hybrid_entry_n: int = 1
+    hybrid_exit_m: int = 1
 
 
 @dataclass(frozen=True)
@@ -114,6 +119,50 @@ class TrendPortfolioInputs:
     macd_signal: int = 9
     macd_v_atr_window: int = 26
     macd_v_scale: float = 100.0
+    hybrid_entry_n: int = 1
+    hybrid_exit_m: int = 1
+
+
+def _hybrid_pos_from_components(
+    *,
+    ma_cross_pos: pd.Series,
+    donchian_pos: pd.Series,
+    tsmom_pos: pd.Series,
+    macd_cross_pos: pd.Series,
+    linreg_pos: pd.Series,
+    entry_n: int,
+    exit_m: int,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    comps = pd.DataFrame(
+        {
+            "ma_cross": ma_cross_pos.astype(float).fillna(0.0),
+            "donchian": donchian_pos.astype(float).fillna(0.0),
+            "tsmom": tsmom_pos.astype(float).fillna(0.0),
+            "macd_cross": macd_cross_pos.astype(float).fillna(0.0),
+            "linreg_slope": linreg_pos.astype(float).fillna(0.0),
+        }
+    )
+    prev = comps.shift(1).fillna(0.0)
+    entry_count = ((comps > 0.0) & (prev <= 0.0)).sum(axis=1).astype(float)
+    exit_count = ((comps <= 0.0) & (prev > 0.0)).sum(axis=1).astype(float)
+    en = max(1, int(entry_n))
+    ex = max(1, int(exit_m))
+    pos = np.zeros(len(comps), dtype=float)
+    in_pos = False
+    for i in range(len(comps)):
+        e_cnt = float(entry_count.iloc[i]) if np.isfinite(float(entry_count.iloc[i])) else 0.0
+        x_cnt = float(exit_count.iloc[i]) if np.isfinite(float(exit_count.iloc[i])) else 0.0
+        if not in_pos:
+            if e_cnt >= float(en):
+                in_pos = True
+        elif x_cnt >= float(ex):
+            in_pos = False
+        pos[i] = 1.0 if in_pos else 0.0
+    return (
+        pd.Series(pos, index=comps.index, dtype=float),
+        entry_count.astype(float),
+        exit_count.astype(float),
+    )
 
 
 def _rolling_linreg_slope(y: np.ndarray) -> float:
@@ -140,6 +189,50 @@ def _turnover_cost_from_weights(w: pd.Series, *, cost_bps: float) -> pd.Series:
     turnover = (w.astype(float) - w_prev).abs() / 2.0
     cost = turnover * (float(cost_bps) / 10000.0)
     return cost.astype(float)
+
+
+def _period_returns(nav: pd.Series, freq: str) -> pd.DataFrame:
+    s = pd.Series(nav).astype(float)
+    if s.empty:
+        return pd.DataFrame(columns=["period_end", "return"])
+    p = s.resample(freq).last().dropna()
+    if p.empty:
+        return pd.DataFrame(columns=["period_end", "return"])
+    r = p.pct_change().dropna()
+    if r.empty:
+        return pd.DataFrame(columns=["period_end", "return"])
+    return pd.DataFrame(
+        {
+            "period_end": r.index.date.astype(str),
+            "return": r.astype(float).to_numpy(),
+        }
+    )
+
+
+def _rolling_pack(nav_s: pd.Series) -> dict[str, dict[str, Any]]:
+    rolling: dict[str, dict[str, Any]] = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
+    for weeks in [4, 12, 52]:
+        window = int(weeks) * 5
+        r = (nav_s / nav_s.shift(window) - 1.0).dropna()
+        d = _rolling_drawdown(nav_s, window).dropna()
+        rolling["returns"][f"{weeks}w"] = {"dates": r.index.date.astype(str).tolist(), "values": r.astype(float).tolist()}
+        rolling["drawdown"][f"{weeks}w"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+        rolling["max_drawdown"][f"{weeks}w"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+    for months in [3, 6, 12]:
+        window = int(months) * 21
+        r = (nav_s / nav_s.shift(window) - 1.0).dropna()
+        d = _rolling_drawdown(nav_s, window).dropna()
+        rolling["returns"][f"{months}m"] = {"dates": r.index.date.astype(str).tolist(), "values": r.astype(float).tolist()}
+        rolling["drawdown"][f"{months}m"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+        rolling["max_drawdown"][f"{months}m"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+    for years in [1, 3]:
+        window = int(years) * 252
+        r = (nav_s / nav_s.shift(window) - 1.0).dropna()
+        d = _rolling_drawdown(nav_s, window).dropna()
+        rolling["returns"][f"{years}y"] = {"dates": r.index.date.astype(str).tolist(), "values": r.astype(float).tolist()}
+        rolling["drawdown"][f"{years}y"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+        rolling["max_drawdown"][f"{years}y"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+    return rolling
 
 
 def _pos_from_donchian(close: pd.Series, *, entry: int, exit_: int) -> pd.Series:
@@ -243,6 +336,8 @@ def _apply_atr_stop(
             "entries": int(((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()),
             "exits": int(((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()),
             "trigger_exit_share": 0.0,
+            "latest_stop_price": None,
+            "latest_stop_date": None,
         }
 
     atr = _atr_from_hlc(high.astype(float), low.astype(float), close.astype(float), window=int(atr_window)).astype(float)
@@ -256,6 +351,7 @@ def _apply_atr_stop(
     entry_atr = float("nan")
     prev_close = float("nan")
     trigger_dates: list[str] = []
+    latest_stop_date: str | None = None
 
     for i in range(len(bp)):
         b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
@@ -272,6 +368,9 @@ def _apply_atr_stop(
             prev_close = c
             stop_px = entry_px - float(n_mult) * entry_atr
             out[i] = b
+            if np.isfinite(stop_px):
+                d = bp.index[i]
+                latest_stop_date = d.date().isoformat() if hasattr(d, "date") else str(d)
             continue
 
         # If base strategy already exits, clear stop state directly.
@@ -312,6 +411,9 @@ def _apply_atr_stop(
 
         out[i] = b
         prev_close = c
+        if np.isfinite(stop_px):
+            d = bp.index[i]
+            latest_stop_date = d.date().isoformat() if hasattr(d, "date") else str(d)
 
     out_s = pd.Series(out, index=base_pos.index, dtype=float)
     entries = int(((out_s > 0.0) & (out_s.shift(1).fillna(0.0) <= 0.0)).sum())
@@ -327,6 +429,8 @@ def _apply_atr_stop(
         "entries": entries,
         "exits": exits,
         "trigger_exit_share": (float(trigger_count) / float(exits) if exits > 0 else 0.0),
+        "latest_stop_price": (float(stop_px) if (in_pos and np.isfinite(stop_px)) else None),
+        "latest_stop_date": (latest_stop_date if (in_pos and np.isfinite(stop_px)) else None),
     }
     return out_s, stats
 
@@ -377,6 +481,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "macd_cross",
         "macd_zero_filter",
         "macd_v",
+        "hybrid_trend",
     }:
         raise ValueError(f"invalid strategy={inp.strategy}")
 
@@ -432,6 +537,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("macd_v_atr_window must be >= 2")
     if (not np.isfinite(float(inp.macd_v_scale))) or float(inp.macd_v_scale) <= 0:
         raise ValueError("macd_v_scale must be finite and > 0")
+    if int(inp.hybrid_entry_n) < 1:
+        raise ValueError("hybrid_entry_n must be >= 1")
+    if int(inp.hybrid_exit_m) < 1:
+        raise ValueError("hybrid_exit_m must be >= 1")
 
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
@@ -605,6 +714,37 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
         macd_v_sig = _ema(macd_v, int(inp.macd_signal))
         raw_pos = (macd_v > macd_v_sig).astype(float).fillna(0.0)
+    elif strat == "hybrid_trend":
+        fast = _moving_average(px_sig, window=int(inp.fast_window), ma_type=ma_type)
+        slow = _moving_average(px_sig, window=int(inp.slow_window), ma_type=ma_type)
+        ma_cross_pos = (fast > slow).astype(float).fillna(0.0)
+        donchian_pos = _pos_from_donchian(px_sig, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)).astype(float)
+        mom = px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0
+        tsmom_pos = _pos_from_tsmom(
+            mom,
+            entry_threshold=float(inp.tsmom_entry_threshold),
+            exit_threshold=float(inp.tsmom_exit_threshold),
+        ).astype(float)
+        macd, sig, _ = _macd_core(
+            px_sig,
+            fast=int(inp.macd_fast),
+            slow=int(inp.macd_slow),
+            signal=int(inp.macd_signal),
+        )
+        macd_cross_pos = (macd > sig).astype(float).fillna(0.0)
+        n = int(inp.sma_window)
+        y = np.log(px_sig.clip(lower=1e-12).astype(float))
+        slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(_rolling_linreg_slope, raw=True)
+        linreg_pos = (slope > 0.0).astype(float).fillna(0.0)
+        raw_pos, _, _ = _hybrid_pos_from_components(
+            ma_cross_pos=ma_cross_pos,
+            donchian_pos=donchian_pos,
+            tsmom_pos=tsmom_pos,
+            macd_cross_pos=macd_cross_pos,
+            linreg_pos=linreg_pos,
+            entry_n=int(inp.hybrid_entry_n),
+            exit_m=int(inp.hybrid_exit_m),
+        )
     else:
         mom = px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0
         raw_pos = _pos_from_tsmom(
@@ -671,6 +811,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "annualized_return": float(_annualized_return(excess_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
         "information_ratio": float(_sharpe(active, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)),
     }
+    attribution = _compute_return_risk_contributions(
+        asset_ret=ret_exec_fwd.to_frame(code).astype(float).reindex(nav.index).fillna(0.0),
+        weights=w.to_frame(code).astype(float).reindex(nav.index).fillna(0.0),
+        total_return=float(nav.iloc[-1] - 1.0),
+    )
+    weekly = _period_returns(nav, "W-FRI")
+    monthly = _period_returns(nav, "ME")
+    quarterly = _period_returns(nav, "QE")
+    yearly = _period_returns(nav, "YE")
+    rolling_out = _rolling_pack(nav)
 
     out = {
         "meta": {
@@ -709,6 +859,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "macd_signal": int(inp.macd_signal),
                 "macd_v_atr_window": int(inp.macd_v_atr_window),
                 "macd_v_scale": float(inp.macd_v_scale),
+                "hybrid_entry_n": int(inp.hybrid_entry_n),
+                "hybrid_exit_m": int(inp.hybrid_exit_m),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "risk_free_rate": float(inp.risk_free_rate),
@@ -724,7 +876,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         },
         "signals": {
             "position": raw_pos.reindex(nav.index).astype(float).tolist(),
+            "position_effective": w.reindex(nav.index).astype(float).tolist(),
         },
+        "period_returns": {
+            "weekly": weekly.to_dict(orient="records"),
+            "monthly": monthly.to_dict(orient="records"),
+            "quarterly": quarterly.to_dict(orient="records"),
+            "yearly": yearly.to_dict(orient="records"),
+        },
+        "rolling": rolling_out,
+        "attribution": attribution,
         "metrics": {"strategy": m_strat, "benchmark": m_bh, "excess": m_ex},
         "risk_controls": {"atr_stop": atr_stop_stats},
         "corporate_actions": (
@@ -788,8 +949,25 @@ def compute_trend_portfolio_backtest(
         raise ValueError("tsmom_exit_threshold must be finite")
     if float(inp.tsmom_entry_threshold) < float(inp.tsmom_exit_threshold):
         raise ValueError("tsmom thresholds must satisfy: entry >= exit")
+    if int(inp.hybrid_entry_n) < 1:
+        raise ValueError("hybrid_entry_n must be >= 1")
+    if int(inp.hybrid_exit_m) < 1:
+        raise ValueError("hybrid_exit_m must be >= 1")
 
     strat = str(inp.strategy or "ma_filter").strip().lower()
+    if strat not in {
+        "ma_filter",
+        "ma_cross",
+        "donchian",
+        "tsmom",
+        "linreg_slope",
+        "bias",
+        "macd_cross",
+        "macd_zero_filter",
+        "macd_v",
+        "hybrid_trend",
+    }:
+        raise ValueError(f"invalid strategy={inp.strategy}")
 
     if data_override is not None:
         dates = data_override["dates"]
@@ -918,6 +1096,33 @@ def compute_trend_portfolio_backtest(
             macd_v_sig = _ema(macd_v, int(inp.macd_signal))
             pos = (macd_v > macd_v_sig).astype(float)
             score = (macd_v - macd_v_sig).astype(float)
+        elif strat == "hybrid_trend":
+            fast = _moving_average(px, window=int(inp.fast_window), ma_type=ma_type)
+            slow = _moving_average(px, window=int(inp.slow_window), ma_type=ma_type)
+            ma_cross_pos = (fast > slow).astype(float).fillna(0.0)
+            donchian_pos = _pos_from_donchian(px, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)).astype(float)
+            mom = px / px.shift(int(inp.mom_lookback)) - 1.0
+            tsmom_pos = _pos_from_tsmom(
+                mom,
+                entry_threshold=float(inp.tsmom_entry_threshold),
+                exit_threshold=float(inp.tsmom_exit_threshold),
+            ).astype(float)
+            macd, sig, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
+            macd_cross_pos = (macd > sig).astype(float).fillna(0.0)
+            n = int(inp.sma_window)
+            y = np.log(px.clip(lower=1e-12).astype(float))
+            slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(_rolling_linreg_slope, raw=True)
+            linreg_pos = (slope > 0.0).astype(float).fillna(0.0)
+            pos, entry_cnt, exit_cnt = _hybrid_pos_from_components(
+                ma_cross_pos=ma_cross_pos,
+                donchian_pos=donchian_pos,
+                tsmom_pos=tsmom_pos,
+                macd_cross_pos=macd_cross_pos,
+                linreg_pos=linreg_pos,
+                entry_n=int(inp.hybrid_entry_n),
+                exit_m=int(inp.hybrid_exit_m),
+            )
+            score = (entry_cnt - exit_cnt).astype(float)
         else:
             mom = px / px.shift(int(inp.mom_lookback)) - 1.0
             pos = _pos_from_tsmom(
@@ -1039,6 +1244,16 @@ def compute_trend_portfolio_backtest(
         "annualized_return": float(_annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
         "information_ratio": float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)),
     }
+    attribution = _compute_return_risk_contributions(
+        asset_ret=ret_exec_fwd.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        total_return=float(nav.iloc[-1] - 1.0),
+    )
+    weekly = _period_returns(nav, "W-FRI")
+    monthly = _period_returns(nav, "ME")
+    quarterly = _period_returns(nav, "QE")
+    yearly = _period_returns(nav, "YE")
+    rolling_out = _rolling_pack(nav)
 
     total_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in atr_stop_by_asset.values()))
     uniq_trigger_dates = sorted(
@@ -1067,6 +1282,8 @@ def compute_trend_portfolio_backtest(
                 "mom_lookback": int(inp.mom_lookback),
                 "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
                 "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
+                "hybrid_entry_n": int(inp.hybrid_entry_n),
+                "hybrid_exit_m": int(inp.hybrid_exit_m),
                 "atr_stop_mode": str(atr_mode),
                 "atr_stop_window": int(inp.atr_stop_window),
                 "atr_stop_n": float(inp.atr_stop_n),
@@ -1086,7 +1303,26 @@ def compute_trend_portfolio_backtest(
             "dates": w.index.date.astype(str).tolist(),
             "series": {c: w[c].astype(float).tolist() for c in codes},
         },
+        "weights_decision": {
+            "dates": w_decision.index.date.astype(str).tolist(),
+            "series": {c: w_decision[c].astype(float).tolist() for c in codes},
+        },
+        "asset_nav_exec": {
+            "dates": ret_exec_fwd.index.date.astype(str).tolist(),
+            "series": {
+                c: (1.0 + ret_exec_fwd[c].astype(float)).cumprod().astype(float).tolist()
+                for c in codes
+            },
+        },
         "holdings": holdings,
+        "period_returns": {
+            "weekly": weekly.to_dict(orient="records"),
+            "monthly": monthly.to_dict(orient="records"),
+            "quarterly": quarterly.to_dict(orient="records"),
+            "yearly": yearly.to_dict(orient="records"),
+        },
+        "rolling": rolling_out,
+        "attribution": attribution,
         "metrics": {"strategy": m_strat, "benchmark": m_bench, "excess": m_ex},
         "risk_controls": {
             "atr_stop": {
