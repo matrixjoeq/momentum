@@ -33,6 +33,7 @@ from .schemas import (
     TrendOosBootstrapRequest,
     TrendPortfolioBacktestRequest,
     AssetGroupSuggestRequest,
+    RotationCandidateScreenRequest,
     LeadLagAnalysisRequest,
     LeadLagAnalysisResponse,
     MacroPairLeadLagRequest,
@@ -64,6 +65,11 @@ from .schemas import (
     EtfPoolUpsert,
     FetchResult,
     FetchSelectedRequest,
+    OffFundFetchResult,
+    OffFundFetchSelectedRequest,
+    OffFundNavOut,
+    OffFundPoolOut,
+    OffFundPoolUpsert,
     IngestionBatchOut,
     SyncFixedPoolRequest,
     SyncFixedPoolResponse,
@@ -94,6 +100,7 @@ from ..analysis.calendar_effect import BaselineCalendarEffectInputs, compute_bas
 from ..analysis.calendar_effect import _decision_dates_for_rebalance as _cal_decision_dates_for_rebalance
 from ..analysis.calendar_effect import _ew_nav_and_weights_by_decision_dates as _cal_ew_nav_and_weights_by_decision_dates
 from ..analysis.grouping import AssetGroupSuggestInputs, suggest_asset_groups
+from ..analysis.candidate_screening import RotationCandidateScreenInputs, screen_rotation_candidates
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.oos_bootstrap import OosBootstrapConfig, run_trend_oos_bootstrap
@@ -123,6 +130,7 @@ from ..data.fred_fetcher import FetchRequest as FredFetchRequest
 from ..data.fred_fetcher import fetch_fred_daily_close
 from ..strategy.vix_signal import VixSignalInputs, backtest_vix_next_day_signal, generate_next_action
 from ..data.ingestion import ingest_one_etf
+from ..data.off_fund_ingestion import ingest_one_off_fund
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
 from ..data.stooq_fetcher import fetch_stooq_daily_close
@@ -151,6 +159,14 @@ from ..db.repo import (
     update_ingestion_batch,
     upsert_etf_pool,
     update_etf_pool_data_range,
+)
+from ..db.off_fund_repo import (
+    delete_off_fund_pool,
+    get_off_fund_date_range,
+    get_off_fund_pool_by_code,
+    list_off_fund_navs,
+    list_off_fund_pool,
+    upsert_off_fund_pool,
 )
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
@@ -668,6 +684,7 @@ def _rotation_inputs_from_payload(
         score_method=payload.score_method,
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
+        slippage_rate=payload.slippage_rate,
         atr_stop_mode=payload.atr_stop_mode,
         atr_stop_atr_basis=payload.atr_stop_atr_basis,
         atr_stop_reentry_mode=payload.atr_stop_reentry_mode,
@@ -734,6 +751,7 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         end=_parse_yyyymmdd(payload.end),
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
+        slippage_rate=payload.slippage_rate,
         exec_price=payload.exec_price,
         strategy=payload.strategy,
         sma_window=payload.sma_window,
@@ -763,6 +781,10 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         macd_v_scale=payload.macd_v_scale,
         hybrid_entry_n=payload.hybrid_entry_n,
         hybrid_exit_m=payload.hybrid_exit_m,
+        group_enforce=bool(getattr(payload, "group_enforce", False)),
+        group_pick_policy=getattr(payload, "group_pick_policy", "highest_sharpe"),
+        group_max_holdings=int(getattr(payload, "group_max_holdings", 4)),
+        asset_groups=getattr(payload, "asset_groups", None),
     )
     try:
         return compute_trend_backtest(db, inp)
@@ -778,6 +800,7 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         end=_parse_yyyymmdd(payload.end),
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
+        slippage_rate=payload.slippage_rate,
         exec_price=payload.exec_price,
         strategy=payload.strategy,
         position_sizing=payload.position_sizing,
@@ -866,6 +889,27 @@ def suggest_groups(payload: AssetGroupSuggestRequest, db: Session = Depends(get_
     )
     try:
         return suggest_asset_groups(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/rotation/candidate-screen")
+def screen_rotation_candidates_api(payload: RotationCandidateScreenRequest, db: Session = Depends(get_session)) -> dict:
+    inp = RotationCandidateScreenInputs(
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        adjust=payload.adjust,
+        lookback_days=payload.lookback_days,
+        top_n=payload.top_n,
+        min_n=payload.min_n,
+        max_pair_corr=payload.max_pair_corr,
+        factor_weights=payload.factor_weights,
+        category_quotas=payload.category_quotas,
+        signif_horizon_days=payload.signif_horizon_days,
+    )
+    try:
+        return screen_rotation_candidates(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -4385,4 +4429,168 @@ def delete_prices_api(
     n = delete_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adjust)
     db.commit()
     return {"deleted": n}
+
+
+@router.get("/off-fund", response_model=list[OffFundPoolOut])
+def get_off_funds(adjust: str = "hfq", db: Session = Depends(get_session)) -> list[OffFundPoolOut]:
+    try:
+        _ = normalize_adjust(adjust)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    items = list_off_fund_pool(db)
+    out: list[OffFundPoolOut] = []
+    for i in items:
+        rng = get_off_fund_date_range(db, code=i.code, adjust=adjust)
+        out.append(
+            OffFundPoolOut(
+                code=i.code,
+                name=i.name,
+                start_date=i.start_date,
+                end_date=i.end_date,
+                last_fetch_status=i.last_fetch_status,
+                last_fetch_message=i.last_fetch_message,
+                last_data_start_date=rng[0],
+                last_data_end_date=rng[1],
+            )
+        )
+    return out
+
+
+@router.post("/off-fund", response_model=OffFundPoolOut)
+def upsert_off_fund(payload: OffFundPoolUpsert, db: Session = Depends(get_session)) -> OffFundPoolOut:
+    if payload.start_date and len(payload.start_date) != 8:
+        raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
+    if payload.end_date and len(payload.end_date) != 8:
+        raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
+    if payload.start_date and payload.end_date and payload.start_date > payload.end_date:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+    obj = upsert_off_fund_pool(
+        db,
+        code=payload.code,
+        name=payload.name,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    db.commit()
+    return OffFundPoolOut(
+        code=obj.code,
+        name=obj.name,
+        start_date=obj.start_date,
+        end_date=obj.end_date,
+        last_fetch_status=obj.last_fetch_status,
+        last_fetch_message=obj.last_fetch_message,
+        last_data_start_date=obj.last_data_start_date,
+        last_data_end_date=obj.last_data_end_date,
+    )
+
+
+@router.delete("/off-fund/{code}")
+def delete_off_fund_api(code: str, db: Session = Depends(get_session)) -> dict:
+    ok = delete_off_fund_pool(db, code)
+    if not ok:
+        raise HTTPException(status_code=404, detail="off-fund not found")
+    db.commit()
+    return {"deleted": True}
+
+
+@router.post("/off-fund/{code}/fetch", response_model=OffFundFetchResult)
+def fetch_one_off_fund(
+    code: str,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> OffFundFetchResult:
+    item = get_off_fund_pool_by_code(db, code)
+    if item is None:
+        raise HTTPException(status_code=404, detail="off-fund not found")
+    res = ingest_one_off_fund(
+        db,
+        ak=ak,
+        code=code,
+        start_date=item.start_date or get_settings().default_start_date,
+        end_date=item.end_date or get_settings().default_end_date,
+    )
+    if res.status != "success":
+        raise HTTPException(status_code=500, detail=res.message or "ingestion failed")
+    return OffFundFetchResult(code=code, inserted_or_updated=int(res.upserted), status=res.status, message=res.message)
+
+
+@router.post("/off-fund/fetch-all", response_model=list[OffFundFetchResult])
+def fetch_all_off_fund(
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> list[OffFundFetchResult]:
+    out: list[OffFundFetchResult] = []
+    for item in list_off_fund_pool(db):
+        res = ingest_one_off_fund(
+            db,
+            ak=ak,
+            code=item.code,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            OffFundFetchResult(
+                code=item.code,
+                inserted_or_updated=(int(res.upserted) if res.status == "success" else 0),
+                status=res.status,
+                message=res.message,
+            )
+        )
+    return out
+
+
+@router.post("/off-fund/fetch-selected", response_model=list[OffFundFetchResult])
+def fetch_selected_off_fund(
+    payload: OffFundFetchSelectedRequest,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> list[OffFundFetchResult]:
+    pool_by_code = {x.code: x for x in list_off_fund_pool(db)}
+    out: list[OffFundFetchResult] = []
+    for code in payload.codes:
+        item = pool_by_code.get(code)
+        if item is None:
+            out.append(OffFundFetchResult(code=code, inserted_or_updated=0, status="failed", message="off-fund not found"))
+            continue
+        res = ingest_one_off_fund(
+            db,
+            ak=ak,
+            code=code,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            OffFundFetchResult(
+                code=code,
+                inserted_or_updated=(int(res.upserted) if res.status == "success" else 0),
+                status=res.status,
+                message=res.message,
+            )
+        )
+    return out
+
+
+@router.get("/off-fund/{code}/navs", response_model=list[OffFundNavOut])
+def get_off_fund_navs_api(
+    code: str,
+    start: str | None = None,
+    end: str | None = None,
+    adjust: str = "hfq",
+    limit: int = 5000,
+    db: Session = Depends(get_session),
+) -> list[OffFundNavOut]:
+    start_d = _parse_yyyymmdd(start) if start else None
+    end_d = _parse_yyyymmdd(end) if end else None
+    rows = list_off_fund_navs(db, code=code, start_date=start_d, end_date=end_d, adjust=adjust, limit=limit)
+    return [
+        OffFundNavOut(
+            code=r.code,
+            trade_date=r.trade_date.isoformat(),
+            nav=r.nav,
+            accum_nav=r.accum_nav,
+            source=r.source,
+            adjust=r.adjust,
+        )
+        for r in rows
+    ]
 

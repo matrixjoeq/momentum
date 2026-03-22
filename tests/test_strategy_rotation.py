@@ -1,9 +1,11 @@
 import datetime as dt
 
+import pandas as pd
 import pytest
 
 from etf_momentum.db.models import EtfPrice
 from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
+from tests.helpers.price_seed import add_price_all_adjustments
 
 
 def test_backtest_rotation_basic_outputs(session_factory):
@@ -54,3 +56,107 @@ def test_backtest_rotation_basic_outputs(session_factory):
         assert "buys" in out["period_details"][0]
         assert "sells" in out["period_details"][0]
 
+
+def test_rotation_close_exec_uses_forward_corp_action_fallback(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        start = dt.date(2024, 1, 1)
+        dates = [start + dt.timedelta(days=i) for i in range(8)]
+        # none has a split-like cliff between day2->day3; hfq remains smooth.
+        none_px = [100.0, 101.0, 102.0, 10.2, 10.3, 10.4, 10.5, 10.6]
+        hfq_px = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0]
+        for d, p_none, p_hfq in zip(dates, none_px, hfq_px):
+            db.add(EtfPrice(code=code, trade_date=d, close=float(p_none), source="eastmoney", adjust="none"))
+            db.add(EtfPrice(code=code, trade_date=d, close=float(p_hfq), source="eastmoney", adjust="hfq"))
+            db.add(EtfPrice(code=code, trade_date=d, close=float(p_hfq), source="eastmoney", adjust="qfq"))
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=[code],
+                start=start,
+                end=dates[-1],
+                rebalance="daily",
+                top_k=1,
+                lookback_days=1,
+                skip_days=0,
+                exec_price="close",
+                cost_bps=0.0,
+            ),
+        )
+
+    nav = [float(x) for x in out["nav"]["series"]["ROTATION"]]
+    assert nav
+    # If fallback is one-day late, nav around split day collapses ~90%.
+    assert min(nav) > 0.90
+
+
+def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
+    """
+    Mirror the user debug setup:
+    - 12 assets
+    - long history (20111209~20260320)
+    - weekly rotation, Monday anchor, close execution
+    - top2 adaptive, dynamic universe on, no entry/exit filters
+    - cost 2bps + slippage 0.001
+
+    The synthetic series keeps the same top-2 assets dominant across the whole span,
+    so without end-of-backtest open-trade inclusion this test would produce zero closed trades.
+    """
+    sf = session_factory
+    start = dt.date(2011, 12, 9)
+    end = dt.date(2026, 3, 20)
+    dates = [d.date() for d in pd.date_range(start, end, freq="B")]
+    codes = [f"G{i:02d}" for i in range(1, 13)]
+    with sf() as db:
+        n = max(1, len(dates) - 1)
+        for k, code in enumerate(codes):
+            drift = 0.00010 + 0.00003 * float(k)  # higher-index codes have stronger trend
+            for i, d in enumerate(dates):
+                px = 100.0 * ((1.0 + drift) ** (float(i) / float(n) * float(n)))
+                add_price_all_adjustments(
+                    db,
+                    code=code,
+                    day=d,
+                    close=float(px),
+                    open_price=float(px),
+                    high=float(px),
+                    low=float(px),
+                )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=start,
+                end=end,
+                dynamic_universe=True,
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                position_mode="adaptive",
+                entry_backfill=False,
+                score_method="raw_mom",
+                lookback_days=20,
+                skip_days=0,
+                cost_bps=2.0,
+                slippage_rate=0.001,
+                atr_stop_mode="none",
+                group_enforce=False,
+                trend_filter=False,
+                trend_exit_filter=False,
+                bias_filter=False,
+                bias_exit_filter=False,
+                rsi_filter=False,
+                chop_filter=False,
+            ),
+        )
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {})
+    assert int(overall.get("total_trades") or 0) > 0
+    assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())

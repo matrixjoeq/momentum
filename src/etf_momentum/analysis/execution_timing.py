@@ -53,3 +53,29 @@ def forward_align_returns(ret: pd.DataFrame) -> pd.DataFrame:
     r = ret.astype(float).replace([np.inf, -np.inf], np.nan)
     return r.shift(-1).fillna(0.0).astype(float)
 
+
+def corporate_action_mask(
+    gross_none: pd.DataFrame,
+    gross_hfq: pd.DataFrame,
+    *,
+    dev_threshold: float = 0.02,
+    ratio_threshold: float = 1.2,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Unified corporate-action cliff detector used by strategy engines.
+
+    Inputs are gross-return matrices aligned to the same execution horizon:
+      gross = 1 + return_on_that_horizon
+
+    Returns:
+    - corp_factor: gross_hfq / gross_none
+    - mask: day/code where fallback to hfq return should be used
+    """
+    gn = gross_none.astype(float).replace([np.inf, -np.inf], np.nan)
+    gh = gross_hfq.astype(float).replace([np.inf, -np.inf], np.nan)
+    corp_factor = (gh / gn).replace([np.inf, -np.inf], np.nan)
+    dev = (corp_factor - 1.0).abs()
+    rt = float(ratio_threshold)
+    mask = (dev > float(dev_threshold)) | (corp_factor > rt) | (corp_factor < (1.0 / rt))
+    return corp_factor, mask
+

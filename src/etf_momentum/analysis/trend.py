@@ -24,6 +24,7 @@ from .baseline import (
     load_high_low_prices,
     load_ohlc_prices,
 )
+from .execution_timing import corporate_action_mask
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
 TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -46,6 +47,7 @@ class TrendInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
+    slippage_rate: float = 0.001
     exec_price: str = "open"  # open|close|oc2
     # strategy selection
     strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | hybrid_trend
@@ -89,6 +91,7 @@ class TrendPortfolioInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
+    slippage_rate: float = 0.001
     exec_price: str = "open"  # open|close|oc2
     strategy: str = "ma_filter"
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio
@@ -126,6 +129,96 @@ class TrendPortfolioInputs:
     macd_v_scale: float = 100.0
     hybrid_entry_n: int = 1
     hybrid_exit_m: int = 1
+    group_enforce: bool = False
+    group_pick_policy: str = "highest_sharpe"  # highest_sharpe | earliest_entry
+    group_max_holdings: int = 4  # max picks kept in each group (1..10)
+    asset_groups: dict[str, str] | None = None  # code -> group_id
+
+
+def _reduce_active_codes_by_group(
+    *,
+    active_codes: list[str],
+    score_row: pd.Series,
+    sharpe_row: pd.Series,
+    group_enforce: bool,
+    asset_groups: dict[str, str] | None,
+    group_pick_policy: str,
+    group_max_holdings: int,
+    current_holdings: set[str] | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """
+    Apply trend portfolio group constraint:
+    - each group keeps at most group_max_holdings candidates.
+    - policy:
+      - earliest_entry: prefer currently-held assets first, then score rank.
+      - highest_sharpe: prefer higher rolling sharpe, then score rank.
+    """
+    meta: dict[str, Any] = {
+        "enabled": bool(group_enforce),
+        "policy": str(group_pick_policy or "highest_sharpe"),
+        "max_holdings_per_group": int(group_max_holdings),
+        "before": list(active_codes),
+        "after": list(active_codes),
+        "group_picks": {},
+        "group_eliminated": {},
+        # backward-compat (single winner view)
+        "group_winners": {},
+    }
+    if (not group_enforce) or (not active_codes):
+        return list(active_codes), meta
+
+    policy = str(group_pick_policy or "highest_sharpe").strip().lower()
+    if policy not in {"earliest_entry", "highest_sharpe"}:
+        raise ValueError("group_pick_policy must be one of: earliest_entry|highest_sharpe")
+    kmax = int(group_max_holdings)
+    if kmax < 1 or kmax > 10:
+        raise ValueError("group_max_holdings must be in [1,10]")
+
+    groups = {str(k): str(v) for k, v in (asset_groups or {}).items()}
+    cur = set(str(x) for x in (current_holdings or set()))
+    active_set = set(active_codes)
+    # keep global score order semantics
+    order_by_score = [str(c) for c in pd.Series(score_row).reindex(active_codes).sort_values(ascending=False).index.tolist() if str(c) in active_set]
+    if len(order_by_score) != len(active_codes):
+        order_by_score = list(active_codes)
+
+    bucket: dict[str, list[str]] = {}
+    for c in order_by_score:
+        gid = str(groups.get(str(c)) or str(c)).strip() or str(c)
+        bucket.setdefault(gid, []).append(str(c))
+
+    kept_set: set[str] = set()
+    for gid, codes_in_gid in bucket.items():
+        chosen: list[str] = []
+        if policy == "earliest_entry":
+            held = [c for c in codes_in_gid if c in cur]
+            chosen.extend(held[:kmax])
+            for c in codes_in_gid:
+                if len(chosen) >= kmax:
+                    break
+                if c not in chosen:
+                    chosen.append(c)
+        else:
+            ranked = sorted(
+                codes_in_gid,
+                key=lambda c: (
+                    -(float(sharpe_row.get(c)) if np.isfinite(float(sharpe_row.get(c))) else -1e18),
+                    -(float(score_row.get(c)) if np.isfinite(float(score_row.get(c))) else -1e18),
+                    str(c),
+                ),
+            )
+            chosen = ranked[:kmax]
+
+        eliminated = [c for c in codes_in_gid if c not in set(chosen)]
+        for c in chosen:
+            kept_set.add(c)
+        meta["group_picks"][gid] = list(chosen)
+        meta["group_eliminated"][gid] = list(eliminated)
+        meta["group_winners"][gid] = (chosen[0] if chosen else "")
+
+    reduced = [c for c in order_by_score if c in kept_set]
+    meta["after"] = list(reduced)
+    return reduced, meta
 
 
 def _hybrid_pos_from_components(
@@ -238,6 +331,171 @@ def _rolling_pack(nav_s: pd.Series) -> dict[str, dict[str, Any]]:
         rolling["drawdown"][f"{years}y"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
         rolling["max_drawdown"][f"{years}y"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
     return rolling
+
+
+def _dist_stats(values: list[float]) -> dict[str, Any]:
+    arr = np.asarray([float(x) for x in (values or []) if np.isfinite(float(x))], dtype=float)
+    if arr.size == 0:
+        return {
+            "count": 0,
+            "max": None,
+            "min": None,
+            "mean": None,
+            "std": None,
+            "quantiles": {k: None for k in ["p01", "p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]},
+        }
+    q = lambda p: float(np.percentile(arr, p))  # noqa: E731
+    return {
+        "count": int(arr.size),
+        "max": float(np.max(arr)),
+        "min": float(np.min(arr)),
+        "mean": float(np.mean(arr)),
+        "std": float(np.std(arr, ddof=1)) if arr.size >= 2 else 0.0,
+        "quantiles": {
+            "p01": q(1),
+            "p05": q(5),
+            "p10": q(10),
+            "p25": q(25),
+            "p50": q(50),
+            "p75": q(75),
+            "p90": q(90),
+            "p95": q(95),
+            "p99": q(99),
+        },
+    }
+
+
+def _trade_stats_from_returns(values: list[float], *, flat_eps: float = 1e-12) -> dict[str, Any]:
+    rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
+    wins = [x for x in rs if x > float(flat_eps)]
+    losses = [x for x in rs if x < -float(flat_eps)]
+    flats = [x for x in rs if abs(float(x)) <= float(flat_eps)]
+    # Kelly (exclude flat/zero-return trades): f* = p - (1-p)/b, b=avg_win/|avg_loss|
+    # Return None when the denominator is not well-defined (no wins/losses).
+    win_rate_ex_zero: float | None = None
+    payoff_ex_zero: float | None = None
+    kelly_ex_zero: float | None = None
+    if wins and losses:
+        avg_win = float(np.mean(np.asarray(wins, dtype=float)))
+        avg_loss_abs = float(abs(np.mean(np.asarray(losses, dtype=float))))
+        if np.isfinite(avg_win) and np.isfinite(avg_loss_abs) and avg_win > 0.0 and avg_loss_abs > 0.0:
+            b = float(avg_win / avg_loss_abs)
+            p = float(len(wins) / (len(wins) + len(losses)))
+            win_rate_ex_zero = p
+            payoff_ex_zero = b
+            kelly_ex_zero = float(p - (1.0 - p) / b)
+    return {
+        "total_trades": int(len(rs)),
+        "win_trades": int(len(wins)),
+        "loss_trades": int(len(losses)),
+        "flat_trades": int(len(flats)),
+        "win_rate_ex_zero": win_rate_ex_zero,
+        "payoff_ex_zero": payoff_ex_zero,
+        "kelly_ex_zero": kelly_ex_zero,
+        "returns": [float(x) for x in rs],
+        "all_stats": _dist_stats(rs),
+        "profit_stats": _dist_stats(wins),
+        "loss_stats": _dist_stats(losses),
+    }
+
+
+def _trade_returns_from_weight_series(
+    w: pd.Series,
+    ret_exec: pd.Series,
+    *,
+    cost_bps: float,
+    slippage_rate: float,
+    dates: pd.Index,
+    eps: float = 1e-12,
+) -> dict[str, Any]:
+    ww = pd.to_numeric(w, errors="coerce").astype(float).reindex(dates).fillna(0.0)
+    rr = pd.to_numeric(ret_exec, errors="coerce").astype(float).reindex(dates).fillna(0.0)
+    n = int(len(dates))
+    if n <= 0:
+        return {"returns": [], "trades": []}
+    cost_rate = float(cost_bps) / 10000.0
+    slip_rate = float(slippage_rate)
+    returns: list[float] = []
+    trades: list[dict[str, Any]] = []
+    active = False
+    start_i = -1
+    start_nav = 1.0
+    nav_prev = 1.0
+    for i in range(n):
+        cur = float(ww.iloc[i])
+        prev = float(ww.iloc[i - 1]) if i > 0 else 0.0
+        r = float(rr.iloc[i]) if np.isfinite(float(rr.iloc[i])) else 0.0
+        turnover = abs(float(cur) - float(prev)) / 2.0
+        day_ret = float(cur) * float(r) - float(turnover) * (float(cost_rate) + float(slip_rate))
+        if (not active) and (prev <= eps) and (cur > eps):
+            active = True
+            start_i = int(i)
+            start_nav = float(nav_prev)
+        nav_cur = float(nav_prev) * (1.0 + float(day_ret))
+        # Trade ends on the execution day when position becomes flat (exit cost is booked on this day).
+        if active and (prev > eps) and (cur <= eps):
+            tr = (float(nav_cur) / float(start_nav) - 1.0) if float(start_nav) != 0 else float("nan")
+            returns.append(float(tr))
+            trades.append(
+                {
+                    "entry_date": str(pd.to_datetime(dates[start_i]).date()) if start_i >= 0 else None,
+                    "exit_date": str(pd.to_datetime(dates[i]).date()),
+                    "return": float(tr),
+                    "closed": True,
+                }
+            )
+            active = False
+            start_i = -1
+            start_nav = float(nav_cur)
+        nav_prev = float(nav_cur)
+    # If trade is still open at the end, include mark-to-market return up to last available date.
+    if active and start_i >= 0:
+        tr = (float(nav_prev) / float(start_nav) - 1.0) if float(start_nav) != 0 else float("nan")
+        returns.append(float(tr))
+        trades.append(
+            {
+                "entry_date": str(pd.to_datetime(dates[start_i]).date()),
+                "exit_date": str(pd.to_datetime(dates[n - 1]).date()),
+                "return": float(tr),
+                "closed": False,
+            }
+        )
+    return {"returns": returns, "trades": trades}
+
+
+def _trade_returns_from_weight_df(
+    w: pd.DataFrame,
+    ret_exec: pd.DataFrame,
+    *,
+    cost_bps: float,
+    slippage_rate: float,
+    dates: pd.Index,
+    eps: float = 1e-12,
+) -> dict[str, Any]:
+    by_code_returns: dict[str, list[float]] = {}
+    by_code_trades: dict[str, list[dict[str, Any]]] = {}
+    for c in [str(x) for x in w.columns]:
+        one = _trade_returns_from_weight_series(
+            w[c] if c in w.columns else pd.Series(dtype=float),
+            ret_exec[c] if c in ret_exec.columns else pd.Series(dtype=float),
+            cost_bps=float(cost_bps),
+            slippage_rate=float(slippage_rate),
+            dates=dates,
+            eps=float(eps),
+        )
+        by_code_returns[str(c)] = [float(x) for x in (one.get("returns") or [])]
+        by_code_trades[str(c)] = list(one.get("trades") or [])
+    all_returns: list[float] = []
+    all_trades: list[dict[str, Any]] = []
+    for c in by_code_returns:
+        all_returns.extend(by_code_returns[c])
+        all_trades.extend([{**x, "code": str(c)} for x in by_code_trades.get(c, [])])
+    return {
+        "returns": [float(x) for x in all_returns],
+        "trades": all_trades,
+        "returns_by_code": by_code_returns,
+        "trades_by_code": by_code_trades,
+    }
 
 
 def _pos_from_donchian(close: pd.Series, *, entry: int, exit_: int) -> pd.Series:
@@ -639,6 +897,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("code is empty")
     if float(inp.cost_bps) < 0:
         raise ValueError("cost_bps must be >= 0")
+    if (not np.isfinite(float(inp.slippage_rate))) or float(inp.slippage_rate) < 0:
+        raise ValueError("slippage_rate must be finite and >= 0")
     ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
     if ep not in {"open", "close", "oc2"}:
         raise ValueError("exec_price must be one of: open|close|oc2")
@@ -722,7 +982,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("hybrid_entry_n must be >= 1")
     if int(inp.hybrid_exit_m) < 1:
         raise ValueError("hybrid_exit_m must be >= 1")
-
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
     # - Execution/NAV: none close, with hfq return fallback on corporate-action days to avoid false cliffs
@@ -812,10 +1071,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     ret_hfq = px_bh.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq).astype(float)
-    corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
-    # same heuristic as rotation debug events: >2% or extreme ratios
-    dev = (corp_factor - 1.0).abs()
-    ca_mask = (dev > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
+    corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_exec_hfq).astype(float)
 
     if strat == "ma_filter":
@@ -961,7 +1217,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     w = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
     ret_exec_day = ret_exec.astype(float)
     cost = _turnover_cost_from_weights(w, cost_bps=float(inp.cost_bps))
-    strat_ret = (w * ret_exec_day - cost).astype(float)
+    slippage = (w - w.shift(1).fillna(0.0)).abs() / 2.0
+    slippage = slippage.astype(float) * float(inp.slippage_rate)
+    strat_ret = (w * ret_exec_day - cost - slippage).astype(float)
 
     nav = (1.0 + strat_ret).cumprod()
     if len(nav) > 0:
@@ -1008,6 +1266,19 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         weights=w.to_frame(code).astype(float).reindex(nav.index).fillna(0.0),
         total_return=float(nav.iloc[-1] - 1.0),
     )
+    trade_one = _trade_returns_from_weight_series(
+        w,
+        ret_exec_day,
+        cost_bps=float(inp.cost_bps),
+        slippage_rate=float(inp.slippage_rate),
+        dates=nav.index,
+    )
+    trade_stats = {
+        "overall": _trade_stats_from_returns(trade_one.get("returns", [])),
+        "by_code": {str(code): _trade_stats_from_returns(trade_one.get("returns", []))},
+        "trades": trade_one.get("trades", []),
+        "trades_by_code": {str(code): trade_one.get("trades", [])},
+    }
     weekly = _period_returns(nav, "W-FRI")
     monthly = _period_returns(nav, "ME")
     quarterly = _period_returns(nav, "QE")
@@ -1057,6 +1328,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "hybrid_exit_m": int(inp.hybrid_exit_m),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
+                "slippage_rate": float(inp.slippage_rate),
                 "risk_free_rate": float(inp.risk_free_rate),
             },
         },
@@ -1081,6 +1353,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         },
         "rolling": rolling_out,
         "attribution": attribution,
+        "trade_statistics": trade_stats,
         "metrics": {"strategy": m_strat, "benchmark": m_bh, "excess": m_ex},
         "risk_controls": {"atr_stop": atr_stop_stats},
         "corporate_actions": (
@@ -1138,6 +1411,8 @@ def compute_trend_portfolio_backtest(
         raise ValueError("codes is empty")
     if float(inp.cost_bps) < 0:
         raise ValueError("cost_bps must be >= 0")
+    if (not np.isfinite(float(inp.slippage_rate))) or float(inp.slippage_rate) < 0:
+        raise ValueError("slippage_rate must be finite and >= 0")
     ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
     if ep not in {"open", "close", "oc2"}:
         raise ValueError("exec_price must be one of: open|close|oc2")
@@ -1188,6 +1463,18 @@ def compute_trend_portfolio_backtest(
         raise ValueError("hybrid_entry_n must be >= 1")
     if int(inp.hybrid_exit_m) < 1:
         raise ValueError("hybrid_exit_m must be >= 1")
+    group_enforce = bool(getattr(inp, "group_enforce", False))
+    group_pick_policy = str(getattr(inp, "group_pick_policy", "highest_sharpe") or "highest_sharpe").strip().lower()
+    if group_pick_policy not in {"earliest_entry", "highest_sharpe"}:
+        raise ValueError("group_pick_policy must be one of: earliest_entry|highest_sharpe")
+    group_max_holdings = int(getattr(inp, "group_max_holdings", 4) or 4)
+    if group_max_holdings < 1 or group_max_holdings > 10:
+        raise ValueError("group_max_holdings must be in [1,10]")
+    group_map = {
+        str(k).strip(): str(v).strip()
+        for k, v in ((getattr(inp, "asset_groups", None) or {}).items())
+        if str(k).strip()
+    }
 
     strat = str(inp.strategy or "ma_filter").strip().lower()
     if strat not in {
@@ -1282,8 +1569,7 @@ def compute_trend_portfolio_backtest(
         ret_hfq = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         gross_none = 1.0 + ret_none
         gross_hfq = 1.0 + ret_hfq
-        corp_factor = (gross_hfq / gross_none).replace([np.inf, -np.inf], np.nan)
-        ca_mask = ((corp_factor - 1.0).abs() > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
+        _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
         ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
@@ -1391,9 +1677,14 @@ def compute_trend_portfolio_backtest(
         atr_stop_by_asset[str(c)] = one_stop_stats
 
     vol_ann = ret_hfq.rolling(window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)).std(ddof=1) * np.sqrt(252.0)
+    sharpe_like = (
+        ret_hfq.rolling(window=max(20, int(inp.vol_window)), min_periods=max(10, int(inp.vol_window) // 2)).mean()
+        / ret_hfq.rolling(window=max(20, int(inp.vol_window)), min_periods=max(10, int(inp.vol_window) // 2)).std(ddof=1).replace(0.0, np.nan)
+    ) * np.sqrt(252.0)
     w_decision = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
     holdings: list[dict[str, Any]] = []
     prev_key: tuple[str, ...] | None = None
+    prev_held_set: set[str] = set()
     fixed_ratio = float(getattr(inp, "fixed_pos_ratio", 0.04) or 0.04)
     fixed_max_holding_n = int(getattr(inp, "fixed_max_holdings", 10) or 10)
     ext_events: list[dict[str, Any]] = []
@@ -1402,7 +1693,17 @@ def compute_trend_portfolio_backtest(
     for d in dates:
         active = sig_pos.loc[d]
         scores = sig_score.loc[d].where(active > 0.0, other=np.nan).replace([np.inf, -np.inf], np.nan)
-        active_codes = [str(c) for c in scores.dropna().sort_values(ascending=False).index.tolist()]
+        active_codes_raw = [str(c) for c in scores.dropna().sort_values(ascending=False).index.tolist()]
+        active_codes, group_meta = _reduce_active_codes_by_group(
+            active_codes=active_codes_raw,
+            score_row=scores,
+            sharpe_row=sharpe_like.loc[d] if d in sharpe_like.index else pd.Series(dtype=float),
+            group_enforce=group_enforce,
+            asset_groups=group_map,
+            group_pick_policy=group_pick_policy,
+            group_max_holdings=group_max_holdings,
+            current_holdings=prev_held_set,
+        )
         if ps == "fixed_ratio":
             active_set = set(active_codes)
             w_row = prev_fixed_w.copy().astype(float).reindex(codes).fillna(0.0)
@@ -1482,17 +1783,21 @@ def compute_trend_portfolio_backtest(
                 {
                     "decision_date": d.date().isoformat(),
                     "picks": list(key),
+                    "grouped_picks": {str(k): [str(x) for x in (v or [])] for k, v in ((group_meta or {}).get("group_picks", {}) or {}).items()},
                     "scores": {c: (None if pd.isna(scores.get(c)) else float(scores.get(c))) for c in key},
+                    "group_filter": group_meta,
                 }
             )
             prev_key = key
+        prev_held_set = set(held_codes)
 
     # Weights become effective on execution day; ret_exec is already execution-day aligned.
     w = w_decision.shift(1).fillna(0.0).astype(float)
     ret_exec_day = ret_exec.astype(float)
     turnover = (w - w.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     cost = turnover * (float(inp.cost_bps) / 10000.0)
-    port_ret = (w * ret_exec_day).sum(axis=1) - cost
+    slippage = turnover * float(inp.slippage_rate)
+    port_ret = (w * ret_exec_day).sum(axis=1) - cost - slippage
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -1537,6 +1842,22 @@ def compute_trend_portfolio_backtest(
         weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
         total_return=float(nav.iloc[-1] - 1.0),
     )
+    trade_pack = _trade_returns_from_weight_df(
+        w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        cost_bps=float(inp.cost_bps),
+        slippage_rate=float(inp.slippage_rate),
+        dates=nav.index,
+    )
+    trade_stats = {
+        "overall": _trade_stats_from_returns(trade_pack.get("returns", [])),
+        "by_code": {
+            str(c): _trade_stats_from_returns((trade_pack.get("returns_by_code") or {}).get(str(c), []))
+            for c in codes
+        },
+        "trades": trade_pack.get("trades", []),
+        "trades_by_code": trade_pack.get("trades_by_code", {}),
+    }
     weekly = _period_returns(nav, "W-FRI")
     monthly = _period_returns(nav, "ME")
     quarterly = _period_returns(nav, "QE")
@@ -1561,6 +1882,18 @@ def compute_trend_portfolio_backtest(
     skip_over_count_count = int(sum(1 for e in skip_events if bool(e.get("over_count"))))
     skip_over_both_count = int(sum(1 for e in skip_events if bool(e.get("over_weight")) and bool(e.get("over_count"))))
     exposure_eff = w.sum(axis=1).astype(float)
+    group_filter_enabled_days = int(sum(1 for h in holdings if bool(((h or {}).get("group_filter") or {}).get("enabled"))))
+    group_filter_effective_days = int(
+        sum(
+            1
+            for h in holdings
+            if bool(((h or {}).get("group_filter") or {}).get("enabled"))
+            and (
+                len((((h or {}).get("group_filter") or {}).get("before") or []))
+                > len((((h or {}).get("group_filter") or {}).get("after") or []))
+            )
+        )
+    )
     usage_enabled = bool(ps == "fixed_ratio")
     usage_quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
     if usage_enabled and (len(exposure_eff) > 0):
@@ -1597,6 +1930,10 @@ def compute_trend_portfolio_backtest(
                 "fixed_overcap_policy": str(fixed_overcap_policy),
                 "fixed_max_holdings": int(fixed_max_holding_n),
                 "selection_mode": "all_active_candidates",
+                "group_enforce": bool(group_enforce),
+                "group_pick_policy": str(group_pick_policy),
+                "group_max_holdings": int(group_max_holdings),
+                "asset_groups": group_map,
                 "ma_type": ma_type,
                 "mom_lookback": int(inp.mom_lookback),
                 "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
@@ -1610,6 +1947,8 @@ def compute_trend_portfolio_backtest(
                 "atr_stop_n": float(inp.atr_stop_n),
                 "atr_stop_m": float(inp.atr_stop_m),
                 "exec_price": str(ep),
+                "cost_bps": float(inp.cost_bps),
+                "slippage_rate": float(inp.slippage_rate),
             },
         },
         "nav": {
@@ -1644,6 +1983,7 @@ def compute_trend_portfolio_backtest(
         },
         "rolling": rolling_out,
         "attribution": attribution,
+        "trade_statistics": trade_stats,
         "metrics": {"strategy": m_strat, "benchmark": m_bench, "excess": m_ex},
         "risk_controls": {
             "atr_stop": {
@@ -1696,6 +2036,13 @@ def compute_trend_portfolio_backtest(
                 },
                 "over_100pct_days": int(util_over100_days),
                 "under_100pct_days": int(util_under100_days),
+            },
+            "group_filter": {
+                "enabled": bool(group_enforce),
+                "policy": str(group_pick_policy),
+                "max_holdings_per_group": int(group_max_holdings),
+                "decision_segments_with_group_filter": int(group_filter_enabled_days),
+                "decision_segments_effective": int(group_filter_effective_days),
             },
         },
     }

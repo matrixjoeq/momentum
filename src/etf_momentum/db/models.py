@@ -158,6 +158,87 @@ class EtfPriceAudit(Base):
     )
 
 
+class OffFundPool(Base):
+    """
+    Off-exchange mutual fund candidate pool.
+    Isolated from ETF/macros to avoid cross-impact.
+    """
+
+    __tablename__ = "off_fund_pool"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
+    end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
+
+    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    last_data_start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    last_data_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OffFundNav(Base):
+    """
+    Daily NAV series for off-exchange mutual funds.
+    adjust:
+      - none: raw unit nav
+      - qfq: forward-adjusted
+      - hfq: backward-adjusted
+    """
+
+    __tablename__ = "off_fund_navs"
+    __table_args__ = (UniqueConstraint("code", "trade_date", "adjust", name="uq_off_fund_navs_code_trade_date_adjust"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+
+    nav: Mapped[float | None] = mapped_column(Float, nullable=True)
+    accum_nav: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="eastmoney")
+    adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="none")
+
+    ingested_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class OffFundEvent(Base):
+    """
+    Dividend/split records used for adjusted NAV reconstruction fallback.
+    """
+
+    __tablename__ = "off_fund_events"
+    __table_args__ = (UniqueConstraint("code", "effective_date", "event_type", "event_key", name="uq_off_fund_events_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    effective_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(16), nullable=False)  # dividend|split
+    event_key: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+
+    cash_dividend: Mapped[float | None] = mapped_column(Float, nullable=True)  # cash per share
+    split_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)  # e.g. 1.2 means 1 -> 1.2
+    raw_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="eastmoney")
+
+    ingested_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class SimPortfolio(Base):
     __tablename__ = "sim_portfolio"
 

@@ -107,6 +107,7 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 
 - Maintenance and evolves
   - Add/adjust unit tests when changing public interfaces.
+  - **Engine consistency rule (mandatory):** For shared strategy concepts (execution timing, corporate-action fallback, NAV compounding, turnover/cost attribution), keep behavior consistent across rotation/trend/holding engines. If one engine changes calculation semantics, update the others (or centralize the logic in shared helpers) and add regression tests proving parity.
   - Update AGENTS.md with any new guidelines that emerge.
 
 - Cursor rules

@@ -62,6 +62,44 @@ class PriceOut(BaseModel):
     adjust: str
 
 
+class OffFundPoolUpsert(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+    start_date: str | None = Field(default=None, description="YYYYMMDD")
+    end_date: str | None = Field(default=None, description="YYYYMMDD")
+
+
+class OffFundPoolOut(BaseModel):
+    code: str
+    name: str
+    start_date: str | None
+    end_date: str | None
+    last_fetch_status: str | None = None
+    last_fetch_message: str | None = None
+    last_data_start_date: str | None = None
+    last_data_end_date: str | None = None
+
+
+class OffFundFetchResult(BaseModel):
+    code: str
+    inserted_or_updated: int
+    status: str
+    message: str | None = None
+
+
+class OffFundFetchSelectedRequest(BaseModel):
+    codes: list[str] = Field(min_length=1, description="off-fund codes to fetch")
+
+
+class OffFundNavOut(BaseModel):
+    code: str
+    trade_date: str  # YYYY-MM-DD
+    nav: float | None
+    accum_nav: float | None
+    source: str
+    adjust: str
+
+
 class IngestionBatchOut(BaseModel):
     id: int
     code: str
@@ -866,6 +904,7 @@ class RotationBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0)
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate per turnover")
     atr_stop_mode: str = Field(default="none", description="Universal ATR stop mode: none|static|trailing|tightening")
     atr_stop_atr_basis: str = Field(default="latest", description="ATR basis for dynamic modes: entry|latest")
     atr_stop_reentry_mode: str = Field(default="reenter", description="Re-entry after ATR stop: reenter|wait_next_entry")
@@ -1031,6 +1070,7 @@ class TrendBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate per turnover")
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
@@ -1072,6 +1112,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate per turnover")
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
@@ -1111,6 +1152,24 @@ class TrendPortfolioBacktestRequest(BaseModel):
     macd_v_scale: float = Field(default=100.0, gt=0.0)
     hybrid_entry_n: int = Field(default=1, ge=1)
     hybrid_exit_m: int = Field(default=1, ge=1)
+    group_enforce: bool = Field(
+        default=False,
+        description="Enable trend group constraint for portfolio mode.",
+    )
+    group_pick_policy: str = Field(
+        default="highest_sharpe",
+        description="Trend group winner policy: earliest_entry | highest_sharpe",
+    )
+    group_max_holdings: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description="Max number of selected assets per group when group_enforce=true.",
+    )
+    asset_groups: dict[str, str] | None = Field(
+        default=None,
+        description="Optional mapping: asset code -> group_id. Missing codes default to independent groups.",
+    )
 
 
 class AssetGroupSuggestRequest(BaseModel):
@@ -1120,6 +1179,26 @@ class AssetGroupSuggestRequest(BaseModel):
     adjust: str = Field(default="hfq", description="Price adjust basis for correlation clustering")
     lookback_days: int = Field(default=252, ge=20, description="Rolling lookback days for correlation matrix")
     corr_threshold: float = Field(default=0.75, ge=0.0, le=0.99, description="Absolute correlation threshold for linking two assets")
+
+
+class RotationCandidateScreenRequest(BaseModel):
+    codes: list[str] = Field(min_length=2, description="Candidate codes from preset pool")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="hfq", description="Price adjust basis")
+    lookback_days: int = Field(default=252, ge=20, le=2520, description="Lookback window for scoring/correlation")
+    top_n: int = Field(default=12, ge=2, le=200, description="Max number of selected assets")
+    min_n: int = Field(default=4, ge=1, le=200, description="Minimum selected assets (fallback fill by score)")
+    max_pair_corr: float = Field(default=0.75, ge=0.0, le=0.99, description="Max absolute pairwise correlation among selected assets")
+    signif_horizon_days: int = Field(default=20, ge=5, le=252, description="Forward horizon for momentum significance test")
+    factor_weights: dict[str, float] | None = Field(
+        default=None,
+        description="Optional factor weights, keys: mom_63,mom_126,sharpe,win_rate,liquidity,mdd",
+    )
+    category_quotas: dict[str, int] | None = Field(
+        default=None,
+        description="Optional minimum quota by inferred category, e.g. {'CN_EQ':2,'US_EQ':2}",
+    )
 
 
 class MonteCarloRequest(BaseModel):

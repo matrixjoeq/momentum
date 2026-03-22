@@ -35,7 +35,7 @@ from ..analysis.baseline import load_close_prices as _load_close_prices
 from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
 from ..analysis.baseline import load_ohlc_prices as _load_ohlc_prices
 from ..analysis.baseline import _compute_return_risk_contributions as _compute_return_risk_contributions
-from ..analysis.execution_timing import forward_returns
+from ..analysis.execution_timing import corporate_action_mask, forward_returns
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,7 @@ class RotationInputs:
     skip_days: int = 0  # skip recent trading days (0 means no skip)
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0  # round-trip cost in bps per turnover, simple approximation
+    slippage_rate: float = 0.001  # execution slippage per one-way turnover, always adverse
     # --- Ranking method ---
     score_method: str = "raw_mom"  # raw_mom | sharpe_mom | sortino_mom
     # --- Pre-trade risk controls (drawdown prevention heuristics) ---
@@ -157,6 +158,171 @@ def _rebalance_labels(index: pd.DatetimeIndex, rebalance: str, *, weekly_anchor:
     if r not in freq_map:
         raise ValueError(f"invalid rebalance={rebalance}")
     return index.to_period(freq_map[r])
+
+
+def _dist_stats(values: list[float]) -> dict[str, Any]:
+    arr = np.asarray([float(x) for x in (values or []) if np.isfinite(float(x))], dtype=float)
+    if arr.size == 0:
+        return {
+            "count": 0,
+            "max": None,
+            "min": None,
+            "mean": None,
+            "std": None,
+            "quantiles": {k: None for k in ["p01", "p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]},
+        }
+    q = lambda p: float(np.percentile(arr, p))  # noqa: E731
+    return {
+        "count": int(arr.size),
+        "max": float(np.max(arr)),
+        "min": float(np.min(arr)),
+        "mean": float(np.mean(arr)),
+        "std": float(np.std(arr, ddof=1)) if arr.size >= 2 else 0.0,
+        "quantiles": {
+            "p01": q(1),
+            "p05": q(5),
+            "p10": q(10),
+            "p25": q(25),
+            "p50": q(50),
+            "p75": q(75),
+            "p90": q(90),
+            "p95": q(95),
+            "p99": q(99),
+        },
+    }
+
+
+def _trade_stats_from_returns(values: list[float], *, flat_eps: float = 1e-12) -> dict[str, Any]:
+    rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
+    wins = [x for x in rs if x > float(flat_eps)]
+    losses = [x for x in rs if x < -float(flat_eps)]
+    flats = [x for x in rs if abs(float(x)) <= float(flat_eps)]
+    # Kelly (exclude flat/zero-return trades): f* = p - (1-p)/b, b=avg_win/|avg_loss|
+    # Return None when the denominator is not well-defined (no wins/losses).
+    win_rate_ex_zero: float | None = None
+    payoff_ex_zero: float | None = None
+    kelly_ex_zero: float | None = None
+    if wins and losses:
+        avg_win = float(np.mean(np.asarray(wins, dtype=float)))
+        avg_loss_abs = float(abs(np.mean(np.asarray(losses, dtype=float))))
+        if np.isfinite(avg_win) and np.isfinite(avg_loss_abs) and avg_win > 0.0 and avg_loss_abs > 0.0:
+            b = float(avg_win / avg_loss_abs)
+            p = float(len(wins) / (len(wins) + len(losses)))
+            win_rate_ex_zero = p
+            payoff_ex_zero = b
+            kelly_ex_zero = float(p - (1.0 - p) / b)
+    return {
+        "total_trades": int(len(rs)),
+        "win_trades": int(len(wins)),
+        "loss_trades": int(len(losses)),
+        "flat_trades": int(len(flats)),
+        "win_rate_ex_zero": win_rate_ex_zero,
+        "payoff_ex_zero": payoff_ex_zero,
+        "kelly_ex_zero": kelly_ex_zero,
+        "returns": [float(x) for x in rs],
+        "all_stats": _dist_stats(rs),
+        "profit_stats": _dist_stats(wins),
+        "loss_stats": _dist_stats(losses),
+    }
+
+
+def _trade_returns_from_weight_series(
+    w: pd.Series,
+    ret_exec: pd.Series,
+    *,
+    cost_bps: float,
+    slippage_rate: float,
+    dates: pd.Index,
+    eps: float = 1e-12,
+) -> dict[str, Any]:
+    ww = pd.to_numeric(w, errors="coerce").astype(float).reindex(dates).fillna(0.0)
+    rr = pd.to_numeric(ret_exec, errors="coerce").astype(float).reindex(dates).fillna(0.0)
+    n = int(len(dates))
+    if n <= 0:
+        return {"returns": [], "trades": []}
+    cost_rate = float(cost_bps) / 10000.0
+    slip_rate = float(slippage_rate)
+    returns: list[float] = []
+    trades: list[dict[str, Any]] = []
+    active = False
+    start_i = -1
+    start_nav = 1.0
+    nav_prev = 1.0
+    for i in range(n):
+        cur = float(ww.iloc[i])
+        prev = float(ww.iloc[i - 1]) if i > 0 else 0.0
+        r = float(rr.iloc[i]) if np.isfinite(float(rr.iloc[i])) else 0.0
+        turnover = abs(float(cur) - float(prev)) / 2.0
+        day_ret = float(cur) * float(r) - float(turnover) * (float(cost_rate) + float(slip_rate))
+        if (not active) and (prev <= eps) and (cur > eps):
+            active = True
+            start_i = int(i)
+            start_nav = float(nav_prev)
+        nav_cur = float(nav_prev) * (1.0 + float(day_ret))
+        # Trade ends on the execution day when position becomes flat (exit cost is booked on this day).
+        if active and (prev > eps) and (cur <= eps):
+            tr = (float(nav_cur) / float(start_nav) - 1.0) if float(start_nav) != 0 else float("nan")
+            returns.append(float(tr))
+            trades.append(
+                {
+                    "entry_date": str(pd.to_datetime(dates[start_i]).date()) if start_i >= 0 else None,
+                    "exit_date": str(pd.to_datetime(dates[i]).date()),
+                    "return": float(tr),
+                    "closed": True,
+                }
+            )
+            active = False
+            start_i = -1
+            start_nav = float(nav_cur)
+        nav_prev = float(nav_cur)
+    # If trade is still open at the end, include mark-to-market return up to last available date.
+    if active and start_i >= 0:
+        tr = (float(nav_prev) / float(start_nav) - 1.0) if float(start_nav) != 0 else float("nan")
+        returns.append(float(tr))
+        trades.append(
+            {
+                "entry_date": str(pd.to_datetime(dates[start_i]).date()),
+                "exit_date": str(pd.to_datetime(dates[n - 1]).date()),
+                "return": float(tr),
+                "closed": False,
+            }
+        )
+    return {"returns": returns, "trades": trades}
+
+
+def _trade_returns_from_weight_df(
+    w: pd.DataFrame,
+    ret_exec: pd.DataFrame,
+    *,
+    cost_bps: float,
+    slippage_rate: float,
+    dates: pd.Index,
+    eps: float = 1e-12,
+) -> dict[str, Any]:
+    by_code_returns: dict[str, list[float]] = {}
+    by_code_trades: dict[str, list[dict[str, Any]]] = {}
+    for c in [str(x) for x in w.columns]:
+        one = _trade_returns_from_weight_series(
+            w[c] if c in w.columns else pd.Series(dtype=float),
+            ret_exec[c] if c in ret_exec.columns else pd.Series(dtype=float),
+            cost_bps=float(cost_bps),
+            slippage_rate=float(slippage_rate),
+            dates=dates,
+            eps=float(eps),
+        )
+        by_code_returns[str(c)] = [float(x) for x in (one.get("returns") or [])]
+        by_code_trades[str(c)] = list(one.get("trades") or [])
+    all_returns: list[float] = []
+    all_trades: list[dict[str, Any]] = []
+    for c in by_code_returns:
+        all_returns.extend(by_code_returns[c])
+        all_trades.extend([{**x, "code": str(c)} for x in by_code_trades.get(c, [])])
+    return {
+        "returns": [float(x) for x in all_returns],
+        "trades": all_trades,
+        "returns_by_code": by_code_returns,
+        "trades_by_code": by_code_trades,
+    }
 
 
 def _momentum_scores(close_qfq: pd.DataFrame, *, lookback_days: int, skip_days: int) -> pd.DataFrame:
@@ -1036,6 +1202,10 @@ def backtest_rotation(
         raise ValueError("exit_match_n must be >= 0")
     if inp.skip_days < 0:
         raise ValueError("skip_days must be >= 0")
+    if not np.isfinite(float(inp.cost_bps)) or float(inp.cost_bps) < 0.0:
+        raise ValueError("cost_bps must be finite and >= 0")
+    if not np.isfinite(float(inp.slippage_rate)) or float(inp.slippage_rate) < 0.0:
+        raise ValueError("slippage_rate must be finite and >= 0")
     sm = (inp.score_method or "raw_mom").strip().lower()
     if sm not in {
         "raw_mom",
@@ -1727,15 +1897,14 @@ def backtest_rotation(
         ret_exec_none = 0.5 * (forward_returns(o_none) + forward_returns(c_none))
         ret_exec_hfq = 0.5 * (forward_returns(o_hfq) + forward_returns(c_hfq))
 
-    # Corporate action factor (gross): (1+hfq_ret)/(1+none_ret) on CLOSE series.
-    # Use this to identify cliff days, then swap that day's execution return to hfq for NAV stability.
+    # Corporate-action cliff detection must align with execution-return horizon.
+    # forward_returns is indexed by t with return over [t -> t+1], so corp_factor
+    # needs the same forward horizon; otherwise fallback is applied one day late.
     ret_none_close = close_none[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     ret_hfq_close = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    gross_none_close = (1.0 + ret_none_close).astype(float)
-    gross_hfq_close = (1.0 + ret_hfq_close).astype(float)
-    corp_factor = (gross_hfq_close / gross_none_close).replace([np.inf, -np.inf], np.nan)
-    dev = (corp_factor - 1.0).abs()
-    corp_mask = (dev > 0.02) | (corp_factor > 1.2) | (corp_factor < 1.0 / 1.2)
+    gross_none_fwd_close = close_none[codes].shift(-1).div(close_none[codes]).replace([np.inf, -np.inf], np.nan)
+    gross_hfq_fwd_close = close_hfq[codes].shift(-1).div(close_hfq[codes]).replace([np.inf, -np.inf], np.nan)
+    corp_factor, corp_mask = corporate_action_mask(gross_none_fwd_close, gross_hfq_fwd_close)
 
     # Final execution returns for NAV: none preferred, hfq fallback on cliff days.
     ret_exec_all = ret_exec_none.copy()
@@ -1845,9 +2014,10 @@ def backtest_rotation(
         w_prev_np = w.iloc[rng - 1].astype(float).to_numpy(dtype=float)
         turnover_np = np.abs(w_np - w_prev_np).sum(axis=1) / 2.0
         cost_np = turnover_np * (float(inp.cost_bps) / 10000.0)
+        slippage_np = turnover_np * float(inp.slippage_rate)
         nav = float(nav_running.iloc[processed_idx])
         # Use raw arrays to avoid any index-alignment surprises.
-        xnet = port_ret.to_numpy(dtype=float) - cost_np.astype(float)
+        xnet = port_ret.to_numpy(dtype=float) - cost_np.astype(float) - slippage_np.astype(float)
         out = np.empty(len(xnet), dtype=float)
         for j, x in enumerate(xnet):
             nav *= (1.0 + float(x))
@@ -1861,7 +2031,7 @@ def backtest_rotation(
                 return i, float(rr_weights[i])
         return len(rr_thresholds), float(rr_weights[-1])
 
-    # Drawdown control (strategy NAV drawdown, net of turnover cost).
+    # Drawdown control (strategy NAV drawdown, net of turnover cost and slippage).
     dd_enabled = bool(inp.dd_control)
     dd_threshold = float(inp.dd_threshold)
     dd_reduce = float(inp.dd_reduce)
@@ -1923,7 +2093,8 @@ def backtest_rotation(
             port_ret = float(np.dot(w_row, r_row))
             turnover = float(np.abs(w_row - dd_prev_w).sum() / 2.0)
             cost = float(turnover * (float(inp.cost_bps) / 10000.0))
-            dd_nav *= (1.0 + float(port_ret) - float(cost))
+            slip = float(turnover * float(inp.slippage_rate))
+            dd_nav *= (1.0 + float(port_ret) - float(cost) - float(slip))
             dd_peak = float(max(float(dd_peak), float(dd_nav)))
             dd_prev_w = w_row
             dd_processed_idx = int(t)
@@ -3318,9 +3489,29 @@ def backtest_rotation(
     w_prev = w.shift(1).fillna(0.0)
     turnover = (w - w_prev).abs().sum(axis=1) / 2.0
     cost = turnover * (inp.cost_bps / 10000.0)
-    port_ret_net = (port_ret - cost).astype(float)
+    slippage = turnover * float(inp.slippage_rate)
+    port_ret_net = (port_ret - cost - slippage).astype(float)
     port_nav_net = (1.0 + port_ret_net).cumprod()
     port_nav_net.iloc[0] = 1.0
+    asset_nav_exec = (1.0 + ret_exec[codes].astype(float).fillna(0.0)).cumprod()
+    if not asset_nav_exec.empty:
+        asset_nav_exec.iloc[0] = 1.0
+    trade_pack = _trade_returns_from_weight_df(
+        w.astype(float).fillna(0.0),
+        ret_exec[codes].astype(float).fillna(0.0),
+        cost_bps=float(inp.cost_bps),
+        slippage_rate=float(inp.slippage_rate),
+        dates=dates,
+    )
+    trade_stats = {
+        "overall": _trade_stats_from_returns(trade_pack.get("returns", [])),
+        "by_code": {
+            str(c): _trade_stats_from_returns((trade_pack.get("returns_by_code") or {}).get(str(c), []))
+            for c in codes
+        },
+        "trades": trade_pack.get("trades", []),
+        "trades_by_code": trade_pack.get("trades_by_code", {}),
+    }
 
     active_ret = port_ret_net - ew_ret
     excess_nav = (1.0 + active_ret).cumprod()
@@ -3705,6 +3896,10 @@ def backtest_rotation(
                 "EXCESS_RP": excess_nav_rp.astype(float).tolist(),
             },
         },
+        "asset_nav_exec": {
+            "dates": dates.date.astype(str).tolist(),
+            "series": {str(c): asset_nav_exec[str(c)].astype(float).tolist() for c in codes if str(c) in asset_nav_exec.columns},
+        },
         "nav_rsi": {
             "windows": [6, 12, 24],
             "dates": dates.date.astype(str).tolist(),
@@ -3715,6 +3910,7 @@ def backtest_rotation(
             },
         },
         "attribution": attribution,
+        "trade_statistics": trade_stats,
         "metrics": metrics,
         "win_payoff": stats,
         "period_returns": periodic,

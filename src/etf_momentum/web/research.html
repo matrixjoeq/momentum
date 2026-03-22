@@ -256,6 +256,7 @@
             <button id="selAll">全选</button>
             <button id="selNone">取消全选</button>
             <button id="selInvert">反选</button>
+            <button id="selInvertUndo">取消反选</button>
           </div>
         </div>
       </div>
@@ -570,14 +571,14 @@
       <div class="muted" style="margin-top:10px;">月内日历效应（单标的）</div>
       <div class="row no-print" style="margin-top:6px; align-items:end;">
         <div>
-          <label>月内日期 d（1~28）</label>
+          <label>月内日期 d（1~31）</label>
           <input id="distCalDay" value="1" style="min-width:120px;" />
         </div>
         <div>
           <label>扫描模式</label>
           <select id="distCalMode" style="min-width:150px;">
             <option value="single">单日</option>
-            <option value="all" selected>全扫描 1~28</option>
+            <option value="all" selected>全扫描 1~31</option>
           </select>
         </div>
         <div>
@@ -873,6 +874,10 @@
               <input id="rotCost" value="2" />
             </div>
             <div>
+              <label>滑点(单边) <button class="helpBtn" data-metric="param_rot_slippage" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+              <input id="rotSlippage" value="0.001" />
+            </div>
+            <div>
               <label>通用ATR止损模式</label>
               <select id="rotAtrStopMode" style="min-width:140px;">
                 <option value="none" selected>关闭</option>
@@ -923,6 +928,69 @@
               <button id="rotSuggestGroups">自动分组建议</button>
               <span class="muted" id="rotSuggestGroupsHint"></span>
             </div>
+            <div class="row" style="margin-top:6px; align-items:end; gap:8px;">
+              <div>
+                <label>参数预设</label>
+                <select id="rotAutoPreset" style="min-width:140px;">
+                  <option value="aggressive">偏进攻</option>
+                  <option value="balanced" selected>平衡（默认）</option>
+                  <option value="defensive">偏防守</option>
+                </select>
+              </div>
+              <button id="rotAutoPresetApply">应用预设</button>
+              <label class="muted" style="display:flex; align-items:center; gap:4px; margin:0;">
+                <input id="rotAutoLockBase" type="checkbox" />
+                锁定基础参数（仅更新自动筛选参数）
+              </label>
+              <span class="muted" id="rotAutoPresetHint"></span>
+            </div>
+            <div class="row" style="margin-top:6px; align-items:end; gap:8px;">
+              <div><label>筛选数量 TopN</label><input id="rotAutoTopN" value="12" style="min-width:90px;" /></div>
+              <div><label>最少数量 MinN</label><input id="rotAutoMinN" value="5" style="min-width:90px;" /></div>
+              <div><label>低相关阈值 |corr|<=</label><input id="rotAutoMaxCorr" value="0.75" style="min-width:90px;" /></div>
+              <div><label>显著性前瞻天数</label><input id="rotAutoSignifHorizon" value="20" style="min-width:90px;" /></div>
+              <button id="rotAutoScreenCandidates">自动筛选动量候选</button>
+            </div>
+            <div class="row" style="margin-top:6px; align-items:end; gap:8px;">
+              <div><label>权重-63日动量</label><input id="rotAutoW_mom63" value="0.25" style="min-width:90px;" /></div>
+              <div><label>权重-126日动量</label><input id="rotAutoW_mom126" value="0.25" style="min-width:90px;" /></div>
+              <div><label>权重-夏普</label><input id="rotAutoW_sharpe" value="0.20" style="min-width:90px;" /></div>
+              <div><label>权重-胜率</label><input id="rotAutoW_win" value="0.10" style="min-width:90px;" /></div>
+              <div><label>权重-流动性</label><input id="rotAutoW_liq" value="0.10" style="min-width:90px;" /></div>
+              <div><label>权重-回撤</label><input id="rotAutoW_mdd" value="0.10" style="min-width:90px;" /></div>
+            </div>
+            <div style="margin-top:6px;">
+              <label>资产类别配额（每行 category=min_count，例如 CN_EQ=2）</label>
+              <textarea id="rotAutoCategoryQuotas" rows="3" style="width:100%; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;" placeholder="CN_EQ=2&#10;US_EQ=2&#10;BOND=1"></textarea>
+              <div class="muted">可选类别：CN_EQ/HK_EQ/US_EQ/JP_EQ/EU_EQ/EM_EQ/BOND/CONVERTIBLE_BOND/GOLD/COMMODITY。</div>
+            </div>
+            <div class="muted" id="rotAutoScreenHint" style="margin-top:4px;"></div>
+            <div class="muted" id="rotAutoSignifSummary" style="margin-top:6px;"></div>
+            <table id="rotAutoSignifTable" style="margin-top:6px;"></table>
+            <details style="margin-top:6px;">
+              <summary class="muted" style="cursor:pointer;">自动筛选结果解读（点击展开）</summary>
+              <div class="muted" style="margin-top:6px; line-height:1.65;">
+                <div><b>结果总览（摘要行）</b></div>
+                <div>“显著(5%) A/B”：B 是参与显著性检验的标的数，A 是其中满足 <code>p&lt;0.05</code> 且“动量效应差&gt;0”的数量。</div>
+                <div>“入选中显著 C/D”：D 是最终入选数，C 是入选里显著的数量。若 C 明显小于 A，通常由低相关约束、TopN、类别配额共同导致。</div>
+                <div>“入选类别分布”：展示最终组合在各资产类别上的计数，用于检查是否满足你设置的类别配额。</div>
+                <div style="margin-top:6px;"><b>表格逐列说明</b></div>
+                <div><b>入选</b>：Y 表示进入最终候选子集；空白表示未入选。</div>
+                <div><b>标的</b>：代码 + 名称。</div>
+                <div><b>类别</b>：自动识别的资产类别（如 CN_EQ/US_EQ/BOND 等），用于类别配额约束。</div>
+                <div><b>样本</b>：用于显著性检验的有效样本数 <code>n</code>（动量与前瞻收益同时可用的期数）。样本越多，统计结论通常越稳健。</div>
+                <div><b>动量效应差</b>：<code>均值(前瞻收益 | 动量&gt;0) - 均值(前瞻收益 | 动量≤0)</code>。越大越好；为负表示“动量状态”对后续收益没有正向区分力。</div>
+                <div><b>IC</b>：当期动量与前瞻收益的相关系数（Information Coefficient）。&gt;0 表示同向，绝对值越大线性关系越强。</div>
+                <div><b>t值</b>：动量效应差相对其估计误差的标准化强度。绝对值越大，代表“差异”越不容易由随机波动造成。</div>
+                <div><b>p值</b>：在“无效应”假设下观察到当前或更极端结果的概率。越小越好；常用阈值 0.05。</div>
+                <div><b>显著(5%)</b>：是否同时满足 <code>p&lt;0.05</code> 且“动量效应差&gt;0”。注意：显著不等于一定入选。</div>
+                <div><b>未入选原因</b>：</div>
+                <div>- <code>样本不足(x/y)</code>：有效样本 x 小于最低要求 y，已被硬过滤。</div>
+                <div>- <code>与 XXX 相关性过高</code>：与已入选资产的绝对相关系数超过阈值 <code>|corr|</code>。</div>
+                <div>- <code>综合约束后未进TopN</code>：满足基本条件，但在得分排序 + 约束联合作用下未进入最终名额。</div>
+                <div style="margin-top:6px;">实务上可优先关注：<code>样本</code>是否充足、<code>动量效应差</code>是否为正且稳定、<code>p值</code>是否足够小，再看未入选原因是否可通过调整阈值/配额优化。</div>
+              </div>
+            </details>
             <div class="muted">未填写的标的默认视作独立组。</div>
           </div>
         </div>
@@ -1472,6 +1540,30 @@
         <div id="rotDailyRetHist" style="width:100%; height:320px; margin-top:10px;"></div>
         <table id="rotDailyRetQuantiles" style="margin-top:10px;"></table>
       </div>
+      <div class="panel">
+        <h3>轮动策略：逐笔交易收益分布（含交易成本）</h3>
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:8px;">
+          <div>
+            <div class="muted">整体策略（所有已平仓交易）</div>
+            <table id="rotTradeOverallTable" style="margin-top:8px;"></table>
+            <div id="rotTradeOverallHist" style="width:100%; height:320px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="row" style="align-items:end;">
+              <div>
+                <label>按标的查看</label>
+                <select id="rotTradeByCodeSelect" style="min-width:200px;"></select>
+              </div>
+            </div>
+            <table id="rotTradeByCodeTable" style="margin-top:8px;"></table>
+            <div id="rotTradeByCodeHist" style="width:100%; height:320px; margin-top:8px;"></div>
+          </div>
+        </div>
+        <details id="rotTradeStatsDebugWrap" style="margin-top:8px;">
+          <summary><b>trade_statistics 原始返回（Debug Trace）</b></summary>
+          <div id="rotTradeStatsDebug" class="muted" style="margin-top:6px;"></div>
+        </details>
+      </div>
 
       <div class="panel">
         <h3>轮动策略：各标的持仓周期长度分布（交易日）</h3>
@@ -1602,6 +1694,16 @@
 
       <div class="panel">
         <h3>分组约束可解释性（组内胜出/淘汰）</h3>
+        <div class="row" style="gap:8px; margin:6px 0;">
+          <button id="rotGroupExplainFirst">首页</button>
+          <button id="rotGroupExplainPrev">上一页</button>
+          <button id="rotGroupExplainNext">下一页</button>
+          <button id="rotGroupExplainLast">末页</button>
+          <span class="muted">跳转</span>
+          <input id="rotGroupExplainGoto" style="min-width:72px;" placeholder="页码" />
+          <button id="rotGroupExplainGo">前往</button>
+          <span class="muted" id="rotGroupExplainPage"></span>
+        </div>
         <table id="rotGroupExplain"></table>
       </div>
 
@@ -2284,8 +2386,37 @@
             <option value="oc2">OC均价</option>
           </select>
         </div>
-        <div><label>成本(bps)</label><input id="trendCost" value="2" /></div>
+        <div><label>成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label><input id="trendCost" value="2" /></div>
+        <div><label>滑点(单边) <button class="helpBtn" data-metric="param_rot_slippage" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label><input id="trendSlippage" value="0.001" /></div>
         <button id="runTrendResearch">运行趋势回测</button>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>分组约束（组合）</label>
+          <select id="trendGroupEnforce" style="min-width:140px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>组内优选（组合）</label>
+          <select id="trendGroupPolicy" style="min-width:180px;">
+            <option value="highest_sharpe" selected>夏普最高</option>
+            <option value="earliest_entry">最早入场（优先当前持仓）</option>
+          </select>
+        </div>
+        <div>
+          <label>每组持仓上限（1~10）</label>
+          <input id="trendGroupMaxHoldings" value="4" />
+        </div>
+      </div>
+      <div style="margin-top:8px;">
+        <label>趋势分组映射（代码=组ID，每行一条）</label>
+        <textarea id="trendAssetGroups" rows="3" style="width:100%; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;" placeholder="159915=CN_EQ&#10;510300=CN_EQ&#10;513100=US_EQ"></textarea>
+        <div class="row" style="margin-top:6px; align-items:center; gap:8px;">
+          <button id="trendSuggestGroups">自动分组建议</button>
+          <span class="muted" id="trendSuggestGroupsHint"></span>
+        </div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>均线窗口(交易日)</label><input id="trendSmaWin" value="200" /></div>
@@ -2373,6 +2504,30 @@
       </div>
       <div id="trendDailyRetHist" style="width:100%; height:320px; margin-top:10px;"></div>
       <table id="trendDailyRetQuantiles" style="margin-top:10px;"></table>
+      <div class="panel" style="margin-top:10px;">
+        <h3>趋势策略：逐笔交易收益分布（含交易成本）</h3>
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:8px;">
+          <div>
+            <div class="muted">整体策略（所有已平仓交易）</div>
+            <table id="trendTradeOverallTable" style="margin-top:8px;"></table>
+            <div id="trendTradeOverallHist" style="width:100%; height:320px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="row" style="align-items:end;">
+              <div>
+                <label>按标的查看</label>
+                <select id="trendTradeByCodeSelect" style="min-width:200px;"></select>
+              </div>
+            </div>
+            <table id="trendTradeByCodeTable" style="margin-top:8px;"></table>
+            <div id="trendTradeByCodeHist" style="width:100%; height:320px; margin-top:8px;"></div>
+          </div>
+        </div>
+        <details id="trendTradeStatsDebugWrap" style="margin-top:8px;">
+          <summary><b>trade_statistics 原始返回（Debug Trace）</b></summary>
+          <div id="trendTradeStatsDebug" class="muted" style="margin-top:6px;"></div>
+        </details>
+      </div>
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
       <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start; margin-top:10px;">
         <div>
@@ -2509,6 +2664,16 @@
           </details>
         </div>
       </div>
+      <div class="row" style="gap:8px; margin:8px 0;">
+        <button id="trendGroupFirst">首页</button>
+        <button id="trendGroupPrev">上一页</button>
+        <button id="trendGroupNext">下一页</button>
+        <button id="trendGroupLast">末页</button>
+        <span class="muted">跳转</span>
+        <input id="trendGroupGoto" style="min-width:72px;" placeholder="页码" />
+        <button id="trendGroupGo">前往</button>
+        <span class="muted" id="trendGroupPage"></span>
+      </div>
       <table id="trendGroupTable" style="margin-top:10px;"></table>
       <div id="trendReport" class="reportCard"></div>
 
@@ -2598,8 +2763,8 @@
           <div id="strategyMixCorr" style="width:100%; height:320px;"></div>
         </div>
         <div>
-          <div class="muted" style="margin-bottom:6px;">相关性矩阵数值</div>
-          <table id="strategyMixCorrTable"></table>
+          <div class="muted" style="margin-bottom:6px;">滚动相关性（窗口内日收益）</div>
+          <div id="strategyMixRollingCorr" style="width:100%; height:320px;"></div>
         </div>
       </div>
       <div class="muted" id="strategyMixNote" style="margin-top:8px;"></div>
@@ -2643,22 +2808,85 @@
       </div>
       <div class="panel two" style="margin-top:10px;">
         <div>
-          <div class="muted" style="margin-bottom:6px;">周期收益率（MIX）</div>
-          <table id="mixPeriodTable"></table>
-        </div>
-        <div>
           <div class="muted" style="margin-bottom:6px;">滚动收益率（MIX）</div>
           <div id="strategyMixRollingReturns" style="width:100%; height:320px;"></div>
-        </div>
-      </div>
-      <div class="panel two" style="margin-top:10px;">
-        <div>
-          <div class="muted" style="margin-bottom:6px;">滚动相关性（窗口内日收益）</div>
-          <div id="strategyMixRollingCorr" style="width:100%; height:320px;"></div>
         </div>
         <div>
           <div class="muted" style="margin-bottom:6px;">滚动回撤（由净值推导）</div>
           <div id="strategyMixRollingDD" style="width:100%; height:320px;"></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:10px;">
+        <div class="muted" style="margin-bottom:6px;">周期收益率（MIX）</div>
+        <div class="two" style="grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="panel" style="margin-top:6px;">
+            <h4>周度（MIX）</h4>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="mixWeeklySortKey" style="min-width:120px;">
+                <option value="period_end" selected>日期</option>
+                <option value="return">收益率</option>
+              </select>
+              <select id="mixWeeklySortDir" style="min-width:120px;">
+                <option value="desc" selected>递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="mixWeeklyPrev">上一页</button>
+              <button id="mixWeeklyNext">下一页</button>
+              <span class="muted" id="mixWeeklyPage"></span>
+            </div>
+            <table id="mixWeekly"></table>
+          </div>
+          <div class="panel" style="margin-top:6px;">
+            <h4>月度（MIX）</h4>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="mixMonthlySortKey" style="min-width:120px;">
+                <option value="period_end" selected>日期</option>
+                <option value="return">收益率</option>
+              </select>
+              <select id="mixMonthlySortDir" style="min-width:120px;">
+                <option value="desc" selected>递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="mixMonthlyPrev">上一页</button>
+              <button id="mixMonthlyNext">下一页</button>
+              <span class="muted" id="mixMonthlyPage"></span>
+            </div>
+            <table id="mixMonthly"></table>
+          </div>
+          <div class="panel" style="margin-top:6px;">
+            <h4>季度（MIX）</h4>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="mixQuarterlySortKey" style="min-width:120px;">
+                <option value="period_end" selected>日期</option>
+                <option value="return">收益率</option>
+              </select>
+              <select id="mixQuarterlySortDir" style="min-width:120px;">
+                <option value="desc" selected>递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="mixQuarterlyPrev">上一页</button>
+              <button id="mixQuarterlyNext">下一页</button>
+              <span class="muted" id="mixQuarterlyPage"></span>
+            </div>
+            <table id="mixQuarterly"></table>
+          </div>
+          <div class="panel" style="margin-top:6px;">
+            <h4>年度（MIX）</h4>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="mixYearlySortKey" style="min-width:120px;">
+                <option value="period_end" selected>日期</option>
+                <option value="return">收益率</option>
+              </select>
+              <select id="mixYearlySortDir" style="min-width:120px;">
+                <option value="desc" selected>递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="mixYearlyPrev">上一页</button>
+              <button id="mixYearlyNext">下一页</button>
+              <span class="muted" id="mixYearlyPage"></span>
+            </div>
+            <table id="mixYearly"></table>
+          </div>
         </div>
       </div>
     </div>
@@ -2818,6 +3046,7 @@
       const DEFAULT_GROUP_NAME = "默认分组";
       let candidateGroups = {};
       let activeGroupName = DEFAULT_GROUP_NAME;
+      let _lastSelectionBeforeInvert = null;
 
       function _uniq(arr) { return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean))); }
       function _poolCodeSet() { return new Set((pool || []).map((x) => String((x && x.code) || "").trim()).filter(Boolean)); }
@@ -2884,12 +3113,16 @@
       }
       function _saveFixedStrategies() {
         _settingsSave(SETTINGS_KEYS.fixedStrategies, { items: fixedStrategies });
+        _idbSet(SETTINGS_KEYS.fixedStrategies, { items: fixedStrategies });
       }
       function _saveMixSelection() {
-        _settingsSave(SETTINGS_KEYS.mixSelection, {
+        const data = {
           strategy_ids: mixSelectedStrategyIds,
           weight_mode: (($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal"),
-        });
+          custom_weights: mixCustomWeightsById,
+        };
+        _settingsSave(SETTINGS_KEYS.mixSelection, data);
+        _idbSet(SETTINGS_KEYS.mixSelection, data);
       }
       function _findFixedStrategy(id) {
         const sid = String(id || "").trim();
@@ -3038,15 +3271,21 @@
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
           "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotEntryBackfill",
-          "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotEntryMatchN", "rotExitMatchN",
+          "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotSlippage", "rotEntryMatchN", "rotExitMatchN",
           "rotAtrStopMode", "rotAtrStopBasis", "rotAtrStopWin", "rotAtrStopN", "rotAtrStopM",
           "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
+          "rotAutoPreset",
+          "rotAutoLockBase",
+          "rotAutoTopN", "rotAutoMinN", "rotAutoMaxCorr", "rotAutoSignifHorizon",
+          "rotAutoW_mom63", "rotAutoW_mom126", "rotAutoW_sharpe", "rotAutoW_win", "rotAutoW_liq", "rotAutoW_mdd",
+          "rotAutoCategoryQuotas",
           "rotFloorOn", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn",
           "rotVolIdxOn", "rotPlanAsof",
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendSingleCode",
+          "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
@@ -3084,6 +3323,7 @@
       let _initialDefaults = null;
       let fixedStrategies = [];
       let mixSelectedStrategyIds = [];
+      let mixCustomWeightsById = {};
       let _groupEditorLastSynced = "";
       const _YMD_FIELD_IDS = new Set(["start", "end", "ewCalStart", "ewCalEnd", "rotCalStart", "rotCalEnd", "simStart", "simEnd", "rotPlanAsof"]);
 
@@ -3101,6 +3341,55 @@
           localStorage.setItem(key, JSON.stringify(data));
         } catch {
           // ignore storage failures (private mode/quota)
+        }
+      }
+      // Durable storage fallback for large objects (fixed strategy results, mix config).
+      const _PERSIST_DB_NAME = "momentum_research_persist_v1";
+      const _PERSIST_DB_STORE = "kv";
+      function _idbOpen() {
+        return new Promise((resolve, reject) => {
+          try {
+            const req = indexedDB.open(_PERSIST_DB_NAME, 1);
+            req.onupgradeneeded = () => {
+              const db = req.result;
+              if (!db.objectStoreNames.contains(_PERSIST_DB_STORE)) db.createObjectStore(_PERSIST_DB_STORE);
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error("indexedDB open failed"));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+      async function _idbSet(key, value) {
+        try {
+          const db = await _idbOpen();
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction(_PERSIST_DB_STORE, "readwrite");
+            const st = tx.objectStore(_PERSIST_DB_STORE);
+            st.put(value, String(key));
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error || new Error("indexedDB write failed"));
+          });
+          db.close();
+        } catch {
+          // ignore durable storage failures
+        }
+      }
+      async function _idbGet(key) {
+        try {
+          const db = await _idbOpen();
+          const out = await new Promise((resolve, reject) => {
+            const tx = db.transaction(_PERSIST_DB_STORE, "readonly");
+            const st = tx.objectStore(_PERSIST_DB_STORE);
+            const req = st.get(String(key));
+            req.onsuccess = () => resolve(req.result == null ? null : req.result);
+            req.onerror = () => reject(req.error || new Error("indexedDB read failed"));
+          });
+          db.close();
+          return out;
+        } catch {
+          return null;
         }
       }
       function _normalizeYmdValue(v) {
@@ -3636,12 +3925,26 @@
         },
         param_rot_cost: {
           title: "交易成本（cost_bps）",
-          sub: "按换手率估算的成本（bps）。",
+          sub: "双边交易成本参数，按换手率每日扣减。",
           body: `
-            <div><b>含义</b>：每日换手率 \\(turnover=\\frac{1}{2}\\sum |w_t-w_{t-1}|\\)，成本=turnover×(bps/10000)，从当日收益中扣减。</div>
+            <div><b>含义</b>：每日换手率 \\(turnover=\\frac{1}{2}\\sum |w_t-w_{t-1}|\\)，交易成本（双边）= \\(turnover\\times(cost\\_bps/10000)\\)，从当日收益中扣减。</div>
+            <div style="margin-top:8px"><b>口语解释</b>：这里的 turnover 可以理解为“当日调仓比例”，也就是今天把组合里多少仓位从旧持仓换到新持仓。</div>
+            <div style="margin-top:8px"><b>与滑点合并口径</b>：当日净收益 = 毛收益 - 交易成本 - 滑点；滑点见“滑点(单边)”说明。</div>
             <div style="margin-top:8px"><b>用途</b>：让回测更接近实盘，抑制过度换手策略。</div>
             <div style="margin-top:8px"><b>范围</b>：≥0。常见取值：2~10 bps（视品种/滑点假设）。</div>
             <div style="margin-top:8px"><b>示例</b>：cost_bps=5 表示每 100% 换手扣 0.05%。</div>
+          `,
+        },
+        param_rot_slippage: {
+          title: "滑点（slippage_rate）",
+          sub: "单边不利滑点参数，按换手率每日扣减。",
+          body: `
+            <div><b>含义</b>：每日滑点（单边）= \\(turnover\\times slippage\\_rate\\)，其中 \\(turnover=\\frac{1}{2}\\sum |w_t-w_{t-1}|\\)。</div>
+            <div style="margin-top:8px"><b>口语解释</b>：这里的 turnover 可以理解为“当日调仓比例”，调得越多，当天滑点扣减越大。</div>
+            <div style="margin-top:8px"><b>方向约定</b>：始终按不利方向处理（买入更贵、卖出更便宜）。</div>
+            <div style="margin-top:8px"><b>与成本合并口径</b>：当日净收益 = 毛收益 - \\(turnover\\times(cost\\_bps/10000)\\) - \\(turnover\\times slippage\\_rate\\)。</div>
+            <div style="margin-top:8px"><b>时序</b>：按交易时序逐日扣减，因此会同步影响按笔、按周期与总体绩效统计。</div>
+            <div style="margin-top:8px"><b>范围</b>：≥0。示例：0.001 表示每 100% 换手额外扣 0.10%。</div>
           `,
         },
         param_rot_score_method: {
@@ -4355,6 +4658,7 @@
               lookback_days: Number(($("rotLookback").value || "20").trim()),
               skip_days: Number(($("rotSkip").value || "0").trim()),
               cost_bps: Number(($("rotCost").value || "2").trim()),
+              slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
               group_enforce: groupEnforce,
               group_pick_policy: groupPolicy,
               asset_groups: groupsParsed,
@@ -4417,6 +4721,7 @@
           rotState.rows = one.period_details || [];
           rotState.page = 1;
           renderRotPeriods();
+          rotGroupExplainState.page = 1;
           renderRotGroupExplain(one.holdings || []);
           rotPeriodTableState.weekly.rows = (one.period_returns && one.period_returns.weekly) ? one.period_returns.weekly : [];
           rotPeriodTableState.monthly.rows = (one.period_returns && one.period_returns.monthly) ? one.period_returns.monthly : [];
@@ -4862,6 +5167,7 @@
           cb.addEventListener("change", () => {
             const c = cb.getAttribute("data-code");
             if (cb.checked) selected.add(c); else selected.delete(c);
+            _lastSelectionBeforeInvert = null;
             _upsertCurrentGroupFromSelected();
             renderCandidateGroupControls();
             renderBenchmarkSelect();
@@ -4967,9 +5273,16 @@
         const mode = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
         const sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
         const isFixed = (mode === "portfolio" && sizing === "fixed_ratio");
+        const singleCodeEl = $("trendSingleCode");
         const ratioEl = $("trendFixedPosRatio");
         const policyEl = $("trendFixedOvercapPolicy");
         const maxHoldEl = $("trendFixedMaxHoldings");
+        if (singleCodeEl) {
+          const enableSingleCode = (mode === "single");
+          singleCodeEl.disabled = !enableSingleCode;
+          singleCodeEl.style.opacity = enableSingleCode ? "1" : "0.55";
+          singleCodeEl.title = enableSingleCode ? "" : "组合模式下不使用单标的代码";
+        }
         if (ratioEl) {
           ratioEl.disabled = !isFixed;
           ratioEl.style.opacity = isFixed ? "1" : "0.55";
@@ -5819,6 +6132,31 @@
         const totalTgt = ctx.totalTgt || {};
         const navByCode = ctx.assetNavByCode || {};
         const totalCodes = Object.keys(totalCur).filter((c) => Number(totalCur[c]) > 1e-12).sort();
+        const _calcTotalHoldRetFromSub = (code, entryIdx) => {
+          if (!(entryIdx >= 0)) return NaN;
+          let num = 0.0;
+          let den = 0.0;
+          const subMap = (ctx && ctx.sub) ? ctx.sub : {};
+          const subCap = (ctx && ctx.subCapitalWeights) ? ctx.subCapitalWeights : {};
+          for (const sk of Object.keys(subMap)) {
+            if (ctx && ctx.hasRotationWeekdayBreakdown && sk === "ROTATION") continue;
+            const one = subMap[sk] || {};
+            const curW = Number(((one.current || {})[code]) || 0);
+            const capW = Number(subCap[sk] || 0);
+            const effW = curW * capW;
+            if (!(Number.isFinite(effW) && effW > 1e-12)) continue;
+            const nv = Array.isArray(((one.assetNavByCode || {})[code])) ? (one.assetNavByCode || {})[code] : [];
+            if (!(entryIdx >= 0 && entryIdx < nv.length && lastIdx < nv.length)) continue;
+            const n0 = Number(nv[entryIdx]);
+            const n1 = Number(nv[lastIdx]);
+            if (!(Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0)) continue;
+            const r = n1 / n0 - 1.0;
+            if (!Number.isFinite(r)) continue;
+            num += effW * r;
+            den += effW;
+          }
+          return den > 1e-12 ? (num / den) : NaN;
+        };
         const tRows = totalCodes.map((c) => {
           const h = Array.isArray(totalHist[c]) ? totalHist[c] : [];
           const entryIdx = _lastEntryIndex(h, lastIdx);
@@ -5831,6 +6169,7 @@
             const n1 = Number(nv[lastIdx]);
             if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
           }
+          if (!Number.isFinite(holdRet)) holdRet = _calcTotalHoldRetFromSub(c, entryIdx);
           const curW = Number(totalCur[c] || 0);
           const px = _lastPx(nv);
           const amt = _amtByWeight(curW, accountAmount);
@@ -5933,9 +6272,22 @@
         const holdHist = {};
         for (const c of Object.keys(holdMap)) holdHist[c] = new Array(dts.length).fill(Number(holdMap[c] || 0));
         const baseNavSeries = ((baseline.nav || {}).series || {});
+        const rotNavSeries = (((rotation.asset_nav_exec || {}).series) || {});
+        const rotNavDates = (((rotation.asset_nav_exec || {}).dates) || ((rotation.nav || {}).dates || []));
+        const trendNavSeries = (((trend.asset_nav_exec || {}).series) || {});
+        const trendNavDates = (((trend.asset_nav_exec || {}).dates) || ((trend.nav || {}).dates || []));
+        const _pickAlignedAssetNav = (code) => {
+          const c = String(code || "").trim();
+          if (!c) return null;
+          if (Array.isArray(baseNavSeries[c])) return _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+          if (Array.isArray(rotNavSeries[c])) return _alignSeriesByDates(rotNavDates, rotNavSeries[c], dts);
+          if (Array.isArray(trendNavSeries[c])) return _alignSeriesByDates(trendNavDates, trendNavSeries[c], dts);
+          return null;
+        };
         const holdAssetNav = {};
         for (const c of selectedCodes) {
-          if (Array.isArray(baseNavSeries[c])) holdAssetNav[String(c)] = _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+          const an = _pickAlignedAssetNav(c);
+          if (Array.isArray(an)) holdAssetNav[String(c)] = an;
         }
 
         const rotByAnchor = window.__lastRotationByAnchor;
@@ -6013,7 +6365,8 @@
           }
           rotTgt = _normalizeWeightMap(rotTgtRaw);
           for (const c of Object.keys(rotHist)) {
-            if (Array.isArray(baseNavSeries[c])) rotAssetNav[c] = _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+            const an = _pickAlignedAssetNav(c);
+            if (Array.isArray(an)) rotAssetNav[c] = an;
           }
         } else {
           rotHist = _rotationHistoryFromPeriods(rotation, dts);
@@ -6021,7 +6374,8 @@
           rotTgt = _targetFromPlan(window.__lastRotationNextExecutionPlan, rotCur);
           rotStop = _rotationLatestStopMapFromPeriods(rotation, dts);
           for (const c of Object.keys(rotHist)) {
-            if (Array.isArray(baseNavSeries[c])) rotAssetNav[c] = _alignSeriesByDates((baseline.nav || {}).dates || [], baseNavSeries[c], dts);
+            const an = _pickAlignedAssetNav(c);
+            if (Array.isArray(an)) rotAssetNav[c] = an;
           }
         }
 
@@ -6251,7 +6605,7 @@
               `<td>${esc(s.name)}</td>` +
               `<td>${esc(_strategyTypeLabel(s.type))}</td>` +
               `<td>${esc(s.group_name || "-")}</td>` +
-              `<td><input id="${customId}" class="mixCustomWeight" data-strategy-id="${esc(String(s.id))}" value="1" ${mode === "custom" ? "" : "disabled"} /></td>` +
+              `<td><input id="${customId}" class="mixCustomWeight" data-strategy-id="${esc(String(s.id))}" value="${esc(String(mixCustomWeightsById[String(s.id)] != null ? mixCustomWeightsById[String(s.id)] : 1))}" ${mode === "custom" ? "" : "disabled"} /></td>` +
               `<td><button class="mixRemoveStrategyBtn" data-strategy-id="${esc(String(s.id))}">移除</button></td>` +
             `</tr>`
           );
@@ -6261,6 +6615,7 @@
           btn.addEventListener("click", () => {
             const id = String(btn.getAttribute("data-strategy-id") || "").trim();
             mixSelectedStrategyIds = (mixSelectedStrategyIds || []).filter((x) => String(x) !== id);
+            delete mixCustomWeightsById[String(id)];
             _renderMixStrategyListTable();
             _saveMixSelection();
           });
@@ -6309,6 +6664,12 @@
         });
         t.querySelectorAll("input.mixCustomWeight[data-strategy-id]").forEach((el) => {
           el.addEventListener("change", () => {
+            const sid = String(el.getAttribute("data-strategy-id") || "").trim();
+            const vv = Number(String(el.value || "").trim());
+            if (sid) {
+              if (Number.isFinite(vv) && vv > 0) mixCustomWeightsById[sid] = vv;
+              else delete mixCustomWeightsById[sid];
+            }
             if ((($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal") !== "custom") return;
             _saveMixSelection();
             try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
@@ -6327,12 +6688,13 @@
         return out;
       }
       function _readCustomMixWeightMap() {
-        const mp = {};
+        const mp = { ...(mixCustomWeightsById || {}) };
         document.querySelectorAll("input.mixCustomWeight[data-strategy-id]").forEach((el) => {
           const id = String(el.getAttribute("data-strategy-id") || "").trim();
           const v = Number(String(el.value || "").trim());
           if (id && Number.isFinite(v) && v > 0) mp[id] = v;
         });
+        mixCustomWeightsById = { ...mp };
         return mp;
       }
       function _mixWeightsByMode(entries, mode) {
@@ -6367,13 +6729,48 @@
         _saveMixSelection();
         try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
       }
-      function _buildMixPositionContextFromFixed(dts, entries, ws) {
+      function _buildMixPositionContextFromFixed(dts, entries, ws, fallbackAssetNavByCode) {
         const n = Math.min((entries || []).length, (ws || []).length);
         const sub = {};
         const subCapitalWeights = {};
         const totalHist = {};
         const totalTgtRaw = {};
         const assetNavByCode = {};
+        const navSources = [];
+        const rotNow = window.__lastRotationResult || {};
+        const rotNowNav = (((rotNow.asset_nav_exec || {}).series) || {});
+        const rotNowDates = (((rotNow.asset_nav_exec || {}).dates) || ((rotNow.nav || {}).dates || []));
+        const baseNow = window.__lastBaselineResult || {};
+        const baseNowNav = ((baseNow.nav || {}).series || {});
+        const baseNowDates = ((baseNow.nav || {}).dates || []);
+        if (rotNowDates.length && Object.keys(rotNowNav).length) {
+          navSources.push({ dates: rotNowDates, series: rotNowNav });
+        }
+        if (baseNowDates.length && Object.keys(baseNowNav).length) {
+          navSources.push({ dates: baseNowDates, series: baseNowNav });
+        }
+        for (const s of (entries || [])) {
+          if (String((s && s.type) || "") === "rotation") {
+            const nav = (((s.result || {}).asset_nav_exec || {}).series || {});
+            const dates = (((s.result || {}).asset_nav_exec || {}).dates || (((s.result || {}).nav || {}).dates || []));
+            if (dates.length && Object.keys(nav).length) navSources.push({ dates, series: nav });
+          }
+          if (String((s && s.type) || "") !== "baseline") continue;
+          const nav = (((s.result || {}).nav || {}).series || {});
+          const dates = (((s.result || {}).nav || {}).dates || []);
+          if (dates.length && Object.keys(nav).length) navSources.push({ dates, series: nav });
+        }
+        const fallbackNav = (fallbackAssetNavByCode && typeof fallbackAssetNavByCode === "object") ? fallbackAssetNavByCode : {};
+        const _pickAlignedAssetNav = (code) => {
+          const c = String(code || "").trim();
+          if (!c) return null;
+          if (Array.isArray(fallbackNav[c])) return fallbackNav[c];
+          for (const src of navSources) {
+            const arr = src && src.series ? src.series[c] : null;
+            if (Array.isArray(arr)) return _alignSeriesByDates(src.dates || [], arr, dts);
+          }
+          return null;
+        };
         const mkConstHist = (mp) => {
           const out = {};
           for (const [c, w] of Object.entries(mp || {})) out[c] = new Array(dts.length).fill(Number(w || 0));
@@ -6410,6 +6807,10 @@
             const bDates = (((s.result || {}).nav || {}).dates || []);
             for (const c of Object.keys(one.current)) {
               if (Array.isArray(bNav[c])) one.assetNavByCode[c] = _alignSeriesByDates(bDates, bNav[c], dts);
+              else {
+                const an = _pickAlignedAssetNav(c);
+                if (Array.isArray(an)) one.assetNavByCode[c] = an;
+              }
             }
           } else if (s.type === "rotation") {
             const hist = _rotationHistoryFromPeriods((s.result || {}), dts);
@@ -6424,6 +6825,12 @@
             }
             one.target = Object.keys(t).length ? _normalizeWeightMap(t) : { ...one.current };
             one.stopByCode = _rotationLatestStopMapFromPeriods((s.result || {}), dts);
+            // Rotation result itself has no per-asset nav series; borrow aligned asset nav
+            // from baseline sources to compute per-asset holding return in sub-strategy table.
+            for (const c of Object.keys(hist || {})) {
+              const an = _pickAlignedAssetNav(c);
+              if (Array.isArray(an)) one.assetNavByCode[c] = an;
+            }
           } else if (s.type === "trend") {
             const tr = s.result || {};
             const trDates = ((tr.nav || {}).dates || []);
@@ -6478,7 +6885,65 @@
           subCapitalWeights,
         };
       }
-      function runStrategyMix() {
+      async function _fetchMixFallbackAssetNav(dts, entries) {
+        const ds = Array.isArray(dts) ? dts.map((x) => String(x || "")).filter(Boolean) : [];
+        if (!ds.length) return {};
+        const start = String(ds[0] || "").replaceAll("-", "");
+        const end = String(ds[ds.length - 1] || "").replaceAll("-", "");
+        if (!start || !end) return {};
+        const need = new Set();
+        for (const s of (entries || [])) {
+          if (String((s && s.type) || "") === "rotation") {
+            const h = _rotationHistoryFromPeriods((s.result || {}), ds);
+            for (const c of Object.keys(h || {})) need.add(String(c));
+          } else if (String((s && s.type) || "") === "trend") {
+            const tr = s.result || {};
+            if (tr && tr.weights && tr.weights.series) {
+              for (const c of Object.keys(tr.weights.series || {})) need.add(String(c));
+            } else {
+              const code = String((((tr.meta || {}).code) || "")).trim();
+              if (code) need.add(code);
+            }
+          } else if (String((s && s.type) || "") === "baseline") {
+            const gCodes = _validCodes(_getGroupCodes((s && s.group_name) || ""));
+            for (const c of gCodes) need.add(String(c));
+          }
+        }
+        if (!need.size) return {};
+        const cache = window.__mixAssetNavCache || {};
+        const out = {};
+        for (const code of Array.from(need)) {
+          const key = `qfq|${code}|${start}|${end}`;
+          if (cache[key] && Array.isArray(cache[key])) {
+            out[code] = cache[key];
+            continue;
+          }
+          try {
+            const path = `/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=qfq&limit=1000000`;
+            const resp = await api(path, { method: "GET" });
+            const text = await resp.text();
+            if (!resp.ok) continue;
+            const rows = JSON.parse(text);
+            const srcDates = [];
+            const srcClose = [];
+            for (const r of (Array.isArray(rows) ? rows : [])) {
+              const d = String(r && r.trade_date != null ? r.trade_date : "").trim();
+              const c = Number(r && r.close != null ? r.close : NaN);
+              if (!d || !Number.isFinite(c) || c <= 0) continue;
+              srcDates.push(d);
+              srcClose.push(c);
+            }
+            if (!srcDates.length) continue;
+            const aligned = _alignSeriesByDates(srcDates, srcClose, ds);
+            if (!Array.isArray(aligned) || !aligned.length) continue;
+            cache[key] = aligned;
+            out[code] = aligned;
+          } catch (_) { /* ignore */ }
+        }
+        window.__mixAssetNavCache = cache;
+        return out;
+      }
+      async function runStrategyMix() {
         const entries = _collectMixStrategies();
         if (entries.length < 1) return setMsg("请先添加至少一个固定策略到组合。");
         const allDates = new Set();
@@ -6524,9 +6989,6 @@
           colorscale: [[0.0, "#2ca02c"], [0.5, "#ffffff"], [1.0, "#d62728"]],
           text: ctext, texttemplate: "%{text}", hovertemplate: "%{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>", showscale: false,
         }], { margin: { t: 20, b: 40 }, yaxis: { autorange: "reversed" } }, { responsive: true, displayModeBar: false });
-        const corrRows = [];
-        for (let i = 0; i < names.length; i++) for (let j = 0; j < names.length; j++) corrRows.push(`<tr><td>${esc(names[i])}</td><td>${esc(names[j])}</td><td>${Number.isFinite(cm[i][j]) ? Number(cm[i][j]).toFixed(4) : "-"}</td></tr>`);
-        $("strategyMixCorrTable").innerHTML = `<tr><th>策略A</th><th>策略B</th><th>相关系数</th></tr>${corrRows.join("")}`;
 
         const rows = [`<tr><td>组合(MIX)</td><td>${mMix.sample_days}</td><td>${fmtPct(mMix.cumulative_return)}</td><td>${fmtPct(mMix.annualized_return)}</td><td>${fmtPct(mMix.annualized_volatility)}</td><td>${fmtPct(mMix.max_drawdown)}</td><td>${fmtNum(mMix.sharpe_ratio)}</td></tr>`];
         for (const s of entries) {
@@ -6549,10 +7011,24 @@
           quarterly: _periodReturnsFromNav(dts, mMix.nav, "quarterly"),
           yearly: _periodReturnsFromNav(dts, mMix.nav, "yearly"),
         };
-        renderSimplePeriodTable("mixPeriodTable", mixPeriods);
+        mixPeriodTableState.weekly.rows = mixPeriods.weekly || [];
+        mixPeriodTableState.monthly.rows = mixPeriods.monthly || [];
+        mixPeriodTableState.quarterly.rows = mixPeriods.quarterly || [];
+        mixPeriodTableState.yearly.rows = mixPeriods.yearly || [];
+        mixPeriodTableState.weekly.page = 1;
+        mixPeriodTableState.monthly.page = 1;
+        mixPeriodTableState.quarterly.page = 1;
+        mixPeriodTableState.yearly.page = 1;
+        renderMixPeriodTable("weekly");
+        renderMixPeriodTable("monthly");
+        renderMixPeriodTable("quarterly");
+        renderMixPeriodTable("yearly");
         const mixRolling = _rollingPackFromNav(dts, mMix.nav);
         plotRolling("strategyMixRollingReturns", "Strategy Mix Rolling Returns", (mixRolling.returns || {}), ".0%");
-        try { _renderMixPositionPlan(_buildMixPositionContextFromFixed(dts, entries, ws)); } catch (_) { /* ignore */ }
+        try {
+          const fallbackNav = await _fetchMixFallbackAssetNav(dts, entries);
+          _renderMixPositionPlan(_buildMixPositionContextFromFixed(dts, entries, ws, fallbackNav));
+        } catch (_) { /* ignore */ }
 
         const rcTraces = [];
         for (let i = 0; i < entries.length; i++) {
@@ -8265,8 +8741,8 @@
           const pxX = String(exitPx || "open").toLowerCase();
           const sh = String(shift || "next").toLowerCase();
           const m = String(mode || "single").toLowerCase();
-          const d0 = Math.max(1, Math.min(28, Math.floor(Number(day) || 1)));
-          const days = (m === "all") ? Array.from({ length: 28 }, (_, i) => i + 1) : [d0];
+          const d0 = Math.max(1, Math.min(31, Math.floor(Number(day) || 1)));
+          const days = (m === "all") ? Array.from({ length: 31 }, (_, i) => i + 1) : [d0];
           const byMonth = new Map();
           for (let i = 0; i < dates.length; i++) {
             const s = String(dates[i] || "");
@@ -8303,9 +8779,18 @@
             const prevs = rows.filter((r) => r.day < d);
             return prevs.length ? prevs[prevs.length - 1].idx : null;
           };
-          for (const rows of byMonth.values()) {
+          const _monthLastDay = (ym) => {
+            const y = Number(String(ym || "").slice(0, 4));
+            const mth = Number(String(ym || "").slice(5, 7));
+            if (!Number.isFinite(y) || !Number.isFinite(mth) || mth < 1 || mth > 12) return 31;
+            return new Date(y, mth, 0).getDate();
+          };
+          for (const [ym, rows] of byMonth.entries()) {
             rows.sort((a, b) => a.idx - b.idx);
+            const monthLast = _monthLastDay(ym);
             for (const d of days) {
+              // For d=29/30/31, skip this month if the calendar date doesn't exist.
+              if (d >= 29 && monthLast < d) continue;
               const i = pickIdx(rows, d, sh);
               if (i == null) continue;
               const j = i + n;
@@ -8340,13 +8825,13 @@
             if (calHint) calHint.textContent = "";
             return;
           }
-          const daysAll = Array.from({ length: 28 }, (_, i) => i + 1);
+          const daysAll = Array.from({ length: 31 }, (_, i) => i + 1);
           const z = daysAll.map((d) => {
             const st = res.stats[String(d)];
             const v = st ? Number(st[metric]) : NaN;
             return Number.isFinite(v) ? v : null;
           });
-          const tgtDay = (mode === "all") ? Math.max(1, Math.min(28, Math.floor(day || 1))) : res.days[0];
+          const tgtDay = (mode === "all") ? Math.max(1, Math.min(31, Math.floor(day || 1))) : res.days[0];
           const picked = res.by_day[String(tgtDay)] || { returns: [], points: [] };
           if (calHint) {
             calHint.textContent = `${codeLabel(code)} · ${entry.toUpperCase()}买入 -> 持有${res.hold_n}日 -> ${exit.toUpperCase()}卖出 · 非交易日处理=${res.shift} · 模式=${mode === "all" ? "全扫描" : `单日(d=${tgtDay})`}`;
@@ -8363,7 +8848,7 @@
             }],
             {
               margin: { t: 20, l: 60, r: 20, b: 40 },
-              xaxis: { title: "月内日期 d (1..28)" },
+              xaxis: { title: "月内日期 d (1..31)" },
               yaxis: { title: "" },
               shapes: [{
                 type: "line",
@@ -8386,7 +8871,7 @@
                 const p = (ev && ev.points && ev.points[0]) ? ev.points[0] : null;
                 const xRaw = p ? Number(p.x) : NaN;
                 if (!Number.isFinite(xRaw)) return;
-                const dSel = Math.max(1, Math.min(28, Math.floor(xRaw)));
+                const dSel = Math.max(1, Math.min(31, Math.floor(xRaw)));
                 if (calDayInput) {
                   calDayInput.value = String(dSel);
                   calDayInput.dispatchEvent(new Event("change"));
@@ -8806,7 +9291,7 @@
             calDayInput.addEventListener("change", updateDisplay);
             calDayInput.addEventListener("input", () => {
               const v = Number(String(calDayInput.value || "").trim());
-              if (Number.isFinite(v) && v >= 1 && v <= 28) updateDisplay();
+              if (Number.isFinite(v) && v >= 1 && v <= 31) updateDisplay();
             });
           }
           if (calHoldNInput) {
@@ -9083,6 +9568,117 @@
         const payload = _dailyReturnsFromNav(nav, dates);
         const mode = modeSel ? String(modeSel.value || "simple") : "simple";
         _renderDailyReturnDist("trendDailyRetHist", "trendDailyRetQuantiles", payload, "趋势策略 日度收益率分布", mode);
+      }
+
+      function _renderTradeStatsTable(tableId, stats) {
+        const t = $(tableId);
+        if (!t) return;
+        const s = (stats && typeof stats === "object") ? stats : {};
+        const all = (s.all_stats && typeof s.all_stats === "object") ? s.all_stats : {};
+        const q = (all.quantiles && typeof all.quantiles === "object") ? all.quantiles : {};
+        const p = (s.profit_stats && typeof s.profit_stats === "object") ? s.profit_stats : {};
+        const l = (s.loss_stats && typeof s.loss_stats === "object") ? s.loss_stats : {};
+        const _v = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtPct(Number(x));
+        const _n = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : String(Math.round(Number(x)));
+        const _num = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtNum(Number(x));
+        t.innerHTML =
+          `<tr><th>指标</th><th>值</th></tr>` +
+          `<tr><td>总交易笔数</td><td>${_n(s.total_trades)}</td></tr>` +
+          `<tr><td>盈利笔数</td><td>${_n(s.win_trades)}</td></tr>` +
+          `<tr><td>亏损笔数</td><td>${_n(s.loss_trades)}</td></tr>` +
+          `<tr><td>持平笔数</td><td>${_n(s.flat_trades)}</td></tr>` +
+          `<tr><td>胜率(剔除零收益)</td><td>${_v(s.win_rate_ex_zero)}</td></tr>` +
+          `<tr><td>赔率(剔除零收益)</td><td>${_num(s.payoff_ex_zero)}</td></tr>` +
+          `<tr><td>凯利比(剔除零收益)</td><td>${_v(s.kelly_ex_zero)}</td></tr>` +
+          `<tr><td>每笔收益最大值</td><td>${_v(all.max)}</td></tr>` +
+          `<tr><td>每笔收益最小值</td><td>${_v(all.min)}</td></tr>` +
+          `<tr><td>每笔收益均值</td><td>${_v(all.mean)}</td></tr>` +
+          `<tr><td>每笔收益标准差</td><td>${_v(all.std)}</td></tr>` +
+          `<tr><td>分位数 P01 / P05 / P10</td><td>${_v(q.p01)} / ${_v(q.p05)} / ${_v(q.p10)}</td></tr>` +
+          `<tr><td>分位数 P25 / P50 / P75</td><td>${_v(q.p25)} / ${_v(q.p50)} / ${_v(q.p75)}</td></tr>` +
+          `<tr><td>分位数 P90 / P95 / P99</td><td>${_v(q.p90)} / ${_v(q.p95)} / ${_v(q.p99)}</td></tr>` +
+          `<tr><td>盈利交易均值 / 标准差</td><td>${_v(p.mean)} / ${_v(p.std)}</td></tr>` +
+          `<tr><td>亏损交易均值 / 标准差</td><td>${_v(l.mean)} / ${_v(l.std)}</td></tr>` +
+          `<tr><td>盈利交易最大 / 最小</td><td>${_v(p.max)} / ${_v(p.min)}</td></tr>` +
+          `<tr><td>亏损交易最大 / 最小</td><td>${_v(l.max)} / ${_v(l.min)}</td></tr>`;
+      }
+
+      function _renderTradeHist(divId, returns, title) {
+        const div = $(divId);
+        if (!div) return;
+        const xs = Array.isArray(returns) ? returns.map(Number).filter(Number.isFinite) : [];
+        if (!xs.length) {
+          div.innerHTML = "<div class='muted'>暂无可用交易样本</div>";
+          return;
+        }
+        Plotly.newPlot(
+          divId,
+          [{ x: xs, type: "histogram", nbinsx: 40, marker: { color: "#4c78a8" }, hovertemplate: "收益=%{x:.2%}<br>频数=%{y}<extra></extra>" }],
+          { margin: { t: 30, b: 40 }, title, xaxis: { title: "每笔交易收益率", tickformat: ".1%" }, yaxis: { title: "频数" } },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function _renderTradeStatsDebug(prefix, data) {
+        const p = String(prefix || "").trim();
+        const boxEl = $(`${p}TradeStatsDebug`);
+        if (!boxEl) return;
+        const stats = (data && data.trade_statistics && typeof data.trade_statistics === "object")
+          ? data.trade_statistics
+          : null;
+        if (!stats) {
+          boxEl.innerHTML = "<div class='muted'>无 trade_statistics 数据</div>";
+          return;
+        }
+        let raw = "";
+        try {
+          raw = JSON.stringify(stats, null, 2) || "";
+        } catch (_) {
+          raw = "";
+        }
+        const maxChars = 200000;
+        const clipped = raw.length > maxChars ? `${raw.slice(0, maxChars)}\n... [truncated]` : raw;
+        boxEl.innerHTML = `<pre style="white-space:pre-wrap; word-break:break-word; max-height:420px; overflow:auto; margin:0;">${esc(clipped)}</pre>`;
+      }
+
+      function renderTradeStatistics(prefix, data) {
+        const p = String(prefix || "").trim();
+        const stats = (data && data.trade_statistics && typeof data.trade_statistics === "object") ? data.trade_statistics : null;
+        const overallTable = `${p}TradeOverallTable`;
+        const overallHist = `${p}TradeOverallHist`;
+        const byCodeSel = `${p}TradeByCodeSelect`;
+        const byCodeTable = `${p}TradeByCodeTable`;
+        const byCodeHist = `${p}TradeByCodeHist`;
+        if (!stats) {
+          _renderTradeStatsTable(overallTable, {});
+          _renderTradeHist(overallHist, [], "无数据");
+          if ($(byCodeSel)) $(byCodeSel).innerHTML = "";
+          _renderTradeStatsTable(byCodeTable, {});
+          _renderTradeHist(byCodeHist, [], "无数据");
+          _renderTradeStatsDebug(p, null);
+          return;
+        }
+        _renderTradeStatsTable(overallTable, stats.overall || {});
+        _renderTradeHist(overallHist, (stats.overall || {}).returns || [], `${p === "rot" ? "轮动" : "趋势"}：整体每笔交易收益分布`);
+        const sel = $(byCodeSel);
+        const by = (stats.by_code && typeof stats.by_code === "object") ? stats.by_code : {};
+        const codes = Object.keys(by).sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN"));
+        if (sel) {
+          sel.innerHTML = codes.map((c) => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
+          const update = () => {
+            const c = String(sel.value || "");
+            const s = by[c] || {};
+            _renderTradeStatsTable(byCodeTable, s);
+            _renderTradeHist(byCodeHist, s.returns || [], `${codeLabel(c)}：每笔交易收益分布`);
+          };
+          sel.onchange = update;
+          if (codes.length) update();
+          else {
+            _renderTradeStatsTable(byCodeTable, {});
+            _renderTradeHist(byCodeHist, [], "无数据");
+          }
+        }
+        _renderTradeStatsDebug(p, data);
       }
 
       function _calcMetricsFromNav(nav, rfAnnual) {
@@ -9981,6 +10577,8 @@
       }
 
       const rotState = { page: 1, rows: [] };
+      const rotGroupExplainState = { page: 1, rows: [] };
+      const trendGroupExplainState = { page: 1, rows: [] };
       function _sortedRotRows(rows, key, dir) {
         const arr = (rows || []).slice();
         const k = key === "excess" ? "excess_return" : (key === "end" ? "end_date" : "start_date");
@@ -10062,12 +10660,74 @@
             });
           }
         }
+        rotGroupExplainState.rows = out;
+        const total = out.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        rotGroupExplainState.page = Math.min(Math.max(1, rotGroupExplainState.page), totalPages);
+        const startIdx = (rotGroupExplainState.page - 1) * pageSize;
+        const pageRows = out.slice(startIdx, startIdx + pageSize);
         $("rotGroupExplain").innerHTML =
           `<tr><th>决策日 (Decision Date)</th><th>命中方式 (Hit Mode)</th><th>组ID (Group ID)</th><th>胜出 (Winner)</th><th>淘汰 (Eliminated)</th></tr>` +
-          out.slice(0, 500).map(r => `<tr><td>${esc(r.d)}</td><td>${esc(r.hit)}</td><td>${esc(r.gid)}</td><td>${esc(codeLabel(r.winner))}</td><td>${(r.eliminated || []).map(codeLabel).join(", ")}</td></tr>`).join("");
+          pageRows.map(r => `<tr><td>${esc(r.d)}</td><td>${esc(r.hit)}</td><td>${esc(r.gid)}</td><td>${esc(codeLabel(r.winner))}</td><td>${(r.eliminated || []).map(codeLabel).join(", ")}</td></tr>`).join("");
+        if ($("rotGroupExplainPage")) $("rotGroupExplainPage").textContent = `${rotGroupExplainState.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+      function _rotGroupExplainTotalPages() {
+        const total = Array.isArray(rotGroupExplainState.rows) ? rotGroupExplainState.rows.length : 0;
+        return Math.max(1, Math.ceil(total / pageSize));
+      }
+      function _renderRotGroupExplainFromLastResult() {
+        renderRotGroupExplain(window.__lastRotationResult ? (window.__lastRotationResult.holdings || []) : []);
+      }
+      function renderTrendGroupExplain(holdings) {
+        const hs = Array.isArray(holdings) ? holdings : [];
+        const out = [];
+        for (const h of hs) {
+          const gf = (h && h.group_filter) ? h.group_filter : {};
+          if (!gf.enabled) continue;
+          const gp = (gf.group_picks && typeof gf.group_picks === "object") ? gf.group_picks : {};
+          const ge = (gf.group_eliminated && typeof gf.group_eliminated === "object") ? gf.group_eliminated : {};
+          const gids = Array.from(new Set([...(Object.keys(gp)), ...(Object.keys(ge))])).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+          for (const gid of gids) {
+            const picks = Array.isArray(gp[gid]) ? gp[gid] : [];
+            const elim = Array.isArray(ge[gid]) ? ge[gid] : [];
+            out.push({
+              decision_date: String((h && h.decision_date) || ""),
+              gid: String(gid || ""),
+              picks,
+              eliminated: elim,
+            });
+          }
+        }
+        trendGroupExplainState.rows = out;
+        const total = out.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        trendGroupExplainState.page = Math.min(Math.max(1, trendGroupExplainState.page), totalPages);
+        const startIdx = (trendGroupExplainState.page - 1) * pageSize;
+        const pageRows = out.slice(startIdx, startIdx + pageSize);
+        $("trendGroupTable").innerHTML =
+          `<tr><th>决策日</th><th>组ID</th><th>组内入选（组别/代码/名称）</th><th>淘汰（代码/名称）</th></tr>` +
+          pageRows.map((r) => {
+            const pickedTxt = (r.picks || []).map((c) => `${esc(r.gid)} / ${esc(c)} / ${esc(codeName(c) || "-")}`).join("<br>");
+            const elimTxt = (r.eliminated || []).map((c) => `${esc(c)} / ${esc(codeName(c) || "-")}`).join("<br>");
+            return `<tr><td>${esc(r.decision_date)}</td><td>${esc(r.gid)}</td><td>${pickedTxt || "-"}</td><td>${elimTxt || "-"}</td></tr>`;
+          }).join("");
+        if ($("trendGroupPage")) $("trendGroupPage").textContent = `${trendGroupExplainState.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+      function _trendGroupExplainTotalPages() {
+        const total = Array.isArray(trendGroupExplainState.rows) ? trendGroupExplainState.rows.length : 0;
+        return Math.max(1, Math.ceil(total / pageSize));
+      }
+      function _renderTrendGroupExplainFromLastResult() {
+        renderTrendGroupExplain(window.__lastTrendResult ? (window.__lastTrendResult.holdings || []) : []);
       }
 
       const rotPeriodTableState = {
+        weekly: { page: 1, rows: [] },
+        monthly: { page: 1, rows: [] },
+        quarterly: { page: 1, rows: [] },
+        yearly: { page: 1, rows: [] },
+      };
+      const mixPeriodTableState = {
         weekly: { page: 1, rows: [] },
         monthly: { page: 1, rows: [] },
         quarterly: { page: 1, rows: [] },
@@ -10138,6 +10798,29 @@
         $(`trend${cap}SortDir`).addEventListener("change", () => { trendPeriodTableState[kind].page = 1; renderTrendPeriodTable(kind); });
         $(`trend${cap}Prev`).addEventListener("click", () => { trendPeriodTableState[kind].page -= 1; renderTrendPeriodTable(kind); });
         $(`trend${cap}Next`).addEventListener("click", () => { trendPeriodTableState[kind].page += 1; renderTrendPeriodTable(kind); });
+      }
+      function renderMixPeriodTable(kind) {
+        const st = mixPeriodTableState[kind];
+        const cap = kind[0].toUpperCase() + kind.slice(1);
+        const sortKey = $(`mix${cap}SortKey`).value;
+        const sortDir = $(`mix${cap}SortDir`).value;
+        const rows = _sortedPeriodRows(st.rows, sortKey, sortDir);
+        const total = rows.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        st.page = Math.min(Math.max(1, st.page), totalPages);
+        const startIdx = (st.page - 1) * pageSize;
+        const pageRows = rows.slice(startIdx, startIdx + pageSize);
+        $(`mix${cap}`).innerHTML =
+          `<tr><th>期末</th><th>收益</th></tr>` +
+          pageRows.map((x) => `<tr><td>${esc(x.period_end || "-")}</td><td>${fmtPct(Number(x.return))}</td></tr>`).join("");
+        $(`mix${cap}Page`).textContent = `${st.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+      function wireMixPeriodControls(kind) {
+        const cap = kind[0].toUpperCase() + kind.slice(1);
+        $(`mix${cap}SortKey`).addEventListener("change", () => { mixPeriodTableState[kind].page = 1; renderMixPeriodTable(kind); });
+        $(`mix${cap}SortDir`).addEventListener("change", () => { mixPeriodTableState[kind].page = 1; renderMixPeriodTable(kind); });
+        $(`mix${cap}Prev`).addEventListener("click", () => { mixPeriodTableState[kind].page -= 1; renderMixPeriodTable(kind); });
+        $(`mix${cap}Next`).addEventListener("click", () => { mixPeriodTableState[kind].page += 1; renderMixPeriodTable(kind); });
       }
 
       function _checkedValues(sel) {
@@ -10546,6 +11229,8 @@
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "2").trim());
+        const slippage_rate = Number(($("rotSlippage").value || "0.001").trim());
+        if (!Number.isFinite(slippage_rate) || slippage_rate < 0) return setMsg("轮动滑点需为>=0数字（例如 0.001）");
         const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
         if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
         const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
@@ -10741,7 +11426,7 @@
         })();
         if (asset_vol_index_rules && asset_vol_index_rules.__error) return setMsg(asset_vol_index_rules.__error);
         const reqPayload = {
-            codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
+            codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
             risk_free_rate,
             score_method,
             atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
@@ -10824,6 +11509,7 @@
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
         renderRotationDailyReturnDist(data);
+        renderTradeStatistics("rot", data);
         // Use continuous holding streaks (not per-rebalance periods) for holding-length distributions.
         renderRotationHoldingPeriodLengthDistributions(data.holding_streaks || data.holdings || [], (data.nav && data.nav.dates) ? data.nav.dates : []);
         renderWinPayoff(data.win_payoff || {});
@@ -10831,6 +11517,7 @@
         rotState.rows = data.period_details || [];
         rotState.page = 1;
         renderRotPeriods();
+        rotGroupExplainState.page = 1;
         renderRotGroupExplain(data.holdings || []);
         // periodic returns tables
         rotPeriodTableState.weekly.rows = (data.period_returns && data.period_returns.weekly) ? data.period_returns.weekly : [];
@@ -10869,12 +11556,15 @@
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const cost_bps = Number(($("trendCost").value || "2").trim());
         if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("趋势成本(bps)需为>=0数字");
+        const slippage_rate = Number(($("trendSlippage").value || "0.001").trim());
+        if (!Number.isFinite(slippage_rate) || slippage_rate < 0) return setMsg("趋势滑点需为>=0数字（例如 0.001）");
         const exec_price = ($("trendExecPrice") && $("trendExecPrice").value) ? String($("trendExecPrice").value) : "open";
         const common = {
           start,
           end,
           risk_free_rate,
           cost_bps,
+          slippage_rate,
           exec_price,
           strategy,
           sma_window: Number(($("trendSmaWin").value || "200").trim()),
@@ -10907,7 +11597,14 @@
           fixed_pos_ratio: Number(($("trendFixedPosRatio") && $("trendFixedPosRatio").value ? $("trendFixedPosRatio").value : "0.04").trim()),
           fixed_overcap_policy: (($("trendFixedOvercapPolicy") && $("trendFixedOvercapPolicy").value) ? String($("trendFixedOvercapPolicy").value) : "skip"),
           fixed_max_holdings: Number(($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value ? $("trendFixedMaxHoldings").value : "10").trim()),
+          group_enforce: ($("trendGroupEnforce") && $("trendGroupEnforce").value === "true"),
+          group_pick_policy: (($("trendGroupPolicy") && $("trendGroupPolicy").value) ? String($("trendGroupPolicy").value) : "highest_sharpe"),
+          group_max_holdings: Number(($("trendGroupMaxHoldings") && $("trendGroupMaxHoldings").value ? $("trendGroupMaxHoldings").value : "4").trim()),
+          asset_groups: null,
         };
+        if (mode === "portfolio") {
+          common.asset_groups = _parseAssetGroupsFromText(($("trendAssetGroups") && $("trendAssetGroups").value) ? $("trendAssetGroups").value : "");
+        }
         if (!Number.isFinite(common.hybrid_entry_n) || common.hybrid_entry_n < 1) {
           return setMsg("混合策略入场阈值 n 需为>=1数字");
         }
@@ -10947,6 +11644,14 @@
           return setMsg("持仓标的上限需为>=1数字");
         }
         common.fixed_max_holdings = Math.floor(common.fixed_max_holdings);
+        if (!["earliest_entry", "highest_sharpe"].includes(String(common.group_pick_policy))) {
+          return setMsg("趋势组内优选仅支持：最早入场/夏普最高");
+        }
+        if (!Number.isFinite(common.group_max_holdings) || common.group_max_holdings < 1 || common.group_max_holdings > 10) {
+          return setMsg("趋势每组持仓上限需为1~10的整数");
+        }
+        common.group_max_holdings = Math.floor(common.group_max_holdings);
+        if (mode === "portfolio" && common.asset_groups && common.asset_groups.__error) return setMsg(common.asset_groups.__error);
         if (strategy === "tsmom" || strategy === "hybrid_trend") {
           const ent = Number(common.tsmom_entry_threshold);
           const ex = Number(common.tsmom_exit_threshold);
@@ -11024,6 +11729,7 @@
           }, { responsive: true, displayModeBar: false });
         } catch (_) { /* ignore */ }
         renderTrendDailyReturnDist(data);
+        renderTradeStatistics("trend", data);
         try { renderTrendPositionPlan(data, mode); } catch (_) { /* ignore */ }
         const m = (data && data.metrics) ? data.metrics : {};
         const rows = [];
@@ -11122,18 +11828,8 @@
           plotRolling("trendRollingReturns", "Trend Rolling Returns", (roll.returns || {}), ".0%");
           plotRolling("trendRollingDD", "Trend Rolling Drawdown", (roll.drawdown || roll.max_drawdown || {}), ".0%");
         } catch (_) { /* ignore */ }
-        const hs = Array.isArray(data.holdings) ? data.holdings : [];
-        const gRows = [];
-        for (const h of hs.slice(0, 200)) {
-          const gf = h.group_filter || {};
-          if (!gf.enabled) continue;
-          const gw = gf.group_winners || {};
-          const ge = gf.group_eliminated || {};
-          for (const gid of Object.keys(gw)) {
-            gRows.push(`<tr><td>${esc(h.decision_date || "")}</td><td>${esc(gid)}</td><td>${esc(codeLabel(gw[gid]))}</td><td>${(Array.isArray(ge[gid]) ? ge[gid] : []).map(codeLabel).join(", ")}</td></tr>`);
-          }
-        }
-        $("trendGroupTable").innerHTML = `<tr><th>决策日</th><th>组ID</th><th>胜出</th><th>淘汰</th></tr>${gRows.join("")}`;
+        trendGroupExplainState.page = 1;
+        renderTrendGroupExplain(Array.isArray(data.holdings) ? data.holdings : []);
         const strategyM = (m && m.strategy) ? m.strategy : {};
         const excessM = (m && m.excess) ? m.excess : {};
         const atrSummary = (atrStats && atrStats.enabled)
@@ -11208,6 +11904,7 @@
             lookback_days: Number(($("rotLookback").value || "20").trim()),
             skip_days: Number(($("rotSkip").value || "0").trim()),
             cost_bps: Number(($("rotCost").value || "2").trim()),
+            slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             score_method: ($("rotScoreMethod") && $("rotScoreMethod").value) ? String($("rotScoreMethod").value) : "raw_mom",
             group_enforce: ($("rotGroupEnforce") && $("rotGroupEnforce").value === "true"),
@@ -11260,6 +11957,7 @@
           lookback_days: Number(($("rotLookback").value || "20").trim()),
           skip_days: Number(($("rotSkip").value || "0").trim()),
           cost_bps: Number(($("rotCost").value || "2").trim()),
+          slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
           score_method: ($("rotScoreMethod") && $("rotScoreMethod").value) ? String($("rotScoreMethod").value) : "raw_mom",
           asset_momentum_floor_rules: (floorRules2.length ? floorRules2 : null),
           trend_filter: ($("rotTrendOn") && $("rotTrendOn").value === "true"),
@@ -11531,12 +12229,12 @@
         }
       }
 
-      async function runSuggestGroups() {
-        const codes = _codesForStrategy("rotation");
+      async function _runSuggestGroupsFor(strategyKey, textAreaId, hintId) {
+        const codes = _codesForStrategy(strategyKey);
         if (codes.length < 2) return setMsg("自动分组至少需要选择2个标的");
         const start = $("start").value.trim();
         const end = $("end").value.trim();
-        const hint = $("rotSuggestGroupsHint");
+        const hint = $(hintId);
         if (hint) hint.textContent = "计算中...";
         const resp = await api("/analysis/groups/suggest", {
           method: "POST",
@@ -11556,9 +12254,305 @@
         }
         const data = JSON.parse(text);
         const mp = (data && data.asset_groups) ? data.asset_groups : {};
-        const lines = Object.keys(mp).sort().map((c) => `${c}=${mp[c]}`);
-        if ($("rotAssetGroups")) $("rotAssetGroups").value = lines.join("\n");
-        if (hint) hint.textContent = `已生成 ${new Set(Object.values(mp)).size} 个分组建议`;
+        const _groupSortKey = (gid) => {
+          const s = String(gid == null ? "" : gid).trim();
+          const n = Number(s);
+          if (Number.isFinite(n)) return { bucket: 0, num: n, txt: s };
+          const m = s.match(/-?\d+(\.\d+)?/);
+          if (m && Number.isFinite(Number(m[0]))) return { bucket: 1, num: Number(m[0]), txt: s };
+          return { bucket: 2, num: Number.POSITIVE_INFINITY, txt: s };
+        };
+        const entries = Object.entries(mp || {}).map(([c, g]) => ({ code: String(c || ""), gid: String(g || "") }));
+        entries.sort((a, b) => {
+          const ka = _groupSortKey(a.gid);
+          const kb = _groupSortKey(b.gid);
+          if (ka.bucket !== kb.bucket) return ka.bucket - kb.bucket;
+          if (ka.num !== kb.num) return ka.num - kb.num;
+          const gt = ka.txt.localeCompare(kb.txt, "zh-Hans-CN");
+          if (gt !== 0) return gt;
+          return a.code.localeCompare(b.code, "zh-Hans-CN");
+        });
+        const lines = entries.map((x) => `${x.code}=${x.gid}`);
+        if ($(textAreaId)) $(textAreaId).value = lines.join("\n");
+        if (hint) {
+          const byGroup = new Map();
+          for (const x of entries) {
+            if (!byGroup.has(x.gid)) byGroup.set(x.gid, []);
+            byGroup.get(x.gid).push(x.code);
+          }
+          const detail = Array.from(byGroup.entries()).map(([gid, codes]) => {
+            const xs = (codes || []).map((c) => `${c}(${codeName(c) || "-"})`);
+            return `组 ${gid}：${xs.join("，")}`;
+          });
+          hint.innerHTML = `已生成 ${byGroup.size} 个分组建议（按组号排序）<br>${detail.map((x) => esc(x)).join("<br>")}`;
+        }
+      }
+      async function runSuggestGroups() {
+        return _runSuggestGroupsFor("rotation", "rotAssetGroups", "rotSuggestGroupsHint");
+      }
+      async function runTrendSuggestGroups() {
+        return _runSuggestGroupsFor("trend", "trendAssetGroups", "trendSuggestGroupsHint");
+      }
+
+      async function runAutoScreenRotationCandidates() {
+        const codes = _codesForStrategy("rotation");
+        if (codes.length < 2) return setMsg("自动筛选至少需要选择2个候选标的");
+        const start = $("start").value.trim();
+        const end = $("end").value.trim();
+        const topN = Math.floor(Number(($("rotAutoTopN") && $("rotAutoTopN").value) ? $("rotAutoTopN").value : "12"));
+        const minN = Math.floor(Number(($("rotAutoMinN") && $("rotAutoMinN").value) ? $("rotAutoMinN").value : "4"));
+        const maxCorr = Number(($("rotAutoMaxCorr") && $("rotAutoMaxCorr").value) ? $("rotAutoMaxCorr").value : "0.75");
+        const signifHorizon = Math.floor(Number(($("rotAutoSignifHorizon") && $("rotAutoSignifHorizon").value) ? $("rotAutoSignifHorizon").value : "20"));
+        const wMom63 = Number(($("rotAutoW_mom63") && $("rotAutoW_mom63").value) ? $("rotAutoW_mom63").value : "0.25");
+        const wMom126 = Number(($("rotAutoW_mom126") && $("rotAutoW_mom126").value) ? $("rotAutoW_mom126").value : "0.25");
+        const wSharpe = Number(($("rotAutoW_sharpe") && $("rotAutoW_sharpe").value) ? $("rotAutoW_sharpe").value : "0.20");
+        const wWin = Number(($("rotAutoW_win") && $("rotAutoW_win").value) ? $("rotAutoW_win").value : "0.10");
+        const wLiq = Number(($("rotAutoW_liq") && $("rotAutoW_liq").value) ? $("rotAutoW_liq").value : "0.10");
+        const wMdd = Number(($("rotAutoW_mdd") && $("rotAutoW_mdd").value) ? $("rotAutoW_mdd").value : "0.10");
+        const quotasRaw = (($("rotAutoCategoryQuotas") && $("rotAutoCategoryQuotas").value) ? $("rotAutoCategoryQuotas").value : "").trim();
+        if (!Number.isFinite(topN) || topN < 2) return setMsg("TopN 需为>=2整数");
+        if (!Number.isFinite(minN) || minN < 1) return setMsg("MinN 需为>=1整数");
+        if (minN > topN) return setMsg("MinN 不能大于 TopN");
+        if (!Number.isFinite(maxCorr) || maxCorr < 0 || maxCorr >= 1) return setMsg("低相关阈值需在 [0,1)");
+        if (!Number.isFinite(signifHorizon) || signifHorizon < 5) return setMsg("显著性前瞻天数需为>=5整数");
+        const weights = [wMom63, wMom126, wSharpe, wWin, wLiq, wMdd];
+        if (weights.some((x) => !Number.isFinite(x) || x < 0)) return setMsg("筛选因子权重需为>=0数字");
+        const parseQuotas = (txt) => {
+          const out = {};
+          if (!txt) return out;
+          const lines = String(txt).split(/\r?\n/);
+          for (let i = 0; i < lines.length; i++) {
+            const s = String(lines[i] || "").trim();
+            if (!s || s.startsWith("#")) continue;
+            const p = s.indexOf("=");
+            if (p <= 0) return { __error: `资产类别配额第${i + 1}行格式错误，需为 category=min_count` };
+            const k = s.slice(0, p).trim().toUpperCase();
+            const v = Math.floor(Number(s.slice(p + 1).trim()));
+            if (!k) return { __error: `资产类别配额第${i + 1}行类别为空` };
+            if (!Number.isFinite(v) || v < 0) return { __error: `资产类别配额第${i + 1}行最小数量需为>=0整数` };
+            out[k] = v;
+          }
+          return out;
+        };
+        const quotas = parseQuotas(quotasRaw);
+        if (quotas && quotas.__error) return setMsg(quotas.__error);
+        const hint = $("rotAutoScreenHint");
+        const sumEl = $("rotAutoSignifSummary");
+        const tblEl = $("rotAutoSignifTable");
+        if (hint) hint.textContent = "筛选中...";
+        if (sumEl) sumEl.textContent = "";
+        if (tblEl) tblEl.innerHTML = "";
+        const resp = await api("/analysis/rotation/candidate-screen", {
+          method: "POST",
+          body: JSON.stringify({
+            codes,
+            start,
+            end,
+            adjust: "hfq",
+            lookback_days: 252,
+            top_n: topN,
+            min_n: minN,
+            max_pair_corr: maxCorr,
+            signif_horizon_days: signifHorizon,
+            factor_weights: { mom_63: wMom63, mom_126: wMom126, sharpe: wSharpe, win_rate: wWin, liquidity: wLiq, mdd: wMdd },
+            category_quotas: quotas,
+          }),
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          if (hint) hint.textContent = "";
+          return setMsg(text);
+        }
+        const data = JSON.parse(text);
+        const picked = Array.isArray(data.selected_codes) ? data.selected_codes.map((x) => String(x || "").trim()).filter(Boolean) : [];
+        if (!picked.length) {
+          if (hint) hint.textContent = "未筛选出候选标的";
+          return;
+        }
+        selected.clear();
+        for (const c of picked) selected.add(c);
+        renderCodeList();
+        renderCandidateGroupControls();
+        renderBenchmarkSelect();
+        renderTrendSingleCodeSelect();
+        maybeAdjustBacktestRange();
+        renderRangeHint();
+        _saveSelectedCodes();
+        const pickedTxt = picked.map((c) => codeLabel(c)).join("，");
+        const details = Array.isArray(data.details) ? data.details : [];
+        const _reasonText = (r) => {
+          if (r && r.selected) return "-";
+          const k = String((r && r.not_selected_reason) || "");
+          if (k === "insufficient_samples") return `样本不足(${Number((r && r.obs_count) || 0)}/${Number((r && r.min_obs_required) || 0)})`;
+          if (k === "blocked_by_correlation") return r && r.blocked_by_code ? `与 ${codeLabel(r.blocked_by_code)} 相关性过高` : "相关性过高";
+          if (k === "not_in_topn_after_constraints") return "综合约束后未进TopN";
+          return k || "未入选";
+        };
+        const rejectedTop = details.filter((x) => x && !x.selected).slice(0, 5).map((x) => {
+          const c = String(x.code || "");
+          return `${codeLabel(c)}（${_reasonText(x)}）`;
+        });
+        if (hint) {
+          hint.innerHTML = `已筛选并回填 ${picked.length} 个标的：${esc(pickedTxt)}` +
+            (rejectedTop.length ? `<br>高分未入选（前5）：${rejectedTop.map((x) => esc(x)).join("，")}` : "");
+        }
+        const report = (data && data.significance_report) ? data.significance_report : {};
+        const sum = (report && report.summary) ? report.summary : {};
+        const rows = (report && Array.isArray(report.rows)) ? report.rows : [];
+        if (sumEl) {
+          const m = (data && data.meta) ? data.meta : {};
+          const catSel = (m && m.selected_by_category) ? m.selected_by_category : {};
+          const catTxt = Object.keys(catSel).sort().map((k) => `${k}:${catSel[k]}`).join("，");
+          sumEl.textContent = `动量显著性报告：显著(5%) ${sum.significant_count_5pct || 0} / ${rows.length}，入选中显著 ${sum.selected_significant_count_5pct || 0} / ${picked.length}` +
+            (catTxt ? `；入选类别分布：${catTxt}` : "");
+        }
+        if (tblEl) {
+          const topRows = rows.slice().sort((a, b) => {
+            const pa = Number((a || {}).p_value);
+            const pb = Number((b || {}).p_value);
+            const aa = Number.isFinite(pa) ? pa : 1.0;
+            const bb = Number.isFinite(pb) ? pb : 1.0;
+            if (aa !== bb) return aa - bb;
+            const ea = Number((a || {}).effect_spread);
+            const eb = Number((b || {}).effect_spread);
+            return (Number.isFinite(eb) ? eb : -1e9) - (Number.isFinite(ea) ? ea : -1e9);
+          }).slice(0, 30);
+          tblEl.innerHTML =
+            `<tr><th>入选</th><th>标的</th><th>类别</th><th>样本</th><th>动量效应差</th><th>IC</th><th>t值</th><th>p值</th><th>显著(5%)</th><th>未入选原因</th></tr>` +
+            topRows.map((r) => {
+              const c = String((r && r.code) || "");
+              const nm = codeName(c);
+              return `<tr><td>${r && r.selected ? "Y" : ""}</td><td>${esc(c)} ${esc(nm || "")}</td><td>${esc(String((r && r.category) || "-"))}</td><td>${Number((r && r.n) || 0)}</td><td>${fmtPct(Number((r && r.effect_spread) || NaN))}</td><td>${fmtNum(Number((r && r.ic) || NaN))}</td><td>${fmtNum(Number((r && r.t_stat) || NaN))}</td><td>${fmtNum(Number((r && r.p_value) || NaN))}</td><td>${r && r.significant_5pct ? "是" : "否"}</td><td>${esc(_reasonText(r))}</td></tr>`;
+            }).join("");
+        }
+      }
+
+      function _rotationAutoPresetSpec(presetKey) {
+        const k = String(presetKey || "").trim().toLowerCase();
+        if (k === "aggressive") {
+          return {
+            label: "偏进攻",
+            topN: 10, minN: 4, maxCorr: 0.85, horizon: 15,
+            w: { mom63: 0.35, mom126: 0.30, sharpe: 0.15, win: 0.08, liq: 0.05, mdd: 0.07 },
+            base: {
+              rebalance: "weekly",
+              rebalanceAnchor: 5,
+              rebalanceShift: "prev",
+              execPrice: "open",
+              topK: 1,
+              positionMode: "adaptive",
+              entryBackfill: "true",
+              scoreMethod: "raw_mom",
+              lookback: 20,
+              skip: 0,
+              cost: 2,
+              entryMatchN: 0,
+              exitMatchN: 0,
+              atrStopMode: "none",
+              groupEnforce: "false",
+              groupPolicy: "strongest_score",
+            },
+          };
+        }
+        if (k === "defensive") {
+          return {
+            label: "偏防守",
+            topN: 8, minN: 4, maxCorr: 0.65, horizon: 30,
+            w: { mom63: 0.15, mom126: 0.20, sharpe: 0.25, win: 0.15, liq: 0.10, mdd: 0.15 },
+            base: {
+              rebalance: "weekly",
+              rebalanceAnchor: 5,
+              rebalanceShift: "prev",
+              execPrice: "open",
+              topK: 2,
+              positionMode: "adaptive",
+              entryBackfill: "false",
+              scoreMethod: "sharpe_mom",
+              lookback: 63,
+              skip: 5,
+              cost: 2,
+              entryMatchN: 0,
+              exitMatchN: 0,
+              atrStopMode: "trailing",
+              groupEnforce: "true",
+              groupPolicy: "strongest_score",
+            },
+          };
+        }
+        return {
+          label: "平衡",
+          topN: 12, minN: 5, maxCorr: 0.75, horizon: 20,
+          w: { mom63: 0.25, mom126: 0.25, sharpe: 0.20, win: 0.10, liq: 0.10, mdd: 0.10 },
+          base: {
+            rebalance: "weekly",
+            rebalanceAnchor: 5,
+            rebalanceShift: "prev",
+            execPrice: "open",
+            topK: 1,
+            positionMode: "adaptive",
+            entryBackfill: "false",
+            scoreMethod: "raw_mom",
+            lookback: 20,
+            skip: 0,
+            cost: 2,
+            entryMatchN: 0,
+            exitMatchN: 0,
+            atrStopMode: "none",
+            groupEnforce: "false",
+            groupPolicy: "strongest_score",
+          },
+        };
+      }
+
+      function applyRotationAutoPreset(opts = {}) {
+        const keepMsg = !!opts.keepMsg;
+        const key = (($("rotAutoPreset") && $("rotAutoPreset").value) ? $("rotAutoPreset").value : "balanced");
+        const lockBase = !!($("rotAutoLockBase") && $("rotAutoLockBase").checked);
+        const spec = _rotationAutoPresetSpec(key);
+        if ($("rotAutoTopN")) $("rotAutoTopN").value = String(spec.topN);
+        if ($("rotAutoMinN")) $("rotAutoMinN").value = String(spec.minN);
+        if ($("rotAutoMaxCorr")) $("rotAutoMaxCorr").value = String(spec.maxCorr);
+        if ($("rotAutoSignifHorizon")) $("rotAutoSignifHorizon").value = String(spec.horizon);
+        if ($("rotAutoW_mom63")) $("rotAutoW_mom63").value = String(spec.w.mom63);
+        if ($("rotAutoW_mom126")) $("rotAutoW_mom126").value = String(spec.w.mom126);
+        if ($("rotAutoW_sharpe")) $("rotAutoW_sharpe").value = String(spec.w.sharpe);
+        if ($("rotAutoW_win")) $("rotAutoW_win").value = String(spec.w.win);
+        if ($("rotAutoW_liq")) $("rotAutoW_liq").value = String(spec.w.liq);
+        if ($("rotAutoW_mdd")) $("rotAutoW_mdd").value = String(spec.w.mdd);
+        if (!lockBase && spec.base) {
+          if ($("rotRebalance")) $("rotRebalance").value = String(spec.base.rebalance);
+          syncRotRebalanceAnchorUI();
+          if ($("rotRebalanceAnchor")) $("rotRebalanceAnchor").value = String(spec.base.rebalanceAnchor);
+          if ($("rotRebalanceShift")) $("rotRebalanceShift").value = String(spec.base.rebalanceShift);
+          if ($("rotExecPrice")) $("rotExecPrice").value = String(spec.base.execPrice);
+          if ($("rotTopK")) $("rotTopK").value = String(spec.base.topK);
+          if ($("rotPositionMode")) $("rotPositionMode").value = String(spec.base.positionMode);
+          if ($("rotEntryBackfill")) $("rotEntryBackfill").value = String(spec.base.entryBackfill);
+          if ($("rotScoreMethod")) $("rotScoreMethod").value = String(spec.base.scoreMethod);
+          if ($("rotLookback")) $("rotLookback").value = String(spec.base.lookback);
+          if ($("rotSkip")) $("rotSkip").value = String(spec.base.skip);
+          if ($("rotCost")) $("rotCost").value = String(spec.base.cost);
+          if ($("rotEntryMatchN")) $("rotEntryMatchN").value = String(spec.base.entryMatchN);
+          if ($("rotExitMatchN")) $("rotExitMatchN").value = String(spec.base.exitMatchN);
+          if ($("rotAtrStopMode")) $("rotAtrStopMode").value = String(spec.base.atrStopMode);
+          if ($("rotGroupEnforce")) $("rotGroupEnforce").value = String(spec.base.groupEnforce);
+          if ($("rotGroupPolicy")) $("rotGroupPolicy").value = String(spec.base.groupPolicy);
+          if (typeof window.__rotSyncMatchN === "function") window.__rotSyncMatchN();
+          _syncAtrStopParamsUi("rot");
+        }
+        if ($("rotAutoPresetHint")) {
+          $("rotAutoPresetHint").textContent = lockBase
+            ? `已应用${spec.label}档（基础参数已锁定）`
+            : `已应用${spec.label}档（含轮动基础参数）`;
+        }
+        _saveResearchSettingsDebounced();
+        if (!keepMsg) {
+          setMsg(
+            lockBase
+              ? `已应用参数预设：${spec.label}（仅自动筛选参数，基础参数已锁定）`
+              : `已应用参数预设：${spec.label}（自动筛选 + 轮动基础参数）`
+          );
+        }
       }
 
       async function runEwCalendarEffect() {
@@ -11610,6 +12604,8 @@
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
         const cost_bps = Number(($("rotCost").value || "2").trim());
+        const slippage_rate = Number(($("rotSlippage").value || "0.001").trim());
+        if (!Number.isFinite(slippage_rate) || slippage_rate < 0) return setMsg("轮动滑点需为>=0数字（例如 0.001）");
         const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
         if (entryFloorRules && entryFloorRules.__error) return setMsg(entryFloorRules.__error);
         const exitFloorRules = _buildFloorRules("rotExitFloorOn", "rotFloorExitRulesTable", "exit");
@@ -11809,7 +12805,7 @@
         const resp = await api("/analysis/rotation/calendar-effect", {
           method: "POST",
           body: JSON.stringify({
-            codes, start, end, rebalance, rebalance_shift, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps,
+            codes, start, end, rebalance, rebalance_shift, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
             risk_free_rate,
             score_method,
             atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
@@ -13021,6 +14017,7 @@
         const s = _findFixedStrategy(id);
         fixedStrategies = fixedStrategies.filter((x) => String(x.id) !== String(id));
         mixSelectedStrategyIds = (mixSelectedStrategyIds || []).filter((x) => String(x) !== String(id));
+        delete mixCustomWeightsById[String(id)];
         _saveFixedStrategies();
         _saveMixSelection();
         _renderFixedStrategyControls();
@@ -13031,11 +14028,13 @@
         const id = ($("mixStrategyAddSelect") && $("mixStrategyAddSelect").value) ? String($("mixStrategyAddSelect").value) : "";
         if (!id) return setMsg("请先选择要加入组合的固定策略。");
         if (!mixSelectedStrategyIds.includes(id)) mixSelectedStrategyIds.push(id);
+        if (!(String(id) in mixCustomWeightsById)) mixCustomWeightsById[String(id)] = 1;
         _renderMixStrategyListTable();
         _saveMixSelection();
       });
       if ($("mixClearStrategies")) $("mixClearStrategies").addEventListener("click", () => {
         mixSelectedStrategyIds = [];
+        mixCustomWeightsById = {};
         _renderMixStrategyListTable();
         _saveMixSelection();
       });
@@ -13072,6 +14071,10 @@
       updateTrendSizingUi();
       _syncAtrStopParamsUi("rot");
       if ($("rotSuggestGroups")) $("rotSuggestGroups").addEventListener("click", runSuggestGroups);
+      if ($("trendSuggestGroups")) $("trendSuggestGroups").addEventListener("click", runTrendSuggestGroups);
+      if ($("rotAutoScreenCandidates")) $("rotAutoScreenCandidates").addEventListener("click", runAutoScreenRotationCandidates);
+      if ($("rotAutoPresetApply")) $("rotAutoPresetApply").addEventListener("click", () => applyRotationAutoPreset());
+      if ($("rotAutoPreset")) $("rotAutoPreset").addEventListener("change", () => applyRotationAutoPreset());
       if ($("rotBenchMode")) $("rotBenchMode").addEventListener("change", () => {
         const data = window.__lastRotationResult;
         if (!data) return;
@@ -13132,6 +14135,9 @@
         _applyFields(SETTINGS_FIELD_IDS.mcEw, mcEwSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.mcRot, mcRotSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.sim, simSaved || {});
+        if (!(rotationSaved && typeof rotationSaved === "object")) {
+          try { applyRotationAutoPreset({ keepMsg: true }); } catch (_) { /* ignore */ }
+        }
 
         if (rotationSaved && rotationSaved.rules) _restoreRotationRuleTables(rotationSaved.rules);
         if (miniSaved && typeof miniSaved === "object") {
@@ -13150,11 +14156,48 @@
         } else {
           mixSelectedStrategyIds = [];
         }
+        if (mixSelSaved && mixSelSaved.custom_weights && typeof mixSelSaved.custom_weights === "object") {
+          mixCustomWeightsById = {};
+          for (const [k, v] of Object.entries(mixSelSaved.custom_weights)) {
+            const id = String(k || "").trim();
+            const vv = Number(v);
+            if (id && Number.isFinite(vv) && vv > 0) mixCustomWeightsById[id] = vv;
+          }
+        } else {
+          mixCustomWeightsById = {};
+        }
         if (mixSelSaved && mixSelSaved.weight_mode && $("mixWeightMode")) {
           $("mixWeightMode").value = String(mixSelSaved.weight_mode);
         }
         _renderFixedStrategyControls();
         _renderMixStrategyListTable();
+        // IndexedDB fallback (large data may exceed localStorage quota).
+        (async () => {
+          const fixedDbSaved = await _idbGet(SETTINGS_KEYS.fixedStrategies);
+          const mixDbSaved = await _idbGet(SETTINGS_KEYS.mixSelection);
+          let touched = false;
+          if (fixedDbSaved && Array.isArray(fixedDbSaved.items)) {
+            fixedStrategies = fixedDbSaved.items.map(_sanitizeFixedStrategy).filter(Boolean);
+            touched = true;
+          }
+          if (mixDbSaved && Array.isArray(mixDbSaved.strategy_ids)) {
+            mixSelectedStrategyIds = mixDbSaved.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean);
+            if (mixDbSaved.weight_mode && $("mixWeightMode")) $("mixWeightMode").value = String(mixDbSaved.weight_mode);
+            mixCustomWeightsById = {};
+            if (mixDbSaved.custom_weights && typeof mixDbSaved.custom_weights === "object") {
+              for (const [k, v] of Object.entries(mixDbSaved.custom_weights)) {
+                const id = String(k || "").trim();
+                const vv = Number(v);
+                if (id && Number.isFinite(vv) && vv > 0) mixCustomWeightsById[id] = vv;
+              }
+            }
+            touched = true;
+          }
+          if (touched) {
+            _renderFixedStrategyControls();
+            _renderMixStrategyListTable();
+          }
+        })();
 
         _afterDefaultsApply();
 
@@ -13175,7 +14218,7 @@
         document.addEventListener("click", (e) => {
           const btn = e.target && e.target.closest ? e.target.closest("button") : null;
           if (!btn) return;
-          if (btn.id && /ResetDefault|AddRule|Remove|selAll|selNone|selInvert/.test(btn.id)) {
+          if (btn.id && /ResetDefault|AddRule|Remove|selAll|selNone|selInvert|selInvertUndo/.test(btn.id)) {
             setTimeout(() => _saveResearchSettingsDebounced(), 0);
           }
           if (btn.className && /Remove/.test(String(btn.className))) {
@@ -13473,6 +14516,7 @@
             method: "POST",
             body: JSON.stringify({
               codes, start, end, rebalance, top_k, lookback_days, skip_days, cost_bps,
+              slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
               position_mode, entry_backfill, entry_match_n, exit_match_n,
               rebalance_anchor, rebalance_shift, exec_price,
               risk_free_rate,
@@ -13698,6 +14742,38 @@
       $("rotPeriodSortDir").addEventListener("change", () => { rotState.page = 1; renderRotPeriods(); });
       $("rotPeriodPrev").addEventListener("click", () => { rotState.page -= 1; renderRotPeriods(); });
       $("rotPeriodNext").addEventListener("click", () => { rotState.page += 1; renderRotPeriods(); });
+      $("rotGroupExplainFirst").addEventListener("click", () => { rotGroupExplainState.page = 1; _renderRotGroupExplainFromLastResult(); });
+      $("rotGroupExplainPrev").addEventListener("click", () => { rotGroupExplainState.page -= 1; _renderRotGroupExplainFromLastResult(); });
+      $("rotGroupExplainNext").addEventListener("click", () => { rotGroupExplainState.page += 1; _renderRotGroupExplainFromLastResult(); });
+      $("rotGroupExplainLast").addEventListener("click", () => { rotGroupExplainState.page = _rotGroupExplainTotalPages(); _renderRotGroupExplainFromLastResult(); });
+      $("rotGroupExplainGo").addEventListener("click", () => {
+        const v = Math.floor(Number(($("rotGroupExplainGoto") && $("rotGroupExplainGoto").value) ? $("rotGroupExplainGoto").value : "1"));
+        if (!Number.isFinite(v) || v < 1) return setMsg("跳转页码需为>=1的整数");
+        rotGroupExplainState.page = v;
+        _renderRotGroupExplainFromLastResult();
+      });
+      if ($("rotGroupExplainGoto")) $("rotGroupExplainGoto").addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const btn = $("rotGroupExplainGo");
+        if (btn && typeof btn.click === "function") btn.click();
+      });
+      $("trendGroupFirst").addEventListener("click", () => { trendGroupExplainState.page = 1; _renderTrendGroupExplainFromLastResult(); });
+      $("trendGroupPrev").addEventListener("click", () => { trendGroupExplainState.page -= 1; _renderTrendGroupExplainFromLastResult(); });
+      $("trendGroupNext").addEventListener("click", () => { trendGroupExplainState.page += 1; _renderTrendGroupExplainFromLastResult(); });
+      $("trendGroupLast").addEventListener("click", () => { trendGroupExplainState.page = _trendGroupExplainTotalPages(); _renderTrendGroupExplainFromLastResult(); });
+      $("trendGroupGo").addEventListener("click", () => {
+        const v = Math.floor(Number(($("trendGroupGoto") && $("trendGroupGoto").value) ? $("trendGroupGoto").value : "1"));
+        if (!Number.isFinite(v) || v < 1) return setMsg("趋势分组解释跳转页码需为>=1的整数");
+        trendGroupExplainState.page = v;
+        _renderTrendGroupExplainFromLastResult();
+      });
+      if ($("trendGroupGoto")) $("trendGroupGoto").addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const btn = $("trendGroupGo");
+        if (btn && typeof btn.click === "function") btn.click();
+      });
       wireRotPeriodControls("weekly");
       wireRotPeriodControls("monthly");
       wireRotPeriodControls("quarterly");
@@ -13706,14 +14782,38 @@
       wireTrendPeriodControls("monthly");
       wireTrendPeriodControls("quarterly");
       wireTrendPeriodControls("yearly");
-      $("selAll").addEventListener("click", () => { pool.forEach(x => selected.add(x.code)); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); _saveSelectedCodes(); });
+      wireMixPeriodControls("weekly");
+      wireMixPeriodControls("monthly");
+      wireMixPeriodControls("quarterly");
+      wireMixPeriodControls("yearly");
+      $("selAll").addEventListener("click", () => { _lastSelectionBeforeInvert = null; pool.forEach(x => selected.add(x.code)); _upsertCurrentGroupFromSelected(); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); _saveSelectedCodes(); });
       $("selAll").addEventListener("click", () => { maybeAdjustBacktestRange(); renderRangeHint(); });
-      $("selNone").addEventListener("click", () => { selected.clear(); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes(); });
+      $("selNone").addEventListener("click", () => { _lastSelectionBeforeInvert = null; selected.clear(); _upsertCurrentGroupFromSelected(); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes(); });
       $("selInvert").addEventListener("click", () => {
+        _lastSelectionBeforeInvert = Array.from(selected);
         const next = new Set();
         for (const it of pool) if (!selected.has(it.code)) next.add(it.code);
         selected.clear(); for (const c of next) selected.add(c);
+        _upsertCurrentGroupFromSelected();
         renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes();
+      });
+      if ($("selInvertUndo")) $("selInvertUndo").addEventListener("click", () => {
+        if (!Array.isArray(_lastSelectionBeforeInvert)) return setMsg("暂无可取消的反选操作。");
+        const valid = new Set((pool || []).map((x) => String((x && x.code) || "").trim()));
+        selected.clear();
+        for (const c0 of _lastSelectionBeforeInvert) {
+          const c = String(c0 || "").trim();
+          if (valid.has(c)) selected.add(c);
+        }
+        _lastSelectionBeforeInvert = null;
+        _upsertCurrentGroupFromSelected();
+        renderCodeList();
+        renderCandidateGroupControls();
+        renderBenchmarkSelect();
+        renderTrendSingleCodeSelect();
+        maybeAdjustBacktestRange();
+        renderRangeHint();
+        _saveSelectedCodes();
       });
       if ($("groupEditorSelect")) $("groupEditorSelect").addEventListener("change", () => {
         const nm = _sanitizeGroupName($("groupEditorSelect").value);
