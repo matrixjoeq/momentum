@@ -93,8 +93,11 @@
         .panel, table { break-inside: avoid; page-break-inside: avoid; }
         h2, h3 { break-after: avoid; page-break-after: avoid; }
         #chart, #rollingReturns, #rollingDD,
+        #baselineNavChart, #baselineDDCompare, #baselineRatioChart, #baseline40dDiffChart, #baselineRollingCombo, #baselineExcessRollingCombo,
+        #calTimingNavChart, #calTimingDDCompare, #calTimingRatioChart, #calTiming40dDiffChart, #calTimingRollingCombo, #calTimingExcessRollingCombo,
         #ewCalHeatmap, #ewCalRollingChart,
         #rotChart, #rotDDCompare, #rotExcessChart, #rot40dDiffChart, #rotRollingCombo, #rotExcessRollingCombo,
+        #trendChart, #trendDDCompare, #trendExcessChart, #trend40dExcessChart, #trendRollingCombo, #trendExcessRollingCombo,
         #rotCalHeatmap, #rotCalRollingChart,
         #corrHeatmap,
         #mcEwHist, #mcRotHist, #mcExcessHist,
@@ -124,10 +127,24 @@
         <span style="margin: 0 6px;">|</span>
         <a href="#section-trend">趋势策略</a>
         <span style="margin: 0 6px;">|</span>
+        <a href="#section-cal-timing">日历择时策略</a>
+        <span style="margin: 0 6px;">|</span>
         <a href="#section-mix">多策略组合</a>
       </div>
     </div>
-    <div class="muted no-print" style="margin-top:6px;"><a href="#pageTop">返回顶部</a></div>
+    <div class="muted no-print" style="margin-top:6px;">
+      <a href="#pageTop">返回顶部</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="#section-hold">持有</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="#section-rotation">轮动</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="#section-trend">趋势</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="#section-cal-timing">日历择时</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="#section-mix">多策略</a>
+    </div>
 
     <div class="panel row no-print">
       <div>
@@ -247,11 +264,15 @@
           <label>趋势策略分组</label>
           <select id="trendGroupPreset" style="min-width:180px;"></select>
         </div>
+        <div>
+          <label>日历择时策略分组</label>
+          <select id="calTimingGroupPreset" style="min-width:180px;"></select>
+        </div>
       </div>
       <div class="row">
         <div class="code-list" id="codes"></div>
         <div class="muted">
-          勾选候选池中的标的组成当前编辑分组。持有/轮动/趋势可分别选择不同分组进行回测。
+          勾选候选池中的标的组成当前编辑分组。持有/轮动/趋势/日历择时可分别选择不同分组进行回测。
           <div style="margin-top:8px">
             <button id="selAll">全选</button>
             <button id="selNone">取消全选</button>
@@ -266,7 +287,30 @@
       <div class="muted" id="dataNote">
         数据口径：交易价格=none（不复权）；信号与风控过滤（动量/趋势/RSI/波动率/震荡等）=qfq（前复权）。
       </div>
-      <div id="chart"></div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <h3 id="baselineTitleNav" style="margin:0;">净值曲线（等权(EW) vs 基准）</h3>
+          <div id="baselineNavChart" style="width:100%; height:520px; margin-top:8px;"></div>
+          <h3 id="baselineTitleDD" style="margin-top:12px;">回撤对比（等权(EW) vs 基准）</h3>
+          <div id="baselineDDCompare" style="width:100%; height:260px;"></div>
+        </div>
+        <div>
+          <h3 id="baselineTitleRatio" style="margin:0;">相对基准比值（等权(EW) / 基准）</h3>
+          <div id="baselineRatioChart" style="width:100%; height:520px; margin-top:8px;"></div>
+          <h3 id="baselineTitle40d" style="margin-top:12px;">40日收益差（等权(EW) - 基准）</h3>
+          <div id="baseline40dDiffChart" style="width:100%; height:260px;"></div>
+        </div>
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <h3 id="baselineTitleRolling">等权(EW)滚动收益&回撤（6个月/1年/2年/3年）</h3>
+          <div id="baselineRollingCombo" style="width:100%; height:520px;"></div>
+        </div>
+        <div>
+          <h3 id="baselineTitleExRolling">等权(EW)超额滚动收益&回撤（6个月/1年/2年/3年）</h3>
+          <div id="baselineExcessRollingCombo" style="width:100%; height:520px;"></div>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
@@ -413,18 +457,7 @@
       <div id="corrHeatmap" style="width:100%; height:1000px;"></div>
     </div>
 
-    <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
-      <div>
-        <h3>滚动收益率（等权组合）</h3>
-        <div id="rollingReturns"></div>
-      </div>
-      <div>
-        <h3>滚动回撤（等权组合）</h3>
-        <div id="rollingDD"></div>
-      </div>
-    </div>
-
-    <!-- RSI is overlaid on NAV charts (secondary axis) -->
+    <!-- RSI is overlaid on NAV and ratio charts (secondary axis) -->
 
     <div class="panel">
       <h3>傅里叶变换分析（候选标的）</h3>
@@ -728,7 +761,17 @@
 
     <div class="panel" id="section-rotation">
       <h2 style="margin-top: 8px">动量轮动回测</h2>
-      <div class="muted no-print" style="margin-top:4px;"><a href="#pageTop">返回顶部</a></div>
+      <div class="muted no-print" style="margin-top:4px;">
+        <a href="#pageTop">返回顶部</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-hold">持有</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-trend">趋势</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-cal-timing">日历择时</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-mix">多策略</a>
+      </div>
       <div class="muted">
         动量信号与风控过滤：qfq（前复权）；交易价格：none（不复权）。
         轮动净值：none 收益为主，但遇到拆分/分红等公司行为导致 none 价格断点时，用 hfq 的当日收益进行修正以避免净值虚假跳变；等权对比净值：hfq（后复权，总回报，含分红再投资），且等权再平衡频率与轮动调仓频率一致。
@@ -1505,11 +1548,11 @@
 
       <div class="panel two" style="grid-template-columns: 1fr 1fr;">
         <div>
-          <h3>轮动策略滚动收益&回撤（1/3/5年）</h3>
+          <h3>轮动策略滚动收益&回撤（6个月/1年/2年/3年）</h3>
           <div id="rotRollingCombo" style="width:100%; height:520px;"></div>
         </div>
         <div>
-          <h3>超额滚动收益&回撤（1/3/5年）</h3>
+          <h3>超额滚动收益&回撤（6个月/1年/2年/3年）</h3>
           <div id="rotExcessRollingCombo" style="width:100%; height:520px;"></div>
         </div>
       </div>
@@ -2327,7 +2370,17 @@
 
     <div class="panel no-print" id="section-trend" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
       <h3 style="margin: 0 0 6px 0;">趋势策略研究（单标的/组合）</h3>
-      <div class="muted no-print" style="margin-top:4px;"><a href="#pageTop">返回顶部</a></div>
+      <div class="muted no-print" style="margin-top:4px;">
+        <a href="#pageTop">返回顶部</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-hold">持有</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-rotation">轮动</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-cal-timing">日历择时</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-mix">多策略</a>
+      </div>
       <div class="row" style="align-items:end;">
         <div>
           <label>模式</label>
@@ -2489,9 +2542,30 @@
       </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
       <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
-      <div id="trendChart" style="width:100%; height:420px; margin-top:10px;"></div>
-      <h3 style="margin-top:12px;">趋势策略：与基准比较的40日收益差</h3>
-      <div id="trend40dExcessChart" style="width:100%; height:320px; margin-top:8px;"></div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <h3 style="margin:0;">净值曲线（趋势 vs 基准）</h3>
+          <div id="trendChart" style="width:100%; height:520px; margin-top:8px;"></div>
+          <h3 style="margin-top:12px;">回撤对比（趋势 vs 基准）</h3>
+          <div id="trendDDCompare" style="width:100%; height:260px;"></div>
+        </div>
+        <div>
+          <h3 style="margin:0;">超额净值（趋势 / 基准）</h3>
+          <div id="trendExcessChart" style="width:100%; height:520px; margin-top:8px;"></div>
+          <h3 style="margin-top:12px;">40日收益差（趋势 - 基准）</h3>
+          <div id="trend40dExcessChart" style="width:100%; height:260px;"></div>
+        </div>
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <h3>趋势策略滚动收益&回撤（6个月/1年/2年/3年）</h3>
+          <div id="trendRollingCombo" style="width:100%; height:520px;"></div>
+        </div>
+        <div>
+          <h3>超额滚动收益&回撤（6个月/1年/2年/3年）</h3>
+          <div id="trendExcessRollingCombo" style="width:100%; height:520px;"></div>
+        </div>
+      </div>
       <h3 style="margin-top:12px;">趋势策略：日度收益率分布统计</h3>
       <div class="row no-print" style="margin-top:8px; align-items:end;">
         <div>
@@ -2541,16 +2615,6 @@
         <div>
           <h3>风险收益比（趋势）</h3>
           <table id="trendRiskReturnRatio"></table>
-        </div>
-      </div>
-      <div class="panel two" style="margin-top:10px;">
-        <div>
-          <h3>滚动收益率（趋势）</h3>
-          <div id="trendRollingReturns" style="width:100%; height:300px;"></div>
-        </div>
-        <div>
-          <h3>滚动回撤（趋势）</h3>
-          <div id="trendRollingDD" style="width:100%; height:300px;"></div>
         </div>
       </div>
       <div class="panel">
@@ -2705,9 +2769,250 @@
       <div id="trendOosBootstrapResult" class="reportCard" style="margin-top:10px; white-space:pre-wrap;"></div>
     </div>
 
+    <div class="panel" id="section-cal-timing" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
+      <h3 style="margin: 0 0 6px 0;">日历效应择时策略研究</h3>
+      <div class="muted no-print" style="margin-top:4px;">
+        <a href="#pageTop">返回顶部</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-hold">持有</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-rotation">轮动</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-trend">趋势</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-mix">多策略</a>
+      </div>
+      <div class="row no-print" style="align-items:end; margin-top:10px;">
+        <div>
+          <label>模式</label>
+          <select id="calTimingMode" style="min-width:140px;">
+            <option value="portfolio" selected>组合</option>
+            <option value="single">单标的</option>
+          </select>
+        </div>
+        <div>
+          <label>单标的代码</label>
+          <select id="calTimingSingleCode" style="min-width:180px;"></select>
+        </div>
+        <div>
+          <label>调仓日（决策日，自然日）</label>
+          <input id="calTimingDecisionDay" value="1" />
+          <div class="muted">范围 [-28,28] 且不为0；负数表示倒数自然日。</div>
+        </div>
+        <div>
+          <label>持仓时长（交易日）</label>
+          <input id="calTimingHoldDays" value="1" />
+        </div>
+        <div>
+          <label>仓位模式</label>
+          <select id="calTimingPositionMode" style="min-width:140px;">
+            <option value="equal" selected>等权</option>
+            <option value="fixed_ratio">固定比例</option>
+          </select>
+        </div>
+        <div>
+          <label>固定比例（仅固定比例模式）</label>
+          <input id="calTimingFixedRatio" value="1.0" />
+        </div>
+      </div>
+      <div class="row no-print" style="align-items:end; margin-top:8px;">
+        <div>
+          <label>成交口径</label>
+          <select id="calTimingExecPrice" style="min-width:120px;">
+            <option value="open" selected>开盘价</option>
+            <option value="close">收盘价</option>
+          </select>
+        </div>
+        <div>
+          <label>交易成本(bps)</label>
+          <input id="calTimingCost" value="2" />
+        </div>
+        <div>
+          <label>交易滑点</label>
+          <input id="calTimingSlippage" value="0.001" />
+        </div>
+        <div>
+          <label>非交易日处理</label>
+          <select id="calTimingShift" style="min-width:180px;">
+            <option value="prev" selected>提前至上一交易日</option>
+            <option value="next">顺延至下一交易日</option>
+            <option value="skip">跳过</option>
+          </select>
+        </div>
+        <div>
+          <button id="runCalTiming">运行日历效应择时策略</button>
+        </div>
+      </div>
+      <div class="muted" id="calTimingParamNote" style="margin-top:8px;">
+        说明：调仓日是“决策日”；仅生成下一交易日执行计划。持仓时长从执行日开始计数（与开盘/收盘成交口径无关）。
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <h3 style="margin:0;">净值曲线（策略 vs 基准）</h3>
+          <div id="calTimingNavChart" style="width:100%; height:520px; margin-top:8px;"></div>
+          <h3 style="margin-top:12px;">回撤对比（策略 vs 基准）</h3>
+          <div id="calTimingDDCompare" style="width:100%; height:260px;"></div>
+        </div>
+        <div>
+          <h3 style="margin:0;">相对基准比值（策略 / 基准）</h3>
+          <div id="calTimingRatioChart" style="width:100%; height:520px; margin-top:8px;"></div>
+          <h3 style="margin-top:12px;">40日收益差（策略 - 基准）</h3>
+          <div id="calTiming40dDiffChart" style="width:100%; height:260px;"></div>
+        </div>
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <h3>策略滚动收益&回撤（6个月/1年/2年/3年）</h3>
+          <div id="calTimingRollingCombo" style="width:100%; height:520px;"></div>
+        </div>
+        <div>
+          <h3>超额滚动收益&回撤（6个月/1年/2年/3年）</h3>
+          <div id="calTimingExcessRollingCombo" style="width:100%; height:520px;"></div>
+        </div>
+      </div>
+      <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start;">
+        <div>
+          <h3>策略指标</h3>
+          <table id="calTimingMetrics"></table>
+        </div>
+        <div>
+          <h3>下一交易日执行计划</h3>
+          <div id="calTimingNextPlan" class="muted"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>当前持仓标的列表</h3>
+        <table id="calTimingCurrentHoldings"></table>
+      </div>
+      <div class="panel">
+        <h3>日度收益率分布统计</h3>
+        <div class="row no-print" style="margin-top:8px; align-items:end;">
+          <div>
+            <label>收益口径</label>
+            <select id="calTimingDailyRetMode" style="min-width:180px;">
+              <option value="simple" selected>普通收益率</option>
+              <option value="log">对数收益率(log return)</option>
+            </select>
+          </div>
+        </div>
+        <div id="calTimingDailyRetHist" style="width:100%; height:320px; margin-top:10px;"></div>
+        <table id="calTimingDailyRetQuantiles" style="margin-top:10px;"></table>
+      </div>
+      <div class="panel">
+        <h3>周期收益率</h3>
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:8px">
+          <div>
+            <div class="muted">周度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="ctWeeklySortKey" style="min-width:120px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="ctWeeklySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="ctWeeklyPrev">上一页</button>
+              <button id="ctWeeklyNext">下一页</button>
+              <span class="muted" id="ctWeeklyPage"></span>
+            </div>
+            <table id="calTimingWeekly"></table>
+          </div>
+          <div>
+            <div class="muted">月度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="ctMonthlySortKey" style="min-width:120px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="ctMonthlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="ctMonthlyPrev">上一页</button>
+              <button id="ctMonthlyNext">下一页</button>
+              <span class="muted" id="ctMonthlyPage"></span>
+            </div>
+            <table id="calTimingMonthly"></table>
+          </div>
+        </div>
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:12px">
+          <div>
+            <div class="muted">季度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="ctQuarterlySortKey" style="min-width:120px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="ctQuarterlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="ctQuarterlyPrev">上一页</button>
+              <button id="ctQuarterlyNext">下一页</button>
+              <span class="muted" id="ctQuarterlyPage"></span>
+            </div>
+            <table id="calTimingQuarterly"></table>
+          </div>
+          <div>
+            <div class="muted">年度</div>
+            <div class="row" style="gap:8px; margin:6px 0;">
+              <select id="ctYearlySortKey" style="min-width:120px;">
+                <option value="date">日期</option>
+                <option value="strategy">策略收益</option>
+                <option value="excess">超额收益</option>
+              </select>
+              <select id="ctYearlySortDir" style="min-width:120px;">
+                <option value="desc">递减</option>
+                <option value="asc">递增</option>
+              </select>
+              <button id="ctYearlyPrev">上一页</button>
+              <button id="ctYearlyNext">下一页</button>
+              <span class="muted" id="ctYearlyPage"></span>
+            </div>
+            <table id="calTimingYearly"></table>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>逐笔交易收益分布（含交易成本与滑点）</h3>
+        <div class="two" style="grid-template-columns: 1fr 1fr; margin-top:8px;">
+          <div>
+            <div class="muted">整体策略</div>
+            <table id="ctTradeOverallTable" style="margin-top:8px;"></table>
+            <div id="ctTradeOverallHist" style="width:100%; height:320px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="row" style="align-items:end;">
+              <div>
+                <label>按标的查看</label>
+                <select id="ctTradeByCodeSelect" style="min-width:200px;"></select>
+              </div>
+            </div>
+            <table id="ctTradeByCodeTable" style="margin-top:8px;"></table>
+            <div id="ctTradeByCodeHist" style="width:100%; height:320px; margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
+      <div id="calTimingReport" class="reportCard"></div>
+    </div>
+
     <div class="panel no-print" id="section-mix" style="margin-top: 22px; border-top: 1px solid #eee; padding-top: 14px;">
       <h3 style="margin: 0 0 6px 0;">固定策略库与多策略组合</h3>
-      <div class="muted no-print" style="margin-top:4px;"><a href="#pageTop">返回顶部</a></div>
+      <div class="muted no-print" style="margin-top:4px;">
+        <a href="#pageTop">返回顶部</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-hold">持有</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-rotation">轮动</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-trend">趋势</a>
+        <span style="margin: 0 6px;">|</span>
+        <a href="#section-cal-timing">日历择时</a>
+      </div>
       <div class="row" style="align-items:end;">
         <div>
           <label>策略类型</label>
@@ -2715,6 +3020,7 @@
             <option value="baseline" selected>持有策略</option>
             <option value="rotation">轮动策略</option>
             <option value="trend">趋势策略</option>
+            <option value="cal_timing">日历择时策略</option>
           </select>
         </div>
         <div><label>策略名称</label><input id="fixedStrategyName" placeholder="例如：防御持有A / 趋势突破1" /></div>
@@ -3098,6 +3404,7 @@
           baseline: "baselineGroupPreset",
           rotation: "rotationGroupPreset",
           trend: "trendGroupPreset",
+          cal_timing: "calTimingGroupPreset",
         };
         const selId = idByKind[String(kind || "").trim()];
         const pick = selId && $(selId) ? String($(selId).value || "").trim() : "";
@@ -3109,6 +3416,7 @@
         if (t === "baseline") return "持有";
         if (t === "rotation") return "轮动";
         if (t === "trend") return "趋势";
+        if (t === "cal_timing") return "日历择时";
         return t || "-";
       }
       function _saveFixedStrategies() {
@@ -3133,7 +3441,7 @@
         const id = String(item.id || "").trim();
         const name = String(item.name || "").trim();
         const type = String(item.type || "").trim().toLowerCase();
-        if (!id || !name || !["baseline", "rotation", "trend"].includes(type)) return null;
+        if (!id || !name || !["baseline", "rotation", "trend", "cal_timing"].includes(type)) return null;
         return {
           id,
           name: name.slice(0, 60),
@@ -3224,6 +3532,10 @@
           const ids = ["start", "end", "trendGroupPreset", ...SETTINGS_FIELD_IDS.trend];
           return _readFields(ids);
         }
+        if (t === "cal_timing") {
+          const ids = ["start", "end", "calTimingGroupPreset", ...SETTINGS_FIELD_IDS.calTiming];
+          return _readFields(ids);
+        }
         return {};
       }
       function _applyFixedStrategyFields(type, fields) {
@@ -3246,6 +3558,13 @@
           _applyFields(ids, fields || {});
           renderTrendSingleCodeSelect();
           updateTrendStrategyParamsUi();
+          return;
+        }
+        if (t === "cal_timing") {
+          const ids = ["start", "end", "calTimingGroupPreset", ...SETTINGS_FIELD_IDS.calTiming];
+          _applyFields(ids, fields || {});
+          _refreshCalTimingSingleCodeOptions();
+          _syncCalTimingModeUi();
         }
       }
       const SETTINGS_NS = "research.settings.v1";
@@ -3260,13 +3579,14 @@
         rotation: `${SETTINGS_NS}.rotation`,
         rotCal: `${SETTINGS_NS}.rotation_calendar`,
         trend: `${SETTINGS_NS}.trend`,
+        calTiming: `${SETTINGS_NS}.calendar_timing`,
         mcEw: `${SETTINGS_NS}.mc_ew`,
         mcRot: `${SETTINGS_NS}.mc_rot`,
         miniRot: `${SETTINGS_NS}.mini_rotation`,
         sim: `${SETTINGS_NS}.sim_gbm`,
       };
       const SETTINGS_FIELD_IDS = {
-        global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "baselineCustomWeights", "benchmark", "baselineGroupPreset", "rotationGroupPreset", "trendGroupPreset", "groupEditorSelect", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse", "mixAccountAmount", "mixWeightMode", "fixedStrategyType"],
+        global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "baselineCustomWeights", "benchmark", "baselineGroupPreset", "rotationGroupPreset", "trendGroupPreset", "calTimingGroupPreset", "groupEditorSelect", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse", "mixAccountAmount", "mixWeightMode", "fixedStrategyType"],
         dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric"],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
@@ -3291,6 +3611,11 @@
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
           "trendHybridEntryN", "trendHybridExitM",
+        ],
+        calTiming: [
+          "calTimingMode", "calTimingSingleCode", "calTimingDecisionDay", "calTimingHoldDays",
+          "calTimingPositionMode", "calTimingFixedRatio", "calTimingExecPrice",
+          "calTimingCost", "calTimingSlippage", "calTimingShift", "calTimingDailyRetMode",
         ],
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
         mcRot: ["mcRotN", "mcRotBlock", "mcRotWindow", "mcRotSeed"],
@@ -3565,6 +3890,7 @@
         rotCal.exec_prices = _checkedValues("input.rotCalPx");
         _settingsSave(SETTINGS_KEYS.rotCal, rotCal);
         _settingsSave(SETTINGS_KEYS.trend, _readFields(SETTINGS_FIELD_IDS.trend));
+        _settingsSave(SETTINGS_KEYS.calTiming, _readFields(SETTINGS_FIELD_IDS.calTiming));
         _settingsSave(SETTINGS_KEYS.mcEw, _readFields(SETTINGS_FIELD_IDS.mcEw));
         _settingsSave(SETTINGS_KEYS.mcRot, _readFields(SETTINGS_FIELD_IDS.mcRot));
         _settingsSave(SETTINGS_KEYS.sim, _readFields(SETTINGS_FIELD_IDS.sim));
@@ -5186,6 +5512,7 @@
         const bSel = $("baselineGroupPreset");
         const rSel = $("rotationGroupPreset");
         const tSel = $("trendGroupPreset");
+        const cSel = $("calTimingGroupPreset");
         const fill = (el, prev) => {
           if (!el) return;
           const old = String(prev != null ? prev : (el.value || "")).trim();
@@ -5205,6 +5532,7 @@
         fill(bSel);
         fill(rSel);
         fill(tSel);
+        fill(cSel);
         const curEditor = editor ? String(editor.value || "").trim() : "";
         if (curEditor) activeGroupName = curEditor;
         // Only sync name input when the editor selection actually changes.
@@ -6015,18 +6343,27 @@
         _renderTrendNextPlanTrace(data, mode);
       }
       function _alignSeriesByDates(srcDates, values, tgtDates) {
+        const _normDateKey = (x) => {
+          const s0 = String(x || "").trim();
+          if (!s0) return "";
+          const s = s0.includes("T") ? s0.slice(0, 10) : s0;
+          if (/^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+          if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) return s.replaceAll("/", "-");
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+          return s;
+        };
         const d0 = Array.isArray(srcDates) ? srcDates.map((x) => String(x || "")) : [];
         const v0 = Array.isArray(values) ? values.map(Number) : [];
         const mp = new Map();
         const n = Math.min(d0.length, v0.length);
         for (let i = 0; i < n; i++) {
-          const d = d0[i];
+          const d = _normDateKey(d0[i]);
           const v = v0[i];
           if (!d || !Number.isFinite(v)) continue;
           mp.set(d, v);
         }
         return (Array.isArray(tgtDates) ? tgtDates : []).map((d) => {
-          const x = mp.get(String(d || ""));
+          const x = mp.get(_normDateKey(d));
           return Number.isFinite(x) ? x : 0.0;
         });
       }
@@ -6169,7 +6506,8 @@
             const n1 = Number(nv[lastIdx]);
             if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
           }
-          if (!Number.isFinite(holdRet)) holdRet = _calcTotalHoldRetFromSub(c, entryIdx);
+          const holdRetFromSub = _calcTotalHoldRetFromSub(c, entryIdx);
+          if (Number.isFinite(holdRetFromSub)) holdRet = holdRetFromSub;
           const curW = Number(totalCur[c] || 0);
           const px = _lastPx(nv);
           const amt = _amtByWeight(curW, accountAmount);
@@ -6588,6 +6926,7 @@
         }
         if (s.type === "rotation") return _seriesMapFromNav(s.result, ["ROTATION", "STRAT"]);
         if (s.type === "trend") return _seriesMapFromNav(s.result, ["STRAT"]);
+        if (s.type === "cal_timing") return _seriesMapFromNav(s.result, ["STRAT"]);
         return null;
       }
       function _renderMixStrategyListTable() {
@@ -6853,6 +7192,53 @@
             one.history = trHist;
             one.current = _normalizeWeightMap(trCur);
             one.target = _normalizeWeightMap(Object.keys(trTgt).length ? trTgt : trCur);
+          } else if (s.type === "cal_timing") {
+            const cr = s.result || {};
+            const crDates = ((cr.nav || {}).dates || []);
+            const ch = Array.isArray(cr.current_holdings) ? cr.current_holdings : [];
+            const cur = {};
+            const hist = {};
+            for (const it of ch) {
+              const c = String((it && it.code) || "").trim();
+              const w = Number((it && it.weight));
+              if (!c || !Number.isFinite(w) || w <= 1e-12) continue;
+              cur[c] = w;
+            }
+            const curNorm = _normalizeWeightMap(cur);
+            for (const [c, w] of Object.entries(curNorm)) {
+              const arr = new Array(dts.length).fill(0);
+              const ent = String((ch.find((x) => String((x && x.code) || "").trim() === c) || {}).entry_date || "").trim();
+              const entIdx = ent ? dts.indexOf(ent) : -1;
+              if (entIdx >= 0) {
+                for (let k = entIdx; k < arr.length; k++) arr[k] = Number(w);
+              } else {
+                for (let k = 0; k < arr.length; k++) arr[k] = Number(w);
+              }
+              hist[c] = arr;
+            }
+            const tgt = {};
+            const plan = (((cr.next_execution_plan || {}).plan) || {});
+            const buys = Array.isArray(plan.buys) ? plan.buys : [];
+            const sells = Array.isArray(plan.sells) ? plan.sells : [];
+            const tp = String(plan.type || "").trim().toLowerCase();
+            if (tp === "entry" && buys.length) {
+              for (const b of buys) {
+                const c = String((b && b.code) || "").trim();
+                const w = Number((b && (b.target_weight != null ? b.target_weight : b.buy_weight)));
+                if (c && Number.isFinite(w) && w > 1e-12) tgt[c] = w;
+              }
+            } else if (tp === "exit" && sells.length) {
+              // Next plan exits to cash.
+            } else {
+              for (const [c, w] of Object.entries(curNorm)) tgt[c] = Number(w);
+            }
+            const an = (((cr.asset_nav_exec || {}).series) || {});
+            for (const c of Object.keys(an || {})) {
+              one.assetNavByCode[c] = _alignSeriesByDates(((cr.asset_nav_exec || {}).dates || crDates), an[c], dts);
+            }
+            one.history = hist;
+            one.current = curNorm;
+            one.target = _normalizeWeightMap(tgt);
           }
           sub[sid] = one;
           subCapitalWeights[sid] = wSub;
@@ -6907,6 +7293,15 @@
           } else if (String((s && s.type) || "") === "baseline") {
             const gCodes = _validCodes(_getGroupCodes((s && s.group_name) || ""));
             for (const c of gCodes) need.add(String(c));
+          } else if (String((s && s.type) || "") === "cal_timing") {
+            const cr = s.result || {};
+            const metaCodes = Array.isArray((cr.meta || {}).codes) ? (cr.meta || {}).codes : [];
+            const curRows = Array.isArray(cr.current_holdings) ? cr.current_holdings : [];
+            for (const c of metaCodes) need.add(String(c));
+            for (const it of curRows) {
+              const c = String((it && it.code) || "").trim();
+              if (c) need.add(c);
+            }
           }
         }
         if (!need.size) return {};
@@ -7065,10 +7460,17 @@
           payload = window.__lastRotationPayload || null;
           nextPlan = window.__lastRotationNextExecutionPlan || null;
           groupName = String(($("rotationGroupPreset") && $("rotationGroupPreset").value) || "").trim();
-        } else {
+        } else if (type === "trend") {
           result = window.__lastTrendResult || null;
           payload = window.__lastTrendPayload || null;
           groupName = String(($("trendGroupPreset") && $("trendGroupPreset").value) || "").trim();
+        } else if (type === "cal_timing") {
+          result = window.__lastCalTimingResult || null;
+          payload = window.__lastCalTimingPayload || null;
+          nextPlan = (result && result.next_execution_plan) ? result.next_execution_plan : null;
+          groupName = String(($("calTimingGroupPreset") && $("calTimingGroupPreset").value) || "").trim();
+        } else {
+          return setMsg("不支持的固定策略类型。");
         }
         if (!result || typeof result !== "object") return setMsg("该类型尚无可保存的回测结果，请先运行回测。");
         const fields = _readFixedStrategyFields(type);
@@ -7105,9 +7507,14 @@
         } else if (s.type === "trend") {
           window.__lastTrendResult = s.result;
           window.__lastTrendPayload = s.payload;
+        } else if (s.type === "cal_timing") {
+          window.__lastCalTimingResult = s.result;
+          window.__lastCalTimingPayload = s.payload;
         }
         renderBenchmarkSelect();
         renderTrendSingleCodeSelect();
+        _refreshCalTimingSingleCodeOptions();
+        _syncCalTimingModeUi();
         _renderFixedStrategyControls();
         setMsg(`已加载固定策略：${s.name}`);
       }
@@ -7428,6 +7835,305 @@
           },
           { responsive: true }
         );
+      }
+
+      function plotBaselineAlignedCharts(data, strategyMode) {
+        const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
+        const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
+        const mode = String(strategyMode || "EW").toUpperCase();
+        const stratNav = Array.isArray(nav[mode]) ? nav[mode] : [];
+        const benchKey = (() => {
+          const keys = Object.keys(nav || {});
+          const bk = keys.find((k) => String(k).startsWith("BENCH:"));
+          if (bk && Array.isArray(nav[bk]) && nav[bk].length) return bk;
+          if (mode !== "EW" && Array.isArray(nav.EW) && nav.EW.length) return "EW";
+          if (mode !== "RP" && Array.isArray(nav.RP) && nav.RP.length) return "RP";
+          if (mode !== "CUSTOM" && Array.isArray(nav.CUSTOM) && nav.CUSTOM.length) return "CUSTOM";
+          return "";
+        })();
+        const benchNav = benchKey ? (Array.isArray(nav[benchKey]) ? nav[benchKey] : []) : [];
+        const hasBench = benchNav.length === stratNav.length && stratNav.length > 0;
+        const rsiWins = [6, 12, 24];
+        const _msg = (id, txt) => {
+          const el = $(id);
+          if (!el) return;
+          el.innerHTML = `<div class='muted'>${esc(txt)}</div>`;
+        };
+        const _rsiWilder = (arr, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(arr.length).fill(null);
+          if (arr.length < w + 1) return out;
+          let avgGain = null;
+          let avgLoss = null;
+          for (let i = 1; i < arr.length; i++) {
+            const prev = Number(arr[i - 1]);
+            const cur = Number(arr[i]);
+            if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0 || cur <= 0) continue;
+            const chg = cur - prev;
+            const gain = Math.max(0, chg);
+            const loss = Math.max(0, -chg);
+            if (i <= w) {
+              if (avgGain == null) { avgGain = 0.0; avgLoss = 0.0; }
+              avgGain += gain;
+              avgLoss += loss;
+              if (i === w) {
+                avgGain = avgGain / w;
+                avgLoss = avgLoss / w;
+              }
+            } else {
+              avgGain = ((avgGain * (w - 1)) + gain) / w;
+              avgLoss = ((avgLoss * (w - 1)) + loss) / w;
+            }
+            if (i >= w && avgGain != null && avgLoss != null) {
+              if (avgLoss === 0 && avgGain === 0) out[i] = 50.0;
+              else if (avgLoss === 0) out[i] = 100.0;
+              else if (avgGain === 0) out[i] = 0.0;
+              else out[i] = 100.0 - (100.0 / (1.0 + avgGain / avgLoss));
+            }
+          }
+          return out;
+        };
+        const _drawdownFromNav = (vals) => {
+          let peak = -Infinity;
+          const out = [];
+          for (const v of vals) {
+            const x = Number(v);
+            if (!Number.isFinite(x) || x <= 0) { out.push(null); continue; }
+            peak = Math.max(peak, x);
+            out.push((x / peak) - 1.0);
+          }
+          return out;
+        };
+        const _rollingReturn = (vals, w0) => {
+          const w = Math.max(1, Number(w0 || 1));
+          const out = new Array(vals.length).fill(null);
+          for (let i = w; i < vals.length; i++) {
+            const a = Number(vals[i - w]);
+            const b = Number(vals[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+            out[i] = (b / a) - 1.0;
+          }
+          return out;
+        };
+        const _rollingDrawdown = (vals, w0) => {
+          const w = Math.max(2, Number(w0 || 2));
+          const out = new Array(vals.length).fill(null);
+          for (let i = w - 1; i < vals.length; i++) {
+            const st = i - w + 1;
+            let peak = -Infinity;
+            let ok = true;
+            for (let j = st; j <= i; j++) {
+              const x = Number(vals[j]);
+              if (!Number.isFinite(x) || x <= 0) { ok = false; break; }
+              peak = Math.max(peak, x);
+            }
+            const cur = Number(vals[i]);
+            if (!ok || !Number.isFinite(cur) || peak <= 0) continue;
+            out[i] = (cur / peak) - 1.0;
+          }
+          return out;
+        };
+        const _rollingMeanStd = (arr, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const mean = new Array(arr.length).fill(null);
+          const std = new Array(arr.length).fill(null);
+          let sum = 0.0;
+          let sumsq = 0.0;
+          let cnt = 0;
+          const q = [];
+          for (let i = 0; i < arr.length; i++) {
+            const x = Number(arr[i]);
+            q.push(x);
+            if (Number.isFinite(x)) {
+              sum += x;
+              sumsq += x * x;
+              cnt += 1;
+            }
+            if (q.length > w) {
+              const y = Number(q.shift());
+              if (Number.isFinite(y)) {
+                sum -= y;
+                sumsq -= y * y;
+                cnt -= 1;
+              }
+            }
+            if (q.length === w && cnt === w) {
+              const m = sum / w;
+              const v = Math.max(0.0, (sumsq / w) - (m * m));
+              mean[i] = m;
+              std[i] = Math.sqrt(v);
+            }
+          }
+          return { mean, std };
+        };
+        const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
+        const _plotRollingCombo = (divId, vals, titlePrefix) => {
+          const w6m = 126, w1 = 252, w2 = 252 * 2, w3 = 252 * 3;
+          const r6m = _rollingReturn(vals, w6m), r1 = _rollingReturn(vals, w1), r2 = _rollingReturn(vals, w2), r3 = _rollingReturn(vals, w3);
+          const d6m = _rollingDrawdown(vals, w6m), d1 = _rollingDrawdown(vals, w1), d2 = _rollingDrawdown(vals, w2), d3 = _rollingDrawdown(vals, w3);
+          const c6m = "rgba(214,39,40,0.90)";
+          const c1 = "rgba(31,119,180,0.90)";
+          const c2 = "rgba(44,160,44,0.90)";
+          const c3 = "rgba(255,127,14,0.90)";
+          const ddMin = (() => {
+            let m = 0.0;
+            for (const arr of [d6m, d1, d2, d3]) {
+              for (const v of arr) {
+                const x = Number(v);
+                if (!Number.isFinite(x)) continue;
+                if (x < m) m = x;
+              }
+            }
+            return Math.min(-0.01, m - 0.02);
+          })();
+          Plotly.newPlot(
+            divId,
+            [
+              { x: dates, y: r6m, mode: "lines", name: `${titlePrefix} R(6M)`, xaxis: "x2", yaxis: "y", line: { color: c6m, width: 1.4 }, hovertemplate: "%{x}<br>R6M=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1Y)`, xaxis: "x2", yaxis: "y", line: { color: c1, width: 1.4 }, hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r2, mode: "lines", name: `${titlePrefix} R(2Y)`, xaxis: "x2", yaxis: "y", line: { color: c2, width: 1.4 }, hovertemplate: "%{x}<br>R2Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3Y)`, xaxis: "x2", yaxis: "y", line: { color: c3, width: 1.4 }, hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d6m, mode: "lines", name: `${titlePrefix} DD(6M)`, xaxis: "x", yaxis: "y2", line: { color: c6m, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD6M=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1Y)`, xaxis: "x", yaxis: "y2", line: { color: c1, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d2, mode: "lines", name: `${titlePrefix} DD(2Y)`, xaxis: "x", yaxis: "y2", line: { color: c2, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD2Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3Y)`, xaxis: "x", yaxis: "y2", line: { color: c3, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>" },
+            ],
+            {
+              margin: { t: 10, b: 30 },
+              legend: { orientation: "h" },
+              xaxis: { domain: [0, 1], anchor: "y2" },
+              xaxis2: { domain: [0, 1], anchor: "y", matches: "x", showticklabels: false },
+              yaxis: { title: "Rolling Return", tickformat: ".0%", domain: [0.55, 1.0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+              yaxis2: { title: "Rolling Drawdown", tickformat: ".0%", domain: [0.0, 0.45], range: [ddMin, 0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+            },
+            { responsive: true }
+          );
+        };
+        const navTraces = [{ x: dates, y: stratNav, mode: "lines", name: mode, hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" }];
+        if (hasBench) navTraces.push({ x: dates, y: benchNav, mode: "lines", name: benchKey, hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" });
+        for (const w of rsiWins) {
+          navTraces.push({ x: dates, y: _rsiWilder(stratNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
+        }
+        Plotly.newPlot(
+          "baselineNavChart",
+          navTraces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+            yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+            shapes: [
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 30, y1: 30, line: { color: "#999", width: 1, dash: "dot" } },
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 70, y1: 70, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
+          },
+          { responsive: true }
+        );
+        Plotly.newPlot(
+          "baselineDDCompare",
+          [
+            { x: dates, y: _drawdownFromNav(stratNav), mode: "lines", name: `${mode} DD`, hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+            ...(hasBench ? [{ x: dates, y: _drawdownFromNav(benchNav), mode: "lines", name: `${benchKey} DD`, hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" }] : []),
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".0%", rangemode: "tozero", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+        _plotRollingCombo("baselineRollingCombo", stratNav, mode);
+        if (!hasBench) {
+          _msg("baselineRatioChart", "未设置可用基准，无法绘制相对基准比值图。");
+          _msg("baseline40dDiffChart", "未设置可用基准，无法绘制40日收益差。");
+          _msg("baselineExcessRollingCombo", "未设置可用基准，无法绘制超额滚动图。");
+          return;
+        }
+        const ratio = stratNav.map((x, i) => {
+          const a = Number(x);
+          const b = Number(benchNav[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return null;
+          return a / b;
+        });
+        const _bbTracesForRatio = (arr, win, opt = {}) => {
+          const isDefault = !!opt.isDefault;
+          const color = String(opt.color || "rgba(31,119,180,0.25)");
+          const ms = _rollingMeanStd(arr, win);
+          const ma = ms.mean;
+          const sd = ms.std;
+          const upper = ma.map((m, i) => (m == null || sd[i] == null ? null : (m + 2.0 * sd[i])));
+          const lower = ma.map((m, i) => (m == null || sd[i] == null ? null : (m - 2.0 * sd[i])));
+          const vis = isDefault ? true : "legendonly";
+          return [
+            { x: dates, y: lower, mode: "lines", name: `BB Lower(${win})`, line: { color, width: 1 }, hoverinfo: "skip", visible: vis },
+            { x: dates, y: upper, mode: "lines", name: `BB Upper(${win})`, line: { color, width: 1 }, fill: "tonexty", fillcolor: color.replace("0.25", "0.10"), hoverinfo: "skip", visible: vis },
+            { x: dates, y: ma, mode: "lines", name: `MA${win}`, line: { color: color.replace("0.25", "0.85"), width: 1.5 }, hovertemplate: `%{x}<br>MA${win}=%{y:.4f}<extra></extra>`, visible: vis },
+          ];
+        };
+        const ratioTraces = [
+          { x: dates, y: ratio, mode: "lines", name: "RATIO", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          ..._bbTracesForRatio(ratio, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+          ..._bbTracesForRatio(ratio, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+          ..._bbTracesForRatio(ratio, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
+        ];
+        for (const w of rsiWins) {
+          ratioTraces.push({ x: dates, y: _rsiWilder(ratio, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
+        }
+        Plotly.newPlot(
+          "baselineRatioChart",
+          ratioTraces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+            yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+            shapes: [
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 30, y1: 30, line: { color: "#999", width: 1, dash: "dot" } },
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 70, y1: 70, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
+          },
+          { responsive: true }
+        );
+        const s40 = _rollingReturn(stratNav, 40);
+        const b40 = _rollingReturn(benchNav, 40);
+        const diff40 = s40.map((x, i) => {
+          const a = Number(x);
+          const b = Number(b40[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+          return a - b;
+        });
+        const diff40Ma250 = _rollingMean(diff40, 250);
+        Plotly.newPlot(
+          "baseline40dDiffChart",
+          [
+            { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
+            { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".0%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+        _plotRollingCombo("baselineExcessRollingCombo", ratio, "EX");
+      }
+
+      function _baselineModeLabel(modeRaw) {
+        const mode = String(modeRaw || "EW").toUpperCase();
+        if (mode === "RP") return "风险平价(RP)";
+        if (mode === "CUSTOM") return "自定义(CUSTOM)";
+        return "等权(EW)";
+      }
+
+      function syncBaselineChartTitles(modeRaw) {
+        const label = _baselineModeLabel(modeRaw);
+        if ($("baselineTitleNav")) $("baselineTitleNav").textContent = `净值曲线（${label} vs 基准）`;
+        if ($("baselineTitleDD")) $("baselineTitleDD").textContent = `回撤对比（${label} vs 基准）`;
+        if ($("baselineTitleRatio")) $("baselineTitleRatio").textContent = `相对基准比值（${label} / 基准）`;
+        if ($("baselineTitle40d")) $("baselineTitle40d").textContent = `40日收益差（${label} - 基准）`;
+        if ($("baselineTitleRolling")) $("baselineTitleRolling").textContent = `${label}滚动收益&回撤（6个月/1年/2年/3年）`;
+        if ($("baselineTitleExRolling")) $("baselineTitleExRolling").textContent = `${label}超额滚动收益&回撤（6个月/1年/2年/3年）`;
       }
 
       function plotRolling(id, title, rollingMap, yTickFormat) {
@@ -10386,17 +11092,26 @@
           "rotExcessChart",
           (() => {
             const ex = s[excessKey] || [];
-            const ms250 = _rollingMeanStd(ex, 250);
-            const ma250 = ms250.mean;
-            const sd250 = ms250.std;
-            const upper = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m + 2.0 * sd250[i])));
-            const lower = ma250.map((m, i) => (m == null || sd250[i] == null ? null : (m - 2.0 * sd250[i])));
+            const _bbTracesForExcess = (arr, win, opt = {}) => {
+              const isDefault = !!opt.isDefault;
+              const color = String(opt.color || "rgba(31,119,180,0.25)");
+              const ms = _rollingMeanStd(arr, win);
+              const ma = ms.mean;
+              const sd = ms.std;
+              const upper = ma.map((m, i) => (m == null || sd[i] == null ? null : (m + 2.0 * sd[i])));
+              const lower = ma.map((m, i) => (m == null || sd[i] == null ? null : (m - 2.0 * sd[i])));
+              const vis = isDefault ? true : "legendonly";
+              return [
+                { x: dates, y: lower, mode: "lines", name: `BB Lower(${win})`, line: { color, width: 1 }, hoverinfo: "skip", visible: vis },
+                { x: dates, y: upper, mode: "lines", name: `BB Upper(${win})`, line: { color, width: 1 }, fill: "tonexty", fillcolor: color.replace("0.25", "0.10"), hoverinfo: "skip", visible: vis },
+                { x: dates, y: ma, mode: "lines", name: `MA${win}`, line: { color: color.replace("0.25", "0.85"), width: 1.5 }, hovertemplate: `%{x}<br>MA${win}=%{y:.4f}<extra></extra>`, visible: vis },
+              ];
+            };
             const out = [
               { x: dates, y: ex, mode: "lines", name: excessKey, hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
-              // Bollinger band (lower -> upper fill)
-              { x: dates, y: lower, mode: "lines", name: "BB Lower(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, hoverinfo: "skip" },
-              { x: dates, y: upper, mode: "lines", name: "BB Upper(250)", line: { color: "rgba(31,119,180,0.25)", width: 1 }, fill: "tonexty", fillcolor: "rgba(31,119,180,0.10)", hoverinfo: "skip" },
-              { x: dates, y: ma250, mode: "lines", name: "MA250", line: { color: "rgba(31,119,180,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>MA250=%{y:.4f}<extra></extra>" },
+              ..._bbTracesForExcess(ex, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+              ..._bbTracesForExcess(ex, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+              ..._bbTracesForExcess(ex, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
             ];
             // RSI on EXCESS below chart (same figure, separate panel)
             for (const w of rsiWins) {
@@ -10441,17 +11156,18 @@
           { responsive: true }
         );
 
-        // Rolling (1/3/5y) return & max drawdown for ROTATION and EXCESS.
-        const w1 = 252, w3 = 252 * 3, w5 = 252 * 5;
+        // Rolling (6m/1y/2y/3y) return & max drawdown for ROTATION and EXCESS.
+        const w6m = 126, w1 = 252, w2 = 252 * 2, w3 = 252 * 3;
         const _plotRollingCombo = (divId, nav, titlePrefix) => {
-          const r1 = _rollingReturn(nav, w1), r3 = _rollingReturn(nav, w3), r5 = _rollingReturn(nav, w5);
-          const d1 = _rollingDrawdown(nav, w1), d3 = _rollingDrawdown(nav, w3), d5 = _rollingDrawdown(nav, w5);
+          const r6m = _rollingReturn(nav, w6m), r1 = _rollingReturn(nav, w1), r2 = _rollingReturn(nav, w2), r3 = _rollingReturn(nav, w3);
+          const d6m = _rollingDrawdown(nav, w6m), d1 = _rollingDrawdown(nav, w1), d2 = _rollingDrawdown(nav, w2), d3 = _rollingDrawdown(nav, w3);
+          const c6m = "rgba(214,39,40,0.90)";
           const c1 = "rgba(31,119,180,0.90)";
-          const c3 = "rgba(44,160,44,0.90)";
-          const c5 = "rgba(255,127,14,0.90)";
+          const c2 = "rgba(44,160,44,0.90)";
+          const c3 = "rgba(255,127,14,0.90)";
           const ddMin = (() => {
             let m = 0.0;
-            for (const arr of [d1, d3, d5]) {
+            for (const arr of [d6m, d1, d2, d3]) {
               for (const v of arr) {
                 const x = Number(v);
                 if (!Number.isFinite(x)) continue;
@@ -10465,13 +11181,15 @@
             divId,
             [
               // returns (top panel)
-              { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1y)`, xaxis: "x2", yaxis: "y", line: { color: c1, width: 1.4 }, hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3y)`, xaxis: "x2", yaxis: "y", line: { color: c3, width: 1.4 }, hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: r5, mode: "lines", name: `${titlePrefix} R(5y)`, xaxis: "x2", yaxis: "y", line: { color: c5, width: 1.4 }, hovertemplate: "%{x}<br>R5Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r6m, mode: "lines", name: `${titlePrefix} R(6M)`, xaxis: "x2", yaxis: "y", line: { color: c6m, width: 1.4 }, hovertemplate: "%{x}<br>R6M=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1Y)`, xaxis: "x2", yaxis: "y", line: { color: c1, width: 1.4 }, hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r2, mode: "lines", name: `${titlePrefix} R(2Y)`, xaxis: "x2", yaxis: "y", line: { color: c2, width: 1.4 }, hovertemplate: "%{x}<br>R2Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3Y)`, xaxis: "x2", yaxis: "y", line: { color: c3, width: 1.4 }, hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>" },
               // drawdowns (bottom panel)
-              { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1y)`, xaxis: "x", yaxis: "y2", line: { color: c1, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3y)`, xaxis: "x", yaxis: "y2", line: { color: c3, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>" },
-              { x: dates, y: d5, mode: "lines", name: `${titlePrefix} DD(5y)`, xaxis: "x", yaxis: "y2", line: { color: c5, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD5Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d6m, mode: "lines", name: `${titlePrefix} DD(6M)`, xaxis: "x", yaxis: "y2", line: { color: c6m, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD6M=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1Y)`, xaxis: "x", yaxis: "y2", line: { color: c1, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d2, mode: "lines", name: `${titlePrefix} DD(2Y)`, xaxis: "x", yaxis: "y2", line: { color: c2, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD2Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3Y)`, xaxis: "x", yaxis: "y2", line: { color: c3, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>" },
             ],
             {
               margin: { t: 10, b: 30 },
@@ -10490,6 +11208,483 @@
         };
         _plotRollingCombo("rotRollingCombo", s.ROTATION || [], "ROT");
         _plotRollingCombo("rotExcessRollingCombo", (s[excessKey] || []), "EX");
+      }
+
+      function plotTrendAlignedCharts(payload) {
+        const dates = Array.isArray(payload && payload.dates) ? payload.dates : [];
+        const stratNav = Array.isArray(payload && payload.stratNav) ? payload.stratNav : [];
+        const benchNav = Array.isArray(payload && payload.benchNav) ? payload.benchNav : [];
+        const rsiWins = [6, 12, 24];
+        const _rsiWilder = (arr, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(arr.length).fill(null);
+          if (arr.length < w + 1) return out;
+          let avgGain = null;
+          let avgLoss = null;
+          for (let i = 1; i < arr.length; i++) {
+            const prev = Number(arr[i - 1]);
+            const cur = Number(arr[i]);
+            if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0 || cur <= 0) continue;
+            const chg = cur - prev;
+            const gain = Math.max(0, chg);
+            const loss = Math.max(0, -chg);
+            if (i <= w) {
+              if (avgGain == null) { avgGain = 0.0; avgLoss = 0.0; }
+              avgGain += gain;
+              avgLoss += loss;
+              if (i === w) {
+                avgGain = avgGain / w;
+                avgLoss = avgLoss / w;
+              }
+            } else {
+              avgGain = ((avgGain * (w - 1)) + gain) / w;
+              avgLoss = ((avgLoss * (w - 1)) + loss) / w;
+            }
+            if (i >= w && avgGain != null && avgLoss != null) {
+              if (avgLoss === 0 && avgGain === 0) out[i] = 50.0;
+              else if (avgLoss === 0) out[i] = 100.0;
+              else if (avgGain === 0) out[i] = 0.0;
+              else {
+                const rs = avgGain / avgLoss;
+                out[i] = 100.0 - (100.0 / (1.0 + rs));
+              }
+            }
+          }
+          return out;
+        };
+        const _drawdownFromNav = (nav) => {
+          let peak = -Infinity;
+          const out = [];
+          for (const v of nav) {
+            const x = Number(v);
+            if (!Number.isFinite(x) || x <= 0) { out.push(null); continue; }
+            peak = Math.max(peak, x);
+            out.push(peak > 0 ? (x / peak - 1.0) : null);
+          }
+          return out;
+        };
+        const _rollingReturn = (nav, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w; i < nav.length; i++) {
+            const a = Number(nav[i - w]);
+            const b = Number(nav[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+            out[i] = (b / a) - 1.0;
+          }
+          return out;
+        };
+        const _rollingDrawdown = (nav, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w - 1; i < nav.length; i++) {
+            const start = i - w + 1;
+            let peak = -Infinity;
+            let ok = true;
+            for (let j = start; j <= i; j++) {
+              const x = Number(nav[j]);
+              if (!Number.isFinite(x) || x <= 0) { ok = false; break; }
+              peak = Math.max(peak, x);
+            }
+            const cur = Number(nav[i]);
+            if (!ok || !Number.isFinite(cur) || peak <= 0) { out[i] = null; continue; }
+            out[i] = (cur / peak) - 1.0;
+          }
+          return out;
+        };
+        const _rollingMeanStd = (arr, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const mean = new Array(arr.length).fill(null);
+          const std = new Array(arr.length).fill(null);
+          let sum = 0.0;
+          let sumsq = 0.0;
+          let cnt = 0;
+          const q = [];
+          for (let i = 0; i < arr.length; i++) {
+            const x = Number(arr[i]);
+            q.push(x);
+            if (Number.isFinite(x)) {
+              sum += x;
+              sumsq += x * x;
+              cnt += 1;
+            }
+            if (q.length > w) {
+              const y = Number(q.shift());
+              if (Number.isFinite(y)) {
+                sum -= y;
+                sumsq -= y * y;
+                cnt -= 1;
+              }
+            }
+            if (q.length === w && cnt === w) {
+              const m = sum / w;
+              const v = Math.max(0.0, (sumsq / w) - (m * m));
+              mean[i] = m;
+              std[i] = Math.sqrt(v);
+            }
+          }
+          return { mean, std };
+        };
+        const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
+        const excessNav = stratNav.map((x, i) => {
+          const a = Number(x);
+          const b = Number(benchNav[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return null;
+          return a / b;
+        });
+        const navTraces = [
+          { x: dates, y: stratNav, mode: "lines", name: "STRAT", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          { x: dates, y: benchNav, mode: "lines", name: "BENCH", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+        ];
+        for (const w of rsiWins) {
+          navTraces.push({ x: dates, y: _rsiWilder(stratNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
+        }
+        Plotly.newPlot(
+          "trendChart",
+          navTraces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+            yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+            shapes: [
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 30, y1: 30, line: { color: "#999", width: 1, dash: "dot" } },
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 70, y1: 70, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
+          },
+          { responsive: true }
+        );
+        Plotly.newPlot(
+          "trendDDCompare",
+          [
+            { x: dates, y: _drawdownFromNav(stratNav), mode: "lines", name: "STRAT DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+            { x: dates, y: _drawdownFromNav(benchNav), mode: "lines", name: "BENCH DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".0%", rangemode: "tozero", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+        const _bbTracesForExcess = (arr, win, opt = {}) => {
+          const isDefault = !!opt.isDefault;
+          const color = String(opt.color || "rgba(31,119,180,0.25)");
+          const ms = _rollingMeanStd(arr, win);
+          const ma = ms.mean;
+          const sd = ms.std;
+          const upper = ma.map((m, i) => (m == null || sd[i] == null ? null : (m + 2.0 * sd[i])));
+          const lower = ma.map((m, i) => (m == null || sd[i] == null ? null : (m - 2.0 * sd[i])));
+          const vis = isDefault ? true : "legendonly";
+          return [
+            { x: dates, y: lower, mode: "lines", name: `BB Lower(${win})`, line: { color, width: 1 }, hoverinfo: "skip", visible: vis },
+            { x: dates, y: upper, mode: "lines", name: `BB Upper(${win})`, line: { color, width: 1 }, fill: "tonexty", fillcolor: color.replace("0.25", "0.10"), hoverinfo: "skip", visible: vis },
+            { x: dates, y: ma, mode: "lines", name: `MA${win}`, line: { color: color.replace("0.25", "0.85"), width: 1.5 }, hovertemplate: `%{x}<br>MA${win}=%{y:.4f}<extra></extra>`, visible: vis },
+          ];
+        };
+        const exTraces = [
+          { x: dates, y: excessNav, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          ..._bbTracesForExcess(excessNav, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+          ..._bbTracesForExcess(excessNav, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+          ..._bbTracesForExcess(excessNav, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
+        ];
+        for (const w of rsiWins) {
+          exTraces.push({ x: dates, y: _rsiWilder(excessNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
+        }
+        Plotly.newPlot(
+          "trendExcessChart",
+          exTraces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+            yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+            shapes: [
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 30, y1: 30, line: { color: "#999", width: 1, dash: "dot" } },
+              { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 70, y1: 70, line: { color: "#999", width: 1, dash: "dot" } },
+            ],
+          },
+          { responsive: true }
+        );
+        const rr40 = _rollingReturn(stratNav, 40);
+        const br40 = _rollingReturn(benchNav, 40);
+        const diff40 = rr40.map((x, i) => {
+          const a = Number(x);
+          const b = Number(br40[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+          return a - b;
+        });
+        const diff40Ma250 = _rollingMean(diff40, 250);
+        Plotly.newPlot(
+          "trend40dExcessChart",
+          [
+            { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
+            { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".0%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+        const w6m = 126, w1 = 252, w2 = 252 * 2, w3 = 252 * 3;
+        const _plotRollingCombo = (divId, nav, titlePrefix) => {
+          const r6m = _rollingReturn(nav, w6m), r1 = _rollingReturn(nav, w1), r2 = _rollingReturn(nav, w2), r3 = _rollingReturn(nav, w3);
+          const d6m = _rollingDrawdown(nav, w6m), d1 = _rollingDrawdown(nav, w1), d2 = _rollingDrawdown(nav, w2), d3 = _rollingDrawdown(nav, w3);
+          const c6m = "rgba(214,39,40,0.90)";
+          const c1 = "rgba(31,119,180,0.90)";
+          const c2 = "rgba(44,160,44,0.90)";
+          const c3 = "rgba(255,127,14,0.90)";
+          const ddMin = (() => {
+            let m = 0.0;
+            for (const arr of [d6m, d1, d2, d3]) {
+              for (const v of arr) {
+                const x = Number(v);
+                if (!Number.isFinite(x)) continue;
+                if (x < m) m = x;
+              }
+            }
+            return Math.min(-0.01, m - 0.02);
+          })();
+          Plotly.newPlot(
+            divId,
+            [
+              { x: dates, y: r6m, mode: "lines", name: `${titlePrefix} R(6M)`, xaxis: "x2", yaxis: "y", line: { color: c6m, width: 1.4 }, hovertemplate: "%{x}<br>R6M=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1Y)`, xaxis: "x2", yaxis: "y", line: { color: c1, width: 1.4 }, hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r2, mode: "lines", name: `${titlePrefix} R(2Y)`, xaxis: "x2", yaxis: "y", line: { color: c2, width: 1.4 }, hovertemplate: "%{x}<br>R2Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3Y)`, xaxis: "x2", yaxis: "y", line: { color: c3, width: 1.4 }, hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d6m, mode: "lines", name: `${titlePrefix} DD(6M)`, xaxis: "x", yaxis: "y2", line: { color: c6m, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD6M=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1Y)`, xaxis: "x", yaxis: "y2", line: { color: c1, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d2, mode: "lines", name: `${titlePrefix} DD(2Y)`, xaxis: "x", yaxis: "y2", line: { color: c2, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD2Y=%{y:.1%}<extra></extra>" },
+              { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3Y)`, xaxis: "x", yaxis: "y2", line: { color: c3, width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>" },
+            ],
+            {
+              margin: { t: 10, b: 30 },
+              legend: { orientation: "h" },
+              xaxis: { domain: [0, 1], anchor: "y2" },
+              xaxis2: { domain: [0, 1], anchor: "y", matches: "x", showticklabels: false },
+              yaxis: { title: "Rolling Return", tickformat: ".0%", domain: [0.55, 1.0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+              yaxis2: { title: "Rolling Drawdown", tickformat: ".0%", domain: [0.0, 0.45], range: [ddMin, 0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+            },
+            { responsive: true }
+          );
+        };
+        _plotRollingCombo("trendRollingCombo", stratNav, "STRAT");
+        _plotRollingCombo("trendExcessRollingCombo", excessNav, "EX");
+      }
+
+      function plotCalTimingAlignedCharts(payload) {
+        const dates = Array.isArray(payload && payload.dates) ? payload.dates : [];
+        const stratNav = Array.isArray(payload && payload.stratNav) ? payload.stratNav : [];
+        const benchNav = Array.isArray(payload && payload.benchNav) ? payload.benchNav : [];
+        const rsiWins = [6, 12, 24];
+        const _rsiWilder = (arr, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(arr.length).fill(null);
+          if (arr.length < w + 1) return out;
+          let avgGain = null;
+          let avgLoss = null;
+          for (let i = 1; i < arr.length; i++) {
+            const prev = Number(arr[i - 1]);
+            const cur = Number(arr[i]);
+            if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev <= 0 || cur <= 0) continue;
+            const chg = cur - prev;
+            const gain = Math.max(0, chg);
+            const loss = Math.max(0, -chg);
+            if (i <= w) {
+              if (avgGain == null) { avgGain = 0.0; avgLoss = 0.0; }
+              avgGain += gain;
+              avgLoss += loss;
+              if (i === w) {
+                avgGain = avgGain / w;
+                avgLoss = avgLoss / w;
+              }
+            } else {
+              avgGain = ((avgGain * (w - 1)) + gain) / w;
+              avgLoss = ((avgLoss * (w - 1)) + loss) / w;
+            }
+            if (i >= w && avgGain != null && avgLoss != null) {
+              if (avgLoss === 0 && avgGain === 0) out[i] = 50.0;
+              else if (avgLoss === 0) out[i] = 100.0;
+              else if (avgGain === 0) out[i] = 0.0;
+              else out[i] = 100.0 - (100.0 / (1.0 + avgGain / avgLoss));
+            }
+          }
+          return out;
+        };
+        const _drawdownFromNav = (nav) => {
+          let peak = -Infinity;
+          const out = [];
+          for (const v of nav) {
+            const x = Number(v);
+            if (!Number.isFinite(x) || x <= 0) { out.push(null); continue; }
+            peak = Math.max(peak, x);
+            out.push(peak > 0 ? (x / peak - 1.0) : null);
+          }
+          return out;
+        };
+        const _rollingReturn = (nav, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w; i < nav.length; i++) {
+            const a = Number(nav[i - w]);
+            const b = Number(nav[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+            out[i] = (b / a) - 1.0;
+          }
+          return out;
+        };
+        const _rollingDrawdown = (nav, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w - 1; i < nav.length; i++) {
+            const start = i - w + 1;
+            let peak = -Infinity;
+            let ok = true;
+            for (let j = start; j <= i; j++) {
+              const x = Number(nav[j]);
+              if (!Number.isFinite(x) || x <= 0) { ok = false; break; }
+              peak = Math.max(peak, x);
+            }
+            const cur = Number(nav[i]);
+            if (!ok || !Number.isFinite(cur) || peak <= 0) { out[i] = null; continue; }
+            out[i] = (cur / peak) - 1.0;
+          }
+          return out;
+        };
+        const _rollingMeanStd = (arr, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const mean = new Array(arr.length).fill(null);
+          const std = new Array(arr.length).fill(null);
+          let sum = 0.0;
+          let sumsq = 0.0;
+          let cnt = 0;
+          const q = [];
+          for (let i = 0; i < arr.length; i++) {
+            const x = Number(arr[i]);
+            q.push(x);
+            if (Number.isFinite(x)) {
+              sum += x;
+              sumsq += x * x;
+              cnt += 1;
+            }
+            if (q.length > w) {
+              const y = Number(q.shift());
+              if (Number.isFinite(y)) {
+                sum -= y;
+                sumsq -= y * y;
+                cnt -= 1;
+              }
+            }
+            if (q.length === w && cnt === w) {
+              const m = sum / w;
+              const v = Math.max(0.0, (sumsq / w) - (m * m));
+              mean[i] = m;
+              std[i] = Math.sqrt(v);
+            }
+          }
+          return { mean, std };
+        };
+        const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
+        const ratioNav = stratNav.map((x, i) => {
+          const a = Number(x);
+          const b = Number(benchNav[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return null;
+          return a / b;
+        });
+        const navTraces = [
+          { x: dates, y: stratNav, mode: "lines", name: "STRAT", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          { x: dates, y: benchNav, mode: "lines", name: "BENCH", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+        ];
+        for (const w of rsiWins) navTraces.push({ x: dates, y: _rsiWilder(stratNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 } });
+        Plotly.newPlot("calTimingNavChart", navTraces, {
+          margin: { t: 20 },
+          legend: { orientation: "h" },
+          yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+          yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+        }, { responsive: true });
+        Plotly.newPlot("calTimingDDCompare", [
+          { x: dates, y: _drawdownFromNav(stratNav), mode: "lines", name: "STRAT DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+          { x: dates, y: _drawdownFromNav(benchNav), mode: "lines", name: "BENCH DD", hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+        ], { margin: { t: 10, b: 30 }, legend: { orientation: "h" }, yaxis: { tickformat: ".0%", rangemode: "tozero", gridcolor: "#eee" } }, { responsive: true });
+
+        const _bbTracesForRatio = (arr, win, opt = {}) => {
+          const isDefault = !!opt.isDefault;
+          const color = String(opt.color || "rgba(31,119,180,0.25)");
+          const ms = _rollingMeanStd(arr, win);
+          const ma = ms.mean;
+          const sd = ms.std;
+          const upper = ma.map((m, i) => (m == null || sd[i] == null ? null : (m + 2.0 * sd[i])));
+          const lower = ma.map((m, i) => (m == null || sd[i] == null ? null : (m - 2.0 * sd[i])));
+          const vis = isDefault ? true : "legendonly";
+          return [
+            { x: dates, y: lower, mode: "lines", name: `BB Lower(${win})`, line: { color, width: 1 }, hoverinfo: "skip", visible: vis },
+            { x: dates, y: upper, mode: "lines", name: `BB Upper(${win})`, line: { color, width: 1 }, fill: "tonexty", fillcolor: color.replace("0.25", "0.10"), hoverinfo: "skip", visible: vis },
+            { x: dates, y: ma, mode: "lines", name: `MA${win}`, line: { color: color.replace("0.25", "0.85"), width: 1.5 }, hovertemplate: `%{x}<br>MA${win}=%{y:.4f}<extra></extra>`, visible: vis },
+          ];
+        };
+        const ratioTraces = [
+          { x: dates, y: ratioNav, mode: "lines", name: "RATIO", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
+          ..._bbTracesForRatio(ratioNav, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+          ..._bbTracesForRatio(ratioNav, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+          ..._bbTracesForRatio(ratioNav, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
+        ];
+        for (const w of rsiWins) ratioTraces.push({ x: dates, y: _rsiWilder(ratioNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 } });
+        Plotly.newPlot("calTimingRatioChart", ratioTraces, {
+          margin: { t: 20 },
+          legend: { orientation: "h" },
+          yaxis: { type: "log", tick0: 0, dtick: Math.log10(2.0), tickformat: ".0f", gridcolor: "#eee", domain: [0.32, 1.0] },
+          yaxis2: { title: "RSI", range: [0, 100], showgrid: false, zeroline: false, domain: [0.0, 0.25] },
+        }, { responsive: true });
+
+        const rr40 = _rollingReturn(stratNav, 40);
+        const br40 = _rollingReturn(benchNav, 40);
+        const diff40 = rr40.map((x, i) => {
+          const a = Number(x);
+          const b = Number(br40[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+          return a - b;
+        });
+        const diff40Ma250 = _rollingMean(diff40, 250);
+        Plotly.newPlot("calTiming40dDiffChart", [
+          { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
+          { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+        ], { margin: { t: 10, b: 30 }, legend: { orientation: "h" }, yaxis: { tickformat: ".0%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" } }, { responsive: true });
+
+        const w6m = 126, w1 = 252, w2 = 252 * 2, w3 = 252 * 3;
+        const _plotRollingCombo = (divId, nav, titlePrefix) => {
+          const r6m = _rollingReturn(nav, w6m), r1 = _rollingReturn(nav, w1), r2 = _rollingReturn(nav, w2), r3 = _rollingReturn(nav, w3);
+          const d6m = _rollingDrawdown(nav, w6m), d1 = _rollingDrawdown(nav, w1), d2 = _rollingDrawdown(nav, w2), d3 = _rollingDrawdown(nav, w3);
+          const c6m = "rgba(214,39,40,0.90)";
+          const c1 = "rgba(31,119,180,0.90)";
+          const c2 = "rgba(44,160,44,0.90)";
+          const c3 = "rgba(255,127,14,0.90)";
+          const ddMin = (() => {
+            let m = 0.0;
+            for (const arr of [d6m, d1, d2, d3]) for (const v of arr) { const x = Number(v); if (Number.isFinite(x) && x < m) m = x; }
+            return Math.min(-0.01, m - 0.02);
+          })();
+          Plotly.newPlot(divId, [
+            { x: dates, y: r6m, mode: "lines", name: `${titlePrefix} R(6M)`, xaxis: "x2", yaxis: "y", line: { color: c6m, width: 1.4 } },
+            { x: dates, y: r1, mode: "lines", name: `${titlePrefix} R(1Y)`, xaxis: "x2", yaxis: "y", line: { color: c1, width: 1.4 } },
+            { x: dates, y: r2, mode: "lines", name: `${titlePrefix} R(2Y)`, xaxis: "x2", yaxis: "y", line: { color: c2, width: 1.4 } },
+            { x: dates, y: r3, mode: "lines", name: `${titlePrefix} R(3Y)`, xaxis: "x2", yaxis: "y", line: { color: c3, width: 1.4 } },
+            { x: dates, y: d6m, mode: "lines", name: `${titlePrefix} DD(6M)`, xaxis: "x", yaxis: "y2", line: { color: c6m, width: 1.2, dash: "dot" } },
+            { x: dates, y: d1, mode: "lines", name: `${titlePrefix} DD(1Y)`, xaxis: "x", yaxis: "y2", line: { color: c1, width: 1.2, dash: "dot" } },
+            { x: dates, y: d2, mode: "lines", name: `${titlePrefix} DD(2Y)`, xaxis: "x", yaxis: "y2", line: { color: c2, width: 1.2, dash: "dot" } },
+            { x: dates, y: d3, mode: "lines", name: `${titlePrefix} DD(3Y)`, xaxis: "x", yaxis: "y2", line: { color: c3, width: 1.2, dash: "dot" } },
+          ], {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            xaxis: { domain: [0, 1], anchor: "y2" },
+            xaxis2: { domain: [0, 1], anchor: "y", matches: "x", showticklabels: false },
+            yaxis: { title: "Rolling Return", tickformat: ".0%", domain: [0.55, 1.0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+            yaxis2: { title: "Rolling Drawdown", tickformat: ".0%", domain: [0.0, 0.45], range: [ddMin, 0], zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+          }, { responsive: true });
+        };
+        _plotRollingCombo("calTimingRollingCombo", stratNav, "STRAT");
+        _plotRollingCombo("calTimingExcessRollingCombo", ratioNav, "EX");
       }
 
       function renderRotationMetrics(m) {
@@ -10739,6 +11934,12 @@
         quarterly: { page: 1, rows: [] },
         yearly: { page: 1, rows: [] },
       };
+      const ctPeriodTableState = {
+        weekly: { page: 1, rows: [] },
+        monthly: { page: 1, rows: [] },
+        quarterly: { page: 1, rows: [] },
+        yearly: { page: 1, rows: [] },
+      };
       function _sortedRotPeriodRows(rows, sortKey, sortDir) {
         const arr = (rows || []).slice();
         let k = "period_end";
@@ -10821,6 +12022,44 @@
         $(`mix${cap}SortDir`).addEventListener("change", () => { mixPeriodTableState[kind].page = 1; renderMixPeriodTable(kind); });
         $(`mix${cap}Prev`).addEventListener("click", () => { mixPeriodTableState[kind].page -= 1; renderMixPeriodTable(kind); });
         $(`mix${cap}Next`).addEventListener("click", () => { mixPeriodTableState[kind].page += 1; renderMixPeriodTable(kind); });
+      }
+      function renderCtPeriodTable(kind) {
+        const st = ctPeriodTableState[kind];
+        const cap = kind[0].toUpperCase() + kind.slice(1);
+        const sortKey = $(`ct${cap}SortKey`).value;
+        const sortDir = $(`ct${cap}SortDir`).value;
+        const _sortedCtPeriodRows = (rows0, key0, dir0) => {
+          const arr = (rows0 || []).slice();
+          let k = "period_end";
+          if (key0 === "strategy") k = "strategy_return";
+          if (key0 === "excess") k = "excess_return";
+          arr.sort((a, b) => {
+            const av = k === "period_end" ? String(a[k]) : Number(a[k]);
+            const bv = k === "period_end" ? String(b[k]) : Number(b[k]);
+            if (av < bv) return -1;
+            if (av > bv) return 1;
+            return 0;
+          });
+          if (dir0 === "desc") arr.reverse();
+          return arr;
+        };
+        const rows = _sortedCtPeriodRows(st.rows || [], sortKey, sortDir);
+        const total = rows.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        st.page = Math.min(Math.max(1, st.page), totalPages);
+        const startIdx = (st.page - 1) * pageSize;
+        const pageRows = rows.slice(startIdx, startIdx + pageSize);
+        $(`calTiming${cap}`).innerHTML =
+          `<tr><th>期末</th><th>策略</th><th>基准</th><th>超额</th></tr>` +
+          pageRows.map((x) => `<tr><td>${x.period_end}</td><td>${fmtPct(Number(x.strategy_return))}</td><td>${fmtPct(Number(x.benchmark_return))}</td><td>${fmtPct(Number(x.excess_return))}</td></tr>`).join("");
+        $(`ct${cap}Page`).textContent = `${st.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+      }
+      function wireCtPeriodControls(kind) {
+        const cap = kind[0].toUpperCase() + kind.slice(1);
+        $(`ct${cap}SortKey`).addEventListener("change", () => { ctPeriodTableState[kind].page = 1; renderCtPeriodTable(kind); });
+        $(`ct${cap}SortDir`).addEventListener("change", () => { ctPeriodTableState[kind].page = 1; renderCtPeriodTable(kind); });
+        $(`ct${cap}Prev`).addEventListener("click", () => { ctPeriodTableState[kind].page -= 1; renderCtPeriodTable(kind); });
+        $(`ct${cap}Next`).addEventListener("click", () => { ctPeriodTableState[kind].page += 1; renderCtPeriodTable(kind); });
       }
 
       function _checkedValues(sel) {
@@ -11697,36 +12936,13 @@
         const y1 = Array.isArray(nav.STRAT) ? nav.STRAT : [];
         const y2 = Array.isArray(nav.BUY_HOLD) ? nav.BUY_HOLD : (Array.isArray(nav.BUY_HOLD_EW) ? nav.BUY_HOLD_EW : []);
         const y3 = Array.isArray(nav.EXCESS) ? nav.EXCESS : [];
-        Plotly.newPlot("trendChart", [
-          { x: dates, y: y1, type: "scatter", mode: "lines", name: "STRAT" },
-          { x: dates, y: y2, type: "scatter", mode: "lines", name: "BENCH" },
-          { x: dates, y: y3, type: "scatter", mode: "lines", name: "EXCESS" },
-        ], {
-          margin: { t: 30 },
-          title: `趋势回测 - ${esc(strategy)} (${mode})`,
-          yaxis: { type: "log", title: "净值(对数)" },
-        });
         try {
-          const rr40 = _rollingReturnDiff(dates, y1, y2, 40);
-          Plotly.newPlot("trend40dExcessChart", [
-            { x: rr40.dates, y: rr40.values, type: "scatter", mode: "lines", name: "40日收益差(策略-基准)" },
-          ], {
-            margin: { t: 30 },
-            title: (mode === "single")
-              ? "40日收益差：策略 vs 标的自身买入持有"
-              : "40日收益差：策略 vs 等权持有组合",
-            yaxis: { title: "收益差", tickformat: ".1%" },
-            shapes: [{
-              type: "line",
-              xref: "paper",
-              x0: 0,
-              x1: 1,
-              yref: "y",
-              y0: 0,
-              y1: 0,
-              line: { color: "#999", width: 1, dash: "dot" },
-            }],
-          }, { responsive: true, displayModeBar: false });
+          plotTrendAlignedCharts({
+            dates,
+            stratNav: y1,
+            benchNav: y2,
+            excessNav: y3,
+          });
         } catch (_) { /* ignore */ }
         renderTrendDailyReturnDist(data);
         renderTradeStatistics("trend", data);
@@ -11824,9 +13040,7 @@
           renderTrendPeriodTable("yearly");
         } catch (_) { /* ignore */ }
         try {
-          const roll = (data && data.rolling) ? data.rolling : _rollingPackFromNav(dates, y1);
-          plotRolling("trendRollingReturns", "Trend Rolling Returns", (roll.returns || {}), ".0%");
-          plotRolling("trendRollingDD", "Trend Rolling Drawdown", (roll.drawdown || roll.max_drawdown || {}), ".0%");
+          // draw by plotTrendAlignedCharts; keep fallback path no-op.
         } catch (_) { /* ignore */ }
         trendGroupExplainState.page = 1;
         renderTrendGroupExplain(Array.isArray(data.holdings) ? data.holdings : []);
@@ -12837,6 +14051,214 @@
         setReportTo("rotCalReport", "轮动日历效应解读", bullets, "说明：该结论仅反映当前参数下锚点与成交价口径的相对表现。");
       }
 
+      function _refreshCalTimingSingleCodeOptions() {
+        const sel = $("calTimingSingleCode");
+        if (!sel) return;
+        const codes = _codesForStrategy("cal_timing");
+        sel.innerHTML = codes.map((c) => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
+      }
+
+      function _syncCalTimingModeUi() {
+        const mode = ($("calTimingMode") && $("calTimingMode").value) ? String($("calTimingMode").value) : "portfolio";
+        const singleSel = $("calTimingSingleCode");
+        if (singleSel) {
+          singleSel.disabled = mode !== "single";
+          singleSel.style.opacity = mode === "single" ? "1" : "0.55";
+        }
+        const pm = ($("calTimingPositionMode") && $("calTimingPositionMode").value) ? String($("calTimingPositionMode").value) : "equal";
+        const fx = $("calTimingFixedRatio");
+        if (fx) {
+          fx.disabled = pm !== "fixed_ratio";
+          fx.style.opacity = pm === "fixed_ratio" ? "1" : "0.55";
+        }
+      }
+
+      function _renderCalTimingMetrics(m) {
+        const s = (m && m.strategy) ? m.strategy : {};
+        const b = (m && m.benchmark) ? m.benchmark : {};
+        const e = (m && m.excess) ? m.excess : {};
+        $("calTimingMetrics").innerHTML =
+          `<tr><th>指标</th><th>策略</th><th>基准</th><th>超额</th></tr>` +
+          `<tr><td>累计收益</td><td>${fmtPct(s.cumulative_return)}</td><td>${fmtPct(b.cumulative_return)}</td><td>${fmtPct(e.cumulative_return)}</td></tr>` +
+          `<tr><td>年化收益</td><td>${fmtPct(s.annualized_return)}</td><td>${fmtPct(b.annualized_return)}</td><td>${fmtPct(e.annualized_return)}</td></tr>` +
+          `<tr><td>年化波动</td><td>${fmtPct(s.annualized_volatility)}</td><td>${fmtPct(b.annualized_volatility)}</td><td>${fmtPct(e.annualized_volatility)}</td></tr>` +
+          `<tr><td>最大回撤</td><td>${fmtPct(s.max_drawdown)}</td><td>${fmtPct(b.max_drawdown)}</td><td>${fmtPct(e.max_drawdown)}</td></tr>` +
+          `<tr><td>最大回撤修复时长(天)</td><td>${s.max_drawdown_recovery_days ?? "-"}</td><td>${b.max_drawdown_recovery_days ?? "-"}</td><td>${e.max_drawdown_recovery_days ?? "-"}</td></tr>` +
+          `<tr><td>夏普</td><td>${fmtNum(s.sharpe_ratio)}</td><td>${fmtNum(b.sharpe_ratio)}</td><td>${fmtNum(e.sharpe_ratio)}</td></tr>` +
+          `<tr><td>索诺提</td><td>${fmtNum(s.sortino_ratio)}</td><td>${fmtNum(b.sortino_ratio)}</td><td>${fmtNum(e.sortino_ratio)}</td></tr>` +
+          `<tr><td>卡玛</td><td>${fmtNum(s.calmar_ratio)}</td><td>${fmtNum(b.calmar_ratio)}</td><td>${fmtNum(e.calmar_ratio)}</td></tr>` +
+          `<tr><td>溃疡指标(UI)</td><td>${fmtNum(s.ulcer_index)}</td><td>${fmtNum(b.ulcer_index)}</td><td>${fmtNum(e.ulcer_index)}</td></tr>` +
+          `<tr><td>溃疡绩效(UPI)</td><td>${fmtNum(s.ulcer_performance_index)}</td><td>${fmtNum(b.ulcer_performance_index)}</td><td>${fmtNum(e.ulcer_performance_index)}</td></tr>` +
+          `<tr><td>平均日换手率</td><td>${fmtPct(s.avg_daily_turnover)}</td><td>${fmtPct(b.avg_daily_turnover)}</td><td>${fmtPct(e.avg_daily_turnover)}</td></tr>` +
+          `<tr><td>平均年换手率</td><td>${fmtPct(s.avg_annual_turnover)}</td><td>${fmtPct(b.avg_annual_turnover)}</td><td>${fmtPct(e.avg_annual_turnover)}</td></tr>` +
+          `<tr><td>超额信息比率</td><td>${fmtNum(s.information_ratio)}</td><td>-</td><td>${fmtNum(e.information_ratio)}</td></tr>`;
+      }
+
+      function _renderCalTimingPeriods(pr) {
+        ctPeriodTableState.weekly.rows = (pr && pr.weekly) ? pr.weekly : [];
+        ctPeriodTableState.monthly.rows = (pr && pr.monthly) ? pr.monthly : [];
+        ctPeriodTableState.quarterly.rows = (pr && pr.quarterly) ? pr.quarterly : [];
+        ctPeriodTableState.yearly.rows = (pr && pr.yearly) ? pr.yearly : [];
+        ctPeriodTableState.weekly.page = 1;
+        ctPeriodTableState.monthly.page = 1;
+        ctPeriodTableState.quarterly.page = 1;
+        ctPeriodTableState.yearly.page = 1;
+        renderCtPeriodTable("weekly");
+        renderCtPeriodTable("monthly");
+        renderCtPeriodTable("quarterly");
+        renderCtPeriodTable("yearly");
+      }
+
+      function _renderCalTimingCurrentHoldings(rows) {
+        const xs = Array.isArray(rows) ? rows : [];
+        $("calTimingCurrentHoldings").innerHTML =
+          `<tr><th>标的代码</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th></tr>` +
+          (xs.length
+            ? xs.map((x) => `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.holding_days ?? "-"}</td><td>${fmtPct(x.weight)}</td><td>${fmtPct(x.holding_return)}</td></tr>`).join("")
+            : `<tr><td colspan="5" class="muted">当前无持仓</td></tr>`);
+      }
+
+      function _renderCalTimingNextPlan(p) {
+        const box = $("calTimingNextPlan");
+        if (!box) return;
+        if (!p || !p.has_execution_plan || !p.plan) {
+          box.innerHTML = "<div class='muted'>下一交易日无执行计划</div>";
+          return;
+        }
+        const x = p.plan;
+        const buys = Array.isArray(x.buys) ? x.buys : [];
+        const sells = Array.isArray(x.sells) ? x.sells : [];
+        const buyTxt = buys.length ? buys.map((r) => `${codeLabel(r.code)} ${fmtPct(r.buy_weight || r.target_weight)}`).join("，") : "无";
+        const sellTxt = sells.length ? sells.map((r) => `${codeLabel(r.code)} ${fmtPct(r.sell_weight || r.current_weight)}`).join("，") : "无";
+        box.innerHTML =
+          `<div><b>执行类型</b>：${esc(x.type || "-")}</div>` +
+          `<div><b>计划执行日期</b>：${esc(x.execution_date || p.next_trading_day || "-")}</div>` +
+          `<div><b>决策日期</b>：${esc(x.decision_date || "-")}</div>` +
+          `<div><b>预计平仓日期</b>：${esc(x.planned_exit_date || "-")}</div>` +
+          `<div><b>买入计划</b>：${buyTxt}</div>` +
+          `<div><b>卖出计划</b>：${sellTxt}</div>`;
+      }
+
+      async function runCalendarTimingStrategy() {
+        const mode = ($("calTimingMode") && $("calTimingMode").value) ? String($("calTimingMode").value) : "portfolio";
+        const baseCodes = _codesForStrategy("cal_timing");
+        const singleCode = ($("calTimingSingleCode") && $("calTimingSingleCode").value) ? String($("calTimingSingleCode").value).trim() : "";
+        const code = mode === "single" ? singleCode : "";
+        const codes = mode === "portfolio" ? baseCodes : [];
+        if (mode === "single" && !code) return setMsg("单标的模式请选择一个标的代码");
+        if (mode === "portfolio" && (!codes || codes.length === 0)) return setMsg("组合模式请先在候选池勾选标的");
+        const start = (($("start") && $("start").value) ? $("start").value : "").trim();
+        const end = (($("end") && $("end").value) ? $("end").value : "").trim();
+        const decision_day = Number(($("calTimingDecisionDay").value || "").trim());
+        const hold_days = Number(($("calTimingHoldDays").value || "").trim());
+        const position_mode = ($("calTimingPositionMode") && $("calTimingPositionMode").value) ? String($("calTimingPositionMode").value) : "equal";
+        const fixed_pos_ratio = Number(($("calTimingFixedRatio").value || "1.0").trim());
+        const exec_price = ($("calTimingExecPrice") && $("calTimingExecPrice").value) ? String($("calTimingExecPrice").value) : "open";
+        const cost_bps = Number(($("calTimingCost").value || "2").trim());
+        const slippage_rate = Number(($("calTimingSlippage").value || "0.001").trim());
+        const rebalance_shift = ($("calTimingShift") && $("calTimingShift").value) ? String($("calTimingShift").value) : "prev";
+        const dynamic_universe = isDynamicUniverseOn();
+        if (!Number.isFinite(decision_day) || Math.floor(decision_day) !== decision_day || decision_day < -28 || decision_day > 28 || decision_day === 0) {
+          return setMsg("调仓日（决策日）必须是 [-28,28] 的整数且不能为0");
+        }
+        if (!Number.isFinite(hold_days) || Math.floor(hold_days) !== hold_days || hold_days < 1) return setMsg("持仓时长必须是 >=1 的整数交易日");
+        if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("交易成本必须是 >=0 的数字（bps）");
+        if (!Number.isFinite(slippage_rate) || slippage_rate < 0) return setMsg("滑点必须是 >=0 的数字");
+        if (position_mode === "fixed_ratio" && (!Number.isFinite(fixed_pos_ratio) || fixed_pos_ratio < 0 || fixed_pos_ratio > 1)) {
+          return setMsg("固定比例仓位必须在 [0,1]");
+        }
+        $("status").textContent = "计算日历效应择时策略...";
+        setMsg("");
+        const reqPayload = {
+          mode,
+          code: (mode === "single" ? code : null),
+          codes: (mode === "portfolio" ? codes : null),
+          start,
+          end,
+          adjust: "none",
+          decision_day: Math.floor(decision_day),
+          hold_days: Math.floor(hold_days),
+          position_mode,
+          fixed_pos_ratio,
+          dynamic_universe,
+          exec_price,
+          cost_bps,
+          slippage_rate,
+          rebalance_shift,
+          risk_free_rate: Number(($("rf").value || "0.025").trim()) > 1 ? Number(($("rf").value || "0.025").trim()) / 100.0 : Number(($("rf").value || "0.025").trim()),
+        };
+        const resp = await api("/analysis/calendar-timing", {
+          method: "POST",
+          body: JSON.stringify(reqPayload),
+        });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
+        const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
+        const dates = (data && data.nav && data.nav.dates) ? data.nav.dates : [];
+        const _mergeCtPeriod = (freq) => {
+          const stratRowsRaw = ((data && data.period_returns && data.period_returns[freq]) || _periodReturnsFromNav(dates, Array.isArray(nav.STRAT) ? nav.STRAT : [], freq));
+          const benchRowsRaw = _periodReturnsFromNav(dates, Array.isArray(nav.BUY_HOLD) ? nav.BUY_HOLD : [], freq);
+          const sRows = Array.isArray(stratRowsRaw) ? stratRowsRaw : [];
+          const bRows = Array.isArray(benchRowsRaw) ? benchRowsRaw : [];
+          const bMap = new Map(bRows.map((r) => [String(r.period_end || ""), Number(r.return)]));
+          return sRows.map((r) => {
+            const sr = Number(r && r.return);
+            const br = Number(bMap.get(String(r && r.period_end || "")));
+            return {
+              period_end: String((r && r.period_end) || ""),
+              strategy_return: Number.isFinite(sr) ? sr : NaN,
+              benchmark_return: Number.isFinite(br) ? br : NaN,
+              excess_return: (Number.isFinite(sr) && Number.isFinite(br)) ? (sr - br) : NaN,
+            };
+          });
+        };
+        const ctPr = {
+          weekly: _mergeCtPeriod("weekly"),
+          monthly: _mergeCtPeriod("monthly"),
+          quarterly: _mergeCtPeriod("quarterly"),
+          yearly: _mergeCtPeriod("yearly"),
+        };
+        plotCalTimingAlignedCharts({
+          dates,
+          stratNav: Array.isArray(nav.STRAT) ? nav.STRAT : [],
+          benchNav: Array.isArray(nav.BUY_HOLD) ? nav.BUY_HOLD : [],
+        });
+        _renderCalTimingMetrics((data && data.metrics) ? data.metrics : {});
+        _renderCalTimingPeriods(ctPr);
+        _renderCalTimingCurrentHoldings((data && data.current_holdings) ? data.current_holdings : []);
+        _renderCalTimingNextPlan((data && data.next_execution_plan) ? data.next_execution_plan : null);
+        _renderDailyReturnDist(
+          "calTimingDailyRetHist",
+          "calTimingDailyRetQuantiles",
+          _dailyReturnsFromNav(Array.isArray(nav.STRAT) ? nav.STRAT : [], dates),
+          "日历效应择时策略 日度收益率分布",
+          ($("calTimingDailyRetMode") && $("calTimingDailyRetMode").value) ? $("calTimingDailyRetMode").value : "simple"
+        );
+        renderTradeStatistics("ct", data);
+        window.__lastCalTimingResult = data;
+        window.__lastCalTimingPayload = { ...reqPayload };
+        try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }
+        const meta = (data && data.meta) ? data.meta : {};
+        const m = (data && data.metrics) ? data.metrics : {};
+        const sm = (m && m.strategy) ? m.strategy : {};
+        const em = (m && m.excess) ? m.excess : {};
+        const modeLabel = (String(meta.mode || mode).toLowerCase() === "single") ? "单标的" : "组合";
+        const shiftMap = { prev: "提前至上一交易日", next: "顺延至下一交易日", skip: "跳过" };
+        setReportTo(
+          "calTimingReport",
+          "日历效应择时研究报告式解读",
+          [
+            ..._perfReportLines(`日历效应择时(${modeLabel})`, sm),
+            `超额：年化 ${fmtPct(em.annualized_return)}，最大回撤 ${fmtPct(em.max_drawdown)}，信息比率 ${fmtNum(em.information_ratio)}。`,
+            `参数：调仓日（决策日）=${meta.decision_day ?? "-"}，持仓时长=${meta.hold_days ?? "-"}天，仓位模式=${meta.position_mode || "-"}，成交口径=${meta.exec_price || "-"}。`,
+            `交易摩擦：成本 ${fmtNum(Number(meta.cost_bps || 0))}bps（双边），滑点 ${fmtNum(Number(meta.slippage_rate || 0))}（单边不利）；非交易日处理=${shiftMap[String(meta.rebalance_shift || "")] || String(meta.rebalance_shift || "-")}。`,
+          ],
+          "说明：调仓日语义为决策日，仅生成下一交易日执行计划；持仓时长从执行日开始计数。"
+        );
+      }
+
       async function runAnalysis() {
         const codes = _codesForStrategy("baseline");
         if (codes.length === 0) return setMsg("未选择任何标的。");
@@ -12980,13 +14402,8 @@
           return { mode, metrics: (by[mode] || data.metrics), rolling: ((data.rolling_by_portfolio || {})[mode] || data.rolling), attribution: ((data.attribution_by_portfolio || {})[mode] || data.attribution) };
         };
         const picked = _pickBaselineMode(baseline_mode);
-        const nav2 = { dates: (data.nav || {}).dates || [], series: {} };
-        // codes + selected portfolio + benchmark
-        for (const c of (data.codes || [])) nav2.series[c] = data.nav.series[c];
-        nav2.series[picked.mode] = data.nav.series[picked.mode];
-        // include benchmark line (if any)
-        for (const k of Object.keys(data.nav.series || {})) if (String(k).startsWith("BENCH:")) nav2.series[k] = data.nav.series[k];
-        plotNav(nav2);
+        syncBaselineChartTitles(picked.mode);
+        plotBaselineAlignedCharts(data, picked.mode);
         renderMetrics(picked.metrics);
         renderBaselineDailyReturnDist(data, picked.mode);
         renderContributionTables("ew", picked.attribution);
@@ -13005,9 +14422,6 @@
         updateCorrRangeButtons();
         // default: full backtest range (client-side recompute for consistency)
         refreshCorrelationForRange("all");
-        // show percent with 0 decimals
-        plotRolling("rollingReturns", "Rolling Returns", (picked.rolling.returns || {}), ".0%");
-        plotRolling("rollingDD", "Rolling Drawdown", (picked.rolling.drawdown || picked.rolling.max_drawdown || {}), ".0%");
         renderFft(data.fft);
         renderFftRoll(data.fft_roll);
         try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }
@@ -13043,20 +14457,14 @@
         updateBaselineHoldingUi();
         if (!lastBaseline || !lastBaseline.nav) return;
         const mode = ($("baselineMode").value || "EW").toUpperCase();
+        syncBaselineChartTitles(mode);
         const by = (lastBaseline.metrics_by_portfolio || {});
         const metrics = (by[mode] || lastBaseline.metrics);
-        const rolling = ((lastBaseline.rolling_by_portfolio || {})[mode] || lastBaseline.rolling);
         const attribution = ((lastBaseline.attribution_by_portfolio || {})[mode] || lastBaseline.attribution);
-        const nav2 = { dates: (lastBaseline.nav || {}).dates || [], series: {} };
-        for (const c of (lastBaseline.codes || [])) nav2.series[c] = lastBaseline.nav.series[c];
-        nav2.series[mode] = lastBaseline.nav.series[mode];
-        for (const k of Object.keys(lastBaseline.nav.series || {})) if (String(k).startsWith("BENCH:")) nav2.series[k] = lastBaseline.nav.series[k];
-        plotNav(nav2);
+        plotBaselineAlignedCharts(lastBaseline, mode);
         renderMetrics(metrics);
         renderBaselineDailyReturnDist(lastBaseline, mode);
         renderContributionTables("ew", attribution);
-        plotRolling("rollingReturns", "Rolling Returns", (rolling.returns || {}), ".0%");
-        plotRolling("rollingDD", "Rolling Drawdown", (rolling.drawdown || rolling.max_drawdown || {}), ".0%");
       });
       if ($("baselineDailyRetSeries")) $("baselineDailyRetSeries").addEventListener("change", () => {
         if (!lastBaseline) return;
@@ -13074,6 +14482,7 @@
         if (!window.__lastTrendResult) return;
         renderTrendDailyReturnDist(window.__lastTrendResult);
       });
+      syncBaselineChartTitles(($("baselineMode") && $("baselineMode").value) ? $("baselineMode").value : "EW");
 
       function initTabs(containerId) {
         const root = $(containerId);
@@ -14097,6 +15506,7 @@
             rotation: _readFields(SETTINGS_FIELD_IDS.rotation),
             rotCal: _readFields(SETTINGS_FIELD_IDS.rotCal),
             trend: _readFields(SETTINGS_FIELD_IDS.trend),
+            calTiming: _readFields(SETTINGS_FIELD_IDS.calTiming),
             mcEw: _readFields(SETTINGS_FIELD_IDS.mcEw),
             mcRot: _readFields(SETTINGS_FIELD_IDS.mcRot),
             sim: _readFields(SETTINGS_FIELD_IDS.sim),
@@ -14110,6 +15520,7 @@
         const rotationSaved = _settingsLoad(SETTINGS_KEYS.rotation);
         const rotCalSaved = _settingsLoad(SETTINGS_KEYS.rotCal);
         const trendSaved = _settingsLoad(SETTINGS_KEYS.trend);
+        const calTimingSaved = _settingsLoad(SETTINGS_KEYS.calTiming);
         const mcLegacy = _settingsLoad(`${SETTINGS_NS}.mc`);
         const mcEwSaved = _settingsLoad(SETTINGS_KEYS.mcEw) || mcLegacy;
         const mcRotSaved = _settingsLoad(SETTINGS_KEYS.mcRot) || mcLegacy;
@@ -14132,6 +15543,7 @@
         _applyFields(SETTINGS_FIELD_IDS.rotation, rotationSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.rotCal, rotCalSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.trend, trendSaved || {});
+        _applyFields(SETTINGS_FIELD_IDS.calTiming, calTimingSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.mcEw, mcEwSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.mcRot, mcRotSaved || {});
         _applyFields(SETTINGS_FIELD_IDS.sim, simSaved || {});
@@ -14250,6 +15662,30 @@
 
       $("runEwCalendar").addEventListener("click", runEwCalendarEffect);
       $("runRotCalendar").addEventListener("click", runRotCalendarEffect);
+      if ($("runCalTiming")) $("runCalTiming").addEventListener("click", runCalendarTimingStrategy);
+      if ($("calTimingMode")) $("calTimingMode").addEventListener("change", () => {
+        _refreshCalTimingSingleCodeOptions();
+        _syncCalTimingModeUi();
+      });
+      if ($("calTimingPositionMode")) $("calTimingPositionMode").addEventListener("change", _syncCalTimingModeUi);
+      if ($("calTimingDailyRetMode")) $("calTimingDailyRetMode").addEventListener("change", () => {
+        try {
+          const chart = document.getElementById("calTimingNavChart");
+          if (!chart || !chart.data || !chart.data.length) return;
+          const tr = (chart.data || []).find((x) => String(x.name || "").toUpperCase() === "STRAT");
+          const dates = tr && Array.isArray(tr.x) ? tr.x : [];
+          const nav = tr && Array.isArray(tr.y) ? tr.y : [];
+          _renderDailyReturnDist(
+            "calTimingDailyRetHist",
+            "calTimingDailyRetQuantiles",
+            _dailyReturnsFromNav(nav, dates),
+            "日历效应择时策略 日度收益率分布",
+            $("calTimingDailyRetMode").value || "simple"
+          );
+        } catch (_) { /* ignore */ }
+      });
+      _refreshCalTimingSingleCodeOptions();
+      _syncCalTimingModeUi();
       $("exportPdf").addEventListener("click", exportPdfReport);
 
       // dynamic anchor options for calendar-effect panels (EW uses top rebalance; rotation uses rotRebalance)
@@ -14786,6 +16222,10 @@
       wireMixPeriodControls("monthly");
       wireMixPeriodControls("quarterly");
       wireMixPeriodControls("yearly");
+      wireCtPeriodControls("weekly");
+      wireCtPeriodControls("monthly");
+      wireCtPeriodControls("quarterly");
+      wireCtPeriodControls("yearly");
       $("selAll").addEventListener("click", () => { _lastSelectionBeforeInvert = null; pool.forEach(x => selected.add(x.code)); _upsertCurrentGroupFromSelected(); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); _saveSelectedCodes(); });
       $("selAll").addEventListener("click", () => { maybeAdjustBacktestRange(); renderRangeHint(); });
       $("selNone").addEventListener("click", () => { _lastSelectionBeforeInvert = null; selected.clear(); _upsertCurrentGroupFromSelected(); renderCodeList(); renderCandidateGroupControls(); renderBenchmarkSelect(); renderTrendSingleCodeSelect(); maybeAdjustBacktestRange(); renderRangeHint(); _saveSelectedCodes(); });
@@ -14862,6 +16302,10 @@
       });
       if ($("trendGroupPreset")) $("trendGroupPreset").addEventListener("change", () => {
         renderTrendSingleCodeSelect();
+      });
+      if ($("calTimingGroupPreset")) $("calTimingGroupPreset").addEventListener("change", () => {
+        _refreshCalTimingSingleCodeOptions();
+        _syncCalTimingModeUi();
       });
       if ($("dynamicUniverse")) {
         $("dynamicUniverse").addEventListener("change", () => {

@@ -708,6 +708,32 @@ class BaselineCalendarEffectRequest(BaseModel):
     exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
 
 
+class CalendarTimingStrategyRequest(BaseModel):
+    mode: str = Field(default="portfolio", description="portfolio|single")
+    code: str | None = Field(default=None, description="Single-asset mode code")
+    codes: list[str] | None = Field(default=None, description="Portfolio mode candidate codes")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="none", description="qfq/hfq/none for execution price series")
+    decision_day: int = Field(
+        default=1,
+        description="Monthly natural decision day in [-28,28] excluding 0. Negative means from month-end.",
+    )
+    hold_days: int = Field(default=1, ge=1, le=252, description="Holding days from execution day")
+    position_mode: str = Field(default="equal", description="equal|fixed_ratio")
+    fixed_pos_ratio: float = Field(default=1.0, ge=0.0, le=1.0, description="Exposure when position_mode=fixed_ratio")
+    dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate coverage over union interval")
+    exec_price: str = Field(default="open", description="open|close")
+    cost_bps: float = Field(default=2.0, ge=0.0, description="Two-way transaction cost in bps")
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate")
+    rebalance_shift: str = Field(
+        default="prev",
+        description="If decision day is non-trading: prev|next|skip",
+    )
+    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    calendar: str = Field(default="XSHG", description="Trading calendar used by decision-day shift")
+
+
 class AssetRiskControlRule(BaseModel):
     """
     Per-asset risk-control rule applied to weights daily:

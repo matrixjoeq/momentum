@@ -108,6 +108,33 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 - Maintenance and evolves
   - Add/adjust unit tests when changing public interfaces.
   - **Engine consistency rule (mandatory):** For shared strategy concepts (execution timing, corporate-action fallback, NAV compounding, turnover/cost attribution), keep behavior consistent across rotation/trend/holding engines. If one engine changes calculation semantics, update the others (or centralize the logic in shared helpers) and add regression tests proving parity.
+  - **Price-adjustment rule for NAV computation (mandatory):**
+    - Benchmark NAV used for strategy comparison must always be computed with **post-adjusted prices (`hfq`)**.
+    - Strategy NAV must always prioritize **raw/unadjusted prices (`none`)** for daily NAV computation.
+    - When raw-price series has abnormal jump risk caused by corporate actions (e.g., dividend, split, reverse split), the affected daily return point(s) must switch to **`hfq` fallback** for NAV calculation to avoid artificial discontinuities.
+    - Apply the same fallback semantics consistently across all strategy engines and keep the behavior covered by regression tests.
+  - **Strategy group-selection rule (mandatory):** Any strategy that supports portfolio mode must expose selectable candidate-pool group binding (same group system as other strategies), and must run calculations strictly against the currently selected group.
+  - **Strategy parameter persistence rule (mandatory):** All strategy parameters (including mode switches, execution/cost settings, group selection, and strategy-specific controls) must be persisted and restored across page refreshes.
+  - **Multi-strategy coverage rule (mandatory):** Multi-strategy composition (MIX) must support all available strategy subtypes in the research page. When a new strategy is introduced, fixed-strategy library save/load and MIX inclusion/aggregation support must be implemented in the same delivery.
+  - **Strategy baseline charting/reporting rule (mandatory):** Every strategy page/output (single strategy and portfolio strategy) must include the following baseline analytics set, with benchmark/excess parts shown only when benchmark exists:
+    1. Strategy NAV curve and benchmark NAV curve (if any) using log scale; subplot shows strategy NAV RSI.
+    2. Strategy-vs-benchmark ratio curve (if benchmark exists) using log scale; main ratio chart must support Bollinger Bands using three middle-band MA windows (MA20, MA60, MA250). Default visible band is MA250; MA20 and MA60 are available as optional overlays. For each MA window, upper/lower bands must be computed from the same window's rolling mean and rolling std (mean ± 2*std). Subplot shows ratio RSI.
+    3. Strategy and benchmark (if any) drawdown curves.
+    4. 40-day return spread between strategy and benchmark (if benchmark exists).
+    5. Strategy rolling returns for 6m/1y/2y/3y.
+    6. Strategy rolling drawdowns for 6m/1y/2y/3y.
+    7. Excess rolling returns (if benchmark exists) for 6m/1y/2y/3y.
+    8. Excess rolling drawdowns (if benchmark exists) for 6m/1y/2y/3y.
+    9. Strategy performance metrics table covering: cumulative return, annualized return, annualized volatility, max drawdown, max-drawdown recovery duration, Sharpe, Sortino, Calmar, Ulcer Index, Ulcer Performance Index, avg daily turnover, avg annual turnover, weekly/monthly/quarterly/yearly win-rate-payoff-Kelly (exclude zero), excess annualized return (if benchmark exists), excess information ratio (if benchmark exists).
+    10. Daily return distribution stats (simple and log-return modes): histogram + current-value marker line + stats table with sample size, max, min, mean, std, skewness, kurtosis, quantiles, current value.
+    11. Per-trade return distribution (overall and by-asset): stats tables with trade count, win/loss/flat counts, win rate (exclude zero), payoff (exclude zero), Kelly (exclude zero), per-trade max/min/mean/std/quantiles, profit-trade max/min/mean/std (exclude zero), loss-trade max/min/mean/std (exclude zero), and per-trade histogram.
+    12. Per-asset holding-period (trading days) distribution: histogram + stats table with min/max/mean/std/quantiles.
+    13. Per-asset return contribution, risk contribution, and risk-return ratio.
+    14. Period return tables (weekly/monthly/quarterly/yearly) with sort by date/return asc/desc, pagination (12 rows/page), page jump, first/last page controls; include strategy return, benchmark return (if any), excess return (if any).
+    15. Current holdings table with code, name, entry date, holding duration (trading days), position weight, holding return.
+    16. Next-trading-day plan with planned execution date, buy list (target weight and buy delta), sell list (current weight and sell delta).
+    17. Narrative research-report style interpretation section.
+  - **Strategy layout rule (mandatory):** Place baseline analytics from overview to detail top-to-bottom; cluster highly related charts/tables together; use 1-3 columns per row for readability and comparison.
   - Update AGENTS.md with any new guidelines that emerge.
 
 - Cursor rules

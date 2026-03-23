@@ -16,6 +16,7 @@ from .deps import get_akshare, get_session
 from .schemas import (
     BaselineAnalysisRequest,
     BaselineCalendarEffectRequest,
+    CalendarTimingStrategyRequest,
     BaselineMonteCarloRequest,
     BaselineWeekly5EWDashboardRequest,
     RotationCalendarEffectRequest,
@@ -99,6 +100,7 @@ from ..analysis.baseline import (
 from ..analysis.calendar_effect import BaselineCalendarEffectInputs, compute_baseline_calendar_effect, compute_rotation_calendar_effect
 from ..analysis.calendar_effect import _decision_dates_for_rebalance as _cal_decision_dates_for_rebalance
 from ..analysis.calendar_effect import _ew_nav_and_weights_by_decision_dates as _cal_ew_nav_and_weights_by_decision_dates
+from ..analysis.calendar_timing_strategy import CalendarTimingStrategyInputs, compute_calendar_timing_strategy_backtest
 from ..analysis.grouping import AssetGroupSuggestInputs, suggest_asset_groups
 from ..analysis.candidate_screening import RotationCandidateScreenInputs, screen_rotation_candidates
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
@@ -573,6 +575,33 @@ def baseline_calendar_effect(payload: BaselineCalendarEffectRequest, db: Session
     )
     try:
         return compute_baseline_calendar_effect(db, inp)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/analysis/calendar-timing")
+def calendar_timing_strategy(payload: CalendarTimingStrategyRequest, db: Session = Depends(get_session)) -> dict:
+    inp = CalendarTimingStrategyInputs(
+        mode=payload.mode,
+        code=payload.code,
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        adjust=payload.adjust,
+        decision_day=int(payload.decision_day),
+        hold_days=int(payload.hold_days),
+        position_mode=payload.position_mode,
+        fixed_pos_ratio=float(payload.fixed_pos_ratio),
+        dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
+        exec_price=payload.exec_price,
+        cost_bps=float(payload.cost_bps),
+        slippage_rate=float(payload.slippage_rate),
+        rebalance_shift=payload.rebalance_shift,
+        risk_free_rate=float(payload.risk_free_rate),
+        cal=payload.calendar,
+    )
+    try:
+        return compute_calendar_timing_strategy_backtest(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
