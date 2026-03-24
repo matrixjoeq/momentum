@@ -29,6 +29,7 @@ from ..analysis.baseline import (
     _sharpe,
     _sortino,
     _ulcer_index,
+    hfq_close_daily_equal_weight_returns,
     load_volume_amount as _load_volume_amount,
 )
 from ..analysis.baseline import load_close_prices as _load_close_prices
@@ -47,7 +48,9 @@ class RotationInputs:
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1
-    position_mode: str = "adaptive"  # adaptive | fixed (base sizing before other exposure controls)
+    position_mode: str = "adaptive"  # adaptive | fixed | risk_budget (base sizing before other exposure controls)
+    risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
+    risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
     entry_backfill: bool = False  # if true, refill from lower-ranked candidates when top_k entries are filtered out
     entry_match_n: int = 0  # 0 => default AND(all enabled); otherwise require at least n entry filters
     exit_match_n: int = 0  # 0 => default AND(all enabled); otherwise require at least n exit filters
@@ -476,6 +479,23 @@ def _ann_realized_vol_from_close(close: pd.DataFrame, *, window: int) -> pd.Data
     ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
     vol_daily = ret.rolling(window=w, min_periods=max(3, w // 2)).std(ddof=1)
     return (vol_daily * np.sqrt(252.0)).astype(float)
+
+
+def _atr_from_hlc(high: pd.DataFrame, low: pd.DataFrame, close: pd.DataFrame, *, window: int) -> pd.DataFrame:
+    """
+    Classic ATR (Wilder-style RMA) from high/low/close.
+    """
+    n = max(2, int(window))
+    hi = high.astype(float)
+    lo = low.astype(float)
+    cl = close.astype(float)
+    prev_cl = cl.shift(1)
+    tr1 = (hi - lo).abs()
+    tr2 = (hi - prev_cl).abs()
+    tr3 = (lo - prev_cl).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=0).groupby(level=0).max()
+    atr = tr.ewm(alpha=1.0 / float(n), adjust=False, min_periods=n).mean()
+    return atr.replace([np.inf, -np.inf], np.nan).astype(float)
 
 
 def _efficiency_ratio(close: pd.DataFrame, *, window: int) -> pd.DataFrame:
@@ -1192,8 +1212,14 @@ def backtest_rotation(
     if inp.top_k <= 0:
         raise ValueError("top_k must be >= 1")
     pos_mode = str(inp.position_mode or "adaptive").strip().lower()
-    if pos_mode not in {"adaptive", "fixed"}:
-        raise ValueError("position_mode must be one of: adaptive|fixed")
+    if pos_mode not in {"adaptive", "fixed", "risk_budget"}:
+        raise ValueError("position_mode must be one of: adaptive|fixed|risk_budget")
+    risk_budget_atr_window = int(getattr(inp, "risk_budget_atr_window", 20) or 20)
+    if risk_budget_atr_window < 2:
+        raise ValueError("risk_budget_atr_window must be >= 2")
+    risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
+    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
+        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     if inp.lookback_days <= 0:
         raise ValueError("lookback_days must be > 0")
     if int(inp.entry_match_n) < 0:
@@ -1483,7 +1509,10 @@ def backtest_rotation(
     # qfq is the unified decision basis (signal/filters/risk controls), so it is always required.
     need_qfq = True
     close_qfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq else pd.DataFrame()
-    need_qfq_hl = bool(inp.chop_filter and (("adx" in chop_modes) if use_chop_rules else (cm == "adx")))
+    need_qfq_hl = bool(
+        (inp.chop_filter and (("adx" in chop_modes) if use_chop_rules else (cm == "adx")))
+        or (pos_mode == "risk_budget")
+    )
     high_qfq, low_qfq = (
         _load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq_hl else (pd.DataFrame(), pd.DataFrame())
     )
@@ -1594,7 +1623,11 @@ def backtest_rotation(
             pass
 
     dates = close_none.index
-    close_hfq = close_hfq.sort_index().reindex(dates).ffill()
+    dynamic_u = bool(getattr(inp, "dynamic_universe", False))
+    close_hfq_raw_align = (
+        close_hfq.sort_index().reindex(dates).reindex(columns=list(dict.fromkeys(codes))).astype(float)
+    )
+    close_hfq = close_hfq_raw_align.ffill()
     if need_hfq_ohlc:
         for k in ["open", "high", "low", "close"]:
             ohlc_hfq[k] = ohlc_hfq[k].sort_index().reindex(dates).ffill()
@@ -1695,6 +1728,15 @@ def backtest_rotation(
             if "adx" in chop_modes:
                 for w in sorted(set(int(x) for x in chop_adx_windows if int(x) > 1)):
                     adx_by_window[w] = _adx(high_qfq[rank_codes], low_qfq[rank_codes], ta_close, window=int(w))
+
+    atr_budget = pd.DataFrame()
+    if pos_mode == "risk_budget":
+        atr_budget = _atr_from_hlc(
+            high_qfq[rank_codes].astype(float),
+            low_qfq[rank_codes].astype(float),
+            close_qfq[rank_codes].astype(float),
+            window=int(risk_budget_atr_window),
+        )
 
     decision_hit_mode: dict[int, str] = {}
     decision_target_date: dict[int, str] = {}
@@ -2876,7 +2918,7 @@ def backtest_rotation(
         else:
             rr_meta.update({"asof": d.date().isoformat(), "trailing_return": None, "bucket": None, "exposure": None})
 
-        # 3) Volatility sizing: scale down weights of risk assets (cash remainder).
+        # 3) Base sizing + volatility scaling (cash remainder).
         exposure = 1.0
         weight_map: dict[str, float] = {}
         if picks and (not dd_in_sleep):
@@ -2884,7 +2926,46 @@ def backtest_rotation(
             if not risk_picks:
                 exposure = 0.0
             else:
-                # default equal-weight, full exposure
+                base_weight_map: dict[str, float] = {}
+                if pos_mode == "risk_budget":
+                    rb_meta: dict[str, Any] = {
+                        "enabled": True,
+                        "atr_window": int(risk_budget_atr_window),
+                        "risk_budget_pct": float(risk_budget_pct),
+                        "by_code": {},
+                        "scaled_to_cap": False,
+                    }
+                    for p in risk_picks:
+                        px = float(close_qfq.loc[d, p]) if (p in close_qfq.columns and d in close_qfq.index) else float("nan")
+                        a = float(atr_budget.loc[d, p]) if (not atr_budget.empty and p in atr_budget.columns and d in atr_budget.index) else float("nan")
+                        if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
+                            w_raw = float(risk_budget_pct) * float(px) / float(a)
+                        else:
+                            w_raw = 0.0
+                        base_weight_map[p] = max(0.0, float(w_raw))
+                        rb_meta["by_code"][str(p)] = {
+                            "close": (None if (not np.isfinite(px)) else float(px)),
+                            "atr": (None if (not np.isfinite(a)) else float(a)),
+                            "weight_raw": float(w_raw),
+                        }
+                    s_raw = float(sum(base_weight_map.values()))
+                    if s_raw > 1.0 + 1e-12:
+                        k = 1.0 / s_raw
+                        for p in list(base_weight_map.keys()):
+                            base_weight_map[p] = float(base_weight_map[p]) * float(k)
+                        rb_meta["scaled_to_cap"] = True
+                        rb_meta["raw_sum_before_cap"] = float(s_raw)
+                    details["risk_budget"] = rb_meta
+                else:
+                    if not risk_picks:
+                        per = 0.0
+                    elif pos_mode == "fixed":
+                        per = 1.0 / max(1, int(inp.top_k))
+                    else:
+                        per = 1.0 / len(risk_picks)
+                    for p in risk_picks:
+                        base_weight_map[p] = float(per)
+
                 scales = {p: 1.0 for p in risk_picks}
                 if inp.vol_monitor and ta_close is not None:
                     vol_map: dict[str, float | None] = {}
@@ -2931,19 +3012,9 @@ def backtest_rotation(
 
                     if vol_map:
                         details["ann_vol"] = vol_map
-                if scales:
-                    den = float(max(1, int(inp.top_k))) if pos_mode == "fixed" else float(len(risk_picks))
-                    exposure = float(np.sum(list(scales.values())) / den) if den > 0 else 0.0
-                else:
-                    exposure = 0.0
-                if not risk_picks:
-                    per = 0.0
-                elif pos_mode == "fixed":
-                    per = 1.0 / max(1, int(inp.top_k))
-                else:
-                    per = 1.0 / len(risk_picks)
                 for p in risk_picks:
-                    weight_map[p] = float(scales.get(p, 0.0) * per)
+                    weight_map[p] = float(scales.get(p, 0.0) * base_weight_map.get(p, 0.0))
+                exposure = float(sum(weight_map.values()))
 
                 # If vol sizing zeroed all positions, fall back to cash.
                 if exposure <= 0.0:
@@ -3409,60 +3480,23 @@ def backtest_rotation(
     )
     # Continuous holding streaks (by actual daily weights, not rebalance schedule).
     holding_streaks = _holding_streaks_from_weights(w, codes=codes, eps=1e-12)
-    port_ret = (w * ret_exec).sum(axis=1)
-    port_nav = (1.0 + port_ret).cumprod()
-    port_nav.iloc[0] = 1.0
 
-    # Equal-weight benchmark WITH SAME rebalance frequency and SAME exec_price proxy:
-    # equal-weight across the selected universe only (not including defensive unless user selected it).
+    # Benchmark: daily HFQ close equal-weight rebalance (no costs); RP uses same daily return matrix.
     bench_codes = universe[:]  # fixed benchmark universe
-    bo = ohlc_hfq.get("open", pd.DataFrame())
-    bc = ohlc_hfq.get("close", pd.DataFrame())
-    if ep == "close":
-        bench_px = close_hfq[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
-    elif ep == "open":
-        b = ohlc_hfq.get("open", pd.DataFrame())
-        if not _has_cols(b, bench_codes):
-            bench_px = close_hfq[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
-        else:
-            bench_px = b[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
-    else:
-        bc = ohlc_hfq.get("close", pd.DataFrame())
-        bo = ohlc_hfq.get("open", pd.DataFrame())
-        if not (_has_cols(bo, bench_codes) and _has_cols(bc, bench_codes)):
-            bench_px = close_hfq[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
-        else:
-            bench_px = (bo[bench_codes].astype(float) + bc[bench_codes].astype(float)) / 2.0
-            bench_px = bench_px.replace([np.inf, -np.inf], np.nan).ffill()
-    if ep == "open":
-        bpx = bo[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill() if _has_cols(bo, bench_codes) else bench_px
-        ret_hfq = forward_returns(bpx)
-    elif ep == "close":
-        bpx = bc[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill() if _has_cols(bc, bench_codes) else bench_px
-        ret_hfq = forward_returns(bpx)
-    else:
-        bo2 = bo[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill() if _has_cols(bo, bench_codes) else bench_px
-        bc2 = bc[bench_codes].astype(float).replace([np.inf, -np.inf], np.nan).ffill() if _has_cols(bc, bench_codes) else bench_px
-        ret_hfq = 0.5 * (forward_returns(bo2) + forward_returns(bc2))
-    w_ew = pd.DataFrame(0.0, index=dates, columns=bench_codes)
     n_b = len(bench_codes)
     if n_b <= 0:
         raise ValueError("benchmark universe empty")
+    ch_bench = close_hfq_raw_align.reindex(columns=bench_codes, fill_value=np.nan)
+    if not dynamic_u:
+        ch_bench = ch_bench.ffill()
     w_eq = 1.0 / n_b
-    for i, d in enumerate(decision_dates):
-        di = dates.get_loc(d)
-        if di + 1 >= len(dates):
-            break
-        start_i = di + 1
-        next_di = (dates.get_loc(decision_dates[i + 1]) if i + 1 < len(decision_dates) else (len(dates) - 1))
-        end_i = min(len(dates) - 1, next_di)
-        w_ew.loc[dates[start_i] : dates[end_i], bench_codes] = w_eq
-    ew_ret = (w_ew * ret_hfq).sum(axis=1)
+    ew_ret = hfq_close_daily_equal_weight_returns(ch_bench, dynamic_universe=dynamic_u).reindex(dates).fillna(0.0)
     ew_nav = (1.0 + ew_ret).cumprod()
     ew_nav.iloc[0] = 1.0
 
     # Risk parity (inverse-vol) benchmark with the same rebalance schedule as decision_dates.
-    # We estimate vol using past returns up to the decision date (inclusive) to avoid lookahead.
+    # We estimate vol using past HFQ close-to-close returns up to the decision date (inclusive).
+    r_for_rp = ch_bench.astype(float).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     rp_window = int(max(20, int(inp.lookback_days or 20)))
     w_rp = pd.DataFrame(0.0, index=dates, columns=bench_codes, dtype=float)
     for i, d in enumerate(decision_dates):
@@ -3472,7 +3506,7 @@ def backtest_rotation(
         start_i = di + 1
         next_di = (dates.get_loc(decision_dates[i + 1]) if i + 1 < len(decision_dates) else (len(dates) - 1))
         end_i = min(len(dates) - 1, next_di)
-        hist = ret_hfq.iloc[max(0, di - rp_window + 1) : di + 1].astype(float).fillna(0.0)
+        hist = r_for_rp.iloc[max(0, di - rp_window + 1) : di + 1].astype(float)
         vol = hist.std(ddof=1).replace(0.0, np.nan)
         inv = (1.0 / vol).replace([np.inf, -np.inf], np.nan)
         s = float(np.nansum(inv.to_numpy(dtype=float)))
@@ -3481,11 +3515,14 @@ def backtest_rotation(
         else:
             wv = pd.Series(w_eq, index=bench_codes, dtype=float)
         w_rp.loc[dates[start_i] : dates[end_i], bench_codes] = wv.to_numpy(dtype=float)
-    rp_ret = (w_rp * ret_hfq).sum(axis=1).astype(float)
+    rp_ret = (w_rp * r_for_rp).sum(axis=1).astype(float)
     rp_nav = (1.0 + rp_ret).cumprod()
     rp_nav.iloc[0] = 1.0
 
-    # Simple turnover and cost: turnover = sum |w_t - w_{t-1}| / 2 ; cost applied to return.
+    # Timed strategy returns/costs.
+    port_ret = (w * ret_exec).sum(axis=1).astype(float)
+    port_nav = (1.0 + port_ret).cumprod()
+    port_nav.iloc[0] = 1.0
     w_prev = w.shift(1).fillna(0.0)
     turnover = (w - w_prev).abs().sum(axis=1) / 2.0
     cost = turnover * (inp.cost_bps / 10000.0)
@@ -3881,6 +3918,8 @@ def backtest_rotation(
         },
         "exec_price": ep,
         "position_mode": pos_mode,
+        "risk_budget_atr_window": int(risk_budget_atr_window),
+        "risk_budget_pct": float(risk_budget_pct),
         "entry_backfill": bool(inp.entry_backfill),
         "entry_match_n": int(inp.entry_match_n or 0),
         "exit_match_n": int(inp.exit_match_n or 0),

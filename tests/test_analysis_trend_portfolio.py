@@ -295,3 +295,36 @@ def test_trend_portfolio_trade_statistics_have_samples_user_case_like(session_fa
     by_code = (ts.get("by_code") or {})
     assert int(overall.get("total_trades") or 0) > 0
     assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())
+
+
+def test_trend_portfolio_risk_budget_position_sizing(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 0.9)
+            _add_price(db, code="A2", day=d, close=80 + i * 0.7)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=8,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=20,
+                risk_budget_pct=0.01,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert str(params.get("position_sizing") or "") == "risk_budget"
+    w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
+    if not w.empty:
+        expo = w.sum(axis=1)
+        assert float(expo.max()) <= 1.0000001
+        assert float(expo.max()) > 0.0
+

@@ -592,6 +592,8 @@ def calendar_timing_strategy(payload: CalendarTimingStrategyRequest, db: Session
         hold_days=int(payload.hold_days),
         position_mode=payload.position_mode,
         fixed_pos_ratio=float(payload.fixed_pos_ratio),
+        risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
+        risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
         dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         exec_price=payload.exec_price,
         cost_bps=float(payload.cost_bps),
@@ -705,6 +707,8 @@ def _rotation_inputs_from_payload(
         exec_price=payload.exec_price if exec_price is None else str(exec_price),
         top_k=payload.top_k,
         position_mode=payload.position_mode,
+        risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
+        risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
         entry_backfill=payload.entry_backfill,
         entry_match_n=payload.entry_match_n,
         exit_match_n=payload.exit_match_n,
@@ -774,6 +778,9 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
 
 @router.post("/analysis/trend")
 def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_session)) -> dict:
+    # Pylint may resolve imported dataclasses from an installed package instead of workspace source,
+    # which can lag during local dev. Keep behavior correct; suppress false-positive for new fields.
+    # pylint: disable=unexpected-keyword-arg
     inp = TrendInputs(
         code=payload.code,
         start=_parse_yyyymmdd(payload.start),
@@ -838,6 +845,8 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         fixed_pos_ratio=payload.fixed_pos_ratio,
         fixed_overcap_policy=payload.fixed_overcap_policy,
         fixed_max_holdings=payload.fixed_max_holdings,
+        risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
+        risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
         dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         sma_window=payload.sma_window,
         fast_window=payload.fast_window,

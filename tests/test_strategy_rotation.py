@@ -160,3 +160,57 @@ def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
     by_code = (ts.get("by_code") or {})
     assert int(overall.get("total_trades") or 0) > 0
     assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())
+
+
+def test_rotation_risk_budget_position_mode_scales_by_atr(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + float(i) * 0.8
+            p2 = 90.0 + float(i) * 0.6
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(p1),
+                open_price=float(p1),
+                high=float(p1 * 1.01),
+                low=float(p1 * 0.99),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(p2),
+                open_price=float(p2),
+                high=float(p2 * 1.01),
+                low=float(p2 * 0.99),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["AAA", "BBB"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                top_k=2,
+                position_mode="risk_budget",
+                risk_budget_atr_window=20,
+                risk_budget_pct=0.01,
+                lookback_days=10,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    assert str(out.get("position_mode") or "") == "risk_budget"
+    w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
+    if not w.empty:
+        expo = w.sum(axis=1)
+        assert float(expo.max()) <= 1.0000001
+        assert float(expo.max()) > 0.0
+

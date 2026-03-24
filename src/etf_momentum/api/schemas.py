@@ -720,8 +720,10 @@ class CalendarTimingStrategyRequest(BaseModel):
         description="Monthly natural decision day in [-28,28] excluding 0. Negative means from month-end.",
     )
     hold_days: int = Field(default=1, ge=1, le=252, description="Holding days from execution day")
-    position_mode: str = Field(default="equal", description="equal|fixed_ratio")
+    position_mode: str = Field(default="equal", description="equal|fixed_ratio|risk_budget")
     fixed_pos_ratio: float = Field(default=1.0, ge=0.0, le=1.0, description="Exposure when position_mode=fixed_ratio")
+    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_mode=risk_budget")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
     dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate coverage over union interval")
     exec_price: str = Field(default="open", description="open|close")
     cost_bps: float = Field(default=2.0, ge=0.0, description="Two-way transaction cost in bps")
@@ -900,8 +902,10 @@ class RotationBacktestRequest(BaseModel):
     top_k: int = Field(default=1, ge=1)
     position_mode: str = Field(
         default="adaptive",
-        description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/top_k).",
+        description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/top_k) | risk_budget(ATR risk budget).",
     )
+    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window for risk-budget sizing")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
     entry_backfill: bool = Field(
         default=False,
         description="If true, refill from lower-ranked candidates when top_k assets are excluded by entry filters.",
@@ -1144,12 +1148,14 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend; ma_filter uses ma_type sma|ema",
     )
-    position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio")
+    position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
     vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling")
     fixed_pos_ratio: float = Field(default=0.04, gt=0.0, description="Fixed position ratio per active asset when position_sizing=fixed_ratio")
     fixed_overcap_policy: str = Field(default="skip", description="When fixed-ratio entry exceeds constraints: skip|extend")
     fixed_max_holdings: int = Field(default=10, ge=1, description="Max number of held assets when position_sizing=fixed_ratio")
+    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_sizing=risk_budget")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
     dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate pool by period over union interval")
     sma_window: int = Field(default=200, ge=2)
     fast_window: int = Field(default=50, ge=2)

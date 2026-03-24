@@ -493,7 +493,7 @@
     <div class="panel">
       <h3>各标的收益率与波动率分布统计</h3>
       <div class="muted">
-        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、价格BIAS、BIAS-V、成交活跃度与拥挤度指标分布直方图与分位数。<br/>
+        统计每个标的在不同周期（日度/周度/月度/季度/年度）下的收益率、波动率、价格BIAS、BIAS-V、成交活跃度与拥挤度指标分布直方图与分位数；并支持按<strong>周内交易日</strong>（周一至周五择一）、<strong>月内公历日</strong>（每月 1～31 号择一）、<strong>公历年内按日序划分的周序号</strong>（第 1～52 周择一）或<strong>公历年内的月份</strong>（1～12 月择一）提取日度收盘收益序列、时间序列图与分布直方图，用于观察日历效应。<br/>
         价格口径：<span id="distAdjustHint"><b>qfq</b></span>（默认前复权，可切换 qfq/hfq/none；切换仅影响“价格类指标”）。成交活跃度/拥挤度始终使用 none 口径（真实成交）。<br/>
         拥挤度口径：
         RVOL=\( \frac{volume}{MA_{20}(volume)} \)；
@@ -601,6 +601,166 @@
       <table id="distFutureProbTable" style="margin-top:8px;"></table>
       <div class="muted" style="margin-top:10px;">相关性与因果检验（预测回归 + Granger-like）</div>
       <table id="distFutureCausalTable" style="margin-top:8px;"></table>
+      <div class="muted" style="margin-top:10px;">周内日历效应（按交易日星期，日度收盘价收益率）</div>
+      <div class="muted" style="margin-top:6px;">
+        仅使用当前「选择标的」在所选区间内的日线：对每个交易日取当日相对前一交易日的<strong>收盘价简单收益</strong>，再按星期筛选（与上方「价格复权口径」一致，1=周一 … 5=周五）。用于观察是否存在周内效应及随时间漂移。
+      </div>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>周内第 n 天（1=周一 … 5=周五）</label>
+          <select id="distWkdaySelect" style="min-width:200px;">
+            <option value="1" selected>1 · 周一</option>
+            <option value="2">2 · 周二</option>
+            <option value="3">3 · 周三</option>
+            <option value="4">4 · 周四</option>
+            <option value="5">5 · 周五</option>
+          </select>
+        </div>
+      </div>
+      <div id="distWkdayHint" class="muted" style="margin-top:6px;"></div>
+      <div id="distWkdayCurve" style="width:100%; height:320px; margin-top:8px;"></div>
+      <div id="distWkdayHist" style="width:100%; height:300px; margin-top:12px;"></div>
+      <table id="distWkdayStats" style="margin-top:8px;"></table>
+      <div class="muted" style="margin-top:10px;">月内日历效应（按公历日，日度收盘价收益率）</div>
+      <div class="muted" style="margin-top:6px;">
+        与下方「月内日历效应（单标的）」持有 n 交易日的月内扫描不同：此处仅筛选<strong>交易日期</strong>的公历「几号」为 n（1～31），对该日取相对前一交易日的<strong>收盘价简单收益</strong>。若某月没有 n 号（如 2 月 30 日）或该日非交易日，则该月不产生样本。复权口径与「价格复权口径」一致。
+      </div>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>月内第 n 天（1=1号 … 31=31号）</label>
+          <select id="distMonthDomSelect" style="min-width:220px;">
+            <option value="1" selected>1 号</option>
+            <option value="2">2 号</option>
+            <option value="3">3 号</option>
+            <option value="4">4 号</option>
+            <option value="5">5 号</option>
+            <option value="6">6 号</option>
+            <option value="7">7 号</option>
+            <option value="8">8 号</option>
+            <option value="9">9 号</option>
+            <option value="10">10 号</option>
+            <option value="11">11 号</option>
+            <option value="12">12 号</option>
+            <option value="13">13 号</option>
+            <option value="14">14 号</option>
+            <option value="15">15 号</option>
+            <option value="16">16 号</option>
+            <option value="17">17 号</option>
+            <option value="18">18 号</option>
+            <option value="19">19 号</option>
+            <option value="20">20 号</option>
+            <option value="21">21 号</option>
+            <option value="22">22 号</option>
+            <option value="23">23 号</option>
+            <option value="24">24 号</option>
+            <option value="25">25 号</option>
+            <option value="26">26 号</option>
+            <option value="27">27 号</option>
+            <option value="28">28 号</option>
+            <option value="29">29 号</option>
+            <option value="30">30 号</option>
+            <option value="31">31 号</option>
+          </select>
+        </div>
+      </div>
+      <div id="distMonthDomHint" class="muted" style="margin-top:6px;"></div>
+      <div id="distMonthDomCurve" style="width:100%; height:320px; margin-top:8px;"></div>
+      <div id="distMonthDomHist" style="width:100%; height:300px; margin-top:12px;"></div>
+      <table id="distMonthDomStats" style="margin-top:8px;"></table>
+      <div class="muted" style="margin-top:10px;">年内周序日历效应（公历年第 n 周，周度收盘价收益率）</div>
+      <div class="muted" style="margin-top:6px;">
+        以<strong>公历每年 1 月 1 日起算</strong>划分周块（第 1 周≈第 1～7 个公历日，依此类推）。对每个<strong>自然年</strong>内落在所选周块的全部交易日：取该周内<strong>首交易日收盘</strong>与<strong>末交易日收盘</strong>计算<strong>周度简单收益</strong>（每年该周至多 1 个样本）。闰年「第 53 周」已并入<strong>第 52 周</strong>。复权口径与「价格复权口径」一致。
+      </div>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>年内第 n 周（1～52）</label>
+          <select id="distYearWeekSelect" style="min-width:200px;">
+            <option value="1" selected>第 1 周</option>
+            <option value="2">第 2 周</option>
+            <option value="3">第 3 周</option>
+            <option value="4">第 4 周</option>
+            <option value="5">第 5 周</option>
+            <option value="6">第 6 周</option>
+            <option value="7">第 7 周</option>
+            <option value="8">第 8 周</option>
+            <option value="9">第 9 周</option>
+            <option value="10">第 10 周</option>
+            <option value="11">第 11 周</option>
+            <option value="12">第 12 周</option>
+            <option value="13">第 13 周</option>
+            <option value="14">第 14 周</option>
+            <option value="15">第 15 周</option>
+            <option value="16">第 16 周</option>
+            <option value="17">第 17 周</option>
+            <option value="18">第 18 周</option>
+            <option value="19">第 19 周</option>
+            <option value="20">第 20 周</option>
+            <option value="21">第 21 周</option>
+            <option value="22">第 22 周</option>
+            <option value="23">第 23 周</option>
+            <option value="24">第 24 周</option>
+            <option value="25">第 25 周</option>
+            <option value="26">第 26 周</option>
+            <option value="27">第 27 周</option>
+            <option value="28">第 28 周</option>
+            <option value="29">第 29 周</option>
+            <option value="30">第 30 周</option>
+            <option value="31">第 31 周</option>
+            <option value="32">第 32 周</option>
+            <option value="33">第 33 周</option>
+            <option value="34">第 34 周</option>
+            <option value="35">第 35 周</option>
+            <option value="36">第 36 周</option>
+            <option value="37">第 37 周</option>
+            <option value="38">第 38 周</option>
+            <option value="39">第 39 周</option>
+            <option value="40">第 40 周</option>
+            <option value="41">第 41 周</option>
+            <option value="42">第 42 周</option>
+            <option value="43">第 43 周</option>
+            <option value="44">第 44 周</option>
+            <option value="45">第 45 周</option>
+            <option value="46">第 46 周</option>
+            <option value="47">第 47 周</option>
+            <option value="48">第 48 周</option>
+            <option value="49">第 49 周</option>
+            <option value="50">第 50 周</option>
+            <option value="51">第 51 周</option>
+            <option value="52">第 52 周</option>
+          </select>
+        </div>
+      </div>
+      <div id="distYearWeekHint" class="muted" style="margin-top:6px;"></div>
+      <div id="distYearWeekCurve" style="width:100%; height:320px; margin-top:8px;"></div>
+      <div id="distYearWeekHist" style="width:100%; height:300px; margin-top:12px;"></div>
+      <table id="distYearWeekStats" style="margin-top:8px;"></table>
+      <div class="muted" style="margin-top:10px;">年内月份日历效应（公历第 n 月，月度收盘价收益率）</div>
+      <div class="muted" style="margin-top:6px;">
+        对每个<strong>自然年</strong>的公历 n 月（1=一月 … 12=十二月）：取该月内<strong>首交易日收盘</strong>与<strong>末交易日收盘</strong>计算<strong>月度简单收益</strong>（每年该月至多 1 个样本）。与「月内几号」的日度收益不同；复权口径与「价格复权口径」一致。
+      </div>
+      <div class="row no-print" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>年内第 n 月（1～12）</label>
+          <select id="distYearMonthSelect" style="min-width:200px;">
+            <option value="1" selected>1 月</option>
+            <option value="2">2 月</option>
+            <option value="3">3 月</option>
+            <option value="4">4 月</option>
+            <option value="5">5 月</option>
+            <option value="6">6 月</option>
+            <option value="7">7 月</option>
+            <option value="8">8 月</option>
+            <option value="9">9 月</option>
+            <option value="10">10 月</option>
+            <option value="11">11 月</option>
+            <option value="12">12 月</option>
+          </select>
+        </div>
+      </div>
+      <div id="distYearMonthHint" class="muted" style="margin-top:6px;"></div>
+      <div id="distYearMonthCurve" style="width:100%; height:320px; margin-top:8px;"></div>
+      <div id="distYearMonthHist" style="width:100%; height:300px; margin-top:12px;"></div>
+      <table id="distYearMonthStats" style="margin-top:8px;"></table>
       <div class="muted" style="margin-top:10px;">月内日历效应（单标的）</div>
       <div class="row no-print" style="margin-top:6px; align-items:end;">
         <div>
@@ -859,7 +1019,7 @@
               </select>
             </div>
             <div>
-              <label id="rotRebalanceAnchorLabel">调仓日（周度 0~5；0=周一到周五等权）</label>
+              <label id="rotRebalanceAnchorLabel">调仓日（周度 1~5；1=周一，5=周五）</label>
               <input id="rotRebalanceAnchor" value="5" />
             </div>
             <div>
@@ -883,11 +1043,20 @@
               <input id="rotTopK" value="1" />
             </div>
             <div>
-              <label>仓位比例模式</label>
+              <label>仓位比例模式 <button class="helpBtn" data-metric="param_rot_position_mode" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
               <select id="rotPositionMode" style="min-width:170px;">
                 <option value="adaptive" selected>自适应等权</option>
                 <option value="fixed">固定 1/K</option>
+                <option value="risk_budget">风险预算(ATR)</option>
               </select>
+            </div>
+            <div>
+              <label>风险预算ATR周期</label>
+              <input id="rotRiskBudgetAtrWin" value="20" />
+            </div>
+            <div>
+              <label>风险预算%（0.1~3）</label>
+              <input id="rotRiskBudgetPct" value="1" />
             </div>
             <div>
               <label>入场补位</label>
@@ -2409,11 +2578,12 @@
           </select>
         </div>
         <div>
-          <label>仓位法（组合）</label>
+          <label>仓位法（组合） <button class="helpBtn" data-metric="param_trend_position_sizing" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
           <select id="trendSizing" style="min-width:140px;">
             <option value="equal" selected>等权</option>
             <option value="vol_target">目标波动率</option>
             <option value="fixed_ratio">固定比例</option>
+            <option value="risk_budget">风险预算(ATR)</option>
           </select>
         </div>
         <div>
@@ -2430,6 +2600,14 @@
             <option value="skip" selected>跳过</option>
             <option value="extend">扩展</option>
           </select>
+        </div>
+        <div>
+          <label>风险预算ATR周期</label>
+          <input id="trendRiskBudgetAtrWin" value="20" />
+        </div>
+        <div>
+          <label>风险预算%（0.1~3）</label>
+          <input id="trendRiskBudgetPct" value="1" />
         </div>
         <div>
           <label>成交价口径</label>
@@ -2804,15 +2982,24 @@
           <input id="calTimingHoldDays" value="1" />
         </div>
         <div>
-          <label>仓位模式</label>
+          <label>仓位模式 <button class="helpBtn" data-metric="param_cal_position_mode" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
           <select id="calTimingPositionMode" style="min-width:140px;">
             <option value="equal" selected>等权</option>
             <option value="fixed_ratio">固定比例</option>
+            <option value="risk_budget">风险预算(ATR)</option>
           </select>
         </div>
         <div>
           <label>固定比例（仅固定比例模式）</label>
           <input id="calTimingFixedRatio" value="1.0" />
+        </div>
+        <div>
+          <label>风险预算ATR周期</label>
+          <input id="calTimingRiskBudgetAtrWin" value="20" />
+        </div>
+        <div>
+          <label>风险预算%（0.1~3）</label>
+          <input id="calTimingRiskBudgetPct" value="1" />
         </div>
       </div>
       <div class="row no-print" style="align-items:end; margin-top:8px;">
@@ -3021,9 +3208,10 @@
             <option value="rotation">轮动策略</option>
             <option value="trend">趋势策略</option>
             <option value="cal_timing">日历择时策略</option>
+            <option value="strategy_mix">多策略组合(MIX)</option>
           </select>
         </div>
-        <div><label>策略名称</label><input id="fixedStrategyName" placeholder="例如：防御持有A / 趋势突破1" /></div>
+        <div><label>策略名称</label><input id="fixedStrategyName" placeholder="例如：防御持有A / 趋势突破1 / 均衡MIX" /></div>
         <button id="saveFixedStrategy">保存当前回测为固定策略</button>
         <div>
           <label>已保存策略</label>
@@ -3034,6 +3222,7 @@
       </div>
       <div class="muted" style="margin-top:8px;">
         固定策略会保存：策略参数、候选池分组选择、最近一次回测结果（用于组合分析）。
+        若类型为「多策略组合(MIX)」，则保存当前组合中的子固定策略列表、权重模式、自定义权重、滚动窗口与账户金额（无需先做单策略回测）；加载后可一键恢复并重新生成组合分析。
       </div>
       <table id="fixedStrategyTable" style="margin-top:8px;"></table>
       <h3 style="margin: 12px 0 6px 0;">任意策略组合研究</h3>
@@ -3060,7 +3249,7 @@
       </div>
       <table id="mixStrategyListTable" style="margin-top:8px;"></table>
       <div class="muted" style="margin-top:8px;">
-        组合支持任意已保存固定策略。可手动加载策略到对应模块，也可直接添加到组合中分析。
+        组合支持任意已保存固定策略（不含嵌套的另一条 MIX）。可将当前组合在上方选择类型「多策略组合(MIX)」后保存为命名预设，避免每次重新添加子策略。
       </div>
       <div id="strategyMixChart" style="width:100%; height:420px; margin-top:10px;"></div>
       <div class="panel two" style="margin-top:10px;">
@@ -3089,11 +3278,11 @@
       </div>
       <div class="panel two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:10px;">
         <div>
-          <div class="muted" style="margin-bottom:6px;">子策略层：当前持仓（持有/轮动/趋势）</div>
+          <div class="muted" style="margin-bottom:6px;">子策略层：当前持仓（持有/轮动/趋势/日历择时）</div>
           <table id="mixSubCurrentHoldingsTable"></table>
         </div>
         <div>
-          <div class="muted" style="margin-bottom:6px;">子策略层：下一交易日交易计划（持有/轮动/趋势）</div>
+          <div class="muted" style="margin-bottom:6px;">子策略层：下一交易日交易计划（持有/轮动/趋势/日历择时）</div>
           <table id="mixSubNextBuyTable"></table>
           <table id="mixSubNextSellTable" style="margin-top:8px;"></table>
         </div>
@@ -3417,6 +3606,7 @@
         if (t === "rotation") return "轮动";
         if (t === "trend") return "趋势";
         if (t === "cal_timing") return "日历择时";
+        if (t === "strategy_mix") return "组合(MIX)";
         return t || "-";
       }
       function _saveFixedStrategies() {
@@ -3441,7 +3631,43 @@
         const id = String(item.id || "").trim();
         const name = String(item.name || "").trim();
         const type = String(item.type || "").trim().toLowerCase();
-        if (!id || !name || !["baseline", "rotation", "trend", "cal_timing"].includes(type)) return null;
+        if (!id || !name || !["baseline", "rotation", "trend", "cal_timing", "strategy_mix"].includes(type)) return null;
+        if (type === "strategy_mix") {
+          const pRaw = (item.payload && typeof item.payload === "object") ? item.payload : {};
+          const rawIds = Array.isArray(pRaw.strategy_ids)
+            ? pRaw.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean)
+            : [];
+          if (rawIds.length < 1) return null;
+          const cwIn = (pRaw.custom_weights && typeof pRaw.custom_weights === "object") ? pRaw.custom_weights : {};
+          const custom_weights = {};
+          for (const [k, v] of Object.entries(cwIn)) {
+            const kk = String(k || "").trim();
+            const vv = Number(v);
+            if (kk && Number.isFinite(vv) && vv > 0) custom_weights[kk] = vv;
+          }
+          const wm0 = String(pRaw.weight_mode || "equal").trim().toLowerCase();
+          const weight_mode = ["equal", "risk_parity", "custom"].includes(wm0) ? wm0 : "equal";
+          let mix_roll_win = Math.floor(Number(pRaw.mix_roll_win != null ? pRaw.mix_roll_win : 60));
+          if (!Number.isFinite(mix_roll_win) || mix_roll_win < 5) mix_roll_win = 60;
+          const mix_account_amount = String(pRaw.mix_account_amount != null ? pRaw.mix_account_amount : "").trim();
+          return {
+            id,
+            name: name.slice(0, 60),
+            type,
+            group_name: "",
+            fields: {},
+            payload: {
+              strategy_ids: rawIds.slice(),
+              weight_mode,
+              custom_weights,
+              mix_roll_win,
+              mix_account_amount,
+            },
+            result: null,
+            next_plan: null,
+            saved_at: String(item.saved_at || ""),
+          };
+        }
         return {
           id,
           name: name.slice(0, 60),
@@ -3470,6 +3696,7 @@
             el.appendChild(o0);
           }
           for (const s of items) {
+            if (el === addSel && String(s.type || "") === "strategy_mix") continue;
             const opt = document.createElement("option");
             opt.value = String(s.id);
             const g = s.group_name ? ` | 分组:${s.group_name}` : "";
@@ -3536,6 +3763,7 @@
           const ids = ["start", "end", "calTimingGroupPreset", ...SETTINGS_FIELD_IDS.calTiming];
           return _readFields(ids);
         }
+        if (t === "strategy_mix") return {};
         return {};
       }
       function _applyFixedStrategyFields(type, fields) {
@@ -3565,7 +3793,9 @@
           _applyFields(ids, fields || {});
           _refreshCalTimingSingleCodeOptions();
           _syncCalTimingModeUi();
+          return;
         }
+        if (t === "strategy_mix") return;
       }
       const SETTINGS_NS = "research.settings.v1";
       const SETTINGS_KEYS = {
@@ -3587,10 +3817,10 @@
       };
       const SETTINGS_FIELD_IDS = {
         global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "baselineCustomWeights", "benchmark", "baselineGroupPreset", "rotationGroupPreset", "trendGroupPreset", "calTimingGroupPreset", "groupEditorSelect", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse", "mixAccountAmount", "mixWeightMode", "fixedStrategyType"],
-        dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric"],
+        dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distRangeQuick", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric", "distWkdaySelect", "distMonthDomSelect", "distYearWeekSelect", "distYearMonthSelect"],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
-          "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotEntryBackfill",
+          "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotRiskBudgetAtrWin", "rotRiskBudgetPct", "rotEntryBackfill",
           "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotSlippage", "rotEntryMatchN", "rotExitMatchN",
           "rotAtrStopMode", "rotAtrStopBasis", "rotAtrStopWin", "rotAtrStopN", "rotAtrStopM",
           "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
@@ -3604,7 +3834,7 @@
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
@@ -3614,7 +3844,7 @@
         ],
         calTiming: [
           "calTimingMode", "calTimingSingleCode", "calTimingDecisionDay", "calTimingHoldDays",
-          "calTimingPositionMode", "calTimingFixedRatio", "calTimingExecPrice",
+          "calTimingPositionMode", "calTimingFixedRatio", "calTimingRiskBudgetAtrWin", "calTimingRiskBudgetPct", "calTimingExecPrice",
           "calTimingCost", "calTimingSlippage", "calTimingShift", "calTimingDailyRetMode",
         ],
         mcEw: ["mcEwN", "mcEwBlock", "mcEwWindow", "mcEwSeed"],
@@ -4227,6 +4457,40 @@
             <div style="margin-top:8px"><b>用途</b>：K 越大分散越强、波动更低，但动量暴露更弱。</div>
             <div style="margin-top:8px"><b>范围</b>：整数 ≥ 1，且不应超过可用标的数量。</div>
             <div style="margin-top:8px"><b>示例</b>：TopK=2 在 4 个标的池里会持有前 2 名等权。</div>
+          `,
+        },
+        param_rot_position_mode: {
+          title: "仓位比例模式（rotation）",
+          sub: "决定被选中标的在组合里的基础权重计算方法。",
+          body: `
+            <div><b>adaptive</b>：在风险标的中自适应等权（每次按当期入选数量平分）。</div>
+            <div style="margin-top:8px"><b>fixed</b>：固定每个入选标的权重为 1/TopK（入选不足时总仓位可低于100%，剩余视为现金）。</div>
+            <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，令“标的波动 1 个 ATR 时对组合净值影响约为 x%”。</div>
+            <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，并对全组合做上限约束（总权重&gt;100%时按比例缩放）。</div>
+            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~3%）。</div>
+          `,
+        },
+        param_trend_position_sizing: {
+          title: "仓位法（trend portfolio）",
+          sub: "决定趋势组合模式下每个入选标的的基础仓位。",
+          body: `
+            <div><b>equal</b>：入选标的等权。</div>
+            <div style="margin-top:8px"><b>vol_target</b>：按波动率逆权重并做目标波动率缩放。</div>
+            <div style="margin-top:8px"><b>fixed_ratio</b>：每个入选标的固定比例（可配超额策略与持仓数上限）。</div>
+            <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，令“单标的波动 1ATR 时组合净值波动约 x%”。</div>
+            <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，当总权重超过100%时按比例缩放到100%。</div>
+            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~3%）。</div>
+          `,
+        },
+        param_cal_position_mode: {
+          title: "仓位模式（calendar timing）",
+          sub: "决定日历效应择时在持仓区间内的目标仓位计算方式。",
+          body: `
+            <div><b>equal</b>：满仓等权持有（组合）或满仓单标的。</div>
+            <div style="margin-top:8px"><b>fixed_ratio</b>：固定总仓位（剩余现金）。</div>
+            <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，控制“每 1ATR 波动对应的组合净值波动预算”。</div>
+            <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，组合层面超100%时会缩放到100%。</div>
+            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~3%）。</div>
           `,
         },
         param_rot_lookback: {
@@ -5601,10 +5865,13 @@
         const mode = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
         const sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
         const isFixed = (mode === "portfolio" && sizing === "fixed_ratio");
+        const isRiskBudget = (mode === "portfolio" && sizing === "risk_budget");
         const singleCodeEl = $("trendSingleCode");
         const ratioEl = $("trendFixedPosRatio");
         const policyEl = $("trendFixedOvercapPolicy");
         const maxHoldEl = $("trendFixedMaxHoldings");
+        const rbAtrEl = $("trendRiskBudgetAtrWin");
+        const rbPctEl = $("trendRiskBudgetPct");
         if (singleCodeEl) {
           const enableSingleCode = (mode === "single");
           singleCodeEl.disabled = !enableSingleCode;
@@ -5622,6 +5889,29 @@
         if (maxHoldEl) {
           maxHoldEl.disabled = !isFixed;
           maxHoldEl.style.opacity = isFixed ? "1" : "0.55";
+        }
+        if (rbAtrEl) {
+          rbAtrEl.disabled = !isRiskBudget;
+          rbAtrEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        if (rbPctEl) {
+          rbPctEl.disabled = !isRiskBudget;
+          rbPctEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+      }
+
+      function _syncRotPositionModeUi() {
+        const mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
+        const on = (mode === "risk_budget");
+        const atrEl = $("rotRiskBudgetAtrWin");
+        const pctEl = $("rotRiskBudgetPct");
+        if (atrEl) {
+          atrEl.disabled = !on;
+          atrEl.style.opacity = on ? "1" : "0.55";
+        }
+        if (pctEl) {
+          pctEl.disabled = !on;
+          pctEl.style.opacity = on ? "1" : "0.55";
         }
       }
 
@@ -7373,7 +7663,12 @@
         const rollWin = Math.max(5, Math.floor(Number(($("mixRollWin") && $("mixRollWin").value) ? $("mixRollWin").value : "60")));
         const traces = [{ x: dts, y: mMix.nav, type: "scatter", mode: "lines", name: "MIX" }];
         for (const s of entries) traces.push({ x: dts, y: (mById[s.id] || {}).nav || [], type: "scatter", mode: "lines", name: s.displayName });
-        Plotly.newPlot("strategyMixChart", traces, { margin: { t: 30 }, title: "任意策略组合净值（共同区间）" }, { responsive: true });
+        Plotly.newPlot(
+          "strategyMixChart",
+          traces,
+          { margin: { t: 30 }, title: "任意策略组合净值（共同区间）", yaxis: { type: "log" } },
+          { responsive: true }
+        );
 
         const names = entries.map((s) => s.displayName);
         const arrs = entries.map((s) => arrById[s.id] || []);
@@ -7469,10 +7764,43 @@
           payload = window.__lastCalTimingPayload || null;
           nextPlan = (result && result.next_execution_plan) ? result.next_execution_plan : null;
           groupName = String(($("calTimingGroupPreset") && $("calTimingGroupPreset").value) || "").trim();
+        } else if (type === "strategy_mix") {
+          const ids = (mixSelectedStrategyIds || []).map((x) => String(x || "").trim()).filter(Boolean);
+          if (ids.length < 1) return setMsg("请先向多策略组合中添加至少一个固定子策略。");
+          for (const sid of ids) {
+            const ch = _findFixedStrategy(sid);
+            if (!ch) return setMsg(`组合中包含无效的固定策略：${sid}`);
+            if (String(ch.type || "") === "strategy_mix") {
+              return setMsg("组合中不能嵌套保存另一条多策略组合：请先从组合中移除组合(MIX)类条目。");
+            }
+          }
+          _readCustomMixWeightMap();
+          const weight_mode = ($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal";
+          const custom_weights = {};
+          for (const sid of ids) {
+            const vv = Number((mixCustomWeightsById || {})[sid]);
+            if (Number.isFinite(vv) && vv > 0) custom_weights[sid] = vv;
+            else custom_weights[sid] = 1;
+          }
+          const mix_roll_win = Math.max(5, Math.floor(Number(($("mixRollWin") && $("mixRollWin").value) ? $("mixRollWin").value : "60")));
+          const mix_account_amount = ($("mixAccountAmount") && $("mixAccountAmount").value != null)
+            ? String($("mixAccountAmount").value).replaceAll(",", "").trim()
+            : "";
+          payload = {
+            strategy_ids: ids.slice(),
+            weight_mode,
+            custom_weights,
+            mix_roll_win,
+            mix_account_amount,
+          };
+          result = null;
+          groupName = "";
         } else {
           return setMsg("不支持的固定策略类型。");
         }
-        if (!result || typeof result !== "object") return setMsg("该类型尚无可保存的回测结果，请先运行回测。");
+        if (type !== "strategy_mix" && (!result || typeof result !== "object")) {
+          return setMsg("该类型尚无可保存的回测结果，请先运行回测。");
+        }
         const fields = _readFixedStrategyFields(type);
         const now = new Date().toISOString();
         const id = `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
@@ -7510,6 +7838,53 @@
         } else if (s.type === "cal_timing") {
           window.__lastCalTimingResult = s.result;
           window.__lastCalTimingPayload = s.payload;
+        } else if (s.type === "strategy_mix") {
+          const p = (s.payload && typeof s.payload === "object") ? s.payload : {};
+          const want = Array.isArray(p.strategy_ids) ? p.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean) : [];
+          const ok = [];
+          const missing = [];
+          for (const sid of want) {
+            if (_findFixedStrategy(sid)) ok.push(sid);
+            else missing.push(sid);
+          }
+          if (!ok.length) {
+            setMsg(`组合「${s.name}」中的子固定策略均已不存在，无法加载。`);
+            _renderFixedStrategyControls();
+            return;
+          }
+          mixSelectedStrategyIds = ok;
+          mixCustomWeightsById = {};
+          const cw = (p.custom_weights && typeof p.custom_weights === "object") ? p.custom_weights : {};
+          for (const sid of ok) {
+            const vv = Number(cw[sid]);
+            mixCustomWeightsById[sid] = (Number.isFinite(vv) && vv > 0) ? vv : 1;
+          }
+          const wm = String(p.weight_mode || "equal").trim().toLowerCase();
+          if ($("mixWeightMode")) {
+            $("mixWeightMode").value = ["equal", "risk_parity", "custom"].includes(wm) ? wm : "equal";
+          }
+          if ($("mixRollWin")) {
+            const rw = Math.max(5, Math.floor(Number(p.mix_roll_win != null ? p.mix_roll_win : 60)));
+            $("mixRollWin").value = String(Number.isFinite(rw) ? rw : 60);
+          }
+          if ($("mixAccountAmount") && p.mix_account_amount != null) {
+            $("mixAccountAmount").value = String(p.mix_account_amount);
+          }
+          _renderMixStrategyListTable();
+          _saveMixSelection();
+          if ($("fixedStrategyType")) $("fixedStrategyType").value = "strategy_mix";
+          try { if (ok.length > 0) runStrategyMix(); } catch (_) { /* ignore */ }
+          if (missing.length) {
+            setMsg(`已加载组合「${s.name}」：${missing.length} 个子策略已删除已跳过；已用其余 ${ok.length} 条重新生成组合。`);
+          } else {
+            setMsg(`已加载组合预设「${s.name}」并已尝试刷新组合分析。`);
+          }
+          renderBenchmarkSelect();
+          renderTrendSingleCodeSelect();
+          _refreshCalTimingSingleCodeOptions();
+          _syncCalTimingModeUi();
+          _renderFixedStrategyControls();
+          return;
         }
         renderBenchmarkSelect();
         renderTrendSingleCodeSelect();
@@ -7837,6 +8212,54 @@
         );
       }
 
+      // NAV helpers shared by baseline charts (file-scoped; do not nest inside a single plotter).
+      function _navDrawdownFromSeries(vals) {
+        let peak = -Infinity;
+        const out = [];
+        for (const v of vals) {
+          const x = Number(v);
+          if (!Number.isFinite(x) || x <= 0) {
+            out.push(null);
+            continue;
+          }
+          peak = Math.max(peak, x);
+          out.push((x / peak) - 1.0);
+        }
+        return out;
+      }
+      function _navRollingReturn(vals, w0) {
+        const w = Math.max(1, Number(w0 || 1));
+        const out = new Array(vals.length).fill(null);
+        for (let i = w; i < vals.length; i++) {
+          const a = Number(vals[i - w]);
+          const b = Number(vals[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+          out[i] = (b / a) - 1.0;
+        }
+        return out;
+      }
+      function _navRollingDrawdown(vals, w0) {
+        const w = Math.max(2, Number(w0 || 2));
+        const out = new Array(vals.length).fill(null);
+        for (let i = w - 1; i < vals.length; i++) {
+          const st = i - w + 1;
+          let peak = -Infinity;
+          let ok = true;
+          for (let j = st; j <= i; j++) {
+            const x = Number(vals[j]);
+            if (!Number.isFinite(x) || x <= 0) {
+              ok = false;
+              break;
+            }
+            peak = Math.max(peak, x);
+          }
+          const cur = Number(vals[i]);
+          if (!ok || !Number.isFinite(cur) || peak <= 0) continue;
+          out[i] = (cur / peak) - 1.0;
+        }
+        return out;
+      }
+
       function plotBaselineAlignedCharts(data, strategyMode) {
         const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
         const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
@@ -7893,46 +8316,6 @@
           }
           return out;
         };
-        const _drawdownFromNav = (vals) => {
-          let peak = -Infinity;
-          const out = [];
-          for (const v of vals) {
-            const x = Number(v);
-            if (!Number.isFinite(x) || x <= 0) { out.push(null); continue; }
-            peak = Math.max(peak, x);
-            out.push((x / peak) - 1.0);
-          }
-          return out;
-        };
-        const _rollingReturn = (vals, w0) => {
-          const w = Math.max(1, Number(w0 || 1));
-          const out = new Array(vals.length).fill(null);
-          for (let i = w; i < vals.length; i++) {
-            const a = Number(vals[i - w]);
-            const b = Number(vals[i]);
-            if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
-            out[i] = (b / a) - 1.0;
-          }
-          return out;
-        };
-        const _rollingDrawdown = (vals, w0) => {
-          const w = Math.max(2, Number(w0 || 2));
-          const out = new Array(vals.length).fill(null);
-          for (let i = w - 1; i < vals.length; i++) {
-            const st = i - w + 1;
-            let peak = -Infinity;
-            let ok = true;
-            for (let j = st; j <= i; j++) {
-              const x = Number(vals[j]);
-              if (!Number.isFinite(x) || x <= 0) { ok = false; break; }
-              peak = Math.max(peak, x);
-            }
-            const cur = Number(vals[i]);
-            if (!ok || !Number.isFinite(cur) || peak <= 0) continue;
-            out[i] = (cur / peak) - 1.0;
-          }
-          return out;
-        };
         const _rollingMeanStd = (arr, window) => {
           const w = Math.max(2, Number(window || 2));
           const mean = new Array(arr.length).fill(null);
@@ -7969,8 +8352,8 @@
         const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
         const _plotRollingCombo = (divId, vals, titlePrefix) => {
           const w6m = 126, w1 = 252, w2 = 252 * 2, w3 = 252 * 3;
-          const r6m = _rollingReturn(vals, w6m), r1 = _rollingReturn(vals, w1), r2 = _rollingReturn(vals, w2), r3 = _rollingReturn(vals, w3);
-          const d6m = _rollingDrawdown(vals, w6m), d1 = _rollingDrawdown(vals, w1), d2 = _rollingDrawdown(vals, w2), d3 = _rollingDrawdown(vals, w3);
+          const r6m = _navRollingReturn(vals, w6m), r1 = _navRollingReturn(vals, w1), r2 = _navRollingReturn(vals, w2), r3 = _navRollingReturn(vals, w3);
+          const d6m = _navRollingDrawdown(vals, w6m), d1 = _navRollingDrawdown(vals, w1), d2 = _navRollingDrawdown(vals, w2), d3 = _navRollingDrawdown(vals, w3);
           const c6m = "rgba(214,39,40,0.90)";
           const c1 = "rgba(31,119,180,0.90)";
           const c2 = "rgba(44,160,44,0.90)";
@@ -8032,8 +8415,8 @@
         Plotly.newPlot(
           "baselineDDCompare",
           [
-            { x: dates, y: _drawdownFromNav(stratNav), mode: "lines", name: `${mode} DD`, hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
-            ...(hasBench ? [{ x: dates, y: _drawdownFromNav(benchNav), mode: "lines", name: `${benchKey} DD`, hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" }] : []),
+            { x: dates, y: _navDrawdownFromSeries(stratNav), mode: "lines", name: `${mode} DD`, hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" },
+            ...(hasBench ? [{ x: dates, y: _navDrawdownFromSeries(benchNav), mode: "lines", name: `${benchKey} DD`, hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>" }] : []),
           ],
           {
             margin: { t: 10, b: 30 },
@@ -8072,8 +8455,8 @@
         };
         const ratioTraces = [
           { x: dates, y: ratio, mode: "lines", name: "RATIO", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
-          ..._bbTracesForRatio(ratio, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
-          ..._bbTracesForRatio(ratio, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+          ..._bbTracesForRatio(ratio, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+          ..._bbTracesForRatio(ratio, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
           ..._bbTracesForRatio(ratio, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
         ];
         for (const w of rsiWins) {
@@ -8094,8 +8477,8 @@
           },
           { responsive: true }
         );
-        const s40 = _rollingReturn(stratNav, 40);
-        const b40 = _rollingReturn(benchNav, 40);
+        const s40 = _navRollingReturn(stratNav, 40);
+        const b40 = _navRollingReturn(benchNav, 40);
         const diff40 = s40.map((x, i) => {
           const a = Number(x);
           const b = Number(b40[i]);
@@ -9634,6 +10017,794 @@
             ).join("");
         };
 
+        const _renderWeekdayDowEffect = (codeMaybe) => {
+          const curveEl = $("distWkdayCurve");
+          const histEl = $("distWkdayHist");
+          const tblEl = $("distWkdayStats");
+          const hintEl = $("distWkdayHint");
+          const selEl = $("distWkdaySelect");
+          if (!curveEl || !histEl || !tblEl) return;
+          const code = String(codeMaybe || "").trim();
+          const dowN = Math.max(1, Math.min(5, Math.floor(Number(selEl && selEl.value ? selEl.value : 1))));
+          const dowNames = ["", "周一", "周二", "周三", "周四", "周五"];
+          const _parseYmd = (s) => {
+            const t = String(s || "").trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(5, 7)) - 1;
+              const d = Number(t.slice(8, 10));
+              return new Date(y, mo, d);
+            }
+            if (/^\d{8}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(4, 6)) - 1;
+              const d = Number(t.slice(6, 8));
+              return new Date(y, mo, d);
+            }
+            return null;
+          };
+          const _weekdayMon1 = (s) => {
+            const dt = _parseYmd(s);
+            if (!dt || !Number.isFinite(dt.getTime())) return -1;
+            const wd = dt.getDay(); // 0 Sun .. 6 Sat
+            if (wd === 0 || wd === 6) return -1;
+            return wd; // Mon=1 .. Fri=5
+          };
+          if (!code) {
+            curveEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            histEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const s = (window.__distOpenByCode || {})[code];
+          if (!s || !Array.isArray(s.dates) || !Array.isArray(s.close) || s.dates.length < 3 || s.close.length !== s.dates.length) {
+            curveEl.innerHTML = "<div class='muted'>无可用收盘价序列，请等待数据加载或调整区间。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const xs = [];
+          const ys = [];
+          for (let i = 1; i < s.close.length; i++) {
+            const dStr = String(s.dates[i] || "");
+            const wd = _weekdayMon1(dStr);
+            if (wd !== dowN) continue;
+            const c0 = Number(s.close[i - 1]);
+            const c1 = Number(s.close[i]);
+            if (!Number.isFinite(c0) || !Number.isFinite(c1) || c0 <= 0) continue;
+            const r = c1 / c0 - 1.0;
+            if (!Number.isFinite(r)) continue;
+            xs.push(dStr);
+            ys.push(r);
+          }
+          const adj = String((adjustSelect && adjustSelect.value) ? adjustSelect.value : "qfq").toLowerCase();
+          if (hintEl) {
+            hintEl.textContent = `${codeLabel(code)} · 复权=${adj} · 样本仅含星期${dowNames[dowN]}（共 ${ys.length} 个交易日收益）`;
+          }
+          if (typeof Plotly === "undefined") {
+            curveEl.innerHTML = "<div class='muted'>Plotly 未加载</div>";
+            histEl.innerHTML = "";
+            return;
+          }
+          if (ys.length === 0) {
+            curveEl.innerHTML = "<div class='muted'>当前区间与星期条件下无有效收益样本。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            return;
+          }
+          Plotly.newPlot(
+            curveEl.id,
+            [{
+              x: xs,
+              y: ys,
+              type: "scatter",
+              mode: "lines+markers",
+              marker: { size: 5, opacity: 0.65 },
+              line: { width: 1, color: "#1f77b4" },
+              name: "日收益",
+              hovertemplate: "%{x}<br>日收益率=%{y:.2%}<extra></extra>",
+            }],
+            {
+              margin: { t: 36, l: 55, r: 20, b: 45 },
+              title: { text: `${dowNames[dowN]} 的日度收盘收益率时间序列`, font: { size: 14 } },
+              xaxis: { title: "交易日" },
+              yaxis: { tickformat: ".2%", title: "收益率" },
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const qRef = (typeof _percentile === "function" && ys.length >= 3) ? {
+            q01: _percentile(ys, 1),
+            q05: _percentile(ys, 5),
+            q10: _percentile(ys, 10),
+            q25: _percentile(ys, 25),
+            q50: _percentile(ys, 50),
+            q75: _percentile(ys, 75),
+            q90: _percentile(ys, 90),
+            q95: _percentile(ys, 95),
+            q99: _percentile(ys, 99),
+          } : null;
+          const mn = ys.reduce((a, b) => a + b, 0) / ys.length;
+          const sd = _std(ys);
+          const curR = ys[ys.length - 1];
+          const curD = xs[xs.length - 1];
+          const mx = Math.max(...ys);
+          const mnV = Math.min(...ys);
+          const mkVline = (xv, color, dash, width) => {
+            const v = Number(xv);
+            if (!Number.isFinite(v)) return null;
+            return {
+              type: "line",
+              xref: "x",
+              yref: "paper",
+              x0: v,
+              x1: v,
+              y0: 0,
+              y1: 1,
+              line: { color, width: width || 1.5, dash: dash || "dot" },
+            };
+          };
+          const shapes = [];
+          if (qRef) {
+            shapes.push(mkVline(qRef.q01, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q99, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q05, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q95, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q10, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q90, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q25, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q75, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q50, "rgba(31,119,180,0.95)", "solid", 2.0));
+          }
+          if (Number.isFinite(curR)) shapes.push(mkVline(curR, "rgba(214,39,40,0.95)", "solid", 2.4));
+          Plotly.newPlot(
+            histEl.id,
+            [
+              {
+                x: ys,
+                type: "histogram",
+                marker: { color: "#4c78a8" },
+                nbinsx: Math.min(48, Math.max(12, Math.round(Math.sqrt(ys.length) * 3))),
+                name: "频数",
+                hovertemplate: "收益=%{x:.2%}<br>频数=%{y}<extra></extra>",
+              },
+            ],
+            {
+              margin: { t: 34, l: 55, r: 20, b: 45 },
+              title: { text: `${dowNames[dowN]} 日收益分布（n=${ys.length}）`, font: { size: 13 } },
+              xaxis: { tickformat: ".2%", title: "日收益率" },
+              yaxis: { title: "频数" },
+              shapes: shapes.filter(Boolean),
+              showlegend: false,
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const fmtQv = (v) => (Number.isFinite(v) ? fmtPct(v) : "-");
+          tblEl.innerHTML =
+            `<tr><th>统计量</th><th>数值</th></tr>` +
+            `<tr><td>样本数</td><td>${ys.length}</td></tr>` +
+            `<tr><td>最大值</td><td>${fmtQv(mx)}</td></tr>` +
+            `<tr><td>最小值</td><td>${fmtQv(mnV)}</td></tr>` +
+            `<tr><td>均值</td><td>${fmtQv(mn)}</td></tr>` +
+            `<tr><td>标准差</td><td>${fmtQv(sd)}</td></tr>` +
+            (qRef ? (
+              `<tr><td>P1</td><td>${fmtQv(qRef.q01)}</td></tr>` +
+              `<tr><td>P5</td><td>${fmtQv(qRef.q05)}</td></tr>` +
+              `<tr><td>P10</td><td>${fmtQv(qRef.q10)}</td></tr>` +
+              `<tr><td>P25</td><td>${fmtQv(qRef.q25)}</td></tr>` +
+              `<tr><td>P50</td><td>${fmtQv(qRef.q50)}</td></tr>` +
+              `<tr><td>P75</td><td>${fmtQv(qRef.q75)}</td></tr>` +
+              `<tr><td>P90</td><td>${fmtQv(qRef.q90)}</td></tr>` +
+              `<tr><td>P95</td><td>${fmtQv(qRef.q95)}</td></tr>` +
+              `<tr><td>P99</td><td>${fmtQv(qRef.q99)}</td></tr>`
+            ) : `<tr><td colspan="2" class="muted">样本不足，分位数省略</td></tr>`) +
+            `<tr><td>当前值</td><td>${Number.isFinite(curR) ? `${fmtQv(curR)}（${esc(String(curD || ""))}）` : "-"}</td></tr>`;
+        };
+
+        const _renderMonthDomEffect = (codeMaybe) => {
+          const curveEl = $("distMonthDomCurve");
+          const histEl = $("distMonthDomHist");
+          const tblEl = $("distMonthDomStats");
+          const hintEl = $("distMonthDomHint");
+          const selEl = $("distMonthDomSelect");
+          if (!curveEl || !histEl || !tblEl) return;
+          const code = String(codeMaybe || "").trim();
+          const domN = Math.max(1, Math.min(31, Math.floor(Number(selEl && selEl.value ? selEl.value : 1))));
+          const _parseYmd2 = (s) => {
+            const t = String(s || "").trim();
+            if (/^\d{4}-\d{2}-\d{2}/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(5, 7)) - 1;
+              const d = Number(t.slice(8, 10));
+              return new Date(y, mo, d);
+            }
+            if (/^\d{8}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(4, 6)) - 1;
+              const d = Number(t.slice(6, 8));
+              return new Date(y, mo, d);
+            }
+            return null;
+          };
+          const _calendarDom = (s) => {
+            const dt = _parseYmd2(s);
+            if (!dt || !Number.isFinite(dt.getTime())) return -1;
+            return dt.getDate();
+          };
+          if (!code) {
+            curveEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            histEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const s = (window.__distOpenByCode || {})[code];
+          if (!s || !Array.isArray(s.dates) || !Array.isArray(s.close) || s.dates.length < 3 || s.close.length !== s.dates.length) {
+            curveEl.innerHTML = "<div class='muted'>无可用收盘价序列，请等待数据加载或调整区间。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const xs = [];
+          const ys = [];
+          for (let i = 1; i < s.close.length; i++) {
+            const dStr = String(s.dates[i] || "");
+            if (_calendarDom(dStr) !== domN) continue;
+            const c0 = Number(s.close[i - 1]);
+            const c1 = Number(s.close[i]);
+            if (!Number.isFinite(c0) || !Number.isFinite(c1) || c0 <= 0) continue;
+            const r = c1 / c0 - 1.0;
+            if (!Number.isFinite(r)) continue;
+            xs.push(dStr);
+            ys.push(r);
+          }
+          const adj = String((adjustSelect && adjustSelect.value) ? adjustSelect.value : "qfq").toLowerCase();
+          if (hintEl) {
+            hintEl.textContent = `${codeLabel(code)} · 复权=${adj} · 样本为公历 ${domN} 号的交易日收益（共 ${ys.length} 个）`;
+          }
+          if (typeof Plotly === "undefined") {
+            curveEl.innerHTML = "<div class='muted'>Plotly 未加载</div>";
+            histEl.innerHTML = "";
+            return;
+          }
+          if (ys.length === 0) {
+            curveEl.innerHTML = "<div class='muted'>当前区间与月内日期条件下无有效收益样本（可能因非交易日或日期不存在被跳过）。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            return;
+          }
+          Plotly.newPlot(
+            curveEl.id,
+            [{
+              x: xs,
+              y: ys,
+              type: "scatter",
+              mode: "lines+markers",
+              marker: { size: 5, opacity: 0.65 },
+              line: { width: 1, color: "#2ca02c" },
+              name: "日收益",
+              hovertemplate: "%{x}<br>日收益率=%{y:.2%}<extra></extra>",
+            }],
+            {
+              margin: { t: 36, l: 55, r: 20, b: 45 },
+              title: { text: `每月 ${domN} 号的日度收盘收益率时间序列`, font: { size: 14 } },
+              xaxis: { title: "交易日" },
+              yaxis: { tickformat: ".2%", title: "收益率" },
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const qRef = (typeof _percentile === "function" && ys.length >= 3) ? {
+            q01: _percentile(ys, 1),
+            q05: _percentile(ys, 5),
+            q10: _percentile(ys, 10),
+            q25: _percentile(ys, 25),
+            q50: _percentile(ys, 50),
+            q75: _percentile(ys, 75),
+            q90: _percentile(ys, 90),
+            q95: _percentile(ys, 95),
+            q99: _percentile(ys, 99),
+          } : null;
+          const mn = ys.reduce((a, b) => a + b, 0) / ys.length;
+          const sd = _std(ys);
+          const curR = ys[ys.length - 1];
+          const curD = xs[xs.length - 1];
+          const mx = Math.max(...ys);
+          const mnV = Math.min(...ys);
+          const mkVline = (xv, color, dash, width) => {
+            const v = Number(xv);
+            if (!Number.isFinite(v)) return null;
+            return {
+              type: "line",
+              xref: "x",
+              yref: "paper",
+              x0: v,
+              x1: v,
+              y0: 0,
+              y1: 1,
+              line: { color, width: width || 1.5, dash: dash || "dot" },
+            };
+          };
+          const shapes = [];
+          if (qRef) {
+            shapes.push(mkVline(qRef.q01, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q99, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q05, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q95, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q10, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q90, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q25, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q75, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q50, "rgba(31,119,180,0.95)", "solid", 2.0));
+          }
+          if (Number.isFinite(curR)) shapes.push(mkVline(curR, "rgba(214,39,40,0.95)", "solid", 2.4));
+          Plotly.newPlot(
+            histEl.id,
+            [{
+              x: ys,
+              type: "histogram",
+              marker: { color: "#98df8a" },
+              nbinsx: Math.min(48, Math.max(12, Math.round(Math.sqrt(ys.length) * 3))),
+              name: "频数",
+              hovertemplate: "收益=%{x:.2%}<br>频数=%{y}<extra></extra>",
+            }],
+            {
+              margin: { t: 34, l: 55, r: 20, b: 45 },
+              title: { text: `每月 ${domN} 号日收益分布（n=${ys.length}）`, font: { size: 13 } },
+              xaxis: { tickformat: ".2%", title: "日收益率" },
+              yaxis: { title: "频数" },
+              shapes: shapes.filter(Boolean),
+              showlegend: false,
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const fmtQv = (v) => (Number.isFinite(v) ? fmtPct(v) : "-");
+          tblEl.innerHTML =
+            `<tr><th>统计量</th><th>数值</th></tr>` +
+            `<tr><td>样本数</td><td>${ys.length}</td></tr>` +
+            `<tr><td>最大值</td><td>${fmtQv(mx)}</td></tr>` +
+            `<tr><td>最小值</td><td>${fmtQv(mnV)}</td></tr>` +
+            `<tr><td>均值</td><td>${fmtQv(mn)}</td></tr>` +
+            `<tr><td>标准差</td><td>${fmtQv(sd)}</td></tr>` +
+            (qRef ? (
+              `<tr><td>P1</td><td>${fmtQv(qRef.q01)}</td></tr>` +
+              `<tr><td>P5</td><td>${fmtQv(qRef.q05)}</td></tr>` +
+              `<tr><td>P10</td><td>${fmtQv(qRef.q10)}</td></tr>` +
+              `<tr><td>P25</td><td>${fmtQv(qRef.q25)}</td></tr>` +
+              `<tr><td>P50</td><td>${fmtQv(qRef.q50)}</td></tr>` +
+              `<tr><td>P75</td><td>${fmtQv(qRef.q75)}</td></tr>` +
+              `<tr><td>P90</td><td>${fmtQv(qRef.q90)}</td></tr>` +
+              `<tr><td>P95</td><td>${fmtQv(qRef.q95)}</td></tr>` +
+              `<tr><td>P99</td><td>${fmtQv(qRef.q99)}</td></tr>`
+            ) : `<tr><td colspan="2" class="muted">样本不足，分位数省略</td></tr>`) +
+            `<tr><td>当前值</td><td>${Number.isFinite(curR) ? `${fmtQv(curR)}（${esc(String(curD || ""))}）` : "-"}</td></tr>`;
+        };
+
+        const _renderYearWeekEffect = (codeMaybe) => {
+          const curveEl = $("distYearWeekCurve");
+          const histEl = $("distYearWeekHist");
+          const tblEl = $("distYearWeekStats");
+          const hintEl = $("distYearWeekHint");
+          const selEl = $("distYearWeekSelect");
+          if (!curveEl || !histEl || !tblEl) return;
+          const code = String(codeMaybe || "").trim();
+          const selN = Math.max(1, Math.min(52, Math.floor(Number(selEl && selEl.value ? selEl.value : 1))));
+          const _parseYmdYw = (s) => {
+            const t = String(s || "").trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(5, 7)) - 1;
+              const d = Number(t.slice(8, 10));
+              return new Date(y, mo, d);
+            }
+            if (/^\d{8}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(4, 6)) - 1;
+              const d = Number(t.slice(6, 8));
+              return new Date(y, mo, d);
+            }
+            return null;
+          };
+          const _dayOfYearCal = (s) => {
+            const dt = _parseYmdYw(s);
+            if (!dt || !Number.isFinite(dt.getTime())) return -1;
+            const y = dt.getFullYear();
+            const t0 = new Date(y, 0, 1);
+            return Math.floor((dt.getTime() - t0.getTime()) / 86400000) + 1;
+          };
+          const _weekIndexInCalendarYear = (s) => {
+            const doy = _dayOfYearCal(s);
+            if (doy < 1) return -1;
+            return Math.floor((doy - 1) / 7) + 1;
+          };
+          const _normWeekBucket = (rawW) => {
+            if (rawW < 1) return -1;
+            return rawW >= 52 ? 52 : rawW;
+          };
+          const _yearOfStrYw = (s) => {
+            const dt = _parseYmdYw(s);
+            if (!dt || !Number.isFinite(dt.getTime())) return -1;
+            return dt.getFullYear();
+          };
+          if (!code) {
+            curveEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            histEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const s = (window.__distOpenByCode || {})[code];
+          if (!s || !Array.isArray(s.dates) || !Array.isArray(s.close) || s.dates.length < 3 || s.close.length !== s.dates.length) {
+            curveEl.innerHTML = "<div class='muted'>无可用收盘价序列，请等待数据加载或调整区间。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const weekGroups = new Map();
+          for (let i = 0; i < s.dates.length; i++) {
+            const dStr = String(s.dates[i] || "");
+            const rawW = _weekIndexInCalendarYear(dStr);
+            const buck = _normWeekBucket(rawW);
+            if (buck < 1) continue;
+            if (selN <= 51) {
+              if (buck !== selN) continue;
+            } else if (buck !== 52) {
+              continue;
+            }
+            const y = _yearOfStrYw(dStr);
+            if (y < 1) continue;
+            const gk = `${y}|${buck}`;
+            if (!weekGroups.has(gk)) weekGroups.set(gk, []);
+            weekGroups.get(gk).push(i);
+          }
+          const xs = [];
+          const ys = [];
+          const wkKeys = Array.from(weekGroups.keys()).sort((a, b) => {
+            const [ya, ba] = a.split("|").map(Number);
+            const [yb, bb] = b.split("|").map(Number);
+            if (ya !== yb) return ya - yb;
+            return ba - bb;
+          });
+          for (const gk of wkKeys) {
+            const idxs = weekGroups.get(gk);
+            if (!idxs || idxs.length < 1) continue;
+            idxs.sort((a, b) => a - b);
+            const i0 = idxs[0];
+            const i1 = idxs[idxs.length - 1];
+            const c0 = Number(s.close[i0]);
+            const c1 = Number(s.close[i1]);
+            if (!Number.isFinite(c0) || !Number.isFinite(c1) || c0 <= 0) continue;
+            const r = c1 / c0 - 1.0;
+            if (!Number.isFinite(r)) continue;
+            xs.push(String(s.dates[i1] || ""));
+            ys.push(r);
+          }
+          const adj = String((adjustSelect && adjustSelect.value) ? adjustSelect.value : "qfq").toLowerCase();
+          const wkHint = (selN <= 51)
+            ? `公历年内第 ${selN} 周（约第 ${(selN - 1) * 7 + 1}～${selN * 7} 号）`
+            : "公历年内第 52 周（含可能的第 53 周）";
+          if (hintEl) {
+            hintEl.textContent = `${codeLabel(code)} · 复权=${adj} · ${wkHint} · 样本 ${ys.length} 个周度收益（每自然年至多 1 个）`;
+          }
+          if (typeof Plotly === "undefined") {
+            curveEl.innerHTML = "<div class='muted'>Plotly 未加载</div>";
+            histEl.innerHTML = "";
+            return;
+          }
+          if (ys.length === 0) {
+            curveEl.innerHTML = "<div class='muted'>当前区间与年内周序条件下无有效周度收益样本。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            return;
+          }
+          Plotly.newPlot(
+            curveEl.id,
+            [{
+              x: xs,
+              y: ys,
+              type: "scatter",
+              mode: "lines+markers",
+              marker: { size: 5, opacity: 0.65 },
+              line: { width: 1, color: "#9467bd" },
+              name: "周收益",
+              hovertemplate: "%{x}<br>周收益率=%{y:.2%}<extra></extra>",
+            }],
+            {
+              margin: { t: 36, l: 55, r: 20, b: 45 },
+              title: { text: `年内第 ${selN} 周 · 周度收盘收益率时间序列（末交易日）`, font: { size: 14 } },
+              xaxis: { title: "周收益截止日" },
+              yaxis: { tickformat: ".2%", title: "周收益率" },
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const qRef = (typeof _percentile === "function" && ys.length >= 3) ? {
+            q01: _percentile(ys, 1),
+            q05: _percentile(ys, 5),
+            q10: _percentile(ys, 10),
+            q25: _percentile(ys, 25),
+            q50: _percentile(ys, 50),
+            q75: _percentile(ys, 75),
+            q90: _percentile(ys, 90),
+            q95: _percentile(ys, 95),
+            q99: _percentile(ys, 99),
+          } : null;
+          const mn = ys.reduce((a, b) => a + b, 0) / ys.length;
+          const sd = _std(ys);
+          const curR = ys[ys.length - 1];
+          const curD = xs[xs.length - 1];
+          const mx = Math.max(...ys);
+          const mnV = Math.min(...ys);
+          const mkVline = (xv, color, dash, width) => {
+            const v = Number(xv);
+            if (!Number.isFinite(v)) return null;
+            return {
+              type: "line",
+              xref: "x",
+              yref: "paper",
+              x0: v,
+              x1: v,
+              y0: 0,
+              y1: 1,
+              line: { color, width: width || 1.5, dash: dash || "dot" },
+            };
+          };
+          const shapes = [];
+          if (qRef) {
+            shapes.push(mkVline(qRef.q01, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q99, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q05, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q95, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q10, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q90, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q25, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q75, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q50, "rgba(31,119,180,0.95)", "solid", 2.0));
+          }
+          if (Number.isFinite(curR)) shapes.push(mkVline(curR, "rgba(214,39,40,0.95)", "solid", 2.4));
+          Plotly.newPlot(
+            histEl.id,
+            [{
+              x: ys,
+              type: "histogram",
+              marker: { color: "#c5b0d5" },
+              nbinsx: Math.min(48, Math.max(12, Math.round(Math.sqrt(ys.length) * 3))),
+              name: "频数",
+              hovertemplate: "收益=%{x:.2%}<br>频数=%{y}<extra></extra>",
+            }],
+            {
+              margin: { t: 34, l: 55, r: 20, b: 45 },
+              title: { text: `年内第 ${selN} 周 · 周度收益率分布（n=${ys.length}）`, font: { size: 13 } },
+              xaxis: { tickformat: ".2%", title: "周收益率" },
+              yaxis: { title: "频数" },
+              shapes: shapes.filter(Boolean),
+              showlegend: false,
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const fmtQv = (v) => (Number.isFinite(v) ? fmtPct(v) : "-");
+          tblEl.innerHTML =
+            `<tr><th>统计量</th><th>数值</th></tr>` +
+            `<tr><td>样本数</td><td>${ys.length}</td></tr>` +
+            `<tr><td>最大值</td><td>${fmtQv(mx)}</td></tr>` +
+            `<tr><td>最小值</td><td>${fmtQv(mnV)}</td></tr>` +
+            `<tr><td>均值</td><td>${fmtQv(mn)}</td></tr>` +
+            `<tr><td>标准差</td><td>${fmtQv(sd)}</td></tr>` +
+            (qRef ? (
+              `<tr><td>P1</td><td>${fmtQv(qRef.q01)}</td></tr>` +
+              `<tr><td>P5</td><td>${fmtQv(qRef.q05)}</td></tr>` +
+              `<tr><td>P10</td><td>${fmtQv(qRef.q10)}</td></tr>` +
+              `<tr><td>P25</td><td>${fmtQv(qRef.q25)}</td></tr>` +
+              `<tr><td>P50</td><td>${fmtQv(qRef.q50)}</td></tr>` +
+              `<tr><td>P75</td><td>${fmtQv(qRef.q75)}</td></tr>` +
+              `<tr><td>P90</td><td>${fmtQv(qRef.q90)}</td></tr>` +
+              `<tr><td>P95</td><td>${fmtQv(qRef.q95)}</td></tr>` +
+              `<tr><td>P99</td><td>${fmtQv(qRef.q99)}</td></tr>`
+            ) : `<tr><td colspan="2" class="muted">样本不足，分位数省略</td></tr>`) +
+            `<tr><td>当前值</td><td>${Number.isFinite(curR) ? `${fmtQv(curR)}（${esc(String(curD || ""))}）` : "-"}</td></tr>`;
+        };
+
+        const _renderYearMonthEffect = (codeMaybe) => {
+          const curveEl = $("distYearMonthCurve");
+          const histEl = $("distYearMonthHist");
+          const tblEl = $("distYearMonthStats");
+          const hintEl = $("distYearMonthHint");
+          const selEl = $("distYearMonthSelect");
+          if (!curveEl || !histEl || !tblEl) return;
+          const code = String(codeMaybe || "").trim();
+          const selN = Math.max(1, Math.min(12, Math.floor(Number(selEl && selEl.value ? selEl.value : 1))));
+          const monthNames = ["", "一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"];
+          const _parseYmdMon = (s) => {
+            const t = String(s || "").trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(5, 7)) - 1;
+              const d = Number(t.slice(8, 10));
+              return new Date(y, mo, d);
+            }
+            if (/^\d{8}$/.test(t)) {
+              const y = Number(t.slice(0, 4));
+              const mo = Number(t.slice(4, 6)) - 1;
+              const d = Number(t.slice(6, 8));
+              return new Date(y, mo, d);
+            }
+            return null;
+          };
+          const _calendarMonth1to12 = (s) => {
+            const dt = _parseYmdMon(s);
+            if (!dt || !Number.isFinite(dt.getTime())) return -1;
+            return dt.getMonth() + 1;
+          };
+          if (!code) {
+            curveEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            histEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const s = (window.__distOpenByCode || {})[code];
+          if (!s || !Array.isArray(s.dates) || !Array.isArray(s.close) || s.dates.length < 3 || s.close.length !== s.dates.length) {
+            curveEl.innerHTML = "<div class='muted'>无可用收盘价序列，请等待数据加载或调整区间。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            if (hintEl) hintEl.textContent = "";
+            return;
+          }
+          const monthGroups = new Map();
+          for (let i = 0; i < s.dates.length; i++) {
+            const dStr = String(s.dates[i] || "");
+            if (_calendarMonth1to12(dStr) !== selN) continue;
+            const dt = _parseYmdMon(dStr);
+            if (!dt || !Number.isFinite(dt.getTime())) continue;
+            const y = dt.getFullYear();
+            const gk = `${y}|${selN}`;
+            if (!monthGroups.has(gk)) monthGroups.set(gk, []);
+            monthGroups.get(gk).push(i);
+          }
+          const xs = [];
+          const ys = [];
+          const moKeys = Array.from(monthGroups.keys()).sort((a, b) => {
+            const [ya, ma] = a.split("|").map(Number);
+            const [yb, mb] = b.split("|").map(Number);
+            if (ya !== yb) return ya - yb;
+            return ma - mb;
+          });
+          for (const gk of moKeys) {
+            const idxs = monthGroups.get(gk);
+            if (!idxs || idxs.length < 1) continue;
+            idxs.sort((a, b) => a - b);
+            const i0 = idxs[0];
+            const i1 = idxs[idxs.length - 1];
+            const c0 = Number(s.close[i0]);
+            const c1 = Number(s.close[i1]);
+            if (!Number.isFinite(c0) || !Number.isFinite(c1) || c0 <= 0) continue;
+            const r = c1 / c0 - 1.0;
+            if (!Number.isFinite(r)) continue;
+            xs.push(String(s.dates[i1] || ""));
+            ys.push(r);
+          }
+          const adj = String((adjustSelect && adjustSelect.value) ? adjustSelect.value : "qfq").toLowerCase();
+          if (hintEl) {
+            hintEl.textContent = `${codeLabel(code)} · 复权=${adj} · 公历${monthNames[selN]} · 样本 ${ys.length} 个月度收益（每自然年至多 1 个）`;
+          }
+          if (typeof Plotly === "undefined") {
+            curveEl.innerHTML = "<div class='muted'>Plotly 未加载</div>";
+            histEl.innerHTML = "";
+            return;
+          }
+          if (ys.length === 0) {
+            curveEl.innerHTML = "<div class='muted'>当前区间与月份条件下无有效月度收益样本。</div>";
+            histEl.innerHTML = "<div class='muted'>无数据</div>";
+            tblEl.innerHTML = "";
+            return;
+          }
+          Plotly.newPlot(
+            curveEl.id,
+            [{
+              x: xs,
+              y: ys,
+              type: "scatter",
+              mode: "lines+markers",
+              marker: { size: 5, opacity: 0.65 },
+              line: { width: 1, color: "#17becf" },
+              name: "月收益",
+              hovertemplate: "%{x}<br>月收益率=%{y:.2%}<extra></extra>",
+            }],
+            {
+              margin: { t: 36, l: 55, r: 20, b: 45 },
+              title: { text: `公历${monthNames[selN]} · 月度收盘收益率时间序列（月末交易日）`, font: { size: 14 } },
+              xaxis: { title: "月收益截止日" },
+              yaxis: { tickformat: ".2%", title: "月收益率" },
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const qRef = (typeof _percentile === "function" && ys.length >= 3) ? {
+            q01: _percentile(ys, 1),
+            q05: _percentile(ys, 5),
+            q10: _percentile(ys, 10),
+            q25: _percentile(ys, 25),
+            q50: _percentile(ys, 50),
+            q75: _percentile(ys, 75),
+            q90: _percentile(ys, 90),
+            q95: _percentile(ys, 95),
+            q99: _percentile(ys, 99),
+          } : null;
+          const mn = ys.reduce((a, b) => a + b, 0) / ys.length;
+          const sd = _std(ys);
+          const curR = ys[ys.length - 1];
+          const curD = xs[xs.length - 1];
+          const mx = Math.max(...ys);
+          const mnV = Math.min(...ys);
+          const mkVline = (xv, color, dash, width) => {
+            const v = Number(xv);
+            if (!Number.isFinite(v)) return null;
+            return {
+              type: "line",
+              xref: "x",
+              yref: "paper",
+              x0: v,
+              x1: v,
+              y0: 0,
+              y1: 1,
+              line: { color, width: width || 1.5, dash: dash || "dot" },
+            };
+          };
+          const shapes = [];
+          if (qRef) {
+            shapes.push(mkVline(qRef.q01, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q99, "rgba(214,39,40,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q05, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q95, "rgba(255,127,14,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q10, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q90, "rgba(255,215,0,0.95)", "dot"));
+            shapes.push(mkVline(qRef.q25, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q75, "rgba(44,160,44,0.85)", "dot"));
+            shapes.push(mkVline(qRef.q50, "rgba(31,119,180,0.95)", "solid", 2.0));
+          }
+          if (Number.isFinite(curR)) shapes.push(mkVline(curR, "rgba(214,39,40,0.95)", "solid", 2.4));
+          Plotly.newPlot(
+            histEl.id,
+            [{
+              x: ys,
+              type: "histogram",
+              marker: { color: "#9edae5" },
+              nbinsx: Math.min(48, Math.max(12, Math.round(Math.sqrt(ys.length) * 3))),
+              name: "频数",
+              hovertemplate: "收益=%{x:.2%}<br>频数=%{y}<extra></extra>",
+            }],
+            {
+              margin: { t: 34, l: 55, r: 20, b: 45 },
+              title: { text: `${monthNames[selN]} · 月度收益率分布（n=${ys.length}）`, font: { size: 13 } },
+              xaxis: { tickformat: ".2%", title: "月收益率" },
+              yaxis: { title: "频数" },
+              shapes: shapes.filter(Boolean),
+              showlegend: false,
+            },
+            { responsive: true, displayModeBar: false }
+          );
+          const fmtQv = (v) => (Number.isFinite(v) ? fmtPct(v) : "-");
+          tblEl.innerHTML =
+            `<tr><th>统计量</th><th>数值</th></tr>` +
+            `<tr><td>样本数</td><td>${ys.length}</td></tr>` +
+            `<tr><td>最大值</td><td>${fmtQv(mx)}</td></tr>` +
+            `<tr><td>最小值</td><td>${fmtQv(mnV)}</td></tr>` +
+            `<tr><td>均值</td><td>${fmtQv(mn)}</td></tr>` +
+            `<tr><td>标准差</td><td>${fmtQv(sd)}</td></tr>` +
+            (qRef ? (
+              `<tr><td>P1</td><td>${fmtQv(qRef.q01)}</td></tr>` +
+              `<tr><td>P5</td><td>${fmtQv(qRef.q05)}</td></tr>` +
+              `<tr><td>P10</td><td>${fmtQv(qRef.q10)}</td></tr>` +
+              `<tr><td>P25</td><td>${fmtQv(qRef.q25)}</td></tr>` +
+              `<tr><td>P50</td><td>${fmtQv(qRef.q50)}</td></tr>` +
+              `<tr><td>P75</td><td>${fmtQv(qRef.q75)}</td></tr>` +
+              `<tr><td>P90</td><td>${fmtQv(qRef.q90)}</td></tr>` +
+              `<tr><td>P95</td><td>${fmtQv(qRef.q95)}</td></tr>` +
+              `<tr><td>P99</td><td>${fmtQv(qRef.q99)}</td></tr>`
+            ) : `<tr><td colspan="2" class="muted">样本不足，分位数省略</td></tr>`) +
+            `<tr><td>当前值</td><td>${Number.isFinite(curR) ? `${fmtQv(curR)}（${esc(String(curD || ""))}）` : "-"}</td></tr>`;
+        };
+
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
@@ -9652,6 +10823,10 @@
             $("distRollingAnnVol").innerHTML = "<div class='muted'>请选择标的</div>";
             if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>请选择标的</div>";
             $("distQuantiles").innerHTML = "";
+            try { _renderWeekdayDowEffect(""); } catch (_e) { /* ignore */ }
+            try { _renderMonthDomEffect(""); } catch (_e2) { /* ignore */ }
+            try { _renderYearWeekEffect(""); } catch (_e2b) { /* ignore */ }
+            try { _renderYearMonthEffect(""); } catch (_e2c) { /* ignore */ }
             return;
           }
 
@@ -9691,6 +10866,10 @@
             if (calTable) calTable.innerHTML = "";
             if (calHint) calHint.textContent = "";
             $("distQuantiles").innerHTML = "";
+            try { _renderWeekdayDowEffect(code); } catch (_ew) { /* ignore */ }
+            try { _renderMonthDomEffect(code); } catch (_ewm) { /* ignore */ }
+            try { _renderYearWeekEffect(code); } catch (_ewy) { /* ignore */ }
+            try { _renderYearMonthEffect(code); } catch (_ewym) { /* ignore */ }
             return;
           }
 
@@ -9709,6 +10888,10 @@
             if (calTable) calTable.innerHTML = "";
             if (calHint) calHint.textContent = "";
             $("distQuantiles").innerHTML = "";
+            try { _renderWeekdayDowEffect(code); } catch (_ew2) { /* ignore */ }
+            try { _renderMonthDomEffect(code); } catch (_ewm2) { /* ignore */ }
+            try { _renderYearWeekEffect(code); } catch (_ewy2) { /* ignore */ }
+            try { _renderYearMonthEffect(code); } catch (_ewym2) { /* ignore */ }
             return;
           }
 
@@ -9894,6 +11077,10 @@
 
           // Rolling annualized volatility chart (always based on daily NAV returns)
           _plotRollingAnnVol();
+          try { _renderWeekdayDowEffect(code); } catch (_ewk) { /* ignore */ }
+          try { _renderMonthDomEffect(code); } catch (_ewkm) { /* ignore */ }
+          try { _renderYearWeekEffect(code); } catch (_ewky) { /* ignore */ }
+          try { _renderYearMonthEffect(code); } catch (_ewkym) { /* ignore */ }
         };
 
         // Bind events (wire once)
@@ -9928,6 +11115,10 @@
                 if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
                 if (calTable) calTable.innerHTML = "";
                 if (calHint) calHint.textContent = "";
+                try { _renderWeekdayDowEffect(""); } catch (_e) { /* ignore */ }
+                try { _renderMonthDomEffect(""); } catch (_em) { /* ignore */ }
+                try { _renderYearWeekEffect(""); } catch (_emy) { /* ignore */ }
+                try { _renderYearMonthEffect(""); } catch (_eYm0) { /* ignore */ }
                 return;
               }
               distByCode[c] = b.period_distributions[c];
@@ -9943,6 +11134,10 @@
               if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
               if (calTable) calTable.innerHTML = "";
               if (calHint) calHint.textContent = "";
+              try { _renderWeekdayDowEffect(""); } catch (_e) { /* ignore */ }
+              try { _renderMonthDomEffect(""); } catch (_em) { /* ignore */ }
+              try { _renderYearWeekEffect(""); } catch (_emy) { /* ignore */ }
+              try { _renderYearMonthEffect(""); } catch (_eYm1) { /* ignore */ }
             }
           };
           const _syncRangeFromQuick = () => {
@@ -10007,6 +11202,22 @@
               if (Number.isFinite(v) && v >= 1) updateDisplay();
             });
           }
+          const wkSel = $("distWkdaySelect");
+          if (wkSel) {
+            wkSel.addEventListener("change", updateDisplay);
+          }
+          const domSel = $("distMonthDomSelect");
+          if (domSel) {
+            domSel.addEventListener("change", updateDisplay);
+          }
+          const ywSel = $("distYearWeekSelect");
+          if (ywSel) {
+            ywSel.addEventListener("change", updateDisplay);
+          }
+          const ymSel = $("distYearMonthSelect");
+          if (ymSel) {
+            ymSel.addEventListener("change", updateDisplay);
+          }
           if (adjustSelect) {
             adjustSelect.addEventListener("change", async () => {
               const adj = String(adjustSelect.value || "qfq").trim().toLowerCase();
@@ -10041,13 +11252,30 @@
         }
 
         if (rangeQuick && !rangeQuick.value) rangeQuick.value = "all";
-        if (rangeStart && rangeEnd) {
-          const r0 = _distRangeByQuick(codeSelect.value, (rangeQuick && rangeQuick.value) || "all");
-          rangeStart.value = rangeStart.value || r0.start || "";
-          rangeEnd.value = rangeEnd.value || r0.end || "";
+        if (rangeQuick && rangeStart && rangeEnd) {
+          const code0 = codeSelect.value;
+          const qv = String(rangeQuick.value || "all").toLowerCase();
+          const rAll = _distRangeByQuick(code0, "all");
+          if (qv === "all") {
+            const re = ymdToNum(rangeEnd.value);
+            const ae = rAll.availEnd ? ymdToNum(rAll.availEnd) : null;
+            const rs = ymdToNum(rangeStart.value);
+            const as = rAll.availStart ? ymdToNum(rAll.availStart) : null;
+            if (!rangeStart.value || (as != null && rs != null && rs < as)) {
+              rangeStart.value = rAll.start || "";
+            }
+            if (!rangeEnd.value || (ae != null && re != null && re < ae)) {
+              rangeEnd.value = rAll.end || "";
+            }
+          } else {
+            const r0 = _distRangeByQuick(code0, rangeQuick.value || "all");
+            if (!rangeStart.value) rangeStart.value = r0.start || "";
+            if (!rangeEnd.value) rangeEnd.value = r0.end || "";
+          }
+          const rHint = _distRangeByQuick(code0, (rangeQuick && rangeQuick.value) || "all");
           if (rangeHint) {
-            const av0 = (r0.availStart && r0.availEnd) ? `可用区间 ${r0.availStart}~${r0.availEnd}` : "可用区间未知";
-            rangeHint.textContent = `${codeSelect.value || "-"} · ${av0} · 当前区间 ${rangeStart.value || "-"}~${rangeEnd.value || "-"}`;
+            const av0 = (rHint.availStart && rHint.availEnd) ? `可用区间 ${rHint.availStart}~${rHint.availEnd}` : "可用区间未知";
+            rangeHint.textContent = `${code0 || "-"} · ${av0} · 当前区间 ${rangeStart.value || "-"}~${rangeEnd.value || "-"}`;
           }
         }
 
@@ -11109,8 +12337,8 @@
             };
             const out = [
               { x: dates, y: ex, mode: "lines", name: excessKey, hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
-              ..._bbTracesForExcess(ex, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
-              ..._bbTracesForExcess(ex, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+              ..._bbTracesForExcess(ex, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+              ..._bbTracesForExcess(ex, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
               ..._bbTracesForExcess(ex, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
             ];
             // RSI on EXCESS below chart (same figure, separate panel)
@@ -11384,8 +12612,8 @@
         };
         const exTraces = [
           { x: dates, y: excessNav, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
-          ..._bbTracesForExcess(excessNav, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
-          ..._bbTracesForExcess(excessNav, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+          ..._bbTracesForExcess(excessNav, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+          ..._bbTracesForExcess(excessNav, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
           ..._bbTracesForExcess(excessNav, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
         ];
         for (const w of rsiWins) {
@@ -11626,8 +12854,8 @@
         };
         const ratioTraces = [
           { x: dates, y: ratioNav, mode: "lines", name: "RATIO", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
-          ..._bbTracesForRatio(ratioNav, 20, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
-          ..._bbTracesForRatio(ratioNav, 60, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
+          ..._bbTracesForRatio(ratioNav, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
+          ..._bbTracesForRatio(ratioNav, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
           ..._bbTracesForRatio(ratioNav, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
         ];
         for (const w of rsiWins) ratioTraces.push({ x: dates, y: _rsiWilder(ratioNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 } });
@@ -12087,7 +13315,7 @@
       function _rotAnchorRangeByRebalance(rebalance) {
         const r = String(rebalance || "weekly").toLowerCase();
         if (r === "daily") return null;
-        if (r === "weekly") return { min: 0, max: 5, label: "调仓日（周度 0~5；0=周一到周五等权组合）", def: 5 };
+        if (r === "weekly") return { min: 1, max: 5, label: "调仓日（周度 1~5；1=周一，5=周五）", def: 5 };
         if (r === "monthly") return { min: 1, max: 28, label: "调仓日（月度 1~28，月内第几天）", def: 1 };
         if (r === "quarterly") return { min: 1, max: 90, label: "调仓日（季度 1~90，季内第几天）", def: 1 };
         if (r === "yearly") return { min: 1, max: 365, label: "调仓日（年度 1~365，年内第几天）", def: 1 };
@@ -12136,90 +13364,6 @@
       function _weekdayLabelByAnchor(a) {
         const m = { "1": "周一", "2": "周二", "3": "周三", "4": "周四", "5": "周五" };
         return m[String(a)] || String(a);
-      }
-
-      function _combineRotationWeeklyMix(byAnchor, rfAnnual) {
-        const anchors = ["1", "2", "3", "4", "5"].filter((k) => byAnchor && byAnchor[k] && byAnchor[k].nav && byAnchor[k].nav.series);
-        if (!anchors.length) return null;
-        const base = byAnchor[anchors[0]];
-        const dates = (((base || {}).nav || {}).dates || []).slice();
-        const keys = Object.keys((((base || {}).nav || {}).series || {}));
-        const series = {};
-        const _combineNavByKey = (key) => {
-          const arrs = anchors.map((k) => ((((byAnchor[k] || {}).nav || {}).series || {})[key] || []).map(Number));
-          const n = Math.min(...arrs.map((x) => x.length), dates.length);
-          if (!Number.isFinite(n) || n <= 0) return [];
-          const nav = new Array(n).fill(1.0);
-          for (let i = 1; i < n; i++) {
-            let s = 0.0;
-            let c = 0;
-            for (const a of arrs) {
-              const p0 = Number(a[i - 1]);
-              const p1 = Number(a[i]);
-              if (!Number.isFinite(p0) || !Number.isFinite(p1) || p0 <= 0) continue;
-              s += (p1 / p0 - 1.0);
-              c += 1;
-            }
-            const r = (c > 0) ? (s / c) : 0.0;
-            nav[i] = nav[i - 1] * (1.0 + r);
-          }
-          return nav;
-        };
-        for (const k of keys) series[k] = _combineNavByKey(k);
-        const nDates = dates.slice(0, Math.min(dates.length, ...(Object.values(series).map((x) => x.length))));
-        const _s = (k) => Array.isArray(series[k]) ? series[k] : [];
-        const mStrat = _calcMetricsFromNav(_s("ROTATION"), Number(rfAnnual));
-        const mEw = _calcMetricsFromNav(_s("EW_REBAL"), Number(rfAnnual));
-        const mRp = _calcMetricsFromNav(_s("RP_REBAL"), Number(rfAnnual));
-        const mEx = _calcMetricsFromNav(_s("EXCESS"), 0.0);
-        const mExRp = _calcMetricsFromNav(_s("EXCESS_RP"), 0.0);
-        const _mkEx = (m) => ({
-          cumulative_return: Number(m.cumulative_return),
-          annualized_return: Number(m.annualized_return),
-          annualized_return_geo: Number(m.annualized_return),
-          annualized_return_arith: Number(m.annualized_return),
-          information_ratio: Number(m.sharpe_ratio),
-        });
-        const _pickRet = (navArr, freq) => _periodReturnsFromNav(nDates, navArr, freq);
-        const _mkPeriod = (freq) => {
-          const a = _pickRet(_s("ROTATION"), freq);
-          const b = _pickRet(_s("EW_REBAL"), freq);
-          const m = Math.min(a.length, b.length);
-          const out = [];
-          for (let i = 0; i < m; i++) {
-            const sr = Number(a[i].return);
-            const br = Number(b[i].return);
-            out.push({
-              period_end: a[i].period_end || b[i].period_end,
-              strategy_return: sr,
-              benchmark_return: br,
-              excess_return: (Number.isFinite(sr) && Number.isFinite(br)) ? (sr - br) : NaN,
-            });
-          }
-          return out;
-        };
-        return {
-          ...base,
-          anchor_mode: "weekly_mix_0",
-          by_anchor: byAnchor,
-          nav: { dates: nDates, series },
-          metrics: {
-            strategy: mStrat,
-            benchmark_equal_weight: mEw,
-            benchmark_risk_parity: mRp,
-            excess_vs_equal_weight: _mkEx(mEx),
-            excess_vs_risk_parity: _mkEx(mExRp),
-          },
-          period_returns: {
-            weekly: _mkPeriod("weekly"),
-            monthly: _mkPeriod("monthly"),
-            quarterly: _mkPeriod("quarterly"),
-            yearly: _mkPeriod("yearly"),
-          },
-          rolling: _rollingPackFromNav(nDates, _s("ROTATION")),
-          holdings: [],
-          holding_streaks: [],
-        };
       }
 
       function renderCalendarAnchorBox(prefix, rebalance) {
@@ -12457,9 +13601,25 @@
         const rebalance_shift = rebCtl.rebalance_shift;
         const exec_price = ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open";
         if (!["open", "close", "oc2"].includes(exec_price)) return setMsg("成交价口径仅支持 open/close/oc2");
-        const top_k = Number(($("rotTopK").value || "1").trim());
+        let top_k = Number(($("rotTopK").value || "1").trim());
+        if (!Number.isFinite(top_k) || top_k < 1) return setMsg("TopK 需为 >=1 的整数");
+        top_k = Math.floor(top_k);
         const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
-        if (!["adaptive", "fixed"].includes(position_mode)) return setMsg("仓位比例模式仅支持 adaptive/fixed");
+        const risk_budget_atr_window = Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim());
+        let risk_budget_pct = Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim());
+        if (!["adaptive", "fixed", "risk_budget"].includes(position_mode)) return setMsg("仓位比例模式仅支持 adaptive/fixed/risk_budget");
+        if (position_mode === "risk_budget") {
+          if (!Number.isFinite(risk_budget_atr_window) || risk_budget_atr_window < 2) return setMsg("风险预算ATR周期需为>=2数字");
+          if (!Number.isFinite(risk_budget_pct)) return setMsg("风险预算%需为数字");
+          risk_budget_pct = (risk_budget_pct > 0.1 ? risk_budget_pct / 100.0 : risk_budget_pct);
+          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+        } else {
+          // API 始终校验 risk_budget_pct ∈ [0.001, 0.03]；非风险预算模式下输入框常为 1 表示 1%。
+          let rbp = Number(risk_budget_pct);
+          if (!Number.isFinite(rbp)) rbp = 0.01;
+          else if (rbp > 0.1) rbp = rbp / 100.0;
+          risk_budget_pct = Math.min(0.03, Math.max(0.001, rbp));
+        }
         const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
         const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
         const exit_match_n = Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0");
@@ -12467,7 +13627,10 @@
         if (!Number.isFinite(exit_match_n) || exit_match_n < 0) return setMsg("出场满足任意N条需为>=0整数");
         const lookback_days = Number(($("rotLookback").value || "252").trim());
         const skip_days = Number(($("rotSkip").value || "0").trim());
+        if (!Number.isFinite(lookback_days) || lookback_days < 1) return setMsg("动量回看天数需为>=1整数");
+        if (!Number.isFinite(skip_days) || skip_days < 0) return setMsg("跳过天数需为>=0整数");
         const cost_bps = Number(($("rotCost").value || "2").trim());
+        if (!Number.isFinite(cost_bps) || cost_bps < 0) return setMsg("成本（bps）需为>=0数字");
         const slippage_rate = Number(($("rotSlippage").value || "0.001").trim());
         if (!Number.isFinite(slippage_rate) || slippage_rate < 0) return setMsg("轮动滑点需为>=0数字（例如 0.001）");
         const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
@@ -12664,8 +13827,12 @@
           return out;
         })();
         if (asset_vol_index_rules && asset_vol_index_rules.__error) return setMsg(asset_vol_index_rules.__error);
+        const risk_budget_atr_window_req = (() => {
+          const n = Math.floor(Number(risk_budget_atr_window));
+          return Number.isFinite(n) && n >= 2 ? n : 20;
+        })();
         const reqPayload = {
-            codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
+            codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, risk_budget_atr_window: risk_budget_atr_window_req, risk_budget_pct, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
             risk_free_rate,
             score_method,
             atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
@@ -12686,63 +13853,16 @@
             asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
         };
         window.__lastRotationPayload = { ...reqPayload };
-        let data = null;
-        let byAnchor = null;
-        const isWeeklyMix0 = (String(rebalance || "").toLowerCase() === "weekly" && Number(rebalance_anchor) === 0);
-        if (isWeeklyMix0) {
-          $("status").textContent = "回测中（周一~周五等权组合）...";
-          const anchors = [1, 2, 3, 4, 5];
-          const reqs = anchors.map((a) => api("/analysis/rotation", {
-            method: "POST",
-            body: JSON.stringify({ ...reqPayload, rebalance_anchor: a }),
-          }));
-          const resps = await Promise.all(reqs);
-          const texts = await Promise.all(resps.map((r) => r.text()));
-          for (let i = 0; i < resps.length; i++) {
-            if (!resps[i].ok) {
-              $("status").textContent = "";
-              return setMsg(texts[i]);
-            }
-          }
-          byAnchor = {};
-          for (let i = 0; i < anchors.length; i++) byAnchor[String(anchors[i])] = JSON.parse(texts[i]);
-          data = _combineRotationWeeklyMix(byAnchor, risk_free_rate);
-          if (!data) {
-            $("status").textContent = "";
-            return setMsg("周度调仓日=0（周一到周五等权）组合失败");
-          }
-          window.__lastRotationByAnchor = byAnchor;
-          window.__lastRotationNextExecutionPlan = null;
-          // Best effort: prefetch next-execution-plan for each weekday anchor.
-          try {
-            const asof = String((((data || {}).nav || {}).dates || []).slice(-1)[0] || "").replaceAll("-", "");
-            if (asof) {
-              const planReqs = anchors.map((a) => api("/analysis/rotation/next-execution-plan", {
-                method: "POST",
-                body: JSON.stringify({ ...reqPayload, rebalance_anchor: a, asof }),
-              }));
-              const planResps = await Promise.all(planReqs);
-              const planTexts = await Promise.all(planResps.map((r) => r.text()));
-              const planByAnchor = {};
-              for (let i = 0; i < anchors.length; i++) {
-                if (!planResps[i].ok) continue;
-                try { planByAnchor[String(anchors[i])] = JSON.parse(planTexts[i]); } catch (_) { /* ignore */ }
-              }
-              window.__lastRotationNextExecutionPlanByAnchor = planByAnchor;
-            }
-          } catch (_) { /* ignore */ }
-        } else {
-          window.__lastRotationByAnchor = null;
-          window.__lastRotationNextExecutionPlanByAnchor = null;
-          const resp = await api("/analysis/rotation", {
-            method: "POST",
-            body: JSON.stringify(reqPayload),
-          });
-          const text = await resp.text();
-          $("status").textContent = "";
-          if (!resp.ok) return setMsg(text);
-          data = JSON.parse(text);
-        }
+        window.__lastRotationByAnchor = null;
+        window.__lastRotationNextExecutionPlanByAnchor = null;
+        const resp = await api("/analysis/rotation", {
+          method: "POST",
+          body: JSON.stringify(reqPayload),
+        });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) return setMsg(text);
+        const data = JSON.parse(text);
         $("status").textContent = "";
         window.__lastRotationResult = data;
         plotRotation(data);
@@ -12779,6 +13899,12 @@
           ..._perfReportLines("轮动策略", (data.metrics || {}).strategy || {}),
           `相对${benchLabel}：超额年化(几何) ${fmtPct((exObj.annualized_return_geo != null) ? exObj.annualized_return_geo : exObj.annualized_return)}，信息比率 ${fmtNum(exObj.information_ratio)}。`,
         ];
+        const rotPosMode = String((data && data.position_mode) || position_mode || "adaptive");
+        if (rotPosMode === "risk_budget") {
+          const rbWin = Number((data && data.risk_budget_atr_window) || risk_budget_atr_window || 20);
+          const rbPct = Number((data && data.risk_budget_pct) || risk_budget_pct || 0.01);
+          bullets.push(`仓位管理：风险预算模式（ATR${Math.floor(rbWin)}，预算 ${fmtPct(rbPct)} / 标的 / ATR）。预算越高组合暴露越高，越低则更稳健。`);
+        }
         setReport("轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
         setReportTo("rotReport", "轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
         try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }
@@ -12836,6 +13962,8 @@
           fixed_pos_ratio: Number(($("trendFixedPosRatio") && $("trendFixedPosRatio").value ? $("trendFixedPosRatio").value : "0.04").trim()),
           fixed_overcap_policy: (($("trendFixedOvercapPolicy") && $("trendFixedOvercapPolicy").value) ? String($("trendFixedOvercapPolicy").value) : "skip"),
           fixed_max_holdings: Number(($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value ? $("trendFixedMaxHoldings").value : "10").trim()),
+          risk_budget_atr_window: Number(($("trendRiskBudgetAtrWin") && $("trendRiskBudgetAtrWin").value ? $("trendRiskBudgetAtrWin").value : "20").trim()),
+          risk_budget_pct: Number(($("trendRiskBudgetPct") && $("trendRiskBudgetPct").value ? $("trendRiskBudgetPct").value : "1").trim()),
           group_enforce: ($("trendGroupEnforce") && $("trendGroupEnforce").value === "true"),
           group_pick_policy: (($("trendGroupPolicy") && $("trendGroupPolicy").value) ? String($("trendGroupPolicy").value) : "highest_sharpe"),
           group_max_holdings: Number(($("trendGroupMaxHoldings") && $("trendGroupMaxHoldings").value ? $("trendGroupMaxHoldings").value : "4").trim()),
@@ -12883,6 +14011,17 @@
           return setMsg("持仓标的上限需为>=1数字");
         }
         common.fixed_max_holdings = Math.floor(common.fixed_max_holdings);
+        if (!Number.isFinite(common.risk_budget_atr_window) || common.risk_budget_atr_window < 2) {
+          return setMsg("风险预算ATR周期需为>=2数字");
+        }
+        common.risk_budget_atr_window = Math.floor(common.risk_budget_atr_window);
+        if (!Number.isFinite(common.risk_budget_pct)) {
+          return setMsg("风险预算%需为数字");
+        }
+        common.risk_budget_pct = (common.risk_budget_pct > 0.1 ? common.risk_budget_pct / 100.0 : common.risk_budget_pct);
+        if (common.risk_budget_pct < 0.001 || common.risk_budget_pct > 0.03) {
+          return setMsg("风险预算%需在0.1%~3%之间");
+        }
         if (!["earliest_entry", "highest_sharpe"].includes(String(common.group_pick_policy))) {
           return setMsg("趋势组内优选仅支持：最早入场/夏普最高");
         }
@@ -12908,7 +14047,7 @@
           const codes = _codesForStrategy("trend");
           if (codes.length === 0) return setMsg("请先选择标的池");
           const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
-          if (!["equal", "vol_target", "fixed_ratio"].includes(position_sizing)) return setMsg("组合仓位法仅支持 等权/目标波动率/固定比例");
+          if (!["equal", "vol_target", "fixed_ratio", "risk_budget"].includes(position_sizing)) return setMsg("组合仓位法仅支持 等权/目标波动率/固定比例/风险预算");
           if (position_sizing === "fixed_ratio" && common.fixed_pos_ratio > 1) {
             return setMsg("固定比例建议不超过1（100%）");
           }
@@ -13059,6 +14198,9 @@
         const usageSummary = (usageStats && usageStats.enabled)
           ? `固定比例资金利用率：均值 ${fmtPct(Number(usageStats.mean_exposure || 0))}，最低 ${fmtPct(Number(usageStats.min_exposure || 0))}，最高 ${fmtPct(Number(usageStats.max_exposure || 0))}，分位数 P05/P25/P50/P75/P95 = ${fmtPct(Number((((usageStats.quantiles || {}).p05) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p25) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p50) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p75) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p95) || 0)))}。`
           : "固定比例资金利用率：不适用。";
+        const riskBudgetSummary = (String(((((data || {}).meta || {}).params || {}).position_sizing || "")).toLowerCase() === "risk_budget")
+          ? `风险预算仓位：ATR周期 ${Math.floor(Number(((((data || {}).meta || {}).params || {}).risk_budget_atr_window || 20)))}，预算 ${fmtPct(Number(((((data || {}).meta || {}).params || {}).risk_budget_pct || 0.01)))} / 标的 / ATR；总仓位超过100%时按比例缩放。`
+          : "风险预算仓位：未启用。";
         setReport(
           "趋势研究报告式解读",
           [
@@ -13067,6 +14209,7 @@
             atrSummary,
             extSummary,
             usageSummary,
+            riskBudgetSummary,
           ],
           "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
         );
@@ -13077,6 +14220,7 @@
             ..._perfReportLines("趋势策略", strategyM),
             `相对基准：超额年化 ${fmtPct(excessM.annualized_return)}，超额回撤 ${fmtPct(excessM.max_drawdown)}，超额夏普 ${fmtNum(excessM.sharpe_ratio)}。`,
             atrSummary,
+            riskBudgetSummary,
           ],
           "说明：单标的与组合模式的可比性不同，请在同一模式下比较参数变更效果。"
         );
@@ -13112,6 +14256,8 @@
             exec_price: ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open",
             top_k: Number(($("rotTopK").value || "1").trim()),
             position_mode: (($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive"),
+            risk_budget_atr_window: Math.floor(Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim())),
+            risk_budget_pct: Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim()),
             entry_backfill: ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true"),
             entry_match_n: Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0"),
             exit_match_n: Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0"),
@@ -13165,6 +14311,8 @@
           exec_price: ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open",
           top_k: Number(($("rotTopK").value || "1").trim()),
           position_mode: (($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive"),
+          risk_budget_atr_window: Math.floor(Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim())),
+          risk_budget_pct: Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim()),
           entry_backfill: ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true"),
           entry_match_n: Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0"),
           exit_match_n: Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0"),
@@ -13195,40 +14343,31 @@
           asset_bias_rules: (asset_bias_rules2.length ? asset_bias_rules2 : null),
           asset_vol_index_rules: (volIdx2 && volIdx2.__error ? null : volIdx2),
         };
+        if (!["adaptive", "fixed", "risk_budget"].includes(String(payload.position_mode || "adaptive"))) {
+          return setMsg("仓位比例模式仅支持 adaptive/fixed/risk_budget");
+        }
+        if (String(payload.position_mode || "") === "risk_budget") {
+          if (!Number.isFinite(Number(payload.risk_budget_atr_window)) || Number(payload.risk_budget_atr_window) < 2) {
+            return setMsg("风险预算ATR周期需为>=2数字");
+          }
+          let rb = Number(payload.risk_budget_pct);
+          if (!Number.isFinite(rb)) return setMsg("风险预算%需为数字");
+          rb = (rb > 0.1 ? rb / 100.0 : rb);
+          if (rb < 0.001 || rb > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+          payload.risk_budget_pct = rb;
+          payload.risk_budget_atr_window = Math.floor(Number(payload.risk_budget_atr_window));
+        } else {
+          let rb = Number(payload.risk_budget_pct);
+          if (!Number.isFinite(rb)) rb = 0.01;
+          else if (rb > 0.1) rb = rb / 100.0;
+          payload.risk_budget_pct = Math.min(0.03, Math.max(0.001, rb));
+          let rw = Math.floor(Number(payload.risk_budget_atr_window));
+          if (!Number.isFinite(rw) || rw < 2) rw = 20;
+          payload.risk_budget_atr_window = rw;
+        }
         payload.asof = asof;
         const box = $("rotNextPlan");
         if (box) box.textContent = "查询中...";
-        const isWeeklyMix0 = (String(payload.rebalance || "").toLowerCase() === "weekly" && Number(payload.rebalance_anchor) === 0);
-        if (isWeeklyMix0) {
-          const anchors = [1, 2, 3, 4, 5];
-          const reqs = anchors.map((a) => api("/analysis/rotation/next-execution-plan", {
-            method: "POST",
-            body: JSON.stringify({ ...payload, rebalance_anchor: a }),
-          }));
-          const resps = await Promise.all(reqs);
-          const texts = await Promise.all(resps.map((r) => r.text()));
-          for (let i = 0; i < resps.length; i++) {
-            if (!resps[i].ok) return setMsg(texts[i]);
-          }
-          const plans = {};
-          for (let i = 0; i < anchors.length; i++) plans[String(anchors[i])] = JSON.parse(texts[i]);
-          window.__lastRotationNextExecutionPlan = null;
-          window.__lastRotationNextExecutionPlanByAnchor = plans;
-          if (box) {
-            const rows = anchors.map((a) => {
-              const p = plans[String(a)] || {};
-              const d = p.next_trading_day || "-";
-              if (!p.has_execution_plan || !p.plan) return `<tr><td>${_weekdayLabelByAnchor(a)}</td><td>${esc(d)}</td><td>无执行计划</td></tr>`;
-              const tw = Array.isArray(p.plan.target_weights) ? p.plan.target_weights : [];
-              const picks = tw.filter((x) => Number(x && x.target_weight) > 1e-12)
-                .map((x) => `${esc(codeLabel(x.code))} ${fmtPct(Number(x.target_weight))}`)
-                .join("，");
-              return `<tr><td>${_weekdayLabelByAnchor(a)}</td><td>${esc(d)}</td><td>${picks || "-"}</td></tr>`;
-            });
-            box.innerHTML = `<div class="muted" style="margin-bottom:6px;">主轮动调仓日=0（周一到周五等权）下，各锚点下一交易日计划：</div><table><tr><th>锚点</th><th>下一交易日</th><th>目标持仓</th></tr>${rows.join("")}</table>`;
-          }
-          return;
-        }
         const resp = await api("/analysis/rotation/next-execution-plan", {
           method: "POST",
           body: JSON.stringify(payload),
@@ -13812,6 +14951,20 @@
         const rebalance_shift = ($("rotCalShift") && $("rotCalShift").value) ? $("rotCalShift").value : "prev";
         const top_k = Number(($("rotTopK").value || "1").trim());
         const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
+        const risk_budget_atr_window = Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim());
+        let risk_budget_pct = Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim());
+        if (!["adaptive", "fixed", "risk_budget"].includes(position_mode)) return setMsg("仓位比例模式仅支持 adaptive/fixed/risk_budget");
+        if (position_mode === "risk_budget") {
+          if (!Number.isFinite(risk_budget_atr_window) || risk_budget_atr_window < 2) return setMsg("风险预算ATR周期需为>=2数字");
+          if (!Number.isFinite(risk_budget_pct)) return setMsg("风险预算%需为数字");
+          risk_budget_pct = (risk_budget_pct > 0.1 ? risk_budget_pct / 100.0 : risk_budget_pct);
+          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+        } else {
+          let rbp = Number(risk_budget_pct);
+          if (!Number.isFinite(rbp)) rbp = 0.01;
+          else if (rbp > 0.1) rbp = rbp / 100.0;
+          risk_budget_pct = Math.min(0.03, Math.max(0.001, rbp));
+        }
         const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
         const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
         const exit_match_n = Number(($("rotExitMatchN") && $("rotExitMatchN").value) ? $("rotExitMatchN").value : "0");
@@ -14019,7 +15172,7 @@
         const resp = await api("/analysis/rotation/calendar-effect", {
           method: "POST",
           body: JSON.stringify({
-            codes, start, end, rebalance, rebalance_shift, top_k, position_mode, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
+            codes, start, end, rebalance, rebalance_shift, top_k, position_mode, risk_budget_atr_window: Math.floor(risk_budget_atr_window), risk_budget_pct, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
             risk_free_rate,
             score_method,
             atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
@@ -14067,9 +15220,19 @@
         }
         const pm = ($("calTimingPositionMode") && $("calTimingPositionMode").value) ? String($("calTimingPositionMode").value) : "equal";
         const fx = $("calTimingFixedRatio");
+        const rbAtr = $("calTimingRiskBudgetAtrWin");
+        const rbPct = $("calTimingRiskBudgetPct");
         if (fx) {
           fx.disabled = pm !== "fixed_ratio";
           fx.style.opacity = pm === "fixed_ratio" ? "1" : "0.55";
+        }
+        if (rbAtr) {
+          rbAtr.disabled = pm !== "risk_budget";
+          rbAtr.style.opacity = pm === "risk_budget" ? "1" : "0.55";
+        }
+        if (rbPct) {
+          rbPct.disabled = pm !== "risk_budget";
+          rbPct.style.opacity = pm === "risk_budget" ? "1" : "0.55";
         }
       }
 
@@ -14153,6 +15316,8 @@
         const hold_days = Number(($("calTimingHoldDays").value || "").trim());
         const position_mode = ($("calTimingPositionMode") && $("calTimingPositionMode").value) ? String($("calTimingPositionMode").value) : "equal";
         const fixed_pos_ratio = Number(($("calTimingFixedRatio").value || "1.0").trim());
+        const risk_budget_atr_window = Number(($("calTimingRiskBudgetAtrWin").value || "20").trim());
+        let risk_budget_pct = Number(($("calTimingRiskBudgetPct").value || "1").trim());
         const exec_price = ($("calTimingExecPrice") && $("calTimingExecPrice").value) ? String($("calTimingExecPrice").value) : "open";
         const cost_bps = Number(($("calTimingCost").value || "2").trim());
         const slippage_rate = Number(($("calTimingSlippage").value || "0.001").trim());
@@ -14167,6 +15332,18 @@
         if (position_mode === "fixed_ratio" && (!Number.isFinite(fixed_pos_ratio) || fixed_pos_ratio < 0 || fixed_pos_ratio > 1)) {
           return setMsg("固定比例仓位必须在 [0,1]");
         }
+        if (!["equal", "fixed_ratio", "risk_budget"].includes(position_mode)) return setMsg("仓位模式仅支持 等权/固定比例/风险预算");
+        if (position_mode === "risk_budget") {
+          if (!Number.isFinite(risk_budget_atr_window) || risk_budget_atr_window < 2) return setMsg("风险预算ATR周期需为>=2数字");
+          if (!Number.isFinite(risk_budget_pct)) return setMsg("风险预算%需为数字");
+          risk_budget_pct = (risk_budget_pct > 0.1 ? risk_budget_pct / 100.0 : risk_budget_pct);
+          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+        } else {
+          let rbp = Number(risk_budget_pct);
+          if (!Number.isFinite(rbp)) rbp = 0.01;
+          else if (rbp > 0.1) rbp = rbp / 100.0;
+          risk_budget_pct = Math.min(0.03, Math.max(0.001, rbp));
+        }
         $("status").textContent = "计算日历效应择时策略...";
         setMsg("");
         const reqPayload = {
@@ -14180,6 +15357,8 @@
           hold_days: Math.floor(hold_days),
           position_mode,
           fixed_pos_ratio,
+          risk_budget_atr_window: Math.floor(risk_budget_atr_window),
+          risk_budget_pct,
           dynamic_universe,
           exec_price,
           cost_bps,
@@ -14253,6 +15432,11 @@
             ..._perfReportLines(`日历效应择时(${modeLabel})`, sm),
             `超额：年化 ${fmtPct(em.annualized_return)}，最大回撤 ${fmtPct(em.max_drawdown)}，信息比率 ${fmtNum(em.information_ratio)}。`,
             `参数：调仓日（决策日）=${meta.decision_day ?? "-"}，持仓时长=${meta.hold_days ?? "-"}天，仓位模式=${meta.position_mode || "-"}，成交口径=${meta.exec_price || "-"}。`,
+            (
+              String(meta.position_mode || "").toLowerCase() === "risk_budget"
+                ? `风险预算仓位：ATR周期=${Math.floor(Number(meta.risk_budget_atr_window || 20))}，预算=${fmtPct(Number(meta.risk_budget_pct || 0.01))}/标的/ATR；若组合总仓位>100%，按比例缩放。`
+                : "风险预算仓位：未启用。"
+            ),
             `交易摩擦：成本 ${fmtNum(Number(meta.cost_bps || 0))}bps（双边），滑点 ${fmtNum(Number(meta.slippage_rate || 0))}（单边不利）；非交易日处理=${shiftMap[String(meta.rebalance_shift || "")] || String(meta.rebalance_shift || "-")}。`,
           ],
           "说明：调仓日语义为决策日，仅生成下一交易日执行计划；持仓时长从执行日开始计数。"
@@ -14445,6 +15629,7 @@
           ],
           "说明：建议结合滚动收益/滚动回撤与相关性变化共同判断稳健性。"
         );
+
       }
 
       // baseline mode toggle: re-render from lastBaseline (no re-fetch)
@@ -15436,6 +16621,10 @@
       if ($("mixAddStrategy")) $("mixAddStrategy").addEventListener("click", () => {
         const id = ($("mixStrategyAddSelect") && $("mixStrategyAddSelect").value) ? String($("mixStrategyAddSelect").value) : "";
         if (!id) return setMsg("请先选择要加入组合的固定策略。");
+        const pick = _findFixedStrategy(id);
+        if (pick && String(pick.type || "") === "strategy_mix") {
+          return setMsg("不能将「多策略组合(MIX)」再加入组合（避免嵌套）。请只添加单策略固定条目。");
+        }
         if (!mixSelectedStrategyIds.includes(id)) mixSelectedStrategyIds.push(id);
         if (!(String(id) in mixCustomWeightsById)) mixCustomWeightsById[String(id)] = 1;
         _renderMixStrategyListTable();
@@ -15457,6 +16646,7 @@
       if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendStrategyParamsUi);
       if ($("trendMode")) $("trendMode").addEventListener("change", updateTrendSizingUi);
       if ($("trendSizing")) $("trendSizing").addEventListener("change", updateTrendSizingUi);
+      if ($("rotPositionMode")) $("rotPositionMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("trendAtrStopMode")) $("trendAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("trend"));
       if ($("rotAtrStopMode")) $("rotAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("rot"));
       if ($("trendTraceN")) $("trendTraceN").addEventListener("change", () => {
@@ -15478,6 +16668,7 @@
       // Init trend strategy parameter enablement/description on page load.
       updateTrendStrategyParamsUi();
       updateTrendSizingUi();
+      _syncRotPositionModeUi();
       _syncAtrStopParamsUi("rot");
       if ($("rotSuggestGroups")) $("rotSuggestGroups").addEventListener("click", runSuggestGroups);
       if ($("trendSuggestGroups")) $("trendSuggestGroups").addEventListener("click", runTrendSuggestGroups);

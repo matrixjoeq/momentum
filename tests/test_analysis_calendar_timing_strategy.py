@@ -85,6 +85,7 @@ def test_calendar_timing_uses_hfq_benchmark_and_none_with_fallback_for_strategy(
 
     bench_nav = [float(x) for x in (out.get("nav") or {}).get("series", {}).get("BUY_HOLD", [])]
     assert len(bench_nav) == len(dates)
+    # Benchmark: single-asset HFQ close buy-and-hold (calendar close-to-close).
     expected_final_bench = float(hfq_px[-1] / hfq_px[0])
     assert bench_nav[-1] == pytest.approx(expected_final_bench, rel=1e-8)
 
@@ -270,3 +271,50 @@ def test_calendar_timing_trade_stats_by_code_no_extreme_explosions(session_facto
             assert float(mn) > -10.0, f"{c} min trade return exploded: {mn}"
         if mx is not None:
             assert float(mx) < 10.0, f"{c} max trade return exploded: {mx}"
+
+
+def test_calendar_timing_risk_budget_position_mode(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + 0.4 * float(i)
+            p2 = 90.0 + 0.3 * float(i)
+            for code, px in [("A1", p1), ("B1", p2)]:
+                for adj in ("none", "hfq", "qfq"):
+                    db.add(
+                        EtfPrice(
+                            code=code,
+                            trade_date=d,
+                            open=float(px),
+                            high=float(px * 1.01),
+                            low=float(px * 0.99),
+                            close=float(px),
+                            source="eastmoney",
+                            adjust=adj,
+                        )
+                    )
+        db.commit()
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="portfolio",
+                code=None,
+                codes=["A1", "B1"],
+                start=dates[0],
+                end=dates[-1],
+                decision_day=1,
+                hold_days=10,
+                position_mode="risk_budget",
+                risk_budget_atr_window=20,
+                risk_budget_pct=0.01,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    meta = out.get("meta") or {}
+    assert str(meta.get("position_mode") or "") == "risk_budget"
+    holds = out.get("current_holdings") or []
+    if holds:
+        assert sum(float(x.get("weight") or 0.0) for x in holds) <= 1.0000001

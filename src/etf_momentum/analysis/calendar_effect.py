@@ -18,6 +18,7 @@ from .baseline import (
     _sharpe,
     _sortino,
     _ulcer_index,
+    hfq_close_daily_equal_weight_returns,
     load_close_prices,
     load_ohlc_prices,
 )
@@ -293,13 +294,12 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             )
             ew_ret = ew_nav.pct_change().fillna(0.0)
 
-            # Benchmark EW NAV (hfq close) on the SAME trading calendar and SAME decision dates.
-            bench_px = bench_close_hfq.sort_index().reindex(px_common.index).ffill()
-            bench_ret = bench_px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-            bench_nav, _ = _ew_nav_and_weights_by_decision_dates(
-                bench_ret[codes], decision_dates=decision_dates, exec_price=str(ep)
-            )
-            bench_daily = bench_nav.pct_change().fillna(0.0)
+            # Benchmark: daily HFQ close equal-weight (no costs), same calendar as strategy grid.
+            bench_ch = bench_close_hfq.sort_index().reindex(px_common.index).reindex(columns=codes).ffill()
+            bench_daily = hfq_close_daily_equal_weight_returns(bench_ch, dynamic_universe=False)
+            bench_nav = (1.0 + bench_daily).cumprod().astype(float)
+            if len(bench_nav) > 0:
+                bench_nav.iloc[0] = 1.0
             active_daily = (ew_ret - bench_daily).astype(float)
             info_ratio = _information_ratio(active_daily, ann_factor=TRADING_DAYS_PER_YEAR)
 
@@ -450,15 +450,13 @@ def compute_rotation_calendar_effect(
                     mdd = _max_drawdown(nav)
                     calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
 
-                    bench_px = bench_close_hfq.sort_index().reindex(idx).ffill()
-                    bench_ret = bench_px.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-                    decision_dates = _decision_dates_for_rebalance(idx, rebalance=reb, anchor=int(a), shift=str(getattr(base, "rebalance_shift", "next")))
-                    bench_nav, _ = _ew_nav_and_weights_by_decision_dates(
-                        bench_ret[list(dict.fromkeys(base.codes))],
-                        decision_dates=decision_dates,
-                        exec_price=str(ep),
-                    )
-                    bench_daily = bench_nav.pct_change().fillna(0.0)
+                    b_codes = list(dict.fromkeys(base.codes))
+                    bench_ch = bench_close_hfq.sort_index().reindex(idx).reindex(columns=b_codes).ffill()
+                    bench_daily = hfq_close_daily_equal_weight_returns(bench_ch, dynamic_universe=False)
+                    bench_nav = (1.0 + bench_daily).cumprod().astype(float)
+                    if len(bench_nav) > 0:
+                        bench_nav.iloc[0] = 1.0
+                    bench_daily = bench_daily.reindex(idx).fillna(0.0)
                     active = (strat_ret - bench_daily).astype(float)
                     info_ratio = _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)
 

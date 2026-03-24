@@ -18,7 +18,9 @@ class RotationAnalysisInputs:
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1
-    position_mode: str = "adaptive"  # adaptive|fixed
+    position_mode: str = "adaptive"  # adaptive|fixed|risk_budget
+    risk_budget_atr_window: int = 20
+    risk_budget_pct: float = 0.01
     entry_backfill: bool = False
     entry_match_n: int = 0
     exit_match_n: int = 0
@@ -77,6 +79,8 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             rebalance_shift=inp.rebalance_shift,
             top_k=inp.top_k,
             position_mode=inp.position_mode,
+            risk_budget_atr_window=inp.risk_budget_atr_window,
+            risk_budget_pct=inp.risk_budget_pct,
             entry_backfill=inp.entry_backfill,
             entry_match_n=inp.entry_match_n,
             exit_match_n=inp.exit_match_n,

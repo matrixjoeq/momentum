@@ -16,6 +16,31 @@ from .execution_timing import forward_align_returns
 TRADING_DAYS_PER_YEAR = 252
 
 
+def hfq_close_buy_hold_returns(close_hfq: pd.Series) -> pd.Series:
+    """Daily simple returns from a single HFQ close series (buy-and-hold)."""
+    s = pd.to_numeric(close_hfq, errors="coerce").astype(float)
+    out = s.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    if len(out) > 0:
+        out.iloc[0] = 0.0
+    return out
+
+
+def hfq_close_daily_equal_weight_returns(close_hfq: pd.DataFrame, *, dynamic_universe: bool) -> pd.Series:
+    """
+    Daily equal-weight portfolio return from HFQ close (close-to-close), no costs.
+    - dynamic_universe: mean across assets with price that day only (skipna).
+    - else: intersection / static — missing return treated as 0 before cross-sectional mean.
+    """
+    r = close_hfq.astype(float).pct_change().replace([np.inf, -np.inf], np.nan)
+    if dynamic_universe:
+        out = r.mean(axis=1, skipna=True).fillna(0.0).astype(float)
+    else:
+        out = r.fillna(0.0).mean(axis=1).astype(float)
+    if len(out) > 0:
+        out.iloc[0] = 0.0
+    return out
+
+
 @dataclass(frozen=True)
 class BaselineInputs:
     codes: list[str]
@@ -2027,11 +2052,18 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         if len(custom_nav) > 0:
             custom_nav.iloc[0] = 1.0
 
-    # benchmark
-    bench_code = inp.benchmark_code
-    if bench_code is None:
-        bench_code = "510300" if "510300" in codes else codes[0]
-    bench_ret = ret_common[bench_code].fillna(0.0) if bench_code in ret_common.columns else ew_ret * 0.0
+    # benchmark: user-specified asset HFQ close buy-and-hold (not strategy/exec return basis)
+    bench_code_raw = inp.benchmark_code
+    if bench_code_raw is None:
+        bench_code_raw = "510300" if "510300" in codes else codes[0]
+    bench_code = str(bench_code_raw).strip()
+    bench_df = load_close_prices(db, codes=[bench_code], start=inp.start, end=inp.end, adjust="hfq")
+    bench_df = bench_df.sort_index()
+    if bench_df.empty or bench_code not in bench_df.columns:
+        bench_ret = (ew_ret * 0.0).reindex(ret_common.index).fillna(0.0)
+    else:
+        bench_s = pd.to_numeric(bench_df[bench_code], errors="coerce").astype(float)
+        bench_ret = hfq_close_buy_hold_returns(bench_s).reindex(ret_common.index).fillna(0.0)
     bench_nav = (1.0 + bench_ret.fillna(0.0)).cumprod()
     bench_nav.iloc[0] = 1.0
 

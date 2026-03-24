@@ -20,6 +20,8 @@ from .baseline import (
     _sharpe,
     _sortino,
     _ulcer_index,
+    hfq_close_buy_hold_returns,
+    hfq_close_daily_equal_weight_returns,
     load_close_prices,
     load_high_low_prices,
     load_ohlc_prices,
@@ -82,6 +84,10 @@ class TrendInputs:
     macd_v_scale: float = 100.0
     hybrid_entry_n: int = 1
     hybrid_exit_m: int = 1
+    group_enforce: bool = False
+    group_pick_policy: str = "highest_sharpe"
+    group_max_holdings: int = 4
+    asset_groups: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -94,12 +100,14 @@ class TrendPortfolioInputs:
     slippage_rate: float = 0.001
     exec_price: str = "open"  # open|close|oc2
     strategy: str = "ma_filter"
-    position_sizing: str = "equal"  # equal | vol_target | fixed_ratio
+    position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
     vol_window: int = 20
     vol_target_ann: float = 0.20
     fixed_pos_ratio: float = 0.04  # used when position_sizing=fixed_ratio
     fixed_overcap_policy: str = "skip"  # skip | extend when position would exceed constraints
     fixed_max_holdings: int = 10  # max number of concurrently held assets when position_sizing=fixed_ratio
+    risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
+    risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
     dynamic_universe: bool = False
     # single-strategy params
     sma_window: int = 200
@@ -1068,7 +1076,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         ret_open_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_close_hfq = (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_exec_hfq = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
-    ret_hfq = px_bh.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_hfq = ret_exec_hfq.astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq).astype(float)
     corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
@@ -1220,7 +1228,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     slippage = (w - w.shift(1).fillna(0.0)).abs() / 2.0
     slippage = slippage.astype(float) * float(inp.slippage_rate)
     strat_ret = (w * ret_exec_day - cost - slippage).astype(float)
-
     nav = (1.0 + strat_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -1419,8 +1426,8 @@ def compute_trend_portfolio_backtest(
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
     ps = str(inp.position_sizing or "equal").strip().lower()
-    if ps not in {"equal", "vol_target", "fixed_ratio"}:
-        raise ValueError("position_sizing must be equal|vol_target|fixed_ratio")
+    if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
+        raise ValueError("position_sizing must be equal|vol_target|fixed_ratio|risk_budget")
     if int(inp.vol_window) < 2:
         raise ValueError("vol_window must be >= 2")
     if (not np.isfinite(float(inp.vol_target_ann))) or float(inp.vol_target_ann) <= 0:
@@ -1433,6 +1440,12 @@ def compute_trend_portfolio_backtest(
     fixed_max_holdings = int(getattr(inp, "fixed_max_holdings", 10) or 10)
     if fixed_max_holdings < 1:
         raise ValueError("fixed_max_holdings must be >= 1")
+    risk_budget_atr_window = int(getattr(inp, "risk_budget_atr_window", 20) or 20)
+    if risk_budget_atr_window < 2:
+        raise ValueError("risk_budget_atr_window must be >= 2")
+    risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
+    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
+        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema"}:
         raise ValueError("ma_type must be one of: sma|ema")
@@ -1507,6 +1520,14 @@ def compute_trend_portfolio_backtest(
             low_qfq_df = low_qfq_df.reindex(columns=codes).reindex(dates).ffill()
         ret_exec = data_override["ret_exec"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
         ret_hfq = data_override["ret_hfq"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
+        du_b = bool(getattr(inp, "dynamic_universe", False))
+        ch_nb = data_override["close_hfq"].reindex(columns=codes).reindex(dates).astype(float)
+        if not du_b:
+            ch_nb = ch_nb.ffill()
+        if len(codes) == 1:
+            bench_ret = hfq_close_buy_hold_returns(ch_nb.iloc[:, 0])
+        else:
+            bench_ret = hfq_close_daily_equal_weight_returns(ch_nb, dynamic_universe=du_b)
     else:
         if db is None:
             raise ValueError("db is required when data_override is not set")
@@ -1529,6 +1550,14 @@ def compute_trend_portfolio_backtest(
             close_qfq = close_qfq.loc[common_start:]
             close_hfq = close_hfq.loc[common_start:]
         dates = close_none.index
+        du_b = bool(getattr(inp, "dynamic_universe", False))
+        ch_nb = close_hfq.reindex(dates).reindex(columns=codes).astype(float)
+        if not du_b:
+            ch_nb = ch_nb.ffill()
+        if len(codes) == 1:
+            bench_ret = hfq_close_buy_hold_returns(ch_nb.iloc[:, 0])
+        else:
+            bench_ret = hfq_close_daily_equal_weight_returns(ch_nb, dynamic_universe=du_b)
         close_qfq = close_qfq.reindex(dates).ffill()
         close_hfq = close_hfq.reindex(dates).ffill()
         high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq")
@@ -1566,7 +1595,7 @@ def compute_trend_portfolio_backtest(
             ret_open_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_close_hfq = (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_hfq_exec = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
-        ret_hfq = close_hfq[codes].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_hfq = ret_hfq_exec.astype(float)
         gross_none = 1.0 + ret_none
         gross_hfq = 1.0 + ret_hfq
         _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
@@ -1676,6 +1705,19 @@ def compute_trend_portfolio_backtest(
         sig_score[c] = score.replace([np.inf, -np.inf], np.nan)
         atr_stop_by_asset[str(c)] = one_stop_stats
 
+    atr_budget_df = pd.DataFrame(index=dates, columns=codes, dtype=float)
+    if ps == "risk_budget":
+        for c in codes:
+            px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+            h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
+            l = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+            atr_budget_df[c] = _atr_from_hlc(
+                h.astype(float).fillna(px),
+                l.astype(float).fillna(px),
+                px,
+                window=int(risk_budget_atr_window),
+            ).astype(float)
+
     vol_ann = ret_hfq.rolling(window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)).std(ddof=1) * np.sqrt(252.0)
     sharpe_like = (
         ret_hfq.rolling(window=max(20, int(inp.vol_window)), min_periods=max(10, int(inp.vol_window) // 2)).mean()
@@ -1744,6 +1786,17 @@ def compute_trend_portfolio_backtest(
                     ext_events.append(event)
                 w_row.loc[c] = fixed_ratio
             prev_fixed_w = w_row.copy()
+        elif ps == "risk_budget":
+            w_row = pd.Series(0.0, index=codes, dtype=float)
+            for c in active_codes:
+                px = float(close_qfq.loc[d, c]) if (c in close_qfq.columns and d in close_qfq.index) else float("nan")
+                a = float(atr_budget_df.loc[d, c]) if (c in atr_budget_df.columns and d in atr_budget_df.index) else float("nan")
+                if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
+                    w_row.loc[c] = float(risk_budget_pct) * float(px) / float(a)
+            w_row = w_row.clip(lower=0.0)
+            s = float(w_row.sum())
+            if s > 1.0 + 1e-12:
+                w_row = (w_row / s).astype(float)
         elif not active_codes:
             w_row = pd.Series(0.0, index=codes, dtype=float)
         elif ps == "equal":
@@ -1794,6 +1847,10 @@ def compute_trend_portfolio_backtest(
     # Weights become effective on execution day; ret_exec is already execution-day aligned.
     w = w_decision.shift(1).fillna(0.0).astype(float)
     ret_exec_day = ret_exec.astype(float)
+    bench_ret = bench_ret.reindex(dates).fillna(0.0).astype(float)
+    bench_nav = (1.0 + bench_ret).cumprod()
+    if len(bench_nav) > 0:
+        bench_nav.iloc[0] = 1.0
     turnover = (w - w.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     cost = turnover * (float(inp.cost_bps) / 10000.0)
     slippage = turnover * float(inp.slippage_rate)
@@ -1801,11 +1858,6 @@ def compute_trend_portfolio_backtest(
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
-
-    bench_ret = ret_hfq.mean(axis=1).fillna(0.0)
-    bench_nav = (1.0 + bench_ret).cumprod()
-    if len(bench_nav) > 0:
-        bench_nav.iloc[0] = 1.0
     active = (port_ret - bench_ret).astype(float)
     ex_nav = (1.0 + active).cumprod()
     if len(ex_nav) > 0:
@@ -1894,7 +1946,7 @@ def compute_trend_portfolio_backtest(
             )
         )
     )
-    usage_enabled = bool(ps == "fixed_ratio")
+    usage_enabled = bool(ps in {"fixed_ratio", "risk_budget"})
     usage_quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
     if usage_enabled and (len(exposure_eff) > 0):
         util_min = float(exposure_eff.min())
@@ -1929,6 +1981,8 @@ def compute_trend_portfolio_backtest(
                 "fixed_pos_ratio": float(fixed_ratio),
                 "fixed_overcap_policy": str(fixed_overcap_policy),
                 "fixed_max_holdings": int(fixed_max_holding_n),
+                "risk_budget_atr_window": int(risk_budget_atr_window),
+                "risk_budget_pct": float(risk_budget_pct),
                 "selection_mode": "all_active_candidates",
                 "group_enforce": bool(group_enforce),
                 "group_pick_policy": str(group_pick_policy),
