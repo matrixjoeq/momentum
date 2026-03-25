@@ -215,6 +215,89 @@ def test_rotation_risk_budget_position_mode_scales_by_atr(session_factory):
         assert float(expo.max()) > 0.0
 
 
+def test_rotation_negative_top_k_selects_lower_momentum_names(session_factory):
+    """Inverse TopK: hold the lowest-momentum names (e.g. BBB vs AAA in a two-asset uptrend)."""
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=60, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(100.0 + 0.5 * i),
+                open_price=float(100.0 + 0.5 * i),
+                high=float(100.0 + 0.5 * i),
+                low=float(100.0 + 0.5 * i),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(90.0 + 0.2 * i),
+                open_price=float(90.0 + 0.2 * i),
+                high=float(90.0 + 0.2 * i),
+                low=float(90.0 + 0.2 * i),
+            )
+        db.commit()
+        base = dict(
+            codes=["AAA", "BBB"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="daily",
+            top_k=1,
+            lookback_days=5,
+            skip_days=0,
+            exec_price="close",
+            cost_bps=0.0,
+            slippage_rate=0.0,
+        )
+        out_top = backtest_rotation(db, RotationInputs(**base))
+        out_inv = backtest_rotation(db, RotationInputs(**{**base, "top_k": -1}))
+
+    periods_top = out_top.get("holdings") or []
+    periods_inv = out_inv.get("holdings") or []
+    assert periods_top and periods_inv
+    # After warmup, picks should diverge: top-1 favors AAA, bottom-1 favors BBB.
+    last_p_top = sorted([str(x) for x in (periods_top[-1].get("picks") or [])])
+    last_p_inv = sorted([str(x) for x in (periods_inv[-1].get("picks") or [])])
+    assert last_p_top == ["AAA"]
+    assert last_p_inv == ["BBB"]
+
+
+def test_rotation_top_k_zero_raises(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [start]
+    with sf() as db:
+        add_price_all_adjustments(
+            db,
+            code="AAA",
+            day=dates[0],
+            close=100.0,
+            open_price=100.0,
+            high=100.0,
+            low=100.0,
+        )
+        db.commit()
+        with pytest.raises(ValueError, match="non-zero"):
+            backtest_rotation(
+                db,
+                RotationInputs(
+                    codes=["AAA"],
+                    start=dates[0],
+                    end=dates[0],
+                    rebalance="daily",
+                    top_k=0,
+                    lookback_days=1,
+                    skip_days=0,
+                    cost_bps=0.0,
+                    slippage_rate=0.0,
+                ),
+            )
+
+
 def test_rotation_topk_larger_than_pool_still_runs(session_factory):
     sf = session_factory
     start = dt.date(2024, 1, 1)

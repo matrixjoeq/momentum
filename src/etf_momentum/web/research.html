@@ -250,6 +250,20 @@
           <button id="groupSaveBtn">保存为分组</button>
           <button id="groupDeleteBtn">删除分组</button>
         </div>
+        <div class="row" style="gap:8px; flex-wrap:wrap;">
+          <span class="muted" style="align-self:center;">全量标的：</span>
+          <button type="button" id="exportPoolCodes">导出 JSON</button>
+          <button type="button" id="importPoolCodesMerge">导入（合并到当前分组）</button>
+          <button type="button" id="importPoolCodesReplace">导入（替换当前分组）</button>
+          <input type="file" id="importPoolCodesFile" accept=".json,application/json" style="display:none" />
+        </div>
+        <div class="row" style="gap:8px; flex-wrap:wrap;">
+          <span class="muted" style="align-self:center;">分组结构：</span>
+          <button type="button" id="exportCandidateGroups">导出 JSON</button>
+          <button type="button" id="importCandidateGroupsMerge">导入（合并）</button>
+          <button type="button" id="importCandidateGroupsReplace">导入（覆盖）</button>
+          <input type="file" id="importCandidateGroupsFile" accept=".json,application/json" style="display:none" />
+        </div>
       </div>
       <div class="row" style="margin-bottom:10px; gap:10px; align-items:end;">
         <div>
@@ -278,6 +292,9 @@
             <button id="selNone">取消全选</button>
             <button id="selInvert">反选</button>
             <button id="selInvertUndo">取消反选</button>
+          </div>
+          <div class="muted" style="margin-top:10px; font-size:12px;">
+            <b>跨浏览器</b>：「全量标的」导出当前页候选池全部代码（与复选框列表一致）；导入时只保留<b>当前后端候选池中存在的代码</b>，并写入左侧<b>当前正在编辑的分组</b>（见上方「编辑候选池分组」）。「分组结构」导出各分组名称与代码列表及当前激活分组；合并导入会与同名分组合并代码，覆盖导入将替换本地全部分组。
           </div>
         </div>
       </div>
@@ -1550,7 +1567,7 @@
           <div class="muted" style="margin-top:8px">
             说明：用于降低频繁调仓。<br/>
             - 最短持有期：当计划换仓时，若距离上一次“持仓发生变化”的调仓决策不足 N 次，则本期保持原持仓。<br/>
-            - 单标的切换阈值：仅对 TopK=1 生效；只有当新标的动量分数比当前持仓至少高出 Δ 时才允许切换。<br/>
+            - 单标的切换阈值：仅对 |TopK|=1 生效；只有当新标的动量分数比当前持仓至少高出 Δ 时才允许切换。<br/>
             - 最小换手阈值：根据目标权重与当前权重估算换手（0.5×Σ|Δw|）；若换手低于阈值则本期不调仓。
           </div>
         </div>
@@ -3240,10 +3257,15 @@
         </div>
         <button id="loadFixedStrategy">加载</button>
         <button id="deleteFixedStrategy">删除</button>
+        <button type="button" id="exportFixedStrategies">导出 JSON</button>
+        <button type="button" id="importFixedStrategiesMerge">导入（合并）</button>
+        <button type="button" id="importFixedStrategiesReplace">导入（覆盖）</button>
+        <input type="file" id="importFixedStrategiesFile" accept=".json,application/json" style="display:none" />
       </div>
       <div class="muted" style="margin-top:8px;">
         固定策略会保存：策略参数、候选池分组选择、最近一次回测结果（用于组合分析）。
-        若类型为「多策略组合(MIX)」，则保存当前组合中的子固定策略列表、权重模式、自定义权重、滚动窗口与账户金额（无需先做单策略回测）；加载后可一键恢复并重新生成组合分析。
+        若类型为「多策略组合(MIX)」，则保存当前组合中的子固定策略列表、权重模式、自定义权重、滚动窗口与账户金额（无需先做单策略回测）；加载后可一键恢复并重新生成组合分析。<br/>
+        <b>跨浏览器</b>：使用「导出 JSON」下载备份；在另一浏览器「导入（合并）」追加到当前库，或「导入（覆盖）」用文件完全替换当前固定策略（组合选中会清空）。合并时若策略 ID 与本地冲突会自动换新 ID，并同步修正 MIX 内的子策略引用与自定义权重键。
       </div>
       <table id="fixedStrategyTable" style="margin-top:8px;"></table>
       <h3 style="margin: 12px 0 6px 0;">任意策略组合研究</h3>
@@ -3581,6 +3603,203 @@
           active_group: activeGroupName,
         });
       }
+      function _refreshUiAfterCandidateImport() {
+        _ensureCandidateGroups();
+        _setSelectedFromGroup(activeGroupName);
+        if ($("groupNameInput")) $("groupNameInput").value = activeGroupName || "";
+        renderCandidateGroupControls();
+        renderCodeList();
+        renderBenchmarkSelect();
+        renderTrendSingleCodeSelect();
+        maybeAdjustBacktestRange();
+        renderRangeHint();
+        _saveCandidateGroups();
+        _saveSelectedCodes();
+      }
+      const POOL_CODES_EXPORT_FORMAT = "etf_momentum_research_candidate_pool_codes";
+      const CANDIDATE_GROUPS_EXPORT_FORMAT = "etf_momentum_research_candidate_groups";
+      function exportCandidatePoolCodesJson() {
+        if (!(pool && pool.length)) return setMsg("候选池未加载，无法导出全量标的。");
+        const codes = [];
+        const entries = [];
+        for (const it of pool) {
+          const code = String((it && it.code) || "").trim();
+          if (!code) continue;
+          codes.push(code);
+          entries.push({
+            code,
+            name: String((it && it.name) || code || ""),
+            last_data_start_date: (it && it.last_data_start_date) != null ? String(it.last_data_start_date) : null,
+            last_data_end_date: (it && it.last_data_end_date) != null ? String(it.last_data_end_date) : null,
+          });
+        }
+        const payload = {
+          format: POOL_CODES_EXPORT_FORMAT,
+          version: 1,
+          exported_at: new Date().toISOString(),
+          codes,
+          entries,
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+        const a = document.createElement("a");
+        const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        a.href = URL.createObjectURL(blob);
+        a.download = `candidate-pool-codes-${ymd}.json`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        setMsg(`已导出候选池全量 ${codes.length} 个标的代码。`);
+      }
+      function _parsePoolCodesImportPayload(parsed) {
+        if (!parsed || typeof parsed !== "object") return { ok: false, error: "文件内容不是 JSON 对象。" };
+        let codes = null;
+        if (Array.isArray(parsed.codes)) codes = parsed.codes;
+        else if (Array.isArray(parsed)) codes = parsed;
+        if (!codes) return { ok: false, error: '需要包含 "codes" 数组（或根为代码数组）。' };
+        return { ok: true, codes: _uniq(codes) };
+      }
+      let _poolCodesImportMode = "merge";
+      function _openPoolCodesImport(mode) {
+        if (!(pool && pool.length)) return setMsg("请先等待候选池加载完成。");
+        _poolCodesImportMode = mode === "replace" ? "replace" : "merge";
+        if (_poolCodesImportMode === "replace") {
+          if (!window.confirm("将用文件中的代码列表替换「当前编辑分组」内的标的（仅保留在当前候选池中的代码）。确定继续？")) return;
+        }
+        const inp = $("importPoolCodesFile");
+        if (inp) inp.click();
+      }
+      async function _onImportPoolCodesFileChange(ev) {
+        const inp = ev && ev.target ? ev.target : null;
+        const file = inp && inp.files && inp.files[0] ? inp.files[0] : null;
+        if (inp) inp.value = "";
+        if (!file) return;
+        if (!(pool && pool.length)) return setMsg("候选池未加载。");
+        let text = "";
+        try {
+          text = await file.text();
+        } catch {
+          return setMsg("无法读取文件。");
+        }
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          return setMsg("文件不是有效的 JSON。");
+        }
+        const pr = _parsePoolCodesImportPayload(parsed);
+        if (!pr.ok) return setMsg(pr.error);
+        const nm = _sanitizeGroupName(activeGroupName) || DEFAULT_GROUP_NAME;
+        if (!candidateGroups[nm]) candidateGroups[nm] = [];
+        const v = _validCodes(pr.codes);
+        if (!v.length && pr.codes.length) {
+          return setMsg(`文件中 ${pr.codes.length} 个代码均不在当前候选池（共 ${pool.length} 只）中，无法导入。`);
+        }
+        if (_poolCodesImportMode === "replace") candidateGroups[nm] = v.slice();
+        else candidateGroups[nm] = _validCodes(_uniq([...(candidateGroups[nm] || []), ...v]));
+        activeGroupName = nm;
+        _groupEditorLastSynced = nm;
+        _refreshUiAfterCandidateImport();
+        setMsg(
+          _poolCodesImportMode === "replace"
+            ? `已替换分组「${nm}」为 ${candidateGroups[nm].length} 个标的（文件中可匹配 ${v.length} 个）。`
+            : `已向分组「${nm}」合并 ${v.length} 个标的，当前共 ${candidateGroups[nm].length} 个。`
+        );
+      }
+      function exportCandidateGroupsJson() {
+        const groups = {};
+        for (const k of Object.keys(candidateGroups || {})) {
+          const nk = _sanitizeGroupName(k);
+          if (!nk) continue;
+          groups[nk] = _validCodes(candidateGroups[k] || []);
+        }
+        if (!Object.keys(groups).length) return setMsg("没有可导出的分组。");
+        const payload = {
+          format: CANDIDATE_GROUPS_EXPORT_FORMAT,
+          version: 1,
+          exported_at: new Date().toISOString(),
+          active_group: String(activeGroupName || DEFAULT_GROUP_NAME),
+          groups,
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+        const a = document.createElement("a");
+        const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        a.href = URL.createObjectURL(blob);
+        a.download = `candidate-groups-${ymd}.json`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        setMsg(`已导出 ${Object.keys(groups).length} 个候选池分组。`);
+      }
+      function _parseCandidateGroupsImportPayload(parsed) {
+        if (!parsed || typeof parsed !== "object") return { ok: false, error: "文件内容不是 JSON 对象。" };
+        const g = parsed.groups;
+        if (!g || typeof g !== "object") return { ok: false, error: '需要包含 "groups" 对象（分组名 -> 代码数组）。' };
+        return { ok: true, groups: g, active_group: parsed.active_group != null ? String(parsed.active_group) : null };
+      }
+      let _candidateGroupsImportMode = "merge";
+      function _openCandidateGroupsImport(mode) {
+        if (!(pool && pool.length)) return setMsg("请先等待候选池加载完成。");
+        _candidateGroupsImportMode = mode === "replace" ? "replace" : "merge";
+        if (_candidateGroupsImportMode === "replace") {
+          if (!window.confirm("将用文件中的分组完全覆盖本地所有候选池分组（当前编辑分组与勾选会按文件重建）。确定继续？")) return;
+        }
+        const inp = $("importCandidateGroupsFile");
+        if (inp) inp.click();
+      }
+      async function _onImportCandidateGroupsFileChange(ev) {
+        const inp = ev && ev.target ? ev.target : null;
+        const file = inp && inp.files && inp.files[0] ? inp.files[0] : null;
+        if (inp) inp.value = "";
+        if (!file) return;
+        if (!(pool && pool.length)) return setMsg("候选池未加载。");
+        let text = "";
+        try {
+          text = await file.text();
+        } catch {
+          return setMsg("无法读取文件。");
+        }
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          return setMsg("文件不是有效的 JSON。");
+        }
+        const pr = _parseCandidateGroupsImportPayload(parsed);
+        if (!pr.ok) return setMsg(pr.error);
+        if (_candidateGroupsImportMode === "replace") {
+          candidateGroups = {};
+          for (const [k, vv] of Object.entries(pr.groups || {})) {
+            const name = _sanitizeGroupName(k);
+            if (!name) continue;
+            candidateGroups[name] = _validCodes(Array.isArray(vv) ? vv : []);
+          }
+          _ensureCandidateGroups();
+          const ag = _sanitizeGroupName(pr.active_group || "") || "";
+          if (ag && candidateGroups[ag]) activeGroupName = ag;
+          else activeGroupName = Object.keys(candidateGroups)[0] || DEFAULT_GROUP_NAME;
+        } else {
+          for (const [k, vv] of Object.entries(pr.groups || {})) {
+            const name = _sanitizeGroupName(k);
+            if (!name) continue;
+            const incoming = _validCodes(Array.isArray(vv) ? vv : []);
+            const cur = candidateGroups[name] || [];
+            candidateGroups[name] = _validCodes(_uniq([...cur, ...incoming]));
+          }
+          _ensureCandidateGroups();
+          const ag2 = _sanitizeGroupName(pr.active_group || "") || "";
+          if (ag2 && candidateGroups[ag2]) {
+            activeGroupName = ag2;
+            _groupEditorLastSynced = ag2;
+          }
+        }
+        _refreshUiAfterCandidateImport();
+        const n = Object.keys(candidateGroups || {}).length;
+        setMsg(_candidateGroupsImportMode === "replace" ? `已覆盖导入 ${n} 个分组。` : `已合并分组，当前共 ${n} 个分组。`);
+      }
       function _ensureCandidateGroups() {
         if (!candidateGroups || typeof candidateGroups !== "object") candidateGroups = {};
         const names = Object.keys(candidateGroups);
@@ -3701,6 +3920,152 @@
           saved_at: String(item.saved_at || ""),
         };
       }
+      const FIXED_STRATEGIES_EXPORT_FORMAT = "etf_momentum_research_fixed_strategies";
+      function _nextFixedStrategyId() {
+        return `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+      }
+      /** Parse export file or legacy `{ items: [...] }` body. */
+      function _parseFixedStrategiesImportPayload(parsed) {
+        if (!parsed || typeof parsed !== "object") return { ok: false, error: "文件内容不是 JSON 对象。" };
+        let items = null;
+        if (Array.isArray(parsed.items)) items = parsed.items;
+        else if (Array.isArray(parsed)) items = parsed;
+        if (!items) return { ok: false, error: '未找到条目列表：需要包含 "items" 数组（或根为数组）。' };
+        return { ok: true, items };
+      }
+      /**
+       * Build oldId -> newId for import batch. `usedSeed` = existing ids to avoid when merging.
+       */
+      function _remapFixedStrategyImportIdMap(rawItems, usedSeed) {
+        const used = new Set(usedSeed.map((x) => String(x || "").trim()).filter(Boolean));
+        const idMap = {};
+        const seenInFile = new Set();
+        for (const it of rawItems) {
+          const oid = String(it && it.id || "").trim();
+          if (!oid) continue;
+          if (seenInFile.has(oid)) continue;
+          seenInFile.add(oid);
+          let nid = oid;
+          if (used.has(nid)) {
+            nid = _nextFixedStrategyId();
+            while (used.has(nid)) nid = _nextFixedStrategyId();
+          }
+          used.add(nid);
+          idMap[oid] = nid;
+        }
+        return idMap;
+      }
+      function _applyFixedStrategyIdRemap(item, idMap) {
+        const copy = JSON.parse(JSON.stringify(item));
+        const oid = String(copy.id || "").trim();
+        if (oid && idMap[oid]) copy.id = idMap[oid];
+        const tp = String(copy.type || "").trim().toLowerCase();
+        if (tp === "strategy_mix" && copy.payload && typeof copy.payload === "object") {
+          const p = copy.payload;
+          if (Array.isArray(p.strategy_ids)) {
+            p.strategy_ids = p.strategy_ids.map((x) => {
+              const s = String(x || "").trim();
+              return idMap[s] || s;
+            });
+          }
+          if (p.custom_weights && typeof p.custom_weights === "object") {
+            const nw = {};
+            for (const [k, v] of Object.entries(p.custom_weights)) {
+              const kk = String(k || "").trim();
+              const nk = kk ? (idMap[kk] || kk) : kk;
+              if (nk) nw[nk] = v;
+            }
+            p.custom_weights = nw;
+          }
+        }
+        return copy;
+      }
+      function exportFixedStrategiesJson() {
+        if (!(fixedStrategies && fixedStrategies.length)) return setMsg("当前没有可导出的固定策略。");
+        const payload = {
+          format: FIXED_STRATEGIES_EXPORT_FORMAT,
+          version: 1,
+          exported_at: new Date().toISOString(),
+          items: JSON.parse(JSON.stringify(fixedStrategies)),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+        const a = document.createElement("a");
+        const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        a.href = URL.createObjectURL(blob);
+        a.download = `fixed-strategies-${ymd}.json`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        setMsg(`已导出 ${fixedStrategies.length} 条固定策略为 JSON。`);
+      }
+      let _fixedImportMode = "merge";
+      function _openFixedStrategiesImport(mode) {
+        _fixedImportMode = mode === "replace" ? "replace" : "merge";
+        if (_fixedImportMode === "replace") {
+          if (!window.confirm("将删除当前所有固定策略，并以文件内容完全替换（当前多策略组合选中列表也会清空）。确定继续？")) return;
+        }
+        const inp = $("importFixedStrategiesFile");
+        if (inp) inp.click();
+      }
+      async function _onImportFixedStrategiesFileChange(ev) {
+        const inp = ev && ev.target ? ev.target : null;
+        const file = inp && inp.files && inp.files[0] ? inp.files[0] : null;
+        if (inp) inp.value = "";
+        if (!file) return;
+        let text = "";
+        try {
+          text = await file.text();
+        } catch {
+          return setMsg("无法读取文件。");
+        }
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          return setMsg("文件不是有效的 JSON。");
+        }
+        const pr = _parseFixedStrategiesImportPayload(parsed);
+        if (!pr.ok) return setMsg(pr.error);
+        const rawItems = pr.items.filter((x) => x && typeof x === "object");
+        if (!rawItems.length) return setMsg("文件中没有可导入的策略条目。");
+        const replace = _fixedImportMode === "replace";
+        const usedSeed = replace ? [] : (fixedStrategies || []).map((x) => x.id);
+        const idMap = _remapFixedStrategyImportIdMap(rawItems, usedSeed);
+        const out = [];
+        const seen = new Set();
+        for (const it of rawItems) {
+          const oid = String(it && it.id || "").trim();
+          if (!oid || !idMap[oid] || seen.has(oid)) continue;
+          seen.add(oid);
+          const remapped = _applyFixedStrategyIdRemap(it, idMap);
+          const clean = _sanitizeFixedStrategy(remapped);
+          if (clean) out.push(clean);
+        }
+        if (!out.length) return setMsg("没有通过校验的策略条目（检查 id、名称、类型与 MIX 子策略）。");
+        if (replace) {
+          fixedStrategies = out.slice();
+          mixSelectedStrategyIds = [];
+          mixCustomWeightsById = {};
+        } else {
+          fixedStrategies = (fixedStrategies || []).concat(out);
+        }
+        _saveFixedStrategies();
+        _saveMixSelection();
+        _renderFixedStrategyControls();
+        _renderMixStrategyListTable();
+        try {
+          mixSelectedStrategyIds = (mixSelectedStrategyIds || []).filter((id) => !!_findFixedStrategy(id));
+          _saveMixSelection();
+          _renderMixStrategyListTable();
+        } catch { /* ignore */ }
+        setMsg(
+          replace
+            ? `已覆盖导入 ${out.length} 条固定策略。`
+            : `已合并导入 ${out.length} 条固定策略（共 ${fixedStrategies.length} 条）。`
+        );
+      }
       function _renderFixedStrategyControls() {
         const sel = $("fixedStrategyLoadSelect");
         const addSel = $("mixStrategyAddSelect");
@@ -3732,16 +4097,20 @@
           const rows = items.map((s) => {
             const dt = s.saved_at ? String(s.saved_at).replace("T", " ").slice(0, 19) : "-";
             return (
-              `<tr>` +
+              `<tr class="fixedStrategyRow" draggable="true" data-strategy-id="${esc(String(s.id))}">` +
+              `<td title="拖拽排序" style="cursor:grab;">↕</td>` +
               `<td>${esc(s.name)}</td>` +
               `<td>${esc(_strategyTypeLabel(s.type))}</td>` +
               `<td>${esc(s.group_name || "-")}</td>` +
               `<td>${esc(dt)}</td>` +
-              `<td><button class="fixedCloneStrategyBtn" data-strategy-id="${esc(String(s.id))}">克隆</button></td>` +
+              `<td>` +
+              `<button class="fixedRenameStrategyBtn" data-strategy-id="${esc(String(s.id))}">重命名</button> ` +
+              `<button class="fixedCloneStrategyBtn" data-strategy-id="${esc(String(s.id))}">克隆</button>` +
+              `</td>` +
               `</tr>`
             );
           });
-          table.innerHTML = `<tr><th>名称</th><th>类型</th><th>候选分组</th><th>保存时间</th><th>操作</th></tr>${rows.length ? rows.join("") : `<tr><td colspan="5" class="muted">暂无固定策略</td></tr>`}`;
+          table.innerHTML = `<tr><th>排序</th><th>名称</th><th>类型</th><th>候选分组</th><th>保存时间</th><th>操作</th></tr>${rows.length ? rows.join("") : `<tr><td colspan="6" class="muted">暂无固定策略</td></tr>`}`;
           table.querySelectorAll(".fixedCloneStrategyBtn").forEach((btn) => {
             btn.addEventListener("click", () => {
               const id = String(btn.getAttribute("data-strategy-id") || "").trim();
@@ -3762,6 +4131,69 @@
               _saveFixedStrategies();
               _renderFixedStrategyControls();
               setMsg(`已克隆固定策略：${src.name}`);
+            });
+          });
+          table.querySelectorAll(".fixedRenameStrategyBtn").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+              const id = String(btn.getAttribute("data-strategy-id") || "").trim();
+              const s = _findFixedStrategy(id);
+              if (!s) return;
+              const oldName = String(s.name || "").trim();
+              const nextRaw = await _promptTextModal("请输入新的策略名称：", oldName);
+              if (nextRaw == null) return;
+              const next = String(nextRaw || "").trim();
+              if (!next) return setMsg("重命名失败：名称不能为空。");
+              const finalName = next.slice(0, 60);
+              const dup = (fixedStrategies || []).find((x) => String((x && x.id) || "") !== id && String((x && x.name) || "").trim() === finalName);
+              if (dup) return setMsg("重命名失败：已存在同名固定策略。");
+              s.name = finalName;
+              _saveFixedStrategies();
+              _renderFixedStrategyControls();
+              _renderMixStrategyListTable();
+              try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
+              setMsg(`固定策略已重命名：${oldName} -> ${finalName}`);
+            });
+          });
+          let draggingId = "";
+          const _clearDragOver = () => {
+            table.querySelectorAll("tr.fixedStrategyRow.drag-over").forEach((r) => r.classList.remove("drag-over"));
+          };
+          table.querySelectorAll("tr.fixedStrategyRow[data-strategy-id]").forEach((row) => {
+            row.addEventListener("dragstart", (e) => {
+              draggingId = String(row.getAttribute("data-strategy-id") || "").trim();
+              row.classList.add("dragging");
+              try { if (e && e.dataTransfer) e.dataTransfer.effectAllowed = "move"; } catch { /* ignore */ }
+            });
+            row.addEventListener("dragend", () => {
+              draggingId = "";
+              row.classList.remove("dragging");
+              _clearDragOver();
+            });
+            row.addEventListener("dragover", (e) => {
+              if (!draggingId) return;
+              e.preventDefault();
+              _clearDragOver();
+              row.classList.add("drag-over");
+              try { if (e && e.dataTransfer) e.dataTransfer.dropEffect = "move"; } catch { /* ignore */ }
+            });
+            row.addEventListener("dragleave", () => {
+              row.classList.remove("drag-over");
+            });
+            row.addEventListener("drop", (e) => {
+              e.preventDefault();
+              row.classList.remove("drag-over");
+              const targetId = String(row.getAttribute("data-strategy-id") || "").trim();
+              if (!draggingId || !targetId || draggingId === targetId) return;
+              const cur = (fixedStrategies || []).slice();
+              const from = cur.findIndex((x) => String(x && x.id) === draggingId);
+              const to = cur.findIndex((x) => String(x && x.id) === targetId);
+              if (from < 0 || to < 0) return;
+              const [mv] = cur.splice(from, 1);
+              cur.splice(to, 0, mv);
+              fixedStrategies = cur;
+              _saveFixedStrategies();
+              _renderFixedStrategyControls();
+              setMsg("固定策略排序已更新。");
             });
           });
         }
@@ -4473,12 +4905,12 @@
         },
         param_rot_topk: {
           title: "TopK",
-          sub: "每次调仓持有动量排名前 K 的标的（等权）。",
+          sub: "每次调仓按动量排名选股：正数取前 K 名，负数取倒数 K 名（反向），等权持有。",
           body: `
-            <div><b>含义</b>：K=1 表示单标的轮动；K>1 表示持有多标的等权组合。</div>
-            <div style="margin-top:8px"><b>用途</b>：K 越大分散越强、波动更低，但动量暴露更弱。</div>
-            <div style="margin-top:8px"><b>范围</b>：整数 ≥ 1，且不应超过可用标的数量。</div>
-            <div style="margin-top:8px"><b>示例</b>：TopK=2 在 4 个标的池里会持有前 2 名等权。</div>
+            <div><b>含义</b>：TopK 为非零整数。TopK&gt;0 持有得分最高的前 K 个标的；TopK&lt;0 持有得分最低的 |K| 个标的（反向/多头弱动量）。TopK=±1 为单标的。</div>
+            <div style="margin-top:8px"><b>动态池</b>：若某一决策日可打分标的少于 |K|，实际持有数为 min(|K|, 当期候选数量)。</div>
+            <div style="margin-top:8px"><b>用途</b>：|K| 越大越分散；反向 TopK 用于鲁棒性/反转实验等。</div>
+            <div style="margin-top:8px"><b>示例</b>：TopK=2 在 4 个标的池里持有前 2 名等权；TopK=-2 持有后 2 名等权。</div>
           `,
         },
         param_rot_position_mode: {
@@ -4486,7 +4918,7 @@
           sub: "决定被选中标的在组合里的基础权重计算方法。",
           body: `
             <div><b>adaptive</b>：在风险标的中自适应等权（每次按当期入选数量平分）。</div>
-            <div style="margin-top:8px"><b>fixed</b>：固定每个入选标的权重为 1/TopK（入选不足时总仓位可低于100%，剩余视为现金）。</div>
+            <div style="margin-top:8px"><b>fixed</b>：固定每个入选标的权重为 1/|TopK|（入选不足时总仓位可低于100%，剩余视为现金）。</div>
             <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，令“标的波动 1 个 ATR 时对组合净值影响约为 x%”。</div>
             <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，并对全组合做上限约束（总权重&gt;100%时按比例缩放）。</div>
             <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~3%）。</div>
@@ -5399,6 +5831,58 @@
 
       function closeMetricModal() {
         $("metricModal").style.display = "none";
+      }
+
+      function _promptTextModal(title, initialValue = "") {
+        return new Promise((resolve) => {
+          const overlay = document.createElement("div");
+          overlay.style.cssText = "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;";
+          const box = document.createElement("div");
+          box.style.cssText = "width:min(520px,92vw);background:#fff;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,0.25);padding:14px;";
+          const h = document.createElement("div");
+          h.style.cssText = "font-weight:600;margin-bottom:10px;";
+          h.textContent = String(title || "请输入内容");
+          const inp = document.createElement("input");
+          inp.type = "text";
+          inp.value = String(initialValue || "");
+          inp.style.cssText = "width:100%;box-sizing:border-box;padding:8px 10px;margin-bottom:10px;";
+          const btns = document.createElement("div");
+          btns.style.cssText = "display:flex;justify-content:flex-end;gap:8px;";
+          const btnCancel = document.createElement("button");
+          btnCancel.type = "button";
+          btnCancel.textContent = "取消";
+          const btnOk = document.createElement("button");
+          btnOk.type = "button";
+          btnOk.textContent = "确定";
+          btns.appendChild(btnCancel);
+          btns.appendChild(btnOk);
+          box.appendChild(h);
+          box.appendChild(inp);
+          box.appendChild(btns);
+          overlay.appendChild(box);
+          const done = (val) => {
+            try { overlay.remove(); } catch { /* ignore */ }
+            resolve(val);
+          };
+          btnCancel.addEventListener("click", () => done(null));
+          btnOk.addEventListener("click", () => done(String(inp.value || "")));
+          overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) done(null);
+          });
+          inp.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              done(String(inp.value || ""));
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              done(null);
+            }
+          });
+          document.body.appendChild(overlay);
+          setTimeout(() => {
+            try { inp.focus(); inp.select(); } catch { /* ignore */ }
+          }, 0);
+        });
       }
 
       function exportPdfReport() {
@@ -6783,10 +7267,38 @@
         const totalTgt = ctx.totalTgt || {};
         const navByCode = ctx.assetNavByCode || {};
         const totalCodes = Object.keys(totalCur).filter((c) => Number(totalCur[c]) > 1e-12).sort();
-        const _calcTotalHoldRetFromSub = (code, entryIdx) => {
-          if (!(entryIdx >= 0)) return NaN;
-          let num = 0.0;
-          let den = 0.0;
+        const _holdReturnFromNav = (nv, entryIdx, endIdx) => {
+          if (!Array.isArray(nv) || !(entryIdx >= 0) || !(endIdx >= 0)) return NaN;
+          const n = nv.length;
+          if (n <= 0) return NaN;
+          const st = Math.max(0, Math.min(n - 1, entryIdx));
+          const ed = Math.max(0, Math.min(n - 1, endIdx));
+          if (st > ed) return NaN;
+          let i0 = -1;
+          for (let i = st; i <= ed; i++) {
+            const v = Number(nv[i]);
+            if (Number.isFinite(v) && v > 0) {
+              i0 = i;
+              break;
+            }
+          }
+          if (i0 < 0) return NaN;
+          let i1 = -1;
+          for (let i = ed; i >= i0; i--) {
+            const v = Number(nv[i]);
+            if (Number.isFinite(v) && v > 0) {
+              i1 = i;
+              break;
+            }
+          }
+          if (i1 < 0) return NaN;
+          const n0 = Number(nv[i0]);
+          const n1 = Number(nv[i1]);
+          if (!(Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0)) return NaN;
+          return n1 / n0 - 1.0;
+        };
+        const _calcTotalHoldRetFromSub = (code) => {
+          let sumContrib = 0.0;
           const subMap = (ctx && ctx.sub) ? ctx.sub : {};
           const subCap = (ctx && ctx.subCapitalWeights) ? ctx.subCapitalWeights : {};
           for (const sk of Object.keys(subMap)) {
@@ -6797,16 +7309,14 @@
             const effW = curW * capW;
             if (!(Number.isFinite(effW) && effW > 1e-12)) continue;
             const nv = Array.isArray(((one.assetNavByCode || {})[code])) ? (one.assetNavByCode || {})[code] : [];
-            if (!(entryIdx >= 0 && entryIdx < nv.length && lastIdx < nv.length)) continue;
-            const n0 = Number(nv[entryIdx]);
-            const n1 = Number(nv[lastIdx]);
-            if (!(Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0)) continue;
-            const r = n1 / n0 - 1.0;
+            const h = Array.isArray(((one.history || {})[code])) ? ((one.history || {})[code]) : [];
+            const subEntryIdx = _lastEntryIndex(h, lastIdx);
+            const r = _holdReturnFromNav(nv, subEntryIdx, lastIdx);
             if (!Number.isFinite(r)) continue;
-            num += effW * r;
-            den += effW;
+            // Contribution-style holding return (additive across sub-strategies).
+            sumContrib += effW * r;
           }
-          return den > 1e-12 ? (num / den) : NaN;
+          return Number.isFinite(sumContrib) ? sumContrib : NaN;
         };
         const tRows = totalCodes.map((c) => {
           const h = Array.isArray(totalHist[c]) ? totalHist[c] : [];
@@ -6815,12 +7325,8 @@
           const holdDays = (entryIdx >= 0) ? (lastIdx - entryIdx + 1) : 0;
           const nv = Array.isArray(navByCode[c]) ? navByCode[c] : [];
           let holdRet = NaN;
-          if (entryIdx >= 0 && entryIdx < nv.length && lastIdx < nv.length) {
-            const n0 = Number(nv[entryIdx]);
-            const n1 = Number(nv[lastIdx]);
-            if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
-          }
-          const holdRetFromSub = _calcTotalHoldRetFromSub(c, entryIdx);
+          holdRet = _holdReturnFromNav(nv, entryIdx, lastIdx);
+          const holdRetFromSub = _calcTotalHoldRetFromSub(c);
           if (Number.isFinite(holdRetFromSub)) holdRet = holdRetFromSub;
           const curW = Number(totalCur[c] || 0);
           const px = _lastPx(nv);
@@ -6874,13 +7380,11 @@
             const entryDate = (entryIdx >= 0 && entryIdx < dts.length) ? dts[entryIdx] : "-";
             const holdDays = (entryIdx >= 0) ? (lastIdx - entryIdx + 1) : 0;
             const nv = Array.isArray(sNav[c]) ? sNav[c] : [];
-            let holdRet = NaN;
-            if (entryIdx >= 0 && entryIdx < nv.length && lastIdx < nv.length) {
-              const n0 = Number(nv[entryIdx]);
-              const n1 = Number(nv[lastIdx]);
-              if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
-            }
             const curW = Number(curMap[c] || 0);
+            let holdRet = NaN;
+            const rawRet = _holdReturnFromNav(nv, entryIdx, lastIdx);
+            const effW = curW * (Number.isFinite(capW) ? capW : 0.0);
+            if (Number.isFinite(rawRet) && Number.isFinite(effW)) holdRet = rawRet * effW;
             const px = _lastPx(nv);
             const amt = _amtByWeight(curW, cap);
             const sh = _shares(amt, px);
@@ -7149,13 +7653,9 @@
           out.drawdown[k] = { dates: ddDates, values: ddVals };
           out.max_drawdown[k] = { dates: ddDates, values: ddVals };
         };
-        add("4w", 20);
-        add("12w", 60);
-        add("52w", 260);
-        add("3m", 63);
         add("6m", 126);
-        add("12m", 252);
         add("1y", 252);
+        add("2y", 504);
         add("3y", 756);
         return out;
       }
@@ -7478,11 +7978,16 @@
             }
             one.target = Object.keys(t).length ? _normalizeWeightMap(t) : { ...one.current };
             one.stopByCode = _rotationLatestStopMapFromPeriods((s.result || {}), dts);
-            // Rotation result itself has no per-asset nav series; borrow aligned asset nav
-            // from baseline sources to compute per-asset holding return in sub-strategy table.
+            const rotOwnNav = ((((s.result || {}).asset_nav_exec || {}).series) || {});
+            const rotOwnDates = ((((s.result || {}).asset_nav_exec || {}).dates) || (((s.result || {}).nav || {}).dates || []));
+            // Prefer this fixed strategy's own per-asset NAV series; fallback to shared sources only when missing.
             for (const c of Object.keys(hist || {})) {
-              const an = _pickAlignedAssetNav(c);
-              if (Array.isArray(an)) one.assetNavByCode[c] = an;
+              if (Array.isArray(rotOwnNav[c])) {
+                one.assetNavByCode[c] = _alignSeriesByDates(rotOwnDates, rotOwnNav[c], dts);
+              } else {
+                const an = _pickAlignedAssetNav(c);
+                if (Array.isArray(an)) one.assetNavByCode[c] = an;
+              }
             }
           } else if (s.type === "trend") {
             const tr = s.result || {};
@@ -7622,32 +8127,56 @@
         const cache = window.__mixAssetNavCache || {};
         const out = {};
         for (const code of Array.from(need)) {
-          const key = `qfq|${code}|${start}|${end}`;
-          if (cache[key] && Array.isArray(cache[key])) {
-            out[code] = cache[key];
+          const keyAny = `any|${code}|${start}|${end}`;
+          if (cache[keyAny] && Array.isArray(cache[keyAny])) {
+            out[code] = cache[keyAny];
             continue;
           }
-          try {
-            const path = `/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=qfq&limit=1000000`;
-            const resp = await api(path, { method: "GET" });
-            const text = await resp.text();
-            if (!resp.ok) continue;
-            const rows = JSON.parse(text);
-            const srcDates = [];
-            const srcClose = [];
-            for (const r of (Array.isArray(rows) ? rows : [])) {
-              const d = String(r && r.trade_date != null ? r.trade_date : "").trim();
-              const c = Number(r && r.close != null ? r.close : NaN);
-              if (!d || !Number.isFinite(c) || c <= 0) continue;
-              srcDates.push(d);
-              srcClose.push(c);
+          let picked = null;
+          for (const adj of ["qfq", "hfq", "none"]) {
+            const key = `${adj}|${code}|${start}|${end}`;
+            if (cache[key] && Array.isArray(cache[key])) {
+              picked = cache[key];
+              break;
             }
-            if (!srcDates.length) continue;
-            const aligned = _alignSeriesByDates(srcDates, srcClose, ds);
-            if (!Array.isArray(aligned) || !aligned.length) continue;
-            cache[key] = aligned;
-            out[code] = aligned;
-          } catch (_) { /* ignore */ }
+            try {
+              const path = `/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=${encodeURIComponent(adj)}&limit=1000000`;
+              const resp = await api(path, { method: "GET" });
+              const text = await resp.text();
+              if (!resp.ok) continue;
+              const rows = JSON.parse(text);
+              const srcDates = [];
+              const srcClose = [];
+              for (const r of (Array.isArray(rows) ? rows : [])) {
+                const d = String(r && r.trade_date != null ? r.trade_date : "").trim();
+                const c = Number(r && r.close != null ? r.close : NaN);
+                if (!d || !Number.isFinite(c) || c <= 0) continue;
+                srcDates.push(d);
+                srcClose.push(c);
+              }
+              if (!srcDates.length) continue;
+              const aligned0 = _alignSeriesByDates(srcDates, srcClose, ds);
+              if (!Array.isArray(aligned0) || !aligned0.length) continue;
+              const aligned = [];
+              let lastValid = NaN;
+              for (const x0 of aligned0) {
+                const x = Number(x0);
+                if (Number.isFinite(x) && x > 0) {
+                  lastValid = x;
+                  aligned.push(x);
+                } else {
+                  aligned.push(Number.isFinite(lastValid) && lastValid > 0 ? lastValid : 0.0);
+                }
+              }
+              cache[key] = aligned;
+              picked = aligned;
+              break;
+            } catch (_) { /* ignore */ }
+          }
+          if (Array.isArray(picked) && picked.length) {
+            cache[keyAny] = picked;
+            out[code] = picked;
+          }
         }
         window.__mixAssetNavCache = cache;
         return out;
@@ -7827,22 +8356,46 @@
         }
         const fields = _readFixedStrategyFields(type);
         const now = new Date().toISOString();
-        const id = `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-        const item = {
-          id,
-          name: name.slice(0, 60),
-          type,
-          group_name: groupName,
-          fields,
-          payload,
-          result,
-          next_plan: nextPlan,
-          saved_at: now,
-        };
-        fixedStrategies.push(item);
-        _saveFixedStrategies();
-        _renderFixedStrategyControls();
-        setMsg(`固定策略已保存：${item.name}`);
+        const savedName = name.slice(0, 60);
+        const existingIdx = fixedStrategies.findIndex(
+          (s) => String(s.name || "") === savedName
+        );
+        let item;
+        if (existingIdx >= 0) {
+          const prev = fixedStrategies[existingIdx];
+          item = {
+            id: prev.id,
+            name: savedName,
+            type,
+            group_name: groupName,
+            fields,
+            payload,
+            result,
+            next_plan: nextPlan,
+            saved_at: now,
+          };
+          fixedStrategies[existingIdx] = item;
+          _saveFixedStrategies();
+          _renderFixedStrategyControls();
+          setMsg(`已覆盖同名固定策略：${item.name}`);
+        } else {
+          const id = `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+          item = {
+            id,
+            name: savedName,
+            type,
+            group_name: groupName,
+            fields,
+            payload,
+            result,
+            next_plan: nextPlan,
+            saved_at: now,
+          };
+          fixedStrategies.push(item);
+          _saveFixedStrategies();
+          _renderFixedStrategyControls();
+          setMsg(`固定策略已保存（新建）：${item.name}`);
+        }
       }
       function loadFixedStrategyById(id) {
         const s = _findFixedStrategy(id);
@@ -13613,6 +14166,15 @@
         }
       }
 
+      /** TopK: non-zero int; positive=top-K by score, negative=bottom-K (inverse). Effective count=min(|K|, pool). */
+      function _parseRotationTopK(raw, label = "TopK") {
+        const v = Number(String(raw ?? "").trim());
+        if (!Number.isFinite(v) || v === 0) return { ok: false, error: `${label} 需为非零整数（正数=动量前K名；负数=倒数K名；实际持有数≤min(|K|,当期可打分标的数)）。` };
+        const t = Math.trunc(v);
+        if (Math.abs(v - t) > 1e-9) return { ok: false, error: `${label} 需为整数。` };
+        return { ok: true, top_k: t };
+      }
+
       async function runRotation() {
         const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
@@ -13625,9 +14187,9 @@
         const rebalance_shift = rebCtl.rebalance_shift;
         const exec_price = ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open";
         if (!["open", "close", "oc2"].includes(exec_price)) return setMsg("成交价口径仅支持 open/close/oc2");
-        let top_k = Number(($("rotTopK").value || "1").trim());
-        if (!Number.isFinite(top_k) || top_k < 1) return setMsg("TopK 需为 >=1 的整数");
-        top_k = Math.floor(top_k);
+        const topKParsed = _parseRotationTopK($("rotTopK").value, "TopK");
+        if (!topKParsed.ok) return setMsg(topKParsed.error);
+        const top_k = topKParsed.top_k;
         const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
         const risk_budget_atr_window = Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim());
         let risk_budget_pct = Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim());
@@ -14975,7 +15537,9 @@
         const end = (($("rotCalEnd").value || "").trim()) || $("end").value.trim();
         const rebalance = $("rotRebalance").value;
         const rebalance_shift = ($("rotCalShift") && $("rotCalShift").value) ? $("rotCalShift").value : "prev";
-        const top_k = Number(($("rotTopK").value || "1").trim());
+        const topKCal = _parseRotationTopK($("rotTopK").value, "TopK");
+        if (!topKCal.ok) return setMsg(topKCal.error);
+        const top_k = topKCal.top_k;
         const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
         const risk_budget_atr_window = Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim());
         let risk_budget_pct = Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim());
@@ -16729,6 +17293,16 @@
         _renderMixStrategyListTable();
         setMsg(`已删除固定策略：${s ? s.name : id}`);
       });
+      if ($("exportFixedStrategies")) $("exportFixedStrategies").addEventListener("click", exportFixedStrategiesJson);
+      if ($("importFixedStrategiesMerge")) {
+        $("importFixedStrategiesMerge").addEventListener("click", () => _openFixedStrategiesImport("merge"));
+      }
+      if ($("importFixedStrategiesReplace")) {
+        $("importFixedStrategiesReplace").addEventListener("click", () => _openFixedStrategiesImport("replace"));
+      }
+      if ($("importFixedStrategiesFile")) {
+        $("importFixedStrategiesFile").addEventListener("change", (e) => { void _onImportFixedStrategiesFileChange(e); });
+      }
       if ($("mixAddStrategy")) $("mixAddStrategy").addEventListener("click", () => {
         const id = ($("mixStrategyAddSelect") && $("mixStrategyAddSelect").value) ? String($("mixStrategyAddSelect").value) : "";
         if (!id) return setMsg("请先选择要加入组合的固定策略。");
@@ -17066,7 +17640,9 @@
         const rebalance_shift = rebCtl.rebalance_shift;
         const exec_price = ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open";
         if (!["open", "close", "oc2"].includes(exec_price)) return setMsg("成交价口径仅支持 open/close/oc2");
-        const top_k = Number(($("rotTopK").value || "1").trim());
+        const topKMc = _parseRotationTopK($("rotTopK").value, "TopK");
+        if (!topKMc.ok) return setMsg(topKMc.error);
+        const top_k = topKMc.top_k;
         const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
         const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
         const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
@@ -17607,6 +18183,14 @@
         _saveCandidateGroups();
         setMsg(`已删除分组：${nm}`);
       });
+      if ($("exportPoolCodes")) $("exportPoolCodes").addEventListener("click", exportCandidatePoolCodesJson);
+      if ($("importPoolCodesMerge")) $("importPoolCodesMerge").addEventListener("click", () => _openPoolCodesImport("merge"));
+      if ($("importPoolCodesReplace")) $("importPoolCodesReplace").addEventListener("click", () => _openPoolCodesImport("replace"));
+      if ($("importPoolCodesFile")) $("importPoolCodesFile").addEventListener("change", (e) => { void _onImportPoolCodesFileChange(e); });
+      if ($("exportCandidateGroups")) $("exportCandidateGroups").addEventListener("click", exportCandidateGroupsJson);
+      if ($("importCandidateGroupsMerge")) $("importCandidateGroupsMerge").addEventListener("click", () => _openCandidateGroupsImport("merge"));
+      if ($("importCandidateGroupsReplace")) $("importCandidateGroupsReplace").addEventListener("click", () => _openCandidateGroupsImport("replace"));
+      if ($("importCandidateGroupsFile")) $("importCandidateGroupsFile").addEventListener("change", (e) => { void _onImportCandidateGroupsFileChange(e); });
       if ($("baselineGroupPreset")) $("baselineGroupPreset").addEventListener("change", () => {
         renderBenchmarkSelect();
       });
@@ -18132,11 +18716,13 @@
       }
       function _buildAbStrategy(prefix) {
         const p = `${prefix}_`;
+        const topKAb = _parseRotationTopK(_str(`${p}topk`) || "1", `${prefix} TopK`);
+        if (!topKAb.ok) return { __error: topKAb.error };
         const out = {
           rebalance: _str(`${p}rebalance`) || "weekly",
           rebalance_shift: _str(`${p}shift`) || "prev",
           exec_price: _str(`${p}exec`) || "open",
-          top_k: Math.max(1, Math.trunc(_num(`${p}topk`, 1))),
+          top_k: topKAb.top_k,
           position_mode: _str(`${p}posMode`) || "adaptive",
           entry_backfill: _boolSel(`${p}backfill`, false),
           entry_match_n: Math.max(0, Math.trunc(_num(`${p}entryN`, 0))),

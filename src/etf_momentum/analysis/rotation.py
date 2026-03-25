@@ -17,7 +17,7 @@ class RotationAnalysisInputs:
     rebalance: str = "weekly"
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
-    top_k: int = 1
+    top_k: int = 1  # non-zero: >0 top-K, <0 bottom-K; effective=min(|k|, pool)
     position_mode: str = "adaptive"  # adaptive|fixed|risk_budget
     risk_budget_atr_window: int = 20
     risk_budget_pct: float = 0.01

@@ -1710,8 +1710,10 @@ def _compute_custom_weight_nav_and_weights(
         raise ValueError("custom_weights sum must be <= 1.0")
 
     rmat = daily_ret.fillna(0.0).to_numpy(dtype=float)
-    labels = _rebalance_labels(pd.DatetimeIndex(daily_ret.index), reb, weekly_anchor=weekly_anchor)
-    change = labels != labels.shift(1)
+    idx = pd.DatetimeIndex(daily_ret.index)
+    labels = _rebalance_labels(idx, reb, weekly_anchor=weekly_anchor)
+    # pandas PeriodIndex equality vs shift can return ndarray (no .iloc); normalize to Series.
+    change = pd.Series(np.asarray(labels != labels.shift(1), dtype=bool), index=daily_ret.index, dtype=bool)
     change.iloc[0] = True
 
     cash_amt = float(max(0.0, 1.0 - tw_sum))
@@ -1990,7 +1992,11 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             else:
                 dt_idx = pd.DatetimeIndex(ret_common.index)
                 labels = _rebalance_labels(dt_idx, reb, weekly_anchor="FRI")
-                exec_mask = (labels != labels.shift(1)).reindex(ret_common.index).fillna(True)
+                exec_mask = pd.Series(
+                    np.asarray(labels != labels.shift(1), dtype=bool),
+                    index=ret_common.index,
+                    dtype=bool,
+                ).reindex(ret_common.index).fillna(True)
             if ep == "open":
                 ret_fwd.loc[exec_mask, codes_eff] = same_day.loc[exec_mask, codes_eff]
             else:

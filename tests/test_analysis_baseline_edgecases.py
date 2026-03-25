@@ -32,6 +32,21 @@ def test_max_drawdown_duration_with_recovery():
     assert bl._max_drawdown_duration_days(nav) == 2
 
 
+def test_compute_custom_weight_nav_weekly_rebalance_no_numpy_iloc_crash():
+    """Regression: custom weights + periodic rebalance must not assume ndarray has .iloc."""
+    idx = pd.date_range("2024-01-02", periods=10, freq="B")
+    daily_ret = pd.DataFrame(0.001, index=idx, columns=["510300", "511010", "513100", "518880"])
+    tw = pd.Series({"510300": 0.3, "511010": 0.3, "513100": 0.3, "518880": 0.1})
+    nav, w = bl._compute_custom_weight_nav_and_weights(
+        daily_ret,
+        rebalance="weekly",
+        target_weights=tw,
+    )
+    assert len(nav) == 10
+    assert w.shape == (10, 4)
+    assert np.isfinite(nav.to_numpy(dtype=float)).all()
+
+
 def test_compute_baseline_errors(session_factory):
     sf = session_factory
     with sf() as db:

@@ -47,7 +47,7 @@ class RotationInputs:
     rebalance: str = "weekly"  # daily/weekly/monthly/quarterly/yearly
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
-    top_k: int = 1
+    top_k: int = 1  # |K|>0: positive=top-K by score; negative=bottom-K (inverse); effective count=min(|K|, pool)
     position_mode: str = "adaptive"  # adaptive | fixed | risk_budget (base sizing before other exposure controls)
     risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
     risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
@@ -114,7 +114,7 @@ class RotationInputs:
     # --- Inertia / dampening (avoid frequent rebalances) ---
     inertia: bool = False
     inertia_min_hold_periods: int = 0  # minimum decision periods between holding changes (0 disables)
-    inertia_score_gap: float = 0.0  # only for top_k=1: require new_score - cur_score >= gap to switch
+    inertia_score_gap: float = 0.0  # only for |top_k|=1: require new_score - cur_score >= gap to switch
     inertia_min_turnover: float = 0.0  # if expected turnover < threshold, skip rebalance (0 disables)
     # --- Rolling-return based position sizing (strategy trailing return) ---
     rr_sizing: bool = False
@@ -1050,15 +1050,24 @@ def _pick_assets(
     Returns (picks, meta):
     - picks: list of codes to hold (equal-weight). Empty list means "cash".
     - meta: debug info (best_score, mode).
+
+    ``top_k`` may be negative: hold the bottom |K| by score (inverse). Effective count is
+    ``min(abs(top_k), len(pool))`` for dynamic pools.
     """
     s = scores_row.dropna()
     if s.empty:
         return [], {"best_score": None, "mode": "no_signal"}
 
-    s = s.sort_values(ascending=False)
-    best = float(s.iloc[0])
-    picks = [str(x) for x in s.index[: max(1, int(top_k))].tolist()]
-    return picks, {"best_score": best, "mode": "risk_on"}
+    tk = int(top_k)
+    if tk == 0:
+        raise ValueError("top_k must be non-zero")
+    k_abs = int(abs(tk))
+    ascending = tk < 0
+    s_ord = s.sort_values(ascending=ascending)
+    eff = int(min(k_abs, int(len(s_ord))))
+    picks = [str(x) for x in s_ord.index[:eff].tolist()]
+    universe_best = float(s.sort_values(ascending=False).iloc[0])
+    return picks, {"best_score": universe_best, "mode": "risk_on"}
 
 
 def _reduce_scores_by_group(
@@ -1209,8 +1218,11 @@ def backtest_rotation(
     universe = list(dict.fromkeys(inp.codes))
     if not universe:
         raise ValueError("codes is empty")
-    if inp.top_k <= 0:
-        raise ValueError("top_k must be >= 1")
+    top_k_signed = int(inp.top_k)
+    if top_k_signed == 0:
+        raise ValueError("top_k must be non-zero")
+    top_k_abs = int(abs(top_k_signed))
+    inverse_top_k = bool(top_k_signed < 0)
     pos_mode = str(inp.position_mode or "adaptive").strip().lower()
     if pos_mode not in {"adaptive", "fixed", "risk_budget"}:
         raise ValueError("position_mode must be one of: adaptive|fixed|risk_budget")
@@ -2291,7 +2303,7 @@ def backtest_rotation(
                 )
                 meta["candidate_count"] = int(candidate_count)
                 meta["target_top_k"] = int(inp.top_k)
-                meta["effective_top_k"] = int(min(int(inp.top_k), int(candidate_count)))
+                meta["effective_top_k"] = int(min(top_k_abs, int(len(reduced_scores))))
         # picks == [] => cash
         reasons: list[str] = []
         details: dict[str, Any] = {}
@@ -2326,9 +2338,12 @@ def backtest_rotation(
         backfill_added: list[str] = []
         backfill_initial: list[str] = list(risk_picks)
         if group_meta.get("after"):
-            candidate_ranked = [str(x) for x in list(group_meta.get("after") or [])]
+            raw_ranked = [str(x) for x in list(group_meta.get("after") or [])]
+            candidate_ranked = list(reversed(raw_ranked)) if inverse_top_k else raw_ranked
         elif candidate_scores is not None and hasattr(candidate_scores, "dropna"):
-            candidate_ranked = [str(x) for x in candidate_scores.dropna().sort_values(ascending=False).index.tolist()]
+            cand = candidate_scores.dropna()
+            asc = bool(inverse_top_k)
+            candidate_ranked = [str(x) for x in cand.sort_values(ascending=asc).index.tolist()]
         details["score_by_code"] = {
             str(k): float(v)
             for k, v in (
@@ -2806,7 +2821,7 @@ def backtest_rotation(
 
             # Optional refill from lower-ranked candidates after entry filters.
             # Only applies to risk-on branch (no defensive/cash replacement).
-            if bool(inp.entry_backfill) and (meta.get("mode") == "risk_on") and candidate_ranked and (len(risk_picks) < int(inp.top_k)):
+            if bool(inp.entry_backfill) and (meta.get("mode") == "risk_on") and candidate_ranked and (len(risk_picks) < top_k_abs):
                 current = [str(x) for x in risk_picks]
                 cur_set = set(current)
                 for c in candidate_ranked:
@@ -2823,10 +2838,10 @@ def backtest_rotation(
                     current.append(cc)
                     cur_set.add(cc)
                     backfill_added.append(cc)
-                    if len(current) >= int(inp.top_k):
+                    if len(current) >= top_k_abs:
                         break
                 if backfill_added:
-                    risk_picks = current[: int(inp.top_k)]
+                    risk_picks = current[:top_k_abs]
                     picks = [p for p in picks if p not in rank_codes] + risk_picks
                     backfill_used = True
                     reasons.append(f"entry_backfill:{','.join(backfill_added)}")
@@ -2879,7 +2894,7 @@ def backtest_rotation(
                     picks = list(cur_key) + list(cur_def)
                     risk_picks = list(cur_key)
                 # 2) Score gap (only meaningful for top_k=1)
-                elif (float(inertia_score_gap) > 0.0) and (int(inp.top_k) == 1) and (len(cur_key) == 1) and (len(new_key) == 1):
+                elif (float(inertia_score_gap) > 0.0) and (top_k_abs == 1) and (len(cur_key) == 1) and (len(new_key) == 1):
                     cur_c = str(cur_key[0])
                     new_c = str(new_key[0])
                     try:
@@ -2963,7 +2978,7 @@ def backtest_rotation(
                     if not risk_picks:
                         per = 0.0
                     elif pos_mode == "fixed":
-                        per = 1.0 / max(1, int(inp.top_k))
+                        per = 1.0 / max(1, top_k_abs)
                     else:
                         per = 1.0 / len(risk_picks)
                     for p in risk_picks:

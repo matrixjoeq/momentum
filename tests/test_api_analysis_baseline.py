@@ -10,6 +10,7 @@ from tests.helpers.rotation_case_data import (
     make_rotation_base_payload,
     make_trend_rule,
     map_case_series_to_miniprogram_codes,
+    post_json,
     post_json_ok,
     seed_prices,
 )
@@ -134,6 +135,63 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "nav_rsi" in data
     assert data["nav_rsi"]["windows"] == [6, 12, 24]
     assert "win_payoff" in data
+
+
+def test_api_rotation_backtest_accepts_negative_top_k(api_client) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "rebalance": "monthly",
+            "top_k": -1,
+            "lookback_days": 1,
+            "skip_days": 0,
+            "risk_off": False,
+            "risk_free_rate": 0.025,
+            "cost_bps": 0.0,
+        },
+    )
+    assert "nav" in data and "ROTATION" in data["nav"]["series"]
+
+
+def test_api_rotation_backtest_rejects_zero_top_k(api_client) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "rebalance": "monthly",
+            "top_k": 0,
+            "lookback_days": 1,
+            "skip_days": 0,
+            "risk_off": False,
+            "risk_free_rate": 0.025,
+            "cost_bps": 0.0,
+        },
+        expected_status=422,
+    )
+    assert isinstance(err, dict)
 
 
 def test_api_rotation_next_execution_plan_happy_path(api_client):

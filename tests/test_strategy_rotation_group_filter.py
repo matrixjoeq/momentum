@@ -85,7 +85,8 @@ def test_group_enforce_earliest_entry_prefers_existing_holding(session_factory):
     assert seg2["picks"] == ["A1"]
 
 
-def test_rotation_holds_cash_when_candidates_not_greater_than_topk(session_factory):
+def test_rotation_top_k_capped_to_pool_size_holds_available_names(session_factory):
+    """Effective K is min(|K|, scored pool): universe=2 and top_k=2 or 5 both hold both names."""
     sf = session_factory
     with sf() as db:
         dates = [d.date() for d in pd.date_range("2024-01-01", "2024-01-31", freq="B")]
@@ -94,20 +95,22 @@ def test_rotation_holds_cash_when_candidates_not_greater_than_topk(session_facto
             _add_price(db, code="A2", day=d, close=100.0 + i * 0.8)
         db.commit()
 
-        out = backtest_rotation(
-            db,
-            RotationInputs(
-                codes=["A1", "A2"],
-                start=dates[0],
-                end=dates[-1],
-                rebalance="weekly",
-                top_k=2,
-                lookback_days=3,
-            ),
+        base = RotationInputs(
+            codes=["A1", "A2"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="weekly",
+            top_k=2,
+            lookback_days=3,
         )
+        out = backtest_rotation(db, base)
+        out_big_k = backtest_rotation(db, RotationInputs(**{**base.__dict__, "top_k": 5}))
 
-    assert out["holdings"]
-    assert all((h.get("picks") or []) == [] for h in out["holdings"])
+    assert out["holdings"] and out_big_k["holdings"]
+    for h in out["holdings"]:
+        assert set(h.get("picks") or []) == {"A1", "A2"}
+    for h in out_big_k["holdings"]:
+        assert set(h.get("picks") or []) == {"A1", "A2"}
 
 
 def test_rotation_entry_backfill_refills_filtered_topk(session_factory):

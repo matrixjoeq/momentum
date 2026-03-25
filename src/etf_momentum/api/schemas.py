@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ValidationPolicyOut(BaseModel):
@@ -398,7 +398,10 @@ class SimGbmAbStrategyParams(BaseModel):
     rebalance_anchor: int | None = Field(default=None)
     rebalance_shift: str = Field(default="prev")
     exec_price: str = Field(default="open", description="open|close|oc2")
-    top_k: int = Field(default=1, ge=1)
+    top_k: int = Field(
+        default=1,
+        description="Non-zero: top-K by momentum if positive, bottom-K (inverse) if negative; effective=min(|K|, pool).",
+    )
     position_mode: str = Field(default="adaptive", description="adaptive|fixed")
     entry_backfill: bool = Field(default=False)
     entry_match_n: int = Field(default=0, ge=0)
@@ -429,6 +432,12 @@ class SimGbmAbStrategyParams(BaseModel):
     asset_trend_rules: list[AssetTrendRule] | None = Field(default=None)
     asset_bias_rules: list[AssetBiasRule] | None = Field(default=None)
     asset_vol_index_rules: list[AssetVolIndexTimingRule] | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_sim_ab_top_k(self) -> SimGbmAbStrategyParams:
+        if int(self.top_k) == 0:
+            raise ValueError("top_k must be non-zero")
+        return self
 
 
 class SimGbmAbSignificanceRequest(BaseModel):
@@ -899,10 +908,13 @@ class RotationBacktestRequest(BaseModel):
         default="open",
         description="Execution price for rebalance trading: open|close|oc2 (open/close average).",
     )
-    top_k: int = Field(default=1, ge=1)
+    top_k: int = Field(
+        default=1,
+        description="Non-zero integer: top-K by score if positive, bottom-K (inverse) if negative; effective=min(|K|, pool).",
+    )
     position_mode: str = Field(
         default="adaptive",
-        description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/top_k) | risk_budget(ATR risk budget).",
+        description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/|top_k|) | risk_budget(ATR risk budget).",
     )
     risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window for risk-budget sizing")
     risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
@@ -993,6 +1005,12 @@ class RotationBacktestRequest(BaseModel):
         default=None,
         description="Optional per-asset vol-index timing rules (e.g. 518880->GVZ, 513100->VIX). Thresholds use rolling/expanding quantiles with shift(1) to avoid lookahead; scales weights daily (cash remainder).",
     )
+
+    @model_validator(mode="after")
+    def _validate_rotation_top_k(self) -> RotationBacktestRequest:
+        if int(self.top_k) == 0:
+            raise ValueError("top_k must be non-zero")
+        return self
 
 
 class RotationCalendarEffectRequest(RotationBacktestRequest):
