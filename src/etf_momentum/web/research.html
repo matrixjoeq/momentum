@@ -3292,7 +3292,7 @@
       </div>
       <table id="mixStrategyListTable" style="margin-top:8px;"></table>
       <div class="muted" style="margin-top:8px;">
-        组合支持任意已保存固定策略（不含嵌套的另一条 MIX）。可将当前组合在上方选择类型「多策略组合(MIX)」后保存为命名预设，避免每次重新添加子策略。
+        组合可将任意已保存固定策略作为子项，包括另一条「多策略组合(MIX)」预设；子组合按其保存的权重规则参与合成。禁止将<strong>当前加载的</strong>同一条组合预设再放入自身子项，亦禁止在保存后出现循环引用（A 含 B 且 B 间接含 A）。
       </div>
       <div id="strategyMixChart" style="width:100%; height:420px; margin-top:10px;"></div>
       <div class="panel two" style="margin-top:10px;">
@@ -4082,7 +4082,7 @@
             el.appendChild(o0);
           }
           for (const s of items) {
-            if (el === addSel && String(s.type || "") === "strategy_mix") continue;
+            if (el === addSel && mixActiveLoadedPresetId && String(s.id) === String(mixActiveLoadedPresetId)) continue;
             const opt = document.createElement("option");
             opt.value = String(s.id);
             const g = s.group_name ? ` | 分组:${s.group_name}` : "";
@@ -4333,6 +4333,8 @@
       let fixedStrategies = [];
       let mixSelectedStrategyIds = [];
       let mixCustomWeightsById = {};
+      /** When user loads a saved MIX preset, blocks adding that same id as a leg (self-nest). */
+      let mixActiveLoadedPresetId = null;
       let _groupEditorLastSynced = "";
       const _YMD_FIELD_IDS = new Set(["start", "end", "ewCalStart", "ewCalEnd", "rotCalStart", "rotCalEnd", "simStart", "simEnd", "rotPlanAsof"]);
 
@@ -7834,7 +7836,12 @@
         for (const id of (mixSelectedStrategyIds || [])) {
           const s = _findFixedStrategy(id);
           if (!s) continue;
-          const retMap = _extractFixedStrategyReturnMap(s);
+          let retMap = null;
+          if (String(s.type || "") === "strategy_mix") {
+            retMap = _computeMixReturnMapFromFixedStrategy(s, new Set());
+          } else {
+            retMap = _extractFixedStrategyReturnMap(s);
+          }
           if (!retMap) continue;
           out.push({ ...s, retMap, displayName: String(s.name || `${_strategyTypeLabel(s.type)}策略`) });
         }
@@ -7870,6 +7877,202 @@
         }
         return _normalizeWeights(arr.map(() => 1.0));
       }
+      function _mixWeightsByModeScoped(entries, mode, customMap) {
+        const arr = entries || [];
+        if (!arr.length) return null;
+        const m = String(mode || "equal").trim().toLowerCase();
+        const cmap = (customMap && typeof customMap === "object") ? customMap : {};
+        if (m === "custom") {
+          const raw = arr.map((x) => {
+            const v = Number(cmap[String(x.id)]);
+            return Number.isFinite(v) && v > 0 ? v : 1.0;
+          });
+          return _normalizeWeights(raw);
+        }
+        if (m === "risk_parity") {
+          const vols = arr.map((x) => {
+            const map = x.retMap || new Map();
+            const rs = Array.from(map.values()).map(Number).filter(Number.isFinite);
+            const mm = _metricsFromReturns(rs, 0.0);
+            return Number(mm && mm.annualized_volatility);
+          });
+          const inv = vols.map((v) => (Number.isFinite(v) && v > 0 ? 1.0 / v : 0.0));
+          return _normalizeWeights(inv);
+        }
+        return _normalizeWeights(arr.map(() => 1.0));
+      }
+      function _computeMixReturnMapFromFixedStrategy(s, visiting) {
+        if (!s || String(s.type || "") !== "strategy_mix") return null;
+        const id = String(s.id || "").trim();
+        if (!id) return null;
+        if (visiting.has(id)) return null;
+        visiting.add(id);
+        const p = (s.payload && typeof s.payload === "object") ? s.payload : {};
+        const rawIds = Array.isArray(p.strategy_ids)
+          ? p.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean)
+          : [];
+        const childObjs = [];
+        const childEntries = [];
+        for (const cid of rawIds) {
+          const ch = _findFixedStrategy(cid);
+          if (!ch) continue;
+          let retMap = null;
+          if (String(ch.type || "") === "strategy_mix") {
+            retMap = _computeMixReturnMapFromFixedStrategy(ch, visiting);
+          } else {
+            retMap = _extractFixedStrategyReturnMap(ch);
+          }
+          if (retMap && retMap.size) {
+            childObjs.push(ch);
+            childEntries.push({ id: ch.id, retMap, displayName: ch.name });
+          }
+        }
+        visiting.delete(id);
+        if (childEntries.length < 1) return null;
+        let dates = Array.from(childEntries[0].retMap.keys()).sort();
+        for (let i = 1; i < childEntries.length; i++) dates = dates.filter((d) => childEntries[i].retMap.has(d));
+        const cw = (p.custom_weights && typeof p.custom_weights === "object") ? p.custom_weights : {};
+        const wm = String(p.weight_mode || "equal").trim().toLowerCase();
+        const ws = _mixWeightsByModeScoped(childEntries, wm, cw);
+        if (!ws || ws.length !== childEntries.length) return null;
+        const out = new Map();
+        for (const d of dates) {
+          let rr = 0.0;
+          for (let i = 0; i < childEntries.length; i++) {
+            rr += Number(ws[i] || 0) * Number(childEntries[i].retMap.get(d));
+          }
+          if (Number.isFinite(rr)) out.set(d, rr);
+        }
+        return out.size ? out : null;
+      }
+      function _mixNestedMixReachesTarget(startMixId, targetId, visiting) {
+        const t0 = String(targetId || "").trim();
+        if (!t0) return false;
+        const s0 = _findFixedStrategy(startMixId);
+        if (!s0 || String(s0.type || "") !== "strategy_mix") return false;
+        const sid = String(s0.id || "").trim();
+        if (!sid) return false;
+        if (sid === t0) return true;
+        if (visiting.has(sid)) return false;
+        visiting.add(sid);
+        const p = (s0.payload && typeof s0.payload === "object") ? s0.payload : {};
+        const rawIds = Array.isArray(p.strategy_ids)
+          ? p.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean)
+          : [];
+        for (const cid of rawIds) {
+          if (String(cid) === t0) return true;
+          const ch = _findFixedStrategy(cid);
+          if (!ch || String(ch.type || "") !== "strategy_mix") continue;
+          if (_mixNestedMixReachesTarget(ch.id, t0, visiting)) return true;
+        }
+        visiting.delete(sid);
+        return false;
+      }
+      function _mixSaveWouldCycle(parentId, allChildIds) {
+        const p0 = String(parentId || "").trim();
+        if (!p0) return false;
+        const ids = Array.isArray(allChildIds) ? allChildIds.map((x) => String(x || "").trim()).filter(Boolean) : [];
+        if (ids.includes(p0)) return true;
+        const mixChildren = ids.filter((cid) => {
+          const ch = _findFixedStrategy(cid);
+          return ch && String(ch.type || "") === "strategy_mix";
+        });
+        const adj = new Map();
+        const addEdge = (a, b) => {
+          const aa = String(a);
+          const bb = String(b);
+          if (!adj.has(aa)) adj.set(aa, []);
+          adj.get(aa).push(bb);
+        };
+        for (const s of fixedStrategies) {
+          if (String(s.type || "") !== "strategy_mix") continue;
+          const pid = String(s.id || "").trim();
+          if (pid === p0) continue;
+          const p = (s.payload && typeof s.payload === "object") ? s.payload : {};
+          const sids = Array.isArray(p.strategy_ids) ? p.strategy_ids : [];
+          for (const cid of sids.map((x) => String(x || "").trim()).filter(Boolean)) {
+            const ch = _findFixedStrategy(cid);
+            if (ch && String(ch.type || "") === "strategy_mix") addEdge(pid, cid);
+          }
+        }
+        for (const cid of mixChildren) addEdge(p0, cid);
+        const nodes = new Set();
+        for (const [k, vs] of adj.entries()) {
+          nodes.add(k);
+          for (const v of vs) nodes.add(v);
+        }
+        const visited = new Set();
+        const recStack = new Set();
+        function dfs(u) {
+          if (recStack.has(u)) return true;
+          if (visited.has(u)) return false;
+          visited.add(u);
+          recStack.add(u);
+          for (const v of adj.get(u) || []) {
+            if (dfs(v)) return true;
+          }
+          recStack.delete(u);
+          return false;
+        }
+        for (const node of nodes) {
+          if (!visited.has(node) && dfs(node)) return true;
+        }
+        return false;
+      }
+      function _mergeMixPositionBlockInPlace(dst, src) {
+        for (const c of Object.keys(src.history || {})) {
+          const sa = src.history[c] || [];
+          if (!Array.isArray(dst.history[c])) dst.history[c] = [];
+          for (let k = 0; k < sa.length; k++) {
+            while (dst.history[c].length <= k) dst.history[c].push(0);
+            dst.history[c][k] = Number(dst.history[c][k] || 0) + Number(sa[k] || 0);
+          }
+        }
+        for (const [c, w] of Object.entries(src.current || {})) {
+          const vv = Number(w);
+          if (!Number.isFinite(vv)) continue;
+          dst.current[c] = Number(dst.current[c] || 0) + vv;
+        }
+        for (const [c, w] of Object.entries(src.target || {})) {
+          const vv = Number(w);
+          if (!Number.isFinite(vv)) continue;
+          dst.target[c] = Number(dst.target[c] || 0) + vv;
+        }
+        for (const [c, px] of Object.entries(src.stopByCode || {})) {
+          const v = Number(px);
+          if (!Number.isFinite(v) || v <= 0) continue;
+          const prev = Number(dst.stopByCode[c]);
+          if (!Number.isFinite(prev) || prev <= 0) dst.stopByCode[c] = v;
+        }
+        for (const [c, nav] of Object.entries(src.assetNavByCode || {})) {
+          if (!dst.assetNavByCode[c] && Array.isArray(nav)) dst.assetNavByCode[c] = nav;
+        }
+      }
+      function _scaleMixPositionLeafBlock(block, w) {
+        const ww = Number(w);
+        if (!Number.isFinite(ww) || ww <= 0) return { name: block.name, current: {}, target: {}, history: {}, assetNavByCode: { ...(block.assetNavByCode || {}) }, stopByCode: { ...(block.stopByCode || {}) } };
+        const out = {
+          name: block.name,
+          current: {},
+          target: {},
+          history: {},
+          assetNavByCode: { ...(block.assetNavByCode || {}) },
+          stopByCode: { ...(block.stopByCode || {}) },
+        };
+        for (const [c, w0] of Object.entries(block.current || {})) {
+          const v = Number(w0);
+          if (Number.isFinite(v)) out.current[c] = v * ww;
+        }
+        for (const [c, w0] of Object.entries(block.target || {})) {
+          const v = Number(w0);
+          if (Number.isFinite(v)) out.target[c] = v * ww;
+        }
+        for (const [c, arr] of Object.entries(block.history || {})) {
+          if (!Array.isArray(arr)) continue;
+          out.history[c] = arr.map((x) => Number(x || 0) * ww);
+        }
+        return out;
+      }
       function setMixEqualWeights() {
         if ($("mixWeightMode")) $("mixWeightMode").value = "equal";
         _renderMixStrategyListTable();
@@ -7902,17 +8105,32 @@
         if (baseNowDates.length && Object.keys(baseNowNav).length) {
           navSources.push({ dates: baseNowDates, series: baseNowNav });
         }
-        for (const s of (entries || [])) {
-          if (String((s && s.type) || "") === "rotation") {
-            const nav = (((s.result || {}).asset_nav_exec || {}).series || {});
-            const dates = (((s.result || {}).asset_nav_exec || {}).dates || (((s.result || {}).nav || {}).dates || []));
+        const _walkMixNavSources = (node) => {
+          if (!node) return;
+          const t = String((node.type) || "").trim();
+          if (t === "rotation") {
+            const nav = (((node.result || {}).asset_nav_exec || {}).series || {});
+            const dates = (((node.result || {}).asset_nav_exec || {}).dates || (((node.result || {}).nav || {}).dates || []));
             if (dates.length && Object.keys(nav).length) navSources.push({ dates, series: nav });
+            return;
           }
-          if (String((s && s.type) || "") !== "baseline") continue;
-          const nav = (((s.result || {}).nav || {}).series || {});
-          const dates = (((s.result || {}).nav || {}).dates || []);
-          if (dates.length && Object.keys(nav).length) navSources.push({ dates, series: nav });
-        }
+          if (t === "baseline") {
+            const nav = (((node.result || {}).nav || {}).series || {});
+            const dates = (((node.result || {}).nav || {}).dates || []);
+            if (dates.length && Object.keys(nav).length) navSources.push({ dates, series: nav });
+            return;
+          }
+          if (t === "strategy_mix") {
+            const st = _findFixedStrategy(node.id);
+            const p = (st && st.payload && typeof st.payload === "object") ? st.payload : {};
+            const ids = Array.isArray(p.strategy_ids) ? p.strategy_ids : [];
+            for (const cid of ids.map((x) => String(x || "").trim()).filter(Boolean)) {
+              const ch = _findFixedStrategy(cid);
+              if (ch) _walkMixNavSources(ch);
+            }
+          }
+        };
+        for (const s of (entries || [])) _walkMixNavSources(s);
         const fallbackNav = (fallbackAssetNavByCode && typeof fallbackAssetNavByCode === "object") ? fallbackAssetNavByCode : {};
         const _pickAlignedAssetNav = (code) => {
           const c = String(code || "").trim();
@@ -7938,10 +8156,7 @@
           }
           return _normalizeWeightMap(out);
         };
-        for (let i = 0; i < n; i++) {
-          const s = entries[i];
-          const wSub = Number(ws[i] || 0);
-          const sid = String(s.id || `S${i + 1}`);
+        const _singleFixedPositionBlock = (s) => {
           const one = { name: s.displayName, current: {}, target: {}, history: {}, assetNavByCode: {}, stopByCode: {} };
           if (s.type === "baseline") {
             const gCodes = _validCodes(_getGroupCodes(s.group_name));
@@ -7980,7 +8195,6 @@
             one.stopByCode = _rotationLatestStopMapFromPeriods((s.result || {}), dts);
             const rotOwnNav = ((((s.result || {}).asset_nav_exec || {}).series) || {});
             const rotOwnDates = ((((s.result || {}).asset_nav_exec || {}).dates) || (((s.result || {}).nav || {}).dates || []));
-            // Prefer this fixed strategy's own per-asset NAV series; fallback to shared sources only when missing.
             for (const c of Object.keys(hist || {})) {
               if (Array.isArray(rotOwnNav[c])) {
                 one.assetNavByCode[c] = _alignSeriesByDates(rotOwnDates, rotOwnNav[c], dts);
@@ -7998,12 +8212,12 @@
             if (tr && tr.weights && tr.weights.series) {
               for (const c of Object.keys(tr.weights.series || {})) {
                 trHist[c] = _alignSeriesByDates((tr.weights || {}).dates || trDates, tr.weights.series[c], dts);
-                const cur = trHist[c].length ? Number(trHist[c][trHist[c].length - 1]) : 0;
-                if (cur > 1e-12) trCur[c] = cur;
+                const cur0 = trHist[c].length ? Number(trHist[c][trHist[c].length - 1]) : 0;
+                if (cur0 > 1e-12) trCur[c] = cur0;
                 const ds = (((tr.weights_decision || {}).series || {})[c]);
                 const dec = Array.isArray(ds) ? _alignSeriesByDates((tr.weights_decision || {}).dates || trDates, ds, dts) : trHist[c];
-                const tgt = dec.length ? Number(dec[dec.length - 1]) : cur;
-                if (tgt > 1e-12) trTgt[c] = tgt;
+                const tgt0 = dec.length ? Number(dec[dec.length - 1]) : cur0;
+                if (tgt0 > 1e-12) trTgt[c] = tgt0;
               }
               const an = (((tr.asset_nav_exec || {}).series || {}));
               for (const c of Object.keys(an || {})) one.assetNavByCode[c] = _alignSeriesByDates(((tr.asset_nav_exec || {}).dates || trDates), an[c], dts);
@@ -8047,7 +8261,7 @@
                 if (c && Number.isFinite(w) && w > 1e-12) tgt[c] = w;
               }
             } else if (tp === "exit" && sells.length) {
-              // Next plan exits to cash.
+              /* next plan exits */
             } else {
               for (const [c, w] of Object.entries(curNorm)) tgt[c] = Number(w);
             }
@@ -8059,6 +8273,64 @@
             one.current = curNorm;
             one.target = _normalizeWeightMap(tgt);
           }
+          return one;
+        };
+        const _nestedMixPositionBlock = (mixS, scale, visiting) => {
+          const mid = String(mixS.id || "").trim();
+          if (!mid || visiting.has(mid)) return null;
+          visiting.add(mid);
+          const st = _findFixedStrategy(mid) || mixS;
+          const p = (st.payload && typeof st.payload === "object") ? st.payload : {};
+          const rawIds = Array.isArray(p.strategy_ids) ? p.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean) : [];
+          const childEntries = [];
+          for (const cid of rawIds) {
+            const ch = _findFixedStrategy(cid);
+            if (!ch) continue;
+            let retMap = null;
+            if (String(ch.type || "") === "strategy_mix") {
+              retMap = _computeMixReturnMapFromFixedStrategy(ch, new Set(visiting));
+            } else {
+              retMap = _extractFixedStrategyReturnMap(ch);
+            }
+            if (retMap && retMap.size) childEntries.push({ id: ch.id, retMap, displayName: ch.name });
+          }
+          const wm = String(p.weight_mode || "equal").trim().toLowerCase();
+          const cw = (p.custom_weights && typeof p.custom_weights === "object") ? p.custom_weights : {};
+          const ns = _mixWeightsByModeScoped(childEntries, wm, cw);
+          if (!ns || childEntries.length < 1) {
+            visiting.delete(mid);
+            return null;
+          }
+          const merged = { name: String(st.name || mixS.displayName || "MIX"), current: {}, target: {}, history: {}, assetNavByCode: {}, stopByCode: {} };
+          for (let j = 0; j < childEntries.length; j++) {
+            const ch = _findFixedStrategy(childEntries[j].id);
+            if (!ch) continue;
+            const wPart = scale * Number(ns[j] || 0);
+            if (!(wPart > 1e-12)) continue;
+            if (String(ch.type || "") === "strategy_mix") {
+              const subM = _nestedMixPositionBlock(ch, wPart, visiting);
+              if (subM) _mergeMixPositionBlockInPlace(merged, subM);
+            } else {
+              const leaf = _singleFixedPositionBlock({ ...ch, displayName: ch.name });
+              const scaled = _scaleMixPositionLeafBlock(leaf, wPart);
+              _mergeMixPositionBlockInPlace(merged, scaled);
+            }
+          }
+          visiting.delete(mid);
+          return merged;
+        };
+        for (let i = 0; i < n; i++) {
+          const s = entries[i];
+          const wSub = Number(ws[i] || 0);
+          const sid = String(s.id || `S${i + 1}`);
+          let one = null;
+          if (String(s.type || "") === "strategy_mix") {
+            one = _nestedMixPositionBlock(s, 1.0, new Set());
+          } else {
+            one = _singleFixedPositionBlock(s);
+          }
+          if (!one) one = { name: s.displayName, current: {}, target: {}, history: {}, assetNavByCode: {}, stopByCode: {} };
+          one.name = s.displayName;
           sub[sid] = one;
           subCapitalWeights[sid] = wSub;
           for (const c of Object.keys(one.history || {})) {
@@ -8090,6 +8362,50 @@
           subCapitalWeights,
         };
       }
+      function _mixFallbackCollectCodes(node, ds, need) {
+        if (!node) return;
+        const t = String((node.type) || "").trim();
+        if (t === "rotation") {
+          const h = _rotationHistoryFromPeriods((node.result || {}), ds);
+          for (const c of Object.keys(h || {})) need.add(String(c));
+          return;
+        }
+        if (t === "trend") {
+          const tr = node.result || {};
+          if (tr && tr.weights && tr.weights.series) {
+            for (const c of Object.keys(tr.weights.series || {})) need.add(String(c));
+          } else {
+            const code = String((((tr.meta || {}).code) || "")).trim();
+            if (code) need.add(code);
+          }
+          return;
+        }
+        if (t === "baseline") {
+          const gCodes = _validCodes(_getGroupCodes((node.group_name) || ""));
+          for (const c of gCodes) need.add(String(c));
+          return;
+        }
+        if (t === "cal_timing") {
+          const cr = node.result || {};
+          const metaCodes = Array.isArray((cr.meta || {}).codes) ? (cr.meta || {}).codes : [];
+          const curRows = Array.isArray(cr.current_holdings) ? cr.current_holdings : [];
+          for (const c of metaCodes) need.add(String(c));
+          for (const it of curRows) {
+            const c = String((it && it.code) || "").trim();
+            if (c) need.add(c);
+          }
+          return;
+        }
+        if (t === "strategy_mix") {
+          const st = _findFixedStrategy(node.id);
+          const p = (st && st.payload && typeof st.payload === "object") ? st.payload : {};
+          const ids = Array.isArray(p.strategy_ids) ? p.strategy_ids : [];
+          for (const cid of ids.map((x) => String(x || "").trim()).filter(Boolean)) {
+            const ch = _findFixedStrategy(cid);
+            if (ch) _mixFallbackCollectCodes(ch, ds, need);
+          }
+        }
+      }
       async function _fetchMixFallbackAssetNav(dts, entries) {
         const ds = Array.isArray(dts) ? dts.map((x) => String(x || "")).filter(Boolean) : [];
         if (!ds.length) return {};
@@ -8097,32 +8413,7 @@
         const end = String(ds[ds.length - 1] || "").replaceAll("-", "");
         if (!start || !end) return {};
         const need = new Set();
-        for (const s of (entries || [])) {
-          if (String((s && s.type) || "") === "rotation") {
-            const h = _rotationHistoryFromPeriods((s.result || {}), ds);
-            for (const c of Object.keys(h || {})) need.add(String(c));
-          } else if (String((s && s.type) || "") === "trend") {
-            const tr = s.result || {};
-            if (tr && tr.weights && tr.weights.series) {
-              for (const c of Object.keys(tr.weights.series || {})) need.add(String(c));
-            } else {
-              const code = String((((tr.meta || {}).code) || "")).trim();
-              if (code) need.add(code);
-            }
-          } else if (String((s && s.type) || "") === "baseline") {
-            const gCodes = _validCodes(_getGroupCodes((s && s.group_name) || ""));
-            for (const c of gCodes) need.add(String(c));
-          } else if (String((s && s.type) || "") === "cal_timing") {
-            const cr = s.result || {};
-            const metaCodes = Array.isArray((cr.meta || {}).codes) ? (cr.meta || {}).codes : [];
-            const curRows = Array.isArray(cr.current_holdings) ? cr.current_holdings : [];
-            for (const c of metaCodes) need.add(String(c));
-            for (const it of curRows) {
-              const c = String((it && it.code) || "").trim();
-              if (c) need.add(c);
-            }
-          }
-        }
+        for (const s of (entries || [])) _mixFallbackCollectCodes(s, ds, need);
         if (!need.size) return {};
         const cache = window.__mixAssetNavCache || {};
         const out = {};
@@ -8295,6 +8586,9 @@
         const nameRaw = ($("fixedStrategyName") && $("fixedStrategyName").value) ? String($("fixedStrategyName").value) : "";
         const name = nameRaw.trim();
         if (!name) return setMsg("请先填写策略名称。");
+        const savedName0 = name.slice(0, 60);
+        const existingIdx0 = fixedStrategies.findIndex((s) => String(s.name || "") === savedName0);
+        let mixPreferredNewId = null;
         let result = null;
         let payload = null;
         let nextPlan = null;
@@ -8323,9 +8617,14 @@
           for (const sid of ids) {
             const ch = _findFixedStrategy(sid);
             if (!ch) return setMsg(`组合中包含无效的固定策略：${sid}`);
-            if (String(ch.type || "") === "strategy_mix") {
-              return setMsg("组合中不能嵌套保存另一条多策略组合：请先从组合中移除组合(MIX)类条目。");
-            }
+          }
+          const mixSaveId = existingIdx0 >= 0 ? String(fixedStrategies[existingIdx0].id) : _nextFixedStrategyId();
+          if (existingIdx0 < 0) mixPreferredNewId = mixSaveId;
+          if (ids.some((sid) => String(sid) === String(mixSaveId))) {
+            return setMsg("不能将组合自身作为子项。");
+          }
+          if (_mixSaveWouldCycle(mixSaveId, ids)) {
+            return setMsg("不能保存：子项中的多策略组合会形成循环引用。");
           }
           _readCustomMixWeightMap();
           const weight_mode = ($("mixWeightMode") && $("mixWeightMode").value) ? String($("mixWeightMode").value) : "equal";
@@ -8356,10 +8655,8 @@
         }
         const fields = _readFixedStrategyFields(type);
         const now = new Date().toISOString();
-        const savedName = name.slice(0, 60);
-        const existingIdx = fixedStrategies.findIndex(
-          (s) => String(s.name || "") === savedName
-        );
+        const savedName = savedName0;
+        const existingIdx = existingIdx0;
         let item;
         if (existingIdx >= 0) {
           const prev = fixedStrategies[existingIdx];
@@ -8379,7 +8676,7 @@
           _renderFixedStrategyControls();
           setMsg(`已覆盖同名固定策略：${item.name}`);
         } else {
-          const id = `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+          const id = mixPreferredNewId || `fs_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
           item = {
             id,
             name: savedName,
@@ -8400,6 +8697,7 @@
       function loadFixedStrategyById(id) {
         const s = _findFixedStrategy(id);
         if (!s) return setMsg("未找到该固定策略。");
+        mixActiveLoadedPresetId = null;
         _applyFixedStrategyFields(s.type, s.fields || {});
         if (s.type === "baseline") {
           window.__lastBaselineResult = s.result;
@@ -8450,6 +8748,7 @@
           _renderMixStrategyListTable();
           _saveMixSelection();
           if ($("fixedStrategyType")) $("fixedStrategyType").value = "strategy_mix";
+          mixActiveLoadedPresetId = String(s.id || "");
           try { if (ok.length > 0) runStrategyMix(); } catch (_) { /* ignore */ }
           if (missing.length) {
             setMsg(`已加载组合「${s.name}」：${missing.length} 个子策略已删除已跳过；已用其余 ${ok.length} 条重新生成组合。`);
@@ -17284,6 +17583,7 @@
         const id = ($("fixedStrategyLoadSelect") && $("fixedStrategyLoadSelect").value) ? String($("fixedStrategyLoadSelect").value) : "";
         if (!id) return setMsg("请先选择要删除的固定策略。");
         const s = _findFixedStrategy(id);
+        if (mixActiveLoadedPresetId && String(id) === String(mixActiveLoadedPresetId)) mixActiveLoadedPresetId = null;
         fixedStrategies = fixedStrategies.filter((x) => String(x.id) !== String(id));
         mixSelectedStrategyIds = (mixSelectedStrategyIds || []).filter((x) => String(x) !== String(id));
         delete mixCustomWeightsById[String(id)];
@@ -17307,8 +17607,13 @@
         const id = ($("mixStrategyAddSelect") && $("mixStrategyAddSelect").value) ? String($("mixStrategyAddSelect").value) : "";
         if (!id) return setMsg("请先选择要加入组合的固定策略。");
         const pick = _findFixedStrategy(id);
-        if (pick && String(pick.type || "") === "strategy_mix") {
-          return setMsg("不能将「多策略组合(MIX)」再加入组合（避免嵌套）。请只添加单策略固定条目。");
+        if (pick && String(pick.type || "") === "strategy_mix" && mixActiveLoadedPresetId && String(pick.id) === String(mixActiveLoadedPresetId)) {
+          return setMsg("不能将当前加载的同一条组合预设添加为自身的子项。");
+        }
+        if (pick && String(pick.type || "") === "strategy_mix" && mixActiveLoadedPresetId) {
+          if (_mixNestedMixReachesTarget(pick.id, mixActiveLoadedPresetId, new Set())) {
+            return setMsg("不能添加：该组合的子项中包含当前正在编辑的组合预设，会形成循环引用。");
+          }
         }
         if (!mixSelectedStrategyIds.includes(id)) mixSelectedStrategyIds.push(id);
         if (!(String(id) in mixCustomWeightsById)) mixCustomWeightsById[String(id)] = 1;
@@ -17318,6 +17623,7 @@
       if ($("mixClearStrategies")) $("mixClearStrategies").addEventListener("click", () => {
         mixSelectedStrategyIds = [];
         mixCustomWeightsById = {};
+        mixActiveLoadedPresetId = null;
         _renderMixStrategyListTable();
         _saveMixSelection();
       });
