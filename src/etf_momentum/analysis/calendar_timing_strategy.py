@@ -299,17 +299,38 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
         exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
         exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-        ret_none = (exec_c_none / exec_o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_hfq_exec = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        # open execution uses holding return from open[t] -> open[t+1]
+        ret_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_hfq_exec = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        # decomposition for open mode: intraday[t] + overnight[t->t+1] + interaction
+        ret_intraday_none = (exec_c_none.div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_none = (exec_o_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_hfq = (exec_c_hfq.div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_hfq = (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     else:
         px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
         px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
         ret_none = (px_none_exec.shift(-1).div(px_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_hfq_exec = (px_hfq_exec.shift(-1).div(px_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        # close mode: close[t] -> next open + next intraday + interaction
+        ret_overnight_none = (
+            open_none.astype(float).combine_first(close_none_f).shift(-1).div(close_none_exec.astype(float).combine_first(close_none_f)) - 1.0
+        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_none = (
+            close_none_exec.astype(float).combine_first(close_none_f).shift(-1).div(open_none.astype(float).combine_first(close_none_f).shift(-1)) - 1.0
+        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_hfq = (
+            open_hfq.astype(float).combine_first(close_hfq_f).shift(-1).div(close_hfq_exec.astype(float).combine_first(close_hfq_f)) - 1.0
+        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_hfq = (
+            close_hfq_exec.astype(float).combine_first(close_hfq_f).shift(-1).div(open_hfq.astype(float).combine_first(close_hfq_f).shift(-1)) - 1.0
+        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq_exec).astype(float)
     _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
+    ret_overnight = ret_overnight_none.where(~ca_mask.fillna(False), other=ret_overnight_hfq).astype(float)
+    ret_intraday = ret_intraday_none.where(~ca_mask.fillna(False), other=ret_intraday_hfq).astype(float)
     if mode == "single":
         bench_ret_series = hfq_close_buy_hold_returns(ch_bench.iloc[:, 0])
     else:
@@ -439,6 +460,12 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         strat_ret = np.zeros(len(idx), dtype=float)
         bench_ret = np.zeros(len(idx), dtype=float)
         turnover = np.zeros(len(idx), dtype=float)
+        decomp_overnight = np.zeros(len(idx), dtype=float)
+        decomp_intraday = np.zeros(len(idx), dtype=float)
+        decomp_interaction = np.zeros(len(idx), dtype=float)
+        decomp_cost = np.zeros(len(idx), dtype=float)
+        decomp_gross = np.zeros(len(idx), dtype=float)
+        decomp_net = np.zeros(len(idx), dtype=float)
         active_trade: dict[str, Any] | None = None
         trade_returns: list[float] = []
         trade_returns_by_code: dict[str, list[float]] = {c: [] for c in codes}
@@ -494,17 +521,22 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             t = float(np.abs(tgt - w_cur).sum() / 2.0)
             turnover[i] = t
             cost_today = t * (cost_rate + slip_rate)
-            if ep == "open":
-                # Open execution: apply today's target before today's return.
-                gross = float(np.dot(tgt, r_exec_i))
-                w_next = tgt
-            else:
-                # Close execution: today's return uses pre-trade holdings; target applies after close.
-                gross = float(np.dot(w_cur, r_exec_i))
-                w_next = tgt
+            r_over_i = ret_overnight.iloc[i].to_numpy(dtype=float)
+            r_intra_i = ret_intraday.iloc[i].to_numpy(dtype=float)
+            comp_overnight = float(np.dot(tgt, r_over_i))
+            comp_intraday = float(np.dot(tgt, r_intra_i))
+            comp_interaction = float(np.dot(tgt, r_over_i * r_intra_i))
+            gross = float(comp_overnight + comp_intraday + comp_interaction)
+            w_next = tgt
             net = gross - cost_today
             strat_ret[i] = net
             bench_ret[i] = bench_gross
+            decomp_overnight[i] = float(comp_overnight)
+            decomp_intraday[i] = float(comp_intraday)
+            decomp_interaction[i] = float(comp_interaction)
+            decomp_cost[i] = float(cost_today)
+            decomp_gross[i] = float(gross)
+            decomp_net[i] = float(net)
 
             if active_trade is not None:
                 active_trade["factor"] *= float(1.0 + net)
@@ -538,6 +570,14 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             "trade_returns": trade_returns,
             "trade_returns_by_code": trade_returns_by_code,
             "w_cur": w_cur.copy(),
+            "decomposition": {
+                "overnight": pd.Series(decomp_overnight, index=idx, dtype=float),
+                "intraday": pd.Series(decomp_intraday, index=idx, dtype=float),
+                "interaction": pd.Series(decomp_interaction, index=idx, dtype=float),
+                "cost": pd.Series(decomp_cost, index=idx, dtype=float),
+                "gross": pd.Series(decomp_gross, index=idx, dtype=float),
+                "net": pd.Series(decomp_net, index=idx, dtype=float),
+            },
             "weak_overlay": {
                 "weak_mode": "equal_weight_hold_no_rebalance",
                 "weak_segments": int(weak_segments),
@@ -556,6 +596,7 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
     trade_returns = list(sim_pack["trade_returns"])
     trade_returns_by_code = dict(sim_pack["trade_returns_by_code"])
     w_cur = np.asarray(sim_pack["w_cur"], dtype=float)
+    decomp_pack = dict(sim_pack.get("decomposition") or {})
 
     strat_nav = pd.Series((1.0 + strat_ret).cumprod(), index=idx, dtype=float)
     asset_nav_exec = (1.0 + ret_exec).cumprod().replace([np.inf, -np.inf], np.nan).ffill()
@@ -764,6 +805,25 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         "trade_statistics": {
             "overall": _trade_stats(trade_returns),
             "by_code": {c: _trade_stats(vs) for c, vs in trade_returns_by_code.items()},
+        },
+        "return_decomposition": {
+            "dates": [str(d.date()) for d in idx],
+            "series": {
+                "overnight": [float(x) for x in (decomp_pack.get("overnight") if isinstance(decomp_pack.get("overnight"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
+                "intraday": [float(x) for x in (decomp_pack.get("intraday") if isinstance(decomp_pack.get("intraday"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
+                "interaction": [float(x) for x in (decomp_pack.get("interaction") if isinstance(decomp_pack.get("interaction"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
+                "cost": [float(x) for x in (decomp_pack.get("cost") if isinstance(decomp_pack.get("cost"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
+                "gross": [float(x) for x in (decomp_pack.get("gross") if isinstance(decomp_pack.get("gross"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
+                "net": [float(x) for x in (decomp_pack.get("net") if isinstance(decomp_pack.get("net"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
+            },
+            "summary": {
+                "ann_overnight": float(np.mean((decomp_pack.get("overnight") if isinstance(decomp_pack.get("overnight"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
+                "ann_intraday": float(np.mean((decomp_pack.get("intraday") if isinstance(decomp_pack.get("intraday"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
+                "ann_interaction": float(np.mean((decomp_pack.get("interaction") if isinstance(decomp_pack.get("interaction"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
+                "ann_cost": float(np.mean((decomp_pack.get("cost") if isinstance(decomp_pack.get("cost"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
+                "ann_gross": float(np.mean((decomp_pack.get("gross") if isinstance(decomp_pack.get("gross"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
+                "ann_net": float(np.mean((decomp_pack.get("net") if isinstance(decomp_pack.get("net"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
+            },
         },
     }
 

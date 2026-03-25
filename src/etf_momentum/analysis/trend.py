@@ -1051,36 +1051,50 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     o_hfq = _pick_series(ohlc_hfq, "open", px_bh)
     c_hfq = _pick_series(ohlc_hfq, "close", px_bh)
     if ep == "open":
-        # Execution-day return when entering at open: close[t] / open[t] - 1
+        # Open execution holding return: open[t] -> open[t+1]
         exec_o_none = o_none.combine_first(px_exec_none)
         exec_c_none = c_none.combine_first(px_exec_none)
         exec_o_hfq = o_hfq.combine_first(px_bh)
         exec_c_hfq = c_hfq.combine_first(px_bh)
-        ret_none = (exec_c_none / exec_o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_exec_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_exec_hfq = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_none = (exec_c_none / exec_o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_none = (exec_o_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_hfq = (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     elif ep == "close":
         # Execution-day return when entering at close: close[t+1] / close[t] - 1
         exec_none = c_none.combine_first(px_exec_none)
         exec_hfq = c_hfq.combine_first(px_bh)
         ret_none = (exec_none.shift(-1).div(exec_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_exec_hfq = (exec_hfq.shift(-1).div(exec_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_none = (o_none.shift(-1).div(c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_none = (c_none.shift(-1).div(o_none.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_hfq = (o_hfq.shift(-1).div(c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_hfq = (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     else:
-        # OC2: 50% open-execution same-day return + 50% close-execution next-close return
+        # OC2: 50% open-execution(open->open) + 50% close-execution(close->close)
         exec_o_none = o_none.combine_first(px_exec_none)
         exec_c_none = c_none.combine_first(px_exec_none)
         exec_o_hfq = o_hfq.combine_first(px_bh)
         exec_c_hfq = c_hfq.combine_first(px_bh)
-        ret_open_none = (exec_c_none / exec_o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_open_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_close_none = (exec_c_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
-        ret_open_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_open_hfq = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_close_hfq = (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_exec_hfq = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
+        ret_overnight_none = (0.5 * (o_none.shift(-1).div(c_none) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_none = (0.5 * (c_none / o_none - 1.0) + 0.5 * (c_none.shift(-1).div(o_none.shift(-1)) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_hfq = (0.5 * (o_hfq.shift(-1).div(c_hfq) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_hfq = (0.5 * (c_hfq / o_hfq - 1.0) + 0.5 * (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     ret_hfq = ret_exec_hfq.astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq).astype(float)
     corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_exec_hfq).astype(float)
+    ret_overnight = ret_overnight_none.where(~ca_mask.fillna(False), other=ret_overnight_hfq).astype(float)
+    ret_intraday = ret_intraday_none.where(~ca_mask.fillna(False), other=ret_intraday_hfq).astype(float)
 
     if strat == "ma_filter":
         ma = _moving_average(px_sig, window=int(inp.sma_window), ma_type=ma_type)
@@ -1228,6 +1242,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     slippage = (w - w.shift(1).fillna(0.0)).abs() / 2.0
     slippage = slippage.astype(float) * float(inp.slippage_rate)
     strat_ret = (w * ret_exec_day - cost - slippage).astype(float)
+    decomp_overnight = (w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)).astype(float)
+    decomp_intraday = (w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)).astype(float)
+    decomp_interaction = (w * (ret_overnight.reindex(w.index).astype(float).fillna(0.0) * ret_intraday.reindex(w.index).astype(float).fillna(0.0))).astype(float)
+    decomp_cost = (cost + slippage).astype(float)
+    decomp_gross = (decomp_overnight + decomp_intraday + decomp_interaction).astype(float)
+    decomp_net = (decomp_gross - decomp_cost).astype(float)
     nav = (1.0 + strat_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -1361,6 +1381,25 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "return_decomposition": {
+            "dates": nav.index.date.astype(str).tolist(),
+            "series": {
+                "overnight": decomp_overnight.astype(float).tolist(),
+                "intraday": decomp_intraday.astype(float).tolist(),
+                "interaction": decomp_interaction.astype(float).tolist(),
+                "cost": decomp_cost.astype(float).tolist(),
+                "gross": decomp_gross.astype(float).tolist(),
+                "net": decomp_net.astype(float).tolist(),
+            },
+            "summary": {
+                "ann_overnight": float(decomp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_overnight) > 1 else 0.0,
+                "ann_intraday": float(decomp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_intraday) > 1 else 0.0,
+                "ann_interaction": float(decomp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_interaction) > 1 else 0.0,
+                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
+                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
+                "ann_net": float(decomp_net.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_net) > 1 else 0.0,
+            },
+        },
         "metrics": {"strategy": m_strat, "benchmark": m_bh, "excess": m_ex},
         "risk_controls": {"atr_stop": atr_stop_stats},
         "corporate_actions": (
@@ -1577,8 +1616,8 @@ def compute_trend_portfolio_backtest(
             exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
             exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
             exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-            ret_none = (exec_c_none / exec_o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-            ret_hfq_exec = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_hfq_exec = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         elif ep == "close":
             px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
             px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
@@ -1589,10 +1628,10 @@ def compute_trend_portfolio_backtest(
             exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
             exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
             exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-            ret_open_none = (exec_c_none / exec_o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_open_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_close_none = (exec_c_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
-            ret_open_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_open_hfq = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_close_hfq = (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_hfq_exec = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
         ret_hfq = ret_hfq_exec.astype(float)
@@ -1600,6 +1639,39 @@ def compute_trend_portfolio_backtest(
         gross_hfq = 1.0 + ret_hfq
         _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
         ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
+        ret_overnight_none_close = (open_none.shift(-1).div(close_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_none_close = (close_none_exec.shift(-1).div(open_none.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_hfq_close = (open_hfq.shift(-1).div(close_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_hfq_close = (close_hfq_exec.shift(-1).div(open_hfq.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_none_open = (close_none_exec.div(open_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_none_open = (open_none.shift(-1).div(close_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_hfq_open = (close_hfq_exec.div(open_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_hfq_open = (open_hfq.shift(-1).div(close_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_close = ret_overnight_none_close.where(~ca_mask.fillna(False), other=ret_overnight_hfq_close).astype(float)
+        ret_intraday_close = ret_intraday_none_close.where(~ca_mask.fillna(False), other=ret_intraday_hfq_close).astype(float)
+        ret_overnight_open = ret_overnight_none_open.where(~ca_mask.fillna(False), other=ret_overnight_hfq_open).astype(float)
+        ret_intraday_open = ret_intraday_none_open.where(~ca_mask.fillna(False), other=ret_intraday_hfq_open).astype(float)
+
+    if data_override is not None:
+        if ep == "open":
+            ret_overnight = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
+            ret_intraday = ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+        elif ep == "close":
+            ret_overnight = ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ret_intraday = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
+        else:
+            ret_overnight = (0.5 * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
+            ret_intraday = (0.5 * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
+    else:
+        if ep == "open":
+            ret_overnight = ret_overnight_open.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ret_intraday = ret_intraday_open.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+        elif ep == "close":
+            ret_overnight = ret_overnight_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ret_intraday = ret_intraday_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+        else:
+            ret_overnight = (0.5 * ret_overnight_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
+            ret_intraday = (0.5 * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0) + 0.5 * ret_intraday_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
@@ -1854,7 +1926,18 @@ def compute_trend_portfolio_backtest(
     turnover = (w - w.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     cost = turnover * (float(inp.cost_bps) / 10000.0)
     slippage = turnover * float(inp.slippage_rate)
-    port_ret = (w * ret_exec_day).sum(axis=1) - cost - slippage
+    comp_overnight = (w * ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
+    comp_intraday = (w * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
+    comp_interaction = (
+        w
+        * (
+            ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)
+            * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)
+        )
+    ).sum(axis=1).astype(float)
+    decomp_cost = (cost + slippage).astype(float)
+    decomp_gross = (comp_overnight + comp_intraday + comp_interaction).astype(float)
+    port_ret = (decomp_gross - decomp_cost).astype(float)
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -2038,6 +2121,25 @@ def compute_trend_portfolio_backtest(
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "return_decomposition": {
+            "dates": nav.index.date.astype(str).tolist(),
+            "series": {
+                "overnight": comp_overnight.astype(float).tolist(),
+                "intraday": comp_intraday.astype(float).tolist(),
+                "interaction": comp_interaction.astype(float).tolist(),
+                "cost": decomp_cost.astype(float).tolist(),
+                "gross": decomp_gross.astype(float).tolist(),
+                "net": port_ret.astype(float).tolist(),
+            },
+            "summary": {
+                "ann_overnight": float(comp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_overnight) > 1 else 0.0,
+                "ann_intraday": float(comp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_intraday) > 1 else 0.0,
+                "ann_interaction": float(comp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_interaction) > 1 else 0.0,
+                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
+                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
+                "ann_net": float(port_ret.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(port_ret) > 1 else 0.0,
+            },
+        },
         "metrics": {"strategy": m_strat, "benchmark": m_bench, "excess": m_ex},
         "risk_controls": {
             "atr_stop": {

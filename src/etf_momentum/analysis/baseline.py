@@ -409,7 +409,7 @@ def _sharpe(daily_ret: pd.Series, rf: float = 0.0, ann_factor: int = TRADING_DAY
         return float("nan")
     ex = daily_ret - rf / ann_factor
     std = ex.std(ddof=1)
-    if std == 0 or np.isnan(std):
+    if (not np.isfinite(std)) or abs(float(std)) <= 1e-12:
         return float("nan")
     return float(ex.mean() / std * np.sqrt(ann_factor))
 
@@ -420,7 +420,7 @@ def _sortino(daily_ret: pd.Series, rf: float = 0.0, ann_factor: int = TRADING_DA
     ex = daily_ret - rf / ann_factor
     downside = ex.where(ex < 0, 0.0)
     dd_std = downside.std(ddof=1)
-    if dd_std == 0 or np.isnan(dd_std):
+    if (not np.isfinite(dd_std)) or abs(float(dd_std)) <= 1e-12:
         return float("nan")
     return float(ex.mean() / dd_std * np.sqrt(ann_factor))
 
@@ -429,7 +429,7 @@ def _information_ratio(active_daily: pd.Series, ann_factor: int = TRADING_DAYS_P
     if active_daily.empty:
         return float("nan")
     std = active_daily.std(ddof=1)
-    if std == 0 or np.isnan(std):
+    if (not np.isfinite(std)) or abs(float(std)) <= 1e-12:
         return float("nan")
     return float(active_daily.mean() / std * np.sqrt(ann_factor))
 
@@ -1939,16 +1939,29 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         nav = pd.Series(1.0, index=index, dtype=float, name=name)
         w = pd.DataFrame(0.0, index=index, columns=columns, dtype=float)
         return nav, w
+    def _single_asset_portfolio(ret_df: pd.DataFrame, code: str, name: str) -> tuple[pd.Series, pd.DataFrame]:
+        rr = pd.to_numeric(ret_df[code], errors="coerce").astype(float).fillna(0.0)
+        nav = (1.0 + rr).cumprod().astype(float).rename(name)
+        if len(nav) > 0:
+            nav.iloc[0] = 1.0
+        w = pd.DataFrame(1.0, index=ret_df.index, columns=[code], dtype=float)
+        return nav, w
 
     if dynamic_universe:
-        ew_nav, ew_w, ew_active_count = _compute_equal_weight_nav_and_weights_dynamic(
-            ret_common[codes_eff],
-            rebalance=inp.rebalance,
-            min_active=2,
-        )
+        if len(codes_eff) == 1:
+            only = codes_eff[0]
+            ew_nav, ew_w = _single_asset_portfolio(ret_common[codes_eff], only, "EW")
+            ew_active_count = pd.Series(1, index=ret_common.index, dtype=int)
+        else:
+            ew_nav, ew_w, ew_active_count = _compute_equal_weight_nav_and_weights_dynamic(
+                ret_common[codes_eff],
+                rebalance=inp.rebalance,
+                min_active=2,
+            )
     else:
         if len(codes_eff) <= 1:
-            ew_nav, ew_w = _cash_portfolio(ret_common.index, codes_eff, "EW")
+            only = codes_eff[0]
+            ew_nav, ew_w = _single_asset_portfolio(ret_common[codes_eff], only, "EW")
         else:
             ew_nav, ew_w = _compute_equal_weight_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance)
         ew_active_count = pd.Series(len(codes_eff), index=ret_common.index, dtype=int)
@@ -1996,15 +2009,20 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     # risk parity (inverse-vol) portfolio with the same rebalancing schedule
     rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
     if dynamic_universe:
-        rp_nav, rp_w = _compute_risk_parity_nav_and_weights_dynamic(
-            ret_common[codes_eff],
-            rebalance=inp.rebalance,
-            window=rp_win,
-            min_active=2,
-        )
+        if len(codes_eff) == 1:
+            only = codes_eff[0]
+            rp_nav, rp_w = _single_asset_portfolio(ret_common[codes_eff], only, "RP")
+        else:
+            rp_nav, rp_w = _compute_risk_parity_nav_and_weights_dynamic(
+                ret_common[codes_eff],
+                rebalance=inp.rebalance,
+                window=rp_win,
+                min_active=2,
+            )
     else:
         if len(codes_eff) <= 1:
-            rp_nav, rp_w = _cash_portfolio(ret_common.index, codes_eff, "RP")
+            only = codes_eff[0]
+            rp_nav, rp_w = _single_asset_portfolio(ret_common[codes_eff], only, "RP")
         else:
             rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
     if reb_mode == "none":

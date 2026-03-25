@@ -106,7 +106,7 @@ def test_compute_baseline_dynamic_universe_uses_union_start(session_factory):
     assert vals and max(vals) >= 2 and 1 in vals
 
 
-def test_compute_baseline_single_asset_portfolios_hold_cash(session_factory):
+def test_compute_baseline_single_asset_portfolios_track_asset_nav(session_factory):
     sf = session_factory
     with sf() as db:
         code = "AAA"
@@ -123,6 +123,9 @@ def test_compute_baseline_single_asset_portfolios_hold_cash(session_factory):
     ew = out["nav"]["series"]["EW"]
     rp = out["nav"]["series"]["RP"]
     assert ew and rp
-    assert all(float(x) == pytest.approx(1.0) for x in ew)
-    assert all(float(x) == pytest.approx(1.0) for x in rp)
+    expected_last = (100.0 + (len(dates) - 1)) / 100.0
+    assert float(ew[-1]) == pytest.approx(expected_last, rel=1e-9)
+    assert float(rp[-1]) == pytest.approx(expected_last, rel=1e-9)
+    m = out.get("metrics") or {}
+    assert float(m.get("cumulative_return") or 0.0) > 0.0
 

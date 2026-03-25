@@ -214,3 +214,47 @@ def test_rotation_risk_budget_position_mode_scales_by_atr(session_factory):
         assert float(expo.max()) <= 1.0000001
         assert float(expo.max()) > 0.0
 
+
+def test_rotation_topk_larger_than_pool_still_runs(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=60, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(100.0 + 0.5 * i),
+                open_price=float(100.0 + 0.5 * i),
+                high=float(100.0 + 0.5 * i),
+                low=float(100.0 + 0.5 * i),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(90.0 + 0.2 * i),
+                open_price=float(90.0 + 0.2 * i),
+                high=float(90.0 + 0.2 * i),
+                low=float(90.0 + 0.2 * i),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["AAA", "BBB"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                top_k=10,  # larger than pool size
+                lookback_days=5,
+                skip_days=0,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    nav = (out.get("nav") or {}).get("series", {}).get("ROTATION", [])
+    assert nav and float(nav[-1]) > 0.0

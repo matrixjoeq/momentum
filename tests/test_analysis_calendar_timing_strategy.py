@@ -273,6 +273,153 @@ def test_calendar_timing_trade_stats_by_code_no_extreme_explosions(session_facto
             assert float(mx) < 10.0, f"{c} max trade return exploded: {mx}"
 
 
+def test_calendar_timing_close_exec_does_not_include_post_exit_return(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2026-03-02", "2026-04-10", freq="B")]
+    with sf() as db:
+        for d in dates:
+            px = 100.0
+            if str(d) == "2026-04-02":
+                px = 200.0  # large jump immediately after expected exit day
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=float(px),
+                        high=float(px),
+                        low=float(px),
+                        close=float(px),
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+        db.commit()
+
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=dates[-1],
+                decision_day=-2,
+                hold_days=1,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                rebalance_shift="prev",
+            ),
+        )
+
+    rs = (((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or [])
+    assert rs, "expected at least one trade sample"
+    # If close-exit leaks post-exit close->next-close return, this trade would be ~+100%.
+    assert max(float(x) for x in rs) < 0.2
+
+
+def test_calendar_timing_open_exec_does_not_include_decision_day_intraday_return(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2026-03-02", "2026-04-10", freq="B")]
+    with sf() as db:
+        for d in dates:
+            # Keep most days flat.
+            o = 100.0
+            c = 100.0
+            if str(d) == "2026-03-30":
+                # Decision day intraday jump; execution is next trading day open (2026-03-31),
+                # so this day must not enter strategy return.
+                o = 100.0
+                c = 200.0
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=float(o),
+                        high=float(max(o, c)),
+                        low=float(min(o, c)),
+                        close=float(c),
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+        db.commit()
+
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=dates[-1],
+                decision_day=-2,
+                hold_days=1,
+                exec_price="open",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                rebalance_shift="prev",
+            ),
+        )
+
+    rs = (((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or [])
+    assert rs, "expected at least one trade sample"
+    # If decision-day intraday return leaks, trade return would be huge positive.
+    assert max(float(x) for x in rs) < 0.2
+
+
+def test_calendar_timing_open_exec_does_not_include_exit_day_intraday_return(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2026-03-02", "2026-04-10", freq="B")]
+    with sf() as db:
+        for d in dates:
+            o = 100.0
+            c = 100.0
+            if str(d) == "2026-04-01":
+                # Exit day intraday jump; with open execution and hold_days=1, the strategy exits
+                # at this day's open, so open->close move must not be included.
+                o = 100.0
+                c = 200.0
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=float(o),
+                        high=float(max(o, c)),
+                        low=float(min(o, c)),
+                        close=float(c),
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+        db.commit()
+
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=dates[-1],
+                decision_day=-2,
+                hold_days=1,
+                exec_price="open",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                rebalance_shift="prev",
+            ),
+        )
+
+    rs = (((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or [])
+    assert rs, "expected at least one trade sample"
+    # If exit-day intraday return leaks, trade return would be huge positive.
+    assert max(float(x) for x in rs) < 0.2
+
+
 def test_calendar_timing_risk_budget_position_mode(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-02", periods=90, freq="B")]
@@ -318,3 +465,56 @@ def test_calendar_timing_risk_budget_position_mode(session_factory):
     holds = out.get("current_holdings") or []
     if holds:
         assert sum(float(x.get("weight") or 0.0) for x in holds) <= 1.0000001
+
+
+def test_calendar_timing_return_decomposition_open_includes_overnight_component(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2026-03-02", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            o = 100.0 + 0.1 * float(i)
+            c = o * (1.0 + (0.003 if i % 5 == 0 else -0.001))
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=float(o),
+                        high=float(max(o, c)),
+                        low=float(min(o, c)),
+                        close=float(c),
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+        db.commit()
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=dates[-1],
+                decision_day=1,
+                hold_days=5,
+                exec_price="open",
+                cost_bps=2.0,
+                slippage_rate=0.001,
+                rebalance_shift="prev",
+            ),
+        )
+    decomp = out.get("return_decomposition") or {}
+    series = decomp.get("series") or {}
+    overnight = [float(x) for x in (series.get("overnight") or [])]
+    intraday = [float(x) for x in (series.get("intraday") or [])]
+    interaction = [float(x) for x in (series.get("interaction") or [])]
+    cost = [float(x) for x in (series.get("cost") or [])]
+    gross = [float(x) for x in (series.get("gross") or [])]
+    net = [float(x) for x in (series.get("net") or [])]
+    assert overnight, "expected decomposition series"
+    # Open execution should still include overnight contribution when holding across days.
+    assert max(abs(x) for x in overnight) > 1e-8
+    for i in range(len(gross)):
+        assert gross[i] == pytest.approx(overnight[i] + intraday[i] + interaction[i], abs=1e-12)
+        assert net[i] == pytest.approx(gross[i] - cost[i], abs=1e-12)

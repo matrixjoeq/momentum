@@ -1592,9 +1592,9 @@ def backtest_rotation(
     # Execution return basis:
     # - Strategy NAV uses NONE prices (tradeable) by default, with HFQ fallback on corporate-action cliff days.
     # - For plotting/benchmark comparisons we still compute HFQ series.
-    # We only load OHLC when needed (open/oc2).
-    need_hfq_ohlc = ep in {"open", "oc2"}
-    need_none_ohlc = ep in {"open", "oc2"}
+    # Return decomposition needs open/close legs for all execution modes.
+    need_hfq_ohlc = True
+    need_none_ohlc = True
     ohlc_hfq = (
         _load_ohlc_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq") if need_hfq_ohlc else {"open": pd.DataFrame(), "high": pd.DataFrame(), "low": pd.DataFrame(), "close": pd.DataFrame()}
     )
@@ -2252,15 +2252,15 @@ def backtest_rotation(
 
             candidate_scores = scores_row.dropna()
             candidate_count = int(candidate_scores.shape[0])
-            min_required = int(inp.top_k) + 1
-            if candidate_count <= int(inp.top_k):
+            if candidate_count <= 0:
                 picks = []
                 best = float(candidate_scores.max()) if candidate_count > 0 else None
                 meta = {
                     "best_score": best,
-                    "mode": "insufficient_candidates",
+                    "mode": "no_signal",
                     "candidate_count": candidate_count,
-                    "min_required": min_required,
+                    "target_top_k": int(inp.top_k),
+                    "effective_top_k": 0,
                 }
                 group_meta = {
                     "enabled": bool(inp.group_enforce),
@@ -2289,6 +2289,9 @@ def backtest_rotation(
                     reduced_scores,
                     top_k=inp.top_k,
                 )
+                meta["candidate_count"] = int(candidate_count)
+                meta["target_top_k"] = int(inp.top_k)
+                meta["effective_top_k"] = int(min(int(inp.top_k), int(candidate_count)))
         # picks == [] => cash
         reasons: list[str] = []
         details: dict[str, Any] = {}
@@ -3530,6 +3533,49 @@ def backtest_rotation(
     port_ret_net = (port_ret - cost - slippage).astype(float)
     port_nav_net = (1.0 + port_ret_net).cumprod()
     port_nav_net.iloc[0] = 1.0
+    # Return decomposition (for explainability panel):
+    # - close/oc2: split gross via close->next-open + next-open->next-close + interaction
+    # - open: use the same split for open->open horizon, and on execution days
+    #   (where we intentionally use same-day open->close), force overnight/interaction=0
+    #   and intraday=gross to preserve exact day-level accounting.
+    ret_overnight_none = (
+        o_none.shift(-1).div(c_none) - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_intraday_none = (
+        c_none.shift(-1).div(o_none.shift(-1)) - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_overnight_hfq = (
+        o_hfq.shift(-1).div(c_hfq) - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_intraday_hfq = (
+        c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret_overnight = ret_overnight_none.where(~corp_mask.fillna(False), other=ret_overnight_hfq).astype(float)
+    ret_intraday = ret_intraday_none.where(~corp_mask.fillna(False), other=ret_intraday_hfq).astype(float)
+    comp_overnight_close = (w * ret_overnight).sum(axis=1).astype(float)
+    comp_intraday_close = (w * ret_intraday).sum(axis=1).astype(float)
+    comp_interaction_close = (w * (ret_overnight * ret_intraday)).sum(axis=1).astype(float)
+    if ep == "open":
+        comp_overnight = (w * ret_overnight).sum(axis=1).astype(float)
+        comp_intraday = (w * ret_intraday).sum(axis=1).astype(float)
+        comp_interaction = (w * (ret_overnight * ret_intraday)).sum(axis=1).astype(float)
+        if exec_day_indices:
+            exec_dates = [dates[j] for j in exec_day_indices if 0 <= int(j) < len(dates)]
+            if exec_dates:
+                comp_overnight.loc[exec_dates] = 0.0
+                comp_interaction.loc[exec_dates] = 0.0
+                comp_intraday.loc[exec_dates] = port_ret.loc[exec_dates].astype(float)
+    elif ep == "close":
+        comp_overnight = comp_overnight_close
+        comp_intraday = comp_intraday_close
+        comp_interaction = comp_interaction_close
+    else:
+        comp_overnight = (0.5 * comp_overnight_close).astype(float)
+        comp_intraday = (0.5 * port_ret + 0.5 * comp_intraday_close).astype(float)
+        comp_interaction = (0.5 * comp_interaction_close).astype(float)
+    decomp_cost = (cost + slippage).astype(float)
+    decomp_gross = (comp_overnight + comp_intraday + comp_interaction).astype(float)
+    decomp_net = (decomp_gross - decomp_cost).astype(float)
     asset_nav_exec = (1.0 + ret_exec[codes].astype(float).fillna(0.0)).cumprod()
     if not asset_nav_exec.empty:
         asset_nav_exec.iloc[0] = 1.0
@@ -3950,6 +3996,25 @@ def backtest_rotation(
         },
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "return_decomposition": {
+            "dates": dates.date.astype(str).tolist(),
+            "series": {
+                "overnight": comp_overnight.astype(float).tolist(),
+                "intraday": comp_intraday.astype(float).tolist(),
+                "interaction": comp_interaction.astype(float).tolist(),
+                "cost": decomp_cost.astype(float).tolist(),
+                "gross": decomp_gross.astype(float).tolist(),
+                "net": decomp_net.astype(float).tolist(),
+            },
+            "summary": {
+                "ann_overnight": float(comp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_overnight) > 1 else 0.0,
+                "ann_intraday": float(comp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_intraday) > 1 else 0.0,
+                "ann_interaction": float(comp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_interaction) > 1 else 0.0,
+                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
+                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
+                "ann_net": float(decomp_net.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_net) > 1 else 0.0,
+            },
+        },
         "metrics": metrics,
         "win_payoff": stats,
         "period_returns": periodic,

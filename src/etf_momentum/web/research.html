@@ -1737,6 +1737,12 @@
           <table id="rotWinPayoff"></table>
         </div>
       </div>
+      <div class="panel">
+        <h3>轮动策略：收益拆解（隔夜 / 日内 / 交互 / 成本）</h3>
+        <div id="rotRetDecompChart" style="width:100%; height:320px;"></div>
+        <table id="rotRetDecompSummary" style="margin-top:10px;"></table>
+        <table id="rotRetDecompShare" style="margin-top:8px;"></table>
+      </div>
 
       <div class="panel">
         <h3>轮动策略：日度收益率分布统计</h3>
@@ -2744,6 +2750,12 @@
           <div id="trendExcessRollingCombo" style="width:100%; height:520px;"></div>
         </div>
       </div>
+      <div class="panel" style="margin-top:10px;">
+        <h3>趋势策略：收益拆解（隔夜 / 日内 / 交互 / 成本）</h3>
+        <div id="trendRetDecompChart" style="width:100%; height:320px;"></div>
+        <table id="trendRetDecompSummary" style="margin-top:10px;"></table>
+        <table id="trendRetDecompShare" style="margin-top:8px;"></table>
+      </div>
       <h3 style="margin-top:12px;">趋势策略：日度收益率分布统计</h3>
       <div class="row no-print" style="margin-top:8px; align-items:end;">
         <div>
@@ -3068,6 +3080,15 @@
         </div>
       </div>
       <div class="panel">
+        <h3>收益拆解（隔夜 / 日内 / 交互 / 成本）</h3>
+        <div id="calTimingRetDecompChart" style="width:100%; height:320px;"></div>
+        <table id="calTimingRetDecompSummary" style="margin-top:10px;"></table>
+        <table id="calTimingRetDecompShare" style="margin-top:8px;"></table>
+        <div id="calTimingRetDecompNote" class="muted" style="margin-top:8px;">
+          说明：按日收益算术拆解；年化贡献使用“日均贡献 × 年交易日数”近似，仅用于解释收益来源。
+        </div>
+      </div>
+      <div class="panel">
         <h3>当前持仓标的列表</h3>
         <table id="calTimingCurrentHoldings"></table>
       </div>
@@ -3217,7 +3238,7 @@
           <label>已保存策略</label>
           <select id="fixedStrategyLoadSelect" style="min-width:260px;"></select>
         </div>
-        <button id="loadFixedStrategy">手动加载</button>
+        <button id="loadFixedStrategy">加载</button>
         <button id="deleteFixedStrategy">删除</button>
       </div>
       <div class="muted" style="margin-top:8px;">
@@ -3875,6 +3896,7 @@
       let _savedFixedStrategies = null;
       let _savedFixedStrategiesReady = false;
       let _savedGlobalSettings = null;
+      let _pendingStrategyGroupPresets = null;
       let _initialDefaults = null;
       let fixedStrategies = [];
       let mixSelectedStrategyIds = [];
@@ -5793,10 +5815,12 @@
         };
         const prevEditor = editor ? String(editor.value || "").trim() : "";
         fill(editor);
-        fill(bSel);
-        fill(rSel);
-        fill(tSel);
-        fill(cSel);
+        fill(bSel, _pendingStrategyGroupPresets ? _pendingStrategyGroupPresets.baselineGroupPreset : undefined);
+        fill(rSel, _pendingStrategyGroupPresets ? _pendingStrategyGroupPresets.rotationGroupPreset : undefined);
+        fill(tSel, _pendingStrategyGroupPresets ? _pendingStrategyGroupPresets.trendGroupPreset : undefined);
+        fill(cSel, _pendingStrategyGroupPresets ? _pendingStrategyGroupPresets.calTimingGroupPreset : undefined);
+        // Only needed during first mount after persistence restore.
+        _pendingStrategyGroupPresets = null;
         const curEditor = editor ? String(editor.value || "").trim() : "";
         if (curEditor) activeGroupName = curEditor;
         // Only sync name input when the editor selection actually changes.
@@ -13867,6 +13891,7 @@
         window.__lastRotationResult = data;
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
+        _renderRotationReturnDecomposition((data && data.return_decomposition) ? data.return_decomposition : null);
         renderRotationDailyReturnDist(data);
         renderTradeStatistics("rot", data);
         // Use continuous holding streaks (not per-rebalance periods) for holding-length distributions.
@@ -14084,6 +14109,7 @@
           });
         } catch (_) { /* ignore */ }
         renderTrendDailyReturnDist(data);
+        _renderTrendReturnDecomposition((data && data.return_decomposition) ? data.return_decomposition : null);
         renderTradeStatistics("trend", data);
         try { renderTrendPositionPlan(data, mode); } catch (_) { /* ignore */ }
         const m = (data && data.metrics) ? data.metrics : {};
@@ -15302,6 +15328,90 @@
           `<div><b>卖出计划</b>：${sellTxt}</div>`;
       }
 
+      function _renderReturnDecompositionByIds(chartId, tableId, shareTableId, decomp) {
+        const chartEl = $(chartId);
+        const tableEl = $(tableId);
+        const shareEl = $(shareTableId);
+        if (!chartEl || !tableEl || !shareEl) return;
+        const dd = (decomp && typeof decomp === "object") ? decomp : {};
+        const dates = Array.isArray(dd.dates) ? dd.dates : [];
+        const s = (dd.series && typeof dd.series === "object") ? dd.series : {};
+        const overnight = Array.isArray(s.overnight) ? s.overnight.map(Number) : [];
+        const intraday = Array.isArray(s.intraday) ? s.intraday.map(Number) : [];
+        const interaction = Array.isArray(s.interaction) ? s.interaction.map(Number) : [];
+        const cost = Array.isArray(s.cost) ? s.cost.map(Number) : [];
+        const gross = Array.isArray(s.gross) ? s.gross.map(Number) : [];
+        const net = Array.isArray(s.net) ? s.net.map(Number) : [];
+        const n = Math.min(dates.length, overnight.length, intraday.length, interaction.length, cost.length, gross.length, net.length);
+        if (n <= 1) {
+          chartEl.innerHTML = "<div class='muted'>暂无可用拆解数据</div>";
+          tableEl.innerHTML = `<tr><td class="muted">暂无可用拆解数据</td></tr>`;
+          shareEl.innerHTML = `<tr><td class="muted">暂无可用拆解数据</td></tr>`;
+          return;
+        }
+        const xs = dates.slice(0, n);
+        const _cumsum = (arr) => {
+          const out = [];
+          let s0 = 0.0;
+          for (let i = 0; i < n; i++) {
+            const v = Number(arr[i]);
+            s0 += Number.isFinite(v) ? v : 0.0;
+            out.push(s0);
+          }
+          return out;
+        };
+        Plotly.newPlot(
+          chartId,
+          [
+            { x: xs, y: _cumsum(overnight), type: "scatter", mode: "lines", name: "隔夜累计贡献(算术)", line: { color: "rgba(31,119,180,0.90)" } },
+            { x: xs, y: _cumsum(intraday), type: "scatter", mode: "lines", name: "日内累计贡献(算术)", line: { color: "rgba(44,160,44,0.90)" } },
+            { x: xs, y: _cumsum(interaction), type: "scatter", mode: "lines", name: "交互项累计贡献(算术)", line: { color: "rgba(148,103,189,0.90)" } },
+            { x: xs, y: _cumsum(cost.map((v) => -Number(v || 0))), type: "scatter", mode: "lines", name: "成本累计拖累(算术)", line: { color: "rgba(214,39,40,0.90)" } },
+            { x: xs, y: _cumsum(net), type: "scatter", mode: "lines", name: "净收益累计(算术)", line: { color: "rgba(255,127,14,0.95)", width: 2 } },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: { tickformat: ".1%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" },
+          },
+          { responsive: true }
+        );
+        const sm = (dd.summary && typeof dd.summary === "object") ? dd.summary : {};
+        const rows = [
+          ["隔夜(年化算术贡献)", fmtPct(Number(sm.ann_overnight))],
+          ["日内(年化算术贡献)", fmtPct(Number(sm.ann_intraday))],
+          ["交互项(年化算术贡献)", fmtPct(Number(sm.ann_interaction))],
+          ["交易摩擦(年化算术拖累)", fmtPct(-Number(sm.ann_cost))],
+          ["毛收益(年化算术贡献)", fmtPct(Number(sm.ann_gross))],
+          ["净收益(年化算术贡献)", fmtPct(Number(sm.ann_net))],
+        ];
+        tableEl.innerHTML = `<tr><th>拆解项</th><th>数值</th></tr>${rows.map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join("")}`;
+        const sumOver = overnight.reduce((a, v) => a + (Number.isFinite(Number(v)) ? Number(v) : 0.0), 0.0);
+        const sumIntra = intraday.reduce((a, v) => a + (Number.isFinite(Number(v)) ? Number(v) : 0.0), 0.0);
+        const sumInter = interaction.reduce((a, v) => a + (Number.isFinite(Number(v)) ? Number(v) : 0.0), 0.0);
+        const sumCostDrag = cost.reduce((a, v) => a + (Number.isFinite(Number(v)) ? -Number(v) : 0.0), 0.0);
+        const sumGross = gross.reduce((a, v) => a + (Number.isFinite(Number(v)) ? Number(v) : 0.0), 0.0);
+        const sumNet = net.reduce((a, v) => a + (Number.isFinite(Number(v)) ? Number(v) : 0.0), 0.0);
+        const den = Math.abs(sumNet) > 1e-12 ? sumNet : null;
+        const ratioRows = [
+          ["隔夜累计贡献", sumOver],
+          ["日内累计贡献", sumIntra],
+          ["交互项累计贡献", sumInter],
+          ["交易摩擦累计拖累", sumCostDrag],
+          ["毛收益累计贡献", sumGross],
+          ["净收益累计贡献", sumNet],
+        ].map(([name, v]) => {
+          const ratio = den == null ? null : (Number(v) / den);
+          return `<tr><td>${esc(name)}</td><td>${fmtPct(Number(v))}</td><td>${ratio == null ? "-" : fmtPct(ratio)}</td></tr>`;
+        });
+        shareEl.innerHTML =
+          `<tr><th>累计拆解项</th><th>累计值(算术)</th><th>占净收益比例</th></tr>` +
+          ratioRows.join("");
+      }
+      function _renderCalTimingReturnDecomposition(decomp) { _renderReturnDecompositionByIds("calTimingRetDecompChart", "calTimingRetDecompSummary", "calTimingRetDecompShare", decomp); }
+      function _renderRotationReturnDecomposition(decomp) { _renderReturnDecompositionByIds("rotRetDecompChart", "rotRetDecompSummary", "rotRetDecompShare", decomp); }
+      function _renderTrendReturnDecomposition(decomp) { _renderReturnDecompositionByIds("trendRetDecompChart", "trendRetDecompSummary", "trendRetDecompShare", decomp); }
+
       async function runCalendarTimingStrategy() {
         const mode = ($("calTimingMode") && $("calTimingMode").value) ? String($("calTimingMode").value) : "portfolio";
         const baseCodes = _codesForStrategy("cal_timing");
@@ -15406,6 +15516,7 @@
         });
         _renderCalTimingMetrics((data && data.metrics) ? data.metrics : {});
         _renderCalTimingPeriods(ctPr);
+        _renderCalTimingReturnDecomposition((data && data.return_decomposition) ? data.return_decomposition : null);
         _renderCalTimingCurrentHoldings((data && data.current_holdings) ? data.current_holdings : []);
         _renderCalTimingNextPlan((data && data.next_execution_plan) ? data.next_execution_plan : null);
         _renderDailyReturnDist(
@@ -16706,6 +16817,14 @@
         }
         const globalSaved = _settingsLoad(SETTINGS_KEYS.global);
         _savedGlobalSettings = (globalSaved && typeof globalSaved === "object") ? globalSaved : null;
+        _pendingStrategyGroupPresets = _savedGlobalSettings
+          ? {
+              baselineGroupPreset: String(_savedGlobalSettings.baselineGroupPreset || "").trim(),
+              rotationGroupPreset: String(_savedGlobalSettings.rotationGroupPreset || "").trim(),
+              trendGroupPreset: String(_savedGlobalSettings.trendGroupPreset || "").trim(),
+              calTimingGroupPreset: String(_savedGlobalSettings.calTimingGroupPreset || "").trim(),
+            }
+          : null;
         const distSaved = _settingsLoad(SETTINGS_KEYS.dist);
         const ewCalSaved = _settingsLoad(SETTINGS_KEYS.ewCal);
         const rotationSaved = _settingsLoad(SETTINGS_KEYS.rotation);
