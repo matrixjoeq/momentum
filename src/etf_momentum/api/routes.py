@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 
@@ -64,6 +66,7 @@ from .schemas import (
     SimGbmAbSignificanceRequest,
     EtfPoolOut,
     EtfPoolUpsert,
+    FetchAllRequest,
     FetchResult,
     FetchSelectedRequest,
     OffFundFetchResult,
@@ -234,6 +237,81 @@ def _rollback_batches_best_effort(db: Session, batch_ids: list[int], *, reason: 
         logical_rollback_batch(db, b)
         update_ingestion_batch(db, batch_id=b.id, status="rolled_back", message=reason)
         db.commit()
+
+
+def _etf_pool_fetch_one_symbol(
+    db: Session,
+    ak: Any,
+    *,
+    code: str,
+    start: str,
+    end: str,
+) -> FetchResult:
+    """Ingest qfq/hfq/none for one pool symbol sequentially; update fetch status (caller commits)."""
+    total = 0
+    ok = True
+    parts: list[str] = []
+    batch_ids: list[int] = []
+    for adj in _ALL_ADJUSTS:
+        res = ingest_one_etf(db, ak=ak, code=code, start_date=start, end_date=end, adjust=adj)
+        batch_ids.append(int(res.batch_id))
+        total += int(res.upserted or 0)
+        if res.status != "success":
+            ok = False
+        extra = f",msg={res.message}" if res.status != "success" and res.message else ""
+        parts.append(f"{adj}:{res.status}(batch={res.batch_id},upserted={res.upserted}{extra})")
+    if ok:
+        try:
+            _ensure_adjust_ranges_consistent(db, code)
+        except ValueError as e:
+            ok = False
+            parts.append(f"range_check:failed({e})")
+            try:
+                _rollback_batches_best_effort(db, batch_ids, reason="auto rollback: adjust range mismatch")
+            except Exception as rb_e:  # pylint: disable=broad-exception-caught
+                parts.append(f"rollback:failed({rb_e})")
+    status = "success" if ok else "failed"
+    msg = "; ".join(parts)
+    mark_fetch_status(db, code=code, status=status, message=msg)
+    return FetchResult(code=code, inserted_or_updated=(total if ok else 0), status=status, message=msg)
+
+
+def _etf_pool_fetch_jobs_parallel(
+    *,
+    session_factory: sessionmaker[Session],
+    ak: Any,
+    jobs: list[tuple[str, str, str]],
+    max_workers: int,
+) -> list[FetchResult]:
+    """Run one fetch job per symbol with isolated DB sessions (max_workers capped by job count)."""
+    if not jobs:
+        return []
+    workers = min(max(1, int(max_workers)), len(jobs))
+
+    def _run(job: tuple[str, str, str]) -> FetchResult:
+        code, start, end = job
+        dbw = session_factory()
+        try:
+            res = _etf_pool_fetch_one_symbol(dbw, ak, code=code, start=start, end=end)
+            dbw.commit()
+            return res
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.exception("parallel ETF pool fetch failed for %s", code)
+            try:
+                dbw.rollback()
+            except Exception:  # pragma: no cover
+                pass
+            return FetchResult(code=code, inserted_or_updated=0, status="failed", message=str(e))
+        finally:
+            dbw.close()
+
+    out: list[FetchResult | None] = [None] * len(jobs)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_run, job): i for i, job in enumerate(jobs)}
+        for fut in as_completed(futs):
+            i = futs[fut]
+            out[i] = fut.result()
+    return [x for x in out if x is not None]
 
 
 def _parse_yyyymmdd(x: str) -> dt.date:
@@ -4255,119 +4333,82 @@ def fetch_one(
     start = item.start_date or settings.default_start_date
     end = item.end_date or settings.default_end_date
 
-    total = 0
-    ok = True
-    parts: list[str] = []
-    batch_ids: list[int] = []
-    for adj in _ALL_ADJUSTS:
-        res = ingest_one_etf(db, ak=ak, code=code, start_date=start, end_date=end, adjust=adj)
-        batch_ids.append(int(res.batch_id))
-        total += int(res.upserted or 0)
-        if res.status != "success":
-            ok = False
-        extra = f",msg={res.message}" if res.status != "success" and res.message else ""
-        parts.append(f"{adj}:{res.status}(batch={res.batch_id},upserted={res.upserted}{extra})")
-
-    if ok:
-        try:
-            _ensure_adjust_ranges_consistent(db, code)
-        except ValueError as e:
-            ok = False
-            parts.append(f"range_check:failed({e})")
-            try:
-                _rollback_batches_best_effort(db, batch_ids, reason="auto rollback: adjust range mismatch")
-            except Exception as rb_e:  # pylint: disable=broad-exception-caught
-                parts.append(f"rollback:failed({rb_e})")
-
-    status = "success" if ok else "failed"
-    msg = "; ".join(parts)
-    mark_fetch_status(db, code=code, status=status, message=msg)
+    res = _etf_pool_fetch_one_symbol(db, ak, code=code, start=start, end=end)
     db.commit()
-    if not ok:
-        raise HTTPException(status_code=500, detail=msg or "ingestion failed")
-    return FetchResult(code=code, inserted_or_updated=total, status="success", message=msg)
+    if res.status != "success":
+        raise HTTPException(status_code=500, detail=res.message or "ingestion failed")
+    return res
 
 
 @router.post("/fetch-all", response_model=list[FetchResult])
 def fetch_all(
+    request: Request,
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
+    payload: FetchAllRequest = Body(default_factory=FetchAllRequest),
 ) -> list[FetchResult]:
+    items = list_etf_pool(db)
+    settings = get_settings()
+    jobs: list[tuple[str, str, str]] = []
+    for item in items:
+        start = item.start_date or settings.default_start_date
+        end = item.end_date or settings.default_end_date
+        jobs.append((item.code, start, end))
+
+    if payload.fetch_mode == "parallel" and jobs:
+        sf: sessionmaker[Session] = request.app.state.session_factory
+        return _etf_pool_fetch_jobs_parallel(
+            session_factory=sf,
+            ak=ak,
+            jobs=jobs,
+            max_workers=payload.parallel_symbol_workers,
+        )
+
     out: list[FetchResult] = []
-    for item in list_etf_pool(db):
-        start = item.start_date or get_settings().default_start_date
-        end = item.end_date or get_settings().default_end_date
-        total = 0
-        ok = True
-        parts: list[str] = []
-        batch_ids: list[int] = []
-        for adj in _ALL_ADJUSTS:
-            res = ingest_one_etf(db, ak=ak, code=item.code, start_date=start, end_date=end, adjust=adj)
-            batch_ids.append(int(res.batch_id))
-            total += int(res.upserted or 0)
-            if res.status != "success":
-                ok = False
-            extra = f",msg={res.message}" if res.status != "success" and res.message else ""
-            parts.append(f"{adj}:{res.status}(batch={res.batch_id},upserted={res.upserted}{extra})")
-        if ok:
-            try:
-                _ensure_adjust_ranges_consistent(db, item.code)
-            except ValueError as e:
-                ok = False
-                parts.append(f"range_check:failed({e})")
-                try:
-                    _rollback_batches_best_effort(db, batch_ids, reason="auto rollback: adjust range mismatch")
-                except Exception as rb_e:  # pylint: disable=broad-exception-caught
-                    parts.append(f"rollback:failed({rb_e})")
-        status = "success" if ok else "failed"
-        msg = "; ".join(parts)
-        mark_fetch_status(db, code=item.code, status=status, message=msg)
-        out.append(FetchResult(code=item.code, inserted_or_updated=(total if ok else 0), status=status, message=msg))
+    for code, start, end in jobs:
+        out.append(_etf_pool_fetch_one_symbol(db, ak, code=code, start=start, end=end))
     return out
 
 
 @router.post("/fetch-selected", response_model=list[FetchResult])
 def fetch_selected(
+    request: Request,
     payload: FetchSelectedRequest,
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[FetchResult]:
     items_by_code = {x.code: x for x in list_etf_pool(db)}
-    out: list[FetchResult] = []
-    for code in payload.codes:
+    settings = get_settings()
+
+    num = len(payload.codes)
+    ordered: list[FetchResult | None] = [None] * num
+    work_jobs: list[tuple[int, str, str, str]] = []
+
+    for i, code in enumerate(payload.codes):
         item = items_by_code.get(code)
         if item is None:
-            out.append(FetchResult(code=code, inserted_or_updated=0, status="failed", message="ETF not found"))
+            ordered[i] = FetchResult(code=code, inserted_or_updated=0, status="failed", message="ETF not found")
             continue
-        start = item.start_date or get_settings().default_start_date
-        end = item.end_date or get_settings().default_end_date
-        total = 0
-        ok = True
-        parts: list[str] = []
-        batch_ids: list[int] = []
-        for adj in _ALL_ADJUSTS:
-            res = ingest_one_etf(db, ak=ak, code=item.code, start_date=start, end_date=end, adjust=adj)
-            batch_ids.append(int(res.batch_id))
-            total += int(res.upserted or 0)
-            if res.status != "success":
-                ok = False
-            extra = f",msg={res.message}" if res.status != "success" and res.message else ""
-            parts.append(f"{adj}:{res.status}(batch={res.batch_id},upserted={res.upserted}{extra})")
-        if ok:
-            try:
-                _ensure_adjust_ranges_consistent(db, item.code)
-            except ValueError as e:
-                ok = False
-                parts.append(f"range_check:failed({e})")
-                try:
-                    _rollback_batches_best_effort(db, batch_ids, reason="auto rollback: adjust range mismatch")
-                except Exception as rb_e:  # pylint: disable=broad-exception-caught
-                    parts.append(f"rollback:failed({rb_e})")
-        status = "success" if ok else "failed"
-        msg = "; ".join(parts)
-        mark_fetch_status(db, code=item.code, status=status, message=msg)
-        out.append(FetchResult(code=item.code, inserted_or_updated=(total if ok else 0), status=status, message=msg))
-    return out
+        start = item.start_date or settings.default_start_date
+        end = item.end_date or settings.default_end_date
+        work_jobs.append((i, code, start, end))
+
+    if payload.fetch_mode == "parallel" and work_jobs:
+        sf: sessionmaker[Session] = request.app.state.session_factory
+        idx_jobs: list[tuple[str, str, str]] = [(c, s, e) for _, c, s, e in work_jobs]
+        parallel_res = _etf_pool_fetch_jobs_parallel(
+            session_factory=sf,
+            ak=ak,
+            jobs=idx_jobs,
+            max_workers=payload.parallel_symbol_workers,
+        )
+        for (idx, _code, _s, _e), res in zip(work_jobs, parallel_res, strict=True):
+            ordered[idx] = res
+    else:
+        for idx, code, start, end in work_jobs:
+            ordered[idx] = _etf_pool_fetch_one_symbol(db, ak, code=code, start=start, end=end)
+
+    return [ordered[i] for i in range(num)]
 
 
 @router.get("/batches", response_model=list[IngestionBatchOut])

@@ -45,7 +45,7 @@
   </head>
   <body>
     <h2>ETF 候选池配置</h2>
-    <div class="muted">数据源：akshare/eastmoney，日频，前复权（qfq），落地 SQLite。</div>
+    <div class="muted">数据源：多源回退（腾讯/新浪/东财），日频，qfq/hfq/none 均抓取，落地数据库。</div>
     <div class="muted" style="margin-top: 6px">
       <a href="/research">进入基准分析（等权组合）</a>
       <span style="margin: 0 6px;">|</span>
@@ -82,6 +82,17 @@
       <div>
         <label>收益跳变覆盖</label>
         <input id="maxAbsReturn" placeholder="如 0.12 (可空)" />
+      </div>
+      <div>
+        <label>批量抓取模式</label>
+        <select id="fetchMode">
+          <option value="serial">串行（逐标的）</option>
+          <option value="parallel">并行（多标的，同一标的仍顺序抓 qfq/hfq/none）</option>
+        </select>
+      </div>
+      <div id="parallelWorkersWrap">
+        <label>并行标的数</label>
+        <input type="number" id="parallelWorkers" min="2" max="5" step="1" value="2" style="min-width: 5rem" />
       </div>
       <button id="save">保存/更新</button>
       <button id="fetchAll">抓取全部</button>
@@ -135,6 +146,50 @@
       const setMsg = (t) => ($("msg").textContent = t || "");
       let policies = [];
       const selected = new Set();
+      const FETCH_MODE_KEY = "etf_pool_fetch_mode";
+      const FETCH_WORKERS_KEY = "etf_pool_parallel_workers";
+
+      function syncFetchModeUi() {
+        const parallel = $("fetchMode").value === "parallel";
+        $("parallelWorkersWrap").style.display = parallel ? "" : "none";
+      }
+
+      function clampParallelWorkers() {
+        let n = Number($("parallelWorkers").value);
+        if (!Number.isFinite(n)) n = 2;
+        n = Math.min(5, Math.max(2, Math.round(n)));
+        $("parallelWorkers").value = String(n);
+      }
+
+      function saveFetchPrefs() {
+        try {
+          clampParallelWorkers();
+          localStorage.setItem(FETCH_MODE_KEY, $("fetchMode").value);
+          localStorage.setItem(FETCH_WORKERS_KEY, String(Number($("parallelWorkers").value)));
+        } catch (_) {}
+      }
+
+      function loadFetchPrefs() {
+        try {
+          const m = localStorage.getItem(FETCH_MODE_KEY);
+          if (m === "serial" || m === "parallel") $("fetchMode").value = m;
+          const w = localStorage.getItem(FETCH_WORKERS_KEY);
+          if (w != null) {
+            const n = parseInt(w, 10);
+            if (Number.isFinite(n) && n >= 2 && n <= 5) $("parallelWorkers").value = String(n);
+          }
+        } catch (_) {}
+        clampParallelWorkers();
+        syncFetchModeUi();
+      }
+
+      function etfFetchBatchBody() {
+        clampParallelWorkers();
+        return {
+          fetch_mode: $("fetchMode").value,
+          parallel_symbol_workers: Number($("parallelWorkers").value),
+        };
+      }
 
       function statusClass(s) {
         if (!s) return "status-null";
@@ -226,9 +281,16 @@
         await refresh();
       });
 
+      $("fetchMode").addEventListener("change", () => {
+        syncFetchModeUi();
+        saveFetchPrefs();
+      });
+      $("parallelWorkers").addEventListener("change", saveFetchPrefs);
+      $("parallelWorkers").addEventListener("blur", saveFetchPrefs);
+
       $("fetchAll").addEventListener("click", async () => {
         setMsg("fetch-all...");
-        const resp = await api("/fetch-all", { method: "POST", body: "{}" });
+        const resp = await api("/fetch-all", { method: "POST", body: JSON.stringify(etfFetchBatchBody()) });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -261,7 +323,7 @@
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何标的。");
         setMsg(`fetch-selected: ${codes.join(", ")} ...`);
-        const resp = await api("/fetch-selected", { method: "POST", body: JSON.stringify({ codes }) });
+        const resp = await api("/fetch-selected", { method: "POST", body: JSON.stringify({ codes, ...etfFetchBatchBody() }) });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -321,6 +383,7 @@
         }
       });
 
+      loadFetchPrefs();
       loadPolicies()
         .then(refresh)
         .catch((e) => setMsg(String(e)));

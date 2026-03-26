@@ -18,6 +18,8 @@ def test_frontend_backend_contract_smoke(api_client: TestClient) -> None:
     assert "/validation-policies" in html
     assert "/etf" in html
     assert "/fetch-selected" in html
+    assert "/fetch-all" in html
+    assert "fetchMode" in html
 
     resp = client.get("/api/validation-policies")
     assert resp.status_code == 200

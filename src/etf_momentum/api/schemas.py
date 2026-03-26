@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -44,9 +44,34 @@ class FetchResult(BaseModel):
     message: str | None = None
 
 
+class FetchAllRequest(BaseModel):
+    """Body for POST /fetch-all: multi-symbol fetch mode (per-symbol still ingests qfq/hfq/none serially)."""
+
+    fetch_mode: Literal["serial", "parallel"] = Field(
+        default="serial",
+        description='Batch fetch for all pool symbols: "serial" or "parallel" across symbols.',
+    )
+    parallel_symbol_workers: int = Field(
+        default=2,
+        ge=2,
+        le=5,
+        description="When fetch_mode=parallel: max concurrent symbols (2–5). Ignored when serial.",
+    )
+
+
 class FetchSelectedRequest(BaseModel):
     codes: list[str] = Field(min_length=1, description="ETF codes to fetch")
     adjust: str = Field(default="hfq", description="qfq/hfq/none (global)")
+    fetch_mode: Literal["serial", "parallel"] = Field(
+        default="serial",
+        description='When multiple codes: "serial" or "parallel" across symbols.',
+    )
+    parallel_symbol_workers: int = Field(
+        default=2,
+        ge=2,
+        le=5,
+        description="When fetch_mode=parallel: max concurrent symbols (2–5). Ignored when serial.",
+    )
 
 
 class PriceOut(BaseModel):
