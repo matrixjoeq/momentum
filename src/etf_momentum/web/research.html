@@ -3240,6 +3240,7 @@
       <div class="muted" style="margin-top:8px;">
         固定策略会保存：策略参数、候选池分组选择、最近一次回测结果（用于组合分析）。
         若类型为「多策略组合(MIX)」，则保存当前组合中的子固定策略列表、权重模式、自定义权重、滚动窗口与账户金额（无需先做单策略回测）；加载后可一键恢复并重新生成组合分析。<br/>
+        「任意策略组合」下一键刷新：按各叶子固定策略已保存的 payload 重新请求后端回测、写回结果（轮动会尽量刷新下一交易日计划），再重算组合图表。<br/>
         <b>跨浏览器</b>：使用「导出 JSON」下载备份；在另一浏览器「导入（合并）」追加到当前库，或「导入（覆盖）」用文件完全替换当前固定策略（组合选中会清空）。合并时若策略 ID 与本地冲突会自动换新 ID，并同步修正 MIX 内的子策略引用与自定义权重键。
       </div>
       <table id="fixedStrategyTable" style="margin-top:8px;"></table>
@@ -3266,6 +3267,7 @@
         <button id="mixSetInvVolWeights">波动率倒数</button>
         <div><label>滚动窗口(交易日)</label><input id="mixRollWin" value="60" /></div>
         <button id="runStrategyMix">生成组合分析</button>
+        <button id="mixRefreshLeafStrategies" type="button">一键刷新子策略并重算组合</button>
       </div>
       <table id="mixStrategyListTable" style="margin-top:8px;"></table>
       <div class="muted" style="margin-top:8px;">
@@ -8590,6 +8592,171 @@
         }
         window.__mixAssetNavCache = cache;
         return out;
+      }
+      /** Expand current MIX selection to unique leaf fixed-strategy ids (baseline/rotation/trend/cal_timing). */
+      function _mixCollectLeafStrategyIdsForRefresh(rootIds) {
+        const ordered = [];
+        const seenLeaf = new Set();
+        const visiting = new Set();
+        const walk = (id) => {
+          const sid = String(id || "").trim();
+          if (!sid || visiting.has(sid)) return;
+          const s = _findFixedStrategy(sid);
+          if (!s) return;
+          const t = String(s.type || "").trim().toLowerCase();
+          if (t === "strategy_mix") {
+            visiting.add(sid);
+            const p = (s.payload && typeof s.payload === "object") ? s.payload : {};
+            const raw = Array.isArray(p.strategy_ids) ? p.strategy_ids : [];
+            for (const c of raw) walk(c);
+            visiting.delete(sid);
+            return;
+          }
+          if (["baseline", "rotation", "trend", "cal_timing"].includes(t)) {
+            if (!seenLeaf.has(sid)) {
+              seenLeaf.add(sid);
+              ordered.push(sid);
+            }
+          }
+        };
+        for (const id of (rootIds || [])) walk(id);
+        return ordered;
+      }
+      function _payloadEndAsLatestTradingDay(payload) {
+        const cp = JSON.parse(JSON.stringify(payload || {}));
+        cp.end = _todayYmd();
+        return cp;
+      }
+      function _trendRefreshBodyFromPayload(payload) {
+        if (!payload || typeof payload !== "object") return null;
+        const copy = _payloadEndAsLatestTradingDay(payload);
+        const mode = String(copy.mode || "single").trim().toLowerCase();
+        delete copy.mode;
+        if (mode === "portfolio") {
+          if (!Array.isArray(copy.codes) || copy.codes.length < 1) return null;
+          delete copy.code;
+          return { body: copy, url: "/analysis/trend/portfolio" };
+        }
+        const code = String(copy.code || "").trim();
+        if (!code) return null;
+        delete copy.codes;
+        delete copy.position_sizing;
+        return { body: copy, url: "/analysis/trend" };
+      }
+      /**
+       * Re-run backtest for one leaf fixed strategy using its saved payload; update `fixedStrategies` in memory.
+       * @returns {{ ok: boolean, error?: string, name?: string }}
+       */
+      async function _refreshFixedStrategyLeafFromServer(s) {
+        const t = String(s.type || "").trim().toLowerCase();
+        const payload = s.payload;
+        const name = String(s.name || s.id || "");
+        if (!payload || typeof payload !== "object") {
+          return { ok: false, error: `${name}：缺少 payload，请重新保存该固定策略。`, name };
+        }
+        const payloadLatest = _payloadEndAsLatestTradingDay(payload);
+        try {
+          if (t === "baseline") {
+            const resp = await api("/analysis/baseline", { method: "POST", body: JSON.stringify(payloadLatest) });
+            const text = await resp.text();
+            if (!resp.ok) return { ok: false, error: `${name}：${text}`, name };
+            const data = JSON.parse(text);
+            _assignRefreshedLeafResult(s.id, { payload: payloadLatest, result: data, next_plan: null });
+            return { ok: true, name };
+          }
+          if (t === "rotation") {
+            const resp = await api("/analysis/rotation", { method: "POST", body: JSON.stringify(payloadLatest) });
+            const text = await resp.text();
+            if (!resp.ok) return { ok: false, error: `${name}：${text}`, name };
+            const data = JSON.parse(text);
+            let nextPlan = null;
+            try {
+              const asof = String(payloadLatest.end || "").trim().replace(/-/g, "");
+              const npResp = await api("/analysis/rotation/next-execution-plan", {
+                method: "POST",
+                body: JSON.stringify({ ...payloadLatest, asof: asof || payloadLatest.end }),
+              });
+              const npText = await npResp.text();
+              if (npResp.ok) nextPlan = JSON.parse(npText);
+            } catch (_np) { /* optional next plan */ }
+            _assignRefreshedLeafResult(s.id, { payload: payloadLatest, result: data, next_plan: nextPlan });
+            return { ok: true, name };
+          }
+          if (t === "trend") {
+            const spec = _trendRefreshBodyFromPayload(payloadLatest);
+            if (!spec) return { ok: false, error: `${name}：趋势 payload 不完整（缺 code/codes 等）。`, name };
+            const resp = await api(spec.url, { method: "POST", body: JSON.stringify(spec.body) });
+            const text = await resp.text();
+            if (!resp.ok) return { ok: false, error: `${name}：${text}`, name };
+            const data = JSON.parse(text);
+            _assignRefreshedLeafResult(s.id, { payload: payloadLatest, result: data, next_plan: null });
+            return { ok: true, name };
+          }
+          if (t === "cal_timing") {
+            const resp = await api("/analysis/calendar-timing", { method: "POST", body: JSON.stringify(payloadLatest) });
+            const text = await resp.text();
+            if (!resp.ok) return { ok: false, error: `${name}：${text}`, name };
+            const data = JSON.parse(text);
+            const np = (data && data.next_execution_plan) ? data.next_execution_plan : null;
+            _assignRefreshedLeafResult(s.id, { payload: payloadLatest, result: data, next_plan: np });
+            return { ok: true, name };
+          }
+          return { ok: false, error: `${name}：不支持刷新的类型 ${t}`, name };
+        } catch (e) {
+          return { ok: false, error: `${name}：${e && (e.message || e)}`, name };
+        }
+      }
+      function _assignRefreshedLeafResult(strategyId, { payload, result, next_plan }) {
+        const sid = String(strategyId || "").trim();
+        const idx = fixedStrategies.findIndex((x) => String(x && x.id) === sid);
+        if (idx < 0) return;
+        const prev = fixedStrategies[idx];
+        fixedStrategies[idx] = {
+          ...prev,
+          payload: (payload && typeof payload === "object") ? payload : prev.payload,
+          result,
+          next_plan: next_plan != null ? next_plan : prev.next_plan,
+          saved_at: new Date().toISOString(),
+        };
+      }
+      async function refreshMixLeafStrategiesAndRerunMix() {
+        const rootIds = (mixSelectedStrategyIds || []).map((x) => String(x || "").trim()).filter(Boolean);
+        if (rootIds.length < 1) return setMsg("请先向组合中添加至少一个固定策略。");
+        const leafIds = _mixCollectLeafStrategyIdsForRefresh(rootIds);
+        if (leafIds.length < 1) return setMsg("没有找到可刷新的叶子策略（需为持有/轮动/趋势/日历择时，且已保存含 payload 的固定策略）。");
+        const btn = $("mixRefreshLeafStrategies");
+        if (btn) btn.disabled = true;
+        const st = $("status");
+        if (st) st.textContent = `刷新叶子策略 0/${leafIds.length}…`;
+        setMsg("");
+        const errors = [];
+        let okN = 0;
+        for (let i = 0; i < leafIds.length; i++) {
+          const id = leafIds[i];
+          const s = _findFixedStrategy(id);
+          if (!s) {
+            errors.push(`[${id}] 未找到固定策略`);
+            continue;
+          }
+          if (st) st.textContent = `刷新叶子策略 ${i + 1}/${leafIds.length}：${s.name}…`;
+          const r = await _refreshFixedStrategyLeafFromServer(s);
+          if (r.ok) okN += 1;
+          else errors.push(r.error || `${s.name} 失败`);
+        }
+        _saveFixedStrategies();
+        _renderFixedStrategyControls();
+        if (st) st.textContent = "";
+        if (btn) btn.disabled = false;
+        if (okN < 1) {
+          setMsg(errors.length ? errors.join("；") : "刷新失败。");
+          return;
+        }
+        await runStrategyMix();
+        if (errors.length) {
+          setMsg(`已刷新 ${okN}/${leafIds.length} 条叶子策略并重算组合。部分失败：${errors.join("；")}`);
+        } else {
+          setMsg(`已刷新 ${okN} 条叶子策略并重算组合（刷新时 end 已自动更新为最后交易日；轮动已尽力更新下一交易日计划）。`);
+        }
       }
       async function runStrategyMix() {
         const entries = _collectMixStrategies();
@@ -17744,6 +17911,15 @@
       if ($("runRotNextPlan")) $("runRotNextPlan").addEventListener("click", runRotNextExecutionPlan);
       if ($("runTrendResearch")) $("runTrendResearch").addEventListener("click", runTrendResearch);
       if ($("runStrategyMix")) $("runStrategyMix").addEventListener("click", runStrategyMix);
+      if ($("mixRefreshLeafStrategies")) {
+        $("mixRefreshLeafStrategies").addEventListener("click", () => {
+          refreshMixLeafStrategiesAndRerunMix().catch((e) => {
+            if ($("mixRefreshLeafStrategies")) $("mixRefreshLeafStrategies").disabled = false;
+            if ($("status")) $("status").textContent = "";
+            setMsg(`组合刷新异常：${e && (e.message || e)}`);
+          });
+        });
+      }
       if ($("mixSetEqualWeights")) $("mixSetEqualWeights").addEventListener("click", setMixEqualWeights);
       if ($("mixSetErcWeights")) $("mixSetErcWeights").addEventListener("click", setMixErcWeights);
       if ($("mixSetInvVolWeights")) $("mixSetInvVolWeights").addEventListener("click", setMixInvVolWeights);
