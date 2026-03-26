@@ -24,3 +24,10 @@ def test_favicon_does_not_404(api_client: TestClient) -> None:
     resp = client.get("/favicon.ico")
     assert resp.status_code in (200, 204)
 
+
+def test_static_shared_terminal_css(api_client: TestClient) -> None:
+    resp = api_client.get("/static/terminal.css")
+    assert resp.status_code == 200
+    assert ":root" in resp.text
+    assert "Noto Sans SC" in resp.text
+

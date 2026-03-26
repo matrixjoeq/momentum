@@ -4,6 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>基准分析（持有策略）</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <script>
       (function () {
         const key = `theme:${location.pathname}`;
@@ -16,93 +22,59 @@
       })();
     </script>
     <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <link rel="stylesheet" href="/static/terminal.css" />
     <style>
-      :root {
-        --bg: #0b1220;
-        --surface: #121a2b;
-        --text: #e5e7eb;
-        --muted: #94a3b8;
-        --border: #334155;
-        --head: #1e293b;
-        --control-bg: #0f172a;
-        --link: #7dd3fc;
-        --plot-fg: #e5e7eb;
-        --plot-grid: #334155;
-        --plot-bg: #0f172a;
+      input,
+      select {
+        min-width: 180px;
       }
-      :root[data-theme="light"] {
-        --bg: #ffffff;
-        --surface: #ffffff;
-        --text: #111827;
-        --muted: #4b5563;
-        --border: #d1d5db;
-        --head: #f3f4f6;
-        --control-bg: #ffffff;
-        --link: #2563eb;
-        --plot-fg: #111827;
-        --plot-grid: #d1d5db;
-        --plot-bg: #ffffff;
+      #chart,
+      #rollingReturns,
+      #rollingDD {
+        width: 100%;
+        height: 520px;
       }
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 24px; background: var(--bg); color: var(--text); }
-      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
-      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-      input, select { padding: 8px; min-width: 180px; background: var(--control-bg); color: var(--text); border: 1px solid var(--border); }
-      button { padding: 8px 12px; cursor: pointer; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-      .muted { color: var(--muted); font-size: 12px; }
-      .panel { margin-top: 16px; }
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; font-size: 13px; }
-      th { background: var(--head); }
-      #chart, #rollingReturns, #rollingDD { width: 100%; height: 520px; }
-      .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-      .code-list { max-height: 220px; overflow: auto; border: 1px solid var(--border); padding: 8px; min-width: 320px; }
-      .msg { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
-      .tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 12px; }
-      .tabBtn { padding: 8px 12px; border: 1px solid var(--border); background: var(--surface); border-radius: 10px 10px 0 0; cursor: pointer; color: var(--text); }
-      .tabBtn.active { border-color: var(--text); font-weight: 600; }
-      .tabPanel { display: none; }
-      .tabPanel.active { display: block; }
-      .reportCard { margin-top: 10px; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.55; color: var(--text); }
-      .reportCard:empty { display: none; }
-      .reportCard .reportTitle { font-weight: 700; color: var(--text); margin-bottom: 4px; }
-      .reportCard .reportSectionTitle { margin-top: 6px; font-weight: 600; color: var(--text); }
-      .reportCard .reportList { margin: 6px 0 0 18px; }
-      .reportCard .reportNote { margin-top: 6px; color: var(--muted); font-size: 12px; }
-      .mixStrategyRow.dragging { opacity: 0.55; background: rgba(148, 163, 184, 0.12); }
-      .mixStrategyRow.drag-over { outline: 2px dashed var(--link); background: rgba(125, 211, 252, 0.18); }
-      .abCol { min-width: 520px; flex: 1; min-inline-size: 0; }
-      .abWideTableWrap { width: 100%; overflow-x: auto; }
-      [style*="color:#444"] { color: var(--muted) !important; }
-      .helpBtn { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
-      #metricModal > div { background: var(--surface) !important; color: var(--text); border: 1px solid var(--border); }
-      a { color: var(--link); }
-      .theme-toggle {
-        position: fixed;
-        top: 14px;
-        right: 14px;
-        z-index: 9999;
-        border-radius: 999px;
-        padding: 6px 10px;
-        font-size: 12px;
-      }
-
       @media print {
-        body { margin: 12mm; }
-        .no-print { display: none !important; }
-        #metricModal { display: none !important; }
-        .panel, table { break-inside: avoid; page-break-inside: avoid; }
-        h2, h3 { break-after: avoid; page-break-after: avoid; }
-        #chart, #rollingReturns, #rollingDD,
-        #baselineNavChart, #baselineDDCompare, #baselineRatioChart, #baseline40dDiffChart, #baselineRollingCombo, #baselineExcessRollingCombo,
-        #calTimingNavChart, #calTimingDDCompare, #calTimingRatioChart, #calTiming40dDiffChart, #calTimingRollingCombo, #calTimingExcessRollingCombo,
-        #ewCalHeatmap, #ewCalRollingChart,
-        #rotChart, #rotDDCompare, #rotExcessChart, #rot40dDiffChart, #rotRollingCombo, #rotExcessRollingCombo,
-        #trendChart, #trendDDCompare, #trendExcessChart, #trend40dExcessChart, #trendRollingCombo, #trendExcessRollingCombo,
-        #rotCalHeatmap, #rotCalRollingChart,
+        #chart,
+        #rollingReturns,
+        #rollingDD,
+        #baselineNavChart,
+        #baselineDDCompare,
+        #baselineRatioChart,
+        #baseline40dDiffChart,
+        #baselineRollingCombo,
+        #baselineExcessRollingCombo,
+        #calTimingNavChart,
+        #calTimingDDCompare,
+        #calTimingRatioChart,
+        #calTiming40dDiffChart,
+        #calTimingRollingCombo,
+        #calTimingExcessRollingCombo,
+        #ewCalHeatmap,
+        #ewCalRollingChart,
+        #rotChart,
+        #rotDDCompare,
+        #rotExcessChart,
+        #rot40dDiffChart,
+        #rotRollingCombo,
+        #rotExcessRollingCombo,
+        #trendChart,
+        #trendDDCompare,
+        #trendExcessChart,
+        #trend40dExcessChart,
+        #trendRollingCombo,
+        #trendExcessRollingCombo,
+        #rotCalHeatmap,
+        #rotCalRollingChart,
         #corrHeatmap,
-        #mcEwHist, #mcRotHist, #mcExcessHist,
-        #mcEwQQ, #mcRotQQ, #mcExcessQQ,
-        #mcRotPeriodHist, #mcExcessPeriodHist {
+        #mcEwHist,
+        #mcRotHist,
+        #mcExcessHist,
+        #mcEwQQ,
+        #mcRotQQ,
+        #mcExcessQQ,
+        #mcRotPeriodHist,
+        #mcExcessPeriodHist {
           height: 420px !important;
         }
       }
@@ -118,7 +90,7 @@
       <span style="margin: 0 6px;">|</span>
       <a href="/research/nasdaq-vix">研究：纳指ETF × VIX（Cboe）</a>
     </div>
-    <div class="panel no-print" style="margin-top:10px;">
+    <div class="panel no-print research-nav-quick" style="margin-top:10px;">
       <div class="muted">
         快捷跳转：
         <a href="#section-hold">持有策略</a>
@@ -132,7 +104,7 @@
         <a href="#section-mix">多策略组合</a>
       </div>
     </div>
-    <div class="muted no-print" style="margin-top:6px;">
+    <div class="muted no-print research-nav-inline" style="margin-top:6px;">
       <a href="#pageTop">返回顶部</a>
       <span style="margin: 0 6px;">|</span>
       <a href="#section-hold">持有</a>
@@ -197,12 +169,13 @@
         <label>持有策略仓位比例</label>
         <select id="baselineMode">
           <option value="EW" selected>等权（EW）</option>
-          <option value="RP">风险平价（RP，inverse-vol）</option>
+          <option value="RP">风险平价（协方差 ERC）</option>
+          <option value="IVOL">波动率倒数加权</option>
           <option value="CUSTOM">自定义</option>
         </select>
       </div>
       <div>
-        <label>风险平价波动率窗口（交易日）</label>
+        <label>ERC / 波动率倒数 估计窗口（交易日）</label>
         <input id="baselineRpWin" value="60" />
       </div>
       <div id="baselineCustomWeightsWrap" style="min-width: 320px; display:none;">
@@ -440,7 +413,8 @@
           <label>组合</label>
           <select id="baselineDailyRetSeries" style="min-width:180px;">
             <option value="EW" selected>等权（EW）</option>
-            <option value="RP">风险平价（RP）</option>
+            <option value="RP">风险平价（ERC）</option>
+            <option value="IVOL">波动率倒数</option>
             <option value="CUSTOM">自定义</option>
           </select>
         </div>
@@ -1708,13 +1682,14 @@
           <div class="row no-print" style="justify-content:space-between; align-items:end;">
             <div>
               <h3 style="margin:0;">净值曲线（轮动 vs 基准）</h3>
-              <div class="muted" style="margin-top:4px;">基准可选：等权（EW_REBAL）或 风险平价（RP_REBAL，inverse-vol）。</div>
+              <div class="muted" style="margin-top:4px;">基准可选：等权（EW_REBAL）、风险平价（RP_REBAL，协方差 ERC）或 波动率倒数（IVOL_REBAL）。</div>
             </div>
             <div>
               <label>轮动基准</label>
               <select id="rotBenchMode" style="min-width:220px;">
                 <option value="EW_REBAL" selected>等权（EW_REBAL）</option>
-                <option value="RP_REBAL">风险平价（RP_REBAL）</option>
+                <option value="RP_REBAL">风险平价（ERC，RP_REBAL）</option>
+                <option value="IVOL_REBAL">波动率倒数（IVOL_REBAL）</option>
               </select>
             </div>
           </div>
@@ -1909,7 +1884,7 @@
       </div>
 
       <div class="panel">
-        <h3>逐期对比（轮动 vs 等权）</h3>
+        <h3>逐期对比（轮动 vs 所选基准）</h3>
         <div class="row" style="gap:8px; margin:6px 0;">
           <select id="rotPeriodSortKey" style="min-width:140px;">
             <option value="start">开始日期</option>
@@ -2158,7 +2133,7 @@
         <div><label>分块大小 (Chunk Size)</label><input id="simChunk" value="200" /></div>
         <div><label>并行进程数（阶段3/4，0=自动）</label><input id="simMcJobs" value="0" /></div>
         <button id="simRun1">阶段1 (Phase 1)：生成资产</button>
-        <button id="simRun2">阶段2 (Phase 2)：轮动 vs 持有策略（EW/RP，轮动参数=策略A）</button>
+        <button id="simRun2">阶段2 (Phase 2)：轮动 vs 持有策略（EW/ERC/IVOL，轮动参数=策略A）</button>
         <button id="simRun3">阶段3 (Phase 3)：批量分布（轮动参数=策略A，持有策略可配）</button>
         <div class="muted" style="flex-basis:100%;margin:8px 0 4px 0;">【A/B专用参数】以下参数仅用于显著性检验</div>
         <div><label>A/B 世界数</label><input id="simAbWorlds" value="3000" /></div>
@@ -2170,7 +2145,7 @@
           <select id="simAbTargetA" style="min-width:260px;">
             <option value="rotation_a" selected>轮动策略A</option>
             <option value="rotation_b">轮动策略B</option>
-            <option value="risk_parity">风险平价再平衡</option>
+            <option value="risk_parity">风险平价再平衡（模拟器为简化 inverse-vol）</option>
             <option value="equal_weight">等权再平衡</option>
             <option value="cash">持有现金</option>
           </select>
@@ -2180,7 +2155,7 @@
           <select id="simAbTargetB" style="min-width:260px;">
             <option value="rotation_b" selected>轮动策略B</option>
             <option value="rotation_a">轮动策略A</option>
-            <option value="risk_parity">风险平价再平衡</option>
+            <option value="risk_parity">风险平价再平衡（模拟器为简化 inverse-vol）</option>
             <option value="equal_weight">等权再平衡</option>
             <option value="cash">持有现金</option>
           </select>
@@ -3274,7 +3249,8 @@
           <label>组合权重模式</label>
           <select id="mixWeightMode">
             <option value="equal" selected>等权</option>
-            <option value="risk_parity">风险平价</option>
+            <option value="erc">风险平价（协方差 ERC）</option>
+            <option value="inverse_vol">波动率倒数加权</option>
             <option value="custom">自定义</option>
           </select>
         </div>
@@ -3286,7 +3262,8 @@
         <button id="mixClearStrategies">清空组合</button>
         <div><label>交易账户金额(元)</label><input id="mixAccountAmount" placeholder="可空，例如 1000000" /></div>
         <button id="mixSetEqualWeights">等权</button>
-        <button id="mixSetInvVolWeights">风险平价</button>
+        <button id="mixSetErcWeights">ERC</button>
+        <button id="mixSetInvVolWeights">波动率倒数</button>
         <div><label>滚动窗口(交易日)</label><input id="mixRollWin" value="60" /></div>
         <button id="runStrategyMix">生成组合分析</button>
       </div>
@@ -3886,7 +3863,7 @@
             if (kk && Number.isFinite(vv) && vv > 0) custom_weights[kk] = vv;
           }
           const wm0 = String(pRaw.weight_mode || "equal").trim().toLowerCase();
-          const weight_mode = ["equal", "risk_parity", "custom"].includes(wm0) ? wm0 : "equal";
+          const weight_mode = _normalizePersistedMixWeightMode(wm0);
           let mix_roll_win = Math.floor(Number(pRaw.mix_roll_win != null ? pRaw.mix_roll_win : 60));
           if (!Number.isFinite(mix_roll_win) || mix_roll_win < 5) mix_roll_win = 60;
           const mix_account_amount = String(pRaw.mix_account_amount != null ? pRaw.mix_account_amount : "").trim();
@@ -7738,7 +7715,7 @@
         if (!s || !s.result || typeof s.result !== "object") return null;
         if (s.type === "baseline") {
           const hm = String((s.payload && s.payload.holding_mode) || (s.fields && s.fields.baselineMode) || (s.result && s.result.holding_mode) || "EW").toUpperCase();
-          return _seriesMapFromNav(s.result, [hm, "EW", "RP", "CUSTOM"]);
+          return _seriesMapFromNav(s.result, [hm, "EW", "RP", "IVOL", "CUSTOM"]);
         }
         if (s.type === "rotation") return _seriesMapFromNav(s.result, ["ROTATION", "STRAT"]);
         if (s.type === "trend") return _seriesMapFromNav(s.result, ["STRAT"]);
@@ -7847,6 +7824,150 @@
         }
         return out;
       }
+      const MIX_ERC_MIN_OBS = 20;
+      function _normalizePersistedMixWeightMode(wm) {
+        const s = String(wm || "equal").trim().toLowerCase();
+        if (s === "risk_parity") return "erc";
+        if (["equal", "erc", "inverse_vol", "custom"].includes(s)) return s;
+        return "equal";
+      }
+      function _normalizeMixWeightModeToken(mode) {
+        return _normalizePersistedMixWeightMode(mode);
+      }
+      function _mixSampleCovFromMatrix(R) {
+        const T = R.length;
+        const n = (R[0] && R[0].length) ? R[0].length : 0;
+        if (T < 2 || n < 1) return null;
+        const mean = new Array(n).fill(0);
+        for (let t = 0; t < T; t++) {
+          for (let j = 0; j < n; j++) mean[j] += R[t][j];
+        }
+        for (let j = 0; j < n; j++) mean[j] /= T;
+        const df = T - 1;
+        const cov = Array.from({ length: n }, () => new Array(n).fill(0));
+        for (let t = 0; t < T; t++) {
+          for (let i = 0; i < n; i++) {
+            const di = R[t][i] - mean[i];
+            for (let j = 0; j < n; j++) {
+              const dj = R[t][j] - mean[j];
+              cov[i][j] += di * dj;
+            }
+          }
+        }
+        for (let i = 0; i < n; i++) {
+          for (let j = 0; j < n; j++) cov[i][j] /= df;
+        }
+        return cov;
+      }
+      function _mixRiskContribNorm(w, sigma) {
+        const n = w.length;
+        const m = new Array(n).fill(0);
+        let pv = 0;
+        for (let i = 0; i < n; i++) {
+          let s = 0;
+          for (let j = 0; j < n; j++) s += sigma[i][j] * w[j];
+          m[i] = s;
+          pv += w[i] * s;
+        }
+        if (pv <= 1e-20) return new Array(n).fill(1 / n);
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) out[i] = (w[i] * m[i]) / pv;
+        return out;
+      }
+      function _mixSolveErcWeights(cov) {
+        const n = cov.length;
+        if (n === 0) return null;
+        if (n === 1) return [1];
+        const eps = 1e-12;
+        const sigma = cov.map((row, i) => row.map((v, j) => (i === j ? v + eps : v)));
+        let w = new Array(n).fill(0);
+        let siv = 0;
+        for (let i = 0; i < n; i++) {
+          const vi = Math.max(sigma[i][i], 1e-18);
+          w[i] = 1 / Math.sqrt(vi);
+          siv += w[i];
+        }
+        if (siv <= 0) w = new Array(n).fill(1 / n);
+        else w = w.map((x) => x / siv);
+        const target = 1 / n;
+        const maxIter = 400;
+        const lr = 0.35;
+        for (let it = 0; it < maxIter; it++) {
+          const rc = _mixRiskContribNorm(w, sigma);
+          let err = 0;
+          for (let i = 0; i < n; i++) {
+            const g = rc[i] - target;
+            err += g * g;
+          }
+          if (err < 1e-10) break;
+          const nw = new Array(n);
+          for (let i = 0; i < n; i++) {
+            const adj = 1 - lr * (rc[i] - target);
+            nw[i] = Math.max(1e-14, w[i] * adj);
+          }
+          let s = 0;
+          for (let i = 0; i < n; i++) s += nw[i];
+          if (s <= 0) break;
+          w = nw.map((x) => x / s);
+        }
+        const rcF = _mixRiskContribNorm(w, sigma);
+        let errF = 0;
+        for (let i = 0; i < n; i++) errF += (rcF[i] - target) ** 2;
+        if (errF > 1e-4) {
+          w = new Array(n).fill(0);
+          siv = 0;
+          for (let i = 0; i < n; i++) {
+            const vi = Math.max(sigma[i][i], 1e-18);
+            w[i] = 1 / Math.sqrt(vi);
+            siv += w[i];
+          }
+          w = siv > 0 ? w.map((x) => x / siv) : new Array(n).fill(1 / n);
+        }
+        return w;
+      }
+      function _mixAlignedReturnMatrix(entries) {
+        const arr = entries || [];
+        if (!arr.length) return { R: null };
+        let dates = Array.from(arr[0].retMap.keys()).sort();
+        for (let i = 1; i < arr.length; i++) {
+          const keys = arr[i].retMap;
+          dates = dates.filter((d) => keys.has(d));
+        }
+        const n = arr.length;
+        const R = [];
+        for (let t = 0; t < dates.length; t++) {
+          const d = dates[t];
+          const row = new Array(n);
+          let ok = true;
+          for (let j = 0; j < n; j++) {
+            const v = Number(arr[j].retMap.get(d));
+            if (!Number.isFinite(v)) { ok = false; break; }
+            row[j] = v;
+          }
+          if (ok) R.push(row);
+        }
+        if (R.length < MIX_ERC_MIN_OBS) return { R: null };
+        return { R };
+      }
+      function _mixErcWeightsFromEntries(entries) {
+        const { R } = _mixAlignedReturnMatrix(entries);
+        if (!R || R.length < 2) return null;
+        const cov = _mixSampleCovFromMatrix(R);
+        if (!cov) return null;
+        return _mixSolveErcWeights(cov);
+      }
+      function _mixInverseVolWeightsFromEntries(entries) {
+        const arr = entries || [];
+        if (!arr.length) return null;
+        const vols = arr.map((x) => {
+          const map = x.retMap || new Map();
+          const rs = Array.from(map.values()).map(Number).filter(Number.isFinite);
+          const mm = _metricsFromReturns(rs, 0.0);
+          return Number(mm && mm.annualized_volatility);
+        });
+        const inv = vols.map((v) => (Number.isFinite(v) && v > 0 ? 1.0 / v : 0.0));
+        return _normalizeWeights(inv);
+      }
       function _readCustomMixWeightMap() {
         const mp = { ...(mixCustomWeightsById || {}) };
         document.querySelectorAll("input.mixCustomWeight[data-strategy-id]").forEach((el) => {
@@ -7860,27 +7981,23 @@
       function _mixWeightsByMode(entries, mode) {
         const arr = entries || [];
         if (!arr.length) return null;
-        const m = String(mode || "equal").trim().toLowerCase();
+        const m = _normalizeMixWeightModeToken(mode);
         if (m === "custom") {
           const raw = arr.map((x) => Number((_readCustomMixWeightMap() || {})[x.id] || 0));
           return _normalizeWeights(raw);
         }
-        if (m === "risk_parity") {
-          const vols = arr.map((x) => {
-            const map = x.retMap || new Map();
-            const rs = Array.from(map.values()).map(Number).filter(Number.isFinite);
-            const mm = _metricsFromReturns(rs, 0.0);
-            return Number(mm && mm.annualized_volatility);
-          });
-          const inv = vols.map((v) => (Number.isFinite(v) && v > 0 ? 1.0 / v : 0.0));
-          return _normalizeWeights(inv);
+        if (m === "erc") {
+          const w = _mixErcWeightsFromEntries(arr);
+          if (w && w.length === arr.length) return w;
+          return _mixInverseVolWeightsFromEntries(arr);
         }
+        if (m === "inverse_vol") return _mixInverseVolWeightsFromEntries(arr);
         return _normalizeWeights(arr.map(() => 1.0));
       }
       function _mixWeightsByModeScoped(entries, mode, customMap) {
         const arr = entries || [];
         if (!arr.length) return null;
-        const m = String(mode || "equal").trim().toLowerCase();
+        const m = _normalizeMixWeightModeToken(mode);
         const cmap = (customMap && typeof customMap === "object") ? customMap : {};
         if (m === "custom") {
           const raw = arr.map((x) => {
@@ -7889,16 +8006,12 @@
           });
           return _normalizeWeights(raw);
         }
-        if (m === "risk_parity") {
-          const vols = arr.map((x) => {
-            const map = x.retMap || new Map();
-            const rs = Array.from(map.values()).map(Number).filter(Number.isFinite);
-            const mm = _metricsFromReturns(rs, 0.0);
-            return Number(mm && mm.annualized_volatility);
-          });
-          const inv = vols.map((v) => (Number.isFinite(v) && v > 0 ? 1.0 / v : 0.0));
-          return _normalizeWeights(inv);
+        if (m === "erc") {
+          const w = _mixErcWeightsFromEntries(arr);
+          if (w && w.length === arr.length) return w;
+          return _mixInverseVolWeightsFromEntries(arr);
         }
+        if (m === "inverse_vol") return _mixInverseVolWeightsFromEntries(arr);
         return _normalizeWeights(arr.map(() => 1.0));
       }
       function _computeMixReturnMapFromFixedStrategy(s, visiting) {
@@ -8079,8 +8192,14 @@
         _saveMixSelection();
         try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
       }
+      function setMixErcWeights() {
+        if ($("mixWeightMode")) $("mixWeightMode").value = "erc";
+        _renderMixStrategyListTable();
+        _saveMixSelection();
+        try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
+      }
       function setMixInvVolWeights() {
-        if ($("mixWeightMode")) $("mixWeightMode").value = "risk_parity";
+        if ($("mixWeightMode")) $("mixWeightMode").value = "inverse_vol";
         _renderMixStrategyListTable();
         _saveMixSelection();
         try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch { /* ignore */ }
@@ -8576,7 +8695,9 @@
         Plotly.newPlot("strategyMixRollingDD", ddTraces, { margin: { t: 20 }, yaxis: { title: "回撤", tickformat: ".0%", autorange: true }, title: "滚动回撤（由净值推导）" }, { responsive: true });
 
         const mixAmtRaw = ($("mixAccountAmount") && $("mixAccountAmount").value != null) ? String($("mixAccountAmount").value).replaceAll(",", "").trim() : "";
-        const modeTxt = (mode === "custom") ? "自定义" : (mode === "risk_parity" ? "风险平价" : "等权");
+        const modeTxt = (mode === "custom")
+          ? "自定义"
+          : ((mode === "erc" || mode === "risk_parity") ? "风险平价(ERC)" : (mode === "inverse_vol" ? "波动率倒数" : "等权"));
         const mixAmtTxt = (mixAmtRaw !== "" && Number.isFinite(Number(mixAmtRaw)) && Number(mixAmtRaw) > 0) ? `；交易账户金额=${fmtMoney(Number(mixAmtRaw))}元` : "；交易账户金额未设置";
         const wTxt = entries.map((s, i) => `${s.displayName}=${fmtPct(ws[i])}`).join("，");
         $("strategyMixNote").textContent = `权重模式=${modeTxt}（归一后：${wTxt}）；共同样本区间：${dts[0]} ~ ${dts[dts.length - 1]}（${dts.length}个交易日）；滚动窗口=${rollWin}${mixAmtTxt}。`;
@@ -8734,9 +8855,9 @@
             const vv = Number(cw[sid]);
             mixCustomWeightsById[sid] = (Number.isFinite(vv) && vv > 0) ? vv : 1;
           }
-          const wm = String(p.weight_mode || "equal").trim().toLowerCase();
+          const wm = _normalizePersistedMixWeightMode(p.weight_mode || "equal");
           if ($("mixWeightMode")) {
-            $("mixWeightMode").value = ["equal", "risk_parity", "custom"].includes(wm) ? wm : "equal";
+            $("mixWeightMode").value = wm;
           }
           if ($("mixRollWin")) {
             const rw = Math.max(5, Math.floor(Number(p.mix_roll_win != null ? p.mix_roll_win : 60)));
@@ -9147,6 +9268,7 @@
           if (bk && Array.isArray(nav[bk]) && nav[bk].length) return bk;
           if (mode !== "EW" && Array.isArray(nav.EW) && nav.EW.length) return "EW";
           if (mode !== "RP" && Array.isArray(nav.RP) && nav.RP.length) return "RP";
+          if (mode !== "IVOL" && Array.isArray(nav.IVOL) && nav.IVOL.length) return "IVOL";
           if (mode !== "CUSTOM" && Array.isArray(nav.CUSTOM) && nav.CUSTOM.length) return "CUSTOM";
           return "";
         })();
@@ -9380,7 +9502,8 @@
 
       function _baselineModeLabel(modeRaw) {
         const mode = String(modeRaw || "EW").toUpperCase();
-        if (mode === "RP") return "风险平价(RP)";
+        if (mode === "RP") return "风险平价 ERC(RP)";
+        if (mode === "IVOL") return "波动率倒数(IVOL)";
         if (mode === "CUSTOM") return "自定义(CUSTOM)";
         return "等权(EW)";
       }
@@ -12348,12 +12471,14 @@
         const series = (data && data.nav && data.nav.series) ? data.nav.series : {};
         if (!sel || !series) return;
         const wanted = String(defaultSeries || sel.value || "EW").toUpperCase();
-        if (wanted === "EW" || wanted === "RP" || wanted === "CUSTOM") sel.value = wanted;
+        if (wanted === "EW" || wanted === "RP" || wanted === "IVOL" || wanted === "CUSTOM") sel.value = wanted;
         const key = String(sel.value || "EW").toUpperCase();
         const nav = Array.isArray(series[key]) ? series[key] : [];
         const dates = (data && data.nav && Array.isArray(data.nav.dates)) ? data.nav.dates : [];
         const payload = _dailyReturnsFromNav(nav, dates);
-        const label = (key === "RP") ? "风险平价（RP）" : ((key === "CUSTOM") ? "自定义（CUSTOM）" : "等权（EW）");
+        const label = (key === "RP")
+          ? "风险平价 ERC（RP）"
+          : ((key === "IVOL") ? "波动率倒数（IVOL）" : ((key === "CUSTOM") ? "自定义（CUSTOM）" : "等权（EW）"));
         const mode = modeSel ? String(modeSel.value || "simple") : "simple";
         _renderDailyReturnDist("baselineDailyRetHist", "baselineDailyRetQuantiles", payload, `${label} 日度收益率分布`, mode);
       }
@@ -13154,7 +13279,7 @@
         };
         const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
         const benchKey = (($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
-        const excessKey = (benchKey === "RP_REBAL") ? "EXCESS_RP" : "EXCESS";
+        const excessKey = (benchKey === "RP_REBAL") ? "EXCESS_RP" : ((benchKey === "IVOL_REBAL") ? "EXCESS_IVOL" : "EXCESS");
         const benchNav = s[benchKey] || [];
         const traces = [
           { x: dates, y: s.ROTATION, mode: "lines", name: "ROTATION", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
@@ -13794,7 +13919,9 @@
       function renderRotationMetrics(m) {
         const s = m.strategy || {};
         const benchKey = (($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
-        const ex = (benchKey === "RP_REBAL") ? (m.excess_vs_risk_parity || {}) : (m.excess_vs_equal_weight || {});
+        let ex = m.excess_vs_equal_weight || {};
+        if (benchKey === "RP_REBAL") ex = m.excess_vs_risk_parity || {};
+        else if (benchKey === "IVOL_REBAL") ex = m.excess_vs_inverse_vol_rebal || {};
         const rows = [
           { key: "rot_cum", label: "策略累积收益", value: fmtPct(s.cumulative_return) },
           { key: "rot_ann", label: "策略年化收益", value: fmtPct(s.annualized_return) },
@@ -13880,16 +14007,48 @@
       const trendGroupExplainState = { page: 1, rows: [] };
       function _sortedRotRows(rows, key, dir) {
         const arr = (rows || []).slice();
-        const k = key === "excess" ? "excess_return" : (key === "end" ? "end_date" : "start_date");
+        const bk = ($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL";
+        let excessField = "excess_return";
+        if (bk === "RP_REBAL") excessField = "excess_return_rp";
+        else if (bk === "IVOL_REBAL") excessField = "excess_return_ivol";
+        const k = key === "excess" ? excessField : (key === "end" ? "end_date" : "start_date");
         arr.sort((a, b) => {
-          const av = k === "excess_return" ? Number(a[k]) : String(a[k]);
-          const bv = k === "excess_return" ? Number(b[k]) : String(b[k]);
+          const av = (k === "start_date" || k === "end_date") ? String(a[k]) : Number(a[k]);
+          const bv = (k === "start_date" || k === "end_date") ? String(b[k]) : Number(b[k]);
           if (av < bv) return -1;
           if (av > bv) return 1;
           return 0;
         });
         if (dir === "desc") arr.reverse();
         return arr;
+      }
+      function _rotBenchColumnSpec() {
+        const bk = ($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL";
+        if (bk === "RP_REBAL") {
+          return {
+            benchHeader: "ERC 基准",
+            excessHeader: "超额(vs ERC)",
+            benchRet: (r) => r.risk_parity_return,
+            excessRet: (r) => r.excess_return_rp,
+            winVal: (r) => r.win_rp,
+          };
+        }
+        if (bk === "IVOL_REBAL") {
+          return {
+            benchHeader: "1/σ 基准",
+            excessHeader: "超额(vs 1/σ)",
+            benchRet: (r) => r.inverse_vol_rebal_return,
+            excessRet: (r) => r.excess_return_ivol,
+            winVal: (r) => r.win_ivol,
+          };
+        }
+        return {
+          benchHeader: "等权(EW)",
+          excessHeader: "超额(vs EW)",
+          benchRet: (r) => r.equal_weight_return,
+          excessRet: (r) => r.excess_return,
+          winVal: (r) => r.win,
+        };
       }
       function renderRotPeriods() {
         const key = $("rotPeriodSortKey").value;
@@ -13900,6 +14059,7 @@
         rotState.page = Math.min(Math.max(1, rotState.page), totalPages);
         const startIdx = (rotState.page - 1) * pageSize;
         const pageRows = rows.slice(startIdx, startIdx + pageSize);
+        const col = _rotBenchColumnSpec();
         const fmtLegBuy = (xs) => (xs || []).map(x => `${codeLabel(x.code)}:${fmtPct(x.delta_weight)}`).join(" ");
         const fmtLegSell = (xs) => (xs || []).map(x => `${codeLabel(x.code)}:${fmtPct(Math.abs(x.delta_weight))}`).join(" ");
         const fmtHit = (r) => {
@@ -13918,8 +14078,12 @@
           return `${m}${t && t !== "-" ? ` (${t})` : ""}`;
         };
         $("rotPeriods").innerHTML =
-          `<tr><th>决策日 (Decision Date)</th><th>命中方式 (Hit Mode)</th><th>补位 (Backfill)</th><th>开始 (Start)</th><th>结束 (End)</th><th>轮动收益 (Rotation)</th><th>等权收益 (EW)</th><th>超额 (Excess)</th><th>胜 (Win)</th><th>调入(Δw) (Buy)</th><th>调出(Δw) (Sell)</th></tr>` +
-          pageRows.map(r => `<tr><td>${r.decision_date || "-"}</td><td>${fmtHit(r)}</td><td>${r.backfill_used ? "是" : "否"}</td><td>${r.start_date}</td><td>${r.end_date}</td><td>${fmtPct(r.strategy_return)}</td><td>${fmtPct(r.equal_weight_return)}</td><td>${fmtPct(r.excess_return)}</td><td>${r.win ? "是" : "否"}</td><td>${fmtLegBuy(r.buys)}</td><td>${fmtLegSell(r.sells)}</td></tr>`).join("");
+          `<tr><th>决策日 (Decision Date)</th><th>命中方式 (Hit Mode)</th><th>补位 (Backfill)</th><th>开始 (Start)</th><th>结束 (End)</th><th>轮动收益 (Rotation)</th><th>${col.benchHeader}</th><th>${col.excessHeader}</th><th>胜 (Win)</th><th>调入(Δw) (Buy)</th><th>调出(Δw) (Sell)</th></tr>` +
+          pageRows.map((r) => {
+            const wv = col.winVal(r);
+            const winTxt = (wv === true || wv === false) ? (wv ? "是" : "否") : "-";
+            return `<tr><td>${r.decision_date || "-"}</td><td>${fmtHit(r)}</td><td>${r.backfill_used ? "是" : "否"}</td><td>${r.start_date}</td><td>${r.end_date}</td><td>${fmtPct(r.strategy_return)}</td><td>${fmtPct(col.benchRet(r))}</td><td>${fmtPct(col.excessRet(r))}</td><td>${winTxt}</td><td>${fmtLegBuy(r.buys)}</td><td>${fmtLegSell(r.sells)}</td></tr>`;
+          }).join("");
         $("rotPeriodPage").textContent = `${rotState.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
       }
 
@@ -14026,6 +14190,26 @@
         quarterly: { page: 1, rows: [] },
         yearly: { page: 1, rows: [] },
       };
+      function _reloadRotPeriodTablesFromResult(data) {
+        const d = data || {};
+        const bk = (($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
+        const pr = (d.period_returns || {});
+        const prRp = (d.period_returns_rp || {});
+        const prIv = (d.period_returns_ivol || {});
+        const pick = bk === "RP_REBAL" ? prRp : (bk === "IVOL_REBAL" ? prIv : pr);
+        rotPeriodTableState.weekly.rows = (pick.weekly) ? pick.weekly : [];
+        rotPeriodTableState.monthly.rows = (pick.monthly) ? pick.monthly : [];
+        rotPeriodTableState.quarterly.rows = (pick.quarterly) ? pick.quarterly : [];
+        rotPeriodTableState.yearly.rows = (pick.yearly) ? pick.yearly : [];
+        rotPeriodTableState.weekly.page = 1;
+        rotPeriodTableState.monthly.page = 1;
+        rotPeriodTableState.quarterly.page = 1;
+        rotPeriodTableState.yearly.page = 1;
+        renderRotPeriodTable("weekly");
+        renderRotPeriodTable("monthly");
+        renderRotPeriodTable("quarterly");
+        renderRotPeriodTable("yearly");
+      }
       const mixPeriodTableState = {
         weekly: { page: 1, rows: [] },
         monthly: { page: 1, rows: [] },
@@ -14764,23 +14948,16 @@
         renderRotPeriods();
         rotGroupExplainState.page = 1;
         renderRotGroupExplain(data.holdings || []);
-        // periodic returns tables
-        rotPeriodTableState.weekly.rows = (data.period_returns && data.period_returns.weekly) ? data.period_returns.weekly : [];
-        rotPeriodTableState.monthly.rows = (data.period_returns && data.period_returns.monthly) ? data.period_returns.monthly : [];
-        rotPeriodTableState.quarterly.rows = (data.period_returns && data.period_returns.quarterly) ? data.period_returns.quarterly : [];
-        rotPeriodTableState.yearly.rows = (data.period_returns && data.period_returns.yearly) ? data.period_returns.yearly : [];
-        rotPeriodTableState.weekly.page = 1;
-        rotPeriodTableState.monthly.page = 1;
-        rotPeriodTableState.quarterly.page = 1;
-        rotPeriodTableState.yearly.page = 1;
-        renderRotPeriodTable("weekly");
-        renderRotPeriodTable("monthly");
-        renderRotPeriodTable("quarterly");
-        renderRotPeriodTable("yearly");
-        const benchLabel = (benchKey => (benchKey === "RP_REBAL" ? "风险平价" : "等权基准"))(($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
-        const exObj = (($("rotBenchMode") && $("rotBenchMode").value) === "RP_REBAL")
+        _reloadRotPeriodTablesFromResult(data);
+        const benchLabel = (benchKey => (
+          benchKey === "RP_REBAL" ? "风险平价(ERC)" : (benchKey === "IVOL_REBAL" ? "波动率倒数基准" : "等权基准")
+        ))(($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
+        const bkNow = (($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
+        const exObj = (bkNow === "RP_REBAL")
           ? ((data.metrics || {}).excess_vs_risk_parity || {})
-          : ((data.metrics || {}).excess_vs_equal_weight || {});
+          : (bkNow === "IVOL_REBAL")
+            ? ((data.metrics || {}).excess_vs_inverse_vol_rebal || {})
+            : ((data.metrics || {}).excess_vs_equal_weight || {});
         const bullets = [
           ..._perfReportLines("轮动策略", (data.metrics || {}).strategy || {}),
           `相对${benchLabel}：超额年化(几何) ${fmtPct((exObj.annualized_return_geo != null) ? exObj.annualized_return_geo : exObj.annualized_return)}，信息比率 ${fmtNum(exObj.information_ratio)}。`,
@@ -16484,7 +16661,7 @@
           custom_weights = parsed.weights;
         }
         const rp_window_days = Math.max(2, Math.floor(Number(($("baselineRpWin").value || "60").trim())));
-        if (!Number.isFinite(rp_window_days) || rp_window_days < 2) return setMsg("RP 波动率窗口必须是 >=2 的整数交易日，例如 60");
+        if (!Number.isFinite(rp_window_days) || rp_window_days < 2) return setMsg("ERC / 波动率倒数 估计窗口必须是 >=2 的整数交易日，例如 60");
         const dynamic_universe = isDynamicUniverseOn();
         const corr_min_obs = 20;
         const exec_price = ($("baselineExecPrice") && $("baselineExecPrice").value) ? String($("baselineExecPrice").value).trim().toLowerCase() : "close";
@@ -16609,7 +16786,7 @@
       // baseline mode toggle: re-render from lastBaseline (no re-fetch)
       function updateBaselineHoldingUi() {
         const mode = ($("baselineMode") && $("baselineMode").value ? String($("baselineMode").value) : "EW").toUpperCase();
-        if ($("baselineRpWin")) $("baselineRpWin").disabled = (mode !== "RP");
+        if ($("baselineRpWin")) $("baselineRpWin").disabled = (mode !== "RP" && mode !== "IVOL");
         if ($("baselineCustomWeightsWrap")) $("baselineCustomWeightsWrap").style.display = (mode === "CUSTOM" ? "" : "none");
       }
       if ($("baselineMode")) $("baselineMode").addEventListener("change", () => {
@@ -17568,6 +17745,7 @@
       if ($("runTrendResearch")) $("runTrendResearch").addEventListener("click", runTrendResearch);
       if ($("runStrategyMix")) $("runStrategyMix").addEventListener("click", runStrategyMix);
       if ($("mixSetEqualWeights")) $("mixSetEqualWeights").addEventListener("click", setMixEqualWeights);
+      if ($("mixSetErcWeights")) $("mixSetErcWeights").addEventListener("click", setMixErcWeights);
       if ($("mixSetInvVolWeights")) $("mixSetInvVolWeights").addEventListener("click", setMixInvVolWeights);
       if ($("mixWeightMode")) $("mixWeightMode").addEventListener("change", () => {
         _renderMixStrategyListTable();
@@ -17671,6 +17849,8 @@
         if (!data) return;
         try { plotRotation(data); } catch (e) { /* best effort */ }
         try { renderRotationMetrics(data.metrics || {}); } catch (e) { /* best effort */ }
+        try { renderRotPeriods(); } catch (e) { /* best effort */ }
+        try { _reloadRotPeriodTablesFromResult(data); } catch (e) { /* best effort */ }
       });
       if ($("rotVolIdxOn")) $("rotVolIdxOn").addEventListener("change", _rotVolIdxUpdateUiEnabled);
       if ($("rotVolIdxAddRule")) $("rotVolIdxAddRule").addEventListener("click", () => _rotVolIdxAddRuleRow({}));
@@ -17769,7 +17949,7 @@
           mixCustomWeightsById = {};
         }
         if (mixSelSaved && mixSelSaved.weight_mode && $("mixWeightMode")) {
-          $("mixWeightMode").value = String(mixSelSaved.weight_mode);
+          $("mixWeightMode").value = _normalizePersistedMixWeightMode(mixSelSaved.weight_mode);
         }
         _renderFixedStrategyControls();
         _renderMixStrategyListTable();
@@ -17784,7 +17964,7 @@
           }
           if (mixDbSaved && Array.isArray(mixDbSaved.strategy_ids)) {
             mixSelectedStrategyIds = mixDbSaved.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean);
-            if (mixDbSaved.weight_mode && $("mixWeightMode")) $("mixWeightMode").value = String(mixDbSaved.weight_mode);
+            if (mixDbSaved.weight_mode && $("mixWeightMode")) $("mixWeightMode").value = _normalizePersistedMixWeightMode(mixDbSaved.weight_mode);
             mixCustomWeightsById = {};
             if (mixDbSaved.custom_weights && typeof mixDbSaved.custom_weights === "object") {
               for (const [k, v] of Object.entries(mixDbSaved.custom_weights)) {

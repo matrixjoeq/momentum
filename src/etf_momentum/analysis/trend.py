@@ -1237,7 +1237,54 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
 
     # Weights become effective on execution day; ret_exec is already aligned to execution-day semantics.
     w = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
+    # Match rotation open/oc2 execution semantics (AGENTS strict execution-timing NAV rule):
+    # while long (w>0), open-leg day returns use same-day open->close (none; hfq on CA days),
+    # not forward open[t]->open[t+1]. Forward legs still apply on flat days (w=0) for series continuity.
+    if ep in {"open", "oc2"}:
+        same_day_none = (c_none / o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        same_day_hfq = (c_hfq / o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        open_fwd_none = (o_none.shift(-1).div(o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        open_fwd_hfq = (o_hfq.shift(-1).div(o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        close_fwd_none = (c_none.shift(-1).div(c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        close_fwd_hfq = (c_hfq.shift(-1).div(c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        cm = ca_mask.reindex(ret_exec.index).fillna(False)
+        w_ix = w.reindex(ret_exec.index).fillna(0.0)
+        if ep == "open":
+            for d in ret_exec.index:
+                if float(w_ix.loc[d]) <= 1e-12:
+                    continue
+                ret_exec.loc[d] = float(same_day_hfq.loc[d]) if bool(cm.loc[d]) else float(same_day_none.loc[d])
+        else:
+            ret_blend_none = pd.Series(0.0, index=ret_exec.index, dtype=float)
+            ret_blend_hfq = pd.Series(0.0, index=ret_exec.index, dtype=float)
+            for d in ret_exec.index:
+                hold = float(w_ix.loc[d]) > 1e-12
+                po_n = float(same_day_none.loc[d]) if hold else float(open_fwd_none.loc[d])
+                po_h = float(same_day_hfq.loc[d]) if hold else float(open_fwd_hfq.loc[d])
+                cn = float(close_fwd_none.loc[d])
+                ch = float(close_fwd_hfq.loc[d])
+                ret_blend_none.loc[d] = 0.5 * (po_n + cn)
+                ret_blend_hfq.loc[d] = 0.5 * (po_h + ch)
+            ret_exec = ret_blend_none.where(~cm, ret_blend_hfq).astype(float)
     ret_exec_day = ret_exec.astype(float)
+    # Buy-and-hold benchmark: always invested; align daily returns with exec_price (tests + rotation parity).
+    cm_bh = ca_mask.reindex(ret_hfq.index)
+    if isinstance(cm_bh, pd.DataFrame):
+        cm_bh = cm_bh.iloc[:, 0].fillna(False) if cm_bh.shape[1] else pd.Series(False, index=ret_hfq.index)
+    else:
+        cm_bh = cm_bh.fillna(False)
+    bh_same_none = (c_none / o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    bh_same_hfq = (c_hfq / o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    if ep == "close":
+        ret_bh = ret_hfq.astype(float)
+    elif ep == "open":
+        ret_bh = bh_same_none.where(~cm_bh, bh_same_hfq).astype(float).reindex(ret_hfq.index).fillna(0.0)
+    else:
+        cf_none = (c_none.shift(-1).div(c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        cf_hfq = (c_hfq.shift(-1).div(c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        blend_bh_none = (0.5 * (bh_same_none + cf_none)).astype(float)
+        blend_bh_hfq = (0.5 * (bh_same_hfq + cf_hfq)).astype(float)
+        ret_bh = blend_bh_none.where(~cm_bh, blend_bh_hfq).astype(float).reindex(ret_hfq.index).fillna(0.0)
     cost = _turnover_cost_from_weights(w, cost_bps=float(inp.cost_bps))
     slippage = (w - w.shift(1).fillna(0.0)).abs() / 2.0
     slippage = slippage.astype(float) * float(inp.slippage_rate)
@@ -1252,11 +1299,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if len(nav) > 0:
         nav.iloc[0] = 1.0
 
-    bh_nav = (1.0 + ret_hfq).cumprod()
+    bh_nav = (1.0 + ret_bh).cumprod()
     if len(bh_nav) > 0:
         bh_nav.iloc[0] = 1.0
 
-    active = strat_ret - ret_hfq
+    active = strat_ret - ret_bh
     excess_nav = (1.0 + active).cumprod()
     if len(excess_nav) > 0:
         excess_nav.iloc[0] = 1.0
@@ -1276,11 +1323,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     m_bh = {
         "cumulative_return": float(bh_nav.iloc[-1] - 1.0),
         "annualized_return": float(_annualized_return(bh_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
-        "annualized_volatility": float(_annualized_vol(ret_hfq, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_volatility": float(_annualized_vol(ret_bh, ann_factor=TRADING_DAYS_PER_YEAR)),
         "max_drawdown": float(_max_drawdown(bh_nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bh_nav)),
-        "sharpe_ratio": float(_sharpe(ret_hfq, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "sortino_ratio": float(_sortino(ret_hfq, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sharpe_ratio": float(_sharpe(ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sortino_ratio": float(_sortino(ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "ulcer_index": float(_ulcer_index(bh_nav, in_percent=True)),
     }
     m_ex = {

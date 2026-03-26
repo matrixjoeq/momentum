@@ -4,12 +4,12 @@ Overview
 - This file documents how coding agents should build, lint, test, and style this codebase.
 - It also defines naming, error handling, and import conventions to keep the project coherent across contributors.
 - **Skill installation:** Any request to install a Skill must follow the mandatory “Installing Skills” workflow in § Security and secrets (vet → report → confirm → install only after approval).
+- **Superpowers workflow (mandatory):** For **every** task, read and follow the **using-superpowers** skill (`superpowers`) and run the work through this pipeline in order: **规划** (plan) → **拆解** (decompose) → **执行** (execute) → **审查** (review) → **复盘** (retrospect). Do not skip ahead to coding without planning and decomposition; after changes land, review results (tests, behavior, scope) and briefly retrospect before treating the task as done.
 - Cursor rules and Copilot guidelines are included if present in the repository. If not, note their absence.
 
 Quick Start: local dev setup
 - Create a virtual environment: `python -m venv .venv`.
-- Activate it: `source .venv/bin/activate` (Unix) or `.
-\venv\Scripts\activate` (Windows).
+- Activate it: `source .venv/bin/activate` (Unix) or `.venv\Scripts\activate` (Windows).
 - Install development dependencies: `pip install -e '.[dev]'`.
 - Optional: install tooling for formatting/checking: `pip install ruff black pytest-cov mypy`.
 - For packaging: `pip install build` and `python -m build`.
@@ -19,19 +19,22 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 1) Build / Lint / Test commands
 - Build distributions: `python -m build` (produces dist/*.whl and dist/*.tar.gz).
 - Install in editable mode (dev): `pip install -e '.[dev]'`.
-- Run unit tests: `pytest -q`.
+- **pytest:** Always run tests with the project virtualenv’s Python (not a system interpreter and not bare `pytest` on PATH unless you know it is this venv). After `pip install -e '.[dev]'`, use:
+  - Unix / macOS: `.venv/bin/python3 -m pytest …`
+  - Windows: `.venv\Scripts\python.exe -m pytest …`
+- Run unit tests: `.venv/bin/python3 -m pytest -q` (adjust the interpreter path on Windows as above).
 - Run a single test explicitly:
-  - `pytest tests/path/to/module.py::TestClass::test_method -q`
-  - `pytest tests/path/to/module.py::test_function -q`
+  - `.venv/bin/python3 -m pytest tests/path/to/module.py::TestClass::test_method -q`
+  - `.venv/bin/python3 -m pytest tests/path/to/module.py::test_function -q`
 - Run tests with coverage:
-  - `pytest --cov=src --cov-report=term-missing -q`
+  - `.venv/bin/python3 -m pytest --cov=src --cov-report=term-missing -q`
 - Lint checks (recommended):
   - `ruff check src tests` (also formats with `ruff format`)
   - `black --check src tests` (or `ruff format --exit-nonzero-on-fix` if you use Ruff as formatter)
 - Type checks (optional):
   - `mypy src` (requires mypy config if used)
 - Quick full verify (lint + tests):
-  - `ruff check src tests && pytest -q --maxfail=1 --disable-warnings`
+  - `ruff check src tests && .venv/bin/python3 -m pytest -q --maxfail=1 --disable-warnings`
 
 2) Code style guidelines
 - Goals: readability, reproducibility, and minimal surprises for new contributors.
@@ -156,7 +159,7 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 - If you add Copilot rules: add `.github/copilot-instructions.md` with guidance for code generation.
 
 4) Quick wins for maintainers
-- Run `pytest -q` locally to verify core behavior before submitting PRs.
+- Run `.venv/bin/python3 -m pytest -q` locally to verify core behavior before submitting PRs (see the **pytest** bullet in section 1).
 - Run `ruff check` and `black --check` to keep code style consistent.
 - Add small, focused tests for any new feature or bug fix.
 - When adding or changing an API route, add or extend an HTTP-level contract test so every method/path remains covered (see **API contract test rule** above).
@@ -165,3 +168,10 @@ Appendix: repository references
 - Tests live under `/tests`.
 - Source code lives under `/src` with top-level package `etf_momentum`.
 - The project uses pyproject.toml to declare packaging and pytest config.
+
+Appendix: web UI (shared stylesheet)
+- **Shared theme:** `src/etf_momentum/web/terminal.css` holds the common “research terminal” styles (CSS variables, typography tokens, panels, forms, tables, theme toggle, print rules, and components used by the main research page such as `.tabBtn` / `.reportCard`). Prefer editing this file when changing cross-page look-and-feel instead of duplicating large `<style>` blocks.
+- **Serving:** The FastAPI app mounts the `web/` directory at **`/static`** (when that directory exists). Pages load the sheet with `<link rel="stylesheet" href="/static/terminal.css" />`. Example URL: `GET /static/terminal.css`. Contract coverage for this path lives in `tests/test_app_root.py` (`test_static_shared_terminal_css`).
+- **Per-page overrides:** Each HTML file should keep a small inline `<style>` after the link for page-only rules (chart heights, tab layout differences, margins). Load **Google Fonts** (Noto Sans SC + JetBrains Mono) in the same `<head>` as on `research.html` when using `terminal.css`.
+- **Exception:** `research_crude_oil.html` uses its own layout and variables; it does not link `terminal.css`. If you change the shared theme, you do not need to mirror every token there unless you intentionally align that page.
+- **Local files:** Opening HTML via `file://` will not resolve `/static/terminal.css`; use the dev server (or another HTTP origin) to preview styled pages.

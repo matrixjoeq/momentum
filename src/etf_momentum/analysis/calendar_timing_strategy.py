@@ -521,12 +521,37 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             t = float(np.abs(tgt - w_cur).sum() / 2.0)
             turnover[i] = t
             cost_today = t * (cost_rate + slip_rate)
-            r_over_i = ret_overnight.iloc[i].to_numpy(dtype=float)
-            r_intra_i = ret_intraday.iloc[i].to_numpy(dtype=float)
-            comp_overnight = float(np.dot(tgt, r_over_i))
-            comp_intraday = float(np.dot(tgt, r_intra_i))
-            comp_interaction = float(np.dot(tgt, r_over_i * r_intra_i))
-            gross = float(comp_overnight + comp_intraday + comp_interaction)
+            if ep == "open" and i in entry_by_i and float(np.sum(tgt)) > 1e-12:
+                # Open-buy: count same-day open->close on entry execution day (align with rotation/trend engines).
+                sdn = (
+                    (close_none_exec.iloc[i].astype(float) / open_none.iloc[i].astype(float) - 1.0)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                    .reindex(codes)
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                )
+                sdh = (
+                    (close_hfq_exec.iloc[i].astype(float) / open_hfq.iloc[i].astype(float) - 1.0)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                    .reindex(codes)
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                )
+                mrow = ca_mask.iloc[i].reindex(codes).fillna(False).to_numpy(dtype=bool)
+                row = np.where(mrow, sdh, sdn)
+                gross = float(np.dot(tgt, row))
+                comp_overnight = 0.0
+                comp_intraday = gross
+                comp_interaction = 0.0
+            else:
+                r_over_i = ret_overnight.iloc[i].to_numpy(dtype=float)
+                r_intra_i = ret_intraday.iloc[i].to_numpy(dtype=float)
+                comp_overnight = float(np.dot(tgt, r_over_i))
+                comp_intraday = float(np.dot(tgt, r_intra_i))
+                comp_interaction = float(np.dot(tgt, r_over_i * r_intra_i))
+                gross = float(comp_overnight + comp_intraday + comp_interaction)
             w_next = tgt
             net = gross - cost_today
             strat_ret[i] = net

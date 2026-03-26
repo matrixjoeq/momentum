@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ETF轮动策略研究</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   <script>
     (function () {
       const key = `theme:${location.pathname}`;
@@ -17,6 +23,10 @@
   </script>
   <style>
     :root {
+      --font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        monospace;
       --primary-color: #2563eb;
       --secondary-color: #14b8a6;
       --accent-color: #2dd4bf;
@@ -41,12 +51,35 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: var(--font-sans);
       background-color: var(--bg-color);
+      background-image: radial-gradient(
+          ellipse 100% 80% at 0% -30%,
+          rgba(125, 211, 252, 0.06),
+          transparent 55%
+        ),
+        radial-gradient(
+          ellipse 80% 60% at 100% 0%,
+          rgba(59, 130, 246, 0.04),
+          transparent 50%
+        );
       color: var(--text-color);
       margin: 0;
       padding: 0;
       line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    :root[data-theme="light"] body {
+      background-image: radial-gradient(
+          ellipse 100% 80% at 0% -30%,
+          rgba(37, 99, 235, 0.05),
+          transparent 55%
+        ),
+        radial-gradient(
+          ellipse 80% 60% at 100% 0%,
+          rgba(59, 130, 246, 0.03),
+          transparent 50%
+        );
     }
 
     .container {
@@ -176,8 +209,11 @@
       letter-spacing: 0.5px;
     }
 
-    tr:hover {
-      background-color: #f8f9fa;
+    tbody tr:hover {
+      background-color: rgba(148, 163, 184, 0.1);
+    }
+    :root[data-theme="light"] tbody tr:hover {
+      background-color: #f1f5f9;
     }
 
     .badge {
@@ -222,7 +258,7 @@
       color: #f8f8f2;
       padding: 16px;
       border-radius: 8px;
-      font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+      font-family: var(--font-mono);
       font-size: 13px;
       overflow-x: auto;
     }
@@ -322,6 +358,15 @@
       background-color: var(--border-color);
     }
 
+    input:focus-visible,
+    select:focus-visible,
+    button:focus-visible,
+    .nav-tab:focus-visible,
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+
     .summary-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -346,6 +391,11 @@
       background: var(--card-bg);
       color: var(--text-color);
       border: 1px solid var(--border-color);
+      cursor: pointer;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .theme-toggle:hover {
+      border-color: var(--accent-color);
     }
 
     .summary-value {

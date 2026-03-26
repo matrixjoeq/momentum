@@ -184,8 +184,13 @@ class BaselineAnalysisRequest(BaseModel):
     )
     fft_roll: bool = Field(default=True, description="If true, compute rolling FFT time series for EW (downsampled by fft_roll_step)")
     fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
-    rp_window_days: int = Field(default=60, ge=2, le=2520, description="Risk parity (inverse-vol) volatility lookback window in trading days")
-    holding_mode: str = Field(default="EW", description="Holding strategy mode: EW|RP|CUSTOM")
+    rp_window_days: int = Field(
+        default=60,
+        ge=2,
+        le=2520,
+        description="ERC / inverse-vol rolling window (trading days): sample covariance for RP (ERC) and vol for IVOL",
+    )
+    holding_mode: str = Field(default="EW", description="Holding strategy mode: EW|RP (ERC)|IVOL (inverse-vol)|CUSTOM")
     custom_weights: dict[str, float] | None = Field(
         default=None,
         description="Custom target weights by code in decimal (e.g. {'510300':0.4,'518880':0.3}); leftover to cash.",

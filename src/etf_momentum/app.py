@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi import status
 from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from .api.routes import router as api_router
 from .api.deps import init_app_state
@@ -26,6 +27,10 @@ def create_app() -> FastAPI:
         await stop_auto_sync(fastapi_app)
 
     fastapi_app = FastAPI(title="ETF Momentum - Pool & Data Service", version="0.1.0", lifespan=lifespan)
+
+    _web_dir = Path(__file__).resolve().parent / "web"
+    if _web_dir.is_dir():
+        fastapi_app.mount("/static", StaticFiles(directory=str(_web_dir)), name="static")
 
     @fastapi_app.get("/")
     def index():

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import EtfPrice
+from .erc_weights import erc_weights_from_return_history
 from .execution_timing import forward_align_returns
 
 
@@ -56,9 +57,9 @@ class BaselineInputs:
     fft_windows: list[int] | None = None
     fft_roll: bool = True
     fft_roll_step: int = 5
-    # Risk parity (inverse-vol) portfolio config (used by research UI)
+    # ERC + inverse-vol portfolios: rolling covariance / vol window (trading days)
     rp_window_days: int = 60
-    # Holding strategy mode: EW | RP | CUSTOM
+    # Holding strategy mode: EW | RP (ERC) | IVOL (inverse-vol) | CUSTOM
     holding_mode: str = "EW"
     # CUSTOM target weights by code (decimal); leftover to cash.
     custom_weights: dict[str, float] | None = None
@@ -88,7 +89,18 @@ def _inv_vol_weights(vol: pd.Series) -> pd.Series:
     return (inv / s).fillna(0.0).astype(float)
 
 
-def _compute_risk_parity_nav_and_weights(
+def _erc_weight_series_from_hist(hist: pd.DataFrame, cols: list[str]) -> pd.Series:
+    """Long-only ERC weights from past return window (rows=time, cols=assets)."""
+    if hist is None or hist.empty or not cols:
+        return pd.Series(0.0, index=cols, dtype=float)
+    sub = hist.reindex(columns=cols).astype(float)
+    w_arr = erc_weights_from_return_history(sub.to_numpy(dtype=float), min_obs=2)
+    if w_arr.size != len(cols):
+        w_arr = np.full(len(cols), 1.0 / max(len(cols), 1), dtype=float)
+    return pd.Series(w_arr, index=cols, dtype=float).fillna(0.0)
+
+
+def _compute_inv_vol_nav_and_weights(
     daily_ret: pd.DataFrame,
     *,
     rebalance: str,
@@ -96,12 +108,100 @@ def _compute_risk_parity_nav_and_weights(
     weekly_anchor: str = "FRI",
 ) -> tuple[pd.Series, pd.DataFrame]:
     """
-    Risk parity (inverse-vol) portfolio NAV and pre-return weights.
+    Inverse-volatility weights (1/sigma) — diagonal approximation, not ERC.
 
-    Implementation notes (no lookahead):
-    - We rebalance weights at the same schedule as EW (daily/weekly/monthly/quarterly/yearly/none).
-    - At each rebalance boundary, we estimate vol using *past* returns only (exclude current-day return).
-    - Weights are proportional to 1/vol (diagonal covariance approximation).
+    No lookahead: weights at t use returns strictly before t (same schedule as EW).
+    """
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+    if daily_ret.empty:
+        return pd.Series(dtype=float, name="IVOL"), pd.DataFrame()
+
+    r = daily_ret.astype(float).fillna(0.0)
+    cols = list(r.columns)
+    n = len(cols)
+    if n <= 0:
+        return pd.Series(dtype=float, name="IVOL"), pd.DataFrame()
+
+    w0 = np.full(n, 1.0 / n, dtype=float)
+    w_df = pd.DataFrame(index=r.index, columns=cols, dtype=float)
+
+    win = max(2, int(window))
+    if reb == "none":
+        hist = r.iloc[1 : 1 + win] if len(r) >= 1 + win else r.iloc[1:]
+        vol = hist.std(ddof=1)
+        w_init = _inv_vol_weights(vol).reindex(cols).fillna(0.0).to_numpy(dtype=float)
+        if float(np.sum(w_init)) <= 0:
+            w_init = w0.copy()
+        indiv_nav = (1.0 + r).cumprod()
+        indiv_nav.iloc[0, :] = 1.0
+        nav = (indiv_nav * w_init.reshape(1, n)).sum(axis=1)
+        w = indiv_nav.mul(w_init, axis=1)
+        w = w.div(w.sum(axis=1), axis=0).fillna(0.0)
+        w_df.loc[:, :] = w.reindex(columns=cols).to_numpy(dtype=float)
+        if len(nav) > 0:
+            nav.iloc[0] = 1.0
+        return nav.rename("IVOL"), w_df
+
+    if reb == "daily":
+        for i, t in enumerate(r.index):
+            hist = r.iloc[max(0, i - win) : i]
+            if len(hist) < win:
+                w_df.loc[t, :] = w0
+            else:
+                w_df.loc[t, :] = _inv_vol_weights(hist.std(ddof=1)).reindex(cols).fillna(0.0)
+        port_ret = (w_df * r).sum(axis=1)
+        nav = (1.0 + port_ret).cumprod()
+        if len(nav) > 0:
+            nav.iloc[0] = 1.0
+        return nav.rename("IVOL"), w_df
+
+    freq_map = {"weekly": f"W-{str(weekly_anchor).strip().upper()}", "monthly": "M", "quarterly": "Q", "yearly": "Y"}
+    labels = r.index.to_period(freq_map[reb])
+    prev_label = None
+    nav = 1.0
+    w = w0.copy()
+    nav_out: list[float] = []
+    w_out: list[np.ndarray] = []
+    rmat = r.to_numpy(dtype=float)
+    for i, lab in enumerate(labels):
+        if prev_label is None or lab != prev_label:
+            hist = r.iloc[max(0, i - win) : i]
+            if len(hist) >= win:
+                ww = _inv_vol_weights(hist.std(ddof=1)).reindex(cols).fillna(0.0).to_numpy(dtype=float)
+                if float(np.sum(ww)) > 0:
+                    w = ww
+                else:
+                    w = w0.copy()
+            else:
+                w = w0.copy()
+        w_out.append(w.copy())
+        rr = rmat[i]
+        port_r = float(np.dot(w, rr))
+        nav *= (1.0 + port_r)
+        if 1.0 + port_r != 0.0:
+            w = w * (1.0 + rr) / (1.0 + port_r)
+        nav_out.append(nav)
+        prev_label = lab
+    nav_s = pd.Series(nav_out, index=r.index, name="IVOL")
+    if len(nav_s) > 0:
+        nav_s.iloc[0] = 1.0
+    w_df2 = pd.DataFrame(np.vstack(w_out), index=r.index, columns=cols, dtype=float)
+    return nav_s, w_df2
+
+
+def _compute_erc_nav_and_weights(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+    window: int,
+    weekly_anchor: str = "FRI",
+) -> tuple[pd.Series, pd.DataFrame]:
+    """
+    Equal Risk Contribution (ERC) using sample covariance on the same rolling window as IVOL.
+
+    No lookahead: weights at t use returns strictly before t.
     """
     reb = (rebalance or "yearly").lower()
     if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
@@ -117,20 +217,17 @@ def _compute_risk_parity_nav_and_weights(
 
     w0 = np.full(n, 1.0 / n, dtype=float)
     w_df = pd.DataFrame(index=r.index, columns=cols, dtype=float)
-
-    # none: buy-and-hold with initial inverse-vol weights estimated on the first window
     win = max(2, int(window))
+
     if reb == "none":
-        # use the earliest available window (excluding day0 return which is 0 by construction)
         hist = r.iloc[1 : 1 + win] if len(r) >= 1 + win else r.iloc[1:]
-        vol = hist.std(ddof=1)
-        w_init = _inv_vol_weights(vol).reindex(cols).fillna(0.0).to_numpy(dtype=float)
+        w_ser = _erc_weight_series_from_hist(hist, cols)
+        w_init = w_ser.reindex(cols).fillna(0.0).to_numpy(dtype=float)
         if float(np.sum(w_init)) <= 0:
             w_init = w0.copy()
         indiv_nav = (1.0 + r).cumprod()
         indiv_nav.iloc[0, :] = 1.0
         nav = (indiv_nav * w_init.reshape(1, n)).sum(axis=1)
-        # weights drift with asset NAV
         w = indiv_nav.mul(w_init, axis=1)
         w = w.div(w.sum(axis=1), axis=0).fillna(0.0)
         w_df.loc[:, :] = w.reindex(columns=cols).to_numpy(dtype=float)
@@ -139,13 +236,12 @@ def _compute_risk_parity_nav_and_weights(
         return nav.rename("RP"), w_df
 
     if reb == "daily":
-        # pre-return weights for day i use returns up to i-1
         for i, t in enumerate(r.index):
             hist = r.iloc[max(0, i - win) : i]
             if len(hist) < win:
                 w_df.loc[t, :] = w0
             else:
-                w_df.loc[t, :] = _inv_vol_weights(hist.std(ddof=1)).reindex(cols).fillna(0.0)
+                w_df.loc[t, :] = _erc_weight_series_from_hist(hist, cols).reindex(cols).fillna(0.0)
         port_ret = (w_df * r).sum(axis=1)
         nav = (1.0 + port_ret).cumprod()
         if len(nav) > 0:
@@ -164,7 +260,7 @@ def _compute_risk_parity_nav_and_weights(
         if prev_label is None or lab != prev_label:
             hist = r.iloc[max(0, i - win) : i]
             if len(hist) >= win:
-                ww = _inv_vol_weights(hist.std(ddof=1)).reindex(cols).fillna(0.0).to_numpy(dtype=float)
+                ww = _erc_weight_series_from_hist(hist, cols).reindex(cols).fillna(0.0).to_numpy(dtype=float)
                 if float(np.sum(ww)) > 0:
                     w = ww
                 else:
@@ -279,7 +375,7 @@ def _compute_equal_weight_nav_and_weights_dynamic(
     return nav_s, w_df, active_count
 
 
-def _compute_risk_parity_nav_and_weights_dynamic(
+def _compute_inv_vol_nav_and_weights_dynamic(
     daily_ret: pd.DataFrame,
     *,
     rebalance: str,
@@ -287,11 +383,9 @@ def _compute_risk_parity_nav_and_weights_dynamic(
     min_active: int = 2,
     weekly_anchor: str = "FRI",
 ) -> tuple[pd.Series, pd.DataFrame]:
-    """
-    Dynamic-universe risk parity (inverse-vol) with active-asset filtering.
-    """
+    """Dynamic-universe inverse-vol weights on the active set each day."""
     if daily_ret.empty:
-        return pd.Series(dtype=float, name="RP"), pd.DataFrame(index=daily_ret.index)
+        return pd.Series(dtype=float, name="IVOL"), pd.DataFrame(index=daily_ret.index)
     r = daily_ret.astype(float)
     idx = r.index
     cols = list(r.columns)
@@ -326,6 +420,84 @@ def _compute_risk_parity_nav_and_weights_dynamic(
                 vol = hist.std(ddof=1).replace([np.inf, -np.inf], np.nan)
                 vol = vol.where(hist.notna().sum() >= max(2, win // 2), other=np.nan)
                 ww = _inv_vol_weights(vol).reindex(active).fillna(0.0)
+                s = float(ww.sum())
+                if s <= 1e-12:
+                    ww = pd.Series(1.0 / float(len(active)), index=active, dtype=float)
+                w_day.loc[active] = ww.astype(float)
+            else:
+                prev_active = w_prev.loc[active].astype(float)
+                s = float(prev_active.sum())
+                if s > 1e-12:
+                    w_day.loc[active] = prev_active / s
+                else:
+                    w_day.loc[active] = 1.0 / float(len(active))
+
+        port_r = float((w_day * rr.fillna(0.0)).sum()) if len(active) >= int(min_active) else 0.0
+        nav *= (1.0 + port_r)
+        nav_out.append(float(nav))
+        w_next = pd.Series(0.0, index=cols, dtype=float)
+        if len(active) >= int(min_active):
+            gross = (1.0 + rr.loc[active].astype(float)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
+            w_act = (w_day.loc[active].astype(float) * gross).astype(float)
+            s = float(w_act.sum())
+            if s > 1e-12:
+                w_next.loc[active] = w_act / s
+            else:
+                w_next.loc[active] = 1.0 / float(len(active))
+        w_prev = w_next
+        w_out.append(w_day.to_numpy(dtype=float))
+
+    nav_s = pd.Series(nav_out, index=idx, name="IVOL")
+    if len(nav_s) > 0:
+        nav_s.iloc[0] = 1.0
+    w_df = pd.DataFrame(np.vstack(w_out), index=idx, columns=cols, dtype=float)
+    return nav_s, w_df
+
+
+def _compute_erc_nav_and_weights_dynamic(
+    daily_ret: pd.DataFrame,
+    *,
+    rebalance: str,
+    window: int,
+    min_active: int = 2,
+    weekly_anchor: str = "FRI",
+) -> tuple[pd.Series, pd.DataFrame]:
+    """Dynamic-universe ERC on the active set (covariance on past window)."""
+    if daily_ret.empty:
+        return pd.Series(dtype=float, name="RP"), pd.DataFrame(index=daily_ret.index)
+    r = daily_ret.astype(float)
+    idx = r.index
+    cols = list(r.columns)
+    reb = (rebalance or "yearly").lower()
+    if reb not in {"none", "daily", "weekly", "monthly", "quarterly", "yearly"}:
+        raise ValueError(f"invalid rebalance={rebalance}")
+    labels = _rebalance_labels(idx, reb, weekly_anchor=weekly_anchor) if reb != "none" else None
+    prev_label = None
+    w_prev = pd.Series(0.0, index=cols, dtype=float)
+    nav = 1.0
+    nav_out: list[float] = []
+    w_out: list[np.ndarray] = []
+    win = max(2, int(window))
+
+    for i, d in enumerate(idx):
+        rr = r.loc[d]
+        active = rr.index[np.isfinite(rr.to_numpy(dtype=float))].tolist()
+        rebal_now = False
+        if reb == "none":
+            rebal_now = (i == 0) or (float(w_prev.sum()) <= 0.0)
+        elif reb == "daily":
+            rebal_now = True
+        else:
+            lab = labels[i]
+            rebal_now = (prev_label is None) or (lab != prev_label)
+            prev_label = lab
+
+        w_day = pd.Series(0.0, index=cols, dtype=float)
+        if len(active) >= int(min_active):
+            if rebal_now:
+                hist = r.iloc[max(0, i - win) : i, :][active]
+                ww = _erc_weight_series_from_hist(hist, active)
+                ww = ww.reindex(active).fillna(0.0)
                 s = float(ww.sum())
                 if s <= 1e-12:
                     ww = pd.Series(1.0 / float(len(active)), index=active, dtype=float)
@@ -2012,14 +2184,21 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         if len(ew_nav) > 0:
             ew_nav.iloc[0] = 1.0
 
-    # risk parity (inverse-vol) portfolio with the same rebalancing schedule
+    # ERC (RP) + inverse-vol (IVOL), same rebalancing schedule and window
     rp_win = max(2, int(getattr(inp, "rp_window_days", 60) or 60))
     if dynamic_universe:
         if len(codes_eff) == 1:
             only = codes_eff[0]
             rp_nav, rp_w = _single_asset_portfolio(ret_common[codes_eff], only, "RP")
+            ivol_nav, ivol_w = rp_nav.copy(), rp_w.copy()
         else:
-            rp_nav, rp_w = _compute_risk_parity_nav_and_weights_dynamic(
+            rp_nav, rp_w = _compute_erc_nav_and_weights_dynamic(
+                ret_common[codes_eff],
+                rebalance=inp.rebalance,
+                window=rp_win,
+                min_active=2,
+            )
+            ivol_nav, ivol_w = _compute_inv_vol_nav_and_weights_dynamic(
                 ret_common[codes_eff],
                 rebalance=inp.rebalance,
                 window=rp_win,
@@ -2029,21 +2208,29 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         if len(codes_eff) <= 1:
             only = codes_eff[0]
             rp_nav, rp_w = _single_asset_portfolio(ret_common[codes_eff], only, "RP")
+            ivol_nav, ivol_w = rp_nav.copy(), rp_w.copy()
         else:
-            rp_nav, rp_w = _compute_risk_parity_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
+            rp_nav, rp_w = _compute_erc_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
+            ivol_nav, ivol_w = _compute_inv_vol_nav_and_weights(ret_common[codes_eff], rebalance=inp.rebalance, window=rp_win)
     if reb_mode == "none":
         rp_nav = rp_nav.astype(float)
         rp_ret = rp_nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ivol_nav = ivol_nav.astype(float)
+        ivol_ret = ivol_nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     else:
         rp_ret = (rp_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
         rp_nav = (1.0 + rp_ret).cumprod().astype(float)
         if len(rp_nav) > 0:
             rp_nav.iloc[0] = 1.0
+        ivol_ret = (ivol_w.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0) * ret_fwd).sum(axis=1).astype(float)
+        ivol_nav = (1.0 + ivol_ret).cumprod().astype(float)
+        if len(ivol_nav) > 0:
+            ivol_nav.iloc[0] = 1.0
 
     # custom-weight holding strategy (fixed target weights with optional periodic rebalance).
     mode = str(getattr(inp, "holding_mode", "EW") or "EW").strip().upper()
-    if mode not in {"EW", "RP", "CUSTOM"}:
-        raise ValueError("holding_mode must be one of: EW|RP|CUSTOM")
+    if mode not in {"EW", "RP", "IVOL", "CUSTOM"}:
+        raise ValueError("holding_mode must be one of: EW|RP|IVOL|CUSTOM")
     cw_raw = dict(getattr(inp, "custom_weights", None) or {})
     cw = pd.Series(0.0, index=codes_eff, dtype=float)
     for k, v in cw_raw.items():
@@ -2098,7 +2285,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         r = s.resample(freq).last().pct_change().dropna()
         return pd.DataFrame({"period_end": r.index.date.astype(str), "return": r.values})
 
-    nav_by_mode = {"EW": ew_nav, "RP": rp_nav, "CUSTOM": custom_nav}
+    nav_by_mode = {"EW": ew_nav, "RP": rp_nav, "IVOL": ivol_nav, "CUSTOM": custom_nav}
     selected_nav = nav_by_mode.get(mode, ew_nav)
     weekly = period_returns(selected_nav, "W-FRI")
     monthly = period_returns(selected_nav, "ME")
@@ -2112,6 +2299,10 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     monthly_rp = period_returns(rp_nav, "ME")
     quarterly_rp = period_returns(rp_nav, "QE")
     yearly_rp = period_returns(rp_nav, "YE")
+    weekly_ivol = period_returns(ivol_nav, "W-FRI")
+    monthly_ivol = period_returns(ivol_nav, "ME")
+    quarterly_ivol = period_returns(ivol_nav, "QE")
+    yearly_ivol = period_returns(ivol_nav, "YE")
     weekly_custom = period_returns(custom_nav, "W-FRI")
     monthly_custom = period_returns(custom_nav, "ME")
     quarterly_custom = period_returns(custom_nav, "QE")
@@ -2141,6 +2332,10 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     monthly_wp_rp = _win_payoff_kelly(monthly_rp)
     quarterly_wp_rp = _win_payoff_kelly(quarterly_rp)
     yearly_wp_rp = _win_payoff_kelly(yearly_rp)
+    weekly_wp_ivol = _win_payoff_kelly(weekly_ivol)
+    monthly_wp_ivol = _win_payoff_kelly(monthly_ivol)
+    quarterly_wp_ivol = _win_payoff_kelly(quarterly_ivol)
+    yearly_wp_ivol = _win_payoff_kelly(yearly_ivol)
     weekly_wp_custom = _win_payoff_kelly(weekly_custom)
     monthly_wp_custom = _win_payoff_kelly(monthly_custom)
     quarterly_wp_custom = _win_payoff_kelly(quarterly_custom)
@@ -2206,6 +2401,14 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         wp_q=quarterly_wp_rp,
         wp_y=yearly_wp_rp,
     )
+    metrics_ivol = _metrics_from_nav(
+        ivol_nav,
+        ivol_ret,
+        wp_w=weekly_wp_ivol,
+        wp_m=monthly_wp_ivol,
+        wp_q=quarterly_wp_ivol,
+        wp_y=yearly_wp_ivol,
+    )
     metrics_custom = _metrics_from_nav(
         custom_nav,
         custom_ret,
@@ -2214,7 +2417,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         wp_q=quarterly_wp_custom,
         wp_y=yearly_wp_custom,
     )
-    metrics_by_portfolio = {"EW": metrics_ew, "RP": metrics_rp, "CUSTOM": metrics_custom}
+    metrics_by_portfolio = {"EW": metrics_ew, "RP": metrics_rp, "IVOL": metrics_ivol, "CUSTOM": metrics_custom}
     metrics = metrics_by_portfolio.get(mode, metrics_ew)
 
     def _rolling_pack(nav_s: pd.Series) -> dict[str, dict[str, Any]]:
@@ -2241,13 +2444,19 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "max_drawdown": {k: {"dates": v.index.date.astype(str).tolist(), "values": v.astype(float).tolist()} for k, v in rolling["max_drawdown"].items()},
         }
 
-    rolling_by_portfolio = {"EW": _rolling_pack(ew_nav), "RP": _rolling_pack(rp_nav), "CUSTOM": _rolling_pack(custom_nav)}
+    rolling_by_portfolio = {
+        "EW": _rolling_pack(ew_nav),
+        "RP": _rolling_pack(rp_nav),
+        "IVOL": _rolling_pack(ivol_nav),
+        "CUSTOM": _rolling_pack(custom_nav),
+    }
 
     # package series for UI (plotly expects arrays)
     dates = nav_common.index.date.astype(str).tolist()
     series = {c: nav_common[c].astype(float).tolist() for c in codes if c in nav_common.columns}
     series["EW"] = ew_nav.astype(float).tolist()
     series["RP"] = rp_nav.astype(float).tolist()
+    series["IVOL"] = ivol_nav.astype(float).tolist()
     series["CUSTOM"] = custom_nav.astype(float).tolist()
     series[f"BENCH:{bench_code}"] = bench_nav.astype(float).tolist()
 
@@ -2259,6 +2468,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "series": {
             "EW": {str(w): _rsi_wilder(ew_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
             "RP": {str(w): _rsi_wilder(rp_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
+            "IVOL": {str(w): _rsi_wilder(ivol_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
             "CUSTOM": {str(w): _rsi_wilder(custom_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
             f"BENCH:{bench_code}": {str(w): _rsi_wilder(bench_nav, window=int(w)).astype(float).tolist() for w in rsi_windows},
         },
@@ -2275,12 +2485,22 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         weights=rp_w[codes_eff] if not rp_w.empty else pd.DataFrame(index=ret_common.index, columns=codes_eff),
         total_return=float(metrics_rp["cumulative_return"]),
     )
+    attribution_ivol = _compute_return_risk_contributions(
+        asset_ret=ret_common[codes_eff],
+        weights=ivol_w[codes_eff] if not ivol_w.empty else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+        total_return=float(metrics_ivol["cumulative_return"]),
+    )
     attribution_custom = _compute_return_risk_contributions(
         asset_ret=ret_common[codes_eff],
         weights=custom_w[codes_eff] if not custom_w.empty else pd.DataFrame(index=ret_common.index, columns=codes_eff),
         total_return=float(metrics_custom["cumulative_return"]),
     )
-    attribution_by_portfolio = {"EW": attribution_ew, "RP": attribution_rp, "CUSTOM": attribution_custom}
+    attribution_by_portfolio = {
+        "EW": attribution_ew,
+        "RP": attribution_rp,
+        "IVOL": attribution_ivol,
+        "CUSTOM": attribution_custom,
+    }
     attribution = attribution_by_portfolio.get(mode, attribution_ew)
 
     # FFT analysis (on log returns, using the same adjustment basis as baseline close)

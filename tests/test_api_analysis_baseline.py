@@ -85,6 +85,8 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert "holding_monthly_payoff_ratio" in data["metrics"]
     assert "holding_yearly_kelly_fraction" in data["metrics"]
     assert "EW" in data["nav"]["series"]
+    assert "RP" in data["nav"]["series"]
+    assert "IVOL" in data["nav"]["series"]
     assert "510300" in data["nav"]["series"]
     assert "511010" in data["nav"]["series"]
     assert any(k.startswith("BENCH:") for k in data["nav"]["series"].keys())
@@ -131,7 +133,13 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "nav" in data and "series" in data["nav"]
     assert "ROTATION" in data["nav"]["series"]
     assert "EW_REBAL" in data["nav"]["series"]
+    assert "RP_REBAL" in data["nav"]["series"]
+    assert "IVOL_REBAL" in data["nav"]["series"]
     assert "EXCESS" in data["nav"]["series"]
+    assert "EXCESS_RP" in data["nav"]["series"]
+    assert "EXCESS_IVOL" in data["nav"]["series"]
+    assert "period_returns_ivol" in data
+    assert "excess_vs_inverse_vol_rebal" in (data.get("metrics") or {})
     assert "nav_rsi" in data
     assert data["nav_rsi"]["windows"] == [6, 12, 24]
     assert "win_payoff" in data
