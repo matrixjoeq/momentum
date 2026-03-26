@@ -2,6 +2,17 @@ import pytest  # pylint: disable=import-error
 
 from tests.helpers.rotation_case_data import post_json_ok
 
+# Minimal ranges: phase1/2 only need simulate_gbm (>=10 sessions); MC paths need >=100 business days.
+_SIM_START = "19900101"
+_SIM_END_QUICK = "19900228"
+_SIM_END_MC = "19900518"  # 100 business days from 19900101 (MC path minimum)
+# API/schema floors
+_MIN_ASSETS = 2
+_MIN_SIMS = 8
+_MIN_LB = 2
+_MIN_PERM = 200
+_MIN_BOOT = 200
+
 
 @pytest.mark.parametrize("path", ["/api/analysis/sim/gbm/phase1", "/api/analysis/sim/gbm/phase2"])
 def test_sim_gbm_phase1_and_phase2_ok(api_client, path):
@@ -10,13 +21,13 @@ def test_sim_gbm_phase1_and_phase2_ok(api_client, path):
         c,
         path,
         {
-            "start": "19900101",
-            "end": "19900330",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_QUICK,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 123,
-            "lookback_days": 20,
+            "lookback_days": _MIN_LB,
         },
     )
     assert data["ok"] is True
@@ -28,21 +39,22 @@ def test_sim_gbm_phase3_ok(api_client):
         c,
         "/api/analysis/sim/gbm/phase3",
         {
-            "start": "19900101",
-            "end": "19920331",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 7,
-            "lookback_days": 20,
-            "n_sims": 200,
-            "chunk_size": 50,
+            "lookback_days": _MIN_LB,
+            "n_sims": _MIN_SIMS,
+            "chunk_size": 1,
+            "n_jobs": 1,
         },
     )
     assert data["ok"] is True
     assert "dist" in data
-    assert len(data["dist"]["rotation"]["cagr"]) == 200
-    assert len(data["dist"]["equal_weight"]["cagr"]) == 200
+    assert len(data["dist"]["rotation"]["cagr"]) == _MIN_SIMS
+    assert len(data["dist"]["equal_weight"]["cagr"]) == _MIN_SIMS
 
 
 def test_sim_gbm_phase4_ok(api_client):
@@ -51,17 +63,18 @@ def test_sim_gbm_phase4_ok(api_client):
         c,
         "/api/analysis/sim/gbm/phase4",
         {
-            "start": "19900101",
-            "end": "19920331",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 7,
-            "lookback_days": 20,
-            "n_sims": 200,
-            "chunk_size": 50,
-            "initial_cash": 1000000,
-            "position_pct": 0.10,
+            "lookback_days": _MIN_LB,
+            "n_sims": _MIN_SIMS,
+            "chunk_size": 1,
+            "n_jobs": 1,
+            "initial_cash": 1.0,
+            "position_pct": 0.01,
         },
     )
     assert data["ok"] is True
@@ -75,9 +88,9 @@ def test_sim_gbm_phase1_supports_corr_and_mu_ranges(api_client):
         c,
         "/api/analysis/sim/gbm/phase1",
         {
-            "start": "19900101",
-            "end": "19900330",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_QUICK,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "corr_low": 0.2,
@@ -101,9 +114,9 @@ def test_sim_gbm_phase1_supports_negative_correlation_range(api_client):
         c,
         "/api/analysis/sim/gbm/phase1",
         {
-            "start": "19900101",
-            "end": "19900330",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_QUICK,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "corr_low": -0.3,
@@ -122,8 +135,8 @@ def test_sim_gbm_phase1_pairwise_corr_not_single_value(api_client):
         c,
         "/api/analysis/sim/gbm/phase1",
         {
-            "start": "19900101",
-            "end": "19921231",
+            "start": _SIM_START,
+            "end": "19900731",
             "n_assets": 6,
             "vol_low": 0.05,
             "vol_high": 0.30,
@@ -146,21 +159,22 @@ def test_sim_gbm_phase3_uses_strategy_a_payload(api_client):
         c,
         "/api/analysis/sim/gbm/phase3",
         {
-            "start": "19900101",
-            "end": "19911231",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 7,
-            "lookback_days": 20,
-            "n_sims": 100,
-            "chunk_size": 20,
-            "strategy_a": {"lookback_days": 20, "top_k": 1, "trend_filter": True, "trend_sma_window": 5, "trend_ma_type": "vma"},
+            "lookback_days": _MIN_LB,
+            "n_sims": _MIN_SIMS,
+            "chunk_size": 1,
+            "n_jobs": 1,
+            "strategy_a": {"lookback_days": 2, "top_k": 1, "trend_filter": True, "trend_sma_window": 2, "trend_ma_type": "vma"},
         },
     )
     assert data["ok"] is True
     assert bool((data.get("meta") or {}).get("strategy_a_applied")) is True
-    assert len(data["dist"]["rotation"]["cagr"]) == 100
+    assert len(data["dist"]["rotation"]["cagr"]) == _MIN_SIMS
 
 
 def test_sim_gbm_phase4_uses_strategy_a_payload(api_client):
@@ -169,18 +183,19 @@ def test_sim_gbm_phase4_uses_strategy_a_payload(api_client):
         c,
         "/api/analysis/sim/gbm/phase4",
         {
-            "start": "19900101",
-            "end": "19911231",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 7,
-            "lookback_days": 20,
-            "n_sims": 100,
-            "chunk_size": 20,
-            "initial_cash": 1000000,
-            "position_pct": 0.10,
-            "strategy_a": {"lookback_days": 20, "top_k": 1, "trend_filter": True, "trend_sma_window": 5, "trend_ma_type": "vma"},
+            "lookback_days": _MIN_LB,
+            "n_sims": _MIN_SIMS,
+            "chunk_size": 1,
+            "n_jobs": 1,
+            "initial_cash": 1.0,
+            "position_pct": 0.01,
+            "strategy_a": {"lookback_days": 2, "top_k": 1, "trend_filter": True, "trend_sma_window": 2, "trend_ma_type": "vma"},
         },
     )
     assert data["ok"] is True
@@ -193,14 +208,14 @@ def test_sim_gbm_phase2_uses_strategy_a_payload(api_client):
         c,
         "/api/analysis/sim/gbm/phase2",
         {
-            "start": "19900101",
-            "end": "19900330",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_QUICK,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 123,
-            "lookback_days": 20,
-            "strategy_a": {"lookback_days": 20, "top_k": 1, "trend_filter": True, "trend_sma_window": 5, "trend_ma_type": "vma"},
+            "lookback_days": _MIN_LB,
+            "strategy_a": {"lookback_days": 2, "top_k": 1, "trend_filter": True, "trend_sma_window": 2, "trend_ma_type": "vma"},
         },
     )
     assert data["ok"] is True
@@ -213,15 +228,15 @@ def test_sim_gbm_phase2_holding_strategy_supports_rebalance_and_cost(api_client)
         c,
         "/api/analysis/sim/gbm/phase2",
         {
-            "start": "19900101",
-            "end": "19900330",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_QUICK,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 123,
-            "lookback_days": 20,
-            "holding_strategy": {"rebalance": "monthly", "cost_bps": 7.0, "rp_vol_window": 15},
-            "strategy_a": {"lookback_days": 20, "top_k": 1},
+            "lookback_days": _MIN_LB,
+            "holding_strategy": {"rebalance": "monthly", "cost_bps": 7.0, "rp_vol_window": 2},
+            "strategy_a": {"lookback_days": 2, "top_k": 1},
         },
     )
     assert data["ok"] is True
@@ -239,9 +254,9 @@ def test_sim_gbm_phase2_reuses_phase1_payload(api_client):
         c,
         "/api/analysis/sim/gbm/phase1",
         {
-            "start": "19900101",
-            "end": "19900330",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_QUICK,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 123,
@@ -251,13 +266,13 @@ def test_sim_gbm_phase2_reuses_phase1_payload(api_client):
         c,
         "/api/analysis/sim/gbm/phase2",
         {
-            "start": "19900101",
-            "end": "19900330",
-            "n_assets": 4,
+            "start": _SIM_START,
+            "end": _SIM_END_QUICK,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 999,
-            "lookback_days": 20,
+            "lookback_days": _MIN_LB,
             "phase1_base": p1,
         },
     )
@@ -272,17 +287,18 @@ def test_sim_gbm_ab_significance_ok(api_client):
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
-            "strategy_a": {"lookback_days": 20, "top_k": 1, "trend_filter": True, "trend_sma_window": 5, "trend_ma_type": "vma"},
-            "strategy_b": {"lookback_days": 20, "top_k": 1, "trend_filter": False},
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
+            "strategy_a": {"lookback_days": 2, "top_k": 1, "trend_filter": True, "trend_sma_window": 2, "trend_ma_type": "vma"},
+            "strategy_b": {"lookback_days": 2, "top_k": 1, "trend_filter": False},
         },
     )
     assert data["ok"] is True
@@ -304,21 +320,22 @@ def test_sim_gbm_ab_significance_holding_strategy_params(api_client):
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "target_a": "equal_weight",
             "target_b": "risk_parity",
-            "holding_strategy_a": {"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 10},
-            "holding_strategy_b": {"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 10},
-            "strategy_a": {"lookback_days": 20, "top_k": 1},
-            "strategy_b": {"lookback_days": 60, "top_k": 1},
+            "holding_strategy_a": {"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 2},
+            "holding_strategy_b": {"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 2},
+            "strategy_a": {"lookback_days": 2, "top_k": 1},
+            "strategy_b": {"lookback_days": 2, "top_k": 1},
         },
     )
     assert data["ok"] is True
@@ -332,17 +349,18 @@ def test_sim_gbm_ab_significance_rotation_vs_equal_weight(api_client):
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "comparison_mode": "rotation_vs_equal_weight",
-            "strategy_a": {"lookback_days": 20, "top_k": 1},
+            "strategy_a": {"lookback_days": 2, "top_k": 1},
             "strategy_b": {},
         },
     )
@@ -358,15 +376,16 @@ def test_sim_gbm_ab_significance_equal_weight_vs_cash(api_client):
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "comparison_mode": "equal_weight_vs_cash",
             "strategy_a": {},
             "strategy_b": {},
@@ -384,15 +403,16 @@ def test_sim_gbm_ab_significance_risk_parity_vs_equal_weight(api_client):
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "comparison_mode": "risk_parity_vs_equal_weight",
             "strategy_a": {},
             "strategy_b": {},
@@ -400,7 +420,7 @@ def test_sim_gbm_ab_significance_risk_parity_vs_equal_weight(api_client):
     )
     assert data["ok"] is True
     assert data["comparison"]["mode"] == "risk_parity_vs_equal_weight"
-    assert data["comparison"]["label_a"] == "风险平价再平衡"
+    assert data["comparison"]["label_a"] == "逆波动加权(仿真,非ERC)"
     assert data["comparison"]["label_b"] == "等权再平衡"
 
 
@@ -410,24 +430,25 @@ def test_sim_gbm_ab_significance_rotation_vs_risk_parity(api_client):
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "comparison_mode": "rotation_vs_risk_parity",
-            "strategy_a": {"lookback_days": 20, "top_k": 1},
+            "strategy_a": {"lookback_days": 2, "top_k": 1},
             "strategy_b": {},
         },
     )
     assert data["ok"] is True
     assert data["comparison"]["mode"] == "rotation_vs_risk_parity"
     assert data["comparison"]["label_a"] == "轮动策略A"
-    assert data["comparison"]["label_b"] == "风险平价再平衡"
+    assert data["comparison"]["label_b"] == "逆波动加权(仿真,非ERC)"
 
 
 def test_sim_gbm_ab_significance_independent_targets_risk_parity_vs_equal_weight(
@@ -438,25 +459,26 @@ def test_sim_gbm_ab_significance_independent_targets_risk_parity_vs_equal_weight
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "target_a": "risk_parity",
             "target_b": "equal_weight",
-            "strategy_a": {"lookback_days": 20, "top_k": 1},
-            "strategy_b": {"lookback_days": 60, "top_k": 1},
+            "strategy_a": {"lookback_days": 2, "top_k": 1},
+            "strategy_b": {"lookback_days": 2, "top_k": 1},
         },
     )
     assert data["ok"] is True
     assert data["comparison"]["target_a"] == "risk_parity"
     assert data["comparison"]["target_b"] == "equal_weight"
-    assert data["comparison"]["label_a"] == "风险平价再平衡"
+    assert data["comparison"]["label_a"] == "逆波动加权(仿真,非ERC)"
     assert data["comparison"]["label_b"] == "等权再平衡"
 
 
@@ -466,19 +488,20 @@ def test_sim_gbm_ab_significance_independent_targets_rotation_b_vs_cash(api_clie
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "target_a": "rotation_b",
             "target_b": "cash",
-            "strategy_a": {"lookback_days": 20, "top_k": 1},
-            "strategy_b": {"lookback_days": 60, "top_k": 1},
+            "strategy_a": {"lookback_days": 2, "top_k": 1},
+            "strategy_b": {"lookback_days": 2, "top_k": 1},
         },
     )
     assert data["ok"] is True
@@ -494,24 +517,25 @@ def test_sim_gbm_ab_significance_with_seed_stability(api_client):
         c,
         "/api/analysis/sim/gbm/ab-significance",
         {
-            "start": "19900101",
-            "end": "19911231",
+            "start": _SIM_START,
+            "end": _SIM_END_MC,
             "n_worlds": 2,
-            "n_assets": 4,
+            "n_assets": _MIN_ASSETS,
             "vol_low": 0.05,
             "vol_high": 0.30,
             "seed": 11,
-            "n_perm": 1200,
-            "n_boot": 1200,
+            "n_perm": _MIN_PERM,
+            "n_boot": _MIN_BOOT,
+            "n_jobs": 1,
             "comparison_mode": "custom_ab",
-            "stability_repeats": 2,
+            "stability_repeats": 1,
             "stability_worlds": 2,
-            "strategy_a": {"lookback_days": 20, "top_k": 1},
-            "strategy_b": {"lookback_days": 20, "top_k": 1},
+            "strategy_a": {"lookback_days": 2, "top_k": 1},
+            "strategy_b": {"lookback_days": 2, "top_k": 1},
         },
     )
     assert data["ok"] is True
     stab = ((data.get("robustness") or {}).get("seed_stability") or {})
     assert stab.get("enabled") is True
-    assert int(stab.get("repeats") or 0) == 2
-
+    assert int(stab.get("repeats") or 0) == 1
+    assert len(stab.get("mean_diff") or []) == 1

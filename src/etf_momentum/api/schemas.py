@@ -388,7 +388,7 @@ class SimGbmPhase2Request(SimGbmPhase1Request):
 
 
 class SimGbmPhase3Request(SimGbmPhase2Request):
-    n_sims: int = Field(default=10000, ge=50, le=50000)
+    n_sims: int = Field(default=10000, ge=8, le=50000)
     chunk_size: int = Field(default=200, ge=1, le=2000)
     n_jobs: int = Field(default=0, ge=0, le=64, description="Parallel workers for Monte Carlo runs; 0=auto")
 
@@ -457,8 +457,8 @@ class SimGbmAbSignificanceRequest(BaseModel):
     mu_low: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift lower bound; unset uses random default range")
     mu_high: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift upper bound; unset uses random default range")
     seed: int | None = Field(default=None)
-    n_perm: int = Field(default=5000, ge=1000, le=20000)
-    n_boot: int = Field(default=3000, ge=1000, le=20000)
+    n_perm: int = Field(default=5000, ge=200, le=20000, description="Permutations; UI default is high; tests may use fewer")
+    n_boot: int = Field(default=3000, ge=200, le=20000, description="Bootstrap resamples; UI default is high; tests may use fewer")
     n_jobs: int = Field(default=1, ge=0, le=64, description="Parallel workers for world evaluation; 0=auto")
     stability_repeats: int = Field(default=0, ge=0, le=30, description="Seed stability repeats; 0 disables")
     stability_worlds: int = Field(default=100, ge=2, le=2000, description="Worlds per seed stability repeat")

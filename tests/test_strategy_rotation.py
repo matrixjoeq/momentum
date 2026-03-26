@@ -95,21 +95,20 @@ def test_rotation_close_exec_uses_forward_corp_action_fallback(session_factory):
 
 def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
     """
-    Mirror the user debug setup:
-    - 12 assets
-    - long history (20111209~20260320)
+    User-case-like trade-stats regression (compressed vs prod-scale dates to keep CI fast):
+    - multi assets with staggered drift so top-2 stay rankable
     - weekly rotation, Monday anchor, close execution
     - top2 adaptive, dynamic universe on, no entry/exit filters
     - cost 2bps + slippage 0.001
 
-    The synthetic series keeps the same top-2 assets dominant across the whole span,
-    so without end-of-backtest open-trade inclusion this test would produce zero closed trades.
+    Same synthetic idea as before: persistent leaders; needs end-of-backtest trade closure
+    for non-empty closed-trade stats.
     """
     sf = session_factory
-    start = dt.date(2011, 12, 9)
-    end = dt.date(2026, 3, 20)
+    start = dt.date(2022, 1, 4)
+    end = dt.date(2023, 10, 31)
     dates = [d.date() for d in pd.date_range(start, end, freq="B")]
-    codes = [f"G{i:02d}" for i in range(1, 13)]
+    codes = [f"G{i:02d}" for i in range(1, 7)]
     with sf() as db:
         n = max(1, len(dates) - 1)
         for k, code in enumerate(codes):

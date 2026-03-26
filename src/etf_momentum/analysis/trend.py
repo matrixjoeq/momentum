@@ -1370,7 +1370,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             "price_basis": {
                 "signal": "qfq close",
                 "strategy_nav": "none close preferred; hfq return fallback on corporate-action days",
-                "benchmark_nav": "hfq close",
+                "benchmark_nav": {
+                    "close": "HFQ close-to-close daily returns (BUY_HOLD line; excess vs strategy uses this series)",
+                    "open": "same-day open→close (none; hfq on corporate-action days); BUY_HOLD aligned to open execution",
+                    "oc2": "50% same-day open→close + 50% HFQ close-to-close next day; BUY_HOLD aligned to OC2 execution",
+                }.get(ep, "unknown exec_price"),
             },
             "params": {
                 "sma_window": int(inp.sma_window),

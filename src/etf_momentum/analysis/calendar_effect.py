@@ -168,15 +168,11 @@ def _ew_nav_and_weights_by_decision_dates(
 
 
 def _pick_exec_price(ohlc: dict[str, pd.DataFrame], *, exec_price: str) -> pd.DataFrame:
+    """Return OHLC column for open or close. OC2 is handled separately (50% open + 50% close daily returns)."""
     ep = (exec_price or "close").strip().lower()
-    if ep not in {"open", "close", "oc2"}:
-        raise ValueError(f"invalid exec_price={exec_price} (expected open|close|oc2)")
-    if ep in {"open", "close"}:
-        px = ohlc[ep]
-    else:
-        # OC2 = (O+C)/2
-        px = (ohlc["open"].astype(float) + ohlc["close"].astype(float)) / 2.0
-    return px
+    if ep not in {"open", "close"}:
+        raise ValueError(f"invalid exec_price={exec_price} (expected open|close)")
+    return ohlc[ep]
 
 
 def _common_start_from_prices(px: pd.DataFrame, codes: list[str]) -> pd.Timestamp:
@@ -246,32 +242,68 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
         }
     for a in anchors:
         for ep in exec_prices:
-            px = _pick_exec_price(ohlc, exec_price=str(ep))
-            if px.empty:
-                grid.append({"anchor": int(a), "exec_price": str(ep), "ok": False, "reason": "empty price matrix"})
-                continue
+            ep_l = str(ep).strip().lower()
+            if ep_l == "oc2":
+                oo = ohlc.get("open", pd.DataFrame())
+                cc = ohlc.get("close", pd.DataFrame())
+                if oo.empty or cc.empty:
+                    grid.append({"anchor": int(a), "exec_price": str(ep), "ok": False, "reason": "empty open/close for oc2"})
+                    continue
+                oo = oo.sort_index().reindex(columns=codes).replace([np.inf, -np.inf], np.nan).ffill()
+                cc = cc.sort_index().reindex(columns=codes).replace([np.inf, -np.inf], np.nan).ffill()
+                missing = [
+                    c
+                    for c in codes
+                    if c not in oo.columns
+                    or c not in cc.columns
+                    or oo[c].dropna().empty
+                    or cc[c].dropna().empty
+                ]
+                if missing:
+                    grid.append(
+                        {
+                            "anchor": int(a),
+                            "exec_price": str(ep),
+                            "ok": False,
+                            "reason": f"missing data for adjust={inp.adjust}: {missing}",
+                        }
+                    )
+                    continue
+                common_start = _common_start_from_prices(cc, codes)
+                px_common = cc.loc[common_start:, codes]
+                oo_c = oo.reindex(px_common.index).ffill().reindex(columns=codes)
+                cc_c = cc.reindex(px_common.index).ffill().reindex(columns=codes)
+                daily_ret_o = oo_c.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                daily_ret_c = cc_c.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                daily_ret = (0.5 * (daily_ret_o + daily_ret_c)).astype(float)
+                ret_aligned = None
+            else:
+                px = _pick_exec_price(ohlc, exec_price=str(ep))
+                if px.empty:
+                    grid.append({"anchor": int(a), "exec_price": str(ep), "ok": False, "reason": "empty price matrix"})
+                    continue
 
-            px = px.sort_index()
-            missing = [c for c in codes if c not in px.columns or px[c].dropna().empty]
-            if missing:
-                grid.append(
-                    {
-                        "anchor": int(a),
-                        "exec_price": str(ep),
-                        "ok": False,
-                        "reason": f"missing data for adjust={inp.adjust}: {missing}",
-                    }
-                )
-                continue
+                px = px.sort_index()
+                missing = [c for c in codes if c not in px.columns or px[c].dropna().empty]
+                if missing:
+                    grid.append(
+                        {
+                            "anchor": int(a),
+                            "exec_price": str(ep),
+                            "ok": False,
+                            "reason": f"missing data for adjust={inp.adjust}: {missing}",
+                        }
+                    )
+                    continue
 
-            px_ff = px.ffill()
-            common_start = _common_start_from_prices(px, codes)
-            px_common = px_ff.loc[common_start:, codes]
-            daily_ret = px_common.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                px_ff = px.ffill()
+                common_start = _common_start_from_prices(px, codes)
+                px_common = px_ff.loc[common_start:, codes]
+                daily_ret = px_common.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                ret_aligned = None
 
             decision_dates = _decision_dates_for_rebalance(px_common.index, rebalance=reb, anchor=int(a), shift=str(inp.rebalance_shift))
-            ret_aligned: pd.DataFrame | None = None
-            if str(ep).strip().lower() == "open":
+            if ep_l == "open":
                 ret_fwd = forward_align_returns(daily_ret[codes].astype(float).fillna(0.0))
                 decision_set = set(pd.to_datetime(decision_dates))
                 idx = px_common.index
@@ -369,7 +401,7 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
         "grid": grid,
         "rolling": {"dates": (rolling_dates or []), "series": rolling_series},
         "rolling_stats": rolling_stats,
-        "exec_price_map": {"open": "开盘", "close": "收盘", "oc2": "OC均价"},
+        "exec_price_map": {"open": "开盘", "close": "收盘", "oc2": "OC2(50%开+50%收日收益)"},
     }
 
 
@@ -506,7 +538,7 @@ def compute_rotation_calendar_effect(
         "grid": grid,
         "rolling": {"dates": (rolling_dates or []), "series": rolling_series},
         "rolling_stats": rolling_stats,
-        "exec_price_map": {"open": "开盘", "close": "收盘", "oc2": "OC均价"},
+        "exec_price_map": {"open": "开盘", "close": "收盘", "oc2": "OC2(50%开+50%收日收益)"},
     }
 
 

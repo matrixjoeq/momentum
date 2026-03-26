@@ -20,6 +20,9 @@ def apply_execution_timing_to_weights(
     - open: full day-t return belongs to day-t target weights.
     - close: day-t target weights start from t+1 return (cannot eat day-t return).
     - oc2: day-t return is split 50/50 between previous and current target weights.
+
+    Note: this **oc2** is a **weight** split between days, not the same object as **OC2 daily return**
+    in backtests (there, oc2 is typically 50% open-leg + 50% close-leg return on the price series).
     """
     ep = str(exec_price or "open").strip().lower()
     if ep not in {"open", "close", "oc2"}:

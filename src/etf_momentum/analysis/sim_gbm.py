@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Allocation key "risk_parity" here is inverse-volatility weighting (not ERC-style risk parity).
+
 import datetime as dt
 import os
 import sys
@@ -733,8 +735,12 @@ def montecarlo_rotation_vs_ew(
         if jobs <= 0:
             jobs = max(1, int(os.cpu_count() or 1))
         jobs = max(1, min(jobs, n_sims))
-        jobs_effective = int(jobs)
-        if jobs == 1:
+        if int(n_sims) <= 4:
+            parallel_jobs = 1
+        else:
+            parallel_jobs = int(jobs)
+        jobs_effective = int(parallel_jobs)
+        if parallel_jobs == 1:
             for s in sim_seeds:
                 one = _eval_mc_world(
                     start=start,
@@ -767,7 +773,7 @@ def montecarlo_rotation_vs_ew(
                         mp_ctx = mp.get_context("fork")
                     except ValueError:
                         mp_ctx = None
-                with ProcessPoolExecutor(max_workers=jobs, mp_context=mp_ctx) as ex:
+                with ProcessPoolExecutor(max_workers=parallel_jobs, mp_context=mp_ctx) as ex:
                     futs = [
                         ex.submit(
                             _eval_mc_world,
@@ -958,7 +964,7 @@ def _extract_max_drawdown_from_bt(bt: dict[str, Any]) -> float:
 _AB_TARGET_LABELS: dict[str, str] = {
     "cash": "持有现金",
     "equal_weight": "等权再平衡",
-    "risk_parity": "风险平价再平衡",
+    "risk_parity": "逆波动加权(仿真,非ERC)",
     "rotation_a": "轮动策略A",
     "rotation_b": "轮动策略B",
 }
@@ -1371,14 +1377,12 @@ def _paired_permutation_pvalue(diff: np.ndarray, *, n_perm: int, seed: int | Non
     if d.size == 0:
         return float("nan")
     obs = float(np.mean(d))
+    n_p = int(max(1, int(n_perm)))
     rng = np.random.default_rng(seed)
-    ge = 0
-    for _ in range(int(max(1000, n_perm))):
-        signs = rng.choice([-1.0, 1.0], size=d.size)
-        stat = float(np.mean(d * signs))
-        if stat >= obs:
-            ge += 1
-    return float((ge + 1) / (int(max(1000, n_perm)) + 1))
+    signs = rng.choice(np.asarray([-1.0, 1.0], dtype=np.float64), size=(n_p, d.size))
+    stats = np.mean(d * signs, axis=1)
+    ge = int(np.sum(stats >= obs))
+    return float((ge + 1) / (n_p + 1))
 
 
 def _bootstrap_ci(diff: np.ndarray, *, n_boot: int, seed: int | None) -> dict[str, list[float]]:
@@ -1387,13 +1391,12 @@ def _bootstrap_ci(diff: np.ndarray, *, n_boot: int, seed: int | None) -> dict[st
     if d.size == 0:
         return {"mean": [float("nan"), float("nan")], "median": [float("nan"), float("nan")]}
     rng = np.random.default_rng(seed)
-    m = np.empty(int(max(1000, n_boot)), dtype=float)
-    md = np.empty(int(max(1000, n_boot)), dtype=float)
-    n = d.size
-    for i in range(m.size):
-        samp = d[rng.integers(0, n, size=n)]
-        m[i] = float(np.mean(samp))
-        md[i] = float(np.median(samp))
+    n_b = int(max(1, int(n_boot)))
+    n = int(d.size)
+    idx = rng.integers(0, n, size=(n_b, n))
+    samp = d[idx]
+    m = np.mean(samp, axis=1)
+    md = np.median(samp, axis=1)
     return {
         "mean": [float(np.percentile(m, 2.5)), float(np.percentile(m, 97.5))],
         "median": [float(np.percentile(md, 2.5)), float(np.percentile(md, 97.5))],
@@ -1479,6 +1482,9 @@ def _collect_ab_samples(
     if jobs <= 0:
         jobs = max(1, int(os.cpu_count() or 1))
     jobs = max(1, min(jobs, int(n_worlds)))
+    # Few-world batches: process startup/fork dominates; serial is faster for smoke and small-N AB.
+    if int(n_worlds) <= 4:
+        jobs = 1
     jobs_effective = int(jobs)
 
     if jobs == 1:
@@ -1840,7 +1846,9 @@ def gbm_ab_significance(
             drep = np.asarray(a_rep, dtype=float) - np.asarray(b_rep, dtype=float)
             rep_mean_diff.append(float(np.mean(drep)) if drep.size else float("nan"))
             rep_p_sign.append(float(_sign_test_pvalue_one_sided(drep)))
-            rep_p_perm.append(float(_paired_permutation_pvalue(drep, n_perm=max(1000, min(int(n_perm), 2000)), seed=srep)))
+            rep_p_perm.append(
+                float(_paired_permutation_pvalue(drep, n_perm=max(1, min(int(n_perm), 2000)), seed=srep))
+            )
         arr_md = np.asarray(rep_mean_diff, dtype=float)
         arr_ps = np.asarray(rep_p_sign, dtype=float)
         arr_pp = np.asarray(rep_p_perm, dtype=float)

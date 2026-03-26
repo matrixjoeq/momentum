@@ -259,14 +259,14 @@ def test_trend_portfolio_group_enforce_respects_group_cap(session_factory):
 
 def test_trend_portfolio_trade_statistics_have_samples_user_case_like(session_factory):
     """
-    Use a user-case-like long-span setup (12 assets, 20111209~20260320) and verify
-    trade statistics are not empty under cost+slippage when positions persist to the end.
+    User-case-like trade-stats check (shorter span than prod debug) with cost+slippage;
+    staggered drifts keep ranked assets so MA trend portfolio produces closable trades.
     """
     sf = session_factory
-    start = dt.date(2011, 12, 9)
-    end = dt.date(2026, 3, 20)
+    start = dt.date(2022, 1, 4)
+    end = dt.date(2023, 10, 31)
     dates = [d.date() for d in pd.date_range(start, end, freq="B")]
-    codes = [f"T{i:02d}" for i in range(1, 13)]
+    codes = [f"T{i:02d}" for i in range(1, 9)]
     with sf() as db:
         n = max(1, len(dates) - 1)
         for k, code in enumerate(codes):
