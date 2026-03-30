@@ -37,7 +37,7 @@ from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
 from ..analysis.baseline import load_ohlc_prices as _load_ohlc_prices
 from ..analysis.baseline import _compute_return_risk_contributions as _compute_return_risk_contributions
 from ..analysis.erc_weights import erc_weights_from_return_history
-from ..analysis.execution_timing import corporate_action_mask, forward_returns
+from ..analysis.execution_timing import corporate_action_mask, forward_returns, slippage_return_from_turnover
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,7 @@ class RotationInputs:
     skip_days: int = 0  # skip recent trading days (0 means no skip)
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0  # round-trip cost in bps per turnover, simple approximation
-    slippage_rate: float = 0.001  # execution slippage per one-way turnover, always adverse
+    slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
     # --- Ranking method ---
     score_method: str = "raw_mom"  # raw_mom | sharpe_mom | sortino_mom
     # --- Pre-trade risk controls (drawdown prevention heuristics) ---
@@ -236,6 +236,7 @@ def _trade_returns_from_weight_series(
     *,
     cost_bps: float,
     slippage_rate: float,
+    exec_price: pd.Series,
     dates: pd.Index,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
@@ -245,7 +246,8 @@ def _trade_returns_from_weight_series(
     if n <= 0:
         return {"returns": [], "trades": []}
     cost_rate = float(cost_bps) / 10000.0
-    slip_rate = float(slippage_rate)
+    px = pd.to_numeric(exec_price, errors="coerce").astype(float).reindex(dates).replace([np.inf, -np.inf], np.nan).ffill()
+    slip_spread = float(slippage_rate)
     returns: list[float] = []
     trades: list[dict[str, Any]] = []
     active = False
@@ -257,7 +259,9 @@ def _trade_returns_from_weight_series(
         prev = float(ww.iloc[i - 1]) if i > 0 else 0.0
         r = float(rr.iloc[i]) if np.isfinite(float(rr.iloc[i])) else 0.0
         turnover = abs(float(cur) - float(prev)) / 2.0
-        day_ret = float(cur) * float(r) - float(turnover) * (float(cost_rate) + float(slip_rate))
+        px_i = float(px.iloc[i]) if np.isfinite(float(px.iloc[i])) and float(px.iloc[i]) > 0.0 else float("nan")
+        slip_ret = float(turnover) * (float(slip_spread) / float(px_i)) if np.isfinite(px_i) and float(slip_spread) > 0.0 else 0.0
+        day_ret = float(cur) * float(r) - float(turnover) * float(cost_rate) - float(slip_ret)
         if (not active) and (prev <= eps) and (cur > eps):
             active = True
             start_i = int(i)
@@ -300,6 +304,7 @@ def _trade_returns_from_weight_df(
     *,
     cost_bps: float,
     slippage_rate: float,
+    exec_price: pd.DataFrame,
     dates: pd.Index,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
@@ -311,6 +316,7 @@ def _trade_returns_from_weight_df(
             ret_exec[c] if c in ret_exec.columns else pd.Series(dtype=float),
             cost_bps=float(cost_bps),
             slippage_rate=float(slippage_rate),
+            exec_price=exec_price[c] if c in exec_price.columns else pd.Series(dtype=float),
             dates=dates,
             eps=float(eps),
         )
@@ -917,6 +923,8 @@ def _tiered_exposure_from_level_quantiles(
 
 def _bias_series_from_close(
     close: pd.DataFrame,
+    high: pd.DataFrame,
+    low: pd.DataFrame,
     *,
     ma_window: int,
     bias_type: str = "bias",
@@ -925,8 +933,8 @@ def _bias_series_from_close(
     bt = str(bias_type or "bias").strip().lower()
     ma = close.rolling(window=w, min_periods=max(2, w // 2)).mean()
     if bt == "bias_v":
-        # Close-only ATR proxy consistent with the rest of strategy internals.
-        atr = close.diff().abs().rolling(window=w, min_periods=max(2, w // 2)).mean()
+        # Use classic ATR from H/L/C for BIAS-V normalization.
+        atr = _atr_from_hlc(high, low, close, window=w)
         return ((close - ma) / atr.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).astype(float)
     return (close / ma - 1.0).replace([np.inf, -np.inf], np.nan).astype(float)
 
@@ -1215,6 +1223,8 @@ def backtest_rotation(
     return_weights_end: bool = False,
     allow_virtual_end: bool = False,
     lightweight: bool = False,
+    include_benchmarks: bool = True,
+    benchmark_mode: str = "EW_REBAL",
 ) -> dict[str, Any]:
     universe = list(dict.fromkeys(inp.codes))
     if not universe:
@@ -1224,6 +1234,9 @@ def backtest_rotation(
         raise ValueError("top_k must be non-zero")
     top_k_abs = int(abs(top_k_signed))
     inverse_top_k = bool(top_k_signed < 0)
+    bm_mode = str(benchmark_mode or "EW_REBAL").strip().upper()
+    if bm_mode not in {"EW_REBAL", "RP_REBAL", "IVOL_REBAL", "ALL"}:
+        bm_mode = "EW_REBAL"
     pos_mode = str(inp.position_mode or "adaptive").strip().lower()
     if pos_mode not in {"adaptive", "fixed", "risk_budget"}:
         raise ValueError("position_mode must be one of: adaptive|fixed|risk_budget")
@@ -1686,6 +1699,8 @@ def backtest_rotation(
 
     # Pre-compute risk-control signals on qfq close (aligned to execution calendar).
     ta_close = close_qfq[rank_codes] if need_qfq else None
+    ta_high = high_qfq.reindex(index=dates, columns=rank_codes) if need_qfq else None
+    ta_low = low_qfq.reindex(index=dates, columns=rank_codes) if need_qfq else None
     trend_ok_each_by_key: dict[tuple[int, str, str], pd.DataFrame] = {}
     bias_by_key: dict[tuple[int, str], pd.DataFrame] = {}
     bias_thr_by_cfg: dict[tuple[str, int, str, str, float, float, int], pd.DataFrame] = {}
@@ -1712,7 +1727,13 @@ def backtest_rotation(
                     all_bias_types.add(str((r or {}).get("bias_type") or b_type).strip().lower())
             for w in sorted(set(int(x) for x in bias_windows if int(x) > 1)):
                 for bt in sorted(x for x in all_bias_types if x in {"bias", "bias_v"}):
-                    bdf = _bias_series_from_close(ta_close, ma_window=int(w), bias_type=str(bt))
+                    bdf = _bias_series_from_close(
+                        ta_close,
+                        ta_high.astype(float).combine_first(ta_close.astype(float)),
+                        ta_low.astype(float).combine_first(ta_close.astype(float)),
+                        ma_window=int(w),
+                        bias_type=str(bt),
+                    )
                     bdf.attrs["bias_type"] = str(bt)
                     bias_by_key[(int(w), str(bt))] = bdf
             for cfg in sorted(list(bias_rule_cfgs)):
@@ -1942,15 +1963,21 @@ def backtest_rotation(
     if ep == "open":
         ret_exec_none = forward_returns(o_none)
         ret_exec_hfq = forward_returns(o_hfq)
+        px_slip_none = o_none.astype(float)
+        px_slip_hfq = o_hfq.astype(float)
     elif ep == "close":
         # 成交价=收盘价时，使用执行日（调仓日后一交易日）的收盘价，非调仓日收盘价：
         # ret[t]=close[t+1]/close[t]-1，权重从执行日 t 起生效，故入场价为 close[t]。
         ret_exec_none = forward_returns(c_none)
         ret_exec_hfq = forward_returns(c_hfq)
+        px_slip_none = c_none.astype(float)
+        px_slip_hfq = c_hfq.astype(float)
     else:
         # OC2 means half execution at open and half at close.
         ret_exec_none = 0.5 * (forward_returns(o_none) + forward_returns(c_none))
         ret_exec_hfq = 0.5 * (forward_returns(o_hfq) + forward_returns(c_hfq))
+        px_slip_none = (0.5 * (o_none + c_none)).astype(float)
+        px_slip_hfq = (0.5 * (o_hfq + c_hfq)).astype(float)
 
     # Corporate-action cliff detection must align with execution-return horizon.
     # forward_returns is indexed by t with return over [t -> t+1], so corp_factor
@@ -1969,6 +1996,13 @@ def backtest_rotation(
             if bool(m.any()):
                 ret_exec_all.loc[m, c] = ret_exec_hfq.loc[m, c]
     ret_exec_all = ret_exec_all.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    px_exec_slip_all = px_slip_none.copy()
+    for c in codes:
+        if c in px_exec_slip_all.columns and c in px_slip_hfq.columns and c in corp_mask.columns:
+            m = corp_mask[c].fillna(False)
+            if bool(m.any()):
+                px_exec_slip_all.loc[m, c] = px_slip_hfq.loc[m, c]
+    px_exec_slip_all = px_exec_slip_all.reindex(index=dates, columns=codes).replace([np.inf, -np.inf], np.nan).ffill()
 
     # 调仓日=决策日，执行日=下一交易日；收益从执行日开始计算。
     # 开盘价可享受执行当日收益；收盘价不享受执行当日收益（保持 forward return）。
@@ -1997,14 +2031,15 @@ def backtest_rotation(
     # Stop-loss carry: track prior picks and whether a stop-out occurred in the prior holding segment.
     prev_picks_key: tuple[str, ...] | None = None
     prev_segment_stopped_out: bool = False
-    # ATR from qfq close only (close-to-close absolute range); aligned to execution calendar.
-    # Note: classic ATR uses high/low/prev close; this is a close-only approximation per spec.
+    # ATR from qfq H/L/C (classic TR-based ATR); aligned to execution calendar.
     atr_style_mode = atr_stop_exec_mode in {"atr_stop_static", "atr_stop_trailing", "atr_stop_tightening"}
     if atr_style_mode:
         w_atr = int(inp.atr_stop_window)
         w_atr = max(2, w_atr)
         close_for_atr = close_qfq[rank_codes].astype(float)
-        atr = close_for_atr.diff().abs().rolling(window=w_atr, min_periods=max(2, w_atr // 2)).mean()
+        high_for_atr = high_qfq[rank_codes].astype(float).combine_first(close_for_atr)
+        low_for_atr = low_qfq[rank_codes].astype(float).combine_first(close_for_atr)
+        atr = _atr_from_hlc(high_for_atr, low_for_atr, close_for_atr, window=w_atr)
     else:
         w_atr = None
         atr = pd.DataFrame()
@@ -2065,11 +2100,18 @@ def backtest_rotation(
         r_slice = ret_exec_all.iloc[rng].astype(float)
         port_ret = (w_slice * r_slice).sum(axis=1).astype(float)
         # Turnover must be computed by position, not by index alignment.
-        w_np = w_slice.to_numpy(dtype=float)
-        w_prev_np = w.iloc[rng - 1].astype(float).to_numpy(dtype=float)
-        turnover_np = np.abs(w_np - w_prev_np).sum(axis=1) / 2.0
+        turnover_df = (w_slice - w.iloc[rng - 1].astype(float)).abs() / 2.0
+        turnover_np = turnover_df.sum(axis=1).to_numpy(dtype=float)
         cost_np = turnover_np * (float(inp.cost_bps) / 10000.0)
-        slippage_np = turnover_np * float(inp.slippage_rate)
+        slippage_np = (
+            slippage_return_from_turnover(
+                turnover_df.astype(float),
+                slippage_spread=float(inp.slippage_rate),
+                exec_price=px_exec_slip_all.iloc[rng].astype(float),
+            )
+            .sum(axis=1)
+            .to_numpy(dtype=float)
+        )
         nav = float(nav_running.iloc[processed_idx])
         # Use raw arrays to avoid any index-alignment surprises.
         xnet = port_ret.to_numpy(dtype=float) - cost_np.astype(float) - slippage_np.astype(float)
@@ -2146,9 +2188,20 @@ def backtest_rotation(
             w_row = w.iloc[t].to_numpy(dtype=float)
             r_row = ret_exec_all.iloc[t].to_numpy(dtype=float)
             port_ret = float(np.dot(w_row, r_row))
-            turnover = float(np.abs(w_row - dd_prev_w).sum() / 2.0)
+            turnover_by_asset = np.abs(w_row - dd_prev_w) / 2.0
+            turnover = float(np.sum(turnover_by_asset))
             cost = float(turnover * (float(inp.cost_bps) / 10000.0))
-            slip = float(turnover * float(inp.slippage_rate))
+            px_row = px_exec_slip_all.iloc[t].to_numpy(dtype=float)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                slip = float(
+                    np.nansum(
+                        np.where(
+                            px_row > 0.0,
+                            turnover_by_asset * (float(inp.slippage_rate) / px_row),
+                            0.0,
+                        )
+                    )
+                )
             dd_nav *= (1.0 + float(port_ret) - float(cost) - float(slip))
             dd_peak = float(max(float(dd_peak), float(dd_nav)))
             dd_prev_w = w_row
@@ -3500,6 +3553,67 @@ def backtest_rotation(
     # Continuous holding streaks (by actual daily weights, not rebalance schedule).
     holding_streaks = _holding_streaks_from_weights(w, codes=codes, eps=1e-12)
 
+    # Strategy-only fast path (used by rotation calendar-effect grid scan):
+    # skip all benchmark NAV computation (EW/RP/IVOL and excess variants).
+    if not bool(include_benchmarks):
+        port_ret = (w * ret_exec).sum(axis=1).astype(float)
+        w_prev = w.shift(1).fillna(0.0)
+        turnover_by_asset = (w - w_prev).abs() / 2.0
+        turnover = turnover_by_asset.sum(axis=1).astype(float)
+        cost = turnover * (float(inp.cost_bps) / 10000.0)
+        slippage = (
+            slippage_return_from_turnover(
+                turnover_by_asset.astype(float),
+                slippage_spread=float(inp.slippage_rate),
+                exec_price=px_exec_slip_all.reindex(index=w.index, columns=codes).ffill(),
+            )
+            .sum(axis=1)
+            .astype(float)
+        )
+        port_ret_net = (port_ret - cost - slippage).astype(float)
+        port_nav_net = (1.0 + port_ret_net).cumprod().astype(float)
+        if len(port_nav_net) > 0:
+            port_nav_net.iloc[0] = 1.0
+
+        ann_ret = _annualized_return(port_nav_net)
+        ann_vol = _annualized_vol(port_ret_net)
+        mdd = _max_drawdown(port_nav_net)
+        mdd_dur = _max_drawdown_duration_days(port_nav_net)
+        sharpe = _sharpe(port_ret_net, rf=float(inp.risk_free_rate))
+        calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
+        sortino = _sortino(port_ret_net, rf=float(inp.risk_free_rate))
+        ui = _ulcer_index(port_nav_net, in_percent=True)
+        ui_den = ui / 100.0
+        upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
+
+        return {
+            "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d")},
+            "codes": codes,
+            "exec_price": ep,
+            "nav": {
+                "dates": dates.date.astype(str).tolist(),
+                "series": {"ROTATION": port_nav_net.astype(float).tolist()},
+            },
+            "metrics": {
+                "strategy": {
+                    "sample_days": int(len(port_nav_net)),
+                    "cumulative_return": float(port_nav_net.iloc[-1] - 1.0) if len(port_nav_net) else float("nan"),
+                    "annualized_return": float(ann_ret),
+                    "annualized_volatility": float(ann_vol),
+                    "max_drawdown": float(mdd),
+                    "max_drawdown_recovery_days": int(mdd_dur),
+                    "sharpe_ratio": float(sharpe),
+                    "calmar_ratio": float(calmar),
+                    "sortino_ratio": float(sortino),
+                    "ulcer_index": float(ui),
+                    "ulcer_performance_index": float(upi),
+                    "information_ratio": float("nan"),
+                    "avg_daily_turnover": float(np.mean(turnover.iloc[1:].to_numpy(dtype=float))) if len(turnover) > 1 else 0.0,
+                    "avg_annual_turnover": float(np.mean(turnover.iloc[1:].to_numpy(dtype=float)) * TRADING_DAYS_PER_YEAR) if len(turnover) > 1 else 0.0,
+                }
+            },
+        }
+
     # Benchmark: daily HFQ close equal-weight rebalance (no costs); RP uses same daily return matrix.
     bench_codes = universe[:]  # fixed benchmark universe
     n_b = len(bench_codes)
@@ -3513,52 +3627,75 @@ def backtest_rotation(
     ew_nav = (1.0 + ew_ret).cumprod()
     ew_nav.iloc[0] = 1.0
 
-    # Benchmarks vs rotation: ERC (RP_REBAL) and inverse-vol (IVOL_REBAL), same rebalance schedule as decision_dates.
-    # We estimate covariance / vol using past HFQ close-to-close returns up to the decision date (inclusive).
-    r_for_rp = ch_bench.astype(float).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    # Optional benchmarks vs rotation:
+    # - RP_REBAL: ERC (rolling covariance)
+    # - IVOL_REBAL: inverse-vol
+    # Compute lazily by selected benchmark mode (default EW only).
+    need_rp = bool(include_benchmarks) and (bm_mode in {"RP_REBAL", "ALL"})
+    need_ivol = bool(include_benchmarks) and (bm_mode in {"IVOL_REBAL", "ALL"})
     rp_window = int(max(20, int(inp.lookback_days or 20)))
-    w_rp = pd.DataFrame(0.0, index=dates, columns=bench_codes, dtype=float)
-    w_ivol_rebal = pd.DataFrame(0.0, index=dates, columns=bench_codes, dtype=float)
-    for i, d in enumerate(decision_dates):
-        di = dates.get_loc(d)
-        if di + 1 >= len(dates):
-            break
-        start_i = di + 1
-        next_di = (dates.get_loc(decision_dates[i + 1]) if i + 1 < len(decision_dates) else (len(dates) - 1))
-        end_i = min(len(dates) - 1, next_di)
-        hist = r_for_rp.iloc[max(0, di - rp_window + 1) : di + 1].astype(float)
-        vol = hist.std(ddof=1).replace(0.0, np.nan)
-        inv = (1.0 / vol).replace([np.inf, -np.inf], np.nan)
-        s = float(np.nansum(inv.to_numpy(dtype=float)))
-        if np.isfinite(s) and s > 0:
-            wv_ivol = (inv / s).fillna(0.0).astype(float)
-        else:
-            wv_ivol = pd.Series(w_eq, index=bench_codes, dtype=float)
-        w_ivol_rebal.loc[dates[start_i] : dates[end_i], bench_codes] = wv_ivol.to_numpy(dtype=float)
-        hmat = hist.reindex(columns=bench_codes).astype(float)
-        w_arr = erc_weights_from_return_history(hmat.to_numpy(dtype=float), min_obs=2)
-        wv_erc = pd.Series(w_arr, index=bench_codes, dtype=float).reindex(bench_codes).fillna(0.0)
-        s_erc = float(wv_erc.sum())
-        if s_erc <= 1e-12:
-            wv_erc = wv_ivol.copy()
-        else:
-            wv_erc = (wv_erc / s_erc).astype(float)
-        w_rp.loc[dates[start_i] : dates[end_i], bench_codes] = wv_erc.to_numpy(dtype=float)
-    rp_ret = (w_rp * r_for_rp).sum(axis=1).astype(float)
-    rp_nav = (1.0 + rp_ret).cumprod()
-    rp_nav.iloc[0] = 1.0
-    ivol_ret = (w_ivol_rebal * r_for_rp).sum(axis=1).astype(float)
-    ivol_nav = (1.0 + ivol_ret).cumprod()
-    ivol_nav.iloc[0] = 1.0
+    if need_rp or need_ivol:
+        r_for_rp = ch_bench.astype(float).pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        w_rp = pd.DataFrame(0.0, index=dates, columns=bench_codes, dtype=float)
+        w_ivol_rebal = pd.DataFrame(0.0, index=dates, columns=bench_codes, dtype=float)
+        for i, d in enumerate(decision_dates):
+            di = dates.get_loc(d)
+            if di + 1 >= len(dates):
+                break
+            start_i = di + 1
+            next_di = (dates.get_loc(decision_dates[i + 1]) if i + 1 < len(decision_dates) else (len(dates) - 1))
+            end_i = min(len(dates) - 1, next_di)
+            hist = r_for_rp.iloc[max(0, di - rp_window + 1) : di + 1].astype(float)
+            vol = hist.std(ddof=1).replace(0.0, np.nan)
+            inv = (1.0 / vol).replace([np.inf, -np.inf], np.nan)
+            s = float(np.nansum(inv.to_numpy(dtype=float)))
+            if np.isfinite(s) and s > 0:
+                wv_ivol = (inv / s).fillna(0.0).astype(float)
+            else:
+                wv_ivol = pd.Series(w_eq, index=bench_codes, dtype=float)
+            if need_ivol or need_rp:
+                w_ivol_rebal.loc[dates[start_i] : dates[end_i], bench_codes] = wv_ivol.to_numpy(dtype=float)
+            if need_rp:
+                hmat = hist.reindex(columns=bench_codes).astype(float)
+                w_arr = erc_weights_from_return_history(hmat.to_numpy(dtype=float), min_obs=2)
+                wv_erc = pd.Series(w_arr, index=bench_codes, dtype=float).reindex(bench_codes).fillna(0.0)
+                s_erc = float(wv_erc.sum())
+                if s_erc <= 1e-12:
+                    wv_erc = wv_ivol.copy()
+                else:
+                    wv_erc = (wv_erc / s_erc).astype(float)
+                w_rp.loc[dates[start_i] : dates[end_i], bench_codes] = wv_erc.to_numpy(dtype=float)
+        rp_ret = (w_rp * r_for_rp).sum(axis=1).astype(float) if need_rp else pd.Series(np.nan, index=dates, dtype=float)
+        rp_nav = (1.0 + rp_ret).cumprod() if need_rp else pd.Series(np.nan, index=dates, dtype=float)
+        if need_rp and len(rp_nav) > 0:
+            rp_nav.iloc[0] = 1.0
+        ivol_ret = (w_ivol_rebal * r_for_rp).sum(axis=1).astype(float) if need_ivol else pd.Series(np.nan, index=dates, dtype=float)
+        ivol_nav = (1.0 + ivol_ret).cumprod() if need_ivol else pd.Series(np.nan, index=dates, dtype=float)
+        if need_ivol and len(ivol_nav) > 0:
+            ivol_nav.iloc[0] = 1.0
+    else:
+        rp_ret = pd.Series(np.nan, index=dates, dtype=float)
+        rp_nav = pd.Series(np.nan, index=dates, dtype=float)
+        ivol_ret = pd.Series(np.nan, index=dates, dtype=float)
+        ivol_nav = pd.Series(np.nan, index=dates, dtype=float)
 
     # Timed strategy returns/costs.
     port_ret = (w * ret_exec).sum(axis=1).astype(float)
     port_nav = (1.0 + port_ret).cumprod()
     port_nav.iloc[0] = 1.0
     w_prev = w.shift(1).fillna(0.0)
-    turnover = (w - w_prev).abs().sum(axis=1) / 2.0
+    turnover_by_asset = (w - w_prev).abs() / 2.0
+    turnover = turnover_by_asset.sum(axis=1).astype(float)
     cost = turnover * (inp.cost_bps / 10000.0)
-    slippage = turnover * float(inp.slippage_rate)
+    slippage = (
+        slippage_return_from_turnover(
+            turnover_by_asset.astype(float),
+            slippage_spread=float(inp.slippage_rate),
+            exec_price=px_exec_slip_all.reindex(index=w.index, columns=codes).ffill(),
+        )
+        .sum(axis=1)
+        .astype(float)
+    )
     port_ret_net = (port_ret - cost - slippage).astype(float)
     port_nav_net = (1.0 + port_ret_net).cumprod()
     port_nav_net.iloc[0] = 1.0
@@ -3613,6 +3750,7 @@ def backtest_rotation(
         ret_exec[codes].astype(float).fillna(0.0),
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
+        exec_price=px_exec_slip_all.reindex(index=dates, columns=codes).ffill(),
         dates=dates,
     )
     trade_stats = {
@@ -3629,13 +3767,15 @@ def backtest_rotation(
     excess_nav = (1.0 + active_ret).cumprod()
     excess_nav.iloc[0] = 1.0
 
-    active_ret_rp = port_ret_net - rp_ret
-    excess_nav_rp = (1.0 + active_ret_rp).cumprod()
-    excess_nav_rp.iloc[0] = 1.0
+    active_ret_rp = (port_ret_net - rp_ret).astype(float) if need_rp else pd.Series(np.nan, index=dates, dtype=float)
+    excess_nav_rp = (1.0 + active_ret_rp).cumprod() if need_rp else pd.Series(np.nan, index=dates, dtype=float)
+    if need_rp and len(excess_nav_rp) > 0:
+        excess_nav_rp.iloc[0] = 1.0
 
-    active_ret_ivol = port_ret_net - ivol_ret
-    excess_nav_ivol = (1.0 + active_ret_ivol).cumprod()
-    excess_nav_ivol.iloc[0] = 1.0
+    active_ret_ivol = (port_ret_net - ivol_ret).astype(float) if need_ivol else pd.Series(np.nan, index=dates, dtype=float)
+    excess_nav_ivol = (1.0 + active_ret_ivol).cumprod() if need_ivol else pd.Series(np.nan, index=dates, dtype=float)
+    if need_ivol and len(excess_nav_ivol) > 0:
+        excess_nav_ivol.iloc[0] = 1.0
 
     if bool(lightweight):
         ann_ret = _annualized_return(port_nav_net)
@@ -3684,19 +3824,19 @@ def backtest_rotation(
     ex_mdd = _max_drawdown(excess_nav)
     ex_mdd_dur = _max_drawdown_duration_days(excess_nav)
 
-    ann_excess_rp = _annualized_return(excess_nav_rp)
-    ann_excess_rp_vol = _annualized_vol(active_ret_rp)
-    ir_rp = _sharpe(active_ret_rp, rf=0.0)
-    ann_excess_rp_arith = float(active_ret_rp.mean() * TRADING_DAYS_PER_YEAR) if len(active_ret_rp) else float("nan")
-    ex_rp_mdd = _max_drawdown(excess_nav_rp)
-    ex_rp_mdd_dur = _max_drawdown_duration_days(excess_nav_rp)
+    ann_excess_rp = _annualized_return(excess_nav_rp) if need_rp else float("nan")
+    ann_excess_rp_vol = _annualized_vol(active_ret_rp) if need_rp else float("nan")
+    ir_rp = _sharpe(active_ret_rp, rf=0.0) if need_rp else float("nan")
+    ann_excess_rp_arith = float(active_ret_rp.mean() * TRADING_DAYS_PER_YEAR) if (need_rp and len(active_ret_rp)) else float("nan")
+    ex_rp_mdd = _max_drawdown(excess_nav_rp) if need_rp else float("nan")
+    ex_rp_mdd_dur = _max_drawdown_duration_days(excess_nav_rp) if need_rp else 0
 
-    ann_excess_ivol = _annualized_return(excess_nav_ivol)
-    ann_excess_ivol_vol = _annualized_vol(active_ret_ivol)
-    ir_ivol = _sharpe(active_ret_ivol, rf=0.0)
-    ann_excess_ivol_arith = float(active_ret_ivol.mean() * TRADING_DAYS_PER_YEAR) if len(active_ret_ivol) else float("nan")
-    ex_ivol_mdd = _max_drawdown(excess_nav_ivol)
-    ex_ivol_mdd_dur = _max_drawdown_duration_days(excess_nav_ivol)
+    ann_excess_ivol = _annualized_return(excess_nav_ivol) if need_ivol else float("nan")
+    ann_excess_ivol_vol = _annualized_vol(active_ret_ivol) if need_ivol else float("nan")
+    ir_ivol = _sharpe(active_ret_ivol, rf=0.0) if need_ivol else float("nan")
+    ann_excess_ivol_arith = float(active_ret_ivol.mean() * TRADING_DAYS_PER_YEAR) if (need_ivol and len(active_ret_ivol)) else float("nan")
+    ex_ivol_mdd = _max_drawdown(excess_nav_ivol) if need_ivol else float("nan")
+    ex_ivol_mdd_dur = _max_drawdown_duration_days(excess_nav_ivol) if need_ivol else 0
 
     metrics = {
         "strategy": {
@@ -3728,16 +3868,14 @@ def backtest_rotation(
             "max_drawdown": float(ex_mdd),
             "max_drawdown_recovery_days": int(ex_mdd_dur),
         },
-        "risk_parity": {
+    }
+    if need_rp:
+        metrics["risk_parity"] = {
             "cumulative_return": float(rp_nav.iloc[-1] - 1.0),
             "rp_window": int(rp_window),
             "note": "ERC (equal risk contribution) on rolling sample covariance",
-        },
-        "inverse_vol_rebal": {
-            "cumulative_return": float(ivol_nav.iloc[-1] - 1.0),
-            "rp_window": int(rp_window),
-        },
-        "excess_vs_risk_parity": {
+        }
+        metrics["excess_vs_risk_parity"] = {
             "cumulative_return": float(excess_nav_rp.iloc[-1] - 1.0),
             "annualized_return": float(ann_excess_rp),
             "annualized_return_geo": float(ann_excess_rp),
@@ -3747,8 +3885,13 @@ def backtest_rotation(
             "max_drawdown": float(ex_rp_mdd),
             "max_drawdown_recovery_days": int(ex_rp_mdd_dur),
             "rp_window": int(rp_window),
-        },
-        "excess_vs_inverse_vol_rebal": {
+        }
+    if need_ivol:
+        metrics["inverse_vol_rebal"] = {
+            "cumulative_return": float(ivol_nav.iloc[-1] - 1.0),
+            "rp_window": int(rp_window),
+        }
+        metrics["excess_vs_inverse_vol_rebal"] = {
             "cumulative_return": float(excess_nav_ivol.iloc[-1] - 1.0),
             "annualized_return": float(ann_excess_ivol),
             "annualized_return_geo": float(ann_excess_ivol),
@@ -3758,8 +3901,7 @@ def backtest_rotation(
             "max_drawdown": float(ex_ivol_mdd),
             "max_drawdown_recovery_days": int(ex_ivol_mdd_dur),
             "rp_window": int(rp_window),
-        },
-    }
+        }
 
     # Period details and win rate / payoff ratio by rebalance periods: compare period returns strategy vs ew.
     period_stats = []
@@ -3954,13 +4096,13 @@ def backtest_rotation(
         "monthly": _period_returns(port_nav_net, rp_nav, "ME"),
         "quarterly": _period_returns(port_nav_net, rp_nav, "QE"),
         "yearly": _period_returns(port_nav_net, rp_nav, "YE"),
-    }
+    } if need_rp else {"weekly": [], "monthly": [], "quarterly": [], "yearly": []}
     periodic_ivol = {
         "weekly": _period_returns(port_nav_net, ivol_nav, "W-FRI"),
         "monthly": _period_returns(port_nav_net, ivol_nav, "ME"),
         "quarterly": _period_returns(port_nav_net, ivol_nav, "QE"),
         "yearly": _period_returns(port_nav_net, ivol_nav, "YE"),
-    }
+    } if need_ivol else {"weekly": [], "monthly": [], "quarterly": [], "yearly": []}
 
     # Rolling stats for strategy vs benchmark (defaults aligned with baseline UI)
     # NOTE: "drawdown" is rolling drawdown; "max_drawdown" is kept for backward-compat (deprecated).
@@ -4032,6 +4174,7 @@ def backtest_rotation(
             "benchmark_nav": "hfq",
         },
         "exec_price": ep,
+        "benchmark_mode": bm_mode,
         "position_mode": pos_mode,
         "risk_budget_atr_window": int(risk_budget_atr_window),
         "risk_budget_pct": float(risk_budget_pct),
@@ -4042,15 +4185,21 @@ def backtest_rotation(
         "asset_vol_index_timing": asset_vol_index_meta,
         "nav": {
             "dates": dates.date.astype(str).tolist(),
-            "series": {
+            "series": ({
                 "ROTATION": port_nav_net.astype(float).tolist(),
                 "EW_REBAL": ew_nav.astype(float).tolist(),
-                "RP_REBAL": rp_nav.astype(float).tolist(),
-                "IVOL_REBAL": ivol_nav.astype(float).tolist(),
                 "EXCESS": excess_nav.astype(float).tolist(),
-                "EXCESS_RP": excess_nav_rp.astype(float).tolist(),
-                "EXCESS_IVOL": excess_nav_ivol.astype(float).tolist(),
-            },
+            } | (
+                {
+                    "RP_REBAL": rp_nav.astype(float).tolist(),
+                    "EXCESS_RP": excess_nav_rp.astype(float).tolist(),
+                } if need_rp else {}
+            ) | (
+                {
+                    "IVOL_REBAL": ivol_nav.astype(float).tolist(),
+                    "EXCESS_IVOL": excess_nav_ivol.astype(float).tolist(),
+                } if need_ivol else {}
+            )),
         },
         "asset_nav_exec": {
             "dates": dates.date.astype(str).tolist(),
@@ -4059,12 +4208,10 @@ def backtest_rotation(
         "nav_rsi": {
             "windows": [6, 12, 24],
             "dates": dates.date.astype(str).tolist(),
-            "series": {
+            "series": ({
                 "ROTATION": {},
                 "EW_REBAL": {},
-                "RP_REBAL": {},
-                "IVOL_REBAL": {},
-            },
+            } | ({"RP_REBAL": {}} if need_rp else {}) | ({"IVOL_REBAL": {}} if need_ivol else {})),
         },
         "attribution": attribution,
         "trade_statistics": trade_stats,
@@ -4090,8 +4237,8 @@ def backtest_rotation(
         "metrics": metrics,
         "win_payoff": stats,
         "period_returns": periodic,
-        "period_returns_rp": periodic_rp,
-        "period_returns_ivol": periodic_ivol,
+        "period_returns_rp": periodic_rp if need_rp else {},
+        "period_returns_ivol": periodic_ivol if need_ivol else {},
         "rolling": rolling_out,
         "period_details": period_stats,
         "holdings": holdings["periods"],
@@ -4112,7 +4259,9 @@ def backtest_rotation(
     for w in out["nav_rsi"]["windows"]:
         out["nav_rsi"]["series"]["ROTATION"][str(w)] = _rsi_wilder(port_nav_net, window=int(w)).astype(float).tolist()
         out["nav_rsi"]["series"]["EW_REBAL"][str(w)] = _rsi_wilder(ew_nav, window=int(w)).astype(float).tolist()
-        out["nav_rsi"]["series"]["RP_REBAL"][str(w)] = _rsi_wilder(rp_nav, window=int(w)).astype(float).tolist()
-        out["nav_rsi"]["series"]["IVOL_REBAL"][str(w)] = _rsi_wilder(ivol_nav, window=int(w)).astype(float).tolist()
+        if need_rp:
+            out["nav_rsi"]["series"]["RP_REBAL"][str(w)] = _rsi_wilder(rp_nav, window=int(w)).astype(float).tolist()
+        if need_ivol:
+            out["nav_rsi"]["series"]["IVOL_REBAL"][str(w)] = _rsi_wilder(ivol_nav, window=int(w)).astype(float).tolist()
     return out
 

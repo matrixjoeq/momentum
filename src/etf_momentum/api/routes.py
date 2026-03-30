@@ -849,7 +849,11 @@ def rotation_backtest(payload: RotationBacktestRequest, db: Session = Depends(ge
         vol_index_close=vol_index_close,
     )
     try:
-        return compute_rotation_backtest(db, inp)
+        return compute_rotation_backtest(
+            db,
+            inp,
+            benchmark_mode=str(getattr(payload, "benchmark_mode", "EW_REBAL") or "EW_REBAL"),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -2643,7 +2647,7 @@ def rotation_next_execution_plan(payload: dict, db: Session = Depends(get_sessio
 
         inp = RotationInputs(
             **{
-                **req.model_dump(),
+                **req.model_dump(exclude={"benchmark_mode"}),
                 "start": _parse_yyyymmdd(req.start),
                 "end": _parse_yyyymmdd(req.end),
                 "asset_momentum_floor_rules": [r.model_dump() for r in req.asset_momentum_floor_rules] if req.asset_momentum_floor_rules else None,

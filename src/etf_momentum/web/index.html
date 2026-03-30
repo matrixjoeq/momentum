@@ -4,12 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ETF 候选池</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
     <script>
       (function () {
         const key = `theme:${location.pathname}`;
@@ -87,7 +81,7 @@
         <label>批量抓取模式</label>
         <select id="fetchMode">
           <option value="serial">串行（逐标的）</option>
-          <option value="parallel">并行（多标的，同一标的仍顺序抓 qfq/hfq/none）</option>
+          <option value="parallel">并行（多标的）</option>
         </select>
       </div>
       <div id="parallelWorkersWrap">

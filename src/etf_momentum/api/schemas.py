@@ -766,7 +766,7 @@ class CalendarTimingStrategyRequest(BaseModel):
     dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate coverage over union interval")
     exec_price: str = Field(default="open", description="open|close")
     cost_bps: float = Field(default=2.0, ge=0.0, description="Two-way transaction cost in bps")
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate")
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
     rebalance_shift: str = Field(
         default="prev",
         description="If decision day is non-trading: prev|next|skip",
@@ -938,6 +938,10 @@ class RotationBacktestRequest(BaseModel):
         default="open",
         description="Execution price for rebalance trading: open|close|oc2 (open/close average).",
     )
+    benchmark_mode: str = Field(
+        default="EW_REBAL",
+        description="Benchmark mode for rotation comparison: EW_REBAL|RP_REBAL|IVOL_REBAL. Default EW_REBAL (compute RP/IVOL only when selected).",
+    )
     top_k: int = Field(
         default=1,
         description="Non-zero integer: top-K by score if positive, bottom-K (inverse) if negative; effective=min(|K|, pool).",
@@ -976,7 +980,7 @@ class RotationBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0)
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate per turnover")
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
     atr_stop_mode: str = Field(default="none", description="Universal ATR stop mode: none|static|trailing|tightening")
     atr_stop_atr_basis: str = Field(default="latest", description="ATR basis for dynamic modes: entry|latest")
     atr_stop_reentry_mode: str = Field(default="reenter", description="Re-entry after ATR stop: reenter|wait_next_entry")
@@ -1040,6 +1044,9 @@ class RotationBacktestRequest(BaseModel):
     def _validate_rotation_top_k(self) -> RotationBacktestRequest:
         if int(self.top_k) == 0:
             raise ValueError("top_k must be non-zero")
+        bm = str(getattr(self, "benchmark_mode", "EW_REBAL") or "EW_REBAL").strip().upper()
+        if bm not in {"EW_REBAL", "RP_REBAL", "IVOL_REBAL", "ALL"}:
+            raise ValueError("benchmark_mode must be one of: EW_REBAL|RP_REBAL|IVOL_REBAL|ALL")
         return self
 
 
@@ -1148,7 +1155,7 @@ class TrendBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate per turnover")
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
@@ -1190,7 +1197,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage rate per turnover")
+    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",

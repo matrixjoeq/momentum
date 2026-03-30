@@ -423,9 +423,6 @@ def compute_rotation_calendar_effect(
     anchors = anchors or ([1, 2, 3, 4, 5] if reb == "weekly" else [1])
     exec_prices = exec_prices or ["open", "close", "oc2"]
 
-    # Benchmark for information ratio: same-frequency EW rebalancing on hfq close (same anchor schedule).
-    bench_close_hfq = load_close_prices(db, codes=list(dict.fromkeys(base.codes)), start=base.start, end=base.end, adjust="hfq")
-
     grid: list[dict[str, Any]] = []
     years_list = [1, 3, 5]
     win_days = [int(TRADING_DAYS_PER_YEAR * y) for y in years_list]
@@ -466,36 +463,11 @@ def compute_rotation_calendar_effect(
                         "exec_price": str(ep),
                     }
                 )
-                res = compute_rotation_backtest(db, inp)
+                res = compute_rotation_backtest(db, inp, include_benchmarks=False)
                 strat = (res.get("metrics") or {}).get("strategy") or {}
 
-                # Compute IR vs hfq EW benchmark (same anchor schedule).
                 nav_dates = (res.get("nav") or {}).get("dates") or []
                 nav_series = ((res.get("nav") or {}).get("series") or {}).get("ROTATION") or []
-                info_ratio = float("nan")
-                calmar = float("nan")
-                if nav_dates and nav_series:
-                    idx = pd.to_datetime(nav_dates)
-                    nav = pd.Series([float(x) for x in nav_series], index=idx, dtype=float)
-                    strat_ret = nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-                    ann_ret = _annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR)
-                    mdd = _max_drawdown(nav)
-                    calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
-
-                    b_codes = list(dict.fromkeys(base.codes))
-                    bench_ch = bench_close_hfq.sort_index().reindex(idx).reindex(columns=b_codes).ffill()
-                    bench_daily = hfq_close_daily_equal_weight_returns(bench_ch, dynamic_universe=False)
-                    bench_nav = (1.0 + bench_daily).cumprod().astype(float)
-                    if len(bench_nav) > 0:
-                        bench_nav.iloc[0] = 1.0
-                    bench_daily = bench_daily.reindex(idx).fillna(0.0)
-                    active = (strat_ret - bench_daily).astype(float)
-                    info_ratio = _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)
-
-                # enrich strategy metrics with calendar-effect specific comparisons
-                strat = dict(strat)
-                strat["calmar_ratio"] = float(calmar)
-                strat["information_ratio"] = float(info_ratio)
                 grid.append(
                     {
                         "anchor": int(a),

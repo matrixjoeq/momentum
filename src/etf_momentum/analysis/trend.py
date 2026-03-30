@@ -26,7 +26,7 @@ from .baseline import (
     load_high_low_prices,
     load_ohlc_prices,
 )
-from .execution_timing import corporate_action_mask
+from .execution_timing import corporate_action_mask, slippage_return_from_turnover
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
 TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -49,7 +49,7 @@ class TrendInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
-    slippage_rate: float = 0.001
+    slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
     exec_price: str = "open"  # open|close|oc2
     # strategy selection
     strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | hybrid_trend
@@ -97,7 +97,7 @@ class TrendPortfolioInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
-    slippage_rate: float = 0.001
+    slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
     exec_price: str = "open"  # open|close|oc2
     strategy: str = "ma_filter"
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
@@ -413,6 +413,7 @@ def _trade_returns_from_weight_series(
     *,
     cost_bps: float,
     slippage_rate: float,
+    exec_price: pd.Series,
     dates: pd.Index,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
@@ -422,7 +423,8 @@ def _trade_returns_from_weight_series(
     if n <= 0:
         return {"returns": [], "trades": []}
     cost_rate = float(cost_bps) / 10000.0
-    slip_rate = float(slippage_rate)
+    px = pd.to_numeric(exec_price, errors="coerce").astype(float).reindex(dates).replace([np.inf, -np.inf], np.nan).ffill()
+    slip_spread = float(slippage_rate)
     returns: list[float] = []
     trades: list[dict[str, Any]] = []
     active = False
@@ -434,7 +436,9 @@ def _trade_returns_from_weight_series(
         prev = float(ww.iloc[i - 1]) if i > 0 else 0.0
         r = float(rr.iloc[i]) if np.isfinite(float(rr.iloc[i])) else 0.0
         turnover = abs(float(cur) - float(prev)) / 2.0
-        day_ret = float(cur) * float(r) - float(turnover) * (float(cost_rate) + float(slip_rate))
+        px_i = float(px.iloc[i]) if np.isfinite(float(px.iloc[i])) and float(px.iloc[i]) > 0.0 else float("nan")
+        slip_ret = float(turnover) * (float(slip_spread) / float(px_i)) if np.isfinite(px_i) and float(slip_spread) > 0.0 else 0.0
+        day_ret = float(cur) * float(r) - float(turnover) * float(cost_rate) - float(slip_ret)
         if (not active) and (prev <= eps) and (cur > eps):
             active = True
             start_i = int(i)
@@ -477,6 +481,7 @@ def _trade_returns_from_weight_df(
     *,
     cost_bps: float,
     slippage_rate: float,
+    exec_price: pd.DataFrame,
     dates: pd.Index,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
@@ -488,6 +493,7 @@ def _trade_returns_from_weight_df(
             ret_exec[c] if c in ret_exec.columns else pd.Series(dtype=float),
             cost_bps=float(cost_bps),
             slippage_rate=float(slippage_rate),
+            exec_price=exec_price[c] if c in exec_price.columns else pd.Series(dtype=float),
             dates=dates,
             eps=float(eps),
         )
@@ -896,7 +902,8 @@ def _atr_from_hlc(high: pd.Series, low: pd.Series, close: pd.Series, *, window: 
         axis=1,
     ).max(axis=1)
     w = max(2, int(window))
-    return tr.rolling(window=w, min_periods=max(2, w // 2)).mean().astype(float)
+    # Wilder-style ATR smoothing (RMA via EWM alpha=1/window).
+    return tr.ewm(alpha=1.0 / float(w), adjust=False, min_periods=w).mean().astype(float)
 
 
 def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
@@ -1062,6 +1069,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         ret_overnight_none = (exec_o_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_intraday_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_overnight_hfq = (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        px_slip_none = exec_o_none.astype(float)
+        px_slip_hfq = exec_o_hfq.astype(float)
     elif ep == "close":
         # Execution-day return when entering at close: close[t+1] / close[t] - 1
         exec_none = c_none.combine_first(px_exec_none)
@@ -1072,6 +1081,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         ret_intraday_none = (c_none.shift(-1).div(o_none.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_overnight_hfq = (o_hfq.shift(-1).div(c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_intraday_hfq = (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        px_slip_none = exec_none.astype(float)
+        px_slip_hfq = exec_hfq.astype(float)
     else:
         # OC2: 50% open-execution(open->open) + 50% close-execution(close->close)
         exec_o_none = o_none.combine_first(px_exec_none)
@@ -1088,6 +1099,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         ret_intraday_none = (0.5 * (c_none / o_none - 1.0) + 0.5 * (c_none.shift(-1).div(o_none.shift(-1)) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_overnight_hfq = (0.5 * (o_hfq.shift(-1).div(c_hfq) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_intraday_hfq = (0.5 * (c_hfq / o_hfq - 1.0) + 0.5 * (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        px_slip_none = (0.5 * (exec_o_none + exec_c_none)).astype(float)
+        px_slip_hfq = (0.5 * (exec_o_hfq + exec_c_hfq)).astype(float)
     ret_hfq = ret_exec_hfq.astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq).astype(float)
@@ -1095,6 +1108,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_exec_hfq).astype(float)
     ret_overnight = ret_overnight_none.where(~ca_mask.fillna(False), other=ret_overnight_hfq).astype(float)
     ret_intraday = ret_intraday_none.where(~ca_mask.fillna(False), other=ret_intraday_hfq).astype(float)
+    px_exec_slip = px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq).replace([np.inf, -np.inf], np.nan).ffill()
 
     if strat == "ma_filter":
         ma = _moving_average(px_sig, window=int(inp.sma_window), ma_type=ma_type)
@@ -1286,8 +1300,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         blend_bh_hfq = (0.5 * (bh_same_hfq + cf_hfq)).astype(float)
         ret_bh = blend_bh_none.where(~cm_bh, blend_bh_hfq).astype(float).reindex(ret_hfq.index).fillna(0.0)
     cost = _turnover_cost_from_weights(w, cost_bps=float(inp.cost_bps))
-    slippage = (w - w.shift(1).fillna(0.0)).abs() / 2.0
-    slippage = slippage.astype(float) * float(inp.slippage_rate)
+    turnover = (w - w.shift(1).fillna(0.0)).abs() / 2.0
+    slippage = slippage_return_from_turnover(
+        turnover.astype(float),
+        slippage_spread=float(inp.slippage_rate),
+        exec_price=px_exec_slip.reindex(turnover.index).ffill(),
+    ).astype(float)
     strat_ret = (w * ret_exec_day - cost - slippage).astype(float)
     decomp_overnight = (w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)).astype(float)
     decomp_intraday = (w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)).astype(float)
@@ -1345,6 +1363,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         ret_exec_day,
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
+        exec_price=px_exec_slip.reindex(nav.index).ffill(),
         dates=nav.index,
     )
     trade_stats = {
@@ -1610,6 +1629,7 @@ def compute_trend_portfolio_backtest(
             low_qfq_df = low_qfq_df.reindex(columns=codes).reindex(dates).ffill()
         ret_exec = data_override["ret_exec"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
         ret_hfq = data_override["ret_hfq"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
+        px_exec_slip = pd.DataFrame(1.0, index=dates, columns=codes, dtype=float)
         du_b = bool(getattr(inp, "dynamic_universe", False))
         ch_nb = data_override["close_hfq"].reindex(columns=codes).reindex(dates).astype(float)
         if not du_b:
@@ -1669,11 +1689,15 @@ def compute_trend_portfolio_backtest(
             exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
             ret_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_hfq_exec = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            px_slip_none = exec_o_none.astype(float)
+            px_slip_hfq = exec_o_hfq.astype(float)
         elif ep == "close":
             px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
             px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
             ret_none = (px_none_exec.shift(-1).div(px_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_hfq_exec = (px_hfq_exec.shift(-1).div(px_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            px_slip_none = px_none_exec.astype(float)
+            px_slip_hfq = px_hfq_exec.astype(float)
         else:
             exec_o_none = open_none.astype(float).combine_first(close_none_f)
             exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
@@ -1685,11 +1709,14 @@ def compute_trend_portfolio_backtest(
             ret_open_hfq = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_close_hfq = (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
             ret_hfq_exec = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
+            px_slip_none = (0.5 * (exec_o_none + exec_c_none)).astype(float)
+            px_slip_hfq = (0.5 * (exec_o_hfq + exec_c_hfq)).astype(float)
         ret_hfq = ret_hfq_exec.astype(float)
         gross_none = 1.0 + ret_none
         gross_hfq = 1.0 + ret_hfq
         _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
         ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
+        px_exec_slip = px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq).replace([np.inf, -np.inf], np.nan).ffill()
         ret_overnight_none_close = (open_none.shift(-1).div(close_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_intraday_none_close = (close_none_exec.shift(-1).div(open_none.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_overnight_hfq_close = (open_hfq.shift(-1).div(close_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
@@ -1976,7 +2003,16 @@ def compute_trend_portfolio_backtest(
         bench_nav.iloc[0] = 1.0
     turnover = (w - w.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     cost = turnover * (float(inp.cost_bps) / 10000.0)
-    slippage = turnover * float(inp.slippage_rate)
+    turnover_by_asset = (w - w.shift(1).fillna(0.0)).abs() / 2.0
+    slippage = (
+        slippage_return_from_turnover(
+            turnover_by_asset.astype(float),
+            slippage_spread=float(inp.slippage_rate),
+            exec_price=px_exec_slip.reindex(index=w.index, columns=codes).ffill(),
+        )
+        .sum(axis=1)
+        .astype(float)
+    )
     comp_overnight = (w * ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
     comp_intraday = (w * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
     comp_interaction = (
@@ -2033,6 +2069,7 @@ def compute_trend_portfolio_backtest(
         ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
+        exec_price=px_exec_slip.reindex(index=nav.index, columns=codes).ffill(),
         dates=nav.index,
     )
     trade_stats = {

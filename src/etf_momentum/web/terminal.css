@@ -1,12 +1,13 @@
 /**
  * Shared “research terminal” theme for etf_momentum web pages.
- * Load Google fonts (Noto Sans SC + JetBrains Mono) in each HTML <head>.
+ * Use local system fonts only (no external font dependency).
  */
 :root {
-  --font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-    Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
   --shadow-elev: 0 12px 40px rgba(0, 0, 0, 0.45);

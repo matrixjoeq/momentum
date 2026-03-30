@@ -82,3 +82,30 @@ def corporate_action_mask(
     mask = (dev > float(dev_threshold)) | (corp_factor > rt) | (corp_factor < (1.0 / rt))
     return corp_factor, mask
 
+
+def slippage_return_from_turnover(
+    turnover_one_way: pd.Series | pd.DataFrame,
+    *,
+    slippage_spread: float,
+    exec_price: pd.Series | pd.DataFrame,
+) -> pd.Series | pd.DataFrame:
+    """
+    Convert one-way turnover into return deduction using absolute price spread.
+
+    Formula (per asset/day):
+      slippage_return = turnover_one_way * (slippage_spread / exec_price)
+
+    - `turnover_one_way`: one-way traded notional ratio (e.g. |dw|/2)
+    - `slippage_spread`: one-way adverse slippage in price units (absolute diff)
+    - `exec_price`: execution price series aligned to turnover (none/hfq fallback already applied)
+    """
+    t = turnover_one_way.astype(float).replace([np.inf, -np.inf], np.nan)
+    px = exec_price.astype(float).replace([np.inf, -np.inf], np.nan)
+    spread = float(slippage_spread)
+    if (not np.isfinite(spread)) or spread <= 0.0:
+        return t * 0.0
+    # Guard invalid prices; no valid price means no slippage deduction on that cell.
+    px = px.where(px > 0.0)
+    ratio = (spread / px).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    return (t * ratio).fillna(0.0).astype(float)
+

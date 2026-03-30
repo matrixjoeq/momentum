@@ -24,7 +24,7 @@ from .baseline import (
     hfq_close_daily_equal_weight_returns,
     load_ohlc_prices,
 )
-from .execution_timing import corporate_action_mask
+from .execution_timing import corporate_action_mask, slippage_return_from_turnover
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class CalendarTimingStrategyInputs:
     dynamic_universe: bool = False
     exec_price: str = "open"  # open | close
     cost_bps: float = 2.0
-    slippage_rate: float = 0.001
+    slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
     rebalance_shift: str = "prev"  # prev | next | skip
     risk_free_rate: float = 0.025
     cal: str = "XSHG"
@@ -176,10 +176,10 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
     if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
         raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     cost_rate = float(inp.cost_bps) / 10000.0
-    slip_rate = float(inp.slippage_rate)
+    slip_spread = float(inp.slippage_rate)
     if not np.isfinite(cost_rate) or cost_rate < 0.0:
         raise ValueError("cost_bps must be finite and >= 0")
-    if not np.isfinite(slip_rate) or slip_rate < 0.0:
+    if not np.isfinite(slip_spread) or slip_spread < 0.0:
         raise ValueError("slippage_rate must be finite and >= 0")
 
     # Price-adjustment policy (mandatory):
@@ -307,6 +307,8 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         ret_overnight_none = (exec_o_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_intraday_hfq = (exec_c_hfq.div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
         ret_overnight_hfq = (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        px_slip_none = exec_o_none.astype(float)
+        px_slip_hfq = exec_o_hfq.astype(float)
     else:
         px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
         px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
@@ -325,12 +327,15 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         ret_intraday_hfq = (
             close_hfq_exec.astype(float).combine_first(close_hfq_f).shift(-1).div(open_hfq.astype(float).combine_first(close_hfq_f).shift(-1)) - 1.0
         ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        px_slip_none = px_none_exec.astype(float)
+        px_slip_hfq = px_hfq_exec.astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq_exec).astype(float)
     _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
     ret_overnight = ret_overnight_none.where(~ca_mask.fillna(False), other=ret_overnight_hfq).astype(float)
     ret_intraday = ret_intraday_none.where(~ca_mask.fillna(False), other=ret_intraday_hfq).astype(float)
+    px_exec_slip = px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq).replace([np.inf, -np.inf], np.nan).ffill()
     if mode == "single":
         bench_ret_series = hfq_close_buy_hold_returns(ch_bench.iloc[:, 0])
     else:
@@ -520,7 +525,16 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
                 last_weak_date = str(idx[i].date())
             t = float(np.abs(tgt - w_cur).sum() / 2.0)
             turnover[i] = t
-            cost_today = t * (cost_rate + slip_rate)
+            abs_delta = np.abs(tgt - w_cur)
+            turnover_by_asset = abs_delta / 2.0
+            slip_today = float(
+                slippage_return_from_turnover(
+                    pd.Series(turnover_by_asset, index=codes, dtype=float),
+                    slippage_spread=float(slip_spread),
+                    exec_price=px_exec_slip.iloc[i].reindex(codes),
+                ).sum()
+            )
+            cost_today = float(t * cost_rate + slip_today)
             if ep == "open" and i in entry_by_i and float(np.sum(tgt)) > 1e-12:
                 # Open-buy: count same-day open->close on entry execution day (align with rotation/trend engines).
                 sdn = (
@@ -566,14 +580,13 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             if active_trade is not None:
                 active_trade["factor"] *= float(1.0 + net)
                 if n_codes > 0:
-                    abs_delta = np.abs(tgt - w_cur)
                     abs_sum = float(abs_delta.sum())
                     for j, c in enumerate(codes):
                         rc = float(r_exec_i[j]) if np.isfinite(r_exec_i[j]) else 0.0
                         alloc = 0.0
                         if exposure > 0.0 and abs_sum > 0.0:
                             invested_base = max(float(w_cur[j]), float(tgt[j]), 1e-12)
-                            alloc = (float(abs_delta[j]) / float(abs_sum)) * (t * (cost_rate + slip_rate)) / invested_base
+                            alloc = (float(abs_delta[j]) / float(abs_sum)) * float(cost_today) / invested_base
                         cnet = rc - alloc
                         active_trade["by_code_factor"][c] *= float(1.0 + cnet)
 

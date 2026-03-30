@@ -64,7 +64,13 @@ class RotationAnalysisInputs:
     vol_index_close: dict[str, Any] | None = None
 
 
-def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[str, Any]:
+def compute_rotation_backtest(
+    db: Session,
+    inp: RotationAnalysisInputs,
+    *,
+    include_benchmarks: bool = True,
+    benchmark_mode: str = "EW_REBAL",
+) -> dict[str, Any]:
     # Pylint may resolve imported dataclasses from an installed package instead of workspace source,
     # which can lag during local dev. Keep behavior correct; suppress false-positive for new fields.
     # pylint: disable=unexpected-keyword-arg
@@ -121,5 +127,7 @@ def compute_rotation_backtest(db: Session, inp: RotationAnalysisInputs) -> dict[
             asset_vol_index_rules=inp.asset_vol_index_rules,
             vol_index_close=inp.vol_index_close,
         ),
+        include_benchmarks=bool(include_benchmarks),
+        benchmark_mode=str(benchmark_mode or "EW_REBAL"),
     )
 

@@ -4,12 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>基准分析（持有策略）</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
     <script>
       (function () {
         const key = `theme:${location.pathname}`;
@@ -4962,14 +4956,14 @@
         },
         param_rot_slippage: {
           title: "滑点（slippage_rate）",
-          sub: "单边不利滑点参数，按换手率每日扣减。",
+          sub: "单边不利滑点参数（绝对价差），按换手与成交价折算后每日扣减。",
           body: `
-            <div><b>含义</b>：每日滑点（单边）= \\(turnover\\times slippage\\_rate\\)，其中 \\(turnover=\\frac{1}{2}\\sum |w_t-w_{t-1}|\\)。</div>
+            <div><b>含义</b>：slippage_rate 表示“单边不利价差”（绝对价格差）。每日滑点约为 \\(\\sum_i \\frac{|\\Delta w_i|}{2}\\times\\frac{slippage\\_rate}{price_i}\\)。</div>
             <div style="margin-top:8px"><b>口语解释</b>：这里的 turnover 可以理解为“当日调仓比例”，调得越多，当天滑点扣减越大。</div>
             <div style="margin-top:8px"><b>方向约定</b>：始终按不利方向处理（买入更贵、卖出更便宜）。</div>
-            <div style="margin-top:8px"><b>与成本合并口径</b>：当日净收益 = 毛收益 - \\(turnover\\times(cost\\_bps/10000)\\) - \\(turnover\\times slippage\\_rate\\)。</div>
+            <div style="margin-top:8px"><b>与成本合并口径</b>：当日净收益 = 毛收益 - \\(turnover\\times(cost\\_bps/10000)\\) - 滑点折算收益扣减。</div>
             <div style="margin-top:8px"><b>时序</b>：按交易时序逐日扣减，因此会同步影响按笔、按周期与总体绩效统计。</div>
-            <div style="margin-top:8px"><b>范围</b>：≥0。示例：0.001 表示每 100% 换手额外扣 0.10%。</div>
+            <div style="margin-top:8px"><b>范围</b>：≥0。示例：0.001 表示成交价不利方向偏移 0.001 个价格单位（不是百分比）。</div>
           `,
         },
         param_rot_score_method: {
@@ -15012,6 +15006,8 @@
         let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
         if (!Number.isFinite(risk_free_rate)) return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
         if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
+        const benchmark_mode = (($("rotBenchMode") && $("rotBenchMode").value) ? String($("rotBenchMode").value) : "EW_REBAL");
+        if (!["EW_REBAL", "RP_REBAL", "IVOL_REBAL"].includes(benchmark_mode)) return setMsg("轮动基准模式不合法");
         // phase-1 rules already validated by table parsers
         $("status").textContent = "回测中...";
         setMsg("");
@@ -15087,8 +15083,10 @@
             asset_momentum_floor_rules: (floorRules.length ? floorRules : null),
             asset_rc_rules,
             asset_vol_index_rules: (asset_vol_index_rules && asset_vol_index_rules.__error ? null : asset_vol_index_rules),
+            benchmark_mode,
         };
         window.__lastRotationPayload = { ...reqPayload };
+        window.__lastRotationResultByBench = {};
         window.__lastRotationByAnchor = null;
         window.__lastRotationNextExecutionPlanByAnchor = null;
         const resp = await api("/analysis/rotation", {
@@ -15100,6 +15098,7 @@
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         $("status").textContent = "";
+        window.__lastRotationResultByBench[benchmark_mode] = data;
         window.__lastRotationResult = data;
         plotRotation(data);
         renderRotationMetrics(data.metrics || {});
@@ -15138,6 +15137,46 @@
         setReport("轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
         setReportTo("rotReport", "轮动回测报告式解读", bullets, "说明：结论基于当前回测区间与当前参数，不代表未来收益承诺。");
         try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }
+      }
+
+      function _rotationHasBenchData(data, mode) {
+        const s = (((data || {}).nav || {}).series || {});
+        if (mode === "EW_REBAL") return Array.isArray(s.EW_REBAL) && s.EW_REBAL.length > 0;
+        if (mode === "RP_REBAL") return Array.isArray(s.RP_REBAL) && s.RP_REBAL.length > 0;
+        if (mode === "IVOL_REBAL") return Array.isArray(s.IVOL_REBAL) && s.IVOL_REBAL.length > 0;
+        return false;
+      }
+
+      async function _ensureRotationBenchData(mode) {
+        const m = String(mode || "EW_REBAL");
+        const cur = window.__lastRotationResult;
+        if (_rotationHasBenchData(cur, m)) return cur;
+        const cache = (window.__lastRotationResultByBench && typeof window.__lastRotationResultByBench === "object")
+          ? window.__lastRotationResultByBench
+          : {};
+        if (_rotationHasBenchData(cache[m], m)) {
+          window.__lastRotationResult = cache[m];
+          return cache[m];
+        }
+        const basePayload = window.__lastRotationPayload;
+        if (!basePayload || typeof basePayload !== "object") return cur;
+        const payload = { ...basePayload, benchmark_mode: m };
+        $("status").textContent = "计算所选基准中...";
+        const resp = await api("/analysis/rotation", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        const text = await resp.text();
+        $("status").textContent = "";
+        if (!resp.ok) {
+          setMsg(text);
+          return window.__lastRotationResult || cur;
+        }
+        const data = JSON.parse(text);
+        window.__lastRotationPayload = { ...payload };
+        window.__lastRotationResultByBench = { ...(window.__lastRotationResultByBench || {}), [m]: data };
+        window.__lastRotationResult = data;
+        return data;
       }
 
       async function runTrendResearch() {
@@ -16755,7 +16794,7 @@
                 ? `风险预算仓位：ATR周期=${Math.floor(Number(meta.risk_budget_atr_window || 20))}，预算=${fmtPct(Number(meta.risk_budget_pct || 0.01))}/标的/ATR；若组合总仓位>100%，按比例缩放。`
                 : "风险预算仓位：未启用。"
             ),
-            `交易摩擦：成本 ${fmtNum(Number(meta.cost_bps || 0))}bps（双边），滑点 ${fmtNum(Number(meta.slippage_rate || 0))}（单边不利）；非交易日处理=${shiftMap[String(meta.rebalance_shift || "")] || String(meta.rebalance_shift || "-")}。`,
+            `交易摩擦：成本 ${fmtNum(Number(meta.cost_bps || 0))}bps（双边），滑点价差 ${fmtNum(Number(meta.slippage_rate || 0))}（单边不利，绝对价格差）；非交易日处理=${shiftMap[String(meta.rebalance_shift || "")] || String(meta.rebalance_shift || "-")}。`,
           ],
           "说明：调仓日语义为决策日，仅生成下一交易日执行计划；持仓时长从执行日开始计数。"
         );
@@ -18020,8 +18059,9 @@
       if ($("rotAutoScreenCandidates")) $("rotAutoScreenCandidates").addEventListener("click", runAutoScreenRotationCandidates);
       if ($("rotAutoPresetApply")) $("rotAutoPresetApply").addEventListener("click", () => applyRotationAutoPreset());
       if ($("rotAutoPreset")) $("rotAutoPreset").addEventListener("change", () => applyRotationAutoPreset());
-      if ($("rotBenchMode")) $("rotBenchMode").addEventListener("change", () => {
-        const data = window.__lastRotationResult;
+      if ($("rotBenchMode")) $("rotBenchMode").addEventListener("change", async () => {
+        const mode = (($("rotBenchMode") && $("rotBenchMode").value) ? String($("rotBenchMode").value) : "EW_REBAL");
+        const data = await _ensureRotationBenchData(mode);
         if (!data) return;
         try { plotRotation(data); } catch (e) { /* best effort */ }
         try { renderRotationMetrics(data.metrics || {}); } catch (e) { /* best effort */ }

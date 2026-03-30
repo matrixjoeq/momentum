@@ -133,16 +133,37 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "nav" in data and "series" in data["nav"]
     assert "ROTATION" in data["nav"]["series"]
     assert "EW_REBAL" in data["nav"]["series"]
-    assert "RP_REBAL" in data["nav"]["series"]
-    assert "IVOL_REBAL" in data["nav"]["series"]
     assert "EXCESS" in data["nav"]["series"]
-    assert "EXCESS_RP" in data["nav"]["series"]
-    assert "EXCESS_IVOL" in data["nav"]["series"]
-    assert "period_returns_ivol" in data
-    assert "excess_vs_inverse_vol_rebal" in (data.get("metrics") or {})
+    assert "RP_REBAL" not in data["nav"]["series"]
+    assert "IVOL_REBAL" not in data["nav"]["series"]
+    assert "EXCESS_RP" not in data["nav"]["series"]
+    assert "EXCESS_IVOL" not in data["nav"]["series"]
+    assert (data.get("period_returns_ivol") or {}) == {}
+    assert "excess_vs_inverse_vol_rebal" not in (data.get("metrics") or {})
     assert "nav_rsi" in data
     assert data["nav_rsi"]["windows"] == [6, 12, 24]
     assert "win_payoff" in data
+
+    data_rp = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "rebalance": "monthly",
+            "top_k": 1,
+            "lookback_days": 1,
+            "skip_days": 0,
+            "risk_off": False,
+            "risk_free_rate": 0.025,
+            "cost_bps": 0.0,
+            "benchmark_mode": "RP_REBAL",
+        },
+    )
+    assert "RP_REBAL" in (data_rp.get("nav") or {}).get("series", {})
+    assert "EXCESS_RP" in (data_rp.get("nav") or {}).get("series", {})
+    assert "excess_vs_risk_parity" in (data_rp.get("metrics") or {})
 
 
 def test_api_rotation_backtest_accepts_negative_top_k(api_client) -> None:
