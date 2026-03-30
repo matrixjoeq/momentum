@@ -1173,6 +1173,7 @@ class TrendBacktestRequest(BaseModel):
     tsmom_exit_threshold: float = Field(default=0.0, description="TSMOM exit threshold on momentum score; exit when score <= threshold")
     atr_stop_mode: str = Field(default="none", description="Universal ATR stop mode: none|static|trailing|tightening")
     atr_stop_atr_basis: str = Field(default="latest", description="ATR basis for dynamic modes: entry|latest")
+    atr_stop_reentry_mode: str = Field(default="reenter", description="Re-entry after ATR stop: reenter|wait_next_entry")
     atr_stop_window: int = Field(default=14, ge=2, description="ATR window for universal stop")
     atr_stop_n: float = Field(default=2.0, gt=0.0, description="ATR stop distance multiplier n")
     atr_stop_m: float = Field(default=0.5, gt=0.0, description="ATR tightening step m (used by tightening mode)")
