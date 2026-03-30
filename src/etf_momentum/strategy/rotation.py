@@ -49,6 +49,8 @@ class RotationInputs:
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1  # |K|>0: positive=top-K by score; negative=bottom-K (inverse); effective count=min(|K|, pool)
+    top_k_mode: str = "fixed"  # fixed|floating
+    floating_benchmark_code: str | None = None  # required when top_k_mode=floating
     position_mode: str = "adaptive"  # adaptive | fixed | risk_budget (base sizing before other exposure controls)
     risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
     risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
@@ -1229,8 +1231,17 @@ def backtest_rotation(
     universe = list(dict.fromkeys(inp.codes))
     if not universe:
         raise ValueError("codes is empty")
+    top_k_mode = str(getattr(inp, "top_k_mode", "fixed") or "fixed").strip().lower()
+    if top_k_mode not in {"fixed", "floating"}:
+        raise ValueError("top_k_mode must be one of: fixed|floating")
+    floating_benchmark_code = str(getattr(inp, "floating_benchmark_code", "") or "").strip()
+    if top_k_mode == "floating":
+        if not floating_benchmark_code:
+            raise ValueError("floating_benchmark_code is required when top_k_mode=floating")
+        if floating_benchmark_code not in universe:
+            raise ValueError("floating_benchmark_code must be one of codes when top_k_mode=floating")
     top_k_signed = int(inp.top_k)
-    if top_k_signed == 0:
+    if top_k_mode == "fixed" and top_k_signed == 0:
         raise ValueError("top_k must be non-zero")
     top_k_abs = int(abs(top_k_signed))
     inverse_top_k = bool(top_k_signed < 0)
@@ -1515,6 +1526,25 @@ def backtest_rotation(
                 if w > 1:
                     chop_er_windows.append(w)
 
+    # Floating-top-k mode anchors backtest start to benchmark inception.
+    calc_start = inp.start
+    if top_k_mode == "floating":
+        bench_hist = _load_close_prices(
+            db,
+            codes=[floating_benchmark_code],
+            start=dt.date(1990, 1, 1),
+            end=inp.end,
+            adjust="none",
+        )
+        if bench_hist.empty or floating_benchmark_code not in bench_hist.columns:
+            raise ValueError(f"missing benchmark execution data (none) for floating top-k: {floating_benchmark_code}")
+        first_valid = bench_hist[floating_benchmark_code].dropna()
+        if first_valid.empty:
+            raise ValueError(f"benchmark has no valid execution data for floating top-k: {floating_benchmark_code}")
+        calc_start = first_valid.index[0].date()
+        if calc_start > inp.end:
+            raise ValueError("floating benchmark start is after end date")
+
     # Need enough history for momentum + optional risk controls (using max window).
     need_hist = inp.lookback_days + inp.skip_days + 60
     if inp.trend_filter:
@@ -1530,7 +1560,7 @@ def backtest_rotation(
             need_hist = max(need_hist, int(max(chop_adx_windows)) + 60)
         else:
             need_hist = max(need_hist, int(max(chop_er_windows)) + 60)
-    ext_start = inp.start - dt.timedelta(days=int(need_hist))
+    ext_start = calc_start - dt.timedelta(days=int(need_hist))
     close_hfq = _load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
     # qfq is the unified decision basis (signal/filters/risk controls), so it is always required.
     need_qfq = True
@@ -1542,7 +1572,7 @@ def backtest_rotation(
     high_qfq, low_qfq = (
         _load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq") if need_qfq_hl else (pd.DataFrame(), pd.DataFrame())
     )
-    close_none = _load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
+    close_none = _load_close_prices(db, codes=codes, start=calc_start, end=inp.end, adjust="none")
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
 
@@ -1685,8 +1715,9 @@ def backtest_rotation(
         if miss_hl and (not bool(getattr(inp, "dynamic_universe", False))):
             raise ValueError(f"missing technical-analysis high/low data (qfq) for: {miss_hl}")
 
+    raw_mom_scores = _momentum_scores(close_qfq[rank_codes], lookback_days=inp.lookback_days, skip_days=inp.skip_days)
     if sm == "raw_mom":
-        scores = _momentum_scores(close_qfq[rank_codes], lookback_days=inp.lookback_days, skip_days=inp.skip_days)
+        scores = raw_mom_scores
     else:
         base_scores = _risk_adjusted_scores(
             close_qfq[rank_codes],
@@ -2318,6 +2349,25 @@ def backtest_rotation(
 
             candidate_scores = scores_row.dropna()
             candidate_count = int(candidate_scores.shape[0])
+            floating_candidates: list[str] = []
+            if top_k_mode == "floating":
+                mom_row = raw_mom_scores.loc[d].dropna() if d in raw_mom_scores.index else pd.Series(dtype=float)
+                bm_ret = float(mom_row.get(floating_benchmark_code, np.nan))
+                if np.isfinite(bm_ret):
+                    for c, rv in mom_row.items():
+                        cc = str(c)
+                        if cc == floating_benchmark_code:
+                            continue
+                        try:
+                            ev = float(rv) - float(bm_ret)
+                        except (TypeError, ValueError):
+                            continue
+                        if np.isfinite(ev) and ev > 0.0:
+                            floating_candidates.append(cc)
+                if not floating_candidates:
+                    floating_candidates = [floating_benchmark_code]
+                candidate_scores = candidate_scores.reindex(floating_candidates).dropna()
+                candidate_count = int(candidate_scores.shape[0])
             if candidate_count <= 0:
                 picks = []
                 best = float(candidate_scores.max()) if candidate_count > 0 else None
@@ -2344,20 +2394,25 @@ def backtest_rotation(
                     if gv is not None and d in gv.index:
                         group_vol_row = gv.loc[d]
                 reduced_scores, group_meta = _reduce_scores_by_group(
-                    scores_row,
+                    scores_row.reindex(candidate_scores.index),
                     group_enforce=bool(inp.group_enforce),
                     asset_groups=group_map,
                     policy=group_policy,
                     current_holdings=cur_holdings,
                     vol_row=group_vol_row,
                 )
-                picks, meta = _pick_assets(
-                    reduced_scores,
-                    top_k=inp.top_k,
-                )
+                if top_k_mode == "floating":
+                    picks = [str(x) for x in reduced_scores.sort_values(ascending=False).index.tolist()]
+                    universe_best = float(scores_row.dropna().sort_values(ascending=False).iloc[0]) if (hasattr(scores_row, "dropna") and not scores_row.dropna().empty) else None
+                    meta = {"best_score": universe_best, "mode": "risk_on"}
+                else:
+                    picks, meta = _pick_assets(
+                        reduced_scores,
+                        top_k=inp.top_k,
+                    )
                 meta["candidate_count"] = int(candidate_count)
-                meta["target_top_k"] = int(inp.top_k)
-                meta["effective_top_k"] = int(min(top_k_abs, int(len(reduced_scores))))
+                meta["target_top_k"] = int(inp.top_k) if top_k_mode == "fixed" else int(len(reduced_scores))
+                meta["effective_top_k"] = int(min(top_k_abs, int(len(reduced_scores)))) if top_k_mode == "fixed" else int(len(reduced_scores))
         # picks == [] => cash
         reasons: list[str] = []
         details: dict[str, Any] = {}
@@ -2875,7 +2930,8 @@ def backtest_rotation(
 
             # Optional refill from lower-ranked candidates after entry filters.
             # Only applies to risk-on branch (no defensive/cash replacement).
-            if bool(inp.entry_backfill) and (meta.get("mode") == "risk_on") and candidate_ranked and (len(risk_picks) < top_k_abs):
+            target_pick_count = int(top_k_abs if top_k_mode == "fixed" else max(1, len(candidate_ranked)))
+            if bool(inp.entry_backfill) and (meta.get("mode") == "risk_on") and candidate_ranked and (len(risk_picks) < target_pick_count):
                 current = [str(x) for x in risk_picks]
                 cur_set = set(current)
                 for c in candidate_ranked:
@@ -2892,10 +2948,10 @@ def backtest_rotation(
                     current.append(cc)
                     cur_set.add(cc)
                     backfill_added.append(cc)
-                    if len(current) >= top_k_abs:
+                    if len(current) >= target_pick_count:
                         break
                 if backfill_added:
-                    risk_picks = current[:top_k_abs]
+                    risk_picks = current[:target_pick_count]
                     picks = [p for p in picks if p not in rank_codes] + risk_picks
                     backfill_used = True
                     reasons.append(f"entry_backfill:{','.join(backfill_added)}")
@@ -2948,7 +3004,7 @@ def backtest_rotation(
                     picks = list(cur_key) + list(cur_def)
                     risk_picks = list(cur_key)
                 # 2) Score gap (only meaningful for top_k=1)
-                elif (float(inertia_score_gap) > 0.0) and (top_k_abs == 1) and (len(cur_key) == 1) and (len(new_key) == 1):
+                elif (float(inertia_score_gap) > 0.0) and (top_k_mode == "fixed") and (top_k_abs == 1) and (len(cur_key) == 1) and (len(new_key) == 1):
                     cur_c = str(cur_key[0])
                     new_c = str(new_key[0])
                     try:
@@ -3032,7 +3088,7 @@ def backtest_rotation(
                     if not risk_picks:
                         per = 0.0
                     elif pos_mode == "fixed":
-                        per = 1.0 / max(1, top_k_abs)
+                        per = 1.0 / max(1, (top_k_abs if top_k_mode == "fixed" else len(risk_picks)))
                     else:
                         per = 1.0 / len(risk_picks)
                     for p in risk_picks:
@@ -4161,7 +4217,7 @@ def backtest_rotation(
             corporate_actions = []
 
     out = {
-        "date_range": {"start": inp.start.strftime("%Y%m%d"), "end": inp.end.strftime("%Y%m%d")},
+        "date_range": {"start": dates[0].strftime("%Y%m%d"), "end": dates[-1].strftime("%Y%m%d")},
         "score_method": (inp.score_method or "raw_mom"),
         "atr_stop_mode": atr_stop_mode,
         "atr_stop_atr_basis": atr_stop_atr_basis,
@@ -4175,6 +4231,8 @@ def backtest_rotation(
         },
         "exec_price": ep,
         "benchmark_mode": bm_mode,
+        "top_k_mode": top_k_mode,
+        "floating_benchmark_code": (floating_benchmark_code if top_k_mode == "floating" else None),
         "position_mode": pos_mode,
         "risk_budget_atr_window": int(risk_budget_atr_window),
         "risk_budget_pct": float(risk_budget_pct),

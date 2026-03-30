@@ -18,6 +18,8 @@ class RotationAnalysisInputs:
     rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1  # non-zero: >0 top-K, <0 bottom-K; effective=min(|k|, pool)
+    top_k_mode: str = "fixed"  # fixed|floating
+    floating_benchmark_code: str | None = None
     position_mode: str = "adaptive"  # adaptive|fixed|risk_budget
     risk_budget_atr_window: int = 20
     risk_budget_pct: float = 0.01
@@ -84,6 +86,8 @@ def compute_rotation_backtest(
             rebalance_anchor=inp.rebalance_anchor,
             rebalance_shift=inp.rebalance_shift,
             top_k=inp.top_k,
+            top_k_mode=inp.top_k_mode,
+            floating_benchmark_code=inp.floating_benchmark_code,
             position_mode=inp.position_mode,
             risk_budget_atr_window=inp.risk_budget_atr_window,
             risk_budget_pct=inp.risk_budget_pct,

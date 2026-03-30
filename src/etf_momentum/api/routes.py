@@ -784,6 +784,8 @@ def _rotation_inputs_from_payload(
         rebalance_shift=payload.rebalance_shift if rebalance_shift is None else str(rebalance_shift),
         exec_price=payload.exec_price if exec_price is None else str(exec_price),
         top_k=payload.top_k,
+        top_k_mode=str(getattr(payload, "top_k_mode", "fixed") or "fixed"),
+        floating_benchmark_code=(str(getattr(payload, "floating_benchmark_code", "")).strip() or None),
         position_mode=payload.position_mode,
         risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
         risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
@@ -2510,6 +2512,8 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
             vol_index_close=vol_index_close,
         )
 
+        # Pylint may resolve RotationInputs from installed package during local dev and miss new fields.
+        # pylint: disable=unexpected-keyword-arg
         out = backtest_rotation(
             db,
             RotationInputs(**bt_inp.__dict__),

@@ -1024,8 +1024,22 @@
               </select>
             </div>
             <div>
+              <label>TopK类型</label>
+              <select id="rotTopKMode" style="min-width:170px;">
+                <option value="fixed" selected>固定K</option>
+                <option value="floating">浮动K</option>
+              </select>
+            </div>
+            <div>
               <label>TopK <button class="helpBtn" data-metric="param_rot_topk" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
               <input id="rotTopK" value="1" />
+            </div>
+            <div>
+              <label>浮动K比较基准代码</label>
+              <input id="rotFloatingBenchmark" placeholder="如 510300（需在当前标的池内）" />
+            </div>
+            <div class="muted" style="grid-column: 1 / -1; margin-top:-4px;">
+              规则说明：固定K按 TopK 选股；浮动K按“相对指定基准在当前动量回看窗口内超额&gt;0”选出全部标的，若均不为正超额则仅持有该基准。浮动K仅改变选股数量逻辑，其余轮动参数全部复用。
             </div>
             <div>
               <label>仓位比例模式 <button class="helpBtn" data-metric="param_rot_position_mode" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
@@ -4246,7 +4260,7 @@
         dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distRangeQuick", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric", "distWkdaySelect", "distMonthDomSelect", "distYearWeekSelect", "distYearMonthSelect"],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
-          "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopK", "rotPositionMode", "rotRiskBudgetAtrWin", "rotRiskBudgetPct", "rotEntryBackfill",
+          "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopKMode", "rotTopK", "rotFloatingBenchmark", "rotPositionMode", "rotRiskBudgetAtrWin", "rotRiskBudgetPct", "rotEntryBackfill",
           "rotScoreMethod", "rotLookback", "rotSkip", "rotCost", "rotSlippage", "rotEntryMatchN", "rotExitMatchN",
           "rotAtrStopMode", "rotAtrStopBasis", "rotAtrStopWin", "rotAtrStopN", "rotAtrStopM",
           "rotGroupEnforce", "rotGroupPolicy", "rotAssetGroups",
@@ -4880,12 +4894,13 @@
         },
         param_rot_topk: {
           title: "TopK",
-          sub: "每次调仓按动量排名选股：正数取前 K 名，负数取倒数 K 名（反向），等权持有。",
+          sub: "支持固定K与浮动K两种选股数量逻辑：固定K按TopK取名次；浮动K按相对基准超额>0全选。",
           body: `
-            <div><b>含义</b>：TopK 为非零整数。TopK&gt;0 持有得分最高的前 K 个标的；TopK&lt;0 持有得分最低的 |K| 个标的（反向/多头弱动量）。TopK=±1 为单标的。</div>
-            <div style="margin-top:8px"><b>动态池</b>：若某一决策日可打分标的少于 |K|，实际持有数为 min(|K|, 当期候选数量)。</div>
-            <div style="margin-top:8px"><b>用途</b>：|K| 越大越分散；反向 TopK 用于鲁棒性/反转实验等。</div>
-            <div style="margin-top:8px"><b>示例</b>：TopK=2 在 4 个标的池里持有前 2 名等权；TopK=-2 持有后 2 名等权。</div>
+            <div><b>固定K（top_k_mode=fixed）</b>：TopK 为非零整数。TopK&gt;0 持有得分最高的前 K 个标的；TopK&lt;0 持有得分最低的 |K| 个标的（反向）。TopK=±1 为单标的。</div>
+            <div style="margin-top:8px"><b>浮动K（top_k_mode=floating）</b>：指定一个“比较基准代码”（必须在当前标的池内）。每次调仓时，选出相对该基准在当前动量回看窗口内“超额收益&gt;0”的全部标的；若除基准外都不满足，则仅持有该基准。</div>
+            <div style="margin-top:8px"><b>参数复用</b>：浮动K不新增额外回看参数，直接复用现有动量窗口参数（动量回看/跳过最近）与全部轮动风控、仓位、成本参数。</div>
+            <div style="margin-top:8px"><b>回测起点</b>：浮动K模式下，回测起始时间锚定为比较基准标的可交易起始日。</div>
+            <div style="margin-top:8px"><b>动态池说明</b>：固定K在可打分标的少于 |K| 时，实际持有数为 min(|K|, 当期候选数量)。</div>
           `,
         },
         param_rot_position_mode: {
@@ -6388,6 +6403,10 @@
         const on = (mode === "risk_budget");
         const atrEl = $("rotRiskBudgetAtrWin");
         const pctEl = $("rotRiskBudgetPct");
+        const topKMode = ($("rotTopKMode") && $("rotTopKMode").value) ? String($("rotTopKMode").value) : "fixed";
+        const isFloatingK = (topKMode === "floating");
+        const topKEl = $("rotTopK");
+        const floatBmEl = $("rotFloatingBenchmark");
         if (atrEl) {
           atrEl.disabled = !on;
           atrEl.style.opacity = on ? "1" : "0.55";
@@ -6395,6 +6414,14 @@
         if (pctEl) {
           pctEl.disabled = !on;
           pctEl.style.opacity = on ? "1" : "0.55";
+        }
+        if (topKEl) {
+          topKEl.disabled = isFloatingK;
+          topKEl.style.opacity = isFloatingK ? "0.55" : "1";
+        }
+        if (floatBmEl) {
+          floatBmEl.disabled = !isFloatingK;
+          floatBmEl.style.opacity = isFloatingK ? "1" : "0.55";
         }
       }
 
@@ -14831,9 +14858,19 @@
         const rebalance_shift = rebCtl.rebalance_shift;
         const exec_price = ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open";
         if (!["open", "close", "oc2"].includes(exec_price)) return setMsg("成交价口径仅支持 open/close/oc2");
-        const topKParsed = _parseRotationTopK($("rotTopK").value, "TopK");
-        if (!topKParsed.ok) return setMsg(topKParsed.error);
-        const top_k = topKParsed.top_k;
+        const top_k_mode = ($("rotTopKMode") && $("rotTopKMode").value) ? String($("rotTopKMode").value) : "fixed";
+        if (!["fixed", "floating"].includes(top_k_mode)) return setMsg("TopK类型仅支持 fixed/floating");
+        let top_k = 1;
+        if (top_k_mode === "fixed") {
+          const topKParsed = _parseRotationTopK($("rotTopK").value, "TopK");
+          if (!topKParsed.ok) return setMsg(topKParsed.error);
+          top_k = topKParsed.top_k;
+        }
+        const floating_benchmark_code = (($("rotFloatingBenchmark") && $("rotFloatingBenchmark").value) ? String($("rotFloatingBenchmark").value).trim() : "");
+        if (top_k_mode === "floating") {
+          if (!floating_benchmark_code) return setMsg("浮动K模式需填写比较基准代码");
+          if (!codes.includes(floating_benchmark_code)) return setMsg("浮动K比较基准必须在当前标的池中");
+        }
         const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
         const risk_budget_atr_window = Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim());
         let risk_budget_pct = Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim());
@@ -15065,6 +15102,7 @@
         })();
         const reqPayload = {
             codes, start, end, rebalance, rebalance_anchor, rebalance_shift, exec_price, top_k, position_mode, risk_budget_atr_window: risk_budget_atr_window_req, risk_budget_pct, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
+            top_k_mode, floating_benchmark_code: (top_k_mode === "floating" ? floating_benchmark_code : null),
             risk_free_rate,
             score_method,
             atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
@@ -15500,6 +15538,19 @@
       async function runRotNextExecutionPlan() {
         const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
+        const top_k_mode = ($("rotTopKMode") && $("rotTopKMode").value) ? String($("rotTopKMode").value) : "fixed";
+        if (!["fixed", "floating"].includes(top_k_mode)) return setMsg("TopK类型仅支持 fixed/floating");
+        let top_k_plan = 1;
+        if (top_k_mode === "fixed") {
+          const topKParsed = _parseRotationTopK($("rotTopK").value, "TopK");
+          if (!topKParsed.ok) return setMsg(topKParsed.error);
+          top_k_plan = topKParsed.top_k;
+        }
+        const floating_benchmark_code = (($("rotFloatingBenchmark") && $("rotFloatingBenchmark").value) ? String($("rotFloatingBenchmark").value).trim() : "");
+        if (top_k_mode === "floating") {
+          if (!floating_benchmark_code) return setMsg("浮动K模式需填写比较基准代码");
+          if (!codes.includes(floating_benchmark_code)) return setMsg("浮动K比较基准必须在当前标的池中");
+        }
         const asofRaw = ($("rotPlanAsof") && $("rotPlanAsof").value) ? String($("rotPlanAsof").value).trim() : "";
         const endRaw = ($("end") && $("end").value) ? String($("end").value).trim() : "";
         const asof = asofRaw || endRaw;
@@ -15524,7 +15575,9 @@
             rebalance_anchor: rebCtl.rebalance_anchor,
             rebalance_shift: rebCtl.rebalance_shift,
             exec_price: ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open",
-            top_k: Number(($("rotTopK").value || "1").trim()),
+            top_k: top_k_plan,
+            top_k_mode,
+            floating_benchmark_code: (top_k_mode === "floating" ? floating_benchmark_code : null),
             position_mode: (($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive"),
             risk_budget_atr_window: Math.floor(Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim())),
             risk_budget_pct: Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim()),
@@ -15579,7 +15632,9 @@
           rebalance_anchor: rebCtl2.rebalance_anchor,
           rebalance_shift: rebCtl2.rebalance_shift,
           exec_price: ($("rotExecPrice") && $("rotExecPrice").value) ? String($("rotExecPrice").value) : "open",
-          top_k: Number(($("rotTopK").value || "1").trim()),
+          top_k: top_k_plan,
+          top_k_mode,
+          floating_benchmark_code: (top_k_mode === "floating" ? floating_benchmark_code : null),
           position_mode: (($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive"),
           risk_budget_atr_window: Math.floor(Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim())),
           risk_budget_pct: Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim()),
@@ -16219,9 +16274,19 @@
         const end = (($("rotCalEnd").value || "").trim()) || $("end").value.trim();
         const rebalance = $("rotRebalance").value;
         const rebalance_shift = ($("rotCalShift") && $("rotCalShift").value) ? $("rotCalShift").value : "prev";
-        const topKCal = _parseRotationTopK($("rotTopK").value, "TopK");
-        if (!topKCal.ok) return setMsg(topKCal.error);
-        const top_k = topKCal.top_k;
+        const top_k_mode = ($("rotTopKMode") && $("rotTopKMode").value) ? String($("rotTopKMode").value) : "fixed";
+        if (!["fixed", "floating"].includes(top_k_mode)) return setMsg("TopK类型仅支持 fixed/floating");
+        let top_k = 1;
+        if (top_k_mode === "fixed") {
+          const topKCal = _parseRotationTopK($("rotTopK").value, "TopK");
+          if (!topKCal.ok) return setMsg(topKCal.error);
+          top_k = topKCal.top_k;
+        }
+        const floating_benchmark_code = (($("rotFloatingBenchmark") && $("rotFloatingBenchmark").value) ? String($("rotFloatingBenchmark").value).trim() : "");
+        if (top_k_mode === "floating") {
+          if (!floating_benchmark_code) return setMsg("浮动K模式需填写比较基准代码");
+          if (!codes.includes(floating_benchmark_code)) return setMsg("浮动K比较基准必须在当前标的池中");
+        }
         const position_mode = ($("rotPositionMode") && $("rotPositionMode").value) ? String($("rotPositionMode").value) : "adaptive";
         const risk_budget_atr_window = Number(($("rotRiskBudgetAtrWin") && $("rotRiskBudgetAtrWin").value ? $("rotRiskBudgetAtrWin").value : "20").trim());
         let risk_budget_pct = Number(($("rotRiskBudgetPct") && $("rotRiskBudgetPct").value ? $("rotRiskBudgetPct").value : "1").trim());
@@ -16444,7 +16509,7 @@
         const resp = await api("/analysis/rotation/calendar-effect", {
           method: "POST",
           body: JSON.stringify({
-            codes, start, end, rebalance, rebalance_shift, top_k, position_mode, risk_budget_atr_window: Math.floor(risk_budget_atr_window), risk_budget_pct, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
+            codes, start, end, rebalance, rebalance_shift, top_k, top_k_mode, floating_benchmark_code: (top_k_mode === "floating" ? floating_benchmark_code : null), position_mode, risk_budget_atr_window: Math.floor(risk_budget_atr_window), risk_budget_pct, entry_backfill, entry_match_n, exit_match_n, lookback_days, skip_days, cost_bps, slippage_rate,
             risk_free_rate,
             score_method,
             atr_stop_mode, atr_stop_atr_basis, atr_stop_window, atr_stop_n, atr_stop_m,
@@ -18031,6 +18096,7 @@
       if ($("trendMode")) $("trendMode").addEventListener("change", updateTrendSizingUi);
       if ($("trendSizing")) $("trendSizing").addEventListener("change", updateTrendSizingUi);
       if ($("rotPositionMode")) $("rotPositionMode").addEventListener("change", _syncRotPositionModeUi);
+      if ($("rotTopKMode")) $("rotTopKMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("trendAtrStopMode")) $("trendAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("trend"));
       if ($("rotAtrStopMode")) $("rotAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("rot"));
       if ($("trendTraceN")) $("trendTraceN").addEventListener("change", () => {

@@ -942,6 +942,14 @@ class RotationBacktestRequest(BaseModel):
         default="EW_REBAL",
         description="Benchmark mode for rotation comparison: EW_REBAL|RP_REBAL|IVOL_REBAL. Default EW_REBAL (compute RP/IVOL only when selected).",
     )
+    top_k_mode: str = Field(
+        default="fixed",
+        description="Top-K selection mode: fixed|floating.",
+    )
+    floating_benchmark_code: str | None = Field(
+        default=None,
+        description="Benchmark code for floating top-k mode. Must be one of codes when top_k_mode=floating.",
+    )
     top_k: int = Field(
         default=1,
         description="Non-zero integer: top-K by score if positive, bottom-K (inverse) if negative; effective=min(|K|, pool).",
@@ -1042,8 +1050,18 @@ class RotationBacktestRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_rotation_top_k(self) -> RotationBacktestRequest:
-        if int(self.top_k) == 0:
-            raise ValueError("top_k must be non-zero")
+        tkm = str(getattr(self, "top_k_mode", "fixed") or "fixed").strip().lower()
+        if tkm not in {"fixed", "floating"}:
+            raise ValueError("top_k_mode must be one of: fixed|floating")
+        if tkm == "fixed":
+            if int(self.top_k) == 0:
+                raise ValueError("top_k must be non-zero")
+        else:
+            bm_code = str(getattr(self, "floating_benchmark_code", "") or "").strip()
+            if not bm_code:
+                raise ValueError("floating_benchmark_code is required when top_k_mode=floating")
+            if bm_code not in [str(x) for x in (self.codes or [])]:
+                raise ValueError("floating_benchmark_code must be in codes when top_k_mode=floating")
         bm = str(getattr(self, "benchmark_mode", "EW_REBAL") or "EW_REBAL").strip().upper()
         if bm not in {"EW_REBAL", "RP_REBAL", "IVOL_REBAL", "ALL"}:
             raise ValueError("benchmark_mode must be one of: EW_REBAL|RP_REBAL|IVOL_REBAL|ALL")

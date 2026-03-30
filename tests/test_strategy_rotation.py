@@ -340,3 +340,118 @@ def test_rotation_topk_larger_than_pool_still_runs(session_factory):
         )
     nav = (out.get("nav") or {}).get("series", {}).get("ROTATION", [])
     assert nav and float(nav[-1]) > 0.0
+
+
+def test_rotation_floating_topk_selects_positive_excess_assets(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            add_price_all_adjustments(
+                db,
+                code="BENCH",
+                day=d,
+                close=float(100.0),
+                open_price=float(100.0),
+                high=float(100.0),
+                low=float(100.0),
+            )
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(100.0 + 0.6 * i),
+                open_price=float(100.0 + 0.6 * i),
+                high=float(100.0 + 0.6 * i),
+                low=float(100.0 + 0.6 * i),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(100.0 - 0.2 * i),
+                open_price=float(100.0 - 0.2 * i),
+                high=float(100.0 - 0.2 * i),
+                low=float(100.0 - 0.2 * i),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["BENCH", "AAA", "BBB"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="daily",
+                top_k_mode="floating",
+                floating_benchmark_code="BENCH",
+                lookback_days=10,
+                skip_days=0,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    periods = out.get("holdings") or []
+    assert periods
+    last_picks = sorted([str(x) for x in (periods[-1].get("picks") or [])])
+    assert last_picks == ["AAA"]
+
+
+def test_rotation_floating_topk_fallback_to_benchmark_and_anchor_start(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=80, freq="B")]
+    bench_start = dates[20]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(100.0),
+                open_price=float(100.0),
+                high=float(100.0),
+                low=float(100.0),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(100.0 - 0.1 * i),
+                open_price=float(100.0 - 0.1 * i),
+                high=float(100.0 - 0.1 * i),
+                low=float(100.0 - 0.1 * i),
+            )
+            if d >= bench_start:
+                add_price_all_adjustments(
+                    db,
+                    code="BENCH",
+                    day=d,
+                    close=float(100.0 + 0.3 * i),
+                    open_price=float(100.0 + 0.3 * i),
+                    high=float(100.0 + 0.3 * i),
+                    low=float(100.0 + 0.3 * i),
+                )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["BENCH", "AAA", "BBB"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="daily",
+                top_k_mode="floating",
+                floating_benchmark_code="BENCH",
+                lookback_days=10,
+                skip_days=0,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    assert ((out.get("date_range") or {}).get("start")) == bench_start.strftime("%Y%m%d")
+    periods = out.get("holdings") or []
+    assert periods
+    last_picks = sorted([str(x) for x in (periods[-1].get("picks") or [])])
+    assert last_picks == ["BENCH"]
