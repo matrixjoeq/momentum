@@ -2666,8 +2666,12 @@
             <option value="ema">EMA</option>
           </select>
         </div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>唐奇安入场</label><input id="trendDonEntry" value="20" /></div>
         <div><label>唐奇安出场</label><input id="trendDonExit" value="10" /></div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>TSMOM回看</label><input id="trendMomLb" value="252" /></div>
         <div><label>TSMOM入场阈值</label><input id="trendMomEntryThr" value="0.0" /></div>
         <div><label>TSMOM出场阈值</label><input id="trendMomExitThr" value="0.0" /></div>
@@ -7221,6 +7225,15 @@
         for (const k of Object.keys(out)) out[k] = out[k] / s;
         return out;
       }
+      function _positiveWeightMap(mp) {
+        const out = {};
+        for (const k of Object.keys(mp || {})) {
+          const v = Number(mp[k]);
+          if (!Number.isFinite(v) || v <= 1e-12) continue;
+          out[String(k)] = v;
+        }
+        return out;
+      }
       function _renderMixPositionPlan(ctx) {
         const curEl = $("mixCurrentHoldingsTable");
         const buyEl = $("mixNextBuyTable");
@@ -7457,7 +7470,7 @@
             const v = (arr && arr.length) ? Number(arr[arr.length - 1]) : 0;
             if (v > 1e-12) out[c] = v;
           }
-          return _normalizeWeightMap(out);
+          return _positiveWeightMap(out);
         };
         const _targetFromPlan = (planObj, fallback) => {
           let out = { ...(fallback || {}) };
@@ -7468,7 +7481,7 @@
               const w = Number(it && it.target_weight);
               if (c && Number.isFinite(w) && w > 1e-12) t[c] = w;
             }
-            out = _normalizeWeightMap(t);
+            out = _positiveWeightMap(t);
           }
           return out;
         };
@@ -7521,7 +7534,7 @@
             const one = rotSubByWeekday[rk];
             for (const c of Object.keys(one.target || {})) rotTgtRaw[c] = Number(rotTgtRaw[c] || 0) + Number(one.target[c] || 0) / Math.max(1, Object.keys(rotSubByWeekday).length);
           }
-          rotTgt = _normalizeWeightMap(rotTgtRaw);
+          rotTgt = _positiveWeightMap(rotTgtRaw);
           for (const c of Object.keys(rotHist)) {
             const an = _pickAlignedAssetNav(c);
             if (Array.isArray(an)) rotAssetNav[c] = an;
@@ -7581,9 +7594,9 @@
         }
 
         const sub = {
-          HOLD: { name: `持有(${String(baseMode || "EW")})`, current: _normalizeWeightMap(holdMap), target: _normalizeWeightMap(holdMap), history: holdHist, assetNavByCode: holdAssetNav, stopByCode: {} },
-          ROTATION: { name: "轮动", current: _normalizeWeightMap(rotCur), target: _normalizeWeightMap(rotTgt), history: rotHist, assetNavByCode: rotAssetNav, stopByCode: rotStop },
-          TREND: { name: "趋势", current: _normalizeWeightMap(trendCur), target: _normalizeWeightMap(trendTgt), history: trendHist, assetNavByCode: trendAssetNav, stopByCode: trendStop },
+          HOLD: { name: `持有(${String(baseMode || "EW")})`, current: _positiveWeightMap(holdMap), target: _positiveWeightMap(holdMap), history: holdHist, assetNavByCode: holdAssetNav, stopByCode: {} },
+          ROTATION: { name: "轮动", current: _positiveWeightMap(rotCur), target: _positiveWeightMap(rotTgt), history: rotHist, assetNavByCode: rotAssetNav, stopByCode: rotStop },
+          TREND: { name: "趋势", current: _positiveWeightMap(trendCur), target: _positiveWeightMap(trendTgt), history: trendHist, assetNavByCode: trendAssetNav, stopByCode: trendStop },
         };
         const subCapitalWeights = { HOLD: Number(ws[0] || 0), ROTATION: Number(ws[1] || 0), TREND: Number(ws[2] || 0) };
         if (hasRotByAnchor) {
@@ -7615,14 +7628,14 @@
           const tgt = ws[0] * Number(sub.HOLD.target[c] || 0) + ws[1] * Number(sub.ROTATION.target[c] || 0) + ws[2] * Number(sub.TREND.target[c] || 0);
           if (tgt > 1e-12) totalTgtRaw[c] = tgt;
         }
-        const totalTgt = _normalizeWeightMap(totalTgtRaw);
+        const totalTgt = _positiveWeightMap(totalTgtRaw);
         const assetNavByCode = {};
         for (const c of allCodes) {
           if (sub.TREND.assetNavByCode[c]) assetNavByCode[c] = sub.TREND.assetNavByCode[c];
           else if (sub.ROTATION.assetNavByCode[c]) assetNavByCode[c] = sub.ROTATION.assetNavByCode[c];
           else if (sub.HOLD.assetNavByCode[c]) assetNavByCode[c] = sub.HOLD.assetNavByCode[c];
         }
-        return { dates: dts, sub, totalHist, totalCur: _normalizeWeightMap(totalCur), totalTgt, assetNavByCode, hasRotationWeekdayBreakdown: hasRotByAnchor, subCapitalWeights };
+        return { dates: dts, sub, totalHist, totalCur: _positiveWeightMap(totalCur), totalTgt, assetNavByCode, hasRotationWeekdayBreakdown: hasRotByAnchor, subCapitalWeights };
       }
       function _rollingPackFromNav(dates, nav) {
         const ds = Array.isArray(dates) ? dates.map((x) => String(x || "")) : [];
@@ -8296,7 +8309,7 @@
             const v = arr.length ? Number(arr[arr.length - 1]) : 0;
             if (v > 1e-12) out[c] = v;
           }
-          return _normalizeWeightMap(out);
+          return _positiveWeightMap(out);
         };
         const _singleFixedPositionBlock = (s) => {
           const one = { name: s.displayName, current: {}, target: {}, history: {}, assetNavByCode: {}, stopByCode: {} };
@@ -8333,7 +8346,7 @@
               const ww = Number((it && (it.target_weight != null ? it.target_weight : it.weight)));
               if (c && Number.isFinite(ww) && ww > 1e-12) t[c] = ww;
             }
-            one.target = Object.keys(t).length ? _normalizeWeightMap(t) : { ...one.current };
+            one.target = Object.keys(t).length ? _positiveWeightMap(t) : { ...one.current };
             one.stopByCode = _rotationLatestStopMapFromPeriods((s.result || {}), dts);
             const rotOwnNav = ((((s.result || {}).asset_nav_exec || {}).series) || {});
             const rotOwnDates = ((((s.result || {}).asset_nav_exec || {}).dates) || (((s.result || {}).nav || {}).dates || []));
@@ -8365,8 +8378,8 @@
               for (const c of Object.keys(an || {})) one.assetNavByCode[c] = _alignSeriesByDates(((tr.asset_nav_exec || {}).dates || trDates), an[c], dts);
             }
             one.history = trHist;
-            one.current = _normalizeWeightMap(trCur);
-            one.target = _normalizeWeightMap(Object.keys(trTgt).length ? trTgt : trCur);
+            one.current = _positiveWeightMap(trCur);
+            one.target = _positiveWeightMap(Object.keys(trTgt).length ? trTgt : trCur);
           } else if (s.type === "cal_timing") {
             const cr = s.result || {};
             const crDates = ((cr.nav || {}).dates || []);
@@ -8379,7 +8392,7 @@
               if (!c || !Number.isFinite(w) || w <= 1e-12) continue;
               cur[c] = w;
             }
-            const curNorm = _normalizeWeightMap(cur);
+            const curNorm = _positiveWeightMap(cur);
             for (const [c, w] of Object.entries(curNorm)) {
               const arr = new Array(dts.length).fill(0);
               const ent = String((ch.find((x) => String((x && x.code) || "").trim() === c) || {}).entry_date || "").trim();
@@ -8413,7 +8426,7 @@
             }
             one.history = hist;
             one.current = curNorm;
-            one.target = _normalizeWeightMap(tgt);
+            one.target = _positiveWeightMap(tgt);
           }
           return one;
         };
@@ -8497,8 +8510,8 @@
           dates: dts,
           sub,
           totalHist,
-          totalCur: _normalizeWeightMap(totalCur),
-          totalTgt: _normalizeWeightMap(totalTgtRaw),
+          totalCur: _positiveWeightMap(totalCur),
+          totalTgt: _positiveWeightMap(totalTgtRaw),
           assetNavByCode,
           hasRotationWeekdayBreakdown: false,
           subCapitalWeights,
