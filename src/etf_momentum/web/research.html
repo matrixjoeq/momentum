@@ -1783,7 +1783,19 @@
         </details>
         <div style="margin-top:10px;">
           <div class="muted">事件研究（入市后 1/5/10/20 交易日）</div>
+          <div class="row no-print" style="margin-top:8px; align-items:end;">
+            <div>
+              <label>分桶阈值档位</label>
+              <select id="rotEventBucketProfile" style="min-width:140px;">
+                <option value="2pct">2%档</option>
+                <option value="5pct" selected>5%档</option>
+                <option value="10pct">10%档</option>
+              </select>
+            </div>
+          </div>
           <div id="rotEventStudyChart" style="width:100%; height:320px; margin-top:8px;"></div>
+          <div id="rotEventStudyWinRateChart" style="width:100%; height:300px; margin-top:10px;"></div>
+          <div id="rotEventStudyBucketChart" style="width:100%; height:430px; margin-top:10px;"></div>
           <div id="rotEventStudySummary" class="muted" style="margin-top:6px;"></div>
           <table id="rotEventStudyTable" style="margin-top:8px;"></table>
         </div>
@@ -2803,7 +2815,19 @@
         </details>
         <div style="margin-top:10px;">
           <div class="muted">事件研究（入市后 1/5/10/20 交易日）</div>
+          <div class="row no-print" style="margin-top:8px; align-items:end;">
+            <div>
+              <label>分桶阈值档位</label>
+              <select id="trendEventBucketProfile" style="min-width:140px;">
+                <option value="2pct">2%档</option>
+                <option value="5pct" selected>5%档</option>
+                <option value="10pct">10%档</option>
+              </select>
+            </div>
+          </div>
           <div id="trendEventStudyChart" style="width:100%; height:320px; margin-top:8px;"></div>
+          <div id="trendEventStudyWinRateChart" style="width:100%; height:300px; margin-top:10px;"></div>
+          <div id="trendEventStudyBucketChart" style="width:100%; height:430px; margin-top:10px;"></div>
           <div id="trendEventStudySummary" class="muted" style="margin-top:6px;"></div>
           <table id="trendEventStudyTable" style="margin-top:8px;"></table>
         </div>
@@ -4287,6 +4311,7 @@
           "rotAutoCategoryQuotas",
           "rotFloorOn", "rotExitFloorOn", "rotTrendOn", "rotExitTrendOn", "rotBiasOn", "rotExitBiasOn",
           "rotVolIdxOn", "rotPlanAsof",
+          "rotEventBucketProfile",
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
@@ -4297,6 +4322,7 @@
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
           "trendHybridEntryN", "trendHybridExitM",
+          "trendEventBucketProfile",
         ],
         calTiming: [
           "calTimingMode", "calTimingSingleCode", "calTimingDecisionDay", "calTimingHoldDays",
@@ -12834,6 +12860,9 @@
       function renderEventStudy(prefix, data) {
         const p = String(prefix || "").trim();
         const chartId = `${p}EventStudyChart`;
+        const winRateChartId = `${p}EventStudyWinRateChart`;
+        const bucketChartId = `${p}EventStudyBucketChart`;
+        const bucketProfileSelId = `${p}EventBucketProfile`;
         const sumEl = $(`${p}EventStudySummary`);
         const tblEl = $(`${p}EventStudyTable`);
         const ev = (data && data.event_study && typeof data.event_study === "object") ? data.event_study : null;
@@ -12841,6 +12870,10 @@
         if (!ev || !ev.windows || typeof ev.windows !== "object") {
           const chartEl = $(chartId);
           if (chartEl) chartEl.innerHTML = "<div class='muted'>无事件研究数据</div>";
+          const wrEl = $(winRateChartId);
+          if (wrEl) wrEl.innerHTML = "<div class='muted'>无事件研究数据</div>";
+          const bkEl = $(bucketChartId);
+          if (bkEl) bkEl.innerHTML = "<div class='muted'>无事件研究数据</div>";
           sumEl.textContent = "无事件研究数据";
           tblEl.innerHTML = "";
           return;
@@ -12889,6 +12922,31 @@
           ev.windows || {},
           `${p === "rot" ? "轮动策略" : "趋势策略"}：策略均值 vs 随机基线（含95%区间）`,
         );
+        _renderEventStudyWinRateChart(
+          winRateChartId,
+          keys,
+          ev.windows || {},
+          `${p === "rot" ? "轮动策略" : "趋势策略"}：获利频率对比（策略 vs 随机）`,
+        );
+        _renderEventStudyBucketChart(
+          bucketChartId,
+          keys,
+          ev.windows || {},
+          `${p === "rot" ? "轮动策略" : "趋势策略"}：收益幅度分桶概率（策略 vs 随机）`,
+          String(($(bucketProfileSelId) && $(bucketProfileSelId).value) || "5pct"),
+        );
+        const sel = $(bucketProfileSelId);
+        if (sel) {
+          sel.onchange = () => {
+            _renderEventStudyBucketChart(
+              bucketChartId,
+              keys,
+              ev.windows || {},
+              `${p === "rot" ? "轮动策略" : "趋势策略"}：收益幅度分桶概率（策略 vs 随机）`,
+              String(sel.value || "5pct"),
+            );
+          };
+        }
       }
 
       function _renderEventStudyMeanVsRandomChart(divId, horizons, windows, title) {
@@ -12957,6 +13015,166 @@
             xaxis: { title: "入市后持有窗口", type: "category" },
             yaxis: { title: "收益率", tickformat: ".1%", zeroline: true, zerolinecolor: "#888" },
             legend: { orientation: "h", y: 1.12 },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function _renderEventStudyWinRateChart(divId, horizons, windows, title) {
+        const el = $(divId);
+        if (!el) return;
+        if (typeof Plotly === "undefined") {
+          el.innerHTML = "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+          return;
+        }
+        const hs = Array.isArray(horizons) ? horizons : [];
+        if (!hs.length) {
+          el.innerHTML = "<div class='muted'>暂无可视化数据</div>";
+          return;
+        }
+        const sig = [];
+        const rnd = [];
+        const delta = [];
+        for (const h of hs) {
+          const one = (windows && windows[h]) ? windows[h] : {};
+          const s = one.signal || {};
+          const r = one.random_baseline || {};
+          const c = one.comparison || {};
+          sig.push(Number(s.profit_frequency));
+          rnd.push(Number(r.profit_frequency_mean));
+          delta.push(Number(c.delta_profit_frequency));
+        }
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              type: "bar",
+              name: "策略获利频率",
+              x: hs,
+              y: sig,
+              marker: { color: "#2a9d8f" },
+              hovertemplate: "窗口=%{x}<br>策略获利频率=%{y:.2%}<extra></extra>",
+            },
+            {
+              type: "bar",
+              name: "随机获利频率(均值)",
+              x: hs,
+              y: rnd,
+              marker: { color: "#e9c46a" },
+              hovertemplate: "窗口=%{x}<br>随机获利频率=%{y:.2%}<extra></extra>",
+            },
+            {
+              type: "scatter",
+              name: "频率差(策略-随机)",
+              x: hs,
+              y: delta,
+              mode: "lines+markers",
+              line: { color: "#e76f51", width: 2 },
+              yaxis: "y2",
+              hovertemplate: "窗口=%{x}<br>频率差=%{y:.2%}<extra></extra>",
+            },
+          ],
+          {
+            title,
+            barmode: "group",
+            margin: { t: 36, b: 42, l: 52, r: 52 },
+            xaxis: { title: "入市后持有窗口", type: "category" },
+            yaxis: { title: "获利频率", tickformat: ".0%", range: [0, 1] },
+            yaxis2: { title: "频率差", overlaying: "y", side: "right", tickformat: ".1%" },
+            legend: { orientation: "h", y: 1.12 },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function _renderEventStudyBucketChart(divId, horizons, windows, title, profileKey) {
+        const el = $(divId);
+        if (!el) return;
+        if (typeof Plotly === "undefined") {
+          el.innerHTML = "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+          return;
+        }
+        const hs = Array.isArray(horizons) ? horizons : [];
+        if (!hs.length) {
+          el.innerHTML = "<div class='muted'>暂无可视化数据</div>";
+          return;
+        }
+        const pk = ["2pct", "5pct", "10pct"].includes(String(profileKey || "")) ? String(profileKey) : "5pct";
+        const profileDefs = {
+          "2pct": {
+            keys: ["lt_m2", "m2_0", "p0_p2", "ge_p2"],
+            labels: { lt_m2: "<-2%", m2_0: "[-2%,0)", p0_p2: "[0,2%)", ge_p2: ">=2%" },
+          },
+          "5pct": {
+            keys: ["lt_m5", "m5_m2", "m2_0", "p0_p2", "p2_p5", "ge_p5"],
+            labels: { lt_m5: "<-5%", m5_m2: "[-5%,-2%)", m2_0: "[-2%,0)", p0_p2: "[0,2%)", p2_p5: "[2%,5%)", ge_p5: ">=5%" },
+          },
+          "10pct": {
+            keys: ["lt_m10", "m10_m5", "m5_m2", "m2_0", "p0_p2", "p2_p5", "p5_p10", "ge_p10"],
+            labels: { lt_m10: "<-10%", m10_m5: "[-10%,-5%)", m5_m2: "[-5%,-2%)", m2_0: "[-2%,0)", p0_p2: "[0,2%)", p2_p5: "[2%,5%)", p5_p10: "[5%,10%)", ge_p10: ">=10%" },
+          },
+        };
+        const bucketKeys = profileDefs[pk].keys;
+        const bucketLabel = profileDefs[pk].labels;
+        const colors = {
+          lt_m10: "#5a0000",
+          m10_m5: "#7a1f1f",
+          lt_m5: "#8b0000",
+          m5_m2: "#c94c4c",
+          lt_m2: "#d76d6d",
+          m2_0: "#f4a261",
+          p0_p2: "#a8dadc",
+          ge_p2: "#4cb7a0",
+          p2_p5: "#2a9d8f",
+          p5_p10: "#205f7a",
+          ge_p10: "#102a43",
+          ge_p5: "#1d3557",
+        };
+        const x = [];
+        for (const h of hs) {
+          x.push(`${h}-策略`);
+          x.push(`${h}-随机`);
+        }
+        const traces = [];
+        for (const bk of bucketKeys) {
+          const y = [];
+          const custom = [];
+          for (const h of hs) {
+            const one = (windows && windows[h]) ? windows[h] : {};
+            const sProfiles = (((one.signal || {}).bucket_profiles) || {});
+            const rProfiles = (((one.random_baseline || {}).bucket_profiles_mean) || {});
+            const dProfiles = (((one.comparison || {}).delta_bucket_profiles) || {});
+            const s = (sProfiles[pk] || ((one.signal || {}).bucket_probabilities) || {});
+            const r = (rProfiles[pk] || ((one.random_baseline || {}).bucket_probabilities_mean) || {});
+            const d = (dProfiles[pk] || ((one.comparison || {}).delta_bucket_probabilities) || {});
+            const sv = Number(s[bk]);
+            const rv = Number(r[bk]);
+            const dv = Number(d[bk]);
+            y.push(sv);
+            custom.push([rv, dv, "策略"]);
+            y.push(rv);
+            custom.push([sv, dv, "随机"]);
+          }
+          traces.push({
+            type: "bar",
+            name: bucketLabel[bk] || bk,
+            x,
+            y,
+            customdata: custom,
+            marker: { color: colors[bk] || "#999" },
+            hovertemplate: "类别=%{x}<br>样本=%{customdata[2]}<br>桶概率=%{y:.2%}<br>对侧桶概率=%{customdata[0]:.2%}<br>桶概率差(策略-随机)=%{customdata[1]:.2%}<extra></extra>",
+          });
+        }
+        Plotly.newPlot(
+          divId,
+          traces,
+          {
+            title: { text: title, x: 0.01, xanchor: "left", y: 0.98, yanchor: "top" },
+            barmode: "stack",
+            margin: { t: 92, b: 132, l: 52, r: 20 },
+            xaxis: { title: "窗口-样本", type: "category", tickangle: -20 },
+            yaxis: { title: "概率", tickformat: ".0%", range: [0, 1] },
+            legend: { orientation: "h", y: -0.32, yanchor: "top", x: 0, xanchor: "left" },
           },
           { responsive: true, displayModeBar: false },
         );

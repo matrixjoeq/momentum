@@ -51,6 +51,14 @@ def test_backtest_rotation_basic_outputs(session_factory):
     assert "weekly" in out["period_returns"]
     assert "event_study" in out
     assert set((out["event_study"] or {}).get("windows", {}).keys()) >= {"1d", "5d", "10d", "20d"}
+    ev1 = (((out.get("event_study") or {}).get("windows") or {}).get("1d") or {})
+    assert "profit_frequency" in (ev1.get("signal") or {})
+    assert "bucket_probabilities" in (ev1.get("signal") or {})
+    assert "bucket_profiles" in (ev1.get("signal") or {})
+    assert "profit_frequency_mean" in (ev1.get("random_baseline") or {})
+    assert "bucket_profiles_mean" in (ev1.get("random_baseline") or {})
+    assert "delta_profit_frequency" in (ev1.get("comparison") or {})
+    assert "delta_bucket_profiles" in (ev1.get("comparison") or {})
     assert "rolling" in out
     assert "returns" in out["rolling"]
     assert "corporate_actions" in out
@@ -457,3 +465,57 @@ def test_rotation_floating_topk_fallback_to_benchmark_and_anchor_start(session_f
     assert periods
     last_picks = sorted([str(x) for x in (periods[-1].get("picks") or [])])
     assert last_picks == ["BENCH"]
+
+
+def test_rotation_event_study_counts_membership_switches(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["AAA", "BBB"]
+        dates = [d.date() for d in pd.date_range("2020-01-01", "2021-12-31", freq="B")]
+        a = 100.0
+        b = 100.0
+        for i, d in enumerate(dates):
+            regime = (i // 35) % 2
+            if regime == 0:
+                a *= 1.006
+                b *= 0.994
+            else:
+                a *= 0.994
+                b *= 1.006
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(a),
+                open_price=float(a),
+                high=float(a),
+                low=float(a),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(b),
+                open_price=float(b),
+                high=float(b),
+                low=float(b),
+            )
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                top_k=1,
+                lookback_days=10,
+                skip_days=0,
+                score_method="raw_mom",
+                cost_bps=0.0,
+            ),
+        )
+    ev = out.get("event_study", {})
+    assert int(ev.get("entry_count", 0)) >= 4

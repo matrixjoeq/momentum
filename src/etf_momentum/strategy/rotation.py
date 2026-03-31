@@ -36,7 +36,7 @@ from ..analysis.baseline import load_close_prices as _load_close_prices
 from ..analysis.baseline import load_high_low_prices as _load_high_low_prices
 from ..analysis.baseline import load_ohlc_prices as _load_ohlc_prices
 from ..analysis.baseline import _compute_return_risk_contributions as _compute_return_risk_contributions
-from ..analysis.event_study import compute_event_study, entry_dates_from_exposure
+from ..analysis.event_study import compute_event_study, entry_dates_from_weight_membership_change
 from ..analysis.erc_weights import erc_weights_from_return_history
 from ..analysis.execution_timing import corporate_action_mask, forward_returns, slippage_return_from_turnover
 
@@ -3822,7 +3822,9 @@ def backtest_rotation(
     event_study = compute_event_study(
         dates=dates,
         daily_returns=port_ret_net.reindex(dates).astype(float),
-        entry_dates=entry_dates_from_exposure(w.sum(axis=1).reindex(dates).astype(float)),
+        entry_dates=entry_dates_from_weight_membership_change(
+            w.reindex(index=dates, columns=codes).astype(float).fillna(0.0)
+        ),
     )
 
     active_ret = port_ret_net - ew_ret

@@ -40,6 +40,14 @@ def test_trend_ma_filter_smoke(session_factory):
     assert len(out["nav"]["dates"]) == len(s["STRAT"]) == len(s["BUY_HOLD"]) == len(s["EXCESS"])
     assert "event_study" in out
     assert set((out["event_study"] or {}).get("windows", {}).keys()) >= {"1d", "5d", "10d", "20d"}
+    ev1 = (((out.get("event_study") or {}).get("windows") or {}).get("1d") or {})
+    assert "profit_frequency" in (ev1.get("signal") or {})
+    assert "bucket_probabilities" in (ev1.get("signal") or {})
+    assert "bucket_profiles" in (ev1.get("signal") or {})
+    assert "profit_frequency_mean" in (ev1.get("random_baseline") or {})
+    assert "bucket_profiles_mean" in (ev1.get("random_baseline") or {})
+    assert "delta_profit_frequency" in (ev1.get("comparison") or {})
+    assert "delta_bucket_profiles" in (ev1.get("comparison") or {})
     # should have some non-trivial positions
     pos = out["signals"]["position"]
     assert any(x > 0 for x in pos)
