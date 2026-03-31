@@ -295,6 +295,11 @@ def test_trend_portfolio_trade_statistics_have_samples_user_case_like(session_fa
     by_code = (ts.get("by_code") or {})
     assert int(overall.get("total_trades") or 0) > 0
     assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())
+    rs = (out.get("r_statistics") or {})
+    assert int(((rs.get("overall") or {}).get("trade_count") or 0) > 0)
+    first_trade = ((ts.get("trades") or [None])[0] or {})
+    assert "initial_r_amount" in first_trade
+    assert "r_multiple" in first_trade
 
 
 def test_trend_portfolio_risk_budget_position_sizing(session_factory):

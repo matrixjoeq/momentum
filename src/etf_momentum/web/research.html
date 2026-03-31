@@ -1767,11 +1767,9 @@
             <div id="rotTradeOverallHist" style="width:100%; height:320px; margin-top:8px;"></div>
           </div>
           <div>
-            <div class="row" style="align-items:end;">
-              <div>
-                <label>按标的查看</label>
-                <select id="rotTradeByCodeSelect" style="min-width:200px;"></select>
-              </div>
+            <div class="row" style="align-items:flex-end; gap:8px;">
+              <label for="rotTradeByCodeSelect" style="margin:0; white-space:nowrap;">按标的查看</label>
+              <select id="rotTradeByCodeSelect" style="min-width:200px;"></select>
             </div>
             <table id="rotTradeByCodeTable" style="margin-top:8px;"></table>
             <div id="rotTradeByCodeHist" style="width:100%; height:320px; margin-top:8px;"></div>
@@ -1798,6 +1796,39 @@
           <div id="rotEventStudyBucketChart" style="width:100%; height:430px; margin-top:10px;"></div>
           <div id="rotEventStudySummary" class="muted" style="margin-top:6px;"></div>
           <table id="rotEventStudyTable" style="margin-top:8px;"></table>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>轮动策略：R 分布统计（初始风险质量 + R乘数）</h3>
+        <div class="row" style="align-items:end; margin-top:8px;">
+          <div>
+            <label>按标的查看</label>
+            <select id="rotRStatsCodeSelect" style="min-width:200px;"></select>
+          </div>
+        </div>
+        <div class="two" style="grid-template-columns:1fr 1fr; margin-top:8px;">
+          <div>
+            <div class="muted">初始风险质量（initial_r_pct_nav）- 整体</div>
+            <table id="rotRInitOverallTable" style="margin-top:8px;"></table>
+            <div id="rotRInitOverallHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="muted">初始风险质量（initial_r_pct_nav）- 按标的</div>
+            <table id="rotRInitByCodeTable" style="margin-top:8px;"></table>
+            <div id="rotRInitByCodeHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+        </div>
+        <div class="two" style="grid-template-columns:1fr 1fr; margin-top:12px;">
+          <div>
+            <div class="muted">R乘数分布（r_multiple）- 整体</div>
+            <table id="rotRMultOverallTable" style="margin-top:8px;"></table>
+            <div id="rotRMultOverallHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="muted">R乘数分布（r_multiple）- 按标的</div>
+            <table id="rotRMultByCodeTable" style="margin-top:8px;"></table>
+            <div id="rotRMultByCodeHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
         </div>
       </div>
 
@@ -2799,11 +2830,9 @@
             <div id="trendTradeOverallHist" style="width:100%; height:320px; margin-top:8px;"></div>
           </div>
           <div>
-            <div class="row" style="align-items:end;">
-              <div>
-                <label>按标的查看</label>
-                <select id="trendTradeByCodeSelect" style="min-width:200px;"></select>
-              </div>
+            <div class="row" style="align-items:flex-end; gap:8px;">
+              <label for="trendTradeByCodeSelect" style="margin:0; white-space:nowrap;">按标的查看</label>
+              <select id="trendTradeByCodeSelect" style="min-width:200px;"></select>
             </div>
             <table id="trendTradeByCodeTable" style="margin-top:8px;"></table>
             <div id="trendTradeByCodeHist" style="width:100%; height:320px; margin-top:8px;"></div>
@@ -2830,6 +2859,39 @@
           <div id="trendEventStudyBucketChart" style="width:100%; height:430px; margin-top:10px;"></div>
           <div id="trendEventStudySummary" class="muted" style="margin-top:6px;"></div>
           <table id="trendEventStudyTable" style="margin-top:8px;"></table>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:10px;">
+        <h3>趋势策略：R 分布统计（初始风险质量 + R乘数）</h3>
+        <div class="row" style="align-items:end; margin-top:8px;">
+          <div>
+            <label>按标的查看</label>
+            <select id="trendRStatsCodeSelect" style="min-width:200px;"></select>
+          </div>
+        </div>
+        <div class="two" style="grid-template-columns:1fr 1fr; margin-top:8px;">
+          <div>
+            <div class="muted">初始风险质量（initial_r_pct_nav）- 整体</div>
+            <table id="trendRInitOverallTable" style="margin-top:8px;"></table>
+            <div id="trendRInitOverallHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="muted">初始风险质量（initial_r_pct_nav）- 按标的</div>
+            <table id="trendRInitByCodeTable" style="margin-top:8px;"></table>
+            <div id="trendRInitByCodeHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+        </div>
+        <div class="two" style="grid-template-columns:1fr 1fr; margin-top:12px;">
+          <div>
+            <div class="muted">R乘数分布（r_multiple）- 整体</div>
+            <table id="trendRMultOverallTable" style="margin-top:8px;"></table>
+            <div id="trendRMultOverallHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="muted">R乘数分布（r_multiple）- 按标的</div>
+            <table id="trendRMultByCodeTable" style="margin-top:8px;"></table>
+            <div id="trendRMultByCodeHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
         </div>
       </div>
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
@@ -12815,6 +12877,120 @@
         boxEl.innerHTML = `<pre style="white-space:pre-wrap; word-break:break-word; max-height:420px; overflow:auto; margin:0;">${esc(clipped)}</pre>`;
       }
 
+      function _strategyLabelByPrefix(prefix) {
+        const p = String(prefix || "").trim();
+        if (p === "rot") return "轮动";
+        if (p === "trend") return "趋势";
+        if (p === "ct") return "日历择时";
+        return "策略";
+      }
+
+      function _renderRStatsTable(tableId, stats, mode, tail) {
+        const t = $(tableId);
+        if (!t) return;
+        const s = (stats && typeof stats === "object") ? stats : {};
+        const tailObj = (tail && typeof tail === "object") ? tail : {};
+        const n = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : String(Math.round(Number(x)));
+        const asPct = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtPct(Number(x));
+        const asNum = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtNum(Number(x));
+        const f = String(mode || "num") === "pct" ? asPct : asNum;
+        const rowTail = String(mode || "num") === "num"
+          ? (
+              `<tr><td>P(R<=-1)</td><td>${asPct(tailObj.p_r_lt_m1)}</td></tr>` +
+              `<tr><td>P(R>=2)</td><td>${asPct(tailObj.p_r_gt_2)}</td></tr>` +
+              `<tr><td>期望R</td><td>${asNum(tailObj.expectancy_r)}</td></tr>`
+            )
+          : "";
+        t.innerHTML =
+          `<tr><th>指标</th><th>值</th></tr>` +
+          `<tr><td>样本数</td><td>${n(s.sample_size)}</td></tr>` +
+          `<tr><td>均值 / 标准差</td><td>${f(s.mean)} / ${f(s.std)}</td></tr>` +
+          `<tr><td>最小 / 最大</td><td>${f(s.min)} / ${f(s.max)}</td></tr>` +
+          `<tr><td>P05 / P25 / P50 / P75 / P95</td><td>${f(s.p05)} / ${f(s.p25)} / ${f(s.p50)} / ${f(s.p75)} / ${f(s.p95)}</td></tr>` +
+          rowTail;
+      }
+
+      function _renderRHist(divId, values, title, mode) {
+        const div = $(divId);
+        if (!div) return;
+        const xs = Array.isArray(values) ? values.map(Number).filter(Number.isFinite) : [];
+        if (!xs.length) {
+          div.innerHTML = "<div class='muted'>暂无可用样本</div>";
+          return;
+        }
+        const isPct = String(mode || "num") === "pct";
+        Plotly.newPlot(
+          divId,
+          [{ x: xs, type: "histogram", nbinsx: 40, marker: { color: "#4c78a8" }, hovertemplate: `${isPct ? "值=%{x:.2%}" : "值=%{x:.3f}"}<br>频数=%{y}<extra></extra>` }],
+          { margin: { t: 30, b: 40 }, title, xaxis: { title: isPct ? "值(占NAV比例)" : "R乘数", tickformat: isPct ? ".1%" : ".2f" }, yaxis: { title: "频数" } },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function renderRStatistics(prefix, data) {
+        const p = String(prefix || "").trim();
+        const strategyLabel = _strategyLabelByPrefix(p);
+        const rStats = (data && data.r_statistics && typeof data.r_statistics === "object") ? data.r_statistics : null;
+        const tradeStats = (data && data.trade_statistics && typeof data.trade_statistics === "object") ? data.trade_statistics : null;
+        const trades = Array.isArray((tradeStats || {}).trades) ? tradeStats.trades : [];
+        const byCodeStats = (rStats && rStats.by_code && typeof rStats.by_code === "object") ? rStats.by_code : {};
+        const codeSel = $(`${p}RStatsCodeSelect`);
+        const initOverallTable = `${p}RInitOverallTable`;
+        const initOverallHist = `${p}RInitOverallHist`;
+        const initByCodeTable = `${p}RInitByCodeTable`;
+        const initByCodeHist = `${p}RInitByCodeHist`;
+        const multOverallTable = `${p}RMultOverallTable`;
+        const multOverallHist = `${p}RMultOverallHist`;
+        const multByCodeTable = `${p}RMultByCodeTable`;
+        const multByCodeHist = `${p}RMultByCodeHist`;
+
+        if (!$(initOverallTable) || !$(multOverallTable)) return;
+
+        const overall = (rStats && rStats.overall && typeof rStats.overall === "object") ? rStats.overall : {};
+        const overallInit = (overall.initial_r_pct_nav_stats && typeof overall.initial_r_pct_nav_stats === "object") ? overall.initial_r_pct_nav_stats : {};
+        const overallMult = (overall.r_multiple_stats && typeof overall.r_multiple_stats === "object") ? overall.r_multiple_stats : {};
+        const overallTail = (overall.tail && typeof overall.tail === "object") ? overall.tail : {};
+        _renderRStatsTable(initOverallTable, overallInit, "pct", {});
+        _renderRStatsTable(multOverallTable, overallMult, "num", overallTail);
+
+        const overallInitVals = trades.map((x) => Number(x && x.initial_r_pct_nav)).filter(Number.isFinite);
+        const overallMultVals = trades.map((x) => Number(x && x.r_multiple)).filter(Number.isFinite);
+        _renderRHist(initOverallHist, overallInitVals, `${strategyLabel}：初始风险质量分布（initial_r_pct_nav）`, "pct");
+        _renderRHist(multOverallHist, overallMultVals, `${strategyLabel}：R乘数分布（r_multiple）`, "num");
+
+        const codeSet = new Set(Object.keys(byCodeStats || {}));
+        for (const tr of trades) {
+          const c = String((tr && tr.code) || "").trim();
+          if (c) codeSet.add(c);
+        }
+        const codes = Array.from(codeSet).sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN"));
+        if (!codeSel) return;
+        codeSel.innerHTML = codes.map((c) => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
+
+        const renderByCode = () => {
+          const c = String(codeSel.value || "");
+          const one = (byCodeStats && byCodeStats[c] && typeof byCodeStats[c] === "object") ? byCodeStats[c] : {};
+          const oneInit = (one.initial_r_pct_nav_stats && typeof one.initial_r_pct_nav_stats === "object") ? one.initial_r_pct_nav_stats : {};
+          const oneMult = (one.r_multiple_stats && typeof one.r_multiple_stats === "object") ? one.r_multiple_stats : {};
+          const oneTail = (one.tail && typeof one.tail === "object") ? one.tail : {};
+          _renderRStatsTable(initByCodeTable, oneInit, "pct", {});
+          _renderRStatsTable(multByCodeTable, oneMult, "num", oneTail);
+          const tCode = trades.filter((x) => String((x && x.code) || "") === c);
+          const initVals = tCode.map((x) => Number(x && x.initial_r_pct_nav)).filter(Number.isFinite);
+          const multVals = tCode.map((x) => Number(x && x.r_multiple)).filter(Number.isFinite);
+          _renderRHist(initByCodeHist, initVals, `${codeLabel(c)}：初始风险质量分布`, "pct");
+          _renderRHist(multByCodeHist, multVals, `${codeLabel(c)}：R乘数分布`, "num");
+        };
+        codeSel.onchange = renderByCode;
+        if (codes.length) renderByCode();
+        else {
+          _renderRStatsTable(initByCodeTable, {}, "pct", {});
+          _renderRStatsTable(multByCodeTable, {}, "num", {});
+          _renderRHist(initByCodeHist, [], "无数据", "pct");
+          _renderRHist(multByCodeHist, [], "无数据", "num");
+        }
+      }
+
       function renderTradeStatistics(prefix, data) {
         const p = String(prefix || "").trim();
         const stats = (data && data.trade_statistics && typeof data.trade_statistics === "object") ? data.trade_statistics : null;
@@ -15519,6 +15695,7 @@
         _renderRotationReturnDecomposition((data && data.return_decomposition) ? data.return_decomposition : null);
         renderRotationDailyReturnDist(data);
         renderTradeStatistics("rot", data);
+        renderRStatistics("rot", data);
         // Use continuous holding streaks (not per-rebalance periods) for holding-length distributions.
         renderRotationHoldingPeriodLengthDistributions(data.holding_streaks || data.holdings || [], (data.nav && data.nav.dates) ? data.nav.dates : []);
         renderWinPayoff(data.win_payoff || {});
@@ -15769,6 +15946,7 @@
         renderTrendDailyReturnDist(data);
         _renderTrendReturnDecomposition((data && data.return_decomposition) ? data.return_decomposition : null);
         renderTradeStatistics("trend", data);
+        renderRStatistics("trend", data);
         try { renderTrendPositionPlan(data, mode); } catch (_) { /* ignore */ }
         const m = (data && data.metrics) ? data.metrics : {};
         const rows = [];
@@ -17214,6 +17392,7 @@
           ($("calTimingDailyRetMode") && $("calTimingDailyRetMode").value) ? $("calTimingDailyRetMode").value : "simple"
         );
         renderTradeStatistics("ct", data);
+        renderRStatistics("ct", data);
         window.__lastCalTimingResult = data;
         window.__lastCalTimingPayload = { ...reqPayload };
         try { if ((mixSelectedStrategyIds || []).length > 0) runStrategyMix(); } catch (e) { /* best effort */ }

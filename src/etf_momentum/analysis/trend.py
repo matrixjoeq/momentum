@@ -28,6 +28,7 @@ from .baseline import (
 )
 from .event_study import compute_event_study, entry_dates_from_exposure
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
+from .r_multiple import enrich_trades_with_r_metrics
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
 TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -1367,11 +1368,30 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         exec_price=px_exec_slip.reindex(nav.index).ffill(),
         dates=nav.index,
     )
+    atr_risk = _atr_from_hlc(
+        high_qfq.astype(float).fillna(px_sig),
+        low_qfq.astype(float).fillna(px_sig),
+        px_sig.astype(float),
+        window=int(inp.atr_stop_window),
+    ).reindex(nav.index)
+    trade_r_pack = enrich_trades_with_r_metrics(
+        trade_one.get("trades", []),
+        nav=nav.astype(float),
+        weights=w.astype(float),
+        exec_price=px_exec_slip.reindex(nav.index).ffill().astype(float),
+        atr=atr_risk.astype(float),
+        atr_mult=float(inp.atr_stop_n),
+        risk_budget_pct=None,
+        cost_bps=float(inp.cost_bps),
+        slippage_rate=float(inp.slippage_rate),
+        default_code=str(code),
+    )
+    trades_with_r = list(trade_r_pack.get("trades") or [])
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_one.get("returns", [])),
         "by_code": {str(code): _trade_stats_from_returns(trade_one.get("returns", []))},
-        "trades": trade_one.get("trades", []),
-        "trades_by_code": {str(code): trade_one.get("trades", [])},
+        "trades": trades_with_r,
+        "trades_by_code": {str(code): trades_with_r},
     }
     event_study = compute_event_study(
         dates=nav.index,
@@ -1457,6 +1477,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
         "return_decomposition": {
             "dates": nav.index.date.astype(str).tolist(),
@@ -2079,14 +2100,42 @@ def compute_trend_portfolio_backtest(
         exec_price=px_exec_slip.reindex(index=nav.index, columns=codes).ffill(),
         dates=nav.index,
     )
+    atr_risk_df = pd.DataFrame(index=nav.index, columns=codes, dtype=float)
+    for c in codes:
+        px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+        hi = high_qfq_df[c].astype(float).fillna(px) if c in high_qfq_df.columns else px
+        lo = low_qfq_df[c].astype(float).fillna(px) if c in low_qfq_df.columns else px
+        atr_risk_df[c] = _atr_from_hlc(
+            hi,
+            lo,
+            px,
+            window=int(inp.atr_stop_window),
+        ).reindex(nav.index).astype(float)
+    trade_r_pack = enrich_trades_with_r_metrics(
+        trade_pack.get("trades", []),
+        nav=nav.astype(float),
+        weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        exec_price=px_exec_slip.reindex(index=nav.index, columns=codes).ffill().astype(float),
+        atr=atr_risk_df.reindex(index=nav.index, columns=codes).astype(float),
+        atr_mult=float(inp.atr_stop_n),
+        risk_budget_pct=float(risk_budget_pct) if np.isfinite(float(risk_budget_pct)) else None,
+        cost_bps=float(inp.cost_bps),
+        slippage_rate=float(inp.slippage_rate),
+    )
+    trades_with_r = list(trade_r_pack.get("trades") or [])
+    trades_by_code: dict[str, list[dict[str, Any]]] = {str(c): [] for c in codes}
+    for tr in trades_with_r:
+        c = str(tr.get("code") or "")
+        if c in trades_by_code:
+            trades_by_code[c].append(tr)
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_pack.get("returns", [])),
         "by_code": {
             str(c): _trade_stats_from_returns((trade_pack.get("returns_by_code") or {}).get(str(c), []))
             for c in codes
         },
-        "trades": trade_pack.get("trades", []),
-        "trades_by_code": trade_pack.get("trades_by_code", {}),
+        "trades": trades_with_r,
+        "trades_by_code": trades_by_code,
     }
     event_study = compute_event_study(
         dates=nav.index,
@@ -2221,6 +2270,7 @@ def compute_trend_portfolio_backtest(
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
         "return_decomposition": {
             "dates": nav.index.date.astype(str).tolist(),

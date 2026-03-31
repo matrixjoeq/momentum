@@ -51,6 +51,16 @@ def test_trend_ma_filter_smoke(session_factory):
     # should have some non-trivial positions
     pos = out["signals"]["position"]
     assert any(x > 0 for x in pos)
+    r_stats = out.get("r_statistics") or {}
+    assert "overall" in r_stats
+    ts = out.get("trade_statistics") or {}
+    trades = list((ts.get("trades") or []))
+    if trades:
+        t0 = trades[0]
+        assert "initial_r_amount" in t0
+        assert "initial_r_pct_nav" in t0
+        assert "pnl_amount" in t0
+        assert "r_multiple" in t0
 
 
 def test_trend_ma_filter_ema_smoke(session_factory):

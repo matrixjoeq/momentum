@@ -39,6 +39,7 @@ from ..analysis.baseline import _compute_return_risk_contributions as _compute_r
 from ..analysis.event_study import compute_event_study, entry_dates_from_weight_membership_change
 from ..analysis.erc_weights import erc_weights_from_return_history
 from ..analysis.execution_timing import corporate_action_mask, forward_returns, slippage_return_from_turnover
+from ..analysis.r_multiple import enrich_trades_with_r_metrics
 
 
 @dataclass(frozen=True)
@@ -2068,9 +2069,9 @@ def backtest_rotation(
     if atr_style_mode:
         w_atr = int(inp.atr_stop_window)
         w_atr = max(2, w_atr)
-        close_for_atr = close_qfq[rank_codes].astype(float)
-        high_for_atr = high_qfq[rank_codes].astype(float).combine_first(close_for_atr)
-        low_for_atr = low_qfq[rank_codes].astype(float).combine_first(close_for_atr)
+        close_for_atr = close_qfq.reindex(index=dates, columns=rank_codes).astype(float)
+        high_for_atr = high_qfq.reindex(index=dates, columns=rank_codes).astype(float).combine_first(close_for_atr)
+        low_for_atr = low_qfq.reindex(index=dates, columns=rank_codes).astype(float).combine_first(close_for_atr)
         atr = _atr_from_hlc(high_for_atr, low_for_atr, close_for_atr, window=w_atr)
     else:
         w_atr = None
@@ -3810,14 +3811,40 @@ def backtest_rotation(
         exec_price=px_exec_slip_all.reindex(index=dates, columns=codes).ffill(),
         dates=dates,
     )
+    close_qfq_r = close_qfq.reindex(index=dates, columns=codes).astype(float)
+    high_qfq_r = high_qfq.reindex(index=dates, columns=codes).astype(float).combine_first(close_qfq_r)
+    low_qfq_r = low_qfq.reindex(index=dates, columns=codes).astype(float).combine_first(close_qfq_r)
+    atr_risk_df = _atr_from_hlc(
+        high_qfq_r,
+        low_qfq_r,
+        close_qfq_r,
+        window=int(inp.atr_stop_window),
+    ).reindex(index=dates, columns=codes)
+    trade_r_pack = enrich_trades_with_r_metrics(
+        trade_pack.get("trades", []),
+        nav=port_nav_net.reindex(dates).astype(float),
+        weights=w.reindex(index=dates, columns=codes).astype(float).fillna(0.0),
+        exec_price=px_exec_slip_all.reindex(index=dates, columns=codes).ffill().astype(float),
+        atr=atr_risk_df.astype(float),
+        atr_mult=float(inp.atr_stop_n),
+        risk_budget_pct=float(inp.risk_budget_pct) if np.isfinite(float(inp.risk_budget_pct)) else None,
+        cost_bps=float(inp.cost_bps),
+        slippage_rate=float(inp.slippage_rate),
+    )
+    trades_with_r = list(trade_r_pack.get("trades") or [])
+    trades_by_code: dict[str, list[dict[str, Any]]] = {str(c): [] for c in codes}
+    for tr in trades_with_r:
+        c = str(tr.get("code") or "")
+        if c in trades_by_code:
+            trades_by_code[c].append(tr)
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_pack.get("returns", [])),
         "by_code": {
             str(c): _trade_stats_from_returns((trade_pack.get("returns_by_code") or {}).get(str(c), []))
             for c in codes
         },
-        "trades": trade_pack.get("trades", []),
-        "trades_by_code": trade_pack.get("trades_by_code", {}),
+        "trades": trades_with_r,
+        "trades_by_code": trades_by_code,
     }
     event_study = compute_event_study(
         dates=dates,
@@ -4281,6 +4308,7 @@ def backtest_rotation(
         },
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
         "return_decomposition": {
             "dates": dates.date.astype(str).tolist(),
