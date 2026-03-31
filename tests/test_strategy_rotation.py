@@ -49,6 +49,8 @@ def test_backtest_rotation_basic_outputs(session_factory):
     assert "excess_vs_equal_weight" in out["metrics"]
     assert "period_returns" in out
     assert "weekly" in out["period_returns"]
+    assert "event_study" in out
+    assert set((out["event_study"] or {}).get("windows", {}).keys()) >= {"1d", "5d", "10d", "20d"}
     assert "rolling" in out
     assert "returns" in out["rolling"]
     assert "corporate_actions" in out

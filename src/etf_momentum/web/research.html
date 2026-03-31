@@ -1781,6 +1781,12 @@
           <summary><b>trade_statistics 原始返回（Debug Trace）</b></summary>
           <div id="rotTradeStatsDebug" class="muted" style="margin-top:6px;"></div>
         </details>
+        <div style="margin-top:10px;">
+          <div class="muted">事件研究（入市后 1/5/10/20 交易日）</div>
+          <div id="rotEventStudyChart" style="width:100%; height:320px; margin-top:8px;"></div>
+          <div id="rotEventStudySummary" class="muted" style="margin-top:6px;"></div>
+          <table id="rotEventStudyTable" style="margin-top:8px;"></table>
+        </div>
       </div>
 
       <div class="panel">
@@ -2795,6 +2801,12 @@
           <summary><b>trade_statistics 原始返回（Debug Trace）</b></summary>
           <div id="trendTradeStatsDebug" class="muted" style="margin-top:6px;"></div>
         </details>
+        <div style="margin-top:10px;">
+          <div class="muted">事件研究（入市后 1/5/10/20 交易日）</div>
+          <div id="trendEventStudyChart" style="width:100%; height:320px; margin-top:8px;"></div>
+          <div id="trendEventStudySummary" class="muted" style="margin-top:6px;"></div>
+          <table id="trendEventStudyTable" style="margin-top:8px;"></table>
+        </div>
       </div>
       <table id="trendMetricsTable" style="margin-top:10px;"></table>
       <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start; margin-top:10px;">
@@ -12792,6 +12804,7 @@
           _renderTradeStatsTable(byCodeTable, {});
           _renderTradeHist(byCodeHist, [], "无数据");
           _renderTradeStatsDebug(p, null);
+          renderEventStudy(p, null);
           return;
         }
         _renderTradeStatsTable(overallTable, stats.overall || {});
@@ -12815,6 +12828,138 @@
           }
         }
         _renderTradeStatsDebug(p, data);
+        renderEventStudy(p, data);
+      }
+
+      function renderEventStudy(prefix, data) {
+        const p = String(prefix || "").trim();
+        const chartId = `${p}EventStudyChart`;
+        const sumEl = $(`${p}EventStudySummary`);
+        const tblEl = $(`${p}EventStudyTable`);
+        const ev = (data && data.event_study && typeof data.event_study === "object") ? data.event_study : null;
+        if (!sumEl || !tblEl) return;
+        if (!ev || !ev.windows || typeof ev.windows !== "object") {
+          const chartEl = $(chartId);
+          if (chartEl) chartEl.innerHTML = "<div class='muted'>无事件研究数据</div>";
+          sumEl.textContent = "无事件研究数据";
+          tblEl.innerHTML = "";
+          return;
+        }
+        const entryCount = Number(ev.entry_count || 0);
+        sumEl.textContent = `入市事件数：${entryCount}；显著性为“策略均值 > 随机基线均值”的单侧 p 值（Monte Carlo）。`;
+        const keys = Object.keys(ev.windows).sort((a, b) => {
+          const aa = Number(String(a).replace(/[^\d]/g, "")) || 0;
+          const bb = Number(String(b).replace(/[^\d]/g, "")) || 0;
+          return aa - bb;
+        });
+        const rows = keys.map((k) => {
+          const one = ev.windows[k] || {};
+          const sig = one.signal || {};
+          const rnd = one.random_baseline || {};
+          const cmp = one.comparison || {};
+          const ci = Array.isArray(sig.ci95_mean) ? sig.ci95_mean : [NaN, NaN];
+          const rci = Array.isArray(rnd.ci95_trial_mean) ? rnd.ci95_trial_mean : [NaN, NaN];
+          return `<tr>
+            <td>${esc(k)}</td>
+            <td>${Number(sig.n || 0)}</td>
+            <td>${fmtPct(Number(sig.mean || NaN))}</td>
+            <td>[${fmtPct(Number(ci[0]))}, ${fmtPct(Number(ci[1]))}]</td>
+            <td>${fmtPct(Number(rnd.mean_of_trial_means || NaN))}</td>
+            <td>[${fmtPct(Number(rci[0]))}, ${fmtPct(Number(rci[1]))}]</td>
+            <td>${fmtPct(Number(cmp.mean_diff_vs_random || NaN))}</td>
+            <td>${fmtNum(Number(cmp.p_value_outperform_random || NaN))}</td>
+            <td>${cmp.significant_5pct ? "是" : "否"}</td>
+          </tr>`;
+        }).join("");
+        tblEl.innerHTML = `<tr>
+          <th>窗口</th>
+          <th>样本数</th>
+          <th>策略均值</th>
+          <th>策略均值95%CI</th>
+          <th>随机基线均值</th>
+          <th>随机均值95%CI</th>
+          <th>均值差</th>
+          <th>p值(单侧)</th>
+          <th>显著(5%)</th>
+        </tr>${rows}`;
+
+        _renderEventStudyMeanVsRandomChart(
+          chartId,
+          keys,
+          ev.windows || {},
+          `${p === "rot" ? "轮动策略" : "趋势策略"}：策略均值 vs 随机基线（含95%区间）`,
+        );
+      }
+
+      function _renderEventStudyMeanVsRandomChart(divId, horizons, windows, title) {
+        const el = $(divId);
+        if (!el) return;
+        if (typeof Plotly === "undefined") {
+          el.innerHTML = "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+          return;
+        }
+        const hs = Array.isArray(horizons) ? horizons : [];
+        if (!hs.length) {
+          el.innerHTML = "<div class='muted'>暂无可视化数据</div>";
+          return;
+        }
+        const sigMean = [];
+        const rndMean = [];
+        const sigErrPlus = [];
+        const sigErrMinus = [];
+        const rndErrPlus = [];
+        const rndErrMinus = [];
+        for (const h of hs) {
+          const one = (windows && windows[h]) ? windows[h] : {};
+          const sig = one.signal || {};
+          const rnd = one.random_baseline || {};
+          const ci = Array.isArray(sig.ci95_mean) ? sig.ci95_mean : [NaN, NaN];
+          const rci = Array.isArray(rnd.ci95_trial_mean) ? rnd.ci95_trial_mean : [NaN, NaN];
+          const sm = Number(sig.mean);
+          const rm = Number(rnd.mean_of_trial_means);
+          const sLo = Number(ci[0]);
+          const sHi = Number(ci[1]);
+          const rLo = Number(rci[0]);
+          const rHi = Number(rci[1]);
+          sigMean.push(Number.isFinite(sm) ? sm : NaN);
+          rndMean.push(Number.isFinite(rm) ? rm : NaN);
+          sigErrPlus.push(Number.isFinite(sHi) && Number.isFinite(sm) ? Math.max(0, sHi - sm) : NaN);
+          sigErrMinus.push(Number.isFinite(sLo) && Number.isFinite(sm) ? Math.max(0, sm - sLo) : NaN);
+          rndErrPlus.push(Number.isFinite(rHi) && Number.isFinite(rm) ? Math.max(0, rHi - rm) : NaN);
+          rndErrMinus.push(Number.isFinite(rLo) && Number.isFinite(rm) ? Math.max(0, rm - rLo) : NaN);
+        }
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              type: "bar",
+              name: "策略均值",
+              x: hs,
+              y: sigMean,
+              marker: { color: "#4c78a8" },
+              error_y: { type: "data", symmetric: false, array: sigErrPlus, arrayminus: sigErrMinus, color: "#4c78a8", thickness: 1.2, width: 3 },
+              hovertemplate: "窗口=%{x}<br>策略均值=%{y:.2%}<extra></extra>",
+            },
+            {
+              type: "bar",
+              name: "随机基线均值",
+              x: hs,
+              y: rndMean,
+              marker: { color: "#f58518" },
+              error_y: { type: "data", symmetric: false, array: rndErrPlus, arrayminus: rndErrMinus, color: "#f58518", thickness: 1.2, width: 3 },
+              hovertemplate: "窗口=%{x}<br>随机均值=%{y:.2%}<extra></extra>",
+            },
+          ],
+          {
+            title,
+            barmode: "group",
+            margin: { t: 36, b: 42, l: 52, r: 20 },
+            xaxis: { title: "入市后持有窗口", type: "category" },
+            yaxis: { title: "收益率", tickformat: ".1%", zeroline: true, zerolinecolor: "#888" },
+            legend: { orientation: "h", y: 1.12 },
+          },
+          { responsive: true, displayModeBar: false },
+        );
       }
 
       function _calcMetricsFromNav(nav, rfAnnual) {

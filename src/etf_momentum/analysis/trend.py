@@ -26,6 +26,7 @@ from .baseline import (
     load_high_low_prices,
     load_ohlc_prices,
 )
+from .event_study import compute_event_study, entry_dates_from_exposure
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
 TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
@@ -1372,6 +1373,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "trades": trade_one.get("trades", []),
         "trades_by_code": {str(code): trade_one.get("trades", [])},
     }
+    event_study = compute_event_study(
+        dates=nav.index,
+        daily_returns=strat_ret.reindex(nav.index).astype(float),
+        entry_dates=entry_dates_from_exposure(w.reindex(nav.index).astype(float)),
+    )
     weekly = _period_returns(nav, "W-FRI")
     monthly = _period_returns(nav, "ME")
     quarterly = _period_returns(nav, "QE")
@@ -1451,6 +1457,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "event_study": event_study,
         "return_decomposition": {
             "dates": nav.index.date.astype(str).tolist(),
             "series": {
@@ -2081,6 +2088,11 @@ def compute_trend_portfolio_backtest(
         "trades": trade_pack.get("trades", []),
         "trades_by_code": trade_pack.get("trades_by_code", {}),
     }
+    event_study = compute_event_study(
+        dates=nav.index,
+        daily_returns=port_ret.reindex(nav.index).astype(float),
+        entry_dates=entry_dates_from_exposure(w.sum(axis=1).reindex(nav.index).astype(float)),
+    )
     weekly = _period_returns(nav, "W-FRI")
     monthly = _period_returns(nav, "ME")
     quarterly = _period_returns(nav, "QE")
@@ -2209,6 +2221,7 @@ def compute_trend_portfolio_backtest(
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
+        "event_study": event_study,
         "return_decomposition": {
             "dates": nav.index.date.astype(str).tolist(),
             "series": {
