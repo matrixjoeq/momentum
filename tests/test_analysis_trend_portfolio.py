@@ -40,6 +40,7 @@ def test_trend_portfolio_all_active_candidates_and_outputs(session_factory):
         )
     assert out["meta"]["type"] == "trend_portfolio_backtest"
     assert "weights" in out and "holdings" in out
+    assert (out.get("market_regime") or {}).get("enabled") is True
     assert out["meta"]["params"]["selection_mode"] == "all_active_candidates"
     if out["holdings"]:
         one = out["holdings"][0]

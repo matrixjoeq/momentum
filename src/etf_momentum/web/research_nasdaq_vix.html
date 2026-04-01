@@ -16,6 +16,7 @@
       })();
     </script>
     <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <script src="/static/market_regime.js"></script>
     <link rel="stylesheet" href="/static/terminal.css" />
     <style>
       .panel {
@@ -35,6 +36,10 @@
       #rollingChart {
         width: 100%;
         height: 360px;
+      }
+      #regimeTimeline,
+      #regimeFuture {
+        width: 100%;
       }
       #distCloseChart,
       #distRetChart {
@@ -304,6 +309,22 @@
       <div id="stratChart"></div>
       <div class="muted" id="stratMetrics" style="margin-top:6px;"></div>
     </div>
+    <div class="panel">
+      <h3 style="margin: 0 0 6px 0;">市场状态划分（统一前端模块）</h3>
+      <div class="row" style="margin-bottom:8px;">
+        <div><label>slope_window</label><input id="regimeSlopeWin" value="20" /></div>
+        <div><label>vol_window</label><input id="regimeVolWin" value="20" /></div>
+        <div><label>direction_threshold_ann</label><input id="regimeSlopeThr" value="0.03" /></div>
+        <div><label>vol_quantile</label><input id="regimeVolQ" value="0.50" /></div>
+        <div><label>future_n</label><input id="regimeNAhead" value="5" /></div>
+      </div>
+      <div id="regimeHint" class="muted"></div>
+      <div id="regimeLegend" class="muted" style="margin-top:6px;"></div>
+      <div id="regimeTimeline" style="height:260px; margin-top:8px;"></div>
+      <table id="regimeStats" style="margin-top:8px;"></table>
+      <div id="regimeFuture" style="height:300px; margin-top:8px;"></div>
+      <table id="regimeFutureStats" style="margin-top:8px;"></table>
+    </div>
 
     <div class="panel">
       <h3 style="margin: 0 0 6px 0;">择时策略绩效对比（开启择时后）</h3>
@@ -524,6 +545,81 @@
         if (!Number.isFinite(n)) return "";
         return n.toFixed(k);
       }
+      const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+
+      function renderRegimeModuleForSeries({ dates, close, titlePrefix }) {
+        if (!window.MarketRegimeUI) return;
+        const tl = $("regimeTimeline");
+        const lg = $("regimeLegend");
+        const st = $("regimeStats");
+        const fh = $("regimeFuture");
+        const fst = $("regimeFutureStats");
+        const hint = $("regimeHint");
+        if (!tl) return;
+        if (!Array.isArray(dates) || !Array.isArray(close) || dates.length < 10 || dates.length !== close.length) {
+          tl.innerHTML = "<div class='muted'>暂无可用状态数据</div>";
+          if (lg) lg.innerHTML = "";
+          if (st) st.innerHTML = "";
+          if (fh) fh.innerHTML = "<div class='muted'>暂无未来收益分布</div>";
+          if (fst) fst.innerHTML = "";
+          if (hint) hint.textContent = "";
+          return;
+        }
+        const params = {
+          slope_window: Math.max(5, Number(($("regimeSlopeWin") && $("regimeSlopeWin").value) || 20)),
+          vol_window: Math.max(5, Number(($("regimeVolWin") && $("regimeVolWin").value) || 20)),
+          direction_threshold_ann: Math.max(0, Number(($("regimeSlopeThr") && $("regimeSlopeThr").value) || 0.03)),
+          vol_quantile: Math.max(0.01, Math.min(0.99, Number(($("regimeVolQ") && $("regimeVolQ").value) || 0.5))),
+        };
+        const nAhead = Math.max(1, Number(($("regimeNAhead") && $("regimeNAhead").value) || 5));
+        const rows = window.MarketRegimeUI.computeRows({ dates, close, ...params });
+        const stateOrder = window.MarketRegimeUI.STATE_ORDER || [];
+        const stateLabel = window.MarketRegimeUI.STATE_LABEL || {};
+        const selected = window.__nasdaqRegimeSelected instanceof Set ? window.__nasdaqRegimeSelected : new Set(stateOrder);
+        window.__nasdaqRegimeSelected = selected;
+        window.MarketRegimeUI.renderLegend(
+          lg,
+          selected,
+          (s) => {
+            if (selected.has(s)) selected.delete(s); else selected.add(s);
+            if (selected.size === 0) for (const x of stateOrder) selected.add(x);
+            renderRegimeModuleForSeries({ dates, close, titlePrefix });
+          },
+          (s) => {
+            selected.clear(); selected.add(s);
+            renderRegimeModuleForSeries({ dates, close, titlePrefix });
+          }
+        );
+        window.MarketRegimeUI.renderTimeline("regimeTimeline", rows, selected, `${titlePrefix}市场状态区间`, titlePrefix);
+        const byState = window.MarketRegimeUI.summarizeStateStats(rows);
+        if (st) {
+          st.innerHTML = "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
+            stateOrder.map((s) => {
+              const xs = ((byState[s] || {}).rets || []).filter(Number.isFinite);
+              const n = xs.length;
+              const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+              const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+              const v = n > 1 ? Math.sqrt(xs.reduce((p, x) => p + (x - m) * (x - m), 0) / (n - 1)) : NaN;
+              return `<tr><td>${stateLabel[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
+            }).join("");
+        }
+        const fwd = window.MarketRegimeUI.summarizeForwardByState(rows, nAhead);
+        window.MarketRegimeUI.renderForwardBox("regimeFuture", fwd, nAhead, selected);
+        if (fst) {
+          fst.innerHTML = "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
+            stateOrder.map((s) => {
+              const xs = (fwd[s] || []).filter(Number.isFinite);
+              const n = xs.length;
+              const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+              const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.10) : NaN;
+              const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.50) : NaN;
+              const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.90) : NaN;
+              const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+              return `<tr><td>${stateLabel[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
+            }).join("");
+        }
+        if (hint) hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
+      }
 
       function renderTables(res) {
         const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
@@ -601,6 +697,21 @@
             metricsLine;
         }
         $("stratMetrics").textContent = metricsLine;
+        window.__nasdaqRegimeSeries = { dates: (dates || []).slice(), close: (navB || []).slice(), titlePrefix: "买入持有NAV-" };
+        renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
+        if (!window.__nasdaqRegimeBound) {
+          for (const id of ["regimeSlopeWin", "regimeVolWin", "regimeSlopeThr", "regimeVolQ", "regimeNAhead"]) {
+            const el = $(id);
+            if (!el) continue;
+            el.addEventListener("change", () => {
+              if (window.__nasdaqRegimeSeries) renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
+            });
+            el.addEventListener("input", () => {
+              if (window.__nasdaqRegimeSeries) renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
+            });
+          }
+          window.__nasdaqRegimeBound = true;
+        }
 
         const r = t.rolling || {};
         const rd = r.dates || [];

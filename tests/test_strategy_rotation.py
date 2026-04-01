@@ -50,6 +50,8 @@ def test_backtest_rotation_basic_outputs(session_factory):
     assert "period_returns" in out
     assert "weekly" in out["period_returns"]
     assert "event_study" in out
+    assert (out.get("market_regime") or {}).get("enabled") is True
+    assert "strategy_by_dominant_state" in (out.get("market_regime") or {})
     assert set((out["event_study"] or {}).get("windows", {}).keys()) >= {"1d", "5d", "10d", "20d"}
     ev1 = (((out.get("event_study") or {}).get("windows") or {}).get("1d") or {})
     assert "profit_frequency" in (ev1.get("signal") or {})

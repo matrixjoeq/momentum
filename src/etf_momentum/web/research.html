@@ -16,6 +16,7 @@
       })();
     </script>
     <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <script src="/static/market_regime.js"></script>
     <link rel="stylesheet" href="/static/terminal.css" />
     <style>
       input,
@@ -578,6 +579,46 @@
         </div>
       </div>
       <div id="distRangeHint" class="muted" style="margin-top:8px;"></div>
+      <div class="panel" style="margin-top:10px;">
+        <h4 style="margin:0 0 6px 0;">ATR%(20日) 波动性历史位置</h4>
+        <div class="muted">
+          口径：ATR20% = ATR(20) / Close，其中 TR=max(H-L, |H-C_prev|, |L-C_prev|)。用于判断当前波动处于历史分位的什么位置。
+        </div>
+        <div id="distAtr20Hist" style="width:100%; height:300px; margin-top:8px;"></div>
+        <table id="distAtr20Stats" style="margin-top:8px;"></table>
+      </div>
+      <div class="panel" style="margin-top:10px;">
+        <h4 style="margin:0 0 6px 0;">市场状态划分引擎（方向 × 波动）</h4>
+        <div class="muted">
+          规则：方向=滚动对数价格线性回归斜率（上升/下降/横向）；波动=滚动 ATR% 分位阈值（宽幅/窄幅）。
+          下图按时间展示所选标的的状态区间（图例可点击筛选），并按状态给出样本占比与未来 n 日收益分布。
+        </div>
+        <div class="row no-print" style="margin-top:8px; align-items:end;">
+          <div>
+            <label>方向窗口（交易日）</label>
+            <input id="distRegimeSlopeWin" value="20" style="min-width:140px;" />
+          </div>
+          <div>
+            <label>波动窗口（交易日）</label>
+            <input id="distRegimeVolWin" value="20" style="min-width:140px;" />
+          </div>
+          <div>
+            <label>方向阈值（年化，默认3%）</label>
+            <input id="distRegimeSlopeThr" value="0.03" style="min-width:160px;" />
+          </div>
+          <div>
+            <label>宽幅分位阈值（0~1）</label>
+            <input id="distRegimeVolQ" value="0.50" style="min-width:140px;" />
+          </div>
+        </div>
+        <div id="distRegimeHint" class="muted" style="margin-top:6px;"></div>
+        <div id="distRegimeTimeline" style="width:100%; height:260px; margin-top:8px;"></div>
+        <div id="distRegimeLegend" class="muted no-print" style="margin-top:6px;"></div>
+        <table id="distRegimeStats" style="margin-top:8px;"></table>
+        <div class="muted" style="margin-top:10px;">按市场状态的未来 n 日收益条件分布（n 使用上方“未来收益预测窗口 n（日）”）</div>
+        <div id="distRegimeFuture" style="width:100%; height:300px; margin-top:8px;"></div>
+        <table id="distRegimeFutureStats" style="margin-top:8px;"></table>
+      </div>
       <div id="distHistogram" style="width:100%; height:420px; margin-top:12px;"></div>
       <table id="distQuantiles" style="margin-top:12px;"></table>
       <div class="muted" style="margin-top:10px;">当前统计指标值 vs 未来 t+n 日收益率（散点）</div>
@@ -4359,7 +4400,7 @@
       };
       const SETTINGS_FIELD_IDS = {
         global: ["start", "end", "rebalance", "baselineExecPrice", "baselineMode", "baselineRpWin", "baselineCustomWeights", "benchmark", "baselineGroupPreset", "rotationGroupPreset", "trendGroupPreset", "calTimingGroupPreset", "groupEditorSelect", "rf", "fftWindows", "fftRollOn", "fftRollStep", "dynamicUniverse", "mixAccountAmount", "mixWeightMode", "fixedStrategyType"],
-        dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distRangeQuick", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric", "distWkdaySelect", "distMonthDomSelect", "distYearWeekSelect", "distYearMonthSelect"],
+        dist: ["distCodeSelect", "distAdjustSelect", "distTypeSelect", "distPeriodSelect", "distRangeQuick", "distStart", "distEnd", "distRollVolWindow", "distFutureN", "distFutureFitOn", "distCalDay", "distCalMode", "distCalHoldN", "distCalEntryPx", "distCalExitPx", "distCalShift", "distCalMetric", "distWkdaySelect", "distMonthDomSelect", "distYearWeekSelect", "distYearMonthSelect", "distRegimeSlopeWin", "distRegimeVolWin", "distRegimeSlopeThr", "distRegimeVolQ"],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
           "rotRebalance", "rotRebalanceAnchor", "rotRebalanceShift", "rotExecPrice", "rotTopKMode", "rotTopK", "rotFloatingBenchmark", "rotPositionMode", "rotRiskBudgetAtrWin", "rotRiskBudgetPct", "rotEntryBackfill",
@@ -10026,7 +10067,7 @@
         if (!code || !start || !end) return null;
         const cache = window.__distCodeOpenCache || {};
         const key = `${adjust}|${code}|${start}|${end}`;
-        if (cache[key] && Array.isArray(cache[key].dates) && Array.isArray(cache[key].open) && Array.isArray(cache[key].close)) return cache[key];
+        if (cache[key] && Array.isArray(cache[key].dates) && Array.isArray(cache[key].open) && Array.isArray(cache[key].close) && Array.isArray(cache[key].high) && Array.isArray(cache[key].low)) return cache[key];
         const path = `/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=${encodeURIComponent(adjust)}&limit=1000000`;
         const resp = await api(path, { method: "GET" });
         const text = await resp.text();
@@ -10034,17 +10075,23 @@
         const rows = JSON.parse(text);
         const dates = [];
         const open = [];
+        const high = [];
+        const low = [];
         const close = [];
         for (const r of (Array.isArray(rows) ? rows : [])) {
           const d = String(r && r.trade_date != null ? r.trade_date : "").trim();
           const o = Number(r && r.open != null ? r.open : NaN);
+          const h = Number(r && r.high != null ? r.high : NaN);
+          const l = Number(r && r.low != null ? r.low : NaN);
           const c = Number(r && r.close != null ? r.close : NaN);
           if (!d || !Number.isFinite(o) || o <= 0 || !Number.isFinite(c) || c <= 0) continue;
           dates.push(d);
           open.push(o);
+          high.push(Number.isFinite(h) && h > 0 ? h : c);
+          low.push(Number.isFinite(l) && l > 0 ? l : c);
           close.push(c);
         }
-        const out = { code, adjust, start, end, dates, open, close };
+        const out = { code, adjust, start, end, dates, open, high, low, close };
         cache[key] = out;
         window.__distCodeOpenCache = cache;
         return out;
@@ -10080,6 +10127,16 @@
         const rangeEnd = $("distEnd");
         const rangeApply = $("distApplyRange");
         const rangeHint = $("distRangeHint");
+        const regimeSlopeWinInput = $("distRegimeSlopeWin");
+        const regimeVolWinInput = $("distRegimeVolWin");
+        const regimeSlopeThrInput = $("distRegimeSlopeThr");
+        const regimeVolQInput = $("distRegimeVolQ");
+        const atr20HistEl = $("distAtr20Hist");
+        const atr20StatsEl = $("distAtr20Stats");
+        const regimeHint = $("distRegimeHint");
+        const regimeLegend = $("distRegimeLegend");
+        const regimeStats = $("distRegimeStats");
+        const regimeFutureStats = $("distRegimeFutureStats");
 
         if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect) return;
 
@@ -10435,6 +10492,304 @@
             },
             { responsive: true, displayModeBar: false }
           );
+        };
+
+        const _distSafeQuantile = (arr, q) => {
+          const xs = (Array.isArray(arr) ? arr : []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+          if (!xs.length) return NaN;
+          const qq = Math.max(0, Math.min(1, Number(q)));
+          if (typeof _percentile === "function") return Number(_percentile(xs, qq * 100));
+          const pos = (xs.length - 1) * qq;
+          const lo = Math.floor(pos);
+          const hi = Math.ceil(pos);
+          if (lo === hi) return xs[lo];
+          const w = pos - lo;
+          return xs[lo] * (1 - w) + xs[hi] * w;
+        };
+
+        const _renderAtr20Level = ({ code, openSeries }) => {
+          if (!atr20HistEl || !atr20StatsEl) return;
+          if (!code || !openSeries || !Array.isArray(openSeries.dates) || !Array.isArray(openSeries.close) || openSeries.close.length < 30) {
+            atr20HistEl.innerHTML = "<div class='muted'>暂无 ATR%(20) 数据</div>";
+            atr20StatsEl.innerHTML = "";
+            return;
+          }
+          const dates = openSeries.dates || [];
+          const close = (openSeries.close || []).map((v) => Number(v));
+          const high = (openSeries.high || openSeries.close || []).map((v) => Number(v));
+          const low = (openSeries.low || openSeries.close || []).map((v) => Number(v));
+          const n = close.length;
+          const tr = new Array(n).fill(NaN);
+          for (let i = 1; i < n; i++) {
+            const prev = Number(close[i - 1]);
+            const h = Number(high[i]);
+            const l = Number(low[i]);
+            if (!Number.isFinite(prev) || prev <= 0 || !Number.isFinite(h) || !Number.isFinite(l)) continue;
+            const tr1 = Math.abs(h - l);
+            const tr2 = Math.abs(h - prev);
+            const tr3 = Math.abs(l - prev);
+            tr[i] = Math.max(tr1, tr2, tr3);
+          }
+          const atr20Pct = new Array(n).fill(NaN);
+          for (let i = 0; i < n; i++) {
+            const s = Math.max(1, i - 20 + 1);
+            const xs = [];
+            for (let j = s; j <= i; j++) {
+              const v = Number(tr[j]);
+              if (Number.isFinite(v)) xs.push(v);
+            }
+            if (xs.length < 20) continue;
+            const atr = xs.reduce((a, b) => a + b, 0) / xs.length;
+            const c = Number(close[i]);
+            if (Number.isFinite(c) && c > 0) atr20Pct[i] = atr / c;
+          }
+          const vals = atr20Pct.filter(Number.isFinite);
+          if (vals.length < 10) {
+            atr20HistEl.innerHTML = "<div class='muted'>样本不足，无法计算 ATR%(20) 历史位置</div>";
+            atr20StatsEl.innerHTML = "";
+            return;
+          }
+          const curIdx = (() => {
+            for (let i = atr20Pct.length - 1; i >= 0; i--) {
+              if (Number.isFinite(atr20Pct[i])) return i;
+            }
+            return -1;
+          })();
+          const cur = curIdx >= 0 ? Number(atr20Pct[curIdx]) : NaN;
+          const curDate = curIdx >= 0 ? String(dates[curIdx] || "") : "";
+          const rankPct = Number.isFinite(cur) ? vals.filter((v) => v <= cur).length / vals.length : NaN;
+          const q01 = _distSafeQuantile(vals, 0.01);
+          const q05 = _distSafeQuantile(vals, 0.05);
+          const q10 = _distSafeQuantile(vals, 0.10);
+          const q25 = _distSafeQuantile(vals, 0.25);
+          const q50 = _distSafeQuantile(vals, 0.50);
+          const q75 = _distSafeQuantile(vals, 0.75);
+          const q90 = _distSafeQuantile(vals, 0.90);
+          const q95 = _distSafeQuantile(vals, 0.95);
+          const q99 = _distSafeQuantile(vals, 0.99);
+          if (typeof Plotly === "undefined") {
+            atr20HistEl.innerHTML = "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+          } else {
+            Plotly.newPlot(
+              "distAtr20Hist",
+              [{
+                x: vals,
+                type: "histogram",
+                marker: { color: "#72b7b2" },
+                nbinsx: Math.min(50, Math.max(12, Math.round(Math.sqrt(vals.length) * 3))),
+                hovertemplate: "ATR20%=%{x:.2%}<br>频数=%{y}<extra></extra>",
+              }],
+              {
+                margin: { t: 36, b: 42, l: 52, r: 20 },
+                title: { text: `${codeLabel(code)}：ATR%(20) 历史分布`, font: { size: 13 } },
+                xaxis: { title: "ATR20%", tickformat: ".1%" },
+                yaxis: { title: "频数" },
+                shapes: [
+                  ...(Number.isFinite(q01) ? [{ type: "line", xref: "x", yref: "paper", x0: q01, x1: q01, y0: 0, y1: 1, line: { color: "rgba(214,39,40,0.85)", width: 1.2, dash: "dot" } }] : []),
+                  ...(Number.isFinite(q99) ? [{ type: "line", xref: "x", yref: "paper", x0: q99, x1: q99, y0: 0, y1: 1, line: { color: "rgba(214,39,40,0.85)", width: 1.2, dash: "dot" } }] : []),
+                  ...(Number.isFinite(q50) ? [{ type: "line", xref: "x", yref: "paper", x0: q50, x1: q50, y0: 0, y1: 1, line: { color: "rgba(31,119,180,0.95)", width: 2.0, dash: "solid" } }] : []),
+                  ...(Number.isFinite(cur) ? [{ type: "line", xref: "x", yref: "paper", x0: cur, x1: cur, y0: 0, y1: 1, line: { color: "rgba(214,39,40,0.95)", width: 2.4, dash: "solid" } }] : []),
+                ],
+              },
+              { responsive: true, displayModeBar: false }
+            );
+          }
+          atr20StatsEl.innerHTML =
+            "<tr><th>指标</th><th>数值</th></tr>" +
+            `<tr><td>当前 ATR20%${curDate ? `（${esc(curDate)}）` : ""}</td><td>${fmtPct(cur)}</td></tr>` +
+            `<tr><td>当前所处分位</td><td>${fmtPct(rankPct)}</td></tr>` +
+            `<tr><td>样本数</td><td>${vals.length}</td></tr>` +
+            `<tr><td>P1 / P5 / P10</td><td>${fmtPct(q01)} / ${fmtPct(q05)} / ${fmtPct(q10)}</td></tr>` +
+            `<tr><td>P25 / P50 / P75</td><td>${fmtPct(q25)} / ${fmtPct(q50)} / ${fmtPct(q75)}</td></tr>` +
+            `<tr><td>P90 / P95 / P99</td><td>${fmtPct(q90)} / ${fmtPct(q95)} / ${fmtPct(q99)}</td></tr>`;
+        };
+
+        const _buildDistMarketRegime = ({ dates, close, high, low, slopeWin, volWin, directionThresholdAnn, volQuantile }) => {
+          const out = [];
+          if (!Array.isArray(dates) || !Array.isArray(close) || dates.length !== close.length || dates.length < 10) return out;
+          const sw = Math.max(5, Math.round(Number(slopeWin) || 20));
+          const vw = Math.max(5, Math.round(Number(volWin) || 20));
+          const thr = Math.max(0, Number(directionThresholdAnn) || 0.03);
+          const q = Math.max(0.01, Math.min(0.99, Number(volQuantile) || 0.5));
+          const minSlope = Math.max(5, Math.floor(sw / 2));
+          const minVol = Math.max(5, Math.floor(vw / 2));
+          const minExpQ = Math.max(vw, 30);
+          const ln = close.map((v) => {
+            const x = Number(v);
+            return (Number.isFinite(x) && x > 0) ? Math.log(x) : NaN;
+          });
+          const hi = Array.isArray(high) && high.length === close.length ? high.map((v) => Number(v)) : close.map((v) => Number(v));
+          const lo = Array.isArray(low) && low.length === close.length ? low.map((v) => Number(v)) : close.map((v) => Number(v));
+          const trPct = new Array(close.length).fill(NaN);
+          for (let i = 1; i < close.length; i++) {
+            const prev = Number(close[i - 1]);
+            const h = Number.isFinite(hi[i]) ? Number(hi[i]) : Number(close[i]);
+            const l = Number.isFinite(lo[i]) ? Number(lo[i]) : Number(close[i]);
+            if (!Number.isFinite(prev) || prev <= 0 || !Number.isFinite(h) || !Number.isFinite(l)) continue;
+            const tr1 = Math.abs(h - l);
+            const tr2 = Math.abs(h - prev);
+            const tr3 = Math.abs(l - prev);
+            trPct[i] = Math.max(tr1, tr2, tr3) / prev;
+          }
+          const slopeAnn = new Array(close.length).fill(NaN);
+          for (let i = 0; i < close.length; i++) {
+            const s = Math.max(0, i - sw + 1);
+            const ys = [];
+            for (let j = s; j <= i; j++) {
+              const y = Number(ln[j]);
+              if (Number.isFinite(y)) ys.push(y);
+            }
+            if (ys.length < minSlope) continue;
+            const n = ys.length;
+            const xMean = (n - 1) / 2;
+            const yMean = ys.reduce((a, b) => a + b, 0) / n;
+            let num = 0;
+            let den = 0;
+            for (let k = 0; k < n; k++) {
+              const dx = k - xMean;
+              const dy = ys[k] - yMean;
+              num += dx * dy;
+              den += dx * dx;
+            }
+            if (den <= 0) continue;
+            slopeAnn[i] = (num / den) * 252.0;
+          }
+          const volMetric = new Array(close.length).fill(NaN);
+          for (let i = 0; i < close.length; i++) {
+            const s = Math.max(1, i - vw + 1);
+            const xs = [];
+            for (let j = s; j <= i; j++) {
+              const v = Number(trPct[j]);
+              if (Number.isFinite(v)) xs.push(v);
+            }
+            if (xs.length < minVol) continue;
+            volMetric[i] = xs.reduce((a, b) => a + b, 0) / xs.length;
+          }
+          const volThreshold = new Array(close.length).fill(NaN);
+          for (let i = 0; i < close.length; i++) {
+            const hist = [];
+            for (let j = 0; j < i; j++) {
+              const v = Number(volMetric[j]);
+              if (Number.isFinite(v)) hist.push(v);
+            }
+            if (hist.length >= minExpQ) volThreshold[i] = _distSafeQuantile(hist, q);
+          }
+          for (let i = 0; i < close.length; i++) {
+            const sl = Number(slopeAnn[i]);
+            let dir = "SIDE";
+            if (Number.isFinite(sl) && sl > thr) dir = "UP";
+            else if (Number.isFinite(sl) && sl < -thr) dir = "DOWN";
+            const vm = Number(volMetric[i]);
+            const qv = Number(volThreshold[i]);
+            const amp = (Number.isFinite(vm) && Number.isFinite(qv) && vm >= qv) ? "WIDE" : "NARROW";
+            const st = `${dir}_${amp}`;
+            out.push({
+              date: String(dates[i] || ""),
+              close: Number(close[i]),
+              slope_ann: sl,
+              vol_metric: vm,
+              vol_threshold: qv,
+              regime: st,
+            });
+          }
+          return out;
+        };
+
+        const _renderDistMarketRegime = ({ code, openSeries }) => {
+          const tl = $("distRegimeTimeline");
+          const fEl = $("distRegimeFuture");
+          if (!tl || !window.MarketRegimeUI) return;
+          if (!code || !openSeries || !Array.isArray(openSeries.dates) || !Array.isArray(openSeries.close) || openSeries.dates.length < 10) {
+            tl.innerHTML = "<div class='muted'>无可用市场状态数据</div>";
+            if (fEl) fEl.innerHTML = "<div class='muted'>无条件分布数据</div>";
+            if (regimeLegend) regimeLegend.innerHTML = "";
+            if (regimeStats) regimeStats.innerHTML = "";
+            if (regimeFutureStats) regimeFutureStats.innerHTML = "";
+            if (regimeHint) regimeHint.textContent = "";
+            return;
+          }
+          const slopeWin = Math.max(5, Math.round(Number((regimeSlopeWinInput && regimeSlopeWinInput.value) || 20)));
+          const volWin = Math.max(5, Math.round(Number((regimeVolWinInput && regimeVolWinInput.value) || 20)));
+          const directionThresholdAnn = Math.max(0, Number((regimeSlopeThrInput && regimeSlopeThrInput.value) || 0.03));
+          const volQuantile = Math.max(0.01, Math.min(0.99, Number((regimeVolQInput && regimeVolQInput.value) || 0.5)));
+          const rows = window.MarketRegimeUI.computeRows({
+            dates: openSeries.dates,
+            close: openSeries.close,
+            high: openSeries.high,
+            low: openSeries.low,
+            slope_window: slopeWin,
+            vol_window: volWin,
+            direction_threshold_ann: directionThresholdAnn,
+            vol_quantile: volQuantile,
+          });
+          if (!rows.length) {
+            tl.innerHTML = "<div class='muted'>样本不足，无法划分市场状态</div>";
+            if (fEl) fEl.innerHTML = "<div class='muted'>无条件分布数据</div>";
+            if (regimeLegend) regimeLegend.innerHTML = "";
+            if (regimeStats) regimeStats.innerHTML = "";
+            if (regimeFutureStats) regimeFutureStats.innerHTML = "";
+            if (regimeHint) regimeHint.textContent = "";
+            return;
+          }
+          const stateOrder = window.MarketRegimeUI.STATE_ORDER || [];
+          const stateLabel = window.MarketRegimeUI.STATE_LABEL || {};
+          const selected = window.__distRegimeSelectedStates instanceof Set ? window.__distRegimeSelectedStates : new Set(stateOrder);
+          window.__distRegimeSelectedStates = selected;
+          window.MarketRegimeUI.renderLegend(
+            regimeLegend,
+            selected,
+            (st) => {
+              if (selected.has(st)) selected.delete(st); else selected.add(st);
+              if (selected.size === 0) for (const x of stateOrder) selected.add(x);
+              _renderDistMarketRegime({ code, openSeries });
+            },
+            (st) => {
+              selected.clear();
+              selected.add(st);
+              _renderDistMarketRegime({ code, openSeries });
+            }
+          );
+          window.MarketRegimeUI.renderTimeline(
+            "distRegimeTimeline",
+            rows,
+            selected,
+            `${codeLabel(code)}：市场状态区间（图例可点击筛选）`,
+            codeLabel(code)
+          );
+          const byState = window.MarketRegimeUI.summarizeStateStats(rows);
+          if (regimeStats) {
+            const total = rows.length;
+            const head = "<tr><th>状态</th><th>样本天数</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>";
+            const body = stateOrder.map((st) => {
+              const xs = ((byState[st] || {}).rets || []).filter(Number.isFinite);
+              const n = xs.length;
+              const avg = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+              const win = n ? xs.filter((v) => v > 0).length / n : NaN;
+              const vol = n > 1 ? Math.sqrt(xs.reduce((s, v) => s + (v - avg) * (v - avg), 0) / (n - 1)) : NaN;
+              return `<tr><td>${esc(stateLabel[st] || st)}</td><td>${n}</td><td>${fmtPct(total > 0 ? n / total : NaN)}</td><td>${fmtPct(avg)}</td><td>${fmtPct(win)}</td><td>${fmtPct(vol)}</td></tr>`;
+            }).join("");
+            regimeStats.innerHTML = head + body;
+          }
+          const nAhead = Math.max(1, Math.round(Number((futNInput && futNInput.value) || 5)));
+          const futByState = window.MarketRegimeUI.summarizeForwardByState(rows, nAhead);
+          if (fEl) window.MarketRegimeUI.renderForwardBox("distRegimeFuture", futByState, nAhead, selected);
+          if (regimeFutureStats) {
+            const header = "<tr><th>状态</th><th>样本数</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>";
+            const body = stateOrder.map((st) => {
+              const xs = (futByState[st] || []).filter(Number.isFinite);
+              const n = xs.length;
+              const mean = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+              const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.10) : NaN;
+              const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.50) : NaN;
+              const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.90) : NaN;
+              const win = n ? xs.filter((v) => v > 0).length / n : NaN;
+              return `<tr><td>${esc(stateLabel[st] || st)}</td><td>${n}</td><td>${fmtPct(mean)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(win)}</td></tr>`;
+            }).join("");
+            regimeFutureStats.innerHTML = header + body;
+          }
+          if (regimeHint) {
+            regimeHint.textContent = `统一口径参数：slope_window=${slopeWin}, vol_window=${volWin}, direction_threshold_ann=${directionThresholdAnn.toFixed(4)}, vol_quantile=${volQuantile.toFixed(2)}；样本=${rows.length}天。`;
+          }
         };
 
         const _parseIsoDay = (s) => {
@@ -12122,11 +12477,14 @@
             if (calHint) calHint.textContent = "";
             $("distRollingAnnVol").innerHTML = "<div class='muted'>请选择标的</div>";
             if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>请选择标的</div>";
+            if (atr20HistEl) atr20HistEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            if (atr20StatsEl) atr20StatsEl.innerHTML = "";
             $("distQuantiles").innerHTML = "";
             try { _renderWeekdayDowEffect(""); } catch (_e) { /* ignore */ }
             try { _renderMonthDomEffect(""); } catch (_e2) { /* ignore */ }
             try { _renderYearWeekEffect(""); } catch (_e2b) { /* ignore */ }
             try { _renderYearMonthEffect(""); } catch (_e2c) { /* ignore */ }
+            try { _renderDistMarketRegime({ code: "", openSeries: null }); } catch (_erg0) { /* ignore */ }
             return;
           }
 
@@ -12165,11 +12523,14 @@
             if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
             if (calTable) calTable.innerHTML = "";
             if (calHint) calHint.textContent = "";
+            if (atr20HistEl) atr20HistEl.innerHTML = "<div class='muted'>无 ATR%(20) 数据</div>";
+            if (atr20StatsEl) atr20StatsEl.innerHTML = "";
             $("distQuantiles").innerHTML = "";
             try { _renderWeekdayDowEffect(code); } catch (_ew) { /* ignore */ }
             try { _renderMonthDomEffect(code); } catch (_ewm) { /* ignore */ }
             try { _renderYearWeekEffect(code); } catch (_ewy) { /* ignore */ }
             try { _renderYearMonthEffect(code); } catch (_ewym) { /* ignore */ }
+            try { _renderDistMarketRegime({ code, openSeries: openByCode[code] }); } catch (_erg1) { /* ignore */ }
             return;
           }
 
@@ -12187,11 +12548,14 @@
             if ($("distCalHist")) $("distCalHist").innerHTML = "<div class='muted'>无数据</div>";
             if (calTable) calTable.innerHTML = "";
             if (calHint) calHint.textContent = "";
+            if (atr20HistEl) atr20HistEl.innerHTML = "<div class='muted'>无 ATR%(20) 数据</div>";
+            if (atr20StatsEl) atr20StatsEl.innerHTML = "";
             $("distQuantiles").innerHTML = "";
             try { _renderWeekdayDowEffect(code); } catch (_ew2) { /* ignore */ }
             try { _renderMonthDomEffect(code); } catch (_ewm2) { /* ignore */ }
             try { _renderYearWeekEffect(code); } catch (_ewy2) { /* ignore */ }
             try { _renderYearMonthEffect(code); } catch (_ewym2) { /* ignore */ }
+            try { _renderDistMarketRegime({ code, openSeries: openByCode[code] }); } catch (_erg2) { /* ignore */ }
             return;
           }
 
@@ -12377,10 +12741,12 @@
 
           // Rolling annualized volatility chart (always based on daily NAV returns)
           _plotRollingAnnVol();
+          try { _renderAtr20Level({ code, openSeries: openByCode[code] }); } catch (_eatr) { /* ignore */ }
           try { _renderWeekdayDowEffect(code); } catch (_ewk) { /* ignore */ }
           try { _renderMonthDomEffect(code); } catch (_ewkm) { /* ignore */ }
           try { _renderYearWeekEffect(code); } catch (_ewky) { /* ignore */ }
           try { _renderYearMonthEffect(code); } catch (_ewkym) { /* ignore */ }
+          try { _renderDistMarketRegime({ code, openSeries: openByCode[code] }); } catch (_erg3) { /* ignore */ }
         };
 
         // Bind events (wire once)
@@ -12408,6 +12774,8 @@
                 $("distQuantiles").innerHTML = "";
                 $("distRollingAnnVol").innerHTML = "<div class='muted'>无数据</div>";
                 if ($("distMirrorTs")) $("distMirrorTs").innerHTML = "<div class='muted'>无数据</div>";
+                if (atr20HistEl) atr20HistEl.innerHTML = "<div class='muted'>无 ATR%(20) 数据</div>";
+                if (atr20StatsEl) atr20StatsEl.innerHTML = "";
                 if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>无散点数据</div>";
                 if (futProbTable) futProbTable.innerHTML = "";
                 if (futCausalTable) futCausalTable.innerHTML = "";
@@ -12419,6 +12787,7 @@
                 try { _renderMonthDomEffect(""); } catch (_em) { /* ignore */ }
                 try { _renderYearWeekEffect(""); } catch (_emy) { /* ignore */ }
                 try { _renderYearMonthEffect(""); } catch (_eYm0) { /* ignore */ }
+                try { _renderDistMarketRegime({ code: "", openSeries: null }); } catch (_erg4) { /* ignore */ }
                 return;
               }
               distByCode[c] = b.period_distributions[c];
@@ -12428,6 +12797,8 @@
             } catch (e2) {
               $("distHistogram").innerHTML = `<div class='muted'>加载失败：${esc(String(e2 && e2.message ? e2.message : e2))}</div>`;
               if ($("distFutureScatter")) $("distFutureScatter").innerHTML = "<div class='muted'>散点加载失败</div>";
+              if (atr20HistEl) atr20HistEl.innerHTML = "<div class='muted'>ATR%(20) 加载失败</div>";
+              if (atr20StatsEl) atr20StatsEl.innerHTML = "";
               if (futProbTable) futProbTable.innerHTML = "";
               if (futCausalTable) futCausalTable.innerHTML = "";
               if ($("distCalHeatmap")) $("distCalHeatmap").innerHTML = "<div class='muted'>日历效应加载失败</div>";
@@ -12438,6 +12809,7 @@
               try { _renderMonthDomEffect(""); } catch (_em) { /* ignore */ }
               try { _renderYearWeekEffect(""); } catch (_emy) { /* ignore */ }
               try { _renderYearMonthEffect(""); } catch (_eYm1) { /* ignore */ }
+              try { _renderDistMarketRegime({ code: "", openSeries: null }); } catch (_erg5) { /* ignore */ }
             }
           };
           const _syncRangeFromQuick = () => {
@@ -12500,6 +12872,34 @@
             calHoldNInput.addEventListener("input", () => {
               const v = Number(String(calHoldNInput.value || "").trim());
               if (Number.isFinite(v) && v >= 1) updateDisplay();
+            });
+          }
+          if (regimeSlopeWinInput) {
+            regimeSlopeWinInput.addEventListener("change", updateDisplay);
+            regimeSlopeWinInput.addEventListener("input", () => {
+              const v = Number(String(regimeSlopeWinInput.value || "").trim());
+              if (Number.isFinite(v) && v >= 5) updateDisplay();
+            });
+          }
+          if (regimeVolWinInput) {
+            regimeVolWinInput.addEventListener("change", updateDisplay);
+            regimeVolWinInput.addEventListener("input", () => {
+              const v = Number(String(regimeVolWinInput.value || "").trim());
+              if (Number.isFinite(v) && v >= 5) updateDisplay();
+            });
+          }
+          if (regimeSlopeThrInput) {
+            regimeSlopeThrInput.addEventListener("change", updateDisplay);
+            regimeSlopeThrInput.addEventListener("input", () => {
+              const v = Number(String(regimeSlopeThrInput.value || "").trim());
+              if (Number.isFinite(v) && v >= 0) updateDisplay();
+            });
+          }
+          if (regimeVolQInput) {
+            regimeVolQInput.addEventListener("change", updateDisplay);
+            regimeVolQInput.addEventListener("input", () => {
+              const v = Number(String(regimeVolQInput.value || "").trim());
+              if (Number.isFinite(v) && v > 0 && v < 1) updateDisplay();
             });
           }
           const wkSel = $("distWkdaySelect");

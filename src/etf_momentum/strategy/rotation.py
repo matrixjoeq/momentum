@@ -39,6 +39,7 @@ from ..analysis.baseline import _compute_return_risk_contributions as _compute_r
 from ..analysis.event_study import compute_event_study, entry_dates_from_weight_membership_change
 from ..analysis.erc_weights import erc_weights_from_return_history
 from ..analysis.execution_timing import corporate_action_mask, forward_returns, slippage_return_from_turnover
+from ..analysis.market_regime import build_market_regime_report
 from ..analysis.r_multiple import enrich_trades_with_r_metrics
 
 
@@ -3853,6 +3854,15 @@ def backtest_rotation(
             w.reindex(index=dates, columns=codes).astype(float).fillna(0.0)
         ),
     )
+    market_regime = build_market_regime_report(
+        close=close_qfq.reindex(index=dates, columns=codes).astype(float),
+        high=high_qfq.reindex(index=dates, columns=codes).astype(float),
+        low=low_qfq.reindex(index=dates, columns=codes).astype(float),
+        weights=w.reindex(index=dates, columns=codes).astype(float).fillna(0.0),
+        asset_returns=ret_exec[codes].reindex(index=dates, columns=codes).astype(float).fillna(0.0),
+        strategy_returns=port_ret_net.reindex(dates).astype(float),
+        ann_factor=TRADING_DAYS_PER_YEAR,
+    )
 
     active_ret = port_ret_net - ew_ret
     excess_nav = (1.0 + active_ret).cumprod()
@@ -4310,6 +4320,7 @@ def backtest_rotation(
         "trade_statistics": trade_stats,
         "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
+        "market_regime": market_regime,
         "return_decomposition": {
             "dates": dates.date.astype(str).tolist(),
             "series": {

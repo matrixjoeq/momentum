@@ -28,6 +28,7 @@ from .baseline import (
 )
 from .event_study import compute_event_study, entry_dates_from_exposure
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
+from .market_regime import build_market_regime_report
 from .r_multiple import enrich_trades_with_r_metrics
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
 TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
@@ -1398,6 +1399,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         daily_returns=strat_ret.reindex(nav.index).astype(float),
         entry_dates=entry_dates_from_exposure(w.reindex(nav.index).astype(float)),
     )
+    market_regime = build_market_regime_report(
+        close=px_sig.to_frame(code).reindex(nav.index).astype(float),
+        high=high_qfq.to_frame(code).reindex(nav.index).astype(float),
+        low=low_qfq.to_frame(code).reindex(nav.index).astype(float),
+        weights=w.to_frame(code).reindex(nav.index).astype(float),
+        asset_returns=ret_exec_day.to_frame(code).reindex(nav.index).astype(float).fillna(0.0),
+        strategy_returns=strat_ret.reindex(nav.index).astype(float),
+        ann_factor=TRADING_DAYS_PER_YEAR,
+    )
     weekly = _period_returns(nav, "W-FRI")
     monthly = _period_returns(nav, "ME")
     quarterly = _period_returns(nav, "QE")
@@ -1479,6 +1489,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "trade_statistics": trade_stats,
         "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
+        "market_regime": market_regime,
         "return_decomposition": {
             "dates": nav.index.date.astype(str).tolist(),
             "series": {
@@ -2142,6 +2153,15 @@ def compute_trend_portfolio_backtest(
         daily_returns=port_ret.reindex(nav.index).astype(float),
         entry_dates=entry_dates_from_exposure(w.sum(axis=1).reindex(nav.index).astype(float)),
     )
+    market_regime = build_market_regime_report(
+        close=close_qfq.reindex(index=nav.index, columns=codes).astype(float),
+        high=high_qfq_df.reindex(index=nav.index, columns=codes).astype(float),
+        low=low_qfq_df.reindex(index=nav.index, columns=codes).astype(float),
+        weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        asset_returns=ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        strategy_returns=port_ret.reindex(nav.index).astype(float),
+        ann_factor=TRADING_DAYS_PER_YEAR,
+    )
     weekly = _period_returns(nav, "W-FRI")
     monthly = _period_returns(nav, "ME")
     quarterly = _period_returns(nav, "QE")
@@ -2272,6 +2292,7 @@ def compute_trend_portfolio_backtest(
         "trade_statistics": trade_stats,
         "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
+        "market_regime": market_regime,
         "return_decomposition": {
             "dates": nav.index.date.astype(str).tolist(),
             "series": {

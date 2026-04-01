@@ -16,6 +16,7 @@
       })();
     </script>
     <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <script src="/static/market_regime.js"></script>
     <link rel="stylesheet" href="/static/terminal.css" />
     <style>
       .panel {
@@ -56,6 +57,10 @@
       #etf_rollingChart {
         width: 100%;
         height: 360px;
+      }
+      #etf_regimeTimeline,
+      #etf_regimeFuture {
+        width: 100%;
       }
       #etf_distCloseChart,
       #etf_distRetChart {
@@ -335,6 +340,22 @@
         <h3 style="margin: 0 0 6px 0;">简单策略回测（risk-on/off，含换仓成本）</h3>
         <div id="etf_stratChart"></div>
         <div class="muted" id="etf_stratMetrics" style="margin-top:6px;"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin: 0 0 6px 0;">市场状态划分（统一前端模块）</h3>
+        <div class="row" style="margin-bottom:8px;">
+          <div><label>slope_window</label><input id="etf_regimeSlopeWin" value="20" /></div>
+          <div><label>vol_window</label><input id="etf_regimeVolWin" value="20" /></div>
+          <div><label>direction_threshold_ann</label><input id="etf_regimeSlopeThr" value="0.03" /></div>
+          <div><label>vol_quantile</label><input id="etf_regimeVolQ" value="0.50" /></div>
+          <div><label>future_n</label><input id="etf_regimeNAhead" value="5" /></div>
+        </div>
+        <div id="etf_regimeHint" class="muted"></div>
+        <div id="etf_regimeLegend" class="muted" style="margin-top:6px;"></div>
+        <div id="etf_regimeTimeline" style="height:260px; margin-top:8px;"></div>
+        <table id="etf_regimeStats" style="margin-top:8px;"></table>
+        <div id="etf_regimeFuture" style="height:300px; margin-top:8px;"></div>
+        <table id="etf_regimeFutureStats" style="margin-top:8px;"></table>
       </div>
 
       <div class="panel">
@@ -787,6 +808,9 @@
         if (!Number.isFinite(n)) return "";
         return n.toFixed(k);
       }
+      function fmtPct(x) {
+        return Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "";
+      }
 
       function norm(arr) {
         if (!arr || arr.length === 0) return [];
@@ -948,6 +972,71 @@
           if (p === "yahoo") return s;
           return s;
         };
+        function renderEtfRegimePanel({ dates, close }) {
+          if (!window.MarketRegimeUI) return;
+          const tl = $("etf_regimeTimeline");
+          const lg = $("etf_regimeLegend");
+          const st = $("etf_regimeStats");
+          const fh = $("etf_regimeFuture");
+          const fst = $("etf_regimeFutureStats");
+          const hint = $("etf_regimeHint");
+          if (!tl) return;
+          if (!Array.isArray(dates) || !Array.isArray(close) || dates.length < 10 || dates.length !== close.length) {
+            tl.innerHTML = "<div class='muted'>暂无可用状态数据</div>";
+            if (lg) lg.innerHTML = "";
+            if (st) st.innerHTML = "";
+            if (fh) fh.innerHTML = "<div class='muted'>暂无未来收益分布</div>";
+            if (fst) fst.innerHTML = "";
+            if (hint) hint.textContent = "";
+            return;
+          }
+          const params = {
+            slope_window: Math.max(5, Number(($("etf_regimeSlopeWin") && $("etf_regimeSlopeWin").value) || 20)),
+            vol_window: Math.max(5, Number(($("etf_regimeVolWin") && $("etf_regimeVolWin").value) || 20)),
+            direction_threshold_ann: Math.max(0, Number(($("etf_regimeSlopeThr") && $("etf_regimeSlopeThr").value) || 0.03)),
+            vol_quantile: Math.max(0.01, Math.min(0.99, Number(($("etf_regimeVolQ") && $("etf_regimeVolQ").value) || 0.5))),
+          };
+          const nAhead = Math.max(1, Number(($("etf_regimeNAhead") && $("etf_regimeNAhead").value) || 5));
+          const rows = window.MarketRegimeUI.computeRows({ dates, close, ...params });
+          const order = window.MarketRegimeUI.STATE_ORDER || [];
+          const labels = window.MarketRegimeUI.STATE_LABEL || {};
+          const selected = window.__goldEtfRegimeSelected instanceof Set ? window.__goldEtfRegimeSelected : new Set(order);
+          window.__goldEtfRegimeSelected = selected;
+          window.MarketRegimeUI.renderLegend(
+            lg, selected,
+            (s) => { if (selected.has(s)) selected.delete(s); else selected.add(s); if (selected.size === 0) for (const x of order) selected.add(x); renderEtfRegimePanel({ dates, close }); },
+            (s) => { selected.clear(); selected.add(s); renderEtfRegimePanel({ dates, close }); }
+          );
+          window.MarketRegimeUI.renderTimeline("etf_regimeTimeline", rows, selected, "ETF市场状态区间", "ETF");
+          const by = window.MarketRegimeUI.summarizeStateStats(rows);
+          if (st) {
+            st.innerHTML = "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
+              order.map((s) => {
+                const xs = ((by[s] || {}).rets || []).filter(Number.isFinite);
+                const n = xs.length;
+                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                const v = n > 1 ? Math.sqrt(xs.reduce((p, x) => p + (x - m) * (x - m), 0) / (n - 1)) : NaN;
+                return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
+              }).join("");
+          }
+          const fwd = window.MarketRegimeUI.summarizeForwardByState(rows, nAhead);
+          window.MarketRegimeUI.renderForwardBox("etf_regimeFuture", fwd, nAhead, selected);
+          if (fst) {
+            fst.innerHTML = "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
+              order.map((s) => {
+                const xs = (fwd[s] || []).filter(Number.isFinite);
+                const n = xs.length;
+                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.1) : NaN;
+                const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.5) : NaN;
+                const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.9) : NaN;
+                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
+              }).join("");
+          }
+          if (hint) hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
+        }
 
         function renderTables(res) {
           const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
@@ -1027,6 +1116,21 @@
               metricsLine;
           }
           $("etf_stratMetrics").textContent = metricsLine;
+          window.__goldEtfRegimeSeries = { dates: (dates || []).slice(), close: (navB || []).slice() };
+          renderEtfRegimePanel(window.__goldEtfRegimeSeries);
+          if (!window.__goldEtfRegimeBound) {
+            for (const id of ["etf_regimeSlopeWin", "etf_regimeVolWin", "etf_regimeSlopeThr", "etf_regimeVolQ", "etf_regimeNAhead"]) {
+              const el = $(id);
+              if (!el) continue;
+              el.addEventListener("change", () => {
+                if (window.__goldEtfRegimeSeries) renderEtfRegimePanel(window.__goldEtfRegimeSeries);
+              });
+              el.addEventListener("input", () => {
+                if (window.__goldEtfRegimeSeries) renderEtfRegimePanel(window.__goldEtfRegimeSeries);
+              });
+            }
+            window.__goldEtfRegimeBound = true;
+          }
 
           // ---- timing compare table (GVZ + spot-vol proxies) ----
           function renderTimingCompare(rows) {
