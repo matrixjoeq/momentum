@@ -94,6 +94,7 @@
       <button id="selectNone">取消全选</button>
       <button id="selectInvert">反选</button>
       <button id="fetchSelected">抓取所选</button>
+      <button id="deleteSelected">删除所选</button>
     </div>
 
     <div id="msg" class="msg"></div>
@@ -142,6 +143,12 @@
       const selected = new Set();
       const FETCH_MODE_KEY = "etf_pool_fetch_mode";
       const FETCH_WORKERS_KEY = "etf_pool_parallel_workers";
+
+      function syncBulkActionButtons() {
+        const hasSel = selected.size > 0;
+        if ($("fetchSelected")) $("fetchSelected").disabled = !hasSel;
+        if ($("deleteSelected")) $("deleteSelected").disabled = !hasSel;
+      }
 
       function syncFetchModeUi() {
         const parallel = $("fetchMode").value === "parallel";
@@ -222,6 +229,7 @@
         tbody.innerHTML = "";
         if (!Array.isArray(data) || data.length === 0) {
           tbody.innerHTML = `<tr><td colspan="7" class="muted">候选池为空：请在上方填写代码/名称后点“保存/更新”，再选择并抓取数据。</td></tr>`;
+          syncBulkActionButtons();
           return;
         }
         for (const it of data) {
@@ -252,6 +260,7 @@
           tr.dataset.item = JSON.stringify(it);
           tbody.appendChild(tr);
         }
+        syncBulkActionButtons();
       }
 
       $("save").addEventListener("click", async () => {
@@ -296,11 +305,13 @@
         const data = await resp.json();
         for (const it of data) selected.add(it.code);
         await refresh();
+        syncBulkActionButtons();
       });
 
       $("selectNone").addEventListener("click", async () => {
         selected.clear();
         await refresh();
+        syncBulkActionButtons();
       });
 
       $("selectInvert").addEventListener("click", async () => {
@@ -311,6 +322,7 @@
         selected.clear();
         for (const x of next) selected.add(x);
         await refresh();
+        syncBulkActionButtons();
       });
 
       $("fetchSelected").addEventListener("click", async () => {
@@ -324,6 +336,39 @@
         await refresh();
       });
 
+      $("deleteSelected").addEventListener("click", async () => {
+        const codes = Array.from(selected);
+        if (codes.length === 0) return setMsg("未选择任何标的。");
+        const ok = confirm(
+          `将删除所选 ${codes.length} 个标的：\n${codes.join(", ")}\n\n` +
+          `每个标的将执行“删除”同等操作（purge=true）：\n` +
+          `- 候选池记录\n- 全部已抓取价格数据（hfq/qfq/none）\n- 对应 ingestion batch 记录（含回滚审计/记录）\n` +
+          `此操作不可恢复，确认继续？`
+        );
+        if (!ok) return;
+        setMsg(`正在删除所选 ${codes.length} 个标的...`);
+        const failed = [];
+        for (const code of codes) {
+          try {
+            const resp = await api(`/etf/${code}?purge=true`, { method: "DELETE" });
+            if (!resp.ok) {
+              const text = await resp.text();
+              failed.push(`${code}: ${text}`);
+              continue;
+            }
+            selected.delete(code);
+          } catch (err) {
+            failed.push(`${code}: ${String(err)}`);
+          }
+        }
+        await refresh();
+        if (failed.length > 0) {
+          setMsg(`部分删除失败（${failed.length}/${codes.length}）：${failed.join(" | ")}`);
+        } else {
+          setMsg(`删除成功：共 ${codes.length} 个标的。`);
+        }
+      });
+
       $("tbody").addEventListener("click", async (e) => {
         const btn = e.target.closest("button");
         const cb = e.target.closest('input[type="checkbox"][data-act="sel"]');
@@ -331,6 +376,7 @@
           const code = cb.getAttribute("data-code");
           if (cb.checked) selected.add(code);
           else selected.delete(code);
+          syncBulkActionButtons();
           return;
         }
         if (!btn) return;
@@ -357,6 +403,7 @@
             setMsg("删除成功。");
           }
           await refresh();
+          syncBulkActionButtons();
         }
         if (act === "edit" && it) {
           $("code").value = it.code;
@@ -378,6 +425,7 @@
       });
 
       loadFetchPrefs();
+      syncBulkActionButtons();
       loadPolicies()
         .then(refresh)
         .catch((e) => setMsg(String(e)));
