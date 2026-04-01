@@ -46,6 +46,10 @@ def test_backtest_rotation_basic_outputs(session_factory):
     assert "kelly_fraction" in out["win_payoff"]
     assert "abs_kelly_fraction" in out["win_payoff"]
     assert "strategy" in out["metrics"]
+    assert "avg_daily_turnover" in out["metrics"]["strategy"]
+    assert "avg_annual_turnover" in out["metrics"]["strategy"]
+    assert "avg_daily_trade_count" in out["metrics"]["strategy"]
+    assert "avg_annual_trade_count" in out["metrics"]["strategy"]
     assert "excess_vs_equal_weight" in out["metrics"]
     assert "period_returns" in out
     assert "weekly" in out["period_returns"]

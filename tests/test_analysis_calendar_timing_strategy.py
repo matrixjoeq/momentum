@@ -82,6 +82,11 @@ def test_calendar_timing_uses_hfq_benchmark_and_none_with_fallback_for_strategy(
     meta = out.get("meta") or {}
     assert "hfq" in str(meta.get("benchmark_price_basis") or "").lower()
     assert "none" in str(meta.get("strategy_price_basis") or "").lower()
+    m = ((out.get("metrics") or {}).get("strategy") or {})
+    assert "avg_daily_turnover" in m
+    assert "avg_annual_turnover" in m
+    assert "avg_daily_trade_count" in m
+    assert "avg_annual_trade_count" in m
 
     bench_nav = [float(x) for x in (out.get("nav") or {}).get("series", {}).get("BUY_HOLD", [])]
     assert len(bench_nav) == len(dates)

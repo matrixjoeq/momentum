@@ -1310,6 +1310,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         exec_price=px_exec_slip.reindex(turnover.index).ffill(),
     ).astype(float)
     strat_ret = (w * ret_exec_day - cost - slippage).astype(float)
+    turnover_daily = ((w - w.shift(1).fillna(0.0)).abs() / 2.0).astype(float)
     decomp_overnight = (w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)).astype(float)
     decomp_intraday = (w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)).astype(float)
     decomp_interaction = (w * (ret_overnight.reindex(w.index).astype(float).fillna(0.0) * ret_intraday.reindex(w.index).astype(float).fillna(0.0))).astype(float)
@@ -1339,7 +1340,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "sharpe_ratio": float(_sharpe(strat_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "sortino_ratio": float(_sortino(strat_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "ulcer_index": float(_ulcer_index(nav, in_percent=True)),
-        "avg_daily_turnover": float(((w - w.shift(1).fillna(0.0)).abs() / 2.0).mean()),
+        "avg_daily_turnover": float(turnover_daily.mean()) if len(turnover_daily) else 0.0,
     }
     m_bh = {
         "cumulative_return": float(bh_nav.iloc[-1] - 1.0),
@@ -1369,6 +1370,17 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         exec_price=px_exec_slip.reindex(nav.index).ffill(),
         dates=nav.index,
     )
+    sample_days = int(len(strat_ret))
+    complete_trade_count = int(len(trade_one.get("returns", [])))
+    avg_daily_turnover = float(turnover_daily.mean()) if len(turnover_daily) else 0.0
+    avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
+    avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+    avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
+    m_strat["avg_daily_turnover"] = float(avg_daily_turnover)
+    m_strat["avg_annual_turnover"] = float(avg_annual_turnover)
+    m_strat["avg_annual_turnover_rate"] = float(avg_annual_turnover)
+    m_strat["avg_daily_trade_count"] = float(avg_daily_trade_count)
+    m_strat["avg_annual_trade_count"] = float(avg_annual_trade_count)
     atr_risk = _atr_from_hlc(
         high_qfq.astype(float).fillna(px_sig),
         low_qfq.astype(float).fillna(px_sig),
@@ -2081,7 +2093,7 @@ def compute_trend_portfolio_backtest(
         "sharpe_ratio": float(_sharpe(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "sortino_ratio": float(_sortino(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "ulcer_index": float(_ulcer_index(nav, in_percent=True)),
-        "avg_daily_turnover": float(turnover.mean()),
+        "avg_daily_turnover": float(turnover.mean()) if len(turnover) else 0.0,
     }
     m_bench = {
         "cumulative_return": float(bench_nav.iloc[-1] - 1.0),
@@ -2111,6 +2123,16 @@ def compute_trend_portfolio_backtest(
         exec_price=px_exec_slip.reindex(index=nav.index, columns=codes).ffill(),
         dates=nav.index,
     )
+    sample_days = int(len(port_ret))
+    complete_trade_count = int(len(trade_pack.get("returns", [])))
+    avg_daily_turnover = float(m_strat["avg_daily_turnover"])
+    avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
+    avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+    avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
+    m_strat["avg_annual_turnover"] = float(avg_annual_turnover)
+    m_strat["avg_annual_turnover_rate"] = float(avg_annual_turnover)
+    m_strat["avg_daily_trade_count"] = float(avg_daily_trade_count)
+    m_strat["avg_annual_trade_count"] = float(avg_annual_trade_count)
     atr_risk_df = pd.DataFrame(index=nav.index, columns=codes, dtype=float)
     for c in codes:
         px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()

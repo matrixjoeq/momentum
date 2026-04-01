@@ -657,6 +657,12 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         ui_den = ui / 100.0
         upi = float((ann_ret - rf) / ui_den) if ui_den > 0 else float("nan")
         ir = float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)) if active is not None else float("nan")
+        sample_days = int(len(nav))
+        complete_trade_count = int(len(trade_returns))
+        avg_daily_turnover = float(np.mean(turnover[1:])) if len(turnover) > 1 else 0.0
+        avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
+        avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+        avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
         return {
             "sample_days": int(len(nav)),
             "cumulative_return": float(nav.iloc[-1] - 1.0) if len(nav) else float("nan"),
@@ -670,8 +676,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             "ulcer_index": float(ui),
             "ulcer_performance_index": float(upi),
             "information_ratio": float(ir),
-            "avg_daily_turnover": float(np.mean(turnover[1:])) if len(turnover) > 1 else 0.0,
-            "avg_annual_turnover": float(np.mean(turnover[1:]) * TRADING_DAYS_PER_YEAR) if len(turnover) > 1 else 0.0,
+            "avg_daily_turnover": float(avg_daily_turnover),
+            "avg_annual_turnover": float(avg_annual_turnover),
+            "avg_annual_turnover_rate": float(avg_annual_turnover),
+            "avg_daily_trade_count": float(avg_daily_trade_count),
+            "avg_annual_trade_count": float(avg_annual_trade_count),
         }
 
     m_strat = _metrics(strat_nav, sret, rf=float(inp.risk_free_rate), active=(sret - bret))

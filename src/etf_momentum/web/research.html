@@ -9263,6 +9263,7 @@
       }
 
       function renderMetrics(metrics) {
+        const annualTurnover = (metrics.avg_annual_turnover != null) ? metrics.avg_annual_turnover : metrics.avg_annual_turnover_rate;
         const rows = [
           { key: "benchmark_code", label: "基准标的", value: codeLabel(metrics.benchmark_code || "") },
           { key: "rebalance", label: "再平衡周期", value: metrics.rebalance || "-" },
@@ -9278,6 +9279,10 @@
           { key: "information_ratio", label: "信息比率", value: fmtNum(metrics.information_ratio) },
           { key: "ulcer_index", label: "溃疡指标(UI)", value: fmtNum(metrics.ulcer_index) },
           { key: "ulcer_performance_index", label: "溃疡绩效(UPI)", value: fmtNum(metrics.ulcer_performance_index) },
+          { key: "avg_daily_turnover", label: "平均日换手率", value: fmtPct(metrics.avg_daily_turnover) },
+          { key: "avg_annual_turnover", label: "平均年换手率", value: fmtPct(annualTurnover) },
+          { key: "avg_daily_trade_count", label: "平均日交易次数(完整交易)", value: fmtNum(metrics.avg_daily_trade_count) },
+          { key: "avg_annual_trade_count", label: "平均年交易次数(完整交易)", value: fmtNum(metrics.avg_annual_trade_count) },
           { key: "holding_weekly_win_rate", label: "周度绝对胜率", value: fmtPct(metrics.holding_weekly_win_rate) },
           { key: "holding_weekly_payoff_ratio", label: "周度绝对赔率(盈/亏)", value: fmtNum(metrics.holding_weekly_payoff_ratio) },
           { key: "holding_weekly_kelly_fraction", label: "周度绝对凯利比(近似)", value: fmtPct(metrics.holding_weekly_kelly_fraction) },
@@ -13693,18 +13698,18 @@
         const bucketKeys = profileDefs[pk].keys;
         const bucketLabel = profileDefs[pk].labels;
         const colors = {
-          lt_m10: "#5a0000",
-          m10_m5: "#7a1f1f",
-          lt_m5: "#8b0000",
-          m5_m2: "#c94c4c",
-          lt_m2: "#d76d6d",
-          m2_0: "#f4a261",
-          p0_p2: "#a8dadc",
-          ge_p2: "#4cb7a0",
-          p2_p5: "#2a9d8f",
-          p5_p10: "#205f7a",
-          ge_p10: "#102a43",
-          ge_p5: "#1d3557",
+          lt_m10: "#0b3d0b",
+          m10_m5: "#1b5e20",
+          lt_m5: "#2e7d32",
+          m5_m2: "#388e3c",
+          lt_m2: "#43a047",
+          m2_0: "#66bb6a",
+          p0_p2: "#ef9a9a",
+          ge_p2: "#e57373",
+          p2_p5: "#ef5350",
+          p5_p10: "#e53935",
+          ge_p10: "#c62828",
+          ge_p5: "#d32f2f",
         };
         const x = [];
         for (const h of hs) {
@@ -15058,6 +15063,7 @@
 
       function renderRotationMetrics(m) {
         const s = m.strategy || {};
+        const sAnnualTurnover = (s.avg_annual_turnover != null) ? s.avg_annual_turnover : s.avg_annual_turnover_rate;
         const benchKey = (($("rotBenchMode") && $("rotBenchMode").value) ? $("rotBenchMode").value : "EW_REBAL");
         let ex = m.excess_vs_equal_weight || {};
         if (benchKey === "RP_REBAL") ex = m.excess_vs_risk_parity || {};
@@ -15071,7 +15077,10 @@
           { key: "rot_sortino", label: "策略索诺提", value: fmtNum(s.sortino_ratio) },
           { key: "rot_ui", label: "溃疡指标(UI)", value: fmtNum(s.ulcer_index) },
           { key: "rot_upi", label: "溃疡绩效(UPI)", value: fmtNum(s.ulcer_performance_index) },
-          { key: "rot_turnover", label: "平均日换手", value: fmtPct(s.avg_daily_turnover) },
+          { key: "rot_turnover", label: "平均日换手率", value: fmtPct(s.avg_daily_turnover) },
+          { key: "rot_annual_turnover", label: "平均年换手率", value: fmtPct(sAnnualTurnover) },
+          { key: "rot_daily_trade_count", label: "平均日交易次数(完整交易)", value: fmtNum(s.avg_daily_trade_count) },
+          { key: "rot_annual_trade_count", label: "平均年交易次数(完整交易)", value: fmtNum(s.avg_annual_trade_count) },
           { key: "rot_excess_cum", label: "超额累积收益", value: fmtPct(ex.cumulative_return) },
           { key: "rot_excess_ann", label: "超额年化收益(几何/CAGR)", value: fmtPct((ex.annualized_return_geo != null) ? ex.annualized_return_geo : ex.annualized_return) },
           { key: "rot_excess_ann_arith", label: "超额年化收益(算术)", value: fmtPct(ex.annualized_return_arith) },
@@ -17531,6 +17540,9 @@
         const s = (m && m.strategy) ? m.strategy : {};
         const b = (m && m.benchmark) ? m.benchmark : {};
         const e = (m && m.excess) ? m.excess : {};
+        const sAnnualTurnover = (s.avg_annual_turnover != null) ? s.avg_annual_turnover : s.avg_annual_turnover_rate;
+        const bAnnualTurnover = (b.avg_annual_turnover != null) ? b.avg_annual_turnover : b.avg_annual_turnover_rate;
+        const eAnnualTurnover = (e.avg_annual_turnover != null) ? e.avg_annual_turnover : e.avg_annual_turnover_rate;
         $("calTimingMetrics").innerHTML =
           `<tr><th>指标</th><th>策略</th><th>基准</th><th>超额</th></tr>` +
           `<tr><td>累计收益</td><td>${fmtPct(s.cumulative_return)}</td><td>${fmtPct(b.cumulative_return)}</td><td>${fmtPct(e.cumulative_return)}</td></tr>` +
@@ -17544,7 +17556,9 @@
           `<tr><td>溃疡指标(UI)</td><td>${fmtNum(s.ulcer_index)}</td><td>${fmtNum(b.ulcer_index)}</td><td>${fmtNum(e.ulcer_index)}</td></tr>` +
           `<tr><td>溃疡绩效(UPI)</td><td>${fmtNum(s.ulcer_performance_index)}</td><td>${fmtNum(b.ulcer_performance_index)}</td><td>${fmtNum(e.ulcer_performance_index)}</td></tr>` +
           `<tr><td>平均日换手率</td><td>${fmtPct(s.avg_daily_turnover)}</td><td>${fmtPct(b.avg_daily_turnover)}</td><td>${fmtPct(e.avg_daily_turnover)}</td></tr>` +
-          `<tr><td>平均年换手率</td><td>${fmtPct(s.avg_annual_turnover)}</td><td>${fmtPct(b.avg_annual_turnover)}</td><td>${fmtPct(e.avg_annual_turnover)}</td></tr>` +
+          `<tr><td>平均年换手率</td><td>${fmtPct(sAnnualTurnover)}</td><td>${fmtPct(bAnnualTurnover)}</td><td>${fmtPct(eAnnualTurnover)}</td></tr>` +
+          `<tr><td>平均日交易次数(完整交易)</td><td>${fmtNum(s.avg_daily_trade_count)}</td><td>${fmtNum(b.avg_daily_trade_count)}</td><td>${fmtNum(e.avg_daily_trade_count)}</td></tr>` +
+          `<tr><td>平均年交易次数(完整交易)</td><td>${fmtNum(s.avg_annual_trade_count)}</td><td>${fmtNum(b.avg_annual_trade_count)}</td><td>${fmtNum(e.avg_annual_trade_count)}</td></tr>` +
           `<tr><td>超额信息比率</td><td>${fmtNum(s.information_ratio)}</td><td>-</td><td>${fmtNum(e.information_ratio)}</td></tr>`;
       }
 

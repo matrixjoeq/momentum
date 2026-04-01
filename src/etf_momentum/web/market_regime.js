@@ -11,10 +11,10 @@
     SIDE_WIDE: "横向-宽幅",
   };
   const STATE_COLOR = {
-    UP_NARROW: "rgba(44,160,44,0.95)",
-    UP_WIDE: "rgba(44,160,44,0.55)",
-    DOWN_NARROW: "rgba(214,39,40,0.95)",
-    DOWN_WIDE: "rgba(214,39,40,0.55)",
+    UP_NARROW: "rgba(214,39,40,0.95)",
+    UP_WIDE: "rgba(214,39,40,0.55)",
+    DOWN_NARROW: "rgba(44,160,44,0.95)",
+    DOWN_WIDE: "rgba(44,160,44,0.55)",
     SIDE_NARROW: "rgba(127,127,127,0.90)",
     SIDE_WIDE: "rgba(127,127,127,0.50)",
   };

@@ -2392,6 +2392,35 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "holding_yearly_kelly_fraction": wp_y["kelly_fraction"],
         }
 
+    def _trade_freq_from_weights(weight_df: pd.DataFrame) -> dict[str, float]:
+        if weight_df is None or weight_df.empty:
+            return {
+                "avg_daily_turnover": 0.0,
+                "avg_annual_turnover": 0.0,
+                "avg_annual_turnover_rate": 0.0,
+                "avg_daily_trade_count": 0.0,
+                "avg_annual_trade_count": 0.0,
+            }
+        w_aligned = (
+            weight_df.reindex(index=ret_common.index, columns=codes_eff)
+            .astype(float)
+            .fillna(0.0)
+        )
+        daily_turnover = ((w_aligned - w_aligned.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0).astype(float)
+        avg_daily_turnover = float(daily_turnover.mean()) if len(daily_turnover) else 0.0
+        avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
+        # A full trade is buy+sell; turnover is one-way notional, so divide by 2.
+        complete_trade_count_equiv = float(daily_turnover.sum() / 2.0)
+        avg_daily_trade_count = float(complete_trade_count_equiv / len(daily_turnover)) if len(daily_turnover) else 0.0
+        avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
+        return {
+            "avg_daily_turnover": float(avg_daily_turnover),
+            "avg_annual_turnover": float(avg_annual_turnover),
+            "avg_annual_turnover_rate": float(avg_annual_turnover),
+            "avg_daily_trade_count": float(avg_daily_trade_count),
+            "avg_annual_trade_count": float(avg_annual_trade_count),
+        }
+
     metrics_ew = _metrics_from_nav(ew_nav, ew_ret, wp_w=weekly_wp, wp_m=monthly_wp, wp_q=quarterly_wp, wp_y=yearly_wp)
     metrics_rp = _metrics_from_nav(
         rp_nav,
@@ -2417,6 +2446,10 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         wp_q=quarterly_wp_custom,
         wp_y=yearly_wp_custom,
     )
+    metrics_ew.update(_trade_freq_from_weights(ew_w))
+    metrics_rp.update(_trade_freq_from_weights(rp_w))
+    metrics_ivol.update(_trade_freq_from_weights(ivol_w))
+    metrics_custom.update(_trade_freq_from_weights(custom_w))
     metrics_by_portfolio = {"EW": metrics_ew, "RP": metrics_rp, "IVOL": metrics_ivol, "CUSTOM": metrics_custom}
     metrics = metrics_by_portfolio.get(mode, metrics_ew)
 

@@ -39,6 +39,10 @@ def test_trend_ma_filter_smoke(session_factory):
     s = out["nav"]["series"]
     assert len(out["nav"]["dates"]) == len(s["STRAT"]) == len(s["BUY_HOLD"]) == len(s["EXCESS"])
     assert "event_study" in out
+    assert "avg_daily_turnover" in out["metrics"]["strategy"]
+    assert "avg_annual_turnover" in out["metrics"]["strategy"]
+    assert "avg_daily_trade_count" in out["metrics"]["strategy"]
+    assert "avg_annual_trade_count" in out["metrics"]["strategy"]
     assert (out.get("market_regime") or {}).get("enabled") is True
     assert "strategy_state_contribution" in (out.get("market_regime") or {})
     assert set((out["event_study"] or {}).get("windows", {}).keys()) >= {"1d", "5d", "10d", "20d"}

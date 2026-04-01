@@ -61,6 +61,10 @@ def test_compute_baseline_basic_metrics(session_factory):
     assert "ulcer_index" in out["metrics"]
     assert out["metrics"]["ulcer_index"] >= 0.0
     assert "ulcer_performance_index" in out["metrics"]
+    assert "avg_daily_turnover" in out["metrics"]
+    assert "avg_annual_turnover" in out["metrics"]
+    assert "avg_daily_trade_count" in out["metrics"]
+    assert "avg_annual_trade_count" in out["metrics"]
     assert "holding_weekly_win_rate" in out["metrics"]
     assert "holding_quarterly_payoff_ratio" in out["metrics"]
     assert "holding_yearly_kelly_fraction" in out["metrics"]

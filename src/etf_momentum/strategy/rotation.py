@@ -3812,6 +3812,12 @@ def backtest_rotation(
         exec_price=px_exec_slip_all.reindex(index=dates, columns=codes).ffill(),
         dates=dates,
     )
+    sample_days = int(len(port_ret_net))
+    complete_trade_count = int(len(trade_pack.get("returns", [])))
+    avg_daily_turnover = float(turnover.mean()) if len(turnover) else 0.0
+    avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
+    avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+    avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
     close_qfq_r = close_qfq.reindex(index=dates, columns=codes).astype(float)
     high_qfq_r = high_qfq.reindex(index=dates, columns=codes).astype(float).combine_first(close_qfq_r)
     low_qfq_r = low_qfq.reindex(index=dates, columns=codes).astype(float).combine_first(close_qfq_r)
@@ -3888,6 +3894,11 @@ def backtest_rotation(
                     "annualized_return": float(ann_ret),
                     "max_drawdown": float(mdd),
                     "cumulative_return": float(port_nav_net.iloc[-1] - 1.0) if len(port_nav_net) else float("nan"),
+                    "avg_daily_turnover": float(avg_daily_turnover),
+                    "avg_annual_turnover": float(avg_annual_turnover),
+                    "avg_annual_turnover_rate": float(avg_annual_turnover),
+                    "avg_daily_trade_count": float(avg_daily_trade_count),
+                    "avg_annual_trade_count": float(avg_annual_trade_count),
                 }
             },
             "avg_exposure": expo_mean,
@@ -3951,7 +3962,11 @@ def backtest_rotation(
             "sortino_ratio": float(sortino),
             "ulcer_index": float(ui),
             "ulcer_performance_index": float(upi),
-            "avg_daily_turnover": float(turnover.mean()),
+            "avg_daily_turnover": float(avg_daily_turnover),
+            "avg_annual_turnover": float(avg_annual_turnover),
+            "avg_annual_turnover_rate": float(avg_annual_turnover),
+            "avg_daily_trade_count": float(avg_daily_trade_count),
+            "avg_annual_trade_count": float(avg_annual_trade_count),
         },
         "equal_weight": {
             "cumulative_return": float(ew_nav.iloc[-1] - 1.0),
