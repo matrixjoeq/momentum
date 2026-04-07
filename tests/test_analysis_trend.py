@@ -59,6 +59,10 @@ def test_trend_ma_filter_smoke(session_factory):
     assert any(x > 0 for x in pos)
     r_stats = out.get("r_statistics") or {}
     assert "overall" in r_stats
+    assert "recent_100" in r_stats
+    recent = (r_stats.get("recent_100") or {})
+    assert int(recent.get("effective_count") or 0) <= int((r_stats.get("overall") or {}).get("trade_count") or 0)
+    assert "sqn" in ((r_stats.get("overall") or {}))
     ts = out.get("trade_statistics") or {}
     trades = list((ts.get("trades") or []))
     if trades:

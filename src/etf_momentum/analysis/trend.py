@@ -1331,26 +1331,32 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         excess_nav.iloc[0] = 1.0
 
     # metrics
+    ui_strat = float(_ulcer_index(nav, in_percent=True))
+    ui_bh = float(_ulcer_index(bh_nav, in_percent=True))
+    ann_strat = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
+    ann_bh = float(_annualized_return(bh_nav, ann_factor=TRADING_DAYS_PER_YEAR))
     m_strat = {
         "cumulative_return": float(nav.iloc[-1] - 1.0),
-        "annualized_return": float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_return": float(ann_strat),
         "annualized_volatility": float(_annualized_vol(strat_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
         "max_drawdown": float(_max_drawdown(nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(nav)),
         "sharpe_ratio": float(_sharpe(strat_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "sortino_ratio": float(_sortino(strat_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "ulcer_index": float(_ulcer_index(nav, in_percent=True)),
+        "ulcer_index": float(ui_strat),
+        "ulcer_performance_index": float((ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)) if ui_strat > 0 else float("nan"),
         "avg_daily_turnover": float(turnover_daily.mean()) if len(turnover_daily) else 0.0,
     }
     m_bh = {
         "cumulative_return": float(bh_nav.iloc[-1] - 1.0),
-        "annualized_return": float(_annualized_return(bh_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_return": float(ann_bh),
         "annualized_volatility": float(_annualized_vol(ret_bh, ann_factor=TRADING_DAYS_PER_YEAR)),
         "max_drawdown": float(_max_drawdown(bh_nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bh_nav)),
         "sharpe_ratio": float(_sharpe(ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "sortino_ratio": float(_sortino(ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "ulcer_index": float(_ulcer_index(bh_nav, in_percent=True)),
+        "ulcer_index": float(ui_bh),
+        "ulcer_performance_index": float((ann_bh - float(inp.risk_free_rate)) / (ui_bh / 100.0)) if ui_bh > 0 else float("nan"),
     }
     m_ex = {
         "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
@@ -2084,26 +2090,32 @@ def compute_trend_portfolio_backtest(
     if len(ex_nav) > 0:
         ex_nav.iloc[0] = 1.0
 
+    ui_strat = float(_ulcer_index(nav, in_percent=True))
+    ui_bench = float(_ulcer_index(bench_nav, in_percent=True))
+    ann_strat = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
+    ann_bench = float(_annualized_return(bench_nav, ann_factor=TRADING_DAYS_PER_YEAR))
     m_strat = {
         "cumulative_return": float(nav.iloc[-1] - 1.0),
-        "annualized_return": float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_return": float(ann_strat),
         "annualized_volatility": float(_annualized_vol(port_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
         "max_drawdown": float(_max_drawdown(nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(nav)),
         "sharpe_ratio": float(_sharpe(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "sortino_ratio": float(_sortino(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "ulcer_index": float(_ulcer_index(nav, in_percent=True)),
+        "ulcer_index": float(ui_strat),
+        "ulcer_performance_index": float((ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)) if ui_strat > 0 else float("nan"),
         "avg_daily_turnover": float(turnover.mean()) if len(turnover) else 0.0,
     }
     m_bench = {
         "cumulative_return": float(bench_nav.iloc[-1] - 1.0),
-        "annualized_return": float(_annualized_return(bench_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_return": float(ann_bench),
         "annualized_volatility": float(_annualized_vol(bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
         "max_drawdown": float(_max_drawdown(bench_nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bench_nav)),
         "sharpe_ratio": float(_sharpe(bench_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
         "sortino_ratio": float(_sortino(bench_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "ulcer_index": float(_ulcer_index(bench_nav, in_percent=True)),
+        "ulcer_index": float(ui_bench),
+        "ulcer_performance_index": float((ann_bench - float(inp.risk_free_rate)) / (ui_bench / 100.0)) if ui_bench > 0 else float("nan"),
     }
     m_ex = {
         "cumulative_return": float(ex_nav.iloc[-1] - 1.0),

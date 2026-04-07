@@ -84,7 +84,95 @@ def _summarize_group(trades: list[dict[str, Any]]) -> dict[str, Any]:
         out["tail"]["p_r_lt_m1"] = _to_num_or_none((rs <= -1.0).mean())
         out["tail"]["p_r_gt_2"] = _to_num_or_none((rs >= 2.0).mean())
         out["tail"]["expectancy_r"] = _to_num_or_none(rs.mean())
+    out["sqn"] = _sqn_summary(trades)
     return out
+
+
+def _recent_n_trades(trades: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+    nn = max(1, int(n))
+    if len(trades) <= nn:
+        return list(trades)
+
+    def _k(idx_trade: tuple[int, dict[str, Any]]) -> tuple[pd.Timestamp, int]:
+        idx, tr = idx_trade
+        d_exit = pd.to_datetime(tr.get("exit_date"), errors="coerce")
+        d_entry = pd.to_datetime(tr.get("entry_date"), errors="coerce")
+        d = d_exit if not pd.isna(d_exit) else d_entry
+        if pd.isna(d):
+            d = pd.Timestamp.min
+        return d, int(idx)
+
+    ordered = sorted(enumerate(trades), key=_k)
+    return [tr for _, tr in ordered[-nn:]]
+
+
+def _sqn_grade(sqn: float | None) -> str | None:
+    if sqn is None or (not np.isfinite(float(sqn))):
+        return None
+    x = float(sqn)
+    if x < 1.5:
+        return "极差"
+    if x < 2.0:
+        return "一般"
+    if x < 3.0:
+        return "良好"
+    if x < 5.0:
+        return "优秀"
+    if x < 7.0:
+        return "卓越"
+    return "圣杯"
+
+
+def _sqn_summary(trades: list[dict[str, Any]], *, min_trades: int = 30, max_trades: int = 100) -> dict[str, Any]:
+    cap = max(1, int(max_trades))
+    min_n = max(1, int(min_trades))
+    total_n = int(len(trades))
+    sampled = _recent_n_trades(trades, cap)
+    r_vals = [float(t["r_multiple"]) for t in sampled if t.get("r_multiple") is not None]
+    used_n = int(len(r_vals))
+    if used_n < min_n:
+        return {
+            "applicable": False,
+            "reason": f"trades_lt_{min_n}",
+            "trade_count_total": total_n,
+            "trade_count_used": used_n,
+            "min_trades": min_n,
+            "max_trades": cap,
+            "expectancy_r": None,
+            "std_r": None,
+            "sqn": None,
+            "rating": None,
+        }
+    s = pd.Series(r_vals, dtype=float)
+    exp_r = _to_num_or_none(s.mean())
+    std_r = _to_num_or_none(s.std(ddof=0))
+    if exp_r is None or std_r is None or (not np.isfinite(std_r)) or std_r <= 0.0:
+        return {
+            "applicable": False,
+            "reason": "std_non_positive",
+            "trade_count_total": total_n,
+            "trade_count_used": used_n,
+            "min_trades": min_n,
+            "max_trades": cap,
+            "expectancy_r": exp_r,
+            "std_r": std_r,
+            "sqn": None,
+            "rating": None,
+        }
+    sqn = float((float(exp_r) / float(std_r)) * np.sqrt(float(used_n)))
+    sqn_v = _to_num_or_none(sqn)
+    return {
+        "applicable": True,
+        "reason": None,
+        "trade_count_total": total_n,
+        "trade_count_used": used_n,
+        "min_trades": min_n,
+        "max_trades": cap,
+        "expectancy_r": exp_r,
+        "std_r": std_r,
+        "sqn": sqn_v,
+        "rating": _sqn_grade(sqn_v),
+    }
 
 
 def enrich_trades_with_r_metrics(
@@ -198,10 +286,26 @@ def enrich_trades_with_r_metrics(
 
     by_code = {k: _summarize_group(v) for k, v in grouped.items()}
     overall = _summarize_group(trades_out)
+
+    recent_window = 100
+    recent_trades = _recent_n_trades(trades_out, recent_window)
+    grouped_recent: dict[str, list[dict[str, Any]]] = {}
+    for tr in recent_trades:
+        c = _group_code(tr, default_code=default_code)
+        grouped_recent.setdefault(c, []).append(tr)
+    recent_by_code = {k: _summarize_group(v) for k, v in grouped_recent.items()}
+    recent_overall = _summarize_group(recent_trades)
     return {
         "trades": trades_out,
         "statistics": {
             "overall": overall,
             "by_code": by_code,
+            "recent_100": {
+                "window_size": int(recent_window),
+                "effective_count": int(len(recent_trades)),
+                "total_trade_count": int(len(trades_out)),
+                "overall": recent_overall,
+                "by_code": recent_by_code,
+            },
         },
     }

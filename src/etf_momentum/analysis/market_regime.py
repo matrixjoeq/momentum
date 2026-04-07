@@ -110,18 +110,23 @@ def _classify_regimes(
     direction = direction.mask(slope_ann > float(direction_threshold_ann), "UP")
     direction = direction.mask(slope_ann < -float(direction_threshold_ann), "DOWN")
 
-    if high is not None and low is not None:
-        h = high.reindex(index=c.index, columns=c.columns).astype(float).replace([np.inf, -np.inf], np.nan).combine_first(c)
-        l = low.reindex(index=c.index, columns=c.columns).astype(float).replace([np.inf, -np.inf], np.nan).combine_first(c)
-        prev = c.shift(1)
-        tr1 = (h - l).abs()
-        tr2 = (h - prev).abs()
-        tr3 = (l - prev).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=0).groupby(level=0).max()
-        vol_metric = tr.div(prev.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
-        vol_metric = vol_metric.rolling(window=vw, min_periods=max(5, vw // 2)).mean()
-    else:
-        vol_metric = c.pct_change().abs().rolling(window=vw, min_periods=max(5, vw // 2)).mean()
+    h = (
+        high.reindex(index=c.index, columns=c.columns).astype(float).replace([np.inf, -np.inf], np.nan).combine_first(c)
+        if high is not None
+        else c.copy()
+    )
+    l = (
+        low.reindex(index=c.index, columns=c.columns).astype(float).replace([np.inf, -np.inf], np.nan).combine_first(c)
+        if low is not None
+        else c.copy()
+    )
+    prev = c.shift(1)
+    tr1 = (h - l).abs()
+    tr2 = (h - prev).abs()
+    tr3 = (l - prev).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=0).groupby(level=0).max()
+    vol_metric = tr.div(prev.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    vol_metric = vol_metric.rolling(window=vw, min_periods=max(5, vw // 2)).mean()
 
     vol_thresh = vol_metric.expanding(min_periods=max(vw, 30)).quantile(float(vol_quantile)).shift(1)
     amplitude = pd.DataFrame("NARROW", index=c.index, columns=c.columns, dtype=object)
@@ -235,7 +240,7 @@ def build_market_regime_report(
         "method": {
             "name": "two_stage_rule_engine",
             "direction": "rolling log-price OLS slope with annualized threshold",
-            "amplitude": "rolling ATR% (or abs return proxy) split by expanding quantile",
+            "amplitude": "rolling ATR% (TR-based) split by expanding quantile",
             "portfolio_aggregation": [
                 "exposure_contribution_attribution",
                 "dominant_state_partition",

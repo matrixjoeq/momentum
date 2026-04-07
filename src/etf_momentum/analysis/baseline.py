@@ -1346,7 +1346,7 @@ def _compute_periodic_returns_and_volatility(
                     ma20 = c.rolling(window=20, min_periods=5).mean()
                     prev_c = c.shift(1)
                     tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
-                    atr20 = tr.rolling(window=20, min_periods=20).mean()
+                    atr20 = tr.ewm(alpha=1.0 / 20.0, adjust=False, min_periods=20).mean()
                     bias_v = ((c - ma20) / atr20.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
                     if bias_v.empty:
                         return
@@ -1381,7 +1381,7 @@ def _compute_periodic_returns_and_volatility(
                     l = l.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
                     prev_c = c.shift(1)
                     tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
-                    atr26 = tr.rolling(window=26, min_periods=26).mean()
+                    atr26 = tr.ewm(alpha=1.0 / 26.0, adjust=False, min_periods=26).mean()
                     ema12 = c.ewm(span=12, adjust=False, min_periods=12).mean()
                     ema26 = c.ewm(span=26, adjust=False, min_periods=26).mean()
                     dif = ((ema12 - ema26) / atr26.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
