@@ -223,6 +223,37 @@ def test_api_rotation_backtest_rejects_zero_top_k(api_client) -> None:
     assert isinstance(err, dict)
 
 
+def test_api_trend_single_accepts_risk_budget_params(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.01,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = (((data or {}).get("meta") or {}).get("params") or {})
+    assert str(params.get("position_sizing") or "") == "risk_budget"
+    assert int(params.get("risk_budget_atr_window") or 0) == 2
+    assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(0.01, rel=0.0, abs=1e-12)
+
+
 def test_api_rotation_backtest_accepts_floating_topk_mode(api_client) -> None:
     c = api_client
     upsert_and_fetch_etfs(

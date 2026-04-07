@@ -87,6 +87,14 @@ class TrendInputs:
     macd_v_scale: float = 100.0
     hybrid_entry_n: int = 1
     hybrid_exit_m: int = 1
+    position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
+    vol_window: int = 20
+    vol_target_ann: float = 0.20
+    fixed_pos_ratio: float = 0.04
+    fixed_overcap_policy: str = "skip"
+    fixed_max_holdings: int = 10
+    risk_budget_atr_window: int = 20
+    risk_budget_pct: float = 0.01
     group_enforce: bool = False
     group_pick_policy: str = "highest_sharpe"
     group_max_holdings: int = 4
@@ -600,7 +608,8 @@ def _apply_atr_stop(
     """
     Apply universal ATR stop-loss overlay on top of base strategy position:
     - static: stop = entry_price - n * ATR(entry), fixed after entry
-    - trailing: if close rises (vs entry or prior close), move stop upward to close - n * ATR(ref)
+    - trailing: compute stop_candidate = close - n * ATR(ref) each in-position day;
+      update stop only when candidate is higher than current stop
     - tightening: trailing + tighten stop distance by m ATR(ref) for each +m * ATR(ref)
       rise from entry; minimum distance is floored at m * ATR(ref).
     where ATR(ref) is chosen by atr_basis:
@@ -618,6 +627,7 @@ def _apply_atr_stop(
         c: float | None,
         a: float | None,
         stop_before: float | None,
+        stop_candidate: float | None,
         stop_after: float | None,
         decision_pos: float,
         in_pos_after: bool,
@@ -629,13 +639,14 @@ def _apply_atr_stop(
     ) -> dict[str, Any]:
         return {
             "date": (idx.date().isoformat() if hasattr(idx, "date") else str(idx)),
-            "event_type": str(event_type),  # entry | exit
+            "event_type": str(event_type),  # entry | exit | hold
             "event_reason": str(event_reason),  # base_entry_signal | stop_reentry | base_exit_signal | atr_stop
             "base_pos": float(b),
             "base_entry_event": bool(base_entry_event),
             "close": (None if c is None else (float(c) if np.isfinite(float(c)) else None)),
             "atr": (None if a is None else (float(a) if np.isfinite(float(a)) else None)),
             "stop_before": stop_before,
+            "stop_candidate": stop_candidate,
             "stop_after": stop_after,
             "stop_triggered": bool(stop_triggered),
             "decision_pos": float(decision_pos),
@@ -660,6 +671,7 @@ def _apply_atr_stop(
                         c=None,
                         a=None,
                         stop_before=None,
+                        stop_candidate=None,
                         stop_after=None,
                         decision_pos=b,
                         in_pos_after=bool(b > 0.0),
@@ -678,6 +690,7 @@ def _apply_atr_stop(
                         c=None,
                         a=None,
                         stop_before=None,
+                        stop_candidate=None,
                         stop_after=None,
                         decision_pos=b,
                         in_pos_after=bool(b > 0.0),
@@ -755,6 +768,7 @@ def _apply_atr_stop(
                     c=c,
                     a=a,
                     stop_before=None,
+                    stop_candidate=(float(stop_px) if np.isfinite(stop_px) else None),
                     stop_after=(float(stop_px) if np.isfinite(stop_px) else None),
                     decision_pos=float(out[i]),
                     in_pos_after=bool(in_pos),
@@ -786,6 +800,7 @@ def _apply_atr_stop(
                     c=c,
                     a=a,
                     stop_before=stop_before,
+                    stop_candidate=None,
                     stop_after=None,
                     decision_pos=float(out[i]),
                     in_pos_after=bool(in_pos),
@@ -822,6 +837,7 @@ def _apply_atr_stop(
                     c=c,
                     a=a,
                     stop_before=stop_before,
+                    stop_candidate=None,
                     stop_after=None,
                     decision_pos=float(out[i]),
                     in_pos_after=bool(in_pos),
@@ -837,22 +853,43 @@ def _apply_atr_stop(
             prev_base = b
             continue
 
+        stop_candidate: float | None = None
         if mode_v in {"trailing", "tightening"} and np.isfinite(c) and np.isfinite(a) and a > 0.0:
-            should_follow = (c > entry_px) or (np.isfinite(prev_close) and c > prev_close)
-            if should_follow:
-                atr_ref = (
-                    float(entry_atr)
-                    if (atr_basis_v == "entry" and np.isfinite(entry_atr) and float(entry_atr) > 0.0)
-                    else float(a)
-                )
-                dist_mult = float(n_mult)
-                if mode_v == "tightening":
-                    rise_in_atr = max(0.0, (c - entry_px) / max(atr_ref, 1e-12))
-                    steps = int(np.floor(rise_in_atr / float(m_step))) if float(m_step) > 0 else 0
-                    dist_mult = max(float(m_step), float(n_mult) - steps * float(m_step))
-                stop_candidate = c - dist_mult * atr_ref
-                if (not np.isfinite(stop_px)) or (stop_candidate > stop_px):
-                    stop_px = stop_candidate
+            atr_ref = (
+                float(entry_atr)
+                if (atr_basis_v == "entry" and np.isfinite(entry_atr) and float(entry_atr) > 0.0)
+                else float(a)
+            )
+            dist_mult = float(n_mult)
+            if mode_v == "tightening":
+                rise_in_atr = max(0.0, (c - entry_px) / max(atr_ref, 1e-12))
+                steps = int(np.floor(rise_in_atr / float(m_step))) if float(m_step) > 0 else 0
+                dist_mult = max(float(m_step), float(n_mult) - steps * float(m_step))
+            stop_candidate_v = c - dist_mult * atr_ref
+            stop_candidate = float(stop_candidate_v) if np.isfinite(stop_candidate_v) else None
+            if np.isfinite(stop_candidate_v) and ((not np.isfinite(stop_px)) or (stop_candidate_v > stop_px)):
+                stop_px = stop_candidate_v
+
+        trace_last_rows.append(
+            _event_row(
+                idx=bp.index[i],
+                b=b,
+                c=c,
+                a=a,
+                stop_before=stop_before,
+                stop_candidate=stop_candidate,
+                stop_after=(float(stop_px) if np.isfinite(stop_px) else None),
+                decision_pos=float(b),
+                in_pos_after=bool(in_pos),
+                wait_lock=bool(wait_next_entry_lock),
+                event_type="hold",
+                event_reason="atr_update",
+                base_entry_event=bool(base_entry_event),
+                stop_triggered=False,
+            )
+        )
+        if len(trace_last_rows) > 120:
+            trace_last_rows = trace_last_rows[-120:]
 
         out[i] = b
         prev_close = c
@@ -1000,6 +1037,28 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("hybrid_entry_n must be >= 1")
     if int(inp.hybrid_exit_m) < 1:
         raise ValueError("hybrid_exit_m must be >= 1")
+    ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
+    if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
+        raise ValueError("position_sizing must be equal|vol_target|fixed_ratio|risk_budget")
+    if int(getattr(inp, "vol_window", 20)) < 2:
+        raise ValueError("vol_window must be >= 2")
+    if (not np.isfinite(float(getattr(inp, "vol_target_ann", 0.20)))) or float(getattr(inp, "vol_target_ann", 0.20)) <= 0:
+        raise ValueError("vol_target_ann must be finite and > 0")
+    fixed_ratio = float(getattr(inp, "fixed_pos_ratio", 0.04) or 0.04)
+    if (not np.isfinite(fixed_ratio)) or fixed_ratio <= 0:
+        raise ValueError("fixed_pos_ratio must be finite and > 0")
+    fixed_overcap_policy = str(getattr(inp, "fixed_overcap_policy", "skip") or "skip").strip().lower()
+    if fixed_overcap_policy not in {"skip", "extend"}:
+        raise ValueError("fixed_overcap_policy must be one of: skip|extend")
+    fixed_max_holding_n = int(getattr(inp, "fixed_max_holdings", 10) or 10)
+    if fixed_max_holding_n < 1:
+        raise ValueError("fixed_max_holdings must be >= 1")
+    risk_budget_atr_window = int(getattr(inp, "risk_budget_atr_window", 20) or 20)
+    if risk_budget_atr_window < 2:
+        raise ValueError("risk_budget_atr_window must be >= 2")
+    risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
+    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
+        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
     # - Execution/NAV: none close, with hfq return fallback on corporate-action days to avoid false cliffs
@@ -1252,6 +1311,30 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
     raw_pos = raw_pos.astype(float)
 
+    # Single-asset sizing overlay (same knobs as portfolio mode).
+    sizing_scale = pd.Series(1.0, index=raw_pos.index, dtype=float)
+    if ps == "fixed_ratio":
+        sizing_scale = pd.Series(float(fixed_ratio), index=raw_pos.index, dtype=float)
+    elif ps == "risk_budget":
+        atr_rb = _atr_from_hlc(
+            high_qfq.astype(float).fillna(px_sig),
+            low_qfq.astype(float).fillna(px_sig),
+            px_sig.astype(float),
+            window=int(risk_budget_atr_window),
+        ).reindex(raw_pos.index).astype(float)
+        rb = (float(risk_budget_pct) * px_sig.astype(float) / atr_rb.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+        sizing_scale = rb.fillna(0.0).clip(lower=0.0, upper=1.0).astype(float)
+    elif ps == "vol_target":
+        asset_vol = (
+            ret_exec.rolling(window=max(2, int(inp.vol_window)), min_periods=max(2, int(inp.vol_window)))
+            .std()
+            .mul(np.sqrt(TRADING_DAYS_PER_YEAR))
+        ).replace([np.inf, -np.inf], np.nan)
+        sizing_scale = (
+            float(inp.vol_target_ann) / asset_vol
+        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(lower=0.0, upper=1.0).astype(float)
+    raw_pos = (raw_pos.clip(lower=0.0, upper=1.0) * sizing_scale).astype(float)
+
     # Weights become effective on execution day; ret_exec is already aligned to execution-day semantics.
     w = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
     # Match rotation open/oc2 execution semantics (AGENTS strict execution-timing NAV rule):
@@ -1400,7 +1483,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         exec_price=px_exec_slip.reindex(nav.index).ffill().astype(float),
         atr=atr_risk.astype(float),
         atr_mult=float(inp.atr_stop_n),
-        risk_budget_pct=None,
+        risk_budget_pct=(float(risk_budget_pct) if ps == "risk_budget" else None),
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
         default_code=str(code),
@@ -1477,6 +1560,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "macd_v_scale": float(inp.macd_v_scale),
                 "hybrid_entry_n": int(inp.hybrid_entry_n),
                 "hybrid_exit_m": int(inp.hybrid_exit_m),
+                "position_sizing": str(ps),
+                "vol_window": int(inp.vol_window),
+                "vol_target_ann": float(inp.vol_target_ann),
+                "fixed_pos_ratio": float(fixed_ratio),
+                "fixed_overcap_policy": str(fixed_overcap_policy),
+                "fixed_max_holdings": int(fixed_max_holding_n),
+                "risk_budget_atr_window": int(risk_budget_atr_window),
+                "risk_budget_pct": float(risk_budget_pct),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),

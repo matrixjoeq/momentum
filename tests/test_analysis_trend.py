@@ -2,7 +2,11 @@ import datetime as dt
 
 import pandas as pd
 
-from etf_momentum.analysis.trend import TrendInputs, compute_trend_backtest
+from etf_momentum.analysis.trend import (
+    TrendInputs,
+    _apply_atr_stop,
+    compute_trend_backtest,
+)
 from etf_momentum.db.models import EtfPrice
 from tests.helpers.price_seed import add_price_all_adjustments
 
@@ -17,6 +21,107 @@ def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
         high=float(close),
         low=float(close),
     )
+
+
+def test_trailing_stop_latest_atr_moves_up_on_volatility_drop() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([1.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([120.0, 120.0, 110.0, 105.0, 103.0, 102.0], index=idx, dtype=float)
+    low = pd.Series([80.0, 80.0, 90.0, 95.0, 97.0, 98.0], index=idx, dtype=float)
+
+    out_pos, stats = _apply_atr_stop(
+        base_pos,
+        close=close,
+        high=high,
+        low=low,
+        mode="trailing",
+        atr_basis="latest",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=2.0,
+        m_step=0.5,
+    )
+
+    trace = list(stats.get("trace_last_rows") or [])
+    entry_rows = [r for r in trace if str(r.get("event_type")) == "entry"]
+    assert entry_rows
+    entry_stop = float(entry_rows[0]["stop_after"])
+    latest_stop = float(stats["latest_stop_price"])
+
+    # Flat close + shrinking ATR should tighten stop upward for latest-ATR trailing mode.
+    assert latest_stop > entry_stop
+    # Trailing stop must remain monotonic in favorable direction (long: only move up).
+    assert latest_stop <= float(close.iloc[-1])
+    hold_rows = [r for r in trace if str(r.get("event_type")) == "hold"]
+    assert hold_rows
+    assert any(r.get("stop_candidate") is not None for r in hold_rows)
+    assert float(out_pos.iloc[-1]) == 1.0
+
+
+def test_trailing_stop_latest_atr_can_rise_when_price_drops() -> None:
+    idx = pd.date_range("2024-01-01", periods=5, freq="B")
+    base_pos = pd.Series([1.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 99.0, 99.0, 99.0], index=idx, dtype=float)
+    # ATR drops sharply after entry although close is lower, so candidate stop still rises.
+    high = pd.Series([120.0, 120.0, 105.0, 103.0, 102.0], index=idx, dtype=float)
+    low = pd.Series([80.0, 80.0, 93.0, 95.0, 96.0], index=idx, dtype=float)
+
+    out_pos, stats = _apply_atr_stop(
+        base_pos,
+        close=close,
+        high=high,
+        low=low,
+        mode="trailing",
+        atr_basis="latest",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=2.0,
+        m_step=0.5,
+    )
+
+    trace = list(stats.get("trace_last_rows") or [])
+    entry_rows = [r for r in trace if str(r.get("event_type")) == "entry"]
+    assert entry_rows
+    entry_stop = float(entry_rows[0]["stop_after"])
+    latest_stop = float(stats["latest_stop_price"])
+
+    assert float(close.iloc[2]) < float(close.iloc[1])
+    assert latest_stop > entry_stop
+    assert float(out_pos.iloc[-1]) == 1.0
+
+
+def test_trend_single_risk_budget_sizing_applies_params(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=40, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.6
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=5,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=2,
+                risk_budget_pct=0.005,
+                cost_bps=0.0,
+            ),
+        )
+
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert str(params.get("position_sizing") or "") == "risk_budget"
+    assert int(params.get("risk_budget_atr_window") or 0) == 2
+    assert float(params.get("risk_budget_pct") or 0.0) == 0.005
+    eff = [float(x) for x in ((out.get("signals") or {}).get("position_effective") or [])]
+    assert eff
+    assert any((x > 0.0) and (x < 1.0) for x in eff)
 
 
 def test_trend_ma_filter_smoke(session_factory):

@@ -1179,6 +1179,14 @@ class TrendBacktestRequest(BaseModel):
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend (long/cash); ma_filter uses ma_type sma|ema",
     )
+    position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
+    vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
+    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling")
+    fixed_pos_ratio: float = Field(default=0.04, gt=0.0, description="Fixed position ratio when position_sizing=fixed_ratio")
+    fixed_overcap_policy: str = Field(default="skip", description="Over-cap policy placeholder: skip|extend")
+    fixed_max_holdings: int = Field(default=10, ge=1, description="Max holdings placeholder for unified payload schema")
+    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_sizing=risk_budget")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="NAV risk budget for 1 ATR move (0.01 = 1%)")
     # parameters (some are strategy-specific)
     sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
     fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")

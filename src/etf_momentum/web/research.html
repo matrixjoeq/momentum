@@ -2677,7 +2677,7 @@
           </select>
         </div>
         <div>
-          <label>仓位法（组合） <button class="helpBtn" data-metric="param_trend_position_sizing" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
+          <label>仓位法（单标的/组合） <button class="helpBtn" data-metric="param_trend_position_sizing" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label>
           <select id="trendSizing" style="min-width:140px;">
             <option value="equal" selected>等权</option>
             <option value="vol_target">目标波动率</option>
@@ -6518,8 +6518,8 @@
       function updateTrendSizingUi() {
         const mode = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
         const sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
-        const isFixed = (mode === "portfolio" && sizing === "fixed_ratio");
-        const isRiskBudget = (mode === "portfolio" && sizing === "risk_budget");
+        const isFixed = (sizing === "fixed_ratio");
+        const isRiskBudget = (sizing === "risk_budget");
         const singleCodeEl = $("trendSingleCode");
         const ratioEl = $("trendFixedPosRatio");
         const policyEl = $("trendFixedOvercapPolicy");
@@ -8826,7 +8826,6 @@
         const code = String(copy.code || "").trim();
         if (!code) return null;
         delete copy.codes;
-        delete copy.position_sizing;
         return { body: copy, url: "/analysis/trend" };
       }
       /**
@@ -16486,15 +16485,15 @@
         }
         $("status").textContent = "趋势回测中...";
         setMsg("");
+        const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
+        if (!["equal", "vol_target", "fixed_ratio", "risk_budget"].includes(position_sizing)) return setMsg("仓位法仅支持 等权/目标波动率/固定比例/风险预算");
+        if (position_sizing === "fixed_ratio" && common.fixed_pos_ratio > 1) {
+          return setMsg("固定比例建议不超过1（100%）");
+        }
         let resp = null;
         if (mode === "portfolio") {
           const codes = _codesForStrategy("trend");
           if (codes.length === 0) return setMsg("请先选择标的池");
-          const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
-          if (!["equal", "vol_target", "fixed_ratio", "risk_budget"].includes(position_sizing)) return setMsg("组合仓位法仅支持 等权/目标波动率/固定比例/风险预算");
-          if (position_sizing === "fixed_ratio" && common.fixed_pos_ratio > 1) {
-            return setMsg("固定比例建议不超过1（100%）");
-          }
           window.__lastTrendPayload = { mode, codes, position_sizing, dynamic_universe: isDynamicUniverseOn(), ...common };
           resp = await api("/analysis/trend/portfolio", {
             method: "POST",
@@ -16506,8 +16505,8 @@
           const chosen = singleSel ? String(singleSel.value || "").trim() : "";
           const code = (chosen && codes.includes(chosen)) ? chosen : (codes.length > 0 ? codes[0] : "");
           if (!code) return setMsg("单标的模式请先勾选至少1个标的");
-          window.__lastTrendPayload = { mode, code, ...common };
-          resp = await api("/analysis/trend", { method: "POST", body: JSON.stringify({ code, ...common }) });
+          window.__lastTrendPayload = { mode, code, position_sizing, ...common };
+          resp = await api("/analysis/trend", { method: "POST", body: JSON.stringify({ code, position_sizing, ...common }) });
         }
         const text = await resp.text();
         $("status").textContent = "";
