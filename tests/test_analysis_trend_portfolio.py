@@ -495,6 +495,20 @@ def test_trend_portfolio_exposes_r_take_profit_controls(session_factory):
     rtp = (rc.get("r_take_profit") or {})
     assert bool(rtp.get("enabled")) is True
     assert str(rtp.get("initial_r_mode") or "") == "virtual_atr_fallback"
+    assert isinstance((rtp.get("tier_trigger_counts") or {}), dict)
     params = (((out.get("meta") or {}).get("params") or {}))
     assert bool(params.get("r_take_profit_enabled")) is True
+    metrics = ((out.get("metrics") or {}).get("strategy") or {})
+    assert "r_take_profit_trigger_count" in metrics
+    assert isinstance((metrics.get("r_take_profit_tier_trigger_counts") or {}), dict)
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {})
+    assert "atr_stop_trigger_count" in overall
+    assert "r_take_profit_trigger_count" in overall
+    assert isinstance((overall.get("r_take_profit_tier_trigger_counts") or {}), dict)
+    for c in ["A1", "A2"]:
+        one = (by_code.get(c) or {})
+        assert "atr_stop_trigger_count" in one
+        assert "r_take_profit_trigger_count" in one
 

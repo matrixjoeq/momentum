@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Header, Request
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 
@@ -288,22 +290,52 @@ def _etf_pool_fetch_jobs_parallel(
         return []
     workers = min(max(1, int(max_workers)), len(jobs))
 
+    lock_markers = (
+        "trying to get lock",
+        "database is locked",
+        "lock wait timeout",
+        "deadlock found",
+        "try restarting transaction",
+        "sqlite_busy",
+        "resource busy",
+    )
+
+    def _is_lock_error_text(msg: str | None) -> bool:
+        t = str(msg or "").strip().lower()
+        return any(x in t for x in lock_markers)
+
+    def _is_retryable_lock_error(exc: Exception) -> bool:
+        if isinstance(exc, (OperationalError, DBAPIError)):
+            return True
+        return _is_lock_error_text(str(exc))
+
     def _run(job: tuple[str, str, str]) -> FetchResult:
         code, start, end = job
-        dbw = session_factory()
-        try:
-            res = _etf_pool_fetch_one_symbol(dbw, ak, code=code, start=start, end=end)
-            dbw.commit()
-            return res
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.exception("parallel ETF pool fetch failed for %s", code)
+        max_attempts = 4
+        for attempt in range(max_attempts):
+            dbw = session_factory()
             try:
-                dbw.rollback()
-            except Exception:  # pragma: no cover
-                pass
-            return FetchResult(code=code, inserted_or_updated=0, status="failed", message=str(e))
-        finally:
-            dbw.close()
+                res = _etf_pool_fetch_one_symbol(dbw, ak, code=code, start=start, end=end)
+                # ingest_one_etf may swallow DB exceptions and return failed status/message.
+                if res.status != "success" and _is_lock_error_text(res.message) and attempt < max_attempts - 1:
+                    dbw.rollback()
+                    time.sleep(0.25 * (2**attempt))
+                    continue
+                dbw.commit()
+                return res
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.exception("parallel ETF pool fetch failed for %s (attempt %s/%s)", code, attempt + 1, max_attempts)
+                try:
+                    dbw.rollback()
+                except Exception:  # pragma: no cover
+                    pass
+                if _is_retryable_lock_error(e) and attempt < max_attempts - 1:
+                    time.sleep(0.25 * (2**attempt))
+                    continue
+                return FetchResult(code=code, inserted_or_updated=0, status="failed", message=str(e))
+            finally:
+                dbw.close()
+        return FetchResult(code=code, inserted_or_updated=0, status="failed", message="lock retry exhausted")
 
     out: list[FetchResult | None] = [None] * len(jobs)
     with ThreadPoolExecutor(max_workers=workers) as pool:

@@ -1052,6 +1052,7 @@ def _apply_r_multiple_take_profit(
             "trigger_exit_share": 0.0,
             "wait_next_entry_lock_active": False,
             "tiers": tiers_v,
+            "tier_trigger_counts": {},
             "trace_last_rows": [],
         }
     bp = base_pos.fillna(0.0).astype(float)
@@ -1061,6 +1062,7 @@ def _apply_r_multiple_take_profit(
     atr = _atr_from_hlc(hi, lo, cl, window=int(atr_window)).astype(float)
     out = np.zeros(len(bp), dtype=float)
     trigger_dates: list[str] = []
+    tier_trigger_counts: dict[str, int] = {}
     trace_last_rows: list[dict[str, Any]] = []
     in_pos = False
     prev_base = 0.0
@@ -1178,6 +1180,8 @@ def _apply_r_multiple_take_profit(
             if reentry_v == "wait_next_entry":
                 wait_next_entry_lock = True
             trigger_dates.append(ds)
+            tier_label = f"{float(active_tier['r_multiple']):g}R" if active_tier else "unknown"
+            tier_trigger_counts[tier_label] = int(tier_trigger_counts.get(tier_label, 0) + 1)
             trace_last_rows.append(
                 {
                     "date": ds,
@@ -1250,6 +1254,7 @@ def _apply_r_multiple_take_profit(
         "trigger_exit_share": (float(trigger_count) / float(exits) if exits > 0 else 0.0),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
         "tiers": tiers_v,
+        "tier_trigger_counts": dict(tier_trigger_counts),
         "invalid_initial_r_entries": int(invalid_r_entries),
         "trace_last_rows": trace_last_rows[-80:],
     }
@@ -1835,12 +1840,22 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         default_code=str(code),
     )
     trades_with_r = list(trade_r_pack.get("trades") or [])
+    single_rtp_tier_counts = dict(((r_take_profit_stats or {}).get("tier_trigger_counts") or {}))
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_one.get("returns", [])),
         "by_code": {str(code): _trade_stats_from_returns(trade_one.get("returns", []))},
         "trades": trades_with_r,
         "trades_by_code": {str(code): trades_with_r},
     }
+    trade_stats["overall"]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
+    trade_stats["overall"]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
+    trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
+    trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
+    trade_stats["by_code"][str(code)]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
+    trade_stats["by_code"][str(code)]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
+    m_strat["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
+    m_strat["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
+    m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
     event_study = compute_event_study(
         dates=nav.index,
         daily_returns=strat_ret.reindex(nav.index).astype(float),
@@ -2732,6 +2747,18 @@ def compute_trend_portfolio_backtest(
         }
     )
     total_rtp_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in rtp_by_asset.values()))
+    total_rtp_tier_counts: dict[str, int] = {}
+    for v in rtp_by_asset.values():
+        one = dict(((v or {}).get("tier_trigger_counts") or {}))
+        for k, n in one.items():
+            kk = str(k).strip()
+            if not kk:
+                continue
+            try:
+                nn = int(float(n))
+            except (TypeError, ValueError):
+                nn = 0
+            total_rtp_tier_counts[kk] = int(total_rtp_tier_counts.get(kk, 0) + nn)
     uniq_rtp_trigger_dates = sorted(
         {
             str(d)
@@ -2740,6 +2767,19 @@ def compute_trend_portfolio_backtest(
             if str(d).strip()
         }
     )
+    trade_stats["overall"]["atr_stop_trigger_count"] = int(total_triggers)
+    trade_stats["overall"]["r_take_profit_trigger_count"] = int(total_rtp_triggers)
+    trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
+    for c in codes:
+        code_key = str(c)
+        one = trade_stats["by_code"].get(code_key) or {}
+        one["atr_stop_trigger_count"] = int((atr_stop_by_asset.get(code_key) or {}).get("trigger_count", 0))
+        one["r_take_profit_trigger_count"] = int((rtp_by_asset.get(code_key) or {}).get("trigger_count", 0))
+        one["r_take_profit_tier_trigger_counts"] = dict(((rtp_by_asset.get(code_key) or {}).get("tier_trigger_counts") or {}))
+        trade_stats["by_code"][code_key] = one
+    m_strat["atr_stop_trigger_count"] = int(total_triggers)
+    m_strat["r_take_profit_trigger_count"] = int(total_rtp_triggers)
+    m_strat["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
     ext_dates = sorted({str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()})
     skip_dates = sorted({str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()})
     ext_over_weight_count = int(sum(1 for e in ext_events if bool(e.get("over_weight"))))
@@ -2903,6 +2943,7 @@ def compute_trend_portfolio_backtest(
                 "reentry_mode": str(rtp_reentry_mode),
                 "tiers": rtp_tiers,
                 "trigger_count": total_rtp_triggers,
+                "tier_trigger_counts": dict(total_rtp_tier_counts),
                 "trigger_days": int(len(uniq_rtp_trigger_dates)),
                 "first_trigger_date": (uniq_rtp_trigger_dates[0] if uniq_rtp_trigger_dates else None),
                 "last_trigger_date": (uniq_rtp_trigger_dates[-1] if uniq_rtp_trigger_dates else None),

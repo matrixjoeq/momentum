@@ -213,6 +213,8 @@ tbody tr:nth-child(even) td {
   gap: 10px;
 }
 .code-list {
+  height: 220px;
+  min-height: 220px;
   max-height: 220px;
   overflow: auto;
   border: 1px solid var(--border);
@@ -226,6 +228,7 @@ tbody tr:nth-child(even) td {
   white-space: pre-wrap;
   font-family: var(--font-mono);
   font-size: 12px;
+  min-height: 1.5em;
 }
 .tabs {
   display: flex;

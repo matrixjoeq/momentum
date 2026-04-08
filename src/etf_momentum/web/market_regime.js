@@ -36,6 +36,30 @@
     return arr[lo] * (1 - w) + arr[hi] * w;
   }
 
+  function _quantileFromSorted(sorted, q) {
+    const arr = Array.isArray(sorted) ? sorted : [];
+    if (!arr.length) return NaN;
+    const qq = Math.max(0, Math.min(1, _num(q)));
+    const pos = (arr.length - 1) * qq;
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    if (lo === hi) return arr[lo];
+    const w = pos - lo;
+    return arr[lo] * (1 - w) + arr[hi] * w;
+  }
+
+  function _sortedInsert(arr, x) {
+    if (!Array.isArray(arr) || !Number.isFinite(x)) return;
+    let lo = 0;
+    let hi = arr.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (arr[mid] <= x) lo = mid + 1;
+      else hi = mid;
+    }
+    arr.splice(lo, 0, x);
+  }
+
   function _rollingSlopeAnn(logClose, i, win) {
     const s = Math.max(0, i - win + 1);
     const ys = [];
@@ -95,6 +119,7 @@
 
     const minVol = Math.max(5, Math.floor(volWindow / 2));
     const minExpQ = Math.max(volWindow, 30);
+    const histSorted = [];
     for (let i = 0; i < close.length; i++) {
       const s = Math.max(1, i - volWindow + 1);
       const xs = [];
@@ -103,12 +128,12 @@
         if (Number.isFinite(v)) xs.push(v);
       }
       if (xs.length >= minVol) volMetric[i] = xs.reduce((a, b) => a + b, 0) / xs.length;
-      const hist = [];
-      for (let j = 0; j < i; j++) {
-        const v = _num(volMetric[j]);
-        if (Number.isFinite(v)) hist.push(v);
+      // Keep an expanding sorted history for quantile lookup in O(log n) insertion.
+      if (i > 0) {
+        const prev = _num(volMetric[i - 1]);
+        if (Number.isFinite(prev)) _sortedInsert(histSorted, prev);
       }
-      if (hist.length >= minExpQ) volThreshold[i] = _quantile(hist, volQuantile);
+      if (histSorted.length >= minExpQ) volThreshold[i] = _quantileFromSorted(histSorted, volQuantile);
     }
 
     const rows = [];
@@ -209,13 +234,16 @@
         hovertemplate: `%{x}<br>state=${STATE_LABEL[st]}<br>close=%{y:.4f}<extra></extra>`,
       });
     }
-    Plotly.newPlot(plotId, traces, {
+    const layout = {
       margin: { t: 30, b: 40, l: 55, r: 15 },
       title: { text: title || "市场状态区间（图例可点击筛选）", font: { size: 13 } },
       yaxis: { title: "价格" },
       xaxis: { title: "日期" },
       legend: { orientation: "h", y: 1.18 },
-    }, { responsive: true, displayModeBar: false });
+    };
+    const config = { responsive: true, displayModeBar: false };
+    if (el.data && el.layout) Plotly.react(plotId, traces, layout, config);
+    else Plotly.newPlot(plotId, traces, layout, config);
   }
 
   function renderForwardBox(plotId, forwardByState, nAhead, selected) {
@@ -236,13 +264,16 @@
       visible: sel.has(st) ? true : "legendonly",
       hovertemplate: `状态=${STATE_LABEL[st]}<br>未来${nAhead}日收益=%{y:.2%}<extra></extra>`,
     }));
-    Plotly.newPlot(plotId, traces, {
+    const layout = {
       margin: { t: 30, b: 55, l: 55, r: 15 },
       title: { text: `按状态分组的未来 ${nAhead} 日收益分布`, font: { size: 13 } },
       yaxis: { title: "未来收益", tickformat: ".1%" },
       xaxis: { title: "市场状态" },
       showlegend: false,
-    }, { responsive: true, displayModeBar: false });
+    };
+    const config = { responsive: true, displayModeBar: false };
+    if (el.data && el.layout) Plotly.react(plotId, traces, layout, config);
+    else Plotly.newPlot(plotId, traces, layout, config);
   }
 
   window.MarketRegimeUI = {
