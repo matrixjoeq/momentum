@@ -286,6 +286,36 @@ def test_api_trend_single_er_filter_contract(engine, api_client):
     assert float(params.get("er_threshold") or 0.0) == pytest.approx(0.8, rel=0.0, abs=1e-12)
 
 
+def test_api_trend_single_kama_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    series = {"KAMA1": [100.0 + (i * 0.4 if i < 40 else (40 * 0.4) - (i - 40) * 0.45) for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "KAMA1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "ma_type": "kama",
+            "sma_window": 20,
+            "kama_er_window": 10,
+            "kama_fast_window": 2,
+            "kama_slow_window": 30,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = (((out or {}).get("meta") or {}).get("params") or {})
+    assert str(params.get("ma_type") or "") == "kama"
+    assert int(params.get("kama_er_window") or 0) == 10
+    assert int(params.get("kama_fast_window") or 0) == 2
+    assert int(params.get("kama_slow_window") or 0) == 30
+
+
 def test_api_trend_portfolio_er_filter_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
     series = {
@@ -366,6 +396,52 @@ def test_api_trend_portfolio_er_filter_rejects_invalid_window(api_client):
         expected_status=422,
     )
     assert isinstance(err, dict)
+
+
+def test_api_trend_single_kama_rejects_fast_ge_slow(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "ma_type": "kama",
+            "sma_window": 20,
+            "kama_er_window": 10,
+            "kama_fast_window": 30,
+            "kama_slow_window": 30,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert isinstance(err, dict)
+    assert "kama_fast_window must be < kama_slow_window" in str((err or {}).get("detail") or "")
+
+
+def test_api_trend_single_ma_cross_rejects_kama_type(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_cross",
+            "ma_type": "kama",
+            "fast_window": 10,
+            "slow_window": 30,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert isinstance(err, dict)
+    assert "ma_type=kama is only supported for ma_filter" in str((err or {}).get("detail") or "")
 
 
 def test_api_rotation_backtest_accepts_floating_topk_mode(api_client) -> None:

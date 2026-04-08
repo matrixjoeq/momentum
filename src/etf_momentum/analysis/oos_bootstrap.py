@@ -383,7 +383,7 @@ def _trend_params_to_inputs(
 def _default_trend_param_grid(strategy: str) -> Dict[str, Sequence[Any]]:
     """Default parameter grid per trend strategy for OOS bootstrap."""
     if strategy == "ma_filter":
-        return {"sma_window": [100, 150, 200], "ma_type": ["sma", "ema"]}
+        return {"sma_window": [100, 150, 200], "ma_type": ["sma", "ema", "kama"]}
     if strategy == "ma_cross":
         return {"fast_window": [50], "slow_window": [150, 200], "ma_type": ["sma", "ema"]}
     if strategy == "donchian":

@@ -33,7 +33,7 @@ from .r_multiple import enrich_trades_with_r_metrics
 Session = Any  # runtime: keep dependency-free typing
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
 TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
-    "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+    "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA/KAMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "ma_cross": "信号在 T 日收盘后根据快慢线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "donchian": "信号在 T 日收盘后根据是否突破通道上轨/下轨确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "tsmom": "信号在 T 日收盘后根据回看期收益与动量入/出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -69,7 +69,10 @@ class TrendInputs:
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
     slow_window: int = 200  # ma_cross
-    ma_type: str = "sma"  # ma_cross: sma | ema
+    ma_type: str = "sma"  # ma_filter: sma | ema | kama; ma_cross: sma | ema
+    kama_er_window: int = 10
+    kama_fast_window: int = 2
+    kama_slow_window: int = 30
     donchian_entry: int = 20  # donchian
     donchian_exit: int = 10  # donchian
     mom_lookback: int = 252  # tsmom
@@ -139,7 +142,10 @@ class TrendPortfolioInputs:
     sma_window: int = 200
     fast_window: int = 50
     slow_window: int = 200
-    ma_type: str = "sma"
+    ma_type: str = "sma"  # ma_filter: sma | ema | kama; ma_cross: sma | ema
+    kama_er_window: int = 10
+    kama_fast_window: int = 2
+    kama_slow_window: int = 30
     donchian_entry: int = 20
     donchian_exit: int = 10
     mom_lookback: int = 252
@@ -579,10 +585,77 @@ def _ema(s: pd.Series, window: int) -> pd.Series:
     return s.ewm(span=w, adjust=False, min_periods=max(2, w // 2)).mean()
 
 
-def _moving_average(s: pd.Series, *, window: int, ma_type: str) -> pd.Series:
+def _kama(
+    s: pd.Series,
+    *,
+    er_window: int = 10,
+    fast_window: int = 2,
+    slow_window: int = 30,
+) -> pd.Series:
+    """
+    Kaufman Adaptive Moving Average (KAMA).
+    """
+    p = pd.to_numeric(s, errors="coerce").astype(float)
+    er_w = max(2, int(er_window))
+    fast_w = max(1, int(fast_window))
+    slow_w = max(2, int(slow_window))
+    if fast_w >= slow_w:
+        fast_w = max(1, slow_w - 1)
+
+    change = (p - p.shift(er_w)).abs()
+    volatility = p.diff().abs().rolling(window=er_w, min_periods=er_w).sum()
+    er = (change / volatility.replace(0.0, np.nan)).clip(lower=0.0, upper=1.0)
+
+    fast_sc = 2.0 / (float(fast_w) + 1.0)
+    slow_sc = 2.0 / (float(slow_w) + 1.0)
+    sc = ((er * (fast_sc - slow_sc) + slow_sc) ** 2).astype(float)
+
+    out = np.full(len(p), np.nan, dtype=float)
+    vals = p.to_numpy(dtype=float)
+    sc_vals = sc.to_numpy(dtype=float)
+
+    first_idx = None
+    for i, v in enumerate(vals):
+        if np.isfinite(v):
+            first_idx = i
+            break
+    if first_idx is None:
+        return pd.Series(out, index=p.index, dtype=float)
+
+    out[first_idx] = float(vals[first_idx])
+    for i in range(first_idx + 1, len(vals)):
+        v = vals[i]
+        prev = out[i - 1]
+        if not np.isfinite(v):
+            out[i] = prev
+            continue
+        if not np.isfinite(prev):
+            out[i] = v
+            continue
+        alpha = sc_vals[i] if np.isfinite(sc_vals[i]) else (slow_sc * slow_sc)
+        out[i] = float(prev + alpha * (v - prev))
+    return pd.Series(out, index=p.index, dtype=float)
+
+
+def _moving_average(
+    s: pd.Series,
+    *,
+    window: int,
+    ma_type: str,
+    kama_er_window: int = 10,
+    kama_fast_window: int = 2,
+    kama_slow_window: int = 30,
+) -> pd.Series:
     t = str(ma_type or "sma").strip().lower()
     if t == "ema":
         return _ema(s, int(window))
+    if t == "kama":
+        return _kama(
+            s,
+            er_window=int(kama_er_window),
+            fast_window=int(kama_fast_window),
+            slow_window=int(kama_slow_window),
+        )
     w = max(2, int(window))
     return s.rolling(window=w, min_periods=max(2, w // 2)).mean()
 
@@ -1303,9 +1376,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("fast_window/slow_window must be >= 2")
     if int(inp.fast_window) >= int(inp.slow_window):
         raise ValueError("fast_window must be < slow_window")
+    strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
-    if ma_type not in {"sma", "ema"}:
-        raise ValueError("ma_type must be one of: sma|ema")
+    if ma_type not in {"sma", "ema", "kama"}:
+        raise ValueError("ma_type must be one of: sma|ema|kama")
+    kama_er_window = int(getattr(inp, "kama_er_window", 10) or 10)
+    kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
+    kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
+    if kama_er_window < 2:
+        raise ValueError("kama_er_window must be >= 2")
+    if kama_fast_window < 1:
+        raise ValueError("kama_fast_window must be >= 1")
+    if kama_slow_window < 2:
+        raise ValueError("kama_slow_window must be >= 2")
+    if kama_fast_window >= kama_slow_window:
+        raise ValueError("kama_fast_window must be < kama_slow_window")
+    if strat == "ma_cross" and ma_type == "kama":
+        raise ValueError("ma_type=kama is only supported for ma_filter")
     if not np.isfinite(float(inp.tsmom_entry_threshold)):
         raise ValueError("tsmom_entry_threshold must be finite")
     if not np.isfinite(float(inp.tsmom_exit_threshold)):
@@ -1512,7 +1599,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     px_exec_slip = px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq).replace([np.inf, -np.inf], np.nan).ffill()
 
     if strat == "ma_filter":
-        ma = _moving_average(px_sig, window=int(inp.sma_window), ma_type=ma_type)
+        ma = _moving_average(
+            px_sig,
+            window=int(inp.sma_window),
+            ma_type=ma_type,
+            kama_er_window=kama_er_window,
+            kama_fast_window=kama_fast_window,
+            kama_slow_window=kama_slow_window,
+        )
         raw_pos = (px_sig > ma).astype(float).fillna(0.0)
     elif strat == "ma_cross":
         fast = _moving_average(px_sig, window=int(inp.fast_window), ma_type=ma_type)
@@ -1876,6 +1970,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "fast_window": int(inp.fast_window),
                 "slow_window": int(inp.slow_window),
                 "ma_type": ma_type,
+                "kama_er_window": int(kama_er_window),
+                "kama_fast_window": int(kama_fast_window),
+                "kama_slow_window": int(kama_slow_window),
                 "donchian_entry": int(inp.donchian_entry),
                 "donchian_exit": int(inp.donchian_exit),
                 "mom_lookback": int(inp.mom_lookback),
@@ -2065,9 +2162,23 @@ def compute_trend_portfolio_backtest(
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
     if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
         raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
+    strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
-    if ma_type not in {"sma", "ema"}:
-        raise ValueError("ma_type must be one of: sma|ema")
+    if ma_type not in {"sma", "ema", "kama"}:
+        raise ValueError("ma_type must be one of: sma|ema|kama")
+    kama_er_window = int(getattr(inp, "kama_er_window", 10) or 10)
+    kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
+    kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
+    if kama_er_window < 2:
+        raise ValueError("kama_er_window must be >= 2")
+    if kama_fast_window < 1:
+        raise ValueError("kama_fast_window must be >= 1")
+    if kama_slow_window < 2:
+        raise ValueError("kama_slow_window must be >= 2")
+    if kama_fast_window >= kama_slow_window:
+        raise ValueError("kama_fast_window must be < kama_slow_window")
+    if strat == "ma_cross" and ma_type == "kama":
+        raise ValueError("ma_type=kama is only supported for ma_filter")
     atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
     if atr_mode not in {"none", "static", "trailing", "tightening"}:
         raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
@@ -2116,7 +2227,6 @@ def compute_trend_portfolio_backtest(
         if str(k).strip()
     }
 
-    strat = str(inp.strategy or "ma_filter").strip().lower()
     if strat not in {
         "ma_filter",
         "ma_cross",
@@ -2282,7 +2392,14 @@ def compute_trend_portfolio_backtest(
             sig_score[c] = np.nan
             continue
         if strat == "ma_filter":
-            ma = _moving_average(px, window=int(inp.sma_window), ma_type=ma_type)
+            ma = _moving_average(
+                px,
+                window=int(inp.sma_window),
+                ma_type=ma_type,
+                kama_er_window=kama_er_window,
+                kama_fast_window=kama_fast_window,
+                kama_slow_window=kama_slow_window,
+            )
             pos = (px > ma).astype(float)
             score = (px / ma - 1.0).astype(float)
         elif strat == "ma_cross":
@@ -2804,6 +2921,9 @@ def compute_trend_portfolio_backtest(
                 "er_window": int(er_window),
                 "er_threshold": float(er_threshold),
                 "ma_type": ma_type,
+                "kama_er_window": int(kama_er_window),
+                "kama_fast_window": int(kama_fast_window),
+                "kama_slow_window": int(kama_slow_window),
                 "mom_lookback": int(inp.mom_lookback),
                 "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
                 "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),

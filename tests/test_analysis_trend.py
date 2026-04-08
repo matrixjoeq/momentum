@@ -253,6 +253,39 @@ def test_trend_ma_filter_ema_smoke(session_factory):
     assert any(x > 0 for x in out["signals"]["position"])
 
 
+def test_trend_ma_filter_kama_smoke(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + (i * 0.4 if i < 50 else (50 * 0.4) - (i - 50) * 0.6)
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="kama",
+                sma_window=20,
+                kama_er_window=10,
+                kama_fast_window=2,
+                kama_slow_window=30,
+                cost_bps=0.0,
+            ),
+        )
+    params = out["meta"]["params"]
+    assert params["ma_type"] == "kama"
+    assert params["kama_er_window"] == 10
+    assert params["kama_fast_window"] == 2
+    assert params["kama_slow_window"] == 30
+    assert out["meta"]["strategy"] == "ma_filter"
+    assert any(x > 0 for x in out["signals"]["position"])
+
+
 def test_trend_ma_cross_supports_ema_type(session_factory):
     sf = session_factory
     code = "AAA"

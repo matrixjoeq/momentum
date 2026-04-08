@@ -1182,7 +1182,7 @@ class TrendBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry (long/cash); ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry (long/cash); ma_filter uses ma_type sma|ema|kama",
     )
     position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
@@ -1196,7 +1196,10 @@ class TrendBacktestRequest(BaseModel):
     sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
     fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")
     slow_window: int = Field(default=200, ge=2, description="Slow MA window (trading days)")
-    ma_type: str = Field(default="sma", description="MA type for ma_filter and ma_cross: sma|ema")
+    ma_type: str = Field(default="sma", description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema")
+    kama_er_window: int = Field(default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)")
+    kama_fast_window: int = Field(default=2, ge=1, description="KAMA fast smoothing window (used when ma_type=kama)")
+    kama_slow_window: int = Field(default=30, ge=2, description="KAMA slow smoothing window (used when ma_type=kama)")
     donchian_entry: int = Field(default=20, ge=2, description="Donchian entry window (trading days)")
     donchian_exit: int = Field(default=10, ge=2, description="Donchian exit window (trading days)")
     mom_lookback: int = Field(default=252, ge=2, description="TS momentum lookback (trading days)")
@@ -1242,7 +1245,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry; ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry; ma_filter uses ma_type sma|ema|kama",
     )
     position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
@@ -1256,7 +1259,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
     sma_window: int = Field(default=200, ge=2)
     fast_window: int = Field(default=50, ge=2)
     slow_window: int = Field(default=200, ge=2)
-    ma_type: str = Field(default="sma", description="MA type for ma_filter and ma_cross: sma|ema")
+    ma_type: str = Field(default="sma", description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema")
+    kama_er_window: int = Field(default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)")
+    kama_fast_window: int = Field(default=2, ge=1, description="KAMA fast smoothing window (used when ma_type=kama)")
+    kama_slow_window: int = Field(default=30, ge=2, description="KAMA slow smoothing window (used when ma_type=kama)")
     donchian_entry: int = Field(default=20, ge=2)
     donchian_exit: int = Field(default=10, ge=2)
     mom_lookback: int = Field(default=252, ge=2)

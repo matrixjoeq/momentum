@@ -2769,12 +2769,18 @@
         <div><label>快线窗口</label><input id="trendFastWin" value="50" /></div>
         <div><label>慢线窗口</label><input id="trendSlowWin" value="200" /></div>
         <div>
-          <label>双均线类型</label>
+          <label>均线类型</label>
           <select id="trendMaType" style="min-width:120px;">
             <option value="sma" selected>SMA</option>
             <option value="ema">EMA</option>
+            <option value="kama">KAMA</option>
           </select>
         </div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div><label>KAMA ER窗口</label><input id="trendKamaErWindow" value="10" /></div>
+        <div><label>KAMA 快线窗口</label><input id="trendKamaFastWindow" value="2" /></div>
+        <div><label>KAMA 慢线窗口</label><input id="trendKamaSlowWindow" value="30" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>唐奇安入场</label><input id="trendDonEntry" value="20" /></div>
@@ -4483,7 +4489,7 @@
         trend: [
           "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
-          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
+          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendErFilterOn", "trendErWindow", "trendErThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
@@ -6673,6 +6679,9 @@
           "trendFastWin",
           "trendSlowWin",
           "trendMaType",
+          "trendKamaErWindow",
+          "trendKamaFastWindow",
+          "trendKamaSlowWindow",
           "trendDonEntry",
           "trendDonExit",
           "trendRandomHoldDays",
@@ -6718,7 +6727,7 @@
           "trendRTpTiers",
         ];
         const byStrat = {
-          ma_filter: ["trendSmaWin", "trendMaType"],
+          ma_filter: ["trendSmaWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow"],
           ma_cross: ["trendFastWin", "trendSlowWin", "trendMaType"],
           donchian: ["trendDonEntry", "trendDonExit"],
           random_entry: ["trendRandomHoldDays", "trendRandomSeed"],
@@ -6741,7 +6750,7 @@
         _syncRTpParamsUi();
 
         const stratDesc = {
-          ma_filter: "均线过滤：价格在均线之上持有，否则空仓；均线类型可选 SMA 或 EMA。",
+          ma_filter: "均线过滤：价格在均线之上持有，否则空仓；均线类型可选 SMA、EMA、KAMA（KAMA仅用于均线过滤）。",
           ma_cross: "双均线：快线上穿慢线入场，下穿离场。",
           donchian: "唐奇安通道：突破上轨入场，跌破下轨离场。",
           random_entry: "随机入市：仅在当前无持仓时抛硬币，1 入场、0 不入场；入场后按持有交易日数到期离场。",
@@ -6753,7 +6762,7 @@
           macd_v: "MACD-V：用ATR归一化的MACD强度进行择时。",
         };
         const execDesc = {
-          ma_filter: "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          ma_filter: "信号在 T 日收盘后根据价格与均线(SMA/EMA/KAMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           ma_cross: "信号在 T 日收盘后根据快慢线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           donchian: "信号在 T 日收盘后根据是否突破通道上轨/下轨确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           random_entry: "信号在 T 日收盘后仅当当前无持仓时抛硬币决定是否入场（1=入场，0=空仓）；入场后持有固定交易日数，到期离场，均在 T+1 日执行。",
@@ -6768,7 +6777,10 @@
           trendSmaWin: "均线窗口：均线/回归窗口长度（交易日）。",
           trendFastWin: "快线窗口：短周期均线窗口。",
           trendSlowWin: "慢线窗口：长周期均线窗口，需大于快线。",
-          trendMaType: "均线类型：均线过滤与双均线交叉使用的均线计算方式（SMA/EMA）。",
+          trendMaType: "均线类型：均线过滤支持 SMA/EMA/KAMA，双均线交叉支持 SMA/EMA。",
+          trendKamaErWindow: "KAMA ER窗口：ER效率比率回看周期，默认10，仅在 ma_filter + KAMA 生效。",
+          trendKamaFastWindow: "KAMA快线窗口：自适应平滑的快端窗口，默认2，仅在 ma_filter + KAMA 生效。",
+          trendKamaSlowWindow: "KAMA慢线窗口：自适应平滑的慢端窗口，默认30，仅在 ma_filter + KAMA 生效，且需大于快线窗口。",
           trendDonEntry: "唐奇安入场：上轨突破回看窗口。",
           trendDonExit: "唐奇安出场：下轨跌破回看窗口。",
           trendRandomHoldDays: "随机入市持有天数：基础退场条件，入场后持有 N 个交易日退出。",
@@ -16654,6 +16666,9 @@
           fast_window: Number(($("trendFastWin").value || "50").trim()),
           slow_window: Number(($("trendSlowWin").value || "200").trim()),
           ma_type: (($("trendMaType") && $("trendMaType").value) ? String($("trendMaType").value) : "sma"),
+          kama_er_window: Number(($("trendKamaErWindow").value || "10").trim()),
+          kama_fast_window: Number(($("trendKamaFastWindow").value || "2").trim()),
+          kama_slow_window: Number(($("trendKamaSlowWindow").value || "30").trim()),
           donchian_entry: Number(($("trendDonEntry").value || "20").trim()),
           donchian_exit: Number(($("trendDonExit").value || "10").trim()),
           mom_lookback: Number(($("trendMomLb").value || "252").trim()),
@@ -16786,6 +16801,28 @@
         common.er_window = Math.floor(common.er_window);
         if (!Number.isFinite(common.er_threshold) || common.er_threshold < 0 || common.er_threshold > 1) {
           return setMsg("ER阈值需在[0,1]区间");
+        }
+        common.ma_type = String(common.ma_type || "sma").trim().toLowerCase();
+        if (!["sma", "ema", "kama"].includes(common.ma_type)) {
+          return setMsg("均线类型仅支持 SMA/EMA/KAMA");
+        }
+        if (strategy === "ma_cross" && common.ma_type === "kama") {
+          return setMsg("双均线策略当前仅支持 SMA/EMA，KAMA 仅支持均线过滤策略");
+        }
+        if (!Number.isFinite(common.kama_er_window) || common.kama_er_window < 2) {
+          return setMsg("KAMA ER窗口需为>=2数字");
+        }
+        common.kama_er_window = Math.floor(common.kama_er_window);
+        if (!Number.isFinite(common.kama_fast_window) || common.kama_fast_window < 1) {
+          return setMsg("KAMA快线窗口需为>=1数字");
+        }
+        common.kama_fast_window = Math.floor(common.kama_fast_window);
+        if (!Number.isFinite(common.kama_slow_window) || common.kama_slow_window < 2) {
+          return setMsg("KAMA慢线窗口需为>=2数字");
+        }
+        common.kama_slow_window = Math.floor(common.kama_slow_window);
+        if (common.kama_fast_window >= common.kama_slow_window) {
+          return setMsg("KAMA参数要求：快线窗口需小于慢线窗口");
         }
         $("status").textContent = "趋势回测中...";
         setMsg("");
