@@ -2670,6 +2670,7 @@
             <option value="donchian">唐奇安通道</option>
             <option value="tsmom">时序动量</option>
             <option value="linreg_slope">线性回归斜率</option>
+            <option value="random_entry">随机入市（抛硬币）</option>
             <option value="bias">bias</option>
             <option value="macd_cross">MACD金叉死叉</option>
             <option value="macd_zero_filter">MACD零轴过滤</option>
@@ -2764,6 +2765,8 @@
       <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>唐奇安入场</label><input id="trendDonEntry" value="20" /></div>
         <div><label>唐奇安出场</label><input id="trendDonExit" value="10" /></div>
+        <div><label>随机持有天数</label><input id="trendRandomHoldDays" value="20" /></div>
+        <div><label>随机种子（可空）</label><input id="trendRandomSeed" value="42" placeholder="留空=系统随机" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>TSMOM回看</label><input id="trendMomLb" value="252" /></div>
@@ -3129,6 +3132,7 @@
             <option value="donchian">donchian</option>
             <option value="tsmom">tsmom</option>
             <option value="linreg_slope">linreg_slope</option>
+            <option value="random_entry">random_entry</option>
             <option value="bias">bias</option>
             <option value="macd_cross">macd_cross</option>
             <option value="macd_zero_filter">macd_zero_filter</option>
@@ -4460,7 +4464,7 @@
         trend: [
           "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
-          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
+          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
@@ -6652,6 +6656,8 @@
           "trendMaType",
           "trendDonEntry",
           "trendDonExit",
+          "trendRandomHoldDays",
+          "trendRandomSeed",
           "trendMomLb",
           "trendMomEntryThr",
           "trendMomExitThr",
@@ -6692,6 +6698,7 @@
           ma_filter: ["trendSmaWin", "trendMaType"],
           ma_cross: ["trendFastWin", "trendSlowWin", "trendMaType"],
           donchian: ["trendDonEntry", "trendDonExit"],
+          random_entry: ["trendRandomHoldDays", "trendRandomSeed"],
           tsmom: ["trendMomLb", "trendMomEntryThr", "trendMomExitThr"],
           linreg_slope: ["trendSmaWin"],
           bias: ["trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode"],
@@ -6730,6 +6737,7 @@
           ma_filter: "均线过滤：价格在均线之上持有，否则空仓；均线类型可选 SMA 或 EMA。",
           ma_cross: "双均线：快线上穿慢线入场，下穿离场。",
           donchian: "唐奇安通道：突破上轨入场，跌破下轨离场。",
+          random_entry: "随机入市：仅在当前无持仓时抛硬币，1 入场、0 不入场；入场后按持有交易日数到期离场。",
           tsmom: "时序动量：回看期收益与入/出场阈值共同决定仓位，支持阈值滞后区间。",
           linreg_slope: "线性回归斜率：回看窗口斜率为正持有，否则空仓。",
           bias: "BIAS策略：基于价格相对均线偏离度，按阈值做进出场与风控。",
@@ -6742,6 +6750,7 @@
           ma_filter: "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           ma_cross: "信号在 T 日收盘后根据快慢线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           donchian: "信号在 T 日收盘后根据是否突破通道上轨/下轨确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
+          random_entry: "信号在 T 日收盘后仅当当前无持仓时抛硬币决定是否入场（1=入场，0=空仓）；入场后持有固定交易日数，到期离场，均在 T+1 日执行。",
           tsmom: "信号在 T 日收盘后根据回看期收益与动量入/出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           linreg_slope: "信号在 T 日收盘后根据回看窗口线性回归斜率正负确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           bias: "信号在 T 日收盘后根据 BIAS 与进出场阈值确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -6757,6 +6766,8 @@
           trendMaType: "均线类型：均线过滤与双均线交叉使用的均线计算方式（SMA/EMA）。",
           trendDonEntry: "唐奇安入场：上轨突破回看窗口。",
           trendDonExit: "唐奇安出场：下轨跌破回看窗口。",
+          trendRandomHoldDays: "随机入市持有天数：基础退场条件，入场后持有 N 个交易日退出。",
+          trendRandomSeed: "随机种子：用于复现随机入市信号；留空时使用系统随机种子。",
           trendMomLb: "TSMOM回看：动量收益计算窗口。",
           trendMomEntryThr: "TSMOM入场阈值：动量 > 该值时入场。",
           trendMomExitThr: "TSMOM出场阈值：动量 <= 该值时离场；建议不高于入场阈值。",
@@ -16546,6 +16557,8 @@
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
           hybrid_entry_n: Number(($("trendHybridEntryN").value || "1").trim()),
           hybrid_exit_m: Number(($("trendHybridExitM").value || "1").trim()),
+          random_hold_days: Number(($("trendRandomHoldDays").value || "20").trim()),
+          random_seed: (($("trendRandomSeed").value || "").trim()),
           atr_stop_mode: (($("trendAtrStopMode") && $("trendAtrStopMode").value) ? String($("trendAtrStopMode").value) : "none"),
           atr_stop_atr_basis: (($("trendAtrStopBasis") && $("trendAtrStopBasis").value) ? String($("trendAtrStopBasis").value) : "latest"),
           atr_stop_reentry_mode: (($("trendAtrStopReentry") && $("trendAtrStopReentry").value) ? String($("trendAtrStopReentry").value) : "reenter"),
@@ -16576,6 +16589,17 @@
         }
         common.hybrid_entry_n = Math.floor(common.hybrid_entry_n);
         common.hybrid_exit_m = Math.floor(common.hybrid_exit_m);
+        if (!Number.isFinite(common.random_hold_days) || common.random_hold_days < 1) {
+          return setMsg("随机持有天数需为>=1数字");
+        }
+        common.random_hold_days = Math.floor(common.random_hold_days);
+        if (String(common.random_seed).trim() === "") {
+          common.random_seed = null;
+        } else {
+          const seedNum = Number(String(common.random_seed).trim());
+          if (!Number.isFinite(seedNum)) return setMsg("随机种子需为数字，或留空使用系统随机");
+          common.random_seed = Math.floor(seedNum);
+        }
         if (!["none", "static", "trailing", "tightening"].includes(String(common.atr_stop_mode))) {
           return setMsg("ATR止损模式非法，请选择 关闭/静态/动态跟随/动态收紧");
         }

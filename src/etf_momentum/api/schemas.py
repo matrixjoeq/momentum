@@ -1182,7 +1182,7 @@ class TrendBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend (long/cash); ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend|random_entry (long/cash); ma_filter uses ma_type sma|ema",
     )
     position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
@@ -1227,6 +1227,8 @@ class TrendBacktestRequest(BaseModel):
     macd_v_scale: float = Field(default=100.0, gt=0.0, description="Scale factor for MACD-V")
     hybrid_entry_n: int = Field(default=1, ge=1, description="Hybrid trend: minimum number of sub-strategy entry signals to enter")
     hybrid_exit_m: int = Field(default=1, ge=1, description="Hybrid trend: minimum number of sub-strategy exit signals to exit")
+    random_hold_days: int = Field(default=20, ge=1, description="Random-entry strategy base exit: hold N trading days after entry")
+    random_seed: int | None = Field(default=42, description="Random-entry strategy seed for reproducible coin-toss signals; null means system random seed")
 
 
 class TrendPortfolioBacktestRequest(BaseModel):
@@ -1239,7 +1241,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend; ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend|random_entry; ma_filter uses ma_type sma|ema",
     )
     position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
@@ -1280,6 +1282,8 @@ class TrendPortfolioBacktestRequest(BaseModel):
     macd_v_scale: float = Field(default=100.0, gt=0.0)
     hybrid_entry_n: int = Field(default=1, ge=1)
     hybrid_exit_m: int = Field(default=1, ge=1)
+    random_hold_days: int = Field(default=20, ge=1)
+    random_seed: int | None = Field(default=42)
     group_enforce: bool = Field(
         default=False,
         description="Enable trend group constraint for portfolio mode.",
@@ -1381,7 +1385,7 @@ class TrendOosBootstrapRequest(BaseModel):
     seed: int | None = Field(default=None, description="Random seed for reproducibility")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend|random_entry",
     )
     cost_bps: float = Field(default=2.0, ge=0.0)
     risk_free_rate: float = Field(default=0.025)

@@ -219,6 +219,84 @@ def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(session
             assert nav[3] <= 1.0000001, f"{strat} appears to include portfolio decision-day return"
 
 
+def test_trend_portfolio_random_entry_seed_controls_reproducibility(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 0.2)
+            _add_price(db, code="A2", day=d, close=90 + i * 0.15)
+        db.commit()
+        out_a = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=42,
+                cost_bps=0.0,
+            ),
+        )
+        out_b = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=42,
+                cost_bps=0.0,
+            ),
+        )
+        out_c = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=43,
+                cost_bps=0.0,
+            ),
+        )
+    wa = (out_a.get("weights") or {}).get("series") or {}
+    wb = (out_b.get("weights") or {}).get("series") or {}
+    wc = (out_c.get("weights") or {}).get("series") or {}
+    assert wa == wb
+    assert wa != wc
+    params = ((out_a.get("meta") or {}).get("params") or {})
+    assert int(params.get("random_hold_days") or 0) == 20
+    assert int(params.get("random_seed") or -1) == 42
+
+
+def test_trend_portfolio_random_entry_allows_system_random_seed(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=40, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 0.2)
+            _add_price(db, code="A2", day=d, close=90 + i * 0.15)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=None,
+                cost_bps=0.0,
+            ),
+        )
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert params.get("random_seed") is None
+
+
 def test_trend_portfolio_group_enforce_respects_group_cap(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-04-30", freq="B")]

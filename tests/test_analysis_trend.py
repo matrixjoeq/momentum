@@ -6,6 +6,7 @@ from etf_momentum.analysis.trend import (
     TrendInputs,
     _apply_atr_stop,
     _apply_r_multiple_take_profit,
+    _pos_from_random_entry_hold,
     compute_trend_backtest,
 )
 from etf_momentum.db.models import EtfPrice
@@ -452,6 +453,90 @@ def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
             # The first post-jump NAV point must remain ~1.0 (decision-day return excluded).
             # We allow tiny epsilon for float operations.
             assert nav[3] <= 1.0000001, f"{strat} appears to include decision-day return"
+
+
+def test_random_entry_signal_generator_is_deterministic() -> None:
+    idx = pd.bdate_range("2024-01-01", periods=20)
+    pos = _pos_from_random_entry_hold(idx, hold_days=3, seed=1)
+    assert [int(x) for x in pos.tolist()] == [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0]
+
+
+def test_trend_random_entry_seed_controls_reproducibility(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code=code, day=d, close=100.0 + i * 0.1)
+        db.commit()
+        out_a = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=42,
+                cost_bps=0.0,
+            ),
+        )
+        out_b = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=42,
+                cost_bps=0.0,
+            ),
+        )
+        out_c = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=43,
+                cost_bps=0.0,
+            ),
+        )
+    pos_a = list((out_a.get("signals") or {}).get("position") or [])
+    pos_b = list((out_b.get("signals") or {}).get("position") or [])
+    pos_c = list((out_c.get("signals") or {}).get("position") or [])
+    assert pos_a == pos_b
+    assert pos_a != pos_c
+    params = ((out_a.get("meta") or {}).get("params") or {})
+    assert int(params.get("random_hold_days") or 0) == 20
+    assert int(params.get("random_seed") or -1) == 42
+
+
+def test_trend_random_entry_allows_system_random_seed(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=40, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code=code, day=d, close=100.0 + i * 0.1)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="random_entry",
+                random_hold_days=20,
+                random_seed=None,
+                cost_bps=0.0,
+            ),
+        )
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert params.get("random_seed") is None
 
 
 def test_r_take_profit_triggers_on_peak_drawdown_with_virtual_atr_fallback() -> None:

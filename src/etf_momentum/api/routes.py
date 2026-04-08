@@ -908,6 +908,12 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         macd_v_scale=payload.macd_v_scale,
         hybrid_entry_n=payload.hybrid_entry_n,
         hybrid_exit_m=payload.hybrid_exit_m,
+        random_hold_days=int(getattr(payload, "random_hold_days", 20)),
+        random_seed=(
+            None
+            if getattr(payload, "random_seed", 42) is None
+            else int(getattr(payload, "random_seed", 42))
+        ),
         position_sizing=payload.position_sizing,
         vol_window=payload.vol_window,
         vol_target_ann=payload.vol_target_ann,
@@ -981,6 +987,12 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         macd_v_scale=payload.macd_v_scale,
         hybrid_entry_n=payload.hybrid_entry_n,
         hybrid_exit_m=payload.hybrid_exit_m,
+        random_hold_days=int(getattr(payload, "random_hold_days", 20)),
+        random_seed=(
+            None
+            if getattr(payload, "random_seed", 42) is None
+            else int(getattr(payload, "random_seed", 42))
+        ),
     )
     try:
         return compute_trend_portfolio_backtest(db, inp)

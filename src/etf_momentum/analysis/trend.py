@@ -43,6 +43,7 @@ TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "macd_zero_filter": "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_v": "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "hybrid_trend": "信号在 T 日收盘后聚合五个子策略（均线交叉/唐奇安/时序动量/MACD金叉死叉/线性回归）的入场/退场触发计数；入场计数>=n 则入场、退场计数>=m 则离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
+    "random_entry": "信号在 T 日收盘后仅当当前无持仓时抛硬币随机决定是否入场（1=入场，0=空仓）；入场后按持有交易日数到期离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
 }
 
 DEFAULT_R_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
@@ -64,7 +65,7 @@ class TrendInputs:
     slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
     exec_price: str = "open"  # open|close|oc2
     # strategy selection
-    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | hybrid_trend
+    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | hybrid_trend | random_entry
     # parameters
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
@@ -99,6 +100,8 @@ class TrendInputs:
     macd_v_scale: float = 100.0
     hybrid_entry_n: int = 1
     hybrid_exit_m: int = 1
+    random_hold_days: int = 20
+    random_seed: int | None = 42
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
     vol_window: int = 20
     vol_target_ann: float = 0.20
@@ -163,6 +166,8 @@ class TrendPortfolioInputs:
     macd_v_scale: float = 100.0
     hybrid_entry_n: int = 1
     hybrid_exit_m: int = 1
+    random_hold_days: int = 20
+    random_seed: int | None = 42
     group_enforce: bool = False
     group_pick_policy: str = "highest_sharpe"  # highest_sharpe | earliest_entry
     group_max_holdings: int = 4  # max picks kept in each group (1..10)
@@ -576,6 +581,37 @@ def _moving_average(s: pd.Series, *, window: int, ma_type: str) -> pd.Series:
         return _ema(s, int(window))
     w = max(2, int(window))
     return s.rolling(window=w, min_periods=max(2, w // 2)).mean()
+
+
+def _stable_code_seed(code: str) -> int:
+    v = 0
+    for i, ch in enumerate(str(code)):
+        v = (v + (i + 1) * ord(ch)) % 2_147_483_647
+    return int(v)
+
+
+def _pos_from_random_entry_hold(index: pd.Index, *, hold_days: int, seed: int | None) -> pd.Series:
+    hold_n = max(1, int(hold_days))
+    rng = np.random.default_rng() if seed is None else np.random.default_rng(int(seed))
+    out = np.zeros(len(index), dtype=float)
+    in_pos = False
+    days_left = 0
+    for i in range(len(index)):
+        if in_pos:
+            out[i] = 1.0
+            days_left -= 1
+            if days_left <= 0:
+                in_pos = False
+            continue
+        toss = int(rng.integers(0, 2))
+        if toss == 1:
+            in_pos = True
+            days_left = hold_n
+            out[i] = 1.0
+            days_left -= 1
+            if days_left <= 0:
+                in_pos = False
+    return pd.Series(out, index=index, dtype=float)
 
 
 def _pos_from_tsmom(
@@ -1246,8 +1282,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "macd_zero_filter",
         "macd_v",
         "hybrid_trend",
+        "random_entry",
     }:
         raise ValueError(f"invalid strategy={inp.strategy}")
+    if int(getattr(inp, "random_hold_days", 20)) < 1:
+        raise ValueError("random_hold_days must be >= 1")
 
     # validate params
     if int(inp.sma_window) < 2:
@@ -1577,6 +1616,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             entry_n=int(inp.hybrid_entry_n),
             exit_m=int(inp.hybrid_exit_m),
         )
+    elif strat == "random_entry":
+        raw_pos = _pos_from_random_entry_hold(
+            px_sig.index,
+            hold_days=int(getattr(inp, "random_hold_days", 20)),
+            seed=getattr(inp, "random_seed", 42),
+        )
     else:
         mom = px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0
         raw_pos = _pos_from_tsmom(
@@ -1864,6 +1909,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "macd_v_scale": float(inp.macd_v_scale),
                 "hybrid_entry_n": int(inp.hybrid_entry_n),
                 "hybrid_exit_m": int(inp.hybrid_exit_m),
+                "random_hold_days": int(getattr(inp, "random_hold_days", 20)),
+                "random_seed": (
+                    None
+                    if getattr(inp, "random_seed", 42) is None
+                    else int(getattr(inp, "random_seed", 42))
+                ),
                 "position_sizing": str(ps),
                 "vol_window": int(inp.vol_window),
                 "vol_target_ann": float(inp.vol_target_ann),
@@ -2080,8 +2131,11 @@ def compute_trend_portfolio_backtest(
         "macd_zero_filter",
         "macd_v",
         "hybrid_trend",
+        "random_entry",
     }:
         raise ValueError(f"invalid strategy={inp.strategy}")
+    if int(getattr(inp, "random_hold_days", 20)) < 1:
+        raise ValueError("random_hold_days must be >= 1")
 
     if data_override is not None:
         dates = data_override["dates"]
@@ -2326,6 +2380,19 @@ def compute_trend_portfolio_backtest(
                 exit_m=int(inp.hybrid_exit_m),
             )
             score = (entry_cnt - exit_cnt).astype(float)
+        elif strat == "random_entry":
+            seed_base_raw = getattr(inp, "random_seed", 42)
+            code_seed = (
+                None
+                if seed_base_raw is None
+                else (int(seed_base_raw) + _stable_code_seed(str(c))) % 2_147_483_647
+            )
+            pos = _pos_from_random_entry_hold(
+                px.index,
+                hold_days=int(getattr(inp, "random_hold_days", 20)),
+                seed=code_seed,
+            )
+            score = pos.astype(float)
         else:
             mom = px / px.shift(int(inp.mom_lookback)) - 1.0
             pos = _pos_from_tsmom(
@@ -2742,6 +2809,12 @@ def compute_trend_portfolio_backtest(
                 "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
                 "hybrid_entry_n": int(inp.hybrid_entry_n),
                 "hybrid_exit_m": int(inp.hybrid_exit_m),
+                "random_hold_days": int(getattr(inp, "random_hold_days", 20)),
+                "random_seed": (
+                    None
+                    if getattr(inp, "random_seed", 42) is None
+                    else int(getattr(inp, "random_seed", 42))
+                ),
                 "atr_stop_mode": str(atr_mode),
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
