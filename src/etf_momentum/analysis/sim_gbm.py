@@ -259,9 +259,9 @@ def simulate_gbm_prices(
             corr_high=float(corr_range[1]),
             rng=rng,
         )
-        l = np.linalg.cholesky(corr_gen)
+        chol = np.linalg.cholesky(corr_gen)
         z_raw = rng.normal(loc=0.0, scale=1.0, size=(len(idx), n)).astype(float)
-        z = (z_raw @ l.T).astype(float)
+        z = (z_raw @ chol.T).astype(float)
     # log returns (first day has no return)
     lr = (mu_d.reshape(1, n) + sig_d.reshape(1, n) * z).astype(float)
     lr[0, :] = 0.0
@@ -1044,11 +1044,11 @@ def _sim_ohlc_from_close(close: pd.DataFrame) -> dict[str, pd.DataFrame]:
     d = (c / o - 1.0).abs().replace([np.inf, -np.inf], np.nan).fillna(0.0)
     pad = (0.002 + 0.5 * d).clip(lower=0.001, upper=0.08)
     h = np.maximum(c, o) * (1.0 + pad)
-    l = np.minimum(c, o) * (1.0 - pad)
+    low_px = np.minimum(c, o) * (1.0 - pad)
     return {
         "open": o.astype(float),
         "high": h.astype(float),
-        "low": l.astype(float),
+        "low": low_px.astype(float),
         "close": c.astype(float),
     }
 

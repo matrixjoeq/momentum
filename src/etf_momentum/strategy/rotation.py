@@ -8,16 +8,6 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
-# Shared helper for rebalance date shifting (to avoid redefining inside blocks)
-def _shift_idx_by_rebalance(target: pd.Timestamp, dates: pd.DatetimeIndex, reb_shift: str) -> int:
-    t = pd.to_datetime(target).normalize()
-    if t in dates:
-        return int(dates.get_loc(t))
-    pos = int(dates.searchsorted(t))
-    if reb_shift == "next":
-        return int(min(pos, len(dates) - 1))
-    return int(max(pos - 1, 0))
-
 from ..analysis.baseline import (
     TRADING_DAYS_PER_YEAR,
     _annualized_return,
@@ -41,6 +31,17 @@ from ..analysis.erc_weights import erc_weights_from_return_history
 from ..analysis.execution_timing import corporate_action_mask, forward_returns, slippage_return_from_turnover
 from ..analysis.market_regime import build_market_regime_report
 from ..analysis.r_multiple import enrich_trades_with_r_metrics
+
+
+# Shared helper for rebalance date shifting (to avoid redefining inside blocks)
+def _shift_idx_by_rebalance(target: pd.Timestamp, dates: pd.DatetimeIndex, reb_shift: str) -> int:
+    t = pd.to_datetime(target).normalize()
+    if t in dates:
+        return int(dates.get_loc(t))
+    pos = int(dates.searchsorted(t))
+    if reb_shift == "next":
+        return int(min(pos, len(dates) - 1))
+    return int(max(pos - 1, 0))
 
 
 @dataclass(frozen=True)
@@ -1961,9 +1962,9 @@ def backtest_rotation(
     if (inp.rebalance or "weekly").lower() == "weekly":
         wd_map = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI"}
         w_anchor = wd_map.get(int(anchor_val), "FRI") if anchor_val is not None else "FRI"
-        labels = _rebalance_labels(dates, inp.rebalance, weekly_anchor=w_anchor)
+        _rebalance_labels(dates, inp.rebalance, weekly_anchor=w_anchor)
     else:
-        labels = _rebalance_labels(dates, inp.rebalance, weekly_anchor="FRI")
+        _rebalance_labels(dates, inp.rebalance, weekly_anchor="FRI")
 
     # Precompute execution returns for strategy NAV:
     # - prefer NONE (tradeable) prices

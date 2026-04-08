@@ -9,7 +9,6 @@ Generic Rotation Research Runner
 from __future__ import annotations
 
 import datetime as dt
-import json
 import logging
 import sys
 from dataclasses import dataclass
@@ -26,10 +25,7 @@ from etf_momentum.db.repo import get_price_date_range
 from etf_momentum.strategy.rotation_research_config import (
     UniverseConfig,
     RotationStrategyConfig,
-    FactorParams,
-    BacktestRules,
     get_preset_universe,
-    validate_config,
 )
 
 logging.basicConfig(

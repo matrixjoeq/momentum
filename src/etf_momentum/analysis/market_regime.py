@@ -115,15 +115,15 @@ def _classify_regimes(
         if high is not None
         else c.copy()
     )
-    l = (
+    low_px = (
         low.reindex(index=c.index, columns=c.columns).astype(float).replace([np.inf, -np.inf], np.nan).combine_first(c)
         if low is not None
         else c.copy()
     )
     prev = c.shift(1)
-    tr1 = (h - l).abs()
+    tr1 = (h - low_px).abs()
     tr2 = (h - prev).abs()
-    tr3 = (l - prev).abs()
+    tr3 = (low_px - prev).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=0).groupby(level=0).max()
     vol_metric = tr.div(prev.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
     vol_metric = vol_metric.rolling(window=vw, min_periods=max(5, vw // 2)).mean()
@@ -163,12 +163,12 @@ def build_market_regime_report(
     r = r.reindex(index=dates, columns=cols).fillna(0.0)
     c = close.reindex(index=dates, columns=cols).astype(float)
     h = None if high is None else high.reindex(index=dates, columns=cols).astype(float)
-    l = None if low is None else low.reindex(index=dates, columns=cols).astype(float)
+    low_px = None if low is None else low.reindex(index=dates, columns=cols).astype(float)
 
     regimes, slope_ann, vol_metric = _classify_regimes(
         c,
         h,
-        l,
+        low_px,
         slope_window=int(slope_window),
         vol_window=int(vol_window),
         direction_threshold_ann=float(direction_threshold_ann),

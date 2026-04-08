@@ -103,8 +103,8 @@ def parkinson_vol(
     Rolling mean of daily variance -> annualized vol.
     """
     h = pd.to_numeric(high, errors="coerce")
-    l = pd.to_numeric(low, errors="coerce")
-    x = (h / l).where((h > 0) & (l > 0))
+    low_px = pd.to_numeric(low, errors="coerce")
+    x = (h / low_px).where((h > 0) & (low_px > 0))
     u2 = (np.log(x) ** 2) / (4.0 * math.log(2.0))
     var = u2.rolling(int(window)).mean()
     return np.sqrt(var * float(ann))
@@ -124,16 +124,16 @@ def garman_klass_vol(
     """
     o = pd.to_numeric(open_, errors="coerce")
     h = pd.to_numeric(high, errors="coerce")
-    l = pd.to_numeric(low, errors="coerce")
+    low_px = pd.to_numeric(low, errors="coerce")
     c = pd.to_numeric(close, errors="coerce")
 
-    ok = (o > 0) & (h > 0) & (l > 0) & (c > 0)
+    ok = (o > 0) & (h > 0) & (low_px > 0) & (c > 0)
     o = o.where(ok)
     h = h.where(ok)
-    l = l.where(ok)
+    low_px = low_px.where(ok)
     c = c.where(ok)
 
-    log_hl = np.log(h / l)
+    log_hl = np.log(h / low_px)
     log_co = np.log(c / o)
     var_d = 0.5 * (log_hl**2) - (2.0 * math.log(2.0) - 1.0) * (log_co**2)
     var = var_d.rolling(int(window)).mean()
@@ -154,17 +154,17 @@ def rogers_satchell_vol(
     """
     o = pd.to_numeric(open_, errors="coerce")
     h = pd.to_numeric(high, errors="coerce")
-    l = pd.to_numeric(low, errors="coerce")
+    low_px = pd.to_numeric(low, errors="coerce")
     c = pd.to_numeric(close, errors="coerce")
 
-    ok = (o > 0) & (h > 0) & (l > 0) & (c > 0)
+    ok = (o > 0) & (h > 0) & (low_px > 0) & (c > 0)
     o = o.where(ok)
     h = h.where(ok)
-    l = l.where(ok)
+    low_px = low_px.where(ok)
     c = c.where(ok)
 
     log_ho = np.log(h / o)
-    log_lo = np.log(l / o)
+    log_lo = np.log(low_px / o)
     log_co = np.log(c / o)
     var_d = log_ho * (log_ho - log_co) + log_lo * (log_lo - log_co)
     var = var_d.rolling(int(window)).mean()
@@ -192,19 +192,21 @@ def yang_zhang_vol(
     w = int(window)
     o = pd.to_numeric(open_, errors="coerce")
     h = pd.to_numeric(high, errors="coerce")
-    l = pd.to_numeric(low, errors="coerce")
+    low_px = pd.to_numeric(low, errors="coerce")
     c = pd.to_numeric(close, errors="coerce")
 
-    ok = (o > 0) & (h > 0) & (l > 0) & (c > 0)
+    ok = (o > 0) & (h > 0) & (low_px > 0) & (c > 0)
     o = o.where(ok)
     h = h.where(ok)
-    l = l.where(ok)
+    low_px = low_px.where(ok)
     c = c.where(ok)
 
     oc = np.log(o / c.shift(1))
     co = np.log(c / o)
 
-    rs_var_d = (np.log(h / o) * (np.log(h / o) - co)) + (np.log(l / o) * (np.log(l / o) - co))
+    rs_var_d = (np.log(h / o) * (np.log(h / o) - co)) + (
+        np.log(low_px / o) * (np.log(low_px / o) - co)
+    )
 
     # Rolling variances
     var_oc = oc.rolling(w).var(ddof=1)

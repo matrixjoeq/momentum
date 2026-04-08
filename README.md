@@ -32,7 +32,7 @@ python3 -m venv .venv
 - 运行服务：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn etf_momentum.app:app --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn etf_momentum.app:app --reload --reload-dir .\src --reload-exclude "tests/*" --port 8000
 ```
 
 - 运行测试：
@@ -44,7 +44,7 @@ python3 -m venv .venv
 ### 运行服务
 
 ```bash
-.venv/bin/python -m uvicorn etf_momentum.app:app --reload --port 8000
+.venv/bin/python -m uvicorn etf_momentum.app:app --reload --reload-dir ./src --reload-exclude "tests/*" --port 8000
 ```
 
 - Web UI：打开 `http://127.0.0.1:8000/`

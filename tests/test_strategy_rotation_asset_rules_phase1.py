@@ -1,6 +1,5 @@
 import datetime as dt
 
-import pytest
 
 from etf_momentum.db.models import EtfPrice
 from etf_momentum.strategy.rotation import (

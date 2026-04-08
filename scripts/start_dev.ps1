@@ -23,7 +23,7 @@ try {
   & $localMysql stop
   & $localMysql start
   & $localMysql bootstrap
-  & $py -m uvicorn etf_momentum.app:app --reload --port 8000
+  & $py -m uvicorn etf_momentum.app:app --reload --reload-dir "$root\src" --reload-exclude "tests/*" --port 8000
 } finally {
   Pop-Location
 }

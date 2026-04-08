@@ -6,7 +6,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-Session = Any  # runtime: keep dependency-free typing
 
 from .baseline import (
     TRADING_DAYS_PER_YEAR,
@@ -30,6 +29,8 @@ from .event_study import compute_event_study, entry_dates_from_exposure
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
 from .market_regime import build_market_regime_report
 from .r_multiple import enrich_trades_with_r_metrics
+
+Session = Any  # runtime: keep dependency-free typing
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
 TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "ma_filter": "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -555,10 +556,10 @@ def _pos_from_donchian(close: pd.Series, *, entry: int, exit_: int) -> pd.Series
             pos[i] = 1.0 if in_pos else 0.0
             continue
         h = hi.iloc[i]
-        l = lo.iloc[i]
+        low_v = lo.iloc[i]
         if (not in_pos) and pd.notna(h) and c > float(h):
             in_pos = True
-        elif in_pos and pd.notna(l) and c < float(l):
+        elif in_pos and pd.notna(low_v) and c < float(low_v):
             in_pos = False
         pos[i] = 1.0 if in_pos else 0.0
     return pd.Series(pos, index=close.index, dtype=float)
@@ -743,7 +744,6 @@ def _apply_atr_stop(
     stop_px = float("nan")
     entry_px = float("nan")
     entry_atr = float("nan")
-    prev_close = float("nan")
     prev_base = 0.0
     wait_next_entry_lock = False
     trigger_dates: list[str] = []
@@ -769,7 +769,6 @@ def _apply_atr_stop(
             wait_next_entry_lock = False
             entry_px = c
             entry_atr = a
-            prev_close = c
             stop_px = entry_px - float(n_mult) * a
             out[i] = b
             if np.isfinite(stop_px):
@@ -806,7 +805,6 @@ def _apply_atr_stop(
             stop_px = float("nan")
             entry_px = float("nan")
             entry_atr = float("nan")
-            prev_close = float("nan")
             trace_last_rows.append(
                 _event_row(
                     idx=bp.index[i],
@@ -843,7 +841,6 @@ def _apply_atr_stop(
             stop_px = float("nan")
             entry_px = float("nan")
             entry_atr = float("nan")
-            prev_close = float("nan")
             trace_last_rows.append(
                 _event_row(
                     idx=bp.index[i],
@@ -906,7 +903,6 @@ def _apply_atr_stop(
             trace_last_rows = trace_last_rows[-120:]
 
         out[i] = b
-        prev_close = c
         if np.isfinite(stop_px):
             d = bp.index[i]
             latest_stop_date = d.date().isoformat() if hasattr(d, "date") else str(d)
@@ -2297,8 +2293,8 @@ def compute_trend_portfolio_backtest(
         elif strat == "macd_v":
             macd, _, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
             h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
-            l = low_qfq_df[c] if (c in low_qfq_df.columns) else px
-            atr = _atr_from_hlc(h.astype(float).fillna(px), l.astype(float).fillna(px), px, window=int(inp.macd_v_atr_window))
+            low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+            atr = _atr_from_hlc(h.astype(float).fillna(px), low_px.astype(float).fillna(px), px, window=int(inp.macd_v_atr_window))
             macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
             macd_v_sig = _ema(macd_v, int(inp.macd_signal))
             pos = (macd_v > macd_v_sig).astype(float)
@@ -2339,12 +2335,12 @@ def compute_trend_portfolio_backtest(
             )
             score = mom.astype(float)
         h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
-        l = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+        low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
         pos, one_stop_stats = _apply_atr_stop(
             pos.fillna(0.0).astype(float),
             close=px,
             high=h.astype(float).fillna(px),
-            low=l.astype(float).fillna(px),
+            low=low_px.astype(float).fillna(px),
             mode=atr_mode,
             atr_basis=atr_basis,
             reentry_mode=atr_reentry_mode,
@@ -2356,7 +2352,7 @@ def compute_trend_portfolio_backtest(
             pos.fillna(0.0).astype(float),
             close=px,
             high=h.astype(float).fillna(px),
-            low=l.astype(float).fillna(px),
+            low=low_px.astype(float).fillna(px),
             enabled=rtp_enabled,
             reentry_mode=rtp_reentry_mode,
             atr_window=int(inp.atr_stop_window),
@@ -2374,10 +2370,10 @@ def compute_trend_portfolio_backtest(
         for c in codes:
             px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
             h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
-            l = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+            low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
             atr_budget_df[c] = _atr_from_hlc(
                 h.astype(float).fillna(px),
-                l.astype(float).fillna(px),
+                low_px.astype(float).fillna(px),
                 px,
                 window=int(risk_budget_atr_window),
             ).astype(float)

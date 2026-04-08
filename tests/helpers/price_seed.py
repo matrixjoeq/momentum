@@ -21,7 +21,7 @@ def add_price_all_adjustments(
     c = float(close)
     o = float(open_price if open_price is not None else c)
     h = float(high if high is not None else c)
-    l = float(low if low is not None else c)
+    low_px = float(low if low is not None else c)
     for adj in adjust_order:
         db.add(
             EtfPrice(
@@ -29,7 +29,7 @@ def add_price_all_adjustments(
                 trade_date=day,
                 open=o,
                 high=h,
-                low=l,
+                low=low_px,
                 close=c,
                 source=str(source),
                 adjust=adj,

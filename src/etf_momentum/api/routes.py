@@ -2487,8 +2487,7 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
     try:
         # Run the SAME strategy engine as weekly5-open, using the provided parameters (if any),
         # and read the weights on the execution day (next trading day).
-        from etf_momentum.analysis.rotation import RotationAnalysisInputs
-        from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
+        from etf_momentum.strategy.rotation import backtest_rotation
 
         # Start/end default: long enough for most indicators; end must cover next_td.
         # For next-plan we MUST include the execution day (next_td) in the backtest range,
@@ -2538,7 +2537,7 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
         # pylint: disable=unexpected-keyword-arg
         out = backtest_rotation(
             db,
-            RotationInputs(**bt_inp.__dict__),
+            bt_inp,
             return_weights_end=True,
             allow_virtual_end=True,
         )  # type: ignore[arg-type]

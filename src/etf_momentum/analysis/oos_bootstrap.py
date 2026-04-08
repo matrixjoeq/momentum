@@ -10,6 +10,7 @@ Used for: rotation strategies, trend strategies (single or portfolio).
 
 from __future__ import annotations
 
+import datetime
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -195,7 +196,6 @@ def run_rotation_oos_bootstrap(
     from etf_momentum.scripts.rotation_research_runner import (
         RotationStrategyConfig,
         backtest_strategy,
-        calculate_metrics,
     )
     from etf_momentum.strategy.rotation_research_config import UniverseConfig
 

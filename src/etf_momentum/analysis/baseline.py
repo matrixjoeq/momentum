@@ -1337,15 +1337,15 @@ def _compute_periodic_returns_and_volatility(
                 def _add_bias_v(kind: str, close_s: pd.Series, high_s: pd.Series, low_s: pd.Series) -> None:
                     c = pd.to_numeric(close_s, errors="coerce").astype(float)
                     h = pd.to_numeric(high_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
-                    l = pd.to_numeric(low_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
+                    low_v = pd.to_numeric(low_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
                     c = c.replace([np.inf, -np.inf], np.nan).dropna()
                     if c.empty:
                         return
                     h = h.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
-                    l = l.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
+                    low_v = low_v.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
                     ma20 = c.rolling(window=20, min_periods=5).mean()
                     prev_c = c.shift(1)
-                    tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
+                    tr = pd.concat([(h - low_v).abs(), (h - prev_c).abs(), (low_v - prev_c).abs()], axis=1).max(axis=1)
                     atr20 = tr.ewm(alpha=1.0 / 20.0, adjust=False, min_periods=20).mean()
                     bias_v = ((c - ma20) / atr20.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
                     if bias_v.empty:
@@ -1373,14 +1373,14 @@ def _compute_periodic_returns_and_volatility(
                 def _add_macd_v(kind: str, close_s: pd.Series, high_s: pd.Series, low_s: pd.Series) -> None:
                     c = pd.to_numeric(close_s, errors="coerce").astype(float)
                     h = pd.to_numeric(high_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
-                    l = pd.to_numeric(low_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
+                    low_v = pd.to_numeric(low_s, errors="coerce").astype(float).reindex(c.index).combine_first(c)
                     c = c.replace([np.inf, -np.inf], np.nan).dropna()
                     if c.empty:
                         return
                     h = h.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
-                    l = l.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
+                    low_v = low_v.reindex(c.index).replace([np.inf, -np.inf], np.nan).combine_first(c)
                     prev_c = c.shift(1)
-                    tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
+                    tr = pd.concat([(h - low_v).abs(), (h - prev_c).abs(), (low_v - prev_c).abs()], axis=1).max(axis=1)
                     atr26 = tr.ewm(alpha=1.0 / 26.0, adjust=False, min_periods=26).mean()
                     ema12 = c.ewm(span=12, adjust=False, min_periods=12).mean()
                     ema26 = c.ewm(span=26, adjust=False, min_periods=26).mean()

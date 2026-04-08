@@ -23,7 +23,9 @@ def _make_synth_ohlc(n: int = 400, seed: int = 7) -> dict[str, pd.Series]:
     high = np.maximum(open_, close) * (1.0 + intraday)
     low = np.minimum(open_, close) * np.maximum(0.0001, (1.0 - intraday))
 
-    s = lambda x: pd.Series(x, index=dates).astype(float)
+    def s(x: np.ndarray) -> pd.Series:
+        return pd.Series(x, index=dates).astype(float)
+
     return {"open": s(open_), "high": s(high), "low": s(low), "close": s(close)}
 
 

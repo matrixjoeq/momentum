@@ -33,4 +33,8 @@ fi
 
 "${LOCAL_MYSQL}" bootstrap
 
-exec "${PY}" -m uvicorn etf_momentum.app:app --reload --port 8000
+exec "${PY}" -m uvicorn etf_momentum.app:app \
+  --reload \
+  --reload-dir "${ROOT_DIR}/src" \
+  --reload-exclude "tests/*" \
+  --port 8000

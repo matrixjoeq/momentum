@@ -305,7 +305,6 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             decision_dates = _decision_dates_for_rebalance(px_common.index, rebalance=reb, anchor=int(a), shift=str(inp.rebalance_shift))
             if ep_l == "open":
                 ret_fwd = forward_align_returns(daily_ret[codes].astype(float).fillna(0.0))
-                decision_set = set(pd.to_datetime(decision_dates))
                 idx = px_common.index
                 exec_day_positions = set()
                 for d in decision_dates:

@@ -9,27 +9,19 @@ Crude Oil Rotation Strategy Backtest Runner
 from __future__ import annotations
 
 import datetime as dt
-import itertools
 import logging
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 
 from etf_momentum.settings import get_settings
-from etf_momentum.db.session import make_engine, make_session_factory, session_scope
+from etf_momentum.db.session import make_engine, make_session_factory
 from etf_momentum.db.init_db import init_db
-from etf_momentum.db.repo import upsert_prices, get_price_date_range
-from etf_momentum.data.multi_source_fetcher import FetchRequest, fetch_etf_daily_with_fallback
-from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
-from etf_momentum.strategy.crude_oil_rotation_config import (
-    CRUDE_OIL_CODES,
-    CrudeOilRotationConfig,
-    FactorParams,
-)
+from etf_momentum.db.repo import get_price_date_range
 
 logging.basicConfig(
     level=logging.INFO,
