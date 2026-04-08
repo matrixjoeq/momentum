@@ -856,6 +856,25 @@ def _rotation_inputs_from_payload(
         bias_quantile=payload.bias_quantile,
         bias_fixed_value=payload.bias_fixed_value,
         bias_min_periods=payload.bias_min_periods,
+        rsi_filter=bool(getattr(payload, "rsi_filter", False)),
+        rsi_window=14,
+        rsi_overbought=float(getattr(payload, "rsi_overbought", 70.0)),
+        rsi_oversold=float(getattr(payload, "rsi_oversold", 30.0)),
+        rsi_block_overbought=bool(getattr(payload, "rsi_block_overbought", True)),
+        rsi_block_oversold=bool(getattr(payload, "rsi_block_oversold", False)),
+        vol_monitor=bool(getattr(payload, "vol_monitor", False)),
+        vol_window=int(getattr(payload, "vol_window", 20)),
+        vol_target_ann=float(getattr(payload, "vol_target_ann", 0.20)),
+        vol_max_ann=float(getattr(payload, "vol_max_ann", 0.60)),
+        chop_filter=bool(getattr(payload, "chop_filter", False)),
+        chop_mode=str(getattr(payload, "chop_mode", "er")),
+        chop_window=int(getattr(payload, "chop_window", 20)),
+        chop_er_threshold=float(getattr(payload, "chop_er_threshold", 0.25)),
+        chop_adx_window=int(getattr(payload, "chop_adx_window", 20)),
+        chop_adx_threshold=float(getattr(payload, "chop_adx_threshold", 20.0)),
+        asset_rsi_rules=[r.model_dump() for r in getattr(payload, "asset_rsi_rules", [])] if getattr(payload, "asset_rsi_rules", None) else None,
+        asset_chop_rules=[r.model_dump() for r in getattr(payload, "asset_chop_rules", [])] if getattr(payload, "asset_chop_rules", None) else None,
+        asset_vol_monitor_rules=[r.model_dump() for r in getattr(payload, "asset_vol_monitor_rules", [])] if getattr(payload, "asset_vol_monitor_rules", None) else None,
         asset_rc_rules=[r.model_dump() for r in payload.asset_rc_rules] if payload.asset_rc_rules else None,
         asset_vol_index_rules=asset_vol_rules,
         vol_index_close=vol_index_close,
@@ -2531,7 +2550,7 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
     try:
         # Run the SAME strategy engine as weekly5-open, using the provided parameters (if any),
         # and read the weights on the execution day (next trading day).
-        from etf_momentum.strategy.rotation import backtest_rotation
+        from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
 
         # Start/end default: long enough for most indicators; end must cover next_td.
         # For next-plan we MUST include the execution day (next_td) in the backtest range,
@@ -2576,6 +2595,7 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
             asset_vol_rules=vol_index_rules,
             vol_index_close=vol_index_close,
         )
+        bt_inp = RotationInputs(**bt_inp.__dict__)
 
         # Pylint may resolve RotationInputs from installed package during local dev and miss new fields.
         # pylint: disable=unexpected-keyword-arg
@@ -2958,7 +2978,7 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
         bb_l = ema252 - 2.0 * sd252
 
         dd = _drawdown(ew_nav)
-        rsi24 = _rsi_wilder(ew_nav, window=24)
+        rsi14 = _rsi_wilder(ew_nav, window=14)
 
         win_3y = 3 * TRADING_DAYS_PER_YEAR
         rr3y = (ew_nav / ew_nav.shift(win_3y) - 1.0).astype(float)
@@ -3021,7 +3041,7 @@ def baseline_weekly5_ew_dashboard(payload: BaselineWeekly5EWDashboardRequest, db
             "bb_upper": _tolist(bb_u),
             "bb_lower": _tolist(bb_l),
             "drawdown": _tolist(dd),
-            "rsi24": _tolist(rsi24),
+            "rsi14": _tolist(rsi14),
             "roll3y_return": _tolist(rr3y),
             "roll3y_dd": _tolist(rdd3y),
             # backward-compat (deprecated)
@@ -3107,7 +3127,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
         bb_l = ema252 - 2.0 * sd252
 
         dd = _drawdown(ew_nav)
-        rsi24 = _rsi_wilder(ew_nav, window=24)
+        rsi14 = _rsi_wilder(ew_nav, window=14)
 
         win_3y = 3 * TRADING_DAYS_PER_YEAR
         rr3y = (ew_nav / ew_nav.shift(win_3y) - 1.0).astype(float)
@@ -3121,7 +3141,7 @@ def baseline_weekly5_ew_dashboard_lite(payload: BaselineWeekly5EWDashboardReques
             "bb_upper": _tolist(bb_u),
             "bb_lower": _tolist(bb_l),
             "drawdown": _tolist(dd),
-            "rsi24": _tolist(rsi24),
+            "rsi14": _tolist(rsi14),
             "roll3y_return": _tolist(rr3y),
             "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
@@ -3201,7 +3221,7 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
     bb_u = ema252 + 2.0 * sd252
     bb_l = ema252 - 2.0 * sd252
     dd = _drawdown(nav_mix)
-    rsi24 = _rsi_wilder(nav_mix, window=24)
+    rsi14 = _rsi_wilder(nav_mix, window=14)
     win_3y = 3 * TRADING_DAYS_PER_YEAR
     rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
     rdd3y = _rolling_drawdown(nav_mix, win_3y).astype(float)
@@ -3215,7 +3235,7 @@ def baseline_weekly5_ew_dashboard_combo_lite(payload: BaselineWeekly5EWDashboard
             "bb_upper": _tolist(bb_u),
             "bb_lower": _tolist(bb_l),
             "drawdown": _tolist(dd),
-            "rsi24": _tolist(rsi24),
+            "rsi14": _tolist(rsi14),
             "roll3y_return": _tolist(rr3y),
             "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),
@@ -3299,7 +3319,7 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
     bb_u = ema252 + 2.0 * sd252
     bb_l = ema252 - 2.0 * sd252
     dd = _drawdown(nav_mix)
-    rsi24 = _rsi_wilder(nav_mix, window=24)
+    rsi14 = _rsi_wilder(nav_mix, window=14)
     win_3y = 3 * TRADING_DAYS_PER_YEAR
     rr3y = (nav_mix / nav_mix.shift(win_3y) - 1.0).astype(float)
     rdd3y = _rolling_drawdown(nav_mix, win_3y).astype(float)
@@ -3355,7 +3375,7 @@ def baseline_weekly5_ew_dashboard_combo(payload: BaselineWeekly5EWDashboardReque
             "bb_upper": _tolist(bb_u),
             "bb_lower": _tolist(bb_l),
             "drawdown": _tolist(dd),
-            "rsi24": _tolist(rsi24),
+            "rsi14": _tolist(rsi14),
             "roll3y_return": _tolist(rr3y),
             "roll3y_dd": _tolist(rdd3y),
             "roll3y_mdd": _tolist(rdd3y),

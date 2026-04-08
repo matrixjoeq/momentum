@@ -358,7 +358,7 @@ async function drawAll(page, payload) {
   const bbU = payload.bb_upper || [];
   const bbL = payload.bb_lower || [];
   const dd = payload.drawdown || [];
-  const rsi = payload.rsi24 || [];
+  const rsi = payload.rsi14 || [];
   const rr3y = payload.roll3y_return || [];
   const rdd3y = payload.roll3y_dd || payload.roll3y_mdd || [];
   const theme = (page && page.data && page.data.theme) ? page.data.theme : "light";
@@ -403,9 +403,9 @@ async function drawAll(page, payload) {
     x: dates,
     yMode: "linear",
     yFixed: [0, 100],
-    title: "RSI24",
+    title: "RSI14",
     theme,
-    series: [{ name: "RSI24", y: rsi, color: "#7b61ff", width: 1.4 }],
+    series: [{ name: "RSI14", y: rsi, color: "#7b61ff", width: 1.4 }],
   });
 
   const rRR = await measure(page, "cRR3Y");
@@ -890,7 +890,7 @@ function attachWeekdayPage({ anchor, title }) {
         if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
         return a / b;
       })));
-      const rsiRot24 = (((rotFull.nav_rsi || {}).series || {}).ROTATION || {})["24"] || _rsiWilder(navRot, 24);
+      const rsiRot14 = (((rotFull.nav_rsi || {}).series || {}).ROTATION || {})["14"] || _rsiWilder(navRot, 14);
       const rr3y = _rollingReturn(navRot, 3 * 252);
       const rdd3y = _rollingDrawdown(navRot, 3 * 252);
 
@@ -905,7 +905,7 @@ function attachWeekdayPage({ anchor, title }) {
       const ratioSd = _rollingStdArr(ratio, 252);
       const ratioBbu = ratioEma.map((v, i) => (v != null && ratioSd[i] != null) ? (Number(v) + 2 * Number(ratioSd[i])) : null);
       const ratioBbl = ratioEma.map((v, i) => (v != null && ratioSd[i] != null) ? (Number(v) - 2 * Number(ratioSd[i])) : null);
-      const ratioRsi24 = _rsiWilder(ratio.map((x) => (x == null ? NaN : x)), 24);
+      const ratioRsi14 = _rsiWilder(ratio.map((x) => (x == null ? NaN : x)), 14);
 
       // 40d rolling return diff: ROT - EW
       const rot40 = _rollingReturn(navRot, 40);
@@ -927,7 +927,7 @@ function attachWeekdayPage({ anchor, title }) {
         ratioEma,
         ratioBbu,
         ratioBbl,
-        ratioRsi24,
+        ratioRsi14,
         diff40,
       };
 
@@ -1074,8 +1074,8 @@ function attachWeekdayPage({ anchor, title }) {
 
       // 3) RSI
       const r3 = await measure("rRSI");
-      drawLineChart(wx.createCanvasContext("rRSI", this), { width: Math.floor(r3.width || 320), height: Math.floor(r3.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "策略 RSI24", theme: this.data.theme, series: [
-        { name: "RSI24", y: rsiRot24, color: "#7b61ff", width: 1.4 },
+      drawLineChart(wx.createCanvasContext("rRSI", this), { width: Math.floor(r3.width || 320), height: Math.floor(r3.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "策略 RSI14", theme: this.data.theme, series: [
+        { name: "RSI14", y: rsiRot14, color: "#7b61ff", width: 1.4 },
       ]});
 
       // 4) rolling 3y return
@@ -1107,8 +1107,8 @@ function attachWeekdayPage({ anchor, title }) {
 
       // 7) ratio rsi
       const r7 = await measure("rRatioRSI");
-      drawLineChart(wx.createCanvasContext("rRatioRSI", this), { width: Math.floor(r7.width || 320), height: Math.floor(r7.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "比值 RSI24", theme: this.data.theme, series: [
-        { name: "RSI24", y: ratioRsi24, color: "#7b61ff", width: 1.4 },
+      drawLineChart(wx.createCanvasContext("rRatioRSI", this), { width: Math.floor(r7.width || 320), height: Math.floor(r7.height || 180), x: dates, yMode: "linear", yFixed: [0,100], title: "比值 RSI14", theme: this.data.theme, series: [
+        { name: "RSI14", y: ratioRsi14, color: "#7b61ff", width: 1.4 },
       ]});
 
       // 8) 40d diff
@@ -1399,7 +1399,7 @@ function attachWeekdayPage({ anchor, title }) {
         } else if (id === "cDD") {
           lines = [`DD=${fmtPct((raw.drawdown || [])[idx])}`];
         } else if (id === "cRSI") {
-          lines = [`RSI24=${fmtNum((raw.rsi24 || [])[idx])}`];
+          lines = [`RSI14=${fmtNum((raw.rsi14 || [])[idx])}`];
         } else if (id === "cRR3Y") {
           lines = [`R3Y=${fmtPct((raw.roll3y_return || [])[idx])}`];
         } else if (id === "cRDD3Y") {
@@ -1416,8 +1416,8 @@ function attachWeekdayPage({ anchor, title }) {
             lines = [`ROT_DD=${fmtPct(_drawdownFromNav(s.ROTATION || [])[idx])}`, `EW_DD=${fmtPct(_drawdownFromNav(s.EW_REBAL || [])[idx])}`];
           }
         } else if (id === "rRSI") {
-          const rsiSeries = (((raw.nav_rsi || {}).series || {}).ROTATION || {})["24"] || [];
-          lines = [`RSI24=${fmtNum(rsiSeries[idx])}`];
+          const rsiSeries = (((raw.nav_rsi || {}).series || {}).ROTATION || {})["14"] || [];
+          lines = [`RSI14=${fmtNum(rsiSeries[idx])}`];
         } else if (id === "rRR3Y") {
           if (rotCache && Array.isArray(rotCache.rr3y)) {
             lines = [`R3Y=${fmtPct(rotCache.rr3y[idx])}`];
@@ -1466,8 +1466,8 @@ function attachWeekdayPage({ anchor, title }) {
             lines = [`EX_DD=${fmtPct(_drawdownFromNav(ex)[idx])}`];
           }
         } else if (id === "rRatioRSI") {
-          if (rotCache && Array.isArray(rotCache.ratioRsi24)) {
-            lines = [`RSI24=${fmtNum(rotCache.ratioRsi24[idx])}`];
+          if (rotCache && Array.isArray(rotCache.ratioRsi14)) {
+            lines = [`RSI14=${fmtNum(rotCache.ratioRsi14[idx])}`];
           } else {
             const s = (raw.nav && raw.nav.series) ? raw.nav.series : {};
             const ratio = (s.ROTATION || []).map((v, i) => {
@@ -1475,8 +1475,8 @@ function attachWeekdayPage({ anchor, title }) {
               if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return NaN;
               return a / b;
             });
-            const rsi = _rsiWilder(ratio, 24);
-            lines = [`RSI24=${fmtNum(rsi[idx])}`];
+            const rsi = _rsiWilder(ratio, 14);
+            lines = [`RSI14=${fmtNum(rsi[idx])}`];
           }
         } else if (id === "rDiff40") {
           if (rotCache && Array.isArray(rotCache.diff40)) {

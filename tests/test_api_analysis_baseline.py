@@ -101,7 +101,7 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert data["fft_roll"]["ew"]["windows"] == [20, 10]
     assert data["fft_roll"]["ew"]["step"] == 5
     assert "nav_rsi" in data
-    assert data["nav_rsi"]["windows"] == [6, 12, 24]
+    assert data["nav_rsi"]["windows"] == [14]
 
 
 def test_api_rotation_backtest_happy_path(api_client):
@@ -141,7 +141,7 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert (data.get("period_returns_ivol") or {}) == {}
     assert "excess_vs_inverse_vol_rebal" not in (data.get("metrics") or {})
     assert "nav_rsi" in data
-    assert data["nav_rsi"]["windows"] == [6, 12, 24]
+    assert data["nav_rsi"]["windows"] == [14]
     assert "win_payoff" in data
 
     data_rp = post_json_ok(

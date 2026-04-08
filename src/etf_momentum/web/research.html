@@ -5870,7 +5870,7 @@
             if (p1 && p1.__error) return p1;
             const td = (p1 && p1.trend_default) ? p1.trend_default : { trend_sma_window: 20, trend_ma_type: "sma" };
             const bd = (p1 && p1.bias_default) ? p1.bias_default : { bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
-            const rd = (p1 && p1.rsi_default) ? p1.rsi_default : { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+            const rd = (p1 && p1.rsi_default) ? p1.rsi_default : { rsi_window: 14, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
             const vd = (p1 && p1.vol_default) ? p1.vol_default : { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
             const cd = (p1 && p1.chop_default) ? p1.chop_default : { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
             const entryFloorRules = _buildFloorRules("rotFloorOn", "rotFloorRulesTable", "entry");
@@ -9655,7 +9655,7 @@
           hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
         }));
         // RSI overlay (fixed windows: 6/12/24) on EW + benchmark only
-        const rsiWins = [6, 12, 24];
+        const rsiWins = [14];
         const _rsiWilder = (arr, window) => {
           const w = Math.max(1, Number(window || 1));
           const out = new Array(arr.length).fill(null);
@@ -9812,7 +9812,7 @@
         })();
         const benchNav = benchKey ? (Array.isArray(nav[benchKey]) ? nav[benchKey] : []) : [];
         const hasBench = benchNav.length === stratNav.length && stratNav.length > 0;
-        const rsiWins = [6, 12, 24];
+        const rsiWins = [14];
         const _msg = (id, txt) => {
           const el = $(id);
           if (!el) return;
@@ -9993,7 +9993,7 @@
           { x: dates, y: ratio, mode: "lines", name: "RATIO", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
           ..._bbTracesForRatio(ratio, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
           ..._bbTracesForRatio(ratio, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
-          ..._bbTracesForRatio(ratio, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
+          ..._bbTracesForRatio(ratio, 242, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
         ];
         for (const w of rsiWins) {
           ratioTraces.push({ x: dates, y: _rsiWilder(ratio, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
@@ -10021,12 +10021,12 @@
           if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
           return a - b;
         });
-        const diff40Ma250 = _rollingMean(diff40, 250);
+        const diff40Ma242 = _rollingMean(diff40, 242);
         Plotly.newPlot(
           "baseline40dDiffChart",
           [
             { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
-            { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+            { x: dates, y: diff40Ma242, mode: "lines", name: "MA242(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA242(Δ)=%{y:.2%}<extra></extra>" },
           ],
           {
             margin: { t: 10, b: 30 },
@@ -14761,7 +14761,7 @@
       function plotRotation(result) {
         const dates = result.nav.dates;
         const s = result.nav.series;
-        const rsiWins = [6, 12, 24];
+        const rsiWins = [14];
         const _rsiWilder = (arr, window) => {
           const w = Math.max(1, Number(window || 1));
           const out = new Array(arr.length).fill(null);
@@ -14937,7 +14937,7 @@
               { x: dates, y: ex, mode: "lines", name: excessKey, hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
               ..._bbTracesForExcess(ex, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
               ..._bbTracesForExcess(ex, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
-              ..._bbTracesForExcess(ex, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
+              ..._bbTracesForExcess(ex, 242, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
             ];
             // RSI on EXCESS below chart (same figure, separate panel)
             for (const w of rsiWins) {
@@ -14967,12 +14967,12 @@
           if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
           return a - b;
         });
-        const diff40Ma250 = _rollingMean(diff40, 250);
+        const diff40Ma242 = _rollingMean(diff40, 242);
         Plotly.newPlot(
           "rot40dDiffChart",
           [
             { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
-            { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+            { x: dates, y: diff40Ma242, mode: "lines", name: "MA242(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA242(Δ)=%{y:.2%}<extra></extra>" },
           ],
           {
             margin: { t: 10, b: 30 },
@@ -15040,7 +15040,7 @@
         const dates = Array.isArray(payload && payload.dates) ? payload.dates : [];
         const stratNav = Array.isArray(payload && payload.stratNav) ? payload.stratNav : [];
         const benchNav = Array.isArray(payload && payload.benchNav) ? payload.benchNav : [];
-        const rsiWins = [6, 12, 24];
+        const rsiWins = [14];
         const _rsiWilder = (arr, window) => {
           const w = Math.max(1, Number(window || 1));
           const out = new Array(arr.length).fill(null);
@@ -15212,7 +15212,7 @@
           { x: dates, y: excessNav, mode: "lines", name: "EXCESS", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
           ..._bbTracesForExcess(excessNav, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
           ..._bbTracesForExcess(excessNav, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
-          ..._bbTracesForExcess(excessNav, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
+          ..._bbTracesForExcess(excessNav, 242, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
         ];
         for (const w of rsiWins) {
           exTraces.push({ x: dates, y: _rsiWilder(excessNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 }, hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>" });
@@ -15240,12 +15240,12 @@
           if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
           return a - b;
         });
-        const diff40Ma250 = _rollingMean(diff40, 250);
+        const diff40Ma242 = _rollingMean(diff40, 242);
         Plotly.newPlot(
           "trend40dExcessChart",
           [
             { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
-            { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+            { x: dates, y: diff40Ma242, mode: "lines", name: "MA242(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA242(Δ)=%{y:.2%}<extra></extra>" },
           ],
           {
             margin: { t: 10, b: 30 },
@@ -15304,7 +15304,7 @@
         const dates = Array.isArray(payload && payload.dates) ? payload.dates : [];
         const stratNav = Array.isArray(payload && payload.stratNav) ? payload.stratNav : [];
         const benchNav = Array.isArray(payload && payload.benchNav) ? payload.benchNav : [];
-        const rsiWins = [6, 12, 24];
+        const rsiWins = [14];
         const _rsiWilder = (arr, window) => {
           const w = Math.max(1, Number(window || 1));
           const out = new Array(arr.length).fill(null);
@@ -15454,7 +15454,7 @@
           { x: dates, y: ratioNav, mode: "lines", name: "RATIO", hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>" },
           ..._bbTracesForRatio(ratioNav, 60, { isDefault: false, color: "rgba(148,163,184,0.25)" }),
           ..._bbTracesForRatio(ratioNav, 120, { isDefault: false, color: "rgba(34,197,94,0.25)" }),
-          ..._bbTracesForRatio(ratioNav, 250, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
+          ..._bbTracesForRatio(ratioNav, 242, { isDefault: true, color: "rgba(31,119,180,0.25)" }),
         ];
         for (const w of rsiWins) ratioTraces.push({ x: dates, y: _rsiWilder(ratioNav, w), mode: "lines", name: `RSI${w}`, yaxis: "y2", line: { width: 1.1 } });
         Plotly.newPlot("calTimingRatioChart", ratioTraces, {
@@ -15472,10 +15472,10 @@
           if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
           return a - b;
         });
-        const diff40Ma250 = _rollingMean(diff40, 250);
+        const diff40Ma242 = _rollingMean(diff40, 242);
         Plotly.newPlot("calTiming40dDiffChart", [
           { x: dates, y: diff40, mode: "lines", name: "40D Δ", line: { color: "rgba(214,39,40,0.85)", width: 1.5 }, hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>" },
-          { x: dates, y: diff40Ma250, mode: "lines", name: "MA250(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA250(Δ)=%{y:.2%}<extra></extra>" },
+          { x: dates, y: diff40Ma242, mode: "lines", name: "MA242(Δ)", line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" }, hovertemplate: "%{x}<br>MA242(Δ)=%{y:.2%}<extra></extra>" },
         ], { margin: { t: 10, b: 30 }, legend: { orientation: "h" }, yaxis: { tickformat: ".0%", zeroline: true, zerolinecolor: "#bbb", gridcolor: "#eee" } }, { responsive: true });
 
         const w6m = 126, w1 = 252, w2 = 252 * 2, w3 = 252 * 3;
@@ -16359,7 +16359,7 @@
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
         const bd = _pickDefaultRule(asset_bias_rules) || { bias_type: "bias", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
-        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 14, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
 
@@ -17805,7 +17805,7 @@
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
         const bd = _pickDefaultRule(asset_bias_rules) || { bias_type: "bias", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
-        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 14, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
 
@@ -18975,7 +18975,7 @@
         if (!tbl) return;
         const r = rule || {};
         const code = (r.code || "").toString();
-        const win = (r.rsi_window == null ? 20 : r.rsi_window).toString();
+        const win = (r.rsi_window == null ? 14 : r.rsi_window).toString();
         const ob = (r.rsi_overbought == null ? 70 : r.rsi_overbought).toString();
         const os = (r.rsi_oversold == null ? 30 : r.rsi_oversold).toString();
         const blkOb = (r.rsi_block_overbought == null ? true : Boolean(r.rsi_block_overbought));
@@ -18983,7 +18983,7 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td><input class="rotRsiCode" value="${code}" placeholder="如 * 或 513100" style="min-width:120px;" /></td>
-          <td><input class="rotRsiWin" value="${win}" placeholder="20" style="min-width:90px;" /></td>
+          <td><input class="rotRsiWin" value="${win}" placeholder="14" style="min-width:90px;" /></td>
           <td><input class="rotRsiOb" value="${ob}" placeholder="70" style="min-width:90px;" /></td>
           <td><input class="rotRsiOs" value="${os}" placeholder="30" style="min-width:90px;" /></td>
           <td>
@@ -19012,7 +19012,7 @@
       }
       function _rotRsiResetDefaultRules() {
         _rotRsiClearRuleRows();
-        _rotRsiAddRuleRow({ code: "*", rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false });
+        _rotRsiAddRuleRow({ code: "*", rsi_window: 14, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false });
       }
       function _buildRsiRules() {
         const on = ($("rotRsiOn") && $("rotRsiOn").value === "true");
@@ -19021,7 +19021,7 @@
         for (const tr of _tableDataRows("rotRsiRulesTable")) {
           const code = (tr.querySelector(".rotRsiCode") && tr.querySelector(".rotRsiCode").value) ? String(tr.querySelector(".rotRsiCode").value).trim() : "";
           if (!code) continue;
-          const rsi_window = Math.floor(Number((tr.querySelector(".rotRsiWin") && tr.querySelector(".rotRsiWin").value) ? tr.querySelector(".rotRsiWin").value : "20"));
+          const rsi_window = Math.floor(Number((tr.querySelector(".rotRsiWin") && tr.querySelector(".rotRsiWin").value) ? tr.querySelector(".rotRsiWin").value : "14"));
           const rsi_overbought = Number((tr.querySelector(".rotRsiOb") && tr.querySelector(".rotRsiOb").value) ? tr.querySelector(".rotRsiOb").value : "70");
           const rsi_oversold = Number((tr.querySelector(".rotRsiOs") && tr.querySelector(".rotRsiOs").value) ? tr.querySelector(".rotRsiOs").value : "30");
           const rsi_block_overbought = ((tr.querySelector(".rotRsiBlkOb") && tr.querySelector(".rotRsiBlkOb").value) ? String(tr.querySelector(".rotRsiBlkOb").value) : "true") === "true";
@@ -19029,7 +19029,7 @@
           if (!Number.isFinite(rsi_window) || rsi_window <= 0) return { __error: "RSI过滤：窗口必须是正整数" };
           if (!Number.isFinite(rsi_overbought) || rsi_overbought < 0 || rsi_overbought > 100) return { __error: "RSI过滤：超买阈值必须在[0,100]" };
           if (!Number.isFinite(rsi_oversold) || rsi_oversold < 0 || rsi_oversold > 100) return { __error: "RSI过滤：超卖阈值必须在[0,100]" };
-          out.push({ code, rsi_window, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold });
+          out.push({ code, rsi_window: 14, rsi_overbought, rsi_oversold, rsi_block_overbought, rsi_block_oversold });
         }
         return out.length ? out : null;
       }
@@ -19933,7 +19933,7 @@
 
         const td = _pickDefaultRule(asset_trend_rules) || { trend_sma_window: 20, trend_ma_type: "sma" };
         const bd = _pickDefaultRule(asset_bias_rules) || { bias_type: "bias", bias_ma_window: 20, level_window: "all", threshold_type: "quantile", quantile: 95, fixed_value: 10, min_periods: 20 };
-        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 20, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
+        const rd = _pickDefaultRule(asset_rsi_rules) || { rsi_window: 14, rsi_overbought: 70, rsi_oversold: 30, rsi_block_overbought: true, rsi_block_oversold: false };
         const vd = _pickDefaultRule(asset_vol_monitor_rules) || { vol_window: 20, vol_target_ann: 0.20, vol_max_ann: 0.60 };
         const cd = _pickDefaultRule(asset_chop_rules) || { chop_mode: "er", chop_window: 20, chop_er_threshold: 0.25, chop_adx_window: 20, chop_adx_threshold: 20 };
 

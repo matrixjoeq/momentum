@@ -2493,8 +2493,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     series["CUSTOM"] = custom_nav.astype(float).tolist()
     series[f"BENCH:{bench_code}"] = bench_nav.astype(float).tolist()
 
-    # NAV RSI (EW + benchmark), windows configurable
-    rsi_windows = [6, 12, 24]
+    # NAV RSI unified to RSI(14)
+    rsi_windows = [14]
     nav_rsi = {
         "windows": rsi_windows,
         "dates": dates,

@@ -85,7 +85,7 @@ class RotationInputs:
     bias_min_periods: int = 20
     # RSI filter: avoid buying overbought / oversold assets.
     rsi_filter: bool = False
-    rsi_window: int = 20
+    rsi_window: int = 14
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
     rsi_block_overbought: bool = True
@@ -1487,15 +1487,8 @@ def backtest_rotation(
             )
             bias_rule_cfgs.add(cfg)
 
-    rsi_windows = [int(inp.rsi_window)]
-    if use_rsi_rules:
-        for r in inp.asset_rsi_rules or []:
-            try:
-                w = int((r or {}).get("rsi_window") or inp.rsi_window)
-            except (TypeError, ValueError):
-                w = int(inp.rsi_window)
-            if w > 0:
-                rsi_windows.append(w)
+    # RSI policy is unified to RSI(14) across the project.
+    rsi_windows = [14]
 
     vol_windows = [int(inp.vol_window)]
     if use_vol_rules:
@@ -2651,7 +2644,7 @@ def backtest_rotation(
                 if not eff:
                     eff = [
                         {
-                            "rsi_window": int(inp.rsi_window),
+                            "rsi_window": 14,
                             "rsi_overbought": float(inp.rsi_overbought),
                             "rsi_oversold": float(inp.rsi_oversold),
                             "rsi_block_overbought": bool(inp.rsi_block_overbought),
@@ -2660,7 +2653,7 @@ def backtest_rotation(
                     ]
                 oks: list[bool] = []
                 for r in eff:
-                    win = int((r or {}).get("rsi_window") or inp.rsi_window)
+                    win = 14
                     df = rsi_by_window.get(int(win))
                     if df is None or asof_d not in df.index:
                         continue
@@ -2863,7 +2856,7 @@ def backtest_rotation(
                     if not eff:
                         eff = [
                             {
-                                "rsi_window": int(inp.rsi_window),
+                                "rsi_window": 14,
                                 "rsi_overbought": float(inp.rsi_overbought),
                                 "rsi_oversold": float(inp.rsi_oversold),
                                 "rsi_block_overbought": bool(inp.rsi_block_overbought),
@@ -2872,7 +2865,7 @@ def backtest_rotation(
                         ]
                     oks: list[bool] = []
                     for r in eff:
-                        win = int((r or {}).get("rsi_window") or inp.rsi_window)
+                        win = 14
                         df = rsi_by_window.get(int(win))
                         if df is None or d not in df.index:
                             continue
@@ -4325,7 +4318,7 @@ def backtest_rotation(
             "series": {str(c): asset_nav_exec[str(c)].astype(float).tolist() for c in codes if str(c) in asset_nav_exec.columns},
         },
         "nav_rsi": {
-            "windows": [6, 12, 24],
+            "windows": [14],
             "dates": dates.date.astype(str).tolist(),
             "series": ({
                 "ROTATION": {},

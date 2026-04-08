@@ -853,7 +853,7 @@ class AssetRsiRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
-    rsi_window: int = Field(default=20, ge=1, description="RSI window (trading days)")
+    rsi_window: int = Field(default=14, ge=1, description="RSI window (trading days, fixed to 14)")
     rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)
     rsi_oversold: float = Field(default=30.0, ge=0.0, le=100.0)
     rsi_block_overbought: bool = Field(default=True, description="If true, exclude assets with RSI > overbought")
