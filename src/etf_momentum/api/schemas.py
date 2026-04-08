@@ -1163,6 +1163,11 @@ class BaselineWeekly5EWDashboardRequest(BaseModel):
     )
 
 
+class RTakeProfitTier(BaseModel):
+    r_multiple: float = Field(gt=0.0, description="Activate drawdown take-profit when peak floating profit reaches this R multiple")
+    retrace_ratio: float = Field(gt=0.0, lt=1.0, description="Allowed pullback ratio from peak floating profit once activated")
+
+
 class TrendBacktestRequest(BaseModel):
     code: str = Field(min_length=1, max_length=32, description="Single ETF code for trend-following backtest")
     start: str = Field(description="YYYYMMDD")
@@ -1203,6 +1208,12 @@ class TrendBacktestRequest(BaseModel):
     atr_stop_window: int = Field(default=14, ge=2, description="ATR window for universal stop")
     atr_stop_n: float = Field(default=2.0, gt=0.0, description="ATR stop distance multiplier n")
     atr_stop_m: float = Field(default=0.5, gt=0.0, description="ATR tightening step m (used by tightening mode)")
+    r_take_profit_enabled: bool = Field(default=False, description="Enable universal R-multiple drawdown take-profit overlay")
+    r_take_profit_reentry_mode: str = Field(default="reenter", description="Re-entry after R take-profit: reenter|wait_next_entry")
+    r_take_profit_tiers: list[RTakeProfitTier] | None = Field(
+        default=None,
+        description="Tiered config: peak>=R multiple activates pullback-exit threshold, e.g. [{r_multiple:2,retrace_ratio:0.5}]",
+    )
     # BIAS strategy params
     bias_ma_window: int = Field(default=20, ge=2, description="EMA window N in BIAS=(LN(C)-LN(EMA(C,N)))*100 (trading days)")
     bias_entry: float = Field(default=2.0, description="Enter when BIAS > entry (percent)")
@@ -1254,6 +1265,9 @@ class TrendPortfolioBacktestRequest(BaseModel):
     atr_stop_window: int = Field(default=14, ge=2)
     atr_stop_n: float = Field(default=2.0, gt=0.0)
     atr_stop_m: float = Field(default=0.5, gt=0.0)
+    r_take_profit_enabled: bool = Field(default=False, description="Enable universal R-multiple drawdown take-profit overlay")
+    r_take_profit_reentry_mode: str = Field(default="reenter", description="reenter|wait_next_entry")
+    r_take_profit_tiers: list[RTakeProfitTier] | None = Field(default=None)
     bias_ma_window: int = Field(default=20, ge=2)
     bias_entry: float = Field(default=2.0)
     bias_hot: float = Field(default=10.0)

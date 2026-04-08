@@ -44,6 +44,14 @@ TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "hybrid_trend": "信号在 T 日收盘后聚合五个子策略（均线交叉/唐奇安/时序动量/MACD金叉死叉/线性回归）的入场/退场触发计数；入场计数>=n 则入场、退场计数>=m 则离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
 }
 
+DEFAULT_R_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
+    {"r_multiple": 2.0, "retrace_ratio": 0.50},
+    {"r_multiple": 3.0, "retrace_ratio": 0.30},
+    {"r_multiple": 4.0, "retrace_ratio": 0.20},
+    {"r_multiple": 5.0, "retrace_ratio": 0.10},
+    {"r_multiple": 6.0, "retrace_ratio": 0.05},
+]
+
 
 @dataclass(frozen=True)
 class TrendInputs:
@@ -72,6 +80,9 @@ class TrendInputs:
     atr_stop_window: int = 14  # ATR lookback window
     atr_stop_n: float = 2.0  # stop distance multiplier by ATR
     atr_stop_m: float = 0.5  # tightening step in ATR multiples
+    r_take_profit_enabled: bool = False
+    r_take_profit_reentry_mode: str = "reenter"  # reenter | wait_next_entry
+    r_take_profit_tiers: list[dict[str, float]] | None = None
     # bias (deviation from EMA) trend-following
     # BIAS = (LN(C) - LN(EMA(C,N))) * 100  (percent)
     bias_ma_window: int = 20  # EMA(C,N) window in trading days
@@ -136,6 +147,9 @@ class TrendPortfolioInputs:
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
+    r_take_profit_enabled: bool = False
+    r_take_profit_reentry_mode: str = "reenter"
+    r_take_profit_tiers: list[dict[str, float]] | None = None
     bias_ma_window: int = 20
     bias_entry: float = 2.0
     bias_hot: float = 10.0
@@ -946,6 +960,270 @@ def _atr_from_hlc(high: pd.Series, low: pd.Series, close: pd.Series, *, window: 
     return tr.ewm(alpha=1.0 / float(w), adjust=False, min_periods=w).mean().astype(float)
 
 
+def _normalize_r_take_profit_tiers(
+    tiers: list[dict[str, float]] | None,
+) -> list[dict[str, float]]:
+    raw = tiers if tiers is not None else DEFAULT_R_TAKE_PROFIT_TIERS
+    out: list[dict[str, float]] = []
+    for item in (raw or []):
+        if not isinstance(item, dict):
+            continue
+        r_mult = float(item.get("r_multiple"))
+        retrace = float(item.get("retrace_ratio"))
+        if (not np.isfinite(r_mult)) or r_mult <= 0.0:
+            continue
+        if (not np.isfinite(retrace)) or retrace <= 0.0 or retrace >= 1.0:
+            continue
+        out.append({"r_multiple": float(r_mult), "retrace_ratio": float(retrace)})
+    if not out:
+        out = [dict(x) for x in DEFAULT_R_TAKE_PROFIT_TIERS]
+    uniq: dict[float, float] = {}
+    for row in out:
+        uniq[float(row["r_multiple"])] = float(row["retrace_ratio"])
+    rows = [{"r_multiple": float(k), "retrace_ratio": float(v)} for k, v in uniq.items()]
+    rows.sort(key=lambda x: float(x["r_multiple"]))
+    return rows
+
+
+def _apply_r_multiple_take_profit(
+    base_pos: pd.Series,
+    *,
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    enabled: bool,
+    reentry_mode: str,
+    atr_window: int,
+    atr_n: float,
+    tiers: list[dict[str, float]] | None,
+    atr_stop_enabled: bool,
+) -> tuple[pd.Series, dict[str, Any]]:
+    tiers_v = _normalize_r_take_profit_tiers(tiers)
+    reentry_v = str(reentry_mode or "reenter").strip().lower()
+    if reentry_v not in {"reenter", "wait_next_entry"}:
+        reentry_v = "reenter"
+    if not bool(enabled):
+        out_none = base_pos.fillna(0.0).astype(float)
+        return out_none, {
+            "enabled": False,
+            "reentry_mode": reentry_v,
+            "atr_window": int(atr_window),
+            "atr_n": float(atr_n),
+            "fallback_mode_used": False,
+            "initial_r_mode": "disabled",
+            "trigger_count": 0,
+            "trigger_dates": [],
+            "first_trigger_date": None,
+            "last_trigger_date": None,
+            "entries": int(((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()),
+            "exits": int(((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()),
+            "trigger_exit_share": 0.0,
+            "wait_next_entry_lock_active": False,
+            "tiers": tiers_v,
+            "trace_last_rows": [],
+        }
+    bp = base_pos.fillna(0.0).astype(float)
+    cl = close.astype(float)
+    hi = high.astype(float).fillna(cl)
+    lo = low.astype(float).fillna(cl)
+    atr = _atr_from_hlc(hi, lo, cl, window=int(atr_window)).astype(float)
+    out = np.zeros(len(bp), dtype=float)
+    trigger_dates: list[str] = []
+    trace_last_rows: list[dict[str, Any]] = []
+    in_pos = False
+    prev_base = 0.0
+    wait_next_entry_lock = False
+    entry_px = float("nan")
+    initial_r_pct = float("nan")
+    peak_profit_pct = float("nan")
+    invalid_r_entries = 0
+    eps = 1e-12
+
+    for i in range(len(bp)):
+        b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
+        c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
+        a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
+        d = bp.index[i]
+        ds = d.date().isoformat() if hasattr(d, "date") else str(d)
+        base_entry_event = bool((b > 0.0) and (prev_base <= 0.0))
+
+        if not in_pos:
+            if b <= 0.0 or (not np.isfinite(c)) or c <= 0.0:
+                out[i] = 0.0
+                prev_base = b
+                continue
+            if reentry_v == "wait_next_entry" and wait_next_entry_lock and (not base_entry_event):
+                out[i] = 0.0
+                prev_base = b
+                continue
+            in_pos = True
+            wait_next_entry_lock = False
+            entry_px = c
+            initial_r_pct = float(atr_n) * a / c if (np.isfinite(a) and a > 0.0) else float("nan")
+            if (not np.isfinite(initial_r_pct)) or initial_r_pct <= eps:
+                invalid_r_entries += 1
+                initial_r_pct = float("nan")
+            peak_profit_pct = 0.0
+            out[i] = b
+            trace_last_rows.append(
+                {
+                    "date": ds,
+                    "event_type": "entry",
+                    "event_reason": ("base_entry_signal" if base_entry_event else "tp_reentry"),
+                    "base_pos": float(b),
+                    "entry_price": float(entry_px),
+                    "atr_entry": (float(a) if np.isfinite(a) else None),
+                    "initial_r_pct": (float(initial_r_pct) if np.isfinite(initial_r_pct) else None),
+                    "peak_profit_pct": 0.0,
+                    "peak_r_multiple": 0.0,
+                    "active_tier_r": None,
+                    "active_tier_retrace": None,
+                    "drawdown_from_peak": 0.0,
+                    "tp_triggered": False,
+                    "decision_pos": float(out[i]),
+                    "in_pos_after": bool(in_pos),
+                    "wait_next_entry_lock": bool(wait_next_entry_lock),
+                }
+            )
+            if len(trace_last_rows) > 120:
+                trace_last_rows = trace_last_rows[-120:]
+            prev_base = b
+            continue
+
+        if b <= 0.0:
+            in_pos = False
+            out[i] = 0.0
+            entry_px = float("nan")
+            initial_r_pct = float("nan")
+            peak_profit_pct = float("nan")
+            trace_last_rows.append(
+                {
+                    "date": ds,
+                    "event_type": "exit",
+                    "event_reason": "base_exit_signal",
+                    "base_pos": float(b),
+                    "entry_price": None,
+                    "atr_entry": None,
+                    "initial_r_pct": None,
+                    "peak_profit_pct": None,
+                    "peak_r_multiple": None,
+                    "active_tier_r": None,
+                    "active_tier_retrace": None,
+                    "drawdown_from_peak": None,
+                    "tp_triggered": False,
+                    "decision_pos": float(out[i]),
+                    "in_pos_after": bool(in_pos),
+                    "wait_next_entry_lock": bool(wait_next_entry_lock),
+                }
+            )
+            if len(trace_last_rows) > 120:
+                trace_last_rows = trace_last_rows[-120:]
+            prev_base = b
+            continue
+
+        cur_profit_pct = (c / entry_px - 1.0) if (np.isfinite(c) and np.isfinite(entry_px) and entry_px > eps) else float("nan")
+        if np.isfinite(cur_profit_pct):
+            peak_profit_pct = max(float(peak_profit_pct), float(cur_profit_pct))
+        peak_r_mult = (float(peak_profit_pct) / float(initial_r_pct)) if (np.isfinite(peak_profit_pct) and np.isfinite(initial_r_pct) and initial_r_pct > eps) else float("nan")
+        active_tier: dict[str, float] | None = None
+        if np.isfinite(peak_r_mult):
+            for row in tiers_v:
+                if peak_r_mult >= float(row["r_multiple"]):
+                    active_tier = row
+        dd_from_peak = (
+            (float(peak_profit_pct) - float(cur_profit_pct)) / float(peak_profit_pct)
+            if (np.isfinite(peak_profit_pct) and peak_profit_pct > eps and np.isfinite(cur_profit_pct))
+            else float("nan")
+        )
+        tp_triggered = bool(
+            active_tier is not None
+            and np.isfinite(dd_from_peak)
+            and dd_from_peak >= float(active_tier["retrace_ratio"])
+        )
+        if tp_triggered:
+            in_pos = False
+            out[i] = 0.0
+            if reentry_v == "wait_next_entry":
+                wait_next_entry_lock = True
+            trigger_dates.append(ds)
+            trace_last_rows.append(
+                {
+                    "date": ds,
+                    "event_type": "exit",
+                    "event_reason": "r_take_profit",
+                    "base_pos": float(b),
+                    "entry_price": (float(entry_px) if np.isfinite(entry_px) else None),
+                    "atr_entry": None,
+                    "initial_r_pct": (float(initial_r_pct) if np.isfinite(initial_r_pct) else None),
+                    "peak_profit_pct": (float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None),
+                    "peak_r_multiple": (float(peak_r_mult) if np.isfinite(peak_r_mult) else None),
+                    "active_tier_r": float(active_tier["r_multiple"]) if active_tier else None,
+                    "active_tier_retrace": float(active_tier["retrace_ratio"]) if active_tier else None,
+                    "drawdown_from_peak": (float(dd_from_peak) if np.isfinite(dd_from_peak) else None),
+                    "tp_triggered": True,
+                    "decision_pos": float(out[i]),
+                    "in_pos_after": bool(in_pos),
+                    "wait_next_entry_lock": bool(wait_next_entry_lock),
+                }
+            )
+            if len(trace_last_rows) > 120:
+                trace_last_rows = trace_last_rows[-120:]
+            entry_px = float("nan")
+            initial_r_pct = float("nan")
+            peak_profit_pct = float("nan")
+            prev_base = b
+            continue
+
+        out[i] = b
+        trace_last_rows.append(
+            {
+                "date": ds,
+                "event_type": "hold",
+                "event_reason": "r_take_profit_watch",
+                "base_pos": float(b),
+                "entry_price": (float(entry_px) if np.isfinite(entry_px) else None),
+                "atr_entry": None,
+                "initial_r_pct": (float(initial_r_pct) if np.isfinite(initial_r_pct) else None),
+                "peak_profit_pct": (float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None),
+                "peak_r_multiple": (float(peak_r_mult) if np.isfinite(peak_r_mult) else None),
+                "active_tier_r": float(active_tier["r_multiple"]) if active_tier else None,
+                "active_tier_retrace": float(active_tier["retrace_ratio"]) if active_tier else None,
+                "drawdown_from_peak": (float(dd_from_peak) if np.isfinite(dd_from_peak) else None),
+                "tp_triggered": False,
+                "decision_pos": float(out[i]),
+                "in_pos_after": bool(in_pos),
+                "wait_next_entry_lock": bool(wait_next_entry_lock),
+            }
+        )
+        if len(trace_last_rows) > 120:
+            trace_last_rows = trace_last_rows[-120:]
+        prev_base = b
+
+    out_s = pd.Series(out, index=base_pos.index, dtype=float)
+    exits = int(((out_s <= 0.0) & (out_s.shift(1).fillna(0.0) > 0.0)).sum())
+    trigger_count = int(len(trigger_dates))
+    stats = {
+        "enabled": True,
+        "reentry_mode": reentry_v,
+        "atr_window": int(atr_window),
+        "atr_n": float(atr_n),
+        "fallback_mode_used": bool(not atr_stop_enabled),
+        "initial_r_mode": ("atr_stop" if atr_stop_enabled else "virtual_atr_fallback"),
+        "trigger_count": trigger_count,
+        "trigger_dates": trigger_dates[:200],
+        "first_trigger_date": (trigger_dates[0] if trigger_dates else None),
+        "last_trigger_date": (trigger_dates[-1] if trigger_dates else None),
+        "entries": int(((out_s > 0.0) & (out_s.shift(1).fillna(0.0) <= 0.0)).sum()),
+        "exits": exits,
+        "trigger_exit_share": (float(trigger_count) / float(exits) if exits > 0 else 0.0),
+        "wait_next_entry_lock_active": bool(wait_next_entry_lock),
+        "tiers": tiers_v,
+        "invalid_initial_r_entries": int(invalid_r_entries),
+        "trace_last_rows": trace_last_rows[-80:],
+    }
+    return out_s, stats
+
+
 def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     code = (inp.code or "").strip()
     if not code:
@@ -991,6 +1269,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("tsmom_exit_threshold must be finite")
     if float(inp.tsmom_entry_threshold) < float(inp.tsmom_exit_threshold):
         raise ValueError("tsmom thresholds must satisfy: entry >= exit")
+    if int(inp.bias_ma_window) < 2:
+        raise ValueError("bias_ma_window must be >= 2")
+    if not np.isfinite(float(inp.bias_entry)):
+        raise ValueError("bias_entry must be finite")
+    if not np.isfinite(float(inp.bias_hot)):
+        raise ValueError("bias_hot must be finite")
+    if not np.isfinite(float(inp.bias_cold)):
+        raise ValueError("bias_cold must be finite")
+    if not (float(inp.bias_cold) < float(inp.bias_entry) < float(inp.bias_hot)):
+        raise ValueError("bias thresholds must satisfy: cold < entry < hot")
     atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
     if atr_mode not in {"none", "static", "trailing", "tightening"}:
         raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
@@ -1008,6 +1296,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("atr_stop_m must be finite and > 0")
     if atr_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
         raise ValueError("atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening")
+    rtp_enabled = bool(getattr(inp, "r_take_profit_enabled", False))
+    rtp_reentry_mode = str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter").strip().lower()
+    if rtp_reentry_mode not in {"reenter", "wait_next_entry"}:
+        raise ValueError("r_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
+    rtp_tiers = _normalize_r_take_profit_tiers(getattr(inp, "r_take_profit_tiers", None))
     if int(inp.donchian_entry) < 2 or int(inp.donchian_exit) < 2:
         raise ValueError("donchian_entry/donchian_exit must be >= 2")
     if int(inp.mom_lookback) < 2:
@@ -1309,6 +1602,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         n_mult=float(inp.atr_stop_n),
         m_step=float(inp.atr_stop_m),
     )
+    raw_pos, r_take_profit_stats = _apply_r_multiple_take_profit(
+        raw_pos,
+        close=px_sig,
+        high=high_qfq,
+        low=low_qfq,
+        enabled=rtp_enabled,
+        reentry_mode=rtp_reentry_mode,
+        atr_window=int(inp.atr_stop_window),
+        atr_n=float(inp.atr_stop_n),
+        tiers=rtp_tiers,
+        atr_stop_enabled=bool(atr_mode != "none"),
+    )
     raw_pos = raw_pos.astype(float)
 
     # Single-asset sizing overlay (same knobs as portfolio mode).
@@ -1548,6 +1853,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "atr_stop_window": int(inp.atr_stop_window),
                 "atr_stop_n": float(inp.atr_stop_n),
                 "atr_stop_m": float(inp.atr_stop_m),
+                "r_take_profit_enabled": bool(rtp_enabled),
+                "r_take_profit_reentry_mode": str(rtp_reentry_mode),
+                "r_take_profit_tiers": rtp_tiers,
                 "bias_ma_window": int(inp.bias_ma_window),
                 "bias_entry": float(inp.bias_entry),
                 "bias_hot": float(inp.bias_hot),
@@ -1619,7 +1927,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             },
         },
         "metrics": {"strategy": m_strat, "benchmark": m_bh, "excess": m_ex},
-        "risk_controls": {"atr_stop": atr_stop_stats},
+        "risk_controls": {
+            "atr_stop": atr_stop_stats,
+            "r_take_profit": r_take_profit_stats,
+        },
         "corporate_actions": (
             [
                 {
@@ -1654,6 +1965,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                     "latest_stop_price": (atr_stop_stats or {}).get("latest_stop_price"),
                     "latest_stop_date": (atr_stop_stats or {}).get("latest_stop_date"),
                     "trace_last_rows": (atr_stop_stats or {}).get("trace_last_rows", []),
+                },
+                "r_take_profit": {
+                    "enabled": bool((r_take_profit_stats or {}).get("enabled", False)),
+                    "initial_r_mode": (r_take_profit_stats or {}).get("initial_r_mode"),
+                    "fallback_mode_used": bool((r_take_profit_stats or {}).get("fallback_mode_used", False)),
+                    "trigger_count": int((r_take_profit_stats or {}).get("trigger_count", 0)),
+                    "last_trigger_date": (r_take_profit_stats or {}).get("last_trigger_date"),
+                    "wait_next_entry_lock_active": bool((r_take_profit_stats or {}).get("wait_next_entry_lock_active", False)),
+                    "tiers": (r_take_profit_stats or {}).get("tiers", []),
+                    "trace_last_rows": (r_take_profit_stats or {}).get("trace_last_rows", []),
                 },
             },
         },
@@ -1723,6 +2044,11 @@ def compute_trend_portfolio_backtest(
         raise ValueError("atr_stop_m must be finite and > 0")
     if atr_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
         raise ValueError("atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening")
+    rtp_enabled = bool(getattr(inp, "r_take_profit_enabled", False))
+    rtp_reentry_mode = str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter").strip().lower()
+    if rtp_reentry_mode not in {"reenter", "wait_next_entry"}:
+        raise ValueError("r_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
+    rtp_tiers = _normalize_r_take_profit_tiers(getattr(inp, "r_take_profit_tiers", None))
     if not np.isfinite(float(inp.tsmom_entry_threshold)):
         raise ValueError("tsmom_entry_threshold must be finite")
     if not np.isfinite(float(inp.tsmom_exit_threshold)):
@@ -1902,6 +2228,7 @@ def compute_trend_portfolio_backtest(
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
     atr_stop_by_asset: dict[str, dict[str, Any]] = {}
+    rtp_by_asset: dict[str, dict[str, Any]] = {}
     for c in codes:
         px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
         if px.dropna().empty:
@@ -1931,7 +2258,33 @@ def compute_trend_portfolio_backtest(
             b_win = int(inp.bias_ma_window)
             ema = _ema(px, b_win)
             bias = (np.log(px.clip(lower=1e-12)) - np.log(ema.clip(lower=1e-12))) * 100.0
-            pos = (bias > float(inp.bias_entry)).astype(float)
+            entry = float(inp.bias_entry)
+            hot = float(inp.bias_hot)
+            cold = float(inp.bias_cold)
+            pos_mode = str(getattr(inp, "bias_pos_mode", "binary") or "binary").strip().lower()
+            if pos_mode not in {"binary", "continuous"}:
+                pos_mode = "binary"
+            pos_arr = np.zeros(len(px), dtype=float)
+            in_pos = False
+            for i in range(len(px)):
+                b = float(bias.iloc[i]) if np.isfinite(float(bias.iloc[i])) else float("nan")
+                if not np.isfinite(b):
+                    in_pos = False
+                    pos_arr[i] = 0.0
+                    continue
+                if not in_pos:
+                    if b > entry:
+                        in_pos = True
+                elif (b >= hot) or (b <= cold):
+                    in_pos = False
+                if not in_pos:
+                    pos_arr[i] = 0.0
+                elif pos_mode == "binary":
+                    pos_arr[i] = 1.0
+                else:
+                    wv = (b - cold) / (hot - cold)
+                    pos_arr[i] = float(np.clip(wv, 0.0, 1.0))
+            pos = pd.Series(pos_arr, index=px.index, dtype=float)
             score = bias.astype(float)
         elif strat == "macd_cross":
             macd, sig, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
@@ -1999,9 +2352,22 @@ def compute_trend_portfolio_backtest(
             n_mult=float(inp.atr_stop_n),
             m_step=float(inp.atr_stop_m),
         )
+        pos, one_rtp_stats = _apply_r_multiple_take_profit(
+            pos.fillna(0.0).astype(float),
+            close=px,
+            high=h.astype(float).fillna(px),
+            low=l.astype(float).fillna(px),
+            enabled=rtp_enabled,
+            reentry_mode=rtp_reentry_mode,
+            atr_window=int(inp.atr_stop_window),
+            atr_n=float(inp.atr_stop_n),
+            tiers=rtp_tiers,
+            atr_stop_enabled=bool(atr_mode != "none"),
+        )
         sig_pos[c] = pos.fillna(0.0)
         sig_score[c] = score.replace([np.inf, -np.inf], np.nan)
         atr_stop_by_asset[str(c)] = one_stop_stats
+        rtp_by_asset[str(c)] = one_rtp_stats
 
     atr_budget_df = pd.DataFrame(index=dates, columns=codes, dtype=float)
     if ps == "risk_budget":
@@ -2302,6 +2668,15 @@ def compute_trend_portfolio_backtest(
             if str(d).strip()
         }
     )
+    total_rtp_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in rtp_by_asset.values()))
+    uniq_rtp_trigger_dates = sorted(
+        {
+            str(d)
+            for v in rtp_by_asset.values()
+            for d in (v or {}).get("trigger_dates", [])
+            if str(d).strip()
+        }
+    )
     ext_dates = sorted({str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()})
     skip_dates = sorted({str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()})
     ext_over_weight_count = int(sum(1 for e in ext_events if bool(e.get("over_weight"))))
@@ -2377,6 +2752,9 @@ def compute_trend_portfolio_backtest(
                 "atr_stop_window": int(inp.atr_stop_window),
                 "atr_stop_n": float(inp.atr_stop_n),
                 "atr_stop_m": float(inp.atr_stop_m),
+                "r_take_profit_enabled": bool(rtp_enabled),
+                "r_take_profit_reentry_mode": str(rtp_reentry_mode),
+                "r_take_profit_tiers": rtp_tiers,
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
@@ -2450,6 +2828,19 @@ def compute_trend_portfolio_backtest(
                 "last_trigger_date": (uniq_trigger_dates[-1] if uniq_trigger_dates else None),
                 "trigger_dates": uniq_trigger_dates[:200],
                 "by_asset": atr_stop_by_asset,
+            },
+            "r_take_profit": {
+                "enabled": bool(rtp_enabled),
+                "reentry_mode": str(rtp_reentry_mode),
+                "tiers": rtp_tiers,
+                "trigger_count": total_rtp_triggers,
+                "trigger_days": int(len(uniq_rtp_trigger_dates)),
+                "first_trigger_date": (uniq_rtp_trigger_dates[0] if uniq_rtp_trigger_dates else None),
+                "last_trigger_date": (uniq_rtp_trigger_dates[-1] if uniq_rtp_trigger_dates else None),
+                "trigger_dates": uniq_rtp_trigger_dates[:200],
+                "fallback_mode_used": bool((atr_mode == "none") and rtp_enabled),
+                "initial_r_mode": ("atr_stop" if atr_mode != "none" else "virtual_atr_fallback"),
+                "by_asset": rtp_by_asset,
             },
             "position_extension": {
                 "enabled": bool(ps == "fixed_ratio" and fixed_overcap_policy == "extend"),

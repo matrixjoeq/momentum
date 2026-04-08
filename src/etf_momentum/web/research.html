@@ -505,6 +505,7 @@
           <select id="distTypeSelect" style="min-width:180px;">
             <!-- raw (original) values -->
             <option value="return">收益率</option>
+            <option value="efficiency_ratio">市场效率比率ER(10)</option>
             <option value="volatility">波动率</option>
             <option value="atr20_level">ATR%(20日) 波动性历史位置</option>
             <option value="mtr_atr20_multiple">当日波动MTR/ATR(20)</option>
@@ -2818,6 +2819,26 @@
         <div><label>收紧步长 m</label><input id="trendAtrStopM" value="0.5" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>通用R乘数止盈</label>
+          <select id="trendRTpEnable" style="min-width:140px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>止盈后重入</label>
+          <select id="trendRTpReentry" style="min-width:150px;">
+            <option value="reenter" selected>允许重返</option>
+            <option value="wait_next_entry">等待下一次入场</option>
+          </select>
+        </div>
+        <div style="min-width:420px;">
+          <label>R阈值与允许回落（r:ratio，逗号分隔）</label>
+          <input id="trendRTpTiers" value="2:0.5,3:0.3,4:0.2,5:0.1,6:0.05" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>混合策略入场阈值 n</label><input id="trendHybridEntryN" value="1" /></div>
         <div><label>混合策略离场阈值 m</label><input id="trendHybridExitM" value="1" /></div>
       </div>
@@ -3065,6 +3086,14 @@
                 <select id="trendTraceView" style="min-width:130px;">
                   <option value="by_date" selected>按日期</option>
                   <option value="by_asset">按标的</option>
+                </select>
+              </div>
+              <div>
+                <label>风控类型</label>
+                <select id="trendTraceRiskFilter" style="min-width:130px;">
+                  <option value="all" selected>全部</option>
+                  <option value="atr">仅ATR止损</option>
+                  <option value="rtp">仅R止盈</option>
                 </select>
               </div>
             </div>
@@ -4433,10 +4462,11 @@
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
+          "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
           "trendHybridEntryN", "trendHybridExitM",
-          "trendEventBucketProfile",
+          "trendEventBucketProfile", "trendTraceN", "trendTraceView", "trendTraceRiskFilter",
         ],
         calTiming: [
           "calTimingMode", "calTimingSingleCode", "calTimingDecisionDay", "calTimingHoldDays",
@@ -6515,6 +6545,36 @@
         setEnabled(basisEl, canEditAll);
         setEnabled(mEl, canEditAll);
       }
+      function _parseRTpTiers(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return { __error: "R止盈分层不能为空", tiers: [] };
+        const parts = s.split(",").map((x) => String(x || "").trim()).filter(Boolean);
+        const tiers = [];
+        for (const p of parts) {
+          const kv = p.split(":").map((x) => String(x || "").trim());
+          if (kv.length !== 2) return { __error: `R止盈分层格式非法：${p}（应为 r:ratio）`, tiers: [] };
+          const r = Number(kv[0]);
+          const ratio = Number(kv[1]);
+          if (!Number.isFinite(r) || r <= 0) return { __error: `R阈值需为>0数字：${p}`, tiers: [] };
+          if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) return { __error: `回落比例需在(0,1)之间：${p}`, tiers: [] };
+          tiers.push({ r_multiple: r, retrace_ratio: ratio });
+        }
+        tiers.sort((a, b) => Number(a.r_multiple) - Number(b.r_multiple));
+        return { tiers };
+      }
+      function _syncRTpParamsUi() {
+        const onEl = $("trendRTpEnable");
+        const reEl = $("trendRTpReentry");
+        const tEl = $("trendRTpTiers");
+        const on = !!(onEl && String(onEl.value || "false") === "true");
+        const setEnabled = (el, enable) => {
+          if (!el) return;
+          el.disabled = !enable;
+          el.style.opacity = enable ? "1" : "0.55";
+        };
+        setEnabled(reEl, on);
+        setEnabled(tEl, on);
+      }
       function updateTrendSizingUi() {
         const mode = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
         const sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
@@ -6613,6 +6673,9 @@
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
+          "trendRTpEnable",
+          "trendRTpReentry",
+          "trendRTpTiers",
         ];
         const alwaysEnabledIds = [
           "trendAtrStopMode",
@@ -6621,6 +6684,9 @@
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
+          "trendRTpEnable",
+          "trendRTpReentry",
+          "trendRTpTiers",
         ];
         const byStrat = {
           ma_filter: ["trendSmaWin", "trendMaType"],
@@ -6658,6 +6724,7 @@
           el.style.opacity = on ? "1" : "0.55";
         }
         _syncAtrStopParamsUi("trend");
+        _syncRTpParamsUi();
 
         const stratDesc = {
           ma_filter: "均线过滤：价格在均线之上持有，否则空仓；均线类型可选 SMA 或 EMA。",
@@ -6711,6 +6778,9 @@
           trendAtrStopWin: "ATR周期：用于止损距离计算的ATR窗口。",
           trendAtrStopN: "止损倍数n：基础止损距离为 n*ATR。",
           trendAtrStopM: "收紧步长m：动态收紧模式下每上涨 m*ATR 收紧一次，且需 n>m。",
+          trendRTpEnable: "通用R乘数止盈：按初始风险R跟踪浮盈，达到分层后按允许回落比例触发离场。",
+          trendRTpReentry: "止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
+          trendRTpTiers: "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
         };
         if (descEl) {
           const s = stratDesc[strat] || "-";
@@ -7138,8 +7208,13 @@
         if (!wrapEl || !boxEl) return;
         const nSel = $("trendTraceN");
         const viewSel = $("trendTraceView");
+        const riskSel = $("trendTraceRiskFilter");
         const nVal = Number((nSel && nSel.value) ? nSel.value : "20");
         const traceN = [1, 5, 10, 20].includes(nVal) ? nVal : 20;
+        const riskFilter = (() => {
+          const v = String((riskSel && riskSel.value) ? riskSel.value : "all").trim().toLowerCase();
+          return ["all", "atr", "rtp"].includes(v) ? v : "all";
+        })();
         const isPortfolio = String(mode || "single") === "portfolio";
         if (viewSel) {
           viewSel.disabled = !isPortfolio;
@@ -7151,7 +7226,9 @@
         const np = (((data || {}).next_plan || {}));
         const tr = ((np && np.trace) || {});
         const atr = ((tr && tr.atr_stop) || {});
-        const rows = Array.isArray(atr.trace_last_rows) ? atr.trace_last_rows : [];
+        const rtp = ((tr && tr.r_take_profit) || (((data || {}).risk_controls || {}).r_take_profit || {}));
+        const atrRows = Array.isArray(atr.trace_last_rows) ? atr.trace_last_rows : [];
+        const rtpRows = Array.isArray(rtp.trace_last_rows) ? rtp.trace_last_rows : [];
         const _eventLabel = (x) => {
           const v = String(x || "").trim().toLowerCase();
           if (v === "entry") return "入场";
@@ -7162,60 +7239,96 @@
           const v = String(x || "").trim().toLowerCase();
           if (v === "base_entry_signal") return "基础信号入场";
           if (v === "stop_reentry") return "止损后重返";
+          if (v === "tp_reentry") return "止盈后重返";
           if (v === "base_exit_signal") return "基础信号出场";
           if (v === "atr_stop") return "ATR止损出场";
+          if (v === "r_take_profit") return "R止盈出场";
+          if (v === "atr_update") return "ATR动态更新";
+          if (v === "r_take_profit_watch") return "R止盈监控";
           return "-";
+        };
+        const _sourceLabel = (x) => {
+          const v = String(x || "").trim().toLowerCase();
+          if (v === "atr") return "ATR止损";
+          if (v === "rtp") return "R止盈";
+          return "-";
+        };
+        const _mergeTraceRows = (atrRowsIn, rtpRowsIn) => {
+          const out = [];
+          if (riskFilter === "all" || riskFilter === "atr") {
+            for (const r of (Array.isArray(atrRowsIn) ? atrRowsIn : [])) out.push({ source: "atr", ...(r || {}) });
+          }
+          if (riskFilter === "all" || riskFilter === "rtp") {
+            for (const r of (Array.isArray(rtpRowsIn) ? rtpRowsIn : [])) out.push({ source: "rtp", ...(r || {}) });
+          }
+          out.sort((a, b) => {
+            const c = String(b.date || "").localeCompare(String(a.date || ""));
+            if (c !== 0) return c;
+            return String(a.source || "").localeCompare(String(b.source || ""));
+          });
+          return out;
         };
         let traceHtml = "";
         if (!isPortfolio) {
-          const shortRows = rows.slice(-traceN);
+          const shortRows = _mergeTraceRows(atrRows, rtpRows).slice(0, traceN);
           const rowHtml = shortRows.length
             ? shortRows.map((r) => `<tr>
                 <td>${esc(r.date || "-")}</td>
+                <td>${esc(_sourceLabel(r.source))}</td>
                 <td>${esc(_eventLabel(r.event_type))}</td>
                 <td>${esc(_reasonLabel(r.event_reason))}</td>
                 <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
                 <td>${r.base_entry_event ? "是" : "否"}</td>
                 <td>${r.stop_triggered ? "是" : "否"}</td>
+                <td>${r.tp_triggered ? "是" : "否"}</td>
                 <td>${fmtNum(r.stop_before)}</td>
                 <td>${fmtNum(r.stop_after)}</td>
+                <td>${Number.isFinite(Number(r.peak_r_multiple)) ? fmtNum(Number(r.peak_r_multiple)) : "-"}</td>
+                <td>${Number.isFinite(Number(r.drawdown_from_peak)) ? fmtPct(Number(r.drawdown_from_peak)) : "-"}</td>
                 <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                 <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
               </tr>`).join("")
-            : `<tr><td colspan="10" class="muted">无可用 trace 数据</td></tr>`;
+            : `<tr><td colspan="13" class="muted">无可用 trace 数据</td></tr>`;
           traceHtml =
             `<div style="margin-top:8px;"><b>最近决策轨迹（近${shortRows.length}条）</b></div>` +
-            `<table style="margin-top:4px;"><tr><th>日期</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>触发前止损价</th><th>触发后止损价</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+            `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
         } else {
-          const byAsset = ((((data || {}).risk_controls || {}).atr_stop || {}).by_asset || {});
+          const byAssetAtr = ((((data || {}).risk_controls || {}).atr_stop || {}).by_asset || {});
+          const byAssetRtp = ((((data || {}).risk_controls || {}).r_take_profit || {}).by_asset || {});
+          const allCodes = Array.from(new Set([...(Object.keys(byAssetAtr || {})), ...(Object.keys(byAssetRtp || {}))])).sort();
           if (traceView === "by_asset") {
-            const codes = Object.keys(byAsset).sort();
-            const blocks = codes.map((code) => {
-              const oneRows = Array.isArray(((byAsset[code] || {}).trace_last_rows)) ? (byAsset[code] || {}).trace_last_rows : [];
-              const shortRows = oneRows.slice(-traceN);
+            const blocks = allCodes.map((code) => {
+              const oneAtrRows = Array.isArray(((byAssetAtr[code] || {}).trace_last_rows)) ? (byAssetAtr[code] || {}).trace_last_rows : [];
+              const oneRtpRows = Array.isArray(((byAssetRtp[code] || {}).trace_last_rows)) ? (byAssetRtp[code] || {}).trace_last_rows : [];
+              const shortRows = _mergeTraceRows(oneAtrRows, oneRtpRows).slice(0, traceN);
               const rowHtml = shortRows.length
                 ? shortRows.map((r) => `<tr>
                     <td>${esc(r.date || "-")}</td>
+                    <td>${esc(_sourceLabel(r.source))}</td>
                     <td>${esc(_eventLabel(r.event_type))}</td>
                     <td>${esc(_reasonLabel(r.event_reason))}</td>
                     <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
                     <td>${r.base_entry_event ? "是" : "否"}</td>
                     <td>${r.stop_triggered ? "是" : "否"}</td>
+                    <td>${r.tp_triggered ? "是" : "否"}</td>
                     <td>${fmtNum(r.stop_before)}</td>
                     <td>${fmtNum(r.stop_after)}</td>
+                    <td>${Number.isFinite(Number(r.peak_r_multiple)) ? fmtNum(Number(r.peak_r_multiple)) : "-"}</td>
+                    <td>${Number.isFinite(Number(r.drawdown_from_peak)) ? fmtPct(Number(r.drawdown_from_peak)) : "-"}</td>
                     <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                     <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
                   </tr>`).join("")
-                : `<tr><td colspan="10" class="muted">无</td></tr>`;
+                : `<tr><td colspan="13" class="muted">无</td></tr>`;
               return `<div style="margin-top:8px;"><b>${esc(codeLabel(code))}（近${shortRows.length}条）</b></div>` +
-                `<table style="margin-top:4px;"><tr><th>日期</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>触发前止损价</th><th>触发后止损价</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+                `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
             });
             traceHtml = blocks.length ? blocks.join("") : `<div class="muted" style="margin-top:8px;">无可用 trace 数据</div>`;
           } else {
             const merged = [];
-            for (const [code, one] of Object.entries(byAsset || {})) {
-              const oneRows = Array.isArray((one || {}).trace_last_rows) ? (one || {}).trace_last_rows : [];
-              for (const r of oneRows) merged.push({ code, ...(r || {}) });
+            for (const code of allCodes) {
+              const oneAtrRows = Array.isArray(((byAssetAtr[code] || {}).trace_last_rows)) ? (byAssetAtr[code] || {}).trace_last_rows : [];
+              const oneRtpRows = Array.isArray(((byAssetRtp[code] || {}).trace_last_rows)) ? (byAssetRtp[code] || {}).trace_last_rows : [];
+              for (const r of _mergeTraceRows(oneAtrRows, oneRtpRows)) merged.push({ code, ...(r || {}) });
             }
             merged.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(a.code || "").localeCompare(String(b.code || "")));
             const shortRows = merged.slice(0, traceN);
@@ -7223,20 +7336,24 @@
               ? shortRows.map((r) => `<tr>
                   <td>${esc(codeLabel(r.code || ""))}</td>
                   <td>${esc(r.date || "-")}</td>
+                  <td>${esc(_sourceLabel(r.source))}</td>
                   <td>${esc(_eventLabel(r.event_type))}</td>
                   <td>${esc(_reasonLabel(r.event_reason))}</td>
                   <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
                   <td>${r.base_entry_event ? "是" : "否"}</td>
                   <td>${r.stop_triggered ? "是" : "否"}</td>
+                  <td>${r.tp_triggered ? "是" : "否"}</td>
                   <td>${fmtNum(r.stop_before)}</td>
                   <td>${fmtNum(r.stop_after)}</td>
+                  <td>${Number.isFinite(Number(r.peak_r_multiple)) ? fmtNum(Number(r.peak_r_multiple)) : "-"}</td>
+                  <td>${Number.isFinite(Number(r.drawdown_from_peak)) ? fmtPct(Number(r.drawdown_from_peak)) : "-"}</td>
                   <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                   <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
                 </tr>`).join("")
-              : `<tr><td colspan="11" class="muted">无可用 trace 数据</td></tr>`;
+              : `<tr><td colspan="14" class="muted">无可用 trace 数据</td></tr>`;
             traceHtml =
               `<div style="margin-top:8px;"><b>最近决策轨迹（按日期，全局近${shortRows.length}条）</b></div>` +
-              `<table style="margin-top:4px;"><tr><th>标的</th><th>日期</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>触发前止损价</th><th>触发后止损价</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+              `<table style="margin-top:4px;"><tr><th>标的</th><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
           }
         }
         const topRows = [
@@ -7252,6 +7369,11 @@
           ["最近触发日", String(atr.last_trigger_date || (((data || {}).risk_controls || {}).atr_stop || {}).last_trigger_date || "-")],
           ["锁定等待下一次入场", (atr.wait_next_entry_lock_active ? "是" : "否")],
           ["最新止损价", (Number.isFinite(Number(atr.latest_stop_price)) ? fmtNum(Number(atr.latest_stop_price)) : "-")],
+          ["R止盈启用", (rtp.enabled ? "是" : "否")],
+          ["R止盈初始风险口径", String(rtp.initial_r_mode || "-")],
+          ["R止盈fallback", (rtp.fallback_mode_used ? "是" : "否")],
+          ["R止盈触发次数", String(Number(rtp.trigger_count || 0))],
+          ["R止盈最近触发日", String(rtp.last_trigger_date || "-")],
         ];
         boxEl.innerHTML =
           `<div class="muted">用于排查“止损后重入”与“下一交易日计划”是否符合预期。</div>` +
@@ -10153,9 +10275,11 @@
 
         if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect) return;
         const _distAtrDerivedTypes = new Set(["atr20_level", "mtr_atr20_multiple", "atr5_atr50_multiple"]);
+        const _distSyntheticTypes = new Set(["efficiency_ratio", ..._distAtrDerivedTypes]);
         const _distTypeIsPct = (t) => (t === "return" || t === "volatility" || t === "bias" || t === "atr20_level");
         const _distTypeLabel = (t) =>
           (t === "return") ? "收益率"
+          : (t === "efficiency_ratio") ? "市场效率比率ER(10)"
           : (t === "volatility") ? "波动率"
           : (t === "atr20_level") ? "ATR%(20日) 波动性历史位置"
           : (t === "mtr_atr20_multiple") ? "当日波动MTR/ATR(20)"
@@ -11101,6 +11225,32 @@
             return pack(dea);
           }
           if (type === "return") return pack(periodRet);
+          if (type === "efficiency_ratio") {
+            const lookback = 10;
+            const eps = 1e-12;
+            const er = new Array(periodClose.length).fill(NaN);
+            for (let i = 0; i < periodClose.length; i++) {
+              if (i < lookback) continue;
+              const cur = Number(periodClose[i]);
+              const past = Number(periodClose[i - lookback]);
+              if (!Number.isFinite(cur) || !Number.isFinite(past)) continue;
+              const direction = Math.abs(cur - past);
+              let volatility = 0.0;
+              let ok = true;
+              for (let j = i - lookback + 1; j <= i; j++) {
+                const a = Number(periodClose[j]);
+                const b = Number(periodClose[j - 1]);
+                if (!Number.isFinite(a) || !Number.isFinite(b)) {
+                  ok = false;
+                  break;
+                }
+                volatility += Math.abs(a - b);
+              }
+              if (!ok) continue;
+              er[i] = (volatility <= eps) ? 0.0 : (direction / volatility);
+            }
+            return pack(er);
+          }
           if (type === "log_return_dev") {
             const lr = periodRet.map((r) => (1 + Number(r) > 0 ? Math.log(1 + Number(r)) : NaN));
             const ma = rollingMean(lr, 20, 5);
@@ -12646,7 +12796,7 @@
 
           const key = `${period}_${type}`;
           let data = distByCode[code][key];
-          if (!data && _distAtrDerivedTypes.has(type)) {
+          if (!data && _distSyntheticTypes.has(type)) {
             data = _buildSyntheticDistData({
               code,
               type,
@@ -16402,6 +16552,9 @@
           atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
           atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
           atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
+          r_take_profit_enabled: (($("trendRTpEnable") && $("trendRTpEnable").value) ? String($("trendRTpEnable").value) === "true" : false),
+          r_take_profit_reentry_mode: (($("trendRTpReentry") && $("trendRTpReentry").value) ? String($("trendRTpReentry").value) : "reenter"),
+          r_take_profit_tiers: [],
           fixed_pos_ratio: Number(($("trendFixedPosRatio") && $("trendFixedPosRatio").value ? $("trendFixedPosRatio").value : "0.04").trim()),
           fixed_overcap_policy: (($("trendFixedOvercapPolicy") && $("trendFixedOvercapPolicy").value) ? String($("trendFixedOvercapPolicy").value) : "skip"),
           fixed_max_holdings: Number(($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value ? $("trendFixedMaxHoldings").value : "10").trim()),
@@ -16444,6 +16597,19 @@
         if (common.atr_stop_mode === "tightening" && !(common.atr_stop_n > common.atr_stop_m)) {
           return setMsg("动态收紧模式要求 n > m");
         }
+        if (!["reenter", "wait_next_entry"].includes(String(common.r_take_profit_reentry_mode))) {
+          return setMsg("R止盈重入模式非法，请选择 允许重返/等待下一次入场");
+        }
+        if (common.r_take_profit_enabled) {
+          const parsed = _parseRTpTiers(($("trendRTpTiers") && $("trendRTpTiers").value) ? $("trendRTpTiers").value : "");
+          if (parsed && parsed.__error) return setMsg(parsed.__error);
+          common.r_take_profit_tiers = parsed.tiers || [];
+          if (!Array.isArray(common.r_take_profit_tiers) || common.r_take_profit_tiers.length === 0) {
+            return setMsg("R止盈分层至少配置1档");
+          }
+        } else {
+          common.r_take_profit_tiers = [];
+        }
         if (!["skip", "extend"].includes(String(common.fixed_overcap_policy))) {
           return setMsg("固定比例超额策略非法，请选择 跳过/扩展");
         }
@@ -16485,6 +16651,11 @@
         }
         $("status").textContent = "趋势回测中...";
         setMsg("");
+        const fallbackHint = (
+          common.r_take_profit_enabled
+          && String(common.atr_stop_mode || "none") === "none"
+        ) ? "提示：ATR止损关闭，R止盈将使用 virtual ATR 初始风险 fallback（入场ATR*n/入场价）。" : "";
+        if (fallbackHint) setMsg(fallbackHint);
         const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
         if (!["equal", "vol_target", "fixed_ratio", "risk_budget"].includes(position_sizing)) return setMsg("仓位法仅支持 等权/目标波动率/固定比例/风险预算");
         if (position_sizing === "fixed_ratio" && common.fixed_pos_ratio > 1) {
@@ -19241,6 +19412,7 @@
       if ($("rotPositionMode")) $("rotPositionMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("rotTopKMode")) $("rotTopKMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("trendAtrStopMode")) $("trendAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("trend"));
+      if ($("trendRTpEnable")) $("trendRTpEnable").addEventListener("change", _syncRTpParamsUi);
       if ($("rotAtrStopMode")) $("rotAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("rot"));
       if ($("trendTraceN")) $("trendTraceN").addEventListener("change", () => {
         try {
@@ -19258,9 +19430,18 @@
           }
         } catch (_) { /* ignore */ }
       });
+      if ($("trendTraceRiskFilter")) $("trendTraceRiskFilter").addEventListener("change", () => {
+        try {
+          if (window.__lastTrendResult) {
+            const m = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
+            renderTrendPositionPlan(window.__lastTrendResult, m);
+          }
+        } catch (_) { /* ignore */ }
+      });
       // Init trend strategy parameter enablement/description on page load.
       updateTrendStrategyParamsUi();
       updateTrendSizingUi();
+      _syncRTpParamsUi();
       _syncRotPositionModeUi();
       _syncAtrStopParamsUi("rot");
       if ($("rotSuggestGroups")) $("rotSuggestGroups").addEventListener("click", runSuggestGroups);

@@ -42,7 +42,7 @@ DEFAULT_POLICIES: list[dict] = [
         "description": "QDII/商品/跨市资产，可能受汇率与跨市影响，阈值更宽。",
         "max_abs_return": 0.35,
         "max_hl_spread": 0.60,
-        "max_gap_days": 15,
+        "max_gap_days": 30,
     },
 ]
 

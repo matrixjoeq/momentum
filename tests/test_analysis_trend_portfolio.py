@@ -341,3 +341,82 @@ def test_trend_portfolio_risk_budget_position_sizing(session_factory):
         assert float(expo.max()) <= 1.0000001
         assert float(expo.max()) > 0.0
 
+
+def test_trend_portfolio_bias_has_base_exit_hot_cold(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            if i < 60:
+                px = 100.0 + i * 0.8
+            elif i < 90:
+                px = 148.0 - (i - 60) * 0.3
+            else:
+                px = 139.0 + (i - 90) * 0.9
+            _add_price(db, code="A1", day=d, close=px)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="bias",
+                bias_ma_window=8,
+                bias_entry=2.0,
+                bias_hot=8.0,
+                bias_cold=-2.0,
+                bias_pos_mode="binary",
+                position_sizing="equal",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    w = pd.DataFrame((out.get("weights_decision") or {}).get("series") or {})
+    assert not w.empty
+    ws = w["A1"].astype(float)
+    assert any(v > 0 for v in ws.tolist())
+    assert any(v <= 0 for v in ws.tolist())
+
+
+def test_trend_portfolio_exposes_r_take_profit_controls(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            if i < 70:
+                a1 = 100.0 + i * 0.7
+                a2 = 90.0 + i * 0.5
+            else:
+                a1 = 149.0 - (i - 70) * 0.4
+                a2 = 125.0 - (i - 70) * 0.2
+            _add_price(db, code="A1", day=d, close=a1)
+            _add_price(db, code="A2", day=d, close=a2)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                atr_stop_mode="none",
+                r_take_profit_enabled=True,
+                r_take_profit_reentry_mode="reenter",
+                r_take_profit_tiers=[
+                    {"r_multiple": 2.0, "retrace_ratio": 0.5},
+                    {"r_multiple": 3.0, "retrace_ratio": 0.3},
+                ],
+                position_sizing="equal",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    rc = (out.get("risk_controls") or {})
+    rtp = (rc.get("r_take_profit") or {})
+    assert bool(rtp.get("enabled")) is True
+    assert str(rtp.get("initial_r_mode") or "") == "virtual_atr_fallback"
+    params = (((out.get("meta") or {}).get("params") or {}))
+    assert bool(params.get("r_take_profit_enabled")) is True
+

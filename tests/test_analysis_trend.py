@@ -5,6 +5,7 @@ import pandas as pd
 from etf_momentum.analysis.trend import (
     TrendInputs,
     _apply_atr_stop,
+    _apply_r_multiple_take_profit,
     compute_trend_backtest,
 )
 from etf_momentum.db.models import EtfPrice
@@ -451,4 +452,70 @@ def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
             # The first post-jump NAV point must remain ~1.0 (decision-day return excluded).
             # We allow tiny epsilon for float operations.
             assert nav[3] <= 1.0000001, f"{strat} appears to include decision-day return"
+
+
+def test_r_take_profit_triggers_on_peak_drawdown_with_virtual_atr_fallback() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([0.0, 0.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 110.0, 120.0, 130.0, 120.0], index=idx, dtype=float)
+    high = close.copy()
+    low = close.copy()
+
+    out_pos, stats = _apply_r_multiple_take_profit(
+        base_pos,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[
+            {"r_multiple": 2.0, "retrace_ratio": 0.5},
+            {"r_multiple": 3.0, "retrace_ratio": 0.3},
+        ],
+        atr_stop_enabled=False,
+    )
+
+    assert float(out_pos.iloc[-1]) == 0.0
+    assert int(stats.get("trigger_count") or 0) >= 1
+    assert bool(stats.get("fallback_mode_used")) is True
+    assert str(stats.get("initial_r_mode") or "") == "virtual_atr_fallback"
+
+
+def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            if i < 60:
+                px = 100.0 + i * 0.8
+            else:
+                px = 148.0 - (i - 60) * 0.5
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                atr_stop_mode="none",
+                r_take_profit_enabled=True,
+                r_take_profit_reentry_mode="reenter",
+                r_take_profit_tiers=[
+                    {"r_multiple": 2.0, "retrace_ratio": 0.5},
+                    {"r_multiple": 3.0, "retrace_ratio": 0.3},
+                ],
+                cost_bps=0.0,
+            ),
+        )
+    rtp = (((out.get("risk_controls") or {}).get("r_take_profit") or {}))
+    assert bool(rtp.get("enabled")) is True
+    assert str(rtp.get("initial_r_mode") or "") == "virtual_atr_fallback"
+    params = (((out.get("meta") or {}).get("params") or {}))
+    assert bool(params.get("r_take_profit_enabled")) is True
 
