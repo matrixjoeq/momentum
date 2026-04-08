@@ -2690,7 +2690,6 @@
             <option value="macd_cross">MACD金叉死叉</option>
             <option value="macd_zero_filter">MACD零轴过滤</option>
             <option value="macd_v">MACD-V</option>
-            <option value="hybrid_trend">混合趋势（5策略共振）</option>
           </select>
         </div>
         <div>
@@ -2789,6 +2788,17 @@
         <div><label>TSMOM出场阈值</label><input id="trendMomExitThr" value="0.0" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>ER入场过滤</label>
+          <select id="trendErFilterOn" style="min-width:120px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div><label>ER周期</label><input id="trendErWindow" value="10" /></div>
+        <div><label>ER阈值(0~1)</label><input id="trendErThreshold" value="0.30" /></div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>BIAS MA窗口</label><input id="trendBiasMaWin" value="20" /></div>
         <div><label>BIAS 入场阈值(%)</label><input id="trendBiasEntry" value="2.0" /></div>
         <div><label>BIAS 过热止盈(%)</label><input id="trendBiasHot" value="10.0" /></div>
@@ -2857,8 +2867,6 @@
         </div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
-        <div><label>混合策略入场阈值 n</label><input id="trendHybridEntryN" value="1" /></div>
-        <div><label>混合策略离场阈值 m</label><input id="trendHybridExitM" value="1" /></div>
       </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
       <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
@@ -3152,7 +3160,6 @@
             <option value="macd_cross">macd_cross</option>
             <option value="macd_zero_filter">macd_zero_filter</option>
             <option value="macd_v">macd_v</option>
-            <option value="hybrid_trend">hybrid_trend</option>
           </select>
         </div>
         <div><label>成本(bps)</label><input id="trendOosCost" value="2" /></div>
@@ -4477,11 +4484,11 @@
           "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
+          "trendErFilterOn", "trendErWindow", "trendErThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
-          "trendHybridEntryN", "trendHybridExitM",
           "trendEventBucketProfile", "trendTraceN", "trendTraceView", "trendTraceRiskFilter",
         ],
         calTiming: [
@@ -6673,6 +6680,9 @@
           "trendMomLb",
           "trendMomEntryThr",
           "trendMomExitThr",
+          "trendErFilterOn",
+          "trendErWindow",
+          "trendErThreshold",
           "trendBiasMaWin",
           "trendBiasEntry",
           "trendBiasHot",
@@ -6683,8 +6693,6 @@
           "trendMacdSignal",
           "trendMacdVAtr",
           "trendMacdVScale",
-          "trendHybridEntryN",
-          "trendHybridExitM",
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
@@ -6696,6 +6704,9 @@
           "trendRTpTiers",
         ];
         const alwaysEnabledIds = [
+          "trendErFilterOn",
+          "trendErWindow",
+          "trendErThreshold",
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
@@ -6717,22 +6728,6 @@
           macd_cross: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
           macd_zero_filter: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
           macd_v: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale"],
-          hybrid_trend: [
-            "trendFastWin",
-            "trendSlowWin",
-            "trendMaType",
-            "trendDonEntry",
-            "trendDonExit",
-            "trendMomLb",
-            "trendMomEntryThr",
-            "trendMomExitThr",
-            "trendMacdFast",
-            "trendMacdSlow",
-            "trendMacdSignal",
-            "trendSmaWin",
-            "trendHybridEntryN",
-            "trendHybridExitM",
-          ],
         };
         const enabled = new Set([...(byStrat[strat] || []), ...alwaysEnabledIds]);
         for (const id of allIds) {
@@ -6756,7 +6751,6 @@
           macd_cross: "MACD金叉死叉：MACD线上穿信号线入场，下穿离场。",
           macd_zero_filter: "MACD零轴过滤：MACD>0 持有，<=0 空仓。",
           macd_v: "MACD-V：用ATR归一化的MACD强度进行择时。",
-          hybrid_trend: "混合趋势：融合均线交叉、唐奇安、时序动量、MACD金叉死叉、线性回归，按 N 入场 / M 离场阈值聚合触发。",
         };
         const execDesc = {
           ma_filter: "信号在 T 日收盘后根据价格与均线(SMA/EMA)关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
@@ -6769,7 +6763,6 @@
           macd_cross: "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           macd_zero_filter: "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
           macd_v: "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
-          hybrid_trend: "信号在 T 日收盘后统计五个子策略当日入场/离场触发数量；入场数量>=n 则入场，离场数量>=m 则离场，均在 T+1 执行；策略收益不包含决策日(T日)当日收益。",
         };
         const paramDesc = {
           trendSmaWin: "均线窗口：均线/回归窗口长度（交易日）。",
@@ -6783,6 +6776,9 @@
           trendMomLb: "TSMOM回看：动量收益计算窗口。",
           trendMomEntryThr: "TSMOM入场阈值：动量 > 该值时入场。",
           trendMomExitThr: "TSMOM出场阈值：动量 <= 该值时离场；建议不高于入场阈值。",
+          trendErFilterOn: "ER入场过滤：开启后仅当 ER>=阈值 才允许新开仓；平仓不受影响。",
+          trendErWindow: "ER周期：效率比率回看窗口（交易日），默认10。",
+          trendErThreshold: "ER阈值：取值[0,1]，ER越高表示趋势越单边。",
           trendBiasMaWin: "BIAS MA窗口：BIAS参考均线窗口。",
           trendBiasEntry: "BIAS入场阈值：偏离超过该值入场。",
           trendBiasHot: "BIAS过热止盈：偏离过高时止盈离场。",
@@ -6793,8 +6789,6 @@
           trendMacdSignal: "MACD信号线：信号EMA窗口。",
           trendMacdVAtr: "MACD-V ATR窗口：归一化波动窗口。",
           trendMacdVScale: "MACD-V scale：归一化缩放系数。",
-          trendHybridEntryN: "混合策略入场阈值 n：当天至少 n 个子策略触发入场信号才入场。",
-          trendHybridExitM: "混合策略离场阈值 m：当天至少 m 个子策略触发离场信号才离场。",
           trendAtrStopMode: "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。",
           trendAtrStopBasis: "ATR基准：动态跟随/动态收紧时，按入场ATR或最新ATR计算止损距离与收紧步长。",
           trendAtrStopReentry: "止损后重入：允许重返=只要基础信号为持有即可重入；等待下一次入场=必须等基础信号再次出现入场事件。",
@@ -16665,6 +16659,9 @@
           mom_lookback: Number(($("trendMomLb").value || "252").trim()),
           tsmom_entry_threshold: Number(($("trendMomEntryThr").value || "0.0").trim()),
           tsmom_exit_threshold: Number(($("trendMomExitThr").value || "0.0").trim()),
+          er_filter: ($("trendErFilterOn") && $("trendErFilterOn").value === "true"),
+          er_window: Number(($("trendErWindow").value || "10").trim()),
+          er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),
           bias_ma_window: Number(($("trendBiasMaWin").value || "20").trim()),
           bias_entry: Number(($("trendBiasEntry").value || "2.0").trim()),
           bias_hot: Number(($("trendBiasHot").value || "10.0").trim()),
@@ -16675,8 +16672,6 @@
           macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
           macd_v_atr_window: Number(($("trendMacdVAtr").value || "26").trim()),
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
-          hybrid_entry_n: Number(($("trendHybridEntryN").value || "1").trim()),
-          hybrid_exit_m: Number(($("trendHybridExitM").value || "1").trim()),
           random_hold_days: Number(($("trendRandomHoldDays").value || "20").trim()),
           random_seed: (($("trendRandomSeed").value || "").trim()),
           atr_stop_mode: (($("trendAtrStopMode") && $("trendAtrStopMode").value) ? String($("trendAtrStopMode").value) : "none"),
@@ -16701,14 +16696,6 @@
         if (mode === "portfolio") {
           common.asset_groups = _parseAssetGroupsFromText(($("trendAssetGroups") && $("trendAssetGroups").value) ? $("trendAssetGroups").value : "");
         }
-        if (!Number.isFinite(common.hybrid_entry_n) || common.hybrid_entry_n < 1) {
-          return setMsg("混合策略入场阈值 n 需为>=1数字");
-        }
-        if (!Number.isFinite(common.hybrid_exit_m) || common.hybrid_exit_m < 1) {
-          return setMsg("混合策略离场阈值 m 需为>=1数字");
-        }
-        common.hybrid_entry_n = Math.floor(common.hybrid_entry_n);
-        common.hybrid_exit_m = Math.floor(common.hybrid_exit_m);
         if (!Number.isFinite(common.random_hold_days) || common.random_hold_days < 1) {
           return setMsg("随机持有天数需为>=1数字");
         }
@@ -16783,7 +16770,7 @@
         }
         common.group_max_holdings = Math.floor(common.group_max_holdings);
         if (mode === "portfolio" && common.asset_groups && common.asset_groups.__error) return setMsg(common.asset_groups.__error);
-        if (strategy === "tsmom" || strategy === "hybrid_trend") {
+        if (strategy === "tsmom") {
           const ent = Number(common.tsmom_entry_threshold);
           const ex = Number(common.tsmom_exit_threshold);
           if (!Number.isFinite(ent) || !Number.isFinite(ex)) {
@@ -16792,6 +16779,13 @@
           if (ent < ex) {
             return setMsg("TSMOM 参数要求：入场阈值需 >= 出场阈值");
           }
+        }
+        if (!Number.isFinite(common.er_window) || common.er_window < 2) {
+          return setMsg("ER周期需为>=2数字");
+        }
+        common.er_window = Math.floor(common.er_window);
+        if (!Number.isFinite(common.er_threshold) || common.er_threshold < 0 || common.er_threshold > 1) {
+          return setMsg("ER阈值需在[0,1]区间");
         }
         $("status").textContent = "趋势回测中...";
         setMsg("");

@@ -254,6 +254,120 @@ def test_api_trend_single_accepts_risk_budget_params(api_client):
     assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(0.01, rel=0.0, abs=1e-12)
 
 
+def test_api_trend_single_er_filter_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    series = {"ER1": [100.0 + ((-1.0) ** i) * 0.8 + i * 0.01 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    base_payload = {
+        "code": "ER1",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    out_no_filter = post_json_ok(c, "/api/analysis/trend", {**base_payload, "er_filter": False})
+    out_with_filter = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {**base_payload, "er_filter": True, "er_window": 10, "er_threshold": 0.8},
+    )
+
+    pos_no_filter = [float(x) for x in ((out_no_filter.get("signals") or {}).get("position") or [])]
+    pos_with_filter = [float(x) for x in ((out_with_filter.get("signals") or {}).get("position") or [])]
+    assert any(x > 0.0 for x in pos_no_filter)
+    assert all(x == 0.0 for x in pos_with_filter)
+    params = (((out_with_filter or {}).get("meta") or {}).get("params") or {})
+    assert params.get("er_filter") is True
+    assert int(params.get("er_window") or 0) == 10
+    assert float(params.get("er_threshold") or 0.0) == pytest.approx(0.8, rel=0.0, abs=1e-12)
+
+
+def test_api_trend_portfolio_er_filter_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    series = {
+        "ER1": [100.0 + ((-1.0) ** i) * 0.8 + i * 0.01 for i, _ in enumerate(dates)],
+        "ER2": [90.0 + ((-1.0) ** (i + 1)) * 0.7 + i * 0.01 for i, _ in enumerate(dates)],
+    }
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    base_payload = {
+        "codes": ["ER1", "ER2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "position_sizing": "equal",
+    }
+    out_no_filter = post_json_ok(c, "/api/analysis/trend/portfolio", {**base_payload, "er_filter": False})
+    out_with_filter = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**base_payload, "er_filter": True, "er_window": 10, "er_threshold": 0.8},
+    )
+
+    w_no = pd.DataFrame(((out_no_filter.get("weights") or {}).get("series") or {}))
+    w_yes = pd.DataFrame(((out_with_filter.get("weights") or {}).get("series") or {}))
+    assert not w_no.empty
+    assert any(float(v) > 0.0 for v in w_no.to_numpy().ravel())
+    assert all(float(v) == 0.0 for v in w_yes.to_numpy().ravel())
+    params = (((out_with_filter or {}).get("meta") or {}).get("params") or {})
+    assert params.get("er_filter") is True
+    assert int(params.get("er_window") or 0) == 10
+    assert float(params.get("er_threshold") or 0.0) == pytest.approx(0.8, rel=0.0, abs=1e-12)
+
+
+def test_api_trend_single_er_filter_rejects_invalid_threshold(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "er_filter": True,
+            "er_window": 10,
+            "er_threshold": 1.2,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert isinstance(err, dict)
+
+
+def test_api_trend_portfolio_er_filter_rejects_invalid_window(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "equal",
+            "er_filter": True,
+            "er_window": 1,
+            "er_threshold": 0.3,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert isinstance(err, dict)
+
+
 def test_api_rotation_backtest_accepts_floating_topk_mode(api_client) -> None:
     c = api_client
     upsert_and_fetch_etfs(

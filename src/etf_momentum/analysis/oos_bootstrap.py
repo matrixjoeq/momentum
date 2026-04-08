@@ -375,8 +375,6 @@ def _trend_params_to_inputs(
         macd_signal=int(params.get("macd_signal", 9)),
         macd_v_atr_window=int(params.get("macd_v_atr_window", 26)),
         macd_v_scale=float(params.get("macd_v_scale", 100.0)),
-        hybrid_entry_n=int(params.get("hybrid_entry_n", 1)),
-        hybrid_exit_m=int(params.get("hybrid_exit_m", 1)),
         random_hold_days=int(params.get("random_hold_days", 20)),
         random_seed=int(params.get("random_seed", 42)),
     )
@@ -404,8 +402,6 @@ def _default_trend_param_grid(strategy: str) -> Dict[str, Sequence[Any]]:
         return {"macd_fast": [12], "macd_slow": [26], "macd_signal": [9]}
     if strategy == "macd_v":
         return {"macd_fast": [12], "macd_slow": [26], "macd_signal": [9], "macd_v_atr_window": [26]}
-    if strategy == "hybrid_trend":
-        return {"hybrid_entry_n": [1, 2, 3], "hybrid_exit_m": [1, 2, 3]}
     if strategy == "random_entry":
         return {"random_hold_days": [10, 20, 40], "random_seed": [42]}
     return {"sma_window": [100, 200], "ma_type": ["sma"]}

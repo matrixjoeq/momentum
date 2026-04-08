@@ -42,7 +42,6 @@ TREND_STRATEGY_EXECUTION_DESCRIPTIONS: dict[str, str] = {
     "macd_cross": "信号在 T 日收盘后根据 MACD 与信号线金叉/死叉确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_zero_filter": "信号在 T 日收盘后根据 MACD 是否大于零确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
     "macd_v": "信号在 T 日收盘后根据 ATR 归一化 MACD 与信号线关系确定，T+1 日按仓位执行；策略收益不包含决策日(T日)当日收益。",
-    "hybrid_trend": "信号在 T 日收盘后聚合五个子策略（均线交叉/唐奇安/时序动量/MACD金叉死叉/线性回归）的入场/退场触发计数；入场计数>=n 则入场、退场计数>=m 则离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
     "random_entry": "信号在 T 日收盘后仅当当前无持仓时抛硬币随机决定是否入场（1=入场，0=空仓）；入场后按持有交易日数到期离场，均在 T+1 日执行；策略收益不包含决策日(T日)当日收益。",
 }
 
@@ -65,7 +64,7 @@ class TrendInputs:
     slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
     exec_price: str = "open"  # open|close|oc2
     # strategy selection
-    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | hybrid_trend | random_entry
+    strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | random_entry
     # parameters
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
@@ -98,8 +97,6 @@ class TrendInputs:
     macd_signal: int = 9
     macd_v_atr_window: int = 26
     macd_v_scale: float = 100.0
-    hybrid_entry_n: int = 1
-    hybrid_exit_m: int = 1
     random_hold_days: int = 20
     random_seed: int | None = 42
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
@@ -114,6 +111,9 @@ class TrendInputs:
     group_pick_policy: str = "highest_sharpe"
     group_max_holdings: int = 4
     asset_groups: dict[str, str] | None = None
+    er_filter: bool = False
+    er_window: int = 10
+    er_threshold: float = 0.30
 
 
 @dataclass(frozen=True)
@@ -164,14 +164,15 @@ class TrendPortfolioInputs:
     macd_signal: int = 9
     macd_v_atr_window: int = 26
     macd_v_scale: float = 100.0
-    hybrid_entry_n: int = 1
-    hybrid_exit_m: int = 1
     random_hold_days: int = 20
     random_seed: int | None = 42
     group_enforce: bool = False
     group_pick_policy: str = "highest_sharpe"  # highest_sharpe | earliest_entry
     group_max_holdings: int = 4  # max picks kept in each group (1..10)
     asset_groups: dict[str, str] | None = None  # code -> group_id
+    er_filter: bool = False
+    er_window: int = 10
+    er_threshold: float = 0.30
 
 
 def _reduce_active_codes_by_group(
@@ -260,48 +261,6 @@ def _reduce_active_codes_by_group(
     return reduced, meta
 
 
-def _hybrid_pos_from_components(
-    *,
-    ma_cross_pos: pd.Series,
-    donchian_pos: pd.Series,
-    tsmom_pos: pd.Series,
-    macd_cross_pos: pd.Series,
-    linreg_pos: pd.Series,
-    entry_n: int,
-    exit_m: int,
-) -> tuple[pd.Series, pd.Series, pd.Series]:
-    comps = pd.DataFrame(
-        {
-            "ma_cross": ma_cross_pos.astype(float).fillna(0.0),
-            "donchian": donchian_pos.astype(float).fillna(0.0),
-            "tsmom": tsmom_pos.astype(float).fillna(0.0),
-            "macd_cross": macd_cross_pos.astype(float).fillna(0.0),
-            "linreg_slope": linreg_pos.astype(float).fillna(0.0),
-        }
-    )
-    prev = comps.shift(1).fillna(0.0)
-    entry_count = ((comps > 0.0) & (prev <= 0.0)).sum(axis=1).astype(float)
-    exit_count = ((comps <= 0.0) & (prev > 0.0)).sum(axis=1).astype(float)
-    en = max(1, int(entry_n))
-    ex = max(1, int(exit_m))
-    pos = np.zeros(len(comps), dtype=float)
-    in_pos = False
-    for i in range(len(comps)):
-        e_cnt = float(entry_count.iloc[i]) if np.isfinite(float(entry_count.iloc[i])) else 0.0
-        x_cnt = float(exit_count.iloc[i]) if np.isfinite(float(exit_count.iloc[i])) else 0.0
-        if not in_pos:
-            if e_cnt >= float(en):
-                in_pos = True
-        elif x_cnt >= float(ex):
-            in_pos = False
-        pos[i] = 1.0 if in_pos else 0.0
-    return (
-        pd.Series(pos, index=comps.index, dtype=float),
-        entry_count.astype(float),
-        exit_count.astype(float),
-    )
-
-
 def _rolling_linreg_slope(y: np.ndarray) -> float:
     """
     Rolling OLS slope on y over an implicit x = 0..n-1 (centered).
@@ -319,6 +278,51 @@ def _rolling_linreg_slope(y: np.ndarray) -> float:
     if denom == 0.0:
         return 0.0
     return float(np.dot(x, y0) / denom)
+
+
+def _efficiency_ratio(price: pd.Series, *, window: int) -> pd.Series:
+    """
+    Kaufman Efficiency Ratio (ER):
+    ER_t = |P_t - P_{t-window}| / sum_{i=t-window+1..t} |ΔP_i|
+    """
+    w = max(2, int(window))
+    p = pd.to_numeric(price, errors="coerce").astype(float)
+    change = (p - p.shift(w)).abs()
+    volatility = p.diff().abs().rolling(window=w, min_periods=w).sum()
+    er = (change / volatility.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    return er.clip(lower=0.0, upper=1.0)
+
+
+def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float) -> pd.Series:
+    """
+    Entry-only filter:
+    - new entry (0 -> >0) is allowed only when ER >= threshold
+    - exits are unchanged
+    """
+    thr = float(threshold)
+    out = np.zeros(len(raw_pos), dtype=float)
+    in_pos = False
+    idx = raw_pos.index
+    for i, d in enumerate(idx):
+        desired = float(raw_pos.iloc[i]) if np.isfinite(float(raw_pos.iloc[i])) else 0.0
+        desired = max(0.0, desired)
+        if not in_pos:
+            if desired > 0.0:
+                er_ok = bool(np.isfinite(float(er.loc[d]))) and float(er.loc[d]) >= thr
+                if er_ok:
+                    in_pos = True
+                    out[i] = desired
+                else:
+                    out[i] = 0.0
+            else:
+                out[i] = 0.0
+        else:
+            if desired <= 0.0:
+                in_pos = False
+                out[i] = 0.0
+            else:
+                out[i] = desired
+    return pd.Series(out, index=idx, dtype=float)
 
 
 def _turnover_cost_from_weights(w: pd.Series, *, cost_bps: float) -> pd.Series:
@@ -1286,7 +1290,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "macd_cross",
         "macd_zero_filter",
         "macd_v",
-        "hybrid_trend",
         "random_entry",
     }:
         raise ValueError(f"invalid strategy={inp.strategy}")
@@ -1366,10 +1369,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("macd_v_atr_window must be >= 2")
     if (not np.isfinite(float(inp.macd_v_scale))) or float(inp.macd_v_scale) <= 0:
         raise ValueError("macd_v_scale must be finite and > 0")
-    if int(inp.hybrid_entry_n) < 1:
-        raise ValueError("hybrid_entry_n must be >= 1")
-    if int(inp.hybrid_exit_m) < 1:
-        raise ValueError("hybrid_exit_m must be >= 1")
+    er_filter = bool(getattr(inp, "er_filter", False))
+    er_window = int(getattr(inp, "er_window", 10) or 10)
+    er_threshold = float(getattr(inp, "er_threshold", 0.30) or 0.30)
+    if er_window < 2:
+        raise ValueError("er_window must be >= 2")
+    if (not np.isfinite(er_threshold)) or er_threshold < 0.0 or er_threshold > 1.0:
+        raise ValueError("er_threshold must be in [0,1]")
     ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
     if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
         raise ValueError("position_sizing must be equal|vol_target|fixed_ratio|risk_budget")
@@ -1590,37 +1596,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
         macd_v_sig = _ema(macd_v, int(inp.macd_signal))
         raw_pos = (macd_v > macd_v_sig).astype(float).fillna(0.0)
-    elif strat == "hybrid_trend":
-        fast = _moving_average(px_sig, window=int(inp.fast_window), ma_type=ma_type)
-        slow = _moving_average(px_sig, window=int(inp.slow_window), ma_type=ma_type)
-        ma_cross_pos = (fast > slow).astype(float).fillna(0.0)
-        donchian_pos = _pos_from_donchian(px_sig, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)).astype(float)
-        mom = px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0
-        tsmom_pos = _pos_from_tsmom(
-            mom,
-            entry_threshold=float(inp.tsmom_entry_threshold),
-            exit_threshold=float(inp.tsmom_exit_threshold),
-        ).astype(float)
-        macd, sig, _ = _macd_core(
-            px_sig,
-            fast=int(inp.macd_fast),
-            slow=int(inp.macd_slow),
-            signal=int(inp.macd_signal),
-        )
-        macd_cross_pos = (macd > sig).astype(float).fillna(0.0)
-        n = int(inp.sma_window)
-        y = np.log(px_sig.clip(lower=1e-12).astype(float))
-        slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(_rolling_linreg_slope, raw=True)
-        linreg_pos = (slope > 0.0).astype(float).fillna(0.0)
-        raw_pos, _, _ = _hybrid_pos_from_components(
-            ma_cross_pos=ma_cross_pos,
-            donchian_pos=donchian_pos,
-            tsmom_pos=tsmom_pos,
-            macd_cross_pos=macd_cross_pos,
-            linreg_pos=linreg_pos,
-            entry_n=int(inp.hybrid_entry_n),
-            exit_m=int(inp.hybrid_exit_m),
-        )
     elif strat == "random_entry":
         raw_pos = _pos_from_random_entry_hold(
             px_sig.index,
@@ -1635,6 +1610,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             exit_threshold=float(inp.tsmom_exit_threshold),
         ).astype(float)
 
+    if er_filter:
+        er = _efficiency_ratio(px_sig, window=er_window)
+        raw_pos = _apply_er_entry_filter(raw_pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
     base_pos = raw_pos.astype(float).fillna(0.0)
     raw_pos, atr_stop_stats = _apply_atr_stop(
         raw_pos,
@@ -1922,8 +1900,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "macd_signal": int(inp.macd_signal),
                 "macd_v_atr_window": int(inp.macd_v_atr_window),
                 "macd_v_scale": float(inp.macd_v_scale),
-                "hybrid_entry_n": int(inp.hybrid_entry_n),
-                "hybrid_exit_m": int(inp.hybrid_exit_m),
                 "random_hold_days": int(getattr(inp, "random_hold_days", 20)),
                 "random_seed": (
                     None
@@ -1938,6 +1914,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "fixed_max_holdings": int(fixed_max_holding_n),
                 "risk_budget_atr_window": int(risk_budget_atr_window),
                 "risk_budget_pct": float(risk_budget_pct),
+                "er_filter": bool(er_filter),
+                "er_window": int(er_window),
+                "er_threshold": float(er_threshold),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
@@ -2117,10 +2096,13 @@ def compute_trend_portfolio_backtest(
         raise ValueError("tsmom_exit_threshold must be finite")
     if float(inp.tsmom_entry_threshold) < float(inp.tsmom_exit_threshold):
         raise ValueError("tsmom thresholds must satisfy: entry >= exit")
-    if int(inp.hybrid_entry_n) < 1:
-        raise ValueError("hybrid_entry_n must be >= 1")
-    if int(inp.hybrid_exit_m) < 1:
-        raise ValueError("hybrid_exit_m must be >= 1")
+    er_filter = bool(getattr(inp, "er_filter", False))
+    er_window = int(getattr(inp, "er_window", 10) or 10)
+    er_threshold = float(getattr(inp, "er_threshold", 0.30) or 0.30)
+    if er_window < 2:
+        raise ValueError("er_window must be >= 2")
+    if (not np.isfinite(er_threshold)) or er_threshold < 0.0 or er_threshold > 1.0:
+        raise ValueError("er_threshold must be in [0,1]")
     group_enforce = bool(getattr(inp, "group_enforce", False))
     group_pick_policy = str(getattr(inp, "group_pick_policy", "highest_sharpe") or "highest_sharpe").strip().lower()
     if group_pick_policy not in {"earliest_entry", "highest_sharpe"}:
@@ -2145,7 +2127,6 @@ def compute_trend_portfolio_backtest(
         "macd_cross",
         "macd_zero_filter",
         "macd_v",
-        "hybrid_trend",
         "random_entry",
     }:
         raise ValueError(f"invalid strategy={inp.strategy}")
@@ -2368,33 +2349,6 @@ def compute_trend_portfolio_backtest(
             macd_v_sig = _ema(macd_v, int(inp.macd_signal))
             pos = (macd_v > macd_v_sig).astype(float)
             score = (macd_v - macd_v_sig).astype(float)
-        elif strat == "hybrid_trend":
-            fast = _moving_average(px, window=int(inp.fast_window), ma_type=ma_type)
-            slow = _moving_average(px, window=int(inp.slow_window), ma_type=ma_type)
-            ma_cross_pos = (fast > slow).astype(float).fillna(0.0)
-            donchian_pos = _pos_from_donchian(px, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)).astype(float)
-            mom = px / px.shift(int(inp.mom_lookback)) - 1.0
-            tsmom_pos = _pos_from_tsmom(
-                mom,
-                entry_threshold=float(inp.tsmom_entry_threshold),
-                exit_threshold=float(inp.tsmom_exit_threshold),
-            ).astype(float)
-            macd, sig, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
-            macd_cross_pos = (macd > sig).astype(float).fillna(0.0)
-            n = int(inp.sma_window)
-            y = np.log(px.clip(lower=1e-12).astype(float))
-            slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(_rolling_linreg_slope, raw=True)
-            linreg_pos = (slope > 0.0).astype(float).fillna(0.0)
-            pos, entry_cnt, exit_cnt = _hybrid_pos_from_components(
-                ma_cross_pos=ma_cross_pos,
-                donchian_pos=donchian_pos,
-                tsmom_pos=tsmom_pos,
-                macd_cross_pos=macd_cross_pos,
-                linreg_pos=linreg_pos,
-                entry_n=int(inp.hybrid_entry_n),
-                exit_m=int(inp.hybrid_exit_m),
-            )
-            score = (entry_cnt - exit_cnt).astype(float)
         elif strat == "random_entry":
             seed_base_raw = getattr(inp, "random_seed", 42)
             code_seed = (
@@ -2416,6 +2370,9 @@ def compute_trend_portfolio_backtest(
                 exit_threshold=float(inp.tsmom_exit_threshold),
             )
             score = mom.astype(float)
+        if er_filter:
+            er = _efficiency_ratio(px, window=er_window)
+            pos = _apply_er_entry_filter(pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
         h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
         low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
         pos, one_stop_stats = _apply_atr_stop(
@@ -2843,12 +2800,13 @@ def compute_trend_portfolio_backtest(
                 "group_pick_policy": str(group_pick_policy),
                 "group_max_holdings": int(group_max_holdings),
                 "asset_groups": group_map,
+                "er_filter": bool(er_filter),
+                "er_window": int(er_window),
+                "er_threshold": float(er_threshold),
                 "ma_type": ma_type,
                 "mom_lookback": int(inp.mom_lookback),
                 "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
                 "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),
-                "hybrid_entry_n": int(inp.hybrid_entry_n),
-                "hybrid_exit_m": int(inp.hybrid_exit_m),
                 "random_hold_days": int(getattr(inp, "random_hold_days", 20)),
                 "random_seed": (
                     None

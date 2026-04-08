@@ -126,6 +126,51 @@ def test_trend_single_risk_budget_sizing_applies_params(session_factory):
     assert any((x > 0.0) and (x < 1.0) for x in eff)
 
 
+def test_trend_single_er_entry_filter_blocks_choppy_entries(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + ((-1.0) ** i) * 0.8 + i * 0.01
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out_no_filter = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                er_filter=False,
+                cost_bps=0.0,
+            ),
+        )
+        out_with_filter = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                er_filter=True,
+                er_window=10,
+                er_threshold=0.8,
+                cost_bps=0.0,
+            ),
+        )
+
+    pos_no_filter = [float(x) for x in out_no_filter["signals"]["position"]]
+    pos_with_filter = [float(x) for x in out_with_filter["signals"]["position"]]
+    assert any(x > 0.0 for x in pos_no_filter)
+    assert all(x == 0.0 for x in pos_with_filter)
+    params = ((out_with_filter.get("meta") or {}).get("params") or {})
+    assert params.get("er_filter") is True
+    assert int(params.get("er_window") or 0) == 10
+
+
 def test_trend_ma_filter_smoke(session_factory):
     sf = session_factory
     code = "AAA"
@@ -371,44 +416,6 @@ def test_trend_macd_family_smoke(session_factory):
     assert len(out_v["signals"]["position"]) == len(out_v["nav"]["dates"])
 
 
-def test_trend_hybrid_strategy_thresholds(session_factory):
-    sf = session_factory
-    code = "AAA"
-    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
-    with sf() as db:
-        for i, d in enumerate(dates):
-            px = 100.0 + i * 0.4 + (1.5 if (i % 12 < 6) else -1.0)
-            _add_price(db, code=code, day=d, close=px)
-        db.commit()
-        out = compute_trend_backtest(
-            db,
-            TrendInputs(
-                code=code,
-                start=dates[0],
-                end=dates[-1],
-                strategy="hybrid_trend",
-                hybrid_entry_n=1,
-                hybrid_exit_m=1,
-                cost_bps=0.0,
-            ),
-        )
-        out_no_entry = compute_trend_backtest(
-            db,
-            TrendInputs(
-                code=code,
-                start=dates[0],
-                end=dates[-1],
-                strategy="hybrid_trend",
-                hybrid_entry_n=6,  # larger than number of sub-strategies, so no entry
-                hybrid_exit_m=1,
-                cost_bps=0.0,
-            ),
-        )
-    assert out["meta"]["strategy"] == "hybrid_trend"
-    assert any(x > 0 for x in out["signals"]["position"])
-    assert all(x == 0 for x in out_no_entry["signals"]["position"])
-
-
 def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
     sf = session_factory
     code = "AAA"
@@ -427,7 +434,6 @@ def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):
         ("macd_cross", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
         ("macd_zero_filter", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
         ("macd_v", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "macd_v_atr_window": 2, "macd_v_scale": 100.0}),
-        ("hybrid_trend", {"fast_window": 2, "slow_window": 3, "donchian_entry": 2, "donchian_exit": 2, "mom_lookback": 2, "macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "sma_window": 3, "hybrid_entry_n": 1, "hybrid_exit_m": 1}),
     ]
     with sf() as db:
         for d, p in zip(dates, pxs):

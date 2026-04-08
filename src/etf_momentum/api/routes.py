@@ -957,8 +957,6 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         macd_signal=payload.macd_signal,
         macd_v_atr_window=payload.macd_v_atr_window,
         macd_v_scale=payload.macd_v_scale,
-        hybrid_entry_n=payload.hybrid_entry_n,
-        hybrid_exit_m=payload.hybrid_exit_m,
         random_hold_days=int(getattr(payload, "random_hold_days", 20)),
         random_seed=(
             None
@@ -977,6 +975,9 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         group_pick_policy=getattr(payload, "group_pick_policy", "highest_sharpe"),
         group_max_holdings=int(getattr(payload, "group_max_holdings", 4)),
         asset_groups=getattr(payload, "asset_groups", None),
+        er_filter=bool(getattr(payload, "er_filter", False)),
+        er_window=int(getattr(payload, "er_window", 10)),
+        er_threshold=float(getattr(payload, "er_threshold", 0.30)),
     )
     try:
         return compute_trend_backtest(db, inp)
@@ -1036,14 +1037,15 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         macd_signal=payload.macd_signal,
         macd_v_atr_window=payload.macd_v_atr_window,
         macd_v_scale=payload.macd_v_scale,
-        hybrid_entry_n=payload.hybrid_entry_n,
-        hybrid_exit_m=payload.hybrid_exit_m,
         random_hold_days=int(getattr(payload, "random_hold_days", 20)),
         random_seed=(
             None
             if getattr(payload, "random_seed", 42) is None
             else int(getattr(payload, "random_seed", 42))
         ),
+        er_filter=bool(getattr(payload, "er_filter", False)),
+        er_window=int(getattr(payload, "er_window", 10)),
+        er_threshold=float(getattr(payload, "er_threshold", 0.30)),
     )
     try:
         return compute_trend_portfolio_backtest(db, inp)

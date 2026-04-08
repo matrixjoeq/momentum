@@ -1182,7 +1182,7 @@ class TrendBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend|random_entry (long/cash); ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry (long/cash); ma_filter uses ma_type sma|ema",
     )
     position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
@@ -1225,8 +1225,9 @@ class TrendBacktestRequest(BaseModel):
     macd_signal: int = Field(default=9, ge=2, description="MACD signal EMA window")
     macd_v_atr_window: int = Field(default=26, ge=2, description="ATR window used by MACD-V normalization")
     macd_v_scale: float = Field(default=100.0, gt=0.0, description="Scale factor for MACD-V")
-    hybrid_entry_n: int = Field(default=1, ge=1, description="Hybrid trend: minimum number of sub-strategy entry signals to enter")
-    hybrid_exit_m: int = Field(default=1, ge=1, description="Hybrid trend: minimum number of sub-strategy exit signals to exit")
+    er_filter: bool = Field(default=False, description="Universal ER entry filter switch (when true, allow entry only if ER >= threshold)")
+    er_window: int = Field(default=10, ge=2, description="ER lookback window (trading days)")
+    er_threshold: float = Field(default=0.30, ge=0.0, le=1.0, description="ER entry threshold in [0,1]")
     random_hold_days: int = Field(default=20, ge=1, description="Random-entry strategy base exit: hold N trading days after entry")
     random_seed: int | None = Field(default=42, description="Random-entry strategy seed for reproducible coin-toss signals; null means system random seed")
 
@@ -1241,7 +1242,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     exec_price: str = Field(default="open", description="open|close|oc2")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend|random_entry; ma_filter uses ma_type sma|ema",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry; ma_filter uses ma_type sma|ema",
     )
     position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
     vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
@@ -1280,8 +1281,9 @@ class TrendPortfolioBacktestRequest(BaseModel):
     macd_signal: int = Field(default=9, ge=2)
     macd_v_atr_window: int = Field(default=26, ge=2)
     macd_v_scale: float = Field(default=100.0, gt=0.0)
-    hybrid_entry_n: int = Field(default=1, ge=1)
-    hybrid_exit_m: int = Field(default=1, ge=1)
+    er_filter: bool = Field(default=False, description="Universal ER entry filter switch")
+    er_window: int = Field(default=10, ge=2)
+    er_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
     random_hold_days: int = Field(default=20, ge=1)
     random_seed: int | None = Field(default=42)
     group_enforce: bool = Field(
@@ -1385,7 +1387,7 @@ class TrendOosBootstrapRequest(BaseModel):
     seed: int | None = Field(default=None, description="Random seed for reproducibility")
     strategy: str = Field(
         default="ma_filter",
-        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|hybrid_trend|random_entry",
+        description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry",
     )
     cost_bps: float = Field(default=2.0, ge=0.0)
     risk_free_rate: float = Field(default=0.025)
