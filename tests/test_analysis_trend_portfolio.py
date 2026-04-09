@@ -128,6 +128,50 @@ def test_trend_portfolio_er_entry_filter_blocks_choppy_entries(session_factory):
     assert int(params.get("er_window") or 0) == 10
 
 
+def test_trend_portfolio_impulse_entry_filter_blocks_entries(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="I1", day=d, close=100.0 + i * 0.6)
+            _add_price(db, code="I2", day=d, close=120.0 + i * 0.5)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["I1", "I2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                impulse_entry_filter=True,
+                impulse_allow_bull=False,
+                impulse_allow_bear=False,
+                impulse_allow_neutral=False,
+                position_sizing="equal",
+                cost_bps=0.0,
+            ),
+        )
+    w = pd.DataFrame(((out.get("weights") or {}).get("series") or {}))
+    assert not w.empty
+    assert all(float(v) == 0.0 for v in w.to_numpy().ravel())
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert params.get("impulse_entry_filter") is True
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
+    blocked_split = (
+        int(overall.get("impulse_filter_blocked_entry_count_bull") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_bear") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_neutral") or 0)
+    )
+    assert blocked > 0
+    assert blocked_split == blocked
+    by_code = (ts.get("by_code") or {})
+    assert int(((by_code.get("I1") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
+    assert int(((by_code.get("I2") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
+
+
 def test_trend_portfolio_ma_cross_supports_ema_type(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-03-31", freq="B")]

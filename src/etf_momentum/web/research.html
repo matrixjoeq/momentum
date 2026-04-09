@@ -2848,6 +2848,36 @@
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div>
+          <label>动力入场过滤</label>
+          <select id="trendImpulseEntryFilterOn" style="min-width:120px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>BULL状态允许入场</label>
+          <select id="trendImpulseAllowBull" style="min-width:120px;">
+            <option value="true" selected>是</option>
+            <option value="false">否</option>
+          </select>
+        </div>
+        <div>
+          <label>BEAR状态允许入场</label>
+          <select id="trendImpulseAllowBear" style="min-width:120px;">
+            <option value="false" selected>否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+        <div>
+          <label>NEUTRAL状态允许入场</label>
+          <select id="trendImpulseAllowNeutral" style="min-width:130px;">
+            <option value="false" selected>否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
           <label>ER入场过滤</label>
           <select id="trendErFilterOn" style="min-width:120px;">
             <option value="false" selected>关闭</option>
@@ -4532,6 +4562,7 @@
           "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
+          "trendImpulseEntryFilterOn", "trendImpulseAllowBull", "trendImpulseAllowBear", "trendImpulseAllowNeutral",
           "trendErFilterOn", "trendErWindow", "trendErThreshold", "trendErExitFilterOn", "trendErExitWindow", "trendErExitThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
@@ -6734,6 +6765,10 @@
           "trendMomLb",
           "trendMomEntryThr",
           "trendMomExitThr",
+          "trendImpulseEntryFilterOn",
+          "trendImpulseAllowBull",
+          "trendImpulseAllowBear",
+          "trendImpulseAllowNeutral",
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
@@ -6767,6 +6802,10 @@
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
+          "trendImpulseEntryFilterOn",
+          "trendImpulseAllowBull",
+          "trendImpulseAllowBear",
+          "trendImpulseAllowNeutral",
           "trendErExitFilterOn",
           "trendErExitWindow",
           "trendErExitThreshold",
@@ -6847,6 +6886,10 @@
           trendMomLb: "TSMOM回看：动量收益计算窗口。",
           trendMomEntryThr: "TSMOM入场阈值：动量 > 该值时入场。",
           trendMomExitThr: "TSMOM出场阈值：动量 <= 该值时离场；建议不高于入场阈值。",
+          trendImpulseEntryFilterOn: "动力入场过滤：开启后仅当当前动力状态被允许时才允许新开仓；平仓不受影响。",
+          trendImpulseAllowBull: "BULL状态允许入场：EMA(13)与MACD柱同时上行状态下，是否允许新开仓。",
+          trendImpulseAllowBear: "BEAR状态允许入场：EMA(13)与MACD柱同时下行状态下，是否允许新开仓。",
+          trendImpulseAllowNeutral: "NEUTRAL状态允许入场：除BULL/BEAR之外的中性状态下，是否允许新开仓。",
           trendErFilterOn: "ER入场过滤：开启后仅当 ER>=阈值 才允许新开仓；平仓不受影响。",
           trendErWindow: "ER入场周期：效率比率回看窗口（交易日），默认10。",
           trendErThreshold: "ER入场阈值：取值[0,1]，ER越高表示趋势越单边。",
@@ -13822,6 +13865,10 @@
           `<tr><td>ER入场过滤器允许入场次数</td><td>${_n(s.er_filter_allowed_entry_count)}</td></tr>` +
           `<tr><td>ER入场过滤器起作用次数</td><td>${_n(s.er_filter_blocked_entry_count)}</td></tr>` +
           `<tr><td>ER入场过滤器拦截率</td><td>${_vp(erBlockRate)}</td></tr>` +
+          `<tr><td>动力入场过滤器起作用次数</td><td>${_n(s.impulse_filter_blocked_entry_count)}</td></tr>` +
+          `<tr><td>动力入场过滤器拦截（BULL）</td><td>${_n(s.impulse_filter_blocked_entry_count_bull)}</td></tr>` +
+          `<tr><td>动力入场过滤器拦截（BEAR）</td><td>${_n(s.impulse_filter_blocked_entry_count_bear)}</td></tr>` +
+          `<tr><td>动力入场过滤器拦截（NEUTRAL）</td><td>${_n(s.impulse_filter_blocked_entry_count_neutral)}</td></tr>` +
           `<tr><td>ER出场过滤器起作用次数</td><td>${_n(s.er_exit_filter_trigger_count)}</td></tr>` +
           `<tr><td>ATR止损触发次数</td><td>${_n(s.atr_stop_trigger_count)}</td></tr>` +
           `<tr><td>R止盈触发次数</td><td>${_n(s.r_take_profit_trigger_count)}</td></tr>` +
@@ -16852,6 +16899,10 @@
           mom_lookback: Number(($("trendMomLb").value || "252").trim()),
           tsmom_entry_threshold: Number(($("trendMomEntryThr").value || "0.0").trim()),
           tsmom_exit_threshold: Number(($("trendMomExitThr").value || "0.0").trim()),
+          impulse_entry_filter: ($("trendImpulseEntryFilterOn") && $("trendImpulseEntryFilterOn").value === "true"),
+          impulse_allow_bull: ($("trendImpulseAllowBull") && $("trendImpulseAllowBull").value === "true"),
+          impulse_allow_bear: ($("trendImpulseAllowBear") && $("trendImpulseAllowBear").value === "true"),
+          impulse_allow_neutral: ($("trendImpulseAllowNeutral") && $("trendImpulseAllowNeutral").value === "true"),
           er_filter: ($("trendErFilterOn") && $("trendErFilterOn").value === "true"),
           er_window: Number(($("trendErWindow").value || "10").trim()),
           er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),

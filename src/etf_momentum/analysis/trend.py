@@ -122,6 +122,10 @@ class TrendInputs:
     er_filter: bool = False
     er_window: int = 10
     er_threshold: float = 0.30
+    impulse_entry_filter: bool = False
+    impulse_allow_bull: bool = True
+    impulse_allow_bear: bool = False
+    impulse_allow_neutral: bool = False
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
@@ -192,6 +196,10 @@ class TrendPortfolioInputs:
     er_filter: bool = False
     er_window: int = 10
     er_threshold: float = 0.30
+    impulse_entry_filter: bool = False
+    impulse_allow_bull: bool = True
+    impulse_allow_bear: bool = False
+    impulse_allow_neutral: bool = False
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
@@ -354,6 +362,92 @@ def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: floa
         "blocked_entry_count": int(blocked_count),
         "attempted_entry_count": int(attempted_entry_count),
         "allowed_entry_count": int(allowed_entry_count),
+    }
+
+
+def _compute_impulse_state(
+    close: pd.Series,
+    *,
+    ema_window: int = 13,
+    macd_fast: int = 12,
+    macd_slow: int = 26,
+    macd_signal: int = 9,
+) -> pd.Series:
+    """
+    Elder Impulse state:
+    - BULL: EMA and MACD histogram both rising vs previous day
+    - BEAR: EMA and MACD histogram both falling vs previous day
+    - otherwise NEUTRAL
+    """
+    px = pd.to_numeric(close, errors="coerce").astype(float)
+    ema = _ema(px, int(ema_window))
+    _, _, hist = _macd_core(px, fast=int(macd_fast), slow=int(macd_slow), signal=int(macd_signal))
+    ema_diff = ema.diff()
+    hist_diff = hist.diff()
+    state = pd.Series("NEUTRAL", index=px.index, dtype=object)
+    bull = (ema_diff > 0.0) & (hist_diff > 0.0)
+    bear = (ema_diff < 0.0) & (hist_diff < 0.0)
+    state.loc[bull.fillna(False)] = "BULL"
+    state.loc[bear.fillna(False)] = "BEAR"
+    return state
+
+
+def _apply_impulse_entry_filter(
+    raw_pos: pd.Series,
+    *,
+    impulse_state: pd.Series,
+    allow_bull: bool,
+    allow_bear: bool,
+    allow_neutral: bool,
+) -> tuple[pd.Series, dict[str, int]]:
+    """
+    Entry-only filter using impulse states.
+    - new entry (0 -> >0) is allowed only if current state is configured as allowed
+    - exits are unchanged
+    """
+    out = np.zeros(len(raw_pos), dtype=float)
+    blocked_count = 0
+    attempted_entry_count = 0
+    allowed_entry_count = 0
+    blocked_by_state = {"BULL": 0, "BEAR": 0, "NEUTRAL": 0}
+    in_pos = False
+    idx = raw_pos.index
+    for i, d in enumerate(idx):
+        desired = float(raw_pos.iloc[i]) if np.isfinite(float(raw_pos.iloc[i])) else 0.0
+        desired = max(0.0, desired)
+        st = str(impulse_state.loc[d]) if d in impulse_state.index else "NEUTRAL"
+        st = st if st in {"BULL", "BEAR", "NEUTRAL"} else "NEUTRAL"
+        is_allowed = (
+            (st == "BULL" and bool(allow_bull))
+            or (st == "BEAR" and bool(allow_bear))
+            or (st == "NEUTRAL" and bool(allow_neutral))
+        )
+        if not in_pos:
+            if desired > 0.0:
+                attempted_entry_count += 1
+                if is_allowed:
+                    in_pos = True
+                    allowed_entry_count += 1
+                    out[i] = desired
+                else:
+                    blocked_count += 1
+                    blocked_by_state[st] = int(blocked_by_state.get(st, 0) + 1)
+                    out[i] = 0.0
+            else:
+                out[i] = 0.0
+        else:
+            if desired <= 0.0:
+                in_pos = False
+                out[i] = 0.0
+            else:
+                out[i] = desired
+    return pd.Series(out, index=idx, dtype=float), {
+        "blocked_entry_count": int(blocked_count),
+        "attempted_entry_count": int(attempted_entry_count),
+        "allowed_entry_count": int(allowed_entry_count),
+        "blocked_entry_count_bull": int(blocked_by_state.get("BULL", 0)),
+        "blocked_entry_count_bear": int(blocked_by_state.get("BEAR", 0)),
+        "blocked_entry_count_neutral": int(blocked_by_state.get("NEUTRAL", 0)),
     }
 
 
@@ -1783,6 +1877,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("er_window must be >= 2")
     if (not np.isfinite(er_threshold)) or er_threshold < 0.0 or er_threshold > 1.0:
         raise ValueError("er_threshold must be in [0,1]")
+    impulse_entry_filter = bool(getattr(inp, "impulse_entry_filter", False))
+    impulse_allow_bull = bool(getattr(inp, "impulse_allow_bull", True))
+    impulse_allow_bear = bool(getattr(inp, "impulse_allow_bear", False))
+    impulse_allow_neutral = bool(getattr(inp, "impulse_allow_neutral", False))
     er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
     er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
@@ -2040,8 +2138,31 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             exit_threshold=float(inp.tsmom_exit_threshold),
         ).astype(float)
 
+    impulse_filter_stats_overall = {
+        "blocked_entry_count": 0,
+        "attempted_entry_count": 0,
+        "allowed_entry_count": 0,
+        "blocked_entry_count_bull": 0,
+        "blocked_entry_count_bear": 0,
+        "blocked_entry_count_neutral": 0,
+    }
     er_filter_stats_overall = {"blocked_entry_count": 0, "attempted_entry_count": 0, "allowed_entry_count": 0}
     er_exit_filter_stats_overall = {"trigger_count": 0, "trigger_dates": []}
+    if impulse_entry_filter:
+        impulse_state = _compute_impulse_state(
+            px_sig,
+            ema_window=13,
+            macd_fast=12,
+            macd_slow=26,
+            macd_signal=9,
+        )
+        raw_pos, impulse_filter_stats_overall = _apply_impulse_entry_filter(
+            raw_pos.astype(float).fillna(0.0),
+            impulse_state=impulse_state,
+            allow_bull=impulse_allow_bull,
+            allow_bear=impulse_allow_bear,
+            allow_neutral=impulse_allow_neutral,
+        )
     if er_filter:
         er = _efficiency_ratio(px_sig, window=er_window)
         raw_pos, er_filter_stats_overall = _apply_er_entry_filter(
@@ -2303,6 +2424,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["overall"]["er_filter_blocked_entry_count"] = int((er_filter_stats_overall or {}).get("blocked_entry_count", 0))
     trade_stats["overall"]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
     trade_stats["overall"]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
+    trade_stats["overall"]["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
     trade_stats["overall"]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
     trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
@@ -2311,9 +2436,17 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["by_code"][str(code)]["er_filter_blocked_entry_count"] = int((er_filter_stats_overall or {}).get("blocked_entry_count", 0))
     trade_stats["by_code"][str(code)]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
     trade_stats["by_code"][str(code)]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
     trade_stats["by_code"][str(code)]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
+    m_strat["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
+    m_strat["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
+    m_strat["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
+    m_strat["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
     m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     event_study = compute_event_study(
         dates=nav.index,
@@ -2406,6 +2539,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "er_filter": bool(er_filter),
                 "er_window": int(er_window),
                 "er_threshold": float(er_threshold),
+                "impulse_entry_filter": bool(impulse_entry_filter),
+                "impulse_allow_bull": bool(impulse_allow_bull),
+                "impulse_allow_bear": bool(impulse_allow_bear),
+                "impulse_allow_neutral": bool(impulse_allow_neutral),
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),
@@ -2621,6 +2758,10 @@ def compute_trend_portfolio_backtest(
         raise ValueError("er_window must be >= 2")
     if (not np.isfinite(er_threshold)) or er_threshold < 0.0 or er_threshold > 1.0:
         raise ValueError("er_threshold must be in [0,1]")
+    impulse_entry_filter = bool(getattr(inp, "impulse_entry_filter", False))
+    impulse_allow_bull = bool(getattr(inp, "impulse_allow_bull", True))
+    impulse_allow_bear = bool(getattr(inp, "impulse_allow_bear", False))
+    impulse_allow_neutral = bool(getattr(inp, "impulse_allow_neutral", False))
     er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
     er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
@@ -2799,6 +2940,7 @@ def compute_trend_portfolio_backtest(
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
     atr_stop_by_asset: dict[str, dict[str, Any]] = {}
     rtp_by_asset: dict[str, dict[str, Any]] = {}
+    impulse_filter_by_asset: dict[str, dict[str, int]] = {}
     er_filter_by_asset: dict[str, dict[str, int]] = {}
     er_exit_filter_by_asset: dict[str, dict[str, Any]] = {}
     for c in codes:
@@ -2912,6 +3054,31 @@ def compute_trend_portfolio_backtest(
                 exit_threshold=float(inp.tsmom_exit_threshold),
             )
             score = mom.astype(float)
+        if impulse_entry_filter:
+            impulse_state = _compute_impulse_state(
+                px,
+                ema_window=13,
+                macd_fast=12,
+                macd_slow=26,
+                macd_signal=9,
+            )
+            pos, one_impulse_stats = _apply_impulse_entry_filter(
+                pos.astype(float).fillna(0.0),
+                impulse_state=impulse_state,
+                allow_bull=impulse_allow_bull,
+                allow_bear=impulse_allow_bear,
+                allow_neutral=impulse_allow_neutral,
+            )
+            impulse_filter_by_asset[str(c)] = dict(one_impulse_stats or {})
+        else:
+            impulse_filter_by_asset[str(c)] = {
+                "blocked_entry_count": 0,
+                "attempted_entry_count": 0,
+                "allowed_entry_count": 0,
+                "blocked_entry_count_bull": 0,
+                "blocked_entry_count_bear": 0,
+                "blocked_entry_count_neutral": 0,
+            }
         if er_filter:
             er = _efficiency_ratio(px, window=er_window)
             pos, one_er_stats = _apply_er_entry_filter(pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
@@ -3308,6 +3475,10 @@ def compute_trend_portfolio_backtest(
         }
     )
     total_rtp_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in rtp_by_asset.values()))
+    total_impulse_filter_blocked_entries = int(sum(int((v or {}).get("blocked_entry_count", 0)) for v in impulse_filter_by_asset.values()))
+    total_impulse_filter_blocked_bull = int(sum(int((v or {}).get("blocked_entry_count_bull", 0)) for v in impulse_filter_by_asset.values()))
+    total_impulse_filter_blocked_bear = int(sum(int((v or {}).get("blocked_entry_count_bear", 0)) for v in impulse_filter_by_asset.values()))
+    total_impulse_filter_blocked_neutral = int(sum(int((v or {}).get("blocked_entry_count_neutral", 0)) for v in impulse_filter_by_asset.values()))
     total_er_filter_blocked_entries = int(sum(int((v or {}).get("blocked_entry_count", 0)) for v in er_filter_by_asset.values()))
     total_er_filter_attempted_entries = int(sum(int((v or {}).get("attempted_entry_count", 0)) for v in er_filter_by_asset.values()))
     total_er_filter_allowed_entries = int(sum(int((v or {}).get("allowed_entry_count", 0)) for v in er_filter_by_asset.values()))
@@ -3335,6 +3506,10 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["atr_stop_trigger_count"] = int(total_triggers)
     trade_stats["overall"]["r_take_profit_trigger_count"] = int(total_rtp_triggers)
     trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
+    trade_stats["overall"]["impulse_filter_blocked_entry_count"] = int(total_impulse_filter_blocked_entries)
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int(total_impulse_filter_blocked_bull)
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int(total_impulse_filter_blocked_bear)
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int(total_impulse_filter_blocked_neutral)
     trade_stats["overall"]["er_filter_blocked_entry_count"] = int(total_er_filter_blocked_entries)
     trade_stats["overall"]["er_filter_attempted_entry_count"] = int(total_er_filter_attempted_entries)
     trade_stats["overall"]["er_filter_allowed_entry_count"] = int(total_er_filter_allowed_entries)
@@ -3346,6 +3521,10 @@ def compute_trend_portfolio_backtest(
         one["atr_stop_trigger_count"] = int((atr_stop_by_asset.get(code_key) or {}).get("trigger_count", 0))
         one["r_take_profit_trigger_count"] = int((rtp_by_asset.get(code_key) or {}).get("trigger_count", 0))
         one["r_take_profit_tier_trigger_counts"] = dict(((rtp_by_asset.get(code_key) or {}).get("tier_trigger_counts") or {}))
+        one["impulse_filter_blocked_entry_count"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0))
+        one["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_bull", 0))
+        one["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_bear", 0))
+        one["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_neutral", 0))
         one["er_filter_blocked_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0))
         one["er_filter_attempted_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0))
         one["er_filter_allowed_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0))
@@ -3353,6 +3532,10 @@ def compute_trend_portfolio_backtest(
         one["monthly_risk_budget_blocked_entry_count"] = int(((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count_by_code") or {}).get(code_key, 0))
         trade_stats["by_code"][code_key] = one
     m_strat["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
+    m_strat["impulse_filter_blocked_entry_count"] = int(total_impulse_filter_blocked_entries)
+    m_strat["impulse_filter_blocked_entry_count_bull"] = int(total_impulse_filter_blocked_bull)
+    m_strat["impulse_filter_blocked_entry_count_bear"] = int(total_impulse_filter_blocked_bear)
+    m_strat["impulse_filter_blocked_entry_count_neutral"] = int(total_impulse_filter_blocked_neutral)
     m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     ext_dates = sorted({str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()})
     skip_dates = sorted({str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()})
@@ -3420,6 +3603,10 @@ def compute_trend_portfolio_backtest(
                 "er_filter": bool(er_filter),
                 "er_window": int(er_window),
                 "er_threshold": float(er_threshold),
+                "impulse_entry_filter": bool(impulse_entry_filter),
+                "impulse_allow_bull": bool(impulse_allow_bull),
+                "impulse_allow_bear": bool(impulse_allow_bear),
+                "impulse_allow_neutral": bool(impulse_allow_neutral),
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),

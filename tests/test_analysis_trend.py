@@ -6,6 +6,7 @@ import pytest
 
 from etf_momentum.analysis.trend import (
     TrendInputs,
+    _apply_impulse_entry_filter,
     _apply_atr_stop,
     _apply_r_multiple_take_profit,
     _position_risk_from_stop_params,
@@ -364,6 +365,26 @@ def test_trend_single_er_entry_filter_blocks_choppy_entries(session_factory):
     assert int(by_code.get("er_filter_blocked_entry_count") or 0) > 0
 
 
+def test_impulse_entry_filter_blocks_by_state_counts_are_split() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    raw_pos = pd.Series([0.0, 1.0, 0.0, 1.0, 0.0, 1.0], index=idx, dtype=float)
+    impulse_state = pd.Series(["BULL", "BEAR", "NEUTRAL", "BULL", "BEAR", "NEUTRAL"], index=idx, dtype=object)
+    out, stats = _apply_impulse_entry_filter(
+        raw_pos,
+        impulse_state=impulse_state,
+        allow_bull=False,
+        allow_bear=False,
+        allow_neutral=False,
+    )
+    assert all(float(x) == 0.0 for x in out.tolist())
+    assert int(stats.get("attempted_entry_count") or 0) == 3
+    assert int(stats.get("allowed_entry_count") or 0) == 0
+    assert int(stats.get("blocked_entry_count") or 0) == 3
+    assert int(stats.get("blocked_entry_count_bull") or 0) == 1
+    assert int(stats.get("blocked_entry_count_bear") or 0) == 1
+    assert int(stats.get("blocked_entry_count_neutral") or 0) == 1
+
+
 def test_trend_single_er_exit_filter_triggers_on_high_er(session_factory):
     sf = session_factory
     code = "AAA"
@@ -396,6 +417,47 @@ def test_trend_single_er_exit_filter_triggers_on_high_er(session_factory):
     by_code = (ts.get("by_code") or {}).get(code, {})
     assert int(overall.get("er_exit_filter_trigger_count") or 0) > 0
     assert int(by_code.get("er_exit_filter_trigger_count") or 0) > 0
+
+
+def test_trend_single_impulse_entry_filter_blocks_entries(session_factory):
+    sf = session_factory
+    code = "IMP1"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code=code, day=d, close=100.0 + i * 0.6)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                impulse_entry_filter=True,
+                impulse_allow_bull=False,
+                impulse_allow_bear=False,
+                impulse_allow_neutral=False,
+                cost_bps=0.0,
+            ),
+        )
+    pos = [float(x) for x in ((out.get("signals") or {}).get("position") or [])]
+    assert all(x == 0.0 for x in pos)
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert params.get("impulse_entry_filter") is True
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {}).get(code, {})
+    blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
+    blocked_split = (
+        int(overall.get("impulse_filter_blocked_entry_count_bull") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_bear") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_neutral") or 0)
+    )
+    assert blocked > 0
+    assert blocked_split == blocked
+    assert int(by_code.get("impulse_filter_blocked_entry_count") or 0) == blocked
 
 
 def test_trend_ma_filter_smoke(session_factory):

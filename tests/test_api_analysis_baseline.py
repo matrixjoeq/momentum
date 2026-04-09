@@ -350,6 +350,46 @@ def test_api_trend_single_er_exit_filter_contract(engine, api_client):
     assert int(((ts.get("by_code") or {}).get("ERX1") or {}).get("er_exit_filter_trigger_count") or 0) > 0
 
 
+def test_api_trend_single_impulse_entry_filter_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    series = {"IMPAPI1": [100.0 + i * 0.6 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "IMPAPI1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "impulse_entry_filter": True,
+            "impulse_allow_bull": False,
+            "impulse_allow_bear": False,
+            "impulse_allow_neutral": False,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    pos = [float(x) for x in ((out.get("signals") or {}).get("position") or [])]
+    assert all(x == 0.0 for x in pos)
+    params = (((out or {}).get("meta") or {}).get("params") or {})
+    assert params.get("impulse_entry_filter") is True
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
+    blocked_split = (
+        int(overall.get("impulse_filter_blocked_entry_count_bull") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_bear") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_neutral") or 0)
+    )
+    assert blocked > 0
+    assert blocked_split == blocked
+    assert int(((ts.get("by_code") or {}).get("IMPAPI1") or {}).get("impulse_filter_blocked_entry_count") or 0) == blocked
+
+
 def test_api_trend_single_kama_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
     series = {"KAMA1": [100.0 + (i * 0.4 if i < 40 else (40 * 0.4) - (i - 40) * 0.45) for i, _ in enumerate(dates)]}
@@ -422,6 +462,53 @@ def test_api_trend_portfolio_er_filter_contract(engine, api_client):
     by_code = (ts.get("by_code") or {})
     assert int(((by_code.get("ER1") or {}).get("er_filter_blocked_entry_count") or 0) >= 0)
     assert int(((by_code.get("ER2") or {}).get("er_filter_blocked_entry_count") or 0) >= 0)
+
+
+def test_api_trend_portfolio_impulse_entry_filter_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    series = {
+        "IMPAP1": [100.0 + i * 0.6 for i, _ in enumerate(dates)],
+        "IMPAP2": [120.0 + i * 0.5 for i, _ in enumerate(dates)],
+    }
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["IMPAP1", "IMPAP2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "equal",
+            "impulse_entry_filter": True,
+            "impulse_allow_bull": False,
+            "impulse_allow_bear": False,
+            "impulse_allow_neutral": False,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    w = pd.DataFrame(((out.get("weights") or {}).get("series") or {}))
+    assert not w.empty
+    assert all(float(v) == 0.0 for v in w.to_numpy().ravel())
+    params = (((out or {}).get("meta") or {}).get("params") or {})
+    assert params.get("impulse_entry_filter") is True
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
+    blocked_split = (
+        int(overall.get("impulse_filter_blocked_entry_count_bull") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_bear") or 0)
+        + int(overall.get("impulse_filter_blocked_entry_count_neutral") or 0)
+    )
+    assert blocked > 0
+    assert blocked_split == blocked
+    by_code = (ts.get("by_code") or {})
+    assert int(((by_code.get("IMPAP1") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
+    assert int(((by_code.get("IMPAP2") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
 
 
 def test_api_trend_portfolio_er_exit_filter_contract(engine, api_client):
