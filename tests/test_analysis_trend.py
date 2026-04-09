@@ -2,11 +2,13 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from etf_momentum.analysis.trend import (
     TrendInputs,
     _apply_atr_stop,
     _apply_r_multiple_take_profit,
+    _position_risk_from_stop_params,
     _pos_from_random_entry_hold,
     compute_trend_backtest,
 )
@@ -154,6 +156,160 @@ def test_trend_single_risk_budget_pct_upper_bound(session_factory):
             assert False, "expected ValueError for risk_budget_pct > 0.02"
         except ValueError as exc:
             assert "risk_budget_pct must be in [0.001, 0.02]" in str(exc)
+
+
+def test_trend_single_monthly_risk_budget_blocks_entries(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + 2.0 * np.sin(i / 2.0) + 0.05 * i
+            _add_price(db, code=code, day=d, close=float(px))
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="ema",
+                sma_window=5,
+                monthly_risk_budget_enabled=True,
+                monthly_risk_budget_pct=0.01,
+                monthly_risk_budget_include_new_trade_risk=True,
+                cost_bps=0.0,
+            ),
+        )
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = ((ts.get("by_code") or {}).get(code) or {})
+    assert int(overall.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
+    assert int(by_code.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
+    m = ((out.get("metrics") or {}).get("strategy") or {})
+    assert int(m.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
+
+
+def test_trend_single_monthly_risk_budget_include_new_trade_switch(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=40, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code=code, day=d, close=float(100.0 + i * 0.8))
+        db.commit()
+        out_no_new = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_type="ema",
+                atr_stop_mode="none",
+                monthly_risk_budget_enabled=True,
+                monthly_risk_budget_pct=0.01,
+                monthly_risk_budget_include_new_trade_risk=False,
+                cost_bps=0.0,
+            ),
+        )
+        out_with_new = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_type="ema",
+                atr_stop_mode="none",
+                monthly_risk_budget_enabled=True,
+                monthly_risk_budget_pct=0.01,
+                monthly_risk_budget_include_new_trade_risk=True,
+                cost_bps=0.0,
+            ),
+        )
+    ts_no = (out_no_new.get("trade_statistics") or {})
+    ts_yes = (out_with_new.get("trade_statistics") or {})
+    no_trades = int(((ts_no.get("overall") or {}).get("total_trades") or 0))
+    yes_trades = int(((ts_yes.get("overall") or {}).get("total_trades") or 0))
+    no_block = int(((ts_no.get("overall") or {}).get("monthly_risk_budget_blocked_entry_count") or 0))
+    yes_block = int(((ts_yes.get("overall") or {}).get("monthly_risk_budget_blocked_entry_count") or 0))
+    assert no_trades > 0
+    assert yes_trades == 0
+    assert yes_block > 0
+    assert no_block <= yes_block
+
+
+def test_monthly_risk_position_formula_with_and_without_valid_stop() -> None:
+    # Valid stop case (static ATR stop): stop = entry - n*atr = 100 - 2*5 = 90
+    # position risk = ((100-90)/100) * 0.30 = 0.03
+    r_with_stop = _position_risk_from_stop_params(
+        atr_stop_enabled=True,
+        atr_mode="static",
+        atr_basis="entry",
+        atr_n=2.0,
+        atr_m=0.5,
+        entry_px=100.0,
+        entry_atr=5.0,
+        curr_close=100.0,
+        curr_atr=5.0,
+        position_weight=0.30,
+        fallback_position_risk=0.02,
+    )
+    assert r_with_stop == pytest.approx(0.03, rel=0.0, abs=1e-12)
+
+    # No valid stop case (e.g. ATR stop disabled): fixed 2% per position, independent of weight.
+    r_no_stop_w10 = _position_risk_from_stop_params(
+        atr_stop_enabled=False,
+        atr_mode="none",
+        atr_basis="latest",
+        atr_n=2.0,
+        atr_m=0.5,
+        entry_px=100.0,
+        entry_atr=5.0,
+        curr_close=100.0,
+        curr_atr=5.0,
+        position_weight=0.10,
+        fallback_position_risk=0.02,
+    )
+    r_no_stop_w60 = _position_risk_from_stop_params(
+        atr_stop_enabled=False,
+        atr_mode="none",
+        atr_basis="latest",
+        atr_n=2.0,
+        atr_m=0.5,
+        entry_px=100.0,
+        entry_atr=5.0,
+        curr_close=100.0,
+        curr_atr=5.0,
+        position_weight=0.60,
+        fallback_position_risk=0.02,
+    )
+    assert r_no_stop_w10 == pytest.approx(0.02, rel=0.0, abs=1e-12)
+    assert r_no_stop_w60 == pytest.approx(0.02, rel=0.0, abs=1e-12)
+
+
+def test_monthly_risk_position_formula_entry_le_stop_returns_zero_not_fallback() -> None:
+    # Trailing mode with entry basis can produce stop >= entry when price rises enough.
+    # Example: entry=100, entry_atr=5, n=2 => stop = curr_close - 10.
+    # Use curr_close=120 => stop=110 >= entry, so risk must be 0 (not fallback 2%).
+    r = _position_risk_from_stop_params(
+        atr_stop_enabled=True,
+        atr_mode="trailing",
+        atr_basis="entry",
+        atr_n=2.0,
+        atr_m=0.5,
+        entry_px=100.0,
+        entry_atr=5.0,
+        curr_close=120.0,
+        curr_atr=5.0,
+        position_weight=0.40,
+        fallback_position_risk=0.02,
+    )
+    assert r == pytest.approx(0.0, rel=0.0, abs=1e-12)
 
 
 def test_trend_single_er_entry_filter_blocks_choppy_entries(session_factory):

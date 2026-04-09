@@ -1219,6 +1219,9 @@ class TrendBacktestRequest(BaseModel):
         default=None,
         description="Tiered config: peak>=R multiple activates pullback-exit threshold, e.g. [{r_multiple:2,retrace_ratio:0.5}]",
     )
+    monthly_risk_budget_enabled: bool = Field(default=False, description="Enable account-level monthly max-loss risk budget gate before new entries")
+    monthly_risk_budget_pct: float = Field(default=0.06, ge=0.01, le=0.06, description="Monthly max-loss budget on account NAV (0.06 = 6%)")
+    monthly_risk_budget_include_new_trade_risk: bool = Field(default=False, description="If true, include candidate new-trade risk in monthly budget check")
     # BIAS strategy params
     bias_ma_window: int = Field(default=20, ge=2, description="EMA window N in BIAS=(LN(C)-LN(EMA(C,N)))*100 (trading days)")
     bias_entry: float = Field(default=2.0, description="Enter when BIAS > entry (percent)")
@@ -1284,6 +1287,9 @@ class TrendPortfolioBacktestRequest(BaseModel):
     r_take_profit_enabled: bool = Field(default=False, description="Enable universal R-multiple drawdown take-profit overlay")
     r_take_profit_reentry_mode: str = Field(default="reenter", description="reenter|wait_next_entry")
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(default=None)
+    monthly_risk_budget_enabled: bool = Field(default=False, description="Enable account-level monthly max-loss risk budget gate before new entries")
+    monthly_risk_budget_pct: float = Field(default=0.06, ge=0.01, le=0.06, description="Monthly max-loss budget on account NAV (0.06 = 6%)")
+    monthly_risk_budget_include_new_trade_risk: bool = Field(default=False, description="If true, include candidate new-trade risk in monthly budget check")
     bias_ma_window: int = Field(default=20, ge=2)
     bias_entry: float = Field(default=2.0)
     bias_hot: float = Field(default=10.0)

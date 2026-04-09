@@ -89,6 +89,9 @@ class TrendInputs:
     r_take_profit_enabled: bool = False
     r_take_profit_reentry_mode: str = "reenter"  # reenter | wait_next_entry
     r_take_profit_tiers: list[dict[str, float]] | None = None
+    monthly_risk_budget_enabled: bool = False
+    monthly_risk_budget_pct: float = 0.06
+    monthly_risk_budget_include_new_trade_risk: bool = False
     # bias (deviation from EMA) trend-following
     # BIAS = (LN(C) - LN(EMA(C,N))) * 100  (percent)
     bias_ma_window: int = 20  # EMA(C,N) window in trading days
@@ -167,6 +170,9 @@ class TrendPortfolioInputs:
     r_take_profit_enabled: bool = False
     r_take_profit_reentry_mode: str = "reenter"
     r_take_profit_tiers: list[dict[str, float]] | None = None
+    monthly_risk_budget_enabled: bool = False
+    monthly_risk_budget_pct: float = 0.06
+    monthly_risk_budget_include_new_trade_risk: bool = False
     bias_ma_window: int = 20
     bias_entry: float = 2.0
     bias_hot: float = 10.0
@@ -390,6 +396,213 @@ def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float
     return pd.Series(out, index=idx, dtype=float), {
         "trigger_count": int(trigger_count),
         "trigger_dates": sorted(set(trigger_dates)),
+    }
+
+
+def _month_key(d: Any) -> str:
+    try:
+        return pd.Timestamp(d).strftime("%Y-%m")
+    except Exception:
+        return ""
+
+
+def _position_risk_from_stop_params(
+    *,
+    atr_stop_enabled: bool,
+    atr_mode: str,
+    atr_basis: str,
+    atr_n: float,
+    atr_m: float,
+    entry_px: float,
+    entry_atr: float,
+    curr_close: float,
+    curr_atr: float,
+    position_weight: float,
+    fallback_position_risk: float = 0.02,
+) -> float:
+    """
+    Return one position's risk contribution as NAV fraction.
+    - valid stop: unit_risk * position_weight
+    - no valid stop: fixed fallback risk per position (independent of weight)
+    """
+    fb = float(fallback_position_risk)
+    if (not np.isfinite(fb)) or fb < 0.0:
+        fb = 0.02
+    w = float(position_weight) if np.isfinite(float(position_weight)) else 0.0
+    w = max(0.0, w)
+    if not atr_stop_enabled:
+        return fb
+    if (not np.isfinite(entry_px)) or entry_px <= 0.0:
+        return fb
+    if (not np.isfinite(entry_atr)) or entry_atr <= 0.0:
+        return fb
+    n_mult = float(atr_n) if np.isfinite(float(atr_n)) else 2.0
+    m_step = float(atr_m) if np.isfinite(float(atr_m)) else 0.5
+    mode = str(atr_mode or "none").strip().lower()
+    basis = str(atr_basis or "latest").strip().lower()
+    stop_px = float("nan")
+    if mode == "static":
+        stop_px = float(entry_px - n_mult * entry_atr)
+    elif mode in {"trailing", "tightening"}:
+        ref_atr = entry_atr if basis == "entry" else curr_atr
+        if (not np.isfinite(ref_atr)) or ref_atr <= 0.0 or (not np.isfinite(curr_close)):
+            return fb
+        if mode == "trailing":
+            stop_px = float(curr_close - n_mult * ref_atr)
+        else:
+            if (not np.isfinite(m_step)) or m_step <= 0.0:
+                m_step = 0.5
+            rise = max(0.0, float(curr_close - entry_px))
+            den = float(m_step * ref_atr)
+            steps = int(np.floor(rise / den)) if den > 0.0 else 0
+            dist_mult = max(float(n_mult - steps * m_step), float(m_step))
+            stop_px = float(curr_close - dist_mult * ref_atr)
+    else:
+        return fb
+    if (not np.isfinite(stop_px)) or (entry_px <= stop_px):
+        return 0.0 if np.isfinite(stop_px) else fb
+    unit_risk = (float(entry_px) - float(stop_px)) / float(entry_px)
+    if not np.isfinite(unit_risk):
+        return fb
+    return float(max(0.0, unit_risk) * w)
+
+
+def _apply_monthly_risk_budget_gate(
+    decision_weights: pd.DataFrame,
+    *,
+    close: pd.DataFrame,
+    atr: pd.DataFrame,
+    enabled: bool,
+    budget_pct: float,
+    include_new_trade_risk: bool,
+    atr_stop_enabled: bool,
+    atr_mode: str,
+    atr_basis: str,
+    atr_n: float,
+    atr_m: float,
+    fallback_position_risk: float = 0.02,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Block new entries when monthly risk budget is exhausted."""
+    w = decision_weights.reindex(index=close.index, columns=close.columns).astype(float).fillna(0.0).clip(lower=0.0)
+    if not enabled:
+        return w, {
+            "enabled": False,
+            "budget_pct": float(budget_pct),
+            "include_new_trade_risk": bool(include_new_trade_risk),
+            "blocked_entry_count": 0,
+            "blocked_entry_count_by_code": {str(c): 0 for c in w.columns},
+        }
+    bgt = float(budget_pct)
+    if (not np.isfinite(bgt)) or bgt < 0.01 or bgt > 0.06:
+        bgt = 0.06
+
+    out = pd.DataFrame(0.0, index=w.index, columns=w.columns, dtype=float)
+    blocked_by_code: dict[str, int] = {str(c): 0 for c in w.columns}
+    realized_by_month: dict[str, float] = {}
+    positions: dict[str, dict[str, float]] = {}
+    eps = 1e-12
+
+    for d in w.index:
+        month = _month_key(d)
+        desired = w.loc[d].astype(float).fillna(0.0).clip(lower=0.0).copy()
+        monthly_realized = float(realized_by_month.get(month, 0.0))
+        monthly_loss = max(0.0, -monthly_realized)
+
+        current_holding_risk = 0.0
+        for c, st in positions.items():
+            wt = float(st.get("weight", 0.0))
+            if wt <= eps:
+                continue
+            entry_px = float(st.get("entry_px", float("nan")))
+            entry_atr = float(st.get("entry_atr", float("nan")))
+            curr_close = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
+            curr_atr = float(atr.loc[d, c]) if (c in atr.columns and d in atr.index and np.isfinite(float(atr.loc[d, c]))) else float("nan")
+            pos_risk = _position_risk_from_stop_params(
+                atr_stop_enabled=bool(atr_stop_enabled),
+                atr_mode=atr_mode,
+                atr_basis=atr_basis,
+                atr_n=float(atr_n),
+                atr_m=float(atr_m),
+                entry_px=entry_px,
+                entry_atr=entry_atr,
+                curr_close=curr_close,
+                curr_atr=curr_atr,
+                position_weight=wt,
+                fallback_position_risk=float(fallback_position_risk),
+            )
+            current_holding_risk += float(max(0.0, pos_risk))
+
+        budget_used = float(monthly_loss + current_holding_risk)
+        accepted = desired.copy()
+        for c in w.columns:
+            code = str(c)
+            target_w = float(desired.get(c, 0.0))
+            is_new_entry = (code not in positions) and (target_w > eps)
+            if not is_new_entry:
+                continue
+            new_trade_risk = 0.0
+            if include_new_trade_risk:
+                entry_px = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
+                entry_atr = float(atr.loc[d, c]) if (c in atr.columns and d in atr.index and np.isfinite(float(atr.loc[d, c]))) else float("nan")
+                new_trade_risk = _position_risk_from_stop_params(
+                    atr_stop_enabled=bool(atr_stop_enabled),
+                    atr_mode=atr_mode,
+                    atr_basis=atr_basis,
+                    atr_n=float(atr_n),
+                    atr_m=float(atr_m),
+                    entry_px=entry_px,
+                    entry_atr=entry_atr,
+                    curr_close=entry_px,
+                    curr_atr=entry_atr,
+                    position_weight=target_w,
+                    fallback_position_risk=float(fallback_position_risk),
+                )
+                new_trade_risk = float(max(0.0, new_trade_risk))
+            if float(budget_used + new_trade_risk) >= float(bgt) - 1e-12:
+                accepted.loc[c] = 0.0
+                blocked_by_code[code] = int(blocked_by_code.get(code, 0) + 1)
+                continue
+            budget_used += float(new_trade_risk)
+
+        out.loc[d] = accepted.to_numpy(dtype=float)
+
+        # Realize PnL for positions closed by today's accepted decision.
+        for c in list(positions.keys()):
+            nw = float(accepted.get(c, 0.0))
+            if nw > eps:
+                positions[c]["weight"] = nw
+                continue
+            entry_px = float(positions[c].get("entry_px", float("nan")))
+            entry_w = float(positions[c].get("entry_weight", positions[c].get("weight", 0.0)))
+            exit_px = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
+            realized = 0.0
+            if np.isfinite(entry_px) and entry_px > 0.0 and np.isfinite(exit_px):
+                realized = float((exit_px / entry_px - 1.0) * entry_w)
+            realized_by_month[month] = float(realized_by_month.get(month, 0.0) + realized)
+            positions.pop(c, None)
+
+        # Register new opens accepted today.
+        for c in w.columns:
+            code = str(c)
+            nw = float(accepted.get(c, 0.0))
+            if nw <= eps or code in positions:
+                continue
+            entry_px = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
+            entry_atr = float(atr.loc[d, c]) if (c in atr.columns and d in atr.index and np.isfinite(float(atr.loc[d, c]))) else float("nan")
+            positions[code] = {
+                "entry_px": float(entry_px),
+                "entry_atr": float(entry_atr),
+                "entry_weight": float(nw),
+                "weight": float(nw),
+            }
+
+    total_blocked = int(sum(int(v) for v in blocked_by_code.values()))
+    return out.astype(float), {
+        "enabled": True,
+        "budget_pct": float(bgt),
+        "include_new_trade_risk": bool(include_new_trade_risk),
+        "blocked_entry_count": int(total_blocked),
+        "blocked_entry_count_by_code": {str(k): int(v) for k, v in blocked_by_code.items()},
     }
 
 
@@ -1533,6 +1746,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if rtp_reentry_mode not in {"reenter", "wait_next_entry"}:
         raise ValueError("r_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
     rtp_tiers = _normalize_r_take_profit_tiers(getattr(inp, "r_take_profit_tiers", None))
+    monthly_risk_budget_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
+    monthly_risk_budget_pct = float(getattr(inp, "monthly_risk_budget_pct", 0.06) or 0.06)
+    monthly_risk_budget_include_new_trade_risk = bool(getattr(inp, "monthly_risk_budget_include_new_trade_risk", False))
+    if (not np.isfinite(monthly_risk_budget_pct)) or monthly_risk_budget_pct < 0.01 or monthly_risk_budget_pct > 0.06:
+        raise ValueError("monthly_risk_budget_pct must be in [0.01, 0.06]")
     if int(inp.donchian_entry) < 2 or int(inp.donchian_exit) < 2:
         raise ValueError("donchian_entry/donchian_exit must be >= 2")
     if int(inp.mom_lookback) < 2:
@@ -1888,6 +2106,35 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             float(inp.vol_target_ann) / asset_vol
         ).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(lower=0.0, upper=1.0).astype(float)
     raw_pos = (raw_pos.clip(lower=0.0, upper=1.0) * sizing_scale).astype(float)
+    atr_gate = _atr_from_hlc(
+        high_qfq.astype(float).fillna(px_sig),
+        low_qfq.astype(float).fillna(px_sig),
+        px_sig.astype(float),
+        window=int(inp.atr_stop_window),
+    ).reindex(raw_pos.index).astype(float)
+    monthly_risk_budget_gate_stats: dict[str, Any] = {
+        "enabled": False,
+        "budget_pct": float(monthly_risk_budget_pct),
+        "include_new_trade_risk": bool(monthly_risk_budget_include_new_trade_risk),
+        "blocked_entry_count": 0,
+        "blocked_entry_count_by_code": {str(code): 0},
+    }
+    if monthly_risk_budget_enabled:
+        gated_w_df, monthly_risk_budget_gate_stats = _apply_monthly_risk_budget_gate(
+            raw_pos.to_frame(code),
+            close=px_sig.to_frame(code).reindex(raw_pos.index),
+            atr=atr_gate.to_frame(code).reindex(raw_pos.index),
+            enabled=True,
+            budget_pct=float(monthly_risk_budget_pct),
+            include_new_trade_risk=bool(monthly_risk_budget_include_new_trade_risk),
+            atr_stop_enabled=bool(atr_mode != "none"),
+            atr_mode=str(atr_mode),
+            atr_basis=str(atr_basis),
+            atr_n=float(inp.atr_stop_n),
+            atr_m=float(inp.atr_stop_m),
+            fallback_position_risk=0.02,
+        )
+        raw_pos = gated_w_df[code].astype(float)
 
     # Weights become effective on execution day; ret_exec is already aligned to execution-day semantics.
     w = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
@@ -2057,6 +2304,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["overall"]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
     trade_stats["overall"]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
     trade_stats["overall"]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
+    trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
@@ -2064,7 +2312,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["by_code"][str(code)]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
     trade_stats["by_code"][str(code)]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
     trade_stats["by_code"][str(code)]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
+    trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
+    m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     event_study = compute_event_study(
         dates=nav.index,
         daily_returns=strat_ret.reindex(nav.index).astype(float),
@@ -2126,6 +2376,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "r_take_profit_enabled": bool(rtp_enabled),
                 "r_take_profit_reentry_mode": str(rtp_reentry_mode),
                 "r_take_profit_tiers": rtp_tiers,
+                "monthly_risk_budget_enabled": bool(monthly_risk_budget_enabled),
+                "monthly_risk_budget_pct": float(monthly_risk_budget_pct),
+                "monthly_risk_budget_include_new_trade_risk": bool(monthly_risk_budget_include_new_trade_risk),
                 "bias_ma_window": int(inp.bias_ma_window),
                 "bias_entry": float(inp.bias_entry),
                 "bias_hot": float(inp.bias_hot),
@@ -2210,6 +2463,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "risk_controls": {
             "atr_stop": atr_stop_stats,
             "r_take_profit": r_take_profit_stats,
+            "monthly_risk_budget": monthly_risk_budget_gate_stats,
         },
         "corporate_actions": (
             [
@@ -2349,6 +2603,11 @@ def compute_trend_portfolio_backtest(
     if rtp_reentry_mode not in {"reenter", "wait_next_entry"}:
         raise ValueError("r_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
     rtp_tiers = _normalize_r_take_profit_tiers(getattr(inp, "r_take_profit_tiers", None))
+    monthly_risk_budget_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
+    monthly_risk_budget_pct = float(getattr(inp, "monthly_risk_budget_pct", 0.06) or 0.06)
+    monthly_risk_budget_include_new_trade_risk = bool(getattr(inp, "monthly_risk_budget_include_new_trade_risk", False))
+    if (not np.isfinite(monthly_risk_budget_pct)) or monthly_risk_budget_pct < 0.01 or monthly_risk_budget_pct > 0.06:
+        raise ValueError("monthly_risk_budget_pct must be in [0.01, 0.06]")
     if not np.isfinite(float(inp.tsmom_entry_threshold)):
         raise ValueError("tsmom_entry_threshold must be finite")
     if not np.isfinite(float(inp.tsmom_exit_threshold)):
@@ -2696,6 +2955,18 @@ def compute_trend_portfolio_backtest(
         atr_stop_by_asset[str(c)] = one_stop_stats
         rtp_by_asset[str(c)] = one_rtp_stats
 
+    atr_gate_df = pd.DataFrame(index=dates, columns=codes, dtype=float)
+    for c in codes:
+        px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+        h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
+        low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
+        atr_gate_df[c] = _atr_from_hlc(
+            h.astype(float).fillna(px),
+            low_px.astype(float).fillna(px),
+            px,
+            window=int(inp.atr_stop_window),
+        ).astype(float)
+
     atr_budget_df = pd.DataFrame(index=dates, columns=codes, dtype=float)
     if ps == "risk_budget":
         for c in codes:
@@ -2834,6 +3105,47 @@ def compute_trend_portfolio_backtest(
             )
             prev_key = key
         prev_held_set = set(held_codes)
+
+    monthly_risk_budget_gate_stats: dict[str, Any] = {
+        "enabled": False,
+        "budget_pct": float(monthly_risk_budget_pct),
+        "include_new_trade_risk": bool(monthly_risk_budget_include_new_trade_risk),
+        "blocked_entry_count": 0,
+        "blocked_entry_count_by_code": {str(c): 0 for c in codes},
+    }
+    if monthly_risk_budget_enabled:
+        w_decision, monthly_risk_budget_gate_stats = _apply_monthly_risk_budget_gate(
+            w_decision.reindex(index=dates, columns=codes).astype(float).fillna(0.0),
+            close=close_qfq.reindex(index=dates, columns=codes).astype(float),
+            atr=atr_gate_df.reindex(index=dates, columns=codes).astype(float),
+            enabled=True,
+            budget_pct=float(monthly_risk_budget_pct),
+            include_new_trade_risk=bool(monthly_risk_budget_include_new_trade_risk),
+            atr_stop_enabled=bool(atr_mode != "none"),
+            atr_mode=str(atr_mode),
+            atr_basis=str(atr_basis),
+            atr_n=float(inp.atr_stop_n),
+            atr_m=float(inp.atr_stop_m),
+            fallback_position_risk=0.02,
+        )
+        # Rebuild holdings timeline from gated decision weights.
+        holdings = []
+        prev_key = None
+        for d in w_decision.index:
+            row = w_decision.loc[d]
+            key = tuple(sorted([str(c) for c in w_decision.columns if float(row.get(c, 0.0)) > 1e-12]))
+            if key != prev_key:
+                sc = sig_score.loc[d] if d in sig_score.index else pd.Series(dtype=float)
+                holdings.append(
+                    {
+                        "decision_date": d.date().isoformat(),
+                        "picks": list(key),
+                        "grouped_picks": {},
+                        "scores": {c: (None if pd.isna(sc.get(c)) else float(sc.get(c))) for c in key},
+                        "group_filter": {},
+                    }
+                )
+                prev_key = key
 
     # Weights become effective on execution day; ret_exec is already execution-day aligned.
     w = w_decision.shift(1).fillna(0.0).astype(float)
@@ -3027,6 +3339,7 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["er_filter_attempted_entry_count"] = int(total_er_filter_attempted_entries)
     trade_stats["overall"]["er_filter_allowed_entry_count"] = int(total_er_filter_allowed_entries)
     trade_stats["overall"]["er_exit_filter_trigger_count"] = int(total_er_exit_filter_triggers)
+    trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     for c in codes:
         code_key = str(c)
         one = trade_stats["by_code"].get(code_key) or {}
@@ -3037,8 +3350,10 @@ def compute_trend_portfolio_backtest(
         one["er_filter_attempted_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0))
         one["er_filter_allowed_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0))
         one["er_exit_filter_trigger_count"] = int((er_exit_filter_by_asset.get(code_key) or {}).get("trigger_count", 0))
+        one["monthly_risk_budget_blocked_entry_count"] = int(((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count_by_code") or {}).get(code_key, 0))
         trade_stats["by_code"][code_key] = one
     m_strat["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
+    m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     ext_dates = sorted({str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()})
     skip_dates = sorted({str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()})
     ext_over_weight_count = int(sum(1 for e in ext_events if bool(e.get("over_weight"))))
@@ -3132,6 +3447,9 @@ def compute_trend_portfolio_backtest(
                 "r_take_profit_enabled": bool(rtp_enabled),
                 "r_take_profit_reentry_mode": str(rtp_reentry_mode),
                 "r_take_profit_tiers": rtp_tiers,
+                "monthly_risk_budget_enabled": bool(monthly_risk_budget_enabled),
+                "monthly_risk_budget_pct": float(monthly_risk_budget_pct),
+                "monthly_risk_budget_include_new_trade_risk": bool(monthly_risk_budget_include_new_trade_risk),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
@@ -3220,6 +3538,7 @@ def compute_trend_portfolio_backtest(
                 "initial_r_mode": ("atr_stop" if atr_mode != "none" else "virtual_atr_fallback"),
                 "by_asset": rtp_by_asset,
             },
+            "monthly_risk_budget": monthly_risk_budget_gate_stats,
             "position_extension": {
                 "enabled": bool(ps == "fixed_ratio" and fixed_overcap_policy == "extend"),
                 "position_sizing": str(ps),

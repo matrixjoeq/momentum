@@ -952,6 +952,9 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
             if getattr(payload, "r_take_profit_tiers", None)
             else None
         ),
+        monthly_risk_budget_enabled=bool(getattr(payload, "monthly_risk_budget_enabled", False)),
+        monthly_risk_budget_pct=float(getattr(payload, "monthly_risk_budget_pct", 0.06)),
+        monthly_risk_budget_include_new_trade_risk=bool(getattr(payload, "monthly_risk_budget_include_new_trade_risk", False)),
         bias_ma_window=payload.bias_ma_window,
         bias_entry=payload.bias_entry,
         bias_hot=payload.bias_hot,
@@ -1040,6 +1043,9 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
             if getattr(payload, "r_take_profit_tiers", None)
             else None
         ),
+        monthly_risk_budget_enabled=bool(getattr(payload, "monthly_risk_budget_enabled", False)),
+        monthly_risk_budget_pct=float(getattr(payload, "monthly_risk_budget_pct", 0.06)),
+        monthly_risk_budget_include_new_trade_risk=bool(getattr(payload, "monthly_risk_budget_include_new_trade_risk", False)),
         bias_ma_window=payload.bias_ma_window,
         bias_entry=payload.bias_entry,
         bias_hot=payload.bias_hot,

@@ -497,6 +497,43 @@ def test_trend_portfolio_risk_budget_pct_upper_bound(session_factory):
             assert "risk_budget_pct must be in [0.001, 0.02]" in str(exc)
 
 
+def test_trend_portfolio_monthly_risk_budget_blocks_entries(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + 2.2 * np.sin(i / 2.0) + 0.08 * i
+            p2 = 90.0 + 1.8 * np.sin(i / 2.3 + 0.7) + 0.06 * i
+            _add_price(db, code="A1", day=d, close=float(p1))
+            _add_price(db, code="A2", day=d, close=float(p2))
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="ema",
+                sma_window=5,
+                position_sizing="equal",
+                monthly_risk_budget_enabled=True,
+                monthly_risk_budget_pct=0.01,
+                monthly_risk_budget_include_new_trade_risk=True,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {})
+    assert int(overall.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
+    assert int(((by_code.get("A1") or {}).get("monthly_risk_budget_blocked_entry_count") or 0)) >= 0
+    assert int(((by_code.get("A2") or {}).get("monthly_risk_budget_blocked_entry_count") or 0)) >= 0
+    m = ((out.get("metrics") or {}).get("strategy") or {})
+    assert int(m.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
+
+
 def test_trend_portfolio_bias_has_base_exit_hot_cold(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]

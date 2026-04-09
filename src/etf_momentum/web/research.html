@@ -2886,6 +2886,21 @@
         </div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>月度风险预算</label>
+          <select id="trendMonthlyRiskBudgetEnable" style="min-width:140px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div><label>月度最大亏损比例(1%~6%)</label><input id="trendMonthlyRiskBudgetPct" value="6" /></div>
+        <div>
+          <label>计入拟开仓风险</label>
+          <select id="trendMonthlyRiskBudgetIncludeNewRisk" style="min-width:150px;">
+            <option value="false" selected>否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
       </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
       <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
@@ -4506,6 +4521,7 @@
           "trendErFilterOn", "trendErWindow", "trendErThreshold", "trendErExitFilterOn", "trendErExitWindow", "trendErExitThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
+          "trendMonthlyRiskBudgetEnable", "trendMonthlyRiskBudgetPct", "trendMonthlyRiskBudgetIncludeNewRisk",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
           "trendEventBucketProfile", "trendTraceN", "trendTraceView", "trendTraceRiskFilter",
@@ -6729,6 +6745,9 @@
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpTiers",
+          "trendMonthlyRiskBudgetEnable",
+          "trendMonthlyRiskBudgetPct",
+          "trendMonthlyRiskBudgetIncludeNewRisk",
         ];
         const alwaysEnabledIds = [
           "trendErFilterOn",
@@ -6746,6 +6765,9 @@
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpTiers",
+          "trendMonthlyRiskBudgetEnable",
+          "trendMonthlyRiskBudgetPct",
+          "trendMonthlyRiskBudgetIncludeNewRisk",
         ];
         const byStrat = {
           ma_filter: ["trendSmaWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef"],
@@ -6836,6 +6858,9 @@
           trendRTpEnable: "通用R乘数止盈：按初始风险R跟踪浮盈，达到分层后按允许回落比例触发离场。",
           trendRTpReentry: "止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
           trendRTpTiers: "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
+          trendMonthlyRiskBudgetEnable: "月度风险预算：按自然月限制账户最大可承受亏损，触发后阻止新开仓。",
+          trendMonthlyRiskBudgetPct: "月度风险预算阈值：单月最大亏损比例，范围1%~6%，默认6%。",
+          trendMonthlyRiskBudgetIncludeNewRisk: "计入拟开仓风险：开启时，预算判断包含本笔拟开仓风险；关闭时仅看当月累计亏损+当前持仓风险。",
         };
         if (descEl) {
           const s = stratDesc[strat] || "-";
@@ -13685,7 +13710,8 @@
           `<tr><td>ER出场过滤器起作用次数</td><td>${_n(s.er_exit_filter_trigger_count)}</td></tr>` +
           `<tr><td>ATR止损触发次数</td><td>${_n(s.atr_stop_trigger_count)}</td></tr>` +
           `<tr><td>R止盈触发次数</td><td>${_n(s.r_take_profit_trigger_count)}</td></tr>` +
-          `<tr><td>R止盈分段触发</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>`;
+          `<tr><td>R止盈分段触发</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>` +
+          `<tr><td>月度风险预算拦截开仓次数</td><td>${_n(s.monthly_risk_budget_blocked_entry_count)}</td></tr>`;
       }
 
       function _renderTradeHist(divId, returns, title) {
@@ -16738,6 +16764,9 @@
           r_take_profit_enabled: (($("trendRTpEnable") && $("trendRTpEnable").value) ? String($("trendRTpEnable").value) === "true" : false),
           r_take_profit_reentry_mode: (($("trendRTpReentry") && $("trendRTpReentry").value) ? String($("trendRTpReentry").value) : "reenter"),
           r_take_profit_tiers: [],
+          monthly_risk_budget_enabled: (($("trendMonthlyRiskBudgetEnable") && $("trendMonthlyRiskBudgetEnable").value) ? String($("trendMonthlyRiskBudgetEnable").value) === "true" : false),
+          monthly_risk_budget_pct: Number(($("trendMonthlyRiskBudgetPct") && $("trendMonthlyRiskBudgetPct").value ? $("trendMonthlyRiskBudgetPct").value : "6").trim()),
+          monthly_risk_budget_include_new_trade_risk: (($("trendMonthlyRiskBudgetIncludeNewRisk") && $("trendMonthlyRiskBudgetIncludeNewRisk").value) ? String($("trendMonthlyRiskBudgetIncludeNewRisk").value) === "true" : false),
           fixed_pos_ratio: Number(($("trendFixedPosRatio") && $("trendFixedPosRatio").value ? $("trendFixedPosRatio").value : "0.04").trim()),
           fixed_overcap_policy: (($("trendFixedOvercapPolicy") && $("trendFixedOvercapPolicy").value) ? String($("trendFixedOvercapPolicy").value) : "skip"),
           fixed_max_holdings: Number(($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value ? $("trendFixedMaxHoldings").value : "10").trim()),
@@ -16795,6 +16824,13 @@
           }
         } else {
           common.r_take_profit_tiers = [];
+        }
+        if (!Number.isFinite(common.monthly_risk_budget_pct)) {
+          return setMsg("月度风险预算需为数字");
+        }
+        common.monthly_risk_budget_pct = (common.monthly_risk_budget_pct > 1.0 ? common.monthly_risk_budget_pct / 100.0 : common.monthly_risk_budget_pct);
+        if (common.monthly_risk_budget_pct < 0.01 || common.monthly_risk_budget_pct > 0.06) {
+          return setMsg("月度风险预算需在1%~6%之间");
         }
         if (!["skip", "extend"].includes(String(common.fixed_overcap_policy))) {
           return setMsg("固定比例超额策略非法，请选择 跳过/扩展");
