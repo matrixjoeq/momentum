@@ -2741,6 +2741,24 @@
           <input id="trendRiskBudgetPct" value="1" />
         </div>
         <div>
+          <label>月度风险预算</label>
+          <select id="trendMonthlyRiskBudgetEnable" style="min-width:140px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div><label>月度最大亏损比例(1%~6%)</label><input id="trendMonthlyRiskBudgetPct" value="6" /></div>
+        <div>
+          <label>计入拟开仓风险</label>
+          <select id="trendMonthlyRiskBudgetIncludeNewRisk" style="min-width:150px;">
+            <option value="false" selected>否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+        <button id="runTrendResearch">运行趋势回测</button>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
           <label>成交价口径</label>
           <select id="trendExecPrice" style="min-width:100px;">
             <option value="open" selected>开盘</option>
@@ -2750,9 +2768,6 @@
         </div>
         <div><label>成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label><input id="trendCost" value="2" /></div>
         <div><label>滑点(单边) <button class="helpBtn" data-metric="param_rot_slippage" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label><input id="trendSlippage" value="0.001" /></div>
-        <button id="runTrendResearch">运行趋势回测</button>
-      </div>
-      <div class="row" style="margin-top:8px; align-items:end;">
         <div>
           <label>分组约束（组合）</label>
           <select id="trendGroupEnforce" style="min-width:140px;">
@@ -2899,23 +2914,6 @@
         <div style="min-width:420px;">
           <label>R阈值与允许回落（r:ratio，逗号分隔）</label>
           <input id="trendRTpTiers" value="2:0.5,3:0.3,4:0.2,5:0.1,6:0.05" />
-        </div>
-      </div>
-      <div class="row" style="margin-top:8px; align-items:end;">
-        <div>
-          <label>月度风险预算</label>
-          <select id="trendMonthlyRiskBudgetEnable" style="min-width:140px;">
-            <option value="false" selected>关闭</option>
-            <option value="true">开启</option>
-          </select>
-        </div>
-        <div><label>月度最大亏损比例(1%~6%)</label><input id="trendMonthlyRiskBudgetPct" value="6" /></div>
-        <div>
-          <label>计入拟开仓风险</label>
-          <select id="trendMonthlyRiskBudgetIncludeNewRisk" style="min-width:150px;">
-            <option value="false" selected>否</option>
-            <option value="true">是</option>
-          </select>
         </div>
       </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
