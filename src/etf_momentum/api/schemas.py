@@ -1231,6 +1231,9 @@ class TrendBacktestRequest(BaseModel):
     er_filter: bool = Field(default=False, description="Universal ER entry filter switch (when true, allow entry only if ER >= threshold)")
     er_window: int = Field(default=10, ge=2, description="ER lookback window (trading days)")
     er_threshold: float = Field(default=0.30, ge=0.0, le=1.0, description="ER entry threshold in [0,1]")
+    er_exit_filter: bool = Field(default=False, description="Universal ER exit filter switch (when true, exit if ER >= threshold)")
+    er_exit_window: int = Field(default=10, ge=2, description="ER exit filter lookback window (trading days)")
+    er_exit_threshold: float = Field(default=0.88, ge=0.0, le=1.0, description="ER exit threshold in [0,1]")
     random_hold_days: int = Field(default=20, ge=1, description="Random-entry strategy base exit: hold N trading days after entry")
     random_seed: int | None = Field(default=42, description="Random-entry strategy seed for reproducible coin-toss signals; null means system random seed")
 
@@ -1290,6 +1293,9 @@ class TrendPortfolioBacktestRequest(BaseModel):
     er_filter: bool = Field(default=False, description="Universal ER entry filter switch")
     er_window: int = Field(default=10, ge=2)
     er_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
+    er_exit_filter: bool = Field(default=False, description="Universal ER exit filter switch")
+    er_exit_window: int = Field(default=10, ge=2)
+    er_exit_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
     random_hold_days: int = Field(default=20, ge=1)
     random_seed: int | None = Field(default=42)
     group_enforce: bool = Field(

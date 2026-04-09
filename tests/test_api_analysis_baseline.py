@@ -284,6 +284,41 @@ def test_api_trend_single_er_filter_contract(engine, api_client):
     assert params.get("er_filter") is True
     assert int(params.get("er_window") or 0) == 10
     assert float(params.get("er_threshold") or 0.0) == pytest.approx(0.8, rel=0.0, abs=1e-12)
+    ts = (out_with_filter.get("trade_statistics") or {})
+    assert int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0) > 0
+    assert int((ts.get("overall") or {}).get("er_filter_attempted_entry_count") or 0) >= int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0)
+    assert int((ts.get("overall") or {}).get("er_filter_allowed_entry_count") or 0) >= 0
+    assert int(((ts.get("by_code") or {}).get("ER1") or {}).get("er_filter_blocked_entry_count") or 0) > 0
+
+
+def test_api_trend_single_er_exit_filter_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    series = {"ERX1": [100.0 + i * 0.6 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out_with_exit = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "ERX1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "er_exit_filter": True,
+            "er_exit_window": 10,
+            "er_exit_threshold": 0.8,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = (((out_with_exit or {}).get("meta") or {}).get("params") or {})
+    assert params.get("er_exit_filter") is True
+    assert int(params.get("er_exit_window") or 0) == 10
+    ts = (out_with_exit.get("trade_statistics") or {})
+    assert int((ts.get("overall") or {}).get("er_exit_filter_trigger_count") or 0) > 0
+    assert int(((ts.get("by_code") or {}).get("ERX1") or {}).get("er_exit_filter_trigger_count") or 0) > 0
 
 
 def test_api_trend_single_kama_contract(engine, api_client):
@@ -351,6 +386,49 @@ def test_api_trend_portfolio_er_filter_contract(engine, api_client):
     assert params.get("er_filter") is True
     assert int(params.get("er_window") or 0) == 10
     assert float(params.get("er_threshold") or 0.0) == pytest.approx(0.8, rel=0.0, abs=1e-12)
+    ts = (out_with_filter.get("trade_statistics") or {})
+    assert int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0) > 0
+    assert int((ts.get("overall") or {}).get("er_filter_attempted_entry_count") or 0) >= int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0)
+    assert int((ts.get("overall") or {}).get("er_filter_allowed_entry_count") or 0) >= 0
+    by_code = (ts.get("by_code") or {})
+    assert int(((by_code.get("ER1") or {}).get("er_filter_blocked_entry_count") or 0) >= 0)
+    assert int(((by_code.get("ER2") or {}).get("er_filter_blocked_entry_count") or 0) >= 0)
+
+
+def test_api_trend_portfolio_er_exit_filter_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    series = {
+        "ERX1": [100.0 + i * 0.6 for i, _ in enumerate(dates)],
+        "ERX2": [120.0 + i * 0.5 for i, _ in enumerate(dates)],
+    }
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["ERX1", "ERX2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "equal",
+            "er_exit_filter": True,
+            "er_exit_window": 10,
+            "er_exit_threshold": 0.8,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = (((out or {}).get("meta") or {}).get("params") or {})
+    assert params.get("er_exit_filter") is True
+    assert int(params.get("er_exit_window") or 0) == 10
+    ts = (out.get("trade_statistics") or {})
+    assert int((ts.get("overall") or {}).get("er_exit_filter_trigger_count") or 0) > 0
+    by_code = (ts.get("by_code") or {})
+    assert int(((by_code.get("ERX1") or {}).get("er_exit_filter_trigger_count") or 0) >= 0)
+    assert int(((by_code.get("ERX2") or {}).get("er_exit_filter_trigger_count") or 0) >= 0)
 
 
 def test_api_trend_single_er_filter_rejects_invalid_threshold(api_client):
@@ -390,6 +468,51 @@ def test_api_trend_portfolio_er_filter_rejects_invalid_window(api_client):
             "er_filter": True,
             "er_window": 1,
             "er_threshold": 0.3,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert isinstance(err, dict)
+
+
+def test_api_trend_single_er_exit_filter_rejects_invalid_threshold(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "er_exit_filter": True,
+            "er_exit_window": 10,
+            "er_exit_threshold": 1.2,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert isinstance(err, dict)
+
+
+def test_api_trend_portfolio_er_exit_filter_rejects_invalid_window(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "equal",
+            "er_exit_filter": True,
+            "er_exit_window": 1,
+            "er_exit_threshold": 0.88,
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
         },

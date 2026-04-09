@@ -354,43 +354,6 @@ def _normalize_weights(w: np.ndarray, *, n: int) -> np.ndarray:
     return ww / s
 
 
-def _decision_indices_by_rebalance(
-    dates: pd.DatetimeIndex,
-    *,
-    rebalance: str,
-) -> list[int]:
-    rb = str(rebalance or "weekly").strip().lower()
-    if rb == "daily":
-        return list(range(len(dates)))
-    if rb == "weekly":
-        return _weekly_decision_indices(dates)
-    if rb == "monthly":
-        p = dates.to_period("M")
-    elif rb == "quarterly":
-        p = dates.to_period("Q")
-    elif rb == "yearly":
-        p = dates.to_period("Y")
-    elif rb == "none":
-        return []
-    else:
-        return _weekly_decision_indices(dates)
-    out: list[int] = []
-    for i in range(len(dates)):
-        if i == len(dates) - 1 or p[i] != p[i + 1]:
-            out.append(i)
-    return out
-
-
-def _normalize_weights(w: np.ndarray, *, n: int) -> np.ndarray:
-    ww = np.asarray(w, dtype=float)
-    ww = np.where(np.isfinite(ww), ww, 0.0)
-    ww = np.where(ww > 0.0, ww, 0.0)
-    s = float(np.sum(ww))
-    if not np.isfinite(s) or s <= 0.0:
-        return np.full(n, 1.0 / max(1, n), dtype=float)
-    return ww / s
-
-
 def backtest_rotation_basic(
     close: pd.DataFrame,
     *,

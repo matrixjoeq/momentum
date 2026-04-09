@@ -2794,17 +2794,6 @@
         <div><label>TSMOM出场阈值</label><input id="trendMomExitThr" value="0.0" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
-        <div>
-          <label>ER入场过滤</label>
-          <select id="trendErFilterOn" style="min-width:120px;">
-            <option value="false" selected>关闭</option>
-            <option value="true">开启</option>
-          </select>
-        </div>
-        <div><label>ER周期</label><input id="trendErWindow" value="10" /></div>
-        <div><label>ER阈值(0~1)</label><input id="trendErThreshold" value="0.30" /></div>
-      </div>
-      <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>BIAS MA窗口</label><input id="trendBiasMaWin" value="20" /></div>
         <div><label>BIAS 入场阈值(%)</label><input id="trendBiasEntry" value="2.0" /></div>
         <div><label>BIAS 过热止盈(%)</label><input id="trendBiasHot" value="10.0" /></div>
@@ -2823,6 +2812,28 @@
         <div><label>MACD 信号线</label><input id="trendMacdSignal" value="9" /></div>
         <div><label>MACD-V ATR窗口</label><input id="trendMacdVAtr" value="26" /></div>
         <div><label>MACD-V scale</label><input id="trendMacdVScale" value="100" /></div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>ER入场过滤</label>
+          <select id="trendErFilterOn" style="min-width:120px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div><label>ER入场周期</label><input id="trendErWindow" value="10" /></div>
+        <div><label>ER入场阈值(0~1)</label><input id="trendErThreshold" value="0.30" /></div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>ER出场过滤</label>
+          <select id="trendErExitFilterOn" style="min-width:120px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div><label>ER出场周期</label><input id="trendErExitWindow" value="10" /></div>
+        <div><label>ER出场阈值(0~1)</label><input id="trendErExitThreshold" value="0.88" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div>
@@ -4490,7 +4501,7 @@
           "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
-          "trendErFilterOn", "trendErWindow", "trendErThreshold",
+          "trendErFilterOn", "trendErWindow", "trendErThreshold", "trendErExitFilterOn", "trendErExitWindow", "trendErExitThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
@@ -6692,6 +6703,9 @@
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
+          "trendErExitFilterOn",
+          "trendErExitWindow",
+          "trendErExitThreshold",
           "trendBiasMaWin",
           "trendBiasEntry",
           "trendBiasHot",
@@ -6716,6 +6730,9 @@
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
+          "trendErExitFilterOn",
+          "trendErExitWindow",
+          "trendErExitThreshold",
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
@@ -6789,8 +6806,11 @@
           trendMomEntryThr: "TSMOM入场阈值：动量 > 该值时入场。",
           trendMomExitThr: "TSMOM出场阈值：动量 <= 该值时离场；建议不高于入场阈值。",
           trendErFilterOn: "ER入场过滤：开启后仅当 ER>=阈值 才允许新开仓；平仓不受影响。",
-          trendErWindow: "ER周期：效率比率回看窗口（交易日），默认10。",
-          trendErThreshold: "ER阈值：取值[0,1]，ER越高表示趋势越单边。",
+          trendErWindow: "ER入场周期：效率比率回看窗口（交易日），默认10。",
+          trendErThreshold: "ER入场阈值：取值[0,1]，ER越高表示趋势越单边。",
+          trendErExitFilterOn: "ER出场过滤：开启后，当 ER>=阈值 时触发离场。",
+          trendErExitWindow: "ER出场周期：效率比率回看窗口（交易日），默认10。",
+          trendErExitThreshold: "ER出场阈值：取值[0,1]，默认0.88。",
           trendBiasMaWin: "BIAS MA窗口：BIAS参考均线窗口。",
           trendBiasEntry: "BIAS入场阈值：偏离超过该值入场。",
           trendBiasHot: "BIAS过热止盈：偏离过高时止盈离场。",
@@ -13598,7 +13618,11 @@
         const _v = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtPct(Number(x));
         const _n = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : String(Math.round(Number(x)));
         const _num = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtNum(Number(x));
+        const _vp = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtPct(Number(x));
         const _obj = (x) => (x && typeof x === "object") ? x : {};
+        const erAttempt = Number(s.er_filter_attempted_entry_count);
+        const erBlocked = Number(s.er_filter_blocked_entry_count);
+        const erBlockRate = (Number.isFinite(erAttempt) && erAttempt > 0 && Number.isFinite(erBlocked)) ? (erBlocked / erAttempt) : null;
         const _tierText = (mp, totalTriggers) => {
           const obj = _obj(mp);
           const _tierR = (k) => {
@@ -13648,6 +13672,11 @@
           `<tr><td>亏损交易均值 / 标准差</td><td>${_v(l.mean)} / ${_v(l.std)}</td></tr>` +
           `<tr><td>盈利交易最大 / 最小</td><td>${_v(p.max)} / ${_v(p.min)}</td></tr>` +
           `<tr><td>亏损交易最大 / 最小</td><td>${_v(l.max)} / ${_v(l.min)}</td></tr>` +
+          `<tr><td>ER入场过滤器尝试入场次数</td><td>${_n(s.er_filter_attempted_entry_count)}</td></tr>` +
+          `<tr><td>ER入场过滤器允许入场次数</td><td>${_n(s.er_filter_allowed_entry_count)}</td></tr>` +
+          `<tr><td>ER入场过滤器起作用次数</td><td>${_n(s.er_filter_blocked_entry_count)}</td></tr>` +
+          `<tr><td>ER入场过滤器拦截率</td><td>${_vp(erBlockRate)}</td></tr>` +
+          `<tr><td>ER出场过滤器起作用次数</td><td>${_n(s.er_exit_filter_trigger_count)}</td></tr>` +
           `<tr><td>ATR止损触发次数</td><td>${_n(s.atr_stop_trigger_count)}</td></tr>` +
           `<tr><td>R止盈触发次数</td><td>${_n(s.r_take_profit_trigger_count)}</td></tr>` +
           `<tr><td>R止盈分段触发</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>`;
@@ -16677,6 +16706,9 @@
           er_filter: ($("trendErFilterOn") && $("trendErFilterOn").value === "true"),
           er_window: Number(($("trendErWindow").value || "10").trim()),
           er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),
+          er_exit_filter: ($("trendErExitFilterOn") && $("trendErExitFilterOn").value === "true"),
+          er_exit_window: Number(($("trendErExitWindow").value || "10").trim()),
+          er_exit_threshold: Number(($("trendErExitThreshold").value || "0.88").trim()),
           bias_ma_window: Number(($("trendBiasMaWin").value || "20").trim()),
           bias_entry: Number(($("trendBiasEntry").value || "2.0").trim()),
           bias_hot: Number(($("trendBiasHot").value || "10.0").trim()),
@@ -16801,6 +16833,13 @@
         common.er_window = Math.floor(common.er_window);
         if (!Number.isFinite(common.er_threshold) || common.er_threshold < 0 || common.er_threshold > 1) {
           return setMsg("ER阈值需在[0,1]区间");
+        }
+        if (!Number.isFinite(common.er_exit_window) || common.er_exit_window < 2) {
+          return setMsg("ER出场周期需为>=2数字");
+        }
+        common.er_exit_window = Math.floor(common.er_exit_window);
+        if (!Number.isFinite(common.er_exit_threshold) || common.er_exit_threshold < 0 || common.er_exit_threshold > 1) {
+          return setMsg("ER出场阈值需在[0,1]区间");
         }
         common.ma_type = String(common.ma_type || "sma").trim().toLowerCase();
         if (!["sma", "ema", "kama"].includes(common.ma_type)) {

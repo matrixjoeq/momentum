@@ -981,6 +981,9 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         er_filter=bool(getattr(payload, "er_filter", False)),
         er_window=int(getattr(payload, "er_window", 10)),
         er_threshold=float(getattr(payload, "er_threshold", 0.30)),
+        er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
+        er_exit_window=int(getattr(payload, "er_exit_window", 10)),
+        er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
     )
     try:
         return compute_trend_backtest(db, inp)
@@ -1052,6 +1055,9 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         er_filter=bool(getattr(payload, "er_filter", False)),
         er_window=int(getattr(payload, "er_window", 10)),
         er_threshold=float(getattr(payload, "er_threshold", 0.30)),
+        er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
+        er_exit_window=int(getattr(payload, "er_exit_window", 10)),
+        er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
     )
     try:
         return compute_trend_portfolio_backtest(db, inp)

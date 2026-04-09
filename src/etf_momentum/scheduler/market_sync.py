@@ -11,7 +11,6 @@ from fastapi import FastAPI
 
 from etf_momentum.calendar.trading_calendar import is_trading_day
 from etf_momentum.db.repo import create_sync_job, update_sync_job
-from etf_momentum.db.session import session_scope
 from etf_momentum.settings import get_settings
 from etf_momentum.services.market_sync import sync_fixed_pool_prices
 
@@ -48,8 +47,15 @@ def _dedupe_key(run_date: dt.date, *, full_refresh: bool, adjusts: list[str]) ->
 
 @contextmanager
 def _session_cm(sf):
-    # session_scope is a generator; wrap it as a proper context manager for this module.
-    yield from session_scope(sf)
+    # Keep local wrapper explicit so static analyzers infer Session members.
+    db = sf()
+    try:
+        yield db
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 async def _market_sync_loop(app: FastAPI) -> None:

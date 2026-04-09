@@ -169,6 +169,47 @@ def test_trend_single_er_entry_filter_blocks_choppy_entries(session_factory):
     params = ((out_with_filter.get("meta") or {}).get("params") or {})
     assert params.get("er_filter") is True
     assert int(params.get("er_window") or 0) == 10
+    ts = (out_with_filter.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {}).get(code, {})
+    assert int(overall.get("er_filter_blocked_entry_count") or 0) > 0
+    assert int(overall.get("er_filter_attempted_entry_count") or 0) >= int(overall.get("er_filter_blocked_entry_count") or 0)
+    assert int(overall.get("er_filter_allowed_entry_count") or 0) >= 0
+    assert int(by_code.get("er_filter_blocked_entry_count") or 0) > 0
+
+
+def test_trend_single_er_exit_filter_triggers_on_high_er(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.6
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                er_exit_filter=True,
+                er_exit_window=10,
+                er_exit_threshold=0.8,
+                cost_bps=0.0,
+            ),
+        )
+
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert params.get("er_exit_filter") is True
+    assert int(params.get("er_exit_window") or 0) == 10
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {}).get(code, {})
+    assert int(overall.get("er_exit_filter_trigger_count") or 0) > 0
+    assert int(by_code.get("er_exit_filter_trigger_count") or 0) > 0
 
 
 def test_trend_ma_filter_smoke(session_factory):
@@ -644,8 +685,7 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
     params = (((out.get("meta") or {}).get("params") or {}))
     assert bool(params.get("r_take_profit_enabled")) is True
     metrics = ((out.get("metrics") or {}).get("strategy") or {})
-    assert "r_take_profit_trigger_count" in metrics
-    assert isinstance((metrics.get("r_take_profit_tier_trigger_counts") or {}), dict)
+    assert "r_take_profit_trigger_count" not in metrics
     ts = (out.get("trade_statistics") or {})
     overall = (ts.get("overall") or {})
     by_code = (ts.get("by_code") or {}).get(code, {})

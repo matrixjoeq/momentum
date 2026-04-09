@@ -117,6 +117,9 @@ class TrendInputs:
     er_filter: bool = False
     er_window: int = 10
     er_threshold: float = 0.30
+    er_exit_filter: bool = False
+    er_exit_window: int = 10
+    er_exit_threshold: float = 0.88
 
 
 @dataclass(frozen=True)
@@ -179,6 +182,9 @@ class TrendPortfolioInputs:
     er_filter: bool = False
     er_window: int = 10
     er_threshold: float = 0.30
+    er_exit_filter: bool = False
+    er_exit_window: int = 10
+    er_exit_threshold: float = 0.88
 
 
 def _reduce_active_codes_by_group(
@@ -299,7 +305,7 @@ def _efficiency_ratio(price: pd.Series, *, window: int) -> pd.Series:
     return er.clip(lower=0.0, upper=1.0)
 
 
-def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float) -> pd.Series:
+def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float) -> tuple[pd.Series, dict[str, int]]:
     """
     Entry-only filter:
     - new entry (0 -> >0) is allowed only when ER >= threshold
@@ -307,6 +313,9 @@ def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: floa
     """
     thr = float(threshold)
     out = np.zeros(len(raw_pos), dtype=float)
+    blocked_count = 0
+    attempted_entry_count = 0
+    allowed_entry_count = 0
     in_pos = False
     idx = raw_pos.index
     for i, d in enumerate(idx):
@@ -314,11 +323,14 @@ def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: floa
         desired = max(0.0, desired)
         if not in_pos:
             if desired > 0.0:
+                attempted_entry_count += 1
                 er_ok = bool(np.isfinite(float(er.loc[d]))) and float(er.loc[d]) >= thr
                 if er_ok:
                     in_pos = True
+                    allowed_entry_count += 1
                     out[i] = desired
                 else:
+                    blocked_count += 1
                     out[i] = 0.0
             else:
                 out[i] = 0.0
@@ -328,7 +340,53 @@ def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: floa
                 out[i] = 0.0
             else:
                 out[i] = desired
-    return pd.Series(out, index=idx, dtype=float)
+    return pd.Series(out, index=idx, dtype=float), {
+        "blocked_entry_count": int(blocked_count),
+        "attempted_entry_count": int(attempted_entry_count),
+        "allowed_entry_count": int(allowed_entry_count),
+    }
+
+
+def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float) -> tuple[pd.Series, dict[str, Any]]:
+    """
+    Exit-only filter:
+    - when currently in position, if ER >= threshold then force exit
+    - entry behavior is unchanged
+    """
+    thr = float(threshold)
+    out = np.zeros(len(raw_pos), dtype=float)
+    trigger_count = 0
+    trigger_dates: list[str] = []
+    in_pos = False
+    idx = raw_pos.index
+    for i, d in enumerate(idx):
+        desired = float(raw_pos.iloc[i]) if np.isfinite(float(raw_pos.iloc[i])) else 0.0
+        desired = max(0.0, desired)
+        if not in_pos:
+            if desired > 0.0:
+                in_pos = True
+                out[i] = desired
+            else:
+                out[i] = 0.0
+            continue
+        er_hit = bool(np.isfinite(float(er.loc[d]))) and float(er.loc[d]) >= thr
+        if er_hit:
+            in_pos = False
+            out[i] = 0.0
+            trigger_count += 1
+            try:
+                trigger_dates.append(pd.Timestamp(d).strftime("%Y%m%d"))
+            except Exception:
+                pass
+        elif desired <= 0.0:
+            in_pos = False
+            out[i] = 0.0
+        else:
+            out[i] = desired
+    return pd.Series(out, index=idx, dtype=float), {
+        "trigger_count": int(trigger_count),
+        "trigger_dates": sorted(set(trigger_dates)),
+    }
 
 
 def _turnover_cost_from_weights(w: pd.Series, *, cost_bps: float) -> pd.Series:
@@ -1463,6 +1521,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("er_window must be >= 2")
     if (not np.isfinite(er_threshold)) or er_threshold < 0.0 or er_threshold > 1.0:
         raise ValueError("er_threshold must be in [0,1]")
+    er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
+    er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
+    er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
+    if er_exit_window < 2:
+        raise ValueError("er_exit_window must be >= 2")
+    if (not np.isfinite(er_exit_threshold)) or er_exit_threshold < 0.0 or er_exit_threshold > 1.0:
+        raise ValueError("er_exit_threshold must be in [0,1]")
     ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
     if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
         raise ValueError("position_sizing must be equal|vol_target|fixed_ratio|risk_budget")
@@ -1704,9 +1769,22 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             exit_threshold=float(inp.tsmom_exit_threshold),
         ).astype(float)
 
+    er_filter_stats_overall = {"blocked_entry_count": 0, "attempted_entry_count": 0, "allowed_entry_count": 0}
+    er_exit_filter_stats_overall = {"trigger_count": 0, "trigger_dates": []}
     if er_filter:
         er = _efficiency_ratio(px_sig, window=er_window)
-        raw_pos = _apply_er_entry_filter(raw_pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
+        raw_pos, er_filter_stats_overall = _apply_er_entry_filter(
+            raw_pos.astype(float).fillna(0.0),
+            er=er,
+            threshold=er_threshold,
+        )
+    if er_exit_filter:
+        er_exit = _efficiency_ratio(px_sig, window=er_exit_window)
+        raw_pos, er_exit_filter_stats_overall = _apply_er_exit_filter(
+            raw_pos.astype(float).fillna(0.0),
+            er=er_exit,
+            threshold=er_exit_threshold,
+        )
     base_pos = raw_pos.astype(float).fillna(0.0)
     raw_pos, atr_stop_stats = _apply_atr_stop(
         raw_pos,
@@ -1922,11 +2000,17 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["overall"]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
     trade_stats["overall"]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
     trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
+    trade_stats["overall"]["er_filter_blocked_entry_count"] = int((er_filter_stats_overall or {}).get("blocked_entry_count", 0))
+    trade_stats["overall"]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
+    trade_stats["overall"]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
+    trade_stats["overall"]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
-    m_strat["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
-    m_strat["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
+    trade_stats["by_code"][str(code)]["er_filter_blocked_entry_count"] = int((er_filter_stats_overall or {}).get("blocked_entry_count", 0))
+    trade_stats["by_code"][str(code)]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
+    trade_stats["by_code"][str(code)]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
+    trade_stats["by_code"][str(code)]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
     event_study = compute_event_study(
         dates=nav.index,
@@ -2014,6 +2098,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "er_filter": bool(er_filter),
                 "er_window": int(er_window),
                 "er_threshold": float(er_threshold),
+                "er_exit_filter": bool(er_exit_filter),
+                "er_exit_window": int(er_exit_window),
+                "er_exit_threshold": float(er_exit_threshold),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
@@ -2214,6 +2301,13 @@ def compute_trend_portfolio_backtest(
         raise ValueError("er_window must be >= 2")
     if (not np.isfinite(er_threshold)) or er_threshold < 0.0 or er_threshold > 1.0:
         raise ValueError("er_threshold must be in [0,1]")
+    er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
+    er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
+    er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
+    if er_exit_window < 2:
+        raise ValueError("er_exit_window must be >= 2")
+    if (not np.isfinite(er_exit_threshold)) or er_exit_threshold < 0.0 or er_exit_threshold > 1.0:
+        raise ValueError("er_exit_threshold must be in [0,1]")
     group_enforce = bool(getattr(inp, "group_enforce", False))
     group_pick_policy = str(getattr(inp, "group_pick_policy", "highest_sharpe") or "highest_sharpe").strip().lower()
     if group_pick_policy not in {"earliest_entry", "highest_sharpe"}:
@@ -2385,6 +2479,8 @@ def compute_trend_portfolio_backtest(
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
     atr_stop_by_asset: dict[str, dict[str, Any]] = {}
     rtp_by_asset: dict[str, dict[str, Any]] = {}
+    er_filter_by_asset: dict[str, dict[str, int]] = {}
+    er_exit_filter_by_asset: dict[str, dict[str, Any]] = {}
     for c in codes:
         px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
         if px.dropna().empty:
@@ -2489,7 +2585,16 @@ def compute_trend_portfolio_backtest(
             score = mom.astype(float)
         if er_filter:
             er = _efficiency_ratio(px, window=er_window)
-            pos = _apply_er_entry_filter(pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
+            pos, one_er_stats = _apply_er_entry_filter(pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
+            er_filter_by_asset[str(c)] = dict(one_er_stats or {})
+        else:
+            er_filter_by_asset[str(c)] = {"blocked_entry_count": 0, "attempted_entry_count": 0, "allowed_entry_count": 0}
+        if er_exit_filter:
+            er_exit = _efficiency_ratio(px, window=er_exit_window)
+            pos, one_er_exit_stats = _apply_er_exit_filter(pos.astype(float).fillna(0.0), er=er_exit, threshold=er_exit_threshold)
+            er_exit_filter_by_asset[str(c)] = dict(one_er_exit_stats or {})
+        else:
+            er_exit_filter_by_asset[str(c)] = {"trigger_count": 0, "trigger_dates": []}
         h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
         low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
         pos, one_stop_stats = _apply_atr_stop(
@@ -2821,6 +2926,10 @@ def compute_trend_portfolio_backtest(
         }
     )
     total_rtp_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in rtp_by_asset.values()))
+    total_er_filter_blocked_entries = int(sum(int((v or {}).get("blocked_entry_count", 0)) for v in er_filter_by_asset.values()))
+    total_er_filter_attempted_entries = int(sum(int((v or {}).get("attempted_entry_count", 0)) for v in er_filter_by_asset.values()))
+    total_er_filter_allowed_entries = int(sum(int((v or {}).get("allowed_entry_count", 0)) for v in er_filter_by_asset.values()))
+    total_er_exit_filter_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in er_exit_filter_by_asset.values()))
     total_rtp_tier_counts: dict[str, int] = {}
     for v in rtp_by_asset.values():
         one = dict(((v or {}).get("tier_trigger_counts") or {}))
@@ -2844,15 +2953,21 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["atr_stop_trigger_count"] = int(total_triggers)
     trade_stats["overall"]["r_take_profit_trigger_count"] = int(total_rtp_triggers)
     trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
+    trade_stats["overall"]["er_filter_blocked_entry_count"] = int(total_er_filter_blocked_entries)
+    trade_stats["overall"]["er_filter_attempted_entry_count"] = int(total_er_filter_attempted_entries)
+    trade_stats["overall"]["er_filter_allowed_entry_count"] = int(total_er_filter_allowed_entries)
+    trade_stats["overall"]["er_exit_filter_trigger_count"] = int(total_er_exit_filter_triggers)
     for c in codes:
         code_key = str(c)
         one = trade_stats["by_code"].get(code_key) or {}
         one["atr_stop_trigger_count"] = int((atr_stop_by_asset.get(code_key) or {}).get("trigger_count", 0))
         one["r_take_profit_trigger_count"] = int((rtp_by_asset.get(code_key) or {}).get("trigger_count", 0))
         one["r_take_profit_tier_trigger_counts"] = dict(((rtp_by_asset.get(code_key) or {}).get("tier_trigger_counts") or {}))
+        one["er_filter_blocked_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0))
+        one["er_filter_attempted_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0))
+        one["er_filter_allowed_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0))
+        one["er_exit_filter_trigger_count"] = int((er_exit_filter_by_asset.get(code_key) or {}).get("trigger_count", 0))
         trade_stats["by_code"][code_key] = one
-    m_strat["atr_stop_trigger_count"] = int(total_triggers)
-    m_strat["r_take_profit_trigger_count"] = int(total_rtp_triggers)
     m_strat["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
     ext_dates = sorted({str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()})
     skip_dates = sorted({str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()})
@@ -2920,6 +3035,9 @@ def compute_trend_portfolio_backtest(
                 "er_filter": bool(er_filter),
                 "er_window": int(er_window),
                 "er_threshold": float(er_threshold),
+                "er_exit_filter": bool(er_exit_filter),
+                "er_exit_window": int(er_exit_window),
+                "er_exit_threshold": float(er_exit_threshold),
                 "ma_type": ma_type,
                 "kama_er_window": int(kama_er_window),
                 "kama_fast_window": int(kama_fast_window),
