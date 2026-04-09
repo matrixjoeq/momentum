@@ -417,6 +417,9 @@ def test_trend_single_er_exit_filter_triggers_on_high_er(session_factory):
     by_code = (ts.get("by_code") or {}).get(code, {})
     assert int(overall.get("er_exit_filter_trigger_count") or 0) > 0
     assert int(by_code.get("er_exit_filter_trigger_count") or 0) > 0
+    er_exit_rc = ((out.get("risk_controls") or {}).get("er_exit_filter") or {})
+    assert int(er_exit_rc.get("trigger_count") or 0) > 0
+    assert isinstance(er_exit_rc.get("trace_last_rows") or [], list)
 
 
 def test_trend_single_impulse_entry_filter_blocks_entries(session_factory):
@@ -458,6 +461,48 @@ def test_trend_single_impulse_entry_filter_blocks_entries(session_factory):
     assert blocked > 0
     assert blocked_split == blocked
     assert int(by_code.get("impulse_filter_blocked_entry_count") or 0) == blocked
+
+
+def test_trend_single_impulse_exit_filter_triggers_by_state(session_factory):
+    sf = session_factory
+    code = "IMPX1"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code=code, day=d, close=100.0 + i * 0.6)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                impulse_exit_filter=True,
+                impulse_exit_on_bull=True,
+                impulse_exit_on_bear=False,
+                impulse_exit_on_neutral=False,
+                cost_bps=0.0,
+            ),
+        )
+    params = ((out.get("meta") or {}).get("params") or {})
+    assert params.get("impulse_exit_filter") is True
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {}).get(code, {})
+    trig = int(overall.get("impulse_exit_filter_trigger_count") or 0)
+    trig_split = (
+        int(overall.get("impulse_exit_filter_trigger_count_bull") or 0)
+        + int(overall.get("impulse_exit_filter_trigger_count_bear") or 0)
+        + int(overall.get("impulse_exit_filter_trigger_count_neutral") or 0)
+    )
+    assert trig > 0
+    assert trig_split == trig
+    assert int(by_code.get("impulse_exit_filter_trigger_count") or 0) == trig
+    impulse_exit_rc = ((out.get("risk_controls") or {}).get("impulse_exit_filter") or {})
+    assert int(impulse_exit_rc.get("trigger_count") or 0) == trig
+    assert isinstance(impulse_exit_rc.get("trace_last_rows") or [], list)
 
 
 def test_trend_ma_filter_smoke(session_factory):

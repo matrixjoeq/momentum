@@ -2878,6 +2878,36 @@
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div>
+          <label>动力出场过滤</label>
+          <select id="trendImpulseExitFilterOn" style="min-width:120px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>BULL状态触发出场</label>
+          <select id="trendImpulseExitOnBull" style="min-width:120px;">
+            <option value="false" selected>否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+        <div>
+          <label>BEAR状态触发出场</label>
+          <select id="trendImpulseExitOnBear" style="min-width:120px;">
+            <option value="true" selected>是</option>
+            <option value="false">否</option>
+          </select>
+        </div>
+        <div>
+          <label>NEUTRAL状态触发出场</label>
+          <select id="trendImpulseExitOnNeutral" style="min-width:130px;">
+            <option value="false" selected>否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
           <label>ER入场过滤</label>
           <select id="trendErFilterOn" style="min-width:120px;">
             <option value="false" selected>关闭</option>
@@ -3198,6 +3228,8 @@
                   <option value="all" selected>全部</option>
                   <option value="atr">仅ATR止损</option>
                   <option value="rtp">仅R止盈</option>
+                  <option value="er_exit">仅ER出场</option>
+                  <option value="impulse_exit">仅动力出场</option>
                 </select>
               </div>
             </div>
@@ -4563,6 +4595,7 @@
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendImpulseEntryFilterOn", "trendImpulseAllowBull", "trendImpulseAllowBear", "trendImpulseAllowNeutral",
+          "trendImpulseExitFilterOn", "trendImpulseExitOnBull", "trendImpulseExitOnBear", "trendImpulseExitOnNeutral",
           "trendErFilterOn", "trendErWindow", "trendErThreshold", "trendErExitFilterOn", "trendErExitWindow", "trendErExitThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
@@ -6769,6 +6802,10 @@
           "trendImpulseAllowBull",
           "trendImpulseAllowBear",
           "trendImpulseAllowNeutral",
+          "trendImpulseExitFilterOn",
+          "trendImpulseExitOnBull",
+          "trendImpulseExitOnBear",
+          "trendImpulseExitOnNeutral",
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
@@ -6806,6 +6843,10 @@
           "trendImpulseAllowBull",
           "trendImpulseAllowBear",
           "trendImpulseAllowNeutral",
+          "trendImpulseExitFilterOn",
+          "trendImpulseExitOnBull",
+          "trendImpulseExitOnBear",
+          "trendImpulseExitOnNeutral",
           "trendErExitFilterOn",
           "trendErExitWindow",
           "trendErExitThreshold",
@@ -6890,6 +6931,10 @@
           trendImpulseAllowBull: "BULL状态允许入场：EMA(13)与MACD柱同时上行状态下，是否允许新开仓。",
           trendImpulseAllowBear: "BEAR状态允许入场：EMA(13)与MACD柱同时下行状态下，是否允许新开仓。",
           trendImpulseAllowNeutral: "NEUTRAL状态允许入场：除BULL/BEAR之外的中性状态下，是否允许新开仓。",
+          trendImpulseExitFilterOn: "动力出场过滤：开启后，当当前动力状态命中已启用状态时触发出场；与其他出场条件按 OR 并联。",
+          trendImpulseExitOnBull: "BULL状态触发出场：EMA(13)与MACD柱同时上行状态下，是否触发出场。",
+          trendImpulseExitOnBear: "BEAR状态触发出场：EMA(13)与MACD柱同时下行状态下，是否触发出场。",
+          trendImpulseExitOnNeutral: "NEUTRAL状态触发出场：除BULL/BEAR之外的中性状态下，是否触发出场。",
           trendErFilterOn: "ER入场过滤：开启后仅当 ER>=阈值 才允许新开仓；平仓不受影响。",
           trendErWindow: "ER入场周期：效率比率回看窗口（交易日），默认10。",
           trendErThreshold: "ER入场阈值：取值[0,1]，ER越高表示趋势越单边。",
@@ -7350,7 +7395,7 @@
         const traceN = [1, 5, 10, 20].includes(nVal) ? nVal : 20;
         const riskFilter = (() => {
           const v = String((riskSel && riskSel.value) ? riskSel.value : "all").trim().toLowerCase();
-          return ["all", "atr", "rtp"].includes(v) ? v : "all";
+          return ["all", "atr", "rtp", "er_exit", "impulse_exit"].includes(v) ? v : "all";
         })();
         const isPortfolio = String(mode || "single") === "portfolio";
         if (viewSel) {
@@ -7364,8 +7409,12 @@
         const tr = ((np && np.trace) || {});
         const atr = ((tr && tr.atr_stop) || {});
         const rtp = ((tr && tr.r_take_profit) || (((data || {}).risk_controls || {}).r_take_profit || {}));
+        const erExit = ((tr && tr.er_exit_filter) || (((data || {}).risk_controls || {}).er_exit_filter || {}));
+        const impulseExit = ((tr && tr.impulse_exit_filter) || (((data || {}).risk_controls || {}).impulse_exit_filter || {}));
         const atrRows = Array.isArray(atr.trace_last_rows) ? atr.trace_last_rows : [];
         const rtpRows = Array.isArray(rtp.trace_last_rows) ? rtp.trace_last_rows : [];
+        const erExitRows = Array.isArray(erExit.trace_last_rows) ? erExit.trace_last_rows : [];
+        const impulseExitRows = Array.isArray(impulseExit.trace_last_rows) ? impulseExit.trace_last_rows : [];
         const _eventLabel = (x) => {
           const v = String(x || "").trim().toLowerCase();
           if (v === "entry") return "入场";
@@ -7380,6 +7429,8 @@
           if (v === "base_exit_signal") return "基础信号出场";
           if (v === "atr_stop") return "ATR止损出场";
           if (v === "r_take_profit") return "R止盈出场";
+          if (v === "er_exit_filter") return "ER出场";
+          if (v === "impulse_exit_filter") return "动力出场";
           if (v === "atr_update") return "ATR动态更新";
           if (v === "r_take_profit_watch") return "R止盈监控";
           return "-";
@@ -7388,15 +7439,36 @@
           const v = String(x || "").trim().toLowerCase();
           if (v === "atr") return "ATR止损";
           if (v === "rtp") return "R止盈";
+          if (v === "er_exit") return "ER出场";
+          if (v === "impulse_exit") return "动力出场";
           return "-";
         };
-        const _mergeTraceRows = (atrRowsIn, rtpRowsIn) => {
+        const _detailLabel = (r) => {
+          const src = String((r || {}).source || "").trim().toLowerCase();
+          if (src === "er_exit") {
+            const v = Number(r.er_value);
+            const thr = Number(r.er_threshold);
+            if (Number.isFinite(v) && Number.isFinite(thr)) return `ER=${fmtNum(v)} >= ${fmtNum(thr)}`;
+          }
+          if (src === "impulse_exit") {
+            const st = String(r.impulse_state || "").trim().toUpperCase();
+            if (st) return `状态=${st}`;
+          }
+          return "-";
+        };
+        const _mergeTraceRows = (atrRowsIn, rtpRowsIn, erRowsIn, impulseRowsIn) => {
           const out = [];
           if (riskFilter === "all" || riskFilter === "atr") {
             for (const r of (Array.isArray(atrRowsIn) ? atrRowsIn : [])) out.push({ source: "atr", ...(r || {}) });
           }
           if (riskFilter === "all" || riskFilter === "rtp") {
             for (const r of (Array.isArray(rtpRowsIn) ? rtpRowsIn : [])) out.push({ source: "rtp", ...(r || {}) });
+          }
+          if (riskFilter === "all" || riskFilter === "er_exit") {
+            for (const r of (Array.isArray(erRowsIn) ? erRowsIn : [])) out.push({ source: "er_exit", ...(r || {}) });
+          }
+          if (riskFilter === "all" || riskFilter === "impulse_exit") {
+            for (const r of (Array.isArray(impulseRowsIn) ? impulseRowsIn : [])) out.push({ source: "impulse_exit", ...(r || {}) });
           }
           out.sort((a, b) => {
             const c = String(b.date || "").localeCompare(String(a.date || ""));
@@ -7407,13 +7479,14 @@
         };
         let traceHtml = "";
         if (!isPortfolio) {
-          const shortRows = _mergeTraceRows(atrRows, rtpRows).slice(0, traceN);
+          const shortRows = _mergeTraceRows(atrRows, rtpRows, erExitRows, impulseExitRows).slice(0, traceN);
           const rowHtml = shortRows.length
             ? shortRows.map((r) => `<tr>
                 <td>${esc(r.date || "-")}</td>
                 <td>${esc(_sourceLabel(r.source))}</td>
                 <td>${esc(_eventLabel(r.event_type))}</td>
                 <td>${esc(_reasonLabel(r.event_reason))}</td>
+                <td>${esc(_detailLabel(r))}</td>
                 <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
                 <td>${r.base_entry_event ? "是" : "否"}</td>
                 <td>${r.stop_triggered ? "是" : "否"}</td>
@@ -7425,25 +7498,30 @@
                 <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                 <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
               </tr>`).join("")
-            : `<tr><td colspan="13" class="muted">无可用 trace 数据</td></tr>`;
+            : `<tr><td colspan="15" class="muted">无可用 trace 数据</td></tr>`;
           traceHtml =
             `<div style="margin-top:8px;"><b>最近决策轨迹（近${shortRows.length}条）</b></div>` +
-            `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+            `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
         } else {
           const byAssetAtr = ((((data || {}).risk_controls || {}).atr_stop || {}).by_asset || {});
           const byAssetRtp = ((((data || {}).risk_controls || {}).r_take_profit || {}).by_asset || {});
-          const allCodes = Array.from(new Set([...(Object.keys(byAssetAtr || {})), ...(Object.keys(byAssetRtp || {}))])).sort();
+          const byAssetErExit = ((((data || {}).risk_controls || {}).er_exit_filter || {}).by_asset || {});
+          const byAssetImpulseExit = ((((data || {}).risk_controls || {}).impulse_exit_filter || {}).by_asset || {});
+          const allCodes = Array.from(new Set([...(Object.keys(byAssetAtr || {})), ...(Object.keys(byAssetRtp || {})), ...(Object.keys(byAssetErExit || {})), ...(Object.keys(byAssetImpulseExit || {}))])).sort();
           if (traceView === "by_asset") {
             const blocks = allCodes.map((code) => {
               const oneAtrRows = Array.isArray(((byAssetAtr[code] || {}).trace_last_rows)) ? (byAssetAtr[code] || {}).trace_last_rows : [];
               const oneRtpRows = Array.isArray(((byAssetRtp[code] || {}).trace_last_rows)) ? (byAssetRtp[code] || {}).trace_last_rows : [];
-              const shortRows = _mergeTraceRows(oneAtrRows, oneRtpRows).slice(0, traceN);
+              const oneErRows = Array.isArray(((byAssetErExit[code] || {}).trace_last_rows)) ? (byAssetErExit[code] || {}).trace_last_rows : [];
+              const oneImpulseRows = Array.isArray(((byAssetImpulseExit[code] || {}).trace_last_rows)) ? (byAssetImpulseExit[code] || {}).trace_last_rows : [];
+              const shortRows = _mergeTraceRows(oneAtrRows, oneRtpRows, oneErRows, oneImpulseRows).slice(0, traceN);
               const rowHtml = shortRows.length
                 ? shortRows.map((r) => `<tr>
                     <td>${esc(r.date || "-")}</td>
                     <td>${esc(_sourceLabel(r.source))}</td>
                     <td>${esc(_eventLabel(r.event_type))}</td>
                     <td>${esc(_reasonLabel(r.event_reason))}</td>
+                    <td>${esc(_detailLabel(r))}</td>
                     <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
                     <td>${r.base_entry_event ? "是" : "否"}</td>
                     <td>${r.stop_triggered ? "是" : "否"}</td>
@@ -7455,9 +7533,9 @@
                     <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                     <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
                   </tr>`).join("")
-                : `<tr><td colspan="13" class="muted">无</td></tr>`;
+                : `<tr><td colspan="15" class="muted">无</td></tr>`;
               return `<div style="margin-top:8px;"><b>${esc(codeLabel(code))}（近${shortRows.length}条）</b></div>` +
-                `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+                `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
             });
             traceHtml = blocks.length ? blocks.join("") : `<div class="muted" style="margin-top:8px;">无可用 trace 数据</div>`;
           } else {
@@ -7465,7 +7543,9 @@
             for (const code of allCodes) {
               const oneAtrRows = Array.isArray(((byAssetAtr[code] || {}).trace_last_rows)) ? (byAssetAtr[code] || {}).trace_last_rows : [];
               const oneRtpRows = Array.isArray(((byAssetRtp[code] || {}).trace_last_rows)) ? (byAssetRtp[code] || {}).trace_last_rows : [];
-              for (const r of _mergeTraceRows(oneAtrRows, oneRtpRows)) merged.push({ code, ...(r || {}) });
+              const oneErRows = Array.isArray(((byAssetErExit[code] || {}).trace_last_rows)) ? (byAssetErExit[code] || {}).trace_last_rows : [];
+              const oneImpulseRows = Array.isArray(((byAssetImpulseExit[code] || {}).trace_last_rows)) ? (byAssetImpulseExit[code] || {}).trace_last_rows : [];
+              for (const r of _mergeTraceRows(oneAtrRows, oneRtpRows, oneErRows, oneImpulseRows)) merged.push({ code, ...(r || {}) });
             }
             merged.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(a.code || "").localeCompare(String(b.code || "")));
             const shortRows = merged.slice(0, traceN);
@@ -7476,6 +7556,7 @@
                   <td>${esc(_sourceLabel(r.source))}</td>
                   <td>${esc(_eventLabel(r.event_type))}</td>
                   <td>${esc(_reasonLabel(r.event_reason))}</td>
+                  <td>${esc(_detailLabel(r))}</td>
                   <td>${fmtNum(Number(r.base_pos || 0), 0)}</td>
                   <td>${r.base_entry_event ? "是" : "否"}</td>
                   <td>${r.stop_triggered ? "是" : "否"}</td>
@@ -7487,10 +7568,10 @@
                   <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                   <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
                 </tr>`).join("")
-              : `<tr><td colspan="14" class="muted">无可用 trace 数据</td></tr>`;
+              : `<tr><td colspan="16" class="muted">无可用 trace 数据</td></tr>`;
             traceHtml =
               `<div style="margin-top:8px;"><b>最近决策轨迹（按日期，全局近${shortRows.length}条）</b></div>` +
-              `<table style="margin-top:4px;"><tr><th>标的</th><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+              `<table style="margin-top:4px;"><tr><th>标的</th><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
           }
         }
         const topRows = [
@@ -7511,6 +7592,10 @@
           ["R止盈fallback", (rtp.fallback_mode_used ? "是" : "否")],
           ["R止盈触发次数", String(Number(rtp.trigger_count || 0))],
           ["R止盈最近触发日", String(rtp.last_trigger_date || "-")],
+          ["ER出场触发次数", String(Number(erExit.trigger_count || 0))],
+          ["ER出场最近触发日", String(((Array.isArray(erExit.trigger_dates) && erExit.trigger_dates.length) ? erExit.trigger_dates[erExit.trigger_dates.length - 1] : "-"))],
+          ["动力出场触发次数", String(Number(impulseExit.trigger_count || 0))],
+          ["动力出场最近触发日", String(((Array.isArray(impulseExit.trigger_dates) && impulseExit.trigger_dates.length) ? impulseExit.trigger_dates[impulseExit.trigger_dates.length - 1] : "-"))],
         ];
         boxEl.innerHTML =
           `<div class="muted">用于排查“止损后重入”与“下一交易日计划”是否符合预期。</div>` +
@@ -13869,6 +13954,10 @@
           `<tr><td>动力入场过滤器拦截（BULL）</td><td>${_n(s.impulse_filter_blocked_entry_count_bull)}</td></tr>` +
           `<tr><td>动力入场过滤器拦截（BEAR）</td><td>${_n(s.impulse_filter_blocked_entry_count_bear)}</td></tr>` +
           `<tr><td>动力入场过滤器拦截（NEUTRAL）</td><td>${_n(s.impulse_filter_blocked_entry_count_neutral)}</td></tr>` +
+          `<tr><td>动力不足出场过滤器起作用次数</td><td>${_n(s.impulse_exit_filter_trigger_count)}</td></tr>` +
+          `<tr><td>动力不足出场过滤器触发（BULL）</td><td>${_n(s.impulse_exit_filter_trigger_count_bull)}</td></tr>` +
+          `<tr><td>动力不足出场过滤器触发（BEAR）</td><td>${_n(s.impulse_exit_filter_trigger_count_bear)}</td></tr>` +
+          `<tr><td>动力不足出场过滤器触发（NEUTRAL）</td><td>${_n(s.impulse_exit_filter_trigger_count_neutral)}</td></tr>` +
           `<tr><td>ER出场过滤器起作用次数</td><td>${_n(s.er_exit_filter_trigger_count)}</td></tr>` +
           `<tr><td>ATR止损触发次数</td><td>${_n(s.atr_stop_trigger_count)}</td></tr>` +
           `<tr><td>R止盈触发次数</td><td>${_n(s.r_take_profit_trigger_count)}</td></tr>` +
@@ -16903,6 +16992,10 @@
           impulse_allow_bull: ($("trendImpulseAllowBull") && $("trendImpulseAllowBull").value === "true"),
           impulse_allow_bear: ($("trendImpulseAllowBear") && $("trendImpulseAllowBear").value === "true"),
           impulse_allow_neutral: ($("trendImpulseAllowNeutral") && $("trendImpulseAllowNeutral").value === "true"),
+          impulse_exit_filter: ($("trendImpulseExitFilterOn") && $("trendImpulseExitFilterOn").value === "true"),
+          impulse_exit_on_bull: ($("trendImpulseExitOnBull") && $("trendImpulseExitOnBull").value === "true"),
+          impulse_exit_on_bear: ($("trendImpulseExitOnBear") && $("trendImpulseExitOnBear").value === "true"),
+          impulse_exit_on_neutral: ($("trendImpulseExitOnNeutral") && $("trendImpulseExitOnNeutral").value === "true"),
           er_filter: ($("trendErFilterOn") && $("trendErFilterOn").value === "true"),
           er_window: Number(($("trendErWindow").value || "10").trim()),
           er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),

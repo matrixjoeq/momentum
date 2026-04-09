@@ -126,6 +126,10 @@ class TrendInputs:
     impulse_allow_bull: bool = True
     impulse_allow_bear: bool = False
     impulse_allow_neutral: bool = False
+    impulse_exit_filter: bool = False
+    impulse_exit_on_bull: bool = False
+    impulse_exit_on_bear: bool = True
+    impulse_exit_on_neutral: bool = False
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
@@ -200,6 +204,10 @@ class TrendPortfolioInputs:
     impulse_allow_bull: bool = True
     impulse_allow_bear: bool = False
     impulse_allow_neutral: bool = False
+    impulse_exit_filter: bool = False
+    impulse_exit_on_bull: bool = False
+    impulse_exit_on_bear: bool = True
+    impulse_exit_on_neutral: bool = False
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
@@ -461,6 +469,7 @@ def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float
     out = np.zeros(len(raw_pos), dtype=float)
     trigger_count = 0
     trigger_dates: list[str] = []
+    trace_last_rows: list[dict[str, Any]] = []
     in_pos = False
     idx = raw_pos.index
     for i, d in enumerate(idx):
@@ -482,6 +491,20 @@ def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float
                 trigger_dates.append(pd.Timestamp(d).strftime("%Y%m%d"))
             except Exception:
                 pass
+            trace_last_rows.append(
+                {
+                    "date": (pd.Timestamp(d).date().isoformat() if hasattr(d, "date") else str(d)),
+                    "event_type": "exit",
+                    "event_reason": "er_exit_filter",
+                    "base_pos": float(desired),
+                    "decision_pos": 0.0,
+                    "er_value": (float(er.loc[d]) if np.isfinite(float(er.loc[d])) else None),
+                    "er_threshold": float(thr),
+                    "er_triggered": True,
+                }
+            )
+            if len(trace_last_rows) > 120:
+                trace_last_rows = trace_last_rows[-120:]
         elif desired <= 0.0:
             in_pos = False
             out[i] = 0.0
@@ -490,6 +513,84 @@ def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float
     return pd.Series(out, index=idx, dtype=float), {
         "trigger_count": int(trigger_count),
         "trigger_dates": sorted(set(trigger_dates)),
+        "trace_last_rows": trace_last_rows[-80:],
+    }
+
+
+def _apply_impulse_exit_filter(
+    raw_pos: pd.Series,
+    *,
+    impulse_state: pd.Series,
+    exit_on_bull: bool,
+    exit_on_bear: bool,
+    exit_on_neutral: bool,
+) -> tuple[pd.Series, dict[str, Any]]:
+    """
+    Exit-only filter using impulse states.
+    - when currently in position, if current impulse state is enabled for exit then force exit
+    - entry behavior is unchanged
+    """
+    out = np.zeros(len(raw_pos), dtype=float)
+    trigger_count = 0
+    trigger_by_state = {"BULL": 0, "BEAR": 0, "NEUTRAL": 0}
+    trigger_dates: list[str] = []
+    trace_last_rows: list[dict[str, Any]] = []
+    in_pos = False
+    idx = raw_pos.index
+    for i, d in enumerate(idx):
+        desired = float(raw_pos.iloc[i]) if np.isfinite(float(raw_pos.iloc[i])) else 0.0
+        desired = max(0.0, desired)
+        st = str(impulse_state.loc[d]) if d in impulse_state.index else "NEUTRAL"
+        st = st if st in {"BULL", "BEAR", "NEUTRAL"} else "NEUTRAL"
+        should_exit = (
+            (st == "BULL" and bool(exit_on_bull))
+            or (st == "BEAR" and bool(exit_on_bear))
+            or (st == "NEUTRAL" and bool(exit_on_neutral))
+        )
+        if not in_pos:
+            if desired > 0.0:
+                in_pos = True
+                out[i] = desired
+            else:
+                out[i] = 0.0
+            continue
+        if should_exit:
+            in_pos = False
+            out[i] = 0.0
+            trigger_count += 1
+            trigger_by_state[st] = int(trigger_by_state.get(st, 0) + 1)
+            try:
+                trigger_dates.append(pd.Timestamp(d).strftime("%Y%m%d"))
+            except Exception:
+                pass
+            trace_last_rows.append(
+                {
+                    "date": (pd.Timestamp(d).date().isoformat() if hasattr(d, "date") else str(d)),
+                    "event_type": "exit",
+                    "event_reason": "impulse_exit_filter",
+                    "base_pos": float(desired),
+                    "decision_pos": 0.0,
+                    "impulse_state": str(st),
+                    "impulse_exit_on_bull": bool(exit_on_bull),
+                    "impulse_exit_on_bear": bool(exit_on_bear),
+                    "impulse_exit_on_neutral": bool(exit_on_neutral),
+                    "impulse_triggered": True,
+                }
+            )
+            if len(trace_last_rows) > 120:
+                trace_last_rows = trace_last_rows[-120:]
+        elif desired <= 0.0:
+            in_pos = False
+            out[i] = 0.0
+        else:
+            out[i] = desired
+    return pd.Series(out, index=idx, dtype=float), {
+        "trigger_count": int(trigger_count),
+        "trigger_count_bull": int(trigger_by_state.get("BULL", 0)),
+        "trigger_count_bear": int(trigger_by_state.get("BEAR", 0)),
+        "trigger_count_neutral": int(trigger_by_state.get("NEUTRAL", 0)),
+        "trigger_dates": sorted(set(trigger_dates)),
+        "trace_last_rows": trace_last_rows[-80:],
     }
 
 
@@ -1881,6 +1982,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     impulse_allow_bull = bool(getattr(inp, "impulse_allow_bull", True))
     impulse_allow_bear = bool(getattr(inp, "impulse_allow_bear", False))
     impulse_allow_neutral = bool(getattr(inp, "impulse_allow_neutral", False))
+    impulse_exit_filter = bool(getattr(inp, "impulse_exit_filter", False))
+    impulse_exit_on_bull = bool(getattr(inp, "impulse_exit_on_bull", False))
+    impulse_exit_on_bear = bool(getattr(inp, "impulse_exit_on_bear", True))
+    impulse_exit_on_neutral = bool(getattr(inp, "impulse_exit_on_neutral", False))
     er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
     er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
@@ -2146,9 +2251,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "blocked_entry_count_bear": 0,
         "blocked_entry_count_neutral": 0,
     }
+    impulse_exit_filter_stats_overall = {
+        "trigger_count": 0,
+        "trigger_count_bull": 0,
+        "trigger_count_bear": 0,
+        "trigger_count_neutral": 0,
+        "trigger_dates": [],
+        "trace_last_rows": [],
+    }
     er_filter_stats_overall = {"blocked_entry_count": 0, "attempted_entry_count": 0, "allowed_entry_count": 0}
-    er_exit_filter_stats_overall = {"trigger_count": 0, "trigger_dates": []}
-    if impulse_entry_filter:
+    er_exit_filter_stats_overall = {"trigger_count": 0, "trigger_dates": [], "trace_last_rows": []}
+    impulse_state: pd.Series | None = None
+    if impulse_entry_filter or impulse_exit_filter:
         impulse_state = _compute_impulse_state(
             px_sig,
             ema_window=13,
@@ -2156,6 +2270,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             macd_slow=26,
             macd_signal=9,
         )
+    if impulse_entry_filter and (impulse_state is not None):
         raw_pos, impulse_filter_stats_overall = _apply_impulse_entry_filter(
             raw_pos.astype(float).fillna(0.0),
             impulse_state=impulse_state,
@@ -2169,6 +2284,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             raw_pos.astype(float).fillna(0.0),
             er=er,
             threshold=er_threshold,
+        )
+    if impulse_exit_filter and (impulse_state is not None):
+        raw_pos, impulse_exit_filter_stats_overall = _apply_impulse_exit_filter(
+            raw_pos.astype(float).fillna(0.0),
+            impulse_state=impulse_state,
+            exit_on_bull=impulse_exit_on_bull,
+            exit_on_bear=impulse_exit_on_bear,
+            exit_on_neutral=impulse_exit_on_neutral,
         )
     if er_exit_filter:
         er_exit = _efficiency_ratio(px_sig, window=er_exit_window)
@@ -2428,6 +2551,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
     trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
     trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
+    trade_stats["overall"]["impulse_exit_filter_trigger_count"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count", 0))
+    trade_stats["overall"]["impulse_exit_filter_trigger_count_bull"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bull", 0))
+    trade_stats["overall"]["impulse_exit_filter_trigger_count_bear"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bear", 0))
+    trade_stats["overall"]["impulse_exit_filter_trigger_count_neutral"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_neutral", 0))
     trade_stats["overall"]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
     trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
@@ -2440,6 +2567,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
     trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
     trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
+    trade_stats["by_code"][str(code)]["impulse_exit_filter_trigger_count"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count", 0))
+    trade_stats["by_code"][str(code)]["impulse_exit_filter_trigger_count_bull"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bull", 0))
+    trade_stats["by_code"][str(code)]["impulse_exit_filter_trigger_count_bear"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bear", 0))
+    trade_stats["by_code"][str(code)]["impulse_exit_filter_trigger_count_neutral"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_neutral", 0))
     trade_stats["by_code"][str(code)]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
@@ -2447,6 +2578,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     m_strat["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
     m_strat["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
     m_strat["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
+    m_strat["impulse_exit_filter_trigger_count"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count", 0))
+    m_strat["impulse_exit_filter_trigger_count_bull"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bull", 0))
+    m_strat["impulse_exit_filter_trigger_count_bear"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bear", 0))
+    m_strat["impulse_exit_filter_trigger_count_neutral"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_neutral", 0))
     m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     event_study = compute_event_study(
         dates=nav.index,
@@ -2543,6 +2678,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "impulse_allow_bull": bool(impulse_allow_bull),
                 "impulse_allow_bear": bool(impulse_allow_bear),
                 "impulse_allow_neutral": bool(impulse_allow_neutral),
+                "impulse_exit_filter": bool(impulse_exit_filter),
+                "impulse_exit_on_bull": bool(impulse_exit_on_bull),
+                "impulse_exit_on_bear": bool(impulse_exit_on_bear),
+                "impulse_exit_on_neutral": bool(impulse_exit_on_neutral),
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),
@@ -2600,6 +2739,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "risk_controls": {
             "atr_stop": atr_stop_stats,
             "r_take_profit": r_take_profit_stats,
+            "impulse_exit_filter": {
+                "enabled": bool(impulse_exit_filter),
+                "trigger_count": int((impulse_exit_filter_stats_overall or {}).get("trigger_count", 0)),
+                "trigger_count_bull": int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bull", 0)),
+                "trigger_count_bear": int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bear", 0)),
+                "trigger_count_neutral": int((impulse_exit_filter_stats_overall or {}).get("trigger_count_neutral", 0)),
+                "trigger_dates": list((impulse_exit_filter_stats_overall or {}).get("trigger_dates", []))[:200],
+                "trace_last_rows": list((impulse_exit_filter_stats_overall or {}).get("trace_last_rows", [])),
+            },
+            "er_exit_filter": {
+                "enabled": bool(er_exit_filter),
+                "window": int(er_exit_window),
+                "threshold": float(er_exit_threshold),
+                "trigger_count": int((er_exit_filter_stats_overall or {}).get("trigger_count", 0)),
+                "trigger_dates": list((er_exit_filter_stats_overall or {}).get("trigger_dates", []))[:200],
+                "trace_last_rows": list((er_exit_filter_stats_overall or {}).get("trace_last_rows", [])),
+            },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
         },
         "corporate_actions": (
@@ -2646,6 +2802,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                     "wait_next_entry_lock_active": bool((r_take_profit_stats or {}).get("wait_next_entry_lock_active", False)),
                     "tiers": (r_take_profit_stats or {}).get("tiers", []),
                     "trace_last_rows": (r_take_profit_stats or {}).get("trace_last_rows", []),
+                },
+                "impulse_exit_filter": {
+                    "enabled": bool(impulse_exit_filter),
+                    "trigger_count": int((impulse_exit_filter_stats_overall or {}).get("trigger_count", 0)),
+                    "trigger_count_bull": int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bull", 0)),
+                    "trigger_count_bear": int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bear", 0)),
+                    "trigger_count_neutral": int((impulse_exit_filter_stats_overall or {}).get("trigger_count_neutral", 0)),
+                    "trigger_dates": list((impulse_exit_filter_stats_overall or {}).get("trigger_dates", []))[:200],
+                    "trace_last_rows": list((impulse_exit_filter_stats_overall or {}).get("trace_last_rows", [])),
+                },
+                "er_exit_filter": {
+                    "enabled": bool(er_exit_filter),
+                    "window": int(er_exit_window),
+                    "threshold": float(er_exit_threshold),
+                    "trigger_count": int((er_exit_filter_stats_overall or {}).get("trigger_count", 0)),
+                    "trigger_dates": list((er_exit_filter_stats_overall or {}).get("trigger_dates", []))[:200],
+                    "trace_last_rows": list((er_exit_filter_stats_overall or {}).get("trace_last_rows", [])),
                 },
             },
         },
@@ -2762,6 +2935,10 @@ def compute_trend_portfolio_backtest(
     impulse_allow_bull = bool(getattr(inp, "impulse_allow_bull", True))
     impulse_allow_bear = bool(getattr(inp, "impulse_allow_bear", False))
     impulse_allow_neutral = bool(getattr(inp, "impulse_allow_neutral", False))
+    impulse_exit_filter = bool(getattr(inp, "impulse_exit_filter", False))
+    impulse_exit_on_bull = bool(getattr(inp, "impulse_exit_on_bull", False))
+    impulse_exit_on_bear = bool(getattr(inp, "impulse_exit_on_bear", True))
+    impulse_exit_on_neutral = bool(getattr(inp, "impulse_exit_on_neutral", False))
     er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
     er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
@@ -2941,6 +3118,7 @@ def compute_trend_portfolio_backtest(
     atr_stop_by_asset: dict[str, dict[str, Any]] = {}
     rtp_by_asset: dict[str, dict[str, Any]] = {}
     impulse_filter_by_asset: dict[str, dict[str, int]] = {}
+    impulse_exit_filter_by_asset: dict[str, dict[str, Any]] = {}
     er_filter_by_asset: dict[str, dict[str, int]] = {}
     er_exit_filter_by_asset: dict[str, dict[str, Any]] = {}
     for c in codes:
@@ -3054,7 +3232,8 @@ def compute_trend_portfolio_backtest(
                 exit_threshold=float(inp.tsmom_exit_threshold),
             )
             score = mom.astype(float)
-        if impulse_entry_filter:
+        impulse_state_one: pd.Series | None = None
+        if impulse_entry_filter or impulse_exit_filter:
             impulse_state = _compute_impulse_state(
                 px,
                 ema_window=13,
@@ -3062,9 +3241,11 @@ def compute_trend_portfolio_backtest(
                 macd_slow=26,
                 macd_signal=9,
             )
+            impulse_state_one = impulse_state
+        if impulse_entry_filter and (impulse_state_one is not None):
             pos, one_impulse_stats = _apply_impulse_entry_filter(
                 pos.astype(float).fillna(0.0),
-                impulse_state=impulse_state,
+                impulse_state=impulse_state_one,
                 allow_bull=impulse_allow_bull,
                 allow_bear=impulse_allow_bear,
                 allow_neutral=impulse_allow_neutral,
@@ -3079,6 +3260,24 @@ def compute_trend_portfolio_backtest(
                 "blocked_entry_count_bear": 0,
                 "blocked_entry_count_neutral": 0,
             }
+        if impulse_exit_filter and (impulse_state_one is not None):
+            pos, one_impulse_exit_stats = _apply_impulse_exit_filter(
+                pos.astype(float).fillna(0.0),
+                impulse_state=impulse_state_one,
+                exit_on_bull=impulse_exit_on_bull,
+                exit_on_bear=impulse_exit_on_bear,
+                exit_on_neutral=impulse_exit_on_neutral,
+            )
+            impulse_exit_filter_by_asset[str(c)] = dict(one_impulse_exit_stats or {})
+        else:
+            impulse_exit_filter_by_asset[str(c)] = {
+                "trigger_count": 0,
+                "trigger_count_bull": 0,
+                "trigger_count_bear": 0,
+                "trigger_count_neutral": 0,
+                "trigger_dates": [],
+                "trace_last_rows": [],
+            }
         if er_filter:
             er = _efficiency_ratio(px, window=er_window)
             pos, one_er_stats = _apply_er_entry_filter(pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
@@ -3090,7 +3289,7 @@ def compute_trend_portfolio_backtest(
             pos, one_er_exit_stats = _apply_er_exit_filter(pos.astype(float).fillna(0.0), er=er_exit, threshold=er_exit_threshold)
             er_exit_filter_by_asset[str(c)] = dict(one_er_exit_stats or {})
         else:
-            er_exit_filter_by_asset[str(c)] = {"trigger_count": 0, "trigger_dates": []}
+            er_exit_filter_by_asset[str(c)] = {"trigger_count": 0, "trigger_dates": [], "trace_last_rows": []}
         h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
         low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
         pos, one_stop_stats = _apply_atr_stop(
@@ -3479,10 +3678,30 @@ def compute_trend_portfolio_backtest(
     total_impulse_filter_blocked_bull = int(sum(int((v or {}).get("blocked_entry_count_bull", 0)) for v in impulse_filter_by_asset.values()))
     total_impulse_filter_blocked_bear = int(sum(int((v or {}).get("blocked_entry_count_bear", 0)) for v in impulse_filter_by_asset.values()))
     total_impulse_filter_blocked_neutral = int(sum(int((v or {}).get("blocked_entry_count_neutral", 0)) for v in impulse_filter_by_asset.values()))
+    total_impulse_exit_filter_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in impulse_exit_filter_by_asset.values()))
+    total_impulse_exit_filter_triggers_bull = int(sum(int((v or {}).get("trigger_count_bull", 0)) for v in impulse_exit_filter_by_asset.values()))
+    total_impulse_exit_filter_triggers_bear = int(sum(int((v or {}).get("trigger_count_bear", 0)) for v in impulse_exit_filter_by_asset.values()))
+    total_impulse_exit_filter_triggers_neutral = int(sum(int((v or {}).get("trigger_count_neutral", 0)) for v in impulse_exit_filter_by_asset.values()))
+    uniq_impulse_exit_trigger_dates = sorted(
+        {
+            str(d)
+            for v in impulse_exit_filter_by_asset.values()
+            for d in (v or {}).get("trigger_dates", [])
+            if str(d).strip()
+        }
+    )
     total_er_filter_blocked_entries = int(sum(int((v or {}).get("blocked_entry_count", 0)) for v in er_filter_by_asset.values()))
     total_er_filter_attempted_entries = int(sum(int((v or {}).get("attempted_entry_count", 0)) for v in er_filter_by_asset.values()))
     total_er_filter_allowed_entries = int(sum(int((v or {}).get("allowed_entry_count", 0)) for v in er_filter_by_asset.values()))
     total_er_exit_filter_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in er_exit_filter_by_asset.values()))
+    uniq_er_exit_trigger_dates = sorted(
+        {
+            str(d)
+            for v in er_exit_filter_by_asset.values()
+            for d in (v or {}).get("trigger_dates", [])
+            if str(d).strip()
+        }
+    )
     total_rtp_tier_counts: dict[str, int] = {}
     for v in rtp_by_asset.values():
         one = dict(((v or {}).get("tier_trigger_counts") or {}))
@@ -3510,6 +3729,10 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int(total_impulse_filter_blocked_bull)
     trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int(total_impulse_filter_blocked_bear)
     trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int(total_impulse_filter_blocked_neutral)
+    trade_stats["overall"]["impulse_exit_filter_trigger_count"] = int(total_impulse_exit_filter_triggers)
+    trade_stats["overall"]["impulse_exit_filter_trigger_count_bull"] = int(total_impulse_exit_filter_triggers_bull)
+    trade_stats["overall"]["impulse_exit_filter_trigger_count_bear"] = int(total_impulse_exit_filter_triggers_bear)
+    trade_stats["overall"]["impulse_exit_filter_trigger_count_neutral"] = int(total_impulse_exit_filter_triggers_neutral)
     trade_stats["overall"]["er_filter_blocked_entry_count"] = int(total_er_filter_blocked_entries)
     trade_stats["overall"]["er_filter_attempted_entry_count"] = int(total_er_filter_attempted_entries)
     trade_stats["overall"]["er_filter_allowed_entry_count"] = int(total_er_filter_allowed_entries)
@@ -3525,6 +3748,10 @@ def compute_trend_portfolio_backtest(
         one["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_bull", 0))
         one["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_bear", 0))
         one["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_neutral", 0))
+        one["impulse_exit_filter_trigger_count"] = int((impulse_exit_filter_by_asset.get(code_key) or {}).get("trigger_count", 0))
+        one["impulse_exit_filter_trigger_count_bull"] = int((impulse_exit_filter_by_asset.get(code_key) or {}).get("trigger_count_bull", 0))
+        one["impulse_exit_filter_trigger_count_bear"] = int((impulse_exit_filter_by_asset.get(code_key) or {}).get("trigger_count_bear", 0))
+        one["impulse_exit_filter_trigger_count_neutral"] = int((impulse_exit_filter_by_asset.get(code_key) or {}).get("trigger_count_neutral", 0))
         one["er_filter_blocked_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0))
         one["er_filter_attempted_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0))
         one["er_filter_allowed_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0))
@@ -3536,6 +3763,10 @@ def compute_trend_portfolio_backtest(
     m_strat["impulse_filter_blocked_entry_count_bull"] = int(total_impulse_filter_blocked_bull)
     m_strat["impulse_filter_blocked_entry_count_bear"] = int(total_impulse_filter_blocked_bear)
     m_strat["impulse_filter_blocked_entry_count_neutral"] = int(total_impulse_filter_blocked_neutral)
+    m_strat["impulse_exit_filter_trigger_count"] = int(total_impulse_exit_filter_triggers)
+    m_strat["impulse_exit_filter_trigger_count_bull"] = int(total_impulse_exit_filter_triggers_bull)
+    m_strat["impulse_exit_filter_trigger_count_bear"] = int(total_impulse_exit_filter_triggers_bear)
+    m_strat["impulse_exit_filter_trigger_count_neutral"] = int(total_impulse_exit_filter_triggers_neutral)
     m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     ext_dates = sorted({str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()})
     skip_dates = sorted({str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()})
@@ -3607,6 +3838,10 @@ def compute_trend_portfolio_backtest(
                 "impulse_allow_bull": bool(impulse_allow_bull),
                 "impulse_allow_bear": bool(impulse_allow_bear),
                 "impulse_allow_neutral": bool(impulse_allow_neutral),
+                "impulse_exit_filter": bool(impulse_exit_filter),
+                "impulse_exit_on_bull": bool(impulse_exit_on_bull),
+                "impulse_exit_on_bear": bool(impulse_exit_on_bear),
+                "impulse_exit_on_neutral": bool(impulse_exit_on_neutral),
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),
@@ -3724,6 +3959,29 @@ def compute_trend_portfolio_backtest(
                 "fallback_mode_used": bool((atr_mode == "none") and rtp_enabled),
                 "initial_r_mode": ("atr_stop" if atr_mode != "none" else "virtual_atr_fallback"),
                 "by_asset": rtp_by_asset,
+            },
+            "impulse_exit_filter": {
+                "enabled": bool(impulse_exit_filter),
+                "trigger_count": int(total_impulse_exit_filter_triggers),
+                "trigger_count_bull": int(total_impulse_exit_filter_triggers_bull),
+                "trigger_count_bear": int(total_impulse_exit_filter_triggers_bear),
+                "trigger_count_neutral": int(total_impulse_exit_filter_triggers_neutral),
+                "trigger_days": int(len(uniq_impulse_exit_trigger_dates)),
+                "first_trigger_date": (uniq_impulse_exit_trigger_dates[0] if uniq_impulse_exit_trigger_dates else None),
+                "last_trigger_date": (uniq_impulse_exit_trigger_dates[-1] if uniq_impulse_exit_trigger_dates else None),
+                "trigger_dates": uniq_impulse_exit_trigger_dates[:200],
+                "by_asset": impulse_exit_filter_by_asset,
+            },
+            "er_exit_filter": {
+                "enabled": bool(er_exit_filter),
+                "window": int(er_exit_window),
+                "threshold": float(er_exit_threshold),
+                "trigger_count": int(total_er_exit_filter_triggers),
+                "trigger_days": int(len(uniq_er_exit_trigger_dates)),
+                "first_trigger_date": (uniq_er_exit_trigger_dates[0] if uniq_er_exit_trigger_dates else None),
+                "last_trigger_date": (uniq_er_exit_trigger_dates[-1] if uniq_er_exit_trigger_dates else None),
+                "trigger_dates": uniq_er_exit_trigger_dates[:200],
+                "by_asset": er_exit_filter_by_asset,
             },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
             "position_extension": {
