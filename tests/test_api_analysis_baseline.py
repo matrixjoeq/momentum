@@ -254,6 +254,35 @@ def test_api_trend_single_accepts_risk_budget_params(api_client):
     assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(0.01, rel=0.0, abs=1e-12)
 
 
+def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.03,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "0.02" in str(err)
+
+
 def test_api_trend_single_er_filter_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
     series = {"ER1": [100.0 + ((-1.0) ** i) * 0.8 + i * 0.01 for i, _ in enumerate(dates)]}

@@ -1592,8 +1592,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if risk_budget_atr_window < 2:
         raise ValueError("risk_budget_atr_window must be >= 2")
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
-    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
-        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
+    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
+        raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
     # - Execution/NAV: none close, with hfq return fallback on corporate-action days to avoid false cliffs
@@ -2302,8 +2302,8 @@ def compute_trend_portfolio_backtest(
     if risk_budget_atr_window < 2:
         raise ValueError("risk_budget_atr_window must be >= 2")
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
-    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
-        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
+    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
+        raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema", "kama"}:

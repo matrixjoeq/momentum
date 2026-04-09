@@ -127,6 +127,35 @@ def test_trend_single_risk_budget_sizing_applies_params(session_factory):
     assert any((x > 0.0) and (x < 1.0) for x in eff)
 
 
+def test_trend_single_risk_budget_pct_upper_bound(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=40, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.6
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        try:
+            compute_trend_backtest(
+                db,
+                TrendInputs(
+                    code=code,
+                    start=dates[0],
+                    end=dates[-1],
+                    strategy="ma_filter",
+                    sma_window=5,
+                    position_sizing="risk_budget",
+                    risk_budget_atr_window=2,
+                    risk_budget_pct=0.03,
+                    cost_bps=0.0,
+                ),
+            )
+            assert False, "expected ValueError for risk_budget_pct > 0.02"
+        except ValueError as exc:
+            assert "risk_budget_pct must be in [0.001, 0.02]" in str(exc)
+
+
 def test_trend_single_er_entry_filter_blocks_choppy_entries(session_factory):
     sf = session_factory
     code = "AAA"

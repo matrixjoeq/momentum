@@ -1259,8 +1259,8 @@ def backtest_rotation(
     if risk_budget_atr_window < 2:
         raise ValueError("risk_budget_atr_window must be >= 2")
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
-    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.03:
-        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
+    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
+        raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
     if inp.lookback_days <= 0:
         raise ValueError("lookback_days must be > 0")
     if int(inp.entry_match_n) < 0:

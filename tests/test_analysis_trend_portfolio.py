@@ -468,6 +468,35 @@ def test_trend_portfolio_risk_budget_position_sizing(session_factory):
         assert float(expo.max()) > 0.0
 
 
+def test_trend_portfolio_risk_budget_pct_upper_bound(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 0.9)
+            _add_price(db, code="A2", day=d, close=80 + i * 0.7)
+        db.commit()
+        try:
+            compute_trend_portfolio_backtest(
+                db,
+                TrendPortfolioInputs(
+                    codes=["A1", "A2"],
+                    start=dates[0],
+                    end=dates[-1],
+                    strategy="ma_filter",
+                    sma_window=8,
+                    position_sizing="risk_budget",
+                    risk_budget_atr_window=20,
+                    risk_budget_pct=0.03,
+                    cost_bps=0.0,
+                    slippage_rate=0.0,
+                ),
+            )
+            assert False, "expected ValueError for risk_budget_pct > 0.02"
+        except ValueError as exc:
+            assert "risk_budget_pct must be in [0.001, 0.02]" in str(exc)
+
+
 def test_trend_portfolio_bias_has_base_exit_hot_cold(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]

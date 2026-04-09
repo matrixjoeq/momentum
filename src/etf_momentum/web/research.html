@@ -5139,7 +5139,7 @@
             <div style="margin-top:8px"><b>fixed</b>：固定每个入选标的权重为 1/|TopK|（入选不足时总仓位可低于100%，剩余视为现金）。</div>
             <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，令“标的波动 1 个 ATR 时对组合净值影响约为 x%”。</div>
             <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，并对全组合做上限约束（总权重&gt;100%时按比例缩放）。</div>
-            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~3%）。</div>
+            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~2%）。</div>
           `,
         },
         param_trend_position_sizing: {
@@ -5151,7 +5151,7 @@
             <div style="margin-top:8px"><b>fixed_ratio</b>：每个入选标的固定比例（可配超额策略与持仓数上限）。</div>
             <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，令“单标的波动 1ATR 时组合净值波动约 x%”。</div>
             <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，当总权重超过100%时按比例缩放到100%。</div>
-            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~3%）。</div>
+            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~2%）。</div>
           `,
         },
         param_cal_position_mode: {
@@ -5162,7 +5162,7 @@
             <div style="margin-top:8px"><b>fixed_ratio</b>：固定总仓位（剩余现金）。</div>
             <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，控制“每 1ATR 波动对应的组合净值波动预算”。</div>
             <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，组合层面超100%时会缩放到100%。</div>
-            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~3%）。</div>
+            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~2%）。</div>
           `,
         },
         param_rot_lookback: {
@@ -16336,13 +16336,13 @@
           if (!Number.isFinite(risk_budget_atr_window) || risk_budget_atr_window < 2) return setMsg("风险预算ATR周期需为>=2数字");
           if (!Number.isFinite(risk_budget_pct)) return setMsg("风险预算%需为数字");
           risk_budget_pct = (risk_budget_pct > 0.1 ? risk_budget_pct / 100.0 : risk_budget_pct);
-          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.02) return setMsg("风险预算%需在0.1%~2%之间");
         } else {
-          // API 始终校验 risk_budget_pct ∈ [0.001, 0.03]；非风险预算模式下输入框常为 1 表示 1%。
+          // API 始终校验 risk_budget_pct ∈ [0.001, 0.02]；非风险预算模式下输入框常为 1 表示 1%。
           let rbp = Number(risk_budget_pct);
           if (!Number.isFinite(rbp)) rbp = 0.01;
           else if (rbp > 0.1) rbp = rbp / 100.0;
-          risk_budget_pct = Math.min(0.03, Math.max(0.001, rbp));
+          risk_budget_pct = Math.min(0.02, Math.max(0.001, rbp));
         }
         const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
         const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
@@ -16814,8 +16814,8 @@
           return setMsg("风险预算%需为数字");
         }
         common.risk_budget_pct = (common.risk_budget_pct > 0.1 ? common.risk_budget_pct / 100.0 : common.risk_budget_pct);
-        if (common.risk_budget_pct < 0.001 || common.risk_budget_pct > 0.03) {
-          return setMsg("风险预算%需在0.1%~3%之间");
+        if (common.risk_budget_pct < 0.001 || common.risk_budget_pct > 0.02) {
+          return setMsg("风险预算%需在0.1%~2%之间");
         }
         if (!["earliest_entry", "highest_sharpe"].includes(String(common.group_pick_policy))) {
           return setMsg("趋势组内优选仅支持：最早入场/夏普最高");
@@ -17215,14 +17215,14 @@
           let rb = Number(payload.risk_budget_pct);
           if (!Number.isFinite(rb)) return setMsg("风险预算%需为数字");
           rb = (rb > 0.1 ? rb / 100.0 : rb);
-          if (rb < 0.001 || rb > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+          if (rb < 0.001 || rb > 0.02) return setMsg("风险预算%需在0.1%~2%之间");
           payload.risk_budget_pct = rb;
           payload.risk_budget_atr_window = Math.floor(Number(payload.risk_budget_atr_window));
         } else {
           let rb = Number(payload.risk_budget_pct);
           if (!Number.isFinite(rb)) rb = 0.01;
           else if (rb > 0.1) rb = rb / 100.0;
-          payload.risk_budget_pct = Math.min(0.03, Math.max(0.001, rb));
+          payload.risk_budget_pct = Math.min(0.02, Math.max(0.001, rb));
           let rw = Math.floor(Number(payload.risk_budget_atr_window));
           if (!Number.isFinite(rw) || rw < 2) rw = 20;
           payload.risk_budget_atr_window = rw;
@@ -17832,12 +17832,12 @@
           if (!Number.isFinite(risk_budget_atr_window) || risk_budget_atr_window < 2) return setMsg("风险预算ATR周期需为>=2数字");
           if (!Number.isFinite(risk_budget_pct)) return setMsg("风险预算%需为数字");
           risk_budget_pct = (risk_budget_pct > 0.1 ? risk_budget_pct / 100.0 : risk_budget_pct);
-          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.02) return setMsg("风险预算%需在0.1%~2%之间");
         } else {
           let rbp = Number(risk_budget_pct);
           if (!Number.isFinite(rbp)) rbp = 0.01;
           else if (rbp > 0.1) rbp = rbp / 100.0;
-          risk_budget_pct = Math.min(0.03, Math.max(0.001, rbp));
+          risk_budget_pct = Math.min(0.02, Math.max(0.001, rbp));
         }
         const entry_backfill = ($("rotEntryBackfill") && $("rotEntryBackfill").value === "true");
         const entry_match_n = Number(($("rotEntryMatchN") && $("rotEntryMatchN").value) ? $("rotEntryMatchN").value : "0");
@@ -18300,12 +18300,12 @@
           if (!Number.isFinite(risk_budget_atr_window) || risk_budget_atr_window < 2) return setMsg("风险预算ATR周期需为>=2数字");
           if (!Number.isFinite(risk_budget_pct)) return setMsg("风险预算%需为数字");
           risk_budget_pct = (risk_budget_pct > 0.1 ? risk_budget_pct / 100.0 : risk_budget_pct);
-          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.03) return setMsg("风险预算%需在0.1%~3%之间");
+          if (risk_budget_pct < 0.001 || risk_budget_pct > 0.02) return setMsg("风险预算%需在0.1%~2%之间");
         } else {
           let rbp = Number(risk_budget_pct);
           if (!Number.isFinite(rbp)) rbp = 0.01;
           else if (rbp > 0.1) rbp = rbp / 100.0;
-          risk_budget_pct = Math.min(0.03, Math.max(0.001, rbp));
+          risk_budget_pct = Math.min(0.02, Math.max(0.001, rbp));
         }
         $("status").textContent = "计算日历效应择时策略...";
         setMsg("");

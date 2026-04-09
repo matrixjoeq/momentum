@@ -762,7 +762,7 @@ class CalendarTimingStrategyRequest(BaseModel):
     position_mode: str = Field(default="equal", description="equal|fixed_ratio|risk_budget")
     fixed_pos_ratio: float = Field(default=1.0, ge=0.0, le=1.0, description="Exposure when position_mode=fixed_ratio")
     risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_mode=risk_budget")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
     dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate coverage over union interval")
     exec_price: str = Field(default="open", description="open|close")
     cost_bps: float = Field(default=2.0, ge=0.0, description="Two-way transaction cost in bps")
@@ -959,7 +959,7 @@ class RotationBacktestRequest(BaseModel):
         description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/|top_k|) | risk_budget(ATR risk budget).",
     )
     risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window for risk-budget sizing")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
     entry_backfill: bool = Field(
         default=False,
         description="If true, refill from lower-ranked candidates when top_k assets are excluded by entry filters.",
@@ -1191,7 +1191,7 @@ class TrendBacktestRequest(BaseModel):
     fixed_overcap_policy: str = Field(default="skip", description="Over-cap policy placeholder: skip|extend")
     fixed_max_holdings: int = Field(default=10, ge=1, description="Max holdings placeholder for unified payload schema")
     risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_sizing=risk_budget")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="NAV risk budget for 1 ATR move (0.01 = 1%)")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="NAV risk budget for 1 ATR move (0.01 = 1%)")
     # parameters (some are strategy-specific)
     sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
     fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")
@@ -1259,7 +1259,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     fixed_overcap_policy: str = Field(default="skip", description="When fixed-ratio entry exceeds constraints: skip|extend")
     fixed_max_holdings: int = Field(default=10, ge=1, description="Max number of held assets when position_sizing=fixed_ratio")
     risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_sizing=risk_budget")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.03, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
+    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
     dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate pool by period over union interval")
     sma_window: int = Field(default=200, ge=2)
     fast_window: int = Field(default=50, ge=2)
