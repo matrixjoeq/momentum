@@ -115,6 +115,12 @@ class TrendInputs:
     fixed_max_holdings: int = 10
     risk_budget_atr_window: int = 20
     risk_budget_pct: float = 0.01
+    vol_regime_risk_mgmt_enabled: bool = False
+    vol_ratio_fast_atr_window: int = 5
+    vol_ratio_slow_atr_window: int = 50
+    vol_ratio_expand_threshold: float = 1.45
+    vol_ratio_contract_threshold: float = 0.65
+    vol_ratio_normal_threshold: float = 1.05
     group_enforce: bool = False
     group_pick_policy: str = "highest_sharpe"
     group_max_holdings: int = 4
@@ -153,6 +159,12 @@ class TrendPortfolioInputs:
     fixed_max_holdings: int = 10  # max number of concurrently held assets when position_sizing=fixed_ratio
     risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
     risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
+    vol_regime_risk_mgmt_enabled: bool = False
+    vol_ratio_fast_atr_window: int = 5
+    vol_ratio_slow_atr_window: int = 50
+    vol_ratio_expand_threshold: float = 1.45
+    vol_ratio_contract_threshold: float = 0.65
+    vol_ratio_normal_threshold: float = 1.05
     dynamic_universe: bool = False
     # single-strategy params
     sma_window: int = 200
@@ -489,7 +501,7 @@ def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float
             trigger_count += 1
             try:
                 trigger_dates.append(pd.Timestamp(d).strftime("%Y%m%d"))
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 pass
             trace_last_rows.append(
                 {
@@ -561,7 +573,7 @@ def _apply_impulse_exit_filter(
             trigger_by_state[st] = int(trigger_by_state.get(st, 0) + 1)
             try:
                 trigger_dates.append(pd.Timestamp(d).strftime("%Y%m%d"))
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 pass
             trace_last_rows.append(
                 {
@@ -597,8 +609,109 @@ def _apply_impulse_exit_filter(
 def _month_key(d: Any) -> str:
     try:
         return pd.Timestamp(d).strftime("%Y-%m")
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return ""
+
+
+def _risk_budget_dynamic_weights(
+    active_signal: pd.Series,
+    *,
+    close: pd.Series,
+    atr_for_budget: pd.Series,
+    atr_fast: pd.Series,
+    atr_slow: pd.Series,
+    risk_budget_pct: float,
+    dynamic_enabled: bool,
+    expand_threshold: float,
+    contract_threshold: float,
+    normal_threshold: float,
+) -> tuple[pd.Series, dict[str, int]]:
+    """
+    Risk-budget weights with post-entry volatility-regime adjustments.
+
+    Base rule: target_weight = risk_budget_pct * close / ATR(budget_window), fixed after entry.
+    Optional dynamic regime rule (while in position):
+    - NORMAL -> REDUCED when ATR(5)/ATR(50) > expand_threshold (de-risk)
+    - NORMAL -> INCREASED when ATR(5)/ATR(50) < contract_threshold (add risk)
+    - REDUCED -> NORMAL when ratio < normal_threshold
+    - INCREASED -> NORMAL when ratio > normal_threshold
+    """
+    idx = active_signal.index
+    sig = active_signal.reindex(idx).astype(float).fillna(0.0).clip(lower=0.0)
+    px = close.reindex(idx).astype(float)
+    atr_b = atr_for_budget.reindex(idx).astype(float)
+    atr_f = atr_fast.reindex(idx).astype(float)
+    atr_s = atr_slow.reindex(idx).astype(float)
+    base_target = (
+        float(risk_budget_pct) * px / atr_b.replace(0.0, np.nan)
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(lower=0.0, upper=1.0).astype(float)
+    ratio = (atr_f / atr_s.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).astype(float)
+
+    out = pd.Series(0.0, index=idx, dtype=float)
+    state = "FLAT"  # FLAT | NORMAL | REDUCED | INCREASED
+    held_weight = 0.0
+    stats = {
+        "vol_risk_adjust_total_count": 0,
+        "vol_risk_adjust_reduce_on_expand_count": 0,
+        "vol_risk_adjust_increase_on_contract_count": 0,
+        "vol_risk_adjust_recover_from_expand_count": 0,
+        "vol_risk_adjust_recover_from_contract_count": 0,
+        "vol_risk_entry_state_reduce_on_expand_count": 0,
+        "vol_risk_entry_state_increase_on_contract_count": 0,
+    }
+    for d in idx:
+        desired = float(sig.loc[d]) if np.isfinite(float(sig.loc[d])) else 0.0
+        desired = max(0.0, desired)
+        if desired <= 1e-12:
+            state = "FLAT"
+            held_weight = 0.0
+            out.loc[d] = 0.0
+            continue
+        if state == "FLAT":
+            held_weight = float(base_target.loc[d]) if np.isfinite(float(base_target.loc[d])) else 0.0
+            held_weight = float(min(1.0, max(0.0, held_weight)))
+            if dynamic_enabled:
+                r = float(ratio.loc[d]) if np.isfinite(float(ratio.loc[d])) else float("nan")
+                if np.isfinite(r) and r > float(expand_threshold):
+                    state = "REDUCED"
+                    stats["vol_risk_entry_state_reduce_on_expand_count"] += 1
+                elif np.isfinite(r) and r < float(contract_threshold):
+                    state = "INCREASED"
+                    stats["vol_risk_entry_state_increase_on_contract_count"] += 1
+                else:
+                    state = "NORMAL"
+            else:
+                state = "NORMAL"
+            out.loc[d] = held_weight
+            continue
+        if dynamic_enabled:
+            r = float(ratio.loc[d]) if np.isfinite(float(ratio.loc[d])) else float("nan")
+            can_recalc = np.isfinite(float(base_target.loc[d]))
+            if state == "NORMAL":
+                if np.isfinite(r) and r > float(expand_threshold) and can_recalc:
+                    held_weight = float(base_target.loc[d])
+                    state = "REDUCED"
+                    stats["vol_risk_adjust_total_count"] += 1
+                    stats["vol_risk_adjust_reduce_on_expand_count"] += 1
+                elif np.isfinite(r) and r < float(contract_threshold) and can_recalc:
+                    held_weight = float(base_target.loc[d])
+                    state = "INCREASED"
+                    stats["vol_risk_adjust_total_count"] += 1
+                    stats["vol_risk_adjust_increase_on_contract_count"] += 1
+            elif state == "REDUCED":
+                if np.isfinite(r) and r < float(normal_threshold) and can_recalc:
+                    held_weight = float(base_target.loc[d])
+                    state = "NORMAL"
+                    stats["vol_risk_adjust_total_count"] += 1
+                    stats["vol_risk_adjust_recover_from_expand_count"] += 1
+            elif state == "INCREASED":
+                if np.isfinite(r) and r > float(normal_threshold) and can_recalc:
+                    held_weight = float(base_target.loc[d])
+                    state = "NORMAL"
+                    stats["vol_risk_adjust_total_count"] += 1
+                    stats["vol_risk_adjust_recover_from_contract_count"] += 1
+        out.loc[d] = float(min(1.0, max(0.0, held_weight)))
+    return out.astype(float), {k: int(v) for k, v in stats.items()}
 
 
 def _position_risk_from_stop_params(
@@ -2015,6 +2128,26 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
     if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
         raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
+    vol_regime_risk_mgmt_enabled = bool(getattr(inp, "vol_regime_risk_mgmt_enabled", False))
+    vol_ratio_fast_atr_window = int(getattr(inp, "vol_ratio_fast_atr_window", 5) or 5)
+    vol_ratio_slow_atr_window = int(getattr(inp, "vol_ratio_slow_atr_window", 50) or 50)
+    vol_ratio_expand_threshold = float(getattr(inp, "vol_ratio_expand_threshold", 1.45) or 1.45)
+    vol_ratio_contract_threshold = float(getattr(inp, "vol_ratio_contract_threshold", 0.65) or 0.65)
+    vol_ratio_normal_threshold = float(getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05)
+    if vol_ratio_fast_atr_window < 2:
+        raise ValueError("vol_ratio_fast_atr_window must be >= 2")
+    if vol_ratio_slow_atr_window < 2:
+        raise ValueError("vol_ratio_slow_atr_window must be >= 2")
+    if (not np.isfinite(vol_ratio_expand_threshold)) or vol_ratio_expand_threshold <= 0:
+        raise ValueError("vol_ratio_expand_threshold must be > 0")
+    if (not np.isfinite(vol_ratio_contract_threshold)) or vol_ratio_contract_threshold <= 0:
+        raise ValueError("vol_ratio_contract_threshold must be > 0")
+    if (not np.isfinite(vol_ratio_normal_threshold)) or vol_ratio_normal_threshold <= 0:
+        raise ValueError("vol_ratio_normal_threshold must be > 0")
+    if vol_ratio_expand_threshold <= vol_ratio_normal_threshold:
+        raise ValueError("vol_ratio_expand_threshold must be > vol_ratio_normal_threshold")
+    if vol_ratio_contract_threshold >= vol_ratio_normal_threshold:
+        raise ValueError("vol_ratio_contract_threshold must be < vol_ratio_normal_threshold")
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
     # - Execution/NAV: none close, with hfq return fallback on corporate-action days to avoid false cliffs
@@ -2326,6 +2459,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         atr_stop_enabled=bool(atr_mode != "none"),
     )
     raw_pos = raw_pos.astype(float)
+    vol_risk_adjust_stats_overall: dict[str, int] = {
+        "vol_risk_adjust_total_count": 0,
+        "vol_risk_adjust_reduce_on_expand_count": 0,
+        "vol_risk_adjust_increase_on_contract_count": 0,
+        "vol_risk_adjust_recover_from_expand_count": 0,
+        "vol_risk_adjust_recover_from_contract_count": 0,
+    }
 
     # Single-asset sizing overlay (same knobs as portfolio mode).
     sizing_scale = pd.Series(1.0, index=raw_pos.index, dtype=float)
@@ -2338,8 +2478,30 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             px_sig.astype(float),
             window=int(risk_budget_atr_window),
         ).reindex(raw_pos.index).astype(float)
-        rb = (float(risk_budget_pct) * px_sig.astype(float) / atr_rb.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
-        sizing_scale = rb.fillna(0.0).clip(lower=0.0, upper=1.0).astype(float)
+        atr_fast = _atr_from_hlc(
+            high_qfq.astype(float).fillna(px_sig),
+            low_qfq.astype(float).fillna(px_sig),
+            px_sig.astype(float),
+            window=int(vol_ratio_fast_atr_window),
+        ).reindex(raw_pos.index).astype(float)
+        atr_slow = _atr_from_hlc(
+            high_qfq.astype(float).fillna(px_sig),
+            low_qfq.astype(float).fillna(px_sig),
+            px_sig.astype(float),
+            window=int(vol_ratio_slow_atr_window),
+        ).reindex(raw_pos.index).astype(float)
+        sizing_scale, vol_risk_adjust_stats_overall = _risk_budget_dynamic_weights(
+            raw_pos.astype(float).fillna(0.0),
+            close=px_sig.astype(float),
+            atr_for_budget=atr_rb,
+            atr_fast=atr_fast,
+            atr_slow=atr_slow,
+            risk_budget_pct=float(risk_budget_pct),
+            dynamic_enabled=bool(vol_regime_risk_mgmt_enabled),
+            expand_threshold=float(vol_ratio_expand_threshold),
+            contract_threshold=float(vol_ratio_contract_threshold),
+            normal_threshold=float(vol_ratio_normal_threshold),
+        )
     elif ps == "vol_target":
         asset_vol = (
             ret_exec.rolling(window=max(2, int(inp.vol_window)), min_periods=max(2, int(inp.vol_window)))
@@ -2556,6 +2718,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["overall"]["impulse_exit_filter_trigger_count_bear"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bear", 0))
     trade_stats["overall"]["impulse_exit_filter_trigger_count_neutral"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_neutral", 0))
     trade_stats["overall"]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
+    trade_stats["overall"]["vol_risk_adjust_total_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0))
+    trade_stats["overall"]["vol_risk_adjust_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_reduce_on_expand_count", 0))
+    trade_stats["overall"]["vol_risk_adjust_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_increase_on_contract_count", 0))
+    trade_stats["overall"]["vol_risk_adjust_recover_from_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_expand_count", 0))
+    trade_stats["overall"]["vol_risk_adjust_recover_from_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_contract_count", 0))
+    trade_stats["overall"]["vol_risk_entry_state_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0))
+    trade_stats["overall"]["vol_risk_entry_state_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_increase_on_contract_count", 0))
     trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
     trade_stats["by_code"][str(code)]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
@@ -2572,6 +2741,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["by_code"][str(code)]["impulse_exit_filter_trigger_count_bear"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_bear", 0))
     trade_stats["by_code"][str(code)]["impulse_exit_filter_trigger_count_neutral"] = int((impulse_exit_filter_stats_overall or {}).get("trigger_count_neutral", 0))
     trade_stats["by_code"][str(code)]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_total_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0))
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_reduce_on_expand_count", 0))
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_increase_on_contract_count", 0))
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_recover_from_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_expand_count", 0))
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_recover_from_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_contract_count", 0))
+    trade_stats["by_code"][str(code)]["vol_risk_entry_state_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0))
+    trade_stats["by_code"][str(code)]["vol_risk_entry_state_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_increase_on_contract_count", 0))
     trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
     m_strat["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
@@ -2671,6 +2847,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "fixed_max_holdings": int(fixed_max_holding_n),
                 "risk_budget_atr_window": int(risk_budget_atr_window),
                 "risk_budget_pct": float(risk_budget_pct),
+                "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
+                "vol_ratio_fast_atr_window": int(vol_ratio_fast_atr_window),
+                "vol_ratio_slow_atr_window": int(vol_ratio_slow_atr_window),
+                "vol_ratio_expand_threshold": float(vol_ratio_expand_threshold),
+                "vol_ratio_contract_threshold": float(vol_ratio_contract_threshold),
+                "vol_ratio_normal_threshold": float(vol_ratio_normal_threshold),
                 "er_filter": bool(er_filter),
                 "er_window": int(er_window),
                 "er_threshold": float(er_threshold),
@@ -2755,6 +2937,21 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "trigger_count": int((er_exit_filter_stats_overall or {}).get("trigger_count", 0)),
                 "trigger_dates": list((er_exit_filter_stats_overall or {}).get("trigger_dates", []))[:200],
                 "trace_last_rows": list((er_exit_filter_stats_overall or {}).get("trace_last_rows", [])),
+            },
+            "vol_regime_risk_mgmt": {
+                "enabled": bool(ps == "risk_budget" and vol_regime_risk_mgmt_enabled),
+                "fast_atr_window": int(vol_ratio_fast_atr_window),
+                "slow_atr_window": int(vol_ratio_slow_atr_window),
+                "expand_threshold": float(vol_ratio_expand_threshold),
+                "contract_threshold": float(vol_ratio_contract_threshold),
+                "normal_threshold": float(vol_ratio_normal_threshold),
+                "adjust_total_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0)),
+                "adjust_reduce_on_expand_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_reduce_on_expand_count", 0)),
+                "adjust_increase_on_contract_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_increase_on_contract_count", 0)),
+                "adjust_recover_from_expand_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_expand_count", 0)),
+                "adjust_recover_from_contract_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_contract_count", 0)),
+                "entry_state_reduce_on_expand_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0)),
+                "entry_state_increase_on_contract_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_increase_on_contract_count", 0)),
             },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
         },
@@ -2868,6 +3065,26 @@ def compute_trend_portfolio_backtest(
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
     if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
         raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
+    vol_regime_risk_mgmt_enabled = bool(getattr(inp, "vol_regime_risk_mgmt_enabled", False))
+    vol_ratio_fast_atr_window = int(getattr(inp, "vol_ratio_fast_atr_window", 5) or 5)
+    vol_ratio_slow_atr_window = int(getattr(inp, "vol_ratio_slow_atr_window", 50) or 50)
+    vol_ratio_expand_threshold = float(getattr(inp, "vol_ratio_expand_threshold", 1.45) or 1.45)
+    vol_ratio_contract_threshold = float(getattr(inp, "vol_ratio_contract_threshold", 0.65) or 0.65)
+    vol_ratio_normal_threshold = float(getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05)
+    if vol_ratio_fast_atr_window < 2:
+        raise ValueError("vol_ratio_fast_atr_window must be >= 2")
+    if vol_ratio_slow_atr_window < 2:
+        raise ValueError("vol_ratio_slow_atr_window must be >= 2")
+    if (not np.isfinite(vol_ratio_expand_threshold)) or vol_ratio_expand_threshold <= 0:
+        raise ValueError("vol_ratio_expand_threshold must be > 0")
+    if (not np.isfinite(vol_ratio_contract_threshold)) or vol_ratio_contract_threshold <= 0:
+        raise ValueError("vol_ratio_contract_threshold must be > 0")
+    if (not np.isfinite(vol_ratio_normal_threshold)) or vol_ratio_normal_threshold <= 0:
+        raise ValueError("vol_ratio_normal_threshold must be > 0")
+    if vol_ratio_expand_threshold <= vol_ratio_normal_threshold:
+        raise ValueError("vol_ratio_expand_threshold must be > vol_ratio_normal_threshold")
+    if vol_ratio_contract_threshold >= vol_ratio_normal_threshold:
+        raise ValueError("vol_ratio_contract_threshold must be < vol_ratio_normal_threshold")
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema", "kama"}:
@@ -3334,6 +3551,8 @@ def compute_trend_portfolio_backtest(
         ).astype(float)
 
     atr_budget_df = pd.DataFrame(index=dates, columns=codes, dtype=float)
+    atr_ratio_fast_df = pd.DataFrame(index=dates, columns=codes, dtype=float)
+    atr_ratio_slow_df = pd.DataFrame(index=dates, columns=codes, dtype=float)
     if ps == "risk_budget":
         for c in codes:
             px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
@@ -3344,6 +3563,18 @@ def compute_trend_portfolio_backtest(
                 low_px.astype(float).fillna(px),
                 px,
                 window=int(risk_budget_atr_window),
+            ).astype(float)
+            atr_ratio_fast_df[c] = _atr_from_hlc(
+                h.astype(float).fillna(px),
+                low_px.astype(float).fillna(px),
+                px,
+                window=int(vol_ratio_fast_atr_window),
+            ).astype(float)
+            atr_ratio_slow_df[c] = _atr_from_hlc(
+                h.astype(float).fillna(px),
+                low_px.astype(float).fillna(px),
+                px,
+                window=int(vol_ratio_slow_atr_window),
             ).astype(float)
 
     vol_ann = ret_hfq.rolling(window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)).std(ddof=1) * np.sqrt(252.0)
@@ -3360,6 +3591,22 @@ def compute_trend_portfolio_backtest(
     ext_events: list[dict[str, Any]] = []
     skip_events: list[dict[str, Any]] = []
     prev_fixed_w = pd.Series(0.0, index=codes, dtype=float)
+    prev_rb_w = pd.Series(0.0, index=codes, dtype=float)
+    rb_state_by_code: dict[str, str] = {str(c): "FLAT" for c in codes}
+    risk_budget_overcap_scale_count = 0
+    risk_budget_overcap_scale_by_code: dict[str, int] = {str(c): 0 for c in codes}
+    vol_risk_adjust_by_asset: dict[str, dict[str, int]] = {
+        str(c): {
+            "vol_risk_adjust_total_count": 0,
+            "vol_risk_adjust_reduce_on_expand_count": 0,
+            "vol_risk_adjust_increase_on_contract_count": 0,
+            "vol_risk_adjust_recover_from_expand_count": 0,
+            "vol_risk_adjust_recover_from_contract_count": 0,
+            "vol_risk_entry_state_reduce_on_expand_count": 0,
+            "vol_risk_entry_state_increase_on_contract_count": 0,
+        }
+        for c in codes
+    }
     for d in dates:
         active = sig_pos.loc[d]
         scores = sig_score.loc[d].where(active > 0.0, other=np.nan).replace([np.inf, -np.inf], np.nan)
@@ -3415,16 +3662,84 @@ def compute_trend_portfolio_backtest(
                 w_row.loc[c] = fixed_ratio
             prev_fixed_w = w_row.copy()
         elif ps == "risk_budget":
-            w_row = pd.Series(0.0, index=codes, dtype=float)
+            active_set = set(active_codes)
+            w_row = prev_rb_w.copy().astype(float).reindex(codes).fillna(0.0)
+            # Exit when base signal is no longer active.
+            for c in codes:
+                if (w_row.loc[c] > 1e-12) and (c not in active_set):
+                    w_row.loc[c] = 0.0
+                    rb_state_by_code[str(c)] = "FLAT"
+            # Keep existing active positions at their entry-time risk-budget weight.
             for c in active_codes:
                 px = float(close_qfq.loc[d, c]) if (c in close_qfq.columns and d in close_qfq.index) else float("nan")
                 a = float(atr_budget_df.loc[d, c]) if (c in atr_budget_df.columns and d in atr_budget_df.index) else float("nan")
+                base_target = float("nan")
                 if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
-                    w_row.loc[c] = float(risk_budget_pct) * float(px) / float(a)
+                    base_target = float(risk_budget_pct) * float(px) / float(a)
+                has_pos = bool(w_row.loc[c] > 1e-12)
+                key = str(c)
+                if not has_pos:
+                    if np.isfinite(base_target) and base_target > 0.0:
+                        w_row.loc[c] = float(base_target)
+                        if bool(vol_regime_risk_mgmt_enabled):
+                            af = float(atr_ratio_fast_df.loc[d, c]) if (c in atr_ratio_fast_df.columns and d in atr_ratio_fast_df.index) else float("nan")
+                            aslow = float(atr_ratio_slow_df.loc[d, c]) if (c in atr_ratio_slow_df.columns and d in atr_ratio_slow_df.index) else float("nan")
+                            ratio = (af / aslow) if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0) else float("nan")
+                            if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
+                                rb_state_by_code[key] = "REDUCED"
+                                vol_risk_adjust_by_asset[key]["vol_risk_entry_state_reduce_on_expand_count"] += 1
+                            elif np.isfinite(ratio) and ratio < float(vol_ratio_contract_threshold):
+                                rb_state_by_code[key] = "INCREASED"
+                                vol_risk_adjust_by_asset[key]["vol_risk_entry_state_increase_on_contract_count"] += 1
+                            else:
+                                rb_state_by_code[key] = "NORMAL"
+                        else:
+                            rb_state_by_code[key] = "NORMAL"
+                    continue
+                if not bool(vol_regime_risk_mgmt_enabled):
+                    continue
+                st = str(rb_state_by_code.get(key, "NORMAL") or "NORMAL").upper()
+                af = float(atr_ratio_fast_df.loc[d, c]) if (c in atr_ratio_fast_df.columns and d in atr_ratio_fast_df.index) else float("nan")
+                aslow = float(atr_ratio_slow_df.loc[d, c]) if (c in atr_ratio_slow_df.columns and d in atr_ratio_slow_df.index) else float("nan")
+                ratio = (af / aslow) if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0) else float("nan")
+                if not np.isfinite(base_target):
+                    continue
+                if st == "NORMAL":
+                    if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
+                        w_row.loc[c] = float(base_target)
+                        rb_state_by_code[key] = "REDUCED"
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_reduce_on_expand_count"] += 1
+                    elif np.isfinite(ratio) and ratio < float(vol_ratio_contract_threshold):
+                        w_row.loc[c] = float(base_target)
+                        rb_state_by_code[key] = "INCREASED"
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_increase_on_contract_count"] += 1
+                elif st == "REDUCED":
+                    if np.isfinite(ratio) and ratio < float(vol_ratio_normal_threshold):
+                        w_row.loc[c] = float(base_target)
+                        rb_state_by_code[key] = "NORMAL"
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_recover_from_expand_count"] += 1
+                elif st == "INCREASED":
+                    if np.isfinite(ratio) and ratio > float(vol_ratio_normal_threshold):
+                        w_row.loc[c] = float(base_target)
+                        rb_state_by_code[key] = "NORMAL"
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_recover_from_contract_count"] += 1
             w_row = w_row.clip(lower=0.0)
             s = float(w_row.sum())
             if s > 1.0 + 1e-12:
+                pre_scale = w_row.copy().astype(float)
                 w_row = (w_row / s).astype(float)
+                risk_budget_overcap_scale_count += 1
+                for cc in w_row.index:
+                    key_cc = str(cc)
+                    before = float(pre_scale.loc[cc]) if np.isfinite(float(pre_scale.loc[cc])) else 0.0
+                    after = float(w_row.loc[cc]) if np.isfinite(float(w_row.loc[cc])) else 0.0
+                    if before > after + 1e-12:
+                        risk_budget_overcap_scale_by_code[key_cc] = int(risk_budget_overcap_scale_by_code.get(key_cc, 0) + 1)
+            prev_rb_w = w_row.copy()
         elif not active_codes:
             w_row = pd.Series(0.0, index=codes, dtype=float)
         elif ps == "equal":
@@ -3694,6 +4009,13 @@ def compute_trend_portfolio_backtest(
     total_er_filter_attempted_entries = int(sum(int((v or {}).get("attempted_entry_count", 0)) for v in er_filter_by_asset.values()))
     total_er_filter_allowed_entries = int(sum(int((v or {}).get("allowed_entry_count", 0)) for v in er_filter_by_asset.values()))
     total_er_exit_filter_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in er_exit_filter_by_asset.values()))
+    total_vol_risk_adjust = int(sum(int((v or {}).get("vol_risk_adjust_total_count", 0)) for v in vol_risk_adjust_by_asset.values()))
+    total_vol_risk_adjust_reduce_expand = int(sum(int((v or {}).get("vol_risk_adjust_reduce_on_expand_count", 0)) for v in vol_risk_adjust_by_asset.values()))
+    total_vol_risk_adjust_increase_contract = int(sum(int((v or {}).get("vol_risk_adjust_increase_on_contract_count", 0)) for v in vol_risk_adjust_by_asset.values()))
+    total_vol_risk_adjust_recover_expand = int(sum(int((v or {}).get("vol_risk_adjust_recover_from_expand_count", 0)) for v in vol_risk_adjust_by_asset.values()))
+    total_vol_risk_adjust_recover_contract = int(sum(int((v or {}).get("vol_risk_adjust_recover_from_contract_count", 0)) for v in vol_risk_adjust_by_asset.values()))
+    total_vol_risk_entry_reduce_expand = int(sum(int((v or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0)) for v in vol_risk_adjust_by_asset.values()))
+    total_vol_risk_entry_increase_contract = int(sum(int((v or {}).get("vol_risk_entry_state_increase_on_contract_count", 0)) for v in vol_risk_adjust_by_asset.values()))
     uniq_er_exit_trigger_dates = sorted(
         {
             str(d)
@@ -3737,6 +4059,14 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["er_filter_attempted_entry_count"] = int(total_er_filter_attempted_entries)
     trade_stats["overall"]["er_filter_allowed_entry_count"] = int(total_er_filter_allowed_entries)
     trade_stats["overall"]["er_exit_filter_trigger_count"] = int(total_er_exit_filter_triggers)
+    trade_stats["overall"]["vol_risk_adjust_total_count"] = int(total_vol_risk_adjust)
+    trade_stats["overall"]["vol_risk_adjust_reduce_on_expand_count"] = int(total_vol_risk_adjust_reduce_expand)
+    trade_stats["overall"]["vol_risk_adjust_increase_on_contract_count"] = int(total_vol_risk_adjust_increase_contract)
+    trade_stats["overall"]["vol_risk_adjust_recover_from_expand_count"] = int(total_vol_risk_adjust_recover_expand)
+    trade_stats["overall"]["vol_risk_adjust_recover_from_contract_count"] = int(total_vol_risk_adjust_recover_contract)
+    trade_stats["overall"]["vol_risk_entry_state_reduce_on_expand_count"] = int(total_vol_risk_entry_reduce_expand)
+    trade_stats["overall"]["vol_risk_entry_state_increase_on_contract_count"] = int(total_vol_risk_entry_increase_contract)
+    trade_stats["overall"]["vol_risk_overcap_scale_count"] = int(risk_budget_overcap_scale_count)
     trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
     for c in codes:
         code_key = str(c)
@@ -3756,6 +4086,14 @@ def compute_trend_portfolio_backtest(
         one["er_filter_attempted_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0))
         one["er_filter_allowed_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0))
         one["er_exit_filter_trigger_count"] = int((er_exit_filter_by_asset.get(code_key) or {}).get("trigger_count", 0))
+        one["vol_risk_adjust_total_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_total_count", 0))
+        one["vol_risk_adjust_reduce_on_expand_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_reduce_on_expand_count", 0))
+        one["vol_risk_adjust_increase_on_contract_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_increase_on_contract_count", 0))
+        one["vol_risk_adjust_recover_from_expand_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_recover_from_expand_count", 0))
+        one["vol_risk_adjust_recover_from_contract_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_recover_from_contract_count", 0))
+        one["vol_risk_entry_state_reduce_on_expand_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0))
+        one["vol_risk_entry_state_increase_on_contract_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_entry_state_increase_on_contract_count", 0))
+        one["vol_risk_overcap_scale_count"] = int(risk_budget_overcap_scale_by_code.get(code_key, 0))
         one["monthly_risk_budget_blocked_entry_count"] = int(((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count_by_code") or {}).get(code_key, 0))
         trade_stats["by_code"][code_key] = one
     m_strat["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
@@ -3826,6 +4164,12 @@ def compute_trend_portfolio_backtest(
                 "fixed_max_holdings": int(fixed_max_holding_n),
                 "risk_budget_atr_window": int(risk_budget_atr_window),
                 "risk_budget_pct": float(risk_budget_pct),
+                "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
+                "vol_ratio_fast_atr_window": int(vol_ratio_fast_atr_window),
+                "vol_ratio_slow_atr_window": int(vol_ratio_slow_atr_window),
+                "vol_ratio_expand_threshold": float(vol_ratio_expand_threshold),
+                "vol_ratio_contract_threshold": float(vol_ratio_contract_threshold),
+                "vol_ratio_normal_threshold": float(vol_ratio_normal_threshold),
                 "selection_mode": "all_active_candidates",
                 "group_enforce": bool(group_enforce),
                 "group_pick_policy": str(group_pick_policy),
@@ -3982,6 +4326,23 @@ def compute_trend_portfolio_backtest(
                 "last_trigger_date": (uniq_er_exit_trigger_dates[-1] if uniq_er_exit_trigger_dates else None),
                 "trigger_dates": uniq_er_exit_trigger_dates[:200],
                 "by_asset": er_exit_filter_by_asset,
+            },
+            "vol_regime_risk_mgmt": {
+                "enabled": bool(ps == "risk_budget" and vol_regime_risk_mgmt_enabled),
+                "fast_atr_window": int(vol_ratio_fast_atr_window),
+                "slow_atr_window": int(vol_ratio_slow_atr_window),
+                "expand_threshold": float(vol_ratio_expand_threshold),
+                "contract_threshold": float(vol_ratio_contract_threshold),
+                "normal_threshold": float(vol_ratio_normal_threshold),
+                "adjust_total_count": int(total_vol_risk_adjust),
+                "adjust_reduce_on_expand_count": int(total_vol_risk_adjust_reduce_expand),
+                "adjust_increase_on_contract_count": int(total_vol_risk_adjust_increase_contract),
+                "adjust_recover_from_expand_count": int(total_vol_risk_adjust_recover_expand),
+                "adjust_recover_from_contract_count": int(total_vol_risk_adjust_recover_contract),
+                "entry_state_reduce_on_expand_count": int(total_vol_risk_entry_reduce_expand),
+                "entry_state_increase_on_contract_count": int(total_vol_risk_entry_increase_contract),
+                "overcap_scale_count": int(risk_budget_overcap_scale_count),
+                "by_asset": vol_risk_adjust_by_asset,
             },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
             "position_extension": {

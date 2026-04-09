@@ -2741,6 +2741,33 @@
           <input id="trendRiskBudgetPct" value="1" />
         </div>
         <div>
+          <label>波动率动态风控</label>
+          <select id="trendVolRegimeRiskMgmtEnable" style="min-width:140px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>波动比率快ATR周期</label>
+          <input id="trendVolRatioFastAtrWindow" value="5" />
+        </div>
+        <div>
+          <label>波动比率慢ATR周期</label>
+          <input id="trendVolRatioSlowAtrWindow" value="50" />
+        </div>
+        <div>
+          <label>放大阈值</label>
+          <input id="trendVolRatioExpandThreshold" value="1.45" />
+        </div>
+        <div>
+          <label>缩小阈值</label>
+          <input id="trendVolRatioContractThreshold" value="0.65" />
+        </div>
+        <div>
+          <label>回归正常阈值</label>
+          <input id="trendVolRatioNormalThreshold" value="0.95" />
+        </div>
+        <div>
           <label>月度风险预算</label>
           <select id="trendMonthlyRiskBudgetEnable" style="min-width:140px;">
             <option value="false" selected>关闭</option>
@@ -2755,7 +2782,6 @@
             <option value="true">是</option>
           </select>
         </div>
-        <button id="runTrendResearch">运行趋势回测</button>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div>
@@ -2786,6 +2812,7 @@
           <label>每组持仓上限（1~10）</label>
           <input id="trendGroupMaxHoldings" value="4" />
         </div>
+        <button id="runTrendResearch">运行趋势回测</button>
       </div>
       <div style="margin-top:8px;">
         <label>趋势分组映射（代码=组ID，每行一条）</label>
@@ -4591,7 +4618,7 @@
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendVolRegimeRiskMgmtEnable", "trendVolRatioFastAtrWindow", "trendVolRatioSlowAtrWindow", "trendVolRatioExpandThreshold", "trendVolRatioContractThreshold", "trendVolRatioNormalThreshold", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendImpulseEntryFilterOn", "trendImpulseAllowBull", "trendImpulseAllowBear", "trendImpulseAllowNeutral",
@@ -6722,6 +6749,13 @@
         const maxHoldEl = $("trendFixedMaxHoldings");
         const rbAtrEl = $("trendRiskBudgetAtrWin");
         const rbPctEl = $("trendRiskBudgetPct");
+        const volMgmtOnEl = $("trendVolRegimeRiskMgmtEnable");
+        const volFastEl = $("trendVolRatioFastAtrWindow");
+        const volSlowEl = $("trendVolRatioSlowAtrWindow");
+        const volExpandEl = $("trendVolRatioExpandThreshold");
+        const volContractEl = $("trendVolRatioContractThreshold");
+        const volNormalEl = $("trendVolRatioNormalThreshold");
+        const volMgmtOn = (isRiskBudget && volMgmtOnEl && String(volMgmtOnEl.value || "false") === "true");
         if (singleCodeEl) {
           const enableSingleCode = (mode === "single");
           singleCodeEl.disabled = !enableSingleCode;
@@ -6747,6 +6781,15 @@
         if (rbPctEl) {
           rbPctEl.disabled = !isRiskBudget;
           rbPctEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        if (volMgmtOnEl) {
+          volMgmtOnEl.disabled = !isRiskBudget;
+          volMgmtOnEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        for (const el of [volFastEl, volSlowEl, volExpandEl, volContractEl, volNormalEl]) {
+          if (!el) continue;
+          el.disabled = !volMgmtOn;
+          el.style.opacity = volMgmtOn ? "1" : "0.55";
         }
       }
 
@@ -6831,6 +6874,12 @@
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpTiers",
+          "trendVolRegimeRiskMgmtEnable",
+          "trendVolRatioFastAtrWindow",
+          "trendVolRatioSlowAtrWindow",
+          "trendVolRatioExpandThreshold",
+          "trendVolRatioContractThreshold",
+          "trendVolRatioNormalThreshold",
           "trendMonthlyRiskBudgetEnable",
           "trendMonthlyRiskBudgetPct",
           "trendMonthlyRiskBudgetIncludeNewRisk",
@@ -6859,6 +6908,12 @@
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpTiers",
+          "trendVolRegimeRiskMgmtEnable",
+          "trendVolRatioFastAtrWindow",
+          "trendVolRatioSlowAtrWindow",
+          "trendVolRatioExpandThreshold",
+          "trendVolRatioContractThreshold",
+          "trendVolRatioNormalThreshold",
           "trendMonthlyRiskBudgetEnable",
           "trendMonthlyRiskBudgetPct",
           "trendMonthlyRiskBudgetIncludeNewRisk",
@@ -6960,6 +7015,12 @@
           trendRTpEnable: "通用R乘数止盈：按初始风险R跟踪浮盈，达到分层后按允许回落比例触发离场。",
           trendRTpReentry: "止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
           trendRTpTiers: "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
+          trendVolRegimeRiskMgmtEnable: "波动率动态风控：仅在风险预算仓位模式生效；持仓后按 ATR(5)/ATR(50) 判断放大/缩小并动态调仓。",
+          trendVolRatioFastAtrWindow: "波动比率快ATR周期：默认5，用于 ATR(5)/ATR(50) 分子。",
+          trendVolRatioSlowAtrWindow: "波动比率慢ATR周期：默认50，用于 ATR(5)/ATR(50) 分母。",
+          trendVolRatioExpandThreshold: "放大阈值：比率高于该值视为波动放大，触发降仓。",
+          trendVolRatioContractThreshold: "缩小阈值：比率低于该值视为波动缩小，触发加仓。",
+          trendVolRatioNormalThreshold: "回归正常阈值：放大后低于该值恢复加仓，缩小后高于该值恢复降仓。",
           trendMonthlyRiskBudgetEnable: "月度风险预算：按自然月限制账户最大可承受亏损，触发后阻止新开仓。",
           trendMonthlyRiskBudgetPct: "月度风险预算阈值：单月最大亏损比例，范围1%~6%，默认6%。",
           trendMonthlyRiskBudgetIncludeNewRisk: "计入拟开仓风险：开启时，预算判断包含本笔拟开仓风险；关闭时仅看当月累计亏损+当前持仓风险。",
@@ -13959,6 +14020,14 @@
           `<tr><td>动力不足出场过滤器触发（BEAR）</td><td>${_n(s.impulse_exit_filter_trigger_count_bear)}</td></tr>` +
           `<tr><td>动力不足出场过滤器触发（NEUTRAL）</td><td>${_n(s.impulse_exit_filter_trigger_count_neutral)}</td></tr>` +
           `<tr><td>ER出场过滤器起作用次数</td><td>${_n(s.er_exit_filter_trigger_count)}</td></tr>` +
+          `<tr><td>风险预算波动动态调仓次数（总）</td><td>${_n(s.vol_risk_adjust_total_count)}</td></tr>` +
+          `<tr><td>风险预算波动动态调仓（降波）</td><td>${_n(s.vol_risk_adjust_reduce_on_expand_count)}</td></tr>` +
+          `<tr><td>风险预算波动动态调仓（升波）</td><td>${_n(s.vol_risk_adjust_increase_on_contract_count)}</td></tr>` +
+          `<tr><td>风险预算波动动态调仓（降波恢复）</td><td>${_n(s.vol_risk_adjust_recover_from_expand_count)}</td></tr>` +
+          `<tr><td>风险预算波动动态调仓（升波恢复）</td><td>${_n(s.vol_risk_adjust_recover_from_contract_count)}</td></tr>` +
+          `<tr><td>风险预算入场即降波状态次数</td><td>${_n(s.vol_risk_entry_state_reduce_on_expand_count)}</td></tr>` +
+          `<tr><td>风险预算入场即升波状态次数</td><td>${_n(s.vol_risk_entry_state_increase_on_contract_count)}</td></tr>` +
+          `<tr><td>风险预算总仓位超限同比例缩放次数</td><td>${_n(s.vol_risk_overcap_scale_count)}</td></tr>` +
           `<tr><td>ATR止损触发次数</td><td>${_n(s.atr_stop_trigger_count)}</td></tr>` +
           `<tr><td>R止盈触发次数</td><td>${_n(s.r_take_profit_trigger_count)}</td></tr>` +
           `<tr><td>R止盈分段触发</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>` +
@@ -17031,6 +17100,12 @@
           fixed_max_holdings: Number(($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value ? $("trendFixedMaxHoldings").value : "10").trim()),
           risk_budget_atr_window: Number(($("trendRiskBudgetAtrWin") && $("trendRiskBudgetAtrWin").value ? $("trendRiskBudgetAtrWin").value : "20").trim()),
           risk_budget_pct: Number(($("trendRiskBudgetPct") && $("trendRiskBudgetPct").value ? $("trendRiskBudgetPct").value : "1").trim()),
+          vol_regime_risk_mgmt_enabled: (($("trendVolRegimeRiskMgmtEnable") && $("trendVolRegimeRiskMgmtEnable").value) ? String($("trendVolRegimeRiskMgmtEnable").value) === "true" : false),
+          vol_ratio_fast_atr_window: Number(($("trendVolRatioFastAtrWindow") && $("trendVolRatioFastAtrWindow").value ? $("trendVolRatioFastAtrWindow").value : "5").trim()),
+          vol_ratio_slow_atr_window: Number(($("trendVolRatioSlowAtrWindow") && $("trendVolRatioSlowAtrWindow").value ? $("trendVolRatioSlowAtrWindow").value : "50").trim()),
+          vol_ratio_expand_threshold: Number(($("trendVolRatioExpandThreshold") && $("trendVolRatioExpandThreshold").value ? $("trendVolRatioExpandThreshold").value : "1.45").trim()),
+          vol_ratio_contract_threshold: Number(($("trendVolRatioContractThreshold") && $("trendVolRatioContractThreshold").value ? $("trendVolRatioContractThreshold").value : "0.65").trim()),
+          vol_ratio_normal_threshold: Number(($("trendVolRatioNormalThreshold") && $("trendVolRatioNormalThreshold").value ? $("trendVolRatioNormalThreshold").value : "0.95").trim()),
           group_enforce: ($("trendGroupEnforce") && $("trendGroupEnforce").value === "true"),
           group_pick_policy: (($("trendGroupPolicy") && $("trendGroupPolicy").value) ? String($("trendGroupPolicy").value) : "highest_sharpe"),
           group_max_holdings: Number(($("trendGroupMaxHoldings") && $("trendGroupMaxHoldings").value ? $("trendGroupMaxHoldings").value : "4").trim()),
@@ -17111,6 +17186,29 @@
         common.risk_budget_pct = (common.risk_budget_pct > 0.1 ? common.risk_budget_pct / 100.0 : common.risk_budget_pct);
         if (common.risk_budget_pct < 0.001 || common.risk_budget_pct > 0.02) {
           return setMsg("风险预算%需在0.1%~2%之间");
+        }
+        if (!Number.isFinite(common.vol_ratio_fast_atr_window) || common.vol_ratio_fast_atr_window < 2) {
+          return setMsg("波动比率快ATR周期需为>=2数字");
+        }
+        common.vol_ratio_fast_atr_window = Math.floor(common.vol_ratio_fast_atr_window);
+        if (!Number.isFinite(common.vol_ratio_slow_atr_window) || common.vol_ratio_slow_atr_window < 2) {
+          return setMsg("波动比率慢ATR周期需为>=2数字");
+        }
+        common.vol_ratio_slow_atr_window = Math.floor(common.vol_ratio_slow_atr_window);
+        if (!Number.isFinite(common.vol_ratio_expand_threshold) || common.vol_ratio_expand_threshold <= 0) {
+          return setMsg("放大阈值需为>0数字");
+        }
+        if (!Number.isFinite(common.vol_ratio_contract_threshold) || common.vol_ratio_contract_threshold <= 0) {
+          return setMsg("缩小阈值需为>0数字");
+        }
+        if (!Number.isFinite(common.vol_ratio_normal_threshold) || common.vol_ratio_normal_threshold <= 0) {
+          return setMsg("回归正常阈值需为>0数字");
+        }
+        if (!(common.vol_ratio_expand_threshold > common.vol_ratio_normal_threshold)) {
+          return setMsg("阈值约束错误：放大阈值需大于回归正常阈值");
+        }
+        if (!(common.vol_ratio_contract_threshold < common.vol_ratio_normal_threshold)) {
+          return setMsg("阈值约束错误：缩小阈值需小于回归正常阈值");
         }
         if (!["earliest_entry", "highest_sharpe"].includes(String(common.group_pick_policy))) {
           return setMsg("趋势组内优选仅支持：最早入场/夏普最高");
@@ -19933,6 +20031,7 @@
       if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendStrategyParamsUi);
       if ($("trendMode")) $("trendMode").addEventListener("change", updateTrendSizingUi);
       if ($("trendSizing")) $("trendSizing").addEventListener("change", updateTrendSizingUi);
+      if ($("trendVolRegimeRiskMgmtEnable")) $("trendVolRegimeRiskMgmtEnable").addEventListener("change", updateTrendSizingUi);
       if ($("rotPositionMode")) $("rotPositionMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("rotTopKMode")) $("rotTopKMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("trendAtrStopMode")) $("trendAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("trend"));

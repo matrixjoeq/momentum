@@ -283,6 +283,146 @@ def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
     assert "0.02" in str(err)
 
 
+def test_api_trend_single_risk_budget_vol_regime_stats_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    series = {"RBVS1": [100.0 + i * 0.5 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "RBVS1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 20,
+            "risk_budget_pct": 0.01,
+            "vol_regime_risk_mgmt_enabled": True,
+            "vol_ratio_fast_atr_window": 5,
+            "vol_ratio_slow_atr_window": 50,
+            "vol_ratio_expand_threshold": 1.45,
+            "vol_ratio_contract_threshold": 0.65,
+            "vol_ratio_normal_threshold": 1.05,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {}).get("RBVS1", {})
+    assert "vol_risk_adjust_total_count" in overall
+    assert "vol_risk_adjust_reduce_on_expand_count" in overall
+    assert "vol_risk_adjust_recover_from_contract_count" in overall
+    assert "vol_risk_entry_state_reduce_on_expand_count" in overall
+    assert "vol_risk_entry_state_increase_on_contract_count" in overall
+    assert "vol_risk_adjust_total_count" in by_code
+    assert "vol_risk_entry_state_reduce_on_expand_count" in by_code
+    rc = ((out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {})
+    assert rc.get("enabled") is True
+
+
+def test_api_trend_single_rejects_invalid_vol_regime_threshold_relation(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 20,
+            "risk_budget_pct": 0.01,
+            "vol_regime_risk_mgmt_enabled": True,
+            "vol_ratio_expand_threshold": 1.0,
+            "vol_ratio_contract_threshold": 0.65,
+            "vol_ratio_normal_threshold": 1.05,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert "vol_ratio_expand_threshold must be > vol_ratio_normal_threshold" in str(err)
+
+
+def test_api_trend_portfolio_risk_budget_freezes_weight_after_entry(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    series = {"RBP1": [100.0 + i * 0.6 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["RBP1"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.005,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = (((out or {}).get("meta") or {}).get("params") or {})
+    assert str(params.get("position_sizing") or "") == "risk_budget"
+    assert int(params.get("risk_budget_atr_window") or 0) == 2
+    assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(0.005, rel=0.0, abs=1e-12)
+    w = [float(x) for x in ((((out.get("weights") or {}).get("series") or {}).get("RBP1")) or [])]
+    positive_w = [x for x in w if x > 1e-12]
+    assert len(positive_w) >= 3
+    assert max(positive_w) - min(positive_w) <= 1e-12
+
+
+def test_api_trend_portfolio_risk_budget_overcap_scale_stats_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    series = {
+        "RBP2A": [100.0 + i * 0.6 for i, _ in enumerate(dates)],
+        "RBP2B": [90.0 + i * 0.5 for i, _ in enumerate(dates)],
+    }
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["RBP2A", "RBP2B"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.02,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {})
+    assert int(overall.get("vol_risk_overcap_scale_count") or 0) > 0
+    assert int(((by_code.get("RBP2A") or {}).get("vol_risk_overcap_scale_count") or 0) >= 0)
+    assert int(((by_code.get("RBP2B") or {}).get("vol_risk_overcap_scale_count") or 0) >= 0)
+
+
 def test_api_trend_single_er_filter_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
     series = {"ER1": [100.0 + ((-1.0) ** i) * 0.8 + i * 0.01 for i, _ in enumerate(dates)]}

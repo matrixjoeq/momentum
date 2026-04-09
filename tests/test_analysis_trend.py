@@ -6,6 +6,7 @@ import pytest
 
 from etf_momentum.analysis.trend import (
     TrendInputs,
+    _risk_budget_dynamic_weights,
     _apply_impulse_entry_filter,
     _apply_atr_stop,
     _apply_r_multiple_take_profit,
@@ -27,6 +28,43 @@ def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
         high=float(close),
         low=float(close),
     )
+
+
+def _add_price_hl(db, *, code: str, day: dt.date, close: float, high: float, low: float) -> None:
+    add_price_all_adjustments(
+        db,
+        code=code,
+        day=day,
+        close=float(close),
+        open_price=float(close),
+        high=float(high),
+        low=float(low),
+    )
+
+
+def test_risk_budget_dynamic_weights_entry_extreme_state_not_counted_as_dynamic_adjust() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    active = pd.Series([1, 1, 1, 1, 1, 1], index=idx, dtype=float)
+    close = pd.Series([100, 100, 100, 100, 100, 100], index=idx, dtype=float)
+    atr_b = pd.Series([10, 10, 10, 10, 10, 10], index=idx, dtype=float)
+    atr_fast = pd.Series([20, 20, 20, 20, 20, 20], index=idx, dtype=float)
+    atr_slow = pd.Series([10, 10, 10, 10, 10, 10], index=idx, dtype=float)
+    w, stats = _risk_budget_dynamic_weights(
+        active,
+        close=close,
+        atr_for_budget=atr_b,
+        atr_fast=atr_fast,
+        atr_slow=atr_slow,
+        risk_budget_pct=0.01,
+        dynamic_enabled=True,
+        expand_threshold=1.45,
+        contract_threshold=0.65,
+        normal_threshold=1.05,
+    )
+    assert all(float(x) > 0.0 for x in w.tolist())
+    assert int(stats.get("vol_risk_entry_state_reduce_on_expand_count") or 0) == 1
+    assert int(stats.get("vol_risk_entry_state_increase_on_contract_count") or 0) == 0
+    assert int(stats.get("vol_risk_adjust_total_count") or 0) == 0
 
 
 def test_trailing_stop_latest_atr_moves_up_on_volatility_drop() -> None:
@@ -127,7 +165,11 @@ def test_trend_single_risk_budget_sizing_applies_params(session_factory):
     assert float(params.get("risk_budget_pct") or 0.0) == 0.005
     eff = [float(x) for x in ((out.get("signals") or {}).get("position_effective") or [])]
     assert eff
-    assert any((x > 0.0) and (x < 1.0) for x in eff)
+    assert any(x > 0.0 for x in eff)
+    positive_eff = [x for x in eff if x > 1e-12]
+    assert len(positive_eff) >= 3
+    # Risk-budget sizing should be frozen at entry while the position stays open.
+    assert max(positive_eff) - min(positive_eff) <= 1e-12
 
 
 def test_trend_single_risk_budget_pct_upper_bound(session_factory):
@@ -291,6 +333,53 @@ def test_monthly_risk_position_formula_with_and_without_valid_stop() -> None:
     )
     assert r_no_stop_w10 == pytest.approx(0.02, rel=0.0, abs=1e-12)
     assert r_no_stop_w60 == pytest.approx(0.02, rel=0.0, abs=1e-12)
+
+
+def test_trend_single_risk_budget_vol_regime_dynamic_adjust_counts(session_factory):
+    sf = session_factory
+    code = "RBVR1"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=180, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.4
+            if i < 70:
+                hi = px * 1.005
+                lo = px * 0.995
+            elif i < 100:
+                hi = px * 1.08
+                lo = px * 0.92
+            else:
+                hi = px * 1.01
+                lo = px * 0.99
+            _add_price_hl(db, code=code, day=d, close=px, high=hi, low=lo)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=20,
+                risk_budget_pct=0.01,
+                vol_regime_risk_mgmt_enabled=True,
+                vol_ratio_fast_atr_window=5,
+                vol_ratio_slow_atr_window=50,
+                vol_ratio_expand_threshold=1.45,
+                vol_ratio_contract_threshold=0.65,
+                vol_ratio_normal_threshold=1.05,
+                cost_bps=0.0,
+            ),
+        )
+    ts = (out.get("trade_statistics") or {})
+    overall = (ts.get("overall") or {})
+    by_code = (ts.get("by_code") or {}).get(code, {})
+    assert int(overall.get("vol_risk_adjust_total_count") or 0) > 0
+    assert int(overall.get("vol_risk_adjust_reduce_on_expand_count") or 0) > 0
+    assert int(overall.get("vol_risk_adjust_recover_from_expand_count") or 0) > 0
+    assert int(by_code.get("vol_risk_adjust_total_count") or 0) == int(overall.get("vol_risk_adjust_total_count") or 0)
 
 
 def test_monthly_risk_position_formula_entry_le_stop_returns_zero_not_fallback() -> None:
