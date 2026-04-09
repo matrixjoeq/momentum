@@ -35,6 +35,8 @@
       #distFutureCausalTable,
       #distRegimeStats,
       #distRegimeFutureStats,
+      #distImpulseStats,
+      #distImpulseFutureStats,
       #distWkdayStats,
       #distMonthDomStats,
       #distYearWeekStats,
@@ -598,9 +600,9 @@
         </div>
       </div>
       <div id="distRangeHint" class="muted" style="margin-top:8px;"></div>
-      <div class="panel" style="margin-top:10px;">
-        <h4 style="margin:0 0 6px 0;">市场状态划分引擎（方向 × 波动）</h4>
-        <div class="muted">
+      <details class="panel" style="margin-top:10px;">
+        <summary><h4 style="display:inline; margin:0;">市场状态划分引擎（线性回归方向 × 波动）</h4></summary>
+        <div class="muted" style="margin-top:8px;">
           规则：方向=滚动对数价格线性回归斜率（上升/下降/横向）；波动=滚动 ATR% 分位阈值（宽幅/窄幅）。
           下图按时间展示所选标的的状态区间（图例可点击筛选），并按状态给出样本占比与未来 n 日收益分布。
         </div>
@@ -629,7 +631,21 @@
         <div class="muted" style="margin-top:10px;">按市场状态的未来 n 日收益条件分布（n 使用上方“未来收益预测窗口 n（日）”）</div>
         <div id="distRegimeFuture" style="width:100%; height:300px; margin-top:8px;"></div>
         <table id="distRegimeFutureStats" style="margin-top:8px;"></table>
-      </div>
+      </details>
+      <details class="panel" style="margin-top:10px;">
+        <summary><h4 style="display:inline; margin:0;">动力监控系统（Impulse）</h4></summary>
+        <div class="muted" style="margin-top:8px;">
+          规则：使用 Elder Impulse System（EMA13 方向 + MACD Histogram 方向）。
+          EMA 与 Histogram 同步上行=做多允许（绿），同步下行=做空允许（红），其余为中性（蓝）。
+        </div>
+        <div id="distImpulseHint" class="muted" style="margin-top:6px;"></div>
+        <div id="distImpulseTimeline" style="width:100%; height:260px; margin-top:8px;"></div>
+        <div id="distImpulseLegend" class="muted no-print" style="margin-top:6px;"></div>
+        <table id="distImpulseStats" style="margin-top:8px;"></table>
+        <div class="muted" style="margin-top:10px;">按动力状态的未来 n 日收益条件分布（n 使用上方“未来收益预测窗口 n（日）”）</div>
+        <div id="distImpulseFuture" style="width:100%; height:300px; margin-top:8px;"></div>
+        <table id="distImpulseFutureStats" style="margin-top:8px;"></table>
+      </details>
       <div id="distHistogram" style="width:100%; height:420px; margin-top:12px;"></div>
       <table id="distQuantiles" style="margin-top:12px;"></table>
       <div class="muted" style="margin-top:10px;">当前统计指标值 vs 未来 t+n 日收益率（散点）</div>
@@ -10388,6 +10404,10 @@
         const regimeLegend = $("distRegimeLegend");
         const regimeStats = $("distRegimeStats");
         const regimeFutureStats = $("distRegimeFutureStats");
+        const impulseHint = $("distImpulseHint");
+        const impulseLegend = $("distImpulseLegend");
+        const impulseStats = $("distImpulseStats");
+        const impulseFutureStats = $("distImpulseFutureStats");
 
         if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect) return;
         const _distAtrDerivedTypes = new Set(["atr20_level", "mtr_atr20_multiple", "atr5_atr50_multiple"]);
@@ -11049,6 +11069,97 @@
           }
           if (regimeHint) {
             regimeHint.textContent = `统一口径参数：slope_window=${slopeWin}, vol_window=${volWin}, direction_threshold_ann=${directionThresholdAnn.toFixed(4)}, vol_quantile=${volQuantile.toFixed(2)}；样本=${rows.length}天。`;
+          }
+        };
+
+        const _renderDistImpulseMonitor = ({ code, openSeries }) => {
+          const tl = $("distImpulseTimeline");
+          const fEl = $("distImpulseFuture");
+          if (!tl || !window.MarketRegimeUI) return;
+          if (!code || !openSeries || !Array.isArray(openSeries.dates) || !Array.isArray(openSeries.close) || openSeries.dates.length < 10) {
+            tl.innerHTML = "<div class='muted'>无可用动力监控数据</div>";
+            if (fEl) fEl.innerHTML = "<div class='muted'>无条件分布数据</div>";
+            if (impulseLegend) impulseLegend.innerHTML = "";
+            if (impulseStats) impulseStats.innerHTML = "";
+            if (impulseFutureStats) impulseFutureStats.innerHTML = "";
+            if (impulseHint) impulseHint.textContent = "";
+            return;
+          }
+          const rows = window.MarketRegimeUI.computeImpulseRows({
+            dates: openSeries.dates,
+            close: openSeries.close,
+            ema_window: 13,
+            macd_fast: 12,
+            macd_slow: 26,
+            macd_signal: 9,
+          });
+          if (!rows.length) {
+            tl.innerHTML = "<div class='muted'>样本不足，无法划分动力状态</div>";
+            if (fEl) fEl.innerHTML = "<div class='muted'>无条件分布数据</div>";
+            if (impulseLegend) impulseLegend.innerHTML = "";
+            if (impulseStats) impulseStats.innerHTML = "";
+            if (impulseFutureStats) impulseFutureStats.innerHTML = "";
+            if (impulseHint) impulseHint.textContent = "";
+            return;
+          }
+          const stateOrder = window.MarketRegimeUI.IMPULSE_ORDER || [];
+          const stateLabel = window.MarketRegimeUI.IMPULSE_LABEL || {};
+          const selected = window.__distImpulseSelectedStates instanceof Set ? window.__distImpulseSelectedStates : new Set(stateOrder);
+          window.__distImpulseSelectedStates = selected;
+          window.MarketRegimeUI.renderImpulseLegend(
+            impulseLegend,
+            selected,
+            (st) => {
+              if (selected.has(st)) selected.delete(st); else selected.add(st);
+              if (selected.size === 0) for (const x of stateOrder) selected.add(x);
+              _renderDistImpulseMonitor({ code, openSeries });
+            },
+            (st) => {
+              selected.clear();
+              selected.add(st);
+              _renderDistImpulseMonitor({ code, openSeries });
+            }
+          );
+          window.MarketRegimeUI.renderImpulseTimeline(
+            "distImpulseTimeline",
+            rows,
+            selected,
+            `${codeLabel(code)}：动力监控状态区间（图例可点击筛选）`,
+            codeLabel(code)
+          );
+          const byState = window.MarketRegimeUI.summarizeImpulseStateStats(rows);
+          if (impulseStats) {
+            const total = rows.length;
+            const head = "<tr><th>状态</th><th>样本天数</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>";
+            const body = stateOrder.map((st) => {
+              const xs = ((byState[st] || {}).rets || []).filter(Number.isFinite);
+              const n = xs.length;
+              const avg = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+              const win = n ? xs.filter((v) => v > 0).length / n : NaN;
+              const vol = n > 1 ? Math.sqrt(xs.reduce((s, v) => s + (v - avg) * (v - avg), 0) / (n - 1)) : NaN;
+              return `<tr><td>${esc(stateLabel[st] || st)}</td><td>${n}</td><td>${fmtPct(total > 0 ? n / total : NaN)}</td><td>${fmtPct(avg)}</td><td>${fmtPct(win)}</td><td>${fmtPct(vol)}</td></tr>`;
+            }).join("");
+            impulseStats.innerHTML = head + body;
+          }
+          const nAhead = Math.max(1, Math.round(Number((futNInput && futNInput.value) || 5)));
+          const futByState = window.MarketRegimeUI.summarizeForwardByImpulseState(rows, nAhead);
+          if (fEl) window.MarketRegimeUI.renderImpulseForwardBox("distImpulseFuture", futByState, nAhead, selected);
+          if (impulseFutureStats) {
+            const header = "<tr><th>状态</th><th>样本数</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>";
+            const body = stateOrder.map((st) => {
+              const xs = (futByState[st] || []).filter(Number.isFinite);
+              const n = xs.length;
+              const mean = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+              const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.10) : NaN;
+              const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.50) : NaN;
+              const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.90) : NaN;
+              const win = n ? xs.filter((v) => v > 0).length / n : NaN;
+              return `<tr><td>${esc(stateLabel[st] || st)}</td><td>${n}</td><td>${fmtPct(mean)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(win)}</td></tr>`;
+            }).join("");
+            impulseFutureStats.innerHTML = header + body;
+          }
+          if (impulseHint) {
+            impulseHint.textContent = `统一口径参数：EMA(13) + MACD(12,26,9) Histogram；样本=${rows.length}天。`;
           }
         };
 
@@ -12931,6 +13042,7 @@
             try { _renderYearWeekEffect(""); } catch (_e2b) { /* ignore */ }
             try { _renderYearMonthEffect(""); } catch (_e2c) { /* ignore */ }
             try { _renderDistMarketRegime({ code: "", openSeries: null }); } catch (_erg0) { /* ignore */ }
+            try { _renderDistImpulseMonitor({ code: "", openSeries: null }); } catch (_eim0) { /* ignore */ }
             return;
           }
 
@@ -12971,6 +13083,7 @@
             try { _renderYearWeekEffect(code); } catch (_ewy) { /* ignore */ }
             try { _renderYearMonthEffect(code); } catch (_ewym) { /* ignore */ }
             try { _renderDistMarketRegime({ code, openSeries: openByCode[code] }); } catch (_erg1) { /* ignore */ }
+            try { _renderDistImpulseMonitor({ code, openSeries: openByCode[code] }); } catch (_eim1) { /* ignore */ }
             return;
           }
 
@@ -12994,6 +13107,7 @@
             try { _renderYearWeekEffect(code); } catch (_ewy2) { /* ignore */ }
             try { _renderYearMonthEffect(code); } catch (_ewym2) { /* ignore */ }
             try { _renderDistMarketRegime({ code, openSeries: openByCode[code] }); } catch (_erg2) { /* ignore */ }
+            try { _renderDistImpulseMonitor({ code, openSeries: openByCode[code] }); } catch (_eim2) { /* ignore */ }
             return;
           }
 
@@ -13171,6 +13285,7 @@
           try { _renderYearWeekEffect(code); } catch (_ewky) { /* ignore */ }
           try { _renderYearMonthEffect(code); } catch (_ewkym) { /* ignore */ }
           try { _renderDistMarketRegime({ code, openSeries: openByCode[code] }); } catch (_erg3) { /* ignore */ }
+          try { _renderDistImpulseMonitor({ code, openSeries: openByCode[code] }); } catch (_eim3) { /* ignore */ }
         };
 
         // Bind events (wire once)
@@ -13210,6 +13325,7 @@
                 try { _renderYearWeekEffect(""); } catch (_emy) { /* ignore */ }
                 try { _renderYearMonthEffect(""); } catch (_eYm0) { /* ignore */ }
                 try { _renderDistMarketRegime({ code: "", openSeries: null }); } catch (_erg4) { /* ignore */ }
+                try { _renderDistImpulseMonitor({ code: "", openSeries: null }); } catch (_eim4) { /* ignore */ }
                 return;
               }
               distByCode[c] = b.period_distributions[c];
@@ -13230,6 +13346,7 @@
               try { _renderYearWeekEffect(""); } catch (_emy) { /* ignore */ }
               try { _renderYearMonthEffect(""); } catch (_eYm1) { /* ignore */ }
               try { _renderDistMarketRegime({ code: "", openSeries: null }); } catch (_erg5) { /* ignore */ }
+              try { _renderDistImpulseMonitor({ code: "", openSeries: null }); } catch (_eim5) { /* ignore */ }
             }
           };
           const _syncRangeFromQuick = () => {

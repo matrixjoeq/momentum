@@ -15,8 +15,19 @@
     UP_WIDE: "rgba(214,39,40,0.55)",
     DOWN_NARROW: "rgba(44,160,44,0.95)",
     DOWN_WIDE: "rgba(44,160,44,0.55)",
-    SIDE_NARROW: "rgba(127,127,127,0.90)",
-    SIDE_WIDE: "rgba(127,127,127,0.50)",
+    SIDE_NARROW: "rgba(31,119,180,0.90)",
+    SIDE_WIDE: "rgba(31,119,180,0.50)",
+  };
+  const IMPULSE_ORDER = ["BULL", "BEAR", "NEUTRAL"];
+  const IMPULSE_LABEL = {
+    BULL: "做多允许",
+    BEAR: "做空允许",
+    NEUTRAL: "中性",
+  };
+  const IMPULSE_COLOR = {
+    BULL: "rgba(214,39,40,0.95)",
+    BEAR: "rgba(44,160,44,0.95)",
+    NEUTRAL: "rgba(31,119,180,0.85)",
   };
 
   function _num(v) {
@@ -187,6 +198,21 @@
     return out;
   }
 
+  function summarizeForwardByImpulseState(rows, nAhead) {
+    const n = Math.max(1, Math.round(_num(nAhead) || 1));
+    const out = {};
+    for (const s of IMPULSE_ORDER) out[s] = [];
+    for (let i = 0; i + n < rows.length; i++) {
+      const st = String((rows[i] || {}).impulse || "");
+      if (!out[st]) continue;
+      const a = _num(rows[i].close);
+      const b = _num(rows[i + n].close);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+      out[st].push(b / a - 1.0);
+    }
+    return out;
+  }
+
   function renderLegend(container, selected, onToggle, onIsolate) {
     if (!container) return;
     const sel = selected || new Set(STATE_ORDER);
@@ -198,6 +224,22 @@
     const chips = Array.from(container.querySelectorAll("[data-regime-chip]"));
     chips.forEach((el) => {
       const st = String(el.getAttribute("data-regime-chip") || "");
+      el.onclick = () => onToggle && onToggle(st);
+      el.ondblclick = () => onIsolate && onIsolate(st);
+    });
+  }
+
+  function renderImpulseLegend(container, selected, onToggle, onIsolate) {
+    if (!container) return;
+    const sel = selected || new Set(IMPULSE_ORDER);
+    container.innerHTML = IMPULSE_ORDER.map((st) => {
+      const on = sel.has(st);
+      const style = `display:inline-flex;align-items:center;gap:6px;margin:2px 8px 2px 0;padding:4px 8px;border-radius:12px;border:1px solid #999;cursor:pointer;opacity:${on ? "1" : "0.35"};`;
+      return `<span data-impulse-chip="${st}" style="${style}"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${IMPULSE_COLOR[st]};"></span>${IMPULSE_LABEL[st]}</span>`;
+    }).join("") + `<span class="muted" style="margin-left:8px;">点击筛选；双击仅保留。</span>`;
+    const chips = Array.from(container.querySelectorAll("[data-impulse-chip]"));
+    chips.forEach((el) => {
+      const st = String(el.getAttribute("data-impulse-chip") || "");
       el.onclick = () => onToggle && onToggle(st);
       el.ondblclick = () => onIsolate && onIsolate(st);
     });
@@ -276,16 +318,181 @@
     else Plotly.newPlot(plotId, traces, layout, config);
   }
 
+  function renderImpulseForwardBox(plotId, forwardByState, nAhead, selected) {
+    const el = document.getElementById(plotId);
+    if (!el) return;
+    if (typeof Plotly === "undefined") {
+      el.innerHTML = "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+      return;
+    }
+    const sel = selected || new Set(IMPULSE_ORDER);
+    const traces = IMPULSE_ORDER.map((st) => ({
+      x: (forwardByState[st] || []).map(() => IMPULSE_LABEL[st]),
+      y: forwardByState[st] || [],
+      type: "box",
+      name: IMPULSE_LABEL[st],
+      marker: { color: IMPULSE_COLOR[st] },
+      boxmean: true,
+      visible: sel.has(st) ? true : "legendonly",
+      hovertemplate: `状态=${IMPULSE_LABEL[st]}<br>未来${nAhead}日收益=%{y:.2%}<extra></extra>`,
+    }));
+    const layout = {
+      margin: { t: 30, b: 55, l: 55, r: 15 },
+      title: { text: `按动力状态分组的未来 ${nAhead} 日收益分布`, font: { size: 13 } },
+      yaxis: { title: "未来收益", tickformat: ".1%" },
+      xaxis: { title: "动力状态" },
+      showlegend: false,
+    };
+    const config = { responsive: true, displayModeBar: false };
+    if (el.data && el.layout) Plotly.react(plotId, traces, layout, config);
+    else Plotly.newPlot(plotId, traces, layout, config);
+  }
+
+  function _ema(arr, win) {
+    const out = new Array(arr.length).fill(NaN);
+    const w = Math.max(2, Math.round(_num(win) || 2));
+    const alpha = 2 / (w + 1);
+    let prev = NaN;
+    for (let i = 0; i < arr.length; i++) {
+      const v = _num(arr[i]);
+      if (!Number.isFinite(v)) {
+        out[i] = prev;
+        continue;
+      }
+      if (!Number.isFinite(prev)) {
+        prev = v;
+      } else {
+        prev = prev + alpha * (v - prev);
+      }
+      out[i] = prev;
+    }
+    return out;
+  }
+
+  function computeImpulseRows(input) {
+    const dates = Array.isArray(input && input.dates) ? input.dates : [];
+    const close = Array.isArray(input && input.close) ? input.close.map(_num) : [];
+    if (!dates.length || dates.length !== close.length) return [];
+    const emaWin = Math.max(2, Math.round(_num((input && input.ema_window) || 13) || 13));
+    const fast = Math.max(2, Math.round(_num((input && input.macd_fast) || 12) || 12));
+    const slow = Math.max(3, Math.round(_num((input && input.macd_slow) || 26) || 26));
+    const sig = Math.max(2, Math.round(_num((input && input.macd_signal) || 9) || 9));
+    const ema = _ema(close, emaWin);
+    const ef = _ema(close, fast);
+    const es = _ema(close, slow);
+    const macd = close.map((_, i) => {
+      const a = _num(ef[i]);
+      const b = _num(es[i]);
+      return (Number.isFinite(a) && Number.isFinite(b)) ? (a - b) : NaN;
+    });
+    const dea = _ema(macd, sig);
+    const hist = macd.map((v, i) => {
+      const d = _num(dea[i]);
+      return (Number.isFinite(v) && Number.isFinite(d)) ? (v - d) : NaN;
+    });
+    const rows = [];
+    for (let i = 0; i < close.length; i++) {
+      const e0 = _num(ema[i]);
+      const e1 = _num(i > 0 ? ema[i - 1] : NaN);
+      const h0 = _num(hist[i]);
+      const h1 = _num(i > 0 ? hist[i - 1] : NaN);
+      let st = "NEUTRAL";
+      if (Number.isFinite(e0) && Number.isFinite(e1) && Number.isFinite(h0) && Number.isFinite(h1)) {
+        const emaUp = e0 > e1;
+        const emaDn = e0 < e1;
+        const histUp = h0 > h1;
+        const histDn = h0 < h1;
+        if (emaUp && histUp) st = "BULL";
+        else if (emaDn && histDn) st = "BEAR";
+      }
+      rows.push({
+        date: String(dates[i] || ""),
+        close: _num(close[i]),
+        ema: e0,
+        macd_hist: h0,
+        impulse: st,
+      });
+    }
+    return rows;
+  }
+
+  function summarizeImpulseStateStats(rows) {
+    const out = {};
+    for (const s of IMPULSE_ORDER) out[s] = { n: 0, rets: [] };
+    for (let i = 1; i < rows.length; i++) {
+      const st = String((rows[i] || {}).impulse || "");
+      if (!out[st]) continue;
+      const a = _num(rows[i - 1].close);
+      const b = _num(rows[i].close);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+      out[st].n += 1;
+      out[st].rets.push(b / a - 1.0);
+    }
+    return out;
+  }
+
+  function renderImpulseTimeline(plotId, rows, selected, title, codeName) {
+    const el = document.getElementById(plotId);
+    if (!el) return;
+    if (typeof Plotly === "undefined") {
+      el.innerHTML = "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+      return;
+    }
+    const sel = selected || new Set(IMPULSE_ORDER);
+    const dates = rows.map((r) => r.date);
+    const close = rows.map((r) => r.close);
+    const traces = [
+      {
+        x: dates, y: close, type: "scatter", mode: "lines",
+        name: `${codeName || "标的"}（全样本）`,
+        line: { color: "rgba(31,119,180,0.30)", width: 1.2 },
+        hovertemplate: "%{x}<br>close=%{y:.4f}<extra></extra>",
+      },
+    ];
+    for (const st of IMPULSE_ORDER) {
+      traces.push({
+        x: dates,
+        y: rows.map((r) => (r.impulse === st ? r.close : null)),
+        type: "scatter",
+        mode: "lines",
+        connectgaps: false,
+        name: IMPULSE_LABEL[st],
+        line: { color: IMPULSE_COLOR[st], width: 2.8 },
+        visible: sel.has(st) ? true : "legendonly",
+        hovertemplate: `%{x}<br>state=${IMPULSE_LABEL[st]}<br>close=%{y:.4f}<extra></extra>`,
+      });
+    }
+    const layout = {
+      margin: { t: 30, b: 40, l: 55, r: 15 },
+      title: { text: title || "动力监控状态区间（图例可点击筛选）", font: { size: 13 } },
+      yaxis: { title: "价格" },
+      xaxis: { title: "日期" },
+      legend: { orientation: "h", y: 1.18 },
+    };
+    const config = { responsive: true, displayModeBar: false };
+    if (el.data && el.layout) Plotly.react(plotId, traces, layout, config);
+    else Plotly.newPlot(plotId, traces, layout, config);
+  }
+
   window.MarketRegimeUI = {
     STATE_ORDER,
     STATE_LABEL,
     STATE_COLOR,
+    IMPULSE_ORDER,
+    IMPULSE_LABEL,
+    IMPULSE_COLOR,
     computeRows,
+    computeImpulseRows,
     summarizeStateStats,
+    summarizeImpulseStateStats,
     summarizeForwardByState,
+    summarizeForwardByImpulseState,
     renderLegend,
+    renderImpulseLegend,
     renderTimeline,
+    renderImpulseTimeline,
     renderForwardBox,
+    renderImpulseForwardBox,
     quantile: _quantile,
   };
 })();
