@@ -1210,7 +1210,7 @@
             <div class="row" style="margin-top:6px; align-items:end; gap:8px;">
               <div><label>筛选数量 TopN</label><input id="rotAutoTopN" value="12" style="min-width:90px;" /></div>
               <div><label>最少数量 MinN</label><input id="rotAutoMinN" value="5" style="min-width:90px;" /></div>
-              <div><label>低相关阈值 |corr|<=</label><input id="rotAutoMaxCorr" value="0.75" style="min-width:90px;" /></div>
+              <div><label>低相关阈值 |corr|&lt;=</label><input id="rotAutoMaxCorr" value="0.75" style="min-width:90px;" /></div>
               <div><label>显著性前瞻天数</label><input id="rotAutoSignifHorizon" value="20" style="min-width:90px;" /></div>
               <button id="rotAutoScreenCandidates">自动筛选动量候选</button>
             </div>
@@ -1781,7 +1781,7 @@
       <div class="panel two" style="grid-template-columns: 1fr 1fr;">
         <div>
           <h3>轮动策略指标</h3>
-          <div class="muted" style="margin:6px 0 8px 0;">SQN口径说明：均值E(R)、标准差Std(R)与样本数N均来自同一批样本（最近<=100笔；若总交易数不足100则使用全量）。</div>
+          <div class="muted" style="margin:6px 0 8px 0;">SQN口径说明：均值E(R)、标准差Std(R)与样本数N均来自同一批样本（最近&lt;=100笔；若总交易数不足100则使用全量）。</div>
           <table id="rotMetrics"></table>
           <div id="rotReport" class="reportCard"></div>
         </div>
@@ -3011,7 +3011,7 @@
           </div>
         </div>
       </div>
-      <div class="muted" style="margin-top:10px;">SQN口径说明：均值E(R)、标准差Std(R)与样本数N均来自同一批样本（最近<=100笔；若总交易数不足100则使用全量）。</div>
+      <div class="muted" style="margin-top:10px;">SQN口径说明：均值E(R)、标准差Std(R)与样本数N均来自同一批样本（最近&lt;=100笔；若总交易数不足100则使用全量）。</div>
       <table id="trendMetricsTable" style="margin-top:6px;"></table>
       <div class="panel two" style="grid-template-columns: 1fr 1fr 1fr; align-items:start; margin-top:10px;">
         <div>
