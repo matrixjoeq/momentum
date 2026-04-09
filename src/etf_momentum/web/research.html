@@ -2781,6 +2781,8 @@
         <div><label>KAMA ER窗口</label><input id="trendKamaErWindow" value="10" /></div>
         <div><label>KAMA 快线窗口</label><input id="trendKamaFastWindow" value="2" /></div>
         <div><label>KAMA 慢线窗口</label><input id="trendKamaSlowWindow" value="30" /></div>
+        <div><label>KAMA 标准差窗口</label><input id="trendKamaStdWindow" value="20" /></div>
+        <div><label>KAMA 标准差系数(0~3)</label><input id="trendKamaStdCoef" value="1.0" /></div>
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div><label>唐奇安入场</label><input id="trendDonEntry" value="20" /></div>
@@ -4500,7 +4502,7 @@
         trend: [
           "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
-          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
+          "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendErFilterOn", "trendErWindow", "trendErThreshold", "trendErExitFilterOn", "trendErExitWindow", "trendErExitThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
           "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
@@ -6693,6 +6695,8 @@
           "trendKamaErWindow",
           "trendKamaFastWindow",
           "trendKamaSlowWindow",
+          "trendKamaStdWindow",
+          "trendKamaStdCoef",
           "trendDonEntry",
           "trendDonExit",
           "trendRandomHoldDays",
@@ -6744,7 +6748,7 @@
           "trendRTpTiers",
         ];
         const byStrat = {
-          ma_filter: ["trendSmaWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow"],
+          ma_filter: ["trendSmaWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef"],
           ma_cross: ["trendFastWin", "trendSlowWin", "trendMaType"],
           donchian: ["trendDonEntry", "trendDonExit"],
           random_entry: ["trendRandomHoldDays", "trendRandomSeed"],
@@ -6798,6 +6802,8 @@
           trendKamaErWindow: "KAMA ER窗口：ER效率比率回看周期，默认10，仅在 ma_filter + KAMA 生效。",
           trendKamaFastWindow: "KAMA快线窗口：自适应平滑的快端窗口，默认2，仅在 ma_filter + KAMA 生效。",
           trendKamaSlowWindow: "KAMA慢线窗口：自适应平滑的慢端窗口，默认30，仅在 ma_filter + KAMA 生效，且需大于快线窗口。",
+          trendKamaStdWindow: "KAMA标准差窗口：对 KAMA 值做滚动标准差窗口，默认20，仅在 ma_filter + KAMA 生效。",
+          trendKamaStdCoef: "KAMA标准差系数：入场阈值为 KAMA + 系数*std，出场阈值为 KAMA - 系数*std；范围[0,3]，默认1。",
           trendDonEntry: "唐奇安入场：上轨突破回看窗口。",
           trendDonExit: "唐奇安出场：下轨跌破回看窗口。",
           trendRandomHoldDays: "随机入市持有天数：基础退场条件，入场后持有 N 个交易日退出。",
@@ -16698,6 +16704,8 @@
           kama_er_window: Number(($("trendKamaErWindow").value || "10").trim()),
           kama_fast_window: Number(($("trendKamaFastWindow").value || "2").trim()),
           kama_slow_window: Number(($("trendKamaSlowWindow").value || "30").trim()),
+          kama_std_window: Number(($("trendKamaStdWindow").value || "20").trim()),
+          kama_std_coef: Number(($("trendKamaStdCoef").value || "1.0").trim()),
           donchian_entry: Number(($("trendDonEntry").value || "20").trim()),
           donchian_exit: Number(($("trendDonExit").value || "10").trim()),
           mom_lookback: Number(($("trendMomLb").value || "252").trim()),
@@ -16862,6 +16870,13 @@
         common.kama_slow_window = Math.floor(common.kama_slow_window);
         if (common.kama_fast_window >= common.kama_slow_window) {
           return setMsg("KAMA参数要求：快线窗口需小于慢线窗口");
+        }
+        if (!Number.isFinite(common.kama_std_window) || common.kama_std_window < 2) {
+          return setMsg("KAMA标准差窗口需为>=2数字");
+        }
+        common.kama_std_window = Math.floor(common.kama_std_window);
+        if (!Number.isFinite(common.kama_std_coef) || common.kama_std_coef < 0 || common.kama_std_coef > 3) {
+          return setMsg("KAMA标准差系数需在[0,3]区间");
         }
         $("status").textContent = "趋势回测中...";
         setMsg("");

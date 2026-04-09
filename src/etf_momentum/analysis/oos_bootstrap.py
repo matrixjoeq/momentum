@@ -354,6 +354,8 @@ def _trend_params_to_inputs(
         fast_window=int(params.get("fast_window", 50)),
         slow_window=int(params.get("slow_window", 200)),
         ma_type=str(params.get("ma_type", "sma")),
+        kama_std_window=int(params.get("kama_std_window", 20)),
+        kama_std_coef=float(params.get("kama_std_coef", 1.0)),
         donchian_entry=int(params.get("donchian_entry", 20)),
         donchian_exit=int(params.get("donchian_exit", 10)),
         mom_lookback=int(params.get("mom_lookback", 252)),

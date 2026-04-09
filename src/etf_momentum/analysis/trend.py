@@ -73,6 +73,8 @@ class TrendInputs:
     kama_er_window: int = 10
     kama_fast_window: int = 2
     kama_slow_window: int = 30
+    kama_std_window: int = 20
+    kama_std_coef: float = 1.0
     donchian_entry: int = 20  # donchian
     donchian_exit: int = 10  # donchian
     mom_lookback: int = 252  # tsmom
@@ -149,6 +151,8 @@ class TrendPortfolioInputs:
     kama_er_window: int = 10
     kama_fast_window: int = 2
     kama_slow_window: int = 30
+    kama_std_window: int = 20
+    kama_std_coef: float = 1.0
     donchian_entry: int = 20
     donchian_exit: int = 10
     mom_lookback: int = 252
@@ -716,6 +720,40 @@ def _moving_average(
         )
     w = max(2, int(window))
     return s.rolling(window=w, min_periods=max(2, w // 2)).mean()
+
+
+def _pos_from_band(
+    price: pd.Series,
+    center: pd.Series,
+    *,
+    band: pd.Series,
+) -> pd.Series:
+    """
+    Hysteresis long/cash rule with upper/lower bands around center:
+    - enter when close > center + band
+    - exit when close < center - band
+    - otherwise keep previous state
+    """
+    px = pd.to_numeric(price, errors="coerce").astype(float)
+    cc = pd.to_numeric(center, errors="coerce").astype(float).reindex(px.index)
+    bb = pd.to_numeric(band, errors="coerce").astype(float).reindex(px.index).fillna(0.0)
+    out = np.zeros(len(px), dtype=float)
+    in_pos = False
+    for i in range(len(px)):
+        p = float(px.iloc[i]) if np.isfinite(float(px.iloc[i])) else float("nan")
+        c = float(cc.iloc[i]) if np.isfinite(float(cc.iloc[i])) else float("nan")
+        b = max(0.0, float(bb.iloc[i])) if np.isfinite(float(bb.iloc[i])) else 0.0
+        if (not np.isfinite(p)) or (not np.isfinite(c)):
+            out[i] = 1.0 if in_pos else 0.0
+            continue
+        upper = c + b
+        lower = c - b
+        if (not in_pos) and p > upper:
+            in_pos = True
+        elif in_pos and p < lower:
+            in_pos = False
+        out[i] = 1.0 if in_pos else 0.0
+    return pd.Series(out, index=px.index, dtype=float)
 
 
 def _stable_code_seed(code: str) -> int:
@@ -1441,6 +1479,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     kama_er_window = int(getattr(inp, "kama_er_window", 10) or 10)
     kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
     kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
+    kama_std_window = int(getattr(inp, "kama_std_window", 20) or 20)
+    kama_std_coef = float(getattr(inp, "kama_std_coef", 1.0) or 0.0)
     if kama_er_window < 2:
         raise ValueError("kama_er_window must be >= 2")
     if kama_fast_window < 1:
@@ -1449,6 +1489,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("kama_slow_window must be >= 2")
     if kama_fast_window >= kama_slow_window:
         raise ValueError("kama_fast_window must be < kama_slow_window")
+    if kama_std_window < 2:
+        raise ValueError("kama_std_window must be >= 2")
+    if (not np.isfinite(kama_std_coef)) or kama_std_coef < 0.0 or kama_std_coef > 3.0:
+        raise ValueError("kama_std_coef must be in [0,3]")
     if strat == "ma_cross" and ma_type == "kama":
         raise ValueError("ma_type=kama is only supported for ma_filter")
     if not np.isfinite(float(inp.tsmom_entry_threshold)):
@@ -1672,7 +1716,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             kama_fast_window=kama_fast_window,
             kama_slow_window=kama_slow_window,
         )
-        raw_pos = (px_sig > ma).astype(float).fillna(0.0)
+        if ma_type == "kama":
+            kstd = (
+                ma.astype(float)
+                .rolling(window=int(kama_std_window), min_periods=max(2, int(kama_std_window) // 2))
+                .std(ddof=0)
+                .fillna(0.0)
+            )
+            raw_pos = _pos_from_band(px_sig.astype(float), ma.astype(float), band=(float(kama_std_coef) * kstd)).astype(float)
+        else:
+            raw_pos = (px_sig > ma).astype(float).fillna(0.0)
     elif strat == "ma_cross":
         fast = _moving_average(px_sig, window=int(inp.fast_window), ma_type=ma_type)
         slow = _moving_average(px_sig, window=int(inp.slow_window), ma_type=ma_type)
@@ -2057,6 +2110,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "kama_er_window": int(kama_er_window),
                 "kama_fast_window": int(kama_fast_window),
                 "kama_slow_window": int(kama_slow_window),
+                "kama_std_window": int(kama_std_window),
+                "kama_std_coef": float(kama_std_coef),
                 "donchian_entry": int(inp.donchian_entry),
                 "donchian_exit": int(inp.donchian_exit),
                 "mom_lookback": int(inp.mom_lookback),
@@ -2256,6 +2311,8 @@ def compute_trend_portfolio_backtest(
     kama_er_window = int(getattr(inp, "kama_er_window", 10) or 10)
     kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
     kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
+    kama_std_window = int(getattr(inp, "kama_std_window", 20) or 20)
+    kama_std_coef = float(getattr(inp, "kama_std_coef", 1.0) or 0.0)
     if kama_er_window < 2:
         raise ValueError("kama_er_window must be >= 2")
     if kama_fast_window < 1:
@@ -2264,6 +2321,10 @@ def compute_trend_portfolio_backtest(
         raise ValueError("kama_slow_window must be >= 2")
     if kama_fast_window >= kama_slow_window:
         raise ValueError("kama_fast_window must be < kama_slow_window")
+    if kama_std_window < 2:
+        raise ValueError("kama_std_window must be >= 2")
+    if (not np.isfinite(kama_std_coef)) or kama_std_coef < 0.0 or kama_std_coef > 3.0:
+        raise ValueError("kama_std_coef must be in [0,3]")
     if strat == "ma_cross" and ma_type == "kama":
         raise ValueError("ma_type=kama is only supported for ma_filter")
     atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
@@ -2496,7 +2557,16 @@ def compute_trend_portfolio_backtest(
                 kama_fast_window=kama_fast_window,
                 kama_slow_window=kama_slow_window,
             )
-            pos = (px > ma).astype(float)
+            if ma_type == "kama":
+                kstd = (
+                    ma.astype(float)
+                    .rolling(window=int(kama_std_window), min_periods=max(2, int(kama_std_window) // 2))
+                    .std(ddof=0)
+                    .fillna(0.0)
+                )
+                pos = _pos_from_band(px.astype(float), ma.astype(float), band=(float(kama_std_coef) * kstd)).astype(float)
+            else:
+                pos = (px > ma).astype(float)
             score = (px / ma - 1.0).astype(float)
         elif strat == "ma_cross":
             fast = _moving_average(px, window=int(inp.fast_window), ma_type=ma_type)
@@ -3042,6 +3112,8 @@ def compute_trend_portfolio_backtest(
                 "kama_er_window": int(kama_er_window),
                 "kama_fast_window": int(kama_fast_window),
                 "kama_slow_window": int(kama_slow_window),
+                "kama_std_window": int(kama_std_window),
+                "kama_std_coef": float(kama_std_coef),
                 "mom_lookback": int(inp.mom_lookback),
                 "tsmom_entry_threshold": float(inp.tsmom_entry_threshold),
                 "tsmom_exit_threshold": float(inp.tsmom_exit_threshold),

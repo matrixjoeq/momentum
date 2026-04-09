@@ -1,5 +1,6 @@
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 
 from etf_momentum.analysis.trend import TrendPortfolioInputs, compute_trend_portfolio_backtest
@@ -558,4 +559,51 @@ def test_trend_portfolio_exposes_r_take_profit_controls(session_factory):
         one = (by_code.get(c) or {})
         assert "atr_stop_trigger_count" in one
         assert "r_take_profit_trigger_count" in one
+
+
+def test_trend_portfolio_kama_std_band_reduces_trades(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=160, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + 0.10 * i + 4.5 * np.sin(i / 3.0)
+            p2 = 90.0 + 0.08 * i + 3.5 * np.sin(i / 3.7 + 0.6)
+            _add_price(db, code="A1", day=d, close=float(p1))
+            _add_price(db, code="A2", day=d, close=float(p2))
+        db.commit()
+        out_lo = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="kama",
+                sma_window=20,
+                kama_std_window=20,
+                kama_std_coef=0.0,
+                position_sizing="equal",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+        out_hi = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="kama",
+                sma_window=20,
+                kama_std_window=20,
+                kama_std_coef=3.0,
+                position_sizing="equal",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    lo_trades = int((((out_lo.get("trade_statistics") or {}).get("overall") or {}).get("total_trades") or 0))
+    hi_trades = int((((out_hi.get("trade_statistics") or {}).get("overall") or {}).get("total_trades") or 0))
+    assert hi_trades <= lo_trades
 

@@ -1,5 +1,6 @@
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 
 from etf_momentum.analysis.trend import (
@@ -315,6 +316,8 @@ def test_trend_ma_filter_kama_smoke(session_factory):
                 kama_er_window=10,
                 kama_fast_window=2,
                 kama_slow_window=30,
+                kama_std_window=20,
+                kama_std_coef=1.0,
                 cost_bps=0.0,
             ),
         )
@@ -323,8 +326,53 @@ def test_trend_ma_filter_kama_smoke(session_factory):
     assert params["kama_er_window"] == 10
     assert params["kama_fast_window"] == 2
     assert params["kama_slow_window"] == 30
+    assert params["kama_std_window"] == 20
+    assert float(params["kama_std_coef"]) == 1.0
     assert out["meta"]["strategy"] == "ma_filter"
     assert any(x > 0 for x in out["signals"]["position"])
+
+
+def test_trend_ma_filter_kama_std_band_reduces_trades(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=160, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            # Oscillating trend to trigger multiple entries/exits under KAMA filter.
+            px = 100.0 + 0.12 * i + 4.0 * np.sin(i / 3.0)
+            _add_price(db, code=code, day=d, close=float(px))
+        db.commit()
+        out_lo = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="kama",
+                sma_window=20,
+                kama_std_window=20,
+                kama_std_coef=0.0,
+                cost_bps=0.0,
+            ),
+        )
+        out_hi = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                ma_type="kama",
+                sma_window=20,
+                kama_std_window=20,
+                kama_std_coef=3.0,
+                cost_bps=0.0,
+            ),
+        )
+    lo_trades = int((((out_lo.get("trade_statistics") or {}).get("overall") or {}).get("total_trades") or 0))
+    hi_trades = int((((out_hi.get("trade_statistics") or {}).get("overall") or {}).get("total_trades") or 0))
+    assert hi_trades <= lo_trades
 
 
 def test_trend_ma_cross_supports_ema_type(session_factory):
