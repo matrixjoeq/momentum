@@ -1004,6 +1004,7 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
+        quick_mode=bool(getattr(payload, "quick_mode", False)),
     )
     try:
         return compute_trend_backtest(db, inp)
@@ -1100,6 +1101,7 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
+        quick_mode=bool(getattr(payload, "quick_mode", False)),
     )
     try:
         return compute_trend_portfolio_backtest(db, inp)

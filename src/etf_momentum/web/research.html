@@ -2813,6 +2813,13 @@
         <div><label>成本(bps) <button class="helpBtn" data-metric="param_rot_cost" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label><input id="trendCost" value="2" /></div>
         <div><label>滑点(单边) <button class="helpBtn" data-metric="param_rot_slippage" title="查看说明" style="margin-left:6px; width:18px; height:18px; border-radius:50%; border:1px solid #bbb; background:#fff; font-size:12px; line-height:16px; padding:0; cursor:pointer;">?</button></label><input id="trendSlippage" value="0.001" /></div>
         <div>
+          <label>快速模式</label>
+          <select id="trendQuickMode" style="min-width:110px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
           <label>分组约束（组合）</label>
           <select id="trendGroupEnforce" style="min-width:140px;">
             <option value="false" selected>关闭</option>
@@ -4671,7 +4678,7 @@
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendRiskBudgetOvercapPolicy", "trendRiskBudgetMaxLeverage", "trendVolRegimeRiskMgmtEnable", "trendVolRatioFastAtrWindow", "trendVolRatioSlowAtrWindow", "trendVolRatioExpandThreshold", "trendVolRatioContractThreshold", "trendVolRatioNormalThreshold", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendQuickMode", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendRiskBudgetOvercapPolicy", "trendRiskBudgetMaxLeverage", "trendVolRegimeRiskMgmtEnable", "trendVolRatioFastAtrWindow", "trendVolRatioSlowAtrWindow", "trendVolRatioExpandThreshold", "trendVolRatioContractThreshold", "trendVolRatioNormalThreshold", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendImpulseEntryFilterOn", "trendImpulseAllowBull", "trendImpulseAllowBear", "trendImpulseAllowNeutral",
@@ -17434,6 +17441,7 @@
           risk_free_rate,
           cost_bps,
           slippage_rate,
+          quick_mode: ($("trendQuickMode") && $("trendQuickMode").value === "true"),
           exec_price,
           strategy,
           sma_window: Number(($("trendSmaWin").value || "200").trim()),

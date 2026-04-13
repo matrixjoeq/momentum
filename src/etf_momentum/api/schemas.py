@@ -1258,6 +1258,10 @@ class TrendBacktestRequest(BaseModel):
     er_exit_threshold: float = Field(default=0.88, ge=0.0, le=1.0, description="ER exit threshold in [0,1]")
     random_hold_days: int = Field(default=20, ge=1, description="Random-entry strategy base exit: hold N trading days after entry")
     random_seed: int | None = Field(default=42, description="Random-entry strategy seed for reproducible coin-toss signals; null means system random seed")
+    quick_mode: bool = Field(
+        default=False,
+        description="If true, skip heavy post analyses (return decomposition, entry-condition causal stats, trade_statistics raw traces, event study).",
+    )
 
 
 class TrendPortfolioBacktestRequest(BaseModel):
@@ -1359,6 +1363,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
     asset_groups: dict[str, str] | None = Field(
         default=None,
         description="Optional mapping: asset code -> group_id. Missing codes default to independent groups.",
+    )
+    quick_mode: bool = Field(
+        default=False,
+        description="If true, skip heavy post analyses (return decomposition, entry-condition causal stats, trade_statistics raw traces, event study).",
     )
 
 

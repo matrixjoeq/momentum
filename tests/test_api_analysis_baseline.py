@@ -283,6 +283,69 @@ def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
     assert "0.02" in str(err)
 
 
+def test_api_trend_single_quick_mode_skips_heavy_sections(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    seed_prices(engine, code_to_series={"TQMS1": [100.0 + i * 0.4 for i, _ in enumerate(dates)]}, dates=dates)
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "TQMS1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "quick_mode": True,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = (((out or {}).get("meta") or {}).get("params") or {})
+    ts = (out.get("trade_statistics") or {})
+    assert params.get("quick_mode") is True
+    assert out.get("return_decomposition") is None
+    assert out.get("event_study") is None
+    assert list(ts.get("trades") or []) == []
+    assert list(((ts.get("trades_by_code") or {}).get("TQMS1")) or []) == []
+    assert "entry_condition_stats" not in ts
+
+
+def test_api_trend_portfolio_quick_mode_skips_heavy_sections(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    series = {
+        "TQMP1": [100.0 + i * 0.5 for i, _ in enumerate(dates)],
+        "TQMP2": [95.0 + i * 0.45 for i, _ in enumerate(dates)],
+    }
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["TQMP1", "TQMP2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "equal",
+            "quick_mode": True,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = (((out or {}).get("meta") or {}).get("params") or {})
+    ts = (out.get("trade_statistics") or {})
+    trades_by_code = (ts.get("trades_by_code") or {})
+    assert params.get("quick_mode") is True
+    assert out.get("return_decomposition") is None
+    assert out.get("event_study") is None
+    assert list(ts.get("trades") or []) == []
+    assert list(trades_by_code.get("TQMP1") or []) == []
+    assert list(trades_by_code.get("TQMP2") or []) == []
+    assert "entry_condition_stats" not in ts
+
+
 def test_api_trend_single_risk_budget_vol_regime_stats_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
     series = {"RBVS1": [100.0 + i * 0.5 for i, _ in enumerate(dates)]}

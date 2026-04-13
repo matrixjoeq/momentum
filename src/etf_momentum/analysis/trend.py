@@ -141,6 +141,7 @@ class TrendInputs:
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
+    quick_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -228,6 +229,7 @@ class TrendPortfolioInputs:
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
+    quick_mode: bool = False
 
 
 def _reduce_active_codes_by_group(
@@ -2486,6 +2488,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("exec_price must be one of: open|close|oc2")
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
+    quick_mode = bool(getattr(inp, "quick_mode", False))
 
     strat = (inp.strategy or "ma_filter").strip().lower()
     if strat not in {
@@ -3129,12 +3132,33 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     ).astype(float)
     strat_ret = (w * ret_exec_day - cost - slippage).astype(float)
     turnover_daily = ((w - w.shift(1).fillna(0.0)).abs() / 2.0).astype(float)
-    decomp_overnight = (w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)).astype(float)
-    decomp_intraday = (w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)).astype(float)
-    decomp_interaction = (w * (ret_overnight.reindex(w.index).astype(float).fillna(0.0) * ret_intraday.reindex(w.index).astype(float).fillna(0.0))).astype(float)
-    decomp_cost = (cost + slippage).astype(float)
-    decomp_gross = (decomp_overnight + decomp_intraday + decomp_interaction).astype(float)
-    decomp_net = (decomp_gross - decomp_cost).astype(float)
+    return_decomposition: dict[str, Any] | None = None
+    if not quick_mode:
+        decomp_overnight = (w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)).astype(float)
+        decomp_intraday = (w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)).astype(float)
+        decomp_interaction = (w * (ret_overnight.reindex(w.index).astype(float).fillna(0.0) * ret_intraday.reindex(w.index).astype(float).fillna(0.0))).astype(float)
+        decomp_cost = (cost + slippage).astype(float)
+        decomp_gross = (decomp_overnight + decomp_intraday + decomp_interaction).astype(float)
+        decomp_net = (decomp_gross - decomp_cost).astype(float)
+        return_decomposition = {
+            "dates": w.index.date.astype(str).tolist(),
+            "series": {
+                "overnight": decomp_overnight.astype(float).tolist(),
+                "intraday": decomp_intraday.astype(float).tolist(),
+                "interaction": decomp_interaction.astype(float).tolist(),
+                "cost": decomp_cost.astype(float).tolist(),
+                "gross": decomp_gross.astype(float).tolist(),
+                "net": decomp_net.astype(float).tolist(),
+            },
+            "summary": {
+                "ann_overnight": float(decomp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_overnight) > 1 else 0.0,
+                "ann_intraday": float(decomp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_intraday) > 1 else 0.0,
+                "ann_interaction": float(decomp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_interaction) > 1 else 0.0,
+                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
+                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
+                "ann_net": float(decomp_net.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_net) > 1 else 0.0,
+            },
+        }
     nav = (1.0 + strat_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -3229,43 +3253,44 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         score_ulcer_weight=0.40,
     )
     trades_with_r = list(trade_r_pack.get("trades") or [])
-    mom_for_entry = (px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0).astype(float)
-    er_for_entry = _efficiency_ratio(px_sig, window=int(er_window)).astype(float)
-    atr_fast_for_entry = _atr_from_hlc(
-        high_qfq.astype(float).fillna(px_sig),
-        low_qfq.astype(float).fillna(px_sig),
-        px_sig.astype(float),
-        window=int(vol_ratio_fast_atr_window),
-    ).astype(float)
-    atr_slow_for_entry = _atr_from_hlc(
-        high_qfq.astype(float).fillna(px_sig),
-        low_qfq.astype(float).fillna(px_sig),
-        px_sig.astype(float),
-        window=int(vol_ratio_slow_atr_window),
-    ).astype(float)
-    vol_ratio_for_entry = (atr_fast_for_entry / atr_slow_for_entry.replace(0.0, np.nan)).astype(float)
-    condition_bins_by_code_single = {
-        str(code): {
-            "momentum": _bucketize_momentum_series(mom_for_entry.reindex(nav.index)),
-            "er": _bucketize_er_series(er_for_entry.reindex(nav.index)),
-            "vol_ratio": _bucketize_vol_ratio_series(vol_ratio_for_entry.reindex(nav.index)),
-            "impulse": _bucketize_impulse_series(
-                (impulse_state if impulse_state is not None else pd.Series(index=nav.index, dtype=object)).reindex(nav.index)
-            ),
+    if not quick_mode:
+        mom_for_entry = (px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0).astype(float)
+        er_for_entry = _efficiency_ratio(px_sig, window=int(er_window)).astype(float)
+        atr_fast_for_entry = _atr_from_hlc(
+            high_qfq.astype(float).fillna(px_sig),
+            low_qfq.astype(float).fillna(px_sig),
+            px_sig.astype(float),
+            window=int(vol_ratio_fast_atr_window),
+        ).astype(float)
+        atr_slow_for_entry = _atr_from_hlc(
+            high_qfq.astype(float).fillna(px_sig),
+            low_qfq.astype(float).fillna(px_sig),
+            px_sig.astype(float),
+            window=int(vol_ratio_slow_atr_window),
+        ).astype(float)
+        vol_ratio_for_entry = (atr_fast_for_entry / atr_slow_for_entry.replace(0.0, np.nan)).astype(float)
+        condition_bins_by_code_single = {
+            str(code): {
+                "momentum": _bucketize_momentum_series(mom_for_entry.reindex(nav.index)),
+                "er": _bucketize_er_series(er_for_entry.reindex(nav.index)),
+                "vol_ratio": _bucketize_vol_ratio_series(vol_ratio_for_entry.reindex(nav.index)),
+                "impulse": _bucketize_impulse_series(
+                    (impulse_state if impulse_state is not None else pd.Series(index=nav.index, dtype=object)).reindex(nav.index)
+                ),
+            }
         }
-    }
-    trades_with_r = _attach_entry_condition_bins_to_trades(
-        trades_with_r,
-        condition_bins_by_code=condition_bins_by_code_single,
-        dates=nav.index,
-        default_code=str(code),
-    )
+        trades_with_r = _attach_entry_condition_bins_to_trades(
+            trades_with_r,
+            condition_bins_by_code=condition_bins_by_code_single,
+            dates=nav.index,
+            default_code=str(code),
+        )
     single_rtp_tier_counts = dict(((r_take_profit_stats or {}).get("tier_trigger_counts") or {}))
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_one.get("returns", [])),
         "by_code": {str(code): _trade_stats_from_returns(trade_one.get("returns", []))},
-        "trades": trades_with_r,
-        "trades_by_code": {str(code): trades_with_r},
+        "trades": ([] if quick_mode else trades_with_r),
+        "trades_by_code": ({str(code): []} if quick_mode else {str(code): trades_with_r}),
     }
     impulse_attempted_overall = int((impulse_filter_stats_overall or {}).get("attempted_entry_count", 0))
     impulse_blocked_overall = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
@@ -3331,27 +3356,30 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["by_code"][str(code)]["monthly_risk_budget_attempted_entry_count"] = monthly_attempted_overall
     trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_count"] = monthly_blocked_overall
     trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_rate"] = float(monthly_block_rate_overall)
-    trade_stats["entry_condition_stats"] = {
-        "scope": "closed_trades_only",
-        "signal_day_basis": "signal_day_before_entry_execution",
-        "quasi_causal_method": "uplift + two_proportion_z / welch_t_normal_approx + BH",
-        "strong_causal_method": "uplift + stratified_permutation + BH",
-        "overall": _build_entry_condition_stats(trades_with_r, by_code=False, n_perm=300, seed=20260410),
-        "by_code": {
-            str(code): _build_entry_condition_stats(trades_with_r, by_code=True, n_perm=200, seed=20260410)
-        },
-    }
+    if not quick_mode:
+        trade_stats["entry_condition_stats"] = {
+            "scope": "closed_trades_only",
+            "signal_day_basis": "signal_day_before_entry_execution",
+            "quasi_causal_method": "uplift + two_proportion_z / welch_t_normal_approx + BH",
+            "strong_causal_method": "uplift + stratified_permutation + BH",
+            "overall": _build_entry_condition_stats(trades_with_r, by_code=False, n_perm=300, seed=20260410),
+            "by_code": {
+                str(code): _build_entry_condition_stats(trades_with_r, by_code=True, n_perm=200, seed=20260410)
+            },
+        }
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
     m_strat["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
     m_strat["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
     m_strat["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
     m_strat["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
     m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
-    event_study = compute_event_study(
-        dates=nav.index,
-        daily_returns=strat_ret.reindex(nav.index).astype(float),
-        entry_dates=entry_dates_from_exposure(w.reindex(nav.index).astype(float)),
-    )
+    event_study = None
+    if not quick_mode:
+        event_study = compute_event_study(
+            dates=nav.index,
+            daily_returns=strat_ret.reindex(nav.index).astype(float),
+            entry_dates=entry_dates_from_exposure(w.reindex(nav.index).astype(float)),
+        )
     market_regime = build_market_regime_report(
         close=px_sig.to_frame(code).reindex(nav.index).astype(float),
         high=high_qfq.to_frame(code).reindex(nav.index).astype(float),
@@ -3458,6 +3486,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),
+                "quick_mode": bool(quick_mode),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
@@ -3489,25 +3518,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
         "market_regime": market_regime,
-        "return_decomposition": {
-            "dates": nav.index.date.astype(str).tolist(),
-            "series": {
-                "overnight": decomp_overnight.astype(float).tolist(),
-                "intraday": decomp_intraday.astype(float).tolist(),
-                "interaction": decomp_interaction.astype(float).tolist(),
-                "cost": decomp_cost.astype(float).tolist(),
-                "gross": decomp_gross.astype(float).tolist(),
-                "net": decomp_net.astype(float).tolist(),
-            },
-            "summary": {
-                "ann_overnight": float(decomp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_overnight) > 1 else 0.0,
-                "ann_intraday": float(decomp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_intraday) > 1 else 0.0,
-                "ann_interaction": float(decomp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_interaction) > 1 else 0.0,
-                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
-                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
-                "ann_net": float(decomp_net.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_net) > 1 else 0.0,
-            },
-        },
+        "return_decomposition": return_decomposition,
         "metrics": {"strategy": m_strat, "benchmark": m_bh, "excess": m_ex},
         "risk_controls": {
             "atr_stop": atr_stop_stats,
@@ -3629,6 +3640,7 @@ def compute_trend_portfolio_backtest(
         raise ValueError("exec_price must be one of: open|close|oc2")
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
+    quick_mode = bool(getattr(inp, "quick_mode", False))
     ps = str(inp.position_sizing or "equal").strip().lower()
     if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
         raise ValueError("position_sizing must be equal|vol_target|fixed_ratio|risk_budget")
@@ -4594,18 +4606,41 @@ def compute_trend_portfolio_backtest(
         .sum(axis=1)
         .astype(float)
     )
-    comp_overnight = (w * ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
-    comp_intraday = (w * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
-    comp_interaction = (
-        w
-        * (
-            ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)
-            * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)
-        )
-    ).sum(axis=1).astype(float)
-    decomp_cost = (cost + slippage).astype(float)
-    decomp_gross = (comp_overnight + comp_intraday + comp_interaction).astype(float)
-    port_ret = (decomp_gross - decomp_cost).astype(float)
+    return_decomposition: dict[str, Any] | None = None
+    if not quick_mode:
+        comp_overnight = (w * ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
+        comp_intraday = (w * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
+        comp_interaction = (
+            w
+            * (
+                ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)
+                * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)
+            )
+        ).sum(axis=1).astype(float)
+        decomp_cost = (cost + slippage).astype(float)
+        decomp_gross = (comp_overnight + comp_intraday + comp_interaction).astype(float)
+        port_ret = (decomp_gross - decomp_cost).astype(float)
+        return_decomposition = {
+            "dates": w.index.date.astype(str).tolist(),
+            "series": {
+                "overnight": comp_overnight.astype(float).tolist(),
+                "intraday": comp_intraday.astype(float).tolist(),
+                "interaction": comp_interaction.astype(float).tolist(),
+                "cost": decomp_cost.astype(float).tolist(),
+                "gross": decomp_gross.astype(float).tolist(),
+                "net": port_ret.astype(float).tolist(),
+            },
+            "summary": {
+                "ann_overnight": float(comp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_overnight) > 1 else 0.0,
+                "ann_intraday": float(comp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_intraday) > 1 else 0.0,
+                "ann_interaction": float(comp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_interaction) > 1 else 0.0,
+                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
+                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
+                "ann_net": float(port_ret.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(port_ret) > 1 else 0.0,
+            },
+        }
+    else:
+        port_ret = (w * ret_exec_day).sum(axis=1).astype(float) - cost.astype(float) - slippage.astype(float)
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -4697,37 +4732,38 @@ def compute_trend_portfolio_backtest(
         score_ulcer_weight=0.40,
     )
     trades_with_r = list(trade_r_pack.get("trades") or [])
-    condition_bins_by_code: dict[str, dict[str, pd.Series]] = {}
-    for c in codes:
-        ck = str(c)
-        condition_bins_by_code[ck] = {
-            "momentum": _bucketize_momentum_series(
-                cond_momentum_df[ck].astype(float).reindex(nav.index)
-                if ck in cond_momentum_df.columns
-                else pd.Series(index=nav.index, dtype=float)
-            ),
-            "er": _bucketize_er_series(
-                cond_er_df[ck].astype(float).reindex(nav.index)
-                if ck in cond_er_df.columns
-                else pd.Series(index=nav.index, dtype=float)
-            ),
-            "vol_ratio": _bucketize_vol_ratio_series(
-                cond_vol_ratio_df[ck].astype(float).reindex(nav.index)
-                if ck in cond_vol_ratio_df.columns
-                else pd.Series(index=nav.index, dtype=float)
-            ),
-            "impulse": _bucketize_impulse_series(
-                cond_impulse_df[ck].astype(object).reindex(nav.index)
-                if ck in cond_impulse_df.columns
-                else pd.Series(index=nav.index, dtype=object)
-            ),
-        }
-    trades_with_r = _attach_entry_condition_bins_to_trades(
-        trades_with_r,
-        condition_bins_by_code=condition_bins_by_code,
-        dates=nav.index,
-        default_code=None,
-    )
+    if not quick_mode:
+        condition_bins_by_code: dict[str, dict[str, pd.Series]] = {}
+        for c in codes:
+            ck = str(c)
+            condition_bins_by_code[ck] = {
+                "momentum": _bucketize_momentum_series(
+                    cond_momentum_df[ck].astype(float).reindex(nav.index)
+                    if ck in cond_momentum_df.columns
+                    else pd.Series(index=nav.index, dtype=float)
+                ),
+                "er": _bucketize_er_series(
+                    cond_er_df[ck].astype(float).reindex(nav.index)
+                    if ck in cond_er_df.columns
+                    else pd.Series(index=nav.index, dtype=float)
+                ),
+                "vol_ratio": _bucketize_vol_ratio_series(
+                    cond_vol_ratio_df[ck].astype(float).reindex(nav.index)
+                    if ck in cond_vol_ratio_df.columns
+                    else pd.Series(index=nav.index, dtype=float)
+                ),
+                "impulse": _bucketize_impulse_series(
+                    cond_impulse_df[ck].astype(object).reindex(nav.index)
+                    if ck in cond_impulse_df.columns
+                    else pd.Series(index=nav.index, dtype=object)
+                ),
+            }
+        trades_with_r = _attach_entry_condition_bins_to_trades(
+            trades_with_r,
+            condition_bins_by_code=condition_bins_by_code,
+            dates=nav.index,
+            default_code=None,
+        )
     trades_by_code: dict[str, list[dict[str, Any]]] = {str(c): [] for c in codes}
     for tr in trades_with_r:
         c = str(tr.get("code") or "")
@@ -4739,14 +4775,16 @@ def compute_trend_portfolio_backtest(
             str(c): _trade_stats_from_returns((trade_pack.get("returns_by_code") or {}).get(str(c), []))
             for c in codes
         },
-        "trades": trades_with_r,
-        "trades_by_code": trades_by_code,
+        "trades": ([] if quick_mode else trades_with_r),
+        "trades_by_code": ({str(c): [] for c in codes} if quick_mode else trades_by_code),
     }
-    event_study = compute_event_study(
-        dates=nav.index,
-        daily_returns=port_ret.reindex(nav.index).astype(float),
-        entry_dates=entry_dates_from_exposure(w.sum(axis=1).reindex(nav.index).astype(float)),
-    )
+    event_study = None
+    if not quick_mode:
+        event_study = compute_event_study(
+            dates=nav.index,
+            daily_returns=port_ret.reindex(nav.index).astype(float),
+            entry_dates=entry_dates_from_exposure(w.sum(axis=1).reindex(nav.index).astype(float)),
+        )
     market_regime = build_market_regime_report(
         close=close_qfq.reindex(index=nav.index, columns=codes).astype(float),
         high=high_qfq_df.reindex(index=nav.index, columns=codes).astype(float),
@@ -4915,17 +4953,18 @@ def compute_trend_portfolio_backtest(
             else 0.0
         )
         trade_stats["by_code"][code_key] = one
-    trade_stats["entry_condition_stats"] = {
-        "scope": "closed_trades_only",
-        "signal_day_basis": "signal_day_before_entry_execution",
-        "quasi_causal_method": "uplift + two_proportion_z / welch_t_normal_approx + BH",
-        "strong_causal_method": "uplift + stratified_permutation + BH",
-        "overall": _build_entry_condition_stats(trades_with_r, by_code=False, n_perm=300, seed=20260410),
-        "by_code": {
-            str(c): _build_entry_condition_stats(trades_by_code.get(str(c), []), by_code=True, n_perm=200, seed=20260410)
-            for c in codes
-        },
-    }
+    if not quick_mode:
+        trade_stats["entry_condition_stats"] = {
+            "scope": "closed_trades_only",
+            "signal_day_basis": "signal_day_before_entry_execution",
+            "quasi_causal_method": "uplift + two_proportion_z / welch_t_normal_approx + BH",
+            "strong_causal_method": "uplift + stratified_permutation + BH",
+            "overall": _build_entry_condition_stats(trades_with_r, by_code=False, n_perm=300, seed=20260410),
+            "by_code": {
+                str(c): _build_entry_condition_stats(trades_by_code.get(str(c), []), by_code=True, n_perm=200, seed=20260410)
+                for c in codes
+            },
+        }
     m_strat["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
     m_strat["r_take_profit_trigger_count"] = int(total_rtp_triggers)
     m_strat["bias_v_take_profit_trigger_count"] = int(total_bias_v_tp_triggers)
@@ -5033,6 +5072,7 @@ def compute_trend_portfolio_backtest(
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),
+                "quick_mode": bool(quick_mode),
                 "ma_type": ma_type,
                 "kama_er_window": int(kama_er_window),
                 "kama_fast_window": int(kama_fast_window),
@@ -5106,25 +5146,7 @@ def compute_trend_portfolio_backtest(
         "r_statistics": trade_r_pack.get("statistics", {}),
         "event_study": event_study,
         "market_regime": market_regime,
-        "return_decomposition": {
-            "dates": nav.index.date.astype(str).tolist(),
-            "series": {
-                "overnight": comp_overnight.astype(float).tolist(),
-                "intraday": comp_intraday.astype(float).tolist(),
-                "interaction": comp_interaction.astype(float).tolist(),
-                "cost": decomp_cost.astype(float).tolist(),
-                "gross": decomp_gross.astype(float).tolist(),
-                "net": port_ret.astype(float).tolist(),
-            },
-            "summary": {
-                "ann_overnight": float(comp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_overnight) > 1 else 0.0,
-                "ann_intraday": float(comp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_intraday) > 1 else 0.0,
-                "ann_interaction": float(comp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_interaction) > 1 else 0.0,
-                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
-                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
-                "ann_net": float(port_ret.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(port_ret) > 1 else 0.0,
-            },
-        },
+        "return_decomposition": return_decomposition,
         "metrics": {"strategy": m_strat, "benchmark": m_bench, "excess": m_ex},
         "risk_controls": {
             "atr_stop": {
