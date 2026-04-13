@@ -914,6 +914,7 @@
           </div>
         </div>
         <button id="runEwCalendar">运行（日历效应 EW）</button>
+        <span id="runEwCalendarHint" class="muted"></span>
       </div>
       <div id="ewCalHeatmap" style="width:100%; height:360px; margin-top:10px;"></div>
       <table id="ewCalTable" style="margin-top:6px;"></table>
@@ -943,6 +944,7 @@
         </div>
         <button id="mcEwResetDefaults">恢复默认（等权MC）</button>
         <button id="runMcEw">运行蒙特卡洛（等权）</button>
+        <span id="runMcEwHint" class="muted"></span>
       </div>
       <table id="mcEwTable"></table>
       <div class="row" style="margin-top:8px">
@@ -1740,6 +1742,7 @@
 
         <div class="row" style="margin-top:12px">
           <button id="runRotation">运行轮动回测</button>
+          <span id="runRotationHint" class="muted"></span>
         </div>
         <div class="row" style="margin-top:8px; align-items:end;">
           <div>
@@ -2082,6 +2085,7 @@
             </div>
           </div>
           <button id="runRotCalendar">运行（日历效应 轮动）</button>
+          <span id="runRotCalendarHint" class="muted"></span>
         </div>
         <div id="rotCalHeatmap" style="width:100%; height:360px; margin-top:10px;"></div>
         <table id="rotCalTable" style="margin-top:6px;"></table>
@@ -2111,6 +2115,7 @@
           </div>
           <button id="mcRotResetDefaults">恢复默认（轮动MC）</button>
           <button id="runMcRot">运行蒙特卡洛（轮动）</button>
+          <span id="runMcRotHint" class="muted"></span>
         </div>
         <div class="two" style="grid-template-columns: 1fr 1fr; align-items:start; margin-top:8px">
           <div>
@@ -2741,6 +2746,19 @@
           <input id="trendRiskBudgetPct" value="1" />
         </div>
         <div>
+          <label>风险预算超限处理</label>
+          <select id="trendRiskBudgetOvercapPolicy" style="min-width:180px;">
+            <option value="scale" selected>等比例缩放</option>
+            <option value="skip_entry">跳过开仓</option>
+            <option value="replace_entry">替换开仓</option>
+            <option value="leverage_entry">杠杆开仓</option>
+          </select>
+        </div>
+        <div>
+          <label>风险预算最大杠杆倍数(1~10)</label>
+          <input id="trendRiskBudgetMaxLeverage" value="2.0" />
+        </div>
+        <div>
           <label>波动率动态风控</label>
           <select id="trendVolRegimeRiskMgmtEnable" style="min-width:140px;">
             <option value="false" selected>关闭</option>
@@ -2813,6 +2831,7 @@
           <input id="trendGroupMaxHoldings" value="4" />
         </div>
         <button id="runTrendResearch">运行趋势回测</button>
+        <span id="runTrendResearchHint" class="muted"></span>
       </div>
       <div style="margin-top:8px;">
         <label>趋势分组映射（代码=组ID，每行一条）</label>
@@ -2905,36 +2924,6 @@
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div>
-          <label>动力出场过滤</label>
-          <select id="trendImpulseExitFilterOn" style="min-width:120px;">
-            <option value="false" selected>关闭</option>
-            <option value="true">开启</option>
-          </select>
-        </div>
-        <div>
-          <label>BULL状态触发出场</label>
-          <select id="trendImpulseExitOnBull" style="min-width:120px;">
-            <option value="false" selected>否</option>
-            <option value="true">是</option>
-          </select>
-        </div>
-        <div>
-          <label>BEAR状态触发出场</label>
-          <select id="trendImpulseExitOnBear" style="min-width:120px;">
-            <option value="true" selected>是</option>
-            <option value="false">否</option>
-          </select>
-        </div>
-        <div>
-          <label>NEUTRAL状态触发出场</label>
-          <select id="trendImpulseExitOnNeutral" style="min-width:130px;">
-            <option value="false" selected>否</option>
-            <option value="true">是</option>
-          </select>
-        </div>
-      </div>
-      <div class="row" style="margin-top:8px; align-items:end;">
-        <div>
           <label>ER入场过滤</label>
           <select id="trendErFilterOn" style="min-width:120px;">
             <option value="false" selected>关闭</option>
@@ -3003,6 +2992,25 @@
           <input id="trendRTpTiers" value="2:0.5,3:0.3,4:0.2,5:0.1,6:0.05" />
         </div>
       </div>
+      <div class="row" style="margin-top:8px; align-items:end;">
+        <div>
+          <label>通用BIAS-V止盈</label>
+          <select id="trendBiasVTpEnable" style="min-width:140px;">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>BIAS-V止盈后重入</label>
+          <select id="trendBiasVTpReentry" style="min-width:150px;">
+            <option value="reenter" selected>允许重返</option>
+            <option value="wait_next_entry">等待下一次入场</option>
+          </select>
+        </div>
+        <div><label>BIAS-V MA窗口</label><input id="trendBiasVTpMaWin" value="20" /></div>
+        <div><label>BIAS-V ATR窗口</label><input id="trendBiasVTpAtrWin" value="20" /></div>
+        <div><label>BIAS-V止盈阈值</label><input id="trendBiasVTpThreshold" value="5.0" /></div>
+      </div>
       <div id="trendStrategyDesc" class="muted" style="margin-top:8px;"></div>
       <div id="trendParamDesc" class="muted" style="margin-top:6px;"></div>
       <div class="panel two" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
@@ -3063,6 +3071,51 @@
             <table id="trendTradeByCodeTable" style="margin-top:8px;"></table>
             <div id="trendTradeByCodeHist" style="width:100%; height:320px; margin-top:8px;"></div>
           </div>
+        </div>
+        <div class="panel" style="margin-top:10px;">
+          <h3 style="margin:0;">趋势策略：入场条件分档统计与因果检验（平仓交易，信号日口径）</h3>
+          <div class="row" style="align-items:flex-end; gap:8px; margin-top:8px;">
+            <div>
+              <label for="trendEntryCondSelect">入场条件</label>
+              <select id="trendEntryCondSelect" style="min-width:180px;">
+                <option value="momentum" selected>动量</option>
+                <option value="er">ER</option>
+                <option value="vol_ratio">波动率比率</option>
+                <option value="impulse">动力状态</option>
+              </select>
+            </div>
+            <div>
+              <label for="trendEntryCondByCodeSelect">按标的查看</label>
+              <select id="trendEntryCondByCodeSelect" style="min-width:200px;"></select>
+            </div>
+          </div>
+          <div class="muted" id="trendEntryCondMethodNote" style="margin-top:6px;"></div>
+          <div class="muted" id="trendEntryCondInterpretationBrief" style="margin-top:6px; white-space:pre-wrap;"></div>
+          <details id="trendEntryCondInterpretationDetailWrap" style="margin-top:6px;">
+            <summary><b>完整版解读</b></summary>
+            <div class="muted" id="trendEntryCondInterpretationDetail" style="margin-top:6px; white-space:pre-wrap;"></div>
+          </details>
+          <div class="two" style="grid-template-columns:1fr 1fr; margin-top:8px;">
+            <div>
+              <div class="muted">总体（全部标的）</div>
+              <table id="trendEntryCondOverallTable" style="margin-top:8px;"></table>
+            </div>
+            <div>
+              <div class="muted">按标的</div>
+              <table id="trendEntryCondByCodeTable" style="margin-top:8px;"></table>
+            </div>
+          </div>
+          <div class="muted" style="margin-top:10px;">风险预算超限触发（按日，四种处理方式频次）</div>
+          <div class="row no-print" style="margin-top:6px; align-items:end;">
+            <div>
+              <label for="trendRiskBudgetLevLineMode">杠杆折线显示</label>
+              <select id="trendRiskBudgetLevLineMode" style="min-width:180px;">
+                <option value="gt1" selected>仅显示 &gt;1x</option>
+                <option value="all">显示全部(含1x)</option>
+              </select>
+            </div>
+          </div>
+          <div id="trendRiskBudgetOvercapDailyChart" style="width:100%; height:280px; margin-top:8px;"></div>
         </div>
         <details id="trendTradeStatsDebugWrap" style="margin-top:8px;">
           <summary><b>trade_statistics 原始返回（Debug Trace）</b></summary>
@@ -3256,7 +3309,6 @@
                   <option value="atr">仅ATR止损</option>
                   <option value="rtp">仅R止盈</option>
                   <option value="er_exit">仅ER出场</option>
-                  <option value="impulse_exit">仅动力出场</option>
                 </select>
               </div>
             </div>
@@ -3386,6 +3438,7 @@
         </div>
         <div>
           <button id="runCalTiming">运行日历效应择时策略</button>
+          <span id="runCalTimingHint" class="muted"></span>
         </div>
       </div>
       <div class="muted" id="calTimingParamNote" style="margin-top:8px;">
@@ -4618,18 +4671,17 @@
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendVolRegimeRiskMgmtEnable", "trendVolRatioFastAtrWindow", "trendVolRatioSlowAtrWindow", "trendVolRatioExpandThreshold", "trendVolRatioContractThreshold", "trendVolRatioNormalThreshold", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendRiskBudgetOvercapPolicy", "trendRiskBudgetMaxLeverage", "trendVolRegimeRiskMgmtEnable", "trendVolRatioFastAtrWindow", "trendVolRatioSlowAtrWindow", "trendVolRatioExpandThreshold", "trendVolRatioContractThreshold", "trendVolRatioNormalThreshold", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendImpulseEntryFilterOn", "trendImpulseAllowBull", "trendImpulseAllowBear", "trendImpulseAllowNeutral",
-          "trendImpulseExitFilterOn", "trendImpulseExitOnBull", "trendImpulseExitOnBear", "trendImpulseExitOnNeutral",
           "trendErFilterOn", "trendErWindow", "trendErThreshold", "trendErExitFilterOn", "trendErExitWindow", "trendErExitThreshold",
           "trendAtrStopMode", "trendAtrStopBasis", "trendAtrStopReentry", "trendAtrStopWin", "trendAtrStopN", "trendAtrStopM",
-          "trendRTpEnable", "trendRTpReentry", "trendRTpTiers",
+          "trendRTpEnable", "trendRTpReentry", "trendRTpTiers", "trendBiasVTpEnable", "trendBiasVTpReentry", "trendBiasVTpMaWin", "trendBiasVTpAtrWin", "trendBiasVTpThreshold",
           "trendMonthlyRiskBudgetEnable", "trendMonthlyRiskBudgetPct", "trendMonthlyRiskBudgetIncludeNewRisk",
           "trendBiasMaWin", "trendBiasEntry", "trendBiasHot", "trendBiasCold", "trendBiasPosMode",
           "trendMacdFast", "trendMacdSlow", "trendMacdSignal", "trendMacdVAtr", "trendMacdVScale",
-          "trendEventBucketProfile", "trendTraceN", "trendTraceView", "trendTraceRiskFilter",
+          "trendEventBucketProfile", "trendTraceN", "trendTraceView", "trendTraceRiskFilter", "trendRiskBudgetLevLineMode",
         ],
         calTiming: [
           "calTimingMode", "calTimingSingleCode", "calTimingDecisionDay", "calTimingHoldDays",
@@ -5056,7 +5108,7 @@
         },
         risk_free_rate: {
           title: "无风险收益率（risk_free_rate）",
-          sub: "用于夏普比率与索诺提比率（年化）。默认 2.5%（长期中国0-1年国债）。",
+          sub: "用于夏普比率与索提诺比率（年化）。默认 2.5%（长期中国0-1年国债）。",
           body: `
             <div><b>含义</b>：在风险调整收益指标中，从组合收益中扣除无风险收益。</div>
             <div style="margin-top:8px"><b>换算</b>：年化 rf 按日频近似换算为 rf/252。</div>
@@ -5119,7 +5171,7 @@
           `,
         },
         sortino_ratio: {
-          title: "索诺提比率（sortino_ratio）",
+          title: "索提诺比率（sortino_ratio）",
           sub: "只用下行波动衡量风险的超额收益。",
           body: `
             <div><b>定义（年化）</b>：\\(Sortino = \\frac{\\mathbb{E}[r - rf/${ANN_FACTOR}]}{\\sigma(\\min(r - rf/${ANN_FACTOR}, 0))} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
@@ -5509,7 +5561,7 @@
           body: `<div><b>计算</b>：Sharpe = mean(r-rf/252)/std(r-rf/252)×√252。</div>`,
         },
         rot_sortino: {
-          title: "策略索诺提",
+          title: "策略索提诺",
           sub: "只用下行波动衡量风险的风险调整收益（年化）。",
           body: `<div><b>计算</b>：Sortino = mean(r-rf/252)/std(min(r-rf/252,0))×√252。</div>`,
         },
@@ -6729,7 +6781,13 @@
         const onEl = $("trendRTpEnable");
         const reEl = $("trendRTpReentry");
         const tEl = $("trendRTpTiers");
+        const bvOnEl = $("trendBiasVTpEnable");
+        const bvReEl = $("trendBiasVTpReentry");
+        const bvMaEl = $("trendBiasVTpMaWin");
+        const bvAtrEl = $("trendBiasVTpAtrWin");
+        const bvThrEl = $("trendBiasVTpThreshold");
         const on = !!(onEl && String(onEl.value || "false") === "true");
+        const bvOn = !!(bvOnEl && String(bvOnEl.value || "false") === "true");
         const setEnabled = (el, enable) => {
           if (!el) return;
           el.disabled = !enable;
@@ -6737,6 +6795,10 @@
         };
         setEnabled(reEl, on);
         setEnabled(tEl, on);
+        setEnabled(bvReEl, bvOn);
+        setEnabled(bvMaEl, bvOn);
+        setEnabled(bvAtrEl, bvOn);
+        setEnabled(bvThrEl, bvOn);
       }
       function updateTrendSizingUi() {
         const mode = ($("trendMode") && $("trendMode").value) ? String($("trendMode").value) : "single";
@@ -6749,6 +6811,8 @@
         const maxHoldEl = $("trendFixedMaxHoldings");
         const rbAtrEl = $("trendRiskBudgetAtrWin");
         const rbPctEl = $("trendRiskBudgetPct");
+        const rbOvercapEl = $("trendRiskBudgetOvercapPolicy");
+        const rbMaxLevEl = $("trendRiskBudgetMaxLeverage");
         const volMgmtOnEl = $("trendVolRegimeRiskMgmtEnable");
         const volFastEl = $("trendVolRatioFastAtrWindow");
         const volSlowEl = $("trendVolRatioSlowAtrWindow");
@@ -6781,6 +6845,16 @@
         if (rbPctEl) {
           rbPctEl.disabled = !isRiskBudget;
           rbPctEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        if (rbOvercapEl) {
+          rbOvercapEl.disabled = !isRiskBudget;
+          rbOvercapEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        if (rbMaxLevEl) {
+          const overcap = (rbOvercapEl && rbOvercapEl.value) ? String(rbOvercapEl.value) : "scale";
+          const enableMaxLev = !!isRiskBudget && (overcap === "leverage_entry");
+          rbMaxLevEl.disabled = !enableMaxLev;
+          rbMaxLevEl.style.opacity = enableMaxLev ? "1" : "0.55";
         }
         if (volMgmtOnEl) {
           volMgmtOnEl.disabled = !isRiskBudget;
@@ -6845,10 +6919,6 @@
           "trendImpulseAllowBull",
           "trendImpulseAllowBear",
           "trendImpulseAllowNeutral",
-          "trendImpulseExitFilterOn",
-          "trendImpulseExitOnBull",
-          "trendImpulseExitOnBear",
-          "trendImpulseExitOnNeutral",
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
@@ -6874,6 +6944,11 @@
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpTiers",
+          "trendBiasVTpEnable",
+          "trendBiasVTpReentry",
+          "trendBiasVTpMaWin",
+          "trendBiasVTpAtrWin",
+          "trendBiasVTpThreshold",
           "trendVolRegimeRiskMgmtEnable",
           "trendVolRatioFastAtrWindow",
           "trendVolRatioSlowAtrWindow",
@@ -6892,10 +6967,6 @@
           "trendImpulseAllowBull",
           "trendImpulseAllowBear",
           "trendImpulseAllowNeutral",
-          "trendImpulseExitFilterOn",
-          "trendImpulseExitOnBull",
-          "trendImpulseExitOnBear",
-          "trendImpulseExitOnNeutral",
           "trendErExitFilterOn",
           "trendErExitWindow",
           "trendErExitThreshold",
@@ -6908,6 +6979,11 @@
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpTiers",
+          "trendBiasVTpEnable",
+          "trendBiasVTpReentry",
+          "trendBiasVTpMaWin",
+          "trendBiasVTpAtrWin",
+          "trendBiasVTpThreshold",
           "trendVolRegimeRiskMgmtEnable",
           "trendVolRatioFastAtrWindow",
           "trendVolRatioSlowAtrWindow",
@@ -6986,10 +7062,6 @@
           trendImpulseAllowBull: "BULL状态允许入场：EMA(13)与MACD柱同时上行状态下，是否允许新开仓。",
           trendImpulseAllowBear: "BEAR状态允许入场：EMA(13)与MACD柱同时下行状态下，是否允许新开仓。",
           trendImpulseAllowNeutral: "NEUTRAL状态允许入场：除BULL/BEAR之外的中性状态下，是否允许新开仓。",
-          trendImpulseExitFilterOn: "动力出场过滤：开启后，当当前动力状态命中已启用状态时触发出场；与其他出场条件按 OR 并联。",
-          trendImpulseExitOnBull: "BULL状态触发出场：EMA(13)与MACD柱同时上行状态下，是否触发出场。",
-          trendImpulseExitOnBear: "BEAR状态触发出场：EMA(13)与MACD柱同时下行状态下，是否触发出场。",
-          trendImpulseExitOnNeutral: "NEUTRAL状态触发出场：除BULL/BEAR之外的中性状态下，是否触发出场。",
           trendErFilterOn: "ER入场过滤：开启后仅当 ER>=阈值 才允许新开仓；平仓不受影响。",
           trendErWindow: "ER入场周期：效率比率回看窗口（交易日），默认10。",
           trendErThreshold: "ER入场阈值：取值[0,1]，ER越高表示趋势越单边。",
@@ -7015,12 +7087,19 @@
           trendRTpEnable: "通用R乘数止盈：按初始风险R跟踪浮盈，达到分层后按允许回落比例触发离场。",
           trendRTpReentry: "止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
           trendRTpTiers: "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
+          trendBiasVTpEnable: "通用BIAS-V止盈：当 BIAS-V=(close-MA)/ATR 大于等于阈值时触发止盈离场。",
+          trendBiasVTpReentry: "BIAS-V止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
+          trendBiasVTpMaWin: "BIAS-V MA窗口：BIAS-V分子中的 MA 窗口，默认20。",
+          trendBiasVTpAtrWin: "BIAS-V ATR窗口：BIAS-V分母中的 ATR 窗口，默认20。",
+          trendBiasVTpThreshold: "BIAS-V止盈阈值：当 BIAS-V>=阈值 触发止盈，默认5.0。",
           trendVolRegimeRiskMgmtEnable: "波动率动态风控：仅在风险预算仓位模式生效；持仓后按 ATR(5)/ATR(50) 判断放大/缩小并动态调仓。",
           trendVolRatioFastAtrWindow: "波动比率快ATR周期：默认5，用于 ATR(5)/ATR(50) 分子。",
           trendVolRatioSlowAtrWindow: "波动比率慢ATR周期：默认50，用于 ATR(5)/ATR(50) 分母。",
           trendVolRatioExpandThreshold: "放大阈值：比率高于该值视为波动放大，触发降仓。",
           trendVolRatioContractThreshold: "缩小阈值：比率低于该值视为波动缩小，触发加仓。",
           trendVolRatioNormalThreshold: "回归正常阈值：放大后低于该值恢复加仓，缩小后高于该值恢复降仓。",
+          trendRiskBudgetOvercapPolicy: "风险预算超限处理：等比例缩放/跳过开仓/替换开仓/杠杆开仓（仅组合风险预算生效）。",
+          trendRiskBudgetMaxLeverage: "最大杠杆倍数：仅杠杆开仓生效，超过该值后回退为按上限倍数等比例缩放（1.0~10.0）。",
           trendMonthlyRiskBudgetEnable: "月度风险预算：按自然月限制账户最大可承受亏损，触发后阻止新开仓。",
           trendMonthlyRiskBudgetPct: "月度风险预算阈值：单月最大亏损比例，范围1%~6%，默认6%。",
           trendMonthlyRiskBudgetIncludeNewRisk: "计入拟开仓风险：开启时，预算判断包含本笔拟开仓风险；关闭时仅看当月累计亏损+当前持仓风险。",
@@ -7456,7 +7535,7 @@
         const traceN = [1, 5, 10, 20].includes(nVal) ? nVal : 20;
         const riskFilter = (() => {
           const v = String((riskSel && riskSel.value) ? riskSel.value : "all").trim().toLowerCase();
-          return ["all", "atr", "rtp", "er_exit", "impulse_exit"].includes(v) ? v : "all";
+          return ["all", "atr", "rtp", "er_exit"].includes(v) ? v : "all";
         })();
         const isPortfolio = String(mode || "single") === "portfolio";
         if (viewSel) {
@@ -7471,11 +7550,9 @@
         const atr = ((tr && tr.atr_stop) || {});
         const rtp = ((tr && tr.r_take_profit) || (((data || {}).risk_controls || {}).r_take_profit || {}));
         const erExit = ((tr && tr.er_exit_filter) || (((data || {}).risk_controls || {}).er_exit_filter || {}));
-        const impulseExit = ((tr && tr.impulse_exit_filter) || (((data || {}).risk_controls || {}).impulse_exit_filter || {}));
         const atrRows = Array.isArray(atr.trace_last_rows) ? atr.trace_last_rows : [];
         const rtpRows = Array.isArray(rtp.trace_last_rows) ? rtp.trace_last_rows : [];
         const erExitRows = Array.isArray(erExit.trace_last_rows) ? erExit.trace_last_rows : [];
-        const impulseExitRows = Array.isArray(impulseExit.trace_last_rows) ? impulseExit.trace_last_rows : [];
         const _eventLabel = (x) => {
           const v = String(x || "").trim().toLowerCase();
           if (v === "entry") return "入场";
@@ -7491,7 +7568,6 @@
           if (v === "atr_stop") return "ATR止损出场";
           if (v === "r_take_profit") return "R止盈出场";
           if (v === "er_exit_filter") return "ER出场";
-          if (v === "impulse_exit_filter") return "动力出场";
           if (v === "atr_update") return "ATR动态更新";
           if (v === "r_take_profit_watch") return "R止盈监控";
           return "-";
@@ -7501,7 +7577,6 @@
           if (v === "atr") return "ATR止损";
           if (v === "rtp") return "R止盈";
           if (v === "er_exit") return "ER出场";
-          if (v === "impulse_exit") return "动力出场";
           return "-";
         };
         const _detailLabel = (r) => {
@@ -7511,13 +7586,9 @@
             const thr = Number(r.er_threshold);
             if (Number.isFinite(v) && Number.isFinite(thr)) return `ER=${fmtNum(v)} >= ${fmtNum(thr)}`;
           }
-          if (src === "impulse_exit") {
-            const st = String(r.impulse_state || "").trim().toUpperCase();
-            if (st) return `状态=${st}`;
-          }
           return "-";
         };
-        const _mergeTraceRows = (atrRowsIn, rtpRowsIn, erRowsIn, impulseRowsIn) => {
+        const _mergeTraceRows = (atrRowsIn, rtpRowsIn, erRowsIn) => {
           const out = [];
           if (riskFilter === "all" || riskFilter === "atr") {
             for (const r of (Array.isArray(atrRowsIn) ? atrRowsIn : [])) out.push({ source: "atr", ...(r || {}) });
@@ -7528,9 +7599,6 @@
           if (riskFilter === "all" || riskFilter === "er_exit") {
             for (const r of (Array.isArray(erRowsIn) ? erRowsIn : [])) out.push({ source: "er_exit", ...(r || {}) });
           }
-          if (riskFilter === "all" || riskFilter === "impulse_exit") {
-            for (const r of (Array.isArray(impulseRowsIn) ? impulseRowsIn : [])) out.push({ source: "impulse_exit", ...(r || {}) });
-          }
           out.sort((a, b) => {
             const c = String(b.date || "").localeCompare(String(a.date || ""));
             if (c !== 0) return c;
@@ -7540,7 +7608,7 @@
         };
         let traceHtml = "";
         if (!isPortfolio) {
-          const shortRows = _mergeTraceRows(atrRows, rtpRows, erExitRows, impulseExitRows).slice(0, traceN);
+          const shortRows = _mergeTraceRows(atrRows, rtpRows, erExitRows).slice(0, traceN);
           const rowHtml = shortRows.length
             ? shortRows.map((r) => `<tr>
                 <td>${esc(r.date || "-")}</td>
@@ -7567,15 +7635,13 @@
           const byAssetAtr = ((((data || {}).risk_controls || {}).atr_stop || {}).by_asset || {});
           const byAssetRtp = ((((data || {}).risk_controls || {}).r_take_profit || {}).by_asset || {});
           const byAssetErExit = ((((data || {}).risk_controls || {}).er_exit_filter || {}).by_asset || {});
-          const byAssetImpulseExit = ((((data || {}).risk_controls || {}).impulse_exit_filter || {}).by_asset || {});
-          const allCodes = Array.from(new Set([...(Object.keys(byAssetAtr || {})), ...(Object.keys(byAssetRtp || {})), ...(Object.keys(byAssetErExit || {})), ...(Object.keys(byAssetImpulseExit || {}))])).sort();
+          const allCodes = Array.from(new Set([...(Object.keys(byAssetAtr || {})), ...(Object.keys(byAssetRtp || {})), ...(Object.keys(byAssetErExit || {}))])).sort();
           if (traceView === "by_asset") {
             const blocks = allCodes.map((code) => {
               const oneAtrRows = Array.isArray(((byAssetAtr[code] || {}).trace_last_rows)) ? (byAssetAtr[code] || {}).trace_last_rows : [];
               const oneRtpRows = Array.isArray(((byAssetRtp[code] || {}).trace_last_rows)) ? (byAssetRtp[code] || {}).trace_last_rows : [];
               const oneErRows = Array.isArray(((byAssetErExit[code] || {}).trace_last_rows)) ? (byAssetErExit[code] || {}).trace_last_rows : [];
-              const oneImpulseRows = Array.isArray(((byAssetImpulseExit[code] || {}).trace_last_rows)) ? (byAssetImpulseExit[code] || {}).trace_last_rows : [];
-              const shortRows = _mergeTraceRows(oneAtrRows, oneRtpRows, oneErRows, oneImpulseRows).slice(0, traceN);
+              const shortRows = _mergeTraceRows(oneAtrRows, oneRtpRows, oneErRows).slice(0, traceN);
               const rowHtml = shortRows.length
                 ? shortRows.map((r) => `<tr>
                     <td>${esc(r.date || "-")}</td>
@@ -7605,8 +7671,7 @@
               const oneAtrRows = Array.isArray(((byAssetAtr[code] || {}).trace_last_rows)) ? (byAssetAtr[code] || {}).trace_last_rows : [];
               const oneRtpRows = Array.isArray(((byAssetRtp[code] || {}).trace_last_rows)) ? (byAssetRtp[code] || {}).trace_last_rows : [];
               const oneErRows = Array.isArray(((byAssetErExit[code] || {}).trace_last_rows)) ? (byAssetErExit[code] || {}).trace_last_rows : [];
-              const oneImpulseRows = Array.isArray(((byAssetImpulseExit[code] || {}).trace_last_rows)) ? (byAssetImpulseExit[code] || {}).trace_last_rows : [];
-              for (const r of _mergeTraceRows(oneAtrRows, oneRtpRows, oneErRows, oneImpulseRows)) merged.push({ code, ...(r || {}) });
+              for (const r of _mergeTraceRows(oneAtrRows, oneRtpRows, oneErRows)) merged.push({ code, ...(r || {}) });
             }
             merged.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(a.code || "").localeCompare(String(b.code || "")));
             const shortRows = merged.slice(0, traceN);
@@ -7655,8 +7720,6 @@
           ["R止盈最近触发日", String(rtp.last_trigger_date || "-")],
           ["ER出场触发次数", String(Number(erExit.trigger_count || 0))],
           ["ER出场最近触发日", String(((Array.isArray(erExit.trigger_dates) && erExit.trigger_dates.length) ? erExit.trigger_dates[erExit.trigger_dates.length - 1] : "-"))],
-          ["动力出场触发次数", String(Number(impulseExit.trigger_count || 0))],
-          ["动力出场最近触发日", String(((Array.isArray(impulseExit.trigger_dates) && impulseExit.trigger_dates.length) ? impulseExit.trigger_dates[impulseExit.trigger_dates.length - 1] : "-"))],
         ];
         boxEl.innerHTML =
           `<div class="muted">用于排查“止损后重入”与“下一交易日计划”是否符合预期。</div>` +
@@ -9719,7 +9782,7 @@
           { key: "max_drawdown_recovery_days", label: "最大回撤修复时长(天)", value: metrics.max_drawdown_recovery_days },
           { key: "sharpe_ratio", label: "夏普比率", value: fmtNum(metrics.sharpe_ratio) },
           { key: "calmar_ratio", label: "卡玛比率", value: fmtNum(metrics.calmar_ratio) },
-          { key: "sortino_ratio", label: "索诺提比率", value: fmtNum(metrics.sortino_ratio) },
+          { key: "sortino_ratio", label: "索提诺比率", value: fmtNum(metrics.sortino_ratio) },
           { key: "information_ratio", label: "信息比率", value: fmtNum(metrics.information_ratio) },
           { key: "ulcer_index", label: "溃疡指标(UI)", value: fmtNum(metrics.ulcer_index) },
           { key: "ulcer_performance_index", label: "溃疡绩效(UPI)", value: fmtNum(metrics.ulcer_performance_index) },
@@ -9727,13 +9790,6 @@
           { key: "avg_annual_turnover", label: "平均年换手率", value: fmtPct(annualTurnover) },
           { key: "avg_daily_trade_count", label: "平均日交易次数(完整交易)", value: fmtNum(metrics.avg_daily_trade_count) },
           { key: "avg_annual_trade_count", label: "平均年交易次数(完整交易)", value: fmtNum(metrics.avg_annual_trade_count) },
-          { key: "atr_stop_trigger_count", label: "ATR止损触发次数", value: (Number.isFinite(Number(metrics.atr_stop_trigger_count)) ? String(Math.round(Number(metrics.atr_stop_trigger_count))) : "-") },
-          { key: "r_take_profit_trigger_count", label: "R止盈触发次数", value: (Number.isFinite(Number(metrics.r_take_profit_trigger_count)) ? String(Math.round(Number(metrics.r_take_profit_trigger_count))) : "-") },
-          {
-            key: "r_take_profit_tier_trigger_counts",
-            label: "R止盈分段触发",
-            value: _tierMapText(metrics.r_take_profit_tier_trigger_counts, metrics.r_take_profit_trigger_count),
-          },
           { key: "holding_weekly_win_rate", label: "周度绝对胜率", value: fmtPct(metrics.holding_weekly_win_rate) },
           { key: "holding_weekly_payoff_ratio", label: "周度绝对赔率(盈/亏)", value: fmtNum(metrics.holding_weekly_payoff_ratio) },
           { key: "holding_weekly_kelly_fraction", label: "周度绝对凯利比(近似)", value: fmtPct(metrics.holding_weekly_kelly_fraction) },
@@ -13958,6 +14014,18 @@
         const erAttempt = Number(s.er_filter_attempted_entry_count);
         const erBlocked = Number(s.er_filter_blocked_entry_count);
         const erBlockRate = (Number.isFinite(erAttempt) && erAttempt > 0 && Number.isFinite(erBlocked)) ? (erBlocked / erAttempt) : null;
+        const impulseAttempt = Number(s.impulse_filter_attempted_entry_count);
+        const impulseBlocked = Number(s.impulse_filter_blocked_entry_count);
+        const impulseBlockRateRaw = Number(s.impulse_filter_blocked_entry_rate);
+        const impulseBlockRate = Number.isFinite(impulseBlockRateRaw)
+          ? impulseBlockRateRaw
+          : ((Number.isFinite(impulseAttempt) && impulseAttempt > 0 && Number.isFinite(impulseBlocked)) ? (impulseBlocked / impulseAttempt) : null);
+        const monthlyAttempt = Number(s.monthly_risk_budget_attempted_entry_count);
+        const monthlyBlocked = Number(s.monthly_risk_budget_blocked_entry_count);
+        const monthlyBlockRateRaw = Number(s.monthly_risk_budget_blocked_entry_rate);
+        const monthlyBlockRate = Number.isFinite(monthlyBlockRateRaw)
+          ? monthlyBlockRateRaw
+          : ((Number.isFinite(monthlyAttempt) && monthlyAttempt > 0 && Number.isFinite(monthlyBlocked)) ? (monthlyBlocked / monthlyAttempt) : null);
         const _tierText = (mp, totalTriggers) => {
           const obj = _obj(mp);
           const _tierR = (k) => {
@@ -14007,19 +14075,17 @@
           `<tr><td>亏损交易均值 / 标准差</td><td>${_v(l.mean)} / ${_v(l.std)}</td></tr>` +
           `<tr><td>盈利交易最大 / 最小</td><td>${_v(p.max)} / ${_v(p.min)}</td></tr>` +
           `<tr><td>亏损交易最大 / 最小</td><td>${_v(l.max)} / ${_v(l.min)}</td></tr>` +
+          `<tr><td>动力入场拦截次数（总）</td><td>${_n(s.impulse_filter_blocked_entry_count)}</td></tr>` +
+          `<tr><td>动力入场拦截次数（BULL）</td><td>${_n(s.impulse_filter_blocked_entry_count_bull)}</td></tr>` +
+          `<tr><td>动力入场拦截次数（BEAR）</td><td>${_n(s.impulse_filter_blocked_entry_count_bear)}</td></tr>` +
+          `<tr><td>动力入场拦截次数（NEUTRAL）</td><td>${_n(s.impulse_filter_blocked_entry_count_neutral)}</td></tr>` +
+          `<tr><td>动力入场拦截率</td><td>${_vp(impulseBlockRate)}</td></tr>` +
           `<tr><td>ER入场过滤器尝试入场次数</td><td>${_n(s.er_filter_attempted_entry_count)}</td></tr>` +
           `<tr><td>ER入场过滤器允许入场次数</td><td>${_n(s.er_filter_allowed_entry_count)}</td></tr>` +
           `<tr><td>ER入场过滤器起作用次数</td><td>${_n(s.er_filter_blocked_entry_count)}</td></tr>` +
           `<tr><td>ER入场过滤器拦截率</td><td>${_vp(erBlockRate)}</td></tr>` +
-          `<tr><td>动力入场过滤器起作用次数</td><td>${_n(s.impulse_filter_blocked_entry_count)}</td></tr>` +
-          `<tr><td>动力入场过滤器拦截（BULL）</td><td>${_n(s.impulse_filter_blocked_entry_count_bull)}</td></tr>` +
-          `<tr><td>动力入场过滤器拦截（BEAR）</td><td>${_n(s.impulse_filter_blocked_entry_count_bear)}</td></tr>` +
-          `<tr><td>动力入场过滤器拦截（NEUTRAL）</td><td>${_n(s.impulse_filter_blocked_entry_count_neutral)}</td></tr>` +
-          `<tr><td>动力不足出场过滤器起作用次数</td><td>${_n(s.impulse_exit_filter_trigger_count)}</td></tr>` +
-          `<tr><td>动力不足出场过滤器触发（BULL）</td><td>${_n(s.impulse_exit_filter_trigger_count_bull)}</td></tr>` +
-          `<tr><td>动力不足出场过滤器触发（BEAR）</td><td>${_n(s.impulse_exit_filter_trigger_count_bear)}</td></tr>` +
-          `<tr><td>动力不足出场过滤器触发（NEUTRAL）</td><td>${_n(s.impulse_exit_filter_trigger_count_neutral)}</td></tr>` +
-          `<tr><td>ER出场过滤器起作用次数</td><td>${_n(s.er_exit_filter_trigger_count)}</td></tr>` +
+          `<tr><td>月度风险预算入场拦截次数</td><td>${_n(s.monthly_risk_budget_blocked_entry_count)}</td></tr>` +
+          `<tr><td>月度风险预算入场拦截率</td><td>${_vp(monthlyBlockRate)}</td></tr>` +
           `<tr><td>风险预算波动动态调仓次数（总）</td><td>${_n(s.vol_risk_adjust_total_count)}</td></tr>` +
           `<tr><td>风险预算波动动态调仓（降波）</td><td>${_n(s.vol_risk_adjust_reduce_on_expand_count)}</td></tr>` +
           `<tr><td>风险预算波动动态调仓（升波）</td><td>${_n(s.vol_risk_adjust_increase_on_contract_count)}</td></tr>` +
@@ -14027,11 +14093,11 @@
           `<tr><td>风险预算波动动态调仓（升波恢复）</td><td>${_n(s.vol_risk_adjust_recover_from_contract_count)}</td></tr>` +
           `<tr><td>风险预算入场即降波状态次数</td><td>${_n(s.vol_risk_entry_state_reduce_on_expand_count)}</td></tr>` +
           `<tr><td>风险预算入场即升波状态次数</td><td>${_n(s.vol_risk_entry_state_increase_on_contract_count)}</td></tr>` +
-          `<tr><td>风险预算总仓位超限同比例缩放次数</td><td>${_n(s.vol_risk_overcap_scale_count)}</td></tr>` +
+          `<tr><td>ER出场过滤器起作用次数</td><td>${_n(s.er_exit_filter_trigger_count)}</td></tr>` +
           `<tr><td>ATR止损触发次数</td><td>${_n(s.atr_stop_trigger_count)}</td></tr>` +
           `<tr><td>R止盈触发次数</td><td>${_n(s.r_take_profit_trigger_count)}</td></tr>` +
-          `<tr><td>R止盈分段触发</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>` +
-          `<tr><td>月度风险预算拦截开仓次数</td><td>${_n(s.monthly_risk_budget_blocked_entry_count)}</td></tr>`;
+          `<tr><td>R止盈分段触发统计</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>` +
+          `<tr><td>BIAS-V止盈触发次数</td><td>${_n(s.bias_v_take_profit_trigger_count)}</td></tr>`;
       }
 
       function _renderTradeHist(divId, returns, title) {
@@ -14093,7 +14159,38 @@
         return `${Number.isFinite(sqn) ? fmtNum(sqn) : "-"}（${rating}，n=${Number.isFinite(nUsed) ? Math.round(nUsed) : "-"}）`;
       }
 
-      function _renderRStatsTable(tableId, stats, mode, tail, sqnObj) {
+      function _formatAnnualizedSqnSummary(sqnObj, annualTradeCount) {
+        const s = (sqnObj && typeof sqnObj === "object") ? sqnObj : {};
+        if (!s.applicable) return "-";
+        const expR = Number(s.expectancy_r);
+        const stdR = Number(s.std_r);
+        const annualN = Number(annualTradeCount);
+        if (!Number.isFinite(expR) || !Number.isFinite(stdR) || stdR <= 0 || !Number.isFinite(annualN) || annualN <= 0) return "-";
+        const annualizedSqn = (expR / stdR) * Math.sqrt(annualN);
+        if (!Number.isFinite(annualizedSqn)) return "-";
+        return `${fmtNum(annualizedSqn)}（年均交易次数=${fmtNum(annualN)}）`;
+      }
+
+      function _formatTradeSystemScoreSummary(scoreObj) {
+        const s = (scoreObj && typeof scoreObj === "object") ? scoreObj : {};
+        if (!s.applicable) return "-";
+        const score = Number(s.score);
+        const grade = String(s.grade || "-");
+        const sqn = Number(s.annualized_sqn);
+        const confidence = Number(s.confidence);
+        const w = (s.weights && typeof s.weights === "object") ? s.weights : {};
+        const wSqn = Number(w.sqn);
+        const wUi = Number(w.ulcer);
+        if (!Number.isFinite(score)) return "-";
+        const confTxt = Number.isFinite(confidence) ? fmtNum(confidence) : "-";
+        const sqnTxt = Number.isFinite(sqn) ? fmtNum(sqn) : "-";
+        const weightTxt = (Number.isFinite(wSqn) && Number.isFinite(wUi))
+          ? `${fmtNum(wSqn)}/${fmtNum(wUi)}`
+          : "-";
+        return `${fmtNum(score)}（${grade}，年化SQN=${sqnTxt}，置信度=${confTxt}，权重S/U=${weightTxt}）`;
+      }
+
+      function _renderRStatsTable(tableId, stats, mode, tail, sqnObj, annualTradeCount, tradeSystemScoreObj) {
         const t = $(tableId);
         if (!t) return;
         const s = (stats && typeof stats === "object") ? stats : {};
@@ -14113,6 +14210,12 @@
         const rowSqn = String(mode || "num") === "num"
           ? `<tr><td>SQN（最近<=100笔）</td><td>${esc(_formatSqnSummary(sqn))}</td></tr>`
           : "";
+        const rowAnnualizedSqn = String(mode || "num") === "num"
+          ? `<tr><td>年化SQN</td><td>${esc(_formatAnnualizedSqnSummary(sqn, annualTradeCount))}</td></tr>`
+          : "";
+        const rowCompositeScore = String(mode || "num") === "num"
+          ? `<tr><td>综合评分（交易系统）</td><td>${esc(_formatTradeSystemScoreSummary(tradeSystemScoreObj))}</td></tr>`
+          : "";
         t.innerHTML =
           `<tr><th>指标</th><th>值</th></tr>` +
           `<tr><td>样本数</td><td>${n(s.sample_size)}</td></tr>` +
@@ -14120,7 +14223,9 @@
           `<tr><td>最小 / 最大</td><td>${f(s.min)} / ${f(s.max)}</td></tr>` +
           `<tr><td>P05 / P25 / P50 / P75 / P95</td><td>${f(s.p05)} / ${f(s.p25)} / ${f(s.p50)} / ${f(s.p75)} / ${f(s.p95)}</td></tr>` +
           rowTail +
-          rowSqn;
+          rowSqn +
+          rowAnnualizedSqn +
+          rowCompositeScore;
       }
 
       function _renderRHist(divId, values, title, mode) {
@@ -14148,6 +14253,11 @@
         const trades = Array.isArray((tradeStats || {}).trades) ? tradeStats.trades : [];
         const byCodeStats = (rStats && rStats.by_code && typeof rStats.by_code === "object") ? rStats.by_code : {};
         const recentPack = (rStats && rStats.recent_100 && typeof rStats.recent_100 === "object") ? rStats.recent_100 : null;
+        const tradeSystemScorePack = (rStats && rStats.trade_system_score && typeof rStats.trade_system_score === "object")
+          ? rStats.trade_system_score
+          : {};
+        const overallAnnualTradeCount = Number((((data || {}).metrics || {}).strategy || {}).avg_annual_trade_count);
+        const overallTradeCountAll = Number((((rStats || {}).overall) || {}).trade_count);
         const codeSel = $(`${p}RStatsCodeSelect`);
         const scopeSel = $(`${p}RStatsScopeSelect`);
         const initOverallTable = `${p}RInitOverallTable`;
@@ -14187,13 +14297,16 @@
           const activeOverall = (useRecent && recentPack && recentPack.overall && typeof recentPack.overall === "object")
             ? recentPack.overall
             : ((rStats && rStats.overall && typeof rStats.overall === "object") ? rStats.overall : {});
+          const activeOverallScore = (useRecent
+            ? tradeSystemScorePack.recent_100_overall
+            : tradeSystemScorePack.overall) || {};
           const scopeSuffix = useRecent ? "（近100次交易）" : "（全部交易）";
 
           const overallInit = (activeOverall.initial_r_pct_nav_stats && typeof activeOverall.initial_r_pct_nav_stats === "object") ? activeOverall.initial_r_pct_nav_stats : {};
           const overallMult = (activeOverall.r_multiple_stats && typeof activeOverall.r_multiple_stats === "object") ? activeOverall.r_multiple_stats : {};
           const overallTail = (activeOverall.tail && typeof activeOverall.tail === "object") ? activeOverall.tail : {};
-          _renderRStatsTable(initOverallTable, overallInit, "pct", {}, {});
-          _renderRStatsTable(multOverallTable, overallMult, "num", overallTail, (activeOverall.sqn || {}));
+          _renderRStatsTable(initOverallTable, overallInit, "pct", {}, {}, null, null);
+          _renderRStatsTable(multOverallTable, overallMult, "num", overallTail, (activeOverall.sqn || {}), overallAnnualTradeCount, activeOverallScore);
 
           const overallInitVals = activeTrades.map((x) => Number(x && x.initial_r_pct_nav)).filter(Number.isFinite);
           const overallMultVals = activeTrades.map((x) => Number(x && x.r_multiple)).filter(Number.isFinite);
@@ -14215,8 +14328,13 @@
           const oneInit = (one.initial_r_pct_nav_stats && typeof one.initial_r_pct_nav_stats === "object") ? one.initial_r_pct_nav_stats : {};
           const oneMult = (one.r_multiple_stats && typeof one.r_multiple_stats === "object") ? one.r_multiple_stats : {};
           const oneTail = (one.tail && typeof one.tail === "object") ? one.tail : {};
-          _renderRStatsTable(initByCodeTable, oneInit, "pct", {}, {});
-          _renderRStatsTable(multByCodeTable, oneMult, "num", oneTail, (one.sqn || {}));
+          const oneTradeCount = Number(one.trade_count);
+          const annualTradeCountByCode =
+            (Number.isFinite(overallAnnualTradeCount) && overallAnnualTradeCount > 0 && Number.isFinite(overallTradeCountAll) && overallTradeCountAll > 0 && Number.isFinite(oneTradeCount) && oneTradeCount >= 0)
+              ? (overallAnnualTradeCount * oneTradeCount / overallTradeCountAll)
+              : null;
+          _renderRStatsTable(initByCodeTable, oneInit, "pct", {}, {}, null, null);
+          _renderRStatsTable(multByCodeTable, oneMult, "num", oneTail, (one.sqn || {}), annualTradeCountByCode, null);
           const tCode = activeTrades.filter((x) => String((x && x.code) || "") === c);
           const initVals = tCode.map((x) => Number(x && x.initial_r_pct_nav)).filter(Number.isFinite);
           const multVals = tCode.map((x) => Number(x && x.r_multiple)).filter(Number.isFinite);
@@ -14224,8 +14342,8 @@
           _renderRHist(multByCodeHist, multVals, `${codeLabel(c)}：R乘数分布${scopeSuffix}`, "num");
 
           if (!codes.length) {
-            _renderRStatsTable(initByCodeTable, {}, "pct", {}, {});
-            _renderRStatsTable(multByCodeTable, {}, "num", {}, {});
+            _renderRStatsTable(initByCodeTable, {}, "pct", {}, {}, null, null);
+            _renderRStatsTable(multByCodeTable, {}, "num", {}, {}, null, null);
             _renderRHist(initByCodeHist, [], "无数据", "pct");
             _renderRHist(multByCodeHist, [], "无数据", "num");
           }
@@ -14233,6 +14351,269 @@
         codeSel.onchange = renderAll;
         if (scopeSel) scopeSel.onchange = renderAll;
         renderAll();
+      }
+
+      function _renderEntryConditionTable(tableId, oneCondition) {
+        const t = $(tableId);
+        if (!t) return;
+        const one = (oneCondition && typeof oneCondition === "object") ? oneCondition : {};
+        const bins = Array.isArray(one.bins) ? one.bins : [];
+        const asPct = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtPct(Number(x));
+        const asNum = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : fmtNum(Number(x));
+        const asInt = (x) => (x == null || !Number.isFinite(Number(x))) ? "-" : String(Math.round(Number(x)));
+        const rows = bins.map((r) => {
+          const q = (r && r.quasi_causal && typeof r.quasi_causal === "object") ? r.quasi_causal : {};
+          const s = (r && r.strong_causal && typeof r.strong_causal === "object") ? r.strong_causal : {};
+          return (
+            `<tr>` +
+              `<td>${esc(String((r && r.bucket) || "-"))}</td>` +
+              `<td>${asInt(r && r.closed_trade_count)}</td>` +
+              `<td>${asPct(r && r.win_rate_ex_zero)}</td>` +
+              `<td>${asPct(r && r.mean_return)}</td>` +
+              `<td>${asPct(q.uplift_win_rate_ex_zero)}</td>` +
+              `<td>${asNum(q.p_value_win_rate)} / ${asNum(q.q_value_win_rate)}</td>` +
+              `<td>${asPct(q.uplift_mean_return)}</td>` +
+              `<td>${asNum(q.p_value_mean_return)} / ${asNum(q.q_value_mean_return)}</td>` +
+              `<td>${asPct(s.uplift_win_rate_ex_zero)}</td>` +
+              `<td>${asNum(s.p_value_win_rate)} / ${asNum(s.q_value_win_rate)}</td>` +
+              `<td>${asPct(s.uplift_mean_return)}</td>` +
+              `<td>${asNum(s.p_value_mean_return)} / ${asNum(s.q_value_mean_return)}</td>` +
+            `</tr>`
+          );
+        }).join("");
+        t.innerHTML =
+          `<tr>` +
+            `<th>分档</th>` +
+            `<th>样本数</th>` +
+            `<th>胜率(剔零)</th>` +
+            `<th>平均收益</th>` +
+            `<th>准因果:胜率提升</th>` +
+            `<th>准因果:胜率 p/q</th>` +
+            `<th>准因果:收益提升</th>` +
+            `<th>准因果:收益 p/q</th>` +
+            `<th>更强因果:胜率提升</th>` +
+            `<th>更强因果:胜率 p/q</th>` +
+            `<th>更强因果:收益提升</th>` +
+            `<th>更强因果:收益 p/q</th>` +
+          `</tr>` +
+          rows;
+        if (!rows) {
+          t.innerHTML += `<tr><td colspan="12" class="muted">暂无可用样本</td></tr>`;
+        }
+      }
+
+      function _entryConditionInterpretationText(conditionKey, oneCondition) {
+        const condLabelMap = {
+          momentum: "动量",
+          er: "ER",
+          vol_ratio: "波动率比率",
+          impulse: "动力状态",
+        };
+        const label = condLabelMap[String(conditionKey || "")] || "当前条件";
+        const one = (oneCondition && typeof oneCondition === "object") ? oneCondition : {};
+        const bins = Array.isArray(one.bins) ? one.bins : [];
+        const passQ = (x) => Number.isFinite(Number(x)) && Number(x) <= 0.10;
+        const safeNum = (x) => (Number.isFinite(Number(x)) ? Number(x) : NaN);
+        const favorable = [];
+        const unfavorable = [];
+        for (const r of bins) {
+          const qz = (r && r.quasi_causal && typeof r.quasi_causal === "object") ? r.quasi_causal : {};
+          const st = (r && r.strong_causal && typeof r.strong_causal === "object") ? r.strong_causal : {};
+          const upW = safeNum(st.uplift_win_rate_ex_zero);
+          const upR = safeNum(st.uplift_mean_return);
+          const qW = st.q_value_win_rate;
+          const qR = st.q_value_mean_return;
+          const quasiQW = qz.q_value_win_rate;
+          const quasiQR = qz.q_value_mean_return;
+          const sigStrong = passQ(qW) || passQ(qR);
+          const sigQuasi = passQ(quasiQW) || passQ(quasiQR);
+          if (!sigStrong && !sigQuasi) continue;
+          const tag = `${String((r && r.bucket) || "-")}（n=${Math.round(Number((r && r.closed_trade_count) || 0))}）`;
+          if (Number.isFinite(upW) && Number.isFinite(upR) && upW > 0 && upR > 0) favorable.push(tag);
+          else if (Number.isFinite(upW) && Number.isFinite(upR) && upW < 0 && upR < 0) unfavorable.push(tag);
+        }
+        const lines = [
+          `解读指南（${label}）：`,
+          "1) uplift>0 表示该分档相对“其他分档”更优，uplift<0 表示更弱。",
+          "2) p/q 越小，统计证据越强；建议优先看 q（已做多重比较校正）。",
+          "3) 准因果用于快速筛查；更强因果（分层置换）通过后再用于风险加减仓决策。",
+          "4) 实务建议：仅在样本数足够且两种检验方向一致时调整单笔风险；否则保持默认风险。",
+        ];
+        if (favorable.length || unfavorable.length) {
+          lines.push("");
+          lines.push("当前显著分档摘要（q<=0.10）：");
+          lines.push(`- 偏有利：${favorable.length ? favorable.join("，") : "暂无"}`);
+          lines.push(`- 偏不利：${unfavorable.length ? unfavorable.join("，") : "暂无"}`);
+        }
+        return lines.join("\n");
+      }
+
+      function _entryConditionInterpretationPack(conditionKey, oneCondition) {
+        const one = (oneCondition && typeof oneCondition === "object") ? oneCondition : {};
+        const bins = Array.isArray(one.bins) ? one.bins : [];
+        const passQ = (x) => Number.isFinite(Number(x)) && Number(x) <= 0.10;
+        let favorableCount = 0;
+        let unfavorableCount = 0;
+        let significantCount = 0;
+        for (const r of bins) {
+          const qz = (r && r.quasi_causal && typeof r.quasi_causal === "object") ? r.quasi_causal : {};
+          const st = (r && r.strong_causal && typeof r.strong_causal === "object") ? r.strong_causal : {};
+          const sigStrong = passQ(st.q_value_win_rate) || passQ(st.q_value_mean_return);
+          const sigQuasi = passQ(qz.q_value_win_rate) || passQ(qz.q_value_mean_return);
+          if (!sigStrong && !sigQuasi) continue;
+          significantCount += 1;
+          const upW = Number(st.uplift_win_rate_ex_zero);
+          const upR = Number(st.uplift_mean_return);
+          if (Number.isFinite(upW) && Number.isFinite(upR) && upW > 0 && upR > 0) favorableCount += 1;
+          else if (Number.isFinite(upW) && Number.isFinite(upR) && upW < 0 && upR < 0) unfavorableCount += 1;
+        }
+        const condLabelMap = {
+          momentum: "动量",
+          er: "ER",
+          vol_ratio: "波动率比率",
+          impulse: "动力状态",
+        };
+        const label = condLabelMap[String(conditionKey || "")] || "当前条件";
+        const brief = [
+          `简版结论（${label}）：`,
+          `- 显著分档数（q<=0.10）：${significantCount}`,
+          `- 偏有利分档：${favorableCount}；偏不利分档：${unfavorableCount}`,
+          "- 仅当样本充足且准因果/更强因果方向一致时，才建议调整单笔风险。",
+        ].join("\n");
+        return {
+          brief,
+          detail: _entryConditionInterpretationText(conditionKey, oneCondition),
+        };
+      }
+
+      function _renderTrendRiskBudgetOvercapDailyChart(data) {
+        const divId = "trendRiskBudgetOvercapDailyChart";
+        const div = $(divId);
+        const modeSel = $("trendRiskBudgetLevLineMode");
+        if (!div) return;
+        const rc = (((data || {}).risk_controls || {}).vol_regime_risk_mgmt) || {};
+        const rows = Array.isArray(rc.overcap_daily_counts) ? rc.overcap_daily_counts : [];
+        const lineMode = (modeSel && modeSel.value) ? String(modeSel.value) : "gt1";
+        const xs = [];
+        const yScale = [];
+        const ySkip = [];
+        const yReplace = [];
+        const yLev = [];
+        const yLevMul = [];
+        for (const r of rows) {
+          const d = String((r && r.date) || "").trim();
+          if (!d) continue;
+          const sc = Number((r && r.scale) || 0);
+          const sk = Number((r && r.skip_entry) || 0);
+          const rp = Number((r && r.replace_entry) || 0);
+          const lv = Number((r && r.leverage_entry) || 0);
+          const lm = Number((r && r.leverage_multiple_max) || 0);
+          if (!(Number.isFinite(sc) || Number.isFinite(sk) || Number.isFinite(rp) || Number.isFinite(lv))) continue;
+          xs.push(d);
+          yScale.push(Number.isFinite(sc) ? sc : 0);
+          ySkip.push(Number.isFinite(sk) ? sk : 0);
+          yReplace.push(Number.isFinite(rp) ? rp : 0);
+          yLev.push(Number.isFinite(lv) ? lv : 0);
+          yLevMul.push(Number.isFinite(lm) ? ((lineMode === "all") ? lm : (lm > 1.0 ? lm : null)) : null);
+        }
+        if (!xs.length) {
+          div.innerHTML = "<div class='muted'>暂无超限触发明细（仅风险预算组合模式下有数据）。</div>";
+          return;
+        }
+        const traces = [
+          { name: "等比例缩放", y: yScale, color: "#4c78a8" },
+          { name: "跳过开仓", y: ySkip, color: "#f58518" },
+          { name: "替换开仓", y: yReplace, color: "#54a24b" },
+          { name: "杠杆开仓", y: yLev, color: "#e45756" },
+        ].map((z) => ({
+          x: xs,
+          y: z.y,
+          type: "bar",
+          name: z.name,
+          marker: { color: z.color },
+          hovertemplate: "日期=%{x}<br>次数=%{y}<extra>" + z.name + "</extra>",
+        }));
+        traces.push({
+          x: xs,
+          y: yLevMul,
+          type: "scatter",
+          mode: "lines+markers",
+          name: "当日最大杠杆倍数",
+          yaxis: "y2",
+          line: { color: "#b279a2", width: 2 },
+          marker: { size: 5 },
+          hovertemplate: "日期=%{x}<br>杠杆倍数=%{y:.3f}<extra>当日最大杠杆倍数</extra>",
+        });
+        Plotly.newPlot(
+          divId,
+          traces,
+          {
+            margin: { t: 24, b: 48, l: 40, r: 16 },
+            barmode: "stack",
+            xaxis: { title: "日期", type: "date" },
+            yaxis: { title: "触发次数", rangemode: "tozero" },
+            yaxis2: { title: "杠杆倍数", overlaying: "y", side: "right", rangemode: "tozero" },
+            legend: { orientation: "h", y: 1.15 },
+            title: "风险预算超限处理触发频次（日度）+ 杠杆强度",
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function renderTrendEntryConditionAnalysis(data) {
+        const condSel = $("trendEntryCondSelect");
+        const codeSel = $("trendEntryCondByCodeSelect");
+        const tbOverall = $("trendEntryCondOverallTable");
+        const tbByCode = $("trendEntryCondByCodeTable");
+        const note = $("trendEntryCondMethodNote");
+        const interpBrief = $("trendEntryCondInterpretationBrief");
+        const interpDetail = $("trendEntryCondInterpretationDetail");
+        if (!condSel || !codeSel || !tbOverall || !tbByCode || !note || !interpBrief || !interpDetail) return;
+        const ts = (data && data.trade_statistics && typeof data.trade_statistics === "object")
+          ? data.trade_statistics
+          : {};
+        const ecs = (ts.entry_condition_stats && typeof ts.entry_condition_stats === "object")
+          ? ts.entry_condition_stats
+          : {};
+        const overall = (ecs.overall && typeof ecs.overall === "object") ? ecs.overall : {};
+        const byCode = (ecs.by_code && typeof ecs.by_code === "object") ? ecs.by_code : {};
+        const methods = [
+          `样本口径：${esc(String(ecs.scope || "closed_trades_only"))}`,
+          `信号口径：${esc(String(ecs.signal_day_basis || "signal_day_before_entry_execution"))}`,
+          `准因果：${esc(String(ecs.quasi_causal_method || "-"))}`,
+          `更强因果：${esc(String(ecs.strong_causal_method || "-"))}`,
+        ];
+        note.innerHTML = methods.join("；");
+
+        const oldCond = String(condSel.value || "momentum");
+        const condOptions = [
+          ["momentum", "动量"],
+          ["er", "ER"],
+          ["vol_ratio", "波动率比率"],
+          ["impulse", "动力状态"],
+        ].filter(([k]) => Object.prototype.hasOwnProperty.call(overall, k) || k === "momentum");
+        condSel.innerHTML = condOptions.map(([k, label]) => `<option value="${esc(k)}">${esc(label)}</option>`).join("");
+        if (condOptions.some(([k]) => k === oldCond)) condSel.value = oldCond;
+
+        const codes = Object.keys(byCode).sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN"));
+        const oldCode = String(codeSel.value || "");
+        codeSel.innerHTML = codes.map((c) => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
+        if (oldCode && codes.includes(oldCode)) codeSel.value = oldCode;
+
+        const redraw = () => {
+          const condKey = String(condSel.value || "momentum");
+          const oneOverall = overall[condKey] || {};
+          _renderEntryConditionTable("trendEntryCondOverallTable", oneOverall);
+          const c = String(codeSel.value || "");
+          const codePack = (byCode[c] && typeof byCode[c] === "object") ? byCode[c] : {};
+          _renderEntryConditionTable("trendEntryCondByCodeTable", codePack[condKey] || {});
+          const pack = _entryConditionInterpretationPack(condKey, oneOverall);
+          interpBrief.textContent = String(pack.brief || "");
+          interpDetail.textContent = String(pack.detail || "");
+        };
+        condSel.onchange = redraw;
+        codeSel.onchange = redraw;
+        redraw();
       }
 
       function renderTradeStatistics(prefix, data) {
@@ -14250,6 +14631,7 @@
           _renderTradeStatsTable(byCodeTable, {});
           _renderTradeHist(byCodeHist, [], "无数据");
           _renderTradeStatsDebug(p, null);
+          if (p === "trend") _renderTrendRiskBudgetOvercapDailyChart(null);
           renderEventStudy(p, null);
           return;
         }
@@ -14274,6 +14656,14 @@
           }
         }
         _renderTradeStatsDebug(p, data);
+        if (p === "trend") {
+          renderTrendEntryConditionAnalysis(data);
+          const levModeSel = $("trendRiskBudgetLevLineMode");
+          if (levModeSel) {
+            levModeSel.onchange = () => _renderTrendRiskBudgetOvercapDailyChart(window.__lastTrendResult || data);
+          }
+          _renderTrendRiskBudgetOvercapDailyChart(data);
+        }
         renderEventStudy(p, data);
       }
 
@@ -15915,7 +16305,7 @@
           { key: "rot_mdd", label: "策略最大回撤", value: fmtPct(s.max_drawdown) },
           { key: "max_drawdown_recovery_days", label: "策略最大回撤修复时长(天)", value: fmtDays(s.max_drawdown_recovery_days) },
           { key: "rot_sharpe", label: "策略夏普", value: fmtNum(s.sharpe_ratio) },
-          { key: "rot_sortino", label: "策略索诺提", value: fmtNum(s.sortino_ratio) },
+          { key: "rot_sortino", label: "策略索提诺", value: fmtNum(s.sortino_ratio) },
           { key: "rot_ui", label: "溃疡指标(UI)", value: fmtNum(s.ulcer_index) },
           { key: "rot_upi", label: "溃疡绩效(UPI)", value: fmtNum(s.ulcer_performance_index) },
           { key: "rot_turnover", label: "平均日换手率", value: fmtPct(s.avg_daily_turnover) },
@@ -16518,7 +16908,7 @@
           return String(a.exec_price).localeCompare(String(b.exec_price));
         });
         el.innerHTML =
-          `<tr><th>调仓锚点</th><th>成交价</th><th>年化收益</th><th>夏普</th><th>卡玛</th><th>索诺提</th><th>溃疡(UI)</th><th>UPI</th><th>信息比率</th><th>最大回撤</th><th>平均日换手</th><th>状态</th></tr>` +
+          `<tr><th>调仓锚点</th><th>成交价</th><th>年化收益</th><th>夏普</th><th>卡玛</th><th>索提诺</th><th>溃疡(UI)</th><th>UPI</th><th>信息比率</th><th>最大回撤</th><th>平均日换手</th><th>状态</th></tr>` +
           rows.map((r) => {
             const ok = !!r.ok;
             const m = ok ? (r.metrics || {}) : {};
@@ -16849,7 +17239,9 @@
         const benchmark_mode = (($("rotBenchMode") && $("rotBenchMode").value) ? String($("rotBenchMode").value) : "EW_REBAL");
         if (!["EW_REBAL", "RP_REBAL", "IVOL_REBAL"].includes(benchmark_mode)) return setMsg("轮动基准模式不合法");
         // phase-1 rules already validated by table parsers
-        $("status").textContent = "回测中...";
+        const runHint = $("runRotationHint");
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
         setMsg("");
         const asset_rc_rules = null;
         const asset_vol_index_rules = (() => {
@@ -16936,6 +17328,7 @@
         });
         const text = await resp.text();
         $("status").textContent = "";
+        if (runHint) runHint.textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         $("status").textContent = "";
@@ -17061,10 +17454,6 @@
           impulse_allow_bull: ($("trendImpulseAllowBull") && $("trendImpulseAllowBull").value === "true"),
           impulse_allow_bear: ($("trendImpulseAllowBear") && $("trendImpulseAllowBear").value === "true"),
           impulse_allow_neutral: ($("trendImpulseAllowNeutral") && $("trendImpulseAllowNeutral").value === "true"),
-          impulse_exit_filter: ($("trendImpulseExitFilterOn") && $("trendImpulseExitFilterOn").value === "true"),
-          impulse_exit_on_bull: ($("trendImpulseExitOnBull") && $("trendImpulseExitOnBull").value === "true"),
-          impulse_exit_on_bear: ($("trendImpulseExitOnBear") && $("trendImpulseExitOnBear").value === "true"),
-          impulse_exit_on_neutral: ($("trendImpulseExitOnNeutral") && $("trendImpulseExitOnNeutral").value === "true"),
           er_filter: ($("trendErFilterOn") && $("trendErFilterOn").value === "true"),
           er_window: Number(($("trendErWindow").value || "10").trim()),
           er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),
@@ -17092,6 +17481,11 @@
           r_take_profit_enabled: (($("trendRTpEnable") && $("trendRTpEnable").value) ? String($("trendRTpEnable").value) === "true" : false),
           r_take_profit_reentry_mode: (($("trendRTpReentry") && $("trendRTpReentry").value) ? String($("trendRTpReentry").value) : "reenter"),
           r_take_profit_tiers: [],
+          bias_v_take_profit_enabled: (($("trendBiasVTpEnable") && $("trendBiasVTpEnable").value) ? String($("trendBiasVTpEnable").value) === "true" : false),
+          bias_v_take_profit_reentry_mode: (($("trendBiasVTpReentry") && $("trendBiasVTpReentry").value) ? String($("trendBiasVTpReentry").value) : "reenter"),
+          bias_v_ma_window: Number(($("trendBiasVTpMaWin") && $("trendBiasVTpMaWin").value ? $("trendBiasVTpMaWin").value : "20").trim()),
+          bias_v_atr_window: Number(($("trendBiasVTpAtrWin") && $("trendBiasVTpAtrWin").value ? $("trendBiasVTpAtrWin").value : "20").trim()),
+          bias_v_take_profit_threshold: Number(($("trendBiasVTpThreshold") && $("trendBiasVTpThreshold").value ? $("trendBiasVTpThreshold").value : "5.0").trim()),
           monthly_risk_budget_enabled: (($("trendMonthlyRiskBudgetEnable") && $("trendMonthlyRiskBudgetEnable").value) ? String($("trendMonthlyRiskBudgetEnable").value) === "true" : false),
           monthly_risk_budget_pct: Number(($("trendMonthlyRiskBudgetPct") && $("trendMonthlyRiskBudgetPct").value ? $("trendMonthlyRiskBudgetPct").value : "6").trim()),
           monthly_risk_budget_include_new_trade_risk: (($("trendMonthlyRiskBudgetIncludeNewRisk") && $("trendMonthlyRiskBudgetIncludeNewRisk").value) ? String($("trendMonthlyRiskBudgetIncludeNewRisk").value) === "true" : false),
@@ -17100,6 +17494,8 @@
           fixed_max_holdings: Number(($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value ? $("trendFixedMaxHoldings").value : "10").trim()),
           risk_budget_atr_window: Number(($("trendRiskBudgetAtrWin") && $("trendRiskBudgetAtrWin").value ? $("trendRiskBudgetAtrWin").value : "20").trim()),
           risk_budget_pct: Number(($("trendRiskBudgetPct") && $("trendRiskBudgetPct").value ? $("trendRiskBudgetPct").value : "1").trim()),
+          risk_budget_overcap_policy: (($("trendRiskBudgetOvercapPolicy") && $("trendRiskBudgetOvercapPolicy").value) ? String($("trendRiskBudgetOvercapPolicy").value) : "scale"),
+          risk_budget_max_leverage_multiple: Number(($("trendRiskBudgetMaxLeverage") && $("trendRiskBudgetMaxLeverage").value ? $("trendRiskBudgetMaxLeverage").value : "2.0").trim()),
           vol_regime_risk_mgmt_enabled: (($("trendVolRegimeRiskMgmtEnable") && $("trendVolRegimeRiskMgmtEnable").value) ? String($("trendVolRegimeRiskMgmtEnable").value) === "true" : false),
           vol_ratio_fast_atr_window: Number(($("trendVolRatioFastAtrWindow") && $("trendVolRatioFastAtrWindow").value ? $("trendVolRatioFastAtrWindow").value : "5").trim()),
           vol_ratio_slow_atr_window: Number(($("trendVolRatioSlowAtrWindow") && $("trendVolRatioSlowAtrWindow").value ? $("trendVolRatioSlowAtrWindow").value : "50").trim()),
@@ -17159,6 +17555,20 @@
         } else {
           common.r_take_profit_tiers = [];
         }
+        if (!["reenter", "wait_next_entry"].includes(String(common.bias_v_take_profit_reentry_mode))) {
+          return setMsg("BIAS-V止盈重入模式非法，请选择 允许重返/等待下一次入场");
+        }
+        if (!Number.isFinite(common.bias_v_ma_window) || common.bias_v_ma_window < 2) {
+          return setMsg("BIAS-V MA窗口需为>=2数字");
+        }
+        common.bias_v_ma_window = Math.floor(common.bias_v_ma_window);
+        if (!Number.isFinite(common.bias_v_atr_window) || common.bias_v_atr_window < 2) {
+          return setMsg("BIAS-V ATR窗口需为>=2数字");
+        }
+        common.bias_v_atr_window = Math.floor(common.bias_v_atr_window);
+        if (!Number.isFinite(common.bias_v_take_profit_threshold) || common.bias_v_take_profit_threshold <= 0) {
+          return setMsg("BIAS-V止盈阈值需为>0数字");
+        }
         if (!Number.isFinite(common.monthly_risk_budget_pct)) {
           return setMsg("月度风险预算需为数字");
         }
@@ -17186,6 +17596,12 @@
         common.risk_budget_pct = (common.risk_budget_pct > 0.1 ? common.risk_budget_pct / 100.0 : common.risk_budget_pct);
         if (common.risk_budget_pct < 0.001 || common.risk_budget_pct > 0.02) {
           return setMsg("风险预算%需在0.1%~2%之间");
+        }
+        if (!["scale", "skip_entry", "replace_entry", "leverage_entry"].includes(String(common.risk_budget_overcap_policy))) {
+          return setMsg("风险预算超限处理非法，请选择 等比例缩放/跳过开仓/替换开仓/杠杆开仓");
+        }
+        if (!Number.isFinite(common.risk_budget_max_leverage_multiple) || common.risk_budget_max_leverage_multiple < 1.0 || common.risk_budget_max_leverage_multiple > 10.0) {
+          return setMsg("风险预算最大杠杆倍数需在1.0~10.0之间");
         }
         if (!Number.isFinite(common.vol_ratio_fast_atr_window) || common.vol_ratio_fast_atr_window < 2) {
           return setMsg("波动比率快ATR周期需为>=2数字");
@@ -17271,7 +17687,9 @@
         if (!Number.isFinite(common.kama_std_coef) || common.kama_std_coef < 0 || common.kama_std_coef > 3) {
           return setMsg("KAMA标准差系数需在[0,3]区间");
         }
-        $("status").textContent = "趋势回测中...";
+        const runHint = $("runTrendResearchHint");
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
         setMsg("");
         const fallbackHint = (
           common.r_take_profit_enabled
@@ -17303,6 +17721,7 @@
         }
         const text = await resp.text();
         $("status").textContent = "";
+        if (runHint) runHint.textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         window.__lastTrendResult = data;
@@ -17326,32 +17745,41 @@
         try { renderTrendPositionPlan(data, mode); } catch (_) { /* ignore */ }
         const m = (data && data.metrics) ? data.metrics : {};
         const rows = [];
+        const hiddenMetricKeys = new Set([
+          "r_take_profit_tier_trigger_counts",
+          "r_take_profit_trigger_count",
+          "bias_v_take_profit_trigger_count",
+          "atr_stop_trigger_count",
+          "monthly_risk_budget_blocked_entry_count",
+        ]);
+        const pctMetricKeys = new Set([
+          "cumulative_return",
+          "annualized_return",
+          "annualized_volatility",
+          "max_drawdown",
+          "avg_daily_turnover",
+          "avg_daily_turnover_rate",
+          "avg_annual_turnover",
+          "avg_annual_turnover_rate",
+        ]);
+        const _metricValueText = (metricKey, value) => {
+          if (typeof value !== "number" || !Number.isFinite(Number(value))) return esc(value);
+          const n = Number(value);
+          if (pctMetricKeys.has(String(metricKey))) return `${(n * 100).toFixed(2)}%`;
+          return n.toFixed(6);
+        };
         for (const k of ["strategy", "benchmark", "excess"]) {
           const obj = m[k] || {};
           for (const kk of Object.keys(obj)) {
-            rows.push(`<tr><td>${esc(k)}</td><td>${esc(kk)}</td><td>${typeof obj[kk] === "number" ? Number(obj[kk]).toFixed(6) : esc(obj[kk])}</td></tr>`);
+            if (hiddenMetricKeys.has(String(kk))) continue;
+            if (String(kk).startsWith("impulse_filter_")) continue;
+            if (String(kk).startsWith("impulse_exit_filter_")) continue;
+            if (String(kk).startsWith("vol_risk_overcap_")) continue;
+            rows.push(`<tr><td>${esc(k)}</td><td>${esc(kk)}</td><td>${_metricValueText(kk, obj[kk])}</td></tr>`);
           }
         }
-        const atrStats = (((data || {}).risk_controls || {}).atr_stop) || null;
         const extStats = (((data || {}).risk_controls || {}).position_extension) || null;
         const usageStats = (((data || {}).risk_controls || {}).position_usage) || null;
-        if (atrStats) {
-          const topPairs = [
-            ["enabled", atrStats.enabled],
-            ["mode", atrStats.mode],
-            ["trigger_count", atrStats.trigger_count],
-            ["trigger_days", atrStats.trigger_days],
-            ["entries", atrStats.entries],
-            ["exits", atrStats.exits],
-            ["trigger_exit_share", atrStats.trigger_exit_share],
-            ["first_trigger_date", atrStats.first_trigger_date],
-            ["last_trigger_date", atrStats.last_trigger_date],
-          ];
-          for (const [kk, vv] of topPairs) {
-            if (vv === undefined || vv === null) continue;
-            rows.push(`<tr><td>${esc("risk_controls.atr_stop")}</td><td>${esc(String(kk))}</td><td>${typeof vv === "number" ? Number(vv).toFixed(6) : esc(vv)}</td></tr>`);
-          }
-        }
         if (extStats) {
           const extPairs = [
             ["enabled", extStats.enabled],
@@ -17436,8 +17864,16 @@
         const usageSummary = (usageStats && usageStats.enabled)
           ? `固定比例资金利用率：均值 ${fmtPct(Number(usageStats.mean_exposure || 0))}，最低 ${fmtPct(Number(usageStats.min_exposure || 0))}，最高 ${fmtPct(Number(usageStats.max_exposure || 0))}，分位数 P05/P25/P50/P75/P95 = ${fmtPct(Number((((usageStats.quantiles || {}).p05) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p25) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p50) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p75) || 0)))} / ${fmtPct(Number((((usageStats.quantiles || {}).p95) || 0)))}。`
           : "固定比例资金利用率：不适用。";
+        const rbOvercapPolicy = String((((((data || {}).meta || {}).params || {}).risk_budget_overcap_policy) || "scale"));
+        const rbMaxLev = Number((((((data || {}).meta || {}).params || {}).risk_budget_max_leverage_multiple) || 2.0));
+        const rbOvercapLabel = ({
+          scale: "等比例缩放",
+          skip_entry: "跳过开仓",
+          replace_entry: "替换开仓",
+          leverage_entry: "杠杆开仓",
+        }[rbOvercapPolicy] || rbOvercapPolicy);
         const riskBudgetSummary = (String(((((data || {}).meta || {}).params || {}).position_sizing || "")).toLowerCase() === "risk_budget")
-          ? `风险预算仓位：ATR周期 ${Math.floor(Number(((((data || {}).meta || {}).params || {}).risk_budget_atr_window || 20)))}，预算 ${fmtPct(Number(((((data || {}).meta || {}).params || {}).risk_budget_pct || 0.01)))} / 标的 / ATR；总仓位超过100%时按比例缩放。`
+          ? `风险预算仓位：ATR周期 ${Math.floor(Number(((((data || {}).meta || {}).params || {}).risk_budget_atr_window || 20)))}，预算 ${fmtPct(Number(((((data || {}).meta || {}).params || {}).risk_budget_pct || 0.01)))} / 标的 / ATR；超限处理=${rbOvercapLabel}${rbOvercapPolicy === "leverage_entry" ? `（最大杠杆${fmtNum(rbMaxLev)}x）` : ""}。`
           : "风险预算仓位：未启用。";
         setReport(
           "趋势研究报告式解读",
@@ -18181,7 +18617,9 @@
         const exec_prices = _checkedValues("input.ewCalPx");
         if (anchors.length === 0) return setMsg("请至少选择一个调仓锚点");
         if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OC均价）");
-        $("status").textContent = "计算日历效应（等权）...";
+        const runHint = $("runEwCalendarHint");
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
         setMsg("");
         const resp = await api("/analysis/baseline/calendar-effect", {
           method: "POST",
@@ -18189,6 +18627,7 @@
         });
         const text = await resp.text();
         $("status").textContent = "";
+        if (runHint) runHint.textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         _renderCalendarTable("ewCalTable", data);
@@ -18386,7 +18825,9 @@
         if (anchors.length === 0) return setMsg("请至少选择一个调仓锚点");
         if (exec_prices.length === 0) return setMsg("请至少选择一个成交价口径（开盘/收盘/OC均价）");
 
-        $("status").textContent = "计算日历效应（轮动）...";
+        const runHint = $("runRotCalendarHint");
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
         setMsg("");
         const asset_rc_rules = null;
         const asset_vol_index_rules = (() => {
@@ -18463,6 +18904,7 @@
         });
         const text = await resp.text();
         $("status").textContent = "";
+        if (runHint) runHint.textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         _renderCalendarTable("rotCalTable", data);
@@ -18518,7 +18960,7 @@
           `<tr><td>最大回撤</td><td>${fmtPct(s.max_drawdown)}</td><td>${fmtPct(b.max_drawdown)}</td><td>${fmtPct(e.max_drawdown)}</td></tr>` +
           `<tr><td>最大回撤修复时长(天)</td><td>${s.max_drawdown_recovery_days ?? "-"}</td><td>${b.max_drawdown_recovery_days ?? "-"}</td><td>${e.max_drawdown_recovery_days ?? "-"}</td></tr>` +
           `<tr><td>夏普</td><td>${fmtNum(s.sharpe_ratio)}</td><td>${fmtNum(b.sharpe_ratio)}</td><td>${fmtNum(e.sharpe_ratio)}</td></tr>` +
-          `<tr><td>索诺提</td><td>${fmtNum(s.sortino_ratio)}</td><td>${fmtNum(b.sortino_ratio)}</td><td>${fmtNum(e.sortino_ratio)}</td></tr>` +
+          `<tr><td>索提诺</td><td>${fmtNum(s.sortino_ratio)}</td><td>${fmtNum(b.sortino_ratio)}</td><td>${fmtNum(e.sortino_ratio)}</td></tr>` +
           `<tr><td>卡玛</td><td>${fmtNum(s.calmar_ratio)}</td><td>${fmtNum(b.calmar_ratio)}</td><td>${fmtNum(e.calmar_ratio)}</td></tr>` +
           `<tr><td>溃疡指标(UI)</td><td>${fmtNum(s.ulcer_index)}</td><td>${fmtNum(b.ulcer_index)}</td><td>${fmtNum(e.ulcer_index)}</td></tr>` +
           `<tr><td>溃疡绩效(UPI)</td><td>${fmtNum(s.ulcer_performance_index)}</td><td>${fmtNum(b.ulcer_performance_index)}</td><td>${fmtNum(e.ulcer_performance_index)}</td></tr>` +
@@ -18700,7 +19142,9 @@
           else if (rbp > 0.1) rbp = rbp / 100.0;
           risk_budget_pct = Math.min(0.02, Math.max(0.001, rbp));
         }
-        $("status").textContent = "计算日历效应择时策略...";
+        const runHint = $("runCalTimingHint");
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
         setMsg("");
         const reqPayload = {
           mode,
@@ -18728,6 +19172,7 @@
         });
         const text = await resp.text();
         $("status").textContent = "";
+        if (runHint) runHint.textContent = "";
         if (!resp.ok) return setMsg(text);
         const data = JSON.parse(text);
         const nav = (data && data.nav && data.nav.series) ? data.nav.series : {};
@@ -20031,11 +20476,13 @@
       if ($("trendStrategy")) $("trendStrategy").addEventListener("change", updateTrendStrategyParamsUi);
       if ($("trendMode")) $("trendMode").addEventListener("change", updateTrendSizingUi);
       if ($("trendSizing")) $("trendSizing").addEventListener("change", updateTrendSizingUi);
+      if ($("trendRiskBudgetOvercapPolicy")) $("trendRiskBudgetOvercapPolicy").addEventListener("change", updateTrendSizingUi);
       if ($("trendVolRegimeRiskMgmtEnable")) $("trendVolRegimeRiskMgmtEnable").addEventListener("change", updateTrendSizingUi);
       if ($("rotPositionMode")) $("rotPositionMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("rotTopKMode")) $("rotTopKMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("trendAtrStopMode")) $("trendAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("trend"));
       if ($("trendRTpEnable")) $("trendRTpEnable").addEventListener("change", _syncRTpParamsUi);
+      if ($("trendBiasVTpEnable")) $("trendBiasVTpEnable").addEventListener("change", _syncRTpParamsUi);
       if ($("rotAtrStopMode")) $("rotAtrStopMode").addEventListener("change", () => _syncAtrStopParamsUi("rot"));
       if ($("trendTraceN")) $("trendTraceN").addEventListener("change", () => {
         try {
@@ -20298,6 +20745,7 @@
 
       async function runMcEw() {
         const btn = $("runMcEw");
+        const runHint = $("runMcEwHint");
         const codes = _codesForStrategy("baseline");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = $("start").value.trim();
@@ -20318,7 +20766,8 @@
         const oldTxt = btn.textContent;
         btn.disabled = true;
         btn.textContent = "计算中...";
-        $("status").textContent = "蒙特卡洛模拟中...";
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
         setMsg("");
         try {
           const resp = await api("/analysis/baseline/montecarlo", {
@@ -20336,6 +20785,7 @@
           setReport("等权蒙特卡洛解读", bullets, "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。");
           setReportTo("mcEwReport", "等权蒙特卡洛解读", bullets, "说明：蒙特卡洛结果反映历史收益片段重采样分布，不等于未来必然路径。");
         } finally {
+          if (runHint) runHint.textContent = "";
           $("status").textContent = "";
           btn.disabled = false;
           btn.textContent = oldTxt;
@@ -20344,6 +20794,7 @@
 
       async function runMcRot() {
         const btn = $("runMcRot");
+        const runHint = $("runMcRotHint");
         const codes = _codesForStrategy("rotation");
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const start = $("start").value.trim();
@@ -20513,7 +20964,8 @@
         const oldTxt = btn.textContent;
         btn.disabled = true;
         btn.textContent = "计算中...";
-        $("status").textContent = "蒙特卡洛模拟中...";
+        if (runHint) runHint.textContent = "计算中...";
+        $("status").textContent = "计算中...";
         setMsg("");
         try {
           const asset_rc_rules = null;
@@ -20616,6 +21068,7 @@
             "说明：请同时关注策略分布与超额分布，避免只看单一高收益样本。"
           );
         } finally {
+          if (runHint) runHint.textContent = "";
           $("status").textContent = "";
           btn.disabled = false;
           btn.textContent = oldTxt;

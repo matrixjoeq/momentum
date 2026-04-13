@@ -180,6 +180,9 @@ def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
     assert "recent_100" in rs
     assert int(((rs.get("recent_100") or {}).get("effective_count") or 0) > 0)
     assert "sqn" in ((rs.get("overall") or {}))
+    score_pack = (rs.get("trade_system_score") or {})
+    assert "overall" in score_pack
+    assert "weights" in score_pack
     first_trade = ((ts.get("trades") or [None])[0] or {})
     assert "initial_r_amount" in first_trade
     assert "r_multiple" in first_trade

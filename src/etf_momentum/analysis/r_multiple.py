@@ -110,8 +110,8 @@ def _sqn_grade(sqn: float | None) -> str | None:
     if sqn is None or (not np.isfinite(float(sqn))):
         return None
     x = float(sqn)
-    if x < 1.5:
-        return "极差"
+    if x < 1.6:
+        return "较差"
     if x < 2.0:
         return "一般"
     if x < 3.0:
@@ -175,6 +175,143 @@ def _sqn_summary(trades: list[dict[str, Any]], *, min_trades: int = 30, max_trad
     }
 
 
+def _annualized_sqn_from_summary(sqn_obj: dict[str, Any], annual_trade_count: float | None) -> float | None:
+    s = sqn_obj if isinstance(sqn_obj, dict) else {}
+    if not bool(s.get("applicable")):
+        return None
+    exp_r = _to_num_or_none(s.get("expectancy_r"))
+    std_r = _to_num_or_none(s.get("std_r"))
+    ann_n = _to_num_or_none(annual_trade_count)
+    if exp_r is None or std_r is None or ann_n is None or std_r <= 0.0 or ann_n <= 0.0:
+        return None
+    return _to_num_or_none((float(exp_r) / float(std_r)) * np.sqrt(float(ann_n)))
+
+
+def _trade_system_composite_score(
+    *,
+    sqn_obj: dict[str, Any],
+    annual_trade_count: float | None,
+    ulcer_index: float | None,
+    backtest_years: float | None,
+    sqn_weight: float = 0.60,
+    ulcer_weight: float = 0.40,
+    sqn_center: float = 2.50,
+    sqn_scale: float = 0.80,
+    ui_tau: float = 8.0,
+) -> dict[str, Any]:
+    sqn_ann = _annualized_sqn_from_summary(sqn_obj, annual_trade_count)
+    ui = _to_num_or_none(ulcer_index)
+    years = _to_num_or_none(backtest_years)
+    n_used = _to_num_or_none((sqn_obj or {}).get("trade_count_used"))
+    if sqn_ann is None:
+        return {
+            "applicable": False,
+            "reason": "annualized_sqn_unavailable",
+            "score": None,
+            "grade": None,
+            "annualized_sqn": None,
+            "sqn_component": None,
+            "ulcer_component": None,
+            "confidence": None,
+            "weights": {"sqn": float(sqn_weight), "ulcer": float(ulcer_weight)},
+        }
+    if ui is None or ui < 0.0:
+        return {
+            "applicable": False,
+            "reason": "ulcer_index_unavailable",
+            "score": None,
+            "grade": None,
+            "annualized_sqn": sqn_ann,
+            "sqn_component": None,
+            "ulcer_component": None,
+            "confidence": None,
+            "weights": {"sqn": float(sqn_weight), "ulcer": float(ulcer_weight)},
+        }
+    if years is None or years <= 0.0:
+        return {
+            "applicable": False,
+            "reason": "backtest_years_unavailable",
+            "score": None,
+            "grade": None,
+            "annualized_sqn": sqn_ann,
+            "sqn_component": None,
+            "ulcer_component": None,
+            "confidence": None,
+            "weights": {"sqn": float(sqn_weight), "ulcer": float(ulcer_weight)},
+        }
+    n_eff = float(max(0.0, n_used if n_used is not None else 0.0))
+    # Clip exponent input to avoid numerical overflow.
+    z = float(np.clip((float(sqn_ann) - float(sqn_center)) / max(float(sqn_scale), 1e-9), -60.0, 60.0))
+    s_sqn = float(1.0 / (1.0 + np.exp(-z)))
+    s_ui = float(np.exp(-float(ui) / max(float(ui_tau), 1e-9)))
+    c_n = float(min(1.0, np.sqrt(n_eff / 50.0)))
+    c_y = float(min(1.0, np.sqrt(float(years) / 3.0)))
+    confidence = float(0.4 + 0.6 * c_n * c_y)
+    raw = float(float(sqn_weight) * s_sqn + float(ulcer_weight) * s_ui)
+    score = float(np.clip(100.0 * raw * confidence, 0.0, 100.0))
+    grade = "D"
+    if score >= 80.0:
+        grade = "A"
+    elif score >= 65.0:
+        grade = "B"
+    elif score >= 50.0:
+        grade = "C"
+    return {
+        "applicable": True,
+        "reason": None,
+        "score": _to_num_or_none(score),
+        "grade": grade,
+        "annualized_sqn": _to_num_or_none(sqn_ann),
+        "sqn_component": _to_num_or_none(s_sqn),
+        "ulcer_component": _to_num_or_none(s_ui),
+        "confidence": _to_num_or_none(confidence),
+        "weights": {"sqn": float(sqn_weight), "ulcer": float(ulcer_weight)},
+        "meta": {
+            "sqn_center": float(sqn_center),
+            "sqn_scale": float(sqn_scale),
+            "ui_tau": float(ui_tau),
+        },
+    }
+
+
+def _attach_trade_system_scores(
+    statistics: dict[str, Any],
+    *,
+    ulcer_index: float | None,
+    annual_trade_count: float | None,
+    backtest_years: float | None,
+    sqn_weight: float = 0.60,
+    ulcer_weight: float = 0.40,
+) -> dict[str, Any]:
+    out = dict(statistics or {})
+    overall = (out.get("overall") or {}) if isinstance(out.get("overall"), dict) else {}
+    recent = (out.get("recent_100") or {}) if isinstance(out.get("recent_100"), dict) else {}
+    recent_overall = (recent.get("overall") or {}) if isinstance(recent.get("overall"), dict) else {}
+
+    overall_score = _trade_system_composite_score(
+        sqn_obj=(overall.get("sqn") or {}),
+        annual_trade_count=annual_trade_count,
+        ulcer_index=ulcer_index,
+        backtest_years=backtest_years,
+        sqn_weight=sqn_weight,
+        ulcer_weight=ulcer_weight,
+    )
+    recent_score = _trade_system_composite_score(
+        sqn_obj=(recent_overall.get("sqn") or {}),
+        annual_trade_count=annual_trade_count,
+        ulcer_index=ulcer_index,
+        backtest_years=backtest_years,
+        sqn_weight=sqn_weight,
+        ulcer_weight=ulcer_weight,
+    )
+    out["trade_system_score"] = {
+        "overall": overall_score,
+        "recent_100_overall": recent_score,
+        "weights": {"sqn": float(sqn_weight), "ulcer": float(ulcer_weight)},
+    }
+    return out
+
+
 def enrich_trades_with_r_metrics(
     trades: list[dict[str, Any]],
     *,
@@ -188,6 +325,11 @@ def enrich_trades_with_r_metrics(
     slippage_rate: float,
     gap_buffer_rate: float = 0.0,
     default_code: str | None = None,
+    ulcer_index: float | None = None,
+    annual_trade_count: float | None = None,
+    backtest_years: float | None = None,
+    score_sqn_weight: float = 0.60,
+    score_ulcer_weight: float = 0.40,
 ) -> dict[str, Any]:
     atr_n = float(atr_mult) if np.isfinite(float(atr_mult)) else float("nan")
     rb = float(risk_budget_pct) if (risk_budget_pct is not None and np.isfinite(float(risk_budget_pct))) else float("nan")
@@ -295,17 +437,26 @@ def enrich_trades_with_r_metrics(
         grouped_recent.setdefault(c, []).append(tr)
     recent_by_code = {k: _summarize_group(v) for k, v in grouped_recent.items()}
     recent_overall = _summarize_group(recent_trades)
+    statistics = {
+        "overall": overall,
+        "by_code": by_code,
+        "recent_100": {
+            "window_size": int(recent_window),
+            "effective_count": int(len(recent_trades)),
+            "total_trade_count": int(len(trades_out)),
+            "overall": recent_overall,
+            "by_code": recent_by_code,
+        },
+    }
+    statistics = _attach_trade_system_scores(
+        statistics,
+        ulcer_index=ulcer_index,
+        annual_trade_count=annual_trade_count,
+        backtest_years=backtest_years,
+        sqn_weight=score_sqn_weight,
+        ulcer_weight=score_ulcer_weight,
+    )
     return {
         "trades": trades_out,
-        "statistics": {
-            "overall": overall,
-            "by_code": by_code,
-            "recent_100": {
-                "window_size": int(recent_window),
-                "effective_count": int(len(recent_trades)),
-                "total_trade_count": int(len(trades_out)),
-                "overall": recent_overall,
-                "by_code": recent_by_code,
-            },
-        },
+        "statistics": statistics,
     }

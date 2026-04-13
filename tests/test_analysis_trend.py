@@ -229,7 +229,21 @@ def test_trend_single_monthly_risk_budget_blocks_entries(session_factory):
     overall = (ts.get("overall") or {})
     by_code = ((ts.get("by_code") or {}).get(code) or {})
     assert int(overall.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
+    attempted = int(overall.get("monthly_risk_budget_attempted_entry_count") or 0)
+    blocked = int(overall.get("monthly_risk_budget_blocked_entry_count") or 0)
+    rate = float(overall.get("monthly_risk_budget_blocked_entry_rate") or 0.0)
+    assert attempted >= blocked >= 0
+    assert 0.0 <= rate <= 1.0
+    if attempted > 0:
+        assert rate == pytest.approx(blocked / attempted, rel=1e-6, abs=1e-9)
     assert int(by_code.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
+    by_attempted = int(by_code.get("monthly_risk_budget_attempted_entry_count") or 0)
+    by_blocked = int(by_code.get("monthly_risk_budget_blocked_entry_count") or 0)
+    by_rate = float(by_code.get("monthly_risk_budget_blocked_entry_rate") or 0.0)
+    assert by_attempted >= by_blocked >= 0
+    assert 0.0 <= by_rate <= 1.0
+    if by_attempted > 0:
+        assert by_rate == pytest.approx(by_blocked / by_attempted, rel=1e-6, abs=1e-9)
     m = ((out.get("metrics") or {}).get("strategy") or {})
     assert int(m.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
 
@@ -542,56 +556,27 @@ def test_trend_single_impulse_entry_filter_blocks_entries(session_factory):
     overall = (ts.get("overall") or {})
     by_code = (ts.get("by_code") or {}).get(code, {})
     blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
+    attempted = int(overall.get("impulse_filter_attempted_entry_count") or 0)
+    rate = float(overall.get("impulse_filter_blocked_entry_rate") or 0.0)
     blocked_split = (
         int(overall.get("impulse_filter_blocked_entry_count_bull") or 0)
         + int(overall.get("impulse_filter_blocked_entry_count_bear") or 0)
         + int(overall.get("impulse_filter_blocked_entry_count_neutral") or 0)
     )
     assert blocked > 0
+    assert attempted >= blocked >= 0
+    assert 0.0 <= rate <= 1.0
+    if attempted > 0:
+        assert rate == pytest.approx(blocked / attempted, rel=1e-6, abs=1e-9)
     assert blocked_split == blocked
-    assert int(by_code.get("impulse_filter_blocked_entry_count") or 0) == blocked
-
-
-def test_trend_single_impulse_exit_filter_triggers_by_state(session_factory):
-    sf = session_factory
-    code = "IMPX1"
-    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
-    with sf() as db:
-        for i, d in enumerate(dates):
-            _add_price(db, code=code, day=d, close=100.0 + i * 0.6)
-        db.commit()
-        out = compute_trend_backtest(
-            db,
-            TrendInputs(
-                code=code,
-                start=dates[0],
-                end=dates[-1],
-                strategy="ma_filter",
-                sma_window=2,
-                impulse_exit_filter=True,
-                impulse_exit_on_bull=True,
-                impulse_exit_on_bear=False,
-                impulse_exit_on_neutral=False,
-                cost_bps=0.0,
-            ),
-        )
-    params = ((out.get("meta") or {}).get("params") or {})
-    assert params.get("impulse_exit_filter") is True
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {}).get(code, {})
-    trig = int(overall.get("impulse_exit_filter_trigger_count") or 0)
-    trig_split = (
-        int(overall.get("impulse_exit_filter_trigger_count_bull") or 0)
-        + int(overall.get("impulse_exit_filter_trigger_count_bear") or 0)
-        + int(overall.get("impulse_exit_filter_trigger_count_neutral") or 0)
-    )
-    assert trig > 0
-    assert trig_split == trig
-    assert int(by_code.get("impulse_exit_filter_trigger_count") or 0) == trig
-    impulse_exit_rc = ((out.get("risk_controls") or {}).get("impulse_exit_filter") or {})
-    assert int(impulse_exit_rc.get("trigger_count") or 0) == trig
-    assert isinstance(impulse_exit_rc.get("trace_last_rows") or [], list)
+    by_blocked = int(by_code.get("impulse_filter_blocked_entry_count") or 0)
+    by_attempted = int(by_code.get("impulse_filter_attempted_entry_count") or 0)
+    by_rate = float(by_code.get("impulse_filter_blocked_entry_rate") or 0.0)
+    assert by_blocked == blocked
+    assert by_attempted >= by_blocked >= 0
+    assert 0.0 <= by_rate <= 1.0
+    if by_attempted > 0:
+        assert by_rate == pytest.approx(by_blocked / by_attempted, rel=1e-6, abs=1e-9)
 
 
 def test_trend_ma_filter_smoke(session_factory):
@@ -638,7 +623,14 @@ def test_trend_ma_filter_smoke(session_factory):
     recent = (r_stats.get("recent_100") or {})
     assert int(recent.get("effective_count") or 0) <= int((r_stats.get("overall") or {}).get("trade_count") or 0)
     assert "sqn" in ((r_stats.get("overall") or {}))
+    score_pack = (r_stats.get("trade_system_score") or {})
+    assert "overall" in score_pack
+    assert "weights" in score_pack
     ts = out.get("trade_statistics") or {}
+    ecs = (ts.get("entry_condition_stats") or {})
+    assert "overall" in ecs
+    assert "by_code" in ecs
+    assert "momentum" in ((ecs.get("overall") or {}))
     trades = list((ts.get("trades") or []))
     if trades:
         t0 = trades[0]
@@ -646,6 +638,12 @@ def test_trend_ma_filter_smoke(session_factory):
         assert "initial_r_pct_nav" in t0
         assert "pnl_amount" in t0
         assert "r_multiple" in t0
+        assert "entry_signal_date" in t0
+        bins = (t0.get("entry_condition_bins") or {})
+        assert "momentum" in bins
+        assert "er" in bins
+        assert "vol_ratio" in bins
+        assert "impulse" in bins
 
 
 def test_trend_ma_filter_ema_smoke(session_factory):
@@ -1104,6 +1102,11 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
                     {"r_multiple": 2.0, "retrace_ratio": 0.5},
                     {"r_multiple": 3.0, "retrace_ratio": 0.3},
                 ],
+                bias_v_take_profit_enabled=True,
+                bias_v_take_profit_reentry_mode="reenter",
+                bias_v_ma_window=20,
+                bias_v_atr_window=20,
+                bias_v_take_profit_threshold=3.0,
                 cost_bps=0.0,
             ),
         )
@@ -1113,6 +1116,9 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
     assert isinstance((rtp.get("tier_trigger_counts") or {}), dict)
     params = (((out.get("meta") or {}).get("params") or {}))
     assert bool(params.get("r_take_profit_enabled")) is True
+    assert bool(params.get("bias_v_take_profit_enabled")) is True
+    bv_rc = (((out.get("risk_controls") or {}).get("bias_v_take_profit") or {}))
+    assert bool(bv_rc.get("enabled")) is True
     metrics = ((out.get("metrics") or {}).get("strategy") or {})
     assert "r_take_profit_trigger_count" not in metrics
     ts = (out.get("trade_statistics") or {})
@@ -1120,7 +1126,9 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
     by_code = (ts.get("by_code") or {}).get(code, {})
     assert "atr_stop_trigger_count" in overall
     assert "r_take_profit_trigger_count" in overall
+    assert "bias_v_take_profit_trigger_count" in overall
     assert isinstance((overall.get("r_take_profit_tier_trigger_counts") or {}), dict)
     assert "atr_stop_trigger_count" in by_code
     assert "r_take_profit_trigger_count" in by_code
+    assert "bias_v_take_profit_trigger_count" in by_code
 

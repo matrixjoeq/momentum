@@ -533,47 +533,6 @@ def test_api_trend_single_impulse_entry_filter_contract(engine, api_client):
     assert int(((ts.get("by_code") or {}).get("IMPAPI1") or {}).get("impulse_filter_blocked_entry_count") or 0) == blocked
 
 
-def test_api_trend_single_impulse_exit_filter_contract(engine, api_client):
-    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
-    series = {"IMPXAPI1": [100.0 + i * 0.6 for i, _ in enumerate(dates)]}
-    seed_prices(engine, code_to_series=series, dates=dates)
-
-    c = api_client
-    out = post_json_ok(
-        c,
-        "/api/analysis/trend",
-        {
-            "code": "IMPXAPI1",
-            "start": fmt_ymd(dates[0]),
-            "end": fmt_ymd(dates[-1]),
-            "strategy": "ma_filter",
-            "sma_window": 2,
-            "impulse_exit_filter": True,
-            "impulse_exit_on_bull": True,
-            "impulse_exit_on_bear": False,
-            "impulse_exit_on_neutral": False,
-            "cost_bps": 0.0,
-            "slippage_rate": 0.0,
-        },
-    )
-    params = (((out or {}).get("meta") or {}).get("params") or {})
-    assert params.get("impulse_exit_filter") is True
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    trig = int(overall.get("impulse_exit_filter_trigger_count") or 0)
-    trig_split = (
-        int(overall.get("impulse_exit_filter_trigger_count_bull") or 0)
-        + int(overall.get("impulse_exit_filter_trigger_count_bear") or 0)
-        + int(overall.get("impulse_exit_filter_trigger_count_neutral") or 0)
-    )
-    assert trig > 0
-    assert trig_split == trig
-    assert int(((ts.get("by_code") or {}).get("IMPXAPI1") or {}).get("impulse_exit_filter_trigger_count") or 0) == trig
-    impulse_exit_rc = ((out.get("risk_controls") or {}).get("impulse_exit_filter") or {})
-    assert int(impulse_exit_rc.get("trigger_count") or 0) == trig
-    assert isinstance(impulse_exit_rc.get("trace_last_rows") or [], list)
-
-
 def test_api_trend_single_kama_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
     series = {"KAMA1": [100.0 + (i * 0.4 if i < 40 else (40 * 0.4) - (i - 40) * 0.45) for i, _ in enumerate(dates)]}
@@ -693,50 +652,6 @@ def test_api_trend_portfolio_impulse_entry_filter_contract(engine, api_client):
     by_code = (ts.get("by_code") or {})
     assert int(((by_code.get("IMPAP1") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
     assert int(((by_code.get("IMPAP2") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
-
-
-def test_api_trend_portfolio_impulse_exit_filter_contract(engine, api_client):
-    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
-    series = {
-        "IMPXAP1": [100.0 + i * 0.6 for i, _ in enumerate(dates)],
-        "IMPXAP2": [120.0 + i * 0.5 for i, _ in enumerate(dates)],
-    }
-    seed_prices(engine, code_to_series=series, dates=dates)
-
-    c = api_client
-    out = post_json_ok(
-        c,
-        "/api/analysis/trend/portfolio",
-        {
-            "codes": ["IMPXAP1", "IMPXAP2"],
-            "start": fmt_ymd(dates[0]),
-            "end": fmt_ymd(dates[-1]),
-            "strategy": "ma_filter",
-            "sma_window": 2,
-            "position_sizing": "equal",
-            "impulse_exit_filter": True,
-            "impulse_exit_on_bull": True,
-            "impulse_exit_on_bear": False,
-            "impulse_exit_on_neutral": False,
-            "cost_bps": 0.0,
-            "slippage_rate": 0.0,
-        },
-    )
-    params = (((out or {}).get("meta") or {}).get("params") or {})
-    assert params.get("impulse_exit_filter") is True
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    trig = int(overall.get("impulse_exit_filter_trigger_count") or 0)
-    trig_split = (
-        int(overall.get("impulse_exit_filter_trigger_count_bull") or 0)
-        + int(overall.get("impulse_exit_filter_trigger_count_bear") or 0)
-        + int(overall.get("impulse_exit_filter_trigger_count_neutral") or 0)
-    )
-    assert trig > 0
-    assert trig_split == trig
-    by_code = (ts.get("by_code") or {})
-    assert int(((by_code.get("IMPXAP1") or {}).get("impulse_exit_filter_trigger_count") or 0) >= 0)
-    assert int(((by_code.get("IMPXAP2") or {}).get("impulse_exit_filter_trigger_count") or 0) >= 0)
 
 
 def test_api_trend_portfolio_er_exit_filter_contract(engine, api_client):

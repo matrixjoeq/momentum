@@ -3812,6 +3812,7 @@ def backtest_rotation(
     avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
     avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
     avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
+    ui_for_trade_score = float(_ulcer_index(port_nav_net, in_percent=True))
     close_qfq_r = close_qfq.reindex(index=dates, columns=codes).astype(float)
     high_qfq_r = high_qfq.reindex(index=dates, columns=codes).astype(float).combine_first(close_qfq_r)
     low_qfq_r = low_qfq.reindex(index=dates, columns=codes).astype(float).combine_first(close_qfq_r)
@@ -3831,6 +3832,11 @@ def backtest_rotation(
         risk_budget_pct=float(inp.risk_budget_pct) if np.isfinite(float(inp.risk_budget_pct)) else None,
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
+        ulcer_index=float(ui_for_trade_score) if np.isfinite(float(ui_for_trade_score)) else None,
+        annual_trade_count=float(avg_annual_trade_count) if np.isfinite(float(avg_annual_trade_count)) else None,
+        backtest_years=(float(sample_days) / float(TRADING_DAYS_PER_YEAR)) if sample_days > 0 else None,
+        score_sqn_weight=0.60,
+        score_ulcer_weight=0.40,
     )
     trades_with_r = list(trade_r_pack.get("trades") or [])
     trades_by_code: dict[str, list[dict[str, Any]]] = {str(c): [] for c in codes}
