@@ -3076,6 +3076,10 @@
             <div id="trendTradeByCodeHist" style="width:100%; height:320px; margin-top:8px;"></div>
           </div>
         </div>
+        <details id="trendRiskTradeRecordsWrap" style="margin-top:8px;">
+          <summary><b>趋势策略：止盈止损逐笔明细（回测交易记录）</b></summary>
+          <div id="trendRiskTradeRecords" class="muted" style="margin-top:6px;"></div>
+        </details>
         <div class="panel" style="margin-top:10px;">
           <h3 style="margin:0;">趋势策略：入场条件分档统计与因果检验（平仓交易，信号日口径）</h3>
           <div class="row" style="align-items:flex-end; gap:8px; margin-top:8px;">
@@ -7517,10 +7521,18 @@
         return xs;
       }
       function _eligibleInPosRows(rows) {
-        return _sortTraceRowsByDate(rows).filter((r) => {
-          const rr = r || {};
-          return !!rr.in_pos_after || Number(rr.decision_pos || 0) > 1e-12;
-        });
+        const xs = _sortTraceRowsByDate(rows);
+        let episode = [];
+        for (const r0 of xs) {
+          const rr = r0 || {};
+          const inPos = (!!rr.in_pos_after) || Number(rr.decision_pos || 0) > 1e-12;
+          if (inPos) {
+            episode.push(rr);
+          } else {
+            episode = [];
+          }
+        }
+        return episode;
       }
       function _rtpTriggerPxFromRow(r) {
         const rr = r || {};
@@ -7532,6 +7544,8 @@
       }
       function _biasVTriggerPxFromRow(r) {
         const rr = r || {};
+        const eff = Number(rr.tp_trigger_price_eff);
+        if (Number.isFinite(eff) && eff > 0) return eff;
         const ma = Number(rr.ma);
         const atr = Number(rr.atr);
         const thr = Number(rr.threshold);
@@ -7548,19 +7562,19 @@
         if (!Number.isFinite(curPx)) curPx = Number(nextPx);
         return { current: curPx, next: nextPx };
       }
-      function _atrCurrentNextFromRows(rows) {
-        const xs = _eligibleInPosRows(rows);
-        if (!xs.length) return { current: NaN, next: NaN };
-        const last = xs[xs.length - 1] || {};
-        const prev = (xs.length >= 2) ? (xs[xs.length - 2] || {}) : null;
-        const nextPx = Number(last.stop_after);
-        let curPx = Number(last.stop_before);
-        if (!Number.isFinite(curPx)) curPx = prev ? Number((prev || {}).stop_after) : NaN;
-        if (!Number.isFinite(curPx)) curPx = Number(nextPx);
-        return { current: curPx, next: nextPx };
+      function _atrCurrentNextFromRows(atrObj) {
+        const one = (atrObj && !Array.isArray(atrObj)) ? atrObj : {};
+        const cur = Number(one.plan_stop_current);
+        const nxt = Number(one.plan_stop_next);
+        if (!Number.isFinite(cur) && !Number.isFinite(nxt)) return { current: NaN, next: NaN };
+        return {
+          current: (Number.isFinite(cur) ? cur : nxt),
+          next: (Number.isFinite(nxt) ? nxt : cur),
+        };
       }
       function _riskPlanTextByCode(riskPlanByCode, code, kind) {
         const one = ((riskPlanByCode || {})[String(code || "")] || {});
+        if (kind === "entry_px") return String(one.entry_px || "-");
         if (kind === "stop_type") return String(one.stop_type || "-");
         if (kind === "stop_px") return String(one.stop_px || "-");
         if (kind === "tp_type") return String(one.tp_type || "-");
@@ -7571,6 +7585,7 @@
         const out = {};
         const codeList = Array.isArray(codes) ? codes.map((x) => String(x || "")).filter(Boolean) : [];
         const isPortfolio = String(mode || "single") === "portfolio";
+        const entryPxMap = ((((data || {}).next_plan || {}).entry_exec_price_with_slippage_by_asset) || {});
         const rc = ((data || {}).risk_controls || {});
         const atrRoot = (rc.atr_stop || {});
         const rtpRoot = (rc.r_take_profit || {});
@@ -7582,13 +7597,13 @@
           const atrObj = isPortfolio ? (atrBy[code] || {}) : atrRoot;
           const rtpObj = isPortfolio ? (rtpBy[code] || {}) : rtpRoot;
           const bvObj = isPortfolio ? (bvBy[code] || {}) : bvRoot;
-          const atrRows = Array.isArray(atrObj.trace_last_rows) ? atrObj.trace_last_rows : [];
           const rtpRows = Array.isArray(rtpObj.trace_last_rows) ? rtpObj.trace_last_rows : [];
           const bvRows = Array.isArray(bvObj.trace_last_rows) ? bvObj.trace_last_rows : [];
 
-          const atrPx = _atrCurrentNextFromRows(atrRows);
+          const atrPx = _atrCurrentNextFromRows(atrObj);
           const rtpPx = _currentNextFromRows(rtpRows, _rtpTriggerPxFromRow);
           const bvPx = _currentNextFromRows(bvRows, _biasVTriggerPxFromRow);
+          const entryPx = Number(entryPxMap[code]);
 
           const stopType = Number.isFinite(atrPx.current) || Number.isFinite(atrPx.next) ? "ATR止损" : "-";
           const stopPxTxt = (Number.isFinite(atrPx.current) || Number.isFinite(atrPx.next))
@@ -7606,6 +7621,7 @@
             tpItems.push(`R:${Number.isFinite(rtpPx.current) ? fmtNum(rtpPx.current) : "-"} / ${Number.isFinite(rtpPx.next) ? fmtNum(rtpPx.next) : "-"}`);
           }
           out[code] = {
+            entry_px: (Number.isFinite(entryPx) ? fmtNum(entryPx) : "-"),
             stop_type: stopType,
             stop_px: stopPxTxt,
             tp_type: tpTypes.length ? tpTypes.join(" | ") : "-",
@@ -7622,7 +7638,7 @@
         if (!holdEl || !buyEl || !sellEl || !dateEl) return;
         const dates = Array.isArray(ctx && ctx.dates) ? ctx.dates : [];
         if (!dates.length) {
-          holdEl.innerHTML = "<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>";
+          holdEl.innerHTML = "<tr><th>标的</th><th>入场日期</th><th>入场价</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>";
           buyEl.innerHTML = "<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>";
           sellEl.innerHTML = "<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>";
           dateEl.textContent = "";
@@ -7658,7 +7674,7 @@
               if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
             }
             curRows.push(
-              `<tr><td>${esc(codeLabel(code))}</td><td>${esc(entryDate)}</td><td>${holdDays}</td><td>${fmtPct(curW)}</td><td>${Number.isFinite(holdRet) ? fmtPct(holdRet) : "-"}</td>` +
+              `<tr><td>${esc(codeLabel(code))}</td><td>${esc(entryDate)}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "entry_px"))}</td><td>${holdDays}</td><td>${fmtPct(curW)}</td><td>${Number.isFinite(holdRet) ? fmtPct(holdRet) : "-"}</td>` +
               `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_px"))}</td>` +
               `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_px"))}</td></tr>`
             );
@@ -7678,7 +7694,7 @@
             );
           }
         }
-        holdEl.innerHTML = `<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>${curRows.length ? curRows.join("") : `<tr><td colspan="9" class="muted">当前空仓</td></tr>`}`;
+        holdEl.innerHTML = `<tr><th>标的</th><th>入场日期</th><th>入场价</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>${curRows.length ? curRows.join("") : `<tr><td colspan="10" class="muted">当前空仓</td></tr>`}`;
         buyEl.innerHTML = `<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>${buyRows.length ? buyRows.join("") : `<tr><td colspan="7" class="muted">无买入计划</td></tr>`}`;
         sellEl.innerHTML = `<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>${sellRows.length ? sellRows.join("") : `<tr><td colspan="7" class="muted">无卖出计划</td></tr>`}`;
       }
@@ -7898,9 +7914,140 @@
           ["ER出场触发次数", String(Number(erExit.trigger_count || 0))],
           ["ER出场最近触发日", String(((Array.isArray(erExit.trigger_dates) && erExit.trigger_dates.length) ? erExit.trigger_dates[erExit.trigger_dates.length - 1] : "-"))],
         ];
+        const _numOrNaN = (v) => {
+          const x = Number(v);
+          return Number.isFinite(x) ? x : NaN;
+        };
+        const _atrRecalcRows = () => {
+          const rcAll = ((data || {}).risk_controls || {});
+          const atrRoot = (rcAll.atr_stop || {});
+          const params = (((data || {}).meta || {}).params || {});
+          const entryPxStrictMap = ((((data || {}).next_plan || {}).entry_exec_price_with_slippage_by_asset) || {});
+          const nDef = _numOrNaN(params.atr_stop_n);
+          const mDef = _numOrNaN(params.atr_stop_m);
+          const out = [];
+          const oneCode = String((((data || {}).meta || {}).code) || "").trim();
+          const byAsset = (atrRoot.by_asset || {});
+          const codes = (String(mode || "single") === "portfolio")
+            ? Object.keys(byAsset || {}).map((x) => String(x || "")).filter(Boolean).sort()
+            : (oneCode ? [oneCode] : []);
+          for (const code of codes) {
+            const atrObj = (String(mode || "single") === "portfolio") ? (byAsset[code] || {}) : atrRoot;
+            const rows = Array.isArray(atrObj.trace_last_rows) ? atrObj.trace_last_rows : [];
+            const xs = _eligibleInPosRows(rows);
+            if (!xs.length) continue;
+            const entryRow = xs.find((r) => String((r || {}).event_type || "").toLowerCase() === "entry") || xs[0] || {};
+            const last = xs[xs.length - 1] || {};
+            const prev = (xs.length >= 2) ? (xs[xs.length - 2] || {}) : null;
+            const modeV = String(atrObj.mode || tr.atr_stop_mode || params.atr_stop_mode || "none").trim().toLowerCase();
+            const basisVRaw = String(atrObj.atr_basis || tr.atr_stop_atr_basis || params.atr_stop_atr_basis || "latest").trim().toLowerCase();
+            const n = Number.isFinite(nDef) ? nDef : 2.0;
+            const m = Number.isFinite(mDef) ? mDef : 0.5;
+            const entryPxTrace = _numOrNaN(entryRow.close);
+            const entryPxStrict = _numOrNaN(entryPxStrictMap[code]);
+            const entryPxEngine = entryPxTrace;
+            const entryAtr = _numOrNaN(entryRow.atr);
+            const latestClose = _numOrNaN(last.close);
+            const latestAtr = _numOrNaN(last.atr);
+            const basisV = (modeV === "static") ? "static-ignored" : basisVRaw;
+            const atrRef = (basisVRaw === "entry") ? entryAtr : latestAtr;
+            let stopBefore = _numOrNaN(last.stop_before);
+            if (!Number.isFinite(stopBefore) && prev) stopBefore = _numOrNaN(prev.stop_after);
+            const stopAfterEngine = _numOrNaN(last.stop_after);
+            let distMult = NaN;
+            let tightenSteps = NaN;
+            let candidate = NaN;
+            if (modeV === "static") {
+              distMult = n;
+              const firstStop = xs
+                .map((r) => _numOrNaN((r || {}).stop_after))
+                .find((v) => Number.isFinite(v));
+              if (Number.isFinite(firstStop)) candidate = firstStop;
+              else if (Number.isFinite(stopAfterEngine)) candidate = stopAfterEngine;
+              else if (Number.isFinite(entryPxEngine) && Number.isFinite(entryAtr) && entryAtr > 0) candidate = entryPxEngine - n * entryAtr;
+            } else if (modeV === "trailing") {
+              distMult = n;
+              if (Number.isFinite(latestClose) && Number.isFinite(atrRef) && atrRef > 0) candidate = latestClose - n * atrRef;
+            } else if (modeV === "tightening") {
+              if (Number.isFinite(latestClose) && Number.isFinite(entryPxEngine) && Number.isFinite(atrRef) && atrRef > 0 && Number.isFinite(m) && m > 0) {
+                const rise = Math.max(0, latestClose - entryPxEngine);
+                const den = m * atrRef;
+                tightenSteps = den > 0 ? Math.floor(rise / den) : 0;
+                distMult = Math.max(m, n - tightenSteps * m);
+                candidate = latestClose - distMult * atrRef;
+              }
+            }
+            let nextRecalc = candidate;
+            if (modeV === "trailing" || modeV === "tightening") {
+              if (Number.isFinite(candidate) && Number.isFinite(stopBefore)) nextRecalc = Math.max(stopBefore, candidate);
+              else if (!Number.isFinite(candidate)) nextRecalc = stopBefore;
+            }
+            out.push({
+              code,
+              modeV,
+              basisV,
+              n,
+              m,
+              entryPxEngine,
+              entryPxTrace,
+              entryPxStrict,
+              entryAtr,
+              latestClose,
+              latestAtr,
+              atrRef,
+              distMult,
+              tightenSteps,
+              stopBefore,
+              candidate,
+              nextRecalc,
+              stopAfterEngine,
+              diff: (Number.isFinite(nextRecalc) && Number.isFinite(stopAfterEngine)) ? (nextRecalc - stopAfterEngine) : NaN,
+            });
+          }
+          return out;
+        };
+        const atrAuditRows = _atrRecalcRows();
+        const atrAuditHtml = (() => {
+          if (!atrAuditRows.length) {
+            return `<div style="margin-top:8px;"><b>ATR计划止损价显式公式核对</b></div><div class="muted">当前无在仓ATR轨迹可核对。</div>`;
+          }
+          const rowsHtml = atrAuditRows.map((r) => {
+            const formula = (() => {
+              if (r.modeV === "static") return "fixed_stop_from_entry_day (basis ignored)";
+              if (r.modeV === "trailing") return "max(stop_before, latest_close - n * atr_ref)";
+              if (r.modeV === "tightening") return "max(stop_before, latest_close - max(m, n-floor(rise/(m*atr_ref))*m) * atr_ref)";
+              return "-";
+            })();
+            return `<tr>
+              <td>${esc(codeLabel(r.code))}</td>
+              <td>${esc(String(r.modeV || "-"))}</td>
+              <td>${esc(String(r.basisV || "-"))}</td>
+              <td>${fmtNum(r.n)}</td>
+              <td>${fmtNum(r.m)}</td>
+              <td>${fmtNum(r.entryPxEngine)}</td>
+              <td>${fmtNum(r.entryPxTrace)}</td>
+              <td>${fmtNum(r.entryPxStrict)}</td>
+              <td>${fmtNum(r.entryAtr)}</td>
+              <td>${fmtNum(r.latestClose)}</td>
+              <td>${fmtNum(r.latestAtr)}</td>
+              <td>${fmtNum(r.atrRef)}</td>
+              <td>${fmtNum(r.distMult)}</td>
+              <td>${fmtNum(r.tightenSteps, 0)}</td>
+              <td>${fmtNum(r.stopBefore)}</td>
+              <td>${fmtNum(r.candidate)}</td>
+              <td>${fmtNum(r.nextRecalc)}</td>
+              <td>${fmtNum(r.stopAfterEngine)}</td>
+              <td>${fmtNum(r.diff)}</td>
+              <td>${esc(formula)}</td>
+            </tr>`;
+          }).join("");
+          return `<div style="margin-top:8px;"><b>ATR计划止损价显式公式核对</b></div>` +
+            `<table style="margin-top:4px;"><tr><th>标的</th><th>mode</th><th>basis</th><th>n</th><th>m</th><th>entry_px(引擎)</th><th>entry_px(trace)</th><th>entry_px(严格对照)</th><th>entry_atr(引擎)</th><th>latest_close</th><th>latest_atr</th><th>atr_ref</th><th>dist_mult</th><th>tighten_steps</th><th>stop_before</th><th>candidate</th><th>next_recalc</th><th>engine_stop_after</th><th>diff</th><th>公式</th></tr>${rowsHtml}</table>`;
+        })();
         boxEl.innerHTML =
           `<div class="muted">用于排查“止损后重入”与“下一交易日计划”是否符合预期。</div>` +
           `<table style="margin-top:6px;"><tr><th>项</th><th>值</th></tr>${topRows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(String(v))}</td></tr>`).join("")}</table>` +
+          atrAuditHtml +
           traceHtml;
       }
       function renderTrendPositionPlan(data, mode) {
@@ -15049,6 +15196,7 @@
           _renderTradeStatsTable(byCodeTable, {});
           _renderTradeHist(byCodeHist, [], "无数据");
           _renderTradeStatsDebug(p, null);
+          if (p === "trend") _renderTrendRiskTradeRecords(null);
           if (p === "trend") _renderTrendRiskBudgetOvercapDailyChart(null);
           renderEventStudy(p, null);
           return;
@@ -15075,6 +15223,7 @@
         }
         _renderTradeStatsDebug(p, data);
         if (p === "trend") {
+          _renderTrendRiskTradeRecords(data);
           renderTrendEntryConditionAnalysis(data);
           const levModeSel = $("trendRiskBudgetLevLineMode");
           if (levModeSel) {
@@ -15083,6 +15232,64 @@
           _renderTrendRiskBudgetOvercapDailyChart(data);
         }
         renderEventStudy(p, data);
+      }
+
+      function _renderTrendRiskTradeRecords(data) {
+        const box = $("trendRiskTradeRecords");
+        if (!box) return;
+        const quickMode = !!((((data || {}).meta || {}).params || {}).quick_mode);
+        if (!data || quickMode) {
+          box.innerHTML = "<div class='muted'>仅非快速模式提供逐笔止盈止损明细。</div>";
+          return;
+        }
+        const rcAll = ((data || {}).risk_controls || {});
+        const atrRoot = (rcAll.atr_stop || {});
+        const bvRoot = (rcAll.bias_v_take_profit || {});
+        const atrRows = [];
+        const bvRows = [];
+        const mode = String((((data || {}).meta || {}).type || "")).includes("portfolio") ? "portfolio" : "single";
+        if (mode === "portfolio") {
+          for (const [code, one] of Object.entries(atrRoot.by_asset || {})) {
+            for (const r of (Array.isArray((one || {}).trade_records) ? (one || {}).trade_records : [])) atrRows.push({ code: String(code || ""), ...(r || {}) });
+          }
+          for (const [code, one] of Object.entries(bvRoot.by_asset || {})) {
+            for (const r of (Array.isArray((one || {}).trade_records) ? (one || {}).trade_records : [])) bvRows.push({ code: String(code || ""), ...(r || {}) });
+          }
+        } else {
+          const c = String((((data || {}).meta || {}).code) || "").trim();
+          for (const r of (Array.isArray(atrRoot.trade_records) ? atrRoot.trade_records : [])) atrRows.push({ code: c, ...(r || {}) });
+          for (const r of (Array.isArray(bvRoot.trade_records) ? bvRoot.trade_records : [])) bvRows.push({ code: c, ...(r || {}) });
+        }
+        const atrBody = atrRows.length
+          ? atrRows.map((r) => `<tr>
+              <td>${esc(codeLabel(r.code || ""))}</td>
+              <td>${esc(String(r.entry_decision_date || "-"))}</td>
+              <td>${esc(String(r.entry_execution_date || "-"))}</td>
+              <td>${fmtNum(Number(r.entry_execution_price))}</td>
+              <td>${fmtNum(Number(r.initial_stop_price))}</td>
+              <td>${fmtNum(Number(r.trigger_stop_price))}</td>
+              <td>${fmtNum(Number(r.execution_stop_price))}</td>
+              <td>${esc(String(r.trigger_date || "-"))}</td>
+            </tr>`).join("")
+          : `<tr><td colspan="8" class="muted">无ATR止损交易记录。</td></tr>`;
+        const bvBody = bvRows.length
+          ? bvRows.map((r) => `<tr>
+              <td>${esc(codeLabel(r.code || ""))}</td>
+              <td>${esc(String(r.entry_decision_date || "-"))}</td>
+              <td>${esc(String(r.entry_execution_date || "-"))}</td>
+              <td>${fmtNum(Number(r.entry_execution_price))}</td>
+              <td>${fmtNum(Number(r.initial_take_profit_price))}</td>
+              <td>${fmtNum(Number(r.trigger_take_profit_price))}</td>
+              <td>${fmtNum(Number(r.execution_take_profit_price))}</td>
+              <td>${esc(String(r.trigger_date || "-"))}</td>
+            </tr>`).join("")
+          : `<tr><td colspan="8" class="muted">无BIAS-V止盈交易记录。</td></tr>`;
+        box.innerHTML = `<details style="margin-top:4px;"><summary><b>ATR止损逐笔明细</b></summary>
+            <table style="margin-top:4px;"><tr><th>标的</th><th>入场决策日</th><th>入场执行日</th><th>入场执行价</th><th>初始止损价</th><th>触发止损价</th><th>执行止损价</th><th>触发日</th></tr>${atrBody}</table>
+          </details>
+          <details style="margin-top:8px;"><summary><b>BIAS-V止盈逐笔明细</b></summary>
+            <table style="margin-top:4px;"><tr><th>标的</th><th>入场决策日</th><th>入场执行日</th><th>入场执行价</th><th>初始止盈价</th><th>触发止盈价</th><th>执行止盈价</th><th>触发日</th></tr>${bvBody}</table>
+          </details>`;
       }
 
       function renderEventStudy(prefix, data) {

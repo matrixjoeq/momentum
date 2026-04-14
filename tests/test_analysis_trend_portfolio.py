@@ -982,3 +982,64 @@ def test_trend_portfolio_kama_std_band_reduces_trades(session_factory):
     hi_trades = int((((out_hi.get("trade_statistics") or {}).get("overall") or {}).get("total_trades") or 0))
     assert hi_trades <= lo_trades
 
+
+def test_trend_portfolio_next_plan_exposes_strict_entry_exec_price_with_slippage(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=14, freq="B")]
+    open_a = [100.0 + i * 0.6 for i in range(len(dates))]
+    open_b = [80.0 + i * 0.4 for i in range(len(dates))]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            add_price_all_adjustments(
+                db,
+                code="A1",
+                day=d,
+                close=float(open_a[i] + 0.3),
+                open_price=float(open_a[i]),
+                high=float(open_a[i] + 0.5),
+                low=float(open_a[i] - 0.2),
+            )
+            add_price_all_adjustments(
+                db,
+                code="A2",
+                day=d,
+                close=float(open_b[i] + 0.25),
+                open_price=float(open_b[i]),
+                high=float(open_b[i] + 0.45),
+                low=float(open_b[i] - 0.2),
+            )
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                exec_price="open",
+                cost_bps=0.0,
+                slippage_rate=0.2,
+            ),
+        )
+
+    w = ((out.get("weights") or {}).get("series") or {})
+    assert w
+    entry_map = (((out.get("next_plan") or {}).get("entry_exec_price_with_slippage_by_asset")) or {})
+    assert isinstance(entry_map, dict)
+    open_by_code = {"A1": open_a, "A2": open_b}
+    for code in ("A1", "A2"):
+        eff = [float(x) for x in (w.get(code) or [])]
+        if (not eff) or float(eff[-1]) <= 1e-12:
+            continue
+        entry_idx = None
+        prev = 0.0
+        for i, vv in enumerate(eff):
+            if vv > 1e-12 and prev <= 1e-12:
+                entry_idx = i
+            prev = vv
+        assert entry_idx is not None
+        assert code in entry_map
+        expected = float(open_by_code[code][int(entry_idx)] + 0.1)
+        assert float(entry_map[code]) == pytest.approx(expected)
+

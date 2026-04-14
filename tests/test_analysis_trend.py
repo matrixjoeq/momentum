@@ -185,6 +185,56 @@ def test_atr_stop_intraday_trigger_on_low_and_gap_open_fill() -> None:
     assert float(ev_gap[0].get("fill_price")) == pytest.approx(96.8)
 
 
+def test_static_atr_stop_is_fixed_and_ignores_atr_basis() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([1.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0, 101.0, 103.0, 102.0, 104.0, 105.0], index=idx, dtype=float)
+    high = pd.Series([102.0, 108.0, 112.0, 111.0, 115.0, 118.0], index=idx, dtype=float)
+    low = pd.Series([98.0, 96.0, 95.0, 97.0, 94.0, 93.0], index=idx, dtype=float)
+    open_ = close.copy()
+    out_entry, stats_entry = _apply_atr_stop(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=2.0,
+        m_step=0.5,
+    )
+    out_latest, stats_latest = _apply_atr_stop(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        mode="static",
+        atr_basis="latest",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=2.0,
+        m_step=0.5,
+    )
+    row_e = [r for r in list(stats_entry.get("trace_last_rows") or []) if float(r.get("decision_pos") or 0.0) > 0.0]
+    row_l = [r for r in list(stats_latest.get("trace_last_rows") or []) if float(r.get("decision_pos") or 0.0) > 0.0]
+    assert row_e and row_l
+    stop_vals_e = [float(r.get("stop_after")) for r in row_e if r.get("stop_after") is not None]
+    stop_vals_l = [float(r.get("stop_after")) for r in row_l if r.get("stop_after") is not None]
+    assert stop_vals_e and stop_vals_l
+    first_e = float(stop_vals_e[0])
+    first_l = float(stop_vals_l[0])
+    for v in stop_vals_e:
+        assert v == pytest.approx(first_e)
+    for v in stop_vals_l:
+        assert v == pytest.approx(first_l)
+    assert first_e == pytest.approx(first_l)
+    assert len(out_entry) == len(base_pos)
+    assert len(out_latest) == len(base_pos)
+
+
 def test_r_take_profit_intraday_retrace_trigger_and_gap_fill() -> None:
     idx = pd.date_range("2024-01-01", periods=5, freq="B")
     base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
@@ -279,6 +329,223 @@ def test_bias_v_take_profit_intraday_high_trigger_and_gap_fill() -> None:
     assert str(ev_gap[0].get("trigger_source")) == "gap_open_above_bias_v_tp"
     assert bool(ev_gap[0].get("gap_open_triggered")) is True
     assert float(ev_gap[0].get("fill_price")) == pytest.approx(106.0)
+
+
+def test_atr_stop_trade_records_capture_required_fields() -> None:
+    idx = pd.date_range("2024-01-01", periods=4, freq="B")
+    base_pos = pd.Series([1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 100.0, 100.0], index=idx, dtype=float)
+    high = pd.Series([106.0, 106.0, 106.0, 106.0], index=idx, dtype=float)
+    low = pd.Series([94.0, 96.0, 95.0, 96.0], index=idx, dtype=float)
+    open_ = pd.Series([100.0, 98.0, 96.8, 100.0], index=idx, dtype=float)
+    _, stats = _apply_atr_stop(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+    )
+    recs = list(stats.get("trade_records") or [])
+    assert recs
+    one = recs[0]
+    assert one.get("entry_decision_date")
+    assert "initial_stop_price" in one
+    assert "trigger_stop_price" in one
+    assert "execution_stop_price" in one
+
+
+def test_bias_v_trade_records_capture_required_fields() -> None:
+    idx = pd.date_range("2024-01-01", periods=4, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 104.0, 105.0], index=idx, dtype=float)
+    high = pd.Series([100.0, 101.0, 106.0, 106.0], index=idx, dtype=float)
+    low = pd.Series([100.0, 99.0, 103.0, 104.0], index=idx, dtype=float)
+    open_ = close.copy()
+    _, stats = _apply_bias_v_take_profit(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        ma_window=2,
+        atr_window=2,
+        threshold=0.5,
+    )
+    recs = list(stats.get("trade_records") or [])
+    assert recs
+    one = recs[0]
+    assert one.get("entry_decision_date")
+    assert "initial_take_profit_price" in one
+    assert "trigger_take_profit_price" in one
+    assert "execution_take_profit_price" in one
+
+
+def test_bias_v_take_profit_trigger_price_is_non_decreasing_in_position() -> None:
+    idx = pd.date_range("2024-01-01", periods=7, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 104.0, 102.0, 101.0, 100.5, 100.0, 100.0], index=idx, dtype=float)
+    high = pd.Series([100.0, 104.0, 103.0, 102.0, 101.0, 100.0, 100.0], index=idx, dtype=float)
+    low = pd.Series([100.0, 103.0, 101.0, 100.0, 99.5, 99.0, 100.0], index=idx, dtype=float)
+    open_ = close.copy()
+    out, stats = _apply_bias_v_take_profit(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="wait_next_entry",
+        ma_window=2,
+        atr_window=2,
+        threshold=0.5,
+    )
+    rows = [r for r in list(stats.get("trace_last_rows") or []) if float(r.get("decision_pos") or 0.0) > 0.0]
+    eff_vals = [float(r.get("tp_trigger_price_eff")) for r in rows if r.get("tp_trigger_price_eff") is not None]
+    assert eff_vals
+    for i in range(1, len(eff_vals)):
+        assert eff_vals[i] >= eff_vals[i - 1] - 1e-9
+    assert any(float(x) >= 0.0 for x in out.tolist())
+
+
+def test_trend_next_plan_exposes_strict_entry_exec_price_with_slippage(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=14, freq="B")]
+    opens = [100.0 + i * 0.7 for i in range(len(dates))]
+    closes = [100.3 + i * 0.7 for i in range(len(dates))]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            add_price_all_adjustments(
+                db,
+                code=code,
+                day=d,
+                close=float(closes[i]),
+                open_price=float(opens[i]),
+                high=float(max(opens[i], closes[i]) + 0.2),
+                low=float(min(opens[i], closes[i]) - 0.2),
+            )
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                exec_price="open",
+                slippage_rate=0.2,
+                cost_bps=0.0,
+            ),
+        )
+    eff = [float(x) for x in ((out.get("signals") or {}).get("position_effective") or [])]
+    assert eff and float(eff[-1]) > 0.0
+    entry_idx = None
+    prev = 0.0
+    for i, w in enumerate(eff):
+        if w > 1e-12 and prev <= 1e-12:
+            entry_idx = i
+        prev = w
+    assert entry_idx is not None
+    m = (((out.get("next_plan") or {}).get("entry_exec_price_with_slippage_by_asset")) or {})
+    got = float(m.get(code))
+    expected = float(opens[int(entry_idx)] + 0.1)
+    assert got == pytest.approx(expected)
+
+
+def test_trend_atr_plan_stop_prices_are_exposed_from_engine(session_factory):
+    sf = session_factory
+    code = "ASTP"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=20, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.6
+            add_price_all_adjustments(
+                db,
+                code=code,
+                day=d,
+                close=float(px),
+                open_price=float(px),
+                high=float(px + 1.0),
+                low=float(px - 1.0),
+            )
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                atr_stop_mode="static",
+                atr_stop_atr_basis="latest",
+                atr_stop_n=2.0,
+                atr_stop_window=2,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    atr = (((out.get("risk_controls") or {}).get("atr_stop")) or {})
+    assert "plan_stop_current" in atr
+    assert "plan_stop_next" in atr
+    if float(((out.get("signals") or {}).get("position_effective") or [0.0])[-1]) > 1e-12:
+        assert (atr.get("plan_stop_next") is None) or np.isfinite(float(atr.get("plan_stop_next")))
+
+
+def test_trend_non_quick_atr_trade_records_include_entry_execution_fields(session_factory):
+    sf = session_factory
+    code = "ATRREC"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=25, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + min(i, 12) * 0.8
+            hi = px + 1.0
+            lo = px - 1.0
+            if i == 15:
+                lo = px - 10.0
+            add_price_all_adjustments(
+                db,
+                code=code,
+                day=d,
+                close=float(px),
+                open_price=float(px),
+                high=float(hi),
+                low=float(lo),
+            )
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                atr_stop_mode="static",
+                atr_stop_atr_basis="entry",
+                atr_stop_window=2,
+                atr_stop_n=0.8,
+                exec_price="open",
+                slippage_rate=0.2,
+                cost_bps=0.0,
+                quick_mode=False,
+            ),
+        )
+    atr = (((out.get("risk_controls") or {}).get("atr_stop")) or {})
+    recs = list(atr.get("trade_records") or [])
+    if recs:
+        one = recs[0]
+        assert one.get("entry_execution_date")
+        assert one.get("entry_execution_price") is not None
 
 
 def test_trend_single_risk_budget_sizing_applies_params(session_factory):
