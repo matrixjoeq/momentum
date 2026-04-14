@@ -7511,6 +7511,109 @@
         }
         return entry;
       }
+      function _sortTraceRowsByDate(rows) {
+        const xs = Array.isArray(rows) ? rows.slice() : [];
+        xs.sort((a, b) => String(a && a.date || "").localeCompare(String(b && b.date || "")));
+        return xs;
+      }
+      function _eligibleInPosRows(rows) {
+        return _sortTraceRowsByDate(rows).filter((r) => {
+          const rr = r || {};
+          return !!rr.in_pos_after || Number(rr.decision_pos || 0) > 1e-12;
+        });
+      }
+      function _rtpTriggerPxFromRow(r) {
+        const rr = r || {};
+        const ep = Number(rr.entry_price);
+        const peak = Number(rr.peak_profit_pct);
+        const retr = Number(rr.active_tier_retrace);
+        if (!Number.isFinite(ep) || ep <= 0 || !Number.isFinite(peak) || peak <= 0 || !Number.isFinite(retr) || retr <= 0 || retr >= 1) return NaN;
+        return ep * (1.0 + peak * (1.0 - retr));
+      }
+      function _biasVTriggerPxFromRow(r) {
+        const rr = r || {};
+        const ma = Number(rr.ma);
+        const atr = Number(rr.atr);
+        const thr = Number(rr.threshold);
+        if (!Number.isFinite(ma) || !Number.isFinite(atr) || atr <= 0 || !Number.isFinite(thr) || thr <= 0) return NaN;
+        return ma + thr * atr;
+      }
+      function _currentNextFromRows(rows, pxFromRow) {
+        const xs = _eligibleInPosRows(rows);
+        if (!xs.length) return { current: NaN, next: NaN };
+        const last = xs[xs.length - 1] || {};
+        const prev = (xs.length >= 2) ? (xs[xs.length - 2] || {}) : null;
+        const nextPx = Number(pxFromRow(last));
+        let curPx = prev ? Number(pxFromRow(prev)) : NaN;
+        if (!Number.isFinite(curPx)) curPx = Number(nextPx);
+        return { current: curPx, next: nextPx };
+      }
+      function _atrCurrentNextFromRows(rows) {
+        const xs = _eligibleInPosRows(rows);
+        if (!xs.length) return { current: NaN, next: NaN };
+        const last = xs[xs.length - 1] || {};
+        const prev = (xs.length >= 2) ? (xs[xs.length - 2] || {}) : null;
+        const nextPx = Number(last.stop_after);
+        let curPx = Number(last.stop_before);
+        if (!Number.isFinite(curPx)) curPx = prev ? Number((prev || {}).stop_after) : NaN;
+        if (!Number.isFinite(curPx)) curPx = Number(nextPx);
+        return { current: curPx, next: nextPx };
+      }
+      function _riskPlanTextByCode(riskPlanByCode, code, kind) {
+        const one = ((riskPlanByCode || {})[String(code || "")] || {});
+        if (kind === "stop_type") return String(one.stop_type || "-");
+        if (kind === "stop_px") return String(one.stop_px || "-");
+        if (kind === "tp_type") return String(one.tp_type || "-");
+        if (kind === "tp_px") return String(one.tp_px || "-");
+        return "-";
+      }
+      function _buildTrendRiskPlanByCode(data, mode, codes) {
+        const out = {};
+        const codeList = Array.isArray(codes) ? codes.map((x) => String(x || "")).filter(Boolean) : [];
+        const isPortfolio = String(mode || "single") === "portfolio";
+        const rc = ((data || {}).risk_controls || {});
+        const atrRoot = (rc.atr_stop || {});
+        const rtpRoot = (rc.r_take_profit || {});
+        const bvRoot = (rc.bias_v_take_profit || {});
+        const atrBy = (isPortfolio ? (atrRoot.by_asset || {}) : null);
+        const rtpBy = (isPortfolio ? (rtpRoot.by_asset || {}) : null);
+        const bvBy = (isPortfolio ? (bvRoot.by_asset || {}) : null);
+        for (const code of codeList) {
+          const atrObj = isPortfolio ? (atrBy[code] || {}) : atrRoot;
+          const rtpObj = isPortfolio ? (rtpBy[code] || {}) : rtpRoot;
+          const bvObj = isPortfolio ? (bvBy[code] || {}) : bvRoot;
+          const atrRows = Array.isArray(atrObj.trace_last_rows) ? atrObj.trace_last_rows : [];
+          const rtpRows = Array.isArray(rtpObj.trace_last_rows) ? rtpObj.trace_last_rows : [];
+          const bvRows = Array.isArray(bvObj.trace_last_rows) ? bvObj.trace_last_rows : [];
+
+          const atrPx = _atrCurrentNextFromRows(atrRows);
+          const rtpPx = _currentNextFromRows(rtpRows, _rtpTriggerPxFromRow);
+          const bvPx = _currentNextFromRows(bvRows, _biasVTriggerPxFromRow);
+
+          const stopType = Number.isFinite(atrPx.current) || Number.isFinite(atrPx.next) ? "ATR止损" : "-";
+          const stopPxTxt = (Number.isFinite(atrPx.current) || Number.isFinite(atrPx.next))
+            ? `${Number.isFinite(atrPx.current) ? fmtNum(atrPx.current) : "-"} / ${Number.isFinite(atrPx.next) ? fmtNum(atrPx.next) : "-"}`
+            : "-";
+
+          const tpTypes = [];
+          const tpItems = [];
+          if (Number.isFinite(bvPx.current) || Number.isFinite(bvPx.next)) {
+            tpTypes.push("BIAS-V止盈");
+            tpItems.push(`BIAS-V:${Number.isFinite(bvPx.current) ? fmtNum(bvPx.current) : "-"} / ${Number.isFinite(bvPx.next) ? fmtNum(bvPx.next) : "-"}`);
+          }
+          if (Number.isFinite(rtpPx.current) || Number.isFinite(rtpPx.next)) {
+            tpTypes.push("R回落止盈");
+            tpItems.push(`R:${Number.isFinite(rtpPx.current) ? fmtNum(rtpPx.current) : "-"} / ${Number.isFinite(rtpPx.next) ? fmtNum(rtpPx.next) : "-"}`);
+          }
+          out[code] = {
+            stop_type: stopType,
+            stop_px: stopPxTxt,
+            tp_type: tpTypes.length ? tpTypes.join(" | ") : "-",
+            tp_px: tpItems.length ? tpItems.join("；") : "-",
+          };
+        }
+        return out;
+      }
       function _renderTrendPlanTables(ctx) {
         const holdEl = $("trendCurrentHoldingsTable");
         const buyEl = $("trendNextBuyTable");
@@ -7519,9 +7622,9 @@
         if (!holdEl || !buyEl || !sellEl || !dateEl) return;
         const dates = Array.isArray(ctx && ctx.dates) ? ctx.dates : [];
         if (!dates.length) {
-          holdEl.innerHTML = "<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th></tr>";
-          buyEl.innerHTML = "<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th></tr>";
-          sellEl.innerHTML = "<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th></tr>";
+          holdEl.innerHTML = "<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>";
+          buyEl.innerHTML = "<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>";
+          sellEl.innerHTML = "<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>";
           dateEl.textContent = "";
           return;
         }
@@ -7534,6 +7637,7 @@
         const effectiveByCode = ctx.effectiveByCode || {};
         const decisionByCode = ctx.decisionByCode || {};
         const assetNavByCode = ctx.assetNavByCode || {};
+        const riskPlanByCode = ctx.riskPlanByCode || {};
         const curRows = [];
         const buyRows = [];
         const sellRows = [];
@@ -7553,18 +7657,30 @@
               const n1 = Number(anav[lastIdx]);
               if (Number.isFinite(n0) && Number.isFinite(n1) && n0 > 0) holdRet = n1 / n0 - 1.0;
             }
-            curRows.push(`<tr><td>${esc(codeLabel(code))}</td><td>${esc(entryDate)}</td><td>${holdDays}</td><td>${fmtPct(curW)}</td><td>${Number.isFinite(holdRet) ? fmtPct(holdRet) : "-"}</td></tr>`);
+            curRows.push(
+              `<tr><td>${esc(codeLabel(code))}</td><td>${esc(entryDate)}</td><td>${holdDays}</td><td>${fmtPct(curW)}</td><td>${Number.isFinite(holdRet) ? fmtPct(holdRet) : "-"}</td>` +
+              `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_px"))}</td>` +
+              `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_px"))}</td></tr>`
+            );
           }
           const delta = tgtW - curW;
           if (delta > 1e-12) {
-            buyRows.push(`<tr><td>${esc(codeLabel(code))}</td><td>${fmtPct(tgtW)}</td><td>${fmtPct(delta)}</td></tr>`);
+            buyRows.push(
+              `<tr><td>${esc(codeLabel(code))}</td><td>${fmtPct(tgtW)}</td><td>${fmtPct(delta)}</td>` +
+              `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_px"))}</td>` +
+              `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_px"))}</td></tr>`
+            );
           } else if (delta < -1e-12) {
-            sellRows.push(`<tr><td>${esc(codeLabel(code))}</td><td>${fmtPct(curW)}</td><td>${fmtPct(-delta)}</td></tr>`);
+            sellRows.push(
+              `<tr><td>${esc(codeLabel(code))}</td><td>${fmtPct(curW)}</td><td>${fmtPct(-delta)}</td>` +
+              `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "stop_px"))}</td>` +
+              `<td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_type"))}</td><td>${esc(_riskPlanTextByCode(riskPlanByCode, code, "tp_px"))}</td></tr>`
+            );
           }
         }
-        holdEl.innerHTML = `<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th></tr>${curRows.length ? curRows.join("") : `<tr><td colspan="5" class="muted">当前空仓</td></tr>`}`;
-        buyEl.innerHTML = `<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th></tr>${buyRows.length ? buyRows.join("") : `<tr><td colspan="3" class="muted">无买入计划</td></tr>`}`;
-        sellEl.innerHTML = `<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th></tr>${sellRows.length ? sellRows.join("") : `<tr><td colspan="3" class="muted">无卖出计划</td></tr>`}`;
+        holdEl.innerHTML = `<tr><th>标的</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>${curRows.length ? curRows.join("") : `<tr><td colspan="9" class="muted">当前空仓</td></tr>`}`;
+        buyEl.innerHTML = `<tr><th>买入标的</th><th>目标比例</th><th>买入比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>${buyRows.length ? buyRows.join("") : `<tr><td colspan="7" class="muted">无买入计划</td></tr>`}`;
+        sellEl.innerHTML = `<tr><th>卖出标的</th><th>当前比例</th><th>卖出比例</th><th>计划止损类型</th><th>止损计划价(当前/下一日)</th><th>计划止盈类型</th><th>止盈计划价(当前/下一日)</th></tr>${sellRows.length ? sellRows.join("") : `<tr><td colspan="7" class="muted">无卖出计划</td></tr>`}`;
       }
       function _renderTrendNextPlanTrace(data, mode) {
         const wrapEl = $("trendNextTraceWrap");
@@ -7630,6 +7746,16 @@
           }
           return "-";
         };
+        const _stopTriggerSourceLabel = (x) => {
+          const v = String(x || "").trim().toLowerCase();
+          if (v === "gap_open_below_stop") return "开盘跳空触发";
+          if (v === "low_touch_stop") return "盘中低点触发";
+          if (v === "gap_open_below_tp") return "开盘跳空止盈触发";
+          if (v === "low_touch_tp_retrace") return "盘中回落止盈触发";
+          if (v === "gap_open_above_bias_v_tp") return "开盘跳空BIAS-V止盈触发";
+          if (v === "high_touch_bias_v_tp") return "盘中高点BIAS-V止盈触发";
+          return "-";
+        };
         const _mergeTraceRows = (atrRowsIn, rtpRowsIn, erRowsIn) => {
           const out = [];
           if (riskFilter === "all" || riskFilter === "atr") {
@@ -7668,11 +7794,14 @@
                 <td>${Number.isFinite(Number(r.drawdown_from_peak)) ? fmtPct(Number(r.drawdown_from_peak)) : "-"}</td>
                 <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                 <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
+                <td>${Number.isFinite(Number(r.stop_fill_price)) ? fmtNum(Number(r.stop_fill_price)) : "-"}</td>
+                <td>${esc(_stopTriggerSourceLabel(r.stop_trigger_source))}</td>
+                <td>${r.gap_open_triggered ? "是" : "否"}</td>
               </tr>`).join("")
-            : `<tr><td colspan="15" class="muted">无可用 trace 数据</td></tr>`;
+            : `<tr><td colspan="18" class="muted">无可用 trace 数据</td></tr>`;
           traceHtml =
             `<div style="margin-top:8px;"><b>最近决策轨迹（近${shortRows.length}条）</b></div>` +
-            `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+            `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th><th>成交价</th><th>止损触发来源</th><th>跳空触发</th></tr>${rowHtml}</table>`;
         } else {
           const byAssetAtr = ((((data || {}).risk_controls || {}).atr_stop || {}).by_asset || {});
           const byAssetRtp = ((((data || {}).risk_controls || {}).r_take_profit || {}).by_asset || {});
@@ -7701,10 +7830,13 @@
                     <td>${Number.isFinite(Number(r.drawdown_from_peak)) ? fmtPct(Number(r.drawdown_from_peak)) : "-"}</td>
                     <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                     <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
+                    <td>${Number.isFinite(Number(r.stop_fill_price)) ? fmtNum(Number(r.stop_fill_price)) : "-"}</td>
+                    <td>${esc(_stopTriggerSourceLabel(r.stop_trigger_source))}</td>
+                    <td>${r.gap_open_triggered ? "是" : "否"}</td>
                   </tr>`).join("")
-                : `<tr><td colspan="15" class="muted">无</td></tr>`;
+                : `<tr><td colspan="18" class="muted">无</td></tr>`;
               return `<div style="margin-top:8px;"><b>${esc(codeLabel(code))}（近${shortRows.length}条）</b></div>` +
-                `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+                `<table style="margin-top:4px;"><tr><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th><th>成交价</th><th>止损触发来源</th><th>跳空触发</th></tr>${rowHtml}</table>`;
             });
             traceHtml = blocks.length ? blocks.join("") : `<div class="muted" style="margin-top:8px;">无可用 trace 数据</div>`;
           } else {
@@ -7735,11 +7867,14 @@
                   <td>${Number.isFinite(Number(r.drawdown_from_peak)) ? fmtPct(Number(r.drawdown_from_peak)) : "-"}</td>
                   <td>${fmtNum(Number(r.decision_pos || 0), 0)}</td>
                   <td>${r.wait_next_entry_lock ? "是" : "否"}</td>
+                  <td>${Number.isFinite(Number(r.stop_fill_price)) ? fmtNum(Number(r.stop_fill_price)) : "-"}</td>
+                  <td>${esc(_stopTriggerSourceLabel(r.stop_trigger_source))}</td>
+                  <td>${r.gap_open_triggered ? "是" : "否"}</td>
                 </tr>`).join("")
-              : `<tr><td colspan="16" class="muted">无可用 trace 数据</td></tr>`;
+              : `<tr><td colspan="19" class="muted">无可用 trace 数据</td></tr>`;
             traceHtml =
               `<div style="margin-top:8px;"><b>最近决策轨迹（按日期，全局近${shortRows.length}条）</b></div>` +
-              `<table style="margin-top:4px;"><tr><th>标的</th><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th></tr>${rowHtml}</table>`;
+              `<table style="margin-top:4px;"><tr><th>标的</th><th>日期</th><th>风控类型</th><th>动作</th><th>触发来源</th><th>触发细节</th><th>基础信号</th><th>入场事件</th><th>止损触发</th><th>止盈触发</th><th>触发前止损价</th><th>触发后止损价</th><th>峰值R</th><th>峰值回撤</th><th>决策仓位</th><th>等待锁</th><th>成交价</th><th>止损触发来源</th><th>跳空触发</th></tr>${rowHtml}</table>`;
           }
         }
         const topRows = [
@@ -7787,6 +7922,7 @@
             effectiveByCode: wEff,
             decisionByCode: wDec,
             assetNavByCode: assetNav,
+            riskPlanByCode: _buildTrendRiskPlanByCode(data, mode, codes),
           });
           _renderTrendNextPlanTrace(data, mode);
           return;
@@ -7805,6 +7941,7 @@
           effectiveByCode: code ? { [code]: posEff } : {},
           decisionByCode: code ? { [code]: posDec } : {},
           assetNavByCode: code ? { [code]: bh } : {},
+          riskPlanByCode: _buildTrendRiskPlanByCode(data, mode, (code ? [code] : [])),
         });
         _renderTrendNextPlanTrace(data, mode);
       }

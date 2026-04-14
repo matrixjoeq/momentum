@@ -10,6 +10,7 @@ from etf_momentum.analysis.trend import (
     _apply_impulse_entry_filter,
     _apply_atr_stop,
     _apply_r_multiple_take_profit,
+    _apply_bias_v_take_profit,
     _position_risk_from_stop_params,
     _pos_from_random_entry_hold,
     compute_trend_backtest,
@@ -133,6 +134,151 @@ def test_trailing_stop_latest_atr_can_rise_when_price_drops() -> None:
     assert float(close.iloc[2]) < float(close.iloc[1])
     assert latest_stop > entry_stop
     assert float(out_pos.iloc[-1]) == 1.0
+
+
+def test_atr_stop_intraday_trigger_on_low_and_gap_open_fill() -> None:
+    idx = pd.date_range("2024-01-01", periods=4, freq="B")
+    base_pos = pd.Series([1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 100.0, 100.0], index=idx, dtype=float)
+    high = pd.Series([106.0, 106.0, 106.0, 106.0], index=idx, dtype=float)
+    low_touch = pd.Series([94.0, 96.0, 97.6, 96.0], index=idx, dtype=float)
+    open_touch = pd.Series([100.0, 98.0, 99.0, 100.0], index=idx, dtype=float)
+    out_touch, stats_touch = _apply_atr_stop(
+        base_pos,
+        open_=open_touch,
+        close=close,
+        high=high,
+        low=low_touch,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+    )
+    assert float(out_touch.iloc[2]) == 0.0
+    ev_touch = list(stats_touch.get("trigger_events") or [])
+    assert ev_touch
+    assert str(ev_touch[0].get("trigger_source")) == "low_touch_stop"
+    assert float(ev_touch[0].get("fill_price")) == pytest.approx(97.8)
+
+    low_gap = pd.Series([94.0, 96.0, 95.0, 96.0], index=idx, dtype=float)
+    open_gap = pd.Series([100.0, 98.0, 96.8, 100.0], index=idx, dtype=float)
+    out_gap, stats_gap = _apply_atr_stop(
+        base_pos,
+        open_=open_gap,
+        close=close,
+        high=high,
+        low=low_gap,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+    )
+    assert float(out_gap.iloc[2]) == 0.0
+    ev_gap = list(stats_gap.get("trigger_events") or [])
+    assert ev_gap
+    assert str(ev_gap[0].get("trigger_source")) == "gap_open_below_stop"
+    assert bool(ev_gap[0].get("gap_open_triggered")) is True
+    assert float(ev_gap[0].get("fill_price")) == pytest.approx(96.8)
+
+
+def test_r_take_profit_intraday_retrace_trigger_and_gap_fill() -> None:
+    idx = pd.date_range("2024-01-01", periods=5, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 108.0, 108.0, 108.0], index=idx, dtype=float)
+    high = pd.Series([100.0, 103.0, 110.0, 112.0, 112.0], index=idx, dtype=float)
+    low = pd.Series([100.0, 97.0, 107.0, 104.0, 104.0], index=idx, dtype=float)
+    open_touch = pd.Series([100.0, 100.0, 109.0, 108.0, 108.0], index=idx, dtype=float)
+    tiers = [{"r_multiple": 1.5, "retrace_ratio": 0.3}]
+
+    out_touch, stats_touch = _apply_r_multiple_take_profit(
+        base_pos,
+        open_=open_touch,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=tiers,
+        atr_stop_enabled=True,
+    )
+    assert float(out_touch.iloc[2]) == 0.0
+    ev_touch = list(stats_touch.get("trigger_events") or [])
+    assert ev_touch
+    assert str(ev_touch[0].get("trigger_source")) == "low_touch_tp_retrace"
+    assert float(ev_touch[0].get("fill_price")) == pytest.approx(107.0)
+
+    open_gap = pd.Series([100.0, 100.0, 106.0, 106.0, 108.0], index=idx, dtype=float)
+    out_gap, stats_gap = _apply_r_multiple_take_profit(
+        base_pos,
+        open_=open_gap,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=tiers,
+        atr_stop_enabled=True,
+    )
+    assert float(out_gap.iloc[2]) == 0.0
+    ev_gap = list(stats_gap.get("trigger_events") or [])
+    assert ev_gap
+    assert str(ev_gap[0].get("trigger_source")) == "gap_open_below_tp"
+    assert bool(ev_gap[0].get("gap_open_triggered")) is True
+    assert float(ev_gap[0].get("fill_price")) == pytest.approx(106.0)
+
+
+def test_bias_v_take_profit_intraday_high_trigger_and_gap_fill() -> None:
+    idx = pd.date_range("2024-01-01", periods=5, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 100.0, 100.0, 100.0], index=idx, dtype=float)
+    high = pd.Series([100.0, 100.0, 100.0, 108.0, 108.0], index=idx, dtype=float)
+    low = pd.Series([99.0, 99.0, 99.0, 99.0, 99.0], index=idx, dtype=float)
+    open_touch = pd.Series([100.0, 100.0, 100.0, 102.0, 102.0], index=idx, dtype=float)
+    out_touch, stats_touch = _apply_bias_v_take_profit(
+        base_pos,
+        open_=open_touch,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        ma_window=2,
+        atr_window=2,
+        threshold=0.5,
+    )
+    assert float(out_touch.iloc[3]) == 0.0
+    ev_touch = list(stats_touch.get("trigger_events") or [])
+    assert ev_touch
+    assert str(ev_touch[0].get("trigger_source")) == "high_touch_bias_v_tp"
+    assert 100.0 < float(ev_touch[0].get("fill_price")) < 108.0
+
+    open_gap = pd.Series([100.0, 100.0, 100.0, 106.0, 104.0], index=idx, dtype=float)
+    out_gap, stats_gap = _apply_bias_v_take_profit(
+        base_pos,
+        open_=open_gap,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        ma_window=2,
+        atr_window=2,
+        threshold=0.5,
+    )
+    assert float(out_gap.iloc[3]) == 0.0
+    ev_gap = list(stats_gap.get("trigger_events") or [])
+    assert ev_gap
+    assert str(ev_gap[0].get("trigger_source")) == "gap_open_above_bias_v_tp"
+    assert bool(ev_gap[0].get("gap_open_triggered")) is True
+    assert float(ev_gap[0].get("fill_price")) == pytest.approx(106.0)
 
 
 def test_trend_single_risk_budget_sizing_applies_params(session_factory):
