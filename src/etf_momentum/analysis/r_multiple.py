@@ -312,6 +312,165 @@ def _attach_trade_system_scores(
     return out
 
 
+def _parse_trade_ts(v: Any) -> pd.Timestamp:
+    ts = pd.to_datetime(v, errors="coerce")
+    if pd.isna(ts):
+        return pd.NaT
+    if isinstance(ts, pd.Timestamp):
+        return ts
+    return pd.Timestamp(ts)
+
+
+def _mfe_default_thresholds() -> list[float]:
+    return [1.0, 1.5, 2.0, 2.5, 3.0, 4.0]
+
+
+def _threshold_key(x: float) -> str:
+    return f"{float(x):g}"
+
+
+def _summarize_mfe_group(
+    trades: list[dict[str, Any]],
+    *,
+    thresholds: list[float],
+) -> dict[str, Any]:
+    mfe_vals = [float(t["mfe_r_multiple"]) for t in trades if t.get("mfe_r_multiple") is not None]
+    pullback_vals = [float(t["mfe_drawdown_to_exit_ratio"]) for t in trades if t.get("mfe_drawdown_to_exit_ratio") is not None]
+    out: dict[str, Any] = {
+        "trade_count": int(len(trades)),
+        "valid_mfe_count": int(len(mfe_vals)),
+        "mfe_r_multiple_stats": _dist_stats(mfe_vals),
+        "pullback_to_exit_ratio_stats": _dist_stats(pullback_vals),
+        "hit_rate_by_threshold": {},
+        "pullback_to_exit_ratio_by_threshold": {},
+        "samples": {
+            "mfe_r_multiple": mfe_vals,
+            "pullback_to_exit_ratio": pullback_vals,
+        },
+    }
+    if not mfe_vals:
+        return out
+    s_mfe = pd.Series(mfe_vals, dtype=float)
+    for thr in thresholds:
+        k = _threshold_key(thr)
+        hit_mask = s_mfe >= float(thr)
+        out["hit_rate_by_threshold"][k] = _to_num_or_none(hit_mask.mean())
+        rows_thr = [
+            float(t["mfe_drawdown_to_exit_ratio"])
+            for t in trades
+            if (
+                t.get("mfe_r_multiple") is not None
+                and float(t["mfe_r_multiple"]) >= float(thr)
+                and t.get("mfe_drawdown_to_exit_ratio") is not None
+            )
+        ]
+        out["pullback_to_exit_ratio_by_threshold"][k] = _dist_stats(rows_thr)
+    return out
+
+
+def build_trade_mfe_r_distribution(
+    trades: list[dict[str, Any]],
+    *,
+    close: pd.Series | pd.DataFrame,
+    high: pd.Series | pd.DataFrame,
+    atr: pd.Series | pd.DataFrame | None,
+    atr_mult: float,
+    default_code: str | None = None,
+    thresholds: list[float] | None = None,
+    recent_window: int = 100,
+) -> dict[str, Any]:
+    atr_n = float(atr_mult) if np.isfinite(float(atr_mult)) else float("nan")
+    thr_src = thresholds if isinstance(thresholds, list) and thresholds else _mfe_default_thresholds()
+    thr = sorted({float(x) for x in thr_src if np.isfinite(float(x)) and float(x) > 0.0})
+    if not thr:
+        thr = _mfe_default_thresholds()
+    eps = 1e-12
+    out_trades: list[dict[str, Any]] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in trades or []:
+        tr = dict(row)
+        if not bool(tr.get("closed")):
+            continue
+        code = _group_code(tr, default_code=default_code)
+        entry_ts = _parse_trade_ts(tr.get("entry_date"))
+        exit_ts = _parse_trade_ts(tr.get("exit_date"))
+        if pd.isna(entry_ts) or pd.isna(exit_ts):
+            tr["mfe_r_multiple"] = None
+            tr["exit_close_r_multiple"] = None
+            tr["mfe_drawdown_to_exit_ratio"] = None
+            out_trades.append(tr)
+            grouped.setdefault(code, []).append(tr)
+            continue
+        px_entry = _lookup_value(close, entry_ts, code if code != "_ALL_" else None)
+        atr_entry = _lookup_value(atr, entry_ts, code if code != "_ALL_" else None)
+        if (not np.isfinite(px_entry)) or px_entry <= 0.0 or (not np.isfinite(atr_n)) or atr_n <= 0.0:
+            tr["mfe_r_multiple"] = None
+            tr["exit_close_r_multiple"] = None
+            tr["mfe_drawdown_to_exit_ratio"] = None
+            out_trades.append(tr)
+            grouped.setdefault(code, []).append(tr)
+            continue
+        init_r_pct = float(atr_n) * float(atr_entry) / float(px_entry) if (np.isfinite(atr_entry) and atr_entry > 0.0) else float("nan")
+        if (not np.isfinite(init_r_pct)) or init_r_pct <= eps:
+            tr["mfe_r_multiple"] = None
+            tr["exit_close_r_multiple"] = None
+            tr["mfe_drawdown_to_exit_ratio"] = None
+            out_trades.append(tr)
+            grouped.setdefault(code, []).append(tr)
+            continue
+        hi_slice = _lookup_value(high, entry_ts, code if code != "_ALL_" else None)
+        hi_max = float("nan")
+        if isinstance(high, pd.Series):
+            if (entry_ts in high.index) and (exit_ts in high.index):
+                hi_seg = pd.to_numeric(high.loc[entry_ts:exit_ts], errors="coerce").astype(float)
+                if not hi_seg.empty:
+                    hi_max = float(hi_seg.max())
+        elif isinstance(high, pd.DataFrame):
+            key = code if code != "_ALL_" else default_code
+            if key is not None and key in high.columns and (entry_ts in high.index) and (exit_ts in high.index):
+                hi_seg = pd.to_numeric(high.loc[entry_ts:exit_ts, key], errors="coerce").astype(float)
+                if not hi_seg.empty:
+                    hi_max = float(hi_seg.max())
+        if not np.isfinite(hi_max):
+            hi_max = hi_slice
+        px_exit = _lookup_value(close, exit_ts, code if code != "_ALL_" else None)
+        mfe_r = float("nan")
+        exit_r = float("nan")
+        dd_exit = float("nan")
+        if np.isfinite(hi_max):
+            mfe_r = float((float(hi_max) / float(px_entry) - 1.0) / float(init_r_pct))
+        if np.isfinite(px_exit):
+            exit_r = float((float(px_exit) / float(px_entry) - 1.0) / float(init_r_pct))
+        if np.isfinite(mfe_r) and mfe_r > eps and np.isfinite(exit_r):
+            dd_exit = float((float(mfe_r) - float(exit_r)) / float(mfe_r))
+        tr["mfe_r_multiple"] = _to_num_or_none(mfe_r)
+        tr["exit_close_r_multiple"] = _to_num_or_none(exit_r)
+        tr["mfe_drawdown_to_exit_ratio"] = _to_num_or_none(dd_exit)
+        out_trades.append(tr)
+        grouped.setdefault(code, []).append(tr)
+
+    overall = _summarize_mfe_group(out_trades, thresholds=thr)
+    by_code = {k: _summarize_mfe_group(v, thresholds=thr) for k, v in grouped.items()}
+    recent = _recent_n_trades(out_trades, int(recent_window))
+    grouped_recent: dict[str, list[dict[str, Any]]] = {}
+    for tr in recent:
+        c = _group_code(tr, default_code=default_code)
+        grouped_recent.setdefault(c, []).append(tr)
+    return {
+        "scope": "closed_trades_only",
+        "thresholds": [float(x) for x in thr],
+        "overall": overall,
+        "by_code": by_code,
+        "recent_100": {
+            "window_size": int(recent_window),
+            "effective_count": int(len(recent)),
+            "total_trade_count": int(len(out_trades)),
+            "overall": _summarize_mfe_group(recent, thresholds=thr),
+            "by_code": {k: _summarize_mfe_group(v, thresholds=thr) for k, v in grouped_recent.items()},
+        },
+    }
+
+
 def enrich_trades_with_r_metrics(
     trades: list[dict[str, Any]],
     *,

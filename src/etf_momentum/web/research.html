@@ -3183,6 +3183,37 @@
             <div id="trendRMultByCodeHist" style="width:100%; height:280px; margin-top:8px;"></div>
           </div>
         </div>
+        <div class="two" style="grid-template-columns:1fr 1fr; margin-top:12px;">
+          <div>
+            <div class="muted">盘中最高收益R分布（MFE-R）- 整体</div>
+            <table id="trendMfeROverallTable" style="margin-top:8px;"></table>
+            <div id="trendMfeROverallHist" style="width:100%; height:280px; margin-top:8px;"></div>
+            <table id="trendMfeRThresholdOverallTable" style="margin-top:8px;"></table>
+          </div>
+          <div>
+            <div class="muted">盘中最高收益R分布（MFE-R）- 按标的</div>
+            <table id="trendMfeRByCodeTable" style="margin-top:8px;"></table>
+            <div id="trendMfeRByCodeHist" style="width:100%; height:280px; margin-top:8px;"></div>
+            <table id="trendMfeRThresholdByCodeTable" style="margin-top:8px;"></table>
+          </div>
+        </div>
+        <div class="two" style="grid-template-columns:1fr 1fr; margin-top:12px;">
+          <div>
+            <div class="muted">触达后平仓回落比例分布（(峰值R-平仓R)/峰值R）- 整体</div>
+            <table id="trendMfeRPullbackOverallTable" style="margin-top:8px;"></table>
+            <div id="trendMfeRPullbackOverallHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+          <div>
+            <div class="muted">触达后平仓回落比例分布（(峰值R-平仓R)/峰值R）- 按标的</div>
+            <table id="trendMfeRPullbackByCodeTable" style="margin-top:8px;"></table>
+            <div id="trendMfeRPullbackByCodeHist" style="width:100%; height:280px; margin-top:8px;"></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:12px;">
+          <div class="muted">R止盈参数建议（基于当前回测样本自动生成，格式 r:ratio）</div>
+          <div id="trendRTpSuggestionSummary" class="muted" style="margin-top:6px;"></div>
+          <table id="trendRTpSuggestionTable" style="margin-top:8px;"></table>
+        </div>
       </div>
       <div class="muted" style="margin-top:10px;">SQN口径说明：均值E(R)、标准差Std(R)与样本数N均来自同一批样本（最近&lt;=100笔；若总交易数不足100则使用全量）。</div>
       <table id="trendMetricsTable" style="margin-top:6px;"></table>
@@ -14224,7 +14255,8 @@
         const rowAnnualizedSqn = String(mode || "num") === "num"
           ? `<tr><td>年化SQN</td><td>${esc(_formatAnnualizedSqnSummary(sqn, annualTradeCount))}</td></tr>`
           : "";
-        const rowCompositeScore = String(mode || "num") === "num"
+        const showCompositeScore = (tradeSystemScoreObj != null);
+        const rowCompositeScore = (String(mode || "num") === "num" && showCompositeScore)
           ? `<tr><td>综合评分（交易系统）</td><td>${esc(_formatTradeSystemScoreSummary(tradeSystemScoreObj))}</td></tr>`
           : "";
         t.innerHTML =
@@ -14256,8 +14288,168 @@
         );
       }
 
+      function _renderMfeThresholdTable(tableId, thresholdList, hitMap, pullbackByThr) {
+        const t = $(tableId);
+        if (!t) return;
+        const thrs = Array.isArray(thresholdList) ? thresholdList.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0) : [];
+        const hm = (hitMap && typeof hitMap === "object") ? hitMap : {};
+        const pb = (pullbackByThr && typeof pullbackByThr === "object") ? pullbackByThr : {};
+        if (!thrs.length) {
+          t.innerHTML = "<tr><th>阈值R</th><th>触达率</th><th>触达后回落P50</th><th>触达后回落P75</th><th>触达样本数</th></tr>";
+          return;
+        }
+        const rows = thrs.map((thr) => {
+          const k = String(Number(thr).toString());
+          const onePb = (pb[k] && typeof pb[k] === "object") ? pb[k] : {};
+          const n = Number(onePb.sample_size);
+          return (
+            `<tr>` +
+              `<td>${esc(fmtNum(thr))}R</td>` +
+              `<td>${fmtPct(Number(hm[k]))}</td>` +
+              `<td>${fmtPct(Number(onePb.p50))}</td>` +
+              `<td>${fmtPct(Number(onePb.p75))}</td>` +
+              `<td>${Number.isFinite(n) ? Math.round(n) : "-"}</td>` +
+            `</tr>`
+          );
+        }).join("");
+        t.innerHTML =
+          `<tr><th>阈值R</th><th>触达率</th><th>触达后回落P50</th><th>触达后回落P75</th><th>触达样本数</th></tr>` +
+          rows;
+      }
+
+      function _buildRTpCandidateRows(thresholdList, hitMap, pullbackByThr) {
+        const thrs = Array.isArray(thresholdList) ? thresholdList.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0) : [];
+        const hm = (hitMap && typeof hitMap === "object") ? hitMap : {};
+        const pb = (pullbackByThr && typeof pullbackByThr === "object") ? pullbackByThr : {};
+        const rows = [];
+        for (const thr of thrs) {
+          const k = String(Number(thr).toString());
+          const hit = Number(hm[k]);
+          const onePb = (pb[k] && typeof pb[k] === "object") ? pb[k] : {};
+          const n = Number(onePb.sample_size);
+          const p25 = Number(onePb.p25);
+          const p50 = Number(onePb.p50);
+          const p75 = Number(onePb.p75);
+          if (!Number.isFinite(hit) || !Number.isFinite(n) || n < 8) continue;
+          if (!Number.isFinite(p25) && !Number.isFinite(p50) && !Number.isFinite(p75)) continue;
+          rows.push({ r: Number(thr), hit, n, p25, p50, p75 });
+        }
+        rows.sort((a, b) => Number(a.r) - Number(b.r));
+        return rows;
+      }
+
+      function _clampRetraceRatio(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return null;
+        return Math.min(0.85, Math.max(0.05, v));
+      }
+
+      function _pickCandidateNearHit(rows, targetHit, usedRSet) {
+        if (!Array.isArray(rows) || !rows.length) return null;
+        const used = usedRSet || new Set();
+        let best = null;
+        let bestScore = Infinity;
+        for (const r of rows) {
+          const rr = Number(r.r);
+          if (used.has(rr)) continue;
+          const hit = Number(r.hit);
+          const n = Number(r.n);
+          if (!Number.isFinite(hit) || !Number.isFinite(n)) continue;
+          const score = Math.abs(hit - Number(targetHit)) + (n < 12 ? 0.15 : 0.0) + (n < 20 ? 0.05 : 0.0);
+          if (score < bestScore) {
+            bestScore = score;
+            best = r;
+          }
+        }
+        return best;
+      }
+
+      function _renderTrendRTpSuggestion(summaryId, tableId, thresholdList, hitMap, pullbackByThr, scopeSuffix) {
+        const box = $(summaryId);
+        const t = $(tableId);
+        if (!box || !t) return;
+        const rows = _buildRTpCandidateRows(thresholdList, hitMap, pullbackByThr);
+        if (!rows.length) {
+          box.textContent = `当前样本不足，暂无法生成建议${scopeSuffix || ""}。建议至少有 8 笔触达样本。`;
+          t.innerHTML = "<tr><th>建议档位</th><th>建议参数</th><th>触达率</th><th>触达样本数</th><th>建议依据</th></tr>";
+          return;
+        }
+        const used = new Set();
+        const picks = [];
+        const pCon = _pickCandidateNearHit(rows, 0.60, used);
+        if (pCon) {
+          used.add(Number(pCon.r));
+          picks.push({
+            name: "稳健",
+            r: Number(pCon.r),
+            ratio: _clampRetraceRatio(Number.isFinite(Number(pCon.p25)) ? Number(pCon.p25) : Number(pCon.p50) * 0.85),
+            hit: Number(pCon.hit),
+            n: Number(pCon.n),
+            reason: "优先更高触达率，回落阈值更紧，减少已得利润回吐。",
+          });
+        }
+        const pBal = _pickCandidateNearHit(rows, 0.40, used);
+        if (pBal) {
+          used.add(Number(pBal.r));
+          picks.push({
+            name: "均衡",
+            r: Number(pBal.r),
+            ratio: _clampRetraceRatio(Number.isFinite(Number(pBal.p50)) ? Number(pBal.p50) : Number(pBal.p75)),
+            hit: Number(pBal.hit),
+            n: Number(pBal.n),
+            reason: "在触达概率与趋势延展之间做折中。",
+          });
+        }
+        const pAgg = _pickCandidateNearHit(rows, 0.25, used);
+        if (pAgg) {
+          picks.push({
+            name: "进取",
+            r: Number(pAgg.r),
+            ratio: _clampRetraceRatio(Number.isFinite(Number(pAgg.p75)) ? Number(pAgg.p75) : Number(pAgg.p50) * 1.15),
+            hit: Number(pAgg.hit),
+            n: Number(pAgg.n),
+            reason: "偏向吃趋势尾段，接受更大回落换取更高R目标。",
+          });
+        }
+        const validPicks = picks.filter((x) => Number.isFinite(Number(x.r)) && Number.isFinite(Number(x.ratio)));
+        if (!validPicks.length) {
+          box.textContent = `当前样本不足，暂无法生成建议${scopeSuffix || ""}。`;
+          t.innerHTML = "<tr><th>建议档位</th><th>建议参数</th><th>触达率</th><th>触达样本数</th><th>建议依据</th></tr>";
+          return;
+        }
+        const shown = validPicks.slice(0, 3);
+        box.textContent = `自动建议${scopeSuffix || ""}：可先从“均衡”档做起，实盘再按风险偏好在稳健/进取之间切换。`;
+        t.innerHTML =
+          `<tr><th>建议档位</th><th>建议参数</th><th>触达率</th><th>触达样本数</th><th>建议依据</th><th>操作</th></tr>` +
+          shown.map((x) => (
+            `<tr data-tier="${esc(`${fmtNum(Number(x.r))}:${fmtNum(Number(x.ratio))}`)}" style="cursor:pointer;" title="点击写回到R阈值与允许回落">` +
+              `<td>${esc(String(x.name || "-"))}</td>` +
+              `<td><code>${esc(`${fmtNum(Number(x.r))}:${fmtNum(Number(x.ratio))}`)}</code></td>` +
+              `<td>${fmtPct(Number(x.hit))}</td>` +
+              `<td>${Math.round(Number(x.n))}</td>` +
+              `<td>${esc(String(x.reason || "-"))}</td>` +
+              `<td><button type="button" data-tier="${esc(`${fmtNum(Number(x.r))}:${fmtNum(Number(x.ratio))}`)}">一键写回</button></td>` +
+            `</tr>`
+          )).join("");
+        t.onclick = (evt) => {
+          const el = evt && evt.target ? evt.target : null;
+          if (!el) return;
+          const target = (el.closest && el.closest("[data-tier]")) ? el.closest("[data-tier]") : null;
+          if (!target) return;
+          const tier = String(target.getAttribute("data-tier") || "").trim();
+          if (!tier) return;
+          const input = $("trendRTpTiers");
+          if (!input) return;
+          input.value = tier;
+          try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch { /* ignore */ }
+          try { input.dispatchEvent(new Event("change", { bubbles: true })); } catch { /* ignore */ }
+          box.textContent = `已写回到R阈值与允许回落：${tier}。可直接点击回测验证。`;
+        };
+      }
+
       function renderRStatistics(prefix, data) {
         const p = String(prefix || "").trim();
+        const hideCompositeScore = (p === "trend");
         const strategyLabel = _strategyLabelByPrefix(p);
         const rStats = (data && data.r_statistics && typeof data.r_statistics === "object") ? data.r_statistics : null;
         const tradeStats = (data && data.trade_statistics && typeof data.trade_statistics === "object") ? data.trade_statistics : null;
@@ -14279,6 +14471,18 @@
         const multOverallHist = `${p}RMultOverallHist`;
         const multByCodeTable = `${p}RMultByCodeTable`;
         const multByCodeHist = `${p}RMultByCodeHist`;
+        const mfeOverallTable = `${p}MfeROverallTable`;
+        const mfeOverallHist = `${p}MfeROverallHist`;
+        const mfeByCodeTable = `${p}MfeRByCodeTable`;
+        const mfeByCodeHist = `${p}MfeRByCodeHist`;
+        const mfeThrOverallTable = `${p}MfeRThresholdOverallTable`;
+        const mfeThrByCodeTable = `${p}MfeRThresholdByCodeTable`;
+        const mfePullbackOverallTable = `${p}MfeRPullbackOverallTable`;
+        const mfePullbackOverallHist = `${p}MfeRPullbackOverallHist`;
+        const mfePullbackByCodeTable = `${p}MfeRPullbackByCodeTable`;
+        const mfePullbackByCodeHist = `${p}MfeRPullbackByCodeHist`;
+        const rtpSuggestionSummary = `${p}RTpSuggestionSummary`;
+        const rtpSuggestionTable = `${p}RTpSuggestionTable`;
 
         if (!$(initOverallTable) || !$(multOverallTable) || !codeSel) return;
         if (scopeSel && !scopeSel.value) scopeSel.value = "all";
@@ -14308,9 +14512,21 @@
           const activeOverall = (useRecent && recentPack && recentPack.overall && typeof recentPack.overall === "object")
             ? recentPack.overall
             : ((rStats && rStats.overall && typeof rStats.overall === "object") ? rStats.overall : {});
-          const activeOverallScore = (useRecent
-            ? tradeSystemScorePack.recent_100_overall
-            : tradeSystemScorePack.overall) || {};
+          const activeOverallScore = hideCompositeScore
+            ? null
+            : ((useRecent ? tradeSystemScorePack.recent_100_overall : tradeSystemScorePack.overall) || {});
+          const mfePack = (tradeStats && tradeStats.mfe_r_distribution && typeof tradeStats.mfe_r_distribution === "object")
+            ? tradeStats.mfe_r_distribution
+            : null;
+          const mfeByCodeAll = (mfePack && mfePack.by_code && typeof mfePack.by_code === "object") ? mfePack.by_code : {};
+          const mfeRecentPack = (mfePack && mfePack.recent_100 && typeof mfePack.recent_100 === "object") ? mfePack.recent_100 : null;
+          const activeMfeByCode = (useRecent && mfeRecentPack && mfeRecentPack.by_code && typeof mfeRecentPack.by_code === "object")
+            ? mfeRecentPack.by_code
+            : mfeByCodeAll;
+          const activeMfeOverall = (useRecent && mfeRecentPack && mfeRecentPack.overall && typeof mfeRecentPack.overall === "object")
+            ? mfeRecentPack.overall
+            : ((mfePack && mfePack.overall && typeof mfePack.overall === "object") ? mfePack.overall : {});
+          const mfeThresholds = (mfePack && Array.isArray(mfePack.thresholds)) ? mfePack.thresholds : [];
           const scopeSuffix = useRecent ? "（近100次交易）" : "（全部交易）";
 
           const overallInit = (activeOverall.initial_r_pct_nav_stats && typeof activeOverall.initial_r_pct_nav_stats === "object") ? activeOverall.initial_r_pct_nav_stats : {};
@@ -14352,11 +14568,65 @@
           _renderRHist(initByCodeHist, initVals, `${codeLabel(c)}：初始风险质量分布${scopeSuffix}`, "pct");
           _renderRHist(multByCodeHist, multVals, `${codeLabel(c)}：R乘数分布${scopeSuffix}`, "num");
 
+          if ($(mfeOverallTable)) {
+            const mfeStatsOverall = (activeMfeOverall.mfe_r_multiple_stats && typeof activeMfeOverall.mfe_r_multiple_stats === "object")
+              ? activeMfeOverall.mfe_r_multiple_stats
+              : {};
+            const pullbackStatsOverall = (activeMfeOverall.pullback_to_exit_ratio_stats && typeof activeMfeOverall.pullback_to_exit_ratio_stats === "object")
+              ? activeMfeOverall.pullback_to_exit_ratio_stats
+              : {};
+            const mfeOverallVals = (((activeMfeOverall.samples || {}).mfe_r_multiple) || []).map((x) => Number(x)).filter(Number.isFinite);
+            const pullbackOverallVals = (((activeMfeOverall.samples || {}).pullback_to_exit_ratio) || []).map((x) => Number(x)).filter(Number.isFinite);
+            _renderRStatsTable(mfeOverallTable, mfeStatsOverall, "num", {}, {}, null, null);
+            _renderRHist(mfeOverallHist, mfeOverallVals, `${strategyLabel}：盘中最高收益R分布（MFE-R）${scopeSuffix}`, "num");
+            _renderRStatsTable(mfePullbackOverallTable, pullbackStatsOverall, "pct", {}, {}, null, null);
+            _renderRHist(mfePullbackOverallHist, pullbackOverallVals, `${strategyLabel}：触达后平仓回落比例分布${scopeSuffix}`, "pct");
+            _renderMfeThresholdTable(
+              mfeThrOverallTable,
+              mfeThresholds,
+              activeMfeOverall.hit_rate_by_threshold || {},
+              activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
+            );
+            const oneMfe = (activeMfeByCode && activeMfeByCode[c] && typeof activeMfeByCode[c] === "object") ? activeMfeByCode[c] : {};
+            const oneMfeStats = (oneMfe.mfe_r_multiple_stats && typeof oneMfe.mfe_r_multiple_stats === "object") ? oneMfe.mfe_r_multiple_stats : {};
+            const onePullbackStats = (oneMfe.pullback_to_exit_ratio_stats && typeof oneMfe.pullback_to_exit_ratio_stats === "object")
+              ? oneMfe.pullback_to_exit_ratio_stats
+              : {};
+            const oneMfeVals = (((oneMfe.samples || {}).mfe_r_multiple) || []).map((x) => Number(x)).filter(Number.isFinite);
+            const onePullbackVals = (((oneMfe.samples || {}).pullback_to_exit_ratio) || []).map((x) => Number(x)).filter(Number.isFinite);
+            _renderRStatsTable(mfeByCodeTable, oneMfeStats, "num", {}, {}, null, null);
+            _renderRHist(mfeByCodeHist, oneMfeVals, `${codeLabel(c)}：盘中最高收益R分布${scopeSuffix}`, "num");
+            _renderRStatsTable(mfePullbackByCodeTable, onePullbackStats, "pct", {}, {}, null, null);
+            _renderRHist(mfePullbackByCodeHist, onePullbackVals, `${codeLabel(c)}：触达后平仓回落比例分布${scopeSuffix}`, "pct");
+            _renderMfeThresholdTable(
+              mfeThrByCodeTable,
+              mfeThresholds,
+              oneMfe.hit_rate_by_threshold || {},
+              oneMfe.pullback_to_exit_ratio_by_threshold || {},
+            );
+            _renderTrendRTpSuggestion(
+              rtpSuggestionSummary,
+              rtpSuggestionTable,
+              mfeThresholds,
+              activeMfeOverall.hit_rate_by_threshold || {},
+              activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
+              scopeSuffix,
+            );
+          }
+
           if (!codes.length) {
             _renderRStatsTable(initByCodeTable, {}, "pct", {}, {}, null, null);
             _renderRStatsTable(multByCodeTable, {}, "num", {}, {}, null, null);
             _renderRHist(initByCodeHist, [], "无数据", "pct");
             _renderRHist(multByCodeHist, [], "无数据", "num");
+            if ($(mfeByCodeTable)) {
+              _renderRStatsTable(mfeByCodeTable, {}, "num", {}, {}, null, null);
+              _renderRHist(mfeByCodeHist, [], "无数据", "num");
+              _renderRStatsTable(mfePullbackByCodeTable, {}, "pct", {}, {}, null, null);
+              _renderRHist(mfePullbackByCodeHist, [], "无数据", "pct");
+              _renderMfeThresholdTable(mfeThrByCodeTable, [], {}, {});
+            }
+            _renderTrendRTpSuggestion(rtpSuggestionSummary, rtpSuggestionTable, [], {}, {}, scopeSuffix);
           }
         };
         codeSel.onchange = renderAll;

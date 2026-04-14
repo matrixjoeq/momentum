@@ -623,9 +623,7 @@ def test_trend_ma_filter_smoke(session_factory):
     recent = (r_stats.get("recent_100") or {})
     assert int(recent.get("effective_count") or 0) <= int((r_stats.get("overall") or {}).get("trade_count") or 0)
     assert "sqn" in ((r_stats.get("overall") or {}))
-    score_pack = (r_stats.get("trade_system_score") or {})
-    assert "overall" in score_pack
-    assert "weights" in score_pack
+    assert "trade_system_score" not in r_stats
     ts = out.get("trade_statistics") or {}
     ecs = (ts.get("entry_condition_stats") or {})
     assert "overall" in ecs
@@ -709,6 +707,43 @@ def test_trend_ma_filter_kama_smoke(session_factory):
     assert float(params["kama_std_coef"]) == 1.0
     assert out["meta"]["strategy"] == "ma_filter"
     assert any(x > 0 for x in out["signals"]["position"])
+
+
+def test_trend_quick_mode_contains_mfe_r_distribution(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            close = 100.0 + (i * 0.35 if i < 70 else (70 * 0.35) - (i - 70) * 0.50)
+            _add_price_hl(db, code=code, day=d, close=close, high=close * 1.02, low=close * 0.99)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                atr_stop_window=5,
+                quick_mode=True,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    ts = out.get("trade_statistics") or {}
+    mfe = ts.get("mfe_r_distribution") or {}
+    overall = mfe.get("overall") or {}
+    by_code = mfe.get("by_code") or {}
+    recent = mfe.get("recent_100") or {}
+    assert int(overall.get("trade_count") or 0) > 0
+    assert int(overall.get("valid_mfe_count") or 0) > 0
+    assert len((((overall.get("samples") or {}).get("mfe_r_multiple")) or [])) == int(overall.get("valid_mfe_count") or 0)
+    assert str(code) in by_code
+    assert int(recent.get("effective_count") or 0) <= int(overall.get("trade_count") or 0)
+    assert ts.get("trades") == []
 
 
 def test_trend_ma_filter_kama_std_band_reduces_trades(session_factory):

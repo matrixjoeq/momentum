@@ -29,7 +29,7 @@ from .baseline import (
 from .event_study import compute_event_study, entry_dates_from_exposure
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
 from .market_regime import build_market_regime_report
-from .r_multiple import enrich_trades_with_r_metrics
+from .r_multiple import build_trade_mfe_r_distribution, enrich_trades_with_r_metrics
 
 Session = Any  # runtime: keep dependency-free typing
 # 各趋势策略的执行说明（信号日与收益归属）：统一为 T 日收盘后确定信号，T+1 日执行，收益不包含决策日当日。
@@ -3252,6 +3252,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         score_sqn_weight=0.60,
         score_ulcer_weight=0.40,
     )
+    r_stats_out = dict(trade_r_pack.get("statistics") or {})
+    r_stats_out.pop("trade_system_score", None)
     trades_with_r = list(trade_r_pack.get("trades") or [])
     if not quick_mode:
         mom_for_entry = (px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0).astype(float)
@@ -3286,11 +3288,20 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             default_code=str(code),
         )
     single_rtp_tier_counts = dict(((r_take_profit_stats or {}).get("tier_trigger_counts") or {}))
+    mfe_r_distribution = build_trade_mfe_r_distribution(
+        trade_one.get("trades", []),
+        close=px_sig.astype(float).reindex(nav.index).ffill(),
+        high=high_qfq.astype(float).fillna(px_sig).reindex(nav.index).ffill(),
+        atr=atr_risk.astype(float).reindex(nav.index),
+        atr_mult=float(inp.atr_stop_n),
+        default_code=str(code),
+    )
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_one.get("returns", [])),
         "by_code": {str(code): _trade_stats_from_returns(trade_one.get("returns", []))},
         "trades": ([] if quick_mode else trades_with_r),
         "trades_by_code": ({str(code): []} if quick_mode else {str(code): trades_with_r}),
+        "mfe_r_distribution": mfe_r_distribution,
     }
     impulse_attempted_overall = int((impulse_filter_stats_overall or {}).get("attempted_entry_count", 0))
     impulse_blocked_overall = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
@@ -3515,7 +3526,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
-        "r_statistics": trade_r_pack.get("statistics", {}),
+        "r_statistics": r_stats_out,
         "event_study": event_study,
         "market_regime": market_regime,
         "return_decomposition": return_decomposition,
@@ -4731,6 +4742,8 @@ def compute_trend_portfolio_backtest(
         score_sqn_weight=0.60,
         score_ulcer_weight=0.40,
     )
+    r_stats_out = dict(trade_r_pack.get("statistics") or {})
+    r_stats_out.pop("trade_system_score", None)
     trades_with_r = list(trade_r_pack.get("trades") or [])
     if not quick_mode:
         condition_bins_by_code: dict[str, dict[str, pd.Series]] = {}
@@ -4769,6 +4782,14 @@ def compute_trend_portfolio_backtest(
         c = str(tr.get("code") or "")
         if c in trades_by_code:
             trades_by_code[c].append(tr)
+    mfe_r_distribution = build_trade_mfe_r_distribution(
+        trade_pack.get("trades", []),
+        close=close_qfq.reindex(index=nav.index, columns=codes).astype(float).ffill(),
+        high=high_qfq_df.reindex(index=nav.index, columns=codes).astype(float).ffill(),
+        atr=atr_risk_df.reindex(index=nav.index, columns=codes).astype(float),
+        atr_mult=float(inp.atr_stop_n),
+        default_code=None,
+    )
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_pack.get("returns", [])),
         "by_code": {
@@ -4777,6 +4798,7 @@ def compute_trend_portfolio_backtest(
         },
         "trades": ([] if quick_mode else trades_with_r),
         "trades_by_code": ({str(c): [] for c in codes} if quick_mode else trades_by_code),
+        "mfe_r_distribution": mfe_r_distribution,
     }
     event_study = None
     if not quick_mode:
@@ -5143,7 +5165,7 @@ def compute_trend_portfolio_backtest(
         "rolling": rolling_out,
         "attribution": attribution,
         "trade_statistics": trade_stats,
-        "r_statistics": trade_r_pack.get("statistics", {}),
+        "r_statistics": r_stats_out,
         "event_study": event_study,
         "market_regime": market_regime,
         "return_decomposition": return_decomposition,

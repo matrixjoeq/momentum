@@ -20,6 +20,18 @@ def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
     )
 
 
+def _add_price_hl(db, *, code: str, day: dt.date, close: float, high: float, low: float) -> None:
+    add_price_all_adjustments(
+        db,
+        code=code,
+        day=day,
+        close=float(close),
+        open_price=float(close),
+        high=float(high),
+        low=float(low),
+    )
+
+
 def test_trend_portfolio_all_active_candidates_and_outputs(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-03-31", freq="B")]
@@ -494,9 +506,7 @@ def test_trend_portfolio_trade_statistics_have_samples_user_case_like(session_fa
     assert "recent_100" in rs
     assert int(((rs.get("recent_100") or {}).get("effective_count") or 0) > 0)
     assert "sqn" in ((rs.get("overall") or {}))
-    score_pack = (rs.get("trade_system_score") or {})
-    assert "overall" in score_pack
-    assert "weights" in score_pack
+    assert "trade_system_score" not in rs
     first_trade = ((ts.get("trades") or [None])[0] or {})
     assert "initial_r_amount" in first_trade
     assert "r_multiple" in first_trade
@@ -532,6 +542,45 @@ def test_trend_portfolio_risk_budget_position_sizing(session_factory):
         expo = w.sum(axis=1)
         assert float(expo.max()) <= 1.0000001
         assert float(expo.max()) > 0.0
+
+
+def test_trend_portfolio_quick_mode_contains_mfe_r_distribution(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    codes = ["A1", "A2"]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            for j, c in enumerate(codes):
+                up = i * (0.25 + 0.04 * j)
+                down = (70 * (0.25 + 0.04 * j)) - (i - 70) * (0.35 + 0.05 * j)
+                close = 100.0 + (up if i < 70 else down)
+                _add_price_hl(db, code=c, day=d, close=close, high=close * 1.015, low=close * 0.99)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=12,
+                atr_stop_window=5,
+                quick_mode=True,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    ts = out.get("trade_statistics") or {}
+    mfe = ts.get("mfe_r_distribution") or {}
+    overall = mfe.get("overall") or {}
+    by_code = mfe.get("by_code") or {}
+    recent = mfe.get("recent_100") or {}
+    assert int(overall.get("trade_count") or 0) > 0
+    assert int(overall.get("valid_mfe_count") or 0) > 0
+    assert all(str(c) in by_code for c in codes)
+    assert int(recent.get("effective_count") or 0) <= int(overall.get("trade_count") or 0)
+    assert ts.get("trades") == []
 
 
 def test_trend_portfolio_risk_budget_pct_upper_bound(session_factory):
