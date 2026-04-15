@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>期货研究</title>
+    <script>
+      (function () {
+        const key = `theme:${location.pathname}`;
+        let theme = "dark";
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved === "light" || saved === "dark") theme = saved;
+        } catch (_) {}
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/terminal.css" />
+    <style>
+      input, select {
+        min-width: 140px;
+      }
+      .panel {
+        margin-top: 12px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+      }
+      .pool-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      #poolList {
+        margin-top: 8px;
+        max-height: 340px;
+        overflow-y: auto;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+      }
+      table.candidates {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      table.candidates th,
+      table.candidates td {
+        border: 1px solid var(--line);
+        padding: 6px 8px;
+        text-align: left;
+      }
+      table.candidates th:first-child,
+      table.candidates td:first-child {
+        width: 70px;
+        text-align: center;
+      }
+      .quick-row button {
+        margin-right: 6px;
+      }
+      #corrTableWrap {
+        overflow-x: auto;
+        margin-top: 10px;
+      }
+      table.corr {
+        border-collapse: collapse;
+        min-width: 600px;
+      }
+      table.corr th, table.corr td {
+        border: 1px solid var(--line);
+        padding: 6px 8px;
+        text-align: center;
+      }
+      .muted {
+        margin-top: 4px;
+      }
+      #msg {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>期货研究</h2>
+    <div class="muted">
+      <a href="/futures-pool">期货标的池</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="/">ETF 候选池</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="/research">ETF 研究页</a>
+    </div>
+
+    <div class="panel">
+      <h3>分组管理（独立于其他研究）</h3>
+      <div class="row">
+        <div>
+          <label>选择分组</label>
+          <select id="groupSelect"></select>
+        </div>
+        <div>
+          <label>分组名称</label>
+          <input id="groupName" placeholder="例如 黑色系 / 股指期货" />
+        </div>
+        <button id="saveGroup">保存分组（同名覆盖）</button>
+        <button id="setCurrentGroup">设为当前</button>
+        <button id="deleteGroup">删除分组</button>
+        <button id="exportGroups">导出分组</button>
+        <label class="pool-item" style="margin-left: 10px;">
+          <span>导入分组(JSON)</span>
+          <input id="importFile" type="file" accept=".json,application/json" />
+        </label>
+      </div>
+      <div class="muted">当前分组会作为本页所有研究内容的组合标的。</div>
+      <div id="poolList"></div>
+    </div>
+
+    <div class="panel">
+      <h3>全局研究范围（全页共享）</h3>
+      <div class="row">
+        <div>
+          <label>开始日期</label>
+          <input id="start" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>结束日期</label>
+          <input id="end" placeholder="YYYYMMDD" />
+        </div>
+        <label class="pool-item">
+          <input id="dynamicUniverse" type="checkbox" />
+          <span>动态候选池</span>
+        </label>
+        <button id="saveState">保存全局设置</button>
+      </div>
+      <div class="quick-row" style="margin-top: 8px;">
+        <button data-quick="1m">近一月</button>
+        <button data-quick="3m">近三月</button>
+        <button data-quick="6m">近六月</button>
+        <button data-quick="1y">近一年</button>
+        <button data-quick="3y">近三年</button>
+        <button data-quick="5y">近五年</button>
+        <button data-quick="10y">近十年</button>
+        <button data-quick="all">全区间</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>相关性矩阵（日收益，none价格）</h3>
+      <div class="quick-row">
+        <button data-corr="1m">近一月</button>
+        <button data-corr="3m">近三月</button>
+        <button data-corr="6m">近六月</button>
+        <button data-corr="1y">近一年</button>
+        <button data-corr="3y">近三年</button>
+        <button data-corr="5y">近五年</button>
+        <button data-corr="10y">近十年</button>
+        <button data-corr="all">全区间</button>
+        <button id="runCorr">刷新相关性</button>
+      </div>
+      <div id="corrMeta" class="muted"></div>
+      <div id="aliasMap" class="muted"></div>
+      <div id="corrTableWrap"></div>
+      <div class="row" style="margin-top: 10px;">
+        <div>
+          <label>筛选依据</label>
+          <select id="corrPickBasis">
+            <option value="mean_abs">平均绝对相关系数（更偏分散化）</option>
+            <option value="mean">平均相关系数</option>
+          </select>
+        </div>
+        <div>
+          <label>筛选数量 N</label>
+          <input id="corrPickN" type="number" min="1" step="1" value="5" />
+        </div>
+        <button id="pickLowestCorr">筛选最低相关 N 个标的</button>
+        <button id="pickHighestCorr">筛选最高相关 N 个标的</button>
+      </div>
+      <div id="corrPickMeta" class="muted"></div>
+      <div id="corrPickWrap"></div>
+    </div>
+
+    <div class="panel">
+      <h3>当前分组可交易覆盖摘要</h3>
+      <div id="covMeta" class="muted"></div>
+      <div id="covTableWrap"></div>
+    </div>
+
+    <div id="msg"></div>
+
+    <script>
+      (function initThemeToggle() {
+        const key = `theme:${location.pathname}`;
+        const html = document.documentElement;
+        const nextTheme = () => (html.getAttribute("data-theme") === "light" ? "dark" : "light");
+        const apply = (theme) => {
+          html.setAttribute("data-theme", theme);
+          try { localStorage.setItem(key, theme); } catch (_) {}
+          const btn = document.getElementById("themeToggle");
+          if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+        };
+        document.addEventListener("DOMContentLoaded", () => {
+          const btn = document.createElement("button");
+          btn.id = "themeToggle";
+          btn.className = "theme-toggle";
+          btn.type = "button";
+          btn.addEventListener("click", () => apply(nextTheme()));
+          document.body.appendChild(btn);
+          apply(html.getAttribute("data-theme") || "dark");
+        });
+      })();
+
+      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const $ = (id) => document.getElementById(id);
+      const setMsg = (t) => { $("msg").textContent = t || ""; };
+
+      let pool = [];
+      let groups = [];
+      let state = null;
+      let corrRangeKey = "all";
+      let editorGroupName = "";
+      const corrRangeStorageKey = `futures-research:corr-range:${location.pathname}`;
+      const corrPickBasisStorageKey = `futures-research:corr-pick-basis:${location.pathname}`;
+      const corrPickNStorageKey = `futures-research:corr-pick-n:${location.pathname}`;
+      const corrRangeAllowed = new Set(["1m", "3m", "6m", "1y", "3y", "5y", "10y", "all"]);
+
+      function normalizeCorrRange(v) {
+        const x = String(v || "").toLowerCase();
+        return corrRangeAllowed.has(x) ? x : "all";
+      }
+
+      function loadCorrRange() {
+        try {
+          return normalizeCorrRange(localStorage.getItem(corrRangeStorageKey) || "all");
+        } catch (_) {
+          return "all";
+        }
+      }
+
+      function saveCorrRange(v) {
+        const value = normalizeCorrRange(v);
+        try { localStorage.setItem(corrRangeStorageKey, value); } catch (_) {}
+        return value;
+      }
+
+      function normalizeCorrPickBasis(v) {
+        return v === "mean_abs" || v === "mean" ? v : "mean_abs";
+      }
+
+      function loadCorrPickBasis() {
+        try {
+          return normalizeCorrPickBasis(localStorage.getItem(corrPickBasisStorageKey) || "mean_abs");
+        } catch (_) {
+          return "mean_abs";
+        }
+      }
+
+      function saveCorrPickBasis(v) {
+        const value = normalizeCorrPickBasis(v);
+        try { localStorage.setItem(corrPickBasisStorageKey, value); } catch (_) {}
+        return value;
+      }
+
+      function normalizeCorrPickN(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 1) return 5;
+        return Math.floor(n);
+      }
+
+      function loadCorrPickN() {
+        try {
+          return normalizeCorrPickN(localStorage.getItem(corrPickNStorageKey) || 5);
+        } catch (_) {
+          return 5;
+        }
+      }
+
+      function saveCorrPickN(v) {
+        const value = normalizeCorrPickN(v);
+        try { localStorage.setItem(corrPickNStorageKey, String(value)); } catch (_) {}
+        return value;
+      }
+
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>\"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[m]));
+      }
+
+      function selectedCodesFromPool() {
+        const out = [];
+        for (const el of document.querySelectorAll('input[data-code][type="checkbox"]')) {
+          if (el.checked) out.push(String(el.getAttribute("data-code") || ""));
+        }
+        return out;
+      }
+
+      function renderPoolChecks(codes) {
+        const picked = new Set((codes || []).map((x) => String(x)));
+        if (!Array.isArray(pool) || pool.length === 0) {
+          $("poolList").innerHTML = `<div class="muted">候选标的池为空，请先到“期货标的池”页面维护标的并抓取数据。</div>`;
+          return;
+        }
+        const rows = pool.map((it) => {
+          const code = String(it.code || "");
+          const checked = picked.has(code) ? "checked" : "";
+          const name = String(it.name || code);
+          const start = it.last_data_start_date || "-";
+          const end = it.last_data_end_date || "-";
+          return (
+            `<tr>` +
+            `<td><input type="checkbox" data-code="${esc(code)}" ${checked} /></td>` +
+            `<td>${esc(code)}</td>` +
+            `<td>${esc(name)}</td>` +
+            `<td>${esc(start)} ~ ${esc(end)}</td>` +
+            `</tr>`
+          );
+        }).join("");
+        $("poolList").innerHTML =
+          `<table class="candidates">` +
+          `<thead><tr><th>选择</th><th>标的代码</th><th>标的名称</th><th>可用数据范围</th></tr></thead>` +
+          `<tbody>${rows}</tbody>` +
+          `</table>`;
+      }
+
+      function renderGroupSelect() {
+        const active = groups.find((g) => g.is_active) || null;
+        $("groupSelect").innerHTML = groups.map((g) => {
+          const sel = (!editorGroupName && g.is_active) || (editorGroupName && editorGroupName === g.name) ? "selected" : "";
+          return `<option value="${esc(g.name)}" ${sel}>${esc(g.name)}${g.is_active ? "（当前）" : ""}</option>`;
+        }).join("");
+        if (!editorGroupName && active) {
+          editorGroupName = active.name;
+        } else if (!editorGroupName && groups.length > 0) {
+          editorGroupName = groups[0].name;
+        }
+        applyEditorSelectionToForm();
+      }
+
+      function applyEditorSelectionToForm() {
+        const selName = $("groupSelect").value || editorGroupName || "";
+        editorGroupName = selName;
+        const picked = groups.find((g) => g.name === selName) || null;
+        $("groupName").value = selName || "";
+        renderPoolChecks((picked && picked.codes) ? picked.codes : []);
+      }
+
+      async function loadPool() {
+        const resp = await api("/futures?adjust=none", { method: "GET" });
+        pool = await resp.json();
+      }
+
+      async function loadGroups() {
+        const resp = await api("/futures/research/groups", { method: "GET" });
+        groups = await resp.json();
+        renderGroupSelect();
+      }
+
+      async function loadState() {
+        const resp = await api("/futures/research/state", { method: "GET" });
+        state = await resp.json();
+        $("start").value = state.start_date || "";
+        $("end").value = state.end_date || "";
+        $("dynamicUniverse").checked = !!state.dynamic_universe;
+      }
+
+      function getActiveGroup() {
+        return groups.find((g) => g && g.is_active) || null;
+      }
+
+      function hasActiveGroupWithCodes() {
+        const g = getActiveGroup();
+        return !!(g && Array.isArray(g.codes) && g.codes.length > 0);
+      }
+
+      function corrColor(v) {
+        if (v == null || !Number.isFinite(v)) return "transparent";
+        const a = Math.min(1, Math.abs(v));
+        if (v > 0) return `rgba(220, 60, 60, ${0.08 + 0.62 * a})`;
+        if (v < 0) return `rgba(70, 180, 100, ${0.08 + 0.62 * a})`;
+        return "rgba(180,180,180,0.12)";
+      }
+
+      function renderCorr(out) {
+        if (!out || out.ok !== true) {
+          $("corrTableWrap").innerHTML = `<div class="muted">相关性结果为空：${esc((out && out.error) || "unknown")}</div>`;
+          $("aliasMap").textContent = "";
+          $("corrMeta").textContent = "";
+          return;
+        }
+        const aliases = Array.isArray(out.aliases) ? out.aliases : [];
+        const matrix = Array.isArray(out.matrix) ? out.matrix : [];
+        const head = aliases.map((a) => `<th>${Number(a.id)}</th>`).join("");
+        const rows = matrix.map((row, i) => {
+          const tds = row.map((v) => {
+            const txt = v == null || !Number.isFinite(v) ? "-" : Number(v).toFixed(3);
+            return `<td style="background:${corrColor(v)}">${txt}</td>`;
+          }).join("");
+          return `<tr><th>${Number(aliases[i].id)}</th>${tds}</tr>`;
+        }).join("");
+        $("corrTableWrap").innerHTML = `<table class="corr"><thead><tr><th>#</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+        $("aliasMap").innerHTML = aliases.map((a) => `${Number(a.id)}=${esc(a.code)}(${esc(a.name || a.code)})`).join(" | ");
+        const m = out.meta || {};
+        $("corrMeta").textContent = `分组=${m.group_name || "-"} | 区间=${m.start || "-"}~${m.end || "-"} | 样本=${m.samples || 0} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 口径=${m.mode || "-"}`;
+      }
+
+      function renderCoverage(out) {
+        if (!out || out.ok !== true) {
+          $("covMeta").textContent = `覆盖摘要不可用：${(out && out.error) || "unknown"}`;
+          $("covTableWrap").innerHTML = "";
+          return;
+        }
+        const m = out.meta || {};
+        $("covMeta").textContent =
+          `分组=${m.group_name || "-"} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | ` +
+          `并集=${m.union_points || 0} | 交集=${m.intersection_points || 0} | 生效样本=${m.effective_points || 0} | ` +
+          `生效起止=${m.used_start || "-"}~${m.used_end || "-"}`;
+        const symbols = Array.isArray(out.symbols) ? out.symbols : [];
+        if (!symbols.length) {
+          $("covTableWrap").innerHTML = `<div class="muted">当前分组无有效标的。</div>`;
+          return;
+        }
+        const rows = symbols.map((s) =>
+          `<tr><td>${Number(s.id)}</td><td>${esc(s.code)}</td><td>${esc(s.name || s.code)}</td><td>${esc(s.valid_start || "-")}</td><td>${esc(s.valid_end || "-")}</td><td>${Number(s.valid_points || 0)}</td></tr>`
+        ).join("");
+        $("covTableWrap").innerHTML =
+          `<table class="corr"><thead><tr><th>#</th><th>代码</th><th>名称</th><th>有效起始</th><th>有效结束</th><th>样本点</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }
+
+      function renderCorrPick(out) {
+        if (!out || out.ok !== true) {
+          $("corrPickMeta").textContent = `筛选结果不可用：${(out && out.error) || "unknown"}`;
+          $("corrPickWrap").innerHTML = "";
+          return;
+        }
+        const items = Array.isArray(out.items) ? out.items : [];
+        const modeLabel = out.mode === "highest" ? "最高相关" : "最低相关";
+        const basis = out.score_basis === "mean_abs" ? "mean_abs" : "mean";
+        const basisLabel = basis === "mean_abs" ? "平均绝对相关系数" : "平均相关系数";
+        $("corrPickMeta").textContent =
+          `${modeLabel} | 依据=${basisLabel} | 请求N=${Number(out.requested_n || 0)} | 生效N=${Number(out.effective_n || 0)} | 区间=${(out.meta && out.meta.start) || "-"}~${(out.meta && out.meta.end) || "-"}`;
+        if (!items.length) {
+          $("corrPickWrap").innerHTML = `<div class="muted">暂无可筛选结果。</div>`;
+          return;
+        }
+        const scoreField = basis === "mean_abs" ? "avg_abs_corr" : "avg_corr";
+        const rows = items.map((x) =>
+          `<tr><td>${Number(x.id)}</td><td>${esc(x.code)}</td><td>${esc(x.name || x.code)}</td><td>${x[scoreField] == null ? "-" : Number(x[scoreField]).toFixed(4)}</td><td>${x.avg_corr == null ? "-" : Number(x.avg_corr).toFixed(4)}</td><td>${x.avg_abs_corr == null ? "-" : Number(x.avg_abs_corr).toFixed(4)}</td><td>${Number(x.obs_pairs || 0)}</td></tr>`
+        ).join("");
+        $("corrPickWrap").innerHTML =
+          `<table class="corr"><thead><tr><th>#</th><th>代码</th><th>名称</th><th>筛选分数(${basisLabel})</th><th>平均相关系数</th><th>平均绝对相关系数</th><th>有效配对数</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }
+
+      async function runCorrelation() {
+        if (!hasActiveGroupWithCodes()) {
+          renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
+          return;
+        }
+        setMsg("正在计算相关性...");
+        const resp = await api("/futures/research/correlation", {
+          method: "POST",
+          body: JSON.stringify({ range_key: corrRangeKey, min_obs: 20 }),
+        });
+        const out = await resp.json();
+        if (!resp.ok) {
+          setMsg(typeof out === "string" ? out : JSON.stringify(out));
+          return;
+        }
+        renderCorr(out);
+        setMsg("相关性已更新。");
+      }
+
+      async function runCoverageSummary() {
+        if (!hasActiveGroupWithCodes()) {
+          renderCoverage({ ok: false, error: "当前分组为空或分组内无标的" });
+          return;
+        }
+        const resp = await api("/futures/research/coverage-summary", {
+          method: "POST",
+          body: JSON.stringify({ range_key: corrRangeKey }),
+        });
+        const out = await resp.json();
+        if (!resp.ok) {
+          renderCoverage({ ok: false, error: (out && out.detail) || JSON.stringify(out) });
+          return;
+        }
+        renderCoverage(out);
+      }
+
+      async function runCorrelationSelect(mode) {
+        if (!hasActiveGroupWithCodes()) {
+          renderCorrPick({ ok: false, error: "当前分组为空或分组内无标的" });
+          return;
+        }
+        let n = Number($("corrPickN").value);
+        n = normalizeCorrPickN(n);
+        n = saveCorrPickN(n);
+        $("corrPickN").value = String(n);
+        const resp = await api("/futures/research/correlation-select", {
+          method: "POST",
+          body: JSON.stringify({
+            range_key: corrRangeKey,
+            min_obs: 2,
+            mode,
+            score_basis: String($("corrPickBasis").value || "mean"),
+            n,
+          }),
+        });
+        const out = await resp.json();
+        if (!resp.ok) {
+          renderCorrPick({ ok: false, error: (out && out.detail) || JSON.stringify(out) });
+          return;
+        }
+        renderCorrPick(out);
+      }
+
+      async function refreshResearchByActiveGroupChange() {
+        if (!hasActiveGroupWithCodes()) {
+          renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
+          renderCoverage({ ok: false, error: "当前分组为空或分组内无标的" });
+          setMsg("当前分组为空或分组内无标的，不触发相关性与覆盖摘要请求。");
+          return;
+        }
+        await runCorrelation();
+        await runCoverageSummary();
+      }
+
+      $("groupSelect").addEventListener("change", async () => {
+        const name = $("groupSelect").value;
+        editorGroupName = String(name || "");
+        applyEditorSelectionToForm();
+        setMsg(`已选择分组：${editorGroupName || "-"}（仅编辑，不影响当前分组）。`);
+      });
+
+      $("saveGroup").addEventListener("click", async () => {
+        const name = $("groupName").value.trim();
+        if (!name) return setMsg("请先填写分组名称。");
+        const codes = selectedCodesFromPool();
+        const resp = await api("/futures/research/groups", {
+          method: "POST",
+          body: JSON.stringify({ name, codes, set_active: false }),
+        });
+        const out = await resp.text();
+        if (!resp.ok) return setMsg(out);
+        editorGroupName = name;
+        await loadGroups();
+        setMsg(`分组已保存：${name}`);
+      });
+
+      $("setCurrentGroup").addEventListener("click", async () => {
+        const name = $("groupSelect").value || $("groupName").value.trim();
+        if (!name) return setMsg("请先在“选择分组”中选择一个分组。");
+        const resp = await api(`/futures/research/groups/${encodeURIComponent(name)}/activate`, { method: "POST", body: "{}" });
+        const out = await resp.text();
+        if (!resp.ok) return setMsg(out);
+        editorGroupName = name;
+        await loadGroups();
+        setMsg(`已设为当前分组：${name}`);
+        await refreshResearchByActiveGroupChange();
+      });
+
+      $("deleteGroup").addEventListener("click", async () => {
+        const name = $("groupSelect").value || $("groupName").value.trim();
+        if (!name) return setMsg("没有可删除的分组。");
+        if (!confirm(`确认删除分组 ${name}？`)) return;
+        const resp = await api(`/futures/research/groups/${encodeURIComponent(name)}`, { method: "DELETE" });
+        const out = await resp.text();
+        if (!resp.ok) return setMsg(out);
+        await loadGroups();
+        setMsg(`分组已删除：${name}。如需更新结果，请点“刷新相关性”。`);
+      });
+
+      $("exportGroups").addEventListener("click", async () => {
+        const resp = await api("/futures/research/groups-export", { method: "GET" });
+        const out = await resp.json();
+        const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `futures-groups-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setMsg("分组导出完成。");
+      });
+
+      $("importFile").addEventListener("change", async (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          const parsed = JSON.parse(text);
+          const groupsObj = (parsed && parsed.groups && typeof parsed.groups === "object") ? parsed.groups : {};
+          const activeGroup = parsed && parsed.active_group ? String(parsed.active_group) : null;
+          const resp = await api("/futures/research/groups-import", {
+            method: "POST",
+            body: JSON.stringify({ groups: groupsObj, active_group: activeGroup }),
+          });
+          const out = await resp.text();
+          if (!resp.ok) return setMsg(out);
+          await loadGroups();
+          setMsg("分组导入完成（同名已覆盖）。如需更新结果，请点“刷新相关性”。");
+        } catch (err) {
+          setMsg(`导入失败：${String(err)}`);
+        } finally {
+          $("importFile").value = "";
+        }
+      });
+
+      $("saveState").addEventListener("click", async () => {
+        const payload = {
+          start_date: $("start").value.trim() || null,
+          end_date: $("end").value.trim() || null,
+          dynamic_universe: !!$("dynamicUniverse").checked,
+          quick_range_key: "all",
+        };
+        const resp = await api("/futures/research/state", { method: "PUT", body: JSON.stringify(payload) });
+        const out = await resp.text();
+        if (!resp.ok) return setMsg(out);
+        await loadState();
+        setMsg("全局研究设置已保存。分组有效时可点“刷新相关性”更新展示。");
+      });
+
+      for (const btn of document.querySelectorAll("button[data-quick]")) {
+        btn.addEventListener("click", async () => {
+          const k = btn.getAttribute("data-quick");
+          const payload = {
+            start_date: $("start").value.trim() || null,
+            end_date: $("end").value.trim() || null,
+            dynamic_universe: !!$("dynamicUniverse").checked,
+            quick_range_key: k,
+          };
+          const resp = await api("/futures/research/state", { method: "PUT", body: JSON.stringify(payload) });
+          const out = await resp.text();
+          if (!resp.ok) return setMsg(out);
+          await loadState();
+          setMsg(`全局区间已切换：${k}。分组有效时可点“刷新相关性”更新展示。`);
+        });
+      }
+
+      for (const btn of document.querySelectorAll("button[data-corr]")) {
+        btn.addEventListener("click", async () => {
+          corrRangeKey = saveCorrRange(btn.getAttribute("data-corr") || "all");
+          setMsg(`相关性区间已切换：${corrRangeKey}。点“刷新相关性”执行请求。`);
+        });
+      }
+
+      $("runCorr").addEventListener("click", async () => {
+        await runCorrelation();
+        await runCoverageSummary();
+      });
+      $("corrPickBasis").addEventListener("change", () => {
+        const saved = saveCorrPickBasis($("corrPickBasis").value);
+        $("corrPickBasis").value = saved;
+        setMsg(`相关性筛选依据已保存：${saved === "mean_abs" ? "平均绝对相关系数" : "平均相关系数"}`);
+      });
+      $("corrPickN").addEventListener("change", () => {
+        const saved = saveCorrPickN($("corrPickN").value);
+        $("corrPickN").value = String(saved);
+        setMsg(`相关性筛选数量已保存：N=${saved}`);
+      });
+      $("pickLowestCorr").addEventListener("click", async () => {
+        await runCorrelationSelect("lowest");
+      });
+      $("pickHighestCorr").addEventListener("click", async () => {
+        await runCorrelationSelect("highest");
+      });
+
+      async function bootstrap() {
+        try {
+          corrRangeKey = loadCorrRange();
+          $("corrPickBasis").value = loadCorrPickBasis();
+          $("corrPickN").value = String(loadCorrPickN());
+          await loadPool();
+          await loadGroups();
+          await loadState();
+          if (!hasActiveGroupWithCodes()) {
+            renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
+            renderCoverage({ ok: false, error: "当前分组为空或分组内无标的" });
+            setMsg("请选择或保存非空分组后触发相关性与覆盖摘要请求。");
+          }
+        } catch (err) {
+          setMsg(String(err));
+        }
+      }
+      bootstrap();
+    </script>
+  </body>
+</html>

@@ -147,6 +147,7 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
     16. Next-trading-day plan with planned execution date, buy list (target weight and buy delta), sell list (current weight and sell delta).
     17. Narrative research-report style interpretation section.
   - **Strategy layout rule (mandatory):** Place baseline analytics from overview to detail top-to-bottom; cluster highly related charts/tables together; use 1-3 columns per row for readability and comparison.
+  - **Futures indicators/backtest library rule (mandatory):** For futures backend research implementation, prefer mature libraries before custom code: use **TA-Lib (`talib`)** for technical indicator calculations and use the **`backtesting`** library for backtests. Only implement custom indicator/backtest logic when library capability cannot satisfy required semantics, and document the gap/reason in code comments or PR notes.
   - Update AGENTS.md with any new guidelines that emerge.
 
 - Cursor rules

@@ -239,6 +239,115 @@ class OffFundEvent(Base):
     )
 
 
+class FuturesPool(Base):
+    """
+    Futures candidate pool.
+    Isolated from ETF/off-fund/macro tables.
+    """
+
+    __tablename__ = "futures_pool"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
+    end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
+
+    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    last_data_start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    last_data_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FuturesPrice(Base):
+    """
+    Futures daily prices from Sina (via AkShare).
+    Futures have no dividend adjustment here; only raw (none) is stored.
+    """
+
+    __tablename__ = "futures_prices"
+    __table_args__ = (UniqueConstraint("code", "trade_date", "adjust", name="uq_futures_prices_code_trade_date_adjust"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+
+    open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="sina")
+    adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="none")
+
+    ingested_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FuturesResearchGroup(Base):
+    """
+    Futures research groups (isolated from ETF/off-fund research groups).
+    """
+
+    __tablename__ = "futures_research_group"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FuturesResearchGroupItem(Base):
+    """
+    Symbols bound to a futures research group.
+    """
+
+    __tablename__ = "futures_research_group_item"
+    __table_args__ = (UniqueConstraint("group_id", "code", name="uq_futures_research_group_item_group_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(Integer, ForeignKey("futures_research_group.id"), index=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class FuturesResearchState(Base):
+    """
+    Shared global state for futures research page.
+    Single row (id=1): start/end/dynamic_universe/current quick range selection.
+    """
+
+    __tablename__ = "futures_research_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
+    start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    dynamic_universe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    quick_range_key: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SimPortfolio(Base):
     __tablename__ = "sim_portfolio"
 

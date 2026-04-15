@@ -19,6 +19,20 @@ def test_research_serves_html(api_client: TestClient) -> None:
     assert "基准分析" in resp.text
 
 
+def test_futures_pool_serves_html(api_client: TestClient) -> None:
+    resp = api_client.get("/futures-pool")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "期货标的池配置" in resp.text
+
+
+def test_futures_research_serves_html(api_client: TestClient) -> None:
+    resp = api_client.get("/research/futures")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "期货研究" in resp.text
+
+
 def test_favicon_does_not_404(api_client: TestClient) -> None:
     client = api_client
     resp = client.get("/favicon.ico")

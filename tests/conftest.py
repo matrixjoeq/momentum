@@ -52,6 +52,22 @@ def api_client(engine):
                 }
             )
 
+        def futures_zh_daily_sina(self, symbol=None):
+            import pandas as pd
+
+            _ = symbol
+            return pd.DataFrame(
+                {
+                    "date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+                    "open": [100.0, 101.0, 100.5],
+                    "high": [102.0, 103.0, 102.0],
+                    "low": [99.0, 100.0, 99.8],
+                    "close": [101.0, 102.0, 101.2],
+                    "volume": [1000.0, 1100.0, 1200.0],
+                    "hold": [2000.0, 2100.0, 2200.0],
+                }
+            )
+
     app = create_app()
     # Prevent app lifespan from creating a MySQL engine during tests.
     app.state.engine = engine

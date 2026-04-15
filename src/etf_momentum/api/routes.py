@@ -76,6 +76,19 @@ from .schemas import (
     OffFundNavOut,
     OffFundPoolOut,
     OffFundPoolUpsert,
+    FuturesFetchResult,
+    FuturesFetchSelectedRequest,
+    FuturesPoolOut,
+    FuturesPoolUpsert,
+    FuturesPriceOut,
+    FuturesResearchGroupOut,
+    FuturesResearchGroupUpsert,
+    FuturesResearchGroupsImportRequest,
+    FuturesResearchStateOut,
+    FuturesResearchStateUpdate,
+    FuturesCorrelationRequest,
+    FuturesCoverageSummaryRequest,
+    FuturesCorrelationSelectRequest,
     IngestionBatchOut,
     SyncFixedPoolRequest,
     SyncFixedPoolResponse,
@@ -108,6 +121,13 @@ from ..analysis.calendar_effect import _ew_nav_and_weights_by_decision_dates as 
 from ..analysis.calendar_timing_strategy import CalendarTimingStrategyInputs, compute_calendar_timing_strategy_backtest
 from ..analysis.grouping import AssetGroupSuggestInputs, suggest_asset_groups
 from ..analysis.candidate_screening import RotationCandidateScreenInputs, screen_rotation_candidates
+from ..analysis.futures_research import (
+    RANGE_KEYS,
+    compute_futures_group_correlation,
+    compute_futures_group_coverage_summary,
+    resolve_quick_range,
+    select_symbols_by_correlation,
+)
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.oos_bootstrap import OosBootstrapConfig, run_trend_oos_bootstrap
@@ -137,6 +157,7 @@ from ..data.fred_fetcher import FetchRequest as FredFetchRequest
 from ..data.fred_fetcher import fetch_fred_daily_close
 from ..strategy.vix_signal import VixSignalInputs, backtest_vix_next_day_signal, generate_next_action
 from ..data.ingestion import ingest_one_etf
+from ..data.futures_ingestion import ingest_one_futures
 from ..data.off_fund_ingestion import ingest_one_off_fund
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
@@ -173,7 +194,27 @@ from ..db.off_fund_repo import (
     get_off_fund_pool_by_code,
     list_off_fund_navs,
     list_off_fund_pool,
+    purge_off_fund_data,
     upsert_off_fund_pool,
+)
+from ..db.futures_repo import (
+    delete_futures_pool,
+    delete_futures_prices,
+    get_futures_date_range,
+    get_futures_pool_by_code,
+    list_futures_pool,
+    list_futures_prices,
+    upsert_futures_pool,
+)
+from ..db.futures_research_repo import (
+    delete_futures_group,
+    get_active_futures_group,
+    get_futures_group,
+    get_futures_research_state,
+    list_futures_groups,
+    set_active_futures_group,
+    upsert_futures_group,
+    upsert_futures_research_state,
 )
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
@@ -4459,13 +4500,11 @@ def upsert_etf(payload: EtfPoolUpsert, db: Session = Depends(get_session)) -> Et
 
 
 @router.delete("/etf/{code}")
-def delete_etf(code: str, purge: bool = False, db: Session = Depends(get_session)) -> dict:
+def delete_etf(code: str, db: Session = Depends(get_session)) -> dict:
     ok = delete_etf_pool(db, code)
     if not ok:
         raise HTTPException(status_code=404, detail="ETF not found")
-    purged = None
-    if purge:
-        purged = purge_etf_data(db, code=code)
+    purged = purge_etf_data(db, code=code)
     db.commit()
     return {"deleted": True, "purged": purged}
 
@@ -4719,8 +4758,9 @@ def delete_off_fund_api(code: str, db: Session = Depends(get_session)) -> dict:
     ok = delete_off_fund_pool(db, code)
     if not ok:
         raise HTTPException(status_code=404, detail="off-fund not found")
+    purged = purge_off_fund_data(db, code=code)
     db.commit()
-    return {"deleted": True}
+    return {"deleted": True, "purged": purged}
 
 
 @router.post("/off-fund/{code}/fetch", response_model=OffFundFetchResult)
@@ -4823,4 +4863,451 @@ def get_off_fund_navs_api(
         )
         for r in rows
     ]
+
+
+def _purge_futures_data(db: Session, *, code: str) -> dict[str, int]:
+    n_prices = delete_futures_prices(db, code=code)
+    return {"prices": int(n_prices)}
+
+
+@router.get("/futures", response_model=list[FuturesPoolOut])
+def get_futures(adjust: str = "none", db: Session = Depends(get_session)) -> list[FuturesPoolOut]:
+    if str(adjust).strip().lower() != "none":
+        raise HTTPException(status_code=400, detail="futures only support adjust=none")
+    items = list_futures_pool(db)
+    out: list[FuturesPoolOut] = []
+    for i in items:
+        rng = get_futures_date_range(db, code=i.code, adjust="none")
+        out.append(
+            FuturesPoolOut(
+                code=i.code,
+                name=i.name,
+                start_date=i.start_date,
+                end_date=i.end_date,
+                last_fetch_status=i.last_fetch_status,
+                last_fetch_message=i.last_fetch_message,
+                last_data_start_date=rng[0],
+                last_data_end_date=rng[1],
+            )
+        )
+    return out
+
+
+@router.post("/futures", response_model=FuturesPoolOut)
+def upsert_futures(payload: FuturesPoolUpsert, db: Session = Depends(get_session)) -> FuturesPoolOut:
+    if payload.start_date and len(payload.start_date) != 8:
+        raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
+    if payload.end_date and len(payload.end_date) != 8:
+        raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
+    if payload.start_date and payload.end_date and payload.start_date > payload.end_date:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+    obj = upsert_futures_pool(
+        db,
+        code=payload.code,
+        name=payload.name,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    db.commit()
+    return FuturesPoolOut(
+        code=obj.code,
+        name=obj.name,
+        start_date=obj.start_date,
+        end_date=obj.end_date,
+        last_fetch_status=obj.last_fetch_status,
+        last_fetch_message=obj.last_fetch_message,
+        last_data_start_date=obj.last_data_start_date,
+        last_data_end_date=obj.last_data_end_date,
+    )
+
+
+@router.delete("/futures/{code}")
+def delete_futures_api(code: str, db: Session = Depends(get_session)) -> dict:
+    ok = delete_futures_pool(db, code)
+    if not ok:
+        raise HTTPException(status_code=404, detail="futures not found")
+    purged = _purge_futures_data(db, code=code)
+    db.commit()
+    return {"deleted": True, "purged": purged}
+
+
+@router.post("/futures/{code}/fetch", response_model=FuturesFetchResult)
+def fetch_one_futures(
+    code: str,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> FuturesFetchResult:
+    item = get_futures_pool_by_code(db, code)
+    if item is None:
+        raise HTTPException(status_code=404, detail="futures not found")
+    res = ingest_one_futures(
+        db,
+        ak=ak,
+        code=code,
+        start_date=item.start_date or get_settings().default_start_date,
+        end_date=item.end_date or get_settings().default_end_date,
+    )
+    if res.status != "success":
+        raise HTTPException(status_code=500, detail=res.message or "ingestion failed")
+    return FuturesFetchResult(code=code, inserted_or_updated=int(res.upserted), status=res.status, message=res.message)
+
+
+@router.post("/futures/fetch-all", response_model=list[FuturesFetchResult])
+def fetch_all_futures(
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> list[FuturesFetchResult]:
+    out: list[FuturesFetchResult] = []
+    for item in list_futures_pool(db):
+        res = ingest_one_futures(
+            db,
+            ak=ak,
+            code=item.code,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            FuturesFetchResult(
+                code=item.code,
+                inserted_or_updated=(int(res.upserted) if res.status == "success" else 0),
+                status=res.status,
+                message=res.message,
+            )
+        )
+    return out
+
+
+@router.post("/futures/fetch-selected", response_model=list[FuturesFetchResult])
+def fetch_selected_futures(
+    payload: FuturesFetchSelectedRequest,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> list[FuturesFetchResult]:
+    pool_by_code = {x.code: x for x in list_futures_pool(db)}
+    out: list[FuturesFetchResult] = []
+    for code in payload.codes:
+        item = pool_by_code.get(code)
+        if item is None:
+            out.append(FuturesFetchResult(code=code, inserted_or_updated=0, status="failed", message="futures not found"))
+            continue
+        res = ingest_one_futures(
+            db,
+            ak=ak,
+            code=code,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            FuturesFetchResult(
+                code=code,
+                inserted_or_updated=(int(res.upserted) if res.status == "success" else 0),
+                status=res.status,
+                message=res.message,
+            )
+        )
+    return out
+
+
+@router.get("/futures/{code}/prices", response_model=list[FuturesPriceOut])
+def get_futures_prices_api(
+    code: str,
+    start: str | None = None,
+    end: str | None = None,
+    adjust: str = "none",
+    limit: int = 5000,
+    db: Session = Depends(get_session),
+) -> list[FuturesPriceOut]:
+    if str(adjust).strip().lower() != "none":
+        raise HTTPException(status_code=400, detail="futures only support adjust=none")
+    start_d = _parse_yyyymmdd(start) if start else None
+    end_d = _parse_yyyymmdd(end) if end else None
+    rows = list_futures_prices(db, code=code, start_date=start_d, end_date=end_d, adjust="none", limit=limit)
+    return [
+        FuturesPriceOut(
+            code=r.code,
+            trade_date=r.trade_date.isoformat(),
+            open=r.open,
+            high=r.high,
+            low=r.low,
+            close=r.close,
+            volume=r.volume,
+            amount=r.amount,
+            open_interest=r.open_interest,
+            source=r.source,
+            adjust=r.adjust,
+        )
+        for r in rows
+    ]
+
+
+def _default_futures_research_dates() -> tuple[str, str]:
+    s = get_settings()
+    return (str(s.default_start_date), str(s.default_end_date))
+
+
+@router.get("/futures/research/state", response_model=FuturesResearchStateOut)
+def get_futures_research_state_api(db: Session = Depends(get_session)) -> FuturesResearchStateOut:
+    st = get_futures_research_state(db)
+    active = get_active_futures_group(db)
+    start_d, end_d = _default_futures_research_dates()
+    return FuturesResearchStateOut(
+        start_date=str(st.start_date or start_d),
+        end_date=str(st.end_date or end_d),
+        dynamic_universe=bool(st.dynamic_universe),
+        quick_range_key=str(st.quick_range_key or "all"),
+        active_group=(active.name if active else None),
+    )
+
+
+@router.put("/futures/research/state", response_model=FuturesResearchStateOut)
+def update_futures_research_state_api(
+    payload: FuturesResearchStateUpdate,
+    db: Session = Depends(get_session),
+) -> FuturesResearchStateOut:
+    start_d = str(payload.start_date or "").strip()
+    end_d = str(payload.end_date or "").strip()
+    if start_d and len(start_d) != 8:
+        raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
+    if end_d and len(end_d) != 8:
+        raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
+    base_start, base_end = _default_futures_research_dates()
+    if start_d:
+        base_start = start_d
+    if end_d:
+        base_end = end_d
+    quick_key = str(payload.quick_range_key or "all").strip().lower()
+    if quick_key not in RANGE_KEYS:
+        raise HTTPException(status_code=400, detail="quick_range_key must be one of: 1m|3m|6m|1y|3y|5y|10y|all")
+    rr = resolve_quick_range(key=quick_key, base_start=base_start, base_end=base_end)
+    obj = upsert_futures_research_state(
+        db,
+        start_date=rr.start,
+        end_date=rr.end,
+        dynamic_universe=bool(payload.dynamic_universe),
+        quick_range_key=rr.key,
+    )
+    db.commit()
+    active = get_active_futures_group(db)
+    return FuturesResearchStateOut(
+        start_date=str(obj.start_date or rr.start),
+        end_date=str(obj.end_date or rr.end),
+        dynamic_universe=bool(obj.dynamic_universe),
+        quick_range_key=str(obj.quick_range_key or rr.key),
+        active_group=(active.name if active else None),
+    )
+
+
+@router.get("/futures/research/groups", response_model=list[FuturesResearchGroupOut])
+def list_futures_research_groups_api(db: Session = Depends(get_session)) -> list[FuturesResearchGroupOut]:
+    return [FuturesResearchGroupOut(name=g.name, codes=g.codes, is_active=g.is_active) for g in list_futures_groups(db)]
+
+
+@router.post("/futures/research/groups", response_model=FuturesResearchGroupOut)
+def upsert_futures_research_group_api(
+    payload: FuturesResearchGroupUpsert,
+    db: Session = Depends(get_session),
+) -> FuturesResearchGroupOut:
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="group name is required")
+    g, _skipped = upsert_futures_group(db, name=name, codes=list(payload.codes or []), set_active=bool(payload.set_active))
+    db.commit()
+    return FuturesResearchGroupOut(name=g.name, codes=g.codes, is_active=g.is_active)
+
+
+@router.delete("/futures/research/groups/{name}")
+def delete_futures_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+    ok = delete_futures_group(db, name=name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="futures group not found")
+    db.commit()
+    return {"deleted": True}
+
+
+@router.post("/futures/research/groups/{name}/activate")
+def activate_futures_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+    ok = set_active_futures_group(db, name=name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="futures group not found")
+    db.commit()
+    return {"ok": True, "active_group": name}
+
+
+@router.get("/futures/research/groups-export")
+def export_futures_research_groups_api(db: Session = Depends(get_session)) -> dict:
+    groups = list_futures_groups(db)
+    active = get_active_futures_group(db)
+    body = {
+        "format": "etf_momentum_futures_groups_v1",
+        "active_group": (active.name if active else None),
+        "groups": {g.name: list(g.codes) for g in groups},
+    }
+    return body
+
+
+@router.post("/futures/research/groups-import")
+def import_futures_research_groups_api(
+    payload: FuturesResearchGroupsImportRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    imported: list[str] = []
+    skipped_codes: dict[str, list[str]] = {}
+    for k, vv in (payload.groups or {}).items():
+        name = str(k or "").strip()
+        if not name:
+            continue
+        g, skipped = upsert_futures_group(db, name=name, codes=list(vv or []), set_active=False)
+        imported.append(g.name)
+        if skipped:
+            skipped_codes[g.name] = skipped
+    active = str(payload.active_group or "").strip()
+    if active:
+        _ = set_active_futures_group(db, name=active)
+    db.commit()
+    return {
+        "ok": True,
+        "imported_groups": imported,
+        "active_group": (get_active_futures_group(db).name if get_active_futures_group(db) else None),
+        "skipped_codes": skipped_codes,
+    }
+
+
+@router.post("/futures/research/correlation")
+def futures_research_correlation_api(
+    payload: FuturesCorrelationRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    st = get_futures_research_state(db)
+    group_name = str(payload.group_name or "").strip()
+    g = get_futures_group(db, name=group_name) if group_name else None
+    if g is None:
+        ag = get_active_futures_group(db)
+        if ag is None:
+            raise HTTPException(status_code=400, detail="no active futures group")
+        group = ag
+    else:
+        # Re-read group with ordered codes
+        all_groups = {x.name: x for x in list_futures_groups(db)}
+        group = all_groups.get(str(g.name))
+        if group is None:
+            raise HTTPException(status_code=404, detail="futures group not found")
+
+    base_start, base_end = _default_futures_research_dates()
+    start_eff = str(payload.start_date or st.start_date or base_start)
+    end_eff = str(payload.end_date or st.end_date or base_end)
+    range_key = str(payload.range_key or "all").strip().lower()
+    if range_key not in RANGE_KEYS:
+        raise HTTPException(status_code=400, detail="range_key must be one of: 1m|3m|6m|1y|3y|5y|10y|all")
+    rr = resolve_quick_range(key=range_key, base_start=start_eff, base_end=end_eff)
+    dyn = bool(st.dynamic_universe) if payload.dynamic_universe is None else bool(payload.dynamic_universe)
+    out = compute_futures_group_correlation(
+        db,
+        group=group,
+        start=rr.start,
+        end=rr.end,
+        dynamic_universe=dyn,
+        min_obs=int(payload.min_obs),
+    )
+    out["meta"] = {
+        **(out.get("meta") or {}),
+        "range_key": rr.key,
+    }
+    return out
+
+
+@router.post("/futures/research/coverage-summary")
+def futures_research_coverage_summary_api(
+    payload: FuturesCoverageSummaryRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    st = get_futures_research_state(db)
+    group_name = str(payload.group_name or "").strip()
+    g = get_futures_group(db, name=group_name) if group_name else None
+    if g is None:
+        ag = get_active_futures_group(db)
+        if ag is None:
+            raise HTTPException(status_code=400, detail="no active futures group")
+        group = ag
+    else:
+        all_groups = {x.name: x for x in list_futures_groups(db)}
+        group = all_groups.get(str(g.name))
+        if group is None:
+            raise HTTPException(status_code=404, detail="futures group not found")
+
+    base_start, base_end = _default_futures_research_dates()
+    start_eff = str(payload.start_date or st.start_date or base_start)
+    end_eff = str(payload.end_date or st.end_date or base_end)
+    range_key = str(payload.range_key or "all").strip().lower()
+    if range_key not in RANGE_KEYS:
+        raise HTTPException(status_code=400, detail="range_key must be one of: 1m|3m|6m|1y|3y|5y|10y|all")
+    rr = resolve_quick_range(key=range_key, base_start=start_eff, base_end=end_eff)
+    dyn = bool(st.dynamic_universe) if payload.dynamic_universe is None else bool(payload.dynamic_universe)
+    out = compute_futures_group_coverage_summary(
+        db,
+        group=group,
+        start=rr.start,
+        end=rr.end,
+        dynamic_universe=dyn,
+    )
+    out["meta"] = {
+        **(out.get("meta") or {}),
+        "range_key": rr.key,
+    }
+    return out
+
+
+@router.post("/futures/research/correlation-select")
+def futures_research_correlation_select_api(
+    payload: FuturesCorrelationSelectRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    st = get_futures_research_state(db)
+    group_name = str(payload.group_name or "").strip()
+    g = get_futures_group(db, name=group_name) if group_name else None
+    if g is None:
+        ag = get_active_futures_group(db)
+        if ag is None:
+            raise HTTPException(status_code=400, detail="no active futures group")
+        group = ag
+    else:
+        all_groups = {x.name: x for x in list_futures_groups(db)}
+        group = all_groups.get(str(g.name))
+        if group is None:
+            raise HTTPException(status_code=404, detail="futures group not found")
+
+    base_start, base_end = _default_futures_research_dates()
+    start_eff = str(payload.start_date or st.start_date or base_start)
+    end_eff = str(payload.end_date or st.end_date or base_end)
+    range_key = str(payload.range_key or "all").strip().lower()
+    if range_key not in RANGE_KEYS:
+        raise HTTPException(status_code=400, detail="range_key must be one of: 1m|3m|6m|1y|3y|5y|10y|all")
+    rr = resolve_quick_range(key=range_key, base_start=start_eff, base_end=end_eff)
+    dyn = bool(st.dynamic_universe) if payload.dynamic_universe is None else bool(payload.dynamic_universe)
+    corr_out = compute_futures_group_correlation(
+        db,
+        group=group,
+        start=rr.start,
+        end=rr.end,
+        dynamic_universe=dyn,
+        min_obs=int(payload.min_obs),
+    )
+    if corr_out.get("ok") is not True:
+        return corr_out
+    mode = str(payload.mode or "lowest").strip().lower()
+    if mode not in {"lowest", "highest"}:
+        raise HTTPException(status_code=400, detail="mode must be lowest|highest")
+    score_basis = str(payload.score_basis or "mean").strip().lower()
+    if score_basis not in {"mean", "mean_abs"}:
+        raise HTTPException(status_code=400, detail="score_basis must be mean|mean_abs")
+    picked = select_symbols_by_correlation(
+        correlation_output=corr_out,
+        mode=mode,
+        score_basis=score_basis,
+        n=int(payload.n),
+    )
+    picked["meta"] = {
+        **(corr_out.get("meta") or {}),
+        "range_key": rr.key,
+    }
+    return picked
 

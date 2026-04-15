@@ -125,6 +125,110 @@ class OffFundNavOut(BaseModel):
     adjust: str
 
 
+class FuturesPoolUpsert(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+    start_date: str | None = Field(default=None, description="YYYYMMDD")
+    end_date: str | None = Field(default=None, description="YYYYMMDD")
+
+
+class FuturesPoolOut(BaseModel):
+    code: str
+    name: str
+    start_date: str | None
+    end_date: str | None
+    last_fetch_status: str | None = None
+    last_fetch_message: str | None = None
+    last_data_start_date: str | None = None
+    last_data_end_date: str | None = None
+
+
+class FuturesFetchResult(BaseModel):
+    code: str
+    inserted_or_updated: int
+    status: str
+    message: str | None = None
+
+
+class FuturesFetchSelectedRequest(BaseModel):
+    codes: list[str] = Field(min_length=1, description="futures symbols to fetch")
+
+
+class FuturesPriceOut(BaseModel):
+    code: str
+    trade_date: str  # YYYY-MM-DD
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    volume: float | None
+    amount: float | None
+    open_interest: float | None
+    source: str
+    adjust: str
+
+
+class FuturesResearchGroupUpsert(BaseModel):
+    name: str = Field(min_length=1, max_length=128, description="Group name")
+    codes: list[str] = Field(default_factory=list, description="Futures symbols in group")
+    set_active: bool = Field(default=True, description="If true, set this group as current active group")
+
+
+class FuturesResearchGroupOut(BaseModel):
+    name: str
+    codes: list[str]
+    is_active: bool
+
+
+class FuturesResearchGroupsImportRequest(BaseModel):
+    groups: dict[str, list[str]] = Field(description="Mapping: group name -> symbol list")
+    active_group: str | None = Field(default=None, description="Optional active group name")
+
+
+class FuturesResearchStateUpdate(BaseModel):
+    start_date: str | None = Field(default=None, description="YYYYMMDD")
+    end_date: str | None = Field(default=None, description="YYYYMMDD")
+    dynamic_universe: bool = Field(default=True)
+    quick_range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
+
+
+class FuturesResearchStateOut(BaseModel):
+    start_date: str | None = None
+    end_date: str | None = None
+    dynamic_universe: bool = True
+    quick_range_key: str = "all"
+    active_group: str | None = None
+
+
+class FuturesCorrelationRequest(BaseModel):
+    group_name: str | None = Field(default=None, description="If null, use active group")
+    range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
+    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+    min_obs: int = Field(default=20, ge=2, le=2520)
+
+
+class FuturesCoverageSummaryRequest(BaseModel):
+    group_name: str | None = Field(default=None, description="If null, use active group")
+    range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
+    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+
+
+class FuturesCorrelationSelectRequest(BaseModel):
+    group_name: str | None = Field(default=None, description="If null, use active group")
+    range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
+    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+    min_obs: int = Field(default=2, ge=2, le=2520)
+    mode: str = Field(default="lowest", description="lowest|highest")
+    score_basis: str = Field(default="mean", description="mean|mean_abs")
+    n: int = Field(default=5, ge=1, le=500)
+
+
 class IngestionBatchOut(BaseModel):
     id: int
     code: str

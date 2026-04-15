@@ -41,11 +41,15 @@
     <h2>ETF 候选池配置</h2>
     <div class="muted">数据源：多源回退（腾讯/新浪/东财），日频，qfq/hfq/none 均抓取，落地数据库。</div>
     <div class="muted" style="margin-top: 6px">
-      <a href="/research">进入基准分析（等权组合）</a>
-      <span style="margin: 0 6px;">|</span>
       <a href="/off-fund-pool">场外基金候选池配置</a>
       <span style="margin: 0 6px;">|</span>
-      <a href="/research/off-fund">场外基金研究（持有）</a>
+      <a href="/futures-pool">期货标的池配置</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="/research/futures">期货研究</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="/research">ETF 研究</a>
+      <span style="margin: 0 6px;">|</span>
+      <a href="/research/off-fund">场外基金研究</a>
       <span style="margin: 0 6px;">|</span>
       <a href="/research/gold">研究：黄金（ETF/全球/国内）</a>
       <span style="margin: 0 6px;">|</span>
@@ -350,7 +354,7 @@
         const failed = [];
         for (const code of codes) {
           try {
-            const resp = await api(`/etf/${code}?purge=true`, { method: "DELETE" });
+            const resp = await api(`/etf/${code}`, { method: "DELETE" });
             if (!resp.ok) {
               const text = await resp.text();
               failed.push(`${code}: ${text}`);
@@ -389,7 +393,7 @@
             `将彻底删除：${code}\n\n- 候选池记录\n- 全部已抓取价格数据（hfq/qfq/none）\n- 对应 ingestion batch 记录（含回滚审计/记录）\n- 若存在，会删除 batch 备份快照文件\n\n此操作不可恢复，确认继续？`
           );
           if (!ok) return;
-          const resp = await api(`/etf/${code}?purge=true`, { method: "DELETE" });
+          const resp = await api(`/etf/${code}`, { method: "DELETE" });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
           try {

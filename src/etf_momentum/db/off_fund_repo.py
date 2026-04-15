@@ -80,6 +80,20 @@ def delete_off_fund_pool(db: Session, code: str) -> bool:
     return True
 
 
+def purge_off_fund_data(db: Session, *, code: str) -> dict[str, int]:
+    """
+    Permanently delete all persisted off-fund data for one code:
+    - nav series (none/qfq/hfq)
+    - event records (dividend/split)
+    """
+    r_navs = db.execute(delete(OffFundNav).where(OffFundNav.code == code))
+    r_events = db.execute(delete(OffFundEvent).where(OffFundEvent.code == code))
+    return {
+        "navs": int(getattr(r_navs, "rowcount", 0) or 0),
+        "events": int(getattr(r_events, "rowcount", 0) or 0),
+    }
+
+
 def list_off_fund_navs(
     db: Session,
     *,

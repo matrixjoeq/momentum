@@ -58,10 +58,26 @@ def create_app() -> FastAPI:
             return RedirectResponse(url="/docs")
         return FileResponse(path)
 
+    @fastapi_app.get("/futures-pool")
+    def futures_pool():
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "futures_pool.html"
+        if not path.exists():
+            return RedirectResponse(url="/docs")
+        return FileResponse(path)
+
     @fastapi_app.get("/research/off-fund")
     def research_off_fund():
         _ = get_settings()
         path = Path(__file__).resolve().parent / "web" / "off_fund_research.html"
+        if not path.exists():
+            return RedirectResponse(url="/docs")
+        return FileResponse(path)
+
+    @fastapi_app.get("/research/futures")
+    def research_futures():
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "futures_research.html"
         if not path.exists():
             return RedirectResponse(url="/docs")
         return FileResponse(path)

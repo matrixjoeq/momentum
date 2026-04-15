@@ -26,7 +26,10 @@ def test_create_list_delete_etf_and_fetch(api_client: TestClient) -> None:
     assert item["last_data_start_date"] == "20240102"
     assert item["last_data_end_date"] == "20240103"
 
-    assert delete_json(client, "/api/etf/510300") == {"deleted": True, "purged": None}
+    out = delete_json(client, "/api/etf/510300")
+    assert out["deleted"] is True
+    assert out["purged"] is not None
+    assert "prices" in out["purged"]
 
 
 def test_delete_etf_purge_removes_prices_and_batches(api_client: TestClient) -> None:
@@ -43,7 +46,7 @@ def test_delete_etf_purge_removes_prices_and_batches(api_client: TestClient) -> 
     assert len(get_json_ok(client, "/api/etf/510300/prices?adjust=hfq")) > 0
     assert len(get_json_ok(client, "/api/batches?code=510300")) >= 1
 
-    data = delete_json(client, "/api/etf/510300", params={"purge": "true"})
+    data = delete_json(client, "/api/etf/510300")
     assert data["deleted"] is True
     assert data["purged"] is not None
     assert data["purged"]["prices"] >= 1
