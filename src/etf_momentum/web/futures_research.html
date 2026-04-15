@@ -73,6 +73,25 @@
       .muted {
         margin-top: 4px;
       }
+      .rule-badge {
+        display: inline-block;
+        margin-top: 6px;
+        margin-bottom: 6px;
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        background: rgba(90, 160, 255, 0.12);
+      }
+      .rule-badge-close {
+        background: rgba(90, 160, 255, 0.14);
+        border-color: rgba(90, 160, 255, 0.42);
+      }
+      .rule-badge-open {
+        background: rgba(255, 160, 70, 0.16);
+        border-color: rgba(255, 160, 70, 0.48);
+      }
       #msg {
         margin-top: 8px;
       }
@@ -180,6 +199,32 @@
       <h3>当前分组可交易覆盖摘要</h3>
       <div id="covMeta" class="muted"></div>
       <div id="covTableWrap"></div>
+    </div>
+
+    <div class="panel">
+      <h3>趋势回测（TA-Lib + backtesting）</h3>
+      <div class="row">
+        <div>
+          <label>执行价</label>
+          <select id="trendExecPrice">
+            <option value="close" selected>收盘执行（默认）</option>
+            <option value="open">开盘执行</option>
+          </select>
+        </div>
+        <div>
+          <label>快线MA</label>
+          <input id="trendFastMa" type="number" min="2" step="1" value="20" />
+        </div>
+        <div>
+          <label>慢线MA</label>
+          <input id="trendSlowMa" type="number" min="3" step="1" value="60" />
+        </div>
+        <button id="runTrendBacktest">刷新趋势回测</button>
+      </div>
+      <div id="trendMeta" class="muted"></div>
+      <div id="trendRuleBadge"></div>
+      <div id="trendSummaryWrap"></div>
+      <div id="trendSeriesWrap"></div>
     </div>
 
     <div id="msg"></div>
@@ -445,6 +490,52 @@
           `<table class="corr"><thead><tr><th>#</th><th>代码</th><th>名称</th><th>筛选分数(${basisLabel})</th><th>平均相关系数</th><th>平均绝对相关系数</th><th>有效配对数</th></tr></thead><tbody>${rows}</tbody></table>`;
       }
 
+      function humanizeSignalExecRule(rule) {
+        const x = String(rule || "").trim();
+        const m = x.match(/^signal_t_execute_t_plus_1_(open|close)$/);
+        if (m) return `signal_t -> execute_t+1_${m[1]}`;
+        return x || "-";
+      }
+
+      function renderTrendBacktest(out) {
+        if (!out || out.ok !== true) {
+          $("trendMeta").textContent = `趋势回测不可用：${(out && out.error) || "unknown"}`;
+          $("trendRuleBadge").innerHTML = "";
+          $("trendSummaryWrap").innerHTML = "";
+          $("trendSeriesWrap").innerHTML = "";
+          return;
+        }
+        const m = out.meta || {};
+        const signalRule = humanizeSignalExecRule(m.signal_execution_rule);
+        const execPrice = String(m.exec_price || "").toLowerCase();
+        const badgeClass = execPrice === "open" ? "rule-badge-open" : "rule-badge-close";
+        $("trendRuleBadge").innerHTML = `<span class="rule-badge ${badgeClass}">执行规则：${esc(signalRule)}</span>`;
+        $("trendMeta").textContent =
+          `分组=${m.group_name || "-"} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+        const s = out.summary || {};
+        $("trendSummaryWrap").innerHTML =
+          `<table class="corr"><thead><tr><th>策略累计收益</th><th>基准累计收益</th><th>超额累计收益</th></tr></thead>` +
+          `<tbody><tr><td>${Number(s.strategy_total_return || 0).toFixed(4)}</td><td>${Number(s.benchmark_total_return || 0).toFixed(4)}</td><td>${Number(s.excess_total_return || 0).toFixed(4)}</td></tr></tbody></table>`;
+        const strat = Array.isArray(out.series && out.series.strategy_nav) ? out.series.strategy_nav : [];
+        const bench = Array.isArray(out.series && out.series.benchmark_nav) ? out.series.benchmark_nav : [];
+        const n = Math.max(strat.length, bench.length);
+        if (!n) {
+          $("trendSeriesWrap").innerHTML = `<div class="muted">暂无净值序列。</div>`;
+          return;
+        }
+        const rows = [];
+        for (let i = Math.max(0, n - 30); i < n; i += 1) {
+          const a = strat[i] || {};
+          const b = bench[i] || {};
+          rows.push(
+            `<tr><td>${esc(a.date || b.date || "-")}</td><td>${a.value == null ? "-" : Number(a.value).toFixed(4)}</td><td>${b.value == null ? "-" : Number(b.value).toFixed(4)}</td></tr>`
+          );
+        }
+        $("trendSeriesWrap").innerHTML =
+          `<div class="muted">展示最近30个点位</div>` +
+          `<table class="corr"><thead><tr><th>日期</th><th>策略NAV</th><th>基准NAV</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+      }
+
       async function runCorrelation() {
         if (!hasActiveGroupWithCodes()) {
           renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
@@ -506,6 +597,43 @@
           return;
         }
         renderCorrPick(out);
+      }
+
+      async function runTrendBacktest() {
+        if (!hasActiveGroupWithCodes()) {
+          renderTrendBacktest({ ok: false, error: "当前分组为空或分组内无标的" });
+          return;
+        }
+        let fast = Number($("trendFastMa").value);
+        let slow = Number($("trendSlowMa").value);
+        if (!Number.isFinite(fast) || fast < 2) fast = 20;
+        if (!Number.isFinite(slow) || slow < 3) slow = 60;
+        fast = Math.floor(fast);
+        slow = Math.floor(slow);
+        if (slow <= fast) slow = fast + 1;
+        $("trendFastMa").value = String(fast);
+        $("trendSlowMa").value = String(slow);
+        const resp = await api("/futures/research/trend-backtest", {
+          method: "POST",
+          body: JSON.stringify({
+            range_key: corrRangeKey,
+            exec_price: String($("trendExecPrice").value || "close"),
+            fast_ma: fast,
+            slow_ma: slow,
+            min_points: 120,
+            cost_bps: 5.0,
+            fee_side: "two_way",
+            slippage_type: "percent",
+            slippage_value: 0.0005,
+            slippage_side: "two_way",
+          }),
+        });
+        const out = await resp.json();
+        if (!resp.ok) {
+          renderTrendBacktest({ ok: false, error: (out && out.detail) || JSON.stringify(out) });
+          return;
+        }
+        renderTrendBacktest(out);
       }
 
       async function refreshResearchByActiveGroupChange() {
@@ -660,6 +788,9 @@
       $("pickHighestCorr").addEventListener("click", async () => {
         await runCorrelationSelect("highest");
       });
+      $("runTrendBacktest").addEventListener("click", async () => {
+        await runTrendBacktest();
+      });
 
       async function bootstrap() {
         try {
@@ -672,6 +803,7 @@
           if (!hasActiveGroupWithCodes()) {
             renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
             renderCoverage({ ok: false, error: "当前分组为空或分组内无标的" });
+            renderTrendBacktest({ ok: false, error: "当前分组为空或分组内无标的" });
             setMsg("请选择或保存非空分组后触发相关性与覆盖摘要请求。");
           }
         } catch (err) {

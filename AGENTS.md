@@ -148,6 +148,7 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
     17. Narrative research-report style interpretation section.
   - **Strategy layout rule (mandatory):** Place baseline analytics from overview to detail top-to-bottom; cluster highly related charts/tables together; use 1-3 columns per row for readability and comparison.
   - **Futures indicators/backtest library rule (mandatory):** For futures backend research implementation, prefer mature libraries before custom code: use **TA-Lib (`talib`)** for technical indicator calculations and use the **`backtesting`** library for backtests. Only implement custom indicator/backtest logic when library capability cannot satisfy required semantics, and document the gap/reason in code comments or PR notes.
+  - **TA-Lib/backtesting API verification rule (mandatory):** Before writing or modifying any code that calls **`talib`** or **`backtesting`**, you must first check the corresponding official API documentation to confirm parameter names, return semantics, and execution behavior (for example sizing, order timing, and trade finalization behavior). Do not code against assumptions; verify usage first and then implement.
   - Update AGENTS.md with any new guidelines that emerge.
 
 - Cursor rules

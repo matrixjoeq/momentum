@@ -89,6 +89,7 @@ from .schemas import (
     FuturesCorrelationRequest,
     FuturesCoverageSummaryRequest,
     FuturesCorrelationSelectRequest,
+    FuturesTrendBacktestRequest,
     IngestionBatchOut,
     SyncFixedPoolRequest,
     SyncFixedPoolResponse,
@@ -128,6 +129,7 @@ from ..analysis.futures_research import (
     resolve_quick_range,
     select_symbols_by_correlation,
 )
+from ..analysis.futures_trend import compute_futures_group_trend_backtest
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.oos_bootstrap import OosBootstrapConfig, run_trend_oos_bootstrap
@@ -5310,4 +5312,55 @@ def futures_research_correlation_select_api(
         "range_key": rr.key,
     }
     return picked
+
+
+@router.post("/futures/research/trend-backtest")
+def futures_research_trend_backtest_api(
+    payload: FuturesTrendBacktestRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    st = get_futures_research_state(db)
+    group_name = str(payload.group_name or "").strip()
+    g = get_futures_group(db, name=group_name) if group_name else None
+    if g is None:
+        ag = get_active_futures_group(db)
+        if ag is None:
+            raise HTTPException(status_code=400, detail="no active futures group")
+        group = ag
+    else:
+        all_groups = {x.name: x for x in list_futures_groups(db)}
+        group = all_groups.get(str(g.name))
+        if group is None:
+            raise HTTPException(status_code=404, detail="futures group not found")
+
+    base_start, base_end = _default_futures_research_dates()
+    start_eff = str(payload.start_date or st.start_date or base_start)
+    end_eff = str(payload.end_date or st.end_date or base_end)
+    range_key = str(payload.range_key or "all").strip().lower()
+    if range_key not in RANGE_KEYS:
+        raise HTTPException(status_code=400, detail="range_key must be one of: 1m|3m|6m|1y|3y|5y|10y|all")
+    rr = resolve_quick_range(key=range_key, base_start=start_eff, base_end=end_eff)
+    dyn = bool(st.dynamic_universe) if payload.dynamic_universe is None else bool(payload.dynamic_universe)
+    out = compute_futures_group_trend_backtest(
+        db,
+        group=group,
+        start=rr.start,
+        end=rr.end,
+        dynamic_universe=dyn,
+        exec_price=str(payload.exec_price or "close").strip().lower(),  # type: ignore[arg-type]
+        fast_ma=int(payload.fast_ma),
+        slow_ma=int(payload.slow_ma),
+        position_size_pct=float(payload.position_size_pct),
+        min_points=int(payload.min_points),
+        cost_bps=float(payload.cost_bps),
+        fee_side=str(payload.fee_side or "two_way").strip().lower(),  # type: ignore[arg-type]
+        slippage_type=str(payload.slippage_type or "percent").strip().lower(),  # type: ignore[arg-type]
+        slippage_value=float(payload.slippage_value),
+        slippage_side=str(payload.slippage_side or "two_way").strip().lower(),  # type: ignore[arg-type]
+    )
+    out["meta"] = {
+        **(out.get("meta") or {}),
+        "range_key": rr.key,
+    }
+    return out
 

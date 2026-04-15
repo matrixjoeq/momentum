@@ -109,3 +109,110 @@ def test_futures_research_groups_import_export_overwrite(api_client: TestClient)
     out = imported.json()
     assert out["ok"] is True
     assert out["active_group"] == "B组"
+
+
+def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
+    client = api_client
+    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
+    post_json_ok(client, "/api/futures", {"code": "IF0", "name": "股指主连"})
+    post_json_ok(client, "/api/futures/RB0/fetch", {})
+    post_json_ok(client, "/api/futures/IF0/fetch", {})
+    post_json_ok(
+        client,
+        "/api/futures/research/groups",
+        {"name": "趋势组", "codes": ["RB0", "IF0"], "set_active": True},
+    )
+    st = client.put(
+        "/api/futures/research/state",
+        json={
+            "start_date": "20240101",
+            "end_date": "20241231",
+            "dynamic_universe": True,
+            "quick_range_key": "all",
+        },
+    )
+    assert st.status_code == 200
+
+    resp = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+        },
+    )
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["ok"] is True
+    assert "series" in out
+    assert "strategy_nav" in out["series"]
+    assert "benchmark_nav" in out["series"]
+    assert "summary" in out
+    assert out["meta"]["exec_price"] == "close"
+    assert out["meta"]["benchmark_price_basis"] == "close"
+    assert out["meta"]["fee_side"] == "two_way"
+    assert out["meta"]["slippage_type"] == "percent"
+    assert out["meta"]["signal_execution_rule"] == "signal_t_execute_t_plus_1_close"
+    assert out["meta"]["signal_lag_trading_days"] == 1
+
+    resp_open = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "open",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+        },
+    )
+    assert resp_open.status_code == 200
+    out_open = resp_open.json()
+    assert out_open["ok"] is True
+    assert out_open["meta"]["exec_price"] == "open"
+    assert out_open["meta"]["benchmark_price_basis"] == "open"
+
+
+def test_futures_trend_backtest_rejects_invalid_semantics(api_client: TestClient) -> None:
+    client = api_client
+    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
+    post_json_ok(client, "/api/futures/RB0/fetch", {})
+    post_json_ok(
+        client,
+        "/api/futures/research/groups",
+        {"name": "趋势组", "codes": ["RB0"], "set_active": True},
+    )
+
+    bad_exec = client.post(
+        "/api/futures/research/trend-backtest",
+        json={"range_key": "all", "exec_price": "oc2", "fast_ma": 2, "slow_ma": 3, "min_points": 2},
+    )
+    assert bad_exec.status_code == 200
+    assert bad_exec.json()["ok"] is False
+    assert bad_exec.json()["error"] == "invalid_exec_price"
+
+    bad_fee = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "fee_side": "x",
+        },
+    )
+    assert bad_fee.status_code == 200
+    assert bad_fee.json()["ok"] is False
+    assert bad_fee.json()["error"] == "invalid_fee_side"

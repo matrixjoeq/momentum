@@ -229,6 +229,24 @@ class FuturesCorrelationSelectRequest(BaseModel):
     n: int = Field(default=5, ge=1, le=500)
 
 
+class FuturesTrendBacktestRequest(BaseModel):
+    group_name: str | None = Field(default=None, description="If null, use active group")
+    range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
+    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+    exec_price: str = Field(default="close", description="open|close")
+    fast_ma: int = Field(default=20, ge=2, le=500)
+    slow_ma: int = Field(default=60, ge=3, le=800)
+    position_size_pct: float = Field(default=1.0, gt=0.0, le=1.0)
+    min_points: int = Field(default=120, ge=2, le=100000)
+    cost_bps: float = Field(default=5.0, ge=0.0, le=2000.0, description="Commission bps with fee_side semantics")
+    fee_side: str = Field(default="two_way", description="one_way|two_way")
+    slippage_type: str = Field(default="percent", description="percent|price_spread")
+    slippage_value: float = Field(default=0.0005, ge=0.0, description="percent ratio or absolute price spread")
+    slippage_side: str = Field(default="two_way", description="one_way|two_way")
+
+
 class IngestionBatchOut(BaseModel):
     id: int
     code: str
