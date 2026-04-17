@@ -134,6 +134,7 @@ from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.oos_bootstrap import OosBootstrapConfig, run_trend_oos_bootstrap
 from ..analysis.trend import TrendInputs, TrendPortfolioInputs, compute_trend_backtest, compute_trend_portfolio_backtest
+from ..analysis.bt_trend import compute_trend_backtest_bt, compute_trend_portfolio_backtest_bt
 from ..analysis.leadlag import LeadLagInputs, compute_lead_lag, align_us_close_to_cn_next_trading_day
 from ..analysis.macro import analyze_pair_leadlag, load_macro_close_series
 from ..analysis.sim_gbm import (
@@ -395,6 +396,25 @@ def _parse_yyyymmdd(x: str) -> dt.date:
 
 def _iso(d: dt.date | None) -> str | None:
     return None if d is None else d.isoformat()
+
+
+_VALID_TREND_ENGINES = {"legacy", "bt"}
+
+
+def _resolve_trend_engine(*, request_engine: str | None, default_engine: str | None) -> tuple[str, str]:
+    """Resolve effective trend engine with safe default fallback.
+
+    Request-level invalid values still raise 400. A malformed server default
+    falls back to legacy so deployments remain available.
+    """
+    req = str(request_engine or "").strip().lower()
+    default_raw = str(default_engine or "legacy").strip().lower()
+    resolved_default = default_raw if default_raw in _VALID_TREND_ENGINES else "legacy"
+    if req:
+        if req not in _VALID_TREND_ENGINES:
+            raise HTTPException(status_code=400, detail="engine must be one of: legacy|bt")
+        return req, resolved_default
+    return resolved_default, resolved_default
 
 
 _FIXED_CODES = ["159915", "511010", "513100", "518880"]
@@ -1049,8 +1069,18 @@ def trend_backtest(payload: TrendBacktestRequest, db: Session = Depends(get_sess
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
         quick_mode=bool(getattr(payload, "quick_mode", False)),
     )
+    settings = get_settings()
+    engine, default_engine = _resolve_trend_engine(
+        request_engine=getattr(payload, "engine", None),
+        default_engine=getattr(settings, "trend_backtest_engine", "legacy"),
+    )
     try:
-        return compute_trend_backtest(db, inp)
+        out = compute_trend_backtest_bt(db, inp) if engine == "bt" else compute_trend_backtest(db, inp)
+        meta = out.setdefault("meta", {})
+        if isinstance(meta, dict):
+            meta.setdefault("engine", engine)
+            meta.setdefault("engine_default", default_engine)
+        return out
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1146,8 +1176,18 @@ def trend_portfolio_backtest(payload: TrendPortfolioBacktestRequest, db: Session
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
         quick_mode=bool(getattr(payload, "quick_mode", False)),
     )
+    settings = get_settings()
+    engine, default_engine = _resolve_trend_engine(
+        request_engine=getattr(payload, "engine", None),
+        default_engine=getattr(settings, "trend_backtest_engine", "legacy"),
+    )
     try:
-        return compute_trend_portfolio_backtest(db, inp)
+        out = compute_trend_portfolio_backtest_bt(db, inp) if engine == "bt" else compute_trend_portfolio_backtest(db, inp)
+        meta = out.setdefault("meta", {})
+        if isinstance(meta, dict):
+            meta.setdefault("engine", engine)
+            meta.setdefault("engine_default", default_engine)
+        return out
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1170,6 +1210,11 @@ def trend_portfolio_oos_bootstrap(payload: TrendOosBootstrapRequest, db: Session
         objective="maximize",
         objective_metric="sharpe_ratio",
     )
+    settings = get_settings()
+    engine, default_engine = _resolve_trend_engine(
+        request_engine=getattr(payload, "engine", None),
+        default_engine=getattr(settings, "trend_backtest_engine", "legacy"),
+    )
     out = run_trend_oos_bootstrap(
         db,
         codes=payload.codes,
@@ -1181,7 +1226,13 @@ def trend_portfolio_oos_bootstrap(payload: TrendOosBootstrapRequest, db: Session
         risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
         exec_price=payload.exec_price,
+        engine=engine,
     )
+    if isinstance(out, dict):
+        meta = out.setdefault("meta", {})
+        if isinstance(meta, dict):
+            meta.setdefault("engine", engine)
+            meta.setdefault("engine_default", default_engine)
     return out
 
 

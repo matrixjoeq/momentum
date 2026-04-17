@@ -3,13 +3,16 @@
 import numpy as np
 import pandas as pd
 
+import etf_momentum.db.repo as repo
 from etf_momentum.analysis.oos_bootstrap import (
     OosBootstrapConfig,
     block_bootstrap_returns,
     returns_to_close,
+    run_trend_oos_bootstrap,
     split_in_sample_oos,
     run_rotation_oos_bootstrap,
 )
+from tests.helpers.rotation_case_data import seed_prices
 
 
 def test_split_in_sample_oos():
@@ -89,3 +92,81 @@ def test_run_rotation_oos_bootstrap_mini():
     assert "oos_start" in out
     assert out["chosen_params"].get("lookback_days") == 20
     assert out["chosen_params"].get("top_k") == 1
+
+
+def test_run_trend_oos_bootstrap_bt_fallback_marks_legacy(engine, session_factory, monkeypatch):
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    cfg = OosBootstrapConfig(oos_ratio=0.3, n_bootstrap=4, block_size=10, seed=7)
+    monkeypatch.setattr(
+        repo,
+        "upsert_prices",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("forced bootstrap synth fail")),
+    )
+    with session_factory() as db:
+        out = run_trend_oos_bootstrap(
+            db,
+            codes=["A", "B"],
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            config=cfg,
+            param_grid={"sma_window": [20], "ma_type": ["sma"]},
+            engine="bt",
+        )
+
+    assert str(out.get("engine") or "").lower() == "bt"
+    assert str(out.get("oos_eval_engine") or "").lower() == "bt"
+    assert str(out.get("bootstrap_eval_engine") or "").lower() == "legacy"
+    limitations = out.get("limitations")
+    assert isinstance(limitations, list)
+    assert any("fallback to legacy" in str(x).lower() for x in limitations)
+
+
+def test_run_trend_oos_bootstrap_bt_fallback_marks_mixed(engine, session_factory, monkeypatch):
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    cfg = OosBootstrapConfig(oos_ratio=0.3, n_bootstrap=4, block_size=10, seed=7)
+
+    real_upsert = repo.upsert_prices
+    calls = {"n": 0}
+
+    def _upsert_with_one_failure(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("forced first bootstrap synth fail")
+        return real_upsert(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "upsert_prices", _upsert_with_one_failure)
+    with session_factory() as db:
+        out = run_trend_oos_bootstrap(
+            db,
+            codes=["A", "B"],
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            config=cfg,
+            param_grid={"sma_window": [20], "ma_type": ["sma"]},
+            engine="bt",
+        )
+
+    assert str(out.get("engine") or "").lower() == "bt"
+    assert str(out.get("oos_eval_engine") or "").lower() == "bt"
+    assert str(out.get("bootstrap_eval_engine") or "").lower() == "mixed"
+    limitations = out.get("limitations")
+    assert isinstance(limitations, list)
+    assert any("fallback to legacy" in str(x).lower() for x in limitations)

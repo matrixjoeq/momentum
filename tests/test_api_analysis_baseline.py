@@ -889,6 +889,526 @@ def test_api_trend_single_ma_cross_rejects_kama_type(api_client):
     assert "ma_type=kama is only supported for ma_filter" in str((err or {}).get("detail") or "")
 
 
+def test_api_trend_single_bt_engine_contract(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "engine": "bt",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert "nav" in data and "series" in data["nav"]
+    assert "STRAT" in (data["nav"]["series"] or {})
+    assert "BUY_HOLD" in (data["nav"]["series"] or {})
+    assert "EXCESS" in (data["nav"]["series"] or {})
+
+
+def test_api_trend_portfolio_bt_engine_contract(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "engine": "bt",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert "nav" in data and "series" in data["nav"]
+    assert "STRAT" in (data["nav"]["series"] or {})
+    assert "BUY_HOLD" in (data["nav"]["series"] or {})
+    assert "EXCESS" in (data["nav"]["series"] or {})
+
+
+def test_api_trend_portfolio_oos_bootstrap_bt_engine_contract(api_client, engine):
+    c = api_client
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio/oos-bootstrap",
+        {
+            "codes": ["A", "B"],
+            "start": dates[0].strftime("%Y%m%d"),
+            "end": dates[-1].strftime("%Y%m%d"),
+            "strategy": "ma_filter",
+            "n_bootstrap": 5,
+            "block_size": 10,
+            "oos_ratio": 0.3,
+            "exec_price": "close",
+            "engine": "bt",
+            "param_grid": {
+                "sma_window": [20],
+                "ma_type": ["sma"],
+            },
+        },
+    )
+    assert "error" not in data
+    assert str(((data.get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert str(data.get("engine") or "").lower() == "bt"
+    assert str(data.get("oos_eval_engine") or "").lower() == "bt"
+    assert str(data.get("bootstrap_eval_engine") or "").lower() == "bt"
+    assert isinstance(data.get("limitations"), list)
+
+
+def test_api_trend_engine_uses_server_default_when_request_missing(api_client, monkeypatch):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bt")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "bt"
+
+
+def test_api_trend_portfolio_engine_uses_server_default_when_request_missing(
+    api_client, monkeypatch
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bt")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "bt"
+
+
+def test_api_trend_engine_falls_back_to_legacy_when_server_default_invalid(api_client, monkeypatch):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bad_engine")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "legacy"
+    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+
+
+def test_api_trend_portfolio_engine_falls_back_to_legacy_when_server_default_invalid(
+    api_client, monkeypatch
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bad_engine")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "legacy"
+    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+
+
+def test_api_trend_single_rejects_invalid_engine(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "engine": "invalid",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert "engine must be one of: legacy|bt" in str((err or {}).get("detail") or "")
+
+
+def test_api_trend_portfolio_rejects_invalid_engine(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "engine": "invalid",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert "engine must be one of: legacy|bt" in str((err or {}).get("detail") or "")
+
+
+def test_api_trend_oos_bootstrap_engine_uses_server_default_when_missing(api_client, engine, monkeypatch):
+    c = api_client
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bt")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio/oos-bootstrap",
+        {
+            "codes": ["A", "B"],
+            "start": dates[0].strftime("%Y%m%d"),
+            "end": dates[-1].strftime("%Y%m%d"),
+            "strategy": "ma_filter",
+            "n_bootstrap": 5,
+            "block_size": 10,
+            "oos_ratio": 0.3,
+            "exec_price": "close",
+            "param_grid": {
+                "sma_window": [20],
+                "ma_type": ["sma"],
+            },
+        },
+    )
+    assert str(((data.get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert str(((data.get("meta") or {}).get("engine_default") or "")).lower() == "bt"
+    assert str(data.get("engine") or "").lower() == "bt"
+
+
+def test_api_trend_oos_bootstrap_falls_back_to_legacy_when_server_default_invalid(
+    api_client, engine, monkeypatch
+):
+    c = api_client
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bad_engine")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio/oos-bootstrap",
+        {
+            "codes": ["A", "B"],
+            "start": dates[0].strftime("%Y%m%d"),
+            "end": dates[-1].strftime("%Y%m%d"),
+            "strategy": "ma_filter",
+            "n_bootstrap": 5,
+            "block_size": 10,
+            "oos_ratio": 0.3,
+            "exec_price": "close",
+            "param_grid": {
+                "sma_window": [20],
+                "ma_type": ["sma"],
+            },
+        },
+    )
+    assert str(((data.get("meta") or {}).get("engine") or "")).lower() == "legacy"
+    assert str(((data.get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert str(data.get("engine") or "").lower() == "legacy"
+
+
+def test_api_trend_single_request_engine_overrides_invalid_server_default(api_client, monkeypatch):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bad_engine")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "engine": "bt",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+
+
+def test_api_trend_portfolio_request_engine_overrides_invalid_server_default(
+    api_client, monkeypatch
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bad_engine")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "engine": "bt",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+
+
+def test_api_trend_oos_request_engine_overrides_invalid_server_default(
+    api_client, engine, monkeypatch
+):
+    c = api_client
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    monkeypatch.setenv("MOMENTUM_TREND_BACKTEST_ENGINE", "bad_engine")
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio/oos-bootstrap",
+        {
+            "codes": ["A", "B"],
+            "start": dates[0].strftime("%Y%m%d"),
+            "end": dates[-1].strftime("%Y%m%d"),
+            "strategy": "ma_filter",
+            "n_bootstrap": 5,
+            "block_size": 10,
+            "oos_ratio": 0.3,
+            "exec_price": "close",
+            "engine": "bt",
+            "param_grid": {
+                "sma_window": [20],
+                "ma_type": ["sma"],
+            },
+        },
+    )
+    assert str(((data.get("meta") or {}).get("engine") or "")).lower() == "bt"
+    assert str(((data.get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert str(data.get("engine") or "").lower() == "bt"
+
+
+def test_api_trend_oos_bootstrap_rejects_invalid_engine(api_client, engine):
+    c = api_client
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio/oos-bootstrap",
+        {
+            "codes": ["A", "B"],
+            "start": dates[0].strftime("%Y%m%d"),
+            "end": dates[-1].strftime("%Y%m%d"),
+            "strategy": "ma_filter",
+            "n_bootstrap": 5,
+            "block_size": 10,
+            "oos_ratio": 0.3,
+            "exec_price": "close",
+            "engine": "invalid",
+            "param_grid": {
+                "sma_window": [20],
+                "ma_type": ["sma"],
+            },
+        },
+        expected_status=400,
+    )
+    assert "engine must be one of: legacy|bt" in str((err or {}).get("detail") or "")
+
+
+def test_api_trend_oos_bootstrap_bt_legacy_consistency(api_client, engine):
+    c = api_client
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
+            "C": [90.0 + i * 0.18 + ((i % 11) - 5) * 0.06 for i, _ in enumerate(dates)],
+        },
+        dates=dates,
+    )
+    body = {
+        "codes": ["A", "B", "C"],
+        "start": dates[0].strftime("%Y%m%d"),
+        "end": dates[-1].strftime("%Y%m%d"),
+        "strategy": "ma_filter",
+        "n_bootstrap": 8,
+        "block_size": 10,
+        "oos_ratio": 0.3,
+        "seed": 7,
+        "exec_price": "close",
+        "cost_bps": 2.0,
+        "param_grid": {
+            "sma_window": [20, 30],
+            "ma_type": ["sma"],
+        },
+    }
+    legacy = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio/oos-bootstrap",
+        {**body, "engine": "legacy"},
+    )
+    bt = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio/oos-bootstrap",
+        {**body, "engine": "bt"},
+    )
+
+    assert legacy.get("chosen_params") == bt.get("chosen_params")
+    l_m = (legacy.get("oos_metrics") or {})
+    b_m = (bt.get("oos_metrics") or {})
+    for key, tol in {
+        "cumulative_return": 1e-6,
+        "annualized_return": 1e-6,
+        "max_drawdown": 1e-6,
+        "sharpe_ratio": 1e-1,
+    }.items():
+        lv = l_m.get(key)
+        bv = b_m.get(key)
+        assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
+        assert abs(float(bv) - float(lv)) <= float(tol)
+
+
 def test_api_rotation_backtest_accepts_floating_topk_mode(api_client) -> None:
     c = api_client
     upsert_and_fetch_etfs(

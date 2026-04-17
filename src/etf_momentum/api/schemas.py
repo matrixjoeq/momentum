@@ -1302,6 +1302,7 @@ class TrendBacktestRequest(BaseModel):
     cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
     slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
     exec_price: str = Field(default="open", description="open|close|oc2")
+    engine: str | None = Field(default=None, description="Backtest engine switch: legacy|bt; null uses server default")
     strategy: str = Field(
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry (long/cash); ma_filter uses ma_type sma|ema|kama",
@@ -1394,6 +1395,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
     slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
     exec_price: str = Field(default="open", description="open|close|oc2")
+    engine: str | None = Field(default=None, description="Backtest engine switch: legacy|bt; null uses server default")
     strategy: str = Field(
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry; ma_filter uses ma_type sma|ema|kama",
@@ -1578,6 +1580,7 @@ class TrendOosBootstrapRequest(BaseModel):
     cost_bps: float = Field(default=2.0, ge=0.0)
     risk_free_rate: float = Field(default=0.025)
     exec_price: str = Field(default="open", description="open|close|oc2")
+    engine: str | None = Field(default=None, description="Backtest engine switch: legacy|bt; null uses server default")
     param_grid: dict[str, list[Any]] | None = Field(
         default=None,
         description="Optional param grid per strategy; if omitted, a default grid is used.",

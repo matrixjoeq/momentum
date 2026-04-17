@@ -56,6 +56,8 @@ class Settings(BaseSettings):
 
     # If set, /api/admin/sync/fixed-pool requires this token via header X-Momentum-Token or body.token
     sync_token: str | None = None
+    # Trend backtest engine default for blue/green rollout: legacy | bt.
+    trend_backtest_engine: str = "legacy"
 
 
 def get_settings() -> Settings:

@@ -421,6 +421,7 @@ def run_trend_oos_bootstrap(
     risk_free_rate: float = 0.025,
     cost_bps: float = 0.0,
     exec_price: str = "open",
+    engine: str = "legacy",
 ) -> Dict[str, Any]:
     """
     Out-of-sample bootstrap parameter optimisation for trend (portfolio) strategy.
@@ -432,9 +433,16 @@ def run_trend_oos_bootstrap(
     """
     from itertools import product
 
+    from .bt_trend import compute_trend_portfolio_backtest_bt
     from .trend import compute_trend_portfolio_backtest
 
     cfg = config or OosBootstrapConfig()
+    engine_sel = str(engine or "legacy").strip().lower()
+    if engine_sel not in {"legacy", "bt"}:
+        return {"error": "engine must be one of: legacy|bt"}
+    oos_eval_engine = "bt" if engine_sel == "bt" else "legacy"
+    bootstrap_eval_engine = "bt" if engine_sel == "bt" else "legacy"
+    limitations: list[str] = []
     codes = list(dict.fromkeys([str(c).strip() for c in codes if str(c).strip()]))
     if not codes:
         return {"error": "codes is empty"}
@@ -462,6 +470,7 @@ def run_trend_oos_bootstrap(
 
     rng = np.random.default_rng(cfg.seed)
     bootstrap_params: List[Dict[str, Any]] = []
+    bootstrap_bt_fallback_count = 0
     keys = list(grid.keys())
     grids = [list(grid[k]) for k in keys]
 
@@ -486,13 +495,93 @@ def run_trend_oos_bootstrap(
             "ret_exec": ret_exec,
             "ret_hfq": ret_hfq,
         }
+        synth_db = None
+        synth_sf = None
+        eval_engine = bootstrap_eval_engine
+        if eval_engine == "bt":
+            try:
+                # Build an in-memory synthetic DB once per bootstrap sample so all
+                # parameter combinations in this sample run through the bt engine.
+                from etf_momentum.db.init_db import init_db
+                from etf_momentum.db.repo import PriceRow, upsert_prices
+                from etf_momentum.db.session import make_session_factory, make_sqlite_engine
+
+                eng = make_sqlite_engine()
+                init_db(eng)
+                synth_sf = make_session_factory(eng)
+                synth_db = synth_sf()
+                rows: list[PriceRow] = []
+                close_qfq = data_override["close_qfq"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
+                close_hfq = data_override["close_hfq"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
+                high_qfq = data_override["high_qfq_df"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
+                low_qfq = data_override["low_qfq_df"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
+                for code in codes:
+                    for d in idx:
+                        td = d.date() if hasattr(d, "date") else d
+                        q_close = float(close_qfq.loc[d, code])
+                        h_close = float(close_hfq.loc[d, code])
+                        q_high = float(high_qfq.loc[d, code]) if np.isfinite(float(high_qfq.loc[d, code])) else q_close
+                        q_low = float(low_qfq.loc[d, code]) if np.isfinite(float(low_qfq.loc[d, code])) else q_close
+                        n_close = q_close
+                        rows.append(
+                            PriceRow(
+                                code=str(code),
+                                trade_date=td,
+                                open=q_close,
+                                high=q_high,
+                                low=q_low,
+                                close=q_close,
+                                volume=None,
+                                amount=None,
+                                source="synthetic",
+                                adjust="qfq",
+                            )
+                        )
+                        rows.append(
+                            PriceRow(
+                                code=str(code),
+                                trade_date=td,
+                                open=h_close,
+                                high=q_high,
+                                low=q_low,
+                                close=h_close,
+                                volume=None,
+                                amount=None,
+                                source="synthetic",
+                                adjust="hfq",
+                            )
+                        )
+                        rows.append(
+                            PriceRow(
+                                code=str(code),
+                                trade_date=td,
+                                open=n_close,
+                                high=q_high,
+                                low=q_low,
+                                close=n_close,
+                                volume=None,
+                                amount=None,
+                                source="synthetic",
+                                adjust="none",
+                            )
+                        )
+                upsert_prices(synth_db, rows)
+                synth_db.commit()
+            except Exception as e:  # noqa: BLE001
+                synth_db = None
+                eval_engine = "legacy"
+                bootstrap_bt_fallback_count += 1
+                limitations.append(f"bt synthetic bootstrap evaluation fallback to legacy: {e}")
         best_metric: float = -np.inf if cfg.objective == "maximize" else np.inf
         best_params: Dict[str, Any] = {}
         for combo in product(*grids):
             params = dict(zip(keys, combo))
             inp = _trend_params_to_inputs(codes, syn_start, syn_end, strategy, params, risk_free_rate=risk_free_rate, cost_bps=cost_bps, exec_price=exec_price)
             try:
-                out = compute_trend_portfolio_backtest(None, inp, data_override=data_override)
+                if eval_engine == "bt" and synth_db is not None:
+                    out = compute_trend_portfolio_backtest_bt(synth_db, inp)
+                else:
+                    out = compute_trend_portfolio_backtest(None, inp, data_override=data_override)
             except Exception as e:  # noqa: BLE001
                 logger.debug("Trend bootstrap backtest failed for %s: %s", params, e)
                 continue
@@ -509,6 +598,18 @@ def run_trend_oos_bootstrap(
                 best_params = params.copy()
         if best_params:
             bootstrap_params.append(best_params)
+        if synth_db is not None:
+            try:
+                synth_db.close()
+            except Exception:  # noqa: BLE001
+                pass
+        if synth_sf is not None:
+            try:
+                bind = synth_sf.kw.get("bind")
+                if bind is not None:
+                    bind.dispose()
+            except Exception:  # noqa: BLE001
+                pass
 
     if not bootstrap_params:
         return {
@@ -517,9 +618,22 @@ def run_trend_oos_bootstrap(
             "oos_start": start_oos.isoformat(),
         }
 
+    if bootstrap_eval_engine == "bt":
+        if bootstrap_bt_fallback_count <= 0:
+            bootstrap_eval_engine_out = "bt"
+        elif bootstrap_bt_fallback_count >= int(cfg.n_bootstrap):
+            bootstrap_eval_engine_out = "legacy"
+        else:
+            bootstrap_eval_engine_out = "mixed"
+    else:
+        bootstrap_eval_engine_out = "legacy"
+
     chosen = _aggregate_params(bootstrap_params, grid, rng)
     inp_oos = _trend_params_to_inputs(codes, start_oos, end_oos, strategy, chosen, risk_free_rate=risk_free_rate, cost_bps=cost_bps, exec_price=exec_price)
-    out_oos = compute_trend_portfolio_backtest(db, inp_oos)
+    if oos_eval_engine == "bt":
+        out_oos = compute_trend_portfolio_backtest_bt(db, inp_oos)
+    else:
+        out_oos = compute_trend_portfolio_backtest(db, inp_oos)
     oos_metrics = (out_oos.get("metrics") or {}).get("strategy")
     if not isinstance(oos_metrics, dict):
         oos_metrics = {}
@@ -533,4 +647,8 @@ def run_trend_oos_bootstrap(
         "n_bootstrap": cfg.n_bootstrap,
         "oos_ratio": cfg.oos_ratio,
         "strategy": strategy,
+        "engine": engine_sel,
+        "bootstrap_eval_engine": bootstrap_eval_engine_out,
+        "oos_eval_engine": oos_eval_engine,
+        "limitations": limitations,
     }

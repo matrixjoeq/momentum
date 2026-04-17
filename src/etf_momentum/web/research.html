@@ -2803,6 +2803,13 @@
       </div>
       <div class="row" style="margin-top:8px; align-items:end;">
         <div>
+          <label>趋势回测引擎</label>
+          <select id="trendEngine" style="min-width:140px;">
+            <option value="legacy" selected>legacy(自研)</option>
+            <option value="bt">bt(backtesting)</option>
+          </select>
+        </div>
+        <div>
           <label>成交价口径</label>
           <select id="trendExecPrice" style="min-width:100px;">
             <option value="open" selected>开盘</option>
@@ -4710,7 +4717,7 @@
         ],
         rotCal: ["rotCalStart", "rotCalEnd", "rotCalShift"],
         trend: [
-          "trendMode", "trendStrategy", "trendExecPrice", "trendCost", "trendSlippage", "trendQuickMode", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendRiskBudgetOvercapPolicy", "trendRiskBudgetMaxLeverage", "trendVolRegimeRiskMgmtEnable", "trendVolRatioFastAtrWindow", "trendVolRatioSlowAtrWindow", "trendVolRatioExpandThreshold", "trendVolRatioContractThreshold", "trendVolRatioNormalThreshold", "trendSingleCode",
+          "trendMode", "trendStrategy", "trendEngine", "trendExecPrice", "trendCost", "trendSlippage", "trendQuickMode", "trendSizing", "trendFixedPosRatio", "trendFixedOvercapPolicy", "trendFixedMaxHoldings", "trendRiskBudgetAtrWin", "trendRiskBudgetPct", "trendRiskBudgetOvercapPolicy", "trendRiskBudgetMaxLeverage", "trendVolRegimeRiskMgmtEnable", "trendVolRatioFastAtrWindow", "trendVolRatioSlowAtrWindow", "trendVolRatioExpandThreshold", "trendVolRatioContractThreshold", "trendVolRatioNormalThreshold", "trendSingleCode",
           "trendGroupEnforce", "trendGroupPolicy", "trendGroupMaxHoldings", "trendAssetGroups",
           "trendSmaWin", "trendFastWin", "trendSlowWin", "trendMaType", "trendKamaErWindow", "trendKamaFastWindow", "trendKamaSlowWindow", "trendKamaStdWindow", "trendKamaStdCoef", "trendDonEntry", "trendDonExit", "trendRandomHoldDays", "trendRandomSeed", "trendMomLb", "trendMomEntryThr", "trendMomExitThr",
           "trendImpulseEntryFilterOn", "trendImpulseAllowBull", "trendImpulseAllowBear", "trendImpulseAllowNeutral",
@@ -18060,6 +18067,7 @@
           cost_bps,
           slippage_rate,
           quick_mode: !!($("trendQuickMode") && $("trendQuickMode").checked),
+          engine: (($("trendEngine") && $("trendEngine").value) ? String($("trendEngine").value).trim().toLowerCase() : "legacy"),
           exec_price,
           strategy,
           sma_window: Number(($("trendSmaWin").value || "200").trim()),
@@ -18323,6 +18331,7 @@
         ) ? "提示：ATR止损关闭，R止盈将使用 virtual ATR 初始风险 fallback（入场ATR*n/入场价）。" : "";
         if (fallbackHint) setMsg(fallbackHint);
         const position_sizing = ($("trendSizing") && $("trendSizing").value) ? String($("trendSizing").value) : "equal";
+        if (!["legacy", "bt"].includes(String(common.engine || ""))) return setMsg("趋势回测引擎仅支持 legacy/bt");
         if (!["equal", "vol_target", "fixed_ratio", "risk_budget"].includes(position_sizing)) return setMsg("仓位法仅支持 等权/目标波动率/固定比例/风险预算");
         if (position_sizing === "fixed_ratio" && common.fixed_pos_ratio > 1) {
           return setMsg("固定比例建议不超过1（100%）");
@@ -21754,13 +21763,17 @@
         const seed = seedRaw === "" ? null : Number(seedRaw);
         const strategy = ($("trendOosStrategy") && $("trendOosStrategy").value) ? String($("trendOosStrategy").value) : "ma_filter";
         const cost_bps = Number(($("trendOosCost") && $("trendOosCost").value) ? $("trendOosCost").value : "2");
+        const engine = (($("trendEngine") && $("trendEngine").value)
+          ? String($("trendEngine").value).trim().toLowerCase()
+          : "legacy");
+        if (!["legacy", "bt"].includes(engine)) return setMsg("趋势回测引擎仅支持 legacy/bt");
         const el = $("trendOosBootstrapResult");
         if (el) el.textContent = "计算中...";
         setMsg("");
         try {
           const resp = await api("/analysis/trend/portfolio/oos-bootstrap", {
             method: "POST",
-            body: JSON.stringify({ codes, start, end, oos_ratio, n_bootstrap, block_size, seed, strategy, cost_bps }),
+            body: JSON.stringify({ codes, start, end, oos_ratio, n_bootstrap, block_size, seed, strategy, cost_bps, engine }),
           });
           const text = await resp.text();
           if (!resp.ok) { if (el) el.textContent = text; return setMsg(text); }
