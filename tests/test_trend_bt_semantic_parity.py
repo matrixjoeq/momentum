@@ -2,10 +2,12 @@ from __future__ import annotations
 # pylint: disable=import-error
 
 import math
+import inspect
 
 import pandas as pd
 import pytest
 
+import etf_momentum.analysis.bt_trend as bt_trend_mod
 from etf_momentum.analysis.bt_trend import (
     compute_trend_backtest_bt,
     compute_trend_portfolio_backtest_bt,
@@ -18,6 +20,157 @@ from etf_momentum.analysis.trend import (
 )
 from etf_momentum.db.session import make_session_factory
 from tests.helpers.rotation_case_data import seed_prices
+
+
+def test_bt_trend_indicator_helpers_are_not_imported_from_legacy_trend_module():
+    src = inspect.getsource(bt_trend_mod)
+    banned = [
+        "_ema as _ema_legacy",
+        "_moving_average as _moving_average_legacy",
+        "_macd_core as _macd_core_legacy",
+        "_atr_from_hlc as _atr_from_hlc_legacy",
+        "_efficiency_ratio as _efficiency_ratio_legacy",
+        "_pos_from_donchian as _pos_from_donchian_legacy",
+        "_pos_from_tsmom as _pos_from_tsmom_legacy",
+        "_compute_impulse_state as _compute_impulse_state_legacy",
+    ]
+    for token in banned:
+        assert token not in src
+
+
+def test_bt_trend_indicator_pipeline_has_no_new_raw_rolling_or_ewm_usage():
+    src = inspect.getsource(bt_trend_mod)
+    # Indicator helper zone ends before input validation helpers; raw rolling/ewm
+    # is only allowed in that helper zone as legacy fallback/comparison baseline.
+    split_marker = "def _validate_bt_single_inputs("
+    assert split_marker in src
+    helper_zone, runtime_zone = src.split(split_marker, 1)
+    assert ".rolling(" in helper_zone
+    assert ".ewm(" in helper_zone
+    assert ".rolling(" not in runtime_zone
+    assert ".ewm(" not in runtime_zone
+
+
+def test_bt_trend_imports_only_non_indicator_helpers_from_legacy_trend_module():
+    src = inspect.getsource(bt_trend_mod)
+    assert "from .trend import (" not in src
+    assert "import etf_momentum.analysis.trend" not in src
+    assert "import etf_momentum.analysis.trend as" not in src
+    assert "from etf_momentum.analysis import trend" not in src
+
+
+def test_bt_trend_core_indicators_keep_talib_first_path():
+    src = inspect.getsource(bt_trend_mod)
+    required_tokens = [
+        "def _ema(",
+        'return _talib_unary_series(s, "EMA"',
+        "def _moving_average(",
+        '"SMA", fallback=legacy',
+        '"KAMA",',
+        "def _macd_core(",
+        "talib.MACD(",
+        "def _atr_from_hlc(",
+        "talib.ATR(",
+        "def _rolling_linreg_slope(",
+        "talib.LINEARREG_SLOPE(",
+        "def _donchian_prev_high(",
+        '"MAX", fallback=legacy',
+        "def _donchian_prev_low(",
+        '"MIN", fallback=legacy',
+        "def _tsmom_rocp(",
+        '"ROCP", fallback=legacy',
+        "def _momentum_delta(",
+        "talib.MOM(",
+        "def _rolling_std(",
+        "talib.STDDEV(",
+        "def _rolling_sma(",
+        "talib.SMA(",
+        "def _efficiency_ratio(",
+        "talib.SUM(",
+    ]
+    for token in required_tokens:
+        assert token in src
+
+
+def test_bt_trend_signal_builder_uses_indicator_wrappers_only():
+    src = inspect.getsource(bt_trend_mod)
+    start = src.find("def _build_signal_position(")
+    assert start >= 0
+    end = src.find("def _build_bt_frame(", start)
+    assert end > start
+    block = src[start:end]
+    assert ".rolling(" not in block
+    assert ".ewm(" not in block
+    assert "talib." not in block
+
+
+def test_bt_trend_raw_rolling_ewm_only_allowed_in_fallback_indicator_helpers():
+    src = inspect.getsource(bt_trend_mod)
+    allowed = {
+        "_ema_fallback",
+        "_kama_fallback",
+        "_atr_from_hlc_fallback",
+        "_rolling_linreg_slope",
+        "_donchian_prev_high",
+        "_donchian_prev_low",
+        "_rolling_std",
+        "_rolling_sma",
+        "_efficiency_ratio",
+    }
+    cur_func = None
+    offenders: list[str] = []
+    for ln in src.splitlines():
+        s = ln.strip()
+        if s.startswith("def ") and "(" in s:
+            cur_func = s[4 : s.index("(")].strip()
+        if ".rolling(" in ln or ".ewm(" in ln:
+            if cur_func not in allowed:
+                offenders.append(f"{cur_func}: {s}")
+    assert not offenders
+
+
+def test_bt_trend_indicator_paths_avoid_raw_diff_calls():
+    src = inspect.getsource(bt_trend_mod)
+    forbidden_tokens = [
+        "ema.diff()",
+        "hist.diff()",
+        "p.diff().abs()",
+        "(p - p.shift(",
+    ]
+    for token in forbidden_tokens:
+        assert token not in src
+
+
+def test_bt_trend_migrated_indicator_helpers_avoid_raw_shift_diff():
+    # These helpers have been migrated to MOM/SUM wrapper paths and should
+    # not regress to direct shift/diff arithmetic in their core logic.
+    checks = {
+        "_kama_fallback": ["p.diff(", "p - p.shift(", ".shift(er_w)"],
+        "_efficiency_ratio": ["p.diff(", "p - p.shift("],
+        "_compute_impulse_state": ["ema.diff(", "hist.diff("],
+    }
+    for fn, forbidden in checks.items():
+        block = inspect.getsource(getattr(bt_trend_mod, fn))
+        for token in forbidden:
+            assert token not in block
+
+
+def test_bt_trend_indicator_shift_diff_usage_is_whitelisted():
+    checked = {
+        "_kama_fallback",
+        "_efficiency_ratio",
+        "_compute_impulse_state",
+    }
+    allowed_tokens = {
+        "_kama_fallback": {"_momentum_delta("},
+        "_efficiency_ratio": {"_momentum_delta("},
+        "_compute_impulse_state": {"_momentum_delta("},
+    }
+    for fn in checked:
+        block = inspect.getsource(getattr(bt_trend_mod, fn))
+        if ".diff(" in block or ".shift(" in block:
+            found = {tok for tok in allowed_tokens[fn] if tok in block}
+            assert found == allowed_tokens[fn]
 
 
 def _flat_keys(obj: object, prefix: str = "") -> set[str]:

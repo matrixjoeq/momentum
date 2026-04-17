@@ -6,6 +6,7 @@ from etf_momentum.analysis.calendar_timing_strategy import (
     CalendarTimingStrategyInputs,
     compute_calendar_timing_strategy_backtest,
 )
+from etf_momentum.analysis.bt_trend import compute_trend_backtest_bt
 from etf_momentum.analysis.trend import TrendInputs, compute_trend_backtest
 from etf_momentum.db.models import EtfPrice
 from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
@@ -137,6 +138,39 @@ def test_trend_exec_price_uses_execution_day_forward_return(
 
     final_nav = float(out["nav"]["series"]["STRAT"][-1])
     assert final_nav == pytest.approx(expected_nav, rel=0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("exec_price", ["open", "close"])
+def test_trend_and_bt_trend_execution_timing_are_aligned(session_factory, exec_price: str):
+    sf = session_factory
+    with sf() as db:
+        start = dt.date(2024, 1, 1)
+        dates = [start + dt.timedelta(days=i) for i in range(5)]
+        # This path magnifies timing differences:
+        # - d2 open->close = +9.09%
+        # - d3 open->close = -30%
+        # If open execution is accidentally delayed by one extra day, final NAV drifts.
+        aaa_none = [(10.0, 10.0), (11.0, 12.0), (9.0, 9.0), (9.9, 13.0), (8.0, 7.0)]
+        aaa_qfq = [10.0, 11.0, 12.0, 13.0, 14.0]
+        _seed_one(db, code="AAA", dates=dates, ohlc_none=aaa_none, close_qfq=aaa_qfq)
+        db.commit()
+
+        inp = TrendInputs(
+            code="AAA",
+            start=start,
+            end=dates[-1],
+            strategy="tsmom",
+            mom_lookback=2,
+            exec_price=exec_price,
+            cost_bps=0.0,
+            slippage_rate=0.0,
+        )
+        out_trend = compute_trend_backtest(db, inp)
+        out_bt = compute_trend_backtest_bt(db, inp)
+
+    nav_trend = float(out_trend["nav"]["series"]["STRAT"][-1])
+    nav_bt = float(out_bt["nav"]["series"]["STRAT"][-1])
+    assert nav_bt == pytest.approx(nav_trend, rel=0.0, abs=1e-12)
 
 
 @pytest.mark.parametrize(
