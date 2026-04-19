@@ -76,6 +76,8 @@ from .schemas import (
     OffFundNavOut,
     OffFundPoolOut,
     OffFundPoolUpsert,
+    FuturesFetchAllRequest,
+    FuturesFetchRequest,
     FuturesFetchResult,
     FuturesFetchSelectedRequest,
     FuturesPoolOut,
@@ -201,6 +203,7 @@ from ..db.off_fund_repo import (
     upsert_off_fund_pool,
 )
 from ..db.futures_repo import (
+    deserialize_futures_tags,
     delete_futures_pool,
     delete_futures_prices,
     get_futures_date_range,
@@ -4923,6 +4926,25 @@ def _purge_futures_data(db: Session, *, code: str) -> dict[str, int]:
     return {"prices": int(n_prices)}
 
 
+def _futures_pool_out_from_model(i, *, data_range: tuple[str | None, str | None] | None = None) -> FuturesPoolOut:
+    rng = data_range if data_range is not None else (i.last_data_start_date, i.last_data_end_date)
+    return FuturesPoolOut(
+        code=i.code,
+        name=i.name,
+        start_date=i.start_date,
+        end_date=i.end_date,
+        min_margin_ratio=i.min_margin_ratio,
+        contract_multiplier=i.contract_multiplier,
+        price_unit=i.price_unit,
+        min_price_tick=i.min_price_tick,
+        tags=deserialize_futures_tags(i.tags_json, code=i.code, name=i.name),
+        last_fetch_status=i.last_fetch_status,
+        last_fetch_message=i.last_fetch_message,
+        last_data_start_date=rng[0],
+        last_data_end_date=rng[1],
+    )
+
+
 @router.get("/futures", response_model=list[FuturesPoolOut])
 def get_futures(adjust: str = "none", db: Session = Depends(get_session)) -> list[FuturesPoolOut]:
     if str(adjust).strip().lower() != "none":
@@ -4931,18 +4953,7 @@ def get_futures(adjust: str = "none", db: Session = Depends(get_session)) -> lis
     out: list[FuturesPoolOut] = []
     for i in items:
         rng = get_futures_date_range(db, code=i.code, adjust="none")
-        out.append(
-            FuturesPoolOut(
-                code=i.code,
-                name=i.name,
-                start_date=i.start_date,
-                end_date=i.end_date,
-                last_fetch_status=i.last_fetch_status,
-                last_fetch_message=i.last_fetch_message,
-                last_data_start_date=rng[0],
-                last_data_end_date=rng[1],
-            )
-        )
+        out.append(_futures_pool_out_from_model(i, data_range=rng))
     return out
 
 
@@ -4960,18 +4971,14 @@ def upsert_futures(payload: FuturesPoolUpsert, db: Session = Depends(get_session
         name=payload.name,
         start_date=payload.start_date,
         end_date=payload.end_date,
+        min_margin_ratio=payload.min_margin_ratio,
+        contract_multiplier=payload.contract_multiplier,
+        price_unit=payload.price_unit,
+        min_price_tick=payload.min_price_tick,
+        tags=payload.tags,
     )
     db.commit()
-    return FuturesPoolOut(
-        code=obj.code,
-        name=obj.name,
-        start_date=obj.start_date,
-        end_date=obj.end_date,
-        last_fetch_status=obj.last_fetch_status,
-        last_fetch_message=obj.last_fetch_message,
-        last_data_start_date=obj.last_data_start_date,
-        last_data_end_date=obj.last_data_end_date,
-    )
+    return _futures_pool_out_from_model(obj)
 
 
 @router.delete("/futures/{code}")
@@ -4987,6 +4994,7 @@ def delete_futures_api(code: str, db: Session = Depends(get_session)) -> dict:
 @router.post("/futures/{code}/fetch", response_model=FuturesFetchResult)
 def fetch_one_futures(
     code: str,
+    payload: FuturesFetchRequest = Body(default_factory=FuturesFetchRequest),
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> FuturesFetchResult:
@@ -4997,8 +5005,9 @@ def fetch_one_futures(
         db,
         ak=ak,
         code=code,
-        start_date=item.start_date or get_settings().default_start_date,
+        start_date=item.start_date or get_settings().default_futures_start_date,
         end_date=item.end_date or get_settings().default_end_date,
+        fetch_type=payload.fetch_type,
     )
     if res.status != "success":
         raise HTTPException(status_code=500, detail=res.message or "ingestion failed")
@@ -5007,6 +5016,7 @@ def fetch_one_futures(
 
 @router.post("/futures/fetch-all", response_model=list[FuturesFetchResult])
 def fetch_all_futures(
+    payload: FuturesFetchAllRequest = Body(default_factory=FuturesFetchAllRequest),
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[FuturesFetchResult]:
@@ -5016,8 +5026,9 @@ def fetch_all_futures(
             db,
             ak=ak,
             code=item.code,
-            start_date=item.start_date or get_settings().default_start_date,
+            start_date=item.start_date or get_settings().default_futures_start_date,
             end_date=item.end_date or get_settings().default_end_date,
+            fetch_type=payload.fetch_type,
         )
         out.append(
             FuturesFetchResult(
@@ -5032,7 +5043,7 @@ def fetch_all_futures(
 
 @router.post("/futures/fetch-selected", response_model=list[FuturesFetchResult])
 def fetch_selected_futures(
-    payload: FuturesFetchSelectedRequest,
+    payload: FuturesFetchSelectedRequest = Body(...),
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[FuturesFetchResult]:
@@ -5047,8 +5058,9 @@ def fetch_selected_futures(
             db,
             ak=ak,
             code=code,
-            start_date=item.start_date or get_settings().default_start_date,
+            start_date=item.start_date or get_settings().default_futures_start_date,
             end_date=item.end_date or get_settings().default_end_date,
+            fetch_type=payload.fetch_type,
         )
         out.append(
             FuturesFetchResult(
@@ -5083,9 +5095,10 @@ def get_futures_prices_api(
             high=r.high,
             low=r.low,
             close=r.close,
+            settle=r.settle,
             volume=r.volume,
             amount=r.amount,
-            open_interest=r.open_interest,
+            hold=r.hold,
             source=r.source,
             adjust=r.adjust,
         )
@@ -5095,7 +5108,7 @@ def get_futures_prices_api(
 
 def _default_futures_research_dates() -> tuple[str, str]:
     s = get_settings()
-    return (str(s.default_start_date), str(s.default_end_date))
+    return (str(s.default_futures_start_date), str(s.default_end_date))
 
 
 @router.get("/futures/research/state", response_model=FuturesResearchStateOut)

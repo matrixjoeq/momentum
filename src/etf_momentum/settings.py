@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     mysql_socket: str | None = None
 
     default_start_date: str = "20100101"  # YYYYMMDD
+    default_futures_start_date: str = "20000101"  # YYYYMMDD
     default_end_date: str = "20991231"  # YYYYMMDD
 
     log_level: str = "INFO"

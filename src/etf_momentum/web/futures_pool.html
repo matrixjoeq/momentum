@@ -64,7 +64,34 @@
         <label>结束日期</label>
         <input id="end" placeholder="YYYYMMDD (可空)" />
       </div>
+      <div>
+        <label>交易单位</label>
+        <input id="contractMultiplier" placeholder="如 10" />
+      </div>
+      <div>
+        <label>报价单位</label>
+        <input id="priceUnit" placeholder="如 元/吨" />
+      </div>
+      <div>
+        <label>最小变动价位</label>
+        <input id="minPriceTick" placeholder="如 1" />
+      </div>
+      <div>
+        <label>最低保证金率</label>
+        <input id="minMarginRatio" placeholder="如 0.12（12%）" />
+      </div>
+      <div style="min-width: 320px;">
+        <label>标签（逗号分隔）</label>
+        <input id="tags" placeholder="留空将按品种自动分类" />
+      </div>
       <button id="save">保存/更新</button>
+      <div>
+        <label>获取方式</label>
+        <select id="fetchType">
+          <option value="incremental" selected>增量</option>
+          <option value="full">全量</option>
+        </select>
+      </div>
       <button id="fetchAll">抓取全部</button>
       <button id="selectAll">全选</button>
       <button id="selectNone">取消全选</button>
@@ -81,6 +108,8 @@
           <th>选择</th>
           <th>代码</th>
           <th>名称</th>
+          <th>合约参数</th>
+          <th>标签</th>
           <th>区间</th>
           <th>抓取状态</th>
           <th>操作</th>
@@ -115,6 +144,22 @@
       const $ = (id) => document.getElementById(id);
       const setMsg = (t) => ($("msg").textContent = t || "");
       const selected = new Set();
+      const parseNullableNumber = (id) => {
+        const raw = String(($(id) && $(id).value) || "").trim();
+        if (!raw) return null;
+        const v = Number(raw);
+        return Number.isFinite(v) ? v : null;
+      };
+      const parseTags = () => {
+        const raw = String(($("tags") && $("tags").value) || "").trim();
+        if (!raw) return null;
+        const vals = raw.split(",").map((x) => x.trim()).filter(Boolean);
+        return vals.length ? vals : null;
+      };
+      const getFetchType = () => {
+        const v = String(($("fetchType") && $("fetchType").value) || "incremental").trim().toLowerCase();
+        return v === "full" ? "full" : "incremental";
+      };
 
       function syncBulkActionButtons() {
         const hasSel = selected.size > 0;
@@ -129,13 +174,33 @@
         return "";
       }
 
+      function fetchStatusText(status, message) {
+        const st = String(status || "").trim().toLowerCase();
+        const msg = String(message || "").trim().toLowerCase();
+
+        if (!st) return "未抓取";
+        if (st === "failed") return "抓取失败";
+        if (st !== "success") return st;
+
+        if (msg.includes("mode=incremental->full")) return "增量回退全量成功";
+        if (
+          msg.includes("no new futures data to fetch") ||
+          (msg.includes("no futures data in requested range") && msg.includes("mode=incremental"))
+        ) {
+          return "增量无新数据";
+        }
+        if (msg.includes("mode=full")) return "全量抓取成功";
+        if (msg.includes("mode=incremental")) return "增量抓取成功";
+        return "抓取成功";
+      }
+
       async function refresh() {
         const resp = await api(`/futures?adjust=none`, { method: "GET" });
         const data = await resp.json();
         const tbody = $("tbody");
         tbody.innerHTML = "";
         if (!Array.isArray(data) || data.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="6" class="muted">候选池为空：请先保存代码/名称。</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="8" class="muted">候选池为空：请先保存代码/名称。</td></tr>`;
           syncBulkActionButtons();
           return;
         }
@@ -145,13 +210,27 @@
           const dataRange = it.last_data_start_date && it.last_data_end_date ? `${it.last_data_start_date} ~ ${it.last_data_end_date}` : "没有";
           const st = it.last_fetch_status || "";
           const msg = it.last_fetch_message || "";
+          const stText = fetchStatusText(st, msg);
           const checked = selected.has(it.code) ? "checked" : "";
+          const margin = (it.min_margin_ratio == null || !Number.isFinite(Number(it.min_margin_ratio)))
+            ? "-"
+            : `${(Number(it.min_margin_ratio) * 100).toFixed(2)}%`;
+          const multiplier = (it.contract_multiplier == null || !Number.isFinite(Number(it.contract_multiplier)))
+            ? "-"
+            : String(Number(it.contract_multiplier));
+          const tick = (it.min_price_tick == null || !Number.isFinite(Number(it.min_price_tick)))
+            ? "-"
+            : String(Number(it.min_price_tick));
+          const punit = it.price_unit ? String(it.price_unit) : "-";
+          const tags = Array.isArray(it.tags) && it.tags.length ? it.tags.join(", ") : "-";
           tr.innerHTML = `
             <td><input type="checkbox" data-act="sel" data-code="${it.code}" ${checked} /></td>
             <td>${it.code}</td>
             <td>${it.name}</td>
+            <td><div>保证金率：${margin}</div><div class="muted">单位：${multiplier} / 报价：${punit} / 最小变动：${tick}</div></td>
+            <td>${tags}</td>
             <td><div>${cfgRange}</div><div class="muted">已抓取（none）：${dataRange}</div></td>
-            <td class="${statusClass(st)}">${st || "-"} <span class="muted">${msg ? "· " + msg : ""}</span></td>
+            <td class="${statusClass(st)}">${stText} <span class="muted">${msg ? "· " + msg : ""}</span></td>
             <td>
               <div class="actions">
                 <button data-act="edit" data-code="${it.code}">编辑</button>
@@ -173,17 +252,31 @@
           name: $("name").value.trim(),
           start_date: $("start").value.trim() || null,
           end_date: $("end").value.trim() || null,
+          min_margin_ratio: parseNullableNumber("minMarginRatio"),
+          contract_multiplier: parseNullableNumber("contractMultiplier"),
+          price_unit: $("priceUnit").value.trim() || null,
+          min_price_tick: parseNullableNumber("minPriceTick"),
+          tags: parseTags(),
         };
         const resp = await api("/futures", { method: "POST", body: JSON.stringify(payload) });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
-        $("code").value = ""; $("name").value = ""; $("start").value = ""; $("end").value = "";
+        $("code").value = "";
+        $("name").value = "";
+        $("start").value = "";
+        $("end").value = "";
+        $("minMarginRatio").value = "";
+        $("contractMultiplier").value = "";
+        $("priceUnit").value = "";
+        $("minPriceTick").value = "";
+        $("tags").value = "";
         await refresh();
       });
 
       $("fetchAll").addEventListener("click", async () => {
-        setMsg("futures fetch-all...");
-        const resp = await api("/futures/fetch-all", { method: "POST", body: "{}" });
+        const fetchType = getFetchType();
+        setMsg(`futures fetch-all (${fetchType})...`);
+        const resp = await api("/futures/fetch-all", { method: "POST", body: JSON.stringify({ fetch_type: fetchType }) });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -216,8 +309,12 @@
       $("fetchSelected").addEventListener("click", async () => {
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何期货标的。");
-        setMsg(`futures fetch-selected: ${codes.join(", ")} ...`);
-        const resp = await api("/futures/fetch-selected", { method: "POST", body: JSON.stringify({ codes }) });
+        const fetchType = getFetchType();
+        setMsg(`futures fetch-selected (${fetchType}): ${codes.join(", ")} ...`);
+        const resp = await api("/futures/fetch-selected", {
+          method: "POST",
+          body: JSON.stringify({ codes, fetch_type: fetchType }),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -280,11 +377,20 @@
           $("name").value = it.name;
           $("start").value = it.start_date || "";
           $("end").value = it.end_date || "";
+          $("minMarginRatio").value = it.min_margin_ratio == null ? "" : String(it.min_margin_ratio);
+          $("contractMultiplier").value = it.contract_multiplier == null ? "" : String(it.contract_multiplier);
+          $("priceUnit").value = it.price_unit || "";
+          $("minPriceTick").value = it.min_price_tick == null ? "" : String(it.min_price_tick);
+          $("tags").value = Array.isArray(it.tags) ? it.tags.join(", ") : "";
           setMsg("已载入到表单，修改后点“保存/更新”。");
         }
         if (act === "fetch") {
-          setMsg(`futures fetch ${code}...`);
-          const resp = await api(`/futures/${code}/fetch`, { method: "POST", body: "{}" });
+          const fetchType = getFetchType();
+          setMsg(`futures fetch ${code} (${fetchType})...`);
+          const resp = await api(`/futures/${code}/fetch`, {
+            method: "POST",
+            body: JSON.stringify({ fetch_type: fetchType }),
+          });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
           setMsg(text);

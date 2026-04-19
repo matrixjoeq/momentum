@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 from sqlalchemy.engine import Engine
 
 
@@ -149,4 +150,53 @@ def ensure_sqlite_schema(engine: Engine) -> None:
         _sqlite_add_column(engine, "ingestion_batch", "val_max_gap_days INTEGER")
 
     _ensure_etf_prices_unique_on_adjust(engine)
+
+
+def _has_column(engine: Engine, table: str, column: str) -> bool:
+    try:
+        cols = inspect(engine).get_columns(table)
+    except (NoSuchTableError, SQLAlchemyError):
+        return False
+    return any(str(c.get("name") or "") == column for c in cols)
+
+
+def _add_column(engine: Engine, table: str, ddl: str) -> None:
+    with engine.begin() as conn:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+
+
+def ensure_runtime_schema(engine: Engine) -> None:
+    """
+    Lightweight runtime schema evolution for local development.
+    Avoids hard failures on existing DBs when new nullable columns are introduced.
+    """
+    if engine.dialect.name == "sqlite":
+        ensure_sqlite_schema(engine)
+    if not inspect(engine).has_table("futures_pool"):
+        return
+    futures_pool_cols = {
+        "min_margin_ratio": "min_margin_ratio FLOAT",
+        "contract_multiplier": "contract_multiplier FLOAT",
+        "price_unit": "price_unit VARCHAR(64)",
+        "min_price_tick": "min_price_tick FLOAT",
+        "tags_json": "tags_json TEXT",
+    }
+    for col, ddl in futures_pool_cols.items():
+        if _has_column(engine, "futures_pool", col):
+            continue
+        _add_column(engine, "futures_pool", ddl)
+
+    if inspect(engine).has_table("futures_prices"):
+        futures_price_cols = {
+            "settle": "settle FLOAT",
+            "hold": "hold FLOAT",
+        }
+        for col, ddl in futures_price_cols.items():
+            if _has_column(engine, "futures_prices", col):
+                continue
+            _add_column(engine, "futures_prices", ddl)
+        # Backfill hold from legacy open_interest when available.
+        if _has_column(engine, "futures_prices", "hold") and _has_column(engine, "futures_prices", "open_interest"):
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE futures_prices SET hold = open_interest WHERE hold IS NULL AND open_interest IS NOT NULL"))
 

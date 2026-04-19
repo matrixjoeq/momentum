@@ -146,10 +146,7 @@ env.bak/
 venv.bak/
 
 # Local app secrets / MySQL datadir
-data/.env.local
-data/mysql/
-data/*.sqlite3
-data/backups/
+data/*
 
 # Spyder project settings
 .spyderproject

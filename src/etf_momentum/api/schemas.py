@@ -130,6 +130,11 @@ class FuturesPoolUpsert(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     start_date: str | None = Field(default=None, description="YYYYMMDD")
     end_date: str | None = Field(default=None, description="YYYYMMDD")
+    min_margin_ratio: float | None = Field(default=None, ge=0.0, le=1.0, description="Minimum margin ratio, decimal in [0,1]")
+    contract_multiplier: float | None = Field(default=None, gt=0.0, description="Contract multiplier (trading unit)")
+    price_unit: str | None = Field(default=None, max_length=64, description="Quoted price unit, e.g. 元/吨")
+    min_price_tick: float | None = Field(default=None, gt=0.0, description="Minimum tick size")
+    tags: list[str] | None = Field(default=None, description="Optional tags; empty means auto category tag")
 
 
 class FuturesPoolOut(BaseModel):
@@ -137,6 +142,11 @@ class FuturesPoolOut(BaseModel):
     name: str
     start_date: str | None
     end_date: str | None
+    min_margin_ratio: float | None = None
+    contract_multiplier: float | None = None
+    price_unit: str | None = None
+    min_price_tick: float | None = None
+    tags: list[str] = Field(default_factory=list)
     last_fetch_status: str | None = None
     last_fetch_message: str | None = None
     last_data_start_date: str | None = None
@@ -150,8 +160,26 @@ class FuturesFetchResult(BaseModel):
     message: str | None = None
 
 
+class FuturesFetchRequest(BaseModel):
+    fetch_type: Literal["incremental", "full"] = Field(
+        default="incremental",
+        description='Fetch mode: "incremental" (fallback to full when no local data) or "full".',
+    )
+
+
+class FuturesFetchAllRequest(BaseModel):
+    fetch_type: Literal["incremental", "full"] = Field(
+        default="incremental",
+        description='Batch fetch mode: "incremental" or "full".',
+    )
+
+
 class FuturesFetchSelectedRequest(BaseModel):
     codes: list[str] = Field(min_length=1, description="futures symbols to fetch")
+    fetch_type: Literal["incremental", "full"] = Field(
+        default="incremental",
+        description='Fetch mode for selected symbols: "incremental" or "full".',
+    )
 
 
 class FuturesPriceOut(BaseModel):
@@ -161,9 +189,10 @@ class FuturesPriceOut(BaseModel):
     high: float | None
     low: float | None
     close: float | None
+    settle: float | None
     volume: float | None
     amount: float | None
-    open_interest: float | None
+    hold: float | None
     source: str
     adjust: str
 

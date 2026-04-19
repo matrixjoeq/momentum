@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select
@@ -19,9 +21,10 @@ class FuturesPriceRow:
     high: float | None
     low: float | None
     close: float | None
+    settle: float | None = None
     volume: float | None = None
     amount: float | None = None
-    open_interest: float | None = None
+    hold: float | None = None
     source: str = "sina"
     adjust: str = "none"
 
@@ -35,6 +38,77 @@ def normalize_futures_adjust(adjust: str | None) -> str:
     return a
 
 
+def _futures_symbol_root(code: str) -> str:
+    c = str(code or "").strip().upper()
+    m = re.match(r"^([A-Z]+)", c)
+    return m.group(1) if m else c
+
+
+def infer_futures_default_tag(code: str, name: str | None = None) -> str:
+    root = _futures_symbol_root(code)
+    if root in {"IF", "IH", "IC", "IM"}:
+        return "股指期货"
+    if root in {"T", "TF", "TS", "TL"}:
+        return "国债期货"
+    if root in {"AU", "AG"}:
+        return "贵金属"
+    if root in {"CU", "AL", "ZN", "PB", "NI", "SN", "SS", "BC"}:
+        return "有色金属"
+    if root in {"RB", "HC", "I", "J", "JM", "SF", "SM"}:
+        return "黑色系"
+    if root in {"SC", "LU", "FU", "BU", "PG"}:
+        return "能源化工"
+    if root in {"RU", "NR", "SP", "L", "V", "PP", "EB", "EG", "TA", "MA", "SA", "FG", "UR"}:
+        return "化工建材"
+    if root in {"A", "B", "M", "Y", "P", "OI", "RM", "C", "CS", "JD", "LH", "AP", "CJ", "CF", "SR", "PK"}:
+        return "农产品"
+    if root in {"SI", "LC"}:
+        return "新能源金属"
+    n = str(name or "")
+    if "国债" in n:
+        return "国债期货"
+    if "股指" in n:
+        return "股指期货"
+    return "其他期货"
+
+
+def _normalize_futures_tags(code: str, name: str, tags: list[str] | None) -> list[str]:
+    cleaned: list[str] = []
+    for t in (tags or []):
+        s = str(t or "").strip()
+        if not s:
+            continue
+        cleaned.extend([x.strip() for x in s.split(",") if str(x).strip()])
+    if not cleaned:
+        cleaned = [infer_futures_default_tag(code, name)]
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in cleaned:
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def serialize_futures_tags(code: str, name: str, tags: list[str] | None) -> str:
+    vals = _normalize_futures_tags(code=code, name=name, tags=tags)
+    return json.dumps(vals, ensure_ascii=False)
+
+
+def deserialize_futures_tags(raw: str | None, *, code: str, name: str) -> list[str]:
+    txt = str(raw or "").strip()
+    if not txt:
+        return [infer_futures_default_tag(code, name)]
+    try:
+        v = json.loads(txt)
+        if isinstance(v, list):
+            return _normalize_futures_tags(code=code, name=name, tags=[str(x) for x in v])
+    except (TypeError, ValueError):
+        pass
+    return _normalize_futures_tags(code=code, name=name, tags=[txt])
+
+
 def upsert_futures_pool(
     db: Session,
     *,
@@ -42,16 +116,36 @@ def upsert_futures_pool(
     name: str,
     start_date: str | None,
     end_date: str | None,
+    min_margin_ratio: float | None = None,
+    contract_multiplier: float | None = None,
+    price_unit: str | None = None,
+    min_price_tick: float | None = None,
+    tags: list[str] | None = None,
 ) -> FuturesPool:
     existing = db.execute(select(FuturesPool).where(FuturesPool.code == code)).scalar_one_or_none()
     if existing is None:
-        obj = FuturesPool(code=code, name=name, start_date=start_date, end_date=end_date)
+        obj = FuturesPool(
+            code=code,
+            name=name,
+            start_date=start_date,
+            end_date=end_date,
+            min_margin_ratio=min_margin_ratio,
+            contract_multiplier=contract_multiplier,
+            price_unit=price_unit,
+            min_price_tick=min_price_tick,
+            tags_json=serialize_futures_tags(code=code, name=name, tags=tags),
+        )
         db.add(obj)
         db.flush()
         return obj
     existing.name = name
     existing.start_date = start_date
     existing.end_date = end_date
+    existing.min_margin_ratio = min_margin_ratio
+    existing.contract_multiplier = contract_multiplier
+    existing.price_unit = price_unit
+    existing.min_price_tick = min_price_tick
+    existing.tags_json = serialize_futures_tags(code=code, name=name, tags=tags)
     db.flush()
     return existing
 
@@ -84,9 +178,10 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
             "high": r.high,
             "low": r.low,
             "close": r.close,
+            "settle": r.settle,
             "volume": r.volume,
             "amount": r.amount,
-            "open_interest": r.open_interest,
+            "hold": r.hold,
             "source": r.source,
             "adjust": normalize_futures_adjust(r.adjust),
         }
@@ -101,9 +196,10 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
                 "high": stmt.inserted.high,
                 "low": stmt.inserted.low,
                 "close": stmt.inserted.close,
+                "settle": stmt.inserted.settle,
                 "volume": stmt.inserted.volume,
                 "amount": stmt.inserted.amount,
-                "open_interest": stmt.inserted.open_interest,
+                "hold": stmt.inserted.hold,
                 "source": stmt.inserted.source,
                 "adjust": stmt.inserted.adjust,
                 "ingested_at": dt.datetime.now(dt.timezone.utc),
@@ -118,9 +214,10 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
                 "high": stmt.excluded.high,
                 "low": stmt.excluded.low,
                 "close": stmt.excluded.close,
+                "settle": stmt.excluded.settle,
                 "volume": stmt.excluded.volume,
                 "amount": stmt.excluded.amount,
-                "open_interest": stmt.excluded.open_interest,
+                "hold": stmt.excluded.hold,
                 "source": stmt.excluded.source,
                 "adjust": stmt.excluded.adjust,
                 "ingested_at": dt.datetime.now(dt.timezone.utc),
@@ -179,6 +276,17 @@ def get_futures_date_range(db: Session, *, code: str, adjust: str = "none") -> t
     if start_d is None or end_d is None:
         return (None, None)
     return (start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d"))
+
+
+def get_futures_last_trade_date(db: Session, *, code: str, adjust: str = "none") -> dt.date | None:
+    adj = normalize_futures_adjust(adjust)
+    end_d = db.execute(
+        select(func.max(FuturesPrice.trade_date)).where(
+            FuturesPrice.code == code,
+            FuturesPrice.adjust == adj,
+        )
+    ).scalar_one_or_none()
+    return end_d
 
 
 def update_futures_pool_data_range(db: Session, *, code: str, adjust: str = "none") -> tuple[str | None, str | None]:

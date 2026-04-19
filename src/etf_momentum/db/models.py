@@ -253,6 +253,11 @@ class FuturesPool(Base):
 
     start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
     end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
+    min_margin_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    contract_multiplier: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    min_price_tick: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tags_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     last_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -286,9 +291,10 @@ class FuturesPrice(Base):
     high: Mapped[float | None] = mapped_column(Float, nullable=True)
     low: Mapped[float | None] = mapped_column(Float, nullable=True)
     close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    settle: Mapped[float | None] = mapped_column(Float, nullable=True)
     volume: Mapped[float | None] = mapped_column(Float, nullable=True)
     amount: Mapped[float | None] = mapped_column(Float, nullable=True)
-    open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hold: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="sina")
     adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="none")
