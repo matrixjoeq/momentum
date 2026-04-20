@@ -7,7 +7,7 @@ from typing import Literal
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from ..db.futures_repo import list_futures_prices
+from ..db.futures_repo import list_futures_pool, list_futures_prices
 from ..db.futures_research_repo import FuturesGroupData
 
 RangeKey = Literal["1m", "3m", "6m", "1y", "3y", "5y", "10y", "all"]
@@ -105,9 +105,11 @@ def compute_futures_group_correlation(
         corr_df = ret_used.corr(min_periods=max(2, int(min_obs)))
         mode = "static_intersection"
 
+    pool_rows = list_futures_pool(db)
+    name_by_code = {str(x.code): str(x.name or x.code) for x in pool_rows}
     aliases: list[dict] = []
     for i, code in enumerate(codes, start=1):
-        aliases.append({"id": i, "code": code, "name": code})
+        aliases.append({"id": i, "code": code, "name": name_by_code.get(code, code)})
     matrix: list[list[float | None]] = []
     for c_i in codes:
         row: list[float | None] = []
