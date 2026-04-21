@@ -135,6 +135,18 @@ class FuturesPoolUpsert(BaseModel):
     price_unit: str | None = Field(default=None, max_length=64, description="Quoted price unit, e.g. 元/吨")
     min_price_tick: float | None = Field(default=None, gt=0.0, description="Minimum tick size")
     tags: list[str] | None = Field(default=None, description="Optional tags; empty means auto category tag")
+    contract_extend_calendar_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=5000,
+        description="Calendar days to extend beyond local main continuous end when fetching deliverable contracts",
+    )
+    contract_parallel: int | None = Field(
+        default=None,
+        ge=1,
+        le=1,
+        description="Reserved for compatibility; deliverable-month fetch is fixed to serial (1) for AkShare",
+    )
 
 
 class FuturesPoolOut(BaseModel):
@@ -147,9 +159,21 @@ class FuturesPoolOut(BaseModel):
     price_unit: str | None = None
     min_price_tick: float | None = None
     tags: list[str] = Field(default_factory=list)
+    contract_extend_calendar_days: int = 366
+    contract_parallel: int = 1
     last_fetch_status: str | None = None
     last_fetch_message: str | None = None
     last_data_start_date: str | None = None
+    last_data_end_date: str | None = None
+    last_contract_fetch_status: str | None = None
+    last_contract_fetch_message: str | None = None
+
+
+class FuturesContractFetchStatusOut(BaseModel):
+    contract_code: str
+    last_fetch_status: str | None = None
+    last_fetch_message: str | None = None
+    rows_upserted: int | None = None
     last_data_end_date: str | None = None
 
 

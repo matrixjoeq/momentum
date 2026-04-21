@@ -10,7 +10,7 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from .models import FuturesPool, FuturesPrice
+from .models import FuturesContractFetchStatus, FuturesPool, FuturesPrice
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,7 @@ class FuturesPriceRow:
     hold: float | None = None
     source: str = "sina"
     adjust: str = "none"
+    pool_id: int | None = None
 
 
 def normalize_futures_adjust(adjust: str | None) -> str:
@@ -121,7 +122,13 @@ def upsert_futures_pool(
     price_unit: str | None = None,
     min_price_tick: float | None = None,
     tags: list[str] | None = None,
+    contract_extend_calendar_days: int | None = None,
+    contract_parallel: int | None = None,
 ) -> FuturesPool:
+    ext_days = int(contract_extend_calendar_days) if contract_extend_calendar_days is not None else 366
+    if contract_parallel is not None:
+        int(contract_parallel)
+    par = 1  # deliverable-month fetch uses AkShare serial-only policy (see futures_contract_ingestion)
     existing = db.execute(select(FuturesPool).where(FuturesPool.code == code)).scalar_one_or_none()
     if existing is None:
         obj = FuturesPool(
@@ -134,6 +141,8 @@ def upsert_futures_pool(
             price_unit=price_unit,
             min_price_tick=min_price_tick,
             tags_json=serialize_futures_tags(code=code, name=name, tags=tags),
+            contract_extend_calendar_days=ext_days,
+            contract_parallel=par,
         )
         db.add(obj)
         db.flush()
@@ -146,6 +155,9 @@ def upsert_futures_pool(
     existing.price_unit = price_unit
     existing.min_price_tick = min_price_tick
     existing.tags_json = serialize_futures_tags(code=code, name=name, tags=tags)
+    if contract_extend_calendar_days is not None:
+        existing.contract_extend_calendar_days = ext_days
+    existing.contract_parallel = par
     db.flush()
     return existing
 
@@ -162,6 +174,10 @@ def delete_futures_pool(db: Session, code: str) -> bool:
     obj = get_futures_pool_by_code(db, code)
     if obj is None:
         return False
+    pid = int(obj.id)
+    db.execute(delete(FuturesContractFetchStatus).where(FuturesContractFetchStatus.pool_id == pid))
+    db.execute(delete(FuturesPrice).where(FuturesPrice.pool_id == pid))
+    delete_futures_prices(db, code=code)
     db.delete(obj)
     db.flush()
     return True
@@ -172,6 +188,7 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
         return 0
     values = [
         {
+            "pool_id": r.pool_id,
             "code": r.code,
             "trade_date": r.trade_date,
             "open": r.open,
@@ -192,6 +209,7 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
         stmt = mysql_insert(FuturesPrice).values(values)
         stmt = stmt.on_duplicate_key_update(
             {
+                "pool_id": stmt.inserted.pool_id,
                 "open": stmt.inserted.open,
                 "high": stmt.inserted.high,
                 "low": stmt.inserted.low,
@@ -210,6 +228,7 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
         stmt = stmt.on_conflict_do_update(
             index_elements=[FuturesPrice.code, FuturesPrice.trade_date, FuturesPrice.adjust],
             set_={
+                "pool_id": stmt.excluded.pool_id,
                 "open": stmt.excluded.open,
                 "high": stmt.excluded.high,
                 "low": stmt.excluded.low,
@@ -318,3 +337,89 @@ def mark_futures_fetch_status(
     obj.last_fetch_status = status
     obj.last_fetch_message = msg
     db.flush()
+
+
+def mark_futures_contract_pool_fetch(
+    db: Session,
+    *,
+    code: str,
+    status: str,
+    message: str | None = None,
+) -> None:
+    obj = get_futures_pool_by_code(db, code)
+    if obj is None:
+        return
+    msg = None if message is None else str(message)
+    if msg is not None and len(msg) > 512:
+        msg = msg[:498] + "...(truncated)"
+    obj.last_contract_fetch_at = dt.datetime.now(dt.timezone.utc)
+    obj.last_contract_fetch_status = status
+    obj.last_contract_fetch_message = msg
+    db.flush()
+
+
+def record_contract_fetch_status(
+    db: Session,
+    *,
+    pool_id: int,
+    contract_code: str,
+    status: str,
+    message: str | None,
+    rows_upserted: int,
+) -> None:
+    code_u = str(contract_code).strip().upper()
+    existing = db.execute(
+        select(FuturesContractFetchStatus).where(
+            FuturesContractFetchStatus.pool_id == pool_id,
+            FuturesContractFetchStatus.contract_code == code_u,
+        )
+    ).scalar_one_or_none()
+    msg = None if message is None else str(message)
+    if msg is not None and len(msg) > 512:
+        msg = msg[:498] + "...(truncated)"
+    end_d = get_futures_last_trade_date(db, code=code_u, adjust="none")
+    end_str = end_d.strftime("%Y%m%d") if end_d is not None else None
+    if existing is None:
+        db.add(
+            FuturesContractFetchStatus(
+                pool_id=pool_id,
+                contract_code=code_u,
+                last_fetch_status=status,
+                last_fetch_message=msg,
+                rows_upserted=int(rows_upserted),
+                last_data_end_date=end_str,
+            )
+        )
+    else:
+        existing.last_fetch_status = status
+        existing.last_fetch_message = msg
+        existing.rows_upserted = int(rows_upserted)
+        existing.last_data_end_date = end_str
+    db.flush()
+
+
+def delete_contract_fetch_status(db: Session, *, pool_id: int, contract_code: str) -> None:
+    """Remove per-contract status when there is no price data to surface (see contract ingestion)."""
+    code_u = str(contract_code).strip().upper()
+    obj = db.execute(
+        select(FuturesContractFetchStatus).where(
+            FuturesContractFetchStatus.pool_id == pool_id,
+            FuturesContractFetchStatus.contract_code == code_u,
+        )
+    ).scalar_one_or_none()
+    if obj is None:
+        return
+    db.delete(obj)
+    db.flush()
+
+
+def list_contract_fetch_statuses(db: Session, *, pool_id: int) -> list[FuturesContractFetchStatus]:
+    return list(
+        db.execute(
+            select(FuturesContractFetchStatus)
+            .where(FuturesContractFetchStatus.pool_id == pool_id)
+            .order_by(FuturesContractFetchStatus.contract_code.asc())
+        )
+        .scalars()
+        .all()
+    )

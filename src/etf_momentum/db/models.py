@@ -266,6 +266,12 @@ class FuturesPool(Base):
     last_data_start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
     last_data_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
+    contract_extend_calendar_days: Mapped[int] = mapped_column(Integer, nullable=False, default=366)
+    contract_parallel: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    last_contract_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_contract_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_contract_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -284,6 +290,9 @@ class FuturesPrice(Base):
     __table_args__ = (UniqueConstraint("code", "trade_date", "adjust", name="uq_futures_prices_code_trade_date_adjust"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pool_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("futures_pool.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
 
@@ -301,6 +310,28 @@ class FuturesPrice(Base):
 
     ingested_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FuturesContractFetchStatus(Base):
+    """
+    Per-deliverable-month contract ingestion status for a futures pool row (main symbol).
+    """
+
+    __tablename__ = "futures_contract_fetch_status"
+    __table_args__ = (
+        UniqueConstraint("pool_id", "contract_code", name="uq_futures_contract_fetch_pool_contract"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pool_id: Mapped[int] = mapped_column(Integer, ForeignKey("futures_pool.id", ondelete="CASCADE"), index=True, nullable=False)
+    contract_code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    rows_upserted: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_data_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 

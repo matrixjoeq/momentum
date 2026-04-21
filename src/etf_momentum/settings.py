@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # Note: currently applied only in yahoo_fetcher.
     yahoo_proxy: str | None = None
 
+    # CTP (上期所等交易通道) uses the broker FTD binary protocol (OpenCTP/native SDK), not HTTP.
+    # No CTP settings are wired until a supported SDK + deployment story exists.
+
+    # Deliverable-month contracts: default uses AkShare Sina per-contract history (serial + throttling).
+    # When True, SHFE/INE/GFEX roots use exchange daily panels (AkShare get_*_daily); one HTTP per
+    # trading day per contract — much slower but matches published settlement tables.
+    # Empty Sina data never auto-switches to exchange; only this flag selects the exchange path.
+    futures_contract_use_official_exchange: bool = False
+
     # --- Market data sync (Cloud trigger preferred) ---
     # Recommended: use WeChat Cloud scheduled trigger to call /api/admin/sync/fixed-pool.
     # If you still want in-process scheduler, you can enable it explicitly.

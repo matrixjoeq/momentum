@@ -80,6 +80,7 @@ from .schemas import (
     FuturesFetchRequest,
     FuturesFetchResult,
     FuturesFetchSelectedRequest,
+    FuturesContractFetchStatusOut,
     FuturesPoolOut,
     FuturesPoolUpsert,
     FuturesPriceOut,
@@ -162,6 +163,7 @@ from ..data.fred_fetcher import FetchRequest as FredFetchRequest
 from ..data.fred_fetcher import fetch_fred_daily_close
 from ..strategy.vix_signal import VixSignalInputs, backtest_vix_next_day_signal, generate_next_action
 from ..data.ingestion import ingest_one_etf
+from ..data.futures_contract_ingestion import run_contract_fetch_job, run_contract_fetch_sequential_job
 from ..data.futures_ingestion import ingest_one_futures
 from ..data.off_fund_ingestion import ingest_one_off_fund
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
@@ -208,6 +210,7 @@ from ..db.futures_repo import (
     delete_futures_prices,
     get_futures_date_range,
     get_futures_pool_by_code,
+    list_contract_fetch_statuses,
     list_futures_pool,
     list_futures_prices,
     upsert_futures_pool,
@@ -4928,6 +4931,8 @@ def _purge_futures_data(db: Session, *, code: str) -> dict[str, int]:
 
 def _futures_pool_out_from_model(i, *, data_range: tuple[str | None, str | None] | None = None) -> FuturesPoolOut:
     rng = data_range if data_range is not None else (i.last_data_start_date, i.last_data_end_date)
+    ext_days = getattr(i, "contract_extend_calendar_days", None)
+    par = getattr(i, "contract_parallel", None)
     return FuturesPoolOut(
         code=i.code,
         name=i.name,
@@ -4938,11 +4943,30 @@ def _futures_pool_out_from_model(i, *, data_range: tuple[str | None, str | None]
         price_unit=i.price_unit,
         min_price_tick=i.min_price_tick,
         tags=deserialize_futures_tags(i.tags_json, code=i.code, name=i.name),
+        contract_extend_calendar_days=int(ext_days) if ext_days is not None else 366,
+        contract_parallel=int(par) if par is not None else 1,
         last_fetch_status=i.last_fetch_status,
         last_fetch_message=i.last_fetch_message,
         last_data_start_date=rng[0],
         last_data_end_date=rng[1],
+        last_contract_fetch_status=getattr(i, "last_contract_fetch_status", None),
+        last_contract_fetch_message=getattr(i, "last_contract_fetch_message", None),
     )
+
+
+def _schedule_contract_fetch(background_tasks: BackgroundTasks, request: Request, code: str, fetch_type: str) -> None:
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    background_tasks.add_task(run_contract_fetch_job, code, fetch_type, session_factory)
+
+
+def _schedule_contract_fetch_sequential(
+    background_tasks: BackgroundTasks, request: Request, pool_codes: list[str], fetch_type: str
+) -> None:
+    """Chain contract jobs in order; abort later pools when an earlier pool fails (fail-fast)."""
+    if not pool_codes:
+        return
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    background_tasks.add_task(run_contract_fetch_sequential_job, pool_codes, fetch_type, session_factory)
 
 
 @router.get("/futures", response_model=list[FuturesPoolOut])
@@ -4976,6 +5000,8 @@ def upsert_futures(payload: FuturesPoolUpsert, db: Session = Depends(get_session
         price_unit=payload.price_unit,
         min_price_tick=payload.min_price_tick,
         tags=payload.tags,
+        contract_extend_calendar_days=payload.contract_extend_calendar_days,
+        contract_parallel=payload.contract_parallel,
     )
     db.commit()
     return _futures_pool_out_from_model(obj)
@@ -4994,6 +5020,8 @@ def delete_futures_api(code: str, db: Session = Depends(get_session)) -> dict:
 @router.post("/futures/{code}/fetch", response_model=FuturesFetchResult)
 def fetch_one_futures(
     code: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
     payload: FuturesFetchRequest = Body(default_factory=FuturesFetchRequest),
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
@@ -5011,17 +5039,21 @@ def fetch_one_futures(
     )
     if res.status != "success":
         raise HTTPException(status_code=500, detail=res.message or "ingestion failed")
+    _schedule_contract_fetch(background_tasks, request, code, payload.fetch_type)
     return FuturesFetchResult(code=code, inserted_or_updated=int(res.upserted), status=res.status, message=res.message)
 
 
 @router.post("/futures/fetch-all", response_model=list[FuturesFetchResult])
 def fetch_all_futures(
+    request: Request,
+    background_tasks: BackgroundTasks,
     payload: FuturesFetchAllRequest = Body(default_factory=FuturesFetchAllRequest),
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[FuturesFetchResult]:
     out: list[FuturesFetchResult] = []
-    for item in list_futures_pool(db):
+    items = list_futures_pool(db)
+    for item in items:
         res = ingest_one_futures(
             db,
             ak=ak,
@@ -5038,11 +5070,15 @@ def fetch_all_futures(
                 message=res.message,
             )
         )
+    ok_codes = [it.code for it, r in zip(items, out) if r.status == "success"]
+    _schedule_contract_fetch_sequential(background_tasks, request, ok_codes, payload.fetch_type)
     return out
 
 
 @router.post("/futures/fetch-selected", response_model=list[FuturesFetchResult])
 def fetch_selected_futures(
+    request: Request,
+    background_tasks: BackgroundTasks,
     payload: FuturesFetchSelectedRequest = Body(...),
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
@@ -5070,7 +5106,27 @@ def fetch_selected_futures(
                 message=res.message,
             )
         )
+    ok_codes = [code for code, r in zip(payload.codes, out) if r.status == "success"]
+    _schedule_contract_fetch_sequential(background_tasks, request, ok_codes, payload.fetch_type)
     return out
+
+
+@router.get("/futures/{code}/contracts/fetch-status", response_model=list[FuturesContractFetchStatusOut])
+def get_futures_contract_fetch_status(code: str, db: Session = Depends(get_session)) -> list[FuturesContractFetchStatusOut]:
+    pool = get_futures_pool_by_code(db, code)
+    if pool is None:
+        raise HTTPException(status_code=404, detail="futures not found")
+    rows = list_contract_fetch_statuses(db, pool_id=int(pool.id))
+    return [
+        FuturesContractFetchStatusOut(
+            contract_code=r.contract_code,
+            last_fetch_status=r.last_fetch_status,
+            last_fetch_message=r.last_fetch_message,
+            rows_upserted=r.rows_upserted,
+            last_data_end_date=r.last_data_end_date,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/futures/{code}/prices", response_model=list[FuturesPriceOut])

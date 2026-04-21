@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db.futures_repo import (
     FuturesPriceRow,
+    delete_futures_prices,
     get_futures_last_trade_date,
     get_futures_pool_by_code,
     mark_futures_fetch_status,
@@ -86,9 +87,17 @@ def _fetch_futures_daily_sina_df(*, ak: Any, symbol: str) -> pd.DataFrame:
     if fn is None:
         raise ValueError("akshare.futures_zh_daily_sina unavailable")
     try:
-        return fn(symbol=symbol)
-    except TypeError:
-        return fn(symbol)
+        try:
+            return fn(symbol=symbol)
+        except TypeError:
+            return fn(symbol)
+    except ValueError as e:
+        # AkShare assigns 8 column names to an empty DataFrame when Sina returns [] (e.g. some GFEX
+        # deliverable months such as LC2307 while LC0 still works).
+        msg = str(e)
+        if "Length mismatch" in msg and "Expected axis has 0 elements" in msg:
+            return pd.DataFrame()
+        raise
 
 
 def ingest_one_futures(
@@ -131,6 +140,9 @@ def ingest_one_futures(
         db.commit()
         return IngestFuturesResult(code=code, upserted=0, status="success", message=msg)
 
+    if mode == "full":
+        delete_futures_prices(db, code=code, adjust="none")
+
     try:
         raw_df = _fetch_futures_daily_sina_df(ak=ak, symbol=code)
     except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as e:
@@ -153,6 +165,7 @@ def ingest_one_futures(
         db.commit()
         return IngestFuturesResult(code=code, upserted=0, status="success", message=msg)
 
+    pid = int(pool.id) if pool is not None else None
     rows = [
         FuturesPriceRow(
             code=code,
@@ -167,6 +180,7 @@ def ingest_one_futures(
             hold=_to_float(row.hold),
             source="sina",
             adjust="none",
+            pool_id=pid,
         )
         for row in norm.itertuples(index=False)
     ]

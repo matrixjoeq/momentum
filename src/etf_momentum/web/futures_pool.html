@@ -30,11 +30,37 @@
       .msg {
         margin-top: 10px;
       }
+      /* 各交割月合约状态：可视约 10 行，其余滚动；表头 sticky */
+      .contract-fetch-scroll-wrap {
+        max-height: calc(2rem + 1.35rem * 10);
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+      }
+      .contract-fetch-status-table {
+        font-size: 12px;
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .contract-fetch-status-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--head);
+        color: var(--text);
+        padding: 4px 6px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      .contract-fetch-status-table tbody td {
+        padding: 4px 6px;
+      }
     </style>
   </head>
   <body>
     <h2>期货标的池配置</h2>
-    <div class="muted">数据源：AkShare Sina 期货日线。仅落库 none（不复权）价格，且与 ETF/场外基金/宏观数据完全隔离。</div>
+    <div class="muted">主连：AkShare 新浪期货日线。交割月合约：默认与主连同源（新浪 per 合约日线，<code>none</code>）；无数据则视为该交割月代码不存在，继续下一枚举合约，不会自动改用交易所接口。若显式设置 <code>MOMENTUM_FUTURES_CONTRACT_USE_OFFICIAL_EXCHANGE=1</code>，则交割月全程改用交易所日表（AkShare <code>get_*_daily</code>，按交易日逐请求，较慢）。均为串行、合约间隔 1 秒、失败即停；<code>pool_id</code> 关联标的池。CTP 为期货公司二进制通道，非 HTTP，此处未接入。与 ETF/场外基金/宏观数据隔离。</div>
     <div class="muted" style="margin-top: 6px">
       <a href="/">ETF 候选池</a>
       <span style="margin: 0 6px;">|</span>
@@ -83,6 +109,14 @@
       <div style="min-width: 320px;">
         <label>标签（逗号分隔）</label>
         <input id="tags" placeholder="留空将按品种自动分类" />
+      </div>
+      <div>
+        <label>合约扩展（天）</label>
+        <input id="contractExtendDays" type="number" min="1" max="5000" value="366" title="主连终止日之后按自然日顺延，用于枚举交割月合约" />
+      </div>
+      <div>
+        <label>合约并行数</label>
+        <input id="contractParallel" type="number" min="1" max="1" value="1" readonly title="AkShare 交割月抓取固定串行，并行数恒为 1" />
       </div>
       <button id="save">保存/更新</button>
       <div>
@@ -174,6 +208,15 @@
         return "";
       }
 
+      function contractPoolSummary(status, message) {
+        const st = String(status || "").trim().toLowerCase();
+        if (!st) return "未触发";
+        if (st === "failed") return "失败";
+        if (st === "skipped") return "跳过";
+        if (st === "success") return "成功";
+        return st;
+      }
+
       function fetchStatusText(status, message) {
         const st = String(status || "").trim().toLowerCase();
         const msg = String(message || "").trim().toLowerCase();
@@ -223,14 +266,26 @@
             : String(Number(it.min_price_tick));
           const punit = it.price_unit ? String(it.price_unit) : "-";
           const tags = Array.isArray(it.tags) && it.tags.length ? it.tags.join(", ") : "-";
+          const ext = Number.isFinite(Number(it.contract_extend_calendar_days)) ? Number(it.contract_extend_calendar_days) : 366;
+          const par = Number.isFinite(Number(it.contract_parallel)) ? Number(it.contract_parallel) : 1;
+          const cst = it.last_contract_fetch_status || "";
+          const cmsg = it.last_contract_fetch_message || "";
+          const cstText = contractPoolSummary(cst, cmsg);
           tr.innerHTML = `
             <td><input type="checkbox" data-act="sel" data-code="${it.code}" ${checked} /></td>
             <td>${it.code}</td>
             <td>${it.name}</td>
             <td><div>保证金率：${margin}</div><div class="muted">单位：${multiplier} / 报价：${punit} / 最小变动：${tick}</div></td>
             <td>${tags}</td>
-            <td><div>${cfgRange}</div><div class="muted">已抓取（none）：${dataRange}</div></td>
-            <td class="${statusClass(st)}">${stText} <span class="muted">${msg ? "· " + msg : ""}</span></td>
+            <td><div>${cfgRange}</div><div class="muted">主连已抓取：${dataRange}</div><div class="muted">合约窗扩展 +${ext} 天 / 并行 ${par}</div></td>
+            <td class="${statusClass(st)}">
+              <div><strong>主连</strong> ${stText} <span class="muted">${msg ? "· " + msg : ""}</span></div>
+              <div class="muted" style="margin-top:4px;"><strong>合约</strong> ${cstText} <span class="muted">${cmsg ? "· " + cmsg : ""}</span></div>
+              <details class="contract-fetch-details" data-code="${it.code}" style="margin-top:6px;">
+                <summary style="cursor:pointer;">各交割月合约状态</summary>
+                <div class="contract-fetch-body muted" style="margin-top:6px;">展开后加载…</div>
+              </details>
+            </td>
             <td>
               <div class="actions">
                 <button data-act="edit" data-code="${it.code}">编辑</button>
@@ -247,6 +302,8 @@
 
       $("save").addEventListener("click", async () => {
         setMsg("");
+        const extRaw = String(($("contractExtendDays") && $("contractExtendDays").value) || "").trim();
+        const extNum = extRaw ? Number(extRaw) : 366;
         const payload = {
           code: $("code").value.trim(),
           name: $("name").value.trim(),
@@ -257,6 +314,8 @@
           price_unit: $("priceUnit").value.trim() || null,
           min_price_tick: parseNullableNumber("minPriceTick"),
           tags: parseTags(),
+          contract_extend_calendar_days: Number.isFinite(extNum) ? Math.min(5000, Math.max(1, Math.floor(extNum))) : 366,
+          contract_parallel: 1,
         };
         const resp = await api("/futures", { method: "POST", body: JSON.stringify(payload) });
         const text = await resp.text();
@@ -348,6 +407,62 @@
         }
       });
 
+      $("tbody").addEventListener(
+        "toggle",
+        async (e) => {
+          const det = e.target;
+          if (!det || !det.classList || !det.classList.contains("contract-fetch-details")) return;
+          if (!det.open) return;
+          const body = det.querySelector(".contract-fetch-body");
+          if (!body || body.dataset.loaded === "1") return;
+          const code = det.getAttribute("data-code") || "";
+          body.textContent = "加载中…";
+          try {
+            const resp = await api(`/futures/${encodeURIComponent(code)}/contracts/fetch-status`);
+            const text = await resp.text();
+            if (!resp.ok) {
+              body.textContent = text || `HTTP ${resp.status}`;
+              body.dataset.loaded = "1";
+              return;
+            }
+            const rows = JSON.parse(text);
+            if (!Array.isArray(rows) || rows.length === 0) {
+              body.innerHTML =
+                '<span class="muted">暂无记录。主连抓取成功后会自动跑后台任务拉取交割月合约。</span>';
+            } else {
+              const esc = (s) =>
+                String(s == null ? "" : s)
+                  .replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(/>/g, "&gt;");
+              const deliveryMonthKey = (code) => {
+                const s = String(code == null ? "" : code).trim().toUpperCase();
+                const m = s.match(/(\d{3,4})$/);
+                return m ? parseInt(m[1], 10) : 0;
+              };
+              const sorted = [...rows].sort(
+                (a, b) => deliveryMonthKey(b.contract_code) - deliveryMonthKey(a.contract_code)
+              );
+              body.innerHTML =
+                '<div class="contract-fetch-scroll-wrap">' +
+                '<table class="contract-fetch-status-table"><thead><tr><th>合约</th><th>状态</th><th>说明</th></tr></thead><tbody>' +
+                sorted
+                  .map(
+                    (r) =>
+                      `<tr><td>${esc(r.contract_code)}</td><td>${esc(r.last_fetch_status)}</td><td>${esc(r.last_fetch_message)}</td></tr>`
+                  )
+                  .join("") +
+                "</tbody></table></div>";
+            }
+            body.dataset.loaded = "1";
+          } catch (err) {
+            body.textContent = String(err);
+            body.dataset.loaded = "1";
+          }
+        },
+        true
+      );
+
       $("tbody").addEventListener("click", async (e) => {
         const btn = e.target.closest("button");
         const cb = e.target.closest('input[type="checkbox"][data-act="sel"]');
@@ -382,6 +497,8 @@
           $("priceUnit").value = it.price_unit || "";
           $("minPriceTick").value = it.min_price_tick == null ? "" : String(it.min_price_tick);
           $("tags").value = Array.isArray(it.tags) ? it.tags.join(", ") : "";
+          if ($("contractExtendDays")) $("contractExtendDays").value = it.contract_extend_calendar_days != null ? String(it.contract_extend_calendar_days) : "366";
+          if ($("contractParallel")) $("contractParallel").value = "1";
           setMsg("已载入到表单，修改后点“保存/更新”。");
         }
         if (act === "fetch") {

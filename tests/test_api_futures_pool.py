@@ -35,6 +35,10 @@ def test_futures_pool_crud_and_fetch_contract(api_client: TestClient) -> None:
     assert rows[0]["code"] == "RB0"
     assert rows[0]["adjust"] == "none"
 
+    cs = client.get("/api/futures/RB0/contracts/fetch-status")
+    assert cs.status_code == 200
+    assert isinstance(cs.json(), list)
+
     bad_adjust = client.get("/api/futures/RB0/prices?adjust=hfq")
     assert bad_adjust.status_code == 400
 

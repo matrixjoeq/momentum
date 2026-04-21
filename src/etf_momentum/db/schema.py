@@ -169,6 +169,10 @@ def ensure_runtime_schema(engine: Engine) -> None:
     """
     Lightweight runtime schema evolution for local development.
     Avoids hard failures on existing DBs when new nullable columns are introduced.
+
+    Uses SQLAlchemy ``inspect()`` + ``ALTER TABLE ... ADD COLUMN``, which applies to
+    MySQL/MariaDB and SQLite alike (not SQLite-only). ETF-specific legacy steps remain
+    under ``ensure_sqlite_schema``.
     """
     if engine.dialect.name == "sqlite":
         ensure_sqlite_schema(engine)
@@ -199,4 +203,44 @@ def ensure_runtime_schema(engine: Engine) -> None:
         if _has_column(engine, "futures_prices", "hold") and _has_column(engine, "futures_prices", "open_interest"):
             with engine.begin() as conn:
                 conn.execute(text("UPDATE futures_prices SET hold = open_interest WHERE hold IS NULL AND open_interest IS NOT NULL"))
+
+    if inspect(engine).has_table("futures_pool"):
+        futures_pool_more = {
+            "contract_extend_calendar_days": "contract_extend_calendar_days INTEGER",
+            "contract_parallel": "contract_parallel INTEGER",
+            "last_contract_fetch_at": "last_contract_fetch_at DATETIME",
+            "last_contract_fetch_status": "last_contract_fetch_status VARCHAR(32)",
+            "last_contract_fetch_message": "last_contract_fetch_message VARCHAR(512)",
+        }
+        for col, ddl in futures_pool_more.items():
+            if _has_column(engine, "futures_pool", col):
+                continue
+            _add_column(engine, "futures_pool", ddl)
+        if _has_column(engine, "futures_pool", "contract_extend_calendar_days"):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE futures_pool SET contract_extend_calendar_days = 366 "
+                        "WHERE contract_extend_calendar_days IS NULL"
+                    )
+                )
+        if _has_column(engine, "futures_pool", "contract_parallel"):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE futures_pool SET contract_parallel = 1 "
+                        "WHERE contract_parallel IS NULL OR contract_parallel <> 1"
+                    )
+                )
+
+    if inspect(engine).has_table("futures_prices") and not _has_column(engine, "futures_prices", "pool_id"):
+        _add_column(engine, "futures_prices", "pool_id INTEGER")
+
+    # Older deployments may have run ALTERs before FuturesContractFetchStatus existed in metadata.
+    if inspect(engine).has_table("futures_pool") and not inspect(engine).has_table(
+        "futures_contract_fetch_status"
+    ):
+        from .models import FuturesContractFetchStatus
+
+        FuturesContractFetchStatus.__table__.create(bind=engine, checkfirst=True)
 
