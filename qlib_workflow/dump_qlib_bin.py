@@ -49,7 +49,9 @@ def _download_dump_bin(dest: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
+    parser.add_argument(
+        "--config", default=str(Path(__file__).with_name("config.toml"))
+    )
     args = parser.parse_args()
 
     cfg = _load_toml(Path(args.config))
@@ -61,7 +63,9 @@ def main() -> int:
 
     dump_bin = _find_dump_bin()
     if dump_bin is None:
-        dump_bin = _download_dump_bin(Path(__file__).with_name("vendor") / "dump_bin.py")
+        dump_bin = _download_dump_bin(
+            Path(__file__).with_name("vendor") / "dump_bin.py"
+        )
 
     cmd = [
         sys.executable,

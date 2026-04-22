@@ -84,6 +84,7 @@ def build_port_config(cfg: dict, signal, strategy: dict) -> dict:
         },
     }
 
+
 def _artifact_dir(recorder) -> Path | None:
     try:
         uri = recorder.get_artifact_uri()
@@ -173,13 +174,16 @@ def _run_baseline(cfg: dict) -> dict:
     if not db_path:
         return {}
     import os
+
     os.environ["MOMENTUM_DB_URL"] = f"sqlite:///{db_path}"
     from fastapi.testclient import TestClient
     from etf_momentum.app import app
 
     backtest = cfg["backtest"]
     automl = cfg["automl"]
-    wd = int(automl.get("baseline_anchor_weekday", backtest.get("rebalance_weekday", 0)))
+    wd = int(
+        automl.get("baseline_anchor_weekday", backtest.get("rebalance_weekday", 0))
+    )
     payload = {
         "start": str(backtest["start"]).replace("-", ""),
         "end": str(backtest["end"]).replace("-", ""),
@@ -231,7 +235,9 @@ def _write_png_ranking(df: pd.DataFrame, path: Path, metric: str) -> None:
     if df.empty:
         return
     top = df.head(10).copy()
-    labels = top.apply(lambda r: f"{r['window']}|{r['handler']}|{r['model']}|{r['strategy']}", axis=1)
+    labels = top.apply(
+        lambda r: f"{r['window']}|{r['handler']}|{r['model']}|{r['strategy']}", axis=1
+    )
     scores = pd.to_numeric(top["score"], errors="coerce").fillna(0.0)
     plt.figure(figsize=(10, 4))
     plt.bar(labels, scores)
@@ -248,8 +254,14 @@ def _write_png_compare(baseline: dict, best: dict, path: Path) -> None:
     a_sharpe = best.get("score")
     a_cum = best.get("cumulative_return")
     labels = ["Sharpe", "Cumulative"]
-    b_vals = [b_sharpe if b_sharpe is not None else 0.0, b_cum if b_cum is not None else 0.0]
-    a_vals = [a_sharpe if a_sharpe is not None else 0.0, a_cum if a_cum is not None else 0.0]
+    b_vals = [
+        b_sharpe if b_sharpe is not None else 0.0,
+        b_cum if b_cum is not None else 0.0,
+    ]
+    a_vals = [
+        a_sharpe if a_sharpe is not None else 0.0,
+        a_cum if a_cum is not None else 0.0,
+    ]
     x = range(len(labels))
     plt.figure(figsize=(6, 4))
     plt.bar([i - 0.2 for i in x], b_vals, width=0.4, label="Baseline")
@@ -299,7 +311,9 @@ def _write_best_config(best: dict, path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
+    parser.add_argument(
+        "--config", default=str(Path(__file__).with_name("config.toml"))
+    )
     args = parser.parse_args()
 
     cfg = _load_toml(Path(args.config))
@@ -307,9 +321,13 @@ def main() -> int:
 
     universe = list(cfg["universe"]["symbols"])
     automl = cfg["automl"]
-    segments_default = automl.get("segments") or cfg.get("ml_pipeline", {}).get("segments", {})
+    segments_default = automl.get("segments") or cfg.get("ml_pipeline", {}).get(
+        "segments", {}
+    )
     if not segments_default and not automl.get("windows"):
-        raise ValueError("segments not found in automl.segments/ml_pipeline or automl.windows")
+        raise ValueError(
+            "segments not found in automl.segments/ml_pipeline or automl.windows"
+        )
 
     handlers = automl["handlers"]
     models = automl["models"]
@@ -335,7 +353,12 @@ def main() -> int:
                 "module_path": m["module_path"],
                 "kwargs": m.get("kwargs", {}),
             }
-            task = {"model": model_cfg, "dataset": dataset_cfg, "strategy": s, "window": w["name"]}
+            task = {
+                "model": model_cfg,
+                "dataset": dataset_cfg,
+                "strategy": s,
+                "window": w["name"],
+            }
 
             recorder_name = f"{automl['recorder_prefix']}_{w['name']}_{h['name']}_{m['name']}_{s['name']}"
             status = "success"
@@ -345,7 +368,10 @@ def main() -> int:
                 model = init_instance_by_config(model_cfg)
                 dataset = init_instance_by_config(dataset_cfg)
 
-                with R.start(experiment_name=automl["experiment_name"], recorder_name=recorder_name):
+                with R.start(
+                    experiment_name=automl["experiment_name"],
+                    recorder_name=recorder_name,
+                ):
                     R.log_params(**_flatten(task))
                     model.fit(dataset)
                     recorder = R.get_recorder()
@@ -382,11 +408,19 @@ def main() -> int:
     out_dir = Path(__file__).with_name("outputs") / "automl_runs"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "runs.json"
-    out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
-    ok_runs = [r for r in results if r.get("status") == "success" and r.get("score") is not None]
+    out_path.write_text(
+        json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    ok_runs = [
+        r
+        for r in results
+        if r.get("status") == "success" and r.get("score") is not None
+    ]
     if ok_runs:
         ok_runs.sort(key=lambda r: float(r.get("score") or -1e18), reverse=True)
-        (out_dir / "best.json").write_text(json.dumps(ok_runs[0], ensure_ascii=False, indent=2), encoding="utf-8")
+        (out_dir / "best.json").write_text(
+            json.dumps(ok_runs[0], ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         _write_best_config(ok_runs[0], out_dir / "best_config.json")
 
     # Ranking table (CSV + HTML)
@@ -394,7 +428,9 @@ def main() -> int:
     _write_csv(ranked, out_dir / "runs.csv")
     if ranked:
         _write_html(pd.DataFrame(ranked), out_dir / "runs.html", title="AutoML Ranking")
-        _write_png_ranking(pd.DataFrame(ranked), out_dir / "ranking.png", metric=metric_key)
+        _write_png_ranking(
+            pd.DataFrame(ranked), out_dir / "ranking.png", metric=metric_key
+        )
 
     # Baseline comparison
     baseline = _run_baseline(cfg)
@@ -409,7 +445,11 @@ def main() -> int:
                 "best_cum": best.get("cumulative_return"),
             }
             _write_csv([compare], out_dir / "compare.csv")
-            _write_html(pd.DataFrame([compare]), out_dir / "compare.html", title="Baseline vs Best")
+            _write_html(
+                pd.DataFrame([compare]),
+                out_dir / "compare.html",
+                title="Baseline vs Best",
+            )
             _write_png_compare(baseline, best, out_dir / "compare.png")
 
     _write_summary_md(out_dir, metric_key, ranked[0] if ranked else None)

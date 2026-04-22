@@ -41,13 +41,13 @@ python -m etf_momentum.scripts.rotation_research_runner -u crude_oil
 
 ### 基础参数
 
-| 参数 | 简写 | 说明 | 默认值 |
-|------|------|------|--------|
-| `--universe` | `-u` | 预设标的池名称 | `crude_oil` |
-| `--codes` | `-c` | 自定义ETF代码（逗号分隔） | 无 |
-| `--name` | `-n` | 研究名称 | `Custom Universe` |
-| `--cost` | `-k` | 交易成本（bps） | `3.0` |
-| `--quick` | `-q` | 快速参数敏感性测试 | `False` |
+| 参数         | 简写 | 说明                      | 默认值            |
+| ------------ | ---- | ------------------------- | ----------------- |
+| `--universe` | `-u` | 预设标的池名称            | `crude_oil`       |
+| `--codes`    | `-c` | 自定义ETF代码（逗号分隔） | 无                |
+| `--name`     | `-n` | 研究名称                  | `Custom Universe` |
+| `--cost`     | `-k` | 交易成本（bps）           | `3.0`             |
+| `--quick`    | `-q` | 快速参数敏感性测试        | `False`           |
 
 ### 使用示例
 
@@ -83,15 +83,15 @@ python -m etf_momentum.scripts.rotation_research_runner -u crude_oil
 
 包含7只原油/油气相关ETF：
 
-| 代码 | 名称 |
-|------|------|
-| 501018 | 南方原油 |
-| 160723 | 嘉实原油 |
+| 代码   | 名称       |
+| ------ | ---------- |
+| 501018 | 南方原油   |
+| 160723 | 嘉实原油   |
 | 161129 | 易方达原油 |
-| 160416 | 华安石油 |
-| 162719 | 广发石油 |
-| 163208 | 诺安油气 |
-| 162411 | 华宝油气 |
+| 160416 | 华安石油   |
+| 162719 | 广发石油   |
+| 163208 | 诺安油气   |
+| 162411 | 华宝油气   |
 
 ### 2. A股核心 (a_core)
 
@@ -101,13 +101,13 @@ python -m etf_momentum.scripts.rotation_research_runner -u a_core
 
 包含5只核心A股ETF：
 
-| 代码 | 名称 |
-|------|------|
-| 510300 | 沪深300 |
-| 510500 | 中证500 |
+| 代码   | 名称     |
+| ------ | -------- |
+| 510300 | 沪深300  |
+| 510500 | 中证500  |
 | 510880 | 创业板指 |
 | 510900 | 中证1000 |
-| 511660 | 中证800 |
+| 511660 | 中证800  |
 
 ### 3. 行业轮动 (sector)
 
@@ -117,8 +117,8 @@ python -m etf_momentum.scripts.rotation_research_runner -u sector
 
 包含5只行业ETF：
 
-| 代码 | 名称 |
-|------|------|
+| 代码   | 名称    |
+| ------ | ------- |
 | 512880 | 证券ETF |
 | 512690 | 银行ETF |
 | 512760 | 券商ETF |
@@ -167,23 +167,23 @@ results = run_research(
 
 ### 可用的评分方法
 
-| 因子名称 | 说明 | 计算方式 |
-|----------|------|----------|
-| `raw_mom` | 原始动量 | 区间收益率 |
-| `sharpe_mom` | 风险调整动量 | 收益率/波动率 |
-| `sma_trend` | 均线趋势 | 价格/SMA偏离度 |
-| `low_vol` | 低波动 | 1/波动率 |
-| `multi_factor` | 多因子综合 | 动量+趋势+波动率加权 |
+| 因子名称       | 说明         | 计算方式             |
+| -------------- | ------------ | -------------------- |
+| `raw_mom`      | 原始动量     | 区间收益率           |
+| `sharpe_mom`   | 风险调整动量 | 收益率/波动率        |
+| `sma_trend`    | 均线趋势     | 价格/SMA偏离度       |
+| `low_vol`      | 低波动       | 1/波动率             |
+| `multi_factor` | 多因子综合   | 动量+趋势+波动率加权 |
 
 ### 默认参数
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| 回看天数 | 90 | 计算动量的历史区间 |
-| 持仓数量 | 2 | 每次轮动持有的ETF数量 |
-| 再平衡频率 | weekly | 每周/每月调仓 |
-| 均线周期 | 50 | SMA计算周期 |
-| 波动率周期 | 20 | 波动率计算周期 |
+| 参数       | 默认值 | 说明                  |
+| ---------- | ------ | --------------------- |
+| 回看天数   | 90     | 计算动量的历史区间    |
+| 持仓数量   | 2      | 每次轮动持有的ETF数量 |
+| 再平衡频率 | weekly | 每周/每月调仓         |
+| 均线周期   | 50     | SMA计算周期           |
+| 波动率周期 | 20     | 波动率计算周期        |
 
 ### 默认网格搜索参数
 
@@ -212,19 +212,19 @@ data/rotation_research/crude_oil/
 
 ### CSV字段说明
 
-| 字段 | 说明 |
-|------|------|
-| strategy_name | 策略名称 |
-| params | 策略参数JSON |
-| metrics.total_return | 总收益率 |
-| metrics.annualized_return | 年化收益率 |
-| metrics.annualized_volatility | 年化波动率 |
-| metrics.max_drawdown | 最大回撤 |
-| metrics.sharpe_ratio | 夏普比率 |
-| metrics.sortino_ratio | Sortino比率 |
-| metrics.calmar_ratio | Calmar比率 |
-| metrics.win_rate | 胜率 |
-| metrics.n_days | 交易日数 |
+| 字段                          | 说明         |
+| ----------------------------- | ------------ |
+| strategy_name                 | 策略名称     |
+| params                        | 策略参数JSON |
+| metrics.total_return          | 总收益率     |
+| metrics.annualized_return     | 年化收益率   |
+| metrics.annualized_volatility | 年化波动率   |
+| metrics.max_drawdown          | 最大回撤     |
+| metrics.sharpe_ratio          | 夏普比率     |
+| metrics.sortino_ratio         | Sortino比率  |
+| metrics.calmar_ratio          | Calmar比率   |
+| metrics.win_rate              | 胜率         |
+| metrics.n_days                | 交易日数     |
 
 ### 报告示例
 
@@ -275,6 +275,7 @@ xdg-open src/etf_momentum/web/research_crude_oil.html
 ### 切换标的池
 
 在网页右上角可以选择不同的预设标的池：
+
 - 原油ETF (7只)
 - A股核心 (5只)
 - 行业轮动 (5只)
@@ -289,8 +290,13 @@ xdg-open src/etf_momentum/web/research_crude_oil.html
 {
   "strategy_name": "sharpe_mom_90d_top3_weekly",
   "codes": [
-    "501018", "160723", "161129",
-    "160416", "162719", "163208", "162411"
+    "501018",
+    "160723",
+    "161129",
+    "160416",
+    "162719",
+    "163208",
+    "162411"
   ],
   "score_method": "sharpe_mom",
   "lookback_days": 90,
@@ -392,7 +398,7 @@ try:
         codes=["510300", "510500", "510880"],
         description="测试策略"
     )
-    
+
     # 运行回测
     results = run_research(
         universe=universe,
@@ -400,7 +406,7 @@ try:
         cost_bps=3.0,
         run_full_grid=True
     )
-    
+
     # 打印摘要
     print(f"测试策略数: {results['total_strategies']}")
     print(f"最佳夏普: {results['best_by_sharpe']['metrics']['sharpe_ratio']:.3f}")
@@ -425,7 +431,7 @@ print(df_sorted.head(10)[["strategy_name", "metrics.sharpe_ratio", "metrics.annu
 
 # 筛选条件
 filtered = df[
-    (df["metrics.sharpe_ratio"] >= 0.3) & 
+    (df["metrics.sharpe_ratio"] >= 0.3) &
     (df["metrics.annualized_return"] >= 0.1)
 ]
 ```
@@ -469,9 +475,9 @@ momentum/
 
 ## 相关文件
 
-| 文件 | 说明 |
-|------|------|
-| `src/etf_momentum/strategy/rotation_research_config.py` | 策略配置模块 |
-| `src/etf_momentum/scripts/rotation_research_runner.py` | 回测运行脚本 |
-| `src/etf_momentum/web/research_crude_oil.html` | 研究结果Web页面 |
-| `data/rotation_research/` | 回测结果目录 |
+| 文件                                                    | 说明            |
+| ------------------------------------------------------- | --------------- |
+| `src/etf_momentum/strategy/rotation_research_config.py` | 策略配置模块    |
+| `src/etf_momentum/scripts/rotation_research_runner.py`  | 回测运行脚本    |
+| `src/etf_momentum/web/research_crude_oil.html`          | 研究结果Web页面 |
+| `data/rotation_research/`                               | 回测结果目录    |

@@ -8,7 +8,11 @@ def _build_test_client_with_fake_ak(*, fetch_end_date: str):
     from etf_momentum.app import create_app
     from etf_momentum.db.init_db import init_db
     from etf_momentum.db.seed import ensure_default_policies
-    from etf_momentum.db.session import make_session_factory, make_sqlite_engine, session_scope
+    from etf_momentum.db.session import (
+        make_session_factory,
+        make_sqlite_engine,
+        session_scope,
+    )
     import etf_momentum.api.routes as routes
 
     engine = make_sqlite_engine()
@@ -62,7 +66,9 @@ def _build_test_client_with_fake_ak(*, fetch_end_date: str):
     return TestClient(app)
 
 
-def _assert_next_plan_payload(c, *, anchor_weekday: int, asof: str = "20240104") -> dict:
+def _assert_next_plan_payload(
+    c, *, anchor_weekday: int, asof: str = "20240104"
+) -> dict:
     return post_json_ok(
         c,
         "/api/analysis/rotation/next-plan",
@@ -120,4 +126,3 @@ def test_api_rotation_next_plan_does_not_require_future_price_row():
     assert data["pick_name"] is not None
     assert data["pick_exposure"] is not None
     assert float(data["pick_exposure"]) >= 0.0
-

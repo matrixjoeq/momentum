@@ -20,6 +20,8 @@ implemented here.
 
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught
+
 import datetime as dt
 import logging
 import time
@@ -90,7 +92,9 @@ def _align_weekend_forward(d: dt.date) -> dt.date:
     return d
 
 
-def _contract_codes_in_window(*, root: str, main_start: str, main_end: str, extend_calendar_days: int) -> list[str]:
+def _contract_codes_in_window(
+    *, root: str, main_start: str, main_end: str, extend_calendar_days: int
+) -> list[str]:
     end_raw = _parse_yyyymmdd(main_end) + dt.timedelta(days=int(extend_calendar_days))
     end_d = _align_weekend_forward(end_raw)
     start_yymm = _yymm_from_yyyymmdd(main_start)
@@ -175,7 +179,9 @@ def _official_daily_series(
             d += dt.timedelta(days=1)
             continue
         if "symbol" not in df.columns:
-            raise RuntimeError(f"official daily missing symbol column ({exchange} {ds})")
+            raise RuntimeError(
+                f"official daily missing symbol column ({exchange} {ds})"
+            )
         m = df[df["symbol"].astype(str).str.upper() == sym_key]
         if m.empty:
             d += dt.timedelta(days=1)
@@ -198,7 +204,17 @@ def _official_daily_series(
         d += dt.timedelta(days=1)
     if not rows:
         return pd.DataFrame(
-            columns=["trade_date", "open", "high", "low", "close", "settle", "volume", "hold", "amount"]
+            columns=[
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "settle",
+                "volume",
+                "hold",
+                "amount",
+            ]
         )
     out = pd.DataFrame(rows)
     return out.sort_values("trade_date", ascending=True)
@@ -281,7 +297,9 @@ def ingest_contracts_for_pool(
     main_rng = get_futures_date_range(db, code=pool_code, adjust="none")
     if main_rng[0] is None or main_rng[1] is None:
         msg = "skip contracts: no local main continuous range"
-        mark_futures_contract_pool_fetch(db, code=pool_code, status="skipped", message=msg)
+        mark_futures_contract_pool_fetch(
+            db, code=pool_code, status="skipped", message=msg
+        )
         db.commit()
         return msg
 
@@ -305,10 +323,18 @@ def ingest_contracts_for_pool(
         for c in contracts:
             delete_futures_prices(db, code=c, adjust="none")
 
-    planned = _plan_contract_windows(db, contracts=contracts, window_start=window_start, window_end=window_end, fetch_type=ui_fetch_type)
+    planned = _plan_contract_windows(
+        db,
+        contracts=contracts,
+        window_start=window_start,
+        window_end=window_end,
+        fetch_type=ui_fetch_type,
+    )
     if not planned:
         msg = f"no contract work (fetch_type={ui_fetch_type})"
-        mark_futures_contract_pool_fetch(db, code=pool_code, status="success", message=msg)
+        mark_futures_contract_pool_fetch(
+            db, code=pool_code, status="success", message=msg
+        )
         db.commit()
         return msg
 
@@ -320,7 +346,9 @@ def ingest_contracts_for_pool(
         request_range = f"range={start_d.strftime('%Y%m%d')}~{end_d.strftime('%Y%m%d')}"
         if norm.empty:
             return sym, 0, "skipped", f"{request_range}"
-        norm2 = norm[(norm["trade_date"] >= start_d) & (norm["trade_date"] <= end_d)].copy()
+        norm2 = norm[
+            (norm["trade_date"] >= start_d) & (norm["trade_date"] <= end_d)
+        ].copy()
         if norm2.empty:
             return sym, 0, "success", f"{request_range}"
         actual_start = norm2["trade_date"].min().strftime("%Y%m%d")
@@ -361,12 +389,25 @@ def ingest_contracts_for_pool(
                 end_d=w.end_d,
                 use_official_exchange=use_official,
             )
-        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as e:
-            range_txt = f"range={w.start_d.strftime('%Y%m%d')}~{w.end_d.strftime('%Y%m%d')}"
+        except (
+            AttributeError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as e:
+            range_txt = (
+                f"range={w.start_d.strftime('%Y%m%d')}~{w.end_d.strftime('%Y%m%d')}"
+            )
             err_msg = f"{range_txt}; {e}"
-            last_td = get_futures_last_trade_date(db, code=w.contract_code, adjust="none")
+            last_td = get_futures_last_trade_date(
+                db, code=w.contract_code, adjust="none"
+            )
             if last_td is None:
-                delete_contract_fetch_status(db, pool_id=pid, contract_code=w.contract_code)
+                delete_contract_fetch_status(
+                    db, pool_id=pid, contract_code=w.contract_code
+                )
             else:
                 record_contract_fetch_status(
                     db,
@@ -383,9 +424,16 @@ def ingest_contracts_for_pool(
                 message=f"contract {w.contract_code}: {err_msg}",
             )
             db.commit()
-            logger.warning("contract fetch aborted pool=%s contract=%s err=%s", pool_code, w.contract_code, e)
+            logger.warning(
+                "contract fetch aborted pool=%s contract=%s err=%s",
+                pool_code,
+                w.contract_code,
+                e,
+            )
             raise ContractFetchAborted(str(e)) from e
-        sym, n, st, msg = _apply_df(w.contract_code, norm, w.start_d, w.end_d, source=src)
+        sym, n, st, msg = _apply_df(
+            w.contract_code, norm, w.start_d, w.end_d, source=src
+        )
         if st == "success":
             ok += 1
         last_td = get_futures_last_trade_date(db, code=sym, adjust="none")
@@ -406,29 +454,39 @@ def ingest_contracts_for_pool(
         f"contracts={len(contracts)} planned={len(planned)} ok_status={ok} fetch_type={ui_fetch_type} "
         f"range={window_start}~{window_end} parallel=1 (AkShare serial)"
     )
-    mark_futures_contract_pool_fetch(db, code=pool_code, status="success", message=summary)
+    mark_futures_contract_pool_fetch(
+        db, code=pool_code, status="success", message=summary
+    )
     db.commit()
     return summary
 
 
-def run_contract_fetch_job(pool_code: str, main_fetch_type: str, session_factory: Any) -> None:
+def run_contract_fetch_job(
+    pool_code: str, main_fetch_type: str, session_factory: Any
+) -> None:
     """Background entrypoint: separate Session, never raises to Starlette."""
     import akshare as ak
 
     db = session_factory()
     try:
-        ingest_contracts_for_pool(db, ak=ak, pool_code=pool_code, main_fetch_type=main_fetch_type)
+        ingest_contracts_for_pool(
+            db, ak=ak, pool_code=pool_code, main_fetch_type=main_fetch_type
+        )
     except ContractFetchAborted:
         pass
     except Exception as e:
         db.rollback()
-        mark_futures_contract_pool_fetch(db, code=pool_code, status="failed", message=str(e))
+        mark_futures_contract_pool_fetch(
+            db, code=pool_code, status="failed", message=str(e)
+        )
         db.commit()
     finally:
         db.close()
 
 
-def run_contract_fetch_sequential_job(pool_codes: list[str], main_fetch_type: str, session_factory: Any) -> None:
+def run_contract_fetch_sequential_job(
+    pool_codes: list[str], main_fetch_type: str, session_factory: Any
+) -> None:
     """
     Run contract ingestion for several pools **in order**. Stops after the first :class:`ContractFetchAborted`
     (failed contract in a pool), so later pools are not processed.
@@ -438,12 +496,16 @@ def run_contract_fetch_sequential_job(pool_codes: list[str], main_fetch_type: st
     for code in pool_codes:
         db = session_factory()
         try:
-            ingest_contracts_for_pool(db, ak=ak, pool_code=code, main_fetch_type=main_fetch_type)
+            ingest_contracts_for_pool(
+                db, ak=ak, pool_code=code, main_fetch_type=main_fetch_type
+            )
         except ContractFetchAborted:
             break
         except Exception as e:
             db.rollback()
-            mark_futures_contract_pool_fetch(db, code=code, status="failed", message=str(e))
+            mark_futures_contract_pool_fetch(
+                db, code=code, status="failed", message=str(e)
+            )
             db.commit()
             break
         finally:

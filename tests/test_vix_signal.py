@@ -28,4 +28,3 @@ def test_vix_signal_buy_sell_hold():
     # last return is down => risk-on => target long => BUY from cash
     assert out["action"] == "BUY"
     assert out["target_position"] == "long"
-

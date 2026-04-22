@@ -24,7 +24,9 @@ def load_macro_close_series(
 ) -> pd.Series:
     start_d = _parse_yyyymmdd(start)
     end_d = _parse_yyyymmdd(end)
-    rows = list_macro_prices(db, series_id=series_id, start_date=start_d, end_date=end_d, limit=500000)
+    rows = list_macro_prices(
+        db, series_id=series_id, start_date=start_d, end_date=end_d, limit=500000
+    )
     if not rows:
         return pd.Series(dtype=float)
     s = pd.Series(
@@ -62,9 +64,19 @@ def analyze_pair_leadlag(
     a = load_macro_close_series(db, series_id=a_series_id, start=start, end=end)
     b = load_macro_close_series(db, series_id=b_series_id, start=start, end=end)
     if a.empty:
-        return {"ok": False, "reason": "empty_series_a", "a_series_id": a_series_id, "b_series_id": b_series_id}
+        return {
+            "ok": False,
+            "reason": "empty_series_a",
+            "a_series_id": a_series_id,
+            "b_series_id": b_series_id,
+        }
     if b.empty:
-        return {"ok": False, "reason": "empty_series_b", "a_series_id": a_series_id, "b_series_id": b_series_id}
+        return {
+            "ok": False,
+            "reason": "empty_series_b",
+            "a_series_id": a_series_id,
+            "b_series_id": b_series_id,
+        }
 
     res = compute_lead_lag(
         LeadLagInputs(
@@ -84,9 +96,19 @@ def analyze_pair_leadlag(
         )
     )
     if not bool(res.get("ok")):
-        return {"ok": False, "reason": str(res.get("reason") or "analysis_failed"), "a_series_id": a_series_id, "b_series_id": b_series_id}
+        return {
+            "ok": False,
+            "reason": str(res.get("reason") or "analysis_failed"),
+            "a_series_id": a_series_id,
+            "b_series_id": b_series_id,
+        }
     meta = dict(res.get("meta") or {})
-    meta.update({"a_series_id": a_series_id, "b_series_id": b_series_id, "index_align": index_align})
+    meta.update(
+        {
+            "a_series_id": a_series_id,
+            "b_series_id": b_series_id,
+            "index_align": index_align,
+        }
+    )
     res["meta"] = meta
     return res
-

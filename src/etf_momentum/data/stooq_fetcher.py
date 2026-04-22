@@ -74,7 +74,14 @@ def fetch_stooq_daily_close(
             if out.empty:
                 return pd.DataFrame(), {**meta, "error": "empty_in_range"}
             return out[["date", "close"]], meta
-        except (HTTPError, URLError, TimeoutError, socket.timeout, ValueError, TypeError) as e:
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            socket.timeout,
+            ValueError,
+            TypeError,
+        ) as e:
             last_err = e
             if attempt < max(1, int(retries) + 1) - 1:
                 continue
@@ -82,4 +89,3 @@ def fetch_stooq_daily_close(
             break
 
     return pd.DataFrame(), {**meta, "error": str(last_err) if last_err else "failed"}
-

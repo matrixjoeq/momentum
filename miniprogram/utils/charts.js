@@ -10,9 +10,16 @@ function _finiteNums(arr) {
 function _minmax(arr) {
   const xs = _finiteNums(arr);
   if (xs.length === 0) return { min: 0, max: 1 };
-  let mn = xs[0], mx = xs[0];
-  for (const x of xs) { if (x < mn) mn = x; if (x > mx) mx = x; }
-  if (mn === mx) { mn *= 0.99; mx *= 1.01; }
+  let mn = xs[0],
+    mx = xs[0];
+  for (const x of xs) {
+    if (x < mn) mn = x;
+    if (x > mx) mx = x;
+  }
+  if (mn === mx) {
+    mn *= 0.99;
+    mx *= 1.01;
+  }
   return { min: mn, max: mx };
 }
 
@@ -46,9 +53,26 @@ function _palette(theme) {
   };
 }
 
-function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed = null, title = "", yLabelFmt = null, theme = "light" }) {
-  const padL = 46, padR = 16, padT = 18, padB = 22;
-  const W = width, H = height;
+function drawLineChart(
+  ctx,
+  {
+    width,
+    height,
+    x,
+    series,
+    yMode = "linear",
+    yFixed = null,
+    title = "",
+    yLabelFmt = null,
+    theme = "light",
+  },
+) {
+  const padL = 46,
+    padR = 16,
+    padT = 18,
+    padB = 22;
+  const W = width,
+    H = height;
   const pal = _palette(theme);
   ctx.clearRect(0, 0, W, H);
   ctx.setFillStyle(pal.bg);
@@ -76,8 +100,12 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
       if (val <= 0) return null;
       val = Math.log(val);
     }
-    let mn = yr.min, mx = yr.max;
-    if (yMode === "log") { mn = Math.log(Math.max(yr.min, 1e-12)); mx = Math.log(Math.max(yr.max, 1e-12)); }
+    let mn = yr.min,
+      mx = yr.max;
+    if (yMode === "log") {
+      mn = Math.log(Math.max(yr.min, 1e-12));
+      mx = Math.log(Math.max(yr.max, 1e-12));
+    }
     const t = (val - mn) / (mx - mn);
     return padT + (1 - t) * plotH;
   }
@@ -103,7 +131,8 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
   ctx.setFontSize(10);
   const yMin = yr.min;
   const yMax = yr.max;
-  const fmt = (typeof yLabelFmt === "function") ? yLabelFmt : ((v) => Number(v).toFixed(4));
+  const fmt =
+    typeof yLabelFmt === "function" ? yLabelFmt : (v) => Number(v).toFixed(4);
   ctx.fillText(String(fmt(yMax)), 2, padT + 10);
   ctx.fillText(String(fmt(yMin)), 2, padT + plotH);
 
@@ -118,10 +147,15 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
     let started = false;
     for (const ii of ds.idx) {
       const yy = yMap((s.y || [])[ii]);
-      if (yy == null) { started = false; continue; }
+      if (yy == null) {
+        started = false;
+        continue;
+      }
       const xx = xMap(ii, n);
-      if (!started) { ctx.moveTo(xx, yy); started = true; }
-      else ctx.lineTo(xx, yy);
+      if (!started) {
+        ctx.moveTo(xx, yy);
+        started = true;
+      } else ctx.lineTo(xx, yy);
     }
     ctx.stroke();
   }
@@ -141,9 +175,13 @@ function drawLineChart(ctx, { width, height, x, series, yMode = "linear", yFixed
   ctx.draw();
 }
 
-function drawHeatmap4(ctx, { width, height, title, labels, matrix, theme = "light" }) {
+function drawHeatmap4(
+  ctx,
+  { width, height, title, labels, matrix, theme = "light" },
+) {
   const pad = 16;
-  const W = width, H = height;
+  const W = width,
+    H = height;
   const pal = _palette(theme);
   ctx.clearRect(0, 0, W, H);
   ctx.setFillStyle(pal.bg);
@@ -153,7 +191,10 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix, theme = "ligh
   ctx.fillText(title || "相关性", pad, 14);
 
   const n = (labels || []).length;
-  if (!n) { ctx.draw(); return; }
+  if (!n) {
+    ctx.draw();
+    return;
+  }
   const gridTop = 24;
   // estimate left label width and center the matrix area in remaining space
   const leftLabelW = 18; // labels are "1..4"; keep a small gutter
@@ -166,7 +207,8 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix, theme = "ligh
   function color(v) {
     const x = Math.max(-1, Math.min(1, Number(v)));
     // green(-1) -> white(0) -> red(+1) (avoid purple/blue tint)
-    if (!Number.isFinite(x)) return (theme === "dark") ? "rgb(45,45,45)" : "rgb(240,240,240)";
+    if (!Number.isFinite(x))
+      return theme === "dark" ? "rgb(45,45,45)" : "rgb(240,240,240)";
     if (theme === "dark") {
       // dark background: use deeper colors with dark center
       if (x >= 0) {
@@ -214,15 +256,26 @@ function drawHeatmap4(ctx, { width, height, title, labels, matrix, theme = "ligh
       ctx.setFillStyle(pal.cellText);
       ctx.setFontSize(9);
       const txt = Number(v).toFixed(2);
-      ctx.fillText(txt, gridLeft + j * cell + 2, gridTop + i * cell + cell * 0.65);
+      ctx.fillText(
+        txt,
+        gridLeft + j * cell + 2,
+        gridTop + i * cell + cell * 0.65,
+      );
     }
   }
   ctx.draw();
 }
 
 function lineIndexFromTouchX(xRel, width, n) {
-  const padL = 46, padR = 16;
-  if (!Number.isFinite(xRel) || !Number.isFinite(width) || !Number.isFinite(n) || n <= 0) return null;
+  const padL = 46,
+    padR = 16;
+  if (
+    !Number.isFinite(xRel) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(n) ||
+    n <= 0
+  )
+    return null;
   const W = width;
   const plotW = W - padL - padR;
   if (plotW <= 1) return 0;
@@ -232,9 +285,27 @@ function lineIndexFromTouchX(xRel, width, n) {
   return Math.max(0, Math.min(n - 1, idx));
 }
 
-function drawBarChart(ctx, { width, height, title, labels, values, colors = [], valueFmt = (x) => String(x), vmin = null, vmax = null, theme = "light" }) {
-  const padL = 70, padR = 16, padT = 18, padB = 18;
-  const W = width, H = height;
+function drawBarChart(
+  ctx,
+  {
+    width,
+    height,
+    title,
+    labels,
+    values,
+    colors = [],
+    valueFmt = (x) => String(x),
+    vmin = null,
+    vmax = null,
+    theme = "light",
+  },
+) {
+  const padL = 70,
+    padR = 16,
+    padT = 18,
+    padB = 18;
+  const W = width,
+    H = height;
   const pal = _palette(theme);
   ctx.clearRect(0, 0, W, H);
   ctx.setFillStyle(pal.bg);
@@ -244,11 +315,18 @@ function drawBarChart(ctx, { width, height, title, labels, values, colors = [], 
   ctx.fillText(title || "", padL, 14);
 
   const n = (labels || []).length;
-  if (!n) { ctx.draw(); return; }
+  if (!n) {
+    ctx.draw();
+    return;
+  }
 
-  const xs = (values || []).map((v) => Number(v)).filter((x) => Number.isFinite(x));
-  const mn = (vmin != null) ? Number(vmin) : Math.min(0, ...(xs.length ? xs : [0]));
-  const mx = (vmax != null) ? Number(vmax) : Math.max(1e-9, ...(xs.length ? xs : [1]));
+  const xs = (values || [])
+    .map((v) => Number(v))
+    .filter((x) => Number.isFinite(x));
+  const mn =
+    vmin != null ? Number(vmin) : Math.min(0, ...(xs.length ? xs : [0]));
+  const mx =
+    vmax != null ? Number(vmax) : Math.max(1e-9, ...(xs.length ? xs : [1]));
 
   const plotW = W - padL - padR;
   const rowH = (H - padT - padB) / n;
@@ -287,8 +365,12 @@ function _heatColor(v) {
   return `rgb(${r},${g},${b})`;
 }
 
-function drawCalendarDailyHeatmap(ctx, { width, height, title, dates, values, maxDays = 252 }) {
-  const W = width, H = height;
+function drawCalendarDailyHeatmap(
+  ctx,
+  { width, height, title, dates, values, maxDays = 252 },
+) {
+  const W = width,
+    H = height;
   ctx.clearRect(0, 0, W, H);
   ctx.setFillStyle("#ffffff");
   ctx.fillRect(0, 0, W, H);
@@ -297,13 +379,19 @@ function drawCalendarDailyHeatmap(ctx, { width, height, title, dates, values, ma
   ctx.fillText(title || "日度收益热力图", 16, 14);
 
   const n0 = (dates || []).length;
-  if (!n0) { ctx.draw(); return; }
+  if (!n0) {
+    ctx.draw();
+    return;
+  }
 
   const n = Math.min(n0, maxDays);
   const d = dates.slice(n0 - n);
   const v = values.slice(n0 - n);
 
-  const padL = 26, padT = 24, padR = 12, padB = 18;
+  const padL = 26,
+    padT = 24,
+    padR = 12,
+    padB = 18;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
 
@@ -314,7 +402,7 @@ function drawCalendarDailyHeatmap(ctx, { width, height, title, dates, values, ma
   const gridH = cell * 7;
 
   // weekday labels
-  const wdl = ["一","二","三","四","五","六","日"];
+  const wdl = ["一", "二", "三", "四", "五", "六", "日"];
   ctx.setFontSize(9);
   ctx.setFillStyle("#666");
   for (let i = 0; i < 7; i++) {
@@ -337,8 +425,12 @@ function drawCalendarDailyHeatmap(ctx, { width, height, title, dates, values, ma
   ctx.draw();
 }
 
-function drawCalendarMonthHeatmap(ctx, { width, height, title, dates, values }) {
-  const W = width, H = height;
+function drawCalendarMonthHeatmap(
+  ctx,
+  { width, height, title, dates, values },
+) {
+  const W = width,
+    H = height;
   ctx.clearRect(0, 0, W, H);
   ctx.setFillStyle("#ffffff");
   ctx.fillRect(0, 0, W, H);
@@ -347,7 +439,10 @@ function drawCalendarMonthHeatmap(ctx, { width, height, title, dates, values }) 
   ctx.fillText(title || "月度收益热力图", 16, 14);
 
   const n = (dates || []).length;
-  if (!n) { ctx.draw(); return; }
+  if (!n) {
+    ctx.draw();
+    return;
+  }
 
   // parse years and months from date strings (YYYY-MM-DD at month end)
   const ym = [];
@@ -355,20 +450,29 @@ function drawCalendarMonthHeatmap(ctx, { width, height, title, dates, values }) 
     const s = String(dates[i]);
     const y = Number(s.slice(0, 4));
     const m = Number(s.slice(5, 7));
-    if (Number.isFinite(y) && Number.isFinite(m)) ym.push({ y, m, v: Number(values[i]) });
+    if (Number.isFinite(y) && Number.isFinite(m))
+      ym.push({ y, m, v: Number(values[i]) });
   }
   const years = Array.from(new Set(ym.map((x) => x.y))).sort((a, b) => a - b);
-  if (!years.length) { ctx.draw(); return; }
+  if (!years.length) {
+    ctx.draw();
+    return;
+  }
 
-  const padL = 40, padT = 24, padR = 10, padB = 18;
+  const padL = 40,
+    padT = 24,
+    padR = 10,
+    padB = 18;
   const cols = 12;
   const rows = years.length;
   const cell = Math.min((W - padL - padR) / cols, (H - padT - padB) / rows);
 
   ctx.setFontSize(9);
   ctx.setFillStyle("#666");
-  for (let c = 0; c < 12; c++) ctx.fillText(String(c + 1), padL + c * cell + 2, padT - 4);
-  for (let r = 0; r < rows; r++) ctx.fillText(String(years[r]), 2, padT + r * cell + cell * 0.7);
+  for (let c = 0; c < 12; c++)
+    ctx.fillText(String(c + 1), padL + c * cell + 2, padT - 4);
+  for (let r = 0; r < rows; r++)
+    ctx.fillText(String(years[r]), 2, padT + r * cell + cell * 0.7);
 
   const map = {};
   for (const x of ym) map[`${x.y}-${x.m}`] = x.v;
@@ -383,5 +487,11 @@ function drawCalendarMonthHeatmap(ctx, { width, height, title, dates, values }) 
   ctx.draw();
 }
 
-module.exports = { drawLineChart, drawHeatmap4, drawBarChart, drawCalendarDailyHeatmap, drawCalendarMonthHeatmap, lineIndexFromTouchX };
-
+module.exports = {
+  drawLineChart,
+  drawHeatmap4,
+  drawBarChart,
+  drawCalendarDailyHeatmap,
+  drawCalendarMonthHeatmap,
+  lineIndexFromTouchX,
+};

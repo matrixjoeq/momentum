@@ -125,7 +125,11 @@ def fetch_yahoo_daily_close(
         return pd.DataFrame()
 
     # Yahoo uses exclusive end timestamp; add 1 day so the end date is included.
-    period1 = int(dt.datetime(start.year, start.month, start.day, tzinfo=dt.timezone.utc).timestamp())
+    period1 = int(
+        dt.datetime(
+            start.year, start.month, start.day, tzinfo=dt.timezone.utc
+        ).timestamp()
+    )
     period2 = int(
         dt.datetime(end.year, end.month, end.day, tzinfo=dt.timezone.utc).timestamp()
         + 24 * 3600
@@ -152,7 +156,10 @@ def fetch_yahoo_daily_close(
                 proxy=proxy,
             ) as client:
                 # Try chart API (two hosts).
-                for host in ("https://query2.finance.yahoo.com", "https://query1.finance.yahoo.com"):
+                for host in (
+                    "https://query2.finance.yahoo.com",
+                    "https://query1.finance.yahoo.com",
+                ):
                     url = f"{host}/v8/finance/chart/{sym_path}"
                     resp = client.get(url, params=params)
                     try:
@@ -168,7 +175,9 @@ def fetch_yahoo_daily_close(
                                 period2=period2,
                             )
                             if not df_csv.empty:
-                                df_csv = df_csv[(df_csv["date"] >= start) & (df_csv["date"] <= end)].copy()
+                                df_csv = df_csv[
+                                    (df_csv["date"] >= start) & (df_csv["date"] <= end)
+                                ].copy()
                                 return df_csv
                         # Try next host or retry loop.
                         continue
@@ -182,9 +191,13 @@ def fetch_yahoo_daily_close(
                     return pd.DataFrame()
 
                 # If both hosts failed, last fallback attempt: CSV flow once.
-                df_csv = _fetch_yahoo_download_csv(client, symbol_path=sym_path, period1=period1, period2=period2)
+                df_csv = _fetch_yahoo_download_csv(
+                    client, symbol_path=sym_path, period1=period1, period2=period2
+                )
                 if not df_csv.empty:
-                    df_csv = df_csv[(df_csv["date"] >= start) & (df_csv["date"] <= end)].copy()
+                    df_csv = df_csv[
+                        (df_csv["date"] >= start) & (df_csv["date"] <= end)
+                    ].copy()
                     return df_csv
                 return pd.DataFrame()
         except (httpx.HTTPError, ValueError, TypeError) as e:
@@ -276,8 +289,9 @@ def fetch_yahoo_daily_close_with_alias(
             continue
         seen.add(ss)
         tried.append(ss)
-        df = fetch_yahoo_daily_close(FetchRequest(symbol=ss, start_date=req.start_date, end_date=req.end_date))
+        df = fetch_yahoo_daily_close(
+            FetchRequest(symbol=ss, start_date=req.start_date, end_date=req.end_date)
+        )
         if not df.empty:
             return df, {"symbol_used": ss, "symbols_tried": tried}
     return pd.DataFrame(), {"symbol_used": None, "symbols_tried": tried}
-

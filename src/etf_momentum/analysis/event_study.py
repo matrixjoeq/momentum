@@ -17,14 +17,29 @@ BUCKET_PROFILE_SPECS: dict[str, dict[str, Any]] = {
     },
     "10pct": {
         "edges": (-np.inf, -0.10, -0.05, -0.02, 0.0, 0.02, 0.05, 0.10, np.inf),
-        "labels": ("lt_m10", "m10_m5", "m5_m2", "m2_0", "p0_p2", "p2_p5", "p5_p10", "ge_p10"),
+        "labels": (
+            "lt_m10",
+            "m10_m5",
+            "m5_m2",
+            "m2_0",
+            "p0_p2",
+            "p2_p5",
+            "p5_p10",
+            "ge_p10",
+        ),
     },
 }
 
 
 def _quantiles(arr: np.ndarray) -> dict[str, float]:
     if arr.size <= 0:
-        return {"p05": float("nan"), "p25": float("nan"), "p50": float("nan"), "p75": float("nan"), "p95": float("nan")}
+        return {
+            "p05": float("nan"),
+            "p25": float("nan"),
+            "p50": float("nan"),
+            "p75": float("nan"),
+            "p95": float("nan"),
+        }
     return {
         "p05": float(np.percentile(arr, 5)),
         "p25": float(np.percentile(arr, 25)),
@@ -34,7 +49,9 @@ def _quantiles(arr: np.ndarray) -> dict[str, float]:
     }
 
 
-def _bootstrap_ci_mean(values: np.ndarray, *, n_bootstrap: int, seed: int) -> tuple[float, float]:
+def _bootstrap_ci_mean(
+    values: np.ndarray, *, n_bootstrap: int, seed: int
+) -> tuple[float, float]:
     arr = values[np.isfinite(values)]
     if arr.size <= 0:
         return float("nan"), float("nan")
@@ -53,12 +70,16 @@ def _bucket_probs(arr: np.ndarray) -> dict[str, float]:
     x = arr[np.isfinite(arr)]
     if x.size <= 0:
         return {k: float("nan") for k in BUCKET_PROFILE_SPECS["5pct"]["labels"]}
-    counts, _ = np.histogram(x, bins=np.asarray(BUCKET_PROFILE_SPECS["5pct"]["edges"], dtype=float))
+    counts, _ = np.histogram(
+        x, bins=np.asarray(BUCKET_PROFILE_SPECS["5pct"]["edges"], dtype=float)
+    )
     probs = counts.astype(float) / float(x.size)
     return {k: float(v) for k, v in zip(BUCKET_PROFILE_SPECS["5pct"]["labels"], probs)}
 
 
-def _bucket_probs_with_spec(arr: np.ndarray, *, edges: tuple[float, ...], labels: tuple[str, ...]) -> dict[str, float]:
+def _bucket_probs_with_spec(
+    arr: np.ndarray, *, edges: tuple[float, ...], labels: tuple[str, ...]
+) -> dict[str, float]:
     x = arr[np.isfinite(arr)]
     if x.size <= 0:
         return {k: float("nan") for k in labels}
@@ -85,7 +106,9 @@ def entry_dates_from_exposure(exposure: pd.Series, *, eps: float = 1e-12) -> lis
     return e.index[m].date.astype(str).tolist()
 
 
-def entry_dates_from_weight_membership_change(weights: pd.DataFrame, *, eps: float = 1e-12) -> list[str]:
+def entry_dates_from_weight_membership_change(
+    weights: pd.DataFrame, *, eps: float = 1e-12
+) -> list[str]:
     """
     Rotation-style entry events:
     - Each date where the held symbol membership changes vs previous date
@@ -112,7 +135,13 @@ def compute_event_study(
     net_cost_threshold: float = 0.0,
 ) -> dict[str, Any]:
     idx = pd.to_datetime(dates)
-    ret = pd.to_numeric(daily_returns, errors="coerce").astype(float).reindex(idx).fillna(0.0).to_numpy(dtype=float)
+    ret = (
+        pd.to_numeric(daily_returns, errors="coerce")
+        .astype(float)
+        .reindex(idx)
+        .fillna(0.0)
+        .to_numpy(dtype=float)
+    )
     n = int(len(ret))
     if n <= 1:
         return {"entry_count": 0, "horizons": list(horizons), "windows": {}}
@@ -140,14 +169,20 @@ def compute_event_study(
         for i in range(valid_max + 1):
             wr_all[i] = float(np.prod(gross[i : i + h2]) - 1.0)
 
-        sig_idx = [i for i in entry_idx_all if 0 <= i <= valid_max and np.isfinite(wr_all[i])]
+        sig_idx = [
+            i for i in entry_idx_all if 0 <= i <= valid_max and np.isfinite(wr_all[i])
+        ]
         sig = np.asarray([wr_all[i] for i in sig_idx], dtype=float)
         sig = sig[np.isfinite(sig)]
         sig_n = int(sig.size)
         sig_mean = float(np.mean(sig)) if sig_n else float("nan")
-        sig_ci_lo, sig_ci_hi = _bootstrap_ci_mean(sig, n_bootstrap=int(bootstrap_trials), seed=1000 + h2)
+        sig_ci_lo, sig_ci_hi = _bootstrap_ci_mean(
+            sig, n_bootstrap=int(bootstrap_trials), seed=1000 + h2
+        )
         sig_profit = float(np.mean(sig > 0.0)) if sig_n else float("nan")
-        sig_profit_net = float(np.mean(sig > float(net_cost_threshold))) if sig_n else float("nan")
+        sig_profit_net = (
+            float(np.mean(sig > float(net_cost_threshold))) if sig_n else float("nan")
+        )
         sig_buckets = _bucket_probs(sig)
         sig_tail_loss_2 = float(np.mean(sig <= -0.02)) if sig_n else float("nan")
         sig_tail_gain_2 = float(np.mean(sig >= 0.02)) if sig_n else float("nan")
@@ -176,27 +211,59 @@ def compute_event_study(
                 if vals.size:
                     trial_means.append(float(np.mean(vals)))
                     trial_profit.append(float(np.mean(vals > 0.0)))
-                    trial_profit_net.append(float(np.mean(vals > float(net_cost_threshold))))
+                    trial_profit_net.append(
+                        float(np.mean(vals > float(net_cost_threshold)))
+                    )
                     b_profiles = _bucket_profiles(vals)
                     for pname, pb in b_profiles.items():
                         for bk, vv in pb.items():
                             if np.isfinite(vv):
                                 trial_bucket_probs[pname][bk].append(float(vv))
-        trial_arr = np.asarray(trial_means, dtype=float) if trial_means else np.asarray([], dtype=float)
+        trial_arr = (
+            np.asarray(trial_means, dtype=float)
+            if trial_means
+            else np.asarray([], dtype=float)
+        )
         rnd_mean = float(np.mean(trial_arr)) if trial_arr.size else float("nan")
-        rnd_ci_lo = float(np.percentile(trial_arr, 2.5)) if trial_arr.size else float("nan")
-        rnd_ci_hi = float(np.percentile(trial_arr, 97.5)) if trial_arr.size else float("nan")
-        trial_profit_arr = np.asarray(trial_profit, dtype=float) if trial_profit else np.asarray([], dtype=float)
-        trial_profit_net_arr = np.asarray(trial_profit_net, dtype=float) if trial_profit_net else np.asarray([], dtype=float)
-        rnd_profit = float(np.mean(trial_profit_arr)) if trial_profit_arr.size else float("nan")
+        rnd_ci_lo = (
+            float(np.percentile(trial_arr, 2.5)) if trial_arr.size else float("nan")
+        )
+        rnd_ci_hi = (
+            float(np.percentile(trial_arr, 97.5)) if trial_arr.size else float("nan")
+        )
+        trial_profit_arr = (
+            np.asarray(trial_profit, dtype=float)
+            if trial_profit
+            else np.asarray([], dtype=float)
+        )
+        trial_profit_net_arr = (
+            np.asarray(trial_profit_net, dtype=float)
+            if trial_profit_net
+            else np.asarray([], dtype=float)
+        )
+        rnd_profit = (
+            float(np.mean(trial_profit_arr)) if trial_profit_arr.size else float("nan")
+        )
         rnd_profit_ci = [
-            float(np.percentile(trial_profit_arr, 2.5)) if trial_profit_arr.size else float("nan"),
-            float(np.percentile(trial_profit_arr, 97.5)) if trial_profit_arr.size else float("nan"),
+            float(np.percentile(trial_profit_arr, 2.5))
+            if trial_profit_arr.size
+            else float("nan"),
+            float(np.percentile(trial_profit_arr, 97.5))
+            if trial_profit_arr.size
+            else float("nan"),
         ]
-        rnd_profit_net = float(np.mean(trial_profit_net_arr)) if trial_profit_net_arr.size else float("nan")
+        rnd_profit_net = (
+            float(np.mean(trial_profit_net_arr))
+            if trial_profit_net_arr.size
+            else float("nan")
+        )
         rnd_profit_net_ci = [
-            float(np.percentile(trial_profit_net_arr, 2.5)) if trial_profit_net_arr.size else float("nan"),
-            float(np.percentile(trial_profit_net_arr, 97.5)) if trial_profit_net_arr.size else float("nan"),
+            float(np.percentile(trial_profit_net_arr, 2.5))
+            if trial_profit_net_arr.size
+            else float("nan"),
+            float(np.percentile(trial_profit_net_arr, 97.5))
+            if trial_profit_net_arr.size
+            else float("nan"),
         ]
         rnd_bucket_mean: dict[str, float] = {}
         rnd_bucket_ci95: dict[str, list[float]] = {}
@@ -224,12 +291,18 @@ def compute_event_study(
             else float("nan")
         )
         p_profit = (
-            float((np.sum(trial_profit_arr >= sig_profit) + 1) / (trial_profit_arr.size + 1))
+            float(
+                (np.sum(trial_profit_arr >= sig_profit) + 1)
+                / (trial_profit_arr.size + 1)
+            )
             if (trial_profit_arr.size and np.isfinite(sig_profit))
             else float("nan")
         )
         p_profit_net = (
-            float((np.sum(trial_profit_net_arr >= sig_profit_net) + 1) / (trial_profit_net_arr.size + 1))
+            float(
+                (np.sum(trial_profit_net_arr >= sig_profit_net) + 1)
+                / (trial_profit_net_arr.size + 1)
+            )
             if (trial_profit_net_arr.size and np.isfinite(sig_profit_net))
             else float("nan")
         )
@@ -264,7 +337,9 @@ def compute_event_study(
                 "n_trials": int(trial_arr.size),
                 "mean_of_trial_means": rnd_mean,
                 "ci95_trial_mean": [rnd_ci_lo, rnd_ci_hi],
-                "std_of_trial_means": float(np.std(trial_arr, ddof=1)) if trial_arr.size >= 2 else float("nan"),
+                "std_of_trial_means": float(np.std(trial_arr, ddof=1))
+                if trial_arr.size >= 2
+                else float("nan"),
                 "profit_frequency_mean": rnd_profit,
                 "profit_frequency_ci95": rnd_profit_ci,
                 "profit_frequency_net_cost_mean": rnd_profit_net,
@@ -275,7 +350,9 @@ def compute_event_study(
                 "bucket_profiles_ci95": rnd_bucket_profiles_ci95,
             },
             "comparison": {
-                "mean_diff_vs_random": (sig_mean - rnd_mean) if (np.isfinite(sig_mean) and np.isfinite(rnd_mean)) else float("nan"),
+                "mean_diff_vs_random": (sig_mean - rnd_mean)
+                if (np.isfinite(sig_mean) and np.isfinite(rnd_mean))
+                else float("nan"),
                 "p_value_outperform_random": p_out,
                 "significant_5pct": bool(np.isfinite(p_out) and p_out < 0.05),
                 "delta_profit_frequency": (
@@ -297,7 +374,9 @@ def compute_event_study(
                         - float(rnd_bucket_mean.get(bk, float("nan")))
                         if (
                             np.isfinite(float(sig_buckets.get(bk, float("nan"))))
-                            and np.isfinite(float(rnd_bucket_mean.get(bk, float("nan"))))
+                            and np.isfinite(
+                                float(rnd_bucket_mean.get(bk, float("nan")))
+                            )
                         )
                         else float("nan")
                     )
@@ -306,11 +385,31 @@ def compute_event_study(
                 "delta_bucket_profiles": {
                     pname: {
                         bk: (
-                            float((sig_bucket_profiles.get(pname) or {}).get(bk, float("nan")))
-                            - float((rnd_bucket_profiles_mean.get(pname) or {}).get(bk, float("nan")))
+                            float(
+                                (sig_bucket_profiles.get(pname) or {}).get(
+                                    bk, float("nan")
+                                )
+                            )
+                            - float(
+                                (rnd_bucket_profiles_mean.get(pname) or {}).get(
+                                    bk, float("nan")
+                                )
+                            )
                             if (
-                                np.isfinite(float((sig_bucket_profiles.get(pname) or {}).get(bk, float("nan"))))
-                                and np.isfinite(float((rnd_bucket_profiles_mean.get(pname) or {}).get(bk, float("nan"))))
+                                np.isfinite(
+                                    float(
+                                        (sig_bucket_profiles.get(pname) or {}).get(
+                                            bk, float("nan")
+                                        )
+                                    )
+                                )
+                                and np.isfinite(
+                                    float(
+                                        (rnd_bucket_profiles_mean.get(pname) or {}).get(
+                                            bk, float("nan")
+                                        )
+                                    )
+                                )
                             )
                             else float("nan")
                         )
@@ -326,4 +425,3 @@ def compute_event_study(
         "horizons": [int(h) for h in horizons],
         "windows": windows,
     }
-

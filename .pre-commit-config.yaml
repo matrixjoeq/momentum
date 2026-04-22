@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check-fix
+        name: ruff check (auto-fix)
+        entry: .venv/bin/python3 -m ruff check --fix
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        entry: .venv/bin/python3 -m ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: prettier-web-format
+        name: prettier format (html/css/js/md)
+        entry: npx --yes prettier --write
+        language: system
+        types_or: [html, css, javascript, markdown]
+      - id: htmlhint-check
+        name: htmlhint check
+        entry: npx --yes htmlhint
+        language: system
+        types_or: [html]

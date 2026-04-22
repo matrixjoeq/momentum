@@ -9,4 +9,3 @@ def test_shift_to_trading_day_prev_weekend_xshg():
     assert is_trading_day(d) is False
     prev = shift_to_trading_day(d, shift="prev")
     assert prev == dt.date(2024, 1, 5)
-

@@ -21,7 +21,15 @@ def test_normalize_adjust_invalid_raises():
 
 def test_api_invalid_adjust_handling(api_client):
     c = api_client
-    c.post("/api/etf", json={"code": "510300", "name": "沪深300", "start_date": "20240102", "end_date": "20240103"})
+    c.post(
+        "/api/etf",
+        json={
+            "code": "510300",
+            "name": "沪深300",
+            "start_date": "20240102",
+            "end_date": "20240103",
+        },
+    )
 
     r = c.get("/api/etf?adjust=bad")
     assert r.status_code == 400
@@ -39,4 +47,3 @@ def test_api_invalid_adjust_handling(api_client):
     assert r4.status_code == 200
     out4 = r4.json()
     assert out4 and out4[0]["status"] in ("success", "failed")
-

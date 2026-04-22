@@ -8,7 +8,9 @@ def test_vol_timing_tiered_exposure_by_level_quantile():
     # 120 business days; index level is low then high (0 -> 1)
     dates = pd.date_range("2024-01-02", periods=120, freq="B").date
     # Use strictly positive levels to avoid log(0) in leadlag codepath.
-    idx_level = np.concatenate([np.linspace(100.0, 101.0, 60), np.linspace(200.0, 201.0, 60)]).astype(float)
+    idx_level = np.concatenate(
+        [np.linspace(100.0, 101.0, 60), np.linspace(200.0, 201.0, 60)]
+    ).astype(float)
     idx_close = pd.Series(idx_level, index=list(dates))
 
     # ETF close: mild stochastic drift to keep Granger regression well-behaved.
@@ -45,7 +47,9 @@ def test_vol_timing_tiered_exposure_by_level_quantile():
     assert len(nav) > 50
 
     # Once exposure becomes 0, NAV should stay flat (no cost, no exposure).
-    first_zero = next((i for i, x in enumerate(exp) if abs(float(x) - 0.0) < 1e-12), None)
+    first_zero = next(
+        (i for i, x in enumerate(exp) if abs(float(x) - 0.0) < 1e-12), None
+    )
     assert first_zero is not None
     tail = nav[first_zero:]
     assert max(abs(float(x) - float(tail[0])) for x in tail) < 1e-12
@@ -80,4 +84,3 @@ def test_vol_timing_with_rolling_quantile_window_runs():
     vt = (out.get("trade") or {}).get("vol_timing") or {}
     assert vt.get("ok") is True
     assert vt.get("vol_level_window") == "1y"
-

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught,cell-var-from-loop
+
 import datetime as dt
 import math
 from dataclasses import dataclass
@@ -62,7 +64,9 @@ class TrendInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
-    slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
+    slippage_rate: float = (
+        0.001  # one-way adverse slippage spread (absolute price diff)
+    )
     exec_price: str = "open"  # open|close|oc2
     # strategy selection
     strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | random_entry
@@ -151,19 +155,29 @@ class TrendPortfolioInputs:
     end: dt.date
     risk_free_rate: float = 0.025
     cost_bps: float = 0.0
-    slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
+    slippage_rate: float = (
+        0.001  # one-way adverse slippage spread (absolute price diff)
+    )
     exec_price: str = "open"  # open|close|oc2
     strategy: str = "ma_filter"
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
     vol_window: int = 20
     vol_target_ann: float = 0.20
     fixed_pos_ratio: float = 0.04  # used when position_sizing=fixed_ratio
-    fixed_overcap_policy: str = "skip"  # skip | extend when position would exceed constraints
-    fixed_max_holdings: int = 10  # max number of concurrently held assets when position_sizing=fixed_ratio
+    fixed_overcap_policy: str = (
+        "skip"  # skip | extend when position would exceed constraints
+    )
+    fixed_max_holdings: int = (
+        10  # max number of concurrently held assets when position_sizing=fixed_ratio
+    )
     risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
     risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
-    risk_budget_overcap_policy: str = "scale"  # scale | skip_entry | replace_entry | leverage_entry
-    risk_budget_max_leverage_multiple: float = 2.0  # only used when overcap_policy=leverage_entry
+    risk_budget_overcap_policy: str = (
+        "scale"  # scale | skip_entry | replace_entry | leverage_entry
+    )
+    risk_budget_max_leverage_multiple: float = (
+        2.0  # only used when overcap_policy=leverage_entry
+    )
     vol_regime_risk_mgmt_enabled: bool = False
     vol_ratio_fast_atr_window: int = 5
     vol_ratio_slow_atr_window: int = 50
@@ -266,7 +280,9 @@ def _reduce_active_codes_by_group(
 
     policy = str(group_pick_policy or "highest_sharpe").strip().lower()
     if policy not in {"earliest_entry", "highest_sharpe"}:
-        raise ValueError("group_pick_policy must be one of: earliest_entry|highest_sharpe")
+        raise ValueError(
+            "group_pick_policy must be one of: earliest_entry|highest_sharpe"
+        )
     kmax = int(group_max_holdings)
     if kmax < 1 or kmax > 10:
         raise ValueError("group_max_holdings must be in [1,10]")
@@ -275,7 +291,14 @@ def _reduce_active_codes_by_group(
     cur = set(str(x) for x in (current_holdings or set()))
     active_set = set(active_codes)
     # keep global score order semantics
-    order_by_score = [str(c) for c in pd.Series(score_row).reindex(active_codes).sort_values(ascending=False).index.tolist() if str(c) in active_set]
+    order_by_score = [
+        str(c)
+        for c in pd.Series(score_row)
+        .reindex(active_codes)
+        .sort_values(ascending=False)
+        .index.tolist()
+        if str(c) in active_set
+    ]
     if len(order_by_score) != len(active_codes):
         order_by_score = list(active_codes)
 
@@ -299,8 +322,16 @@ def _reduce_active_codes_by_group(
             ranked = sorted(
                 codes_in_gid,
                 key=lambda c: (
-                    -(float(sharpe_row.get(c)) if np.isfinite(float(sharpe_row.get(c))) else -1e18),
-                    -(float(score_row.get(c)) if np.isfinite(float(score_row.get(c))) else -1e18),
+                    -(
+                        float(sharpe_row.get(c))
+                        if np.isfinite(float(sharpe_row.get(c)))
+                        else -1e18
+                    ),
+                    -(
+                        float(score_row.get(c))
+                        if np.isfinite(float(score_row.get(c)))
+                        else -1e18
+                    ),
                     str(c),
                 ),
             )
@@ -311,7 +342,7 @@ def _reduce_active_codes_by_group(
             kept_set.add(c)
         meta["group_picks"][gid] = list(chosen)
         meta["group_eliminated"][gid] = list(eliminated)
-        meta["group_winners"][gid] = (chosen[0] if chosen else "")
+        meta["group_winners"][gid] = chosen[0] if chosen else ""
 
     reduced = [c for c in order_by_score if c in kept_set]
     meta["after"] = list(reduced)
@@ -350,7 +381,9 @@ def _efficiency_ratio(price: pd.Series, *, window: int) -> pd.Series:
     return er.clip(lower=0.0, upper=1.0)
 
 
-def _apply_er_entry_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float) -> tuple[pd.Series, dict[str, int]]:
+def _apply_er_entry_filter(
+    raw_pos: pd.Series, *, er: pd.Series, threshold: float
+) -> tuple[pd.Series, dict[str, int]]:
     """
     Entry-only filter:
     - new entry (0 -> >0) is allowed only when ER >= threshold
@@ -408,7 +441,9 @@ def _compute_impulse_state(
     """
     px = pd.to_numeric(close, errors="coerce").astype(float)
     ema = _ema(px, int(ema_window))
-    _, _, hist = _macd_core(px, fast=int(macd_fast), slow=int(macd_slow), signal=int(macd_signal))
+    _, _, hist = _macd_core(
+        px, fast=int(macd_fast), slow=int(macd_slow), signal=int(macd_signal)
+    )
     ema_diff = ema.diff()
     hist_diff = hist.diff()
     state = pd.Series("NEUTRAL", index=px.index, dtype=object)
@@ -478,7 +513,9 @@ def _apply_impulse_entry_filter(
     }
 
 
-def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float) -> tuple[pd.Series, dict[str, Any]]:
+def _apply_er_exit_filter(
+    raw_pos: pd.Series, *, er: pd.Series, threshold: float
+) -> tuple[pd.Series, dict[str, Any]]:
     """
     Exit-only filter:
     - when currently in position, if ER >= threshold then force exit
@@ -512,12 +549,18 @@ def _apply_er_exit_filter(raw_pos: pd.Series, *, er: pd.Series, threshold: float
                 pass
             trace_last_rows.append(
                 {
-                    "date": (pd.Timestamp(d).date().isoformat() if hasattr(d, "date") else str(d)),
+                    "date": (
+                        pd.Timestamp(d).date().isoformat()
+                        if hasattr(d, "date")
+                        else str(d)
+                    ),
                     "event_type": "exit",
                     "event_reason": "er_exit_filter",
                     "base_pos": float(desired),
                     "decision_pos": 0.0,
-                    "er_value": (float(er.loc[d]) if np.isfinite(float(er.loc[d])) else None),
+                    "er_value": (
+                        float(er.loc[d]) if np.isfinite(float(er.loc[d])) else None
+                    ),
                     "er_threshold": float(thr),
                     "er_triggered": True,
                 }
@@ -573,9 +616,17 @@ def _risk_budget_dynamic_weights(
     atr_f = atr_fast.reindex(idx).astype(float)
     atr_s = atr_slow.reindex(idx).astype(float)
     base_target = (
-        float(risk_budget_pct) * px / atr_b.replace(0.0, np.nan)
-    ).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(lower=0.0, upper=1.0).astype(float)
-    ratio = (atr_f / atr_s.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).astype(float)
+        (float(risk_budget_pct) * px / atr_b.replace(0.0, np.nan))
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(lower=0.0, upper=1.0)
+        .astype(float)
+    )
+    ratio = (
+        (atr_f / atr_s.replace(0.0, np.nan))
+        .replace([np.inf, -np.inf], np.nan)
+        .astype(float)
+    )
 
     out = pd.Series(0.0, index=idx, dtype=float)
     state = "FLAT"  # FLAT | NORMAL | REDUCED | INCREASED
@@ -598,10 +649,18 @@ def _risk_budget_dynamic_weights(
             out.loc[d] = 0.0
             continue
         if state == "FLAT":
-            held_weight = float(base_target.loc[d]) if np.isfinite(float(base_target.loc[d])) else 0.0
+            held_weight = (
+                float(base_target.loc[d])
+                if np.isfinite(float(base_target.loc[d]))
+                else 0.0
+            )
             held_weight = float(min(1.0, max(0.0, held_weight)))
             if dynamic_enabled:
-                r = float(ratio.loc[d]) if np.isfinite(float(ratio.loc[d])) else float("nan")
+                r = (
+                    float(ratio.loc[d])
+                    if np.isfinite(float(ratio.loc[d]))
+                    else float("nan")
+                )
                 if np.isfinite(r) and r > float(expand_threshold):
                     state = "REDUCED"
                     stats["vol_risk_entry_state_reduce_on_expand_count"] += 1
@@ -615,7 +674,11 @@ def _risk_budget_dynamic_weights(
             out.loc[d] = held_weight
             continue
         if dynamic_enabled:
-            r = float(ratio.loc[d]) if np.isfinite(float(ratio.loc[d])) else float("nan")
+            r = (
+                float(ratio.loc[d])
+                if np.isfinite(float(ratio.loc[d]))
+                else float("nan")
+            )
             can_recalc = np.isfinite(float(base_target.loc[d]))
             if state == "NORMAL":
                 if np.isfinite(r) and r > float(expand_threshold) and can_recalc:
@@ -683,7 +746,11 @@ def _position_risk_from_stop_params(
         stop_px = float(entry_px - n_mult * entry_atr)
     elif mode in {"trailing", "tightening"}:
         ref_atr = entry_atr if basis == "entry" else curr_atr
-        if (not np.isfinite(ref_atr)) or ref_atr <= 0.0 or (not np.isfinite(curr_close)):
+        if (
+            (not np.isfinite(ref_atr))
+            or ref_atr <= 0.0
+            or (not np.isfinite(curr_close))
+        ):
             return fb
         if mode == "trailing":
             stop_px = float(curr_close - n_mult * ref_atr)
@@ -721,7 +788,12 @@ def _apply_monthly_risk_budget_gate(
     fallback_position_risk: float = 0.02,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Block new entries when monthly risk budget is exhausted."""
-    w = decision_weights.reindex(index=close.index, columns=close.columns).astype(float).fillna(0.0).clip(lower=0.0)
+    w = (
+        decision_weights.reindex(index=close.index, columns=close.columns)
+        .astype(float)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
     if not enabled:
         return w, {
             "enabled": False,
@@ -756,8 +828,24 @@ def _apply_monthly_risk_budget_gate(
                 continue
             entry_px = float(st.get("entry_px", float("nan")))
             entry_atr = float(st.get("entry_atr", float("nan")))
-            curr_close = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
-            curr_atr = float(atr.loc[d, c]) if (c in atr.columns and d in atr.index and np.isfinite(float(atr.loc[d, c]))) else float("nan")
+            curr_close = (
+                float(close.loc[d, c])
+                if (
+                    c in close.columns
+                    and d in close.index
+                    and np.isfinite(float(close.loc[d, c]))
+                )
+                else float("nan")
+            )
+            curr_atr = (
+                float(atr.loc[d, c])
+                if (
+                    c in atr.columns
+                    and d in atr.index
+                    and np.isfinite(float(atr.loc[d, c]))
+                )
+                else float("nan")
+            )
             pos_risk = _position_risk_from_stop_params(
                 atr_stop_enabled=bool(atr_stop_enabled),
                 atr_mode=atr_mode,
@@ -784,8 +872,24 @@ def _apply_monthly_risk_budget_gate(
             attempted_by_code[code] = int(attempted_by_code.get(code, 0) + 1)
             new_trade_risk = 0.0
             if include_new_trade_risk:
-                entry_px = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
-                entry_atr = float(atr.loc[d, c]) if (c in atr.columns and d in atr.index and np.isfinite(float(atr.loc[d, c]))) else float("nan")
+                entry_px = (
+                    float(close.loc[d, c])
+                    if (
+                        c in close.columns
+                        and d in close.index
+                        and np.isfinite(float(close.loc[d, c]))
+                    )
+                    else float("nan")
+                )
+                entry_atr = (
+                    float(atr.loc[d, c])
+                    if (
+                        c in atr.columns
+                        and d in atr.index
+                        and np.isfinite(float(atr.loc[d, c]))
+                    )
+                    else float("nan")
+                )
                 new_trade_risk = _position_risk_from_stop_params(
                     atr_stop_enabled=bool(atr_stop_enabled),
                     atr_mode=atr_mode,
@@ -815,12 +919,24 @@ def _apply_monthly_risk_budget_gate(
                 positions[c]["weight"] = nw
                 continue
             entry_px = float(positions[c].get("entry_px", float("nan")))
-            entry_w = float(positions[c].get("entry_weight", positions[c].get("weight", 0.0)))
-            exit_px = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
+            entry_w = float(
+                positions[c].get("entry_weight", positions[c].get("weight", 0.0))
+            )
+            exit_px = (
+                float(close.loc[d, c])
+                if (
+                    c in close.columns
+                    and d in close.index
+                    and np.isfinite(float(close.loc[d, c]))
+                )
+                else float("nan")
+            )
             realized = 0.0
             if np.isfinite(entry_px) and entry_px > 0.0 and np.isfinite(exit_px):
                 realized = float((exit_px / entry_px - 1.0) * entry_w)
-            realized_by_month[month] = float(realized_by_month.get(month, 0.0) + realized)
+            realized_by_month[month] = float(
+                realized_by_month.get(month, 0.0) + realized
+            )
             positions.pop(c, None)
 
         # Register new opens accepted today.
@@ -829,8 +945,24 @@ def _apply_monthly_risk_budget_gate(
             nw = float(accepted.get(c, 0.0))
             if nw <= eps or code in positions:
                 continue
-            entry_px = float(close.loc[d, c]) if (c in close.columns and d in close.index and np.isfinite(float(close.loc[d, c]))) else float("nan")
-            entry_atr = float(atr.loc[d, c]) if (c in atr.columns and d in atr.index and np.isfinite(float(atr.loc[d, c]))) else float("nan")
+            entry_px = (
+                float(close.loc[d, c])
+                if (
+                    c in close.columns
+                    and d in close.index
+                    and np.isfinite(float(close.loc[d, c]))
+                )
+                else float("nan")
+            )
+            entry_atr = (
+                float(atr.loc[d, c])
+                if (
+                    c in atr.columns
+                    and d in atr.index
+                    and np.isfinite(float(atr.loc[d, c]))
+                )
+                else float("nan")
+            )
             positions[code] = {
                 "entry_px": float(entry_px),
                 "entry_atr": float(entry_atr),
@@ -845,9 +977,13 @@ def _apply_monthly_risk_budget_gate(
         "budget_pct": float(bgt),
         "include_new_trade_risk": bool(include_new_trade_risk),
         "attempted_entry_count": int(total_attempted),
-        "attempted_entry_count_by_code": {str(k): int(v) for k, v in attempted_by_code.items()},
+        "attempted_entry_count_by_code": {
+            str(k): int(v) for k, v in attempted_by_code.items()
+        },
         "blocked_entry_count": int(total_blocked),
-        "blocked_entry_count_by_code": {str(k): int(v) for k, v in blocked_by_code.items()},
+        "blocked_entry_count_by_code": {
+            str(k): int(v) for k, v in blocked_by_code.items()
+        },
     }
 
 
@@ -875,35 +1011,55 @@ def _latest_entry_exec_price_with_slippage(
     if not entry_dates:
         return None
     entry_dt = entry_dates[-1]
-    px = pd.to_numeric(exec_price_series, errors="coerce").astype(float).reindex(w.index).replace([np.inf, -np.inf], np.nan).ffill()
-    px0 = float(px.loc[entry_dt]) if entry_dt in px.index and np.isfinite(float(px.loc[entry_dt])) else float("nan")
+    px = (
+        pd.to_numeric(exec_price_series, errors="coerce")
+        .astype(float)
+        .reindex(w.index)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
+    px0 = (
+        float(px.loc[entry_dt])
+        if entry_dt in px.index and np.isfinite(float(px.loc[entry_dt]))
+        else float("nan")
+    )
     if (not np.isfinite(px0)) or px0 <= 0.0:
         return None
-    spread = float(slippage_spread) if np.isfinite(float(slippage_spread)) and float(slippage_spread) > 0.0 else 0.0
+    spread = (
+        float(slippage_spread)
+        if np.isfinite(float(slippage_spread)) and float(slippage_spread) > 0.0
+        else 0.0
+    )
     # Turnover pipeline uses one-way turnover (|dw|/2), so one-side execution price impact is spread/2.
     return float(px0 + 0.5 * spread)
 
 
-def _extract_atr_plan_stops_from_trace(stats: dict[str, Any]) -> dict[str, float | None]:
+def _extract_atr_plan_stops_from_trace(
+    stats: dict[str, Any],
+) -> dict[str, float | None]:
     rows = list((stats or {}).get("trace_last_rows") or [])
     if not rows:
         return {"plan_stop_current": None, "plan_stop_next": None}
     episode: list[dict[str, Any]] = []
     for r in rows:
         rr = r or {}
-        in_pos = bool(rr.get("in_pos_after")) or (float(rr.get("decision_pos") or 0.0) > 1e-12)
+        in_pos = bool(rr.get("in_pos_after")) or (
+            float(rr.get("decision_pos") or 0.0) > 1e-12
+        )
         if in_pos:
             episode.append(rr)
         else:
             episode = []
     if not episode:
         return {"plan_stop_current": None, "plan_stop_next": None}
+
     def _to_finite(v: Any) -> float:
         try:
             x = float(v)
         except Exception:
             return float("nan")
         return x if np.isfinite(x) else float("nan")
+
     last = episode[-1] or {}
     prev = episode[-2] if len(episode) >= 2 else None
     stop_next = _to_finite(last.get("stop_after"))
@@ -929,8 +1085,18 @@ def _enrich_trade_records_with_engine_timeline(
     if not recs:
         return []
     w = effective_weight.astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    px = pd.to_numeric(exec_price_series, errors="coerce").astype(float).reindex(w.index).replace([np.inf, -np.inf], np.nan).ffill()
-    spread = float(slippage_spread) if np.isfinite(float(slippage_spread)) and float(slippage_spread) > 0.0 else 0.0
+    px = (
+        pd.to_numeric(exec_price_series, errors="coerce")
+        .astype(float)
+        .reindex(w.index)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
+    spread = (
+        float(slippage_spread)
+        if np.isfinite(float(slippage_spread)) and float(slippage_spread) > 0.0
+        else 0.0
+    )
     by_trigger_date: dict[str, list[int]] = {}
     for i, rr in enumerate(recs):
         d = str(rr.get("trigger_date") or "").strip()
@@ -944,12 +1110,20 @@ def _enrich_trade_records_with_engine_timeline(
             ds = dt0.date().isoformat() if hasattr(dt0, "date") else str(dt0)
             p = float(px.iloc[i]) if np.isfinite(float(px.iloc[i])) else float("nan")
             open_entry_date = str(ds)
-            open_entry_price = (float(p + 0.5 * spread) if np.isfinite(p) and p > 0.0 else None)
+            open_entry_price = (
+                float(p + 0.5 * spread) if np.isfinite(p) and p > 0.0 else None
+            )
         ds = dt0.date().isoformat() if hasattr(dt0, "date") else str(dt0)
         for ridx in by_trigger_date.get(str(ds), []):
-            if open_entry_date is not None and recs[ridx].get("entry_execution_date") is None:
+            if (
+                open_entry_date is not None
+                and recs[ridx].get("entry_execution_date") is None
+            ):
                 recs[ridx]["entry_execution_date"] = str(open_entry_date)
-            if open_entry_price is not None and recs[ridx].get("entry_execution_price") is None:
+            if (
+                open_entry_price is not None
+                and recs[ridx].get("entry_execution_price") is None
+            ):
                 recs[ridx]["entry_execution_price"] = float(open_entry_price)
             open_entry_date = None
             open_entry_price = None
@@ -975,33 +1149,66 @@ def _period_returns(nav: pd.Series, freq: str) -> pd.DataFrame:
 
 
 def _rolling_pack(nav_s: pd.Series) -> dict[str, dict[str, Any]]:
-    rolling: dict[str, dict[str, Any]] = {"returns": {}, "drawdown": {}, "max_drawdown": {}}
+    rolling: dict[str, dict[str, Any]] = {
+        "returns": {},
+        "drawdown": {},
+        "max_drawdown": {},
+    }
     for weeks in [4, 12, 52]:
         window = int(weeks) * 5
         r = (nav_s / nav_s.shift(window) - 1.0).dropna()
         d = _rolling_drawdown(nav_s, window).dropna()
-        rolling["returns"][f"{weeks}w"] = {"dates": r.index.date.astype(str).tolist(), "values": r.astype(float).tolist()}
-        rolling["drawdown"][f"{weeks}w"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
-        rolling["max_drawdown"][f"{weeks}w"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+        rolling["returns"][f"{weeks}w"] = {
+            "dates": r.index.date.astype(str).tolist(),
+            "values": r.astype(float).tolist(),
+        }
+        rolling["drawdown"][f"{weeks}w"] = {
+            "dates": d.index.date.astype(str).tolist(),
+            "values": d.astype(float).tolist(),
+        }
+        rolling["max_drawdown"][f"{weeks}w"] = {
+            "dates": d.index.date.astype(str).tolist(),
+            "values": d.astype(float).tolist(),
+        }
     for months in [3, 6, 12]:
         window = int(months) * 21
         r = (nav_s / nav_s.shift(window) - 1.0).dropna()
         d = _rolling_drawdown(nav_s, window).dropna()
-        rolling["returns"][f"{months}m"] = {"dates": r.index.date.astype(str).tolist(), "values": r.astype(float).tolist()}
-        rolling["drawdown"][f"{months}m"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
-        rolling["max_drawdown"][f"{months}m"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+        rolling["returns"][f"{months}m"] = {
+            "dates": r.index.date.astype(str).tolist(),
+            "values": r.astype(float).tolist(),
+        }
+        rolling["drawdown"][f"{months}m"] = {
+            "dates": d.index.date.astype(str).tolist(),
+            "values": d.astype(float).tolist(),
+        }
+        rolling["max_drawdown"][f"{months}m"] = {
+            "dates": d.index.date.astype(str).tolist(),
+            "values": d.astype(float).tolist(),
+        }
     for years in [1, 3]:
         window = int(years) * 252
         r = (nav_s / nav_s.shift(window) - 1.0).dropna()
         d = _rolling_drawdown(nav_s, window).dropna()
-        rolling["returns"][f"{years}y"] = {"dates": r.index.date.astype(str).tolist(), "values": r.astype(float).tolist()}
-        rolling["drawdown"][f"{years}y"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
-        rolling["max_drawdown"][f"{years}y"] = {"dates": d.index.date.astype(str).tolist(), "values": d.astype(float).tolist()}
+        rolling["returns"][f"{years}y"] = {
+            "dates": r.index.date.astype(str).tolist(),
+            "values": r.astype(float).tolist(),
+        }
+        rolling["drawdown"][f"{years}y"] = {
+            "dates": d.index.date.astype(str).tolist(),
+            "values": d.astype(float).tolist(),
+        }
+        rolling["max_drawdown"][f"{years}y"] = {
+            "dates": d.index.date.astype(str).tolist(),
+            "values": d.astype(float).tolist(),
+        }
     return rolling
 
 
 def _dist_stats(values: list[float]) -> dict[str, Any]:
-    arr = np.asarray([float(x) for x in (values or []) if np.isfinite(float(x))], dtype=float)
+    arr = np.asarray(
+        [float(x) for x in (values or []) if np.isfinite(float(x))], dtype=float
+    )
     if arr.size == 0:
         return {
             "count": 0,
@@ -1009,7 +1216,10 @@ def _dist_stats(values: list[float]) -> dict[str, Any]:
             "min": None,
             "mean": None,
             "std": None,
-            "quantiles": {k: None for k in ["p01", "p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]},
+            "quantiles": {
+                k: None
+                for k in ["p01", "p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]
+            },
         }
     q = lambda p: float(np.percentile(arr, p))  # noqa: E731
     return {
@@ -1032,7 +1242,9 @@ def _dist_stats(values: list[float]) -> dict[str, Any]:
     }
 
 
-def _trade_stats_from_returns(values: list[float], *, flat_eps: float = 1e-12) -> dict[str, Any]:
+def _trade_stats_from_returns(
+    values: list[float], *, flat_eps: float = 1e-12
+) -> dict[str, Any]:
     rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
     wins = [x for x in rs if x > float(flat_eps)]
     losses = [x for x in rs if x < -float(flat_eps)]
@@ -1045,7 +1257,12 @@ def _trade_stats_from_returns(values: list[float], *, flat_eps: float = 1e-12) -
     if wins and losses:
         avg_win = float(np.mean(np.asarray(wins, dtype=float)))
         avg_loss_abs = float(abs(np.mean(np.asarray(losses, dtype=float))))
-        if np.isfinite(avg_win) and np.isfinite(avg_loss_abs) and avg_win > 0.0 and avg_loss_abs > 0.0:
+        if (
+            np.isfinite(avg_win)
+            and np.isfinite(avg_loss_abs)
+            and avg_win > 0.0
+            and avg_loss_abs > 0.0
+        ):
             b = float(avg_win / avg_loss_abs)
             p = float(len(wins) / (len(wins) + len(losses)))
             win_rate_ex_zero = p
@@ -1115,7 +1332,11 @@ def _bucketize_vol_ratio_series(vol_ratio: pd.Series) -> pd.Series:
 def _bucketize_impulse_series(impulse_state: pd.Series) -> pd.Series:
     out = pd.Series("NA", index=impulse_state.index, dtype=object)
     for d in out.index:
-        st = str(impulse_state.loc[d]).strip().upper() if d in impulse_state.index else "NA"
+        st = (
+            str(impulse_state.loc[d]).strip().upper()
+            if d in impulse_state.index
+            else "NA"
+        )
         if st in {"BULL", "BEAR", "NEUTRAL"}:
             out.loc[d] = st
     return out
@@ -1131,7 +1352,7 @@ def _build_entry_signal_date_map(dates: pd.Index) -> dict[str, str | None]:
     ds = [str(pd.to_datetime(d).date()) for d in dates]
     out: dict[str, str | None] = {}
     for i, d in enumerate(ds):
-        out[d] = (ds[i - 1] if i > 0 else None)
+        out[d] = ds[i - 1] if i > 0 else None
     return out
 
 
@@ -1147,7 +1368,9 @@ def _attach_entry_condition_bins_to_trades(
     for code, mp in (condition_bins_by_code or {}).items():
         one: dict[str, pd.Series] = {}
         for k, s in (mp or {}).items():
-            one[str(k)] = _series_index_to_date_str(s if isinstance(s, pd.Series) else pd.Series(dtype=object))
+            one[str(k)] = _series_index_to_date_str(
+                s if isinstance(s, pd.Series) else pd.Series(dtype=object)
+            )
         normalized[str(code)] = one
     out: list[dict[str, Any]] = []
     for tr in list(trades or []):
@@ -1177,7 +1400,9 @@ def _normal_two_sided_p_from_z(z: float) -> float | None:
     return float(max(0.0, min(1.0, math.erfc(abs(float(z)) / math.sqrt(2.0)))))
 
 
-def _two_proportion_z_test(*, wins_a: int, losses_a: int, wins_b: int, losses_b: int) -> float | None:
+def _two_proportion_z_test(
+    *, wins_a: int, losses_a: int, wins_b: int, losses_b: int
+) -> float | None:
     na = int(wins_a) + int(losses_a)
     nb = int(wins_b) + int(losses_b)
     if na <= 0 or nb <= 0:
@@ -1207,7 +1432,11 @@ def _welch_t_test_normal_approx(a: list[float], b: list[float]) -> float | None:
 
 
 def _bh_qvalues(ps: list[float | None]) -> list[float | None]:
-    pairs = [(i, float(p)) for i, p in enumerate(ps) if (p is not None and np.isfinite(float(p)))]
+    pairs = [
+        (i, float(p))
+        for i, p in enumerate(ps)
+        if (p is not None and np.isfinite(float(p)))
+    ]
     m = int(len(pairs))
     out: list[float | None] = [None for _ in ps]
     if m <= 0:
@@ -1328,7 +1557,7 @@ def _build_entry_condition_stats(
         rr = tr.get("return")
         if rr is None or (not np.isfinite(float(rr))):
             continue
-        bins = (tr.get("entry_condition_bins") or {})
+        bins = tr.get("entry_condition_bins") or {}
         if not isinstance(bins, dict):
             bins = {}
         entry_signal_date = str(tr.get("entry_signal_date") or "")
@@ -1359,10 +1588,14 @@ def _build_entry_condition_stats(
                     "return": rr,
                     "is_win": 1 if rr > 1e-12 else 0,
                     "is_loss": 1 if rr < -1e-12 else 0,
-                    "strata": (f"{r['year']}" if by_code else f"{r['code']}|{r['year']}"),
+                    "strata": (
+                        f"{r['year']}" if by_code else f"{r['code']}|{r['year']}"
+                    ),
                 }
             )
-        uniq = _sorted_condition_buckets(cond, [str(x.get("bucket") or "NA") for x in rows])
+        uniq = _sorted_condition_buckets(
+            cond, [str(x.get("bucket") or "NA") for x in rows]
+        )
         bins_out: list[dict[str, Any]] = []
         p_quasi_win: list[float | None] = []
         p_quasi_ret: list[float | None] = []
@@ -1373,8 +1606,12 @@ def _build_entry_condition_stats(
             out_rows = [x for x in rows if str(x.get("bucket")) != b]
             in_rets = [float(x["return"]) for x in in_rows]
             out_rets = [float(x["return"]) for x in out_rows]
-            in_nonflat = [x for x in in_rows if int(x["is_win"]) == 1 or int(x["is_loss"]) == 1]
-            out_nonflat = [x for x in out_rows if int(x["is_win"]) == 1 or int(x["is_loss"]) == 1]
+            in_nonflat = [
+                x for x in in_rows if int(x["is_win"]) == 1 or int(x["is_loss"]) == 1
+            ]
+            out_nonflat = [
+                x for x in out_rows if int(x["is_win"]) == 1 or int(x["is_loss"]) == 1
+            ]
             in_wins = int(sum(int(x["is_win"]) for x in in_nonflat))
             in_losses = int(sum(int(x["is_loss"]) for x in in_nonflat))
             out_wins = int(sum(int(x["is_win"]) for x in out_nonflat))
@@ -1383,10 +1620,20 @@ def _build_entry_condition_stats(
             n_out_eff = int(out_wins + out_losses)
             wr_in = (float(in_wins) / float(n_in_eff)) if n_in_eff > 0 else None
             wr_out = (float(out_wins) / float(n_out_eff)) if n_out_eff > 0 else None
-            mean_in = float(np.mean(np.asarray(in_rets, dtype=float))) if in_rets else None
-            mean_out = float(np.mean(np.asarray(out_rets, dtype=float))) if out_rets else None
-            uplift_win = (wr_in - wr_out) if (wr_in is not None and wr_out is not None) else None
-            uplift_ret = (mean_in - mean_out) if (mean_in is not None and mean_out is not None) else None
+            mean_in = (
+                float(np.mean(np.asarray(in_rets, dtype=float))) if in_rets else None
+            )
+            mean_out = (
+                float(np.mean(np.asarray(out_rets, dtype=float))) if out_rets else None
+            )
+            uplift_win = (
+                (wr_in - wr_out) if (wr_in is not None and wr_out is not None) else None
+            )
+            uplift_ret = (
+                (mean_in - mean_out)
+                if (mean_in is not None and mean_out is not None)
+                else None
+            )
             quasi_p_win = _two_proportion_z_test(
                 wins_a=in_wins,
                 losses_a=in_losses,
@@ -1469,6 +1716,7 @@ def _build_entry_condition_stats(
         }
     return out
 
+
 def _trade_returns_from_weight_series(
     w: pd.Series,
     ret_exec: pd.Series,
@@ -1480,12 +1728,23 @@ def _trade_returns_from_weight_series(
     eps: float = 1e-12,
 ) -> dict[str, Any]:
     ww = pd.to_numeric(w, errors="coerce").astype(float).reindex(dates).fillna(0.0)
-    rr = pd.to_numeric(ret_exec, errors="coerce").astype(float).reindex(dates).fillna(0.0)
+    rr = (
+        pd.to_numeric(ret_exec, errors="coerce")
+        .astype(float)
+        .reindex(dates)
+        .fillna(0.0)
+    )
     n = int(len(dates))
     if n <= 0:
         return {"returns": [], "trades": []}
     cost_rate = float(cost_bps) / 10000.0
-    px = pd.to_numeric(exec_price, errors="coerce").astype(float).reindex(dates).replace([np.inf, -np.inf], np.nan).ffill()
+    px = (
+        pd.to_numeric(exec_price, errors="coerce")
+        .astype(float)
+        .reindex(dates)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
     slip_spread = float(slippage_rate)
     returns: list[float] = []
     trades: list[dict[str, Any]] = []
@@ -1498,9 +1757,19 @@ def _trade_returns_from_weight_series(
         prev = float(ww.iloc[i - 1]) if i > 0 else 0.0
         r = float(rr.iloc[i]) if np.isfinite(float(rr.iloc[i])) else 0.0
         turnover = abs(float(cur) - float(prev)) / 2.0
-        px_i = float(px.iloc[i]) if np.isfinite(float(px.iloc[i])) and float(px.iloc[i]) > 0.0 else float("nan")
-        slip_ret = float(turnover) * (float(slip_spread) / float(px_i)) if np.isfinite(px_i) and float(slip_spread) > 0.0 else 0.0
-        day_ret = float(cur) * float(r) - float(turnover) * float(cost_rate) - float(slip_ret)
+        px_i = (
+            float(px.iloc[i])
+            if np.isfinite(float(px.iloc[i])) and float(px.iloc[i]) > 0.0
+            else float("nan")
+        )
+        slip_ret = (
+            float(turnover) * (float(slip_spread) / float(px_i))
+            if np.isfinite(px_i) and float(slip_spread) > 0.0
+            else 0.0
+        )
+        day_ret = (
+            float(cur) * float(r) - float(turnover) * float(cost_rate) - float(slip_ret)
+        )
         if (not active) and (prev <= eps) and (cur > eps):
             active = True
             start_i = int(i)
@@ -1508,11 +1777,17 @@ def _trade_returns_from_weight_series(
         nav_cur = float(nav_prev) * (1.0 + float(day_ret))
         # Trade ends on the execution day when position becomes flat (exit cost is booked on this day).
         if active and (prev > eps) and (cur <= eps):
-            tr = (float(nav_cur) / float(start_nav) - 1.0) if float(start_nav) != 0 else float("nan")
+            tr = (
+                (float(nav_cur) / float(start_nav) - 1.0)
+                if float(start_nav) != 0
+                else float("nan")
+            )
             returns.append(float(tr))
             trades.append(
                 {
-                    "entry_date": str(pd.to_datetime(dates[start_i]).date()) if start_i >= 0 else None,
+                    "entry_date": str(pd.to_datetime(dates[start_i]).date())
+                    if start_i >= 0
+                    else None,
                     "exit_date": str(pd.to_datetime(dates[i]).date()),
                     "return": float(tr),
                     "closed": True,
@@ -1524,7 +1799,11 @@ def _trade_returns_from_weight_series(
         nav_prev = float(nav_cur)
     # If trade is still open at the end, include mark-to-market return up to last available date.
     if active and start_i >= 0:
-        tr = (float(nav_prev) / float(start_nav) - 1.0) if float(start_nav) != 0 else float("nan")
+        tr = (
+            (float(nav_prev) / float(start_nav) - 1.0)
+            if float(start_nav) != 0
+            else float("nan")
+        )
         returns.append(float(tr))
         trades.append(
             {
@@ -1555,7 +1834,9 @@ def _trade_returns_from_weight_df(
             ret_exec[c] if c in ret_exec.columns else pd.Series(dtype=float),
             cost_bps=float(cost_bps),
             slippage_rate=float(slippage_rate),
-            exec_price=exec_price[c] if c in exec_price.columns else pd.Series(dtype=float),
+            exec_price=exec_price[c]
+            if c in exec_price.columns
+            else pd.Series(dtype=float),
             dates=dates,
             eps=float(eps),
         )
@@ -1695,7 +1976,9 @@ def _pos_from_band(
     """
     px = pd.to_numeric(price, errors="coerce").astype(float)
     cc = pd.to_numeric(center, errors="coerce").astype(float).reindex(px.index)
-    bb = pd.to_numeric(band, errors="coerce").astype(float).reindex(px.index).fillna(0.0)
+    bb = (
+        pd.to_numeric(band, errors="coerce").astype(float).reindex(px.index).fillna(0.0)
+    )
     out = np.zeros(len(px), dtype=float)
     in_pos = False
     for i in range(len(px)):
@@ -1722,7 +2005,9 @@ def _stable_code_seed(code: str) -> int:
     return int(v)
 
 
-def _pos_from_random_entry_hold(index: pd.Index, *, hold_days: int, seed: int | None) -> pd.Series:
+def _pos_from_random_entry_hold(
+    index: pd.Index, *, hold_days: int, seed: int | None
+) -> pd.Series:
     hold_n = max(1, int(hold_days))
     rng = np.random.default_rng() if seed is None else np.random.default_rng(int(seed))
     out = np.zeros(len(index), dtype=float)
@@ -1808,6 +2093,7 @@ def _apply_atr_stop(
     mode_v = str(mode or "none").strip().lower()
     atr_basis_v = str(atr_basis or "latest").strip().lower()
     reentry_v = str(reentry_mode or "reenter").strip().lower()
+
     def _event_row(
         *,
         idx: Any,
@@ -1833,24 +2119,37 @@ def _apply_atr_stop(
         return {
             "date": (idx.date().isoformat() if hasattr(idx, "date") else str(idx)),
             "event_type": str(event_type),  # entry | exit | hold
-            "event_reason": str(event_reason),  # base_entry_signal | stop_reentry | base_exit_signal | atr_stop
+            "event_reason": str(
+                event_reason
+            ),  # base_entry_signal | stop_reentry | base_exit_signal | atr_stop
             "base_pos": float(b),
             "base_entry_event": bool(base_entry_event),
-            "close": (None if c is None else (float(c) if np.isfinite(float(c)) else None)),
-            "open": (None if o is None else (float(o) if np.isfinite(float(o)) else None)),
-            "low": (None if l is None else (float(l) if np.isfinite(float(l)) else None)),
-            "atr": (None if a is None else (float(a) if np.isfinite(float(a)) else None)),
+            "close": (
+                None if c is None else (float(c) if np.isfinite(float(c)) else None)
+            ),
+            "open": (
+                None if o is None else (float(o) if np.isfinite(float(o)) else None)
+            ),
+            "low": (
+                None if l is None else (float(l) if np.isfinite(float(l)) else None)
+            ),
+            "atr": (
+                None if a is None else (float(a) if np.isfinite(float(a)) else None)
+            ),
             "stop_before": stop_before,
             "stop_candidate": stop_candidate,
             "stop_after": stop_after,
             "stop_triggered": bool(stop_triggered),
             "stop_fill_price": stop_fill_price,
             "stop_trigger_source": stop_trigger_source,
-            "gap_open_triggered": (None if gap_open_triggered is None else bool(gap_open_triggered)),
+            "gap_open_triggered": (
+                None if gap_open_triggered is None else bool(gap_open_triggered)
+            ),
             "decision_pos": float(decision_pos),
             "in_pos_after": bool(in_pos_after),
             "wait_next_entry_lock": bool(wait_lock),
         }
+
     if mode_v == "none":
         out_none = base_pos.fillna(0.0).astype(float)
         bp = out_none.astype(float)
@@ -1920,8 +2219,12 @@ def _apply_atr_stop(
             "trigger_events": [],
             "first_trigger_date": None,
             "last_trigger_date": None,
-            "entries": int(((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()),
-            "exits": int(((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()),
+            "entries": int(
+                ((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()
+            ),
+            "exits": int(
+                ((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()
+            ),
             "trigger_exit_share": 0.0,
             "latest_stop_price": None,
             "latest_stop_date": None,
@@ -1932,9 +2235,18 @@ def _apply_atr_stop(
             "trade_records": [],
         }
 
-    atr = _atr_from_hlc(high.astype(float), low.astype(float), close.astype(float), window=int(atr_window)).astype(float)
+    atr = _atr_from_hlc(
+        high.astype(float),
+        low.astype(float),
+        close.astype(float),
+        window=int(atr_window),
+    ).astype(float)
     bp = base_pos.astype(float).fillna(0.0)
-    op = (open_.astype(float) if isinstance(open_, pd.Series) else close.astype(float)).reindex(bp.index).astype(float)
+    op = (
+        (open_.astype(float) if isinstance(open_, pd.Series) else close.astype(float))
+        .reindex(bp.index)
+        .astype(float)
+    )
     cl = close.astype(float)
     lo = low.astype(float)
 
@@ -1966,7 +2278,11 @@ def _apply_atr_stop(
                 out[i] = 0.0
                 prev_base = b
                 continue
-            if reentry_v == "wait_next_entry" and wait_next_entry_lock and (not base_entry_event):
+            if (
+                reentry_v == "wait_next_entry"
+                and wait_next_entry_lock
+                and (not base_entry_event)
+            ):
                 out[i] = 0.0
                 prev_base = b
                 continue
@@ -1975,12 +2291,20 @@ def _apply_atr_stop(
             entry_px = c
             entry_atr = a
             stop_px = entry_px - float(n_mult) * a
-            entry_decision_date = (bp.index[i].date().isoformat() if hasattr(bp.index[i], "date") else str(bp.index[i]))
-            initial_stop_price = float(stop_px) if np.isfinite(stop_px) else float("nan")
+            entry_decision_date = (
+                bp.index[i].date().isoformat()
+                if hasattr(bp.index[i], "date")
+                else str(bp.index[i])
+            )
+            initial_stop_price = (
+                float(stop_px) if np.isfinite(stop_px) else float("nan")
+            )
             out[i] = b
             if np.isfinite(stop_px):
                 d = bp.index[i]
-                latest_stop_date = d.date().isoformat() if hasattr(d, "date") else str(d)
+                latest_stop_date = (
+                    d.date().isoformat() if hasattr(d, "date") else str(d)
+                )
             trace_last_rows.append(
                 _event_row(
                     idx=bp.index[i],
@@ -1999,7 +2323,9 @@ def _apply_atr_stop(
                     in_pos_after=bool(in_pos),
                     wait_lock=bool(wait_next_entry_lock),
                     event_type="entry",
-                    event_reason=("base_entry_signal" if base_entry_event else "stop_reentry"),
+                    event_reason=(
+                        "base_entry_signal" if base_entry_event else "stop_reentry"
+                    ),
                     base_entry_event=bool(base_entry_event),
                     stop_triggered=False,
                 )
@@ -2011,7 +2337,7 @@ def _apply_atr_stop(
 
         # If base strategy already exits, clear stop state directly.
         if b <= 0.0:
-            stop_before = (float(stop_px) if np.isfinite(stop_px) else None)
+            stop_before = float(stop_px) if np.isfinite(stop_px) else None
             in_pos = False
             out[i] = 0.0
             stop_px = float("nan")
@@ -2048,7 +2374,7 @@ def _apply_atr_stop(
             continue
 
         # Stop trigger uses intraday low <= stop (same-day execution).
-        stop_before = (float(stop_px) if np.isfinite(stop_px) else None)
+        stop_before = float(stop_px) if np.isfinite(stop_px) else None
         if np.isfinite(l) and np.isfinite(stop_px) and (l <= stop_px):
             in_pos = False
             out[i] = 0.0
@@ -2056,15 +2382,21 @@ def _apply_atr_stop(
             ds = d.date().isoformat() if hasattr(d, "date") else str(d)
             trigger_dates.append(ds)
             gap_open_triggered = bool(np.isfinite(o) and (o <= stop_px))
-            fill_price = float(o) if gap_open_triggered and np.isfinite(o) else float(stop_px)
-            trigger_source = "gap_open_below_stop" if gap_open_triggered else "low_touch_stop"
+            fill_price = (
+                float(o) if gap_open_triggered and np.isfinite(o) else float(stop_px)
+            )
+            trigger_source = (
+                "gap_open_below_stop" if gap_open_triggered else "low_touch_stop"
+            )
             trigger_events.append(
                 {
                     "date": ds,
                     "stop_price": (float(stop_px) if np.isfinite(stop_px) else None),
                     "open_price": (float(o) if np.isfinite(o) else None),
                     "low_price": (float(l) if np.isfinite(l) else None),
-                    "fill_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "fill_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "trigger_source": trigger_source,
                     "gap_open_triggered": bool(gap_open_triggered),
                 }
@@ -2074,9 +2406,17 @@ def _apply_atr_stop(
                     "entry_decision_date": entry_decision_date,
                     "entry_execution_date": None,
                     "entry_execution_price": None,
-                    "initial_stop_price": (float(initial_stop_price) if np.isfinite(initial_stop_price) else None),
-                    "trigger_stop_price": (float(stop_px) if np.isfinite(stop_px) else None),
-                    "execution_stop_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "initial_stop_price": (
+                        float(initial_stop_price)
+                        if np.isfinite(initial_stop_price)
+                        else None
+                    ),
+                    "trigger_stop_price": (
+                        float(stop_px) if np.isfinite(stop_px) else None
+                    ),
+                    "execution_stop_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "trigger_date": ds,
                 }
             )
@@ -2098,7 +2438,9 @@ def _apply_atr_stop(
                     stop_before=stop_before,
                     stop_candidate=None,
                     stop_after=None,
-                    stop_fill_price=(float(fill_price) if np.isfinite(fill_price) else None),
+                    stop_fill_price=(
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     stop_trigger_source=trigger_source,
                     gap_open_triggered=bool(gap_open_triggered),
                     decision_pos=float(out[i]),
@@ -2116,20 +2458,37 @@ def _apply_atr_stop(
             continue
 
         stop_candidate: float | None = None
-        if mode_v in {"trailing", "tightening"} and np.isfinite(c) and np.isfinite(a) and a > 0.0:
+        if (
+            mode_v in {"trailing", "tightening"}
+            and np.isfinite(c)
+            and np.isfinite(a)
+            and a > 0.0
+        ):
             atr_ref = (
                 float(entry_atr)
-                if (atr_basis_v == "entry" and np.isfinite(entry_atr) and float(entry_atr) > 0.0)
+                if (
+                    atr_basis_v == "entry"
+                    and np.isfinite(entry_atr)
+                    and float(entry_atr) > 0.0
+                )
                 else float(a)
             )
             dist_mult = float(n_mult)
             if mode_v == "tightening":
                 rise_in_atr = max(0.0, (c - entry_px) / max(atr_ref, 1e-12))
-                steps = int(np.floor(rise_in_atr / float(m_step))) if float(m_step) > 0 else 0
+                steps = (
+                    int(np.floor(rise_in_atr / float(m_step)))
+                    if float(m_step) > 0
+                    else 0
+                )
                 dist_mult = max(float(m_step), float(n_mult) - steps * float(m_step))
             stop_candidate_v = c - dist_mult * atr_ref
-            stop_candidate = float(stop_candidate_v) if np.isfinite(stop_candidate_v) else None
-            if np.isfinite(stop_candidate_v) and ((not np.isfinite(stop_px)) or (stop_candidate_v > stop_px)):
+            stop_candidate = (
+                float(stop_candidate_v) if np.isfinite(stop_candidate_v) else None
+            )
+            if np.isfinite(stop_candidate_v) and (
+                (not np.isfinite(stop_px)) or (stop_candidate_v > stop_px)
+            ):
                 stop_px = stop_candidate_v
 
         trace_last_rows.append(
@@ -2180,9 +2539,15 @@ def _apply_atr_stop(
         "last_trigger_date": (trigger_dates[-1] if trigger_dates else None),
         "entries": entries,
         "exits": exits,
-        "trigger_exit_share": (float(trigger_count) / float(exits) if exits > 0 else 0.0),
-        "latest_stop_price": (float(stop_px) if (in_pos and np.isfinite(stop_px)) else None),
-        "latest_stop_date": (latest_stop_date if (in_pos and np.isfinite(stop_px)) else None),
+        "trigger_exit_share": (
+            float(trigger_count) / float(exits) if exits > 0 else 0.0
+        ),
+        "latest_stop_price": (
+            float(stop_px) if (in_pos and np.isfinite(stop_px)) else None
+        ),
+        "latest_stop_date": (
+            latest_stop_date if (in_pos and np.isfinite(stop_px)) else None
+        ),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
         "trigger_rule": "low_le_stop_same_day_exit",
         "fill_rule": "fill=min(stop_price,open_price) for long",
@@ -2256,9 +2621,19 @@ def _apply_intraday_stop_execution_single(
             fill_px = float("nan")
         if not np.isfinite(fill_px):
             fill_px = float("nan")
-        o = float(open_sig.loc[d]) if (d in open_sig.index and np.isfinite(float(open_sig.loc[d]))) else float("nan")
-        pc = float(prev_close.loc[d]) if (d in prev_close.index and np.isfinite(float(prev_close.loc[d]))) else float("nan")
-        day_ret = _stop_fill_return(exec_price=exec_price, open_px=o, prev_close_px=pc, fill_px=fill_px)
+        o = (
+            float(open_sig.loc[d])
+            if (d in open_sig.index and np.isfinite(float(open_sig.loc[d])))
+            else float("nan")
+        )
+        pc = (
+            float(prev_close.loc[d])
+            if (d in prev_close.index and np.isfinite(float(prev_close.loc[d])))
+            else float("nan")
+        )
+        day_ret = _stop_fill_return(
+            exec_price=exec_price, open_px=o, prev_close_px=pc, fill_px=fill_px
+        )
         override.loc[d] = float(override.loc[d] + wv * day_ret)
         w_adj.loc[d] = 0.0
     return w_adj, override
@@ -2299,15 +2674,35 @@ def _apply_intraday_stop_execution_portfolio(
                 fill_px = float("nan")
             if not np.isfinite(fill_px):
                 fill_px = float("nan")
-            o = float(open_sig_df.loc[d, c]) if (d in open_sig_df.index and c in open_sig_df.columns and np.isfinite(float(open_sig_df.loc[d, c]))) else float("nan")
-            pc = float(prev_close_df.loc[d, c]) if (d in prev_close_df.index and c in prev_close_df.columns and np.isfinite(float(prev_close_df.loc[d, c]))) else float("nan")
-            day_ret = _stop_fill_return(exec_price=exec_price, open_px=o, prev_close_px=pc, fill_px=fill_px)
+            o = (
+                float(open_sig_df.loc[d, c])
+                if (
+                    d in open_sig_df.index
+                    and c in open_sig_df.columns
+                    and np.isfinite(float(open_sig_df.loc[d, c]))
+                )
+                else float("nan")
+            )
+            pc = (
+                float(prev_close_df.loc[d, c])
+                if (
+                    d in prev_close_df.index
+                    and c in prev_close_df.columns
+                    and np.isfinite(float(prev_close_df.loc[d, c]))
+                )
+                else float("nan")
+            )
+            day_ret = _stop_fill_return(
+                exec_price=exec_price, open_px=o, prev_close_px=pc, fill_px=fill_px
+            )
             override.loc[d] = float(override.loc[d] + wv * day_ret)
             w_adj.loc[d, c] = 0.0
     return w_adj, override
 
 
-def _macd_core(close: pd.Series, *, fast: int, slow: int, signal: int) -> tuple[pd.Series, pd.Series, pd.Series]:
+def _macd_core(
+    close: pd.Series, *, fast: int, slow: int, signal: int
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     ema_fast = _ema(close, int(fast))
     ema_slow = _ema(close, int(slow))
     macd = (ema_fast - ema_slow).astype(float)
@@ -2316,7 +2711,9 @@ def _macd_core(close: pd.Series, *, fast: int, slow: int, signal: int) -> tuple[
     return macd, sig, hist
 
 
-def _atr_from_hlc(high: pd.Series, low: pd.Series, close: pd.Series, *, window: int) -> pd.Series:
+def _atr_from_hlc(
+    high: pd.Series, low: pd.Series, close: pd.Series, *, window: int
+) -> pd.Series:
     prev_close = close.shift(1)
     tr = pd.concat(
         [
@@ -2328,7 +2725,9 @@ def _atr_from_hlc(high: pd.Series, low: pd.Series, close: pd.Series, *, window: 
     ).max(axis=1)
     w = max(2, int(window))
     # Wilder-style ATR smoothing (RMA via EWM alpha=1/window).
-    return tr.ewm(alpha=1.0 / float(w), adjust=False, min_periods=w).mean().astype(float)
+    return (
+        tr.ewm(alpha=1.0 / float(w), adjust=False, min_periods=w).mean().astype(float)
+    )
 
 
 def _normalize_r_take_profit_tiers(
@@ -2336,7 +2735,7 @@ def _normalize_r_take_profit_tiers(
 ) -> list[dict[str, float]]:
     raw = tiers if tiers is not None else DEFAULT_R_TAKE_PROFIT_TIERS
     out: list[dict[str, float]] = []
-    for item in (raw or []):
+    for item in raw or []:
         if not isinstance(item, dict):
             continue
         r_mult = float(item.get("r_multiple"))
@@ -2351,7 +2750,9 @@ def _normalize_r_take_profit_tiers(
     uniq: dict[float, float] = {}
     for row in out:
         uniq[float(row["r_multiple"])] = float(row["retrace_ratio"])
-    rows = [{"r_multiple": float(k), "retrace_ratio": float(v)} for k, v in uniq.items()]
+    rows = [
+        {"r_multiple": float(k), "retrace_ratio": float(v)} for k, v in uniq.items()
+    ]
     rows.sort(key=lambda x: float(x["r_multiple"]))
     return rows
 
@@ -2388,8 +2789,12 @@ def _apply_r_multiple_take_profit(
             "trigger_events": [],
             "first_trigger_date": None,
             "last_trigger_date": None,
-            "entries": int(((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()),
-            "exits": int(((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()),
+            "entries": int(
+                ((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()
+            ),
+            "exits": int(
+                ((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()
+            ),
             "trigger_exit_share": 0.0,
             "wait_next_entry_lock_active": False,
             "tiers": tiers_v,
@@ -2400,7 +2805,11 @@ def _apply_r_multiple_take_profit(
         }
     bp = base_pos.fillna(0.0).astype(float)
     cl = close.astype(float)
-    op = (open_.astype(float) if isinstance(open_, pd.Series) else cl.astype(float)).reindex(bp.index).astype(float)
+    op = (
+        (open_.astype(float) if isinstance(open_, pd.Series) else cl.astype(float))
+        .reindex(bp.index)
+        .astype(float)
+    )
     hi = high.astype(float).fillna(cl)
     lo = low.astype(float).fillna(cl)
     atr = _atr_from_hlc(hi, lo, cl, window=int(atr_window)).astype(float)
@@ -2434,14 +2843,20 @@ def _apply_r_multiple_take_profit(
                 out[i] = 0.0
                 prev_base = b
                 continue
-            if reentry_v == "wait_next_entry" and wait_next_entry_lock and (not base_entry_event):
+            if (
+                reentry_v == "wait_next_entry"
+                and wait_next_entry_lock
+                and (not base_entry_event)
+            ):
                 out[i] = 0.0
                 prev_base = b
                 continue
             in_pos = True
             wait_next_entry_lock = False
             entry_px = c
-            initial_r_pct = float(atr_n) * a / c if (np.isfinite(a) and a > 0.0) else float("nan")
+            initial_r_pct = (
+                float(atr_n) * a / c if (np.isfinite(a) and a > 0.0) else float("nan")
+            )
             if (not np.isfinite(initial_r_pct)) or initial_r_pct <= eps:
                 invalid_r_entries += 1
                 initial_r_pct = float("nan")
@@ -2451,11 +2866,15 @@ def _apply_r_multiple_take_profit(
                 {
                     "date": ds,
                     "event_type": "entry",
-                    "event_reason": ("base_entry_signal" if base_entry_event else "tp_reentry"),
+                    "event_reason": (
+                        "base_entry_signal" if base_entry_event else "tp_reentry"
+                    ),
                     "base_pos": float(b),
                     "entry_price": float(entry_px),
                     "atr_entry": (float(a) if np.isfinite(a) else None),
-                    "initial_r_pct": (float(initial_r_pct) if np.isfinite(initial_r_pct) else None),
+                    "initial_r_pct": (
+                        float(initial_r_pct) if np.isfinite(initial_r_pct) else None
+                    ),
                     "peak_profit_pct": 0.0,
                     "peak_r_multiple": 0.0,
                     "active_tier_r": None,
@@ -2519,19 +2938,40 @@ def _apply_r_multiple_take_profit(
             prev_base = b
             continue
 
-        cur_peak_profit_pct = (h / entry_px - 1.0) if (np.isfinite(h) and np.isfinite(entry_px) and entry_px > eps) else float("nan")
-        cur_low_profit_pct = (l / entry_px - 1.0) if (np.isfinite(l) and np.isfinite(entry_px) and entry_px > eps) else float("nan")
+        cur_peak_profit_pct = (
+            (h / entry_px - 1.0)
+            if (np.isfinite(h) and np.isfinite(entry_px) and entry_px > eps)
+            else float("nan")
+        )
+        cur_low_profit_pct = (
+            (l / entry_px - 1.0)
+            if (np.isfinite(l) and np.isfinite(entry_px) and entry_px > eps)
+            else float("nan")
+        )
         if np.isfinite(cur_peak_profit_pct):
             peak_profit_pct = max(float(peak_profit_pct), float(cur_peak_profit_pct))
-        peak_r_mult = (float(peak_profit_pct) / float(initial_r_pct)) if (np.isfinite(peak_profit_pct) and np.isfinite(initial_r_pct) and initial_r_pct > eps) else float("nan")
+        peak_r_mult = (
+            (float(peak_profit_pct) / float(initial_r_pct))
+            if (
+                np.isfinite(peak_profit_pct)
+                and np.isfinite(initial_r_pct)
+                and initial_r_pct > eps
+            )
+            else float("nan")
+        )
         active_tier: dict[str, float] | None = None
         if np.isfinite(peak_r_mult):
             for row in tiers_v:
                 if peak_r_mult >= float(row["r_multiple"]):
                     active_tier = row
         dd_from_peak = (
-            (float(peak_profit_pct) - float(cur_low_profit_pct)) / float(peak_profit_pct)
-            if (np.isfinite(peak_profit_pct) and peak_profit_pct > eps and np.isfinite(cur_low_profit_pct))
+            (float(peak_profit_pct) - float(cur_low_profit_pct))
+            / float(peak_profit_pct)
+            if (
+                np.isfinite(peak_profit_pct)
+                and peak_profit_pct > eps
+                and np.isfinite(cur_low_profit_pct)
+            )
             else float("nan")
         )
         tp_triggered = bool(
@@ -2542,30 +2982,56 @@ def _apply_r_multiple_take_profit(
         if tp_triggered:
             in_pos = False
             out[i] = 0.0
-            trigger_profit_pct = float(peak_profit_pct) * (1.0 - float(active_tier["retrace_ratio"]))
-            trigger_px = float(entry_px) * (1.0 + float(trigger_profit_pct)) if np.isfinite(entry_px) and np.isfinite(trigger_profit_pct) else float("nan")
-            gap_open_triggered = bool(np.isfinite(o) and np.isfinite(trigger_px) and (o <= trigger_px))
-            fill_price = float(o) if gap_open_triggered and np.isfinite(o) else float(trigger_px)
-            trigger_source = "gap_open_below_tp" if gap_open_triggered else "low_touch_tp_retrace"
+            trigger_profit_pct = float(peak_profit_pct) * (
+                1.0 - float(active_tier["retrace_ratio"])
+            )
+            trigger_px = (
+                float(entry_px) * (1.0 + float(trigger_profit_pct))
+                if np.isfinite(entry_px) and np.isfinite(trigger_profit_pct)
+                else float("nan")
+            )
+            gap_open_triggered = bool(
+                np.isfinite(o) and np.isfinite(trigger_px) and (o <= trigger_px)
+            )
+            fill_price = (
+                float(o) if gap_open_triggered and np.isfinite(o) else float(trigger_px)
+            )
+            trigger_source = (
+                "gap_open_below_tp" if gap_open_triggered else "low_touch_tp_retrace"
+            )
             if reentry_v == "wait_next_entry":
                 wait_next_entry_lock = True
             trigger_dates.append(ds)
             trigger_events.append(
                 {
                     "date": ds,
-                    "trigger_price": (float(trigger_px) if np.isfinite(trigger_px) else None),
+                    "trigger_price": (
+                        float(trigger_px) if np.isfinite(trigger_px) else None
+                    ),
                     "open_price": (float(o) if np.isfinite(o) else None),
                     "low_price": (float(l) if np.isfinite(l) else None),
-                    "fill_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "fill_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "trigger_source": trigger_source,
                     "gap_open_triggered": bool(gap_open_triggered),
-                    "peak_r_multiple": (float(peak_r_mult) if np.isfinite(peak_r_mult) else None),
-                    "active_tier_r": float(active_tier["r_multiple"]) if active_tier else None,
-                    "active_tier_retrace": float(active_tier["retrace_ratio"]) if active_tier else None,
+                    "peak_r_multiple": (
+                        float(peak_r_mult) if np.isfinite(peak_r_mult) else None
+                    ),
+                    "active_tier_r": float(active_tier["r_multiple"])
+                    if active_tier
+                    else None,
+                    "active_tier_retrace": float(active_tier["retrace_ratio"])
+                    if active_tier
+                    else None,
                 }
             )
-            tier_label = f"{float(active_tier['r_multiple']):g}R" if active_tier else "unknown"
-            tier_trigger_counts[tier_label] = int(tier_trigger_counts.get(tier_label, 0) + 1)
+            tier_label = (
+                f"{float(active_tier['r_multiple']):g}R" if active_tier else "unknown"
+            )
+            tier_trigger_counts[tier_label] = int(
+                tier_trigger_counts.get(tier_label, 0) + 1
+            )
             trace_last_rows.append(
                 {
                     "date": ds,
@@ -2574,20 +3040,36 @@ def _apply_r_multiple_take_profit(
                     "base_pos": float(b),
                     "entry_price": (float(entry_px) if np.isfinite(entry_px) else None),
                     "atr_entry": None,
-                    "initial_r_pct": (float(initial_r_pct) if np.isfinite(initial_r_pct) else None),
-                    "peak_profit_pct": (float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None),
-                    "peak_r_multiple": (float(peak_r_mult) if np.isfinite(peak_r_mult) else None),
-                    "active_tier_r": float(active_tier["r_multiple"]) if active_tier else None,
-                    "active_tier_retrace": float(active_tier["retrace_ratio"]) if active_tier else None,
-                    "drawdown_from_peak": (float(dd_from_peak) if np.isfinite(dd_from_peak) else None),
+                    "initial_r_pct": (
+                        float(initial_r_pct) if np.isfinite(initial_r_pct) else None
+                    ),
+                    "peak_profit_pct": (
+                        float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None
+                    ),
+                    "peak_r_multiple": (
+                        float(peak_r_mult) if np.isfinite(peak_r_mult) else None
+                    ),
+                    "active_tier_r": float(active_tier["r_multiple"])
+                    if active_tier
+                    else None,
+                    "active_tier_retrace": float(active_tier["retrace_ratio"])
+                    if active_tier
+                    else None,
+                    "drawdown_from_peak": (
+                        float(dd_from_peak) if np.isfinite(dd_from_peak) else None
+                    ),
                     "tp_triggered": True,
                     "open": (float(o) if np.isfinite(o) else None),
                     "high": (float(h) if np.isfinite(h) else None),
                     "low": (float(l) if np.isfinite(l) else None),
-                    "tp_fill_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "tp_fill_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "tp_trigger_source": trigger_source,
                     "gap_open_triggered": bool(gap_open_triggered),
-                    "stop_fill_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "stop_fill_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "stop_trigger_source": trigger_source,
                     "decision_pos": float(out[i]),
                     "in_pos_after": bool(in_pos),
@@ -2611,12 +3093,24 @@ def _apply_r_multiple_take_profit(
                 "base_pos": float(b),
                 "entry_price": (float(entry_px) if np.isfinite(entry_px) else None),
                 "atr_entry": None,
-                "initial_r_pct": (float(initial_r_pct) if np.isfinite(initial_r_pct) else None),
-                "peak_profit_pct": (float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None),
-                "peak_r_multiple": (float(peak_r_mult) if np.isfinite(peak_r_mult) else None),
-                "active_tier_r": float(active_tier["r_multiple"]) if active_tier else None,
-                "active_tier_retrace": float(active_tier["retrace_ratio"]) if active_tier else None,
-                "drawdown_from_peak": (float(dd_from_peak) if np.isfinite(dd_from_peak) else None),
+                "initial_r_pct": (
+                    float(initial_r_pct) if np.isfinite(initial_r_pct) else None
+                ),
+                "peak_profit_pct": (
+                    float(peak_profit_pct) if np.isfinite(peak_profit_pct) else None
+                ),
+                "peak_r_multiple": (
+                    float(peak_r_mult) if np.isfinite(peak_r_mult) else None
+                ),
+                "active_tier_r": float(active_tier["r_multiple"])
+                if active_tier
+                else None,
+                "active_tier_retrace": float(active_tier["retrace_ratio"])
+                if active_tier
+                else None,
+                "drawdown_from_peak": (
+                    float(dd_from_peak) if np.isfinite(dd_from_peak) else None
+                ),
                 "tp_triggered": False,
                 "open": (float(o) if np.isfinite(o) else None),
                 "high": (float(h) if np.isfinite(h) else None),
@@ -2652,7 +3146,9 @@ def _apply_r_multiple_take_profit(
         "last_trigger_date": (trigger_dates[-1] if trigger_dates else None),
         "entries": int(((out_s > 0.0) & (out_s.shift(1).fillna(0.0) <= 0.0)).sum()),
         "exits": exits,
-        "trigger_exit_share": (float(trigger_count) / float(exits) if exits > 0 else 0.0),
+        "trigger_exit_share": (
+            float(trigger_count) / float(exits) if exits > 0 else 0.0
+        ),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
         "tiers": tiers_v,
         "tier_trigger_counts": dict(tier_trigger_counts),
@@ -2693,8 +3189,12 @@ def _apply_bias_v_take_profit(
             "trigger_events": [],
             "first_trigger_date": None,
             "last_trigger_date": None,
-            "entries": int(((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()),
-            "exits": int(((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()),
+            "entries": int(
+                ((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()
+            ),
+            "exits": int(
+                ((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()
+            ),
             "trigger_exit_share": 0.0,
             "wait_next_entry_lock_active": False,
             "trigger_rule": "high_ge_threshold_same_day_exit",
@@ -2704,12 +3204,24 @@ def _apply_bias_v_take_profit(
         }
     bp = base_pos.fillna(0.0).astype(float)
     cl = close.astype(float)
-    op = (open_.astype(float) if isinstance(open_, pd.Series) else cl.astype(float)).reindex(bp.index).astype(float)
+    op = (
+        (open_.astype(float) if isinstance(open_, pd.Series) else cl.astype(float))
+        .reindex(bp.index)
+        .astype(float)
+    )
     hi = high.astype(float).fillna(cl)
     lo = low.astype(float).fillna(cl)
-    ma = cl.rolling(window=max(2, int(ma_window)), min_periods=max(2, int(ma_window))).mean().astype(float)
+    ma = (
+        cl.rolling(window=max(2, int(ma_window)), min_periods=max(2, int(ma_window)))
+        .mean()
+        .astype(float)
+    )
     atr = _atr_from_hlc(hi, lo, cl, window=max(2, int(atr_window))).astype(float)
-    bias_v = ((cl - ma) / atr.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).astype(float)
+    bias_v = (
+        ((cl - ma) / atr.replace(0.0, np.nan))
+        .replace([np.inf, -np.inf], np.nan)
+        .astype(float)
+    )
 
     out = np.zeros(len(bp), dtype=float)
     trigger_dates: list[str] = []
@@ -2730,7 +3242,11 @@ def _apply_bias_v_take_profit(
         l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
         m = float(ma.iloc[i]) if np.isfinite(float(ma.iloc[i])) else float("nan")
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
-        v = float(bias_v.iloc[i]) if np.isfinite(float(bias_v.iloc[i])) else float("nan")
+        v = (
+            float(bias_v.iloc[i])
+            if np.isfinite(float(bias_v.iloc[i]))
+            else float("nan")
+        )
         d = bp.index[i]
         ds = d.date().isoformat() if hasattr(d, "date") else str(d)
         base_entry_event = bool((b > 0.0) and (prev_base <= 0.0))
@@ -2740,22 +3256,34 @@ def _apply_bias_v_take_profit(
                 out[i] = 0.0
                 prev_base = b
                 continue
-            if reentry_v == "wait_next_entry" and wait_next_entry_lock and (not base_entry_event):
+            if (
+                reentry_v == "wait_next_entry"
+                and wait_next_entry_lock
+                and (not base_entry_event)
+            ):
                 out[i] = 0.0
                 prev_base = b
                 continue
             in_pos = True
             wait_next_entry_lock = False
-            raw_px = float(m + float(threshold) * a) if (np.isfinite(m) and np.isfinite(a)) else float("nan")
+            raw_px = (
+                float(m + float(threshold) * a)
+                if (np.isfinite(m) and np.isfinite(a))
+                else float("nan")
+            )
             tp_line_px = float(raw_px) if np.isfinite(raw_px) else float("nan")
             entry_decision_date = ds
-            initial_tp_price = float(tp_line_px) if np.isfinite(tp_line_px) else float("nan")
+            initial_tp_price = (
+                float(tp_line_px) if np.isfinite(tp_line_px) else float("nan")
+            )
             out[i] = b
             trace_last_rows.append(
                 {
                     "date": ds,
                     "event_type": "entry",
-                    "event_reason": ("base_entry_signal" if base_entry_event else "tp_reentry"),
+                    "event_reason": (
+                        "base_entry_signal" if base_entry_event else "tp_reentry"
+                    ),
                     "base_pos": float(b),
                     "open": (float(o) if np.isfinite(o) else None),
                     "high": (float(h) if np.isfinite(h) else None),
@@ -2765,8 +3293,12 @@ def _apply_bias_v_take_profit(
                     "atr": (float(a) if np.isfinite(a) else None),
                     "bias_v": (float(v) if np.isfinite(v) else None),
                     "threshold": float(threshold),
-                    "tp_trigger_price_raw": (float(raw_px) if np.isfinite(raw_px) else None),
-                    "tp_trigger_price_eff": (float(tp_line_px) if np.isfinite(tp_line_px) else None),
+                    "tp_trigger_price_raw": (
+                        float(raw_px) if np.isfinite(raw_px) else None
+                    ),
+                    "tp_trigger_price_eff": (
+                        float(tp_line_px) if np.isfinite(tp_line_px) else None
+                    ),
                     "tp_triggered": False,
                     "tp_fill_price": None,
                     "tp_trigger_source": None,
@@ -2821,29 +3353,55 @@ def _apply_bias_v_take_profit(
             prev_base = b
             continue
 
-        trigger_px_raw = float(m + float(threshold) * a) if (np.isfinite(m) and np.isfinite(a)) else float("nan")
+        trigger_px_raw = (
+            float(m + float(threshold) * a)
+            if (np.isfinite(m) and np.isfinite(a))
+            else float("nan")
+        )
         if np.isfinite(trigger_px_raw):
-            tp_line_px = float(trigger_px_raw) if (not np.isfinite(tp_line_px)) else max(float(tp_line_px), float(trigger_px_raw))
+            tp_line_px = (
+                float(trigger_px_raw)
+                if (not np.isfinite(tp_line_px))
+                else max(float(tp_line_px), float(trigger_px_raw))
+            )
         trigger_px = float(tp_line_px) if np.isfinite(tp_line_px) else float("nan")
-        tp_triggered = bool(np.isfinite(h) and np.isfinite(trigger_px) and (h >= trigger_px))
+        tp_triggered = bool(
+            np.isfinite(h) and np.isfinite(trigger_px) and (h >= trigger_px)
+        )
         if tp_triggered:
             in_pos = False
             out[i] = 0.0
-            gap_open_triggered = bool(np.isfinite(o) and np.isfinite(trigger_px) and (o >= trigger_px))
-            fill_price = float(o) if gap_open_triggered and np.isfinite(o) else float(trigger_px)
-            trigger_source = "gap_open_above_bias_v_tp" if gap_open_triggered else "high_touch_bias_v_tp"
+            gap_open_triggered = bool(
+                np.isfinite(o) and np.isfinite(trigger_px) and (o >= trigger_px)
+            )
+            fill_price = (
+                float(o) if gap_open_triggered and np.isfinite(o) else float(trigger_px)
+            )
+            trigger_source = (
+                "gap_open_above_bias_v_tp"
+                if gap_open_triggered
+                else "high_touch_bias_v_tp"
+            )
             if reentry_v == "wait_next_entry":
                 wait_next_entry_lock = True
             trigger_dates.append(ds)
             trigger_events.append(
                 {
                     "date": ds,
-                    "trigger_price": (float(trigger_px) if np.isfinite(trigger_px) else None),
-                    "trigger_price_raw": (float(trigger_px_raw) if np.isfinite(trigger_px_raw) else None),
-                    "trigger_price_eff": (float(trigger_px) if np.isfinite(trigger_px) else None),
+                    "trigger_price": (
+                        float(trigger_px) if np.isfinite(trigger_px) else None
+                    ),
+                    "trigger_price_raw": (
+                        float(trigger_px_raw) if np.isfinite(trigger_px_raw) else None
+                    ),
+                    "trigger_price_eff": (
+                        float(trigger_px) if np.isfinite(trigger_px) else None
+                    ),
                     "open_price": (float(o) if np.isfinite(o) else None),
                     "high_price": (float(h) if np.isfinite(h) else None),
-                    "fill_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "fill_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "trigger_source": trigger_source,
                     "gap_open_triggered": bool(gap_open_triggered),
                     "threshold": float(threshold),
@@ -2855,9 +3413,17 @@ def _apply_bias_v_take_profit(
                     "entry_decision_date": entry_decision_date,
                     "entry_execution_date": None,
                     "entry_execution_price": None,
-                    "initial_take_profit_price": (float(initial_tp_price) if np.isfinite(initial_tp_price) else None),
-                    "trigger_take_profit_price": (float(trigger_px) if np.isfinite(trigger_px) else None),
-                    "execution_take_profit_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "initial_take_profit_price": (
+                        float(initial_tp_price)
+                        if np.isfinite(initial_tp_price)
+                        else None
+                    ),
+                    "trigger_take_profit_price": (
+                        float(trigger_px) if np.isfinite(trigger_px) else None
+                    ),
+                    "execution_take_profit_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "trigger_date": ds,
                 }
             )
@@ -2875,13 +3441,21 @@ def _apply_bias_v_take_profit(
                     "atr": (float(a) if np.isfinite(a) else None),
                     "bias_v": (float(v) if np.isfinite(v) else None),
                     "threshold": float(threshold),
-                    "tp_trigger_price_raw": (float(trigger_px_raw) if np.isfinite(trigger_px_raw) else None),
-                    "tp_trigger_price_eff": (float(trigger_px) if np.isfinite(trigger_px) else None),
+                    "tp_trigger_price_raw": (
+                        float(trigger_px_raw) if np.isfinite(trigger_px_raw) else None
+                    ),
+                    "tp_trigger_price_eff": (
+                        float(trigger_px) if np.isfinite(trigger_px) else None
+                    ),
                     "tp_triggered": True,
-                    "tp_fill_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "tp_fill_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "tp_trigger_source": trigger_source,
                     "gap_open_triggered": bool(gap_open_triggered),
-                    "stop_fill_price": (float(fill_price) if np.isfinite(fill_price) else None),
+                    "stop_fill_price": (
+                        float(fill_price) if np.isfinite(fill_price) else None
+                    ),
                     "stop_trigger_source": trigger_source,
                     "decision_pos": float(out[i]),
                     "in_pos_after": bool(in_pos),
@@ -2911,8 +3485,12 @@ def _apply_bias_v_take_profit(
                 "atr": (float(a) if np.isfinite(a) else None),
                 "bias_v": (float(v) if np.isfinite(v) else None),
                 "threshold": float(threshold),
-                "tp_trigger_price_raw": (float(trigger_px_raw) if np.isfinite(trigger_px_raw) else None),
-                "tp_trigger_price_eff": (float(trigger_px) if np.isfinite(trigger_px) else None),
+                "tp_trigger_price_raw": (
+                    float(trigger_px_raw) if np.isfinite(trigger_px_raw) else None
+                ),
+                "tp_trigger_price_eff": (
+                    float(trigger_px) if np.isfinite(trigger_px) else None
+                ),
                 "tp_triggered": False,
                 "tp_fill_price": None,
                 "tp_trigger_source": None,
@@ -2944,7 +3522,9 @@ def _apply_bias_v_take_profit(
         "last_trigger_date": (trigger_dates[-1] if trigger_dates else None),
         "entries": int(((out_s > 0.0) & (out_s.shift(1).fillna(0.0) <= 0.0)).sum()),
         "exits": exits,
-        "trigger_exit_share": (float(trigger_count) / float(exits) if exits > 0 else 0.0),
+        "trigger_exit_share": (
+            float(trigger_count) / float(exits) if exits > 0 else 0.0
+        ),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
         "trigger_rule": "high_ge_threshold_same_day_exit",
         "fill_rule": "fill=max(trigger_price,open_price) for long",
@@ -3034,13 +3614,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("bias thresholds must satisfy: cold < entry < hot")
     atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
     if atr_mode not in {"none", "static", "trailing", "tightening"}:
-        raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
-    atr_basis = str(getattr(inp, "atr_stop_atr_basis", "latest") or "latest").strip().lower()
+        raise ValueError(
+            "atr_stop_mode must be one of: none|static|trailing|tightening"
+        )
+    atr_basis = (
+        str(getattr(inp, "atr_stop_atr_basis", "latest") or "latest").strip().lower()
+    )
     if atr_basis not in {"entry", "latest"}:
         raise ValueError("atr_stop_atr_basis must be one of: entry|latest")
-    atr_reentry_mode = str(getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter").strip().lower()
+    atr_reentry_mode = (
+        str(getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
     if atr_reentry_mode not in {"reenter", "wait_next_entry"}:
-        raise ValueError("atr_stop_reentry_mode must be one of: reenter|wait_next_entry")
+        raise ValueError(
+            "atr_stop_reentry_mode must be one of: reenter|wait_next_entry"
+        )
     if int(inp.atr_stop_window) < 2:
         raise ValueError("atr_stop_window must be >= 2")
     if (not np.isfinite(float(inp.atr_stop_n))) or float(inp.atr_stop_n) <= 0:
@@ -3048,29 +3638,57 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if (not np.isfinite(float(inp.atr_stop_m))) or float(inp.atr_stop_m) <= 0:
         raise ValueError("atr_stop_m must be finite and > 0")
     if atr_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
-        raise ValueError("atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening")
+        raise ValueError(
+            "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening"
+        )
     rtp_enabled = bool(getattr(inp, "r_take_profit_enabled", False))
-    rtp_reentry_mode = str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter").strip().lower()
+    rtp_reentry_mode = (
+        str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
     if rtp_reentry_mode not in {"reenter", "wait_next_entry"}:
-        raise ValueError("r_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
-    rtp_tiers = _normalize_r_take_profit_tiers(getattr(inp, "r_take_profit_tiers", None))
+        raise ValueError(
+            "r_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
+        )
+    rtp_tiers = _normalize_r_take_profit_tiers(
+        getattr(inp, "r_take_profit_tiers", None)
+    )
     bias_v_tp_enabled = bool(getattr(inp, "bias_v_take_profit_enabled", False))
-    bias_v_tp_reentry_mode = str(getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter").strip().lower()
+    bias_v_tp_reentry_mode = (
+        str(getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
     if bias_v_tp_reentry_mode not in {"reenter", "wait_next_entry"}:
-        raise ValueError("bias_v_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
+        raise ValueError(
+            "bias_v_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
+        )
     bias_v_tp_ma_window = int(getattr(inp, "bias_v_ma_window", 20) or 20)
     if bias_v_tp_ma_window < 2:
         raise ValueError("bias_v_ma_window must be >= 2")
     bias_v_tp_atr_window = int(getattr(inp, "bias_v_atr_window", 20) or 20)
     if bias_v_tp_atr_window < 2:
         raise ValueError("bias_v_atr_window must be >= 2")
-    bias_v_tp_threshold = float(getattr(inp, "bias_v_take_profit_threshold", 5.0) or 5.0)
+    bias_v_tp_threshold = float(
+        getattr(inp, "bias_v_take_profit_threshold", 5.0) or 5.0
+    )
     if (not np.isfinite(bias_v_tp_threshold)) or bias_v_tp_threshold <= 0.0:
         raise ValueError("bias_v_take_profit_threshold must be finite and > 0")
-    monthly_risk_budget_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
-    monthly_risk_budget_pct = float(getattr(inp, "monthly_risk_budget_pct", 0.06) or 0.06)
-    monthly_risk_budget_include_new_trade_risk = bool(getattr(inp, "monthly_risk_budget_include_new_trade_risk", False))
-    if (not np.isfinite(monthly_risk_budget_pct)) or monthly_risk_budget_pct < 0.01 or monthly_risk_budget_pct > 0.06:
+    monthly_risk_budget_enabled = bool(
+        getattr(inp, "monthly_risk_budget_enabled", False)
+    )
+    monthly_risk_budget_pct = float(
+        getattr(inp, "monthly_risk_budget_pct", 0.06) or 0.06
+    )
+    monthly_risk_budget_include_new_trade_risk = bool(
+        getattr(inp, "monthly_risk_budget_include_new_trade_risk", False)
+    )
+    if (
+        (not np.isfinite(monthly_risk_budget_pct))
+        or monthly_risk_budget_pct < 0.01
+        or monthly_risk_budget_pct > 0.06
+    ):
         raise ValueError("monthly_risk_budget_pct must be in [0.01, 0.06]")
     if int(inp.donchian_entry) < 2 or int(inp.donchian_exit) < 2:
         raise ValueError("donchian_entry/donchian_exit must be >= 2")
@@ -3113,19 +3731,29 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
     if er_exit_window < 2:
         raise ValueError("er_exit_window must be >= 2")
-    if (not np.isfinite(er_exit_threshold)) or er_exit_threshold < 0.0 or er_exit_threshold > 1.0:
+    if (
+        (not np.isfinite(er_exit_threshold))
+        or er_exit_threshold < 0.0
+        or er_exit_threshold > 1.0
+    ):
         raise ValueError("er_exit_threshold must be in [0,1]")
     ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
     if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
-        raise ValueError("position_sizing must be equal|vol_target|fixed_ratio|risk_budget")
+        raise ValueError(
+            "position_sizing must be equal|vol_target|fixed_ratio|risk_budget"
+        )
     if int(getattr(inp, "vol_window", 20)) < 2:
         raise ValueError("vol_window must be >= 2")
-    if (not np.isfinite(float(getattr(inp, "vol_target_ann", 0.20)))) or float(getattr(inp, "vol_target_ann", 0.20)) <= 0:
+    if (not np.isfinite(float(getattr(inp, "vol_target_ann", 0.20)))) or float(
+        getattr(inp, "vol_target_ann", 0.20)
+    ) <= 0:
         raise ValueError("vol_target_ann must be finite and > 0")
     fixed_ratio = float(getattr(inp, "fixed_pos_ratio", 0.04) or 0.04)
     if (not np.isfinite(fixed_ratio)) or fixed_ratio <= 0:
         raise ValueError("fixed_pos_ratio must be finite and > 0")
-    fixed_overcap_policy = str(getattr(inp, "fixed_overcap_policy", "skip") or "skip").strip().lower()
+    fixed_overcap_policy = (
+        str(getattr(inp, "fixed_overcap_policy", "skip") or "skip").strip().lower()
+    )
     if fixed_overcap_policy not in {"skip", "extend"}:
         raise ValueError("fixed_overcap_policy must be one of: skip|extend")
     fixed_max_holding_n = int(getattr(inp, "fixed_max_holdings", 10) or 10)
@@ -3135,55 +3763,117 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if risk_budget_atr_window < 2:
         raise ValueError("risk_budget_atr_window must be >= 2")
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
-    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
+    if (
+        (not np.isfinite(risk_budget_pct))
+        or risk_budget_pct < 0.001
+        or risk_budget_pct > 0.02
+    ):
         raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
-    risk_budget_overcap_policy = str(getattr(inp, "risk_budget_overcap_policy", "scale") or "scale").strip().lower()
-    if risk_budget_overcap_policy not in {"scale", "skip_entry", "replace_entry", "leverage_entry"}:
-        raise ValueError("risk_budget_overcap_policy must be one of: scale|skip_entry|replace_entry|leverage_entry")
-    risk_budget_max_leverage_multiple = float(getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0)
-    if (not np.isfinite(risk_budget_max_leverage_multiple)) or risk_budget_max_leverage_multiple < 1.0 or risk_budget_max_leverage_multiple > 10.0:
+    risk_budget_overcap_policy = (
+        str(getattr(inp, "risk_budget_overcap_policy", "scale") or "scale")
+        .strip()
+        .lower()
+    )
+    if risk_budget_overcap_policy not in {
+        "scale",
+        "skip_entry",
+        "replace_entry",
+        "leverage_entry",
+    }:
+        raise ValueError(
+            "risk_budget_overcap_policy must be one of: scale|skip_entry|replace_entry|leverage_entry"
+        )
+    risk_budget_max_leverage_multiple = float(
+        getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0
+    )
+    if (
+        (not np.isfinite(risk_budget_max_leverage_multiple))
+        or risk_budget_max_leverage_multiple < 1.0
+        or risk_budget_max_leverage_multiple > 10.0
+    ):
         raise ValueError("risk_budget_max_leverage_multiple must be in [1.0, 10.0]")
-    vol_regime_risk_mgmt_enabled = bool(getattr(inp, "vol_regime_risk_mgmt_enabled", False))
+    vol_regime_risk_mgmt_enabled = bool(
+        getattr(inp, "vol_regime_risk_mgmt_enabled", False)
+    )
     vol_ratio_fast_atr_window = int(getattr(inp, "vol_ratio_fast_atr_window", 5) or 5)
     vol_ratio_slow_atr_window = int(getattr(inp, "vol_ratio_slow_atr_window", 50) or 50)
-    vol_ratio_expand_threshold = float(getattr(inp, "vol_ratio_expand_threshold", 1.45) or 1.45)
-    vol_ratio_contract_threshold = float(getattr(inp, "vol_ratio_contract_threshold", 0.65) or 0.65)
-    vol_ratio_normal_threshold = float(getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05)
+    vol_ratio_expand_threshold = float(
+        getattr(inp, "vol_ratio_expand_threshold", 1.45) or 1.45
+    )
+    vol_ratio_contract_threshold = float(
+        getattr(inp, "vol_ratio_contract_threshold", 0.65) or 0.65
+    )
+    vol_ratio_normal_threshold = float(
+        getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
+    )
     if vol_ratio_fast_atr_window < 2:
         raise ValueError("vol_ratio_fast_atr_window must be >= 2")
     if vol_ratio_slow_atr_window < 2:
         raise ValueError("vol_ratio_slow_atr_window must be >= 2")
     if (not np.isfinite(vol_ratio_expand_threshold)) or vol_ratio_expand_threshold <= 0:
         raise ValueError("vol_ratio_expand_threshold must be > 0")
-    if (not np.isfinite(vol_ratio_contract_threshold)) or vol_ratio_contract_threshold <= 0:
+    if (
+        not np.isfinite(vol_ratio_contract_threshold)
+    ) or vol_ratio_contract_threshold <= 0:
         raise ValueError("vol_ratio_contract_threshold must be > 0")
     if (not np.isfinite(vol_ratio_normal_threshold)) or vol_ratio_normal_threshold <= 0:
         raise ValueError("vol_ratio_normal_threshold must be > 0")
     if vol_ratio_expand_threshold <= vol_ratio_normal_threshold:
-        raise ValueError("vol_ratio_expand_threshold must be > vol_ratio_normal_threshold")
+        raise ValueError(
+            "vol_ratio_expand_threshold must be > vol_ratio_normal_threshold"
+        )
     if vol_ratio_contract_threshold >= vol_ratio_normal_threshold:
-        raise ValueError("vol_ratio_contract_threshold must be < vol_ratio_normal_threshold")
+        raise ValueError(
+            "vol_ratio_contract_threshold must be < vol_ratio_normal_threshold"
+        )
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
     # - Execution/NAV: none close, with hfq return fallback on corporate-action days to avoid false cliffs
     # - Benchmark (buy&hold): hfq close (total return proxy; non-tradable)
-    need_hist = max(int(inp.sma_window), int(inp.slow_window), int(inp.donchian_entry), int(inp.mom_lookback), 20) + 60
+    need_hist = (
+        max(
+            int(inp.sma_window),
+            int(inp.slow_window),
+            int(inp.donchian_entry),
+            int(inp.mom_lookback),
+            20,
+        )
+        + 60
+    )
     ext_start = inp.start - dt.timedelta(days=int(need_hist) * 2)
 
-    close_none = load_close_prices(db, codes=[code], start=inp.start, end=inp.end, adjust="none")
-    if close_none.empty or (code not in close_none.columns) or close_none[code].dropna().empty:
+    close_none = load_close_prices(
+        db, codes=[code], start=inp.start, end=inp.end, adjust="none"
+    )
+    if (
+        close_none.empty
+        or (code not in close_none.columns)
+        or close_none[code].dropna().empty
+    ):
         raise ValueError("no execution price data for given range (none)")
     dates = close_none.sort_index().ffill().index
 
-    close_qfq = load_close_prices(db, codes=[code], start=ext_start, end=inp.end, adjust="qfq").sort_index().reindex(dates).ffill()
-    close_hfq = load_close_prices(db, codes=[code], start=ext_start, end=inp.end, adjust="hfq").sort_index().reindex(dates).ffill()
+    close_qfq = (
+        load_close_prices(db, codes=[code], start=ext_start, end=inp.end, adjust="qfq")
+        .sort_index()
+        .reindex(dates)
+        .ffill()
+    )
+    close_hfq = (
+        load_close_prices(db, codes=[code], start=ext_start, end=inp.end, adjust="hfq")
+        .sort_index()
+        .reindex(dates)
+        .ffill()
+    )
 
     for name, df in [("qfq", close_qfq), ("hfq", close_hfq)]:
         if df.empty or (code not in df.columns) or df[code].dropna().empty:
             raise ValueError(f"missing {name} close data for: {code}")
 
     px_sig = close_qfq[code].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
-    px_exec_none = close_none[code].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    px_exec_none = (
+        close_none[code].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    )
     px_bh = close_hfq[code].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
 
     px_sig = px_sig.dropna()
@@ -3195,14 +3885,24 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if px_exec_none.dropna().empty or px_sig.dropna().empty or px_bh.dropna().empty:
         raise ValueError("no valid price series after alignment")
 
-    high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=[code], start=ext_start, end=inp.end, adjust="qfq")
+    high_qfq_df, low_qfq_df = load_high_low_prices(
+        db, codes=[code], start=ext_start, end=inp.end, adjust="qfq"
+    )
     high_qfq = (
-        high_qfq_df[code].astype(float).replace([np.inf, -np.inf], np.nan).reindex(dates).ffill()
+        high_qfq_df[code]
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .reindex(dates)
+        .ffill()
         if (not high_qfq_df.empty and code in high_qfq_df.columns)
         else px_sig
     )
     low_qfq = (
-        low_qfq_df[code].astype(float).replace([np.inf, -np.inf], np.nan).reindex(dates).ffill()
+        low_qfq_df[code]
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .reindex(dates)
+        .ffill()
         if (not low_qfq_df.empty and code in low_qfq_df.columns)
         else px_sig
     )
@@ -3210,15 +3910,29 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     # Returns:
     # - strategy execution: choose open/close/oc2 by exec_price, then apply none->hfq fallback on CA days
     # - benchmark: hfq close
-    ohlc_none = load_ohlc_prices(db, codes=[code], start=inp.start, end=inp.end, adjust="none")
-    ohlc_hfq = load_ohlc_prices(db, codes=[code], start=inp.start, end=inp.end, adjust="hfq")
-    ohlc_qfq = load_ohlc_prices(db, codes=[code], start=inp.start, end=inp.end, adjust="qfq")
+    ohlc_none = load_ohlc_prices(
+        db, codes=[code], start=inp.start, end=inp.end, adjust="none"
+    )
+    ohlc_hfq = load_ohlc_prices(
+        db, codes=[code], start=inp.start, end=inp.end, adjust="hfq"
+    )
+    ohlc_qfq = load_ohlc_prices(
+        db, codes=[code], start=inp.start, end=inp.end, adjust="qfq"
+    )
 
-    def _pick_series(ohlc: dict[str, pd.DataFrame], field: str, fallback: pd.Series) -> pd.Series:
+    def _pick_series(
+        ohlc: dict[str, pd.DataFrame], field: str, fallback: pd.Series
+    ) -> pd.Series:
         df = ohlc.get(field, pd.DataFrame())
         if df is None or df.empty or code not in df.columns:
             return fallback.astype(float)
-        return pd.to_numeric(df[code], errors="coerce").astype(float).reindex(dates).ffill().combine_first(fallback.astype(float))
+        return (
+            pd.to_numeric(df[code], errors="coerce")
+            .astype(float)
+            .reindex(dates)
+            .ffill()
+            .combine_first(fallback.astype(float))
+        )
 
     o_none = _pick_series(ohlc_none, "open", px_exec_none)
     c_none = _pick_series(ohlc_none, "close", px_exec_none)
@@ -3231,24 +3945,84 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         exec_c_none = c_none.combine_first(px_exec_none)
         exec_o_hfq = o_hfq.combine_first(px_bh)
         exec_c_hfq = c_hfq.combine_first(px_bh)
-        ret_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_exec_hfq = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_none = (exec_c_none / exec_o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_none = (exec_o_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_hfq = (exec_c_hfq / exec_o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_hfq = (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_none = (
+            (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_exec_hfq = (
+            (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_none = (
+            (exec_c_none / exec_o_none - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_none = (
+            (exec_o_none.shift(-1).div(exec_c_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_hfq = (
+            (exec_c_hfq / exec_o_hfq - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_hfq = (
+            (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         px_slip_none = exec_o_none.astype(float)
         px_slip_hfq = exec_o_hfq.astype(float)
     elif ep == "close":
         # Execution-day return when entering at close: close[t+1] / close[t] - 1
         exec_none = c_none.combine_first(px_exec_none)
         exec_hfq = c_hfq.combine_first(px_bh)
-        ret_none = (exec_none.shift(-1).div(exec_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_exec_hfq = (exec_hfq.shift(-1).div(exec_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_none = (o_none.shift(-1).div(c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_none = (c_none.shift(-1).div(o_none.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_hfq = (o_hfq.shift(-1).div(c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_hfq = (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_none = (
+            (exec_none.shift(-1).div(exec_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_exec_hfq = (
+            (exec_hfq.shift(-1).div(exec_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_none = (
+            (o_none.shift(-1).div(c_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_none = (
+            (c_none.shift(-1).div(o_none.shift(-1)) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_hfq = (
+            (o_hfq.shift(-1).div(c_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_hfq = (
+            (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         px_slip_none = exec_none.astype(float)
         px_slip_hfq = exec_hfq.astype(float)
     else:
@@ -3257,16 +4031,62 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         exec_c_none = c_none.combine_first(px_exec_none)
         exec_o_hfq = o_hfq.combine_first(px_bh)
         exec_c_hfq = c_hfq.combine_first(px_bh)
-        ret_open_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_close_none = (exec_c_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_open_none = (
+            (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_close_none = (
+            (exec_c_none.shift(-1).div(exec_c_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
-        ret_open_hfq = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_close_hfq = (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_open_hfq = (
+            (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_close_hfq = (
+            (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         ret_exec_hfq = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
-        ret_overnight_none = (0.5 * (o_none.shift(-1).div(c_none) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_none = (0.5 * (c_none / o_none - 1.0) + 0.5 * (c_none.shift(-1).div(o_none.shift(-1)) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_hfq = (0.5 * (o_hfq.shift(-1).div(c_hfq) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_hfq = (0.5 * (c_hfq / o_hfq - 1.0) + 0.5 * (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_overnight_none = (
+            (0.5 * (o_none.shift(-1).div(c_none) - 1.0))
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_none = (
+            (
+                0.5 * (c_none / o_none - 1.0)
+                + 0.5 * (c_none.shift(-1).div(o_none.shift(-1)) - 1.0)
+            )
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_hfq = (
+            (0.5 * (o_hfq.shift(-1).div(c_hfq) - 1.0))
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_hfq = (
+            (
+                0.5 * (c_hfq / o_hfq - 1.0)
+                + 0.5 * (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0)
+            )
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         px_slip_none = (0.5 * (exec_o_none + exec_c_none)).astype(float)
         px_slip_hfq = (0.5 * (exec_o_hfq + exec_c_hfq)).astype(float)
     ret_hfq = ret_exec_hfq.astype(float)
@@ -3274,9 +4094,17 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     gross_hfq = (1.0 + ret_hfq).astype(float)
     corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_exec_hfq).astype(float)
-    ret_overnight = ret_overnight_none.where(~ca_mask.fillna(False), other=ret_overnight_hfq).astype(float)
-    ret_intraday = ret_intraday_none.where(~ca_mask.fillna(False), other=ret_intraday_hfq).astype(float)
-    px_exec_slip = px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq).replace([np.inf, -np.inf], np.nan).ffill()
+    ret_overnight = ret_overnight_none.where(
+        ~ca_mask.fillna(False), other=ret_overnight_hfq
+    ).astype(float)
+    ret_intraday = ret_intraday_none.where(
+        ~ca_mask.fillna(False), other=ret_intraday_hfq
+    ).astype(float)
+    px_exec_slip = (
+        px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
 
     if strat == "ma_filter":
         ma = _moving_average(
@@ -3290,11 +4118,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         if ma_type == "kama":
             kstd = (
                 ma.astype(float)
-                .rolling(window=int(kama_std_window), min_periods=max(2, int(kama_std_window) // 2))
+                .rolling(
+                    window=int(kama_std_window),
+                    min_periods=max(2, int(kama_std_window) // 2),
+                )
                 .std(ddof=0)
                 .fillna(0.0)
             )
-            raw_pos = _pos_from_band(px_sig.astype(float), ma.astype(float), band=(float(kama_std_coef) * kstd)).astype(float)
+            raw_pos = _pos_from_band(
+                px_sig.astype(float),
+                ma.astype(float),
+                band=(float(kama_std_coef) * kstd),
+            ).astype(float)
         else:
             raw_pos = (px_sig > ma).astype(float).fillna(0.0)
     elif strat == "ma_cross":
@@ -3302,12 +4137,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         slow = _moving_average(px_sig, window=int(inp.slow_window), ma_type=ma_type)
         raw_pos = (fast > slow).astype(float).fillna(0.0)
     elif strat == "donchian":
-        raw_pos = _pos_from_donchian(px_sig, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)).astype(float)
+        raw_pos = _pos_from_donchian(
+            px_sig, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)
+        ).astype(float)
     elif strat == "linreg_slope":
         # Linear regression slope of log price over window; long if slope > 0.
         n = int(inp.sma_window)
         y = np.log(px_sig.clip(lower=1e-12).astype(float))
-        slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(_rolling_linreg_slope, raw=True)
+        slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(
+            _rolling_linreg_slope, raw=True
+        )
         raw_pos = (slope > 0.0).astype(float).fillna(0.0)
     elif strat == "bias":
         # BIAS rising-follow strategy:
@@ -3315,7 +4154,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         # - BIAS computed from log-diff to EMA: (ln(C) - ln(EMA(C,N))) * 100 (percent)
         # - Enter when bias > entry; exit on take-profit (bias >= hot) or stop-loss (bias <= cold)
         b_win = int(inp.bias_ma_window)
-        ema = px_sig.ewm(span=b_win, adjust=False, min_periods=max(2, b_win // 2)).mean()
+        ema = px_sig.ewm(
+            span=b_win, adjust=False, min_periods=max(2, b_win // 2)
+        ).mean()
         ln_c = np.log(px_sig.clip(lower=1e-12).astype(float))
         ln_ema = np.log(ema.clip(lower=1e-12).astype(float))
         bias = (ln_c - ln_ema) * 100.0
@@ -3375,7 +4216,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             slow=int(inp.macd_slow),
             signal=int(inp.macd_signal),
         )
-        atr = _atr_from_hlc(high_qfq, low_qfq, px_sig, window=int(inp.macd_v_atr_window))
+        atr = _atr_from_hlc(
+            high_qfq, low_qfq, px_sig, window=int(inp.macd_v_atr_window)
+        )
         macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
         macd_v_sig = _ema(macd_v, int(inp.macd_signal))
         raw_pos = (macd_v > macd_v_sig).astype(float).fillna(0.0)
@@ -3401,8 +4244,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "blocked_entry_count_bear": 0,
         "blocked_entry_count_neutral": 0,
     }
-    er_filter_stats_overall = {"blocked_entry_count": 0, "attempted_entry_count": 0, "allowed_entry_count": 0}
-    er_exit_filter_stats_overall = {"trigger_count": 0, "trigger_dates": [], "trace_last_rows": []}
+    er_filter_stats_overall = {
+        "blocked_entry_count": 0,
+        "attempted_entry_count": 0,
+        "allowed_entry_count": 0,
+    }
+    er_exit_filter_stats_overall = {
+        "trigger_count": 0,
+        "trigger_dates": [],
+        "trace_last_rows": [],
+    }
     impulse_state: pd.Series | None = _compute_impulse_state(
         px_sig,
         ema_window=13,
@@ -3446,7 +4297,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         n_mult=float(inp.atr_stop_n),
         m_step=float(inp.atr_stop_m),
     )
-    atr_stop_stats = {**(atr_stop_stats or {}), **_extract_atr_plan_stops_from_trace(atr_stop_stats or {})}
+    atr_stop_stats = {
+        **(atr_stop_stats or {}),
+        **_extract_atr_plan_stops_from_trace(atr_stop_stats or {}),
+    }
     raw_pos, bias_v_take_profit_stats = _apply_bias_v_take_profit(
         raw_pos,
         open_=o_qfq.astype(float),
@@ -3486,24 +4340,36 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if ps == "fixed_ratio":
         sizing_scale = pd.Series(float(fixed_ratio), index=raw_pos.index, dtype=float)
     elif ps == "risk_budget":
-        atr_rb = _atr_from_hlc(
-            high_qfq.astype(float).fillna(px_sig),
-            low_qfq.astype(float).fillna(px_sig),
-            px_sig.astype(float),
-            window=int(risk_budget_atr_window),
-        ).reindex(raw_pos.index).astype(float)
-        atr_fast = _atr_from_hlc(
-            high_qfq.astype(float).fillna(px_sig),
-            low_qfq.astype(float).fillna(px_sig),
-            px_sig.astype(float),
-            window=int(vol_ratio_fast_atr_window),
-        ).reindex(raw_pos.index).astype(float)
-        atr_slow = _atr_from_hlc(
-            high_qfq.astype(float).fillna(px_sig),
-            low_qfq.astype(float).fillna(px_sig),
-            px_sig.astype(float),
-            window=int(vol_ratio_slow_atr_window),
-        ).reindex(raw_pos.index).astype(float)
+        atr_rb = (
+            _atr_from_hlc(
+                high_qfq.astype(float).fillna(px_sig),
+                low_qfq.astype(float).fillna(px_sig),
+                px_sig.astype(float),
+                window=int(risk_budget_atr_window),
+            )
+            .reindex(raw_pos.index)
+            .astype(float)
+        )
+        atr_fast = (
+            _atr_from_hlc(
+                high_qfq.astype(float).fillna(px_sig),
+                low_qfq.astype(float).fillna(px_sig),
+                px_sig.astype(float),
+                window=int(vol_ratio_fast_atr_window),
+            )
+            .reindex(raw_pos.index)
+            .astype(float)
+        )
+        atr_slow = (
+            _atr_from_hlc(
+                high_qfq.astype(float).fillna(px_sig),
+                low_qfq.astype(float).fillna(px_sig),
+                px_sig.astype(float),
+                window=int(vol_ratio_slow_atr_window),
+            )
+            .reindex(raw_pos.index)
+            .astype(float)
+        )
         sizing_scale, vol_risk_adjust_stats_overall = _risk_budget_dynamic_weights(
             raw_pos.astype(float).fillna(0.0),
             close=px_sig.astype(float),
@@ -3518,20 +4384,31 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         )
     elif ps == "vol_target":
         asset_vol = (
-            ret_exec.rolling(window=max(2, int(inp.vol_window)), min_periods=max(2, int(inp.vol_window)))
+            ret_exec.rolling(
+                window=max(2, int(inp.vol_window)),
+                min_periods=max(2, int(inp.vol_window)),
+            )
             .std()
             .mul(np.sqrt(TRADING_DAYS_PER_YEAR))
         ).replace([np.inf, -np.inf], np.nan)
         sizing_scale = (
-            float(inp.vol_target_ann) / asset_vol
-        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(lower=0.0, upper=1.0).astype(float)
+            (float(inp.vol_target_ann) / asset_vol)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .clip(lower=0.0, upper=1.0)
+            .astype(float)
+        )
     raw_pos = (raw_pos.clip(lower=0.0, upper=1.0) * sizing_scale).astype(float)
-    atr_gate = _atr_from_hlc(
-        high_qfq.astype(float).fillna(px_sig),
-        low_qfq.astype(float).fillna(px_sig),
-        px_sig.astype(float),
-        window=int(inp.atr_stop_window),
-    ).reindex(raw_pos.index).astype(float)
+    atr_gate = (
+        _atr_from_hlc(
+            high_qfq.astype(float).fillna(px_sig),
+            low_qfq.astype(float).fillna(px_sig),
+            px_sig.astype(float),
+            window=int(inp.atr_stop_window),
+        )
+        .reindex(raw_pos.index)
+        .astype(float)
+    )
     monthly_risk_budget_gate_stats: dict[str, Any] = {
         "enabled": False,
         "budget_pct": float(monthly_risk_budget_pct),
@@ -3585,26 +4462,64 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     # while long (w>0), open-leg day returns use same-day open->close (none; hfq on CA days),
     # not forward open[t]->open[t+1]. Forward legs still apply on flat days (w=0) for series continuity.
     if ep in {"open", "oc2"}:
-        same_day_none = (c_none / o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        same_day_hfq = (c_hfq / o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        open_fwd_none = (o_none.shift(-1).div(o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        open_fwd_hfq = (o_hfq.shift(-1).div(o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        close_fwd_none = (c_none.shift(-1).div(c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        close_fwd_hfq = (c_hfq.shift(-1).div(c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        same_day_none = (
+            (c_none / o_none - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        same_day_hfq = (
+            (c_hfq / o_hfq - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        open_fwd_none = (
+            (o_none.shift(-1).div(o_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        open_fwd_hfq = (
+            (o_hfq.shift(-1).div(o_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        close_fwd_none = (
+            (c_none.shift(-1).div(c_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        close_fwd_hfq = (
+            (c_hfq.shift(-1).div(c_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         cm = ca_mask.reindex(ret_exec.index).fillna(False)
         w_ix = w.reindex(ret_exec.index).fillna(0.0)
         if ep == "open":
             for d in ret_exec.index:
                 if float(w_ix.loc[d]) <= 1e-12:
                     continue
-                ret_exec.loc[d] = float(same_day_hfq.loc[d]) if bool(cm.loc[d]) else float(same_day_none.loc[d])
+                ret_exec.loc[d] = (
+                    float(same_day_hfq.loc[d])
+                    if bool(cm.loc[d])
+                    else float(same_day_none.loc[d])
+                )
         else:
             ret_blend_none = pd.Series(0.0, index=ret_exec.index, dtype=float)
             ret_blend_hfq = pd.Series(0.0, index=ret_exec.index, dtype=float)
             for d in ret_exec.index:
                 hold = float(w_ix.loc[d]) > 1e-12
-                po_n = float(same_day_none.loc[d]) if hold else float(open_fwd_none.loc[d])
-                po_h = float(same_day_hfq.loc[d]) if hold else float(open_fwd_hfq.loc[d])
+                po_n = (
+                    float(same_day_none.loc[d]) if hold else float(open_fwd_none.loc[d])
+                )
+                po_h = (
+                    float(same_day_hfq.loc[d]) if hold else float(open_fwd_hfq.loc[d])
+                )
                 cn = float(close_fwd_none.loc[d])
                 ch = float(close_fwd_hfq.loc[d])
                 ret_blend_none.loc[d] = 0.5 * (po_n + cn)
@@ -3614,21 +4529,55 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     # Buy-and-hold benchmark: always invested; align daily returns with exec_price (tests + rotation parity).
     cm_bh = ca_mask.reindex(ret_hfq.index)
     if isinstance(cm_bh, pd.DataFrame):
-        cm_bh = cm_bh.iloc[:, 0].fillna(False) if cm_bh.shape[1] else pd.Series(False, index=ret_hfq.index)
+        cm_bh = (
+            cm_bh.iloc[:, 0].fillna(False)
+            if cm_bh.shape[1]
+            else pd.Series(False, index=ret_hfq.index)
+        )
     else:
         cm_bh = cm_bh.fillna(False)
-    bh_same_none = (c_none / o_none - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    bh_same_hfq = (c_hfq / o_hfq - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    bh_same_none = (
+        (c_none / o_none - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+    )
+    bh_same_hfq = (
+        (c_hfq / o_hfq - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+    )
     if ep == "close":
         ret_bh = ret_hfq.astype(float)
     elif ep == "open":
-        ret_bh = bh_same_none.where(~cm_bh, bh_same_hfq).astype(float).reindex(ret_hfq.index).fillna(0.0)
+        ret_bh = (
+            bh_same_none.where(~cm_bh, bh_same_hfq)
+            .astype(float)
+            .reindex(ret_hfq.index)
+            .fillna(0.0)
+        )
     else:
-        cf_none = (c_none.shift(-1).div(c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        cf_hfq = (c_hfq.shift(-1).div(c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        cf_none = (
+            (c_none.shift(-1).div(c_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        cf_hfq = (
+            (c_hfq.shift(-1).div(c_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         blend_bh_none = (0.5 * (bh_same_none + cf_none)).astype(float)
         blend_bh_hfq = (0.5 * (bh_same_hfq + cf_hfq)).astype(float)
-        ret_bh = blend_bh_none.where(~cm_bh, blend_bh_hfq).astype(float).reindex(ret_hfq.index).fillna(0.0)
+        ret_bh = (
+            blend_bh_none.where(~cm_bh, blend_bh_hfq)
+            .astype(float)
+            .reindex(ret_hfq.index)
+            .fillna(0.0)
+        )
     cost = _turnover_cost_from_weights(w, cost_bps=float(inp.cost_bps))
     turnover = (w - w.shift(1).fillna(0.0)).abs() / 2.0
     slippage = slippage_return_from_turnover(
@@ -3636,11 +4585,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         slippage_spread=float(inp.slippage_rate),
         exec_price=px_exec_slip.reindex(turnover.index).ffill(),
     ).astype(float)
-    atr_stop_override_ret = atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
-    bias_v_take_profit_override_ret = bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-    r_take_profit_override_ret = r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-    risk_exit_override_ret = (atr_stop_override_ret + bias_v_take_profit_override_ret + r_take_profit_override_ret).astype(float)
-    strat_ret = (w * ret_exec_day + risk_exit_override_ret - cost - slippage).astype(float)
+    atr_stop_override_ret = (
+        atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
+    )
+    bias_v_take_profit_override_ret = (
+        bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+    )
+    r_take_profit_override_ret = (
+        r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+    )
+    risk_exit_override_ret = (
+        atr_stop_override_ret
+        + bias_v_take_profit_override_ret
+        + r_take_profit_override_ret
+    ).astype(float)
+    strat_ret = (w * ret_exec_day + risk_exit_override_ret - cost - slippage).astype(
+        float
+    )
     if not quick_mode:
         atr_stop_stats = {
             **(atr_stop_stats or {}),
@@ -3654,7 +4615,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         bias_v_take_profit_stats = {
             **(bias_v_take_profit_stats or {}),
             "trade_records": _enrich_trade_records_with_engine_timeline(
-                records=list((bias_v_take_profit_stats or {}).get("trade_records") or []),
+                records=list(
+                    (bias_v_take_profit_stats or {}).get("trade_records") or []
+                ),
                 effective_weight=w.astype(float),
                 exec_price_series=px_exec_slip.reindex(w.index).ffill().astype(float),
                 slippage_spread=float(inp.slippage_rate),
@@ -3662,19 +4625,43 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         }
     else:
         atr_stop_stats = {**(atr_stop_stats or {}), "trade_records": []}
-        bias_v_take_profit_stats = {**(bias_v_take_profit_stats or {}), "trade_records": []}
+        bias_v_take_profit_stats = {
+            **(bias_v_take_profit_stats or {}),
+            "trade_records": [],
+        }
     turnover_daily = ((w - w.shift(1).fillna(0.0)).abs() / 2.0).astype(float)
     return_decomposition: dict[str, Any] | None = None
     if not quick_mode:
-        decomp_overnight = (w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)).astype(float)
-        decomp_intraday = (w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)).astype(float)
-        decomp_interaction = (w * (ret_overnight.reindex(w.index).astype(float).fillna(0.0) * ret_intraday.reindex(w.index).astype(float).fillna(0.0))).astype(float)
+        decomp_overnight = (
+            w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)
+        ).astype(float)
+        decomp_intraday = (
+            w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)
+        ).astype(float)
+        decomp_interaction = (
+            w
+            * (
+                ret_overnight.reindex(w.index).astype(float).fillna(0.0)
+                * ret_intraday.reindex(w.index).astype(float).fillna(0.0)
+            )
+        ).astype(float)
         decomp_atr_stop_override = atr_stop_override_ret.astype(float)
-        decomp_bias_v_take_profit_override = bias_v_take_profit_override_ret.astype(float)
+        decomp_bias_v_take_profit_override = bias_v_take_profit_override_ret.astype(
+            float
+        )
         decomp_r_take_profit_override = r_take_profit_override_ret.astype(float)
-        decomp_risk_exit_override = (decomp_atr_stop_override + decomp_bias_v_take_profit_override + decomp_r_take_profit_override).astype(float)
+        decomp_risk_exit_override = (
+            decomp_atr_stop_override
+            + decomp_bias_v_take_profit_override
+            + decomp_r_take_profit_override
+        ).astype(float)
         decomp_cost = (cost + slippage).astype(float)
-        decomp_gross = (decomp_overnight + decomp_intraday + decomp_interaction + decomp_risk_exit_override).astype(float)
+        decomp_gross = (
+            decomp_overnight
+            + decomp_intraday
+            + decomp_interaction
+            + decomp_risk_exit_override
+        ).astype(float)
         decomp_net = (decomp_gross - decomp_cost).astype(float)
         return_decomposition = {
             "dates": w.index.date.astype(str).tolist(),
@@ -3683,24 +4670,64 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "intraday": decomp_intraday.astype(float).tolist(),
                 "interaction": decomp_interaction.astype(float).tolist(),
                 "atr_stop_override": decomp_atr_stop_override.astype(float).tolist(),
-                "bias_v_take_profit_override": decomp_bias_v_take_profit_override.astype(float).tolist(),
-                "r_take_profit_override": decomp_r_take_profit_override.astype(float).tolist(),
+                "bias_v_take_profit_override": decomp_bias_v_take_profit_override.astype(
+                    float
+                ).tolist(),
+                "r_take_profit_override": decomp_r_take_profit_override.astype(
+                    float
+                ).tolist(),
                 "risk_exit_override": decomp_risk_exit_override.astype(float).tolist(),
                 "cost": decomp_cost.astype(float).tolist(),
                 "gross": decomp_gross.astype(float).tolist(),
                 "net": decomp_net.astype(float).tolist(),
             },
             "summary": {
-                "ann_overnight": float(decomp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_overnight) > 1 else 0.0,
-                "ann_intraday": float(decomp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_intraday) > 1 else 0.0,
-                "ann_interaction": float(decomp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_interaction) > 1 else 0.0,
-                "ann_atr_stop_override": float(decomp_atr_stop_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_atr_stop_override) > 1 else 0.0,
-                "ann_bias_v_take_profit_override": float(decomp_bias_v_take_profit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_bias_v_take_profit_override) > 1 else 0.0,
-                "ann_r_take_profit_override": float(decomp_r_take_profit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_r_take_profit_override) > 1 else 0.0,
-                "ann_risk_exit_override": float(decomp_risk_exit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_risk_exit_override) > 1 else 0.0,
-                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
-                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
-                "ann_net": float(decomp_net.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_net) > 1 else 0.0,
+                "ann_overnight": float(
+                    decomp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_overnight) > 1
+                else 0.0,
+                "ann_intraday": float(
+                    decomp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_intraday) > 1
+                else 0.0,
+                "ann_interaction": float(
+                    decomp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_interaction) > 1
+                else 0.0,
+                "ann_atr_stop_override": float(
+                    decomp_atr_stop_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_atr_stop_override) > 1
+                else 0.0,
+                "ann_bias_v_take_profit_override": float(
+                    decomp_bias_v_take_profit_override.iloc[1:].mean()
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_bias_v_take_profit_override) > 1
+                else 0.0,
+                "ann_r_take_profit_override": float(
+                    decomp_r_take_profit_override.iloc[1:].mean()
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_r_take_profit_override) > 1
+                else 0.0,
+                "ann_risk_exit_override": float(
+                    decomp_risk_exit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_risk_exit_override) > 1
+                else 0.0,
+                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
+                if len(decomp_cost) > 1
+                else 0.0,
+                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
+                if len(decomp_gross) > 1
+                else 0.0,
+                "ann_net": float(decomp_net.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
+                if len(decomp_net) > 1
+                else 0.0,
             },
         }
     nav = (1.0 + strat_ret).cumprod()
@@ -3724,33 +4751,74 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     m_strat = {
         "cumulative_return": float(nav.iloc[-1] - 1.0),
         "annualized_return": float(ann_strat),
-        "annualized_volatility": float(_annualized_vol(strat_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_volatility": float(
+            _annualized_vol(strat_ret, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
         "max_drawdown": float(_max_drawdown(nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(nav)),
-        "sharpe_ratio": float(_sharpe(strat_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "sortino_ratio": float(_sortino(strat_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sharpe_ratio": float(
+            _sharpe(
+                strat_ret,
+                rf=float(inp.risk_free_rate),
+                ann_factor=TRADING_DAYS_PER_YEAR,
+            )
+        ),
+        "sortino_ratio": float(
+            _sortino(
+                strat_ret,
+                rf=float(inp.risk_free_rate),
+                ann_factor=TRADING_DAYS_PER_YEAR,
+            )
+        ),
         "ulcer_index": float(ui_strat),
-        "ulcer_performance_index": float((ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)) if ui_strat > 0 else float("nan"),
-        "avg_daily_turnover": float(turnover_daily.mean()) if len(turnover_daily) else 0.0,
+        "ulcer_performance_index": float(
+            (ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)
+        )
+        if ui_strat > 0
+        else float("nan"),
+        "avg_daily_turnover": float(turnover_daily.mean())
+        if len(turnover_daily)
+        else 0.0,
     }
     m_bh = {
         "cumulative_return": float(bh_nav.iloc[-1] - 1.0),
         "annualized_return": float(ann_bh),
-        "annualized_volatility": float(_annualized_vol(ret_bh, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_volatility": float(
+            _annualized_vol(ret_bh, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
         "max_drawdown": float(_max_drawdown(bh_nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bh_nav)),
-        "sharpe_ratio": float(_sharpe(ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "sortino_ratio": float(_sortino(ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sharpe_ratio": float(
+            _sharpe(
+                ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
+            )
+        ),
+        "sortino_ratio": float(
+            _sortino(
+                ret_bh, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
+            )
+        ),
         "ulcer_index": float(ui_bh),
-        "ulcer_performance_index": float((ann_bh - float(inp.risk_free_rate)) / (ui_bh / 100.0)) if ui_bh > 0 else float("nan"),
+        "ulcer_performance_index": float(
+            (ann_bh - float(inp.risk_free_rate)) / (ui_bh / 100.0)
+        )
+        if ui_bh > 0
+        else float("nan"),
     }
     m_ex = {
         "cumulative_return": float(excess_nav.iloc[-1] - 1.0),
-        "annualized_return": float(_annualized_return(excess_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
-        "information_ratio": float(_sharpe(active, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_return": float(
+            _annualized_return(excess_nav, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
+        "information_ratio": float(
+            _sharpe(active, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
     }
     attribution = _compute_return_risk_contributions(
-        asset_ret=ret_exec_day.to_frame(code).astype(float).reindex(nav.index).fillna(0.0),
+        asset_ret=ret_exec_day.to_frame(code)
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0),
         weights=w.to_frame(code).astype(float).reindex(nav.index).fillna(0.0),
         total_return=float(nav.iloc[-1] - 1.0),
     )
@@ -3766,7 +4834,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     complete_trade_count = int(len(trade_one.get("returns", [])))
     avg_daily_turnover = float(turnover_daily.mean()) if len(turnover_daily) else 0.0
     avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
-    avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+    avg_daily_trade_count = (
+        float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+    )
     avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
     m_strat["avg_daily_turnover"] = float(avg_daily_turnover)
     m_strat["avg_annual_turnover"] = float(avg_annual_turnover)
@@ -3790,9 +4860,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
         default_code=str(code),
-        ulcer_index=float(m_strat.get("ulcer_index")) if np.isfinite(float(m_strat.get("ulcer_index", np.nan))) else None,
-        annual_trade_count=float(avg_annual_trade_count) if np.isfinite(float(avg_annual_trade_count)) else None,
-        backtest_years=(float(sample_days) / float(TRADING_DAYS_PER_YEAR)) if sample_days > 0 else None,
+        ulcer_index=float(m_strat.get("ulcer_index"))
+        if np.isfinite(float(m_strat.get("ulcer_index", np.nan)))
+        else None,
+        annual_trade_count=float(avg_annual_trade_count)
+        if np.isfinite(float(avg_annual_trade_count))
+        else None,
+        backtest_years=(float(sample_days) / float(TRADING_DAYS_PER_YEAR))
+        if sample_days > 0
+        else None,
         score_sqn_weight=0.60,
         score_ulcer_weight=0.40,
     )
@@ -3800,7 +4876,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     r_stats_out.pop("trade_system_score", None)
     trades_with_r = list(trade_r_pack.get("trades") or [])
     if not quick_mode:
-        mom_for_entry = (px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0).astype(float)
+        mom_for_entry = (px_sig / px_sig.shift(int(inp.mom_lookback)) - 1.0).astype(
+            float
+        )
         er_for_entry = _efficiency_ratio(px_sig, window=int(er_window)).astype(float)
         atr_fast_for_entry = _atr_from_hlc(
             high_qfq.astype(float).fillna(px_sig),
@@ -3814,14 +4892,24 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             px_sig.astype(float),
             window=int(vol_ratio_slow_atr_window),
         ).astype(float)
-        vol_ratio_for_entry = (atr_fast_for_entry / atr_slow_for_entry.replace(0.0, np.nan)).astype(float)
+        vol_ratio_for_entry = (
+            atr_fast_for_entry / atr_slow_for_entry.replace(0.0, np.nan)
+        ).astype(float)
         condition_bins_by_code_single = {
             str(code): {
-                "momentum": _bucketize_momentum_series(mom_for_entry.reindex(nav.index)),
+                "momentum": _bucketize_momentum_series(
+                    mom_for_entry.reindex(nav.index)
+                ),
                 "er": _bucketize_er_series(er_for_entry.reindex(nav.index)),
-                "vol_ratio": _bucketize_vol_ratio_series(vol_ratio_for_entry.reindex(nav.index)),
+                "vol_ratio": _bucketize_vol_ratio_series(
+                    vol_ratio_for_entry.reindex(nav.index)
+                ),
                 "impulse": _bucketize_impulse_series(
-                    (impulse_state if impulse_state is not None else pd.Series(index=nav.index, dtype=object)).reindex(nav.index)
+                    (
+                        impulse_state
+                        if impulse_state is not None
+                        else pd.Series(index=nav.index, dtype=object)
+                    ).reindex(nav.index)
                 ),
             }
         }
@@ -3831,7 +4919,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             dates=nav.index,
             default_code=str(code),
         )
-    single_rtp_tier_counts = dict(((r_take_profit_stats or {}).get("tier_trigger_counts") or {}))
+    single_rtp_tier_counts = dict(
+        ((r_take_profit_stats or {}).get("tier_trigger_counts") or {})
+    )
     mfe_r_distribution = build_trade_mfe_r_distribution(
         trade_one.get("trades", []),
         close=px_sig.astype(float).reindex(nav.index).ffill(),
@@ -3844,13 +4934,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "overall": _trade_stats_from_returns(trade_one.get("returns", [])),
         "by_code": {str(code): _trade_stats_from_returns(trade_one.get("returns", []))},
         "trades": ([] if quick_mode else trades_with_r),
-        "trades_by_code": ({str(code): []} if quick_mode else {str(code): trades_with_r}),
+        "trades_by_code": (
+            {str(code): []} if quick_mode else {str(code): trades_with_r}
+        ),
         "mfe_r_distribution": mfe_r_distribution,
     }
-    impulse_attempted_overall = int((impulse_filter_stats_overall or {}).get("attempted_entry_count", 0))
-    impulse_blocked_overall = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
-    monthly_attempted_overall = int((monthly_risk_budget_gate_stats or {}).get("attempted_entry_count", 0))
-    monthly_blocked_overall = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
+    impulse_attempted_overall = int(
+        (impulse_filter_stats_overall or {}).get("attempted_entry_count", 0)
+    )
+    impulse_blocked_overall = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    monthly_attempted_overall = int(
+        (monthly_risk_budget_gate_stats or {}).get("attempted_entry_count", 0)
+    )
+    monthly_blocked_overall = int(
+        (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
+    )
     impulse_block_rate_overall = (
         float(impulse_blocked_overall / impulse_attempted_overall)
         if impulse_attempted_overall > 0
@@ -3861,73 +4961,219 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         if monthly_attempted_overall > 0
         else 0.0
     )
-    trade_stats["overall"]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
-    trade_stats["overall"]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
-    trade_stats["overall"]["bias_v_take_profit_trigger_count"] = int((bias_v_take_profit_stats or {}).get("trigger_count", 0))
+    trade_stats["overall"]["atr_stop_trigger_count"] = int(
+        (atr_stop_stats or {}).get("trigger_count", 0)
+    )
+    trade_stats["overall"]["r_take_profit_trigger_count"] = int(
+        (r_take_profit_stats or {}).get("trigger_count", 0)
+    )
+    trade_stats["overall"]["bias_v_take_profit_trigger_count"] = int(
+        (bias_v_take_profit_stats or {}).get("trigger_count", 0)
+    )
     trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
-    trade_stats["overall"]["er_filter_blocked_entry_count"] = int((er_filter_stats_overall or {}).get("blocked_entry_count", 0))
-    trade_stats["overall"]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
-    trade_stats["overall"]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
-    trade_stats["overall"]["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
-    trade_stats["overall"]["impulse_filter_attempted_entry_count"] = impulse_attempted_overall
-    trade_stats["overall"]["impulse_filter_allowed_entry_count"] = int((impulse_filter_stats_overall or {}).get("allowed_entry_count", 0))
-    trade_stats["overall"]["impulse_filter_blocked_entry_rate"] = float(impulse_block_rate_overall)
-    trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
-    trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
-    trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
-    trade_stats["overall"]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
-    trade_stats["overall"]["vol_risk_adjust_total_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0))
-    trade_stats["overall"]["vol_risk_adjust_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_reduce_on_expand_count", 0))
-    trade_stats["overall"]["vol_risk_adjust_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_increase_on_contract_count", 0))
-    trade_stats["overall"]["vol_risk_adjust_recover_from_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_expand_count", 0))
-    trade_stats["overall"]["vol_risk_adjust_recover_from_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_contract_count", 0))
-    trade_stats["overall"]["vol_risk_entry_state_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0))
-    trade_stats["overall"]["vol_risk_entry_state_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_increase_on_contract_count", 0))
-    trade_stats["overall"]["monthly_risk_budget_attempted_entry_count"] = monthly_attempted_overall
-    trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = monthly_blocked_overall
-    trade_stats["overall"]["monthly_risk_budget_blocked_entry_rate"] = float(monthly_block_rate_overall)
-    trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int((atr_stop_stats or {}).get("trigger_count", 0))
-    trade_stats["by_code"][str(code)]["r_take_profit_trigger_count"] = int((r_take_profit_stats or {}).get("trigger_count", 0))
-    trade_stats["by_code"][str(code)]["bias_v_take_profit_trigger_count"] = int((bias_v_take_profit_stats or {}).get("trigger_count", 0))
-    trade_stats["by_code"][str(code)]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
-    trade_stats["by_code"][str(code)]["er_filter_blocked_entry_count"] = int((er_filter_stats_overall or {}).get("blocked_entry_count", 0))
-    trade_stats["by_code"][str(code)]["er_filter_attempted_entry_count"] = int((er_filter_stats_overall or {}).get("attempted_entry_count", 0))
-    trade_stats["by_code"][str(code)]["er_filter_allowed_entry_count"] = int((er_filter_stats_overall or {}).get("allowed_entry_count", 0))
-    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
-    trade_stats["by_code"][str(code)]["impulse_filter_attempted_entry_count"] = impulse_attempted_overall
-    trade_stats["by_code"][str(code)]["impulse_filter_allowed_entry_count"] = int((impulse_filter_stats_overall or {}).get("allowed_entry_count", 0))
-    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_rate"] = float(impulse_block_rate_overall)
-    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
-    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
-    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
-    trade_stats["by_code"][str(code)]["er_exit_filter_trigger_count"] = int((er_exit_filter_stats_overall or {}).get("trigger_count", 0))
-    trade_stats["by_code"][str(code)]["vol_risk_adjust_total_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0))
-    trade_stats["by_code"][str(code)]["vol_risk_adjust_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_reduce_on_expand_count", 0))
-    trade_stats["by_code"][str(code)]["vol_risk_adjust_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_increase_on_contract_count", 0))
-    trade_stats["by_code"][str(code)]["vol_risk_adjust_recover_from_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_expand_count", 0))
-    trade_stats["by_code"][str(code)]["vol_risk_adjust_recover_from_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_contract_count", 0))
-    trade_stats["by_code"][str(code)]["vol_risk_entry_state_reduce_on_expand_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0))
-    trade_stats["by_code"][str(code)]["vol_risk_entry_state_increase_on_contract_count"] = int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_increase_on_contract_count", 0))
-    trade_stats["by_code"][str(code)]["monthly_risk_budget_attempted_entry_count"] = monthly_attempted_overall
-    trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_count"] = monthly_blocked_overall
-    trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_rate"] = float(monthly_block_rate_overall)
+    trade_stats["overall"]["er_filter_blocked_entry_count"] = int(
+        (er_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    trade_stats["overall"]["er_filter_attempted_entry_count"] = int(
+        (er_filter_stats_overall or {}).get("attempted_entry_count", 0)
+    )
+    trade_stats["overall"]["er_filter_allowed_entry_count"] = int(
+        (er_filter_stats_overall or {}).get("allowed_entry_count", 0)
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    trade_stats["overall"]["impulse_filter_attempted_entry_count"] = (
+        impulse_attempted_overall
+    )
+    trade_stats["overall"]["impulse_filter_allowed_entry_count"] = int(
+        (impulse_filter_stats_overall or {}).get("allowed_entry_count", 0)
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_rate"] = float(
+        impulse_block_rate_overall
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0)
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0)
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0)
+    )
+    trade_stats["overall"]["er_exit_filter_trigger_count"] = int(
+        (er_exit_filter_stats_overall or {}).get("trigger_count", 0)
+    )
+    trade_stats["overall"]["vol_risk_adjust_total_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0)
+    )
+    trade_stats["overall"]["vol_risk_adjust_reduce_on_expand_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_adjust_reduce_on_expand_count", 0
+        )
+    )
+    trade_stats["overall"]["vol_risk_adjust_increase_on_contract_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_adjust_increase_on_contract_count", 0
+        )
+    )
+    trade_stats["overall"]["vol_risk_adjust_recover_from_expand_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_adjust_recover_from_expand_count", 0
+        )
+    )
+    trade_stats["overall"]["vol_risk_adjust_recover_from_contract_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_adjust_recover_from_contract_count", 0
+        )
+    )
+    trade_stats["overall"]["vol_risk_entry_state_reduce_on_expand_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_entry_state_reduce_on_expand_count", 0
+        )
+    )
+    trade_stats["overall"]["vol_risk_entry_state_increase_on_contract_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_entry_state_increase_on_contract_count", 0
+        )
+    )
+    trade_stats["overall"]["monthly_risk_budget_attempted_entry_count"] = (
+        monthly_attempted_overall
+    )
+    trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = (
+        monthly_blocked_overall
+    )
+    trade_stats["overall"]["monthly_risk_budget_blocked_entry_rate"] = float(
+        monthly_block_rate_overall
+    )
+    trade_stats["by_code"][str(code)]["atr_stop_trigger_count"] = int(
+        (atr_stop_stats or {}).get("trigger_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["r_take_profit_trigger_count"] = int(
+        (r_take_profit_stats or {}).get("trigger_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["bias_v_take_profit_trigger_count"] = int(
+        (bias_v_take_profit_stats or {}).get("trigger_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["r_take_profit_tier_trigger_counts"] = (
+        single_rtp_tier_counts
+    )
+    trade_stats["by_code"][str(code)]["er_filter_blocked_entry_count"] = int(
+        (er_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["er_filter_attempted_entry_count"] = int(
+        (er_filter_stats_overall or {}).get("attempted_entry_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["er_filter_allowed_entry_count"] = int(
+        (er_filter_stats_overall or {}).get("allowed_entry_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["impulse_filter_attempted_entry_count"] = (
+        impulse_attempted_overall
+    )
+    trade_stats["by_code"][str(code)]["impulse_filter_allowed_entry_count"] = int(
+        (impulse_filter_stats_overall or {}).get("allowed_entry_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_rate"] = float(
+        impulse_block_rate_overall
+    )
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bull"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0)
+    )
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_bear"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0)
+    )
+    trade_stats["by_code"][str(code)]["impulse_filter_blocked_entry_count_neutral"] = (
+        int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
+    )
+    trade_stats["by_code"][str(code)]["er_exit_filter_trigger_count"] = int(
+        (er_exit_filter_stats_overall or {}).get("trigger_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_total_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_reduce_on_expand_count"] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_adjust_reduce_on_expand_count", 0
+        )
+    )
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_increase_on_contract_count"] = (
+        int(
+            (vol_risk_adjust_stats_overall or {}).get(
+                "vol_risk_adjust_increase_on_contract_count", 0
+            )
+        )
+    )
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_recover_from_expand_count"] = (
+        int(
+            (vol_risk_adjust_stats_overall or {}).get(
+                "vol_risk_adjust_recover_from_expand_count", 0
+            )
+        )
+    )
+    trade_stats["by_code"][str(code)]["vol_risk_adjust_recover_from_contract_count"] = (
+        int(
+            (vol_risk_adjust_stats_overall or {}).get(
+                "vol_risk_adjust_recover_from_contract_count", 0
+            )
+        )
+    )
+    trade_stats["by_code"][str(code)]["vol_risk_entry_state_reduce_on_expand_count"] = (
+        int(
+            (vol_risk_adjust_stats_overall or {}).get(
+                "vol_risk_entry_state_reduce_on_expand_count", 0
+            )
+        )
+    )
+    trade_stats["by_code"][str(code)][
+        "vol_risk_entry_state_increase_on_contract_count"
+    ] = int(
+        (vol_risk_adjust_stats_overall or {}).get(
+            "vol_risk_entry_state_increase_on_contract_count", 0
+        )
+    )
+    trade_stats["by_code"][str(code)]["monthly_risk_budget_attempted_entry_count"] = (
+        monthly_attempted_overall
+    )
+    trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_count"] = (
+        monthly_blocked_overall
+    )
+    trade_stats["by_code"][str(code)]["monthly_risk_budget_blocked_entry_rate"] = float(
+        monthly_block_rate_overall
+    )
     if not quick_mode:
         trade_stats["entry_condition_stats"] = {
             "scope": "closed_trades_only",
             "signal_day_basis": "signal_day_before_entry_execution",
             "quasi_causal_method": "uplift + two_proportion_z / welch_t_normal_approx + BH",
             "strong_causal_method": "uplift + stratified_permutation + BH",
-            "overall": _build_entry_condition_stats(trades_with_r, by_code=False, n_perm=300, seed=20260410),
+            "overall": _build_entry_condition_stats(
+                trades_with_r, by_code=False, n_perm=300, seed=20260410
+            ),
             "by_code": {
-                str(code): _build_entry_condition_stats(trades_with_r, by_code=True, n_perm=200, seed=20260410)
+                str(code): _build_entry_condition_stats(
+                    trades_with_r, by_code=True, n_perm=200, seed=20260410
+                )
             },
         }
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
-    m_strat["impulse_filter_blocked_entry_count"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count", 0))
-    m_strat["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0))
-    m_strat["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0))
-    m_strat["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0))
-    m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
+    m_strat["impulse_filter_blocked_entry_count"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    m_strat["impulse_filter_blocked_entry_count_bull"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_bull", 0)
+    )
+    m_strat["impulse_filter_blocked_entry_count_bear"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_bear", 0)
+    )
+    m_strat["impulse_filter_blocked_entry_count_neutral"] = int(
+        (impulse_filter_stats_overall or {}).get("blocked_entry_count_neutral", 0)
+    )
+    m_strat["monthly_risk_budget_blocked_entry_count"] = int(
+        (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
+    )
     event_study = None
     if not quick_mode:
         event_study = compute_event_study(
@@ -3940,7 +5186,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         high=high_qfq.to_frame(code).reindex(nav.index).astype(float),
         low=low_qfq.to_frame(code).reindex(nav.index).astype(float),
         weights=w.to_frame(code).reindex(nav.index).astype(float),
-        asset_returns=ret_exec_day.to_frame(code).reindex(nav.index).astype(float).fillna(0.0),
+        asset_returns=ret_exec_day.to_frame(code)
+        .reindex(nav.index)
+        .astype(float)
+        .fillna(0.0),
         strategy_returns=strat_ret.reindex(nav.index).astype(float),
         ann_factor=TRADING_DAYS_PER_YEAR,
     )
@@ -3962,7 +5211,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             "start": inp.start.strftime("%Y%m%d"),
             "end": inp.end.strftime("%Y%m%d"),
             "strategy": strat,
-            "strategy_execution_description": TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(strat, ""),
+            "strategy_execution_description": TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(
+                strat, ""
+            ),
             "price_basis": {
                 "signal": "qfq close",
                 "strategy_nav": "none close preferred; hfq return fallback on corporate-action days",
@@ -4003,7 +5254,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "bias_v_take_profit_threshold": float(bias_v_tp_threshold),
                 "monthly_risk_budget_enabled": bool(monthly_risk_budget_enabled),
                 "monthly_risk_budget_pct": float(monthly_risk_budget_pct),
-                "monthly_risk_budget_include_new_trade_risk": bool(monthly_risk_budget_include_new_trade_risk),
+                "monthly_risk_budget_include_new_trade_risk": bool(
+                    monthly_risk_budget_include_new_trade_risk
+                ),
                 "bias_ma_window": int(inp.bias_ma_window),
                 "bias_entry": float(inp.bias_entry),
                 "bias_hot": float(inp.bias_hot),
@@ -4029,7 +5282,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "risk_budget_atr_window": int(risk_budget_atr_window),
                 "risk_budget_pct": float(risk_budget_pct),
                 "risk_budget_overcap_policy": str(risk_budget_overcap_policy),
-                "risk_budget_max_leverage_multiple": float(risk_budget_max_leverage_multiple),
+                "risk_budget_max_leverage_multiple": float(
+                    risk_budget_max_leverage_multiple
+                ),
                 "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
                 "vol_ratio_fast_atr_window": int(vol_ratio_fast_atr_window),
                 "vol_ratio_slow_atr_window": int(vol_ratio_slow_atr_window),
@@ -4088,9 +5343,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "enabled": bool(er_exit_filter),
                 "window": int(er_exit_window),
                 "threshold": float(er_exit_threshold),
-                "trigger_count": int((er_exit_filter_stats_overall or {}).get("trigger_count", 0)),
-                "trigger_dates": list((er_exit_filter_stats_overall or {}).get("trigger_dates", []))[:200],
-                "trace_last_rows": list((er_exit_filter_stats_overall or {}).get("trace_last_rows", [])),
+                "trigger_count": int(
+                    (er_exit_filter_stats_overall or {}).get("trigger_count", 0)
+                ),
+                "trigger_dates": list(
+                    (er_exit_filter_stats_overall or {}).get("trigger_dates", [])
+                )[:200],
+                "trace_last_rows": list(
+                    (er_exit_filter_stats_overall or {}).get("trace_last_rows", [])
+                ),
             },
             "vol_regime_risk_mgmt": {
                 "enabled": bool(ps == "risk_budget" and vol_regime_risk_mgmt_enabled),
@@ -4099,13 +5360,41 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "expand_threshold": float(vol_ratio_expand_threshold),
                 "contract_threshold": float(vol_ratio_contract_threshold),
                 "normal_threshold": float(vol_ratio_normal_threshold),
-                "adjust_total_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_total_count", 0)),
-                "adjust_reduce_on_expand_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_reduce_on_expand_count", 0)),
-                "adjust_increase_on_contract_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_increase_on_contract_count", 0)),
-                "adjust_recover_from_expand_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_expand_count", 0)),
-                "adjust_recover_from_contract_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_adjust_recover_from_contract_count", 0)),
-                "entry_state_reduce_on_expand_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0)),
-                "entry_state_increase_on_contract_count": int((vol_risk_adjust_stats_overall or {}).get("vol_risk_entry_state_increase_on_contract_count", 0)),
+                "adjust_total_count": int(
+                    (vol_risk_adjust_stats_overall or {}).get(
+                        "vol_risk_adjust_total_count", 0
+                    )
+                ),
+                "adjust_reduce_on_expand_count": int(
+                    (vol_risk_adjust_stats_overall or {}).get(
+                        "vol_risk_adjust_reduce_on_expand_count", 0
+                    )
+                ),
+                "adjust_increase_on_contract_count": int(
+                    (vol_risk_adjust_stats_overall or {}).get(
+                        "vol_risk_adjust_increase_on_contract_count", 0
+                    )
+                ),
+                "adjust_recover_from_expand_count": int(
+                    (vol_risk_adjust_stats_overall or {}).get(
+                        "vol_risk_adjust_recover_from_expand_count", 0
+                    )
+                ),
+                "adjust_recover_from_contract_count": int(
+                    (vol_risk_adjust_stats_overall or {}).get(
+                        "vol_risk_adjust_recover_from_contract_count", 0
+                    )
+                ),
+                "entry_state_reduce_on_expand_count": int(
+                    (vol_risk_adjust_stats_overall or {}).get(
+                        "vol_risk_entry_state_reduce_on_expand_count", 0
+                    )
+                ),
+                "entry_state_increase_on_contract_count": int(
+                    (vol_risk_adjust_stats_overall or {}).get(
+                        "vol_risk_entry_state_increase_on_contract_count", 0
+                    )
+                ),
             },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
         },
@@ -4123,7 +5412,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "next_plan": {
             "decision_date": (str(nav.index[-1].date()) if len(nav.index) else None),
             "current_effective_weight": (float(w.iloc[-1]) if len(w) else 0.0),
-            "target_weight": (float(raw_pos.reindex(nav.index).iloc[-1]) if len(nav.index) else 0.0),
+            "target_weight": (
+                float(raw_pos.reindex(nav.index).iloc[-1]) if len(nav.index) else 0.0
+            ),
             "entry_exec_price_with_slippage_by_asset": (
                 {str(code): float(entry_exec_price_with_slippage)}
                 if entry_exec_price_with_slippage is not None
@@ -4134,49 +5425,118 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "atr_stop_mode": str(atr_mode),
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
-                "base_signal_today": (float(base_pos.reindex(nav.index).iloc[-1]) if len(nav.index) else 0.0),
-                "base_signal_prev": (float(base_pos.reindex(nav.index).iloc[-2]) if len(nav.index) > 1 else 0.0),
+                "base_signal_today": (
+                    float(base_pos.reindex(nav.index).iloc[-1])
+                    if len(nav.index)
+                    else 0.0
+                ),
+                "base_signal_prev": (
+                    float(base_pos.reindex(nav.index).iloc[-2])
+                    if len(nav.index) > 1
+                    else 0.0
+                ),
                 "base_entry_event_today": bool(
                     (len(nav.index) > 0)
                     and (float(base_pos.reindex(nav.index).iloc[-1]) > 0.0)
-                    and ((float(base_pos.reindex(nav.index).iloc[-2]) if len(nav.index) > 1 else 0.0) <= 0.0)
+                    and (
+                        (
+                            float(base_pos.reindex(nav.index).iloc[-2])
+                            if len(nav.index) > 1
+                            else 0.0
+                        )
+                        <= 0.0
+                    )
                 ),
                 "atr_stop": {
-                    "trigger_count": int((atr_stop_stats or {}).get("trigger_count", 0)),
-                    "last_trigger_date": (atr_stop_stats or {}).get("last_trigger_date"),
-                    "wait_next_entry_lock_active": bool((atr_stop_stats or {}).get("wait_next_entry_lock_active", False)),
-                    "latest_stop_price": (atr_stop_stats or {}).get("latest_stop_price"),
+                    "trigger_count": int(
+                        (atr_stop_stats or {}).get("trigger_count", 0)
+                    ),
+                    "last_trigger_date": (atr_stop_stats or {}).get(
+                        "last_trigger_date"
+                    ),
+                    "wait_next_entry_lock_active": bool(
+                        (atr_stop_stats or {}).get("wait_next_entry_lock_active", False)
+                    ),
+                    "latest_stop_price": (atr_stop_stats or {}).get(
+                        "latest_stop_price"
+                    ),
                     "latest_stop_date": (atr_stop_stats or {}).get("latest_stop_date"),
-                    "trace_last_rows": (atr_stop_stats or {}).get("trace_last_rows", []),
+                    "trace_last_rows": (atr_stop_stats or {}).get(
+                        "trace_last_rows", []
+                    ),
                 },
                 "r_take_profit": {
                     "enabled": bool((r_take_profit_stats or {}).get("enabled", False)),
                     "initial_r_mode": (r_take_profit_stats or {}).get("initial_r_mode"),
-                    "fallback_mode_used": bool((r_take_profit_stats or {}).get("fallback_mode_used", False)),
-                    "trigger_count": int((r_take_profit_stats or {}).get("trigger_count", 0)),
-                    "last_trigger_date": (r_take_profit_stats or {}).get("last_trigger_date"),
-                    "wait_next_entry_lock_active": bool((r_take_profit_stats or {}).get("wait_next_entry_lock_active", False)),
+                    "fallback_mode_used": bool(
+                        (r_take_profit_stats or {}).get("fallback_mode_used", False)
+                    ),
+                    "trigger_count": int(
+                        (r_take_profit_stats or {}).get("trigger_count", 0)
+                    ),
+                    "last_trigger_date": (r_take_profit_stats or {}).get(
+                        "last_trigger_date"
+                    ),
+                    "wait_next_entry_lock_active": bool(
+                        (r_take_profit_stats or {}).get(
+                            "wait_next_entry_lock_active", False
+                        )
+                    ),
                     "tiers": (r_take_profit_stats or {}).get("tiers", []),
-                    "trace_last_rows": (r_take_profit_stats or {}).get("trace_last_rows", []),
+                    "trace_last_rows": (r_take_profit_stats or {}).get(
+                        "trace_last_rows", []
+                    ),
                 },
                 "bias_v_take_profit": {
-                    "enabled": bool((bias_v_take_profit_stats or {}).get("enabled", False)),
-                    "reentry_mode": (bias_v_take_profit_stats or {}).get("reentry_mode"),
-                    "ma_window": int((bias_v_take_profit_stats or {}).get("ma_window", bias_v_tp_ma_window)),
-                    "atr_window": int((bias_v_take_profit_stats or {}).get("atr_window", bias_v_tp_atr_window)),
-                    "threshold": float((bias_v_take_profit_stats or {}).get("threshold", bias_v_tp_threshold)),
-                    "trigger_count": int((bias_v_take_profit_stats or {}).get("trigger_count", 0)),
-                    "last_trigger_date": (bias_v_take_profit_stats or {}).get("last_trigger_date"),
-                    "wait_next_entry_lock_active": bool((bias_v_take_profit_stats or {}).get("wait_next_entry_lock_active", False)),
-                    "trace_last_rows": (bias_v_take_profit_stats or {}).get("trace_last_rows", []),
+                    "enabled": bool(
+                        (bias_v_take_profit_stats or {}).get("enabled", False)
+                    ),
+                    "reentry_mode": (bias_v_take_profit_stats or {}).get(
+                        "reentry_mode"
+                    ),
+                    "ma_window": int(
+                        (bias_v_take_profit_stats or {}).get(
+                            "ma_window", bias_v_tp_ma_window
+                        )
+                    ),
+                    "atr_window": int(
+                        (bias_v_take_profit_stats or {}).get(
+                            "atr_window", bias_v_tp_atr_window
+                        )
+                    ),
+                    "threshold": float(
+                        (bias_v_take_profit_stats or {}).get(
+                            "threshold", bias_v_tp_threshold
+                        )
+                    ),
+                    "trigger_count": int(
+                        (bias_v_take_profit_stats or {}).get("trigger_count", 0)
+                    ),
+                    "last_trigger_date": (bias_v_take_profit_stats or {}).get(
+                        "last_trigger_date"
+                    ),
+                    "wait_next_entry_lock_active": bool(
+                        (bias_v_take_profit_stats or {}).get(
+                            "wait_next_entry_lock_active", False
+                        )
+                    ),
+                    "trace_last_rows": (bias_v_take_profit_stats or {}).get(
+                        "trace_last_rows", []
+                    ),
                 },
                 "er_exit_filter": {
                     "enabled": bool(er_exit_filter),
                     "window": int(er_exit_window),
                     "threshold": float(er_exit_threshold),
-                    "trigger_count": int((er_exit_filter_stats_overall or {}).get("trigger_count", 0)),
-                    "trigger_dates": list((er_exit_filter_stats_overall or {}).get("trigger_dates", []))[:200],
-                    "trace_last_rows": list((er_exit_filter_stats_overall or {}).get("trace_last_rows", [])),
+                    "trigger_count": int(
+                        (er_exit_filter_stats_overall or {}).get("trigger_count", 0)
+                    ),
+                    "trigger_dates": list(
+                        (er_exit_filter_stats_overall or {}).get("trigger_dates", [])
+                    )[:200],
+                    "trace_last_rows": list(
+                        (er_exit_filter_stats_overall or {}).get("trace_last_rows", [])
+                    ),
                 },
             },
         },
@@ -4193,7 +5553,9 @@ def compute_trend_portfolio_backtest(
     Run trend portfolio backtest. When data_override is provided, db is not used
     (can be None); used for OOS bootstrap with synthetic in-sample data.
     """
-    codes = list(dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()]))
+    codes = list(
+        dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()])
+    )
     if not codes:
         raise ValueError("codes is empty")
     if float(inp.cost_bps) < 0:
@@ -4208,14 +5570,20 @@ def compute_trend_portfolio_backtest(
     quick_mode = bool(getattr(inp, "quick_mode", False))
     ps = str(inp.position_sizing or "equal").strip().lower()
     if ps not in {"equal", "vol_target", "fixed_ratio", "risk_budget"}:
-        raise ValueError("position_sizing must be equal|vol_target|fixed_ratio|risk_budget")
+        raise ValueError(
+            "position_sizing must be equal|vol_target|fixed_ratio|risk_budget"
+        )
     if int(inp.vol_window) < 2:
         raise ValueError("vol_window must be >= 2")
     if (not np.isfinite(float(inp.vol_target_ann))) or float(inp.vol_target_ann) <= 0:
         raise ValueError("vol_target_ann must be finite and > 0")
-    if (not np.isfinite(float(getattr(inp, "fixed_pos_ratio", 0.04)))) or float(getattr(inp, "fixed_pos_ratio", 0.04)) <= 0:
+    if (not np.isfinite(float(getattr(inp, "fixed_pos_ratio", 0.04)))) or float(
+        getattr(inp, "fixed_pos_ratio", 0.04)
+    ) <= 0:
         raise ValueError("fixed_pos_ratio must be finite and > 0")
-    fixed_overcap_policy = str(getattr(inp, "fixed_overcap_policy", "skip") or "skip").strip().lower()
+    fixed_overcap_policy = (
+        str(getattr(inp, "fixed_overcap_policy", "skip") or "skip").strip().lower()
+    )
     if fixed_overcap_policy not in {"skip", "extend"}:
         raise ValueError("fixed_overcap_policy must be one of: skip|extend")
     fixed_max_holdings = int(getattr(inp, "fixed_max_holdings", 10) or 10)
@@ -4225,34 +5593,69 @@ def compute_trend_portfolio_backtest(
     if risk_budget_atr_window < 2:
         raise ValueError("risk_budget_atr_window must be >= 2")
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
-    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
+    if (
+        (not np.isfinite(risk_budget_pct))
+        or risk_budget_pct < 0.001
+        or risk_budget_pct > 0.02
+    ):
         raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
-    risk_budget_overcap_policy = str(getattr(inp, "risk_budget_overcap_policy", "scale") or "scale").strip().lower()
-    if risk_budget_overcap_policy not in {"scale", "skip_entry", "replace_entry", "leverage_entry"}:
-        raise ValueError("risk_budget_overcap_policy must be one of: scale|skip_entry|replace_entry|leverage_entry")
-    risk_budget_max_leverage_multiple = float(getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0)
-    if (not np.isfinite(risk_budget_max_leverage_multiple)) or risk_budget_max_leverage_multiple < 1.0 or risk_budget_max_leverage_multiple > 10.0:
+    risk_budget_overcap_policy = (
+        str(getattr(inp, "risk_budget_overcap_policy", "scale") or "scale")
+        .strip()
+        .lower()
+    )
+    if risk_budget_overcap_policy not in {
+        "scale",
+        "skip_entry",
+        "replace_entry",
+        "leverage_entry",
+    }:
+        raise ValueError(
+            "risk_budget_overcap_policy must be one of: scale|skip_entry|replace_entry|leverage_entry"
+        )
+    risk_budget_max_leverage_multiple = float(
+        getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0
+    )
+    if (
+        (not np.isfinite(risk_budget_max_leverage_multiple))
+        or risk_budget_max_leverage_multiple < 1.0
+        or risk_budget_max_leverage_multiple > 10.0
+    ):
         raise ValueError("risk_budget_max_leverage_multiple must be in [1.0, 10.0]")
-    vol_regime_risk_mgmt_enabled = bool(getattr(inp, "vol_regime_risk_mgmt_enabled", False))
+    vol_regime_risk_mgmt_enabled = bool(
+        getattr(inp, "vol_regime_risk_mgmt_enabled", False)
+    )
     vol_ratio_fast_atr_window = int(getattr(inp, "vol_ratio_fast_atr_window", 5) or 5)
     vol_ratio_slow_atr_window = int(getattr(inp, "vol_ratio_slow_atr_window", 50) or 50)
-    vol_ratio_expand_threshold = float(getattr(inp, "vol_ratio_expand_threshold", 1.45) or 1.45)
-    vol_ratio_contract_threshold = float(getattr(inp, "vol_ratio_contract_threshold", 0.65) or 0.65)
-    vol_ratio_normal_threshold = float(getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05)
+    vol_ratio_expand_threshold = float(
+        getattr(inp, "vol_ratio_expand_threshold", 1.45) or 1.45
+    )
+    vol_ratio_contract_threshold = float(
+        getattr(inp, "vol_ratio_contract_threshold", 0.65) or 0.65
+    )
+    vol_ratio_normal_threshold = float(
+        getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
+    )
     if vol_ratio_fast_atr_window < 2:
         raise ValueError("vol_ratio_fast_atr_window must be >= 2")
     if vol_ratio_slow_atr_window < 2:
         raise ValueError("vol_ratio_slow_atr_window must be >= 2")
     if (not np.isfinite(vol_ratio_expand_threshold)) or vol_ratio_expand_threshold <= 0:
         raise ValueError("vol_ratio_expand_threshold must be > 0")
-    if (not np.isfinite(vol_ratio_contract_threshold)) or vol_ratio_contract_threshold <= 0:
+    if (
+        not np.isfinite(vol_ratio_contract_threshold)
+    ) or vol_ratio_contract_threshold <= 0:
         raise ValueError("vol_ratio_contract_threshold must be > 0")
     if (not np.isfinite(vol_ratio_normal_threshold)) or vol_ratio_normal_threshold <= 0:
         raise ValueError("vol_ratio_normal_threshold must be > 0")
     if vol_ratio_expand_threshold <= vol_ratio_normal_threshold:
-        raise ValueError("vol_ratio_expand_threshold must be > vol_ratio_normal_threshold")
+        raise ValueError(
+            "vol_ratio_expand_threshold must be > vol_ratio_normal_threshold"
+        )
     if vol_ratio_contract_threshold >= vol_ratio_normal_threshold:
-        raise ValueError("vol_ratio_contract_threshold must be < vol_ratio_normal_threshold")
+        raise ValueError(
+            "vol_ratio_contract_threshold must be < vol_ratio_normal_threshold"
+        )
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema", "kama"}:
@@ -4278,13 +5681,23 @@ def compute_trend_portfolio_backtest(
         raise ValueError("ma_type=kama is only supported for ma_filter")
     atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
     if atr_mode not in {"none", "static", "trailing", "tightening"}:
-        raise ValueError("atr_stop_mode must be one of: none|static|trailing|tightening")
-    atr_basis = str(getattr(inp, "atr_stop_atr_basis", "latest") or "latest").strip().lower()
+        raise ValueError(
+            "atr_stop_mode must be one of: none|static|trailing|tightening"
+        )
+    atr_basis = (
+        str(getattr(inp, "atr_stop_atr_basis", "latest") or "latest").strip().lower()
+    )
     if atr_basis not in {"entry", "latest"}:
         raise ValueError("atr_stop_atr_basis must be one of: entry|latest")
-    atr_reentry_mode = str(getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter").strip().lower()
+    atr_reentry_mode = (
+        str(getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
     if atr_reentry_mode not in {"reenter", "wait_next_entry"}:
-        raise ValueError("atr_stop_reentry_mode must be one of: reenter|wait_next_entry")
+        raise ValueError(
+            "atr_stop_reentry_mode must be one of: reenter|wait_next_entry"
+        )
     if int(inp.atr_stop_window) < 2:
         raise ValueError("atr_stop_window must be >= 2")
     if (not np.isfinite(float(inp.atr_stop_n))) or float(inp.atr_stop_n) <= 0:
@@ -4292,29 +5705,57 @@ def compute_trend_portfolio_backtest(
     if (not np.isfinite(float(inp.atr_stop_m))) or float(inp.atr_stop_m) <= 0:
         raise ValueError("atr_stop_m must be finite and > 0")
     if atr_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
-        raise ValueError("atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening")
+        raise ValueError(
+            "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening"
+        )
     rtp_enabled = bool(getattr(inp, "r_take_profit_enabled", False))
-    rtp_reentry_mode = str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter").strip().lower()
+    rtp_reentry_mode = (
+        str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
     if rtp_reentry_mode not in {"reenter", "wait_next_entry"}:
-        raise ValueError("r_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
-    rtp_tiers = _normalize_r_take_profit_tiers(getattr(inp, "r_take_profit_tiers", None))
+        raise ValueError(
+            "r_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
+        )
+    rtp_tiers = _normalize_r_take_profit_tiers(
+        getattr(inp, "r_take_profit_tiers", None)
+    )
     bias_v_tp_enabled = bool(getattr(inp, "bias_v_take_profit_enabled", False))
-    bias_v_tp_reentry_mode = str(getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter").strip().lower()
+    bias_v_tp_reentry_mode = (
+        str(getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
     if bias_v_tp_reentry_mode not in {"reenter", "wait_next_entry"}:
-        raise ValueError("bias_v_take_profit_reentry_mode must be one of: reenter|wait_next_entry")
+        raise ValueError(
+            "bias_v_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
+        )
     bias_v_tp_ma_window = int(getattr(inp, "bias_v_ma_window", 20) or 20)
     if bias_v_tp_ma_window < 2:
         raise ValueError("bias_v_ma_window must be >= 2")
     bias_v_tp_atr_window = int(getattr(inp, "bias_v_atr_window", 20) or 20)
     if bias_v_tp_atr_window < 2:
         raise ValueError("bias_v_atr_window must be >= 2")
-    bias_v_tp_threshold = float(getattr(inp, "bias_v_take_profit_threshold", 5.0) or 5.0)
+    bias_v_tp_threshold = float(
+        getattr(inp, "bias_v_take_profit_threshold", 5.0) or 5.0
+    )
     if (not np.isfinite(bias_v_tp_threshold)) or bias_v_tp_threshold <= 0.0:
         raise ValueError("bias_v_take_profit_threshold must be finite and > 0")
-    monthly_risk_budget_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
-    monthly_risk_budget_pct = float(getattr(inp, "monthly_risk_budget_pct", 0.06) or 0.06)
-    monthly_risk_budget_include_new_trade_risk = bool(getattr(inp, "monthly_risk_budget_include_new_trade_risk", False))
-    if (not np.isfinite(monthly_risk_budget_pct)) or monthly_risk_budget_pct < 0.01 or monthly_risk_budget_pct > 0.06:
+    monthly_risk_budget_enabled = bool(
+        getattr(inp, "monthly_risk_budget_enabled", False)
+    )
+    monthly_risk_budget_pct = float(
+        getattr(inp, "monthly_risk_budget_pct", 0.06) or 0.06
+    )
+    monthly_risk_budget_include_new_trade_risk = bool(
+        getattr(inp, "monthly_risk_budget_include_new_trade_risk", False)
+    )
+    if (
+        (not np.isfinite(monthly_risk_budget_pct))
+        or monthly_risk_budget_pct < 0.01
+        or monthly_risk_budget_pct > 0.06
+    ):
         raise ValueError("monthly_risk_budget_pct must be in [0.01, 0.06]")
     if not np.isfinite(float(inp.tsmom_entry_threshold)):
         raise ValueError("tsmom_entry_threshold must be finite")
@@ -4338,12 +5779,22 @@ def compute_trend_portfolio_backtest(
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
     if er_exit_window < 2:
         raise ValueError("er_exit_window must be >= 2")
-    if (not np.isfinite(er_exit_threshold)) or er_exit_threshold < 0.0 or er_exit_threshold > 1.0:
+    if (
+        (not np.isfinite(er_exit_threshold))
+        or er_exit_threshold < 0.0
+        or er_exit_threshold > 1.0
+    ):
         raise ValueError("er_exit_threshold must be in [0,1]")
     group_enforce = bool(getattr(inp, "group_enforce", False))
-    group_pick_policy = str(getattr(inp, "group_pick_policy", "highest_sharpe") or "highest_sharpe").strip().lower()
+    group_pick_policy = (
+        str(getattr(inp, "group_pick_policy", "highest_sharpe") or "highest_sharpe")
+        .strip()
+        .lower()
+    )
     if group_pick_policy not in {"earliest_entry", "highest_sharpe"}:
-        raise ValueError("group_pick_policy must be one of: earliest_entry|highest_sharpe")
+        raise ValueError(
+            "group_pick_policy must be one of: earliest_entry|highest_sharpe"
+        )
     group_max_holdings = int(getattr(inp, "group_max_holdings", 4) or 4)
     if group_max_holdings < 1 or group_max_holdings > 10:
         raise ValueError("group_max_holdings must be in [1,10]")
@@ -4371,8 +5822,12 @@ def compute_trend_portfolio_backtest(
 
     if data_override is not None:
         dates = data_override["dates"]
-        close_qfq = data_override["close_qfq"].reindex(columns=codes).reindex(dates).ffill()
-        close_hfq = data_override["close_hfq"].reindex(columns=codes).reindex(dates).ffill()
+        close_qfq = (
+            data_override["close_qfq"].reindex(columns=codes).reindex(dates).ffill()
+        )
+        close_hfq = (
+            data_override["close_hfq"].reindex(columns=codes).reindex(dates).ffill()
+        )
         open_qfq_df = close_qfq.copy()
         high_qfq_df = data_override.get("high_qfq_df")
         if high_qfq_df is None or high_qfq_df.empty:
@@ -4384,32 +5839,80 @@ def compute_trend_portfolio_backtest(
             low_qfq_df = pd.DataFrame(index=dates, columns=codes)
         else:
             low_qfq_df = low_qfq_df.reindex(columns=codes).reindex(dates).ffill()
-        ret_exec = data_override["ret_exec"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
-        ret_hfq = data_override["ret_hfq"].reindex(columns=codes).reindex(dates).fillna(0.0).astype(float)
+        ret_exec = (
+            data_override["ret_exec"]
+            .reindex(columns=codes)
+            .reindex(dates)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_hfq = (
+            data_override["ret_hfq"]
+            .reindex(columns=codes)
+            .reindex(dates)
+            .fillna(0.0)
+            .astype(float)
+        )
         px_exec_slip = pd.DataFrame(1.0, index=dates, columns=codes, dtype=float)
         du_b = bool(getattr(inp, "dynamic_universe", False))
-        ch_nb = data_override["close_hfq"].reindex(columns=codes).reindex(dates).astype(float)
+        ch_nb = (
+            data_override["close_hfq"]
+            .reindex(columns=codes)
+            .reindex(dates)
+            .astype(float)
+        )
         if not du_b:
             ch_nb = ch_nb.ffill()
         if len(codes) == 1:
             bench_ret = hfq_close_buy_hold_returns(ch_nb.iloc[:, 0])
         else:
-            bench_ret = hfq_close_daily_equal_weight_returns(ch_nb, dynamic_universe=du_b)
+            bench_ret = hfq_close_daily_equal_weight_returns(
+                ch_nb, dynamic_universe=du_b
+            )
     else:
         if db is None:
             raise ValueError("db is required when data_override is not set")
-        need_hist = max(int(inp.sma_window), int(inp.slow_window), int(inp.donchian_entry), int(inp.mom_lookback), int(inp.macd_slow), int(inp.macd_v_atr_window), 20) + 60
+        need_hist = (
+            max(
+                int(inp.sma_window),
+                int(inp.slow_window),
+                int(inp.donchian_entry),
+                int(inp.mom_lookback),
+                int(inp.macd_slow),
+                int(inp.macd_v_atr_window),
+                20,
+            )
+            + 60
+        )
         ext_start = inp.start - dt.timedelta(days=int(need_hist) * 2)
-        close_none = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none").sort_index().ffill()
-        close_qfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq").sort_index()
-        close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq").sort_index()
+        close_none = (
+            load_close_prices(
+                db, codes=codes, start=inp.start, end=inp.end, adjust="none"
+            )
+            .sort_index()
+            .ffill()
+        )
+        close_qfq = load_close_prices(
+            db, codes=codes, start=ext_start, end=inp.end, adjust="qfq"
+        ).sort_index()
+        close_hfq = load_close_prices(
+            db, codes=codes, start=ext_start, end=inp.end, adjust="hfq"
+        ).sort_index()
         if close_none.empty:
             raise ValueError("no execution price data for given range (none)")
         if not bool(getattr(inp, "dynamic_universe", False)):
-            miss = [c for c in codes if c not in close_none.columns or close_none[c].dropna().empty]
+            miss = [
+                c
+                for c in codes
+                if c not in close_none.columns or close_none[c].dropna().empty
+            ]
             if miss:
                 raise ValueError(f"missing execution data (none) for: {miss}")
-            first_valid = [close_none[c].first_valid_index() for c in codes if close_none[c].first_valid_index() is not None]
+            first_valid = [
+                close_none[c].first_valid_index()
+                for c in codes
+                if close_none[c].first_valid_index() is not None
+            ]
             if not first_valid:
                 raise ValueError("no valid first trading date for selected codes")
             common_start = max(first_valid)
@@ -4424,21 +5927,69 @@ def compute_trend_portfolio_backtest(
         if len(codes) == 1:
             bench_ret = hfq_close_buy_hold_returns(ch_nb.iloc[:, 0])
         else:
-            bench_ret = hfq_close_daily_equal_weight_returns(ch_nb, dynamic_universe=du_b)
+            bench_ret = hfq_close_daily_equal_weight_returns(
+                ch_nb, dynamic_universe=du_b
+            )
         close_qfq = close_qfq.reindex(dates).ffill()
         close_hfq = close_hfq.reindex(dates).ffill()
-        high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq")
-        high_qfq_df = high_qfq_df.sort_index().reindex(dates).ffill() if not high_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
-        low_qfq_df = low_qfq_df.sort_index().reindex(dates).ffill() if not low_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
-        ohlc_qfq = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="qfq")
-        open_qfq_df = ohlc_qfq.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+        high_qfq_df, low_qfq_df = load_high_low_prices(
+            db, codes=codes, start=ext_start, end=inp.end, adjust="qfq"
+        )
+        high_qfq_df = (
+            high_qfq_df.sort_index().reindex(dates).ffill()
+            if not high_qfq_df.empty
+            else pd.DataFrame(index=dates, columns=codes)
+        )
+        low_qfq_df = (
+            low_qfq_df.sort_index().reindex(dates).ffill()
+            if not low_qfq_df.empty
+            else pd.DataFrame(index=dates, columns=codes)
+        )
+        ohlc_qfq = load_ohlc_prices(
+            db, codes=codes, start=inp.start, end=inp.end, adjust="qfq"
+        )
+        open_qfq_df = (
+            ohlc_qfq.get("open", pd.DataFrame())
+            .sort_index()
+            .reindex(dates)
+            .reindex(columns=codes)
+            .ffill()
+        )
 
-        ohlc_none = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
-        ohlc_hfq = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="hfq")
-        open_none = ohlc_none.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
-        close_none_exec = ohlc_none.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
-        open_hfq = ohlc_hfq.get("open", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
-        close_hfq_exec = ohlc_hfq.get("close", pd.DataFrame()).sort_index().reindex(dates).reindex(columns=codes).ffill()
+        ohlc_none = load_ohlc_prices(
+            db, codes=codes, start=inp.start, end=inp.end, adjust="none"
+        )
+        ohlc_hfq = load_ohlc_prices(
+            db, codes=codes, start=inp.start, end=inp.end, adjust="hfq"
+        )
+        open_none = (
+            ohlc_none.get("open", pd.DataFrame())
+            .sort_index()
+            .reindex(dates)
+            .reindex(columns=codes)
+            .ffill()
+        )
+        close_none_exec = (
+            ohlc_none.get("close", pd.DataFrame())
+            .sort_index()
+            .reindex(dates)
+            .reindex(columns=codes)
+            .ffill()
+        )
+        open_hfq = (
+            ohlc_hfq.get("open", pd.DataFrame())
+            .sort_index()
+            .reindex(dates)
+            .reindex(columns=codes)
+            .ffill()
+        )
+        close_hfq_exec = (
+            ohlc_hfq.get("close", pd.DataFrame())
+            .sort_index()
+            .reindex(dates)
+            .reindex(columns=codes)
+            .ffill()
+        )
         close_none_f = close_none.reindex(columns=codes).astype(float)
         close_hfq_f = close_hfq.reindex(columns=codes).astype(float)
         if ep == "open":
@@ -4446,15 +5997,35 @@ def compute_trend_portfolio_backtest(
             exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
             exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
             exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-            ret_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-            ret_hfq_exec = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_none = (
+                (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
+            ret_hfq_exec = (
+                (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
             px_slip_none = exec_o_none.astype(float)
             px_slip_hfq = exec_o_hfq.astype(float)
         elif ep == "close":
             px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
             px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-            ret_none = (px_none_exec.shift(-1).div(px_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-            ret_hfq_exec = (px_hfq_exec.shift(-1).div(px_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_none = (
+                (px_none_exec.shift(-1).div(px_none_exec) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
+            ret_hfq_exec = (
+                (px_hfq_exec.shift(-1).div(px_hfq_exec) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
             px_slip_none = px_none_exec.astype(float)
             px_slip_hfq = px_hfq_exec.astype(float)
         else:
@@ -4462,11 +6033,31 @@ def compute_trend_portfolio_backtest(
             exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
             exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
             exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-            ret_open_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-            ret_close_none = (exec_c_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_open_none = (
+                (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
+            ret_close_none = (
+                (exec_c_none.shift(-1).div(exec_c_none) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
             ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
-            ret_open_hfq = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-            ret_close_hfq = (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            ret_open_hfq = (
+                (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
+            ret_close_hfq = (
+                (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0)
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
             ret_hfq_exec = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
             px_slip_none = (0.5 * (exec_o_none + exec_c_none)).astype(float)
             px_slip_hfq = (0.5 * (exec_o_hfq + exec_c_hfq)).astype(float)
@@ -4474,41 +6065,133 @@ def compute_trend_portfolio_backtest(
         gross_none = 1.0 + ret_none
         gross_hfq = 1.0 + ret_hfq
         _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
-        ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
-        px_exec_slip = px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq).replace([np.inf, -np.inf], np.nan).ffill()
-        ret_overnight_none_close = (open_none.shift(-1).div(close_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_none_close = (close_none_exec.shift(-1).div(open_none.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_hfq_close = (open_hfq.shift(-1).div(close_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_hfq_close = (close_hfq_exec.shift(-1).div(open_hfq.shift(-1)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_none_open = (close_none_exec.div(open_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_none_open = (open_none.shift(-1).div(close_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_hfq_open = (close_hfq_exec.div(open_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_hfq_open = (open_hfq.shift(-1).div(close_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_close = ret_overnight_none_close.where(~ca_mask.fillna(False), other=ret_overnight_hfq_close).astype(float)
-        ret_intraday_close = ret_intraday_none_close.where(~ca_mask.fillna(False), other=ret_intraday_hfq_close).astype(float)
-        ret_overnight_open = ret_overnight_none_open.where(~ca_mask.fillna(False), other=ret_overnight_hfq_open).astype(float)
-        ret_intraday_open = ret_intraday_none_open.where(~ca_mask.fillna(False), other=ret_intraday_hfq_open).astype(float)
+        ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(
+            float
+        )
+        px_exec_slip = (
+            px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq)
+            .replace([np.inf, -np.inf], np.nan)
+            .ffill()
+        )
+        ret_overnight_none_close = (
+            (open_none.shift(-1).div(close_none_exec) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_none_close = (
+            (close_none_exec.shift(-1).div(open_none.shift(-1)) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_hfq_close = (
+            (open_hfq.shift(-1).div(close_hfq_exec) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_hfq_close = (
+            (close_hfq_exec.shift(-1).div(open_hfq.shift(-1)) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_none_open = (
+            (close_none_exec.div(open_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_none_open = (
+            (open_none.shift(-1).div(close_none_exec) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_hfq_open = (
+            (close_hfq_exec.div(open_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_hfq_open = (
+            (open_hfq.shift(-1).div(close_hfq_exec) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_close = ret_overnight_none_close.where(
+            ~ca_mask.fillna(False), other=ret_overnight_hfq_close
+        ).astype(float)
+        ret_intraday_close = ret_intraday_none_close.where(
+            ~ca_mask.fillna(False), other=ret_intraday_hfq_close
+        ).astype(float)
+        ret_overnight_open = ret_overnight_none_open.where(
+            ~ca_mask.fillna(False), other=ret_overnight_hfq_open
+        ).astype(float)
+        ret_intraday_open = ret_intraday_none_open.where(
+            ~ca_mask.fillna(False), other=ret_intraday_hfq_open
+        ).astype(float)
 
     if data_override is not None:
         if ep == "open":
             ret_overnight = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
-            ret_intraday = ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ret_intraday = (
+                ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            )
         elif ep == "close":
-            ret_overnight = ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ret_overnight = (
+                ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            )
             ret_intraday = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
         else:
-            ret_overnight = (0.5 * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
-            ret_intraday = (0.5 * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
+            ret_overnight = (
+                0.5
+                * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ).astype(float)
+            ret_intraday = (
+                0.5
+                * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ).astype(float)
     else:
         if ep == "open":
-            ret_overnight = ret_overnight_open.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
-            ret_intraday = ret_intraday_open.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ret_overnight = (
+                ret_overnight_open.astype(float)
+                .reindex(index=dates, columns=codes)
+                .fillna(0.0)
+            )
+            ret_intraday = (
+                ret_intraday_open.astype(float)
+                .reindex(index=dates, columns=codes)
+                .fillna(0.0)
+            )
         elif ep == "close":
-            ret_overnight = ret_overnight_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
-            ret_intraday = ret_intraday_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+            ret_overnight = (
+                ret_overnight_close.astype(float)
+                .reindex(index=dates, columns=codes)
+                .fillna(0.0)
+            )
+            ret_intraday = (
+                ret_intraday_close.astype(float)
+                .reindex(index=dates, columns=codes)
+                .fillna(0.0)
+            )
         else:
-            ret_overnight = (0.5 * ret_overnight_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
-            ret_intraday = (0.5 * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0) + 0.5 * ret_intraday_close.astype(float).reindex(index=dates, columns=codes).fillna(0.0)).astype(float)
+            ret_overnight = (
+                0.5
+                * ret_overnight_close.astype(float)
+                .reindex(index=dates, columns=codes)
+                .fillna(0.0)
+            ).astype(float)
+            ret_intraday = (
+                0.5
+                * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
+                + 0.5
+                * ret_intraday_close.astype(float)
+                .reindex(index=dates, columns=codes)
+                .fillna(0.0)
+            ).astype(float)
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
@@ -4540,11 +6223,18 @@ def compute_trend_portfolio_backtest(
             if ma_type == "kama":
                 kstd = (
                     ma.astype(float)
-                    .rolling(window=int(kama_std_window), min_periods=max(2, int(kama_std_window) // 2))
+                    .rolling(
+                        window=int(kama_std_window),
+                        min_periods=max(2, int(kama_std_window) // 2),
+                    )
                     .std(ddof=0)
                     .fillna(0.0)
                 )
-                pos = _pos_from_band(px.astype(float), ma.astype(float), band=(float(kama_std_coef) * kstd)).astype(float)
+                pos = _pos_from_band(
+                    px.astype(float),
+                    ma.astype(float),
+                    band=(float(kama_std_coef) * kstd),
+                ).astype(float)
             else:
                 pos = (px > ma).astype(float)
             score = (px / ma - 1.0).astype(float)
@@ -4554,29 +6244,48 @@ def compute_trend_portfolio_backtest(
             pos = (fast > slow).astype(float)
             score = (fast / slow - 1.0).astype(float)
         elif strat == "donchian":
-            pos = _pos_from_donchian(px, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit))
-            hi = px.shift(1).rolling(window=max(2, int(inp.donchian_entry)), min_periods=max(2, int(inp.donchian_entry))).max()
+            pos = _pos_from_donchian(
+                px, entry=int(inp.donchian_entry), exit_=int(inp.donchian_exit)
+            )
+            hi = (
+                px.shift(1)
+                .rolling(
+                    window=max(2, int(inp.donchian_entry)),
+                    min_periods=max(2, int(inp.donchian_entry)),
+                )
+                .max()
+            )
             score = (px / hi - 1.0).astype(float)
         elif strat == "linreg_slope":
             n = int(inp.sma_window)
             y = np.log(px.clip(lower=1e-12).astype(float))
-            slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(_rolling_linreg_slope, raw=True)
+            slope = y.rolling(window=n, min_periods=max(2, n // 2)).apply(
+                _rolling_linreg_slope, raw=True
+            )
             pos = (slope > 0.0).astype(float)
             score = slope.astype(float)
         elif strat == "bias":
             b_win = int(inp.bias_ma_window)
             ema = _ema(px, b_win)
-            bias = (np.log(px.clip(lower=1e-12)) - np.log(ema.clip(lower=1e-12))) * 100.0
+            bias = (
+                np.log(px.clip(lower=1e-12)) - np.log(ema.clip(lower=1e-12))
+            ) * 100.0
             entry = float(inp.bias_entry)
             hot = float(inp.bias_hot)
             cold = float(inp.bias_cold)
-            pos_mode = str(getattr(inp, "bias_pos_mode", "binary") or "binary").strip().lower()
+            pos_mode = (
+                str(getattr(inp, "bias_pos_mode", "binary") or "binary").strip().lower()
+            )
             if pos_mode not in {"binary", "continuous"}:
                 pos_mode = "binary"
             pos_arr = np.zeros(len(px), dtype=float)
             in_pos = False
             for i in range(len(px)):
-                b = float(bias.iloc[i]) if np.isfinite(float(bias.iloc[i])) else float("nan")
+                b = (
+                    float(bias.iloc[i])
+                    if np.isfinite(float(bias.iloc[i]))
+                    else float("nan")
+                )
                 if not np.isfinite(b):
                     in_pos = False
                     pos_arr[i] = 0.0
@@ -4596,18 +6305,38 @@ def compute_trend_portfolio_backtest(
             pos = pd.Series(pos_arr, index=px.index, dtype=float)
             score = bias.astype(float)
         elif strat == "macd_cross":
-            macd, sig, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
+            macd, sig, _ = _macd_core(
+                px,
+                fast=int(inp.macd_fast),
+                slow=int(inp.macd_slow),
+                signal=int(inp.macd_signal),
+            )
             pos = (macd > sig).astype(float)
             score = (macd - sig).astype(float)
         elif strat == "macd_zero_filter":
-            macd, _, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
+            macd, _, _ = _macd_core(
+                px,
+                fast=int(inp.macd_fast),
+                slow=int(inp.macd_slow),
+                signal=int(inp.macd_signal),
+            )
             pos = (macd > 0.0).astype(float)
             score = macd.astype(float)
         elif strat == "macd_v":
-            macd, _, _ = _macd_core(px, fast=int(inp.macd_fast), slow=int(inp.macd_slow), signal=int(inp.macd_signal))
+            macd, _, _ = _macd_core(
+                px,
+                fast=int(inp.macd_fast),
+                slow=int(inp.macd_slow),
+                signal=int(inp.macd_signal),
+            )
             h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
             low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
-            atr = _atr_from_hlc(h.astype(float).fillna(px), low_px.astype(float).fillna(px), px, window=int(inp.macd_v_atr_window))
+            atr = _atr_from_hlc(
+                h.astype(float).fillna(px),
+                low_px.astype(float).fillna(px),
+                px,
+                window=int(inp.macd_v_atr_window),
+            )
             macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
             macd_v_sig = _ema(macd_v, int(inp.macd_signal))
             pos = (macd_v > macd_v_sig).astype(float)
@@ -4660,21 +6389,37 @@ def compute_trend_portfolio_backtest(
             }
         if er_filter:
             er = _efficiency_ratio(px, window=er_window)
-            pos, one_er_stats = _apply_er_entry_filter(pos.astype(float).fillna(0.0), er=er, threshold=er_threshold)
+            pos, one_er_stats = _apply_er_entry_filter(
+                pos.astype(float).fillna(0.0), er=er, threshold=er_threshold
+            )
             er_filter_by_asset[str(c)] = dict(one_er_stats or {})
         else:
-            er_filter_by_asset[str(c)] = {"blocked_entry_count": 0, "attempted_entry_count": 0, "allowed_entry_count": 0}
+            er_filter_by_asset[str(c)] = {
+                "blocked_entry_count": 0,
+                "attempted_entry_count": 0,
+                "allowed_entry_count": 0,
+            }
         if er_exit_filter:
             er_exit = _efficiency_ratio(px, window=er_exit_window)
-            pos, one_er_exit_stats = _apply_er_exit_filter(pos.astype(float).fillna(0.0), er=er_exit, threshold=er_exit_threshold)
+            pos, one_er_exit_stats = _apply_er_exit_filter(
+                pos.astype(float).fillna(0.0), er=er_exit, threshold=er_exit_threshold
+            )
             er_exit_filter_by_asset[str(c)] = dict(one_er_exit_stats or {})
         else:
-            er_exit_filter_by_asset[str(c)] = {"trigger_count": 0, "trigger_dates": [], "trace_last_rows": []}
+            er_exit_filter_by_asset[str(c)] = {
+                "trigger_count": 0,
+                "trigger_dates": [],
+                "trace_last_rows": [],
+            }
         h = high_qfq_df[c] if (c in high_qfq_df.columns) else px
         low_px = low_qfq_df[c] if (c in low_qfq_df.columns) else px
         pos, one_stop_stats = _apply_atr_stop(
             pos.fillna(0.0).astype(float),
-            open_=(open_qfq_df[c].astype(float).fillna(px) if c in open_qfq_df.columns else px),
+            open_=(
+                open_qfq_df[c].astype(float).fillna(px)
+                if c in open_qfq_df.columns
+                else px
+            ),
             close=px,
             high=h.astype(float).fillna(px),
             low=low_px.astype(float).fillna(px),
@@ -4685,10 +6430,17 @@ def compute_trend_portfolio_backtest(
             n_mult=float(inp.atr_stop_n),
             m_step=float(inp.atr_stop_m),
         )
-        one_stop_stats = {**(one_stop_stats or {}), **_extract_atr_plan_stops_from_trace(one_stop_stats or {})}
+        one_stop_stats = {
+            **(one_stop_stats or {}),
+            **_extract_atr_plan_stops_from_trace(one_stop_stats or {}),
+        }
         pos, one_bias_v_tp_stats = _apply_bias_v_take_profit(
             pos.fillna(0.0).astype(float),
-            open_=(open_qfq_df[c].astype(float).fillna(px) if c in open_qfq_df.columns else px),
+            open_=(
+                open_qfq_df[c].astype(float).fillna(px)
+                if c in open_qfq_df.columns
+                else px
+            ),
             close=px,
             high=h.astype(float).fillna(px),
             low=low_px.astype(float).fillna(px),
@@ -4700,7 +6452,11 @@ def compute_trend_portfolio_backtest(
         )
         pos, one_rtp_stats = _apply_r_multiple_take_profit(
             pos.fillna(0.0).astype(float),
-            open_=(open_qfq_df[c].astype(float).fillna(px) if c in open_qfq_df.columns else px),
+            open_=(
+                open_qfq_df[c].astype(float).fillna(px)
+                if c in open_qfq_df.columns
+                else px
+            ),
             close=px,
             high=h.astype(float).fillna(px),
             low=low_px.astype(float).fillna(px),
@@ -4713,8 +6469,12 @@ def compute_trend_portfolio_backtest(
         )
         sig_pos[c] = pos.fillna(0.0)
         sig_score[c] = score.replace([np.inf, -np.inf], np.nan)
-        cond_momentum_df[c] = (px / px.shift(int(inp.mom_lookback)) - 1.0).replace([np.inf, -np.inf], np.nan)
-        cond_er_df[c] = _efficiency_ratio(px, window=int(er_window)).replace([np.inf, -np.inf], np.nan)
+        cond_momentum_df[c] = (px / px.shift(int(inp.mom_lookback)) - 1.0).replace(
+            [np.inf, -np.inf], np.nan
+        )
+        cond_er_df[c] = _efficiency_ratio(px, window=int(er_window)).replace(
+            [np.inf, -np.inf], np.nan
+        )
         atr_fast_for_entry = _atr_from_hlc(
             h.astype(float).fillna(px),
             low_px.astype(float).fillna(px),
@@ -4727,7 +6487,9 @@ def compute_trend_portfolio_backtest(
             px,
             window=int(vol_ratio_slow_atr_window),
         ).astype(float)
-        cond_vol_ratio_df[c] = (atr_fast_for_entry / atr_slow_for_entry.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+        cond_vol_ratio_df[c] = (
+            atr_fast_for_entry / atr_slow_for_entry.replace(0.0, np.nan)
+        ).replace([np.inf, -np.inf], np.nan)
         cond_impulse_df[c] = (
             impulse_state_one.reindex(dates).astype(object)
             if impulse_state_one is not None
@@ -4776,10 +6538,20 @@ def compute_trend_portfolio_backtest(
                 window=int(vol_ratio_slow_atr_window),
             ).astype(float)
 
-    vol_ann = ret_hfq.rolling(window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)).std(ddof=1) * np.sqrt(252.0)
+    vol_ann = ret_hfq.rolling(
+        window=int(inp.vol_window), min_periods=max(3, int(inp.vol_window) // 2)
+    ).std(ddof=1) * np.sqrt(252.0)
     sharpe_like = (
-        ret_hfq.rolling(window=max(20, int(inp.vol_window)), min_periods=max(10, int(inp.vol_window) // 2)).mean()
-        / ret_hfq.rolling(window=max(20, int(inp.vol_window)), min_periods=max(10, int(inp.vol_window) // 2)).std(ddof=1).replace(0.0, np.nan)
+        ret_hfq.rolling(
+            window=max(20, int(inp.vol_window)),
+            min_periods=max(10, int(inp.vol_window) // 2),
+        ).mean()
+        / ret_hfq.rolling(
+            window=max(20, int(inp.vol_window)),
+            min_periods=max(10, int(inp.vol_window) // 2),
+        )
+        .std(ddof=1)
+        .replace(0.0, np.nan)
     ) * np.sqrt(252.0)
     w_decision = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
     holdings: list[dict[str, Any]] = []
@@ -4798,16 +6570,26 @@ def compute_trend_portfolio_backtest(
     risk_budget_overcap_scale_by_code: dict[str, int] = {str(c): 0 for c in codes}
     risk_budget_overcap_skip_decision_count = 0
     risk_budget_overcap_skip_episode_count = 0
-    risk_budget_overcap_skip_decision_by_code: dict[str, int] = {str(c): 0 for c in codes}
-    risk_budget_overcap_skip_episode_by_code: dict[str, int] = {str(c): 0 for c in codes}
-    risk_budget_overcap_skip_episode_active_by_code: dict[str, bool] = {str(c): False for c in codes}
+    risk_budget_overcap_skip_decision_by_code: dict[str, int] = {
+        str(c): 0 for c in codes
+    }
+    risk_budget_overcap_skip_episode_by_code: dict[str, int] = {
+        str(c): 0 for c in codes
+    }
+    risk_budget_overcap_skip_episode_active_by_code: dict[str, bool] = {
+        str(c): False for c in codes
+    }
     risk_budget_overcap_replace_count = 0
     risk_budget_overcap_replace_out_by_code: dict[str, int] = {str(c): 0 for c in codes}
     risk_budget_overcap_replace_in_by_code: dict[str, int] = {str(c): 0 for c in codes}
     risk_budget_overcap_leverage_usage_count = 0
-    risk_budget_overcap_leverage_usage_by_code: dict[str, int] = {str(c): 0 for c in codes}
+    risk_budget_overcap_leverage_usage_by_code: dict[str, int] = {
+        str(c): 0 for c in codes
+    }
     risk_budget_overcap_leverage_max_multiple = 0.0
-    risk_budget_overcap_leverage_max_multiple_by_code: dict[str, float] = {str(c): 0.0 for c in codes}
+    risk_budget_overcap_leverage_max_multiple_by_code: dict[str, float] = {
+        str(c): 0.0 for c in codes
+    }
     risk_budget_overcap_daily_counts: dict[str, dict[str, int]] = {}
     day_seq = 0
     vol_risk_adjust_by_asset: dict[str, dict[str, int]] = {
@@ -4826,12 +6608,20 @@ def compute_trend_portfolio_backtest(
         day_seq += 1
         d_key = d.date().isoformat()
         active = sig_pos.loc[d]
-        scores = sig_score.loc[d].where(active > 0.0, other=np.nan).replace([np.inf, -np.inf], np.nan)
-        active_codes_raw = [str(c) for c in scores.dropna().sort_values(ascending=False).index.tolist()]
+        scores = (
+            sig_score.loc[d]
+            .where(active > 0.0, other=np.nan)
+            .replace([np.inf, -np.inf], np.nan)
+        )
+        active_codes_raw = [
+            str(c) for c in scores.dropna().sort_values(ascending=False).index.tolist()
+        ]
         active_codes, group_meta = _reduce_active_codes_by_group(
             active_codes=active_codes_raw,
             score_row=scores,
-            sharpe_row=sharpe_like.loc[d] if d in sharpe_like.index else pd.Series(dtype=float),
+            sharpe_row=sharpe_like.loc[d]
+            if d in sharpe_like.index
+            else pd.Series(dtype=float),
             group_enforce=group_enforce,
             asset_groups=group_map,
             group_pick_policy=group_pick_policy,
@@ -4901,7 +6691,11 @@ def compute_trend_portfolio_backtest(
 
             def _apply_overcap_scale_once(cap_multiple: float = 1.0) -> None:
                 nonlocal w_row, risk_budget_overcap_scale_count
-                cap_v = float(cap_multiple) if np.isfinite(float(cap_multiple)) and float(cap_multiple) > 0.0 else 1.0
+                cap_v = (
+                    float(cap_multiple)
+                    if np.isfinite(float(cap_multiple)) and float(cap_multiple) > 0.0
+                    else 1.0
+                )
                 s_now = float(w_row.sum())
                 if s_now <= cap_v + 1e-12:
                     return
@@ -4911,27 +6705,69 @@ def compute_trend_portfolio_backtest(
                 _inc_overcap_daily("scale", 1)
                 for cc in w_row.index:
                     key_cc = str(cc)
-                    before = float(pre_scale.loc[cc]) if np.isfinite(float(pre_scale.loc[cc])) else 0.0
-                    after = float(w_row.loc[cc]) if np.isfinite(float(w_row.loc[cc])) else 0.0
+                    before = (
+                        float(pre_scale.loc[cc])
+                        if np.isfinite(float(pre_scale.loc[cc]))
+                        else 0.0
+                    )
+                    after = (
+                        float(w_row.loc[cc])
+                        if np.isfinite(float(w_row.loc[cc]))
+                        else 0.0
+                    )
                     if before > after + 1e-12:
-                        risk_budget_overcap_scale_by_code[key_cc] = int(risk_budget_overcap_scale_by_code.get(key_cc, 0) + 1)
+                        risk_budget_overcap_scale_by_code[key_cc] = int(
+                            risk_budget_overcap_scale_by_code.get(key_cc, 0) + 1
+                        )
 
             def _set_new_risk_budget_entry(key: str, base_target: float) -> None:
                 nonlocal w_row
                 w_row.loc[key] = float(base_target)
-                px_now = float(close_qfq.loc[d, key]) if (key in close_qfq.columns and d in close_qfq.index) else float("nan")
-                rb_entry_price_by_code[key] = (float(px_now) if np.isfinite(px_now) and px_now > 0.0 else float("nan"))
+                px_now = (
+                    float(close_qfq.loc[d, key])
+                    if (key in close_qfq.columns and d in close_qfq.index)
+                    else float("nan")
+                )
+                rb_entry_price_by_code[key] = (
+                    float(px_now)
+                    if np.isfinite(px_now) and px_now > 0.0
+                    else float("nan")
+                )
                 rb_entry_seq_by_code[key] = int(day_seq)
                 if bool(vol_regime_risk_mgmt_enabled):
-                    af = float(atr_ratio_fast_df.loc[d, key]) if (key in atr_ratio_fast_df.columns and d in atr_ratio_fast_df.index) else float("nan")
-                    aslow = float(atr_ratio_slow_df.loc[d, key]) if (key in atr_ratio_slow_df.columns and d in atr_ratio_slow_df.index) else float("nan")
-                    ratio = (af / aslow) if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0) else float("nan")
+                    af = (
+                        float(atr_ratio_fast_df.loc[d, key])
+                        if (
+                            key in atr_ratio_fast_df.columns
+                            and d in atr_ratio_fast_df.index
+                        )
+                        else float("nan")
+                    )
+                    aslow = (
+                        float(atr_ratio_slow_df.loc[d, key])
+                        if (
+                            key in atr_ratio_slow_df.columns
+                            and d in atr_ratio_slow_df.index
+                        )
+                        else float("nan")
+                    )
+                    ratio = (
+                        (af / aslow)
+                        if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0)
+                        else float("nan")
+                    )
                     if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
                         rb_state_by_code[key] = "REDUCED"
-                        vol_risk_adjust_by_asset[key]["vol_risk_entry_state_reduce_on_expand_count"] += 1
-                    elif np.isfinite(ratio) and ratio < float(vol_ratio_contract_threshold):
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_entry_state_reduce_on_expand_count"
+                        ] += 1
+                    elif np.isfinite(ratio) and ratio < float(
+                        vol_ratio_contract_threshold
+                    ):
                         rb_state_by_code[key] = "INCREASED"
-                        vol_risk_adjust_by_asset[key]["vol_risk_entry_state_increase_on_contract_count"] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_entry_state_increase_on_contract_count"
+                        ] += 1
                     else:
                         rb_state_by_code[key] = "NORMAL"
                 else:
@@ -4945,9 +6781,22 @@ def compute_trend_portfolio_backtest(
                         continue
                     if float(w_row.loc[key_cc]) <= 1e-12:
                         continue
-                    cur_px = float(close_qfq.loc[d, key_cc]) if (key_cc in close_qfq.columns and d in close_qfq.index) else float("nan")
+                    cur_px = (
+                        float(close_qfq.loc[d, key_cc])
+                        if (key_cc in close_qfq.columns and d in close_qfq.index)
+                        else float("nan")
+                    )
                     ent_px = float(rb_entry_price_by_code.get(key_cc, float("nan")))
-                    ret = ((cur_px / ent_px) - 1.0) if (np.isfinite(cur_px) and cur_px > 0.0 and np.isfinite(ent_px) and ent_px > 0.0) else float("inf")
+                    ret = (
+                        ((cur_px / ent_px) - 1.0)
+                        if (
+                            np.isfinite(cur_px)
+                            and cur_px > 0.0
+                            and np.isfinite(ent_px)
+                            and ent_px > 0.0
+                        )
+                        else float("inf")
+                    )
                     seq = int(rb_entry_seq_by_code.get(key_cc, 10**9))
                     if seq < 0:
                         seq = 10**9
@@ -4967,8 +6816,16 @@ def compute_trend_portfolio_backtest(
                     rb_entry_seq_by_code[key_c] = -1
             # Keep existing active positions at their entry-time risk-budget weight.
             for c in active_codes:
-                px = float(close_qfq.loc[d, c]) if (c in close_qfq.columns and d in close_qfq.index) else float("nan")
-                a = float(atr_budget_df.loc[d, c]) if (c in atr_budget_df.columns and d in atr_budget_df.index) else float("nan")
+                px = (
+                    float(close_qfq.loc[d, c])
+                    if (c in close_qfq.columns and d in close_qfq.index)
+                    else float("nan")
+                )
+                a = (
+                    float(atr_budget_df.loc[d, c])
+                    if (c in atr_budget_df.columns and d in atr_budget_df.index)
+                    else float("nan")
+                )
                 base_target = float("nan")
                 if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
                     base_target = float(risk_budget_pct) * float(px) / float(a)
@@ -4978,17 +6835,35 @@ def compute_trend_portfolio_backtest(
                     if np.isfinite(base_target) and base_target > 0.0:
                         proposed_total = float(w_row.sum() + float(base_target))
                         overcap_on_new_entry = bool(proposed_total > 1.0 + 1e-12)
-                        if overcap_on_new_entry and str(risk_budget_overcap_policy) == "skip_entry":
+                        if (
+                            overcap_on_new_entry
+                            and str(risk_budget_overcap_policy) == "skip_entry"
+                        ):
                             risk_budget_overcap_skip_decision_count += 1
                             _inc_overcap_daily("skip_entry", 1)
-                            risk_budget_overcap_skip_decision_by_code[key] = int(risk_budget_overcap_skip_decision_by_code.get(key, 0) + 1)
+                            risk_budget_overcap_skip_decision_by_code[key] = int(
+                                risk_budget_overcap_skip_decision_by_code.get(key, 0)
+                                + 1
+                            )
                             skipped_today.add(key)
-                            if not bool(risk_budget_overcap_skip_episode_active_by_code.get(key, False)):
-                                risk_budget_overcap_skip_episode_active_by_code[key] = True
+                            if not bool(
+                                risk_budget_overcap_skip_episode_active_by_code.get(
+                                    key, False
+                                )
+                            ):
+                                risk_budget_overcap_skip_episode_active_by_code[key] = (
+                                    True
+                                )
                                 risk_budget_overcap_skip_episode_count += 1
-                                risk_budget_overcap_skip_episode_by_code[key] = int(risk_budget_overcap_skip_episode_by_code.get(key, 0) + 1)
+                                risk_budget_overcap_skip_episode_by_code[key] = int(
+                                    risk_budget_overcap_skip_episode_by_code.get(key, 0)
+                                    + 1
+                                )
                             continue
-                        if overcap_on_new_entry and str(risk_budget_overcap_policy) == "replace_entry":
+                        if (
+                            overcap_on_new_entry
+                            and str(risk_budget_overcap_policy) == "replace_entry"
+                        ):
                             out_code = _select_replace_out_code(key)
                             if out_code:
                                 w_row.loc[out_code] = 0.0
@@ -4997,18 +6872,44 @@ def compute_trend_portfolio_backtest(
                                 rb_entry_seq_by_code[out_code] = -1
                                 risk_budget_overcap_replace_count += 1
                                 _inc_overcap_daily("replace_entry", 1)
-                                risk_budget_overcap_replace_out_by_code[out_code] = int(risk_budget_overcap_replace_out_by_code.get(out_code, 0) + 1)
-                                risk_budget_overcap_replace_in_by_code[key] = int(risk_budget_overcap_replace_in_by_code.get(key, 0) + 1)
+                                risk_budget_overcap_replace_out_by_code[out_code] = int(
+                                    risk_budget_overcap_replace_out_by_code.get(
+                                        out_code, 0
+                                    )
+                                    + 1
+                                )
+                                risk_budget_overcap_replace_in_by_code[key] = int(
+                                    risk_budget_overcap_replace_in_by_code.get(key, 0)
+                                    + 1
+                                )
                         _set_new_risk_budget_entry(key, float(base_target))
-                        if overcap_on_new_entry and str(risk_budget_overcap_policy) == "replace_entry":
+                        if (
+                            overcap_on_new_entry
+                            and str(risk_budget_overcap_policy) == "replace_entry"
+                        ):
                             _apply_overcap_scale_once()
-                        elif overcap_on_new_entry and str(risk_budget_overcap_policy) == "leverage_entry":
+                        elif (
+                            overcap_on_new_entry
+                            and str(risk_budget_overcap_policy) == "leverage_entry"
+                        ):
                             lev_now = float(w_row.sum())
                             if lev_now > 1.0 + 1e-12:
                                 risk_budget_overcap_leverage_usage_count += 1
                                 _inc_overcap_daily("leverage_entry", 1)
-                                landed_lev = float(min(float(lev_now), float(risk_budget_max_leverage_multiple)))
-                                risk_budget_overcap_leverage_max_multiple = float(max(float(risk_budget_overcap_leverage_max_multiple), landed_lev))
+                                landed_lev = float(
+                                    min(
+                                        float(lev_now),
+                                        float(risk_budget_max_leverage_multiple),
+                                    )
+                                )
+                                risk_budget_overcap_leverage_max_multiple = float(
+                                    max(
+                                        float(
+                                            risk_budget_overcap_leverage_max_multiple
+                                        ),
+                                        landed_lev,
+                                    )
+                                )
                                 row = risk_budget_overcap_daily_counts.setdefault(
                                     d_key,
                                     {
@@ -5019,54 +6920,114 @@ def compute_trend_portfolio_backtest(
                                         "leverage_multiple_max": 0.0,
                                     },
                                 )
-                                row["leverage_multiple_max"] = float(max(float(row.get("leverage_multiple_max", 0.0) or 0.0), landed_lev))
+                                row["leverage_multiple_max"] = float(
+                                    max(
+                                        float(
+                                            row.get("leverage_multiple_max", 0.0) or 0.0
+                                        ),
+                                        landed_lev,
+                                    )
+                                )
                                 for cc in codes:
                                     key_cc = str(cc)
                                     if float(w_row.loc[key_cc]) > 1e-12:
-                                        risk_budget_overcap_leverage_usage_by_code[key_cc] = int(risk_budget_overcap_leverage_usage_by_code.get(key_cc, 0) + 1)
-                                        risk_budget_overcap_leverage_max_multiple_by_code[key_cc] = float(
-                                            max(float(risk_budget_overcap_leverage_max_multiple_by_code.get(key_cc, 0.0)), landed_lev)
+                                        risk_budget_overcap_leverage_usage_by_code[
+                                            key_cc
+                                        ] = int(
+                                            risk_budget_overcap_leverage_usage_by_code.get(
+                                                key_cc, 0
+                                            )
+                                            + 1
                                         )
-                                if lev_now > float(risk_budget_max_leverage_multiple) + 1e-12:
-                                    _apply_overcap_scale_once(float(risk_budget_max_leverage_multiple))
+                                        risk_budget_overcap_leverage_max_multiple_by_code[
+                                            key_cc
+                                        ] = float(
+                                            max(
+                                                float(
+                                                    risk_budget_overcap_leverage_max_multiple_by_code.get(
+                                                        key_cc, 0.0
+                                                    )
+                                                ),
+                                                landed_lev,
+                                            )
+                                        )
+                                if (
+                                    lev_now
+                                    > float(risk_budget_max_leverage_multiple) + 1e-12
+                                ):
+                                    _apply_overcap_scale_once(
+                                        float(risk_budget_max_leverage_multiple)
+                                    )
                     continue
                 if not bool(vol_regime_risk_mgmt_enabled):
                     continue
                 st = str(rb_state_by_code.get(key, "NORMAL") or "NORMAL").upper()
-                af = float(atr_ratio_fast_df.loc[d, c]) if (c in atr_ratio_fast_df.columns and d in atr_ratio_fast_df.index) else float("nan")
-                aslow = float(atr_ratio_slow_df.loc[d, c]) if (c in atr_ratio_slow_df.columns and d in atr_ratio_slow_df.index) else float("nan")
-                ratio = (af / aslow) if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0) else float("nan")
+                af = (
+                    float(atr_ratio_fast_df.loc[d, c])
+                    if (c in atr_ratio_fast_df.columns and d in atr_ratio_fast_df.index)
+                    else float("nan")
+                )
+                aslow = (
+                    float(atr_ratio_slow_df.loc[d, c])
+                    if (c in atr_ratio_slow_df.columns and d in atr_ratio_slow_df.index)
+                    else float("nan")
+                )
+                ratio = (
+                    (af / aslow)
+                    if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0)
+                    else float("nan")
+                )
                 if not np.isfinite(base_target):
                     continue
                 if st == "NORMAL":
                     if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
                         w_row.loc[c] = float(base_target)
                         rb_state_by_code[key] = "REDUCED"
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_reduce_on_expand_count"] += 1
-                    elif np.isfinite(ratio) and ratio < float(vol_ratio_contract_threshold):
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_total_count"
+                        ] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_reduce_on_expand_count"
+                        ] += 1
+                    elif np.isfinite(ratio) and ratio < float(
+                        vol_ratio_contract_threshold
+                    ):
                         w_row.loc[c] = float(base_target)
                         rb_state_by_code[key] = "INCREASED"
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_increase_on_contract_count"] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_total_count"
+                        ] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_increase_on_contract_count"
+                        ] += 1
                 elif st == "REDUCED":
                     if np.isfinite(ratio) and ratio < float(vol_ratio_normal_threshold):
                         w_row.loc[c] = float(base_target)
                         rb_state_by_code[key] = "NORMAL"
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_recover_from_expand_count"] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_total_count"
+                        ] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_recover_from_expand_count"
+                        ] += 1
                 elif st == "INCREASED":
                     if np.isfinite(ratio) and ratio > float(vol_ratio_normal_threshold):
                         w_row.loc[c] = float(base_target)
                         rb_state_by_code[key] = "NORMAL"
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
-                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_recover_from_contract_count"] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_total_count"
+                        ] += 1
+                        vol_risk_adjust_by_asset[key][
+                            "vol_risk_adjust_recover_from_contract_count"
+                        ] += 1
             w_row = w_row.clip(lower=0.0)
             if str(risk_budget_overcap_policy) != "leverage_entry":
                 _apply_overcap_scale_once()
             for cc in codes:
                 key_cc = str(cc)
-                if bool(risk_budget_overcap_skip_episode_active_by_code.get(key_cc, False)) and (key_cc not in skipped_today):
+                if bool(
+                    risk_budget_overcap_skip_episode_active_by_code.get(key_cc, False)
+                ) and (key_cc not in skipped_today):
                     risk_budget_overcap_skip_episode_active_by_code[key_cc] = False
             prev_rb_w = w_row.copy()
         elif not active_codes:
@@ -5092,8 +7053,29 @@ def compute_trend_portfolio_backtest(
             if den > 0:
                 raw = {c: float(v) / den for c, v in inv.items()}
                 # portfolio target-vol scalar
-                port_vol = float(np.sqrt(np.sum([(raw[c] ** 2) * ((float(vol_ann.loc[d, c]) if np.isfinite(float(vol_ann.loc[d, c])) else 0.0) ** 2) for c in active_codes])))
-                scale = 1.0 if port_vol <= 1e-12 else min(1.0, float(inp.vol_target_ann) / port_vol)
+                port_vol = float(
+                    np.sqrt(
+                        np.sum(
+                            [
+                                (raw[c] ** 2)
+                                * (
+                                    (
+                                        float(vol_ann.loc[d, c])
+                                        if np.isfinite(float(vol_ann.loc[d, c]))
+                                        else 0.0
+                                    )
+                                    ** 2
+                                )
+                                for c in active_codes
+                            ]
+                        )
+                    )
+                )
+                scale = (
+                    1.0
+                    if port_vol <= 1e-12
+                    else min(1.0, float(inp.vol_target_ann) / port_vol)
+                )
                 for c in active_codes:
                     w_row.loc[c] = raw[c] * scale
             else:
@@ -5108,8 +7090,16 @@ def compute_trend_portfolio_backtest(
                 {
                     "decision_date": d.date().isoformat(),
                     "picks": list(key),
-                    "grouped_picks": {str(k): [str(x) for x in (v or [])] for k, v in ((group_meta or {}).get("group_picks", {}) or {}).items()},
-                    "scores": {c: (None if pd.isna(scores.get(c)) else float(scores.get(c))) for c in key},
+                    "grouped_picks": {
+                        str(k): [str(x) for x in (v or [])]
+                        for k, v in (
+                            (group_meta or {}).get("group_picks", {}) or {}
+                        ).items()
+                    },
+                    "scores": {
+                        c: (None if pd.isna(scores.get(c)) else float(scores.get(c)))
+                        for c in key
+                    },
                     "group_filter": group_meta,
                 }
             )
@@ -5145,15 +7135,28 @@ def compute_trend_portfolio_backtest(
         prev_key = None
         for d in w_decision.index:
             row = w_decision.loc[d]
-            key = tuple(sorted([str(c) for c in w_decision.columns if float(row.get(c, 0.0)) > 1e-12]))
+            key = tuple(
+                sorted(
+                    [
+                        str(c)
+                        for c in w_decision.columns
+                        if float(row.get(c, 0.0)) > 1e-12
+                    ]
+                )
+            )
             if key != prev_key:
-                sc = sig_score.loc[d] if d in sig_score.index else pd.Series(dtype=float)
+                sc = (
+                    sig_score.loc[d] if d in sig_score.index else pd.Series(dtype=float)
+                )
                 holdings.append(
                     {
                         "decision_date": d.date().isoformat(),
                         "picks": list(key),
                         "grouped_picks": {},
-                        "scores": {c: (None if pd.isna(sc.get(c)) else float(sc.get(c))) for c in key},
+                        "scores": {
+                            c: (None if pd.isna(sc.get(c)) else float(sc.get(c)))
+                            for c in key
+                        },
                         "group_filter": {},
                     }
                 )
@@ -5165,22 +7168,34 @@ def compute_trend_portfolio_backtest(
         weights=w,
         atr_stop_by_asset=atr_stop_by_asset,
         exec_price=str(ep),
-        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes).astype(float).ffill(),
-        close_sig_df=close_qfq.reindex(index=w.index, columns=codes).astype(float).ffill(),
+        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes)
+        .astype(float)
+        .ffill(),
+        close_sig_df=close_qfq.reindex(index=w.index, columns=codes)
+        .astype(float)
+        .ffill(),
     )
     w, bias_v_take_profit_override_ret = _apply_intraday_stop_execution_portfolio(
         weights=w,
         atr_stop_by_asset=bias_v_tp_by_asset,
         exec_price=str(ep),
-        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes).astype(float).ffill(),
-        close_sig_df=close_qfq.reindex(index=w.index, columns=codes).astype(float).ffill(),
+        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes)
+        .astype(float)
+        .ffill(),
+        close_sig_df=close_qfq.reindex(index=w.index, columns=codes)
+        .astype(float)
+        .ffill(),
     )
     w, r_take_profit_override_ret = _apply_intraday_stop_execution_portfolio(
         weights=w,
         atr_stop_by_asset=rtp_by_asset,
         exec_price=str(ep),
-        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes).astype(float).ffill(),
-        close_sig_df=close_qfq.reindex(index=w.index, columns=codes).astype(float).ffill(),
+        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes)
+        .astype(float)
+        .ffill(),
+        close_sig_df=close_qfq.reindex(index=w.index, columns=codes)
+        .astype(float)
+        .ffill(),
     )
     ret_exec_day = ret_exec.astype(float)
     bench_ret = bench_ret.reindex(dates).fillna(0.0).astype(float)
@@ -5208,7 +7223,10 @@ def compute_trend_portfolio_backtest(
                 "trade_records": _enrich_trade_records_with_engine_timeline(
                     records=list(one_atr.get("trade_records") or []),
                     effective_weight=w[key].astype(float),
-                    exec_price_series=px_exec_slip[key].reindex(w.index).ffill().astype(float),
+                    exec_price_series=px_exec_slip[key]
+                    .reindex(w.index)
+                    .ffill()
+                    .astype(float),
                     slippage_spread=float(inp.slippage_rate),
                 ),
             }
@@ -5218,7 +7236,10 @@ def compute_trend_portfolio_backtest(
                 "trade_records": _enrich_trade_records_with_engine_timeline(
                     records=list(one_bv.get("trade_records") or []),
                     effective_weight=w[key].astype(float),
-                    exec_price_series=px_exec_slip[key].reindex(w.index).ffill().astype(float),
+                    exec_price_series=px_exec_slip[key]
+                    .reindex(w.index)
+                    .ffill()
+                    .astype(float),
                     slippage_spread=float(inp.slippage_rate),
                 ),
             }
@@ -5231,21 +7252,48 @@ def compute_trend_portfolio_backtest(
             bias_v_tp_by_asset[key] = {**one_bv, "trade_records": []}
     return_decomposition: dict[str, Any] | None = None
     if not quick_mode:
-        comp_overnight = (w * ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
-        comp_intraday = (w * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)).sum(axis=1).astype(float)
+        comp_overnight = (
+            (w * ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0))
+            .sum(axis=1)
+            .astype(float)
+        )
+        comp_intraday = (
+            (w * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0))
+            .sum(axis=1)
+            .astype(float)
+        )
         comp_interaction = (
-            w
-            * (
-                ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)
-                * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)
+            (
+                w
+                * (
+                    ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)
+                    * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)
+                )
             )
-        ).sum(axis=1).astype(float)
-        decomp_atr_stop_override = atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        decomp_bias_v_take_profit_override = bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        decomp_r_take_profit_override = r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        decomp_risk_exit_override = (decomp_atr_stop_override + decomp_bias_v_take_profit_override + decomp_r_take_profit_override).astype(float)
+            .sum(axis=1)
+            .astype(float)
+        )
+        decomp_atr_stop_override = (
+            atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
+        )
+        decomp_bias_v_take_profit_override = (
+            bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+        )
+        decomp_r_take_profit_override = (
+            r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+        )
+        decomp_risk_exit_override = (
+            decomp_atr_stop_override
+            + decomp_bias_v_take_profit_override
+            + decomp_r_take_profit_override
+        ).astype(float)
         decomp_cost = (cost + slippage).astype(float)
-        decomp_gross = (comp_overnight + comp_intraday + comp_interaction + decomp_risk_exit_override).astype(float)
+        decomp_gross = (
+            comp_overnight
+            + comp_intraday
+            + comp_interaction
+            + decomp_risk_exit_override
+        ).astype(float)
         port_ret = (decomp_gross - decomp_cost).astype(float)
         return_decomposition = {
             "dates": w.index.date.astype(str).tolist(),
@@ -5254,32 +7302,87 @@ def compute_trend_portfolio_backtest(
                 "intraday": comp_intraday.astype(float).tolist(),
                 "interaction": comp_interaction.astype(float).tolist(),
                 "atr_stop_override": decomp_atr_stop_override.astype(float).tolist(),
-                "bias_v_take_profit_override": decomp_bias_v_take_profit_override.astype(float).tolist(),
-                "r_take_profit_override": decomp_r_take_profit_override.astype(float).tolist(),
+                "bias_v_take_profit_override": decomp_bias_v_take_profit_override.astype(
+                    float
+                ).tolist(),
+                "r_take_profit_override": decomp_r_take_profit_override.astype(
+                    float
+                ).tolist(),
                 "risk_exit_override": decomp_risk_exit_override.astype(float).tolist(),
                 "cost": decomp_cost.astype(float).tolist(),
                 "gross": decomp_gross.astype(float).tolist(),
                 "net": port_ret.astype(float).tolist(),
             },
             "summary": {
-                "ann_overnight": float(comp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_overnight) > 1 else 0.0,
-                "ann_intraday": float(comp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_intraday) > 1 else 0.0,
-                "ann_interaction": float(comp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(comp_interaction) > 1 else 0.0,
-                "ann_atr_stop_override": float(decomp_atr_stop_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_atr_stop_override) > 1 else 0.0,
-                "ann_bias_v_take_profit_override": float(decomp_bias_v_take_profit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_bias_v_take_profit_override) > 1 else 0.0,
-                "ann_r_take_profit_override": float(decomp_r_take_profit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_r_take_profit_override) > 1 else 0.0,
-                "ann_risk_exit_override": float(decomp_risk_exit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_risk_exit_override) > 1 else 0.0,
-                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_cost) > 1 else 0.0,
-                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(decomp_gross) > 1 else 0.0,
-                "ann_net": float(port_ret.iloc[1:].mean() * TRADING_DAYS_PER_YEAR) if len(port_ret) > 1 else 0.0,
+                "ann_overnight": float(
+                    comp_overnight.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(comp_overnight) > 1
+                else 0.0,
+                "ann_intraday": float(
+                    comp_intraday.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(comp_intraday) > 1
+                else 0.0,
+                "ann_interaction": float(
+                    comp_interaction.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(comp_interaction) > 1
+                else 0.0,
+                "ann_atr_stop_override": float(
+                    decomp_atr_stop_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_atr_stop_override) > 1
+                else 0.0,
+                "ann_bias_v_take_profit_override": float(
+                    decomp_bias_v_take_profit_override.iloc[1:].mean()
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_bias_v_take_profit_override) > 1
+                else 0.0,
+                "ann_r_take_profit_override": float(
+                    decomp_r_take_profit_override.iloc[1:].mean()
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_r_take_profit_override) > 1
+                else 0.0,
+                "ann_risk_exit_override": float(
+                    decomp_risk_exit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_risk_exit_override) > 1
+                else 0.0,
+                "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
+                if len(decomp_cost) > 1
+                else 0.0,
+                "ann_gross": float(decomp_gross.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
+                if len(decomp_gross) > 1
+                else 0.0,
+                "ann_net": float(port_ret.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
+                if len(port_ret) > 1
+                else 0.0,
             },
         }
     else:
-        decomp_atr_stop_override = atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        decomp_bias_v_take_profit_override = bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        decomp_r_take_profit_override = r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        decomp_risk_exit_override = (decomp_atr_stop_override + decomp_bias_v_take_profit_override + decomp_r_take_profit_override).astype(float)
-        port_ret = (w * ret_exec_day).sum(axis=1).astype(float) + decomp_risk_exit_override - cost.astype(float) - slippage.astype(float)
+        decomp_atr_stop_override = (
+            atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
+        )
+        decomp_bias_v_take_profit_override = (
+            bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+        )
+        decomp_r_take_profit_override = (
+            r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+        )
+        decomp_risk_exit_override = (
+            decomp_atr_stop_override
+            + decomp_bias_v_take_profit_override
+            + decomp_r_take_profit_override
+        ).astype(float)
+        port_ret = (
+            (w * ret_exec_day).sum(axis=1).astype(float)
+            + decomp_risk_exit_override
+            - cost.astype(float)
+            - slippage.astype(float)
+        )
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -5295,33 +7398,71 @@ def compute_trend_portfolio_backtest(
     m_strat = {
         "cumulative_return": float(nav.iloc[-1] - 1.0),
         "annualized_return": float(ann_strat),
-        "annualized_volatility": float(_annualized_vol(port_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_volatility": float(
+            _annualized_vol(port_ret, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
         "max_drawdown": float(_max_drawdown(nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(nav)),
-        "sharpe_ratio": float(_sharpe(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "sortino_ratio": float(_sortino(port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sharpe_ratio": float(
+            _sharpe(
+                port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
+            )
+        ),
+        "sortino_ratio": float(
+            _sortino(
+                port_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
+            )
+        ),
         "ulcer_index": float(ui_strat),
-        "ulcer_performance_index": float((ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)) if ui_strat > 0 else float("nan"),
+        "ulcer_performance_index": float(
+            (ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)
+        )
+        if ui_strat > 0
+        else float("nan"),
         "avg_daily_turnover": float(turnover.mean()) if len(turnover) else 0.0,
     }
     m_bench = {
         "cumulative_return": float(bench_nav.iloc[-1] - 1.0),
         "annualized_return": float(ann_bench),
-        "annualized_volatility": float(_annualized_vol(bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_volatility": float(
+            _annualized_vol(bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
         "max_drawdown": float(_max_drawdown(bench_nav)),
         "max_drawdown_recovery_days": int(_max_drawdown_duration_days(bench_nav)),
-        "sharpe_ratio": float(_sharpe(bench_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
-        "sortino_ratio": float(_sortino(bench_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)),
+        "sharpe_ratio": float(
+            _sharpe(
+                bench_ret,
+                rf=float(inp.risk_free_rate),
+                ann_factor=TRADING_DAYS_PER_YEAR,
+            )
+        ),
+        "sortino_ratio": float(
+            _sortino(
+                bench_ret,
+                rf=float(inp.risk_free_rate),
+                ann_factor=TRADING_DAYS_PER_YEAR,
+            )
+        ),
         "ulcer_index": float(ui_bench),
-        "ulcer_performance_index": float((ann_bench - float(inp.risk_free_rate)) / (ui_bench / 100.0)) if ui_bench > 0 else float("nan"),
+        "ulcer_performance_index": float(
+            (ann_bench - float(inp.risk_free_rate)) / (ui_bench / 100.0)
+        )
+        if ui_bench > 0
+        else float("nan"),
     }
     m_ex = {
         "cumulative_return": float(ex_nav.iloc[-1] - 1.0),
-        "annualized_return": float(_annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR)),
-        "information_ratio": float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)),
+        "annualized_return": float(
+            _annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
+        "information_ratio": float(
+            _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)
+        ),
     }
     attribution = _compute_return_risk_contributions(
-        asset_ret=ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        asset_ret=ret_exec_day.reindex(index=nav.index, columns=codes)
+        .astype(float)
+        .fillna(0.0),
         weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
         total_return=float(nav.iloc[-1] - 1.0),
     )
@@ -5337,7 +7478,9 @@ def compute_trend_portfolio_backtest(
     complete_trade_count = int(len(trade_pack.get("returns", [])))
     avg_daily_turnover = float(m_strat["avg_daily_turnover"])
     avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
-    avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+    avg_daily_trade_count = (
+        float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+    )
     avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
     m_strat["avg_annual_turnover"] = float(avg_annual_turnover)
     m_strat["avg_annual_turnover_rate"] = float(avg_annual_turnover)
@@ -5348,25 +7491,39 @@ def compute_trend_portfolio_backtest(
         px = close_qfq[c].astype(float).replace([np.inf, -np.inf], np.nan).ffill()
         hi = high_qfq_df[c].astype(float).fillna(px) if c in high_qfq_df.columns else px
         lo = low_qfq_df[c].astype(float).fillna(px) if c in low_qfq_df.columns else px
-        atr_risk_df[c] = _atr_from_hlc(
-            hi,
-            lo,
-            px,
-            window=int(inp.atr_stop_window),
-        ).reindex(nav.index).astype(float)
+        atr_risk_df[c] = (
+            _atr_from_hlc(
+                hi,
+                lo,
+                px,
+                window=int(inp.atr_stop_window),
+            )
+            .reindex(nav.index)
+            .astype(float)
+        )
     trade_r_pack = enrich_trades_with_r_metrics(
         trade_pack.get("trades", []),
         nav=nav.astype(float),
         weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
-        exec_price=px_exec_slip.reindex(index=nav.index, columns=codes).ffill().astype(float),
+        exec_price=px_exec_slip.reindex(index=nav.index, columns=codes)
+        .ffill()
+        .astype(float),
         atr=atr_risk_df.reindex(index=nav.index, columns=codes).astype(float),
         atr_mult=float(inp.atr_stop_n),
-        risk_budget_pct=float(risk_budget_pct) if np.isfinite(float(risk_budget_pct)) else None,
+        risk_budget_pct=float(risk_budget_pct)
+        if np.isfinite(float(risk_budget_pct))
+        else None,
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
-        ulcer_index=float(m_strat.get("ulcer_index")) if np.isfinite(float(m_strat.get("ulcer_index", np.nan))) else None,
-        annual_trade_count=float(avg_annual_trade_count) if np.isfinite(float(avg_annual_trade_count)) else None,
-        backtest_years=(float(sample_days) / float(TRADING_DAYS_PER_YEAR)) if sample_days > 0 else None,
+        ulcer_index=float(m_strat.get("ulcer_index"))
+        if np.isfinite(float(m_strat.get("ulcer_index", np.nan)))
+        else None,
+        annual_trade_count=float(avg_annual_trade_count)
+        if np.isfinite(float(avg_annual_trade_count))
+        else None,
+        backtest_years=(float(sample_days) / float(TRADING_DAYS_PER_YEAR))
+        if sample_days > 0
+        else None,
         score_sqn_weight=0.60,
         score_ulcer_weight=0.40,
     )
@@ -5421,11 +7578,15 @@ def compute_trend_portfolio_backtest(
     trade_stats = {
         "overall": _trade_stats_from_returns(trade_pack.get("returns", [])),
         "by_code": {
-            str(c): _trade_stats_from_returns((trade_pack.get("returns_by_code") or {}).get(str(c), []))
+            str(c): _trade_stats_from_returns(
+                (trade_pack.get("returns_by_code") or {}).get(str(c), [])
+            )
             for c in codes
         },
         "trades": ([] if quick_mode else trades_with_r),
-        "trades_by_code": ({str(c): [] for c in codes} if quick_mode else trades_by_code),
+        "trades_by_code": (
+            {str(c): [] for c in codes} if quick_mode else trades_by_code
+        ),
         "mfe_r_distribution": mfe_r_distribution,
     }
     event_study = None
@@ -5433,14 +7594,18 @@ def compute_trend_portfolio_backtest(
         event_study = compute_event_study(
             dates=nav.index,
             daily_returns=port_ret.reindex(nav.index).astype(float),
-            entry_dates=entry_dates_from_exposure(w.sum(axis=1).reindex(nav.index).astype(float)),
+            entry_dates=entry_dates_from_exposure(
+                w.sum(axis=1).reindex(nav.index).astype(float)
+            ),
         )
     market_regime = build_market_regime_report(
         close=close_qfq.reindex(index=nav.index, columns=codes).astype(float),
         high=high_qfq_df.reindex(index=nav.index, columns=codes).astype(float),
         low=low_qfq_df.reindex(index=nav.index, columns=codes).astype(float),
         weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
-        asset_returns=ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        asset_returns=ret_exec_day.reindex(index=nav.index, columns=codes)
+        .astype(float)
+        .fillna(0.0),
         strategy_returns=port_ret.reindex(nav.index).astype(float),
         ann_factor=TRADING_DAYS_PER_YEAR,
     )
@@ -5450,7 +7615,9 @@ def compute_trend_portfolio_backtest(
     yearly = _period_returns(nav, "YE")
     rolling_out = _rolling_pack(nav)
 
-    total_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in atr_stop_by_asset.values()))
+    total_triggers = int(
+        sum(int((v or {}).get("trigger_count", 0)) for v in atr_stop_by_asset.values())
+    )
     uniq_trigger_dates = sorted(
         {
             str(d)
@@ -5459,34 +7626,133 @@ def compute_trend_portfolio_backtest(
             if str(d).strip()
         }
     )
-    total_rtp_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in rtp_by_asset.values()))
-    total_bias_v_tp_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in bias_v_tp_by_asset.values()))
-    total_impulse_filter_blocked_entries = int(sum(int((v or {}).get("blocked_entry_count", 0)) for v in impulse_filter_by_asset.values()))
-    total_impulse_filter_attempted_entries = int(sum(int((v or {}).get("attempted_entry_count", 0)) for v in impulse_filter_by_asset.values()))
-    total_impulse_filter_allowed_entries = int(sum(int((v or {}).get("allowed_entry_count", 0)) for v in impulse_filter_by_asset.values()))
-    total_impulse_filter_blocked_bull = int(sum(int((v or {}).get("blocked_entry_count_bull", 0)) for v in impulse_filter_by_asset.values()))
-    total_impulse_filter_blocked_bear = int(sum(int((v or {}).get("blocked_entry_count_bear", 0)) for v in impulse_filter_by_asset.values()))
-    total_impulse_filter_blocked_neutral = int(sum(int((v or {}).get("blocked_entry_count_neutral", 0)) for v in impulse_filter_by_asset.values()))
-    total_er_filter_blocked_entries = int(sum(int((v or {}).get("blocked_entry_count", 0)) for v in er_filter_by_asset.values()))
-    total_er_filter_attempted_entries = int(sum(int((v or {}).get("attempted_entry_count", 0)) for v in er_filter_by_asset.values()))
-    total_er_filter_allowed_entries = int(sum(int((v or {}).get("allowed_entry_count", 0)) for v in er_filter_by_asset.values()))
-    total_er_exit_filter_triggers = int(sum(int((v or {}).get("trigger_count", 0)) for v in er_exit_filter_by_asset.values()))
-    total_vol_risk_adjust = int(sum(int((v or {}).get("vol_risk_adjust_total_count", 0)) for v in vol_risk_adjust_by_asset.values()))
-    total_vol_risk_adjust_reduce_expand = int(sum(int((v or {}).get("vol_risk_adjust_reduce_on_expand_count", 0)) for v in vol_risk_adjust_by_asset.values()))
-    total_vol_risk_adjust_increase_contract = int(sum(int((v or {}).get("vol_risk_adjust_increase_on_contract_count", 0)) for v in vol_risk_adjust_by_asset.values()))
-    total_vol_risk_adjust_recover_expand = int(sum(int((v or {}).get("vol_risk_adjust_recover_from_expand_count", 0)) for v in vol_risk_adjust_by_asset.values()))
-    total_vol_risk_adjust_recover_contract = int(sum(int((v or {}).get("vol_risk_adjust_recover_from_contract_count", 0)) for v in vol_risk_adjust_by_asset.values()))
-    total_vol_risk_entry_reduce_expand = int(sum(int((v or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0)) for v in vol_risk_adjust_by_asset.values()))
-    total_vol_risk_entry_increase_contract = int(sum(int((v or {}).get("vol_risk_entry_state_increase_on_contract_count", 0)) for v in vol_risk_adjust_by_asset.values()))
-    total_monthly_risk_budget_attempted_entries = int((monthly_risk_budget_gate_stats or {}).get("attempted_entry_count", 0))
-    total_monthly_risk_budget_blocked_entries = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
+    total_rtp_triggers = int(
+        sum(int((v or {}).get("trigger_count", 0)) for v in rtp_by_asset.values())
+    )
+    total_bias_v_tp_triggers = int(
+        sum(int((v or {}).get("trigger_count", 0)) for v in bias_v_tp_by_asset.values())
+    )
+    total_impulse_filter_blocked_entries = int(
+        sum(
+            int((v or {}).get("blocked_entry_count", 0))
+            for v in impulse_filter_by_asset.values()
+        )
+    )
+    total_impulse_filter_attempted_entries = int(
+        sum(
+            int((v or {}).get("attempted_entry_count", 0))
+            for v in impulse_filter_by_asset.values()
+        )
+    )
+    total_impulse_filter_allowed_entries = int(
+        sum(
+            int((v or {}).get("allowed_entry_count", 0))
+            for v in impulse_filter_by_asset.values()
+        )
+    )
+    total_impulse_filter_blocked_bull = int(
+        sum(
+            int((v or {}).get("blocked_entry_count_bull", 0))
+            for v in impulse_filter_by_asset.values()
+        )
+    )
+    total_impulse_filter_blocked_bear = int(
+        sum(
+            int((v or {}).get("blocked_entry_count_bear", 0))
+            for v in impulse_filter_by_asset.values()
+        )
+    )
+    total_impulse_filter_blocked_neutral = int(
+        sum(
+            int((v or {}).get("blocked_entry_count_neutral", 0))
+            for v in impulse_filter_by_asset.values()
+        )
+    )
+    total_er_filter_blocked_entries = int(
+        sum(
+            int((v or {}).get("blocked_entry_count", 0))
+            for v in er_filter_by_asset.values()
+        )
+    )
+    total_er_filter_attempted_entries = int(
+        sum(
+            int((v or {}).get("attempted_entry_count", 0))
+            for v in er_filter_by_asset.values()
+        )
+    )
+    total_er_filter_allowed_entries = int(
+        sum(
+            int((v or {}).get("allowed_entry_count", 0))
+            for v in er_filter_by_asset.values()
+        )
+    )
+    total_er_exit_filter_triggers = int(
+        sum(
+            int((v or {}).get("trigger_count", 0))
+            for v in er_exit_filter_by_asset.values()
+        )
+    )
+    total_vol_risk_adjust = int(
+        sum(
+            int((v or {}).get("vol_risk_adjust_total_count", 0))
+            for v in vol_risk_adjust_by_asset.values()
+        )
+    )
+    total_vol_risk_adjust_reduce_expand = int(
+        sum(
+            int((v or {}).get("vol_risk_adjust_reduce_on_expand_count", 0))
+            for v in vol_risk_adjust_by_asset.values()
+        )
+    )
+    total_vol_risk_adjust_increase_contract = int(
+        sum(
+            int((v or {}).get("vol_risk_adjust_increase_on_contract_count", 0))
+            for v in vol_risk_adjust_by_asset.values()
+        )
+    )
+    total_vol_risk_adjust_recover_expand = int(
+        sum(
+            int((v or {}).get("vol_risk_adjust_recover_from_expand_count", 0))
+            for v in vol_risk_adjust_by_asset.values()
+        )
+    )
+    total_vol_risk_adjust_recover_contract = int(
+        sum(
+            int((v or {}).get("vol_risk_adjust_recover_from_contract_count", 0))
+            for v in vol_risk_adjust_by_asset.values()
+        )
+    )
+    total_vol_risk_entry_reduce_expand = int(
+        sum(
+            int((v or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0))
+            for v in vol_risk_adjust_by_asset.values()
+        )
+    )
+    total_vol_risk_entry_increase_contract = int(
+        sum(
+            int((v or {}).get("vol_risk_entry_state_increase_on_contract_count", 0))
+            for v in vol_risk_adjust_by_asset.values()
+        )
+    )
+    total_monthly_risk_budget_attempted_entries = int(
+        (monthly_risk_budget_gate_stats or {}).get("attempted_entry_count", 0)
+    )
+    total_monthly_risk_budget_blocked_entries = int(
+        (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
+    )
     total_impulse_filter_blocked_rate = (
-        float(total_impulse_filter_blocked_entries / total_impulse_filter_attempted_entries)
+        float(
+            total_impulse_filter_blocked_entries
+            / total_impulse_filter_attempted_entries
+        )
         if total_impulse_filter_attempted_entries > 0
         else 0.0
     )
     total_monthly_risk_budget_blocked_rate = (
-        float(total_monthly_risk_budget_blocked_entries / total_monthly_risk_budget_attempted_entries)
+        float(
+            total_monthly_risk_budget_blocked_entries
+            / total_monthly_risk_budget_attempted_entries
+        )
         if total_monthly_risk_budget_attempted_entries > 0
         else 0.0
     )
@@ -5528,77 +7794,235 @@ def compute_trend_portfolio_backtest(
     )
     trade_stats["overall"]["atr_stop_trigger_count"] = int(total_triggers)
     trade_stats["overall"]["r_take_profit_trigger_count"] = int(total_rtp_triggers)
-    trade_stats["overall"]["bias_v_take_profit_trigger_count"] = int(total_bias_v_tp_triggers)
-    trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = dict(total_rtp_tier_counts)
-    trade_stats["overall"]["impulse_filter_blocked_entry_count"] = int(total_impulse_filter_blocked_entries)
-    trade_stats["overall"]["impulse_filter_attempted_entry_count"] = int(total_impulse_filter_attempted_entries)
-    trade_stats["overall"]["impulse_filter_allowed_entry_count"] = int(total_impulse_filter_allowed_entries)
-    trade_stats["overall"]["impulse_filter_blocked_entry_rate"] = float(total_impulse_filter_blocked_rate)
-    trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int(total_impulse_filter_blocked_bull)
-    trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int(total_impulse_filter_blocked_bear)
-    trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int(total_impulse_filter_blocked_neutral)
-    trade_stats["overall"]["er_filter_blocked_entry_count"] = int(total_er_filter_blocked_entries)
-    trade_stats["overall"]["er_filter_attempted_entry_count"] = int(total_er_filter_attempted_entries)
-    trade_stats["overall"]["er_filter_allowed_entry_count"] = int(total_er_filter_allowed_entries)
-    trade_stats["overall"]["er_exit_filter_trigger_count"] = int(total_er_exit_filter_triggers)
+    trade_stats["overall"]["bias_v_take_profit_trigger_count"] = int(
+        total_bias_v_tp_triggers
+    )
+    trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = dict(
+        total_rtp_tier_counts
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count"] = int(
+        total_impulse_filter_blocked_entries
+    )
+    trade_stats["overall"]["impulse_filter_attempted_entry_count"] = int(
+        total_impulse_filter_attempted_entries
+    )
+    trade_stats["overall"]["impulse_filter_allowed_entry_count"] = int(
+        total_impulse_filter_allowed_entries
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_rate"] = float(
+        total_impulse_filter_blocked_rate
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bull"] = int(
+        total_impulse_filter_blocked_bull
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_bear"] = int(
+        total_impulse_filter_blocked_bear
+    )
+    trade_stats["overall"]["impulse_filter_blocked_entry_count_neutral"] = int(
+        total_impulse_filter_blocked_neutral
+    )
+    trade_stats["overall"]["er_filter_blocked_entry_count"] = int(
+        total_er_filter_blocked_entries
+    )
+    trade_stats["overall"]["er_filter_attempted_entry_count"] = int(
+        total_er_filter_attempted_entries
+    )
+    trade_stats["overall"]["er_filter_allowed_entry_count"] = int(
+        total_er_filter_allowed_entries
+    )
+    trade_stats["overall"]["er_exit_filter_trigger_count"] = int(
+        total_er_exit_filter_triggers
+    )
     trade_stats["overall"]["vol_risk_adjust_total_count"] = int(total_vol_risk_adjust)
-    trade_stats["overall"]["vol_risk_adjust_reduce_on_expand_count"] = int(total_vol_risk_adjust_reduce_expand)
-    trade_stats["overall"]["vol_risk_adjust_increase_on_contract_count"] = int(total_vol_risk_adjust_increase_contract)
-    trade_stats["overall"]["vol_risk_adjust_recover_from_expand_count"] = int(total_vol_risk_adjust_recover_expand)
-    trade_stats["overall"]["vol_risk_adjust_recover_from_contract_count"] = int(total_vol_risk_adjust_recover_contract)
-    trade_stats["overall"]["vol_risk_entry_state_reduce_on_expand_count"] = int(total_vol_risk_entry_reduce_expand)
-    trade_stats["overall"]["vol_risk_entry_state_increase_on_contract_count"] = int(total_vol_risk_entry_increase_contract)
-    trade_stats["overall"]["vol_risk_overcap_scale_count"] = int(risk_budget_overcap_scale_count)
-    trade_stats["overall"]["vol_risk_overcap_skip_entry_decision_count"] = int(risk_budget_overcap_skip_decision_count)
-    trade_stats["overall"]["vol_risk_overcap_skip_entry_episode_count"] = int(risk_budget_overcap_skip_episode_count)
-    trade_stats["overall"]["vol_risk_overcap_replace_entry_count"] = int(risk_budget_overcap_replace_count)
-    trade_stats["overall"]["vol_risk_overcap_replace_out_count"] = int(risk_budget_overcap_replace_count)
-    trade_stats["overall"]["vol_risk_overcap_replace_in_count"] = int(risk_budget_overcap_replace_count)
-    trade_stats["overall"]["vol_risk_overcap_leverage_usage_count"] = int(risk_budget_overcap_leverage_usage_count)
-    trade_stats["overall"]["vol_risk_overcap_leverage_max_multiple"] = float(risk_budget_overcap_leverage_max_multiple)
-    trade_stats["overall"]["monthly_risk_budget_attempted_entry_count"] = int(total_monthly_risk_budget_attempted_entries)
-    trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int(total_monthly_risk_budget_blocked_entries)
-    trade_stats["overall"]["monthly_risk_budget_blocked_entry_rate"] = float(total_monthly_risk_budget_blocked_rate)
+    trade_stats["overall"]["vol_risk_adjust_reduce_on_expand_count"] = int(
+        total_vol_risk_adjust_reduce_expand
+    )
+    trade_stats["overall"]["vol_risk_adjust_increase_on_contract_count"] = int(
+        total_vol_risk_adjust_increase_contract
+    )
+    trade_stats["overall"]["vol_risk_adjust_recover_from_expand_count"] = int(
+        total_vol_risk_adjust_recover_expand
+    )
+    trade_stats["overall"]["vol_risk_adjust_recover_from_contract_count"] = int(
+        total_vol_risk_adjust_recover_contract
+    )
+    trade_stats["overall"]["vol_risk_entry_state_reduce_on_expand_count"] = int(
+        total_vol_risk_entry_reduce_expand
+    )
+    trade_stats["overall"]["vol_risk_entry_state_increase_on_contract_count"] = int(
+        total_vol_risk_entry_increase_contract
+    )
+    trade_stats["overall"]["vol_risk_overcap_scale_count"] = int(
+        risk_budget_overcap_scale_count
+    )
+    trade_stats["overall"]["vol_risk_overcap_skip_entry_decision_count"] = int(
+        risk_budget_overcap_skip_decision_count
+    )
+    trade_stats["overall"]["vol_risk_overcap_skip_entry_episode_count"] = int(
+        risk_budget_overcap_skip_episode_count
+    )
+    trade_stats["overall"]["vol_risk_overcap_replace_entry_count"] = int(
+        risk_budget_overcap_replace_count
+    )
+    trade_stats["overall"]["vol_risk_overcap_replace_out_count"] = int(
+        risk_budget_overcap_replace_count
+    )
+    trade_stats["overall"]["vol_risk_overcap_replace_in_count"] = int(
+        risk_budget_overcap_replace_count
+    )
+    trade_stats["overall"]["vol_risk_overcap_leverage_usage_count"] = int(
+        risk_budget_overcap_leverage_usage_count
+    )
+    trade_stats["overall"]["vol_risk_overcap_leverage_max_multiple"] = float(
+        risk_budget_overcap_leverage_max_multiple
+    )
+    trade_stats["overall"]["monthly_risk_budget_attempted_entry_count"] = int(
+        total_monthly_risk_budget_attempted_entries
+    )
+    trade_stats["overall"]["monthly_risk_budget_blocked_entry_count"] = int(
+        total_monthly_risk_budget_blocked_entries
+    )
+    trade_stats["overall"]["monthly_risk_budget_blocked_entry_rate"] = float(
+        total_monthly_risk_budget_blocked_rate
+    )
     for c in codes:
         code_key = str(c)
         one = trade_stats["by_code"].get(code_key) or {}
-        one["atr_stop_trigger_count"] = int((atr_stop_by_asset.get(code_key) or {}).get("trigger_count", 0))
-        one["r_take_profit_trigger_count"] = int((rtp_by_asset.get(code_key) or {}).get("trigger_count", 0))
-        one["bias_v_take_profit_trigger_count"] = int((bias_v_tp_by_asset.get(code_key) or {}).get("trigger_count", 0))
-        one["r_take_profit_tier_trigger_counts"] = dict(((rtp_by_asset.get(code_key) or {}).get("tier_trigger_counts") or {}))
-        one["impulse_filter_blocked_entry_count"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0))
-        one["impulse_filter_attempted_entry_count"] = int((impulse_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0))
-        one["impulse_filter_allowed_entry_count"] = int((impulse_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0))
+        one["atr_stop_trigger_count"] = int(
+            (atr_stop_by_asset.get(code_key) or {}).get("trigger_count", 0)
+        )
+        one["r_take_profit_trigger_count"] = int(
+            (rtp_by_asset.get(code_key) or {}).get("trigger_count", 0)
+        )
+        one["bias_v_take_profit_trigger_count"] = int(
+            (bias_v_tp_by_asset.get(code_key) or {}).get("trigger_count", 0)
+        )
+        one["r_take_profit_tier_trigger_counts"] = dict(
+            ((rtp_by_asset.get(code_key) or {}).get("tier_trigger_counts") or {})
+        )
+        one["impulse_filter_blocked_entry_count"] = int(
+            (impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0)
+        )
+        one["impulse_filter_attempted_entry_count"] = int(
+            (impulse_filter_by_asset.get(code_key) or {}).get(
+                "attempted_entry_count", 0
+            )
+        )
+        one["impulse_filter_allowed_entry_count"] = int(
+            (impulse_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0)
+        )
         one["impulse_filter_blocked_entry_rate"] = (
-            float(one["impulse_filter_blocked_entry_count"] / one["impulse_filter_attempted_entry_count"])
+            float(
+                one["impulse_filter_blocked_entry_count"]
+                / one["impulse_filter_attempted_entry_count"]
+            )
             if int(one["impulse_filter_attempted_entry_count"]) > 0
             else 0.0
         )
-        one["impulse_filter_blocked_entry_count_bull"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_bull", 0))
-        one["impulse_filter_blocked_entry_count_bear"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_bear", 0))
-        one["impulse_filter_blocked_entry_count_neutral"] = int((impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count_neutral", 0))
-        one["er_filter_blocked_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0))
-        one["er_filter_attempted_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0))
-        one["er_filter_allowed_entry_count"] = int((er_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0))
-        one["er_exit_filter_trigger_count"] = int((er_exit_filter_by_asset.get(code_key) or {}).get("trigger_count", 0))
-        one["vol_risk_adjust_total_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_total_count", 0))
-        one["vol_risk_adjust_reduce_on_expand_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_reduce_on_expand_count", 0))
-        one["vol_risk_adjust_increase_on_contract_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_increase_on_contract_count", 0))
-        one["vol_risk_adjust_recover_from_expand_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_recover_from_expand_count", 0))
-        one["vol_risk_adjust_recover_from_contract_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_adjust_recover_from_contract_count", 0))
-        one["vol_risk_entry_state_reduce_on_expand_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_entry_state_reduce_on_expand_count", 0))
-        one["vol_risk_entry_state_increase_on_contract_count"] = int((vol_risk_adjust_by_asset.get(code_key) or {}).get("vol_risk_entry_state_increase_on_contract_count", 0))
-        one["vol_risk_overcap_scale_count"] = int(risk_budget_overcap_scale_by_code.get(code_key, 0))
-        one["vol_risk_overcap_skip_entry_decision_count"] = int(risk_budget_overcap_skip_decision_by_code.get(code_key, 0))
-        one["vol_risk_overcap_skip_entry_episode_count"] = int(risk_budget_overcap_skip_episode_by_code.get(code_key, 0))
-        one["vol_risk_overcap_replace_out_count"] = int(risk_budget_overcap_replace_out_by_code.get(code_key, 0))
-        one["vol_risk_overcap_replace_in_count"] = int(risk_budget_overcap_replace_in_by_code.get(code_key, 0))
-        one["vol_risk_overcap_leverage_usage_count"] = int(risk_budget_overcap_leverage_usage_by_code.get(code_key, 0))
-        one["vol_risk_overcap_leverage_max_multiple"] = float(risk_budget_overcap_leverage_max_multiple_by_code.get(code_key, 0.0))
-        one["monthly_risk_budget_attempted_entry_count"] = int(((monthly_risk_budget_gate_stats or {}).get("attempted_entry_count_by_code") or {}).get(code_key, 0))
-        one["monthly_risk_budget_blocked_entry_count"] = int(((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count_by_code") or {}).get(code_key, 0))
+        one["impulse_filter_blocked_entry_count_bull"] = int(
+            (impulse_filter_by_asset.get(code_key) or {}).get(
+                "blocked_entry_count_bull", 0
+            )
+        )
+        one["impulse_filter_blocked_entry_count_bear"] = int(
+            (impulse_filter_by_asset.get(code_key) or {}).get(
+                "blocked_entry_count_bear", 0
+            )
+        )
+        one["impulse_filter_blocked_entry_count_neutral"] = int(
+            (impulse_filter_by_asset.get(code_key) or {}).get(
+                "blocked_entry_count_neutral", 0
+            )
+        )
+        one["er_filter_blocked_entry_count"] = int(
+            (er_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0)
+        )
+        one["er_filter_attempted_entry_count"] = int(
+            (er_filter_by_asset.get(code_key) or {}).get("attempted_entry_count", 0)
+        )
+        one["er_filter_allowed_entry_count"] = int(
+            (er_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0)
+        )
+        one["er_exit_filter_trigger_count"] = int(
+            (er_exit_filter_by_asset.get(code_key) or {}).get("trigger_count", 0)
+        )
+        one["vol_risk_adjust_total_count"] = int(
+            (vol_risk_adjust_by_asset.get(code_key) or {}).get(
+                "vol_risk_adjust_total_count", 0
+            )
+        )
+        one["vol_risk_adjust_reduce_on_expand_count"] = int(
+            (vol_risk_adjust_by_asset.get(code_key) or {}).get(
+                "vol_risk_adjust_reduce_on_expand_count", 0
+            )
+        )
+        one["vol_risk_adjust_increase_on_contract_count"] = int(
+            (vol_risk_adjust_by_asset.get(code_key) or {}).get(
+                "vol_risk_adjust_increase_on_contract_count", 0
+            )
+        )
+        one["vol_risk_adjust_recover_from_expand_count"] = int(
+            (vol_risk_adjust_by_asset.get(code_key) or {}).get(
+                "vol_risk_adjust_recover_from_expand_count", 0
+            )
+        )
+        one["vol_risk_adjust_recover_from_contract_count"] = int(
+            (vol_risk_adjust_by_asset.get(code_key) or {}).get(
+                "vol_risk_adjust_recover_from_contract_count", 0
+            )
+        )
+        one["vol_risk_entry_state_reduce_on_expand_count"] = int(
+            (vol_risk_adjust_by_asset.get(code_key) or {}).get(
+                "vol_risk_entry_state_reduce_on_expand_count", 0
+            )
+        )
+        one["vol_risk_entry_state_increase_on_contract_count"] = int(
+            (vol_risk_adjust_by_asset.get(code_key) or {}).get(
+                "vol_risk_entry_state_increase_on_contract_count", 0
+            )
+        )
+        one["vol_risk_overcap_scale_count"] = int(
+            risk_budget_overcap_scale_by_code.get(code_key, 0)
+        )
+        one["vol_risk_overcap_skip_entry_decision_count"] = int(
+            risk_budget_overcap_skip_decision_by_code.get(code_key, 0)
+        )
+        one["vol_risk_overcap_skip_entry_episode_count"] = int(
+            risk_budget_overcap_skip_episode_by_code.get(code_key, 0)
+        )
+        one["vol_risk_overcap_replace_out_count"] = int(
+            risk_budget_overcap_replace_out_by_code.get(code_key, 0)
+        )
+        one["vol_risk_overcap_replace_in_count"] = int(
+            risk_budget_overcap_replace_in_by_code.get(code_key, 0)
+        )
+        one["vol_risk_overcap_leverage_usage_count"] = int(
+            risk_budget_overcap_leverage_usage_by_code.get(code_key, 0)
+        )
+        one["vol_risk_overcap_leverage_max_multiple"] = float(
+            risk_budget_overcap_leverage_max_multiple_by_code.get(code_key, 0.0)
+        )
+        one["monthly_risk_budget_attempted_entry_count"] = int(
+            (
+                (monthly_risk_budget_gate_stats or {}).get(
+                    "attempted_entry_count_by_code"
+                )
+                or {}
+            ).get(code_key, 0)
+        )
+        one["monthly_risk_budget_blocked_entry_count"] = int(
+            (
+                (monthly_risk_budget_gate_stats or {}).get(
+                    "blocked_entry_count_by_code"
+                )
+                or {}
+            ).get(code_key, 0)
+        )
         one["monthly_risk_budget_blocked_entry_rate"] = (
-            float(one["monthly_risk_budget_blocked_entry_count"] / one["monthly_risk_budget_attempted_entry_count"])
+            float(
+                one["monthly_risk_budget_blocked_entry_count"]
+                / one["monthly_risk_budget_attempted_entry_count"]
+            )
             if int(one["monthly_risk_budget_attempted_entry_count"]) > 0
             else 0.0
         )
@@ -5609,9 +8033,16 @@ def compute_trend_portfolio_backtest(
             "signal_day_basis": "signal_day_before_entry_execution",
             "quasi_causal_method": "uplift + two_proportion_z / welch_t_normal_approx + BH",
             "strong_causal_method": "uplift + stratified_permutation + BH",
-            "overall": _build_entry_condition_stats(trades_with_r, by_code=False, n_perm=300, seed=20260410),
+            "overall": _build_entry_condition_stats(
+                trades_with_r, by_code=False, n_perm=300, seed=20260410
+            ),
             "by_code": {
-                str(c): _build_entry_condition_stats(trades_by_code.get(str(c), []), by_code=True, n_perm=200, seed=20260410)
+                str(c): _build_entry_condition_stats(
+                    trades_by_code.get(str(c), []),
+                    by_code=True,
+                    n_perm=200,
+                    seed=20260410,
+                )
                 for c in codes
             },
         }
@@ -5619,27 +8050,75 @@ def compute_trend_portfolio_backtest(
     m_strat["r_take_profit_trigger_count"] = int(total_rtp_triggers)
     m_strat["bias_v_take_profit_trigger_count"] = int(total_bias_v_tp_triggers)
     m_strat["atr_stop_trigger_count"] = int(total_triggers)
-    m_strat["impulse_filter_blocked_entry_count"] = int(total_impulse_filter_blocked_entries)
-    m_strat["impulse_filter_blocked_entry_count_bull"] = int(total_impulse_filter_blocked_bull)
-    m_strat["impulse_filter_blocked_entry_count_bear"] = int(total_impulse_filter_blocked_bear)
-    m_strat["impulse_filter_blocked_entry_count_neutral"] = int(total_impulse_filter_blocked_neutral)
+    m_strat["impulse_filter_blocked_entry_count"] = int(
+        total_impulse_filter_blocked_entries
+    )
+    m_strat["impulse_filter_blocked_entry_count_bull"] = int(
+        total_impulse_filter_blocked_bull
+    )
+    m_strat["impulse_filter_blocked_entry_count_bear"] = int(
+        total_impulse_filter_blocked_bear
+    )
+    m_strat["impulse_filter_blocked_entry_count_neutral"] = int(
+        total_impulse_filter_blocked_neutral
+    )
     m_strat["vol_risk_overcap_scale_count"] = int(risk_budget_overcap_scale_count)
-    m_strat["vol_risk_overcap_skip_entry_decision_count"] = int(risk_budget_overcap_skip_decision_count)
-    m_strat["vol_risk_overcap_skip_entry_episode_count"] = int(risk_budget_overcap_skip_episode_count)
-    m_strat["vol_risk_overcap_replace_entry_count"] = int(risk_budget_overcap_replace_count)
-    m_strat["vol_risk_overcap_leverage_usage_count"] = int(risk_budget_overcap_leverage_usage_count)
-    m_strat["vol_risk_overcap_leverage_max_multiple"] = float(risk_budget_overcap_leverage_max_multiple)
-    m_strat["monthly_risk_budget_blocked_entry_count"] = int((monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0))
-    ext_dates = sorted({str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()})
-    skip_dates = sorted({str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()})
-    ext_over_weight_count = int(sum(1 for e in ext_events if bool(e.get("over_weight"))))
+    m_strat["vol_risk_overcap_skip_entry_decision_count"] = int(
+        risk_budget_overcap_skip_decision_count
+    )
+    m_strat["vol_risk_overcap_skip_entry_episode_count"] = int(
+        risk_budget_overcap_skip_episode_count
+    )
+    m_strat["vol_risk_overcap_replace_entry_count"] = int(
+        risk_budget_overcap_replace_count
+    )
+    m_strat["vol_risk_overcap_leverage_usage_count"] = int(
+        risk_budget_overcap_leverage_usage_count
+    )
+    m_strat["vol_risk_overcap_leverage_max_multiple"] = float(
+        risk_budget_overcap_leverage_max_multiple
+    )
+    m_strat["monthly_risk_budget_blocked_entry_count"] = int(
+        (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
+    )
+    ext_dates = sorted(
+        {str(e.get("date")) for e in ext_events if str(e.get("date", "")).strip()}
+    )
+    skip_dates = sorted(
+        {str(e.get("date")) for e in skip_events if str(e.get("date", "")).strip()}
+    )
+    ext_over_weight_count = int(
+        sum(1 for e in ext_events if bool(e.get("over_weight")))
+    )
     ext_over_count_count = int(sum(1 for e in ext_events if bool(e.get("over_count"))))
-    ext_over_both_count = int(sum(1 for e in ext_events if bool(e.get("over_weight")) and bool(e.get("over_count"))))
-    skip_over_weight_count = int(sum(1 for e in skip_events if bool(e.get("over_weight"))))
-    skip_over_count_count = int(sum(1 for e in skip_events if bool(e.get("over_count"))))
-    skip_over_both_count = int(sum(1 for e in skip_events if bool(e.get("over_weight")) and bool(e.get("over_count"))))
+    ext_over_both_count = int(
+        sum(
+            1
+            for e in ext_events
+            if bool(e.get("over_weight")) and bool(e.get("over_count"))
+        )
+    )
+    skip_over_weight_count = int(
+        sum(1 for e in skip_events if bool(e.get("over_weight")))
+    )
+    skip_over_count_count = int(
+        sum(1 for e in skip_events if bool(e.get("over_count")))
+    )
+    skip_over_both_count = int(
+        sum(
+            1
+            for e in skip_events
+            if bool(e.get("over_weight")) and bool(e.get("over_count"))
+        )
+    )
     exposure_eff = w.sum(axis=1).astype(float)
-    group_filter_enabled_days = int(sum(1 for h in holdings if bool(((h or {}).get("group_filter") or {}).get("enabled"))))
+    group_filter_enabled_days = int(
+        sum(
+            1
+            for h in holdings
+            if bool(((h or {}).get("group_filter") or {}).get("enabled"))
+        )
+    )
     group_filter_effective_days = int(
         sum(
             1
@@ -5659,9 +8138,13 @@ def compute_trend_portfolio_backtest(
             "skip_entry": int((v or {}).get("skip_entry", 0)),
             "replace_entry": int((v or {}).get("replace_entry", 0)),
             "leverage_entry": int((v or {}).get("leverage_entry", 0)),
-            "leverage_multiple_max": float((v or {}).get("leverage_multiple_max", 0.0) or 0.0),
+            "leverage_multiple_max": float(
+                (v or {}).get("leverage_multiple_max", 0.0) or 0.0
+            ),
         }
-        for k, v in sorted((risk_budget_overcap_daily_counts or {}).items(), key=lambda x: str(x[0]))
+        for k, v in sorted(
+            (risk_budget_overcap_daily_counts or {}).items(), key=lambda x: str(x[0])
+        )
     ]
     usage_quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
     if usage_enabled and (len(exposure_eff) > 0):
@@ -5698,7 +8181,9 @@ def compute_trend_portfolio_backtest(
             "start": inp.start.strftime("%Y%m%d"),
             "end": inp.end.strftime("%Y%m%d"),
             "strategy": strat,
-            "strategy_execution_description": TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(strat, ""),
+            "strategy_execution_description": TREND_STRATEGY_EXECUTION_DESCRIPTIONS.get(
+                strat, ""
+            ),
             "params": {
                 "position_sizing": ps,
                 "vol_window": int(inp.vol_window),
@@ -5709,7 +8194,9 @@ def compute_trend_portfolio_backtest(
                 "risk_budget_atr_window": int(risk_budget_atr_window),
                 "risk_budget_pct": float(risk_budget_pct),
                 "risk_budget_overcap_policy": str(risk_budget_overcap_policy),
-                "risk_budget_max_leverage_multiple": float(risk_budget_max_leverage_multiple),
+                "risk_budget_max_leverage_multiple": float(
+                    risk_budget_max_leverage_multiple
+                ),
                 "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
                 "vol_ratio_fast_atr_window": int(vol_ratio_fast_atr_window),
                 "vol_ratio_slow_atr_window": int(vol_ratio_slow_atr_window),
@@ -5763,7 +8250,9 @@ def compute_trend_portfolio_backtest(
                 "bias_v_take_profit_threshold": float(bias_v_tp_threshold),
                 "monthly_risk_budget_enabled": bool(monthly_risk_budget_enabled),
                 "monthly_risk_budget_pct": float(monthly_risk_budget_pct),
-                "monthly_risk_budget_include_new_trade_risk": bool(monthly_risk_budget_include_new_trade_risk),
+                "monthly_risk_budget_include_new_trade_risk": bool(
+                    monthly_risk_budget_include_new_trade_risk
+                ),
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
@@ -5788,7 +8277,10 @@ def compute_trend_portfolio_backtest(
         "asset_nav_exec": {
             "dates": ret_exec_day.index.date.astype(str).tolist(),
             "series": {
-                c: (1.0 + ret_exec_day[c].astype(float)).cumprod().astype(float).tolist()
+                c: (1.0 + ret_exec_day[c].astype(float))
+                .cumprod()
+                .astype(float)
+                .tolist()
                 for c in codes
             },
         },
@@ -5819,8 +8311,12 @@ def compute_trend_portfolio_backtest(
                 "reentry_mode": str(atr_reentry_mode),
                 "trigger_count": total_triggers,
                 "trigger_days": int(len(uniq_trigger_dates)),
-                "first_trigger_date": (uniq_trigger_dates[0] if uniq_trigger_dates else None),
-                "last_trigger_date": (uniq_trigger_dates[-1] if uniq_trigger_dates else None),
+                "first_trigger_date": (
+                    uniq_trigger_dates[0] if uniq_trigger_dates else None
+                ),
+                "last_trigger_date": (
+                    uniq_trigger_dates[-1] if uniq_trigger_dates else None
+                ),
                 "trigger_dates": uniq_trigger_dates[:200],
                 "by_asset": atr_stop_by_asset,
             },
@@ -5831,11 +8327,17 @@ def compute_trend_portfolio_backtest(
                 "trigger_count": total_rtp_triggers,
                 "tier_trigger_counts": dict(total_rtp_tier_counts),
                 "trigger_days": int(len(uniq_rtp_trigger_dates)),
-                "first_trigger_date": (uniq_rtp_trigger_dates[0] if uniq_rtp_trigger_dates else None),
-                "last_trigger_date": (uniq_rtp_trigger_dates[-1] if uniq_rtp_trigger_dates else None),
+                "first_trigger_date": (
+                    uniq_rtp_trigger_dates[0] if uniq_rtp_trigger_dates else None
+                ),
+                "last_trigger_date": (
+                    uniq_rtp_trigger_dates[-1] if uniq_rtp_trigger_dates else None
+                ),
                 "trigger_dates": uniq_rtp_trigger_dates[:200],
                 "fallback_mode_used": bool((atr_mode == "none") and rtp_enabled),
-                "initial_r_mode": ("atr_stop" if atr_mode != "none" else "virtual_atr_fallback"),
+                "initial_r_mode": (
+                    "atr_stop" if atr_mode != "none" else "virtual_atr_fallback"
+                ),
                 "by_asset": rtp_by_asset,
             },
             "bias_v_take_profit": {
@@ -5846,8 +8348,16 @@ def compute_trend_portfolio_backtest(
                 "threshold": float(bias_v_tp_threshold),
                 "trigger_count": int(total_bias_v_tp_triggers),
                 "trigger_days": int(len(uniq_bias_v_tp_trigger_dates)),
-                "first_trigger_date": (uniq_bias_v_tp_trigger_dates[0] if uniq_bias_v_tp_trigger_dates else None),
-                "last_trigger_date": (uniq_bias_v_tp_trigger_dates[-1] if uniq_bias_v_tp_trigger_dates else None),
+                "first_trigger_date": (
+                    uniq_bias_v_tp_trigger_dates[0]
+                    if uniq_bias_v_tp_trigger_dates
+                    else None
+                ),
+                "last_trigger_date": (
+                    uniq_bias_v_tp_trigger_dates[-1]
+                    if uniq_bias_v_tp_trigger_dates
+                    else None
+                ),
                 "trigger_dates": uniq_bias_v_tp_trigger_dates[:200],
                 "by_asset": bias_v_tp_by_asset,
             },
@@ -5857,8 +8367,16 @@ def compute_trend_portfolio_backtest(
                 "threshold": float(er_exit_threshold),
                 "trigger_count": int(total_er_exit_filter_triggers),
                 "trigger_days": int(len(uniq_er_exit_trigger_dates)),
-                "first_trigger_date": (uniq_er_exit_trigger_dates[0] if uniq_er_exit_trigger_dates else None),
-                "last_trigger_date": (uniq_er_exit_trigger_dates[-1] if uniq_er_exit_trigger_dates else None),
+                "first_trigger_date": (
+                    uniq_er_exit_trigger_dates[0]
+                    if uniq_er_exit_trigger_dates
+                    else None
+                ),
+                "last_trigger_date": (
+                    uniq_er_exit_trigger_dates[-1]
+                    if uniq_er_exit_trigger_dates
+                    else None
+                ),
                 "trigger_dates": uniq_er_exit_trigger_dates[:200],
                 "by_asset": er_exit_filter_by_asset,
             },
@@ -5870,32 +8388,68 @@ def compute_trend_portfolio_backtest(
                 "contract_threshold": float(vol_ratio_contract_threshold),
                 "normal_threshold": float(vol_ratio_normal_threshold),
                 "adjust_total_count": int(total_vol_risk_adjust),
-                "adjust_reduce_on_expand_count": int(total_vol_risk_adjust_reduce_expand),
-                "adjust_increase_on_contract_count": int(total_vol_risk_adjust_increase_contract),
-                "adjust_recover_from_expand_count": int(total_vol_risk_adjust_recover_expand),
-                "adjust_recover_from_contract_count": int(total_vol_risk_adjust_recover_contract),
-                "entry_state_reduce_on_expand_count": int(total_vol_risk_entry_reduce_expand),
-                "entry_state_increase_on_contract_count": int(total_vol_risk_entry_increase_contract),
+                "adjust_reduce_on_expand_count": int(
+                    total_vol_risk_adjust_reduce_expand
+                ),
+                "adjust_increase_on_contract_count": int(
+                    total_vol_risk_adjust_increase_contract
+                ),
+                "adjust_recover_from_expand_count": int(
+                    total_vol_risk_adjust_recover_expand
+                ),
+                "adjust_recover_from_contract_count": int(
+                    total_vol_risk_adjust_recover_contract
+                ),
+                "entry_state_reduce_on_expand_count": int(
+                    total_vol_risk_entry_reduce_expand
+                ),
+                "entry_state_increase_on_contract_count": int(
+                    total_vol_risk_entry_increase_contract
+                ),
                 "overcap_scale_count": int(risk_budget_overcap_scale_count),
                 "overcap_policy": str(risk_budget_overcap_policy),
-                "overcap_max_leverage_multiple": float(risk_budget_max_leverage_multiple),
-                "overcap_skip_entry_decision_count": int(risk_budget_overcap_skip_decision_count),
-                "overcap_skip_entry_episode_count": int(risk_budget_overcap_skip_episode_count),
-                "overcap_skip_entry_decision_count_by_code": dict(risk_budget_overcap_skip_decision_by_code),
-                "overcap_skip_entry_episode_count_by_code": dict(risk_budget_overcap_skip_episode_by_code),
+                "overcap_max_leverage_multiple": float(
+                    risk_budget_max_leverage_multiple
+                ),
+                "overcap_skip_entry_decision_count": int(
+                    risk_budget_overcap_skip_decision_count
+                ),
+                "overcap_skip_entry_episode_count": int(
+                    risk_budget_overcap_skip_episode_count
+                ),
+                "overcap_skip_entry_decision_count_by_code": dict(
+                    risk_budget_overcap_skip_decision_by_code
+                ),
+                "overcap_skip_entry_episode_count_by_code": dict(
+                    risk_budget_overcap_skip_episode_by_code
+                ),
                 "overcap_replace_entry_count": int(risk_budget_overcap_replace_count),
-                "overcap_replace_out_count_by_code": dict(risk_budget_overcap_replace_out_by_code),
-                "overcap_replace_in_count_by_code": dict(risk_budget_overcap_replace_in_by_code),
-                "overcap_leverage_usage_count": int(risk_budget_overcap_leverage_usage_count),
-                "overcap_leverage_max_multiple": float(risk_budget_overcap_leverage_max_multiple),
-                "overcap_leverage_usage_count_by_code": dict(risk_budget_overcap_leverage_usage_by_code),
-                "overcap_leverage_max_multiple_by_code": dict(risk_budget_overcap_leverage_max_multiple_by_code),
+                "overcap_replace_out_count_by_code": dict(
+                    risk_budget_overcap_replace_out_by_code
+                ),
+                "overcap_replace_in_count_by_code": dict(
+                    risk_budget_overcap_replace_in_by_code
+                ),
+                "overcap_leverage_usage_count": int(
+                    risk_budget_overcap_leverage_usage_count
+                ),
+                "overcap_leverage_max_multiple": float(
+                    risk_budget_overcap_leverage_max_multiple
+                ),
+                "overcap_leverage_usage_count_by_code": dict(
+                    risk_budget_overcap_leverage_usage_by_code
+                ),
+                "overcap_leverage_max_multiple_by_code": dict(
+                    risk_budget_overcap_leverage_max_multiple_by_code
+                ),
                 "overcap_daily_counts": risk_budget_overcap_daily,
                 "by_asset": vol_risk_adjust_by_asset,
             },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
             "position_extension": {
-                "enabled": bool(ps == "fixed_ratio" and fixed_overcap_policy == "extend"),
+                "enabled": bool(
+                    ps == "fixed_ratio" and fixed_overcap_policy == "extend"
+                ),
                 "position_sizing": str(ps),
                 "fixed_pos_ratio": float(fixed_ratio),
                 "overcap_policy": str(fixed_overcap_policy),
@@ -5922,12 +8476,30 @@ def compute_trend_portfolio_backtest(
             "position_usage": {
                 "enabled": bool(usage_enabled),
                 "position_sizing": str(ps),
-                "cash_as_residual": bool(usage_enabled),  # <100% exposure is treated as cash at 0 return
-                "min_exposure": (None if (not usage_enabled or (not np.isfinite(util_min))) else float(util_min)),
-                "max_exposure": (None if (not usage_enabled or (not np.isfinite(util_max))) else float(util_max)),
-                "mean_exposure": (None if (not usage_enabled or (not np.isfinite(util_mean))) else float(util_mean)),
+                "cash_as_residual": bool(
+                    usage_enabled
+                ),  # <100% exposure is treated as cash at 0 return
+                "min_exposure": (
+                    None
+                    if (not usage_enabled or (not np.isfinite(util_min)))
+                    else float(util_min)
+                ),
+                "max_exposure": (
+                    None
+                    if (not usage_enabled or (not np.isfinite(util_max)))
+                    else float(util_max)
+                ),
+                "mean_exposure": (
+                    None
+                    if (not usage_enabled or (not np.isfinite(util_mean)))
+                    else float(util_mean)
+                ),
                 "quantiles": {
-                    k: (None if (not usage_enabled or (not np.isfinite(v))) else float(v))
+                    k: (
+                        None
+                        if (not usage_enabled or (not np.isfinite(v)))
+                        else float(v)
+                    )
                     for k, v in util_q.items()
                 },
                 "over_100pct_days": int(util_over100_days),

@@ -94,7 +94,7 @@ def test_rotation_exec_price_uses_execution_day_forward_return(
                 skip_days=0,
                 exec_price=exec_price,
                 cost_bps=0.0,
-                    slippage_rate=0.0,
+                slippage_rate=0.0,
             ),
         )
 
@@ -132,7 +132,7 @@ def test_trend_exec_price_uses_execution_day_forward_return(
                 mom_lookback=2,
                 exec_price=exec_price,
                 cost_bps=0.0,
-                    slippage_rate=0.0,
+                slippage_rate=0.0,
             ),
         )
 
@@ -141,7 +141,9 @@ def test_trend_exec_price_uses_execution_day_forward_return(
 
 
 @pytest.mark.parametrize("exec_price", ["open", "close"])
-def test_trend_and_bt_trend_execution_timing_are_aligned(session_factory, exec_price: str):
+def test_trend_and_bt_trend_execution_timing_are_aligned(
+    session_factory, exec_price: str
+):
     sf = session_factory
     with sf() as db:
         start = dt.date(2024, 1, 1)
@@ -180,7 +182,9 @@ def test_trend_and_bt_trend_execution_timing_are_aligned(session_factory, exec_p
         ("close", 0.0),
     ],
 )
-def test_trend_atr_stop_reentry_timing_no_lookahead(session_factory, exec_price: str, expected_d8_ret: float):
+def test_trend_atr_stop_reentry_timing_no_lookahead(
+    session_factory, exec_price: str, expected_d8_ret: float
+):
     sf = session_factory
     with sf() as db:
         start = dt.date(2024, 1, 1)
@@ -190,7 +194,18 @@ def test_trend_atr_stop_reentry_timing_no_lookahead(session_factory, exec_price:
         # - d6 dip keeps base signal long but breaks trailing stop
         # - d7 base stays long to allow stop_reentry decision
         # - d8/d9 used to distinguish open vs close execution-day return
-        close_qfq = [100.0, 102.0, 104.0, 106.0, 108.0, 110.0, 106.5, 112.0, 120.0, 120.0]
+        close_qfq = [
+            100.0,
+            102.0,
+            104.0,
+            106.0,
+            108.0,
+            110.0,
+            106.5,
+            112.0,
+            120.0,
+            120.0,
+        ]
         # none/hfq execution OHLC:
         # - mostly open=close
         # - d8 has large intraday open->close move (20%)
@@ -215,7 +230,7 @@ def test_trend_atr_stop_reentry_timing_no_lookahead(session_factory, exec_price:
                 atr_stop_reentry_mode="reenter",
                 exec_price=exec_price,
                 cost_bps=0.0,
-                    slippage_rate=0.0,
+                slippage_rate=0.0,
             ),
         )
 
@@ -264,7 +279,10 @@ def test_calendar_open_exec_includes_entry_day_and_excludes_exit_day(session_fac
             if d == dt.date(2024, 1, 3):
                 o, c = 100.0, 110.0  # entry execution day: +10%
             elif d == dt.date(2024, 1, 4):
-                o, c = 100.0, 80.0  # exit execution day: -20% should NOT be counted in open mode
+                o, c = (
+                    100.0,
+                    80.0,
+                )  # exit execution day: -20% should NOT be counted in open mode
             else:
                 o, c = 100.0, 100.0
             ohlc_none.append((o, c))
@@ -294,9 +312,13 @@ def test_calendar_open_exec_includes_entry_day_and_excludes_exit_day(session_fac
     i_entry = nav_dates.index("2024-01-03")
     i_exit = nav_dates.index("2024-01-04")
     # Open-buy: execution day return is counted.
-    assert float(nav[i_entry] / nav[i_entry - 1] - 1.0) == pytest.approx(0.10, rel=0.0, abs=1e-12)
+    assert float(nav[i_entry] / nav[i_entry - 1] - 1.0) == pytest.approx(
+        0.10, rel=0.0, abs=1e-12
+    )
     # Open-sell: execution day return is not counted.
-    assert float(nav[i_exit] / nav[i_entry] - 1.0) == pytest.approx(0.0, rel=0.0, abs=1e-12)
+    assert float(nav[i_exit] / nav[i_entry] - 1.0) == pytest.approx(
+        0.0, rel=0.0, abs=1e-12
+    )
 
 
 def test_trend_benchmark_nav_uses_exec_price_basis(session_factory):
@@ -342,4 +364,3 @@ def test_trend_benchmark_nav_uses_exec_price_basis(session_factory):
     bh_close = [float(x) for x in out_close["nav"]["series"]["BUY_HOLD"]]
     assert bh_open[-1] > 1.0
     assert bh_close[-1] == pytest.approx(1.0, rel=0.0, abs=1e-12)
-

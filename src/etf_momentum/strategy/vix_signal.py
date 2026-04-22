@@ -69,7 +69,9 @@ def _map_us_close_to_cn_trade_dates(
         for us_d, v in x.items():
             if not isinstance(us_d, dt.date):
                 continue
-            cn_d = shift_to_trading_day(us_d + dt.timedelta(days=1), shift="next", cal=cal)
+            cn_d = shift_to_trading_day(
+                us_d + dt.timedelta(days=1), shift="next", cal=cal
+            )
             out[cn_d] = float(v)
             mapping[cn_d] = us_d
         return pd.Series(out).sort_index(), mapping
@@ -91,15 +93,27 @@ def _period_returns(series: pd.Series, freq: str) -> pd.DataFrame:
 
 
 def _win_payoff_kelly(df: pd.DataFrame) -> dict[str, float]:
-    r = pd.Series(df["return"].astype(float).to_numpy()) if (df is not None and not df.empty) else pd.Series([], dtype=float)
+    r = (
+        pd.Series(df["return"].astype(float).to_numpy())
+        if (df is not None and not df.empty)
+        else pd.Series([], dtype=float)
+    )
     if r.empty:
-        return {"win_rate": float("nan"), "payoff_ratio": float("nan"), "kelly_fraction": float("nan")}
+        return {
+            "win_rate": float("nan"),
+            "payoff_ratio": float("nan"),
+            "kelly_fraction": float("nan"),
+        }
     pos = r[r > 0]
     neg = r[r < 0]
     win_rate = float(len(pos) / len(r)) if len(r) else float("nan")
     avg_win = float(pos.mean()) if len(pos) else float("nan")
     avg_loss = float(neg.mean()) if len(neg) else float("nan")  # negative
-    payoff = float(avg_win / abs(avg_loss)) if (len(pos) and len(neg) and avg_loss != 0) else float("nan")
+    payoff = (
+        float(avg_win / abs(avg_loss))
+        if (len(pos) and len(neg) and avg_loss != 0)
+        else float("nan")
+    )
     if np.isfinite(win_rate) and np.isfinite(payoff) and payoff > 0:
         kelly = float(win_rate - (1.0 - win_rate) / payoff)
     else:
@@ -151,8 +165,15 @@ def _dist_stats(x: pd.Series | np.ndarray) -> dict[str, float | int | None]:
     return out
 
 
-def _metrics_from_nav(*, nav: pd.Series, rf_annual: float) -> dict[str, float | int | None]:
-    nav = pd.to_numeric(nav, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().astype(float)
+def _metrics_from_nav(
+    *, nav: pd.Series, rf_annual: float
+) -> dict[str, float | int | None]:
+    nav = (
+        pd.to_numeric(nav, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .astype(float)
+    )
     if nav.empty or len(nav) < 3:
         return {
             "cumulative_return": None,
@@ -168,15 +189,25 @@ def _metrics_from_nav(*, nav: pd.Series, rf_annual: float) -> dict[str, float | 
             "ulcer_index": None,
             "ulcer_performance_index": None,
         }
-    daily_ret = nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    daily_ret = (
+        nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    )
     cum = float(nav.iloc[-1] / nav.iloc[0] - 1.0)
     ann_ret = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
     ann_vol = float(_annualized_vol(daily_ret, ann_factor=TRADING_DAYS_PER_YEAR))
-    sharpe = float(_sharpe(daily_ret, rf=float(rf_annual), ann_factor=TRADING_DAYS_PER_YEAR))
-    sortino = float(_sortino(daily_ret, rf=float(rf_annual), ann_factor=TRADING_DAYS_PER_YEAR))
+    sharpe = float(
+        _sharpe(daily_ret, rf=float(rf_annual), ann_factor=TRADING_DAYS_PER_YEAR)
+    )
+    sortino = float(
+        _sortino(daily_ret, rf=float(rf_annual), ann_factor=TRADING_DAYS_PER_YEAR)
+    )
     mdd = float(_max_drawdown(nav))
     mdd_dur = int(_max_drawdown_duration_days(nav))
-    calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
+    calmar = (
+        float(ann_ret / abs(mdd))
+        if np.isfinite(mdd) and float(mdd) < 0
+        else float("nan")
+    )
     ui = float(_ulcer_index(nav, in_percent=True))
     ui_den = ui / 100.0
     upi = float((ann_ret - float(rf_annual)) / ui_den) if ui_den > 0 else float("nan")
@@ -204,7 +235,9 @@ def generate_next_action(inputs: VixSignalInputs) -> dict[str, Any]:
     - target_position: long/cash
     - reason + signal values
     """
-    cn_close, cn_to_us = _map_us_close_to_cn_trade_dates(inputs.index_close_us, align=inputs.index_align, cal=inputs.calendar)
+    cn_close, cn_to_us = _map_us_close_to_cn_trade_dates(
+        inputs.index_close_us, align=inputs.index_align, cal=inputs.calendar
+    )
     if cn_close.empty or len(cn_close) < 3:
         return {"ok": False, "error": "insufficient_index_history"}
 
@@ -243,14 +276,20 @@ def generate_next_action(inputs: VixSignalInputs) -> dict[str, Any]:
         q = float(min(max(inputs.threshold_quantile, 0.01), 0.99))
         thr_abs = float(np.quantile(abs_hist, q))
     # hard floor
-    thr_eff = float(inputs.min_abs_ret) if np.isfinite(float(inputs.min_abs_ret)) else 0.0
+    thr_eff = (
+        float(inputs.min_abs_ret) if np.isfinite(float(inputs.min_abs_ret)) else 0.0
+    )
     if np.isfinite(thr_abs):
         thr_eff = max(thr_eff, thr_abs)
 
     sig = float(idx_ret.loc[action_date])
     sig_abs = abs(sig)
     us_date = cn_to_us.get(action_date)
-    v_close = float(cn_close.loc[action_date]) if action_date in cn_close.index else float("nan")
+    v_close = (
+        float(cn_close.loc[action_date])
+        if action_date in cn_close.index
+        else float("nan")
+    )
 
     # Risk rule (configurable by sign): for Nasdaq ETF we usually interpret VIX up as risk-off.
     # We'll express as target position; action depends on current_position.
@@ -259,7 +298,11 @@ def generate_next_action(inputs: VixSignalInputs) -> dict[str, Any]:
         action: Action = "HOLD"
         reason = "signal_nan"
     elif sig_abs < thr_eff:
-        target = inputs.current_position if inputs.current_position in {"long", "cash"} else "unknown"
+        target = (
+            inputs.current_position
+            if inputs.current_position in {"long", "cash"}
+            else "unknown"
+        )
         action = "HOLD"
         reason = "below_threshold"
     else:
@@ -346,7 +389,9 @@ def backtest_vix_next_day_signal(
         if etf_open.empty or len(etf_open) < 6:
             return {"ok": False, "error": "insufficient_etf_open_range"}
 
-    cn_idx_close, cn_to_us = _map_us_close_to_cn_trade_dates(index_close_us, align=index_align, cal=calendar)
+    cn_idx_close, cn_to_us = _map_us_close_to_cn_trade_dates(
+        index_close_us, align=index_align, cal=calendar
+    )
     if cn_idx_close.empty or len(cn_idx_close) < 5:
         return {"ok": False, "error": "insufficient_index_history"}
 
@@ -378,7 +423,9 @@ def backtest_vix_next_day_signal(
     df["thr_eff"] = thr_eff
 
     # signal active?
-    df["sig_active"] = (abs_sig.to_numpy(dtype=float) >= df["thr_eff"].to_numpy(dtype=float)) & abs_sig.notna()
+    df["sig_active"] = (
+        abs_sig.to_numpy(dtype=float) >= df["thr_eff"].to_numpy(dtype=float)
+    ) & abs_sig.notna()
 
     # target position for each date
     # - active: VIX up => cash, VIX down => long
@@ -397,10 +444,14 @@ def backtest_vix_next_day_signal(
     # action based on change vs yesterday
     df["pos_prev"] = df["pos_num"].shift(1)
     df["turnover"] = (df["pos_num"] - df["pos_prev"]).abs().fillna(0.0)
+
     def _action(row) -> str:
         if float(row["turnover"]) <= 0:
             return "HOLD"
-        return "BUY" if float(row["pos_num"]) > float(row["pos_prev"] or 0.0) else "SELL"
+        return (
+            "BUY" if float(row["pos_num"]) > float(row["pos_prev"] or 0.0) else "SELL"
+        )
+
     df["action"] = df.apply(_action, axis=1)
     # Backtest ends at `end` (inclusive); we don't realize PnL beyond the last available exec return.
     # Avoid a phantom last-day trade affecting logs/metrics when there is no T->T+1 return.
@@ -414,9 +465,21 @@ def backtest_vix_next_day_signal(
     nav_b = [float(initial_nav)]
     if em == "open_open":
         for i in range(0, len(df) - 1):
-            r = float(df["etf_ret_exec"].iloc[i]) if np.isfinite(float(df["etf_ret_exec"].iloc[i] or 0.0)) else 0.0
-            posi = float(df["pos_num"].iloc[i]) if np.isfinite(float(df["pos_num"].iloc[i] or 0.0)) else 0.0
-            to = float(df["turnover"].iloc[i]) if np.isfinite(float(df["turnover"].iloc[i] or 0.0)) else 0.0
+            r = (
+                float(df["etf_ret_exec"].iloc[i])
+                if np.isfinite(float(df["etf_ret_exec"].iloc[i] or 0.0))
+                else 0.0
+            )
+            posi = (
+                float(df["pos_num"].iloc[i])
+                if np.isfinite(float(df["pos_num"].iloc[i] or 0.0))
+                else 0.0
+            )
+            to = (
+                float(df["turnover"].iloc[i])
+                if np.isfinite(float(df["turnover"].iloc[i] or 0.0))
+                else 0.0
+            )
 
             ns_prev = nav_s[-1]
             ns = ns_prev * (1.0 - cost_rate * to)
@@ -429,9 +492,21 @@ def backtest_vix_next_day_signal(
     else:
         # legacy: apply position to same-day close-to-close return
         for i in range(1, len(df)):
-            r = float(df["etf_ret_exec"].iloc[i]) if np.isfinite(float(df["etf_ret_exec"].iloc[i] or 0.0)) else 0.0
-            posi = float(df["pos_num"].iloc[i]) if np.isfinite(float(df["pos_num"].iloc[i] or 0.0)) else 0.0
-            to = float(df["turnover"].iloc[i]) if np.isfinite(float(df["turnover"].iloc[i] or 0.0)) else 0.0
+            r = (
+                float(df["etf_ret_exec"].iloc[i])
+                if np.isfinite(float(df["etf_ret_exec"].iloc[i] or 0.0))
+                else 0.0
+            )
+            posi = (
+                float(df["pos_num"].iloc[i])
+                if np.isfinite(float(df["pos_num"].iloc[i] or 0.0))
+                else 0.0
+            )
+            to = (
+                float(df["turnover"].iloc[i])
+                if np.isfinite(float(df["turnover"].iloc[i] or 0.0))
+                else 0.0
+            )
 
             ns_prev = nav_s[-1]
             ns = ns_prev * (1.0 - cost_rate * to)
@@ -445,16 +520,30 @@ def backtest_vix_next_day_signal(
     df["nav_strategy"] = nav_s
     df["nav_buy_hold"] = nav_b
     # Excess NAV (strategy daily active return vs buy&hold)
-    strat_daily = pd.Series(df["nav_strategy"], index=pd.to_datetime(df.index)).pct_change().fillna(0.0).astype(float)
-    bh_daily = pd.Series(df["nav_buy_hold"], index=pd.to_datetime(df.index)).pct_change().fillna(0.0).astype(float)
+    strat_daily = (
+        pd.Series(df["nav_strategy"], index=pd.to_datetime(df.index))
+        .pct_change()
+        .fillna(0.0)
+        .astype(float)
+    )
+    bh_daily = (
+        pd.Series(df["nav_buy_hold"], index=pd.to_datetime(df.index))
+        .pct_change()
+        .fillna(0.0)
+        .astype(float)
+    )
     active = (strat_daily - bh_daily).astype(float)
     nav_excess = (1.0 + active).cumprod().astype(float)
     nav_excess.iloc[0] = 1.0
     df["nav_excess"] = nav_excess.to_numpy(dtype=float)
 
     # metrics
-    nav_s_ser = pd.Series(df["nav_strategy"], index=pd.to_datetime(df.index), dtype=float)
-    nav_b_ser = pd.Series(df["nav_buy_hold"], index=pd.to_datetime(df.index), dtype=float)
+    nav_s_ser = pd.Series(
+        df["nav_strategy"], index=pd.to_datetime(df.index), dtype=float
+    )
+    nav_b_ser = pd.Series(
+        df["nav_buy_hold"], index=pd.to_datetime(df.index), dtype=float
+    )
     nav_x_ser = pd.Series(df["nav_excess"], index=pd.to_datetime(df.index), dtype=float)
     ms = _metrics_from_nav(nav=nav_s_ser, rf_annual=0.0)
     mb = _metrics_from_nav(nav=nav_b_ser, rf_annual=0.0)
@@ -465,21 +554,42 @@ def backtest_vix_next_day_signal(
 
     # period returns + win/payoff/kelly
     periods = {
-        "daily": pd.DataFrame({"period_end": nav_s_ser.index.date.astype(str), "return": strat_daily.to_numpy(dtype=float)}).iloc[1:].reset_index(drop=True),
+        "daily": pd.DataFrame(
+            {
+                "period_end": nav_s_ser.index.date.astype(str),
+                "return": strat_daily.to_numpy(dtype=float),
+            }
+        )
+        .iloc[1:]
+        .reset_index(drop=True),
         "weekly": _period_returns(nav_s_ser, "W-FRI"),
         "monthly": _period_returns(nav_s_ser, "ME"),
         "quarterly": _period_returns(nav_s_ser, "QE"),
         "yearly": _period_returns(nav_s_ser, "YE"),
     }
     periods_b = {
-        "daily": pd.DataFrame({"period_end": nav_b_ser.index.date.astype(str), "return": bh_daily.to_numpy(dtype=float)}).iloc[1:].reset_index(drop=True),
+        "daily": pd.DataFrame(
+            {
+                "period_end": nav_b_ser.index.date.astype(str),
+                "return": bh_daily.to_numpy(dtype=float),
+            }
+        )
+        .iloc[1:]
+        .reset_index(drop=True),
         "weekly": _period_returns(nav_b_ser, "W-FRI"),
         "monthly": _period_returns(nav_b_ser, "ME"),
         "quarterly": _period_returns(nav_b_ser, "QE"),
         "yearly": _period_returns(nav_b_ser, "YE"),
     }
     periods_x = {
-        "daily": pd.DataFrame({"period_end": nav_x_ser.index.date.astype(str), "return": active.to_numpy(dtype=float)}).iloc[1:].reset_index(drop=True),
+        "daily": pd.DataFrame(
+            {
+                "period_end": nav_x_ser.index.date.astype(str),
+                "return": active.to_numpy(dtype=float),
+            }
+        )
+        .iloc[1:]
+        .reset_index(drop=True),
         "weekly": _period_returns(nav_x_ser, "W-FRI"),
         "monthly": _period_returns(nav_x_ser, "ME"),
         "quarterly": _period_returns(nav_x_ser, "QE"),
@@ -499,9 +609,21 @@ def backtest_vix_next_day_signal(
             "excess": x_df.to_dict(orient="records"),
         }
         distributions_out[k] = {
-            "strategy": _dist_stats(pd.Series(s_df["return"].astype(float).to_numpy(dtype=float)) if (s_df is not None and not s_df.empty) else pd.Series([], dtype=float)),
-            "buy_hold": _dist_stats(pd.Series(b_df["return"].astype(float).to_numpy(dtype=float)) if (b_df is not None and not b_df.empty) else pd.Series([], dtype=float)),
-            "excess": _dist_stats(pd.Series(x_df["return"].astype(float).to_numpy(dtype=float)) if (x_df is not None and not x_df.empty) else pd.Series([], dtype=float)),
+            "strategy": _dist_stats(
+                pd.Series(s_df["return"].astype(float).to_numpy(dtype=float))
+                if (s_df is not None and not s_df.empty)
+                else pd.Series([], dtype=float)
+            ),
+            "buy_hold": _dist_stats(
+                pd.Series(b_df["return"].astype(float).to_numpy(dtype=float))
+                if (b_df is not None and not b_df.empty)
+                else pd.Series([], dtype=float)
+            ),
+            "excess": _dist_stats(
+                pd.Series(x_df["return"].astype(float).to_numpy(dtype=float))
+                if (x_df is not None and not x_df.empty)
+                else pd.Series([], dtype=float)
+            ),
         }
         # win/payoff/kelly (absolute return, not log)
         win_payoff_out[k] = {
@@ -516,7 +638,9 @@ def backtest_vix_next_day_signal(
         for cn_d, us_d in zip(df.index, df["idx_us_date"].to_list()):
             if isinstance(cn_d, dt.date) and isinstance(us_d, dt.date):
                 if us_d >= cn_d:
-                    violations.append({"cn_date": cn_d.isoformat(), "us_date": us_d.isoformat()})
+                    violations.append(
+                        {"cn_date": cn_d.isoformat(), "us_date": us_d.isoformat()}
+                    )
 
     # trade log (ALL dates, newest first)
     trades = []
@@ -528,19 +652,45 @@ def backtest_vix_next_day_signal(
                 "action": str(r.get("action") or "HOLD"),
                 "position": str(r.get("position") or ""),
                 "idx_us_date": us_d.isoformat() if isinstance(us_d, dt.date) else None,
-                "idx_close": (float(r["idx_close"]) if pd.notna(r.get("idx_close")) else None),
-                "idx_log_ret": (float(r["idx_log_ret"]) if pd.notna(r.get("idx_log_ret")) else None),
-                "thr_abs": (float(r["thr_abs"]) if pd.notna(r.get("thr_abs")) else None),
-                "thr_eff": (float(r["thr_eff"]) if pd.notna(r.get("thr_eff")) else None),
-                "sig_active": bool(r.get("sig_active")) if pd.notna(r.get("sig_active")) else False,
-                "etf_open": (float(r["etf_open"]) if pd.notna(r.get("etf_open")) else None),
-                "etf_close": float(r["etf_close"]) if pd.notna(r.get("etf_close")) else None,
-                "etf_ret_exec": (float(r["etf_ret_exec"]) if pd.notna(r.get("etf_ret_exec")) else None),
-                "turnover": float(r["turnover"]) if pd.notna(r.get("turnover")) else 0.0,
+                "idx_close": (
+                    float(r["idx_close"]) if pd.notna(r.get("idx_close")) else None
+                ),
+                "idx_log_ret": (
+                    float(r["idx_log_ret"]) if pd.notna(r.get("idx_log_ret")) else None
+                ),
+                "thr_abs": (
+                    float(r["thr_abs"]) if pd.notna(r.get("thr_abs")) else None
+                ),
+                "thr_eff": (
+                    float(r["thr_eff"]) if pd.notna(r.get("thr_eff")) else None
+                ),
+                "sig_active": bool(r.get("sig_active"))
+                if pd.notna(r.get("sig_active"))
+                else False,
+                "etf_open": (
+                    float(r["etf_open"]) if pd.notna(r.get("etf_open")) else None
+                ),
+                "etf_close": float(r["etf_close"])
+                if pd.notna(r.get("etf_close"))
+                else None,
+                "etf_ret_exec": (
+                    float(r["etf_ret_exec"])
+                    if pd.notna(r.get("etf_ret_exec"))
+                    else None
+                ),
+                "turnover": float(r["turnover"])
+                if pd.notna(r.get("turnover"))
+                else 0.0,
                 "trade_cost_bps": float(max(0.0, trade_cost_bps)),
-                "nav_strategy": float(r["nav_strategy"]) if pd.notna(r.get("nav_strategy")) else None,
-                "nav_buy_hold": float(r["nav_buy_hold"]) if pd.notna(r.get("nav_buy_hold")) else None,
-                "nav_excess": float(r["nav_excess"]) if pd.notna(r.get("nav_excess")) else None,
+                "nav_strategy": float(r["nav_strategy"])
+                if pd.notna(r.get("nav_strategy"))
+                else None,
+                "nav_buy_hold": float(r["nav_buy_hold"])
+                if pd.notna(r.get("nav_buy_hold"))
+                else None,
+                "nav_excess": float(r["nav_excess"])
+                if pd.notna(r.get("nav_excess"))
+                else None,
             }
         )
 
@@ -551,7 +701,11 @@ def backtest_vix_next_day_signal(
             "index_align": str(index_align),
             "calendar": str(calendar),
             "exec_model": str(em),
-            "return_basis": ("etf_open[t]->etf_open[t+1]" if em == "open_open" else "etf_close.pct_change"),
+            "return_basis": (
+                "etf_open[t]->etf_open[t+1]"
+                if em == "open_open"
+                else "etf_close.pct_change"
+            ),
             "start": start.isoformat(),
             "end": end.isoformat(),
             "n": int(len(df)),
@@ -583,9 +737,13 @@ def backtest_vix_next_day_signal(
             "thr_eff": df["thr_eff"].astype(float).tolist(),
             "sig_active": df["sig_active"].astype(bool).tolist(),
         },
-        "metrics": {"strategy": ms, "buy_hold": mb, "excess": mx, "win_payoff_kelly": win_payoff_out},
+        "metrics": {
+            "strategy": ms,
+            "buy_hold": mb,
+            "excess": mx,
+            "win_payoff_kelly": win_payoff_out,
+        },
         "period_returns": period_returns_out,
         "distributions": distributions_out,
         "trades": trades,
     }
-

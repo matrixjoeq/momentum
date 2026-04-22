@@ -15,7 +15,12 @@ def test_api_baseline_weekly5_ew_dashboard_smoke(api_client):
     data = post_json_ok(
         c,
         "/api/analysis/baseline/weekly5-ew-dashboard",
-        {"start": "20240102", "end": "20240103", "risk_free_rate": 0.02, "rebalance_shift": "prev"},
+        {
+            "start": "20240102",
+            "end": "20240103",
+            "risk_free_rate": 0.02,
+            "rebalance_shift": "prev",
+        },
     )
     assert data["meta"]["type"] == "baseline_weekly5_ew_dashboard"
     assert "by_anchor" in data
@@ -24,4 +29,3 @@ def test_api_baseline_weekly5_ew_dashboard_smoke(api_client):
         corr = data["by_anchor"][k]["correlation"]
         assert corr["method"] == "pearson_log_return"
         assert isinstance(corr["n_obs"], int)
-

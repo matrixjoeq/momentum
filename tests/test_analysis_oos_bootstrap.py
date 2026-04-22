@@ -80,7 +80,9 @@ def test_run_rotation_oos_bootstrap_mini():
         "enable_trend_filter": [True],
     }
     cfg = OosBootstrapConfig(oos_ratio=0.3, n_bootstrap=2, block_size=5, seed=1)
-    out = run_rotation_oos_bootstrap(close, FakeUniverse(), param_grid, cost_bps=0.0, config=cfg)
+    out = run_rotation_oos_bootstrap(
+        close, FakeUniverse(), param_grid, cost_bps=0.0, config=cfg
+    )
     assert "error" not in out or "Insufficient" not in str(out.get("error", ""))
     if "error" in out:
         # May fail if in-sample too short for lookback
@@ -94,12 +96,16 @@ def test_run_rotation_oos_bootstrap_mini():
     assert out["chosen_params"].get("top_k") == 1
 
 
-def test_run_trend_oos_bootstrap_bt_fallback_marks_legacy(engine, session_factory, monkeypatch):
+def test_run_trend_oos_bootstrap_bt_fallback_marks_legacy(
+    engine, session_factory, monkeypatch
+):
     dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
         },
         dates=dates,
@@ -108,7 +114,9 @@ def test_run_trend_oos_bootstrap_bt_fallback_marks_legacy(engine, session_factor
     monkeypatch.setattr(
         repo,
         "upsert_prices",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("forced bootstrap synth fail")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("forced bootstrap synth fail")
+        ),
     )
     with session_factory() as db:
         out = run_trend_oos_bootstrap(
@@ -130,12 +138,16 @@ def test_run_trend_oos_bootstrap_bt_fallback_marks_legacy(engine, session_factor
     assert any("fallback to legacy" in str(x).lower() for x in limitations)
 
 
-def test_run_trend_oos_bootstrap_bt_fallback_marks_mixed(engine, session_factory, monkeypatch):
+def test_run_trend_oos_bootstrap_bt_fallback_marks_mixed(
+    engine, session_factory, monkeypatch
+):
     dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
         },
         dates=dates,

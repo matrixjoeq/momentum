@@ -10,5 +10,3 @@ from .schema import ensure_runtime_schema
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     ensure_runtime_schema(engine)
-
-

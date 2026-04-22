@@ -59,4 +59,3 @@ def infer_policy_name(*, code: str, name: str | None) -> InferResult:
     # Default: most A-share index ETFs (10% band)
     _ = code  # reserved for future code-based heuristics
     return InferResult(policy_name="cn_stock_etf_10", source="default")
-

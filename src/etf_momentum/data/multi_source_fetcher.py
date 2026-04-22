@@ -39,7 +39,9 @@ def _try_sina(ak: Any, *, req: FetchRequest) -> list[PriceRow]:
     try:
         packs = fetch_etf_daily_sina_none_and_adjusted(
             ak,
-            SinaFetchRequest(code=req.code, start_date=req.start_date, end_date=req.end_date),
+            SinaFetchRequest(
+                code=req.code, start_date=req.start_date, end_date=req.end_date
+            ),
         )
     except Exception:  # pylint: disable=broad-exception-caught
         return []
@@ -103,4 +105,3 @@ def fetch_etf_daily_with_fallback(
         return rows3, meta
     meta["errors"]["eastmoney"] = "empty_or_failed"
     return [], meta
-

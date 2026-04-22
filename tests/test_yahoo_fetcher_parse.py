@@ -22,4 +22,3 @@ def test_extract_chart_series_parses_dates_and_close():
     assert list(df.columns) == ["date", "close"]
     assert df["date"].tolist() == [dt.date(2024, 1, 2), dt.date(2024, 1, 3)]
     assert df["close"].tolist() == [10.0, 11.5]
-

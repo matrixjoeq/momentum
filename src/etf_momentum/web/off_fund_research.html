@@ -59,18 +59,23 @@
   </head>
   <body>
     <h2>场外基金研究（持有策略）</h2>
-    <div class="muted">支持候选池分组、组间仓位分配、组内协方差风险平价（等风险贡献）。</div>
+    <div class="muted">
+      支持候选池分组、组间仓位分配、组内协方差风险平价（等风险贡献）。
+    </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/off-fund-pool">场外基金候选池配置</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research">ETF 研究页</a>
     </div>
 
     <div class="panel">
-      <h3 style="margin:0 0 8px 0;">参数</h3>
+      <h3 style="margin: 0 0 8px 0">参数</h3>
       <div class="row">
         <div><label>开始日期</label><input id="start" value="20110210" /></div>
-        <div><label>结束日期</label><input id="end" placeholder="YYYYMMDD，留空=今天" /></div>
+        <div>
+          <label>结束日期</label
+          ><input id="end" placeholder="YYYYMMDD，留空=今天" />
+        </div>
         <div>
           <label>净值口径</label>
           <select id="adjust">
@@ -79,51 +84,74 @@
             <option value="none">none</option>
           </select>
         </div>
-        <div><label>无风险利率(年化)</label><input id="rf" value="0.025" /></div>
+        <div>
+          <label>无风险利率(年化)</label><input id="rf" value="0.025" />
+        </div>
         <div>
           <label>组内权重法</label>
           <select id="innerMode">
-            <option value="risk_parity_cov" selected>风险平价(协方差ERC)</option>
+            <option value="risk_parity_cov" selected>
+              风险平价(协方差ERC)
+            </option>
             <option value="equal">等权</option>
           </select>
         </div>
-        <div><label>风险平价窗口(日)</label><input id="rpWindow" value="60" /></div>
+        <div>
+          <label>风险平价窗口(日)</label><input id="rpWindow" value="60" />
+        </div>
         <button id="run">运行持有策略回测</button>
       </div>
-      <div class="muted" style="margin-top:6px;">风险平价说明：按协方差矩阵迭代求解 ERC（Equal Risk Contribution），目标是组内各基金风险贡献相等。</div>
+      <div class="muted" style="margin-top: 6px">
+        风险平价说明：按协方差矩阵迭代求解 ERC（Equal Risk
+        Contribution），目标是组内各基金风险贡献相等。
+      </div>
     </div>
 
     <div class="panel">
-      <h3 style="margin:0 0 8px 0;">候选池与分组</h3>
+      <h3 style="margin: 0 0 8px 0">候选池与分组</h3>
       <div class="row">
         <button id="refreshPool">刷新候选池</button>
         <div>
           <label>持久分组（大组）</label>
-          <select id="persistentGroupSelect" style="min-width:180px;"></select>
+          <select id="persistentGroupSelect" style="min-width: 180px"></select>
         </div>
         <button id="applyPersistentGroup">载入大组</button>
-        <div><label>新分组名</label><input id="persistentGroupName" placeholder="例如：债基核心池" /></div>
+        <div>
+          <label>新分组名</label
+          ><input id="persistentGroupName" placeholder="例如：债基核心池" />
+        </div>
         <button id="savePersistentGroup">保存当前勾选为大组</button>
         <button id="deletePersistentGroup">删除当前大组</button>
       </div>
-      <div class="muted" style="margin-top:6px;">说明：先选择或保存“持久分组（大组）”，然后在该大组内部再做“小分组”。</div>
-      <div class="row" style="margin-top:8px;">
+      <div class="muted" style="margin-top: 6px">
+        说明：先选择或保存“持久分组（大组）”，然后在该大组内部再做“小分组”。
+      </div>
+      <div class="row" style="margin-top: 8px">
         <button id="selAll">全选</button>
         <button id="selNone">取消全选</button>
         <button id="selInvert">反选</button>
-        <div><label>当前小组ID</label><input id="activeGroup" value="S01" /></div>
+        <div>
+          <label>当前小组ID</label><input id="activeGroup" value="S01" />
+        </div>
         <button id="assignToGroup">将勾选标的归入当前小组</button>
         <button id="removeFromGroup">从当前小组移除勾选标的</button>
       </div>
       <table id="poolTable"></table>
       <div class="two">
         <div>
-          <div class="muted" style="margin:8px 0 4px 0;">小分组映射（code=subgroup）</div>
+          <div class="muted" style="margin: 8px 0 4px 0">
+            小分组映射（code=subgroup）
+          </div>
           <textarea id="assetGroups"></textarea>
         </div>
         <div>
-          <div class="muted" style="margin:8px 0 4px 0;">小分组间仓位（subgroup=weight）</div>
-          <textarea id="groupWeights" placeholder="S01=0.6&#10;S02=0.4"></textarea>
+          <div class="muted" style="margin: 8px 0 4px 0">
+            小分组间仓位（subgroup=weight）
+          </div>
+          <textarea
+            id="groupWeights"
+            placeholder="S01=0.6&#10;S02=0.4"
+          ></textarea>
         </div>
       </div>
     </div>
@@ -131,30 +159,47 @@
     <div id="msg" class="msg"></div>
 
     <div class="panel">
-      <div id="navChart" style="width:100%; height:360px;"></div>
+      <div id="navChart" style="width: 100%; height: 360px"></div>
       <table id="metricsTable"></table>
     </div>
     <div class="panel">
-      <h3 style="margin:0 0 6px 0;">市场状态划分（统一前端模块）</h3>
-      <div class="row" style="margin-bottom:8px;">
-        <div><label>slope_window</label><input id="offRegimeSlopeWin" value="20" /></div>
-        <div><label>vol_window</label><input id="offRegimeVolWin" value="20" /></div>
-        <div><label>direction_threshold_ann</label><input id="offRegimeSlopeThr" value="0.03" /></div>
-        <div><label>vol_quantile</label><input id="offRegimeVolQ" value="0.50" /></div>
-        <div><label>future_n</label><input id="offRegimeNAhead" value="5" /></div>
+      <h3 style="margin: 0 0 6px 0">市场状态划分（统一前端模块）</h3>
+      <div class="row" style="margin-bottom: 8px">
+        <div>
+          <label>slope_window</label><input id="offRegimeSlopeWin" value="20" />
+        </div>
+        <div>
+          <label>vol_window</label><input id="offRegimeVolWin" value="20" />
+        </div>
+        <div>
+          <label>direction_threshold_ann</label
+          ><input id="offRegimeSlopeThr" value="0.03" />
+        </div>
+        <div>
+          <label>vol_quantile</label><input id="offRegimeVolQ" value="0.50" />
+        </div>
+        <div>
+          <label>future_n</label><input id="offRegimeNAhead" value="5" />
+        </div>
       </div>
       <div id="offRegimeHint" class="muted"></div>
-      <div id="offRegimeLegend" class="muted" style="margin-top:6px;"></div>
-      <div id="offRegimeTimeline" style="width:100%; height:260px; margin-top:8px;"></div>
-      <table id="offRegimeStats" style="margin-top:8px;"></table>
-      <div id="offRegimeFuture" style="width:100%; height:300px; margin-top:8px;"></div>
-      <table id="offRegimeFutureStats" style="margin-top:8px;"></table>
+      <div id="offRegimeLegend" class="muted" style="margin-top: 6px"></div>
+      <div
+        id="offRegimeTimeline"
+        style="width: 100%; height: 260px; margin-top: 8px"
+      ></div>
+      <table id="offRegimeStats" style="margin-top: 8px"></table>
+      <div
+        id="offRegimeFuture"
+        style="width: 100%; height: 300px; margin-top: 8px"
+      ></div>
+      <table id="offRegimeFutureStats" style="margin-top: 8px"></table>
     </div>
 
     <div class="panel two">
       <div>
         <div class="muted">日度收益率分布统计（组合）</div>
-        <div id="offDailyRetHist" style="width:100%; height:320px;"></div>
+        <div id="offDailyRetHist" style="width: 100%; height: 320px"></div>
       </div>
       <div>
         <div class="muted">分位数与统计（组合）</div>
@@ -164,7 +209,7 @@
 
     <div class="panel">
       <div class="muted">相关性矩阵（日收益）</div>
-      <div id="offCorrHeat" style="width:100%; height:560px;"></div>
+      <div id="offCorrHeat" style="width: 100%; height: 560px"></div>
     </div>
 
     <div class="panel">
@@ -188,7 +233,7 @@
       <div class="two">
         <div>
           <div class="muted">各标的收益率与波动率分布统计</div>
-          <div id="offAssetDistHist" style="width:100%; height:300px;"></div>
+          <div id="offAssetDistHist" style="width: 100%; height: 300px"></div>
         </div>
         <div>
           <div class="muted">分位数与统计（所选标的）</div>
@@ -199,9 +244,14 @@
 
     <div class="panel">
       <div class="muted">月内日历效应（单标的，按净值 close-&gt;close）</div>
-      <div class="row" style="margin-top:6px;">
-        <div><label>标的</label><select id="offCalCode"></select></div>
-        <div><label>月内日期 d（1~31）</label><input id="offCalDay" value="1" /></div>
+      <div class="row" style="margin-top: 6px">
+        <div>
+          <label>标的</label
+          ><select id="offCalCode"></select>
+        </div>
+        <div>
+          <label>月内日期 d（1~31）</label><input id="offCalDay" value="1" />
+        </div>
         <div>
           <label>扫描模式</label>
           <select id="offCalMode">
@@ -209,7 +259,9 @@
             <option value="all" selected>全扫描 1~31</option>
           </select>
         </div>
-        <div><label>持有 n（日）</label><input id="offCalHoldN" value="5" /></div>
+        <div>
+          <label>持有 n（日）</label><input id="offCalHoldN" value="5" />
+        </div>
         <div>
           <label>非交易日处理</label>
           <select id="offCalShift">
@@ -228,10 +280,16 @@
           </select>
         </div>
       </div>
-      <div id="offCalHint" class="muted" style="margin-top:6px;"></div>
-      <div id="offCalHeatmap" style="width:100%; height:280px; margin-top:8px;"></div>
-      <div id="offCalHist" style="width:100%; height:280px; margin-top:8px;"></div>
-      <table id="offCalTable" style="margin-top:8px;"></table>
+      <div id="offCalHint" class="muted" style="margin-top: 6px"></div>
+      <div
+        id="offCalHeatmap"
+        style="width: 100%; height: 280px; margin-top: 8px"
+      ></div>
+      <div
+        id="offCalHist"
+        style="width: 100%; height: 280px; margin-top: 8px"
+      ></div>
+      <table id="offCalTable" style="margin-top: 8px"></table>
     </div>
 
     <div class="panel two">
@@ -259,50 +317,82 @@
     <div class="panel two">
       <div>
         <div class="muted">滚动收益率（60日）</div>
-        <div id="rollingRetChart" style="width:100%; height:300px;"></div>
+        <div id="rollingRetChart" style="width: 100%; height: 300px"></div>
       </div>
       <div>
         <div class="muted">滚动回撤（由净值推导）</div>
-        <div id="rollingDdChart" style="width:100%; height:300px;"></div>
+        <div id="rollingDdChart" style="width: 100%; height: 300px"></div>
       </div>
     </div>
 
     <div class="panel">
       <div class="muted">周期收益率（周/月/季/年，分页+排序）</div>
-      <div class="four" style="margin-top:8px;">
-        <div class="panel" style="margin-top:0;">
+      <div class="four" style="margin-top: 8px">
+        <div class="panel" style="margin-top: 0">
           <h4>周度</h4>
-          <div class="row" style="gap:8px;">
-            <select id="offWeeklySortKey"><option value="period_end" selected>日期</option><option value="return">收益率</option></select>
-            <select id="offWeeklySortDir"><option value="desc" selected>递减</option><option value="asc">递增</option></select>
-            <button id="offWeeklyPrev">上一页</button><button id="offWeeklyNext">下一页</button><span class="muted" id="offWeeklyPage"></span>
+          <div class="row" style="gap: 8px">
+            <select id="offWeeklySortKey">
+              <option value="period_end" selected>日期</option>
+              <option value="return">收益率</option>
+            </select>
+            <select id="offWeeklySortDir">
+              <option value="desc" selected>递减</option>
+              <option value="asc">递增</option>
+            </select>
+            <button id="offWeeklyPrev">上一页</button
+            ><button id="offWeeklyNext">下一页</button
+            ><span class="muted" id="offWeeklyPage"></span>
           </div>
           <table id="offWeekly"></table>
         </div>
-        <div class="panel" style="margin-top:0;">
+        <div class="panel" style="margin-top: 0">
           <h4>月度</h4>
-          <div class="row" style="gap:8px;">
-            <select id="offMonthlySortKey"><option value="period_end" selected>日期</option><option value="return">收益率</option></select>
-            <select id="offMonthlySortDir"><option value="desc" selected>递减</option><option value="asc">递增</option></select>
-            <button id="offMonthlyPrev">上一页</button><button id="offMonthlyNext">下一页</button><span class="muted" id="offMonthlyPage"></span>
+          <div class="row" style="gap: 8px">
+            <select id="offMonthlySortKey">
+              <option value="period_end" selected>日期</option>
+              <option value="return">收益率</option>
+            </select>
+            <select id="offMonthlySortDir">
+              <option value="desc" selected>递减</option>
+              <option value="asc">递增</option>
+            </select>
+            <button id="offMonthlyPrev">上一页</button
+            ><button id="offMonthlyNext">下一页</button
+            ><span class="muted" id="offMonthlyPage"></span>
           </div>
           <table id="offMonthly"></table>
         </div>
-        <div class="panel" style="margin-top:0;">
+        <div class="panel" style="margin-top: 0">
           <h4>季度</h4>
-          <div class="row" style="gap:8px;">
-            <select id="offQuarterlySortKey"><option value="period_end" selected>日期</option><option value="return">收益率</option></select>
-            <select id="offQuarterlySortDir"><option value="desc" selected>递减</option><option value="asc">递增</option></select>
-            <button id="offQuarterlyPrev">上一页</button><button id="offQuarterlyNext">下一页</button><span class="muted" id="offQuarterlyPage"></span>
+          <div class="row" style="gap: 8px">
+            <select id="offQuarterlySortKey">
+              <option value="period_end" selected>日期</option>
+              <option value="return">收益率</option>
+            </select>
+            <select id="offQuarterlySortDir">
+              <option value="desc" selected>递减</option>
+              <option value="asc">递增</option>
+            </select>
+            <button id="offQuarterlyPrev">上一页</button
+            ><button id="offQuarterlyNext">下一页</button
+            ><span class="muted" id="offQuarterlyPage"></span>
           </div>
           <table id="offQuarterly"></table>
         </div>
-        <div class="panel" style="margin-top:0;">
+        <div class="panel" style="margin-top: 0">
           <h4>年度</h4>
-          <div class="row" style="gap:8px;">
-            <select id="offYearlySortKey"><option value="period_end" selected>日期</option><option value="return">收益率</option></select>
-            <select id="offYearlySortDir"><option value="desc" selected>递减</option><option value="asc">递增</option></select>
-            <button id="offYearlyPrev">上一页</button><button id="offYearlyNext">下一页</button><span class="muted" id="offYearlyPage"></span>
+          <div class="row" style="gap: 8px">
+            <select id="offYearlySortKey">
+              <option value="period_end" selected>日期</option>
+              <option value="return">收益率</option>
+            </select>
+            <select id="offYearlySortDir">
+              <option value="desc" selected>递减</option>
+              <option value="asc">递增</option>
+            </select>
+            <button id="offYearlyPrev">上一页</button
+            ><button id="offYearlyNext">下一页</button
+            ><span class="muted" id="offYearlyPage"></span>
           </div>
           <table id="offYearly"></table>
         </div>
@@ -313,10 +403,13 @@
       (function initThemeToggle() {
         const key = `theme:${location.pathname}`;
         const html = document.documentElement;
-        const nextTheme = () => (html.getAttribute("data-theme") === "light" ? "dark" : "light");
+        const nextTheme = () =>
+          html.getAttribute("data-theme") === "light" ? "dark" : "light";
         const apply = (theme) => {
           html.setAttribute("data-theme", theme);
-          try { localStorage.setItem(key, theme); } catch (_) {}
+          try {
+            localStorage.setItem(key, theme);
+          } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
         };
@@ -331,12 +424,24 @@
         });
       })();
 
-      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const api = (path, opts) =>
+        fetch(`/api${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
       const $ = (id) => document.getElementById(id);
-      const esc = (x) => String(x == null ? "" : x).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-      const fmtPct = (x) => Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "-";
-      const fmtNum = (x, n = 4) => Number.isFinite(Number(x)) ? Number(x).toFixed(n) : "-";
-      const setMsg = (x) => { $("msg").textContent = x || ""; };
+      const esc = (x) =>
+        String(x == null ? "" : x)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      const fmtPct = (x) =>
+        Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "-";
+      const fmtNum = (x, n = 4) =>
+        Number.isFinite(Number(x)) ? Number(x).toFixed(n) : "-";
+      const setMsg = (x) => {
+        $("msg").textContent = x || "";
+      };
       function renderOffRegimePanel({ dates, close }) {
         if (!window.MarketRegimeUI) return;
         const tl = $("offRegimeTimeline");
@@ -346,7 +451,12 @@
         const fst = $("offRegimeFutureStats");
         const hint = $("offRegimeHint");
         if (!tl) return;
-        if (!Array.isArray(dates) || !Array.isArray(close) || dates.length < 10 || dates.length !== close.length) {
+        if (
+          !Array.isArray(dates) ||
+          !Array.isArray(close) ||
+          dates.length < 10 ||
+          dates.length !== close.length
+        ) {
           tl.innerHTML = "<div class='muted'>暂无可用状态数据</div>";
           if (lg) lg.innerHTML = "";
           if (st) st.innerHTML = "";
@@ -356,54 +466,118 @@
           return;
         }
         const params = {
-          slope_window: Math.max(5, Number(($("offRegimeSlopeWin") && $("offRegimeSlopeWin").value) || 20)),
-          vol_window: Math.max(5, Number(($("offRegimeVolWin") && $("offRegimeVolWin").value) || 20)),
-          direction_threshold_ann: Math.max(0, Number(($("offRegimeSlopeThr") && $("offRegimeSlopeThr").value) || 0.03)),
-          vol_quantile: Math.max(0.01, Math.min(0.99, Number(($("offRegimeVolQ") && $("offRegimeVolQ").value) || 0.5))),
+          slope_window: Math.max(
+            5,
+            Number(
+              ($("offRegimeSlopeWin") && $("offRegimeSlopeWin").value) || 20,
+            ),
+          ),
+          vol_window: Math.max(
+            5,
+            Number(($("offRegimeVolWin") && $("offRegimeVolWin").value) || 20),
+          ),
+          direction_threshold_ann: Math.max(
+            0,
+            Number(
+              ($("offRegimeSlopeThr") && $("offRegimeSlopeThr").value) || 0.03,
+            ),
+          ),
+          vol_quantile: Math.max(
+            0.01,
+            Math.min(
+              0.99,
+              Number(($("offRegimeVolQ") && $("offRegimeVolQ").value) || 0.5),
+            ),
+          ),
         };
-        const nAhead = Math.max(1, Number(($("offRegimeNAhead") && $("offRegimeNAhead").value) || 5));
-        const rows = window.MarketRegimeUI.computeRows({ dates, close, ...params });
+        const nAhead = Math.max(
+          1,
+          Number(($("offRegimeNAhead") && $("offRegimeNAhead").value) || 5),
+        );
+        const rows = window.MarketRegimeUI.computeRows({
+          dates,
+          close,
+          ...params,
+        });
         const order = window.MarketRegimeUI.STATE_ORDER || [];
         const labels = window.MarketRegimeUI.STATE_LABEL || {};
-        const selected = window.__offRegimeSelected instanceof Set ? window.__offRegimeSelected : new Set(order);
+        const selected =
+          window.__offRegimeSelected instanceof Set
+            ? window.__offRegimeSelected
+            : new Set(order);
         window.__offRegimeSelected = selected;
         window.MarketRegimeUI.renderLegend(
-          lg, selected,
-          (s) => { if (selected.has(s)) selected.delete(s); else selected.add(s); if (selected.size === 0) for (const x of order) selected.add(x); renderOffRegimePanel({ dates, close }); },
-          (s) => { selected.clear(); selected.add(s); renderOffRegimePanel({ dates, close }); }
+          lg,
+          selected,
+          (s) => {
+            if (selected.has(s)) selected.delete(s);
+            else selected.add(s);
+            if (selected.size === 0) for (const x of order) selected.add(x);
+            renderOffRegimePanel({ dates, close });
+          },
+          (s) => {
+            selected.clear();
+            selected.add(s);
+            renderOffRegimePanel({ dates, close });
+          },
         );
-        window.MarketRegimeUI.renderTimeline("offRegimeTimeline", rows, selected, "组合净值市场状态区间", "组合净值");
+        window.MarketRegimeUI.renderTimeline(
+          "offRegimeTimeline",
+          rows,
+          selected,
+          "组合净值市场状态区间",
+          "组合净值",
+        );
         const by = window.MarketRegimeUI.summarizeStateStats(rows);
         if (st) {
-          st.innerHTML = "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
-            order.map((s) => {
-              const xs = ((by[s] || {}).rets || []).filter(Number.isFinite);
-              const n = xs.length;
-              const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
-              const w = n ? xs.filter((x) => x > 0).length / n : NaN;
-              const v = n > 1 ? Math.sqrt(xs.reduce((p, x) => p + (x - m) * (x - m), 0) / (n - 1)) : NaN;
-              return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
-            }).join("");
+          st.innerHTML =
+            "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
+            order
+              .map((s) => {
+                const xs = ((by[s] || {}).rets || []).filter(Number.isFinite);
+                const n = xs.length;
+                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                const v =
+                  n > 1
+                    ? Math.sqrt(
+                        xs.reduce((p, x) => p + (x - m) * (x - m), 0) / (n - 1),
+                      )
+                    : NaN;
+                return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
+              })
+              .join("");
         }
         const fwd = window.MarketRegimeUI.summarizeForwardByState(rows, nAhead);
-        window.MarketRegimeUI.renderForwardBox("offRegimeFuture", fwd, nAhead, selected);
+        window.MarketRegimeUI.renderForwardBox(
+          "offRegimeFuture",
+          fwd,
+          nAhead,
+          selected,
+        );
         if (fst) {
-          fst.innerHTML = "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
-            order.map((s) => {
-              const xs = (fwd[s] || []).filter(Number.isFinite);
-              const n = xs.length;
-              const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
-              const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.1) : NaN;
-              const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.5) : NaN;
-              const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.9) : NaN;
-              const w = n ? xs.filter((x) => x > 0).length / n : NaN;
-              return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
-            }).join("");
+          fst.innerHTML =
+            "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
+            order
+              .map((s) => {
+                const xs = (fwd[s] || []).filter(Number.isFinite);
+                const n = xs.length;
+                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.1) : NaN;
+                const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.5) : NaN;
+                const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.9) : NaN;
+                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
+              })
+              .join("");
         }
-        if (hint) hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
+        if (hint)
+          hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
       }
       const todayYmd = () => {
-        const d = new Date(); const m = String(d.getMonth() + 1).padStart(2, "0"); const dd = String(d.getDate()).padStart(2, "0");
+        const d = new Date();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
         return `${d.getFullYear()}${m}${dd}`;
       };
 
@@ -449,7 +623,11 @@
         return n ? `${c} (${n})` : c;
       }
       function validCodes(arr) {
-        return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean)));
+        return Array.from(
+          new Set(
+            (arr || []).map((x) => String(x || "").trim()).filter(Boolean),
+          ),
+        );
       }
       function sanitizeGroupName(x) {
         const s = String(x || "").trim();
@@ -457,13 +635,16 @@
       }
       function persistState() {
         try {
-          localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-            groups: persistentGroups,
-            active: activePersistentGroup,
-            subgroup_maps: subgroupMapByPersistent,
-            subgroup_weights: subgroupWeightsByPersistent,
-            active_subgroups: activeSubgroupByPersistent,
-          }));
+          localStorage.setItem(
+            SETTINGS_KEY,
+            JSON.stringify({
+              groups: persistentGroups,
+              active: activePersistentGroup,
+              subgroup_maps: subgroupMapByPersistent,
+              subgroup_weights: subgroupWeightsByPersistent,
+              active_subgroups: activeSubgroupByPersistent,
+            }),
+          );
         } catch (_) {}
       }
       function hydrateStateFromStorage() {
@@ -471,7 +652,10 @@
           const raw = localStorage.getItem(SETTINGS_KEY);
           if (!raw) return;
           const obj = JSON.parse(raw);
-          const g = (obj && obj.groups && typeof obj.groups === "object") ? obj.groups : {};
+          const g =
+            obj && obj.groups && typeof obj.groups === "object"
+              ? obj.groups
+              : {};
           const out = {};
           for (const [k, v] of Object.entries(g)) {
             const nm = sanitizeGroupName(k);
@@ -479,10 +663,24 @@
             out[nm] = validCodes(Array.isArray(v) ? v : []);
           }
           persistentGroups = out;
-          activePersistentGroup = sanitizeGroupName(obj && obj.active) || DEFAULT_PERSISTENT_GROUP;
-          subgroupMapByPersistent = (obj && obj.subgroup_maps && typeof obj.subgroup_maps === "object") ? obj.subgroup_maps : {};
-          subgroupWeightsByPersistent = (obj && obj.subgroup_weights && typeof obj.subgroup_weights === "object") ? obj.subgroup_weights : {};
-          activeSubgroupByPersistent = (obj && obj.active_subgroups && typeof obj.active_subgroups === "object") ? obj.active_subgroups : {};
+          activePersistentGroup =
+            sanitizeGroupName(obj && obj.active) || DEFAULT_PERSISTENT_GROUP;
+          subgroupMapByPersistent =
+            obj && obj.subgroup_maps && typeof obj.subgroup_maps === "object"
+              ? obj.subgroup_maps
+              : {};
+          subgroupWeightsByPersistent =
+            obj &&
+            obj.subgroup_weights &&
+            typeof obj.subgroup_weights === "object"
+              ? obj.subgroup_weights
+              : {};
+          activeSubgroupByPersistent =
+            obj &&
+            obj.active_subgroups &&
+            typeof obj.active_subgroups === "object"
+              ? obj.active_subgroups
+              : {};
         } catch (_) {}
       }
       function ensurePersistentGroupExists(name) {
@@ -493,23 +691,46 @@
       function renderPersistentGroupSelect() {
         const sel = $("persistentGroupSelect");
         if (!sel) return;
-        const names = Object.keys(persistentGroups).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-        sel.innerHTML = names.map((n) => `<option value="${esc(n)}" ${n === activePersistentGroup ? "selected" : ""}>${esc(n)}</option>`).join("");
+        const names = Object.keys(persistentGroups).sort((a, b) =>
+          a.localeCompare(b, "zh-Hans-CN"),
+        );
+        sel.innerHTML = names
+          .map(
+            (n) =>
+              `<option value="${esc(n)}" ${n === activePersistentGroup ? "selected" : ""}>${esc(n)}</option>`,
+          )
+          .join("");
       }
-      function applyPersistentGroupSelection(name, { keepSelection = false } = {}) {
+      function applyPersistentGroupSelection(
+        name,
+        { keepSelection = false } = {},
+      ) {
         activePersistentGroup = ensurePersistentGroupExists(name);
-        const baseCodes = validCodes(persistentGroups[activePersistentGroup] || []);
+        const baseCodes = validCodes(
+          persistentGroups[activePersistentGroup] || [],
+        );
         if (!keepSelection) {
           selected.clear();
           for (const c of baseCodes) selected.add(c);
         }
-        const mapRaw = (subgroupMapByPersistent && subgroupMapByPersistent[activePersistentGroup] && typeof subgroupMapByPersistent[activePersistentGroup] === "object")
-          ? subgroupMapByPersistent[activePersistentGroup]
-          : {};
+        const mapRaw =
+          subgroupMapByPersistent &&
+          subgroupMapByPersistent[activePersistentGroup] &&
+          typeof subgroupMapByPersistent[activePersistentGroup] === "object"
+            ? subgroupMapByPersistent[activePersistentGroup]
+            : {};
         for (const k of Object.keys(codeGroup)) delete codeGroup[k];
         for (const c of baseCodes) codeGroup[c] = String(mapRaw[c] || "S01");
-        $("groupWeights").value = String((subgroupWeightsByPersistent && subgroupWeightsByPersistent[activePersistentGroup]) || "");
-        const activeSub = String((activeSubgroupByPersistent && activeSubgroupByPersistent[activePersistentGroup]) || "S01");
+        $("groupWeights").value = String(
+          (subgroupWeightsByPersistent &&
+            subgroupWeightsByPersistent[activePersistentGroup]) ||
+            "",
+        );
+        const activeSub = String(
+          (activeSubgroupByPersistent &&
+            activeSubgroupByPersistent[activePersistentGroup]) ||
+            "S01",
+        );
         if ($("activeGroup")) $("activeGroup").value = activeSub;
         syncAssetGroupsText();
         renderPersistentGroupSelect();
@@ -518,12 +739,17 @@
       function saveCurrentSubgroupState() {
         if (!activePersistentGroup) return;
         const mp = {};
-        for (const c of (persistentGroups[activePersistentGroup] || [])) {
+        for (const c of persistentGroups[activePersistentGroup] || []) {
           if (codeGroup[c]) mp[c] = String(codeGroup[c]);
         }
         subgroupMapByPersistent[activePersistentGroup] = mp;
-        subgroupWeightsByPersistent[activePersistentGroup] = String(($("groupWeights").value || "")).trim();
-        activeSubgroupByPersistent[activePersistentGroup] = String((($("activeGroup") && $("activeGroup").value) || "S01")).trim() || "S01";
+        subgroupWeightsByPersistent[activePersistentGroup] = String(
+          $("groupWeights").value || "",
+        ).trim();
+        activeSubgroupByPersistent[activePersistentGroup] =
+          String(
+            ($("activeGroup") && $("activeGroup").value) || "S01",
+          ).trim() || "S01";
         persistState();
       }
 
@@ -532,7 +758,10 @@
         let sum = 0;
         for (const k of keys) {
           const v = Number(mp[k]);
-          if (Number.isFinite(v) && v > 0) { raw[k] = v; sum += v; }
+          if (Number.isFinite(v) && v > 0) {
+            raw[k] = v;
+            sum += v;
+          }
         }
         if (sum <= 0 && keys.length > 0) {
           const eq = 1 / keys.length;
@@ -544,7 +773,12 @@
         return out;
       }
 
-      function dot(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += Number(a[i] || 0) * Number(b[i] || 0); return s; }
+      function dot(a, b) {
+        let s = 0;
+        for (let i = 0; i < a.length; i++)
+          s += Number(a[i] || 0) * Number(b[i] || 0);
+        return s;
+      }
       function std(arr) {
         const xs = (arr || []).map(Number).filter(Number.isFinite);
         const n = xs.length;
@@ -554,30 +788,44 @@
         return Math.sqrt(Math.max(0, v));
       }
       function percentile(arr, p) {
-        const xs = (arr || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+        const xs = (arr || [])
+          .map(Number)
+          .filter(Number.isFinite)
+          .sort((a, b) => a - b);
         if (!xs.length) return NaN;
         const pp = Math.max(0, Math.min(100, Number(p)));
         const i = (pp / 100) * (xs.length - 1);
-        const lo = Math.floor(i), hi = Math.ceil(i);
+        const lo = Math.floor(i),
+          hi = Math.ceil(i);
         if (lo === hi) return xs[lo];
         const w = i - lo;
         return xs[lo] * (1 - w) + xs[hi] * w;
       }
       function corr(a, b) {
-        const x = []; const y = [];
+        const x = [];
+        const y = [];
         const n0 = Math.min((a || []).length, (b || []).length);
         for (let i = 0; i < n0; i++) {
-          const xv = Number(a[i]), yv = Number(b[i]);
-          if (Number.isFinite(xv) && Number.isFinite(yv)) { x.push(xv); y.push(yv); }
+          const xv = Number(a[i]),
+            yv = Number(b[i]);
+          if (Number.isFinite(xv) && Number.isFinite(yv)) {
+            x.push(xv);
+            y.push(yv);
+          }
         }
         const n = x.length;
         if (n <= 1) return NaN;
         const mx = x.reduce((s, v) => s + v, 0) / n;
         const my = y.reduce((s, v) => s + v, 0) / n;
-        let sxy = 0, sxx = 0, syy = 0;
+        let sxy = 0,
+          sxx = 0,
+          syy = 0;
         for (let i = 0; i < n; i++) {
-          const dx = x[i] - mx, dy = y[i] - my;
-          sxy += dx * dy; sxx += dx * dx; syy += dy * dy;
+          const dx = x[i] - mx,
+            dy = y[i] - my;
+          sxy += dx * dy;
+          sxx += dx * dx;
+          syy += dy * dy;
         }
         if (sxx <= 0 || syy <= 0) return NaN;
         return sxy / Math.sqrt(sxx * syy);
@@ -585,9 +833,12 @@
       function drawdownSeries(nav) {
         const out = [];
         let peak = -Infinity;
-        for (const v0 of (nav || [])) {
+        for (const v0 of nav || []) {
           const v = Number(v0);
-          if (!Number.isFinite(v) || v <= 0) { out.push(null); continue; }
+          if (!Number.isFinite(v) || v <= 0) {
+            out.push(null);
+            continue;
+          }
           if (v > peak) peak = v;
           out.push(peak > 0 ? v / peak - 1 : null);
         }
@@ -597,8 +848,10 @@
         const w = Math.max(2, Math.floor(Number(win) || 60));
         const out = new Array((nav || []).length).fill(null);
         for (let i = w; i < out.length; i++) {
-          const a = Number(nav[i - w]); const b = Number(nav[i]);
-          if (Number.isFinite(a) && Number.isFinite(b) && a > 0) out[i] = b / a - 1;
+          const a = Number(nav[i - w]);
+          const b = Number(nav[i]);
+          if (Number.isFinite(a) && Number.isFinite(b) && a > 0)
+            out[i] = b / a - 1;
         }
         return out;
       }
@@ -606,7 +859,10 @@
         const w = Math.max(5, Math.floor(Number(win) || 60));
         const out = new Array((rs || []).length).fill(null);
         for (let i = w - 1; i < out.length; i++) {
-          const seg = rs.slice(i - w + 1, i + 1).map(Number).filter(Number.isFinite);
+          const seg = rs
+            .slice(i - w + 1, i + 1)
+            .map(Number)
+            .filter(Number.isFinite);
           if (seg.length < w) continue;
           const s = std(seg);
           out[i] = Number.isFinite(s) ? s * Math.sqrt(252) : null;
@@ -618,14 +874,20 @@
         const n = retRows.length;
         if (!n) return [];
         const t = retRows[0].length;
-        const means = retRows.map((r) => (r.reduce((a, b) => a + b, 0) / Math.max(1, r.length)));
-        const c = Array.from({ length: n }, () => Array.from({ length: n }, () => 0));
+        const means = retRows.map(
+          (r) => r.reduce((a, b) => a + b, 0) / Math.max(1, r.length),
+        );
+        const c = Array.from({ length: n }, () =>
+          Array.from({ length: n }, () => 0),
+        );
         for (let i = 0; i < n; i++) {
           for (let j = i; j < n; j++) {
             let s = 0;
-            for (let k = 0; k < t; k++) s += (retRows[i][k] - means[i]) * (retRows[j][k] - means[j]);
+            for (let k = 0; k < t; k++)
+              s += (retRows[i][k] - means[i]) * (retRows[j][k] - means[j]);
             const v = t > 1 ? s / (t - 1) : 0;
-            c[i][j] = v; c[j][i] = v;
+            c[i][j] = v;
+            c[j][i] = v;
           }
         }
         return c;
@@ -636,7 +898,8 @@
         const out = Array.from({ length: n }, () => 0);
         for (let i = 0; i < n; i++) {
           let s = 0;
-          for (let j = 0; j < n; j++) s += Number(cov[i][j] || 0) * Number(w[j] || 0);
+          for (let j = 0; j < n; j++)
+            s += Number(cov[i][j] || 0) * Number(w[j] || 0);
           out[i] = s;
         }
         return out;
@@ -678,16 +941,33 @@
         const cum = nav1[nav1.length - 1] - 1;
         const ann = Math.pow(1 + cum, 252 / n) - 1;
         const mean = arr.reduce((a, b) => a + b, 0) / n;
-        const var0 = arr.reduce((a, b) => a + (b - mean) * (b - mean), 0) / Math.max(1, n - 1);
+        const var0 =
+          arr.reduce((a, b) => a + (b - mean) * (b - mean), 0) /
+          Math.max(1, n - 1);
         const vol = Math.sqrt(Math.max(0, var0)) * Math.sqrt(252);
         const rfDaily = Math.pow(1 + Number(rfAnnual || 0), 1 / 252) - 1;
         const ex = arr.map((x) => x - rfDaily);
         const exMean = ex.reduce((a, b) => a + b, 0) / n;
-        const exVar = ex.reduce((a, b) => a + (b - exMean) * (b - exMean), 0) / Math.max(1, n - 1);
-        const sharpe = exVar > 0 ? (exMean / Math.sqrt(exVar)) * Math.sqrt(252) : null;
-        let peak = 1, mdd = 0;
-        for (const v of nav1) { if (v > peak) peak = v; mdd = Math.min(mdd, v / peak - 1); }
-        return { nav: nav1, cumulative_return: cum, annualized_return: ann, annualized_volatility: vol, sharpe_ratio: sharpe, max_drawdown: mdd, sample_days: n };
+        const exVar =
+          ex.reduce((a, b) => a + (b - exMean) * (b - exMean), 0) /
+          Math.max(1, n - 1);
+        const sharpe =
+          exVar > 0 ? (exMean / Math.sqrt(exVar)) * Math.sqrt(252) : null;
+        let peak = 1,
+          mdd = 0;
+        for (const v of nav1) {
+          if (v > peak) peak = v;
+          mdd = Math.min(mdd, v / peak - 1);
+        }
+        return {
+          nav: nav1,
+          cumulative_return: cum,
+          annualized_return: ann,
+          annualized_volatility: vol,
+          sharpe_ratio: sharpe,
+          max_drawdown: mdd,
+          sample_days: n,
+        };
       }
 
       function periodReturns(dates, nav, kind) {
@@ -697,11 +977,13 @@
           const dt = new Date(d + "T00:00:00");
           if (kind === "weekly") {
             const day = (dt.getDay() + 6) % 7; // Mon=0
-            const monday = new Date(dt); monday.setDate(dt.getDate() - day);
+            const monday = new Date(dt);
+            monday.setDate(dt.getDate() - day);
             return monday.toISOString().slice(0, 10);
           }
           if (kind === "monthly") return `${y}-${String(m).padStart(2, "0")}`;
-          if (kind === "quarterly") return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+          if (kind === "quarterly")
+            return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
           return `${y}`;
         };
         const bucket = new Map();
@@ -713,7 +995,8 @@
         const out = [];
         for (const [, idxs] of bucket) {
           if (!idxs.length) continue;
-          const s = idxs[0], e = idxs[idxs.length - 1];
+          const s = idxs[0],
+            e = idxs[idxs.length - 1];
           const prev = s > 0 ? nav[s - 1] : 1;
           const ret = prev > 0 ? nav[e] / prev - 1 : null;
           out.push({ period_end: dates[e], return: ret });
@@ -744,27 +1027,60 @@
         st.page = Math.min(Math.max(1, st.page), totalPages);
         const start = (st.page - 1) * pageSize;
         const pageRows = rows.slice(start, start + pageSize);
-        $(`off${cap}`).innerHTML = `<tr><th>期末</th><th>收益</th></tr>` + pageRows.map((x) => `<tr><td>${esc(x.period_end)}</td><td>${fmtPct(x.return)}</td></tr>`).join("");
-        $(`off${cap}Page`).textContent = `${st.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
+        $(`off${cap}`).innerHTML =
+          `<tr><th>期末</th><th>收益</th></tr>` +
+          pageRows
+            .map(
+              (x) =>
+                `<tr><td>${esc(x.period_end)}</td><td>${fmtPct(x.return)}</td></tr>`,
+            )
+            .join("");
+        $(`off${cap}Page`).textContent =
+          `${st.page}/${totalPages} · 共${total}条 · 每页${pageSize}条`;
       }
       function wireOffPeriodControls(kind) {
         const cap = kind[0].toUpperCase() + kind.slice(1);
-        $(`off${cap}SortKey`).addEventListener("change", () => { offPeriodState[kind].page = 1; renderOffPeriodTable(kind); });
-        $(`off${cap}SortDir`).addEventListener("change", () => { offPeriodState[kind].page = 1; renderOffPeriodTable(kind); });
-        $(`off${cap}Prev`).addEventListener("click", () => { offPeriodState[kind].page -= 1; renderOffPeriodTable(kind); });
-        $(`off${cap}Next`).addEventListener("click", () => { offPeriodState[kind].page += 1; renderOffPeriodTable(kind); });
+        $(`off${cap}SortKey`).addEventListener("change", () => {
+          offPeriodState[kind].page = 1;
+          renderOffPeriodTable(kind);
+        });
+        $(`off${cap}SortDir`).addEventListener("change", () => {
+          offPeriodState[kind].page = 1;
+          renderOffPeriodTable(kind);
+        });
+        $(`off${cap}Prev`).addEventListener("click", () => {
+          offPeriodState[kind].page -= 1;
+          renderOffPeriodTable(kind);
+        });
+        $(`off${cap}Next`).addEventListener("click", () => {
+          offPeriodState[kind].page += 1;
+          renderOffPeriodTable(kind);
+        });
       }
-      function buildAttribution(retByCode, groupByCode, weights, rsPort, totalReturn) {
-        const codes = Object.keys(weights || {}).filter((c) => Number(weights[c]) > 0 && Array.isArray(retByCode[c]));
+      function buildAttribution(
+        retByCode,
+        groupByCode,
+        weights,
+        rsPort,
+        totalReturn,
+      ) {
+        const codes = Object.keys(weights || {}).filter(
+          (c) => Number(weights[c]) > 0 && Array.isArray(retByCode[c]),
+        );
         if (!codes.length) return { byCode: [], byGroup: [] };
         const w = codes.map((c) => Number(weights[c] || 0));
-        const rows = codes.map((c) => (retByCode[c] || []).map(Number).filter(Number.isFinite));
+        const rows = codes.map((c) =>
+          (retByCode[c] || []).map(Number).filter(Number.isFinite),
+        );
         const minLen = Math.min(...rows.map((r) => r.length));
         const mat = rows.map((r) => r.slice(r.length - minLen));
         const cov = covMatrix(mat);
         const m = mv(cov, w);
         const pvar = dot(w, m);
-        const totalLog = (rsPort || []).reduce((a, r) => a + Math.log1p(Number(r || 0)), 0);
+        const totalLog = (rsPort || []).reduce(
+          (a, r) => a + Math.log1p(Number(r || 0)),
+          0,
+        );
         const byCode = [];
         for (let i = 0; i < codes.length; i++) {
           const c = codes[i];
@@ -773,7 +1089,18 @@
           const lg = wr.reduce((a, r) => (r > -1 ? a + Math.log1p(r) : a), 0);
           const retShare = Math.abs(totalLog) > 1e-12 ? lg / totalLog : null;
           const riskShare = pvar > 1e-12 ? (w[i] * m[i]) / pvar : null;
-          byCode.push({ code: c, group: String(groupByCode[c] || "-"), retShare, riskShare, ratio: (retShare != null && riskShare != null && Math.abs(riskShare) > 1e-12) ? retShare / riskShare : null });
+          byCode.push({
+            code: c,
+            group: String(groupByCode[c] || "-"),
+            retShare,
+            riskShare,
+            ratio:
+              retShare != null &&
+              riskShare != null &&
+              Math.abs(riskShare) > 1e-12
+                ? retShare / riskShare
+                : null,
+          });
         }
         const gMap = {};
         for (const x of byCode) {
@@ -782,22 +1109,48 @@
           gMap[g].retShare += Number(x.retShare || 0);
           gMap[g].riskShare += Number(x.riskShare || 0);
         }
-        const byGroup = Object.values(gMap).map((x) => ({ ...x, ratio: (Math.abs(Number(x.riskShare || 0)) > 1e-12) ? Number(x.retShare || 0) / Number(x.riskShare || 0) : null }));
+        const byGroup = Object.values(gMap).map((x) => ({
+          ...x,
+          ratio:
+            Math.abs(Number(x.riskShare || 0)) > 1e-12
+              ? Number(x.retShare || 0) / Number(x.riskShare || 0)
+              : null,
+        }));
         return { byCode, byGroup };
       }
       function renderDist(tableId, chartId, arr, title, asPct = true) {
         const xs = (arr || []).map(Number).filter(Number.isFinite);
         if (!xs.length) {
-          if ($(chartId)) $(chartId).innerHTML = "<div class='muted'>无可用数据</div>";
+          if ($(chartId))
+            $(chartId).innerHTML = "<div class='muted'>无可用数据</div>";
           if ($(tableId)) $(tableId).innerHTML = "";
           return;
         }
-        Plotly.newPlot(chartId, [{ type: "histogram", x: xs, histnorm: "probability", marker: { color: "#5B8FF9" }, nbinsx: 50 }], { margin: { t: 20 }, title }, { responsive: true, displayModeBar: false });
+        Plotly.newPlot(
+          chartId,
+          [
+            {
+              type: "histogram",
+              x: xs,
+              histnorm: "probability",
+              marker: { color: "#5B8FF9" },
+              nbinsx: 50,
+            },
+          ],
+          { margin: { t: 20 }, title },
+          { responsive: true, displayModeBar: false },
+        );
         const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
         const s = std(xs);
-        const q01 = percentile(xs, 1), q05 = percentile(xs, 5), q10 = percentile(xs, 10), q50 = percentile(xs, 50), q90 = percentile(xs, 90), q95 = percentile(xs, 95), q99 = percentile(xs, 99);
+        const q01 = percentile(xs, 1),
+          q05 = percentile(xs, 5),
+          q10 = percentile(xs, 10),
+          q50 = percentile(xs, 50),
+          q90 = percentile(xs, 90),
+          q95 = percentile(xs, 95),
+          q99 = percentile(xs, 99);
         const win = xs.filter((x) => x > 0).length / xs.length;
-        const f = (v) => asPct ? fmtPct(v) : fmtNum(v, 4);
+        const f = (v) => (asPct ? fmtPct(v) : fmtNum(v, 4));
         $(tableId).innerHTML =
           `<tr><th>指标</th><th>值</th></tr>` +
           `<tr><td>样本数</td><td>${xs.length}</td></tr>` +
@@ -816,47 +1169,117 @@
         const names = (ctx.picked || []).map((c) => codeLabel(c));
         const rsBy = ctx.retByCode || {};
         if (!names.length) return;
-        const cm = names.map((_, i) => names.map((__, j) => corr(rsBy[ctx.picked[i]], rsBy[ctx.picked[j]])));
-        const ctext = cm.map((row) => row.map((v) => Number.isFinite(v) ? Number(v).toFixed(3) : "-"));
-        Plotly.newPlot("offCorrHeat", [{
-          type: "heatmap", x: names, y: names, z: cm, zmin: -1, zmax: 1,
-          colorscale: [[0.0, "#2ca02c"], [0.5, "#ffffff"], [1.0, "#d62728"]],
-          text: ctext, texttemplate: "%{text}",
-          hovertemplate: "%{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>", showscale: false,
-        }], { margin: { t: 20, b: 40 }, yaxis: { autorange: "reversed" } }, { responsive: true, displayModeBar: false });
+        const cm = names.map((_, i) =>
+          names.map((__, j) => corr(rsBy[ctx.picked[i]], rsBy[ctx.picked[j]])),
+        );
+        const ctext = cm.map((row) =>
+          row.map((v) => (Number.isFinite(v) ? Number(v).toFixed(3) : "-")),
+        );
+        Plotly.newPlot(
+          "offCorrHeat",
+          [
+            {
+              type: "heatmap",
+              x: names,
+              y: names,
+              z: cm,
+              zmin: -1,
+              zmax: 1,
+              colorscale: [
+                [0.0, "#2ca02c"],
+                [0.5, "#ffffff"],
+                [1.0, "#d62728"],
+              ],
+              text: ctext,
+              texttemplate: "%{text}",
+              hovertemplate: "%{y} × %{x}<br>ρ=%{z:.3f}<extra></extra>",
+              showscale: false,
+            },
+          ],
+          { margin: { t: 20, b: 40 }, yaxis: { autorange: "reversed" } },
+          { responsive: true, displayModeBar: false },
+        );
       }
       function renderAssetDistSelectors(ctx) {
         const sel1 = $("offDistCode");
         const sel2 = $("offCalCode");
-        const opts = (ctx.picked || []).map((c) => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`).join("");
+        const opts = (ctx.picked || [])
+          .map((c) => `<option value="${esc(c)}">${esc(codeLabel(c))}</option>`)
+          .join("");
         sel1.innerHTML = opts;
         sel2.innerHTML = opts;
       }
       function renderAssetDist(ctx) {
-        const code = String(($("offDistCode").value || "")).trim();
+        const code = String($("offDistCode").value || "").trim();
         if (!code || !ctx.retByCode[code]) return;
-        const tp = String(($("offDistType").value || "returns"));
+        const tp = String($("offDistType").value || "returns");
         if (tp === "returns") {
-          renderDist("offAssetDistQuantiles", "offAssetDistHist", ctx.retByCode[code], `${codeLabel(code)} · 日收益率分布`, true);
+          renderDist(
+            "offAssetDistQuantiles",
+            "offAssetDistHist",
+            ctx.retByCode[code],
+            `${codeLabel(code)} · 日收益率分布`,
+            true,
+          );
         } else {
-          const w = Math.max(5, Math.floor(Number(($("offDistVolWin").value || "60"))));
-          const rv = rollingAnnVol(ctx.retByCode[code], w).filter((x) => Number.isFinite(Number(x)));
-          renderDist("offAssetDistQuantiles", "offAssetDistHist", rv, `${codeLabel(code)} · 滚动年化波动分布（窗口=${w}）`, true);
+          const w = Math.max(
+            5,
+            Math.floor(Number($("offDistVolWin").value || "60")),
+          );
+          const rv = rollingAnnVol(ctx.retByCode[code], w).filter((x) =>
+            Number.isFinite(Number(x)),
+          );
+          renderDist(
+            "offAssetDistQuantiles",
+            "offAssetDistHist",
+            rv,
+            `${codeLabel(code)} · 滚动年化波动分布（窗口=${w}）`,
+            true,
+          );
         }
       }
       function calendarStats(arr, holdDays = 1) {
-        const xs = (arr || []).map((x) => Number(x)).filter((x) => Number.isFinite(x));
-        if (xs.length === 0) return { count: 0, mean: NaN, std: NaN, median: NaN, q10: NaN, q90: NaN, win_rate: NaN, sharpe: NaN };
+        const xs = (arr || [])
+          .map((x) => Number(x))
+          .filter((x) => Number.isFinite(x));
+        if (xs.length === 0)
+          return {
+            count: 0,
+            mean: NaN,
+            std: NaN,
+            median: NaN,
+            q10: NaN,
+            q90: NaN,
+            win_rate: NaN,
+            sharpe: NaN,
+          };
         const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
         const s = std(xs);
         const win = xs.filter((x) => x > 0).length / xs.length;
-        return { count: xs.length, mean, std: s, median: percentile(xs, 50), q10: percentile(xs, 10), q90: percentile(xs, 90), win_rate: win, sharpe: (Number.isFinite(s) && s > 0 ? mean / s : NaN) };
+        return {
+          count: xs.length,
+          mean,
+          std: s,
+          median: percentile(xs, 50),
+          q10: percentile(xs, 10),
+          q90: percentile(xs, 90),
+          win_rate: win,
+          sharpe: Number.isFinite(s) && s > 0 ? mean / s : NaN,
+        };
       }
-      function computeMonthdayEffectFromNav({ dates, nav, holdN, mode, day, shift }) {
+      function computeMonthdayEffectFromNav({
+        dates,
+        nav,
+        holdN,
+        mode,
+        day,
+        shift,
+      }) {
         const n = Math.max(1, Math.floor(Number(holdN) || 5));
         const d0 = Math.max(1, Math.min(31, Math.floor(Number(day) || 1)));
         const m = String(mode || "single");
-        const days = m === "all" ? Array.from({ length: 31 }, (_, i) => i + 1) : [d0];
+        const days =
+          m === "all" ? Array.from({ length: 31 }, (_, i) => i + 1) : [d0];
         const byMonth = new Map();
         for (let i = 0; i < dates.length; i++) {
           const s = String(dates[i] || "");
@@ -881,7 +1304,8 @@
         };
         for (const [ym, rows] of byMonth.entries()) {
           rows.sort((a, b) => a.idx - b.idx);
-          const y = Number(ym.slice(0, 4)), mm = Number(ym.slice(5, 7));
+          const y = Number(ym.slice(0, 4)),
+            mm = Number(ym.slice(5, 7));
           const monthLast = new Date(y, mm, 0).getDate();
           for (const d of days) {
             if (d >= 29 && monthLast < d) continue;
@@ -889,43 +1313,109 @@
             if (i == null) continue;
             const j = i + n;
             if (j >= nav.length) continue;
-            const p0 = Number(nav[i]), p1 = Number(nav[j]);
-            if (!Number.isFinite(p0) || !Number.isFinite(p1) || p0 <= 0) continue;
+            const p0 = Number(nav[i]),
+              p1 = Number(nav[j]);
+            if (!Number.isFinite(p0) || !Number.isFinite(p1) || p0 <= 0)
+              continue;
             const r = p1 / p0 - 1;
             out[String(d)].returns.push(r);
-            out[String(d)].points.push({ entry_date: dates[i], exit_date: dates[j], ret: r });
+            out[String(d)].points.push({
+              entry_date: dates[i],
+              exit_date: dates[j],
+              ret: r,
+            });
           }
         }
         const stats = {};
-        for (const d of days) stats[String(d)] = calendarStats(out[String(d)].returns, n);
+        for (const d of days)
+          stats[String(d)] = calendarStats(out[String(d)].returns, n);
         return { days, by_day: out, stats, hold_n: n, shift };
       }
       function renderCalendarEffect(ctx) {
-        const code = String(($("offCalCode").value || "")).trim();
+        const code = String($("offCalCode").value || "").trim();
         if (!code || !ctx.navByCode[code]) return;
         const navRows = ctx.navByCode[code] || [];
         const dates = navRows.map((x) => String(x.trade_date));
         const nav = navRows.map((x) => Number(x.nav));
-        const mode = String(($("offCalMode").value || "single"));
-        const day = Number(($("offCalDay").value || "1"));
-        const holdN = Number(($("offCalHoldN").value || "5"));
-        const shift = String(($("offCalShift").value || "next"));
-        const metric = String(($("offCalMetric").value || "mean"));
-        const res = computeMonthdayEffectFromNav({ dates, nav, holdN, mode, day, shift });
+        const mode = String($("offCalMode").value || "single");
+        const day = Number($("offCalDay").value || "1");
+        const holdN = Number($("offCalHoldN").value || "5");
+        const shift = String($("offCalShift").value || "next");
+        const metric = String($("offCalMetric").value || "mean");
+        const res = computeMonthdayEffectFromNav({
+          dates,
+          nav,
+          holdN,
+          mode,
+          day,
+          shift,
+        });
         const daysAll = Array.from({ length: 31 }, (_, i) => i + 1);
         const z = daysAll.map((d) => {
           const st = res.stats[String(d)];
           const v = st ? Number(st[metric]) : NaN;
           return Number.isFinite(v) ? v : null;
         });
-        const tgtDay = mode === "all" ? Math.max(1, Math.min(31, Math.floor(day || 1))) : res.days[0];
-        const picked = res.by_day[String(tgtDay)] || { returns: [], points: [] };
-        $("offCalHint").textContent = `${codeLabel(code)} · close->持有${res.hold_n}日->close · 非交易日处理=${res.shift} · 模式=${mode === "all" ? "全扫描" : `单日(d=${tgtDay})`}`;
-        Plotly.newPlot("offCalHeatmap", [{ type: "heatmap", x: daysAll, y: [metric], z: [z], colorscale: "RdYlGn", hovertemplate: "d=%{x}<br>metric=%{y}<br>value=%{z:.4f}<extra></extra>" }], {
-          margin: { t: 20, l: 60, r: 20, b: 40 }, xaxis: { title: "月内日期 d (1..31)" }, yaxis: { title: "" },
-          shapes: [{ type: "line", xref: "x", yref: "paper", x0: tgtDay, x1: tgtDay, y0: 0, y1: 1, line: { color: "rgba(214,39,40,0.95)", width: 2.0 } }],
-        }, { responsive: true, displayModeBar: false });
-        Plotly.newPlot("offCalHist", [{ type: "histogram", x: picked.returns || [], histnorm: "probability", marker: { color: "#5B8FF9" } }], { margin: { t: 20 }, title: `d=${tgtDay} 的收益率分布（n=${res.hold_n}）`, yaxis: { title: "概率" }, xaxis: { tickformat: ".2%" } }, { responsive: true, displayModeBar: false });
+        const tgtDay =
+          mode === "all"
+            ? Math.max(1, Math.min(31, Math.floor(day || 1)))
+            : res.days[0];
+        const picked = res.by_day[String(tgtDay)] || {
+          returns: [],
+          points: [],
+        };
+        $("offCalHint").textContent =
+          `${codeLabel(code)} · close->持有${res.hold_n}日->close · 非交易日处理=${res.shift} · 模式=${mode === "all" ? "全扫描" : `单日(d=${tgtDay})`}`;
+        Plotly.newPlot(
+          "offCalHeatmap",
+          [
+            {
+              type: "heatmap",
+              x: daysAll,
+              y: [metric],
+              z: [z],
+              colorscale: "RdYlGn",
+              hovertemplate:
+                "d=%{x}<br>metric=%{y}<br>value=%{z:.4f}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 20, l: 60, r: 20, b: 40 },
+            xaxis: { title: "月内日期 d (1..31)" },
+            yaxis: { title: "" },
+            shapes: [
+              {
+                type: "line",
+                xref: "x",
+                yref: "paper",
+                x0: tgtDay,
+                x1: tgtDay,
+                y0: 0,
+                y1: 1,
+                line: { color: "rgba(214,39,40,0.95)", width: 2.0 },
+              },
+            ],
+          },
+          { responsive: true, displayModeBar: false },
+        );
+        Plotly.newPlot(
+          "offCalHist",
+          [
+            {
+              type: "histogram",
+              x: picked.returns || [],
+              histnorm: "probability",
+              marker: { color: "#5B8FF9" },
+            },
+          ],
+          {
+            margin: { t: 20 },
+            title: `d=${tgtDay} 的收益率分布（n=${res.hold_n}）`,
+            yaxis: { title: "概率" },
+            xaxis: { tickformat: ".2%" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
         const st = res.stats[String(tgtDay)] || {};
         $("offCalTable").innerHTML =
           `<tr><th>指标</th><th>值</th></tr>` +
@@ -942,13 +1432,16 @@
       function syncAssetGroupsText() {
         const lines = [];
         const base = validCodes(persistentGroups[activePersistentGroup] || []);
-        for (const c of base.sort()) lines.push(`${c}=${codeGroup[c] || "S01"}`);
+        for (const c of base.sort())
+          lines.push(`${c}=${codeGroup[c] || "S01"}`);
         $("assetGroups").value = lines.join("\n");
       }
 
       function renderPool() {
         const rows = [];
-        const inActive = new Set(validCodes(persistentGroups[activePersistentGroup] || []));
+        const inActive = new Set(
+          validCodes(persistentGroups[activePersistentGroup] || []),
+        );
         const show = pool.filter((it) => inActive.has(String(it.code || "")));
         for (const it of show) {
           const c = String(it.code || "");
@@ -961,7 +1454,8 @@
             <td>${esc(it.last_data_start_date || "-")} ~ ${esc(it.last_data_end_date || "-")}</td>
           </tr>`);
         }
-        $("poolTable").innerHTML = `<tr><th>选择</th><th>代码</th><th>名称</th><th>小组</th><th>已抓取区间(hfq)</th></tr>${rows.join("") || `<tr><td colspan="5" class="muted">当前大组无标的。请先保存/载入一个持久分组。</td></tr>`}`;
+        $("poolTable").innerHTML =
+          `<tr><th>选择</th><th>代码</th><th>名称</th><th>小组</th><th>已抓取区间(hfq)</th></tr>${rows.join("") || `<tr><td colspan="5" class="muted">当前大组无标的。请先保存/载入一个持久分组。</td></tr>`}`;
       }
 
       async function loadPool() {
@@ -975,10 +1469,17 @@
           activePersistentGroup = DEFAULT_PERSISTENT_GROUP;
         }
         for (const nm of Object.keys(persistentGroups)) {
-          persistentGroups[nm] = validCodes((persistentGroups[nm] || []).filter((c) => allCodes.includes(c)));
+          persistentGroups[nm] = validCodes(
+            (persistentGroups[nm] || []).filter((c) => allCodes.includes(c)),
+          );
         }
-        activePersistentGroup = ensurePersistentGroupExists(activePersistentGroup);
-        if (!(persistentGroups[activePersistentGroup] || []).length && allCodes.length) {
+        activePersistentGroup = ensurePersistentGroupExists(
+          activePersistentGroup,
+        );
+        if (
+          !(persistentGroups[activePersistentGroup] || []).length &&
+          allCodes.length
+        ) {
           persistentGroups[activePersistentGroup] = allCodes.slice();
         }
         applyPersistentGroupSelection(activePersistentGroup);
@@ -987,47 +1488,77 @@
 
       async function fetchNav(code, adjust, start, end) {
         const qs = `?adjust=${encodeURIComponent(adjust)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=300000`;
-        const resp = await api(`/off-fund/${encodeURIComponent(code)}/navs${qs}`, { method: "GET" });
+        const resp = await api(
+          `/off-fund/${encodeURIComponent(code)}/navs${qs}`,
+          { method: "GET" },
+        );
         const txt = await resp.text();
         if (!resp.ok) throw new Error(`${code}: ${txt}`);
         return JSON.parse(txt);
       }
 
       async function runBacktest() {
-        const universe = new Set(validCodes(persistentGroups[activePersistentGroup] || []));
-        const picked = pool.filter((it) => universe.has(String(it.code || "")) && selected.has(String(it.code || ""))).map((it) => String(it.code || ""));
+        const universe = new Set(
+          validCodes(persistentGroups[activePersistentGroup] || []),
+        );
+        const picked = pool
+          .filter(
+            (it) =>
+              universe.has(String(it.code || "")) &&
+              selected.has(String(it.code || "")),
+          )
+          .map((it) => String(it.code || ""));
         if (!picked.length) return setMsg("请先在候选池勾选至少1个基金。");
         const start = String(($("start").value || "").trim() || "20110210");
         const end = String(($("end").value || "").trim() || todayYmd());
-        const adjust = String(($("adjust").value || "hfq"));
-        const rf = Number(String(($("rf").value || "0.025")).trim());
-        const innerMode = String(($("innerMode").value || "risk_parity_cov"));
-        const rpWindow = Math.max(20, Math.floor(Number(String(($("rpWindow").value || "60")).trim())));
+        const adjust = String($("adjust").value || "hfq");
+        const rf = Number(String($("rf").value || "0.025").trim());
+        const innerMode = String($("innerMode").value || "risk_parity_cov");
+        const rpWindow = Math.max(
+          20,
+          Math.floor(Number(String($("rpWindow").value || "60").trim())),
+        );
 
         const mpGroup = parseKvText($("assetGroups").value);
-        for (const c of picked) codeGroup[c] = mpGroup[c] || codeGroup[c] || "S01";
+        for (const c of picked)
+          codeGroup[c] = mpGroup[c] || codeGroup[c] || "S01";
         saveCurrentSubgroupState();
         syncAssetGroupsText();
         renderPool();
 
         setMsg("加载净值中...");
         const navByCode = {};
-        for (const c of picked) navByCode[c] = await fetchNav(c, adjust, start, end);
+        for (const c of picked)
+          navByCode[c] = await fetchNav(c, adjust, start, end);
 
-        const dateSets = picked.map((c) => new Set((navByCode[c] || []).map((x) => String(x.trade_date))));
+        const dateSets = picked.map(
+          (c) => new Set((navByCode[c] || []).map((x) => String(x.trade_date))),
+        );
         let common = dateSets[0] ? Array.from(dateSets[0]) : [];
-        for (let i = 1; i < dateSets.length; i++) common = common.filter((d) => dateSets[i].has(d));
+        for (let i = 1; i < dateSets.length; i++)
+          common = common.filter((d) => dateSets[i].has(d));
         common.sort();
-        if (common.length < 20) return setMsg("共同样本不足（<20天），请调整区间或检查数据完整性。");
+        if (common.length < 20)
+          return setMsg("共同样本不足（<20天），请调整区间或检查数据完整性。");
 
         const retByCode = {};
         for (const c of picked) {
-          const mp = new Map((navByCode[c] || []).map((x) => [String(x.trade_date), Number(x.nav)]));
+          const mp = new Map(
+            (navByCode[c] || []).map((x) => [
+              String(x.trade_date),
+              Number(x.nav),
+            ]),
+          );
           const nav = common.map((d) => Number(mp.get(d)));
           const rs = [];
           for (let i = 1; i < nav.length; i++) {
-            const p0 = nav[i - 1], p1 = nav[i];
-            rs.push((Number.isFinite(p0) && Number.isFinite(p1) && p0 > 0) ? (p1 / p0 - 1) : NaN);
+            const p0 = nav[i - 1],
+              p1 = nav[i];
+            rs.push(
+              Number.isFinite(p0) && Number.isFinite(p1) && p0 > 0
+                ? p1 / p0 - 1
+                : NaN,
+            );
           }
           retByCode[c] = rs;
         }
@@ -1040,14 +1571,21 @@
           groups[g].push(c);
         }
         const groupIds = Object.keys(groups).sort();
-        const gw = normalizeWeights(parseKvText($("groupWeights").value), groupIds);
+        const gw = normalizeWeights(
+          parseKvText($("groupWeights").value),
+          groupIds,
+        );
 
         const finalW = {};
         const rcRows = [];
         for (const g of groupIds) {
           const codes = groups[g];
-          const rows = codes.map((c) => retByCode[c].slice(Math.max(0, retByCode[c].length - rpWindow)));
-          const validRows = rows.map((arr) => arr.map(Number).filter(Number.isFinite));
+          const rows = codes.map((c) =>
+            retByCode[c].slice(Math.max(0, retByCode[c].length - rpWindow)),
+          );
+          const validRows = rows.map((arr) =>
+            arr.map(Number).filter(Number.isFinite),
+          );
           const minLen = Math.min(...validRows.map((r) => r.length));
           const aligned = validRows.map((r) => r.slice(r.length - minLen));
           let wIn = [];
@@ -1063,30 +1601,62 @@
               rcRows.push({ group: g, code: codes[i], rc, w_in: wIn[i] });
             }
           }
-          for (let i = 0; i < codes.length; i++) finalW[codes[i]] = (gw[g] || 0) * (wIn[i] || 0);
+          for (let i = 0; i < codes.length; i++)
+            finalW[codes[i]] = (gw[g] || 0) * (wIn[i] || 0);
         }
 
-        const sumW = Object.values(finalW).reduce((a, b) => a + Number(b || 0), 0);
+        const sumW = Object.values(finalW).reduce(
+          (a, b) => a + Number(b || 0),
+          0,
+        );
         if (!(sumW > 0)) return setMsg("权重配置无效，请检查组间仓位。");
         for (const c of Object.keys(finalW)) finalW[c] = finalW[c] / sumW;
 
-        const rsPort = datesRet.map((_, i) => picked.reduce((a, c) => a + Number(finalW[c] || 0) * Number(retByCode[c][i] || 0), 0));
+        const rsPort = datesRet.map((_, i) =>
+          picked.reduce(
+            (a, c) => a + Number(finalW[c] || 0) * Number(retByCode[c][i] || 0),
+            0,
+          ),
+        );
         const m = metricsFromReturns(rsPort, Number.isFinite(rf) ? rf : 0.025);
         if (!m) return setMsg("回测失败：收益序列无效。");
-        lastCtx = { picked: picked.slice(), retByCode, rsPort: rsPort.slice(), datesRet: datesRet.slice(), nav: m.nav.slice(), navByCode };
+        lastCtx = {
+          picked: picked.slice(),
+          retByCode,
+          rsPort: rsPort.slice(),
+          datesRet: datesRet.slice(),
+          nav: m.nav.slice(),
+          navByCode,
+        };
 
-        Plotly.newPlot("navChart", [{ x: datesRet, y: m.nav, mode: "lines", name: "Holding" }], { margin: { t: 20 }, title: "场外基金持有策略净值" }, { responsive: true });
-        window.__offRegimeSeries = { dates: datesRet.slice(), close: m.nav.slice() };
+        Plotly.newPlot(
+          "navChart",
+          [{ x: datesRet, y: m.nav, mode: "lines", name: "Holding" }],
+          { margin: { t: 20 }, title: "场外基金持有策略净值" },
+          { responsive: true },
+        );
+        window.__offRegimeSeries = {
+          dates: datesRet.slice(),
+          close: m.nav.slice(),
+        };
         renderOffRegimePanel(window.__offRegimeSeries);
         if (!window.__offRegimeBound) {
-          for (const id of ["offRegimeSlopeWin", "offRegimeVolWin", "offRegimeSlopeThr", "offRegimeVolQ", "offRegimeNAhead"]) {
+          for (const id of [
+            "offRegimeSlopeWin",
+            "offRegimeVolWin",
+            "offRegimeSlopeThr",
+            "offRegimeVolQ",
+            "offRegimeNAhead",
+          ]) {
             const el = $(id);
             if (!el) continue;
             el.addEventListener("change", () => {
-              if (window.__offRegimeSeries) renderOffRegimePanel(window.__offRegimeSeries);
+              if (window.__offRegimeSeries)
+                renderOffRegimePanel(window.__offRegimeSeries);
             });
             el.addEventListener("input", () => {
-              if (window.__offRegimeSeries) renderOffRegimePanel(window.__offRegimeSeries);
+              if (window.__offRegimeSeries)
+                renderOffRegimePanel(window.__offRegimeSeries);
             });
           }
           window.__offRegimeBound = true;
@@ -1095,31 +1665,87 @@
           `<tr><th>样本日</th><th>累计收益</th><th>年化收益</th><th>年化波动</th><th>最大回撤</th><th>夏普</th></tr>` +
           `<tr><td>${m.sample_days}</td><td>${fmtPct(m.cumulative_return)}</td><td>${fmtPct(m.annualized_return)}</td><td>${fmtPct(m.annualized_volatility)}</td><td>${fmtPct(m.max_drawdown)}</td><td>${fmtNum(m.sharpe_ratio, 3)}</td></tr>`;
 
-        const fwRows = Object.keys(finalW).sort().map((c) => `<tr><td>${esc(codeGroup[c] || "-")}</td><td>${esc(c)}</td><td>${esc(codeName(c) || "-")}</td><td>${fmtPct(finalW[c])}</td></tr>`);
-        $("finalWeightsTable").innerHTML = `<tr><th>组</th><th>代码</th><th>名称</th><th>最终权重</th></tr>${fwRows.join("")}`;
+        const fwRows = Object.keys(finalW)
+          .sort()
+          .map(
+            (c) =>
+              `<tr><td>${esc(codeGroup[c] || "-")}</td><td>${esc(c)}</td><td>${esc(codeName(c) || "-")}</td><td>${fmtPct(finalW[c])}</td></tr>`,
+          );
+        $("finalWeightsTable").innerHTML =
+          `<tr><th>组</th><th>代码</th><th>名称</th><th>最终权重</th></tr>${fwRows.join("")}`;
 
         const rcOut = rcRows.length
-          ? rcRows.map((x) => `<tr><td>${esc(x.group)}</td><td>${esc(x.code)}</td><td>${esc(codeName(x.code) || "-")}</td><td>${fmtPct(x.w_in)}</td><td>${fmtPct(x.rc)}</td></tr>`).join("")
+          ? rcRows
+              .map(
+                (x) =>
+                  `<tr><td>${esc(x.group)}</td><td>${esc(x.code)}</td><td>${esc(codeName(x.code) || "-")}</td><td>${fmtPct(x.w_in)}</td><td>${fmtPct(x.rc)}</td></tr>`,
+              )
+              .join("")
           : `<tr><td colspan="5" class="muted">当前为等权模式、单标的组或样本不足，未展示ERC风险贡献。</td></tr>`;
-        $("groupRcTable").innerHTML = `<tr><th>组</th><th>代码</th><th>名称</th><th>组内权重</th><th>风险贡献</th></tr>${rcOut}`;
+        $("groupRcTable").innerHTML =
+          `<tr><th>组</th><th>代码</th><th>名称</th><th>组内权重</th><th>风险贡献</th></tr>${rcOut}`;
 
-        const attr = buildAttribution(retByCode, codeGroup, finalW, rsPort, m.cumulative_return);
+        const attr = buildAttribution(
+          retByCode,
+          codeGroup,
+          finalW,
+          rsPort,
+          m.cumulative_return,
+        );
         $("attrGroupTable").innerHTML =
           `<tr><th>组</th><th>收益贡献</th><th>风险贡献</th><th>风险收益比</th></tr>` +
-          (attr.byGroup || []).sort((a, b) => String(a.group).localeCompare(String(b.group))).map((x) => `<tr><td>${esc(x.group)}</td><td>${fmtPct(x.retShare)}</td><td>${fmtPct(x.riskShare)}</td><td>${fmtNum(x.ratio, 3)}</td></tr>`).join("");
+          (attr.byGroup || [])
+            .sort((a, b) => String(a.group).localeCompare(String(b.group)))
+            .map(
+              (x) =>
+                `<tr><td>${esc(x.group)}</td><td>${fmtPct(x.retShare)}</td><td>${fmtPct(x.riskShare)}</td><td>${fmtNum(x.ratio, 3)}</td></tr>`,
+            )
+            .join("");
         $("attrCodeTable").innerHTML =
           `<tr><th>组</th><th>代码</th><th>名称</th><th>收益贡献</th><th>风险贡献</th><th>风险收益比</th></tr>` +
-          (attr.byCode || []).sort((a, b) => (String(a.group).localeCompare(String(b.group)) || String(a.code).localeCompare(String(b.code)))).map((x) => `<tr><td>${esc(x.group)}</td><td>${esc(x.code)}</td><td>${esc(codeName(x.code) || "-")}</td><td>${fmtPct(x.retShare)}</td><td>${fmtPct(x.riskShare)}</td><td>${fmtNum(x.ratio, 3)}</td></tr>`).join("");
+          (attr.byCode || [])
+            .sort(
+              (a, b) =>
+                String(a.group).localeCompare(String(b.group)) ||
+                String(a.code).localeCompare(String(b.code)),
+            )
+            .map(
+              (x) =>
+                `<tr><td>${esc(x.group)}</td><td>${esc(x.code)}</td><td>${esc(codeName(x.code) || "-")}</td><td>${fmtPct(x.retShare)}</td><td>${fmtPct(x.riskShare)}</td><td>${fmtNum(x.ratio, 3)}</td></tr>`,
+            )
+            .join("");
 
         const rollWin = 60;
         const rollR = rollingReturn(m.nav, rollWin);
         const dd = drawdownSeries(m.nav);
-        Plotly.newPlot("rollingRetChart", [{ x: datesRet, y: rollR, mode: "lines", name: "R60" }], { margin: { t: 20 }, yaxis: { tickformat: ".0%" }, title: `滚动收益率（窗口=${rollWin}）` }, { responsive: true });
-        Plotly.newPlot("rollingDdChart", [{ x: datesRet, y: dd, mode: "lines", name: "DD" }], { margin: { t: 20 }, yaxis: { tickformat: ".0%" }, title: "滚动回撤（由净值推导）" }, { responsive: true });
+        Plotly.newPlot(
+          "rollingRetChart",
+          [{ x: datesRet, y: rollR, mode: "lines", name: "R60" }],
+          {
+            margin: { t: 20 },
+            yaxis: { tickformat: ".0%" },
+            title: `滚动收益率（窗口=${rollWin}）`,
+          },
+          { responsive: true },
+        );
+        Plotly.newPlot(
+          "rollingDdChart",
+          [{ x: datesRet, y: dd, mode: "lines", name: "DD" }],
+          {
+            margin: { t: 20 },
+            yaxis: { tickformat: ".0%" },
+            title: "滚动回撤（由净值推导）",
+          },
+          { responsive: true },
+        );
 
         offPeriodState.weekly.rows = periodReturns(datesRet, m.nav, "weekly");
         offPeriodState.monthly.rows = periodReturns(datesRet, m.nav, "monthly");
-        offPeriodState.quarterly.rows = periodReturns(datesRet, m.nav, "quarterly");
+        offPeriodState.quarterly.rows = periodReturns(
+          datesRet,
+          m.nav,
+          "quarterly",
+        );
         offPeriodState.yearly.rows = periodReturns(datesRet, m.nav, "yearly");
         offPeriodState.weekly.page = 1;
         offPeriodState.monthly.page = 1;
@@ -1130,16 +1756,29 @@
         renderOffPeriodTable("quarterly");
         renderOffPeriodTable("yearly");
 
-        renderDist("offDailyRetQuantiles", "offDailyRetHist", rsPort, "组合日度收益率分布", true);
+        renderDist(
+          "offDailyRetQuantiles",
+          "offDailyRetHist",
+          rsPort,
+          "组合日度收益率分布",
+          true,
+        );
         renderCorrMatrix(lastCtx);
         renderAssetDistSelectors(lastCtx);
-        if ($("offDistCode") && !$("offDistCode").value && picked.length) $("offDistCode").value = picked[0];
-        if ($("offCalCode") && !$("offCalCode").value && picked.length) $("offCalCode").value = picked[0];
+        if ($("offDistCode") && !$("offDistCode").value && picked.length)
+          $("offDistCode").value = picked[0];
+        if ($("offCalCode") && !$("offCalCode").value && picked.length)
+          $("offCalCode").value = picked[0];
         renderAssetDist(lastCtx);
         renderCalendarEffect(lastCtx);
 
-        const gwTxt = Object.keys(gw).sort().map((g) => `${g}=${fmtPct(gw[g])}`).join("，");
-        setMsg(`完成：标的数=${picked.length}，共同样本=${datesRet.length}，组间权重=${gwTxt}，组内方法=${innerMode === "risk_parity_cov" ? "协方差ERC" : "等权"}。`);
+        const gwTxt = Object.keys(gw)
+          .sort()
+          .map((g) => `${g}=${fmtPct(gw[g])}`)
+          .join("，");
+        setMsg(
+          `完成：标的数=${picked.length}，共同样本=${datesRet.length}，组间权重=${gwTxt}，组内方法=${innerMode === "risk_parity_cov" ? "协方差ERC" : "等权"}。`,
+        );
       }
 
       document.addEventListener("click", (e) => {
@@ -1147,12 +1786,17 @@
         if (!cb) return;
         const c = String(cb.getAttribute("data-code") || "");
         if (!c) return;
-        if (cb.checked) selected.add(c); else selected.delete(c);
+        if (cb.checked) selected.add(c);
+        else selected.delete(c);
       });
 
-      $("refreshPool").addEventListener("click", () => loadPool().catch((e) => setMsg(String(e && e.message || e))));
+      $("refreshPool").addEventListener("click", () =>
+        loadPool().catch((e) => setMsg(String((e && e.message) || e))),
+      );
       $("selAll").addEventListener("click", () => {
-        const inActive = new Set(validCodes(persistentGroups[activePersistentGroup] || []));
+        const inActive = new Set(
+          validCodes(persistentGroups[activePersistentGroup] || []),
+        );
         for (const it of pool) {
           const c = String(it.code || "");
           if (inActive.has(c)) selected.add(c);
@@ -1160,19 +1804,25 @@
         renderPool();
       });
       $("selNone").addEventListener("click", () => {
-        const inActive = new Set(validCodes(persistentGroups[activePersistentGroup] || []));
-        for (const c of Array.from(selected)) if (inActive.has(c)) selected.delete(c);
+        const inActive = new Set(
+          validCodes(persistentGroups[activePersistentGroup] || []),
+        );
+        for (const c of Array.from(selected))
+          if (inActive.has(c)) selected.delete(c);
         renderPool();
       });
       $("selInvert").addEventListener("click", () => {
-        const inActive = new Set(validCodes(persistentGroups[activePersistentGroup] || []));
+        const inActive = new Set(
+          validCodes(persistentGroups[activePersistentGroup] || []),
+        );
         const nxt = new Set();
         for (const it of pool) {
           const c = String(it.code || "");
           if (!inActive.has(c)) continue;
           if (!selected.has(c)) nxt.add(c);
         }
-        for (const c of Array.from(selected)) if (inActive.has(c)) selected.delete(c);
+        for (const c of Array.from(selected))
+          if (inActive.has(c)) selected.delete(c);
         for (const c of nxt) selected.add(c);
         renderPool();
       });
@@ -1181,102 +1831,152 @@
         if (!g) return;
         for (const c of selected) codeGroup[c] = g;
         saveCurrentSubgroupState();
-        syncAssetGroupsText(); renderPool();
+        syncAssetGroupsText();
+        renderPool();
       });
       $("removeFromGroup").addEventListener("click", () => {
         const g = String(($("activeGroup").value || "").trim() || "S01");
-        for (const c of selected) if ((codeGroup[c] || "") === g) delete codeGroup[c];
+        for (const c of selected)
+          if ((codeGroup[c] || "") === g) delete codeGroup[c];
         saveCurrentSubgroupState();
-        syncAssetGroupsText(); renderPool();
+        syncAssetGroupsText();
+        renderPool();
       });
       $("assetGroups").addEventListener("change", () => {
         const mp = parseKvText($("assetGroups").value);
         const base = validCodes(persistentGroups[activePersistentGroup] || []);
-        for (const c of base) codeGroup[c] = String(mp[c] || codeGroup[c] || "S01");
+        for (const c of base)
+          codeGroup[c] = String(mp[c] || codeGroup[c] || "S01");
         saveCurrentSubgroupState();
         renderPool();
       });
       $("assetGroups").addEventListener("input", () => {
         const mp = parseKvText($("assetGroups").value);
         const base = validCodes(persistentGroups[activePersistentGroup] || []);
-        for (const c of base) codeGroup[c] = String(mp[c] || codeGroup[c] || "S01");
+        for (const c of base)
+          codeGroup[c] = String(mp[c] || codeGroup[c] || "S01");
         saveCurrentSubgroupState();
       });
-      $("groupWeights").addEventListener("change", () => saveCurrentSubgroupState());
-      $("groupWeights").addEventListener("input", () => saveCurrentSubgroupState());
-      $("activeGroup").addEventListener("change", () => saveCurrentSubgroupState());
-      $("activeGroup").addEventListener("input", () => saveCurrentSubgroupState());
-      $("offDistCode").addEventListener("change", () => { if (lastCtx) renderAssetDist(lastCtx); });
-      $("offDistType").addEventListener("change", () => { if (lastCtx) renderAssetDist(lastCtx); });
-      $("offDistVolWin").addEventListener("change", () => { if (lastCtx) renderAssetDist(lastCtx); });
+      $("groupWeights").addEventListener("change", () =>
+        saveCurrentSubgroupState(),
+      );
+      $("groupWeights").addEventListener("input", () =>
+        saveCurrentSubgroupState(),
+      );
+      $("activeGroup").addEventListener("change", () =>
+        saveCurrentSubgroupState(),
+      );
+      $("activeGroup").addEventListener("input", () =>
+        saveCurrentSubgroupState(),
+      );
+      $("offDistCode").addEventListener("change", () => {
+        if (lastCtx) renderAssetDist(lastCtx);
+      });
+      $("offDistType").addEventListener("change", () => {
+        if (lastCtx) renderAssetDist(lastCtx);
+      });
+      $("offDistVolWin").addEventListener("change", () => {
+        if (lastCtx) renderAssetDist(lastCtx);
+      });
       $("offDistVolWin").addEventListener("input", () => {
-        const v = Number(String(($("offDistVolWin").value || "")).trim());
+        const v = Number(String($("offDistVolWin").value || "").trim());
         if (Number.isFinite(v) && v >= 5 && lastCtx) renderAssetDist(lastCtx);
       });
-      $("offCalCode").addEventListener("change", () => { if (lastCtx) renderCalendarEffect(lastCtx); });
-      $("offCalMode").addEventListener("change", () => { if (lastCtx) renderCalendarEffect(lastCtx); });
-      $("offCalShift").addEventListener("change", () => { if (lastCtx) renderCalendarEffect(lastCtx); });
-      $("offCalMetric").addEventListener("change", () => { if (lastCtx) renderCalendarEffect(lastCtx); });
-      $("offCalDay").addEventListener("change", () => { if (lastCtx) renderCalendarEffect(lastCtx); });
-      $("offCalDay").addEventListener("input", () => {
-        const v = Number(String(($("offCalDay").value || "")).trim());
-        if (Number.isFinite(v) && v >= 1 && v <= 31 && lastCtx) renderCalendarEffect(lastCtx);
+      $("offCalCode").addEventListener("change", () => {
+        if (lastCtx) renderCalendarEffect(lastCtx);
       });
-      $("offCalHoldN").addEventListener("change", () => { if (lastCtx) renderCalendarEffect(lastCtx); });
+      $("offCalMode").addEventListener("change", () => {
+        if (lastCtx) renderCalendarEffect(lastCtx);
+      });
+      $("offCalShift").addEventListener("change", () => {
+        if (lastCtx) renderCalendarEffect(lastCtx);
+      });
+      $("offCalMetric").addEventListener("change", () => {
+        if (lastCtx) renderCalendarEffect(lastCtx);
+      });
+      $("offCalDay").addEventListener("change", () => {
+        if (lastCtx) renderCalendarEffect(lastCtx);
+      });
+      $("offCalDay").addEventListener("input", () => {
+        const v = Number(String($("offCalDay").value || "").trim());
+        if (Number.isFinite(v) && v >= 1 && v <= 31 && lastCtx)
+          renderCalendarEffect(lastCtx);
+      });
+      $("offCalHoldN").addEventListener("change", () => {
+        if (lastCtx) renderCalendarEffect(lastCtx);
+      });
       $("offCalHoldN").addEventListener("input", () => {
-        const v = Number(String(($("offCalHoldN").value || "")).trim());
-        if (Number.isFinite(v) && v >= 1 && lastCtx) renderCalendarEffect(lastCtx);
+        const v = Number(String($("offCalHoldN").value || "").trim());
+        if (Number.isFinite(v) && v >= 1 && lastCtx)
+          renderCalendarEffect(lastCtx);
       });
       $("persistentGroupSelect").addEventListener("change", () => {
-        const nm = sanitizeGroupName(($("persistentGroupSelect").value || "")) || DEFAULT_PERSISTENT_GROUP;
+        const nm =
+          sanitizeGroupName($("persistentGroupSelect").value || "") ||
+          DEFAULT_PERSISTENT_GROUP;
         saveCurrentSubgroupState();
         applyPersistentGroupSelection(nm);
         persistState();
       });
       $("applyPersistentGroup").addEventListener("click", () => {
-        const nm = sanitizeGroupName(($("persistentGroupSelect").value || "")) || DEFAULT_PERSISTENT_GROUP;
+        const nm =
+          sanitizeGroupName($("persistentGroupSelect").value || "") ||
+          DEFAULT_PERSISTENT_GROUP;
         saveCurrentSubgroupState();
         applyPersistentGroupSelection(nm);
         persistState();
       });
       $("savePersistentGroup").addEventListener("click", () => {
-        const nmInput = sanitizeGroupName(($("persistentGroupName").value || ""));
-        const nm = nmInput || (sanitizeGroupName(($("persistentGroupSelect").value || "")) || DEFAULT_PERSISTENT_GROUP);
+        const nmInput = sanitizeGroupName($("persistentGroupName").value || "");
+        const nm =
+          nmInput ||
+          sanitizeGroupName($("persistentGroupSelect").value || "") ||
+          DEFAULT_PERSISTENT_GROUP;
         if (!nm) return setMsg("分组名不能为空。");
-        const codes = Array.from(selected).filter((c) => pool.some((it) => String(it.code || "") === String(c)));
+        const codes = Array.from(selected).filter((c) =>
+          pool.some((it) => String(it.code || "") === String(c)),
+        );
         if (!codes.length) return setMsg("请先勾选至少1个标的再保存大组。");
         persistentGroups[nm] = validCodes(codes);
         activePersistentGroup = nm;
         if (!subgroupMapByPersistent[nm]) subgroupMapByPersistent[nm] = {};
-        if (!subgroupWeightsByPersistent[nm]) subgroupWeightsByPersistent[nm] = "";
+        if (!subgroupWeightsByPersistent[nm])
+          subgroupWeightsByPersistent[nm] = "";
         applyPersistentGroupSelection(nm, { keepSelection: true });
         persistState();
         setMsg(`大组已保存：${nm}（${persistentGroups[nm].length}个标的）`);
       });
       $("deletePersistentGroup").addEventListener("click", () => {
-        const nm = sanitizeGroupName(($("persistentGroupSelect").value || ""));
+        const nm = sanitizeGroupName($("persistentGroupSelect").value || "");
         if (!nm || !persistentGroups[nm]) return;
         delete persistentGroups[nm];
         delete subgroupMapByPersistent[nm];
         delete subgroupWeightsByPersistent[nm];
-        if (!Object.keys(persistentGroups).length) persistentGroups[DEFAULT_PERSISTENT_GROUP] = [];
-        activePersistentGroup = Object.keys(persistentGroups).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))[0] || DEFAULT_PERSISTENT_GROUP;
+        if (!Object.keys(persistentGroups).length)
+          persistentGroups[DEFAULT_PERSISTENT_GROUP] = [];
+        activePersistentGroup =
+          Object.keys(persistentGroups).sort((a, b) =>
+            a.localeCompare(b, "zh-Hans-CN"),
+          )[0] || DEFAULT_PERSISTENT_GROUP;
         applyPersistentGroupSelection(activePersistentGroup);
         persistState();
         setMsg(`已删除大组：${nm}`);
       });
-      $("run").addEventListener("click", () => runBacktest().catch((e) => setMsg(String(e && e.message || e))));
+      $("run").addEventListener("click", () =>
+        runBacktest().catch((e) => setMsg(String((e && e.message) || e))),
+      );
       wireOffPeriodControls("weekly");
       wireOffPeriodControls("monthly");
       wireOffPeriodControls("quarterly");
       wireOffPeriodControls("yearly");
       window.addEventListener("beforeunload", () => {
-        try { saveCurrentSubgroupState(); } catch (_) {}
+        try {
+          saveCurrentSubgroupState();
+        } catch (_) {}
       });
 
       hydrateStateFromStorage();
-      loadPool().catch((e) => setMsg(String(e && e.message || e)));
+      loadPool().catch((e) => setMsg(String((e && e.message) || e)));
     </script>
   </body>
 </html>
-

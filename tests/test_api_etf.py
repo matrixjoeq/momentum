@@ -12,7 +12,12 @@ def test_create_list_delete_etf_and_fetch(api_client: TestClient) -> None:
     data = post_json(
         client,
         "/api/etf",
-        {"code": "510300", "name": "沪深300ETF", "start_date": "20240101", "end_date": "20240131"},
+        {
+            "code": "510300",
+            "name": "沪深300ETF",
+            "start_date": "20240101",
+            "end_date": "20240131",
+        },
     )
     # auto-inferred policy should exist
     assert data["validation_policy"]["name"] == "cn_stock_etf_10"
@@ -58,4 +63,3 @@ def test_delete_etf_purge_removes_prices_and_batches(api_client: TestClient) -> 
     # data removed
     assert get_json_ok(client, "/api/etf/510300/prices?adjust=hfq") == []
     assert get_json_ok(client, "/api/batches?code=510300") == []
-

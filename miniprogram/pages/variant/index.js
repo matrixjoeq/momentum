@@ -38,9 +38,12 @@ Page({
       const id = this.data.id;
       const st = await request(`/sim/variant/${id}/status`);
       const positions = st.positions || {};
-      const posText = Object.keys(positions).length === 0
-        ? "现金"
-        : Object.entries(positions).map(([k, q]) => `${k}:${Number(q).toFixed(2)}`).join(" ");
+      const posText =
+        Object.keys(positions).length === 0
+          ? "现金"
+          : Object.entries(positions)
+              .map(([k, q]) => `${k}:${Number(q).toFixed(2)}`)
+              .join(" ");
       this.setData({
         label: st.label,
         asof: st.asof || "-",
@@ -66,4 +69,3 @@ Page({
     wx.navigateTo({ url: `/pages/execute/index?id=${this.data.id}` });
   },
 });
-

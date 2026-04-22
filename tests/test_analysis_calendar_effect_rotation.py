@@ -31,7 +31,9 @@ def test_rotation_calendar_effect_uses_strategy_only_backtest(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(cal_effect, "compute_rotation_backtest", _fake_compute_rotation_backtest)
+    monkeypatch.setattr(
+        cal_effect, "compute_rotation_backtest", _fake_compute_rotation_backtest
+    )
 
     base = RotationAnalysisInputs(
         codes=["510300", "511010"],

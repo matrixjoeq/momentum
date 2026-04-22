@@ -13,4 +13,3 @@ def test_api_list_empty(api_client: TestClient) -> None:
     resp = client.get("/api/etf")
     assert resp.status_code == 200
     assert resp.json() == []
-

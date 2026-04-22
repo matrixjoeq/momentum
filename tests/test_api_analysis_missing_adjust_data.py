@@ -20,8 +20,13 @@ def test_api_analysis_errors_if_any_code_missing_adjust_data(api_client):
     out = post_json(
         c,
         "/api/analysis/baseline",
-        {"codes": ["A", "B"], "start": "20240102", "end": "20240103", "adjust": "hfq", "rebalance": "yearly"},
+        {
+            "codes": ["A", "B"],
+            "start": "20240102",
+            "end": "20240103",
+            "adjust": "hfq",
+            "rebalance": "yearly",
+        },
         expected_status=400,
     )
     assert "missing data" in out.get("detail", "")
-

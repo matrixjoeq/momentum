@@ -22,12 +22,20 @@ def test_prices_crud_via_fetch_read_delete(api_client: TestClient) -> None:
     assert data[0]["trade_date"] == "2024-01-02"
 
     # Delete one day
-    assert delete_json(api_client, "/api/etf/510300/prices", params={"end": "20240102"})["deleted"] == 1
+    assert (
+        delete_json(api_client, "/api/etf/510300/prices", params={"end": "20240102"})[
+            "deleted"
+        ]
+        == 1
+    )
 
-    assert [x["trade_date"] for x in get_json_ok(api_client, "/api/etf/510300/prices")] == ["2024-01-03"]
+    assert [
+        x["trade_date"] for x in get_json_ok(api_client, "/api/etf/510300/prices")
+    ] == ["2024-01-03"]
 
     # Re-fetch should restore missing day via upsert
     post_json(api_client, "/api/etf/510300/fetch", {})
 
-    assert [x["trade_date"] for x in get_json_ok(api_client, "/api/etf/510300/prices")] == ["2024-01-02", "2024-01-03"]
-
+    assert [
+        x["trade_date"] for x in get_json_ok(api_client, "/api/etf/510300/prices")
+    ] == ["2024-01-02", "2024-01-03"]

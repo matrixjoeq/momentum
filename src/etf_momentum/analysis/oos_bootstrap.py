@@ -10,6 +10,8 @@ Used for: rotation strategies, trend strategies (single or portfolio).
 
 from __future__ import annotations
 
+# pylint: disable=cell-var-from-loop,unused-argument,broad-exception-caught,unused-variable
+
 import datetime
 import logging
 from dataclasses import dataclass
@@ -83,7 +85,9 @@ def block_bootstrap_returns(
     return returns.iloc[idx].reset_index(drop=True)
 
 
-def returns_to_close(returns: pd.DataFrame, initial: Optional[pd.Series] = None) -> pd.DataFrame:
+def returns_to_close(
+    returns: pd.DataFrame, initial: Optional[pd.Series] = None
+) -> pd.DataFrame:
     """Build close prices from daily returns; first row is 1.0 (or initial) then cumprod(1+r)."""
     r = returns.fillna(0.0).astype(float)
     if initial is not None:
@@ -117,18 +121,37 @@ def _aggregate_params(
         if grid is not None and len(grid) > 0:
             # Categorical or discrete: use mode, then ensure in grid
             uniq, counts = np.unique(values, return_counts=True)
-            mode_val = uniq[np.argmax(counts)].tolist() if hasattr(uniq[0], "tolist") else uniq[np.argmax(counts)]
+            mode_val = (
+                uniq[np.argmax(counts)].tolist()
+                if hasattr(uniq[0], "tolist")
+                else uniq[np.argmax(counts)]
+            )
             if mode_val in grid:
                 out[k] = mode_val
             else:
-                out[k] = min(grid, key=lambda x: (abs(x - mode_val) if isinstance(mode_val, (int, float)) else 1))
+                out[k] = min(
+                    grid,
+                    key=lambda x: (
+                        abs(x - mode_val) if isinstance(mode_val, (int, float)) else 1
+                    ),
+                )
         else:
-            numeric = [v for v in values if isinstance(v, (int, float)) and np.isfinite(v)]
+            numeric = [
+                v for v in values if isinstance(v, (int, float)) and np.isfinite(v)
+            ]
             if numeric:
-                out[k] = int(round(np.median(numeric))) if all(isinstance(v, int) for v in numeric) else float(np.median(numeric))
+                out[k] = (
+                    int(round(np.median(numeric)))
+                    if all(isinstance(v, int) for v in numeric)
+                    else float(np.median(numeric))
+                )
             else:
                 uniq, counts = np.unique(values, return_counts=True)
-                out[k] = uniq[np.argmax(counts)].tolist() if hasattr(uniq[0], "tolist") else uniq[np.argmax(counts)]
+                out[k] = (
+                    uniq[np.argmax(counts)].tolist()
+                    if hasattr(uniq[0], "tolist")
+                    else uniq[np.argmax(counts)]
+                )
     return out
 
 
@@ -205,7 +228,11 @@ def run_rotation_oos_bootstrap(
     else:
         universe_config = UniverseConfig(name="Custom", codes=close.columns.tolist())
 
-    dates = close.index.sort_values() if hasattr(close.index, "sort_values") else pd.DatetimeIndex(sorted(close.index))
+    dates = (
+        close.index.sort_values()
+        if hasattr(close.index, "sort_values")
+        else pd.DatetimeIndex(sorted(close.index))
+    )
     in_dates, oos_dates = split_in_sample_oos(dates, cfg.oos_ratio)
     close_in = close.loc[in_dates].dropna(how="all").ffill().bfill()
     close_oos = close.loc[oos_dates].reindex(columns=close_in.columns).ffill().bfill()
@@ -218,7 +245,10 @@ def run_rotation_oos_bootstrap(
 
     returns_in = close_in.pct_change().dropna(how="all").fillna(0.0)
     if returns_in.empty or len(returns_in) < 10:
-        return {"error": "Insufficient in-sample returns", "in_sample_days": len(close_in)}
+        return {
+            "error": "Insufficient in-sample returns",
+            "in_sample_days": len(close_in),
+        }
 
     rng = np.random.default_rng(cfg.seed)
     bootstrap_params: List[Dict[str, Any]] = []
@@ -286,9 +316,15 @@ def _load_trend_in_sample_data(
     from .baseline import load_close_prices, load_high_low_prices
 
     ext_start = start_in - datetime.timedelta(days=int(need_hist) * 2)
-    close_qfq = load_close_prices(db, codes=codes, start=ext_start, end=end_in, adjust="qfq").sort_index()
-    close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=end_in, adjust="hfq").sort_index()
-    high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=end_in, adjust="qfq")
+    close_qfq = load_close_prices(
+        db, codes=codes, start=ext_start, end=end_in, adjust="qfq"
+    ).sort_index()
+    close_hfq = load_close_prices(
+        db, codes=codes, start=ext_start, end=end_in, adjust="hfq"
+    ).sort_index()
+    high_qfq_df, low_qfq_df = load_high_low_prices(
+        db, codes=codes, start=ext_start, end=end_in, adjust="qfq"
+    )
     if close_qfq.empty or close_hfq.empty:
         return None
     common = close_qfq.index.intersection(close_hfq.index)
@@ -308,8 +344,16 @@ def _load_trend_in_sample_data(
     returns_in = close_qfq.pct_change().fillna(0.0).astype(float)
     if returns_in.empty or len(returns_in) < 20:
         return None
-    high_qfq_df = high_qfq_df.sort_index().reindex(dates).reindex(columns=codes).ffill() if not high_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
-    low_qfq_df = low_qfq_df.sort_index().reindex(dates).reindex(columns=codes).ffill() if not low_qfq_df.empty else pd.DataFrame(index=dates, columns=codes)
+    high_qfq_df = (
+        high_qfq_df.sort_index().reindex(dates).reindex(columns=codes).ffill()
+        if not high_qfq_df.empty
+        else pd.DataFrame(index=dates, columns=codes)
+    )
+    low_qfq_df = (
+        low_qfq_df.sort_index().reindex(dates).reindex(columns=codes).ffill()
+        if not low_qfq_df.empty
+        else pd.DataFrame(index=dates, columns=codes)
+    )
     return {
         "dates": dates,
         "close_qfq": close_qfq,
@@ -385,7 +429,11 @@ def _default_trend_param_grid(strategy: str) -> Dict[str, Sequence[Any]]:
     if strategy == "ma_filter":
         return {"sma_window": [100, 150, 200], "ma_type": ["sma", "ema", "kama"]}
     if strategy == "ma_cross":
-        return {"fast_window": [50], "slow_window": [150, 200], "ma_type": ["sma", "ema"]}
+        return {
+            "fast_window": [50],
+            "slow_window": [150, 200],
+            "ma_type": ["sma", "ema"],
+        }
     if strategy == "donchian":
         return {"donchian_entry": [20, 55], "donchian_exit": [10, 20]}
     if strategy == "tsmom":
@@ -401,7 +449,12 @@ def _default_trend_param_grid(strategy: str) -> Dict[str, Sequence[Any]]:
     if strategy in ("macd_cross", "macd_zero_filter"):
         return {"macd_fast": [12], "macd_slow": [26], "macd_signal": [9]}
     if strategy == "macd_v":
-        return {"macd_fast": [12], "macd_slow": [26], "macd_signal": [9], "macd_v_atr_window": [26]}
+        return {
+            "macd_fast": [12],
+            "macd_slow": [26],
+            "macd_signal": [9],
+            "macd_v_atr_window": [26],
+        }
     if strategy == "random_entry":
         return {"random_hold_days": [10, 20, 40], "random_seed": [42]}
     return {"sma_window": [100, 200], "ma_type": ["sma"]}
@@ -464,7 +517,10 @@ def run_trend_oos_bootstrap(
         }
     returns_in = data_in["returns_in"]
     if len(returns_in) < 30:
-        return {"error": "Insufficient in-sample returns", "in_sample_days": len(returns_in)}
+        return {
+            "error": "Insufficient in-sample returns",
+            "in_sample_days": len(returns_in),
+        }
 
     rng = np.random.default_rng(cfg.seed)
     bootstrap_params: List[Dict[str, Any]] = []
@@ -473,13 +529,19 @@ def run_trend_oos_bootstrap(
     grids = [list(grid[k]) for k in keys]
 
     for b in range(cfg.n_bootstrap):
-        boot_idx = _circular_block_bootstrap_indices(len(returns_in), block_size=cfg.block_size, rng=rng)
+        boot_idx = _circular_block_bootstrap_indices(
+            len(returns_in), block_size=cfg.block_size, rng=rng
+        )
         ret_boot = returns_in.iloc[boot_idx].reset_index(drop=True)
         close_boot = returns_to_close(ret_boot, initial=None)
         idx = pd.date_range(start="2000-01-01", periods=len(close_boot), freq="B")
         close_boot = close_boot.set_axis(idx)
-        high_boot = data_in["high_qfq_df"].iloc[boot_idx].reset_index(drop=True).set_axis(idx)
-        low_boot = data_in["low_qfq_df"].iloc[boot_idx].reset_index(drop=True).set_axis(idx)
+        high_boot = (
+            data_in["high_qfq_df"].iloc[boot_idx].reset_index(drop=True).set_axis(idx)
+        )
+        low_boot = (
+            data_in["low_qfq_df"].iloc[boot_idx].reset_index(drop=True).set_axis(idx)
+        )
         ret_exec = ret_boot.set_axis(idx).reindex(idx).fillna(0.0).astype(float)
         ret_hfq = ret_exec.copy()
         syn_start = idx[0].date() if hasattr(idx[0], "date") else idx[0]
@@ -502,24 +564,59 @@ def run_trend_oos_bootstrap(
                 # parameter combinations in this sample run through the bt engine.
                 from etf_momentum.db.init_db import init_db
                 from etf_momentum.db.repo import PriceRow, upsert_prices
-                from etf_momentum.db.session import make_session_factory, make_sqlite_engine
+                from etf_momentum.db.session import (
+                    make_session_factory,
+                    make_sqlite_engine,
+                )
 
                 eng = make_sqlite_engine()
                 init_db(eng)
                 synth_sf = make_session_factory(eng)
                 synth_db = synth_sf()
                 rows: list[PriceRow] = []
-                close_qfq = data_override["close_qfq"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
-                close_hfq = data_override["close_hfq"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
-                high_qfq = data_override["high_qfq_df"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
-                low_qfq = data_override["low_qfq_df"].reindex(index=idx, columns=codes).astype(float).ffill().bfill()
+                close_qfq = (
+                    data_override["close_qfq"]
+                    .reindex(index=idx, columns=codes)
+                    .astype(float)
+                    .ffill()
+                    .bfill()
+                )
+                close_hfq = (
+                    data_override["close_hfq"]
+                    .reindex(index=idx, columns=codes)
+                    .astype(float)
+                    .ffill()
+                    .bfill()
+                )
+                high_qfq = (
+                    data_override["high_qfq_df"]
+                    .reindex(index=idx, columns=codes)
+                    .astype(float)
+                    .ffill()
+                    .bfill()
+                )
+                low_qfq = (
+                    data_override["low_qfq_df"]
+                    .reindex(index=idx, columns=codes)
+                    .astype(float)
+                    .ffill()
+                    .bfill()
+                )
                 for code in codes:
                     for d in idx:
                         td = d.date() if hasattr(d, "date") else d
                         q_close = float(close_qfq.loc[d, code])
                         h_close = float(close_hfq.loc[d, code])
-                        q_high = float(high_qfq.loc[d, code]) if np.isfinite(float(high_qfq.loc[d, code])) else q_close
-                        q_low = float(low_qfq.loc[d, code]) if np.isfinite(float(low_qfq.loc[d, code])) else q_close
+                        q_high = (
+                            float(high_qfq.loc[d, code])
+                            if np.isfinite(float(high_qfq.loc[d, code]))
+                            else q_close
+                        )
+                        q_low = (
+                            float(low_qfq.loc[d, code])
+                            if np.isfinite(float(low_qfq.loc[d, code]))
+                            else q_close
+                        )
                         n_close = q_close
                         rows.append(
                             PriceRow(
@@ -569,22 +666,39 @@ def run_trend_oos_bootstrap(
                 synth_db = None
                 eval_engine = "legacy"
                 bootstrap_bt_fallback_count += 1
-                limitations.append(f"bt synthetic bootstrap evaluation fallback to legacy: {e}")
+                limitations.append(
+                    f"bt synthetic bootstrap evaluation fallback to legacy: {e}"
+                )
         best_metric: float = -np.inf if cfg.objective == "maximize" else np.inf
         best_params: Dict[str, Any] = {}
         for combo in product(*grids):
             params = dict(zip(keys, combo))
-            inp = _trend_params_to_inputs(codes, syn_start, syn_end, strategy, params, risk_free_rate=risk_free_rate, cost_bps=cost_bps, exec_price=exec_price)
+            inp = _trend_params_to_inputs(
+                codes,
+                syn_start,
+                syn_end,
+                strategy,
+                params,
+                risk_free_rate=risk_free_rate,
+                cost_bps=cost_bps,
+                exec_price=exec_price,
+            )
             try:
                 if eval_engine == "bt" and synth_db is not None:
                     out = compute_trend_portfolio_backtest_bt(synth_db, inp)
                 else:
-                    out = compute_trend_portfolio_backtest(None, inp, data_override=data_override)
+                    out = compute_trend_portfolio_backtest(
+                        None, inp, data_override=data_override
+                    )
             except Exception as e:  # noqa: BLE001
                 logger.debug("Trend bootstrap backtest failed for %s: %s", params, e)
                 continue
             metrics = out.get("metrics") or {}
-            m_dict = metrics.get("strategy") if isinstance(metrics.get("strategy"), dict) else {}
+            m_dict = (
+                metrics.get("strategy")
+                if isinstance(metrics.get("strategy"), dict)
+                else {}
+            )
             m = m_dict.get(cfg.objective_metric)
             if m is None or not np.isfinite(m):
                 continue
@@ -603,7 +717,8 @@ def run_trend_oos_bootstrap(
                 pass
         if synth_sf is not None:
             try:
-                bind = synth_sf.kw.get("bind")
+                sf_kw = getattr(synth_sf, "kw", None)
+                bind = sf_kw.get("bind") if isinstance(sf_kw, dict) else None
                 if bind is not None:
                     bind.dispose()
             except Exception:  # noqa: BLE001
@@ -627,7 +742,16 @@ def run_trend_oos_bootstrap(
         bootstrap_eval_engine_out = "legacy"
 
     chosen = _aggregate_params(bootstrap_params, grid, rng)
-    inp_oos = _trend_params_to_inputs(codes, start_oos, end_oos, strategy, chosen, risk_free_rate=risk_free_rate, cost_bps=cost_bps, exec_price=exec_price)
+    inp_oos = _trend_params_to_inputs(
+        codes,
+        start_oos,
+        end_oos,
+        strategy,
+        chosen,
+        risk_free_rate=risk_free_rate,
+        cost_bps=cost_bps,
+        exec_price=exec_price,
+    )
     if oos_eval_engine == "bt":
         out_oos = compute_trend_portfolio_backtest_bt(db, inp_oos)
     else:

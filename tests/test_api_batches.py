@@ -35,4 +35,3 @@ def test_get_batch_404(api_client: TestClient) -> None:
 
 def test_rollback_batch_missing_returns_error(api_client: TestClient) -> None:
     post_json(api_client, "/api/batches/99999999/rollback", {}, expected_status=500)
-

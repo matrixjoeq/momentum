@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..db.repo import PriceRow
-from .akshare_fetcher import AkshareLike, FetchRequest as AkFetchRequest, fetch_etf_daily_qfq
+from .akshare_fetcher import (
+    AkshareLike,
+    FetchRequest as AkFetchRequest,
+    fetch_etf_daily_qfq,
+)
 
 
 @dataclass(frozen=True)
@@ -30,7 +34,12 @@ def fetch_etf_daily_eastmoney(
 
     rows = fetch_etf_daily_qfq(
         ak,
-        AkFetchRequest(code=req.code, start_date=req.start_date, end_date=req.end_date, adjust=ak_adj),
+        AkFetchRequest(
+            code=req.code,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            adjust=ak_adj,
+        ),
     )
 
     if not rows:
@@ -54,4 +63,3 @@ def fetch_etf_daily_eastmoney(
             )
         )
     return out
-

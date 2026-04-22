@@ -26,4 +26,3 @@ def test_etf_list_range_changes_with_adjust(api_client):
     it_n = get_json_ok(c, "/api/etf?adjust=none")[0]
     assert it_n["last_data_start_date"] == "20240102"
     assert it_n["last_data_end_date"] == "20240103"
-

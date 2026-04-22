@@ -49,6 +49,7 @@ def _make_next_execution_plan_payload(
         "exec_price": str(exec_price),
     }
 
+
 def test_api_baseline_analysis_happy_path(api_client):
     c = api_client
     upsert_and_fetch_etfs(
@@ -249,10 +250,12 @@ def test_api_trend_single_accepts_risk_budget_params(api_client):
             "slippage_rate": 0.0,
         },
     )
-    params = (((data or {}).get("meta") or {}).get("params") or {})
+    params = ((data or {}).get("meta") or {}).get("params") or {}
     assert str(params.get("position_sizing") or "") == "risk_budget"
     assert int(params.get("risk_budget_atr_window") or 0) == 2
-    assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(0.01, rel=0.0, abs=1e-12)
+    assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(
+        0.01, rel=0.0, abs=1e-12
+    )
 
 
 def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
@@ -286,7 +289,11 @@ def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
 
 def test_api_trend_single_quick_mode_skips_heavy_sections(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
-    seed_prices(engine, code_to_series={"TQMS1": [100.0 + i * 0.4 for i, _ in enumerate(dates)]}, dates=dates)
+    seed_prices(
+        engine,
+        code_to_series={"TQMS1": [100.0 + i * 0.4 for i, _ in enumerate(dates)]},
+        dates=dates,
+    )
     c = api_client
     out = post_json_ok(
         c,
@@ -302,8 +309,8 @@ def test_api_trend_single_quick_mode_skips_heavy_sections(engine, api_client):
             "slippage_rate": 0.0,
         },
     )
-    params = (((out or {}).get("meta") or {}).get("params") or {})
-    ts = (out.get("trade_statistics") or {})
+    params = ((out or {}).get("meta") or {}).get("params") or {}
+    ts = out.get("trade_statistics") or {}
     assert params.get("quick_mode") is True
     assert out.get("return_decomposition") is None
     assert out.get("event_study") is None
@@ -335,9 +342,9 @@ def test_api_trend_portfolio_quick_mode_skips_heavy_sections(engine, api_client)
             "slippage_rate": 0.0,
         },
     )
-    params = (((out or {}).get("meta") or {}).get("params") or {})
-    ts = (out.get("trade_statistics") or {})
-    trades_by_code = (ts.get("trades_by_code") or {})
+    params = ((out or {}).get("meta") or {}).get("params") or {}
+    ts = out.get("trade_statistics") or {}
+    trades_by_code = ts.get("trades_by_code") or {}
     assert params.get("quick_mode") is True
     assert out.get("return_decomposition") is None
     assert out.get("event_study") is None
@@ -375,8 +382,8 @@ def test_api_trend_single_risk_budget_vol_regime_stats_contract(engine, api_clie
             "slippage_rate": 0.0,
         },
     )
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
     by_code = (ts.get("by_code") or {}).get("RBVS1", {})
     assert "vol_risk_adjust_total_count" in overall
     assert "vol_risk_adjust_reduce_on_expand_count" in overall
@@ -385,7 +392,7 @@ def test_api_trend_single_risk_budget_vol_regime_stats_contract(engine, api_clie
     assert "vol_risk_entry_state_increase_on_contract_count" in overall
     assert "vol_risk_adjust_total_count" in by_code
     assert "vol_risk_entry_state_reduce_on_expand_count" in by_code
-    rc = ((out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {})
+    rc = (out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
     assert rc.get("enabled") is True
 
 
@@ -444,17 +451,24 @@ def test_api_trend_portfolio_risk_budget_freezes_weight_after_entry(engine, api_
             "slippage_rate": 0.0,
         },
     )
-    params = (((out or {}).get("meta") or {}).get("params") or {})
+    params = ((out or {}).get("meta") or {}).get("params") or {}
     assert str(params.get("position_sizing") or "") == "risk_budget"
     assert int(params.get("risk_budget_atr_window") or 0) == 2
-    assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(0.005, rel=0.0, abs=1e-12)
-    w = [float(x) for x in ((((out.get("weights") or {}).get("series") or {}).get("RBP1")) or [])]
+    assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(
+        0.005, rel=0.0, abs=1e-12
+    )
+    w = [
+        float(x)
+        for x in ((((out.get("weights") or {}).get("series") or {}).get("RBP1")) or [])
+    ]
     positive_w = [x for x in w if x > 1e-12]
     assert len(positive_w) >= 3
     assert max(positive_w) - min(positive_w) <= 1e-12
 
 
-def test_api_trend_portfolio_risk_budget_overcap_scale_stats_contract(engine, api_client):
+def test_api_trend_portfolio_risk_budget_overcap_scale_stats_contract(
+    engine, api_client
+):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
     series = {
         "RBP2A": [100.0 + i * 0.6 for i, _ in enumerate(dates)],
@@ -479,17 +493,23 @@ def test_api_trend_portfolio_risk_budget_overcap_scale_stats_contract(engine, ap
             "slippage_rate": 0.0,
         },
     )
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
     assert int(overall.get("vol_risk_overcap_scale_count") or 0) > 0
-    assert int(((by_code.get("RBP2A") or {}).get("vol_risk_overcap_scale_count") or 0) >= 0)
-    assert int(((by_code.get("RBP2B") or {}).get("vol_risk_overcap_scale_count") or 0) >= 0)
+    assert int(
+        ((by_code.get("RBP2A") or {}).get("vol_risk_overcap_scale_count") or 0) >= 0
+    )
+    assert int(
+        ((by_code.get("RBP2B") or {}).get("vol_risk_overcap_scale_count") or 0) >= 0
+    )
 
 
 def test_api_trend_single_er_filter_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
-    series = {"ER1": [100.0 + ((-1.0) ** i) * 0.8 + i * 0.01 for i, _ in enumerate(dates)]}
+    series = {
+        "ER1": [100.0 + ((-1.0) ** i) * 0.8 + i * 0.01 for i, _ in enumerate(dates)]
+    }
     seed_prices(engine, code_to_series=series, dates=dates)
 
     c = api_client
@@ -502,26 +522,44 @@ def test_api_trend_single_er_filter_contract(engine, api_client):
         "cost_bps": 0.0,
         "slippage_rate": 0.0,
     }
-    out_no_filter = post_json_ok(c, "/api/analysis/trend", {**base_payload, "er_filter": False})
+    out_no_filter = post_json_ok(
+        c, "/api/analysis/trend", {**base_payload, "er_filter": False}
+    )
     out_with_filter = post_json_ok(
         c,
         "/api/analysis/trend",
         {**base_payload, "er_filter": True, "er_window": 10, "er_threshold": 0.8},
     )
 
-    pos_no_filter = [float(x) for x in ((out_no_filter.get("signals") or {}).get("position") or [])]
-    pos_with_filter = [float(x) for x in ((out_with_filter.get("signals") or {}).get("position") or [])]
+    pos_no_filter = [
+        float(x) for x in ((out_no_filter.get("signals") or {}).get("position") or [])
+    ]
+    pos_with_filter = [
+        float(x) for x in ((out_with_filter.get("signals") or {}).get("position") or [])
+    ]
     assert any(x > 0.0 for x in pos_no_filter)
     assert all(x == 0.0 for x in pos_with_filter)
-    params = (((out_with_filter or {}).get("meta") or {}).get("params") or {})
+    params = ((out_with_filter or {}).get("meta") or {}).get("params") or {}
     assert params.get("er_filter") is True
     assert int(params.get("er_window") or 0) == 10
-    assert float(params.get("er_threshold") or 0.0) == pytest.approx(0.8, rel=0.0, abs=1e-12)
-    ts = (out_with_filter.get("trade_statistics") or {})
+    assert float(params.get("er_threshold") or 0.0) == pytest.approx(
+        0.8, rel=0.0, abs=1e-12
+    )
+    ts = out_with_filter.get("trade_statistics") or {}
     assert int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0) > 0
-    assert int((ts.get("overall") or {}).get("er_filter_attempted_entry_count") or 0) >= int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0)
+    assert int(
+        (ts.get("overall") or {}).get("er_filter_attempted_entry_count") or 0
+    ) >= int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0)
     assert int((ts.get("overall") or {}).get("er_filter_allowed_entry_count") or 0) >= 0
-    assert int(((ts.get("by_code") or {}).get("ER1") or {}).get("er_filter_blocked_entry_count") or 0) > 0
+    assert (
+        int(
+            ((ts.get("by_code") or {}).get("ER1") or {}).get(
+                "er_filter_blocked_entry_count"
+            )
+            or 0
+        )
+        > 0
+    )
 
 
 def test_api_trend_single_er_exit_filter_contract(engine, api_client):
@@ -546,13 +584,21 @@ def test_api_trend_single_er_exit_filter_contract(engine, api_client):
             "slippage_rate": 0.0,
         },
     )
-    params = (((out_with_exit or {}).get("meta") or {}).get("params") or {})
+    params = ((out_with_exit or {}).get("meta") or {}).get("params") or {}
     assert params.get("er_exit_filter") is True
     assert int(params.get("er_exit_window") or 0) == 10
-    ts = (out_with_exit.get("trade_statistics") or {})
+    ts = out_with_exit.get("trade_statistics") or {}
     assert int((ts.get("overall") or {}).get("er_exit_filter_trigger_count") or 0) > 0
-    assert int(((ts.get("by_code") or {}).get("ERX1") or {}).get("er_exit_filter_trigger_count") or 0) > 0
-    er_exit_rc = ((out_with_exit.get("risk_controls") or {}).get("er_exit_filter") or {})
+    assert (
+        int(
+            ((ts.get("by_code") or {}).get("ERX1") or {}).get(
+                "er_exit_filter_trigger_count"
+            )
+            or 0
+        )
+        > 0
+    )
+    er_exit_rc = (out_with_exit.get("risk_controls") or {}).get("er_exit_filter") or {}
     assert int(er_exit_rc.get("trigger_count") or 0) > 0
     assert isinstance(er_exit_rc.get("trace_last_rows") or [], list)
 
@@ -582,10 +628,10 @@ def test_api_trend_single_impulse_entry_filter_contract(engine, api_client):
     )
     pos = [float(x) for x in ((out.get("signals") or {}).get("position") or [])]
     assert all(x == 0.0 for x in pos)
-    params = (((out or {}).get("meta") or {}).get("params") or {})
+    params = ((out or {}).get("meta") or {}).get("params") or {}
     assert params.get("impulse_entry_filter") is True
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
     blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
     blocked_split = (
         int(overall.get("impulse_filter_blocked_entry_count_bull") or 0)
@@ -594,12 +640,25 @@ def test_api_trend_single_impulse_entry_filter_contract(engine, api_client):
     )
     assert blocked > 0
     assert blocked_split == blocked
-    assert int(((ts.get("by_code") or {}).get("IMPAPI1") or {}).get("impulse_filter_blocked_entry_count") or 0) == blocked
+    assert (
+        int(
+            ((ts.get("by_code") or {}).get("IMPAPI1") or {}).get(
+                "impulse_filter_blocked_entry_count"
+            )
+            or 0
+        )
+        == blocked
+    )
 
 
 def test_api_trend_single_kama_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
-    series = {"KAMA1": [100.0 + (i * 0.4 if i < 40 else (40 * 0.4) - (i - 40) * 0.45) for i, _ in enumerate(dates)]}
+    series = {
+        "KAMA1": [
+            100.0 + (i * 0.4 if i < 40 else (40 * 0.4) - (i - 40) * 0.45)
+            for i, _ in enumerate(dates)
+        ]
+    }
     seed_prices(engine, code_to_series=series, dates=dates)
 
     c = api_client
@@ -620,7 +679,7 @@ def test_api_trend_single_kama_contract(engine, api_client):
             "slippage_rate": 0.0,
         },
     )
-    params = (((out or {}).get("meta") or {}).get("params") or {})
+    params = ((out or {}).get("meta") or {}).get("params") or {}
     assert str(params.get("ma_type") or "") == "kama"
     assert int(params.get("kama_er_window") or 0) == 10
     assert int(params.get("kama_fast_window") or 0) == 2
@@ -631,7 +690,9 @@ def test_api_trend_portfolio_er_filter_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
     series = {
         "ER1": [100.0 + ((-1.0) ** i) * 0.8 + i * 0.01 for i, _ in enumerate(dates)],
-        "ER2": [90.0 + ((-1.0) ** (i + 1)) * 0.7 + i * 0.01 for i, _ in enumerate(dates)],
+        "ER2": [
+            90.0 + ((-1.0) ** (i + 1)) * 0.7 + i * 0.01 for i, _ in enumerate(dates)
+        ],
     }
     seed_prices(engine, code_to_series=series, dates=dates)
 
@@ -646,7 +707,9 @@ def test_api_trend_portfolio_er_filter_contract(engine, api_client):
         "slippage_rate": 0.0,
         "position_sizing": "equal",
     }
-    out_no_filter = post_json_ok(c, "/api/analysis/trend/portfolio", {**base_payload, "er_filter": False})
+    out_no_filter = post_json_ok(
+        c, "/api/analysis/trend/portfolio", {**base_payload, "er_filter": False}
+    )
     out_with_filter = post_json_ok(
         c,
         "/api/analysis/trend/portfolio",
@@ -658,17 +721,25 @@ def test_api_trend_portfolio_er_filter_contract(engine, api_client):
     assert not w_no.empty
     assert any(float(v) > 0.0 for v in w_no.to_numpy().ravel())
     assert all(float(v) == 0.0 for v in w_yes.to_numpy().ravel())
-    params = (((out_with_filter or {}).get("meta") or {}).get("params") or {})
+    params = ((out_with_filter or {}).get("meta") or {}).get("params") or {}
     assert params.get("er_filter") is True
     assert int(params.get("er_window") or 0) == 10
-    assert float(params.get("er_threshold") or 0.0) == pytest.approx(0.8, rel=0.0, abs=1e-12)
-    ts = (out_with_filter.get("trade_statistics") or {})
+    assert float(params.get("er_threshold") or 0.0) == pytest.approx(
+        0.8, rel=0.0, abs=1e-12
+    )
+    ts = out_with_filter.get("trade_statistics") or {}
     assert int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0) > 0
-    assert int((ts.get("overall") or {}).get("er_filter_attempted_entry_count") or 0) >= int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0)
+    assert int(
+        (ts.get("overall") or {}).get("er_filter_attempted_entry_count") or 0
+    ) >= int((ts.get("overall") or {}).get("er_filter_blocked_entry_count") or 0)
     assert int((ts.get("overall") or {}).get("er_filter_allowed_entry_count") or 0) >= 0
-    by_code = (ts.get("by_code") or {})
-    assert int(((by_code.get("ER1") or {}).get("er_filter_blocked_entry_count") or 0) >= 0)
-    assert int(((by_code.get("ER2") or {}).get("er_filter_blocked_entry_count") or 0) >= 0)
+    by_code = ts.get("by_code") or {}
+    assert int(
+        ((by_code.get("ER1") or {}).get("er_filter_blocked_entry_count") or 0) >= 0
+    )
+    assert int(
+        ((by_code.get("ER2") or {}).get("er_filter_blocked_entry_count") or 0) >= 0
+    )
 
 
 def test_api_trend_portfolio_impulse_entry_filter_contract(engine, api_client):
@@ -701,10 +772,10 @@ def test_api_trend_portfolio_impulse_entry_filter_contract(engine, api_client):
     w = pd.DataFrame(((out.get("weights") or {}).get("series") or {}))
     assert not w.empty
     assert all(float(v) == 0.0 for v in w.to_numpy().ravel())
-    params = (((out or {}).get("meta") or {}).get("params") or {})
+    params = ((out or {}).get("meta") or {}).get("params") or {}
     assert params.get("impulse_entry_filter") is True
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
     blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
     blocked_split = (
         int(overall.get("impulse_filter_blocked_entry_count_bull") or 0)
@@ -713,9 +784,15 @@ def test_api_trend_portfolio_impulse_entry_filter_contract(engine, api_client):
     )
     assert blocked > 0
     assert blocked_split == blocked
-    by_code = (ts.get("by_code") or {})
-    assert int(((by_code.get("IMPAP1") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
-    assert int(((by_code.get("IMPAP2") or {}).get("impulse_filter_blocked_entry_count") or 0) >= 0)
+    by_code = ts.get("by_code") or {}
+    assert int(
+        ((by_code.get("IMPAP1") or {}).get("impulse_filter_blocked_entry_count") or 0)
+        >= 0
+    )
+    assert int(
+        ((by_code.get("IMPAP2") or {}).get("impulse_filter_blocked_entry_count") or 0)
+        >= 0
+    )
 
 
 def test_api_trend_portfolio_er_exit_filter_contract(engine, api_client):
@@ -744,14 +821,18 @@ def test_api_trend_portfolio_er_exit_filter_contract(engine, api_client):
             "slippage_rate": 0.0,
         },
     )
-    params = (((out or {}).get("meta") or {}).get("params") or {})
+    params = ((out or {}).get("meta") or {}).get("params") or {}
     assert params.get("er_exit_filter") is True
     assert int(params.get("er_exit_window") or 0) == 10
-    ts = (out.get("trade_statistics") or {})
+    ts = out.get("trade_statistics") or {}
     assert int((ts.get("overall") or {}).get("er_exit_filter_trigger_count") or 0) > 0
-    by_code = (ts.get("by_code") or {})
-    assert int(((by_code.get("ERX1") or {}).get("er_exit_filter_trigger_count") or 0) >= 0)
-    assert int(((by_code.get("ERX2") or {}).get("er_exit_filter_trigger_count") or 0) >= 0)
+    by_code = ts.get("by_code") or {}
+    assert int(
+        ((by_code.get("ERX1") or {}).get("er_exit_filter_trigger_count") or 0) >= 0
+    )
+    assert int(
+        ((by_code.get("ERX2") or {}).get("er_exit_filter_trigger_count") or 0) >= 0
+    )
 
 
 def test_api_trend_single_er_filter_rejects_invalid_threshold(api_client):
@@ -865,7 +946,9 @@ def test_api_trend_single_kama_rejects_fast_ge_slow(api_client):
         expected_status=400,
     )
     assert isinstance(err, dict)
-    assert "kama_fast_window must be < kama_slow_window" in str((err or {}).get("detail") or "")
+    assert "kama_fast_window must be < kama_slow_window" in str(
+        (err or {}).get("detail") or ""
+    )
 
 
 def test_api_trend_single_ma_cross_rejects_kama_type(api_client):
@@ -887,7 +970,9 @@ def test_api_trend_single_ma_cross_rejects_kama_type(api_client):
         expected_status=400,
     )
     assert isinstance(err, dict)
-    assert "ma_type=kama is only supported for ma_filter" in str((err or {}).get("detail") or "")
+    assert "ma_type=kama is only supported for ma_filter" in str(
+        (err or {}).get("detail") or ""
+    )
 
 
 def test_api_trend_single_bt_engine_contract(api_client):
@@ -956,7 +1041,9 @@ def test_api_trend_portfolio_oos_bootstrap_bt_engine_contract(api_client, engine
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
         },
         dates=dates,
@@ -988,7 +1075,9 @@ def test_api_trend_portfolio_oos_bootstrap_bt_engine_contract(api_client, engine
     assert isinstance(data.get("limitations"), list)
 
 
-def test_api_trend_engine_uses_server_default_when_request_missing(api_client, monkeypatch):
+def test_api_trend_engine_uses_server_default_when_request_missing(
+    api_client, monkeypatch
+):
     c = api_client
     upsert_and_fetch_etfs(
         c,
@@ -1012,7 +1101,10 @@ def test_api_trend_engine_uses_server_default_when_request_missing(api_client, m
         },
     )
     assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
-    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "bt"
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower()
+        == "bt"
+    )
 
 
 def test_api_trend_portfolio_engine_uses_server_default_when_request_missing(
@@ -1041,10 +1133,15 @@ def test_api_trend_portfolio_engine_uses_server_default_when_request_missing(
         },
     )
     assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
-    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "bt"
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower()
+        == "bt"
+    )
 
 
-def test_api_trend_engine_falls_back_to_legacy_when_server_default_invalid(api_client, monkeypatch):
+def test_api_trend_engine_falls_back_to_legacy_when_server_default_invalid(
+    api_client, monkeypatch
+):
     c = api_client
     upsert_and_fetch_etfs(
         c,
@@ -1067,8 +1164,13 @@ def test_api_trend_engine_falls_back_to_legacy_when_server_default_invalid(api_c
             "slippage_rate": 0.0,
         },
     )
-    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "legacy"
-    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "legacy"
+    )
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower()
+        == "legacy"
+    )
 
 
 def test_api_trend_portfolio_engine_falls_back_to_legacy_when_server_default_invalid(
@@ -1096,8 +1198,13 @@ def test_api_trend_portfolio_engine_falls_back_to_legacy_when_server_default_inv
             "slippage_rate": 0.0,
         },
     )
-    assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "legacy"
-    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "legacy"
+    )
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower()
+        == "legacy"
+    )
 
 
 def test_api_trend_single_rejects_invalid_engine(api_client):
@@ -1154,13 +1261,17 @@ def test_api_trend_portfolio_rejects_invalid_engine(api_client):
     assert "engine must be one of: legacy|bt" in str((err or {}).get("detail") or "")
 
 
-def test_api_trend_oos_bootstrap_engine_uses_server_default_when_missing(api_client, engine, monkeypatch):
+def test_api_trend_oos_bootstrap_engine_uses_server_default_when_missing(
+    api_client, engine, monkeypatch
+):
     c = api_client
     dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
         },
         dates=dates,
@@ -1197,7 +1308,9 @@ def test_api_trend_oos_bootstrap_falls_back_to_legacy_when_server_default_invali
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
         },
         dates=dates,
@@ -1222,11 +1335,15 @@ def test_api_trend_oos_bootstrap_falls_back_to_legacy_when_server_default_invali
         },
     )
     assert str(((data.get("meta") or {}).get("engine") or "")).lower() == "legacy"
-    assert str(((data.get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert (
+        str(((data.get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    )
     assert str(data.get("engine") or "").lower() == "legacy"
 
 
-def test_api_trend_single_request_engine_overrides_invalid_server_default(api_client, monkeypatch):
+def test_api_trend_single_request_engine_overrides_invalid_server_default(
+    api_client, monkeypatch
+):
     c = api_client
     upsert_and_fetch_etfs(
         c,
@@ -1251,7 +1368,10 @@ def test_api_trend_single_request_engine_overrides_invalid_server_default(api_cl
         },
     )
     assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
-    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower()
+        == "legacy"
+    )
 
 
 def test_api_trend_portfolio_request_engine_overrides_invalid_server_default(
@@ -1281,7 +1401,10 @@ def test_api_trend_portfolio_request_engine_overrides_invalid_server_default(
         },
     )
     assert str((((data or {}).get("meta") or {}).get("engine") or "")).lower() == "bt"
-    assert str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert (
+        str((((data or {}).get("meta") or {}).get("engine_default") or "")).lower()
+        == "legacy"
+    )
 
 
 def test_api_trend_oos_request_engine_overrides_invalid_server_default(
@@ -1292,7 +1415,9 @@ def test_api_trend_oos_request_engine_overrides_invalid_server_default(
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
         },
         dates=dates,
@@ -1318,7 +1443,9 @@ def test_api_trend_oos_request_engine_overrides_invalid_server_default(
         },
     )
     assert str(((data.get("meta") or {}).get("engine") or "")).lower() == "bt"
-    assert str(((data.get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    assert (
+        str(((data.get("meta") or {}).get("engine_default") or "")).lower() == "legacy"
+    )
     assert str(data.get("engine") or "").lower() == "bt"
 
 
@@ -1328,7 +1455,9 @@ def test_api_trend_oos_bootstrap_rejects_invalid_engine(api_client, engine):
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
         },
         dates=dates,
@@ -1362,7 +1491,9 @@ def test_api_trend_oos_bootstrap_bt_legacy_consistency(api_client, engine):
     seed_prices(
         engine,
         code_to_series={
-            "A": [100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)],
+            "A": [
+                100.0 + i * 0.20 + ((i % 17) - 8) * 0.08 for i, _ in enumerate(dates)
+            ],
             "B": [95.0 + i * 0.15 + ((i % 13) - 6) * 0.07 for i, _ in enumerate(dates)],
             "C": [90.0 + i * 0.18 + ((i % 11) - 5) * 0.06 for i, _ in enumerate(dates)],
         },
@@ -1396,8 +1527,8 @@ def test_api_trend_oos_bootstrap_bt_legacy_consistency(api_client, engine):
     )
 
     assert legacy.get("chosen_params") == bt.get("chosen_params")
-    l_m = (legacy.get("oos_metrics") or {})
-    b_m = (bt.get("oos_metrics") or {})
+    l_m = legacy.get("oos_metrics") or {}
+    b_m = bt.get("oos_metrics") or {}
     for key, tol in {
         "cumulative_return": 1e-6,
         "annualized_return": 1e-6,
@@ -1468,7 +1599,9 @@ def test_api_rotation_next_execution_plan_happy_path(api_client):
         assert "target_weights" in data["plan"]
 
 
-def test_api_rotation_next_execution_plan_keeps_explicit_empty_picks(api_client, monkeypatch):
+def test_api_rotation_next_execution_plan_keeps_explicit_empty_picks(
+    api_client, monkeypatch
+):
     c = api_client
     upsert_and_fetch_etfs(
         c,
@@ -1493,7 +1626,9 @@ def test_api_rotation_next_execution_plan_keeps_explicit_empty_picks(api_client,
                     "scores": {},
                 }
             ],
-            "period_details": [{"start_date": "2024-01-03", "buys": [], "sells": [], "turnover": 0.0}],
+            "period_details": [
+                {"start_date": "2024-01-03", "buys": [], "sells": [], "turnover": 0.0}
+            ],
             "weights_end": {"weights": {"510300": 1.0}},
         }
 
@@ -1511,7 +1646,10 @@ def test_api_rotation_next_execution_plan_keeps_explicit_empty_picks(api_client,
     )
     assert data["has_execution_plan"] is True
     assert data["plan"]["picks"] == []
-    assert data["plan"]["target_weights"] and data["plan"]["target_weights"][0]["code"] == "510300"
+    assert (
+        data["plan"]["target_weights"]
+        and data["plan"]["target_weights"][0]["code"] == "510300"
+    )
 
 
 def test_api_rotation_next_plan_keeps_explicit_empty_picks(api_client, monkeypatch):
@@ -1519,7 +1657,12 @@ def test_api_rotation_next_plan_keeps_explicit_empty_picks(api_client, monkeypat
     upsert_and_fetch_etfs(
         c,
         codes=["159915", "511010", "513100", "518880"],
-        names={"159915": "创业板", "511010": "国债", "513100": "纳指", "518880": "黄金"},
+        names={
+            "159915": "创业板",
+            "511010": "国债",
+            "513100": "纳指",
+            "518880": "黄金",
+        },
         start_date="20240102",
         end_date="20240103",
     )
@@ -1572,7 +1715,9 @@ def test_api_rotation_next_execution_plan_entry_param_matrix(
     seed_prices(engine, code_to_series=series, dates=dates)
 
     c = api_client
-    base = make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="daily")
+    base = make_rotation_base_payload(
+        codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="daily"
+    )
     data = post_json_ok(
         c,
         "/api/analysis/rotation/next-execution-plan",
@@ -1585,7 +1730,9 @@ def test_api_rotation_next_execution_plan_entry_param_matrix(
             "trend_filter": True,
             "bias_filter": True,
             "asset_trend_rules": [make_trend_rule(stage="entry")],
-            "asset_bias_rules": [make_bias_rule(stage="entry", op="<=", fixed_value=1.5)],
+            "asset_bias_rules": [
+                make_bias_rule(stage="entry", op="<=", fixed_value=1.5)
+            ],
         },
     )
     plan = data["plan"]
@@ -1598,10 +1745,14 @@ def test_api_rotation_next_execution_plan_entry_param_matrix(
         assert any(p in expect_codes for p in picks)
 
 
-def test_api_rotation_next_execution_plan_entry_backfill_recovers_slots(api_client, engine):
+def test_api_rotation_next_execution_plan_entry_backfill_recovers_slots(
+    api_client, engine
+):
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-07-31", freq="B")]
 
-    def _spike(base: float, slope: float, spike_start: int, spike_slope: float) -> list[float]:
+    def _spike(
+        base: float, slope: float, spike_start: int, spike_slope: float
+    ) -> list[float]:
         out: list[float] = []
         for i, _ in enumerate(dates):
             v = base + i * slope
@@ -1624,7 +1775,9 @@ def test_api_rotation_next_execution_plan_entry_backfill_recovers_slots(api_clie
 
     c = api_client
     common = {
-        **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="daily"),
+        **make_rotation_base_payload(
+            codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="daily"
+        ),
         "asof": fmt_ymd(dates[-2]),
         "exec_price": "open",
         "entry_match_n": 0,  # strict AND on enabled entry filters
@@ -1634,15 +1787,25 @@ def test_api_rotation_next_execution_plan_entry_backfill_recovers_slots(api_clie
         "asset_bias_rules": [make_bias_rule(stage="entry", op="<=", fixed_value=1.5)],
     }
 
-    d_off = post_json_ok(c, "/api/analysis/rotation/next-execution-plan", {**common, "entry_backfill": False})
-    d_on = post_json_ok(c, "/api/analysis/rotation/next-execution-plan", {**common, "entry_backfill": True})
+    d_off = post_json_ok(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        {**common, "entry_backfill": False},
+    )
+    d_on = post_json_ok(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        {**common, "entry_backfill": True},
+    )
     picks_off = (d_off.get("plan") or {}).get("picks") or []
     picks_on = (d_on.get("plan") or {}).get("picks") or []
     assert len(picks_on) >= len(picks_off)
     assert len(picks_on) > len(picks_off)
 
 
-def test_api_rotation_next_execution_plan_trace_includes_scores_and_entry_checks_with_default_rules(api_client, engine):
+def test_api_rotation_next_execution_plan_trace_includes_scores_and_entry_checks_with_default_rules(
+    api_client, engine
+):
     dates, series = build_rotation_case_series()
     seed_prices(engine, code_to_series=series, dates=dates)
 
@@ -1651,7 +1814,9 @@ def test_api_rotation_next_execution_plan_trace_includes_scores_and_entry_checks
         c,
         "/api/analysis/rotation/next-execution-plan",
         {
-            **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="daily"),
+            **make_rotation_base_payload(
+                codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="daily"
+            ),
             "asof": fmt_ymd(dates[-2]),
             "exec_price": "open",
             "trend_filter": True,
@@ -1661,7 +1826,7 @@ def test_api_rotation_next_execution_plan_trace_includes_scores_and_entry_checks
     )
     trace = (data.get("plan") or {}).get("trace") or {}
     m = trace.get("momentum_scores") or {}
-    entry = ((trace.get("entry_filtering") or {}).get("entry_checks_by_code") or {})
+    entry = (trace.get("entry_filtering") or {}).get("entry_checks_by_code") or {}
     assert m, "trace.momentum_scores should not be empty"
     assert entry, "trace.entry_filtering.entry_checks_by_code should not be empty"
     one = next(iter(entry.values()))
@@ -1670,7 +1835,9 @@ def test_api_rotation_next_execution_plan_trace_includes_scores_and_entry_checks
     assert "ok_gate" in one
 
 
-def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_trigger_events(api_client, monkeypatch):
+def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_trigger_events(
+    api_client, monkeypatch
+):
     c = api_client
     upsert_and_fetch_etfs(
         c,
@@ -1691,7 +1858,11 @@ def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_tri
                     "mode": "risk_on",
                     "picks": ["510300"],
                     "scores": {"510300": 0.02},
-                    "risk_controls": {"reasons": [], "score_by_code": {"510300": 0.02}, "candidate_ranked": ["510300"]},
+                    "risk_controls": {
+                        "reasons": [],
+                        "score_by_code": {"510300": 0.02},
+                        "candidate_ranked": ["510300"],
+                    },
                     "daily_exit": {
                         "gate": {"enabled_count": 2, "required": 2, "mode": "and"},
                         "checks_by_day": [
@@ -1705,7 +1876,11 @@ def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_tri
                                         "required": 2,
                                         "hit_conditions": ["trend_rule"],
                                         "triggered": False,
-                                        "by_filter": {"momentum_rule": False, "trend_rule": True, "bias_rule": False},
+                                        "by_filter": {
+                                            "momentum_rule": False,
+                                            "trend_rule": True,
+                                            "bias_rule": False,
+                                        },
                                     }
                                 ],
                             }
@@ -1714,7 +1889,9 @@ def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_tri
                     },
                 }
             ],
-            "period_details": [{"start_date": "2024-01-03", "buys": [], "sells": [], "turnover": 0.0}],
+            "period_details": [
+                {"start_date": "2024-01-03", "buys": [], "sells": [], "turnover": 0.0}
+            ],
             "daily_exit_events": [],
             "weights_end": {"weights": {"510300": 1.0}},
         }
@@ -1731,7 +1908,9 @@ def test_api_rotation_next_execution_plan_trace_includes_exit_checks_without_tri
             asof="20240102",
         ),
     )
-    checks = ((((data.get("plan") or {}).get("trace") or {}).get("exit_checks") or {}).get("execution_day_checks") or [])
+    checks = (
+        ((data.get("plan") or {}).get("trace") or {}).get("exit_checks") or {}
+    ).get("execution_day_checks") or []
     assert checks
     assert checks[0]["code"] == "510300"
     assert checks[0]["triggered"] is False
@@ -1764,13 +1943,17 @@ def test_api_rotation_next_plan_entry_param_matrix_mini_program(
         {
             "asof": fmt_ymd(asof),
             "anchor_weekday": 3,
-            **make_rotation_base_payload(codes=["159915", "511010", "513100", "518880"], dates=dates),
+            **make_rotation_base_payload(
+                codes=["159915", "511010", "513100", "518880"], dates=dates
+            ),
             "entry_backfill": False,
             "entry_match_n": int(entry_match_n),
             "trend_filter": True,
             "bias_filter": True,
             "asset_trend_rules": [make_trend_rule(stage="entry")],
-            "asset_bias_rules": [make_bias_rule(stage="entry", op="<=", fixed_value=1.5)],
+            "asset_bias_rules": [
+                make_bias_rule(stage="entry", op="<=", fixed_value=1.5)
+            ],
         },
     )
     assert data["rebalance_effective_next_day"] is True
@@ -1781,4 +1964,3 @@ def test_api_rotation_next_plan_entry_param_matrix_mini_program(
     else:
         assert data["pick_code"] is not None
         assert float(data["pick_exposure"]) > 0.0
-

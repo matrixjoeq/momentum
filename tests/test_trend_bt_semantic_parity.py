@@ -201,7 +201,9 @@ def _seed_case(engine) -> list:
         code_to_series={
             "A": [100.0 + i * 0.35 + ((i % 17) - 8) * 0.1 for i, _ in enumerate(dates)],
             "B": [95.0 + i * 0.25 + ((i % 13) - 6) * 0.12 for i, _ in enumerate(dates)],
-            "C": [105.0 + i * 0.15 + ((i % 11) - 5) * 0.08 for i, _ in enumerate(dates)],
+            "C": [
+                105.0 + i * 0.15 + ((i % 11) - 5) * 0.08 for i, _ in enumerate(dates)
+            ],
         },
         dates=dates,
     )
@@ -340,7 +342,9 @@ def test_bt_portfolio_semantic_parity_keys_and_core_metrics(engine):
         ("macd_v", "oc2", "equal"),
     ],
 )
-def test_bt_single_semantic_parity_matrix(engine, strategy: str, exec_price: str, position_sizing: str):
+def test_bt_single_semantic_parity_matrix(
+    engine, strategy: str, exec_price: str, position_sizing: str
+):
     dates = _seed_case(engine)
     sf = make_session_factory(engine)
     with sf() as db:
@@ -543,7 +547,9 @@ def test_bt_portfolio_effective_weights_semantic_parity(engine):
         ("oc2", "vol_target"),
     ],
 )
-def test_bt_single_sizing_modes_sentinel_parity(engine, exec_price: str, position_sizing: str):
+def test_bt_single_sizing_modes_sentinel_parity(
+    engine, exec_price: str, position_sizing: str
+):
     dates = _seed_case(engine)
     sf = make_session_factory(engine)
     with sf() as db:

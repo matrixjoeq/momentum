@@ -35,6 +35,9 @@ def test_seed_updates_existing_policy_fields(session_factory: sessionmaker) -> N
         db.commit()
 
     with session_factory() as db:
-        p = db.query(ValidationPolicy).filter(ValidationPolicy.name == "cn_stock_etf_10").one()
+        p = (
+            db.query(ValidationPolicy)
+            .filter(ValidationPolicy.name == "cn_stock_etf_10")
+            .one()
+        )
         assert p.max_gap_days == 15
-

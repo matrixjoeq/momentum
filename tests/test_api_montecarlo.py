@@ -89,7 +89,9 @@ def test_api_rotation_montecarlo_entry_param_combo_diff(api_client, engine):
 
     c = api_client
     base = {
-        **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"),
+        **make_rotation_base_payload(
+            codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"
+        ),
         "n_sims": 100,
         "block_size": 5,
         "seed": 7,
@@ -99,8 +101,12 @@ def test_api_rotation_montecarlo_entry_param_combo_diff(api_client, engine):
         "asset_trend_rules": [make_trend_rule(stage="entry")],
         "asset_bias_rules": [make_bias_rule(stage="entry", op="<=", fixed_value=1.5)],
     }
-    d_and = post_json_ok(c, "/api/analysis/rotation/montecarlo", {**base, "entry_match_n": 0})
-    d_nofm = post_json_ok(c, "/api/analysis/rotation/montecarlo", {**base, "entry_match_n": 1})
+    d_and = post_json_ok(
+        c, "/api/analysis/rotation/montecarlo", {**base, "entry_match_n": 0}
+    )
+    d_nofm = post_json_ok(
+        c, "/api/analysis/rotation/montecarlo", {**base, "entry_match_n": 1}
+    )
     assert "observed_holding_len" in d_and and "observed_holding_len" in d_nofm
     ar_and = mc_metric_mean(d_and, "annualized_return")
     ar_nofm = mc_metric_mean(d_nofm, "annualized_return")
@@ -113,17 +119,28 @@ def test_api_rotation_montecarlo_exit_param_combo_diff(api_client, engine):
 
     c = api_client
     base = {
-        **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"),
+        **make_rotation_base_payload(
+            codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"
+        ),
         "n_sims": 100,
         "block_size": 5,
         "seed": 9,
         "sample_window_days": 120,
         "entry_match_n": 1,
         **make_entry_filters_payload(bias_fixed_value=1.5),
-        "asset_trend_rules": [make_trend_rule(stage="entry"), make_trend_rule(stage="exit")],
+        "asset_trend_rules": [
+            make_trend_rule(stage="entry"),
+            make_trend_rule(stage="exit"),
+        ],
     }
-    d_off = post_json_ok(c, "/api/analysis/rotation/montecarlo", {**base, "trend_exit_filter": False})
-    d_on = post_json_ok(c, "/api/analysis/rotation/montecarlo", {**base, "trend_exit_filter": True, "exit_match_n": 1})
+    d_off = post_json_ok(
+        c, "/api/analysis/rotation/montecarlo", {**base, "trend_exit_filter": False}
+    )
+    d_on = post_json_ok(
+        c,
+        "/api/analysis/rotation/montecarlo",
+        {**base, "trend_exit_filter": True, "exit_match_n": 1},
+    )
     ar_off = mc_metric_mean(d_off, "annualized_return")
     ar_on = mc_metric_mean(d_on, "annualized_return")
     assert ar_on <= ar_off
@@ -135,17 +152,24 @@ def test_api_rotation_montecarlo_entry_exit_nofm_combo_diff(api_client, engine):
 
     c = api_client
     payload = {
-        **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"),
+        **make_rotation_base_payload(
+            codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"
+        ),
         "n_sims": 100,
         "block_size": 5,
         "seed": 11,
         "sample_window_days": 120,
         "entry_match_n": 1,
-        **make_entry_exit_filters_payload(entry_bias_fixed_value=1.5, exit_bias_fixed_value=99.0),
+        **make_entry_exit_filters_payload(
+            entry_bias_fixed_value=1.5, exit_bias_fixed_value=99.0
+        ),
     }
-    d_and = post_json_ok(c, "/api/analysis/rotation/montecarlo", {**payload, "exit_match_n": 0})
-    d_nofm = post_json_ok(c, "/api/analysis/rotation/montecarlo", {**payload, "exit_match_n": 1})
+    d_and = post_json_ok(
+        c, "/api/analysis/rotation/montecarlo", {**payload, "exit_match_n": 0}
+    )
+    d_nofm = post_json_ok(
+        c, "/api/analysis/rotation/montecarlo", {**payload, "exit_match_n": 1}
+    )
     ar_and = mc_metric_mean(d_and, "annualized_return")
     ar_nofm = mc_metric_mean(d_nofm, "annualized_return")
     assert ar_nofm <= ar_and
-

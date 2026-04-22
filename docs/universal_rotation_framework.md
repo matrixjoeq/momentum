@@ -5,6 +5,7 @@
 ### What Was Built
 
 #### 1. Universal Configuration (`src/etf_momentum/strategy/rotation_research_config.py`)
+
 - **`UniverseConfig`**: Define any ETF pool with name, codes, and description
 - **`RotationStrategyConfig`**: Full strategy parameters with dataclasses
 - **`ScoreMethod` Enum**: raw_mom, sharpe_mom, sortino_mom, return_over_vol, sma_trend, low_vol, multi_factor
@@ -16,6 +17,7 @@
 - **Validation**: Config validation with error messages
 
 #### 2. Universal Runner (`src/etf_momentum/scripts/rotation_research_runner.py`)
+
 - **Grid Search**: 72 combinations (3 score_methods × 4 lookbacks × 3 top_k × 2 rebalance_freqs)
 - **Parameter Search**: 18 combinations for sensitivity analysis
 - **Factor Calculations**: All scoring methods with numpy/pandas
@@ -23,18 +25,20 @@
 - **Metrics**: Sharpe, Sortino, Calmar, max drawdown, win rate, annualized return
 - **Report Generation**: Auto-generated markdown reports
 - **Command-Line Interface**:
+
   ```bash
   # Preset universe
   python -m etf_momentum.scripts.rotation_research_runner -u crude_oil
-  
+
   # Custom ETF list
   python -m etf_momentum.scripts.rotation_research_runner -c "510300,510500" -n "My Strategy"
-  
+
   # Quick test
   python -m etf_momentum.scripts.rotation_research_runner -u sector -q
   ```
 
 #### 3. Research Web Page (`src/etf_momentum/web/research_crude_oil.html`)
+
 - **Universe Selector**: Dropdown to switch between crude_oil, a_core, sector
 - **Dynamic ETF Lists**: Shows correct ETFs for each universe
 - **Results Loading**: Auto-loads from `data/rotation_research/{universe}/all_results.csv`
@@ -72,6 +76,7 @@ momentum/
 ### Usage Examples
 
 #### Python API
+
 ```python
 from etf_momentum.strategy.rotation_research_config import (
     UniverseConfig,
@@ -98,6 +103,7 @@ results = run_research(universe=universe, db=db, cost_bps=3.0)
 ```
 
 #### Command Line
+
 ```bash
 # Full grid search on crude oil
 python -m etf_momentum.scripts.rotation_research_runner -u crude_oil
@@ -110,10 +116,12 @@ python -m etf_momentum.scripts.rotation_research_runner -c "510300,510500,510880
 ```
 
 ### Results Location
+
 - **CSV**: `data/rotation_research/{universe}/all_results.csv`
 - **Report**: `data/rotation_research/{universe}/{universe}_report.md`
 
 ### Next Steps (Optional)
+
 1. **Test the universal runner**: Run `python -m etf_momentum.scripts.rotation_research_runner -u crude_oil`
 2. **Verify compatibility**: Results should match existing crude_oil results
 3. **Run on other universes**: Test a_core and sector universes
@@ -121,6 +129,7 @@ python -m etf_momentum.scripts.rotation_research_runner -c "510300,510500,510880
 5. **Add new universes**: Extend `PRESET_UNIVERSES` as needed
 
 ### Key Metrics (Crude Oil - Existing Results)
+
 - **Total strategies tested**: 168
 - **Best Sharpe**: 0.344 (sharpe_mom_90d_top3_weekly)
 - **Best Return**: 11.5% annual
@@ -128,6 +137,7 @@ python -m etf_momentum.scripts.rotation_research_runner -c "510300,510500,510880
 - **Target achievement**: None (Sharpe≥1.3, Return≥28%, MaxDD≤15% not met)
 
 ### Notes
+
 - The universal framework is backward compatible with existing crude_oil results
 - Code compiles without syntax errors
 - Web page supports dynamic universe switching

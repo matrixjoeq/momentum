@@ -51,7 +51,9 @@ def test_vol_proxy_levels_shapes_and_finiteness() -> None:
 
 def test_tier_backtest_runs_on_vol_proxy() -> None:
     ohlc = _make_synth_ohlc()
-    lvl = compute_vol_proxy_levels(ohlc, spec=VolProxySpec(kind="rv_close", window=20, ann=252))
+    lvl = compute_vol_proxy_levels(
+        ohlc, spec=VolProxySpec(kind="rv_close", window=20, ann=252)
+    )
 
     close = ohlc["close"]
     etf_ret = np.log(close).diff()
@@ -65,9 +67,15 @@ def test_tier_backtest_runs_on_vol_proxy() -> None:
     thr_abs = [float(np.quantile(lv, q)) for q in qs]
     exposures = [1.0, 0.5, 0.2]
 
-    out = backtest_tiered_exposure_by_level(df2, levels, thresholds_abs=thr_abs, exposures=exposures, cost_bps=10, ann=252)
+    out = backtest_tiered_exposure_by_level(
+        df2, levels, thresholds_abs=thr_abs, exposures=exposures, cost_bps=10, ann=252
+    )
     assert out["ok"] is True
-    assert len(out["dates"]) == len(out["nav_strategy"]) == len(out["nav_buy_hold"]) == len(out["exp"])
+    assert (
+        len(out["dates"])
+        == len(out["nav_strategy"])
+        == len(out["nav_buy_hold"])
+        == len(out["exp"])
+    )
     ms = out["metrics"]["strategy"]
     assert "cagr" in ms and "vol" in ms and "sharpe" in ms and "max_drawdown" in ms
-

@@ -1,1296 +1,1633 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ETF轮动策略研究</title>
-  <script>
-    (function () {
-      const key = `theme:${location.pathname}`;
-      let theme = "dark";
-      try {
-        const saved = localStorage.getItem(key);
-        if (saved === "light" || saved === "dark") theme = saved;
-      } catch (_) {}
-      document.documentElement.setAttribute("data-theme", theme);
-    })();
-  </script>
-  <style>
-    :root {
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-        "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-        "Courier New", monospace;
-      --primary-color: #2563eb;
-      --secondary-color: #14b8a6;
-      --accent-color: #2dd4bf;
-      --bg-color: #0b1220;
-      --card-bg: #121a2b;
-      --text-color: #e5e7eb;
-      --text-light: #94a3b8;
-      --border-color: #334155;
-      --success-color: #28a745;
-      --warning-color: #ffc107;
-      --danger-color: #dc3545;
-    }
-    :root[data-theme="light"] {
-      --primary-color: #1a5f7a;
-      --secondary-color: #159895;
-      --accent-color: #57c5b6;
-      --bg-color: #f8f9fa;
-      --card-bg: #ffffff;
-      --text-color: #333333;
-      --text-light: #666666;
-      --border-color: #e0e0e0;
-    }
+    <script>
+      (function () {
+        const key = `theme:${location.pathname}`;
+        let theme = "dark";
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved === "light" || saved === "dark") theme = saved;
+        } catch (_) {}
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <style>
+      :root {
+        --font-sans:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue",
+          Arial, sans-serif;
+        --font-mono:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        --primary-color: #2563eb;
+        --secondary-color: #14b8a6;
+        --accent-color: #2dd4bf;
+        --bg-color: #0b1220;
+        --card-bg: #121a2b;
+        --text-color: #e5e7eb;
+        --text-light: #94a3b8;
+        --border-color: #334155;
+        --success-color: #28a745;
+        --warning-color: #ffc107;
+        --danger-color: #dc3545;
+      }
+      :root[data-theme="light"] {
+        --primary-color: #1a5f7a;
+        --secondary-color: #159895;
+        --accent-color: #57c5b6;
+        --bg-color: #f8f9fa;
+        --card-bg: #ffffff;
+        --text-color: #333333;
+        --text-light: #666666;
+        --border-color: #e0e0e0;
+      }
 
-    body {
-      font-family: var(--font-sans);
-      background-color: var(--bg-color);
-      background-image: radial-gradient(
-          ellipse 100% 80% at 0% -30%,
-          rgba(125, 211, 252, 0.06),
-          transparent 55%
-        ),
-        radial-gradient(
-          ellipse 80% 60% at 100% 0%,
-          rgba(59, 130, 246, 0.04),
-          transparent 50%
+      body {
+        font-family: var(--font-sans);
+        background-color: var(--bg-color);
+        background-image:
+          radial-gradient(
+            ellipse 100% 80% at 0% -30%,
+            rgba(125, 211, 252, 0.06),
+            transparent 55%
+          ),
+          radial-gradient(
+            ellipse 80% 60% at 100% 0%,
+            rgba(59, 130, 246, 0.04),
+            transparent 50%
+          );
+        color: var(--text-color);
+        margin: 0;
+        padding: 0;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      :root[data-theme="light"] body {
+        background-image:
+          radial-gradient(
+            ellipse 100% 80% at 0% -30%,
+            rgba(37, 99, 235, 0.05),
+            transparent 55%
+          ),
+          radial-gradient(
+            ellipse 80% 60% at 100% 0%,
+            rgba(59, 130, 246, 0.03),
+            transparent 50%
+          );
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      header {
+        background: linear-gradient(
+          135deg,
+          var(--primary-color),
+          var(--secondary-color)
         );
-      color: var(--text-color);
-      margin: 0;
-      padding: 0;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-    :root[data-theme="light"] body {
-      background-image: radial-gradient(
-          ellipse 100% 80% at 0% -30%,
-          rgba(37, 99, 235, 0.05),
-          transparent 55%
-        ),
-        radial-gradient(
-          ellipse 80% 60% at 100% 0%,
-          rgba(59, 130, 246, 0.03),
-          transparent 50%
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      header h1 {
+        margin: 0 0 10px 0;
+        font-size: 28px;
+      }
+
+      header p {
+        margin: 0;
+        opacity: 0.9;
+      }
+
+      .nav-tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid var(--border-color);
+        padding-bottom: 0;
+      }
+
+      .nav-tab {
+        padding: 12px 24px;
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--text-light);
+        transition: all 0.3s;
+      }
+
+      .nav-tab:hover {
+        color: var(--primary-color);
+      }
+
+      .nav-tab.active {
+        color: var(--primary-color);
+        border-bottom-color: var(--primary-color);
+      }
+
+      .card {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+
+      .card-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 16px 0;
+        color: var(--primary-color);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+      }
+
+      .stat-card {
+        background: linear-gradient(
+          135deg,
+          var(--primary-color),
+          var(--secondary-color)
         );
-    }
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+      }
 
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 20px;
-    }
+      .stat-value {
+        font-size: 32px;
+        font-weight: 700;
+        margin-bottom: 5px;
+      }
 
-    header {
-      background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-      color: white;
-      padding: 30px;
-      border-radius: 12px;
-      margin-bottom: 30px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
+      .stat-label {
+        font-size: 14px;
+        opacity: 0.9;
+      }
 
-    header h1 {
-      margin: 0 0 10px 0;
-      font-size: 28px;
-    }
+      .stat-card.success {
+        background: linear-gradient(135deg, var(--success-color), #20c997);
+      }
 
-    header p {
-      margin: 0;
-      opacity: 0.9;
-    }
+      .stat-card.warning {
+        background: linear-gradient(135deg, var(--warning-color), #fd7e14);
+      }
 
-    .nav-tabs {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-      border-bottom: 2px solid var(--border-color);
-      padding-bottom: 0;
-    }
+      .stat-card.danger {
+        background: linear-gradient(135deg, var(--danger-color), #e83e8c);
+      }
 
-    .nav-tab {
-      padding: 12px 24px;
-      background: none;
-      border: none;
-      border-bottom: 3px solid transparent;
-      cursor: pointer;
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--text-light);
-      transition: all 0.3s;
-    }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
 
-    .nav-tab:hover {
-      color: var(--primary-color);
-    }
+      th,
+      td {
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+      }
 
-    .nav-tab.active {
-      color: var(--primary-color);
-      border-bottom-color: var(--primary-color);
-    }
+      th {
+        background-color: var(--bg-color);
+        font-weight: 600;
+        color: var(--text-light);
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
 
-    .card {
-      background: var(--card-bg);
-      border-radius: 12px;
-      padding: 24px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-    }
+      tbody tr:hover {
+        background-color: rgba(148, 163, 184, 0.1);
+      }
+      :root[data-theme="light"] tbody tr:hover {
+        background-color: #f1f5f9;
+      }
 
-    .card-title {
-      font-size: 18px;
-      font-weight: 600;
-      margin: 0 0 16px 0;
-      color: var(--primary-color);
-    }
+      .badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+      }
 
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 20px;
-    }
+      .badge-success {
+        background-color: #d4edda;
+        color: #155724;
+      }
 
-    .stat-card {
-      background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-      color: white;
-      padding: 20px;
-      border-radius: 10px;
-      text-align: center;
-    }
+      .badge-warning {
+        background-color: #fff3cd;
+        color: #856404;
+      }
 
-    .stat-value {
-      font-size: 32px;
-      font-weight: 700;
-      margin-bottom: 5px;
-    }
+      .badge-danger {
+        background-color: #f8d7da;
+        color: #721c24;
+      }
 
-    .stat-label {
-      font-size: 14px;
-      opacity: 0.9;
-    }
+      .progress-bar {
+        height: 8px;
+        background-color: var(--border-color);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 5px;
+      }
 
-    .stat-card.success {
-      background: linear-gradient(135deg, var(--success-color), #20c997);
-    }
+      .progress-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s;
+      }
 
-    .stat-card.warning {
-      background: linear-gradient(135deg, var(--warning-color), #fd7e14);
-    }
+      .code-block {
+        background-color: #2d2d2d;
+        color: #f8f8f2;
+        padding: 16px;
+        border-radius: 8px;
+        font-family: var(--font-mono);
+        font-size: 13px;
+        overflow-x: auto;
+      }
 
-    .stat-card.danger {
-      background: linear-gradient(135deg, var(--danger-color), #e83e8c);
-    }
+      .etf-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+      }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-    }
+      .etf-item {
+        background: var(--bg-color);
+        padding: 12px 16px;
+        border-radius: 8px;
+        border-left: 4px solid var(--secondary-color);
+      }
 
-    th, td {
-      padding: 12px 16px;
-      text-align: left;
-      border-bottom: 1px solid var(--border-color);
-    }
+      .etf-code {
+        font-weight: 600;
+        color: var(--primary-color);
+      }
 
-    th {
-      background-color: var(--bg-color);
-      font-weight: 600;
-      color: var(--text-light);
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
+      .etf-name {
+        font-size: 13px;
+        color: var(--text-light);
+        margin-top: 4px;
+      }
 
-    tbody tr:hover {
-      background-color: rgba(148, 163, 184, 0.1);
-    }
-    :root[data-theme="light"] tbody tr:hover {
-      background-color: #f1f5f9;
-    }
+      .section {
+        display: none;
+      }
 
-    .badge {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 500;
-    }
+      .section.active {
+        display: block;
+      }
 
-    .badge-success {
-      background-color: #d4edda;
-      color: #155724;
-    }
+      .chart-container {
+        height: 400px;
+        background: var(--bg-color);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-light);
+      }
 
-    .badge-warning {
-      background-color: #fff3cd;
-      color: #856404;
-    }
+      .filter-row {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+      }
 
-    .badge-danger {
-      background-color: #f8d7da;
-      color: #721c24;
-    }
+      .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
 
-    .progress-bar {
-      height: 8px;
-      background-color: var(--border-color);
-      border-radius: 4px;
-      overflow: hidden;
-      margin-top: 5px;
-    }
+      .filter-group label {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-light);
+      }
 
-    .progress-fill {
-      height: 100%;
-      border-radius: 4px;
-      transition: width 0.3s;
-    }
+      select,
+      input {
+        padding: 8px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        font-size: 14px;
+        min-width: 150px;
+      }
 
-    .code-block {
-      background-color: #2d2d2d;
-      color: #f8f8f2;
-      padding: 16px;
-      border-radius: 8px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      overflow-x: auto;
-    }
+      button {
+        padding: 10px 20px;
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background-color 0.3s;
+      }
 
-    .etf-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 12px;
-    }
+      button:hover {
+        background-color: var(--secondary-color);
+      }
 
-    .etf-item {
-      background: var(--bg-color);
-      padding: 12px 16px;
-      border-radius: 8px;
-      border-left: 4px solid var(--secondary-color);
-    }
+      button.secondary {
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        border: 1px solid var(--border-color);
+      }
 
-    .etf-code {
-      font-weight: 600;
-      color: var(--primary-color);
-    }
+      button.secondary:hover {
+        background-color: var(--border-color);
+      }
 
-    .etf-name {
-      font-size: 13px;
-      color: var(--text-light);
-      margin-top: 4px;
-    }
+      input:focus-visible,
+      select:focus-visible,
+      button:focus-visible,
+      .nav-tab:focus-visible,
+      .theme-toggle:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+      }
 
-    .section {
-      display: none;
-    }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      }
 
-    .section.active {
-      display: block;
-    }
+      .summary-item {
+        text-align: center;
+        padding: 16px;
+        background: var(--bg-color);
+        border-radius: 8px;
+      }
+      .theme-toggle {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        z-index: 9999;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 12px;
+        background: var(--card-bg);
+        color: var(--text-color);
+        border: 1px solid var(--border-color);
+        cursor: pointer;
+        transition:
+          border-color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+      .theme-toggle:hover {
+        border-color: var(--accent-color);
+      }
 
-    .chart-container {
-      height: 400px;
-      background: var(--bg-color);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--text-light);
-    }
+      .summary-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--primary-color);
+      }
 
-    .filter-row {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      margin-bottom: 20px;
-    }
+      .summary-label {
+        font-size: 13px;
+        color: var(--text-light);
+        margin-top: 4px;
+      }
 
-    .filter-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
+      .heatmap-container {
+        overflow-x: auto;
+      }
 
-    .filter-group label {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-light);
-    }
+      .heatmap {
+        min-width: 100%;
+      }
 
-    select, input {
-      padding: 8px 12px;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      font-size: 14px;
-      min-width: 150px;
-    }
+      .heatmap td {
+        text-align: center;
+        padding: 8px;
+        font-size: 13px;
+      }
 
-    button {
-      padding: 10px 20px;
-      background-color: var(--primary-color);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      transition: background-color 0.3s;
-    }
+      .heatmap td.good {
+        background-color: #d4edda;
+        color: #155724;
+      }
 
-    button:hover {
-      background-color: var(--secondary-color);
-    }
+      .heatmap td.moderate {
+        background-color: #fff3cd;
+        color: #856404;
+      }
 
-    button.secondary {
-      background-color: var(--bg-color);
-      color: var(--text-color);
-      border: 1px solid var(--border-color);
-    }
-
-    button.secondary:hover {
-      background-color: var(--border-color);
-    }
-
-    input:focus-visible,
-    select:focus-visible,
-    button:focus-visible,
-    .nav-tab:focus-visible,
-    .theme-toggle:focus-visible {
-      outline: 2px solid var(--primary-color);
-      outline-offset: 2px;
-    }
-
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
-    .summary-item {
-      text-align: center;
-      padding: 16px;
-      background: var(--bg-color);
-      border-radius: 8px;
-    }
-    .theme-toggle {
-      position: fixed;
-      top: 14px;
-      right: 14px;
-      z-index: 9999;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
-      background: var(--card-bg);
-      color: var(--text-color);
-      border: 1px solid var(--border-color);
-      cursor: pointer;
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    }
-    .theme-toggle:hover {
-      border-color: var(--accent-color);
-    }
-
-    .summary-value {
-      font-size: 24px;
-      font-weight: 700;
-      color: var(--primary-color);
-    }
-
-    .summary-label {
-      font-size: 13px;
-      color: var(--text-light);
-      margin-top: 4px;
-    }
-
-    .heatmap-container {
-      overflow-x: auto;
-    }
-
-    .heatmap {
-      min-width: 100%;
-    }
-
-    .heatmap td {
-      text-align: center;
-      padding: 8px;
-      font-size: 13px;
-    }
-
-    .heatmap td.good {
-      background-color: #d4edda;
-      color: #155724;
-    }
-
-    .heatmap td.moderate {
-      background-color: #fff3cd;
-      color: #856404;
-    }
-
-    .heatmap td.poor {
-      background-color: #f8d7da;
-      color: #721c24;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <header>
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-          <h1>ETF轮动策略研究</h1>
-          <p>基于多因子模型的ETF轮动策略回测与分析框架</p>
-        </div>
-        <div class="universe-selector">
-          <label style="font-size: 14px; color: rgba(255,255,255,0.9);">研究标的池:</label>
-          <select id="universe-select" onchange="switchUniverse()" style="margin-left: 10px; padding: 8px 12px; border-radius: 6px; border: none;">
-            <option value="crude_oil">原油ETF (7只)</option>
-            <option value="a_core">A股核心 (5只)</option>
-            <option value="sector">行业轮动 (5只)</option>
-            <option value="custom">自定义...</option>
-          </select>
-        </div>
-      </div>
-    </header>
-
-    <nav class="nav-tabs">
-      <button class="nav-tab active" data-section="overview">策略概览</button>
-      <button class="nav-tab" data-section="results">回测结果</button>
-      <button class="nav-tab" data-section="sensitivity">参数敏感性</button>
-      <button class="nav-tab" data-section="config">策略配置</button>
-      <button class="nav-tab" data-section="panic">恐慌择时设置</button>
-      <button class="nav-tab" data-section="run">运行回测</button>
-      <button class="nav-tab" data-section="report">研究报告</button>
-    </nav>
-
-    <!-- 策略概览 -->
-    <section id="overview" class="section active">
-      <div class="card">
-        <h2 class="card-title">当前研究标的池: <span id="universe-name">原油ETF</span></h2>
-        <div class="etf-list" id="etf-list">
-          <div class="etf-item">
-            <div class="etf-code">501018</div>
-            <div class="etf-name">南方原油</div>
+      .heatmap td.poor {
+        background-color: #f8d7da;
+        color: #721c24;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          "
+        >
+          <div>
+            <h1>ETF轮动策略研究</h1>
+            <p>基于多因子模型的ETF轮动策略回测与分析框架</p>
           </div>
-          <div class="etf-item">
-            <div class="etf-code">160723</div>
-            <div class="etf-name">嘉实原油</div>
-          </div>
-          <div class="etf-item">
-            <div class="etf-code">161129</div>
-            <div class="etf-name">易方达原油</div>
-          </div>
-          <div class="etf-item">
-            <div class="etf-code">160416</div>
-            <div class="etf-name">华安石油</div>
-          </div>
-          <div class="etf-item">
-            <div class="etf-code">162719</div>
-            <div class="etf-name">广发石油</div>
-          </div>
-          <div class="etf-item">
-            <div class="etf-code">163208</div>
-            <div class="etf-name">诺安油气</div>
-          </div>
-          <div class="etf-item">
-            <div class="etf-code">162411</div>
-            <div class="etf-name">华宝油气</div>
-          </div>
-        </div>
-        <div style="margin-top: 16px; padding: 12px; background: #e3f2fd; border-radius: 8px; color: #1565c0;">
-          <strong>💡 提示:</strong> 可以使用"运行回测"页面选择其他预设标的池或自定义ETF组合进行轮动策略研究。
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">因子体系</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>因子类别</th>
-              <th>因子名称</th>
-              <th>计算公式</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td rowspan="4"><strong>动量因子</strong></td>
-              <td>raw_mom</td>
-              <td>Close(t)/Close(t-N) - 1</td>
-              <td>原始动量</td>
-            </tr>
-            <tr>
-              <td>sharpe_mom</td>
-              <td>累计收益 / 波动率</td>
-              <td>风险调整动量</td>
-            </tr>
-            <tr>
-              <td>sortino_mom</td>
-              <td>累计收益 / 下行波动率</td>
-              <td>下行风险调整</td>
-            </tr>
-            <tr>
-              <td>return_over_vol</td>
-              <td>收益率 / 波动率</td>
-              <td>简化夏普</td>
-            </tr>
-            <tr>
-              <td><strong>趋势因子</strong></td>
-              <td>sma_trend</td>
-              <td>Close / SMA(N) - 1</td>
-              <td>均线偏离度</td>
-            </tr>
-            <tr>
-              <td><strong>波动率因子</strong></td>
-              <td>low_vol</td>
-              <td>1 / 波动率</td>
-              <td>低波动优选</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">回测统计</h2>
-        <div class="grid">
-          <div class="stat-card">
-            <div class="stat-value" id="total-strategies">168</div>
-            <div class="stat-label">测试策略数</div>
-          </div>
-          <div class="stat-card danger">
-            <div class="stat-value" id="sharpe-1">0</div>
-            <div class="stat-label">夏普 ≥ 1.0</div>
-          </div>
-          <div class="stat-card danger">
-            <div class="stat-value" id="sharpe-1.3">0</div>
-            <div class="stat-label">夏普 ≥ 1.3</div>
-          </div>
-          <div class="stat-card danger">
-            <div class="stat-value" id="return-28">0</div>
-            <div class="stat-label">年化 ≥ 28%</div>
-          </div>
-          <div class="stat-card danger">
-            <div class="stat-value" id="maxdd-15">0</div>
-            <div class="stat-label">最大回撤 ≤ 15%</div>
-          </div>
-        </div>
-        <div style="margin-top: 16px; padding: 16px; background: #fff3cd; border-radius: 8px; color: #856404;">
-          <strong>⚠️ 重要发现</strong><br>
-          在168种策略配置中，没有策略能同时满足：夏普≥1.0、年化≥28%、最大回撤≤15%。<br>
-          最佳策略夏普仅为0.344，最大回撤约-41%。<br>
-          原油ETF的高波动特性使得达成目标非常困难。
-        </div>
-      </div>
-    </section>
-
-    <!-- 回测结果 -->
-    <section id="results" class="section">
-      <div class="card">
-        <h2 class="card-title">回测结果对比</h2>
-        <div class="filter-row">
-          <div class="filter-group">
-            <label>评分方法</label>
-            <select id="filter-score">
-              <option value="">全部</option>
-              <option value="raw_mom">raw_mom</option>
-              <option value="sharpe_mom">sharpe_mom</option>
-              <option value="sortino_mom">sortino_mom</option>
-              <option value="return_over_vol">return_over_vol</option>
-              <option value="multi_factor">multi_factor</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>回看天数</label>
-            <select id="filter-lookback">
-              <option value="">全部</option>
-              <option value="60">60天</option>
-              <option value="90">90天</option>
-              <option value="120">120天</option>
-              <option value="180">180天</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>持仓数量</label>
-            <select id="filter-topk">
-              <option value="">全部</option>
-              <option value="1">1只</option>
-              <option value="2">2只</option>
-              <option value="3">3只</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>再平衡频率</label>
-            <select id="filter-rebalance">
-              <option value="">全部</option>
-              <option value="daily">日度</option>
-              <option value="weekly">周度</option>
-              <option value="monthly">月度</option>
-            </select>
-          </div>
-          <button onclick="applyFilters()">筛选</button>
-        </div>
-        <table id="results-table">
-          <thead>
-            <tr>
-              <th>策略名称</th>
-              <th>夏普比率</th>
-              <th>年化收益</th>
-              <th>最大回撤</th>
-              <th>卡尔马比率</th>
-              <th>Sortino</th>
-              <th>胜率</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody id="results-body">
-            <tr>
-              <td colspan="8" style="text-align: center; color: var(--text-light);">
-                加载中... 请运行 python -m etf_momentum.scripts.crude_oil_rotation_runner
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">最佳策略详情</h2>
-        <div id="best-strategy-details">
-          <div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-            <h3 style="margin: 0 0 12px 0; color: var(--primary-color);">最佳策略: sharpe_mom_90d_top3_weekly</h3>
-            <table>
-              <tr><td style="padding: 8px 0;"><strong>夏普比率:</strong></td><td>0.344</td></tr>
-              <tr><td style="padding: 8px 0;"><strong>年化收益率:</strong></td><td>11.5%</td></tr>
-              <tr><td style="padding: 8px 0;"><strong>最大回撤:</strong></td><td style="color: var(--danger-color);">-40.9%</td></tr>
-              <tr><td style="padding: 8px 0;"><strong>卡尔马比率:</strong></td><td>0.28</td></tr>
-              <tr><td style="padding: 8px 0;"><strong>Sortino比率:</strong></td><td>0.48</td></tr>
-              <tr><td style="padding: 8px 0;"><strong>胜率:</strong></td><td>54%</td></tr>
-            </table>
-          </div>
-          <div style="background: #fff3cd; padding: 16px; border-radius: 8px; color: #856404;">
-            <strong>⚠️ 目标未达成</strong><br>
-            该策略距离目标(夏普≥1.3, 年化≥28%, 最大回撤≤15%)仍有较大差距。<br>
-            原油ETF的高波动特性使得同时满足高收益和低回撤非常困难。
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 参数敏感性 -->
-    <section id="sensitivity" class="section">
-      <div class="card">
-        <h2 class="card-title">回看天数敏感性分析</h2>
-        <div class="heatmap-container">
-          <table class="heatmap">
-            <thead>
-              <tr>
-                <th>回看天数</th>
-                <th>平均夏普</th>
-                <th>最优夏普</th>
-                <th>最优策略</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>60天</td><td>0.23</td><td class="good">0.344</td><td>raw_mom/sharpe_mom top3</td></tr>
-              <tr><td>90天</td><td>0.22</td><td class="good">0.344</td><td>sharpe_mom/return_over_vol</td></tr>
-              <tr><td>120天</td><td>0.18</td><td>0.286</td><td>raw_mom_top3</td></tr>
-              <tr><td>180天</td><td>0.15</td><td>0.267</td><td>raw_mom_top3</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">持仓数量敏感性分析</h2>
-        <div class="heatmap-container">
-          <table class="heatmap">
-            <thead>
-              <tr>
-                <th>持仓数量</th>
-                <th>平均夏普</th>
-                <th>最优夏普</th>
-                <th>最优策略</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>1只</td><td>0.16</td><td>0.267</td><td>sharpe_mom_180d</td></tr>
-              <tr><td>2只</td><td>0.19</td><td>0.344</td><td>sharpe_mom_90d</td></tr>
-              <tr><td>3只</td><td>0.25</td><td class="good">0.344</td><td>sharpe_mom_90d</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">多因子权重敏感性</h2>
-        <div class="heatmap-container">
-          <table class="heatmap" id="weight-heatmap">
-            <thead>
-              <tr>
-                <th>动量权重</th>
-                <th>趋势权重</th>
-                <th>波动率权重</th>
-                <th>夏普比率</th>
-                <th>年化收益</th>
-              </tr>
-            </thead>
-            <tbody id="weight-body">
-              <tr>
-                <td colspan="5" style="text-align: center; color: var(--text-light);">运行回测后查看</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- 策略配置 -->
-    <section id="config" class="section">
-      <div class="card">
-        <h2 class="card-title">当前推荐策略配置</h2>
-        <div class="code-block" id="optimal-config">
-{
-  "strategy_name": "sharpe_mom_90d_top3_weekly",
-  "codes": [
-    "501018", "160723", "161129", "160416",
-    "162719", "163208", "162411"
-  ],
-  "score_method": "sharpe_mom",
-  "lookback_days": 90,
-  "top_k": 3,
-  "rebalance": "weekly",
-  "enable_trend_filter": false,
-  "sma_period": 50,
-  "cost_bps": 3.0,
-  "expected_metrics": {
-    "sharpe_ratio": 0.344,
-    "annualized_return": "11.5%",
-    "max_drawdown": "-40.9%"
-  },
-  "note": "目标未达成，此为回测最佳表现"
-}
-        </div>
-        <div style="margin-top: 16px;">
-          <button onclick="copyConfig()">复制配置</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">运行回测脚本</h2>
-        <p>在终端中执行以下命令运行完整回测：</p>
-        <div class="code-block">
-cd /path/to/momentum
-python -m etf_momentum.scripts.crude_oil_rotation_runner
-        </div>
-        <p style="margin-top: 16px; color: var(--text-light);">
-          回测结果将保存至 <code>data/crude_oil/</code> 目录，包括：
-        </p>
-        <ul style="color: var(--text-light);">
-          <li><code>all_results.csv</code> - 所有策略回测结果</li>
-          <li><code>single_factor_results.csv</code> - 单因子策略结果</li>
-          <li><code>multi_factor_results.csv</code> - 多因子策略结果</li>
-          <li><code>crude_oil_rotation_report.md</code> - 研究报告</li>
-        </ul>
-      </div>
-    </section>
-
-    <!-- 恐慌择时设置 -->
-    <section id="panic" class="section">
-      <div class="card">
-        <h2 class="card-title">恐慌指数择时设置</h2>
-        <div style="background: #e3f2fd; padding: 16px; border-radius: 8px; margin-bottom: 20px; color: #1565c0;">
-          <strong>OVX（原油波动率恐慌指数）择时配置</strong><br>
-          基于 Cboe OVX 指数为 <strong>160723 嘉实原油</strong> 设置恐慌择时策略
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="card-title">目标ETF配置</h3>
-        <div class="etf-list" style="max-width: 400px;">
-          <div class="etf-item">
-            <div class="etf-code">160723</div>
-            <div class="etf-name">嘉实原油（OVX恐慌择时专用）</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="card-title">恐慌指数参数</h3>
-        <div class="filter-row">
-          <div class="filter-group">
-            <label>恐慌指数</label>
-            <select id="panic-index">
-              <option value="OVX" selected>OVX（原油波动率恐慌指数）</option>
-              <option value="VIX">VIX（标普500恐慌指数）</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>数据源</label>
-            <select id="panic-provider">
-              <option value="cboe" selected>CBOE</option>
-              <option value="yahoo">Yahoo Finance</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>日期对齐</label>
-            <select id="panic-align">
-              <option value="cn_next_trading_day" selected>美股收盘顺延到A股下一交易日</option>
-              <option value="none">不做顺延（原始日期）</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="card-title">择时阈值设置</h3>
-        <div class="filter-row">
-          <div class="filter-group">
-            <label>OVX高位阈值（分位数）</label>
-            <input type="number" id="panic-high-q" value="0.8" step="0.05" min="0.5" max="0.99" style="width: 100px;">
-            <span class="muted" style="font-size: 12px;">OVX超过此分位数时减仓</span>
-          </div>
-          <div class="filter-group">
-            <label>OVX低位阈值（分位数）</label>
-            <input type="number" id="panic-low-q" value="0.3" step="0.05" min="0.01" max="0.5" style="width: 100px;">
-            <span class="muted" style="font-size: 12px;">OVX低于此分位数时恢复正常仓位</span>
-          </div>
-        </div>
-        <div class="filter-row">
-          <div class="filter-group">
-            <label>恐慌期间仓位</label>
-            <input type="number" id="panic-high-pct" value="0.3" step="0.1" min="0" max="1" style="width: 100px;">
-            <span class="muted" style="font-size: 12px;">高位时持仓比例</span>
-          </div>
-          <div class="filter-group">
-            <label>正常仓位</label>
-            <input type="number" id="panic-normal-pct" value="1.0" step="0.1" min="0" max="1" style="width: 100px;">
-            <span class="muted" style="font-size: 12px;">低位/正常时持仓比例</span>
-          </div>
-          <div class="filter-group">
-            <label>分位数窗口</label>
-            <select id="panic-window">
-              <option value="all">全区间（无前视）</option>
-              <option value="1y">近1年滚动</option>
-              <option value="3y">近3年滚动</option>
-              <option value="5y" selected>近5年滚动</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="card-title">交易成本与回测设置</h3>
-        <div class="filter-row">
-          <div class="filter-group">
-            <label>交易成本（bps/换仓）</label>
-            <input type="number" id="panic-cost" value="10" step="1" min="0" style="width: 100px;">
-          </div>
-          <div class="filter-group">
-            <label>开始日期</label>
-            <input type="text" id="panic-start" placeholder="YYYYMMDD" value="20170101" style="width: 120px;">
-          </div>
-          <div class="filter-group">
-            <label>结束日期</label>
-            <input type="text" id="panic-end" placeholder="YYYYMMDD" style="width: 120px;">
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="card-title">回测命令</h3>
-        <div class="code-block" id="panic-command">
-# 运行 OVX 恐慌择时回测（160723 嘉实原油）
-python -m etf_momentum.scripts.crude_oil_rotation_runner --etf 160723 --index OVX --high-q 0.8 --low-q 0.3 --high-pct 0.3 --window 5y
-
-# 运行 VIX 恐慌择时回测
-python -m etf_momentum.scripts.crude_oil_rotation_runner --etf 160723 --index VIX --high-q 0.85 --low-q 0.25 --high-pct 0.5
-        </div>
-        <div style="margin-top: 16px;">
-          <button onclick="copyPanicCommand()">复制命令</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="card-title">择时策略说明</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>市场状态</th>
-              <th>OVX分位数</th>
-              <th>操作</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="badge badge-danger">恐慌</span></td>
-              <td>≥ 80%</td>
-              <td>减仓至30%</td>
-              <td>市场恐慌时降低敞口</td>
-            </tr>
-            <tr>
-              <td><span class="badge badge-success">正常</span></td>
-              <td>&lt; 30%</td>
-              <td>恢复满仓</td>
-              <td>恐慌情绪消退后加回</td>
-            </tr>
-            <tr>
-              <td><span class="badge badge-warning">观望</span></td>
-              <td>30% - 80%</td>
-              <td>维持当前仓位</td>
-              <td>不做调整</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- 运行回测 -->
-    <section id="run" class="section">
-      <div class="card">
-        <h2 class="card-title">运行轮动策略回测</h2>
-        
-        <div class="filter-row" style="margin-bottom: 24px;">
-          <div class="filter-group">
-            <label>选择预设标的池</label>
-            <select id="run-universe" onchange="updateUniverseInfo()">
+          <div class="universe-selector">
+            <label style="font-size: 14px; color: rgba(255, 255, 255, 0.9)"
+              >研究标的池:</label
+            >
+            <select
+              id="universe-select"
+              onchange="switchUniverse()"
+              style="
+                margin-left: 10px;
+                padding: 8px 12px;
+                border-radius: 6px;
+                border: none;
+              "
+            >
               <option value="crude_oil">原油ETF (7只)</option>
               <option value="a_core">A股核心 (5只)</option>
               <option value="sector">行业轮动 (5只)</option>
+              <option value="custom">自定义...</option>
             </select>
           </div>
-          <div class="filter-group">
-            <label>或输入自定义ETF代码</label>
-            <input type="text" id="custom-codes" placeholder="510300,510500,510880" style="width: 250px;">
+        </div>
+      </header>
+
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-section="overview">策略概览</button>
+        <button class="nav-tab" data-section="results">回测结果</button>
+        <button class="nav-tab" data-section="sensitivity">参数敏感性</button>
+        <button class="nav-tab" data-section="config">策略配置</button>
+        <button class="nav-tab" data-section="panic">恐慌择时设置</button>
+        <button class="nav-tab" data-section="run">运行回测</button>
+        <button class="nav-tab" data-section="report">研究报告</button>
+      </nav>
+
+      <!-- 策略概览 -->
+      <section id="overview" class="section active">
+        <div class="card">
+          <h2 class="card-title">
+            当前研究标的池: <span id="universe-name">原油ETF</span>
+          </h2>
+          <div class="etf-list" id="etf-list">
+            <div class="etf-item">
+              <div class="etf-code">501018</div>
+              <div class="etf-name">南方原油</div>
+            </div>
+            <div class="etf-item">
+              <div class="etf-code">160723</div>
+              <div class="etf-name">嘉实原油</div>
+            </div>
+            <div class="etf-item">
+              <div class="etf-code">161129</div>
+              <div class="etf-name">易方达原油</div>
+            </div>
+            <div class="etf-item">
+              <div class="etf-code">160416</div>
+              <div class="etf-name">华安石油</div>
+            </div>
+            <div class="etf-item">
+              <div class="etf-code">162719</div>
+              <div class="etf-name">广发石油</div>
+            </div>
+            <div class="etf-item">
+              <div class="etf-code">163208</div>
+              <div class="etf-name">诺安油气</div>
+            </div>
+            <div class="etf-item">
+              <div class="etf-code">162411</div>
+              <div class="etf-name">华宝油气</div>
+            </div>
           </div>
-          <div class="filter-group">
-            <label>回测名称</label>
-            <input type="text" id="run-name" placeholder="自定义研究" style="width: 150px;">
+          <div
+            style="
+              margin-top: 16px;
+              padding: 12px;
+              background: #e3f2fd;
+              border-radius: 8px;
+              color: #1565c0;
+            "
+          >
+            <strong>💡 提示:</strong>
+            可以使用"运行回测"页面选择其他预设标的池或自定义ETF组合进行轮动策略研究。
           </div>
         </div>
 
-        <div class="card" style="background: #f8f9fa;">
-          <h3 style="margin: 0 0 16px 0; color: var(--primary-color);">当前配置</h3>
-          <div id="run-config-info" style="font-size: 14px; color: var(--text-light);">
-            <p><strong>标的池:</strong> <span id="selected-codes">501018, 160723, 161129, 160416, 162719, 163208, 162411</span></p>
-            <p><strong>评分方法:</strong> sharpe_mom, raw_mom, sma_trend, low_vol, multi_factor</p>
-            <p><strong>参数范围:</strong> 回看天数(60/90/120/180天), 持仓数量(1/2/3只), 再平衡频率(日/周/月)</p>
-            <p><strong>交易成本:</strong> 3bps (双边)</p>
-          </div>
-        </div>
-
-        <div style="margin-top: 24px;">
-          <h3 style="margin-bottom: 16px;">运行命令</h3>
-          <div class="code-block" id="run-command">
-# 使用预设标的池
-python -m etf_momentum.scripts.rotation_research_runner -u crude_oil
-
-# 使用自定义ETF
-python -m etf_momentum.scripts.rotation_research_runner -c "510300,510500" -n "我的策略"
-
-# 快速参数敏感性测试
-python -m etf_momentum.scripts.rotation_research_runner -u crude_oil -q
-          </div>
-          <div style="margin-top: 16px;">
-            <button onclick="copyRunCommand()">复制命令</button>
-            <span style="margin-left: 16px; color: var(--text-light); font-size: 14px;">
-              回测结果将保存至 <code>data/rotation_research/</code> 目录
-            </span>
-          </div>
-        </div>
-
-        <div style="margin-top: 24px; padding: 16px; background: #fff3cd; border-radius: 8px; color: #856404;">
-          <strong>⚠️ 注意事项</strong>
-          <ul style="margin: 8px 0 0 0;">
-            <li>首次运行可能需要几分钟时间完成数据加载和回测</li>
-            <li>回测完成后请刷新页面查看最新结果</li>
-            <li>自定义ETF需要确保代码存在于数据库中</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- 研究报告 -->
-    <section id="report" class="section">
-      <div class="card">
-        <h2 class="card-title">原油轮动策略研究报告摘要</h2>
-        <div id="report-content" style="max-height: 600px; overflow-y: auto;">
-          <h3>回测概览</h3>
-          <ul>
-            <li>测试策略总数: 168种配置</li>
-            <li>回测区间: 2017-05-05 至 2026-02-09 (约9年)</li>
-            <li>标的池: 7只原油/油气ETF</li>
-          </ul>
-          
-          <h3>关键发现</h3>
-          <div style="background: #f8d7da; padding: 16px; border-radius: 8px; margin: 16px 0;">
-            <strong>⚠️ 目标未达成</strong><br>
-            在168种策略中，没有策略能同时满足：<br>
-            • 夏普比率 ≥ 1.0<br>
-            • 年化收益率 ≥ 28%<br>
-            • 最大回撤 ≤ 15%
-          </div>
-          
-          <h3>最佳策略绩效</h3>
+        <div class="card">
+          <h2 class="card-title">因子体系</h2>
           <table>
-            <tr><td>策略名称</td><td>sharpe_mom_90d_top3_weekly</td></tr>
-            <tr><td>夏普比率</td><td>0.344</td></tr>
-            <tr><td>年化收益率</td><td>11.5%</td></tr>
-            <tr><td>最大回撤</td><td style="color: var(--danger-color);">-40.9%</td></tr>
+            <thead>
+              <tr>
+                <th>因子类别</th>
+                <th>因子名称</th>
+                <th>计算公式</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td rowspan="4"><strong>动量因子</strong></td>
+                <td>raw_mom</td>
+                <td>Close(t)/Close(t-N) - 1</td>
+                <td>原始动量</td>
+              </tr>
+              <tr>
+                <td>sharpe_mom</td>
+                <td>累计收益 / 波动率</td>
+                <td>风险调整动量</td>
+              </tr>
+              <tr>
+                <td>sortino_mom</td>
+                <td>累计收益 / 下行波动率</td>
+                <td>下行风险调整</td>
+              </tr>
+              <tr>
+                <td>return_over_vol</td>
+                <td>收益率 / 波动率</td>
+                <td>简化夏普</td>
+              </tr>
+              <tr>
+                <td><strong>趋势因子</strong></td>
+                <td>sma_trend</td>
+                <td>Close / SMA(N) - 1</td>
+                <td>均线偏离度</td>
+              </tr>
+              <tr>
+                <td><strong>波动率因子</strong></td>
+                <td>low_vol</td>
+                <td>1 / 波动率</td>
+                <td>低波动优选</td>
+              </tr>
+            </tbody>
           </table>
-          
-          <h3>原因分析</h3>
-          <ul>
-            <li><strong>原油市场特性</strong>: 高度波动，单日可达5-10%</li>
-            <li><strong>2020年负油价</strong>: 导致极端回撤</li>
-            <li><strong>标的高度相关</strong>: 7只ETF相关系数&gt;0.8</li>
-          </ul>
-          
-          <h3>改进建议</h3>
-          <ul>
-            <li>降低收益预期 (年化8-12%较为合理)</li>
-            <li>放宽回撤限制 (30-40%)</li>
-            <li>引入对冲策略或期权保护</li>
-            <li>将原油作为资产配置的一部分</li>
-          </ul>
-          
-          <p style="color: var(--text-light); margin-top: 24px;">
-            完整报告: <code>data/crude_oil/crude_oil_rotation_report.md</code>
-          </p>
         </div>
-      </div>
-    </section>
-  </div>
 
-  <script>
-    (function initThemeToggle() {
-      const THEME_KEY = `theme:${location.pathname}`;
-      const html = document.documentElement;
-      const isLight = () => html.getAttribute("data-theme") === "light";
-      const setTheme = (theme) => {
-        html.setAttribute("data-theme", theme);
-        try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
-        const btn = document.getElementById("themeToggle");
-        if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+        <div class="card">
+          <h2 class="card-title">回测统计</h2>
+          <div class="grid">
+            <div class="stat-card">
+              <div class="stat-value" id="total-strategies">168</div>
+              <div class="stat-label">测试策略数</div>
+            </div>
+            <div class="stat-card danger">
+              <div class="stat-value" id="sharpe-1">0</div>
+              <div class="stat-label">夏普 ≥ 1.0</div>
+            </div>
+            <div class="stat-card danger">
+              <div class="stat-value" id="sharpe-1.3">0</div>
+              <div class="stat-label">夏普 ≥ 1.3</div>
+            </div>
+            <div class="stat-card danger">
+              <div class="stat-value" id="return-28">0</div>
+              <div class="stat-label">年化 ≥ 28%</div>
+            </div>
+            <div class="stat-card danger">
+              <div class="stat-value" id="maxdd-15">0</div>
+              <div class="stat-label">最大回撤 ≤ 15%</div>
+            </div>
+          </div>
+          <div
+            style="
+              margin-top: 16px;
+              padding: 16px;
+              background: #fff3cd;
+              border-radius: 8px;
+              color: #856404;
+            "
+          >
+            <strong>⚠️ 重要发现</strong><br />
+            在168种策略配置中，没有策略能同时满足：夏普≥1.0、年化≥28%、最大回撤≤15%。<br />
+            最佳策略夏普仅为0.344，最大回撤约-41%。<br />
+            原油ETF的高波动特性使得达成目标非常困难。
+          </div>
+        </div>
+      </section>
+
+      <!-- 回测结果 -->
+      <section id="results" class="section">
+        <div class="card">
+          <h2 class="card-title">回测结果对比</h2>
+          <div class="filter-row">
+            <div class="filter-group">
+              <label>评分方法</label>
+              <select id="filter-score">
+                <option value="">全部</option>
+                <option value="raw_mom">raw_mom</option>
+                <option value="sharpe_mom">sharpe_mom</option>
+                <option value="sortino_mom">sortino_mom</option>
+                <option value="return_over_vol">return_over_vol</option>
+                <option value="multi_factor">multi_factor</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>回看天数</label>
+              <select id="filter-lookback">
+                <option value="">全部</option>
+                <option value="60">60天</option>
+                <option value="90">90天</option>
+                <option value="120">120天</option>
+                <option value="180">180天</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>持仓数量</label>
+              <select id="filter-topk">
+                <option value="">全部</option>
+                <option value="1">1只</option>
+                <option value="2">2只</option>
+                <option value="3">3只</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>再平衡频率</label>
+              <select id="filter-rebalance">
+                <option value="">全部</option>
+                <option value="daily">日度</option>
+                <option value="weekly">周度</option>
+                <option value="monthly">月度</option>
+              </select>
+            </div>
+            <button onclick="applyFilters()">筛选</button>
+          </div>
+          <table id="results-table">
+            <thead>
+              <tr>
+                <th>策略名称</th>
+                <th>夏普比率</th>
+                <th>年化收益</th>
+                <th>最大回撤</th>
+                <th>卡尔马比率</th>
+                <th>Sortino</th>
+                <th>胜率</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="results-body">
+              <tr>
+                <td
+                  colspan="8"
+                  style="text-align: center; color: var(--text-light)"
+                >
+                  加载中... 请运行 python -m
+                  etf_momentum.scripts.crude_oil_rotation_runner
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">最佳策略详情</h2>
+          <div id="best-strategy-details">
+            <div
+              style="
+                background: #f8f9fa;
+                padding: 16px;
+                border-radius: 8px;
+                margin-bottom: 16px;
+              "
+            >
+              <h3 style="margin: 0 0 12px 0; color: var(--primary-color)">
+                最佳策略: sharpe_mom_90d_top3_weekly
+              </h3>
+              <table>
+                <tr>
+                  <td style="padding: 8px 0"><strong>夏普比率:</strong></td>
+                  <td>0.344</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0"><strong>年化收益率:</strong></td>
+                  <td>11.5%</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0"><strong>最大回撤:</strong></td>
+                  <td style="color: var(--danger-color)">-40.9%</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0"><strong>卡尔马比率:</strong></td>
+                  <td>0.28</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0"><strong>Sortino比率:</strong></td>
+                  <td>0.48</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0"><strong>胜率:</strong></td>
+                  <td>54%</td>
+                </tr>
+              </table>
+            </div>
+            <div
+              style="
+                background: #fff3cd;
+                padding: 16px;
+                border-radius: 8px;
+                color: #856404;
+              "
+            >
+              <strong>⚠️ 目标未达成</strong><br />
+              该策略距离目标(夏普≥1.3, 年化≥28%, 最大回撤≤15%)仍有较大差距。<br />
+              原油ETF的高波动特性使得同时满足高收益和低回撤非常困难。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 参数敏感性 -->
+      <section id="sensitivity" class="section">
+        <div class="card">
+          <h2 class="card-title">回看天数敏感性分析</h2>
+          <div class="heatmap-container">
+            <table class="heatmap">
+              <thead>
+                <tr>
+                  <th>回看天数</th>
+                  <th>平均夏普</th>
+                  <th>最优夏普</th>
+                  <th>最优策略</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>60天</td>
+                  <td>0.23</td>
+                  <td class="good">0.344</td>
+                  <td>raw_mom/sharpe_mom top3</td>
+                </tr>
+                <tr>
+                  <td>90天</td>
+                  <td>0.22</td>
+                  <td class="good">0.344</td>
+                  <td>sharpe_mom/return_over_vol</td>
+                </tr>
+                <tr>
+                  <td>120天</td>
+                  <td>0.18</td>
+                  <td>0.286</td>
+                  <td>raw_mom_top3</td>
+                </tr>
+                <tr>
+                  <td>180天</td>
+                  <td>0.15</td>
+                  <td>0.267</td>
+                  <td>raw_mom_top3</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">持仓数量敏感性分析</h2>
+          <div class="heatmap-container">
+            <table class="heatmap">
+              <thead>
+                <tr>
+                  <th>持仓数量</th>
+                  <th>平均夏普</th>
+                  <th>最优夏普</th>
+                  <th>最优策略</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>1只</td>
+                  <td>0.16</td>
+                  <td>0.267</td>
+                  <td>sharpe_mom_180d</td>
+                </tr>
+                <tr>
+                  <td>2只</td>
+                  <td>0.19</td>
+                  <td>0.344</td>
+                  <td>sharpe_mom_90d</td>
+                </tr>
+                <tr>
+                  <td>3只</td>
+                  <td>0.25</td>
+                  <td class="good">0.344</td>
+                  <td>sharpe_mom_90d</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">多因子权重敏感性</h2>
+          <div class="heatmap-container">
+            <table class="heatmap" id="weight-heatmap">
+              <thead>
+                <tr>
+                  <th>动量权重</th>
+                  <th>趋势权重</th>
+                  <th>波动率权重</th>
+                  <th>夏普比率</th>
+                  <th>年化收益</th>
+                </tr>
+              </thead>
+              <tbody id="weight-body">
+                <tr>
+                  <td
+                    colspan="5"
+                    style="text-align: center; color: var(--text-light)"
+                  >
+                    运行回测后查看
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 策略配置 -->
+      <section id="config" class="section">
+        <div class="card">
+          <h2 class="card-title">当前推荐策略配置</h2>
+          <div class="code-block" id="optimal-config">
+            { "strategy_name": "sharpe_mom_90d_top3_weekly", "codes": [
+            "501018", "160723", "161129", "160416", "162719", "163208", "162411"
+            ], "score_method": "sharpe_mom", "lookback_days": 90, "top_k": 3,
+            "rebalance": "weekly", "enable_trend_filter": false, "sma_period":
+            50, "cost_bps": 3.0, "expected_metrics": { "sharpe_ratio": 0.344,
+            "annualized_return": "11.5%", "max_drawdown": "-40.9%" }, "note":
+            "目标未达成，此为回测最佳表现" }
+          </div>
+          <div style="margin-top: 16px">
+            <button onclick="copyConfig()">复制配置</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">运行回测脚本</h2>
+          <p>在终端中执行以下命令运行完整回测：</p>
+          <div class="code-block">
+            cd /path/to/momentum python -m
+            etf_momentum.scripts.crude_oil_rotation_runner
+          </div>
+          <p style="margin-top: 16px; color: var(--text-light)">
+            回测结果将保存至 <code>data/crude_oil/</code> 目录，包括：
+          </p>
+          <ul style="color: var(--text-light)">
+            <li><code>all_results.csv</code> - 所有策略回测结果</li>
+            <li><code>single_factor_results.csv</code> - 单因子策略结果</li>
+            <li><code>multi_factor_results.csv</code> - 多因子策略结果</li>
+            <li><code>crude_oil_rotation_report.md</code> - 研究报告</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 恐慌择时设置 -->
+      <section id="panic" class="section">
+        <div class="card">
+          <h2 class="card-title">恐慌指数择时设置</h2>
+          <div
+            style="
+              background: #e3f2fd;
+              padding: 16px;
+              border-radius: 8px;
+              margin-bottom: 20px;
+              color: #1565c0;
+            "
+          >
+            <strong>OVX（原油波动率恐慌指数）择时配置</strong><br />
+            基于 Cboe OVX 指数为
+            <strong>160723 嘉实原油</strong> 设置恐慌择时策略
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">目标ETF配置</h3>
+          <div class="etf-list" style="max-width: 400px">
+            <div class="etf-item">
+              <div class="etf-code">160723</div>
+              <div class="etf-name">嘉实原油（OVX恐慌择时专用）</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">恐慌指数参数</h3>
+          <div class="filter-row">
+            <div class="filter-group">
+              <label>恐慌指数</label>
+              <select id="panic-index">
+                <option value="OVX" selected>OVX（原油波动率恐慌指数）</option>
+                <option value="VIX">VIX（标普500恐慌指数）</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>数据源</label>
+              <select id="panic-provider">
+                <option value="cboe" selected>CBOE</option>
+                <option value="yahoo">Yahoo Finance</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>日期对齐</label>
+              <select id="panic-align">
+                <option value="cn_next_trading_day" selected>
+                  美股收盘顺延到A股下一交易日
+                </option>
+                <option value="none">不做顺延（原始日期）</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">择时阈值设置</h3>
+          <div class="filter-row">
+            <div class="filter-group">
+              <label>OVX高位阈值（分位数）</label>
+              <input
+                type="number"
+                id="panic-high-q"
+                value="0.8"
+                step="0.05"
+                min="0.5"
+                max="0.99"
+                style="width: 100px"
+              />
+              <span class="muted" style="font-size: 12px"
+                >OVX超过此分位数时减仓</span
+              >
+            </div>
+            <div class="filter-group">
+              <label>OVX低位阈值（分位数）</label>
+              <input
+                type="number"
+                id="panic-low-q"
+                value="0.3"
+                step="0.05"
+                min="0.01"
+                max="0.5"
+                style="width: 100px"
+              />
+              <span class="muted" style="font-size: 12px"
+                >OVX低于此分位数时恢复正常仓位</span
+              >
+            </div>
+          </div>
+          <div class="filter-row">
+            <div class="filter-group">
+              <label>恐慌期间仓位</label>
+              <input
+                type="number"
+                id="panic-high-pct"
+                value="0.3"
+                step="0.1"
+                min="0"
+                max="1"
+                style="width: 100px"
+              />
+              <span class="muted" style="font-size: 12px">高位时持仓比例</span>
+            </div>
+            <div class="filter-group">
+              <label>正常仓位</label>
+              <input
+                type="number"
+                id="panic-normal-pct"
+                value="1.0"
+                step="0.1"
+                min="0"
+                max="1"
+                style="width: 100px"
+              />
+              <span class="muted" style="font-size: 12px"
+                >低位/正常时持仓比例</span
+              >
+            </div>
+            <div class="filter-group">
+              <label>分位数窗口</label>
+              <select id="panic-window">
+                <option value="all">全区间（无前视）</option>
+                <option value="1y">近1年滚动</option>
+                <option value="3y">近3年滚动</option>
+                <option value="5y" selected>近5年滚动</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">交易成本与回测设置</h3>
+          <div class="filter-row">
+            <div class="filter-group">
+              <label>交易成本（bps/换仓）</label>
+              <input
+                type="number"
+                id="panic-cost"
+                value="10"
+                step="1"
+                min="0"
+                style="width: 100px"
+              />
+            </div>
+            <div class="filter-group">
+              <label>开始日期</label>
+              <input
+                type="text"
+                id="panic-start"
+                placeholder="YYYYMMDD"
+                value="20170101"
+                style="width: 120px"
+              />
+            </div>
+            <div class="filter-group">
+              <label>结束日期</label>
+              <input
+                type="text"
+                id="panic-end"
+                placeholder="YYYYMMDD"
+                style="width: 120px"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">回测命令</h3>
+          <div class="code-block" id="panic-command">
+            # 运行 OVX 恐慌择时回测（160723 嘉实原油） python -m
+            etf_momentum.scripts.crude_oil_rotation_runner --etf 160723 --index
+            OVX --high-q 0.8 --low-q 0.3 --high-pct 0.3 --window 5y # 运行 VIX
+            恐慌择时回测 python -m
+            etf_momentum.scripts.crude_oil_rotation_runner --etf 160723 --index
+            VIX --high-q 0.85 --low-q 0.25 --high-pct 0.5
+          </div>
+          <div style="margin-top: 16px">
+            <button onclick="copyPanicCommand()">复制命令</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">择时策略说明</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>市场状态</th>
+                <th>OVX分位数</th>
+                <th>操作</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="badge badge-danger">恐慌</span></td>
+                <td>≥ 80%</td>
+                <td>减仓至30%</td>
+                <td>市场恐慌时降低敞口</td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-success">正常</span></td>
+                <td>&lt; 30%</td>
+                <td>恢复满仓</td>
+                <td>恐慌情绪消退后加回</td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-warning">观望</span></td>
+                <td>30% - 80%</td>
+                <td>维持当前仓位</td>
+                <td>不做调整</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 运行回测 -->
+      <section id="run" class="section">
+        <div class="card">
+          <h2 class="card-title">运行轮动策略回测</h2>
+
+          <div class="filter-row" style="margin-bottom: 24px">
+            <div class="filter-group">
+              <label>选择预设标的池</label>
+              <select id="run-universe" onchange="updateUniverseInfo()">
+                <option value="crude_oil">原油ETF (7只)</option>
+                <option value="a_core">A股核心 (5只)</option>
+                <option value="sector">行业轮动 (5只)</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>或输入自定义ETF代码</label>
+              <input
+                type="text"
+                id="custom-codes"
+                placeholder="510300,510500,510880"
+                style="width: 250px"
+              />
+            </div>
+            <div class="filter-group">
+              <label>回测名称</label>
+              <input
+                type="text"
+                id="run-name"
+                placeholder="自定义研究"
+                style="width: 150px"
+              />
+            </div>
+          </div>
+
+          <div class="card" style="background: #f8f9fa">
+            <h3 style="margin: 0 0 16px 0; color: var(--primary-color)">
+              当前配置
+            </h3>
+            <div
+              id="run-config-info"
+              style="font-size: 14px; color: var(--text-light)"
+            >
+              <p>
+                <strong>标的池:</strong>
+                <span id="selected-codes"
+                  >501018, 160723, 161129, 160416, 162719, 163208, 162411</span
+                >
+              </p>
+              <p>
+                <strong>评分方法:</strong> sharpe_mom, raw_mom, sma_trend,
+                low_vol, multi_factor
+              </p>
+              <p>
+                <strong>参数范围:</strong> 回看天数(60/90/120/180天),
+                持仓数量(1/2/3只), 再平衡频率(日/周/月)
+              </p>
+              <p><strong>交易成本:</strong> 3bps (双边)</p>
+            </div>
+          </div>
+
+          <div style="margin-top: 24px">
+            <h3 style="margin-bottom: 16px">运行命令</h3>
+            <div class="code-block" id="run-command">
+              # 使用预设标的池 python -m
+              etf_momentum.scripts.rotation_research_runner -u crude_oil #
+              使用自定义ETF python -m
+              etf_momentum.scripts.rotation_research_runner -c "510300,510500"
+              -n "我的策略" # 快速参数敏感性测试 python -m
+              etf_momentum.scripts.rotation_research_runner -u crude_oil -q
+            </div>
+            <div style="margin-top: 16px">
+              <button onclick="copyRunCommand()">复制命令</button>
+              <span
+                style="
+                  margin-left: 16px;
+                  color: var(--text-light);
+                  font-size: 14px;
+                "
+              >
+                回测结果将保存至 <code>data/rotation_research/</code> 目录
+              </span>
+            </div>
+          </div>
+
+          <div
+            style="
+              margin-top: 24px;
+              padding: 16px;
+              background: #fff3cd;
+              border-radius: 8px;
+              color: #856404;
+            "
+          >
+            <strong>⚠️ 注意事项</strong>
+            <ul style="margin: 8px 0 0 0">
+              <li>首次运行可能需要几分钟时间完成数据加载和回测</li>
+              <li>回测完成后请刷新页面查看最新结果</li>
+              <li>自定义ETF需要确保代码存在于数据库中</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 研究报告 -->
+      <section id="report" class="section">
+        <div class="card">
+          <h2 class="card-title">原油轮动策略研究报告摘要</h2>
+          <div id="report-content" style="max-height: 600px; overflow-y: auto">
+            <h3>回测概览</h3>
+            <ul>
+              <li>测试策略总数: 168种配置</li>
+              <li>回测区间: 2017-05-05 至 2026-02-09 (约9年)</li>
+              <li>标的池: 7只原油/油气ETF</li>
+            </ul>
+
+            <h3>关键发现</h3>
+            <div
+              style="
+                background: #f8d7da;
+                padding: 16px;
+                border-radius: 8px;
+                margin: 16px 0;
+              "
+            >
+              <strong>⚠️ 目标未达成</strong><br />
+              在168种策略中，没有策略能同时满足：<br />
+              • 夏普比率 ≥ 1.0<br />
+              • 年化收益率 ≥ 28%<br />
+              • 最大回撤 ≤ 15%
+            </div>
+
+            <h3>最佳策略绩效</h3>
+            <table>
+              <tr>
+                <td>策略名称</td>
+                <td>sharpe_mom_90d_top3_weekly</td>
+              </tr>
+              <tr>
+                <td>夏普比率</td>
+                <td>0.344</td>
+              </tr>
+              <tr>
+                <td>年化收益率</td>
+                <td>11.5%</td>
+              </tr>
+              <tr>
+                <td>最大回撤</td>
+                <td style="color: var(--danger-color)">-40.9%</td>
+              </tr>
+            </table>
+
+            <h3>原因分析</h3>
+            <ul>
+              <li><strong>原油市场特性</strong>: 高度波动，单日可达5-10%</li>
+              <li><strong>2020年负油价</strong>: 导致极端回撤</li>
+              <li><strong>标的高度相关</strong>: 7只ETF相关系数&gt;0.8</li>
+            </ul>
+
+            <h3>改进建议</h3>
+            <ul>
+              <li>降低收益预期 (年化8-12%较为合理)</li>
+              <li>放宽回撤限制 (30-40%)</li>
+              <li>引入对冲策略或期权保护</li>
+              <li>将原油作为资产配置的一部分</li>
+            </ul>
+
+            <p style="color: var(--text-light); margin-top: 24px">
+              完整报告: <code>data/crude_oil/crude_oil_rotation_report.md</code>
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      (function initThemeToggle() {
+        const THEME_KEY = `theme:${location.pathname}`;
+        const html = document.documentElement;
+        const isLight = () => html.getAttribute("data-theme") === "light";
+        const setTheme = (theme) => {
+          html.setAttribute("data-theme", theme);
+          try {
+            localStorage.setItem(THEME_KEY, theme);
+          } catch (_) {}
+          const btn = document.getElementById("themeToggle");
+          if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+        };
+        document.addEventListener("DOMContentLoaded", () => {
+          const btn = document.createElement("button");
+          btn.id = "themeToggle";
+          btn.className = "theme-toggle";
+          btn.type = "button";
+          btn.addEventListener("click", () =>
+            setTheme(isLight() ? "dark" : "light"),
+          );
+          document.body.appendChild(btn);
+          setTheme(html.getAttribute("data-theme") || "dark");
+        });
+      })();
+
+      const UNIVERSE_CONFIGS = {
+        crude_oil: {
+          name: "原油ETF",
+          codes: [
+            "501018",
+            "160723",
+            "161129",
+            "160416",
+            "162719",
+            "163208",
+            "162411",
+          ],
+          description: "7只原油/油气LOF",
+          dataDir: "crude_oil",
+        },
+        a_core: {
+          name: "A股核心",
+          codes: ["510300", "510500", "510880", "510900", "511660"],
+          description: "核心A股ETF",
+          dataDir: "a_core",
+        },
+        sector: {
+          name: "行业轮动",
+          codes: ["512880", "512690", "512760", "512800", "512780"],
+          description: "5大行业ETF",
+          dataDir: "sector",
+        },
       };
-      document.addEventListener("DOMContentLoaded", () => {
-        const btn = document.createElement("button");
-        btn.id = "themeToggle";
-        btn.className = "theme-toggle";
-        btn.type = "button";
-        btn.addEventListener("click", () => setTheme(isLight() ? "dark" : "light"));
-        document.body.appendChild(btn);
-        setTheme(html.getAttribute("data-theme") || "dark");
+
+      let currentUniverse = "crude_oil";
+      let currentResults = [];
+
+      document.querySelectorAll(".nav-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document
+            .querySelectorAll(".nav-tab")
+            .forEach((t) => t.classList.remove("active"));
+          document
+            .querySelectorAll(".section")
+            .forEach((s) => s.classList.remove("active"));
+          tab.classList.add("active");
+          document.getElementById(tab.dataset.section).classList.add("active");
+        });
       });
-    })();
 
-    const UNIVERSE_CONFIGS = {
-      crude_oil: {
-        name: '原油ETF',
-        codes: ['501018', '160723', '161129', '160416', '162719', '163208', '162411'],
-        description: '7只原油/油气LOF',
-        dataDir: 'crude_oil'
-      },
-      a_core: {
-        name: 'A股核心',
-        codes: ['510300', '510500', '510880', '510900', '511660'],
-        description: '核心A股ETF',
-        dataDir: 'a_core'
-      },
-      sector: {
-        name: '行业轮动',
-        codes: ['512880', '512690', '512760', '512800', '512780'],
-        description: '5大行业ETF',
-        dataDir: 'sector'
+      function switchUniverse() {
+        const selector = document.getElementById("universe-select");
+        currentUniverse = selector.value;
+
+        const config = UNIVERSE_CONFIGS[currentUniverse];
+        if (config) {
+          document.getElementById("universe-name").textContent = config.name;
+          renderEtfList(config.codes);
+          loadResults(config.dataDir);
+        }
       }
-    };
 
-    let currentUniverse = 'crude_oil';
-    let currentResults = [];
+      function renderEtfList(codes) {
+        const list = document.getElementById("etf-list");
+        const names = {
+          501018: "南方原油",
+          160723: "嘉实原油",
+          161129: "易方达原油",
+          160416: "华安石油",
+          162719: "广发石油",
+          163208: "诺安油气",
+          162411: "华宝油气",
+          510300: "沪深300",
+          510500: "中证500",
+          510880: "创业板指",
+          510900: "中证1000",
+          511660: "中证800",
+          512880: "证券ETF",
+          512690: "银行ETF",
+          512760: "券商ETF",
+          512800: "保险ETF",
+          512780: "地产ETF",
+        };
 
-    document.querySelectorAll('.nav-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-        tab.classList.add('active');
-        document.getElementById(tab.dataset.section).classList.add('active');
-      });
-    });
-
-    function switchUniverse() {
-      const selector = document.getElementById('universe-select');
-      currentUniverse = selector.value;
-      
-      const config = UNIVERSE_CONFIGS[currentUniverse];
-      if (config) {
-        document.getElementById('universe-name').textContent = config.name;
-        renderEtfList(config.codes);
-        loadResults(config.dataDir);
-      }
-    }
-
-    function renderEtfList(codes) {
-      const list = document.getElementById('etf-list');
-      const names = {
-        '501018': '南方原油', '160723': '嘉实原油', '161129': '易方达原油',
-        '160416': '华安石油', '162719': '广发石油', '163208': '诺安油气',
-        '162411': '华宝油气', '510300': '沪深300', '510500': '中证500',
-        '510880': '创业板指', '510900': '中证1000', '511660': '中证800',
-        '512880': '证券ETF', '512690': '银行ETF', '512760': '券商ETF',
-        '512800': '保险ETF', '512780': '地产ETF'
-      };
-      
-      list.innerHTML = codes.map(code => `
+        list.innerHTML = codes
+          .map(
+            (code) => `
         <div class="etf-item">
           <div class="etf-code">${code}</div>
           <div class="etf-name">${names[code] || code}</div>
         </div>
-      `).join('');
-    }
-
-    function updateUniverseInfo() {
-      const universe = document.getElementById('run-universe').value;
-      const config = UNIVERSE_CONFIGS[universe];
-      if (config) {
-        document.getElementById('selected-codes').textContent = config.codes.join(', ');
+      `,
+          )
+          .join("");
       }
-    }
 
-    function copyRunCommand() {
-      const universe = document.getElementById('run-universe').value;
-      const customCodes = document.getElementById('custom-codes').value.trim();
-      const name = document.getElementById('run-name').value.trim();
-      
-      let command;
-      if (customCodes) {
-        command = `python -m etf_momentum.scripts.rotation_research_runner -c "${customCodes}" -n "${name || 'Custom'}"`;
-      } else {
-        command = `python -m etf_momentum.scripts.rotation_research_runner -u ${universe}`;
+      function updateUniverseInfo() {
+        const universe = document.getElementById("run-universe").value;
+        const config = UNIVERSE_CONFIGS[universe];
+        if (config) {
+          document.getElementById("selected-codes").textContent =
+            config.codes.join(", ");
+        }
       }
-      
-      navigator.clipboard.writeText(command).then(() => {
-        alert('运行命令已复制到剪贴板');
-      });
-    }
 
-    function loadResults(dataDir) {
-      const resultsPath = `data/rotation_research/${dataDir}/all_results.csv`;
-      
-      fetch(resultsPath)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('File not found');
-          }
-          return response.text();
-        })
-        .then(csv => {
-          parseAndDisplayResults(csv);
-        })
-        .catch(() => {
-          const fallbackPath = `data/${dataDir}/all_results.csv`;
-          fetch(fallbackPath)
-            .then(response => response.text())
-            .then(csv => parseAndDisplayResults(csv))
-            .catch(() => {
-              console.log('No results file found, using sample data');
-              loadSampleData();
-            });
+      function copyRunCommand() {
+        const universe = document.getElementById("run-universe").value;
+        const customCodes = document
+          .getElementById("custom-codes")
+          .value.trim();
+        const name = document.getElementById("run-name").value.trim();
+
+        let command;
+        if (customCodes) {
+          command = `python -m etf_momentum.scripts.rotation_research_runner -c "${customCodes}" -n "${name || "Custom"}"`;
+        } else {
+          command = `python -m etf_momentum.scripts.rotation_research_runner -u ${universe}`;
+        }
+
+        navigator.clipboard.writeText(command).then(() => {
+          alert("运行命令已复制到剪贴板");
         });
-    }
+      }
 
-    function parseAndDisplayResults(csv) {
-      const lines = csv.trim().split('\n');
-      const headers = lines[0].split(',');
-      
-      currentResults = lines.slice(1).map(line => {
-        const values = line.split(',');
-        const obj = {};
-        headers.forEach((h, i) => {
-          obj[h] = values[i];
+      function loadResults(dataDir) {
+        const resultsPath = `data/rotation_research/${dataDir}/all_results.csv`;
+
+        fetch(resultsPath)
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error("File not found");
+            }
+            return response.text();
+          })
+          .then((csv) => {
+            parseAndDisplayResults(csv);
+          })
+          .catch(() => {
+            const fallbackPath = `data/${dataDir}/all_results.csv`;
+            fetch(fallbackPath)
+              .then((response) => response.text())
+              .then((csv) => parseAndDisplayResults(csv))
+              .catch(() => {
+                console.log("No results file found, using sample data");
+                loadSampleData();
+              });
+          });
+      }
+
+      function parseAndDisplayResults(csv) {
+        const lines = csv.trim().split("\n");
+        const headers = lines[0].split(",");
+
+        currentResults = lines.slice(1).map((line) => {
+          const values = line.split(",");
+          const obj = {};
+          headers.forEach((h, i) => {
+            obj[h] = values[i];
+          });
+          return obj;
         });
-        return obj;
-      });
-      
-      updateResultsTable(currentResults);
-      updateStatistics(currentResults);
-      updateBestStrategy(currentResults);
-    }
 
-    function loadSampleData() {
-      const sampleData = [
-        { strategy_name: 'sharpe_mom_90d_top3_weekly', 'metrics.sharpe_ratio': '0.344', 'metrics.annualized_return': '0.115', 'metrics.max_drawdown': '-0.409', 'metrics.calmar_ratio': '0.28', 'metrics.sortino_ratio': '0.48', 'metrics.win_rate': '0.54' },
-        { strategy_name: 'return_over_vol_90d_top3_weekly', 'metrics.sharpe_ratio': '0.344', 'metrics.annualized_return': '0.115', 'metrics.max_drawdown': '-0.409', 'metrics.calmar_ratio': '0.28', 'metrics.sortino_ratio': '0.48', 'metrics.win_rate': '0.54' },
-        { strategy_name: 'raw_mom_60d_top3_weekly', 'metrics.sharpe_ratio': '0.316', 'metrics.annualized_return': '0.109', 'metrics.max_drawdown': '-0.420', 'metrics.calmar_ratio': '0.26', 'metrics.sortino_ratio': '0.43', 'metrics.win_rate': '0.53' },
-        { strategy_name: 'sortino_mom_90d_top3_weekly', 'metrics.sharpe_ratio': '0.312', 'metrics.annualized_return': '0.107', 'metrics.max_drawdown': '-0.429', 'metrics.calmar_ratio': '0.25', 'metrics.sortino_ratio': '0.45', 'metrics.win_rate': '0.52' },
-        { strategy_name: 'raw_mom_90d_top3_weekly', 'metrics.sharpe_ratio': '0.303', 'metrics.annualized_return': '0.105', 'metrics.max_drawdown': '-0.391', 'metrics.calmar_ratio': '0.27', 'metrics.sortino_ratio': '0.42', 'metrics.win_rate': '0.52' },
-      ];
-      currentResults = sampleData;
-      updateResultsTable(sampleData);
-      updateStatistics(sampleData);
-      updateBestStrategy(sampleData);
-    }
+        updateResultsTable(currentResults);
+        updateStatistics(currentResults);
+        updateBestStrategy(currentResults);
+      }
 
-    function updateResultsTable(data) {
-      const tbody = document.getElementById('results-body');
-      if (!tbody) return;
-      
-      tbody.innerHTML = data.slice(0, 50).map(row => {
-        const sharpe = parseFloat(row['metrics.sharpe_ratio'] || 0);
-        const ret = parseFloat(row['metrics.annualized_return'] || 0) * 100;
-        const maxdd = parseFloat(row['metrics.max_drawdown'] || 0) * 100;
-        const calmar = parseFloat(row['metrics.calmar_ratio'] || 0);
-        const sortino = parseFloat(row['metrics.sortino_ratio'] || 0);
-        const winRate = parseFloat(row['metrics.win_rate'] || 0) * 100;
-        
-        let badgeClass = sharpe >= 1.3 ? 'badge-success' : sharpe >= 1.0 ? 'badge-warning' : 'badge-danger';
-        let badgeText = sharpe >= 1.3 ? '优秀' : sharpe >= 1.0 ? '良好' : '一般';
-        
-        return `<tr>
+      function loadSampleData() {
+        const sampleData = [
+          {
+            strategy_name: "sharpe_mom_90d_top3_weekly",
+            "metrics.sharpe_ratio": "0.344",
+            "metrics.annualized_return": "0.115",
+            "metrics.max_drawdown": "-0.409",
+            "metrics.calmar_ratio": "0.28",
+            "metrics.sortino_ratio": "0.48",
+            "metrics.win_rate": "0.54",
+          },
+          {
+            strategy_name: "return_over_vol_90d_top3_weekly",
+            "metrics.sharpe_ratio": "0.344",
+            "metrics.annualized_return": "0.115",
+            "metrics.max_drawdown": "-0.409",
+            "metrics.calmar_ratio": "0.28",
+            "metrics.sortino_ratio": "0.48",
+            "metrics.win_rate": "0.54",
+          },
+          {
+            strategy_name: "raw_mom_60d_top3_weekly",
+            "metrics.sharpe_ratio": "0.316",
+            "metrics.annualized_return": "0.109",
+            "metrics.max_drawdown": "-0.420",
+            "metrics.calmar_ratio": "0.26",
+            "metrics.sortino_ratio": "0.43",
+            "metrics.win_rate": "0.53",
+          },
+          {
+            strategy_name: "sortino_mom_90d_top3_weekly",
+            "metrics.sharpe_ratio": "0.312",
+            "metrics.annualized_return": "0.107",
+            "metrics.max_drawdown": "-0.429",
+            "metrics.calmar_ratio": "0.25",
+            "metrics.sortino_ratio": "0.45",
+            "metrics.win_rate": "0.52",
+          },
+          {
+            strategy_name: "raw_mom_90d_top3_weekly",
+            "metrics.sharpe_ratio": "0.303",
+            "metrics.annualized_return": "0.105",
+            "metrics.max_drawdown": "-0.391",
+            "metrics.calmar_ratio": "0.27",
+            "metrics.sortino_ratio": "0.42",
+            "metrics.win_rate": "0.52",
+          },
+        ];
+        currentResults = sampleData;
+        updateResultsTable(sampleData);
+        updateStatistics(sampleData);
+        updateBestStrategy(sampleData);
+      }
+
+      function updateResultsTable(data) {
+        const tbody = document.getElementById("results-body");
+        if (!tbody) return;
+
+        tbody.innerHTML = data
+          .slice(0, 50)
+          .map((row) => {
+            const sharpe = parseFloat(row["metrics.sharpe_ratio"] || 0);
+            const ret = parseFloat(row["metrics.annualized_return"] || 0) * 100;
+            const maxdd = parseFloat(row["metrics.max_drawdown"] || 0) * 100;
+            const calmar = parseFloat(row["metrics.calmar_ratio"] || 0);
+            const sortino = parseFloat(row["metrics.sortino_ratio"] || 0);
+            const winRate = parseFloat(row["metrics.win_rate"] || 0) * 100;
+
+            let badgeClass =
+              sharpe >= 1.3
+                ? "badge-success"
+                : sharpe >= 1.0
+                  ? "badge-warning"
+                  : "badge-danger";
+            let badgeText =
+              sharpe >= 1.3 ? "优秀" : sharpe >= 1.0 ? "良好" : "一般";
+
+            return `<tr>
           <td><strong>${row.strategy_name}</strong></td>
           <td>${sharpe.toFixed(3)}</td>
-          <td style="color: ${ret >= 28 ? 'var(--success-color)' : 'inherit'}">${ret.toFixed(1)}%</td>
-          <td style="color: ${maxdd >= -15 ? 'var(--success-color)' : 'var(--danger-color)'}">${maxdd.toFixed(1)}%</td>
+          <td style="color: ${ret >= 28 ? "var(--success-color)" : "inherit"}">${ret.toFixed(1)}%</td>
+          <td style="color: ${maxdd >= -15 ? "var(--success-color)" : "var(--danger-color)"}">${maxdd.toFixed(1)}%</td>
           <td>${calmar.toFixed(2)}</td>
           <td>${sortino.toFixed(2)}</td>
           <td>${winRate.toFixed(1)}%</td>
           <td><span class="badge ${badgeClass}">${badgeText}</span></td>
         </tr>`;
-      }).join('');
-    }
+          })
+          .join("");
+      }
 
-    function updateStatistics(data) {
-      const total = data.length;
-      const sharpe1 = data.filter(r => parseFloat(r['metrics.sharpe_ratio'] || 0) >= 1.0).length;
-      const sharpe13 = data.filter(r => parseFloat(r['metrics.sharpe_ratio'] || 0) >= 1.3).length;
-      const ret28 = data.filter(r => parseFloat(r['metrics.annualized_return'] || 0) >= 0.28).length;
-      const maxdd15 = data.filter(r => parseFloat(r['metrics.max_drawdown'] || 0) >= -0.15).length;
-      
-      const totalEl = document.getElementById('total-strategies');
-      if (totalEl) totalEl.textContent = total;
-      
-      const el = id => document.getElementById(id);
-      if (el('sharpe-1')) el('sharpe-1').textContent = sharpe1;
-      if (el('sharpe-1.3')) el('sharpe-1.3').textContent = sharpe13;
-      if (el('return-28')) el('return-28').textContent = ret28;
-      if (el('maxdd-15')) el('maxdd-15').textContent = maxdd15;
-    }
+      function updateStatistics(data) {
+        const total = data.length;
+        const sharpe1 = data.filter(
+          (r) => parseFloat(r["metrics.sharpe_ratio"] || 0) >= 1.0,
+        ).length;
+        const sharpe13 = data.filter(
+          (r) => parseFloat(r["metrics.sharpe_ratio"] || 0) >= 1.3,
+        ).length;
+        const ret28 = data.filter(
+          (r) => parseFloat(r["metrics.annualized_return"] || 0) >= 0.28,
+        ).length;
+        const maxdd15 = data.filter(
+          (r) => parseFloat(r["metrics.max_drawdown"] || 0) >= -0.15,
+        ).length;
 
-    function updateBestStrategy(data) {
-      const best = data.reduce((prev, curr) => {
-        return (parseFloat(curr['metrics.sharpe_ratio'] || 0) > parseFloat(prev['metrics.sharpe_ratio'] || 0)) ? curr : prev;
-      }, data[0] || {});
-      
-      const details = document.getElementById('best-strategy-details');
-      if (details && best.strategy_name) {
-        const sharpe = parseFloat(best['metrics.sharpe_ratio'] || 0);
-        const ret = parseFloat(best['metrics.annualized_return'] || 0) * 100;
-        const maxdd = parseFloat(best['metrics.max_drawdown'] || 0) * 100;
-        const calmar = parseFloat(best['metrics.calmar_ratio'] || 0);
-        const sortino = parseFloat(best['metrics.sortino_ratio'] || 0);
-        const winRate = parseFloat(best['metrics.win_rate'] || 0) * 100;
-        
-        details.innerHTML = `
+        const totalEl = document.getElementById("total-strategies");
+        if (totalEl) totalEl.textContent = total;
+
+        const el = (id) => document.getElementById(id);
+        if (el("sharpe-1")) el("sharpe-1").textContent = sharpe1;
+        if (el("sharpe-1.3")) el("sharpe-1.3").textContent = sharpe13;
+        if (el("return-28")) el("return-28").textContent = ret28;
+        if (el("maxdd-15")) el("maxdd-15").textContent = maxdd15;
+      }
+
+      function updateBestStrategy(data) {
+        const best = data.reduce((prev, curr) => {
+          return parseFloat(curr["metrics.sharpe_ratio"] || 0) >
+            parseFloat(prev["metrics.sharpe_ratio"] || 0)
+            ? curr
+            : prev;
+        }, data[0] || {});
+
+        const details = document.getElementById("best-strategy-details");
+        if (details && best.strategy_name) {
+          const sharpe = parseFloat(best["metrics.sharpe_ratio"] || 0);
+          const ret = parseFloat(best["metrics.annualized_return"] || 0) * 100;
+          const maxdd = parseFloat(best["metrics.max_drawdown"] || 0) * 100;
+          const calmar = parseFloat(best["metrics.calmar_ratio"] || 0);
+          const sortino = parseFloat(best["metrics.sortino_ratio"] || 0);
+          const winRate = parseFloat(best["metrics.win_rate"] || 0) * 100;
+
+          details.innerHTML = `
           <div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
             <h3 style="margin: 0 0 12px 0; color: var(--primary-color);">最佳策略: ${best.strategy_name}</h3>
             <table>
@@ -1302,58 +1639,69 @@ python -m etf_momentum.scripts.rotation_research_runner -u crude_oil -q
               <tr><td style="padding: 8px 0;"><strong>胜率:</strong></td><td>${winRate.toFixed(1)}%</td></tr>
             </table>
           </div>
-          <div style="background: ${ret >= 28 && maxdd >= -15 ? '#d4edda' : '#fff3cd'}; padding: 16px; border-radius: 8px; color: ${ret >= 28 && maxdd >= -15 ? '#155724' : '#856404'};">
-            <strong>${ret >= 28 && maxdd >= -15 ? '✅ 目标达成' : '⚠️ 目标未达成'}</strong><br>
-            ${ret >= 28 && maxdd >= -15 
-              ? '该策略已满足年化收益≥28%且最大回撤≤15%的目标' 
-              : `该策略距离目标(夏普≥1.3, 年化≥28%, 最大回撤≤15%)仍有差距。`}
+          <div style="background: ${ret >= 28 && maxdd >= -15 ? "#d4edda" : "#fff3cd"}; padding: 16px; border-radius: 8px; color: ${ret >= 28 && maxdd >= -15 ? "#155724" : "#856404"};">
+            <strong>${ret >= 28 && maxdd >= -15 ? "✅ 目标达成" : "⚠️ 目标未达成"}</strong><br>
+            ${
+              ret >= 28 && maxdd >= -15
+                ? "该策略已满足年化收益≥28%且最大回撤≤15%的目标"
+                : `该策略距离目标(夏普≥1.3, 年化≥28%, 最大回撤≤15%)仍有差距。`
+            }
           </div>
         `;
+        }
       }
-    }
 
-    function applyFilters() {
-      const score = document.getElementById('filter-score')?.value;
-      const lookback = document.getElementById('filter-lookback')?.value;
-      const topk = document.getElementById('filter-topk')?.value;
-      const rebalance = document.getElementById('filter-rebalance')?.value;
-      
-      let filtered = currentResults;
-      if (score) filtered = filtered.filter(r => r.params?.includes(`'${score}'`));
-      if (lookback) filtered = filtered.filter(r => r.params?.includes(`${lookback}d`));
-      if (topk) filtered = filtered.filter(r => r.strategy_name?.includes(`top${topk}`));
-      if (rebalance) filtered = filtered.filter(r => r.strategy_name?.includes(rebalance));
-      
-      updateResultsTable(filtered);
-    }
+      function applyFilters() {
+        const score = document.getElementById("filter-score")?.value;
+        const lookback = document.getElementById("filter-lookback")?.value;
+        const topk = document.getElementById("filter-topk")?.value;
+        const rebalance = document.getElementById("filter-rebalance")?.value;
 
-    function copyConfig() {
-      const config = document.getElementById('optimal-config')?.textContent;
-      if (config) {
-        navigator.clipboard.writeText(config).then(() => {
-          alert('配置已复制到剪贴板');
+        let filtered = currentResults;
+        if (score)
+          filtered = filtered.filter((r) => r.params?.includes(`'${score}'`));
+        if (lookback)
+          filtered = filtered.filter((r) => r.params?.includes(`${lookback}d`));
+        if (topk)
+          filtered = filtered.filter((r) =>
+            r.strategy_name?.includes(`top${topk}`),
+          );
+        if (rebalance)
+          filtered = filtered.filter((r) =>
+            r.strategy_name?.includes(rebalance),
+          );
+
+        updateResultsTable(filtered);
+      }
+
+      function copyConfig() {
+        const config = document.getElementById("optimal-config")?.textContent;
+        if (config) {
+          navigator.clipboard.writeText(config).then(() => {
+            alert("配置已复制到剪贴板");
+          });
+        }
+      }
+
+      function copyPanicCommand() {
+        const index = document.getElementById("panic-index")?.value || "OVX";
+        const highQ = document.getElementById("panic-high-q")?.value || "0.8";
+        const lowQ = document.getElementById("panic-low-q")?.value || "0.3";
+        const highPct =
+          document.getElementById("panic-high-pct")?.value || "0.3";
+        const window = document.getElementById("panic-window")?.value || "5y";
+
+        const command = `python -m etf_momentum.scripts.crude_oil_rotation_runner --etf 160723 --index ${index} --high-q ${highQ} --low-q ${lowQ} --high-pct ${highPct} --window ${window}`;
+
+        navigator.clipboard.writeText(command).then(() => {
+          alert("回测命令已复制到剪贴板");
         });
       }
-    }
 
-    function copyPanicCommand() {
-      const index = document.getElementById('panic-index')?.value || 'OVX';
-      const highQ = document.getElementById('panic-high-q')?.value || '0.8';
-      const lowQ = document.getElementById('panic-low-q')?.value || '0.3';
-      const highPct = document.getElementById('panic-high-pct')?.value || '0.3';
-      const window = document.getElementById('panic-window')?.value || '5y';
-      
-      const command = `python -m etf_momentum.scripts.crude_oil_rotation_runner --etf 160723 --index ${index} --high-q ${highQ} --low-q ${lowQ} --high-pct ${highPct} --window ${window}`;
-      
-      navigator.clipboard.writeText(command).then(() => {
-        alert('回测命令已复制到剪贴板');
+      document.addEventListener("DOMContentLoaded", () => {
+        loadResults("crude_oil");
+        updateUniverseInfo();
       });
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      loadResults('crude_oil');
-      updateUniverseInfo();
-    });
-  </script>
-</body>
+    </script>
+  </body>
 </html>

@@ -22,7 +22,9 @@ class AssetGroupSuggestInputs:
 
 
 def suggest_asset_groups(db: Session, inp: AssetGroupSuggestInputs) -> dict[str, Any]:
-    codes = list(dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()]))
+    codes = list(
+        dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()])
+    )
     if len(codes) < 2:
         raise ValueError("codes must have at least 2 assets")
     if int(inp.lookback_days) < 20:
@@ -31,7 +33,9 @@ def suggest_asset_groups(db: Session, inp: AssetGroupSuggestInputs) -> dict[str,
     if (not np.isfinite(thr)) or thr < 0.0 or thr >= 1.0:
         raise ValueError("corr_threshold must be in [0,1)")
 
-    close = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq"))
+    close = load_close_prices(
+        db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq")
+    )
     if close.empty:
         raise ValueError("no price data in selected range")
     close = close.sort_index().ffill()
@@ -64,7 +68,11 @@ def suggest_asset_groups(db: Session, inp: AssetGroupSuggestInputs) -> dict[str,
     for i in range(len(codes)):
         for j in range(i + 1, len(codes)):
             a, b = codes[i], codes[j]
-            v = float(corr.loc[a, b]) if (a in corr.index and b in corr.columns) else 0.0
+            v = (
+                float(corr.loc[a, b])
+                if (a in corr.index and b in corr.columns)
+                else 0.0
+            )
             if abs(v) >= thr:
                 union(a, b)
                 links.append({"a": a, "b": b, "corr": v})
@@ -79,7 +87,11 @@ def suggest_asset_groups(db: Session, inp: AssetGroupSuggestInputs) -> dict[str,
     stability: dict[str, float] = {}
     for i, (_, members) in enumerate(groups.items(), start=1):
         gid = f"G{i:02d}"
-        sub = corr.loc[members, members] if len(members) > 1 else pd.DataFrame([[1.0]], index=members, columns=members)
+        sub = (
+            corr.loc[members, members]
+            if len(members) > 1
+            else pd.DataFrame([[1.0]], index=members, columns=members)
+        )
         vals = []
         for x in members:
             for y in members:
@@ -101,7 +113,14 @@ def suggest_asset_groups(db: Session, inp: AssetGroupSuggestInputs) -> dict[str,
             "corr_threshold": float(inp.corr_threshold),
         },
         "asset_groups": mapping,
-        "groups": [{"group_id": gid, "members": [c for c, g in mapping.items() if g == gid], "stability": float(stability.get(gid, 0.0))} for gid in sorted(set(mapping.values()))],
+        "groups": [
+            {
+                "group_id": gid,
+                "members": [c for c, g in mapping.items() if g == gid],
+                "stability": float(stability.get(gid, 0.0)),
+            }
+            for gid in sorted(set(mapping.values()))
+        ],
         "links": sorted(links, key=lambda x: abs(float(x["corr"])), reverse=True)[:300],
         "corr_matrix": {c: {k: float(corr.loc[c, k]) for k in codes} for c in codes},
     }

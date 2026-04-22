@@ -29,4 +29,3 @@ def test_shift_to_trading_day_date_out_of_bounds_returns_original(monkeypatch):
 
     d = dt.date(2099, 1, 1)
     assert tc.shift_to_trading_day(d, shift="prev", cal="XSHG") == d
-

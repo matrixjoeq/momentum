@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught
+
 import json
 import logging
 import time
@@ -4056,7 +4058,9 @@ def baseline_weekly5_ew_dashboard(
         }
 
         # attribution (simple returns) + correlation (log returns)
-        corr_ret = np.log(px[codes].astype(float)).diff().replace([np.inf, -np.inf], np.nan)
+        corr_ret = (
+            np.log(px[codes].astype(float)).diff().replace([np.inf, -np.inf], np.nan)
+        )
         corr = corr_ret.corr(method="pearson")
         corr_out = {
             "method": "pearson_log_return",
@@ -6515,9 +6519,7 @@ def fetch_selected_futures(
         )
         if res.status == "success":
             ok_codes.append(code)
-            _mark_contract_fetch_enqueued(
-                db, code=code, fetch_type=payload.fetch_type
-            )
+            _mark_contract_fetch_enqueued(db, code=code, fetch_type=payload.fetch_type)
     if ok_codes:
         db.commit()
     _schedule_contract_fetch_sequential(
@@ -6581,9 +6583,7 @@ def validate_all_futures_synthesis(
             out = FuturesSynthesisValidationItemOut(
                 code=str(rep.get("code") or item.code),
                 status=(
-                    status
-                    if status in {"passed", "failed", "skipped"}
-                    else "failed"
+                    status if status in {"passed", "failed", "skipped"} else "failed"
                 ),
                 conclusion=str(rep.get("conclusion") or "校验失败"),
                 details=rep.get("details") or {},

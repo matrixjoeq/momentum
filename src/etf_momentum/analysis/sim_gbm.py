@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # Allocation key "risk_parity" here is inverse-volatility weighting (not ERC-style risk parity).
+# pylint: disable=broad-exception-caught,protected-access,unused-argument
 
 import datetime as dt
 import os
@@ -54,17 +55,42 @@ def _today_last_business_day_yyyymmdd() -> str:
     return _yyyymmdd(d)
 
 
-def _metrics_from_nav(nav: pd.Series, *, rf_annual: float = 0.0) -> dict[str, float | None]:
-    nav = pd.to_numeric(nav, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().astype(float)
+def _metrics_from_nav(
+    nav: pd.Series, *, rf_annual: float = 0.0
+) -> dict[str, float | None]:
+    nav = (
+        pd.to_numeric(nav, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .astype(float)
+    )
     if nav.empty or len(nav) < 3:
-        return {"cagr": None, "vol": None, "sharpe": None, "max_drawdown": None, "calmar": None}
-    daily_ret = nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        return {
+            "cagr": None,
+            "vol": None,
+            "sharpe": None,
+            "max_drawdown": None,
+            "calmar": None,
+        }
+    daily_ret = (
+        nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    )
     cagr = float(_annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR))
     vol = float(_annualized_vol(daily_ret, ann_factor=TRADING_DAYS_PER_YEAR))
-    sharpe = float(_sharpe(daily_ret, rf=float(rf_annual), ann_factor=TRADING_DAYS_PER_YEAR))
+    sharpe = float(
+        _sharpe(daily_ret, rf=float(rf_annual), ann_factor=TRADING_DAYS_PER_YEAR)
+    )
     mdd = float(_max_drawdown(nav))
-    calmar = float(cagr / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
-    return {"cagr": cagr, "vol": vol, "sharpe": sharpe, "max_drawdown": mdd, "calmar": calmar}
+    calmar = (
+        float(cagr / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
+    )
+    return {
+        "cagr": cagr,
+        "vol": vol,
+        "sharpe": sharpe,
+        "max_drawdown": mdd,
+        "calmar": calmar,
+    }
 
 
 @dataclass(frozen=True)
@@ -107,7 +133,9 @@ def _resolve_corr_range(cfg: SimConfig, *, n_assets: int) -> tuple[float, float]
     return lo, hi
 
 
-def _nearest_correlation_matrix(a: np.ndarray, *, max_iter: int = 40, eps: float = 1e-10) -> np.ndarray:
+def _nearest_correlation_matrix(
+    a: np.ndarray, *, max_iter: int = 40, eps: float = 1e-10
+) -> np.ndarray:
     x = np.array(a, dtype=float, copy=True)
     x = 0.5 * (x + x.T)
     np.fill_diagonal(x, 1.0)
@@ -160,7 +188,9 @@ def _sample_pairwise_corr_matrix(
         t[(iu[1], iu[0])] = vals
         c = _nearest_correlation_matrix(t)
         off = c[iu]
-        pen = float(np.maximum(0.0, lo - np.min(off)) + np.maximum(0.0, np.max(off) - hi))
+        pen = float(
+            np.maximum(0.0, lo - np.min(off)) + np.maximum(0.0, np.max(off) - hi)
+        )
         if pen < best_pen:
             best_pen = pen
             best = c
@@ -169,7 +199,9 @@ def _sample_pairwise_corr_matrix(
     return best if best is not None else np.eye(n, dtype=float)
 
 
-def _enforce_mu_monotonic_with_vol(ann_vols: np.ndarray, ann_mus: np.ndarray) -> np.ndarray:
+def _enforce_mu_monotonic_with_vol(
+    ann_vols: np.ndarray, ann_mus: np.ndarray
+) -> np.ndarray:
     """
     Enforce monotonic positive relation between annual vol and annual drift:
     if vol_i < vol_j then mu_i <= mu_j.
@@ -192,7 +224,9 @@ def _enforce_mu_monotonic_with_vol(ann_vols: np.ndarray, ann_mus: np.ndarray) ->
     return out
 
 
-def _enforce_mu_monotonic_with_vol_batch(ann_vols: np.ndarray, ann_mus: np.ndarray) -> np.ndarray:
+def _enforce_mu_monotonic_with_vol_batch(
+    ann_vols: np.ndarray, ann_mus: np.ndarray
+) -> np.ndarray:
     vol = np.asarray(ann_vols, dtype=float)
     mu = np.asarray(ann_mus, dtype=float)
     if vol.ndim != 2 or mu.ndim != 2 or vol.shape != mu.shape:
@@ -224,7 +258,11 @@ def simulate_gbm_prices(
     end = str(end or _today_last_business_day_yyyymmdd())
     idx = business_days_index(start=start, end=end)
     if len(idx) < 10:
-        return {"ok": False, "error": "insufficient_dates", "meta": {"start": start, "end": end}}
+        return {
+            "ok": False,
+            "error": "insufficient_dates",
+            "meta": {"start": start, "end": end},
+        }
 
     n = int(cfg.n_assets)
     if n <= 1 or n > 20:
@@ -233,15 +271,27 @@ def simulate_gbm_prices(
     v0 = float(cfg.vol_low)
     v1 = float(cfg.vol_high)
     if not (0.0 < v0 <= v1 <= 2.0):
-        return {"ok": False, "error": "invalid_vol_range", "meta": {"vol_low": v0, "vol_high": v1}}
+        return {
+            "ok": False,
+            "error": "invalid_vol_range",
+            "meta": {"vol_low": v0, "vol_high": v1},
+        }
     try:
         mu0, mu1 = _resolve_mu_range(cfg)
     except ValueError:
-        return {"ok": False, "error": "invalid_mu_range", "meta": {"mu_low": cfg.mu_low, "mu_high": cfg.mu_high}}
+        return {
+            "ok": False,
+            "error": "invalid_mu_range",
+            "meta": {"mu_low": cfg.mu_low, "mu_high": cfg.mu_high},
+        }
     try:
         corr_range = _resolve_corr_range(cfg, n_assets=n)
     except ValueError:
-        return {"ok": False, "error": "invalid_corr_range", "meta": {"corr_low": cfg.corr_low, "corr_high": cfg.corr_high}}
+        return {
+            "ok": False,
+            "error": "invalid_corr_range",
+            "meta": {"corr_low": cfg.corr_low, "corr_high": cfg.corr_high},
+        }
 
     rng = np.random.default_rng(None if cfg.seed is None else int(cfg.seed))
     ann_vols = rng.uniform(low=v0, high=v1, size=n).astype(float)
@@ -267,7 +317,7 @@ def simulate_gbm_prices(
     lr[0, :] = 0.0
     logp = np.cumsum(lr, axis=0)
     px = np.exp(logp).astype(float)
-    codes = [f"SIM{i+1}" for i in range(n)]
+    codes = [f"SIM{i + 1}" for i in range(n)]
     close = pd.DataFrame(px, index=idx, columns=codes, dtype=float)
 
     # Correlation of daily log returns (exclude first)
@@ -374,7 +424,9 @@ def backtest_rotation_basic(
     lb = int(max(2, lookback_days))
     _ = int(max(1, min(len(codes), int(top_k))))
 
-    ret = close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret = (
+        close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    )
     score = close / close.shift(lb) - 1.0
 
     decision_idx = _weekly_decision_indices(dates)
@@ -407,7 +459,9 @@ def backtest_rotation_basic(
                 "start_date": dates[start_i].date().isoformat(),
                 "end_date": dates[end_i].date().isoformat(),
                 "pick": str(codes[pick]),
-                "score": (None if not np.isfinite(float(row[pick])) else float(row[pick])),
+                "score": (
+                    None if not np.isfinite(float(row[pick])) else float(row[pick])
+                ),
             }
         )
 
@@ -426,7 +480,10 @@ def backtest_rotation_basic(
     m = _metrics_from_nav(nav_s)
     return {
         "ok": True,
-        "series": {"dates": pd.DatetimeIndex(dates).strftime("%Y-%m-%d").tolist(), "nav": nav_s.astype(float).tolist()},
+        "series": {
+            "dates": pd.DatetimeIndex(dates).strftime("%Y-%m-%d").tolist(),
+            "nav": nav_s.astype(float).tolist(),
+        },
         "metrics": m,
         "holdings": picks_by_decision,
     }
@@ -465,7 +522,9 @@ def backtest_holding_rebalance(
     if n <= 0:
         return {"ok": False, "error": "empty_universe"}
 
-    ret = close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    ret = (
+        close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    )
     alloc = str(allocation or "equal_weight").strip().lower()
     rb = str(rebalance or "weekly").strip().lower()
     cost = float(cost_bps) if np.isfinite(float(cost_bps)) else 0.0
@@ -488,7 +547,9 @@ def backtest_holding_rebalance(
             if not np.isfinite(rv).any():
                 rv = hist.std(ddof=1).to_numpy(dtype=float)
             if not np.isfinite(rv).any() and ann_vols:
-                rv = np.asarray([float(ann_vols.get(c, np.nan)) for c in codes], dtype=float)
+                rv = np.asarray(
+                    [float(ann_vols.get(c, np.nan)) for c in codes], dtype=float
+                )
             inv = np.where((np.isfinite(rv) & (rv > 0.0)), 1.0 / rv, 0.0)
             return _normalize_weights(inv, n=n)
         return np.full(n, 1.0 / n, dtype=float)
@@ -502,17 +563,21 @@ def backtest_holding_rebalance(
             start_i = di + 1
             if start_i >= len(dates):
                 break
-            next_di = decision_idx[j + 1] if j + 1 < len(decision_idx) else (len(dates) - 1)
+            next_di = (
+                decision_idx[j + 1] if j + 1 < len(decision_idx) else (len(dates) - 1)
+            )
             end_i = min(len(dates) - 1, next_di)
             w[start_i : end_i + 1, :] = _target_w(int(di)).reshape(1, -1)
 
     w_df = pd.DataFrame(w, index=dates, columns=codes, dtype=float)
     ret_fwd = ret.shift(-1).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-    gross = (w_df.to_numpy(dtype=float) * ret_fwd.to_numpy(dtype=float)).sum(axis=1).astype(float)
-    w_prev = w_df.shift(1).fillna(0.0)
-    turnover = (
-        (w_df.to_numpy(dtype=float) - w_prev.to_numpy(dtype=float)).astype(float)
+    gross = (
+        (w_df.to_numpy(dtype=float) * ret_fwd.to_numpy(dtype=float))
+        .sum(axis=1)
+        .astype(float)
     )
+    w_prev = w_df.shift(1).fillna(0.0)
+    turnover = (w_df.to_numpy(dtype=float) - w_prev.to_numpy(dtype=float)).astype(float)
     turnover = np.abs(turnover).sum(axis=1).astype(float)
     net = gross - turnover * (cost / 10000.0)
     nav = np.cumprod(1.0 + net).astype(float)
@@ -521,7 +586,10 @@ def backtest_holding_rebalance(
     m = _metrics_from_nav(nav_s)
     return {
         "ok": True,
-        "series": {"dates": pd.DatetimeIndex(dates).strftime("%Y-%m-%d").tolist(), "nav": nav_s.astype(float).tolist()},
+        "series": {
+            "dates": pd.DatetimeIndex(dates).strftime("%Y-%m-%d").tolist(),
+            "nav": nav_s.astype(float).tolist(),
+        },
         "metrics": m,
         "holding": {
             "allocation": alloc,
@@ -529,7 +597,10 @@ def backtest_holding_rebalance(
             "cost_bps": float(cost),
             "avg_turnover": float(np.mean(turnover)) if turnover.size else 0.0,
         },
-        "weights_last": {c: float(v) for c, v in zip(codes, w_df.iloc[-1].to_numpy(dtype=float), strict=False)},
+        "weights_last": {
+            c: float(v)
+            for c, v in zip(codes, w_df.iloc[-1].to_numpy(dtype=float), strict=False)
+        },
     }
 
 
@@ -566,7 +637,12 @@ def apply_position_sizing(
     initial_cash: float,
     position_pct: float,
 ) -> dict[str, Any]:
-    nav = pd.to_numeric(nav, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().astype(float)
+    nav = (
+        pd.to_numeric(nav, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .astype(float)
+    )
     if nav.empty or len(nav) < 3:
         return {"ok": False, "error": "empty_nav"}
     pos = float(position_pct)
@@ -576,7 +652,9 @@ def apply_position_sizing(
     if not np.isfinite(cash0) or cash0 <= 0:
         return {"ok": False, "error": "invalid_initial_cash"}
 
-    daily_ret = nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    daily_ret = (
+        nav.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+    )
     equity = np.full(len(nav), float(cash0), dtype=float)
     for i in range(1, len(nav)):
         r = float(daily_ret.iloc[i])
@@ -586,12 +664,17 @@ def apply_position_sizing(
     ruin = bool(min_eq <= 0.0)
     return {
         "ok": True,
-        "series": {"dates": pd.DatetimeIndex(eq.index).strftime("%Y-%m-%d").tolist(), "equity": eq.astype(float).tolist()},
+        "series": {
+            "dates": pd.DatetimeIndex(eq.index).strftime("%Y-%m-%d").tolist(),
+            "equity": eq.astype(float).tolist(),
+        },
         "stats": {
             "initial_cash": float(cash0),
             "position_pct": float(pos),
             "min_equity": float(min_eq),
-            "min_equity_ratio": float(min_eq / cash0) if cash0 > 0 and np.isfinite(min_eq) else None,
+            "min_equity_ratio": float(min_eq / cash0)
+            if cash0 > 0 and np.isfinite(min_eq)
+            else None,
             "ruin": bool(ruin),
         },
     }
@@ -636,7 +719,11 @@ def montecarlo_rotation_vs_ew(
         asset_indices = all_indices
     n_assets_eff = len(asset_indices)
     if n_assets_eff <= 0 or n_assets_eff > 50:
-        return {"ok": False, "error": "invalid_n_assets", "meta": {"n_assets": n_assets_eff}}
+        return {
+            "ok": False,
+            "error": "invalid_n_assets",
+            "meta": {"n_assets": n_assets_eff},
+        }
 
     n_sims = int(n_sims)
     if n_sims <= 0 or n_sims > 50000:
@@ -655,11 +742,19 @@ def montecarlo_rotation_vs_ew(
     try:
         corr_range = _resolve_corr_range(cfg_check, n_assets=int(n_assets_eff))
     except ValueError:
-        return {"ok": False, "error": "invalid_corr_range", "meta": {"corr_low": corr_low, "corr_high": corr_high}}
+        return {
+            "ok": False,
+            "error": "invalid_corr_range",
+            "meta": {"corr_low": corr_low, "corr_high": corr_high},
+        }
     try:
         mu0, mu1 = _resolve_mu_range(cfg_check)
     except ValueError:
-        return {"ok": False, "error": "invalid_mu_range", "meta": {"mu_low": mu_low, "mu_high": mu_high}}
+        return {
+            "ok": False,
+            "error": "invalid_mu_range",
+            "meta": {"mu_low": mu_low, "mu_high": mu_high},
+        }
 
     rng = np.random.default_rng(None if seed is None else int(seed))
     # Precompute decision indices and segments once.
@@ -736,7 +831,9 @@ def montecarlo_rotation_vs_ew(
                         mp_ctx = mp.get_context("fork")
                     except ValueError:
                         mp_ctx = None
-                with ProcessPoolExecutor(max_workers=parallel_jobs, mp_context=mp_ctx) as ex:
+                with ProcessPoolExecutor(
+                    max_workers=parallel_jobs, mp_context=mp_ctx
+                ) as ex:
                     futs = [
                         ex.submit(
                             _eval_mc_world,
@@ -796,15 +893,23 @@ def montecarlo_rotation_vs_ew(
         done = 0
         while done < n_sims:
             m = min(chunk_size, n_sims - done)
-            ann_vols_all = rng.uniform(low=float(vol_low), high=float(vol_high), size=(m, n_assets)).astype(float)
-            ann_mus_all = rng.uniform(low=float(mu0), high=float(mu1), size=(m, n_assets)).astype(float)
-            ann_mus_all = _enforce_mu_monotonic_with_vol_batch(ann_vols_all, ann_mus_all)
+            ann_vols_all = rng.uniform(
+                low=float(vol_low), high=float(vol_high), size=(m, n_assets)
+            ).astype(float)
+            ann_mus_all = rng.uniform(
+                low=float(mu0), high=float(mu1), size=(m, n_assets)
+            ).astype(float)
+            ann_mus_all = _enforce_mu_monotonic_with_vol_batch(
+                ann_vols_all, ann_mus_all
+            )
             ann_vols = ann_vols_all[:, asset_indices]
             ann_mus = ann_mus_all[:, asset_indices]
             sig_d = ann_vols / np.sqrt(float(TRADING_DAYS_PER_YEAR))
             mu_d = ann_mus / float(TRADING_DAYS_PER_YEAR)
             if corr_range is None:
-                z = rng.normal(loc=0.0, scale=1.0, size=(m, n_days, n_assets_eff)).astype(float)
+                z = rng.normal(
+                    loc=0.0, scale=1.0, size=(m, n_days, n_assets_eff)
+                ).astype(float)
             else:
                 l_batch = np.empty((m, n_assets_eff, n_assets_eff), dtype=float)
                 for i in range(m):
@@ -815,7 +920,9 @@ def montecarlo_rotation_vs_ew(
                         rng=rng,
                     )
                     l_batch[i] = np.linalg.cholesky(c)
-                z_raw = rng.normal(loc=0.0, scale=1.0, size=(m, n_days, n_assets_eff)).astype(float)
+                z_raw = rng.normal(
+                    loc=0.0, scale=1.0, size=(m, n_days, n_assets_eff)
+                ).astype(float)
                 z = np.einsum("itk,ijk->itj", z_raw, l_batch).astype(float)
             lr = (mu_d[:, None, :] + sig_d[:, None, :] * z).astype(float)
             lr[:, 0, :] = 0.0
@@ -841,9 +948,15 @@ def montecarlo_rotation_vs_ew(
             ew_ret = ret.mean(axis=2).astype(float)
             ew_nav = np.cumprod(1.0 + ew_ret, axis=1).astype(float)
             ew_nav[:, 0] = 1.0
-            inv = 1.0 / np.where((np.isfinite(ann_vols) & (ann_vols > 0)), ann_vols, np.nan)
+            inv = 1.0 / np.where(
+                (np.isfinite(ann_vols) & (ann_vols > 0)), ann_vols, np.nan
+            )
             inv_sum = np.nansum(inv, axis=1, keepdims=True)
-            w_rp = np.where(np.isfinite(inv_sum) & (inv_sum > 0), inv / inv_sum, (1.0 / float(n_assets_eff)))
+            w_rp = np.where(
+                np.isfinite(inv_sum) & (inv_sum > 0),
+                inv / inv_sum,
+                (1.0 / float(n_assets_eff)),
+            )
             rp_ret = np.sum(ret * w_rp[:, None, :], axis=2).astype(float)
             rp_nav = np.cumprod(1.0 + rp_ret, axis=1).astype(float)
             rp_nav[:, 0] = 1.0
@@ -893,12 +1006,22 @@ def montecarlo_rotation_vs_ew(
             "equal_weight": {"cagr": out_cagr_ew, "max_drawdown": out_mdd_ew},
             "risk_parity": {"cagr": out_cagr_rp, "max_drawdown": out_mdd_rp},
             "excess": {
-                "cagr": [float(a - b) for a, b in zip(out_cagr_rot, out_cagr_ew, strict=False)],
-                "max_drawdown": [float(a - b) for a, b in zip(out_mdd_rot, out_mdd_ew, strict=False)],
+                "cagr": [
+                    float(a - b)
+                    for a, b in zip(out_cagr_rot, out_cagr_ew, strict=False)
+                ],
+                "max_drawdown": [
+                    float(a - b) for a, b in zip(out_mdd_rot, out_mdd_ew, strict=False)
+                ],
             },
             "excess_vs_risk_parity": {
-                "cagr": [float(a - b) for a, b in zip(out_cagr_rot, out_cagr_rp, strict=False)],
-                "max_drawdown": [float(a - b) for a, b in zip(out_mdd_rot, out_mdd_rp, strict=False)],
+                "cagr": [
+                    float(a - b)
+                    for a, b in zip(out_cagr_rot, out_cagr_rp, strict=False)
+                ],
+                "max_drawdown": [
+                    float(a - b) for a, b in zip(out_mdd_rot, out_mdd_rp, strict=False)
+                ],
             },
         },
     }
@@ -1021,7 +1144,12 @@ def _sim_vol_index_proxy(close: pd.DataFrame) -> dict[str, pd.Series]:
     # vol-index timing rules in synthetic worlds.
     ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
     rv = ret.rolling(20, min_periods=5).std(ddof=1) * np.sqrt(252.0) * 100.0
-    lvl = rv.mean(axis=1, skipna=True).astype(float).replace([np.inf, -np.inf], np.nan).ffill()
+    lvl = (
+        rv.mean(axis=1, skipna=True)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
     if lvl.dropna().empty:
         lvl = pd.Series(20.0, index=close.index, dtype=float)
     return {
@@ -1046,7 +1174,9 @@ def _patched_rotation_loaders(
     old_ohlc = _rot._load_ohlc_prices
     old_vol_amt = _rot._load_volume_amount
 
-    def _slice_df(df: pd.DataFrame, codes: list[str], start: dt.date, end: dt.date) -> pd.DataFrame:
+    def _slice_df(
+        df: pd.DataFrame, codes: list[str], start: dt.date, end: dt.date
+    ) -> pd.DataFrame:
         if df is None or df.empty:
             return pd.DataFrame()
         idx = pd.to_datetime(df.index)
@@ -1059,10 +1189,14 @@ def _patched_rotation_loaders(
         out = out.reindex(columns=[str(c) for c in codes])
         return out.sort_index()
 
-    def _slice_ohlc(src: dict[str, pd.DataFrame], codes: list[str], start: dt.date, end: dt.date) -> dict[str, pd.DataFrame]:
+    def _slice_ohlc(
+        src: dict[str, pd.DataFrame], codes: list[str], start: dt.date, end: dt.date
+    ) -> dict[str, pd.DataFrame]:
         return {k: _slice_df(v, codes, start, end) for k, v in src.items()}
 
-    def _load_close(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> pd.DataFrame:
+    def _load_close(
+        _db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str
+    ) -> pd.DataFrame:
         a = str(adjust or "none").strip().lower()
         if a == "hfq":
             return _slice_df(close_hfq, codes, start, end)
@@ -1070,16 +1204,22 @@ def _patched_rotation_loaders(
             return _slice_df(close_qfq, codes, start, end)
         return _slice_df(close_none, codes, start, end)
 
-    def _load_hl(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _load_hl(
+        _db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         src = ohlc_hfq if str(adjust or "").strip().lower() == "qfq" else ohlc_none
         d = _slice_ohlc(src, codes, start, end)
         return d.get("high", pd.DataFrame()), d.get("low", pd.DataFrame())
 
-    def _load_ohlc(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> dict[str, pd.DataFrame]:
+    def _load_ohlc(
+        _db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str
+    ) -> dict[str, pd.DataFrame]:
         src = ohlc_hfq if str(adjust or "").strip().lower() == "hfq" else ohlc_none
         return _slice_ohlc(src, codes, start, end)
 
-    def _load_vol_amt(_db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _load_vol_amt(
+        _db: Any, *, codes: list[str], start: dt.date, end: dt.date, adjust: str
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         return pd.DataFrame(), pd.DataFrame()
 
     _rot._load_close_prices = _load_close
@@ -1118,7 +1258,11 @@ def _run_rotation_variant_on_sim(
         start=start_d,
         end=end_d,
         rebalance=str(s.get("rebalance", "weekly")),
-        rebalance_anchor=(None if s.get("rebalance_anchor") is None else int(s.get("rebalance_anchor"))),
+        rebalance_anchor=(
+            None
+            if s.get("rebalance_anchor") is None
+            else int(s.get("rebalance_anchor"))
+        ),
         rebalance_shift=str(s.get("rebalance_shift", "prev")),
         exec_price=str(s.get("exec_price", "open")),
         top_k=int(s.get("top_k", 1) or 1),
@@ -1151,7 +1295,11 @@ def _run_rotation_variant_on_sim(
         asset_trend_rules=s.get("asset_trend_rules"),
         asset_bias_rules=s.get("asset_bias_rules"),
         asset_vol_index_rules=s.get("asset_vol_index_rules"),
-        vol_index_close=(vol_index_close if vol_index_close is not None else _sim_vol_index_proxy(close)),
+        vol_index_close=(
+            vol_index_close
+            if vol_index_close is not None
+            else _sim_vol_index_proxy(close)
+        ),
         dynamic_universe=True,
     )
     if ohlc_hfq is None:
@@ -1167,7 +1315,9 @@ def _run_rotation_variant_on_sim(
     ):
         out = _rot.backtest_rotation(None, inp, lightweight=True)
     ann = _extract_annualized_return(out)
-    exposure = float(out.get("avg_exposure")) if out.get("avg_exposure") is not None else 0.0
+    exposure = (
+        float(out.get("avg_exposure")) if out.get("avg_exposure") is not None else 0.0
+    )
     return ann, exposure
 
 
@@ -1194,7 +1344,11 @@ def _run_rotation_variant_perf_on_sim(
         start=start_d,
         end=end_d,
         rebalance=str(s.get("rebalance", "weekly")),
-        rebalance_anchor=(None if s.get("rebalance_anchor") is None else int(s.get("rebalance_anchor"))),
+        rebalance_anchor=(
+            None
+            if s.get("rebalance_anchor") is None
+            else int(s.get("rebalance_anchor"))
+        ),
         rebalance_shift=str(s.get("rebalance_shift", "prev")),
         exec_price=str(s.get("exec_price", "open")),
         top_k=int(s.get("top_k", 1) or 1),
@@ -1227,7 +1381,11 @@ def _run_rotation_variant_perf_on_sim(
         asset_trend_rules=s.get("asset_trend_rules"),
         asset_bias_rules=s.get("asset_bias_rules"),
         asset_vol_index_rules=s.get("asset_vol_index_rules"),
-        vol_index_close=(vol_index_close if vol_index_close is not None else _sim_vol_index_proxy(close)),
+        vol_index_close=(
+            vol_index_close
+            if vol_index_close is not None
+            else _sim_vol_index_proxy(close)
+        ),
         dynamic_universe=True,
     )
     if ohlc_hfq is None:
@@ -1268,7 +1426,11 @@ def _run_rotation_variant_with_series_on_sim(
         start=start_d,
         end=end_d,
         rebalance=str(s.get("rebalance", "weekly")),
-        rebalance_anchor=(None if s.get("rebalance_anchor") is None else int(s.get("rebalance_anchor"))),
+        rebalance_anchor=(
+            None
+            if s.get("rebalance_anchor") is None
+            else int(s.get("rebalance_anchor"))
+        ),
         rebalance_shift=str(s.get("rebalance_shift", "prev")),
         exec_price=str(s.get("exec_price", "open")),
         top_k=int(s.get("top_k", 1) or 1),
@@ -1301,7 +1463,11 @@ def _run_rotation_variant_with_series_on_sim(
         asset_trend_rules=s.get("asset_trend_rules"),
         asset_bias_rules=s.get("asset_bias_rules"),
         asset_vol_index_rules=s.get("asset_vol_index_rules"),
-        vol_index_close=(vol_index_close if vol_index_close is not None else _sim_vol_index_proxy(close)),
+        vol_index_close=(
+            vol_index_close
+            if vol_index_close is not None
+            else _sim_vol_index_proxy(close)
+        ),
         dynamic_universe=True,
     )
     if ohlc_hfq is None:
@@ -1316,16 +1482,26 @@ def _run_rotation_variant_with_series_on_sim(
         ohlc_none=ohlc_none,
     ):
         out = _rot.backtest_rotation(None, inp, lightweight=False)
-    nav = (out.get("nav") or {})
+    nav = out.get("nav") or {}
     dates = list(nav.get("dates") or [])
     vals = list(((nav.get("series") or {}).get("ROTATION") or []))
     m = {}
     if dates and vals and len(dates) == len(vals):
-        nav_s = pd.Series(pd.to_numeric(vals, errors="coerce"), index=pd.to_datetime(dates), dtype=float)
+        nav_s = pd.Series(
+            pd.to_numeric(vals, errors="coerce"),
+            index=pd.to_datetime(dates),
+            dtype=float,
+        )
         m = _metrics_from_nav(nav_s)
     else:
         ann = _extract_annualized_return(out)
-        m = {"cagr": ann if np.isfinite(ann) else None, "vol": None, "sharpe": None, "max_drawdown": None, "calmar": None}
+        m = {
+            "cagr": ann if np.isfinite(ann) else None,
+            "vol": None,
+            "sharpe": None,
+            "max_drawdown": None,
+            "calmar": None,
+        }
     return {
         "ok": True,
         "series": {"dates": dates, "nav": [float(x) for x in vals]},
@@ -1334,7 +1510,9 @@ def _run_rotation_variant_with_series_on_sim(
     }
 
 
-def _paired_permutation_pvalue(diff: np.ndarray, *, n_perm: int, seed: int | None) -> float:
+def _paired_permutation_pvalue(
+    diff: np.ndarray, *, n_perm: int, seed: int | None
+) -> float:
     d = np.asarray(diff, dtype=float)
     d = d[np.isfinite(d)]
     if d.size == 0:
@@ -1348,11 +1526,16 @@ def _paired_permutation_pvalue(diff: np.ndarray, *, n_perm: int, seed: int | Non
     return float((ge + 1) / (n_p + 1))
 
 
-def _bootstrap_ci(diff: np.ndarray, *, n_boot: int, seed: int | None) -> dict[str, list[float]]:
+def _bootstrap_ci(
+    diff: np.ndarray, *, n_boot: int, seed: int | None
+) -> dict[str, list[float]]:
     d = np.asarray(diff, dtype=float)
     d = d[np.isfinite(d)]
     if d.size == 0:
-        return {"mean": [float("nan"), float("nan")], "median": [float("nan"), float("nan")]}
+        return {
+            "mean": [float("nan"), float("nan")],
+            "median": [float("nan"), float("nan")],
+        }
     rng = np.random.default_rng(seed)
     n_b = int(max(1, int(n_boot)))
     n = int(d.size)
@@ -1382,7 +1565,7 @@ def _sign_test_pvalue_one_sided(diff: np.ndarray) -> float:
     k = int(np.sum(d > 0.0))
     p = 0.0
     for i in range(k, n + 1):
-        p += math.comb(n, i) * (0.5 ** n)
+        p += math.comb(n, i) * (0.5**n)
     return float(min(1.0, max(0.0, p)))
 
 
@@ -1581,7 +1764,7 @@ def _eval_mc_world(
     if not bool(sim.get("ok")):
         return None
     dates = pd.to_datetime(((sim.get("series") or {}).get("dates") or []))
-    close_map = ((sim.get("series") or {}).get("close") or {})
+    close_map = (sim.get("series") or {}).get("close") or {}
     close = pd.DataFrame(close_map, index=dates, dtype=float)
     if close.empty:
         return None
@@ -1616,7 +1799,11 @@ def _eval_mc_world(
     cagr_rp = _extract_annualized_return(rp)
     mdd_rp = _extract_max_drawdown_from_bt(rp)
     vals = [cagr_rot, cagr_ew, cagr_rp, mdd_rot, mdd_ew, mdd_rp]
-    return tuple(float(x) for x in vals) if all(np.isfinite(float(x)) for x in vals) else None
+    return (
+        tuple(float(x) for x in vals)
+        if all(np.isfinite(float(x)) for x in vals)
+        else None
+    )
 
 
 def _eval_ab_world(
@@ -1655,7 +1842,7 @@ def _eval_ab_world(
     if not bool(sim.get("ok")):
         return None
     dates = pd.to_datetime(((sim.get("series") or {}).get("dates") or []))
-    close_map = ((sim.get("series") or {}).get("close") or {})
+    close_map = (sim.get("series") or {}).get("close") or {}
     close = pd.DataFrame(close_map, index=dates, dtype=float)
     ohlc_hfq = _sim_ohlc_from_close(close)
     vol_idx = _sim_vol_index_proxy(close)
@@ -1769,13 +1956,19 @@ def gbm_ab_significance(
     b_arr = np.asarray(b_vals, dtype=float)
     diff = a_arr - b_arr
     p = _paired_permutation_pvalue(diff, n_perm=n_perm, seed=seed)
-    ci = _bootstrap_ci(diff, n_boot=n_boot, seed=(None if seed is None else int(seed) + 7))
+    ci = _bootstrap_ci(
+        diff, n_boot=n_boot, seed=(None if seed is None else int(seed) + 7)
+    )
     p_sign = _sign_test_pvalue_one_sided(diff)
     p_wilcoxon = _wilcoxon_signed_rank_pvalue_one_sided(diff)
 
     rep = int(max(0, stability_repeats))
     ws = int(max(2, stability_worlds))
-    stab: dict[str, Any] = {"enabled": bool(rep > 0), "repeats": rep, "worlds_per_repeat": ws}
+    stab: dict[str, Any] = {
+        "enabled": bool(rep > 0),
+        "repeats": rep,
+        "worlds_per_repeat": ws,
+    }
     if rep > 0:
         rep_seeds: list[int] = []
         rep_mean_diff: list[float] = []
@@ -1810,7 +2003,11 @@ def gbm_ab_significance(
             rep_mean_diff.append(float(np.mean(drep)) if drep.size else float("nan"))
             rep_p_sign.append(float(_sign_test_pvalue_one_sided(drep)))
             rep_p_perm.append(
-                float(_paired_permutation_pvalue(drep, n_perm=max(1, min(int(n_perm), 2000)), seed=srep))
+                float(
+                    _paired_permutation_pvalue(
+                        drep, n_perm=max(1, min(int(n_perm), 2000)), seed=srep
+                    )
+                )
             )
         arr_md = np.asarray(rep_mean_diff, dtype=float)
         arr_ps = np.asarray(rep_p_sign, dtype=float)
@@ -1821,9 +2018,15 @@ def gbm_ab_significance(
                 "mean_diff": [float(x) for x in rep_mean_diff],
                 "pvalue_sign_test_one_sided": [float(x) for x in rep_p_sign],
                 "pvalue_permutation_one_sided": [float(x) for x in rep_p_perm],
-                "positive_mean_fraction": float(np.mean(arr_md > 0.0)) if arr_md.size else float("nan"),
-                "sign_sig_fraction": float(np.mean(arr_ps < 0.05)) if arr_ps.size else float("nan"),
-                "perm_sig_fraction": float(np.mean(arr_pp < 0.05)) if arr_pp.size else float("nan"),
+                "positive_mean_fraction": float(np.mean(arr_md > 0.0))
+                if arr_md.size
+                else float("nan"),
+                "sign_sig_fraction": float(np.mean(arr_ps < 0.05))
+                if arr_ps.size
+                else float("nan"),
+                "perm_sig_fraction": float(np.mean(arr_pp < 0.05))
+                if arr_pp.size
+                else float("nan"),
             }
         )
     return {
@@ -1863,8 +2066,12 @@ def gbm_ab_significance(
             "pvalue_sign_test_one_sided": float(p_sign),
             "pvalue_wilcoxon_one_sided": float(p_wilcoxon),
             "bootstrap_ci_95": ci,
-            "avg_exposure_a": float(np.mean(np.asarray(exp_a, dtype=float))) if exp_a else float("nan"),
-            "avg_exposure_b": float(np.mean(np.asarray(exp_b, dtype=float))) if exp_b else float("nan"),
+            "avg_exposure_a": float(np.mean(np.asarray(exp_a, dtype=float)))
+            if exp_a
+            else float("nan"),
+            "avg_exposure_b": float(np.mean(np.asarray(exp_b, dtype=float)))
+            if exp_b
+            else float("nan"),
         },
         "robustness": {
             "sign_test_one_sided": float(p_sign),
@@ -1975,4 +2182,3 @@ def montecarlo_strategy_pair(
             "excess": {"cagr": [float(x) for x in d.tolist()]},
         },
     }
-

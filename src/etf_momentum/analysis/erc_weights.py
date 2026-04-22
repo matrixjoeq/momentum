@@ -9,6 +9,8 @@ Uses scipy.optimize (project dependency). Falls back to inverse-volatility on fa
 
 from __future__ import annotations
 
+# pylint: disable=unused-argument,unused-variable
+
 import numpy as np
 from scipy.optimize import minimize
 
@@ -88,7 +90,11 @@ def solve_erc_weights(
     if err > 1e-4 or not np.all(np.isfinite(w)):
         iv = 1.0 / np.sqrt(np.maximum(np.diag(sigma), 1e-18))
         w = np.maximum(iv, 0.0)
-        w = w / float(np.sum(w)) if float(np.sum(w)) > 0 else np.full(n, 1.0 / n, dtype=float)
+        w = (
+            w / float(np.sum(w))
+            if float(np.sum(w)) > 0
+            else np.full(n, 1.0 / n, dtype=float)
+        )
     _ = portfolio_var(w)
     return w.astype(float)
 

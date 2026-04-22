@@ -11,7 +11,10 @@ function request(path, { method = "GET", data = null } = {}) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(res.data);
         } else {
-          const msg = (res.data && (res.data.detail || res.data.message)) ? (res.data.detail || res.data.message) : JSON.stringify(res.data);
+          const msg =
+            res.data && (res.data.detail || res.data.message)
+              ? res.data.detail || res.data.message
+              : JSON.stringify(res.data);
           reject(new Error(`${res.statusCode}: ${msg}`));
         }
       },
@@ -21,4 +24,3 @@ function request(path, { method = "GET", data = null } = {}) {
 }
 
 module.exports = { request };
-

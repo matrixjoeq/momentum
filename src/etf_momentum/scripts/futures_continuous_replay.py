@@ -105,7 +105,9 @@ def _fetch_symbol(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     return df[(df["date"] >= s) & (df["date"] <= e)].copy()
 
 
-def _load_contract_universe(cfg: ReplayConfig) -> tuple[dict[str, pd.DataFrame], list[dict[str, object]]]:
+def _load_contract_universe(
+    cfg: ReplayConfig,
+) -> tuple[dict[str, pd.DataFrame], list[dict[str, object]]]:
     data: dict[str, pd.DataFrame] = {}
     coverage: list[dict[str, object]] = []
     for yymm in _month_iter(cfg.contract_start, cfg.contract_end):
@@ -113,7 +115,16 @@ def _load_contract_universe(cfg: ReplayConfig) -> tuple[dict[str, pd.DataFrame],
         try:
             df = _fetch_symbol(symbol, cfg.start_date, cfg.end_date)
             if df.empty:
-                coverage.append({"symbol": symbol, "ok": False, "rows": 0, "start": None, "end": None, "error": "empty"})
+                coverage.append(
+                    {
+                        "symbol": symbol,
+                        "ok": False,
+                        "rows": 0,
+                        "start": None,
+                        "end": None,
+                        "error": "empty",
+                    }
+                )
                 continue
             data[symbol] = df
             coverage.append(
@@ -127,7 +138,16 @@ def _load_contract_universe(cfg: ReplayConfig) -> tuple[dict[str, pd.DataFrame],
                 }
             )
         except Exception as e:  # noqa: BLE001
-            coverage.append({"symbol": symbol, "ok": False, "rows": 0, "start": None, "end": None, "error": str(e)})
+            coverage.append(
+                {
+                    "symbol": symbol,
+                    "ok": False,
+                    "rows": 0,
+                    "start": None,
+                    "end": None,
+                    "error": str(e),
+                }
+            )
     return data, coverage
 
 
@@ -138,11 +158,15 @@ def _build_hold_table(contract_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         x["symbol"] = sym
         pieces.append(x)
     panel = pd.concat(pieces, ignore_index=True)
-    tbl = panel.pivot_table(index="date", columns="symbol", values="hold", aggfunc="last").sort_index()
+    tbl = panel.pivot_table(
+        index="date", columns="symbol", values="hold", aggfunc="last"
+    ).sort_index()
     return tbl
 
 
-def _build_quote_panel(contract_data: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+def _build_quote_panel(
+    contract_data: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
     out: dict[str, pd.DataFrame] = {}
     for sym, df in contract_data.items():
         x = df.copy().set_index("date").sort_index()
@@ -157,7 +181,9 @@ def _argmax_hold(holds: pd.Series) -> str | None:
     return str(v.idxmax())
 
 
-def _replay_dominant(cfg: ReplayConfig, contract_data: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _replay_dominant(
+    cfg: ReplayConfig, contract_data: dict[str, pd.DataFrame]
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     holds_tbl = _build_hold_table(contract_data)
     panel = _build_quote_panel(contract_data)
     if holds_tbl.empty:
@@ -187,7 +213,11 @@ def _replay_dominant(cfg: ReplayConfig, contract_data: dict[str, pd.DataFrame]) 
             best = _argmax_hold(prev_holds)
             if best is not None and pd.notna(cur_hold):
                 best_hold = prev_holds.get(best, np.nan)
-                if best != cur and pd.notna(best_hold) and float(best_hold) > cfg.switch_threshold * float(cur_hold):
+                if (
+                    best != cur
+                    and pd.notna(best_hold)
+                    and float(best_hold) > cfg.switch_threshold * float(cur_hold)
+                ):
                     cur = best
         if cur is None or cur not in panel or d not in panel[cur].index:
             fallback = _argmax_hold(today_holds)
@@ -220,14 +250,24 @@ def _replay_dominant(cfg: ReplayConfig, contract_data: dict[str, pd.DataFrame]) 
         prev = None
         for r in replay_df.itertuples(index=False):
             if prev is not None and r.dominant_symbol != prev:
-                switches.append({"date": str(r.date.date()), "from_symbol": prev, "to_symbol": r.dominant_symbol})
+                switches.append(
+                    {
+                        "date": str(r.date.date()),
+                        "from_symbol": prev,
+                        "to_symbol": r.dominant_symbol,
+                    }
+                )
             prev = r.dominant_symbol
     switch_df = pd.DataFrame(switches)
     return replay_df, switch_df
 
 
 def _calc_price_diff(
-    panel: dict[str, pd.DataFrame], old_sym: str, new_sym: str, date: pd.Timestamp, field: str
+    panel: dict[str, pd.DataFrame],
+    old_sym: str,
+    new_sym: str,
+    date: pd.Timestamp,
+    field: str,
 ) -> float | None:
     old_df = panel.get(old_sym)
     new_df = panel.get(new_sym)
@@ -263,7 +303,9 @@ def _build_adjusted_continuous(
             if i <= 0:
                 continue
             prev_d = idx[i - 1]
-            pre_delta = _calc_price_diff(panel, r.from_symbol, r.to_symbol, prev_d, "close")
+            pre_delta = _calc_price_diff(
+                panel, r.from_symbol, r.to_symbol, prev_d, "close"
+            )
             if pre_delta is not None:
                 pre_adj.loc[idx <= prev_d] += pre_delta
             post_delta = _calc_price_diff(panel, r.from_symbol, r.to_symbol, d, "open")
@@ -285,7 +327,9 @@ def _build_adjusted_continuous(
     return replay888, replay889
 
 
-def _build_joined_for_error(replay88_df: pd.DataFrame, main_df: pd.DataFrame) -> pd.DataFrame:
+def _build_joined_for_error(
+    replay88_df: pd.DataFrame, main_df: pd.DataFrame
+) -> pd.DataFrame:
     if replay88_df.empty or main_df.empty:
         return pd.DataFrame()
 
@@ -300,8 +344,16 @@ def _calc_error_stats(joined_df: pd.DataFrame) -> pd.DataFrame:
     for f in ERROR_FIELDS:
         col_a = f"{f}_replay88"
         col_b = f"{f}_main0"
-        a_raw = joined_df[col_a] if col_a in joined_df.columns else pd.Series(np.nan, index=joined_df.index)
-        b_raw = joined_df[col_b] if col_b in joined_df.columns else pd.Series(np.nan, index=joined_df.index)
+        a_raw = (
+            joined_df[col_a]
+            if col_a in joined_df.columns
+            else pd.Series(np.nan, index=joined_df.index)
+        )
+        b_raw = (
+            joined_df[col_b]
+            if col_b in joined_df.columns
+            else pd.Series(np.nan, index=joined_df.index)
+        )
         a = pd.to_numeric(a_raw, errors="coerce")
         b = pd.to_numeric(b_raw, errors="coerce")
         valid = a.notna() & b.notna()
@@ -339,7 +391,9 @@ def _calc_error_stats(joined_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _evaluate_usability(cfg: ReplayConfig, err_df: pd.DataFrame, compare_summary: dict[str, object]) -> dict[str, object]:
+def _evaluate_usability(
+    cfg: ReplayConfig, err_df: pd.DataFrame, compare_summary: dict[str, object]
+) -> dict[str, object]:
     if not compare_summary.get("ok"):
         return {
             "usable": False,
@@ -367,14 +421,19 @@ def _evaluate_usability(cfg: ReplayConfig, err_df: pd.DataFrame, compare_summary
         p95 = float(r.get("p95_ape", np.nan))
         item = {"field": f, "n": n, "mape": mape, "p95_ape": p95}
         covered.append(item)
-        if (
-            (not np.isnan(mape) and mape > cfg.usable_rel_mean_max)
-            or (not np.isnan(p95) and p95 > cfg.usable_rel_p95_max)
+        if (not np.isnan(mape) and mape > cfg.usable_rel_mean_max) or (
+            not np.isnan(p95) and p95 > cfg.usable_rel_p95_max
         ):
             failed.append(item)
     usable = len(covered) >= cfg.usable_min_fields and len(failed) == 0
-    reason = "pass" if usable else (
-        "insufficient covered fields" if len(covered) < cfg.usable_min_fields else "relative error threshold exceeded"
+    reason = (
+        "pass"
+        if usable
+        else (
+            "insufficient covered fields"
+            if len(covered) < cfg.usable_min_fields
+            else "relative error threshold exceeded"
+        )
     )
     return {
         "usable": usable,
@@ -389,16 +448,24 @@ def _evaluate_usability(cfg: ReplayConfig, err_df: pd.DataFrame, compare_summary
     }
 
 
-def _compare_with_main(replay88_df: pd.DataFrame, main_df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, object], pd.DataFrame]:
+def _compare_with_main(
+    replay88_df: pd.DataFrame, main_df: pd.DataFrame
+) -> tuple[pd.DataFrame, dict[str, object], pd.DataFrame]:
     if replay88_df.empty or main_df.empty:
-        return pd.DataFrame(), {"ok": False, "reason": "empty replay or main"}, pd.DataFrame()
+        return (
+            pd.DataFrame(),
+            {"ok": False, "reason": "empty replay or main"},
+            pd.DataFrame(),
+        )
 
     both = _build_joined_for_error(replay88_df, main_df)
     if both.empty:
         return both.reset_index(), {"ok": False, "reason": "no overlap"}, pd.DataFrame()
 
     both["close_abs_diff"] = (both["close_replay88"] - both["close_main0"]).abs()
-    both["close_rel_diff"] = both["close_abs_diff"] / both["close_main0"].replace(0, np.nan).abs()
+    both["close_rel_diff"] = (
+        both["close_abs_diff"] / both["close_main0"].replace(0, np.nan).abs()
+    )
     err_df = _calc_error_stats(both)
     summary = {
         "ok": True,
@@ -443,7 +510,14 @@ def _plot_kline(df: pd.DataFrame, title: str, out_png: Path) -> None:
         if height == 0:
             ax.hlines(ci, xi - width / 2, xi + width / 2, color=color, linewidth=1.0)
         else:
-            rect = plt.Rectangle((xi - width / 2, bottom), width, height, facecolor=color, edgecolor=color, alpha=0.8)
+            rect = plt.Rectangle(
+                (xi - width / 2, bottom),
+                width,
+                height,
+                facecolor=color,
+                edgecolor=color,
+                alpha=0.8,
+            )
             ax.add_patch(rect)
     ax.set_title(title)
     ax.xaxis_date()
@@ -458,7 +532,9 @@ def _plot_ratio(compare_df: pd.DataFrame, out_png: Path, title: str) -> None:
     if compare_df.empty:
         return
     x = pd.to_datetime(compare_df["date"])
-    y = pd.to_numeric(compare_df["close_replay88"], errors="coerce") / pd.to_numeric(compare_df["close_main0"], errors="coerce").replace(0, np.nan)
+    y = pd.to_numeric(compare_df["close_replay88"], errors="coerce") / pd.to_numeric(
+        compare_df["close_main0"], errors="coerce"
+    ).replace(0, np.nan)
     valid = x.notna() & y.notna()
     x = x[valid]
     y = y[valid]
@@ -554,16 +630,16 @@ def _write_html_report(
       <tr><th>失败字段</th><td>{failed_text}</td></tr>
     </table>
   </div>
-  <div class="card"><h2>1) 原始 *0 主连 K 线</h2><img src="{image_map.get('k0','')}" alt="k0"/></div>
-  <div class="card"><h2>2) 合成 *88 简单主连 K 线</h2><img src="{image_map.get('k88','')}" alt="k88"/></div>
-  <div class="card"><h2>3) 合成 *888 前复权主连 K 线</h2><img src="{image_map.get('k888','')}" alt="k888"/></div>
-  <div class="card"><h2>4) 合成 *889 后复权主连 K 线</h2><img src="{image_map.get('k889','')}" alt="k889"/></div>
-  <div class="card"><h2>5) *88 / *0 收盘价比值图</h2><img src="{image_map.get('ratio','')}" alt="ratio"/></div>
+  <div class="card"><h2>1) 原始 *0 主连 K 线</h2><img src="{image_map.get("k0", "")}" alt="k0"/></div>
+  <div class="card"><h2>2) 合成 *88 简单主连 K 线</h2><img src="{image_map.get("k88", "")}" alt="k88"/></div>
+  <div class="card"><h2>3) 合成 *888 前复权主连 K 线</h2><img src="{image_map.get("k888", "")}" alt="k888"/></div>
+  <div class="card"><h2>4) 合成 *889 后复权主连 K 线</h2><img src="{image_map.get("k889", "")}" alt="k889"/></div>
+  <div class="card"><h2>5) *88 / *0 收盘价比值图</h2><img src="{image_map.get("ratio", "")}" alt="ratio"/></div>
   <div class="card">
     <h2>6) *88 相对 *0 误差统计</h2>
     <table>
       <tr><th>字段</th><th>有效样本数</th><th>MAE</th><th>RMSE</th><th>MaxAbs</th><th>MAPE</th><th>P95 APE</th></tr>
-      {''.join(err_rows)}
+      {"".join(err_rows)}
     </table>
   </div>
 </body>
@@ -572,23 +648,59 @@ def _write_html_report(
 
 
 def parse_args() -> ReplayConfig:
-    p = argparse.ArgumentParser(description="Replay dominant continuous futures from monthly contracts and compare with main continuous.")
+    p = argparse.ArgumentParser(
+        description="Replay dominant continuous futures from monthly contracts and compare with main continuous."
+    )
     p.add_argument("--underlying", default="LC", help="Underlying symbol root, e.g. LC")
-    p.add_argument("--main-symbol", default=None, help="Main continuous symbol, default: <underlying>0")
+    p.add_argument(
+        "--main-symbol",
+        default=None,
+        help="Main continuous symbol, default: <underlying>0",
+    )
     p.add_argument("--start-date", default="20230721", help="YYYYMMDD")
     p.add_argument("--end-date", default="20260417", help="YYYYMMDD")
-    p.add_argument("--contract-start", default=None, help="YYMM; default derives from start-date")
-    p.add_argument("--contract-end", default=None, help="YYMM; default derives from end-date + 12 months")
-    p.add_argument("--switch-threshold", type=float, default=1.1, help="Switch if best_hold > threshold * current_hold")
-    p.add_argument("--usable-rel-mean-max", type=float, default=0.005, help="Usability threshold: max mean relative error (MAPE)")
-    p.add_argument("--usable-rel-p95-max", type=float, default=0.02, help="Usability threshold: max P95 absolute percentage error")
-    p.add_argument("--usable-min-fields", type=int, default=4, help="Minimum covered key fields among open/high/low/close/settle")
-    p.add_argument("--output-dir", default="data/futures_replay", help="Output directory")
+    p.add_argument(
+        "--contract-start", default=None, help="YYMM; default derives from start-date"
+    )
+    p.add_argument(
+        "--contract-end",
+        default=None,
+        help="YYMM; default derives from end-date + 12 months",
+    )
+    p.add_argument(
+        "--switch-threshold",
+        type=float,
+        default=1.1,
+        help="Switch if best_hold > threshold * current_hold",
+    )
+    p.add_argument(
+        "--usable-rel-mean-max",
+        type=float,
+        default=0.005,
+        help="Usability threshold: max mean relative error (MAPE)",
+    )
+    p.add_argument(
+        "--usable-rel-p95-max",
+        type=float,
+        default=0.02,
+        help="Usability threshold: max P95 absolute percentage error",
+    )
+    p.add_argument(
+        "--usable-min-fields",
+        type=int,
+        default=4,
+        help="Minimum covered key fields among open/high/low/close/settle",
+    )
+    p.add_argument(
+        "--output-dir", default="data/futures_replay", help="Output directory"
+    )
     a = p.parse_args()
     main_symbol = a.main_symbol or f"{a.underlying}0"
     inferred_contract_start = _yymm_from_yyyymmdd(str(a.start_date))
     inferred_contract_end = _shift_yymm(_yymm_from_yyyymmdd(str(a.end_date)), months=12)
-    contract_start = str(a.contract_start) if a.contract_start else inferred_contract_start
+    contract_start = (
+        str(a.contract_start) if a.contract_start else inferred_contract_start
+    )
     contract_end = str(a.contract_end) if a.contract_end else inferred_contract_end
     return ReplayConfig(
         underlying=str(a.underlying).upper(),
@@ -610,21 +722,45 @@ def main() -> None:
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
     contract_data, coverage = _load_contract_universe(cfg)
-    coverage_df = pd.DataFrame(coverage).sort_values(["ok", "symbol"], ascending=[False, True])
-    coverage_df.to_csv(cfg.output_dir / f"{cfg.underlying}_contract_coverage.csv", index=False, encoding="utf-8-sig")
+    coverage_df = pd.DataFrame(coverage).sort_values(
+        ["ok", "symbol"], ascending=[False, True]
+    )
+    coverage_df.to_csv(
+        cfg.output_dir / f"{cfg.underlying}_contract_coverage.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
 
     replay88_df, switch_df = _replay_dominant(cfg, contract_data)
     if not replay88_df.empty:
-        replay88_df.to_csv(cfg.output_dir / f"{cfg.underlying}_replay_88.csv", index=False, encoding="utf-8-sig")
+        replay88_df.to_csv(
+            cfg.output_dir / f"{cfg.underlying}_replay_88.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
     if not switch_df.empty:
-        switch_df.to_csv(cfg.output_dir / f"{cfg.underlying}_switches.csv", index=False, encoding="utf-8-sig")
+        switch_df.to_csv(
+            cfg.output_dir / f"{cfg.underlying}_switches.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
 
     panel = _build_quote_panel(contract_data)
-    replay888_df, replay889_df = _build_adjusted_continuous(replay88_df, switch_df, panel)
+    replay888_df, replay889_df = _build_adjusted_continuous(
+        replay88_df, switch_df, panel
+    )
     if not replay888_df.empty:
-        replay888_df.to_csv(cfg.output_dir / f"{cfg.underlying}_replay_888.csv", index=False, encoding="utf-8-sig")
+        replay888_df.to_csv(
+            cfg.output_dir / f"{cfg.underlying}_replay_888.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
     if not replay889_df.empty:
-        replay889_df.to_csv(cfg.output_dir / f"{cfg.underlying}_replay_889.csv", index=False, encoding="utf-8-sig")
+        replay889_df.to_csv(
+            cfg.output_dir / f"{cfg.underlying}_replay_889.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
 
     try:
         main_df = _fetch_symbol(cfg.main_symbol, cfg.start_date, cfg.end_date)
@@ -632,13 +768,27 @@ def main() -> None:
         main_df = pd.DataFrame()
         print(f"[WARN] failed to fetch main symbol {cfg.main_symbol}: {e}")
     if not main_df.empty:
-        main_df.to_csv(cfg.output_dir / f"{cfg.main_symbol}_raw.csv", index=False, encoding="utf-8-sig")
+        main_df.to_csv(
+            cfg.output_dir / f"{cfg.main_symbol}_raw.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
 
     compare_df, compare_summary, err_df = _compare_with_main(replay88_df, main_df)
     if not compare_df.empty:
-        compare_df.to_csv(cfg.output_dir / f"{cfg.underlying}_compare_replay88_vs_{cfg.main_symbol}.csv", index=False, encoding="utf-8-sig")
+        compare_df.to_csv(
+            cfg.output_dir
+            / f"{cfg.underlying}_compare_replay88_vs_{cfg.main_symbol}.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
     if not err_df.empty:
-        err_df.to_csv(cfg.output_dir / f"{cfg.underlying}_error_stats_replay88_vs_{cfg.main_symbol}.csv", index=False, encoding="utf-8-sig")
+        err_df.to_csv(
+            cfg.output_dir
+            / f"{cfg.underlying}_error_stats_replay88_vs_{cfg.main_symbol}.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
     usability = _evaluate_usability(cfg, err_df, compare_summary)
 
     # Charts + HTML report
@@ -653,7 +803,9 @@ def main() -> None:
     _plot_kline(replay88_df, f"{cfg.underlying}88 合成简单主连 K线", k88_png)
     _plot_kline(replay888_df, f"{cfg.underlying}888 合成前复权主连 K线", k888_png)
     _plot_kline(replay889_df, f"{cfg.underlying}889 合成后复权主连 K线", k889_png)
-    _plot_ratio(compare_df, ratio_png, f"{cfg.underlying}88 / {cfg.main_symbol} 收盘价比值")
+    _plot_ratio(
+        compare_df, ratio_png, f"{cfg.underlying}88 / {cfg.main_symbol} 收盘价比值"
+    )
     _write_html_report(
         cfg=cfg,
         compare_summary=compare_summary,
@@ -675,8 +827,12 @@ def main() -> None:
         "date_range": {"start": cfg.start_date, "end": cfg.end_date},
         "contract_range": {"start": cfg.contract_start, "end": cfg.contract_end},
         "switch_threshold": cfg.switch_threshold,
-        "contracts_ok": int((coverage_df["ok"] == True).sum()) if not coverage_df.empty else 0,  # noqa: E712
-        "contracts_bad": int((coverage_df["ok"] == False).sum()) if not coverage_df.empty else 0,  # noqa: E712
+        "contracts_ok": int(coverage_df["ok"].fillna(False).sum())
+        if not coverage_df.empty
+        else 0,
+        "contracts_bad": int((~coverage_df["ok"].fillna(False)).sum())
+        if not coverage_df.empty
+        else 0,
         "replay_rows": int(len(replay88_df)),
         "replay_888_rows": int(len(replay888_df)),
         "replay_889_rows": int(len(replay889_df)),
@@ -684,25 +840,37 @@ def main() -> None:
         "compare": compare_summary,
         "usability": usability,
         "outputs": {
-            "coverage_csv": str(cfg.output_dir / f"{cfg.underlying}_contract_coverage.csv"),
+            "coverage_csv": str(
+                cfg.output_dir / f"{cfg.underlying}_contract_coverage.csv"
+            ),
             "replay_88_csv": str(cfg.output_dir / f"{cfg.underlying}_replay_88.csv"),
             "replay_888_csv": str(cfg.output_dir / f"{cfg.underlying}_replay_888.csv"),
             "replay_889_csv": str(cfg.output_dir / f"{cfg.underlying}_replay_889.csv"),
             "switches_csv": str(cfg.output_dir / f"{cfg.underlying}_switches.csv"),
             "main_raw_csv": str(cfg.output_dir / f"{cfg.main_symbol}_raw.csv"),
-            "compare_csv": str(cfg.output_dir / f"{cfg.underlying}_compare_replay88_vs_{cfg.main_symbol}.csv"),
-            "error_stats_csv": str(cfg.output_dir / f"{cfg.underlying}_error_stats_replay88_vs_{cfg.main_symbol}.csv"),
+            "compare_csv": str(
+                cfg.output_dir
+                / f"{cfg.underlying}_compare_replay88_vs_{cfg.main_symbol}.csv"
+            ),
+            "error_stats_csv": str(
+                cfg.output_dir
+                / f"{cfg.underlying}_error_stats_replay88_vs_{cfg.main_symbol}.csv"
+            ),
             "kline_main_png": str(k0_png),
             "kline_88_png": str(k88_png),
             "kline_888_png": str(k888_png),
             "kline_889_png": str(k889_png),
             "ratio_png": str(ratio_png),
             "report_html": str(report_html),
-            "summary_json": str(cfg.output_dir / f"{cfg.underlying}_replay_summary.json"),
+            "summary_json": str(
+                cfg.output_dir / f"{cfg.underlying}_replay_summary.json"
+            ),
         },
     }
     summary_path = cfg.output_dir / f"{cfg.underlying}_replay_summary.json"
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 

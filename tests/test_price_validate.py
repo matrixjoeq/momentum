@@ -72,8 +72,9 @@ def test_validate_rejects_negative_volume() -> None:
 
 
 def test_validate_rejects_low_nonpositive() -> None:
-    pol = ValidationPolicyParams(max_abs_return=1.0, max_hl_spread=10.0, max_gap_days=10)
+    pol = ValidationPolicyParams(
+        max_abs_return=1.0, max_hl_spread=10.0, max_gap_days=10
+    )
     pts = [PricePoint(dt.date(2024, 1, 2), 1.0, 1.1, 0.0, 1.0)]
     with pytest.raises(ValidationError):
         validate_price_series(pts, policy=pol)
-

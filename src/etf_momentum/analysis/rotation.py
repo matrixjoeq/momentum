@@ -15,7 +15,9 @@ class RotationAnalysisInputs:
     start: dt.date
     end: dt.date
     rebalance: str = "weekly"
-    rebalance_anchor: int | None = None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
+    rebalance_anchor: int | None = (
+        None  # weekly:1..5; monthly:1..28; quarterly:1..90; yearly:1..365
+    )
     rebalance_shift: str = "prev"  # prev|next|skip when anchor falls on non-trading day
     top_k: int = 1  # non-zero: >0 top-K, <0 bottom-K; effective=min(|k|, pool)
     top_k_mode: str = "fixed"  # fixed|floating
@@ -172,4 +174,3 @@ def compute_rotation_backtest(
         include_benchmarks=bool(include_benchmarks),
         benchmark_mode=str(benchmark_mode or "EW_REBAL"),
     )
-

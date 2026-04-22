@@ -103,7 +103,12 @@ def fetch_etf_daily_sina_none_and_adjusted(
     except Exception:  # pylint: disable=broad-exception-caught
         div = None
     cash = pd.Series(0.0, index=df0["date"])
-    if div is not None and (not div.empty) and ("日期" in div.columns) and ("累计分红" in div.columns):
+    if (
+        div is not None
+        and (not div.empty)
+        and ("日期" in div.columns)
+        and ("累计分红" in div.columns)
+    ):
         d2 = div.copy()
         d2["日期"] = pd.to_datetime(d2["日期"], errors="coerce").dt.date
         d2 = d2.dropna(subset=["日期"])
@@ -120,7 +125,11 @@ def fetch_etf_daily_sina_none_and_adjusted(
     # qfq: scale hfq to match last close of raw (so latest is tradable)
     raw_last = float(pd.to_numeric(df0["close"], errors="coerce").dropna().iloc[-1])
     hfq_last = float(pd.to_numeric(hfq_df["close"], errors="coerce").dropna().iloc[-1])
-    scale = (raw_last / hfq_last) if (np.isfinite(raw_last) and np.isfinite(hfq_last) and hfq_last != 0) else 1.0
+    scale = (
+        (raw_last / hfq_last)
+        if (np.isfinite(raw_last) and np.isfinite(hfq_last) and hfq_last != 0)
+        else 1.0
+    )
     qfq_df = _scale_prices(hfq_df, scale=scale)
 
     def _to_rows(df: pd.DataFrame, *, adjust: str) -> list[PriceRow]:
@@ -152,4 +161,3 @@ def fetch_etf_daily_sina_none_and_adjusted(
         "hfq": _to_rows(hfq_df, adjust="hfq"),
         "qfq": _to_rows(qfq_df, adjust="qfq"),
     }
-

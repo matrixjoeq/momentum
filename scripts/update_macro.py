@@ -19,7 +19,9 @@ def _today_yyyymmdd() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Update macro series for Step 1 (global gold / US yields / DXY).")
+    ap = argparse.ArgumentParser(
+        description="Update macro series for Step 1 (global gold / US yields / DXY)."
+    )
     ap.add_argument("--start", default="1985101", help="YYYYMMDD (default 1985101)")
     ap.add_argument("--end", default=_today_yyyymmdd(), help="YYYYMMDD (default today)")
     ap.add_argument(
@@ -37,7 +39,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # series filter (default: all)
     raw = ",".join([str(x) for x in (args.series or [])])
-    chosen = [s.strip().upper() for s in raw.split(",") if s.strip()] if raw.strip() else []
+    chosen = (
+        [s.strip().upper() for s in raw.split(",") if s.strip()] if raw.strip() else []
+    )
     if chosen:
         by_id = {s.series_id.strip().upper(): s for s in MACRO_SERIES}
         missing = [sid for sid in chosen if sid not in by_id]
@@ -50,7 +54,9 @@ def main(argv: list[str] | None = None) -> int:
     ok = True
     with sf() as db:
         for spec in series_specs:
-            res = ingest_macro_series(db, spec=spec, start=str(args.start), end=str(args.end))
+            res = ingest_macro_series(
+                db, spec=spec, start=str(args.start), end=str(args.end)
+            )
             print(res)
             ok = ok and bool(res.get("ok"))
     return 0 if ok else 2
@@ -58,4 +64,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

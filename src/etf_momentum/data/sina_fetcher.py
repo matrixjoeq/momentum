@@ -65,7 +65,10 @@ def fetch_sina_forex_day_kline_daily_close(
                 url,
                 timeout=timeout,
                 follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"},
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": "https://finance.sina.com.cn",
+                },
             )
             r.raise_for_status()
             text = (r.content or b"").decode("utf-8", errors="replace")
@@ -114,10 +117,9 @@ def fetch_sina_forex_day_kline_daily_close(
             last_err = e
             if attempt < max(1, int(retries) + 1) - 1:
                 # light exponential backoff to avoid hammering Sina
-                time.sleep(min(2.0 ** attempt, 8.0))
+                time.sleep(min(2.0**attempt, 8.0))
                 continue
             logger.warning("sina forex day kline fetch failed symbol=%s err=%s", sym, e)
             break
 
     return pd.DataFrame(), {**meta, "error": str(last_err) if last_err else "failed"}
-

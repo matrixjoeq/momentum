@@ -53,7 +53,19 @@ def _to_float(v: Any) -> float | None:
 
 def _normalize_futures_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
-        return pd.DataFrame(columns=["trade_date", "open", "high", "low", "close", "settle", "volume", "hold", "amount"])
+        return pd.DataFrame(
+            columns=[
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "settle",
+                "volume",
+                "hold",
+                "amount",
+            ]
+        )
     cols = [str(c) for c in list(df.columns)]
     date_col = _pick_col(cols, ("日期", "交易日期", "date"))
     open_col = _pick_col(cols, ("开盘", "open"))
@@ -66,18 +78,50 @@ def _normalize_futures_df(df: pd.DataFrame) -> pd.DataFrame:
     hold_col = _pick_col(cols, ("持仓量", "持仓", "hold", "open_interest", "oi"))
 
     if date_col is None or close_col is None:
-        return pd.DataFrame(columns=["trade_date", "open", "high", "low", "close", "settle", "volume", "hold", "amount"])
+        return pd.DataFrame(
+            columns=[
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "settle",
+                "volume",
+                "hold",
+                "amount",
+            ]
+        )
 
     out = pd.DataFrame()
     out["trade_date"] = pd.to_datetime(df[date_col], errors="coerce").dt.date
-    out["open"] = pd.to_numeric(df[open_col], errors="coerce") if open_col is not None else None
-    out["high"] = pd.to_numeric(df[high_col], errors="coerce") if high_col is not None else None
-    out["low"] = pd.to_numeric(df[low_col], errors="coerce") if low_col is not None else None
+    out["open"] = (
+        pd.to_numeric(df[open_col], errors="coerce") if open_col is not None else None
+    )
+    out["high"] = (
+        pd.to_numeric(df[high_col], errors="coerce") if high_col is not None else None
+    )
+    out["low"] = (
+        pd.to_numeric(df[low_col], errors="coerce") if low_col is not None else None
+    )
     out["close"] = pd.to_numeric(df[close_col], errors="coerce")
-    out["settle"] = pd.to_numeric(df[settle_col], errors="coerce") if settle_col is not None else None
-    out["volume"] = pd.to_numeric(df[volume_col], errors="coerce") if volume_col is not None else None
-    out["amount"] = pd.to_numeric(df[amount_col], errors="coerce") if amount_col is not None else None
-    out["hold"] = pd.to_numeric(df[hold_col], errors="coerce") if hold_col is not None else None
+    out["settle"] = (
+        pd.to_numeric(df[settle_col], errors="coerce")
+        if settle_col is not None
+        else None
+    )
+    out["volume"] = (
+        pd.to_numeric(df[volume_col], errors="coerce")
+        if volume_col is not None
+        else None
+    )
+    out["amount"] = (
+        pd.to_numeric(df[amount_col], errors="coerce")
+        if amount_col is not None
+        else None
+    )
+    out["hold"] = (
+        pd.to_numeric(df[hold_col], errors="coerce") if hold_col is not None else None
+    )
     out = out.dropna(subset=["trade_date"]).sort_values("trade_date", ascending=True)
     return out
 
@@ -192,4 +236,6 @@ def ingest_one_futures(
     msg = f"none={len(rows)} source=sina mode={mode_note} range={start}~{end}"
     mark_futures_fetch_status(db, code=code, status="success", message=msg)
     db.commit()
-    return IngestFuturesResult(code=code, upserted=int(n), status="success", message=msg)
+    return IngestFuturesResult(
+        code=code, upserted=int(n), status="success", message=msg
+    )

@@ -83,4 +83,3 @@ def api_client(engine):
     app.dependency_overrides[routes.get_akshare] = override_get_akshare
 
     return TestClient(app)
-

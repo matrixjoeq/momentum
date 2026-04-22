@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught
+
 import math
 from dataclasses import dataclass
 from typing import Literal
@@ -235,7 +237,9 @@ def har_forecast_vol(
     Output is annualized volatility level (sqrt(rv_forecast*ann)).
     """
     r = _log_return(close)
-    rv = (pd.to_numeric(r, errors="coerce") ** 2).astype(float)  # daily realized variance proxy
+    rv = (pd.to_numeric(r, errors="coerce") ** 2).astype(
+        float
+    )  # daily realized variance proxy
 
     h1, h5, h22 = horizons
     h1 = int(max(1, h1))
@@ -321,8 +325,12 @@ def compute_vol_proxy_levels(
         return yang_zhang_vol(open_, high, low, close, window=w, ann=ann)
     if kind == "har_rv":
         # HAR returns already annualized; optionally smooth it with rolling window (w)
-        har = har_forecast_vol(close, train_window=spec.har_train_window, horizons=spec.har_horizons, ann=ann)
+        har = har_forecast_vol(
+            close,
+            train_window=spec.har_train_window,
+            horizons=spec.har_horizons,
+            ann=ann,
+        )
         return har.rolling(w).mean()
 
     raise ValueError(f"unknown vol proxy kind={kind}")
-

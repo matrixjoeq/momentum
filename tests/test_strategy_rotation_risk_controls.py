@@ -130,7 +130,9 @@ def test_vol_monitor_scales_exposure_down(session_factory):
         )
 
     # At least one period should have exposure < 1 when holding risk assets.
-    exposures = [float(p.get("exposure")) for p in out["holdings"] if p.get("mode") == "risk_on"]
+    exposures = [
+        float(p.get("exposure")) for p in out["holdings"] if p.get("mode") == "risk_on"
+    ]
     assert exposures, "expected some risk_on periods"
     assert any(x < 0.99 for x in exposures)
 
@@ -152,13 +154,81 @@ def test_momentum_signal_uses_qfq_not_hfq(session_factory):
         none_a = [100.0 + i * 0.2 for i in range(len(dates))]
         none_b = [100.0 + i * 0.1 for i in range(len(dates))]
 
-        for d, qa, qb, ha, hb, na, nb in zip(dates, qfq_a, qfq_b, hfq_a, hfq_b, none_a, none_b):
-            db.add(EtfPrice(code="AAA", trade_date=d, open=qa, high=qa * 1.01, low=qa * 0.99, close=qa, source="eastmoney", adjust="qfq"))
-            db.add(EtfPrice(code="BBB", trade_date=d, open=qb, high=qb * 1.01, low=qb * 0.99, close=qb, source="eastmoney", adjust="qfq"))
-            db.add(EtfPrice(code="AAA", trade_date=d, open=ha, high=ha * 1.01, low=ha * 0.99, close=ha, source="eastmoney", adjust="hfq"))
-            db.add(EtfPrice(code="BBB", trade_date=d, open=hb, high=hb * 1.01, low=hb * 0.99, close=hb, source="eastmoney", adjust="hfq"))
-            db.add(EtfPrice(code="AAA", trade_date=d, open=na, high=na * 1.01, low=na * 0.99, close=na, source="eastmoney", adjust="none"))
-            db.add(EtfPrice(code="BBB", trade_date=d, open=nb, high=nb * 1.01, low=nb * 0.99, close=nb, source="eastmoney", adjust="none"))
+        for d, qa, qb, ha, hb, na, nb in zip(
+            dates, qfq_a, qfq_b, hfq_a, hfq_b, none_a, none_b
+        ):
+            db.add(
+                EtfPrice(
+                    code="AAA",
+                    trade_date=d,
+                    open=qa,
+                    high=qa * 1.01,
+                    low=qa * 0.99,
+                    close=qa,
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code="BBB",
+                    trade_date=d,
+                    open=qb,
+                    high=qb * 1.01,
+                    low=qb * 0.99,
+                    close=qb,
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code="AAA",
+                    trade_date=d,
+                    open=ha,
+                    high=ha * 1.01,
+                    low=ha * 0.99,
+                    close=ha,
+                    source="eastmoney",
+                    adjust="hfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code="BBB",
+                    trade_date=d,
+                    open=hb,
+                    high=hb * 1.01,
+                    low=hb * 0.99,
+                    close=hb,
+                    source="eastmoney",
+                    adjust="hfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code="AAA",
+                    trade_date=d,
+                    open=na,
+                    high=na * 1.01,
+                    low=na * 0.99,
+                    close=na,
+                    source="eastmoney",
+                    adjust="none",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code="BBB",
+                    trade_date=d,
+                    open=nb,
+                    high=nb * 1.01,
+                    low=nb * 0.99,
+                    close=nb,
+                    source="eastmoney",
+                    adjust="none",
+                )
+            )
         db.commit()
 
         out = backtest_rotation(
@@ -234,8 +304,30 @@ def test_trend_filters_do_not_use_future_data(session_factory):
 
         for d, pa, pb in zip(dates, a, b):
             for adj in ("hfq", "qfq", "none"):
-                db.add(EtfPrice(code="AAA", trade_date=d, open=pa, high=pa * 1.01, low=pa * 0.99, close=pa, source="eastmoney", adjust=adj))
-                db.add(EtfPrice(code="BBB", trade_date=d, open=pb, high=pb * 1.01, low=pb * 0.99, close=pb, source="eastmoney", adjust=adj))
+                db.add(
+                    EtfPrice(
+                        code="AAA",
+                        trade_date=d,
+                        open=pa,
+                        high=pa * 1.01,
+                        low=pa * 0.99,
+                        close=pa,
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+                db.add(
+                    EtfPrice(
+                        code="BBB",
+                        trade_date=d,
+                        open=pb,
+                        high=pb * 1.01,
+                        low=pb * 0.99,
+                        close=pb,
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
         db.commit()
 
         base = backtest_rotation(
@@ -312,4 +404,6 @@ def test_trend_filters_do_not_use_future_data(session_factory):
     nav_base = list(base["nav"]["series"]["ROTATION"])
     nav_fut = list(fut["nav"]["series"]["ROTATION"])
     # Historical NAV before the perturbation window must be identical.
-    assert nav_base[: cutoff + 8] == pytest.approx(nav_fut[: cutoff + 8], rel=0.0, abs=1e-12)
+    assert nav_base[: cutoff + 8] == pytest.approx(
+        nav_fut[: cutoff + 8], rel=0.0, abs=1e-12
+    )

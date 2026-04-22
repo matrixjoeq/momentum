@@ -17,8 +17,24 @@ def test_entry_momentum_rule_can_trigger_cash_when_all_blocked(session_factory):
             px_a = 100 - i * 0.2
             px_b = 100 - i * 0.1
             for adj in ("qfq", "hfq", "none"):
-                db.add(EtfPrice(code="AAA", trade_date=d, close=px_a, source="eastmoney", adjust=adj))
-                db.add(EtfPrice(code="BBB", trade_date=d, close=px_b, source="eastmoney", adjust=adj))
+                db.add(
+                    EtfPrice(
+                        code="AAA",
+                        trade_date=d,
+                        close=px_a,
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+                db.add(
+                    EtfPrice(
+                        code="BBB",
+                        trade_date=d,
+                        close=px_b,
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
         db.commit()
 
         out = backtest_rotation(
@@ -33,7 +49,13 @@ def test_entry_momentum_rule_can_trigger_cash_when_all_blocked(session_factory):
                 skip_days=0,
                 # Global risk_off/floor has been removed; use entry momentum rules only.
                 asset_momentum_floor_rules=[
-                    {"code": "*", "stage": "entry", "op": ">", "threshold": 0.5, "threshold_unit": "raw"},
+                    {
+                        "code": "*",
+                        "stage": "entry",
+                        "op": ">",
+                        "threshold": 0.5,
+                        "threshold_unit": "raw",
+                    },
                 ],
                 cost_bps=0.0,
             ),
@@ -44,4 +66,3 @@ def test_entry_momentum_rule_can_trigger_cash_when_all_blocked(session_factory):
     assert any((p.get("picks") == []) for p in out["holdings"])
     # If always cash, NAV should be flat at 1.0 (allow floating noise).
     assert out["nav"]["series"]["ROTATION"][-1] == pytest.approx(1.0)
-

@@ -55,49 +55,71 @@
   <body>
     <h2>研究：纳指（NDX / QQQ / 513100）与 VXN（Cboe）</h2>
     <div class="muted">
-      目标：检查“纳指资产”与 VXN（纳指恐慌指数）之间的相关性、领先/同步/滞后关系，以及 Granger 因果检验（收益率层面）。
-      <div style="margin-top: 6px;">
+      目标：检查“纳指资产”与
+      VXN（纳指恐慌指数）之间的相关性、领先/同步/滞后关系，以及 Granger
+      因果检验（收益率层面）。
+      <div style="margin-top: 6px">
         <a href="/">返回候选池</a>
-        <span style="margin: 0 6px;">|</span>
+        <span style="margin: 0 6px">|</span>
         <a href="/research">返回基准分析</a>
       </div>
     </div>
 
     <div class="panel">
       <details>
-        <summary style="cursor:pointer; user-select:none;">结果解读说明（点击展开）</summary>
-        <div class="muted" style="margin-top: 8px; line-height: 1.65;">
+        <summary style="cursor: pointer; user-select: none">
+          结果解读说明（点击展开）
+        </summary>
+        <div class="muted" style="margin-top: 8px; line-height: 1.65">
           <div><b>1) relation / best_lag / best_corr</b></div>
           <div>
-            - 我们用“日收益率（log-ret）”做互相关。<br/>
-            - <b>best_lag=1</b> 表示：用 <b>VIX 的 t-1</b> 去对齐 <b>ETF 的 t</b>，此时相关最强（=VIX 领先 1 个交易日）。<br/>
-            - <b>best_corr 为负</b>：VIX 上升（风险上升）往往对应 ETF 下跌；VIX 下降往往对应 ETF 上涨。<br/>
-            - pvalue 很小只说明“统计显著相关”，<b>不等于充要指标/稳定可交易</b>。
+            - 我们用“日收益率（log-ret）”做互相关。<br />
+            - <b>best_lag=1</b> 表示：用 <b>VIX 的 t-1</b> 去对齐
+            <b>ETF 的 t</b>，此时相关最强（=VIX 领先 1 个交易日）。<br />
+            - <b>best_corr 为负</b>：VIX 上升（风险上升）往往对应 ETF 下跌；VIX
+            下降往往对应 ETF 上涨。<br />
+            - pvalue
+            很小只说明“统计显著相关”，<b>不等于充要指标/稳定可交易</b>。
           </div>
-          <div style="margin-top: 8px;"><b>2) Granger（因果检验）</b></div>
+          <div style="margin-top: 8px"><b>2) Granger（因果检验）</b></div>
           <div>
-            - idx→etf 显著：在“线性+滞后项”的模型下，加入 VIX 的过去值能提升对 ETF 收益的预测（Granger 意义）。<br/>
+            - idx→etf 显著：在“线性+滞后项”的模型下，加入 VIX 的过去值能提升对
+            ETF 收益的预测（Granger 意义）。<br />
             - 若 etf→idx 也显著：更像是反馈/共同驱动，而非单向因果。
           </div>
-          <div style="margin-top: 8px;"><b>3) 日期对齐（很重要）</b></div>
+          <div style="margin-top: 8px"><b>3) 日期对齐（很重要）</b></div>
           <div>
-            - Cboe 的 VIX 是美股收盘后的数值；若你做 A 股 ETF 实盘，通常应选择 <b>“US 收盘顺延到中国下一交易日”</b>，更贴近可用信息集。<br/>
+            - Cboe 的 VIX 是美股收盘后的数值；若你做 A 股 ETF 实盘，通常应选择
+            <b>“US 收盘顺延到中国下一交易日”</b>，更贴近可用信息集。<br />
           </div>
-          <div style="margin-top: 8px;"><b>4) 交易可用性（direction / conditional / strategy / rolling）</b></div>
-          <div>
-            - <b>命中率/混淆矩阵</b>：把“预测涨/跌”当二分类，看 hit_rate、TP/TN/FP/FN（注意：高命中率不一定高收益）。<br/>
-            - <b>条件分布</b>：对比 “VIX↑/VIX↓(信号日)” 两组下 ETF 次日收益的均值/分位数，判断是否存在“可利用的偏移”。<br/>
-            - <b>简单策略回测</b>：仅作诊断（不是完整交易系统）。看 NAV、CAGR/Sharpe/MDD，并考虑成本（bps）敏感性。<br/>
-            - <b>滚动稳定性</b>：若 rolling corr / rolling hit_rate 波动很大，说明关系可能阶段性、容易失效。
+          <div style="margin-top: 8px">
+            <b>4) 交易可用性（direction / conditional / strategy / rolling）</b>
           </div>
-          <div style="margin-top: 8px;"><b>5) 阈值信号与 Walk-forward</b></div>
           <div>
-            - <b>阈值信号</b>：只有当 |VIX 日收益| 足够大时才允许改变仓位；<b>active_rate</b> 越低，交易越少（噪声更少但机会也更少）。<br/>
-            - <b>Walk-forward</b>：在训练段选参数（lag、阈值），在测试段固定参数验证；重点看 <b>测试段</b> 是否仍有收益/Sharpe 优势。<br/>
+            - <b>命中率/混淆矩阵</b>：把“预测涨/跌”当二分类，看
+            hit_rate、TP/TN/FP/FN（注意：高命中率不一定高收益）。<br />
+            - <b>条件分布</b>：对比 “VIX↑/VIX↓(信号日)” 两组下 ETF
+            次日收益的均值/分位数，判断是否存在“可利用的偏移”。<br />
+            - <b>简单策略回测</b>：仅作诊断（不是完整交易系统）。看
+            NAV、CAGR/Sharpe/MDD，并考虑成本（bps）敏感性。<br />
+            - <b>滚动稳定性</b>：若 rolling corr / rolling hit_rate
+            波动很大，说明关系可能阶段性、容易失效。
           </div>
-          <div style="margin-top: 8px;"><b>6) 实盘注意事项</b></div>
+          <div style="margin-top: 8px"><b>5) 阈值信号与 Walk-forward</b></div>
           <div>
-            - 结构变化（制度/宏观/波动 regime）、样本外失效、交易成本与滑点、信号发布时间（信息可得性）都会影响可交易性。<br/>
+            - <b>阈值信号</b>：只有当 |VIX 日收益| 足够大时才允许改变仓位；<b
+              >active_rate</b
+            >
+            越低，交易越少（噪声更少但机会也更少）。<br />
+            -
+            <b>Walk-forward</b
+            >：在训练段选参数（lag、阈值），在测试段固定参数验证；重点看
+            <b>测试段</b> 是否仍有收益/Sharpe 优势。<br />
+          </div>
+          <div style="margin-top: 8px"><b>6) 实盘注意事项</b></div>
+          <div>
+            - 结构变化（制度/宏观/波动
+            regime）、样本外失效、交易成本与滑点、信号发布时间（信息可得性）都会影响可交易性。<br />
           </div>
         </div>
       </details>
@@ -114,10 +136,15 @@
       </div>
       <div>
         <label>资产预设</label>
-        <select id="assetPreset" title="选择预设会自动填充资产来源与symbol/代码。">
+        <select
+          id="assetPreset"
+          title="选择预设会自动填充资产来源与symbol/代码。"
+        >
           <option value="db:513100" selected>513100（A股纳指ETF，DB）</option>
           <option value="stooq:qqq.us">QQQ（海外ETF，Stooq: qqq.us）</option>
-          <option value="stooq:^ndx">NDX（纳斯达克100指数，Stooq: ^ndx）</option>
+          <option value="stooq:^ndx">
+            NDX（纳斯达克100指数，Stooq: ^ndx）
+          </option>
           <option value="custom:">custom（自定义）</option>
         </select>
       </div>
@@ -167,7 +194,9 @@
       <div>
         <label>日期对齐</label>
         <select id="align">
-          <option value="cn_next_trading_day" selected>US 收盘顺延到中国下一交易日（推荐）</option>
+          <option value="cn_next_trading_day" selected>
+            US 收盘顺延到中国下一交易日（推荐）
+          </option>
           <option value="none">不做顺延（原始日期）</option>
         </select>
       </div>
@@ -185,15 +214,27 @@
       </div>
       <div>
         <label>成本（bps/换仓）</label>
-        <input id="costBps" value="10" title="简单策略每次仓位变化收取成本（bps）。" />
+        <input
+          id="costBps"
+          value="10"
+          title="简单策略每次仓位变化收取成本（bps）。"
+        />
       </div>
       <div>
         <label>阈值信号（|index_ret| 分位数）</label>
-        <input id="thrQ" value="0.8" title="只有当 |指数 日收益| >= 该分位数阈值时才允许触发换仓。" />
+        <input
+          id="thrQ"
+          value="0.8"
+          title="只有当 |指数 日收益| >= 该分位数阈值时才允许触发换仓。"
+        />
       </div>
       <div>
         <label>Walk-forward 训练占比</label>
-        <input id="trainRatio" value="0.6" title="训练/测试切分比例（按时间顺序）。" />
+        <input
+          id="trainRatio"
+          value="0.6"
+          title="训练/测试切分比例（按时间顺序）。"
+        />
       </div>
       <div>
         <label>Walk-forward 目标</label>
@@ -202,14 +243,18 @@
           <option value="cagr">最大化 CAGR</option>
         </select>
       </div>
-      <div style="min-width: 220px;">
+      <div style="min-width: 220px">
         <label>波动率择时（按指数 level 分位数分段仓位）</label>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <label style="margin:0; font-size:12px; color:#444;">
+        <div style="display: flex; gap: 8px; align-items: center">
+          <label style="margin: 0; font-size: 12px; color: #444">
             <input type="checkbox" id="volOn" />
             启用
           </label>
-          <span class="muted" title="示例：分位数=0.8,0.9；仓位=1,0.5,0.2（长度=分位数+1）">说明</span>
+          <span
+            class="muted"
+            title="示例：分位数=0.8,0.9；仓位=1,0.5,0.2（长度=分位数+1）"
+            >说明</span
+          >
         </div>
       </div>
       <div>
@@ -222,7 +267,10 @@
       </div>
       <div>
         <label>分位数窗口（用于 VXN/现货波动 level）</label>
-        <select id="volWindow" title="all=expanding分位数(无前视)；static_all=全样本固定阈值(有前视,研究口径)；1y/3y/5y/10y=滚动窗口分位数（按交易日近似）。">
+        <select
+          id="volWindow"
+          title="all=expanding分位数(无前视)；static_all=全样本固定阈值(有前视,研究口径)；1y/3y/5y/10y=滚动窗口分位数（按交易日近似）。"
+        >
           <option value="all" selected>全区间（all，无前视/expanding）</option>
           <option value="static_all">全样本固定（static_all，研究口径）</option>
           <option value="1y">近1年（1y）</option>
@@ -231,35 +279,40 @@
           <option value="10y">近10年（10y）</option>
         </select>
       </div>
-      <div style="min-width: 260px;">
+      <div style="min-width: 260px">
         <label>同时对比：现货波动择时（仅用 513100 价格）</label>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <label style="margin:0; font-size:12px; color:#444;">
+        <div
+          style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap"
+        >
+          <label style="margin: 0; font-size: 12px; color: #444">
             <input type="checkbox" id="proxyOn" checked />
             启用对比
           </label>
-          <label style="margin:0; font-size:12px; color:#444;">
+          <label style="margin: 0; font-size: 12px; color: #444">
             <input type="checkbox" id="proxy_rv20" checked />
             RV20
           </label>
-          <label style="margin:0; font-size:12px; color:#444;">
+          <label style="margin: 0; font-size: 12px; color: #444">
             <input type="checkbox" id="proxy_yz20" checked />
             Yang-Zhang20
           </label>
-          <label style="margin:0; font-size:12px; color:#444;">
+          <label style="margin: 0; font-size: 12px; color: #444">
             <input type="checkbox" id="proxy_gk20" />
             Garman-Klass20
           </label>
-          <label style="margin:0; font-size:12px; color:#444;">
+          <label style="margin: 0; font-size: 12px; color: #444">
             <input type="checkbox" id="proxy_ewma094" checked />
             EWMA(0.94)
           </label>
-          <label style="margin:0; font-size:12px; color:#444;">
+          <label style="margin: 0; font-size: 12px; color: #444">
             <input type="checkbox" id="proxy_har252" checked />
             HAR(252)
           </label>
         </div>
-        <div class="muted" style="margin-top:6px;">说明：现货波动择时需要 DB 中的 513100 OHLC；当你选择 QQQ/NDX（外盘）时将跳过该对比。</div>
+        <div class="muted" style="margin-top: 6px">
+          说明：现货波动择时需要 DB 中的 513100 OHLC；当你选择
+          QQQ/NDX（外盘）时将跳过该对比。
+        </div>
       </div>
       <button id="run">运行分析</button>
     </div>
@@ -268,72 +321,81 @@
 
     <div class="panel two">
       <div>
-        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <h3 style="margin: 0 0 6px 0">价格（归一化）</h3>
         <div id="pxChart"></div>
       </div>
       <div>
-        <h3 style="margin: 0 0 6px 0;">日收益率</h3>
+        <h3 style="margin: 0 0 6px 0">日收益率</h3>
         <div id="retChart"></div>
       </div>
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">互相关（正滞后 = 指数领先 ETF）</h3>
+      <h3 style="margin: 0 0 6px 0">互相关（正滞后 = 指数领先 ETF）</h3>
       <div id="xcorrChart"></div>
     </div>
 
     <div class="panel two">
       <div>
-        <h3 style="margin: 0 0 6px 0;">互相关明细</h3>
+        <h3 style="margin: 0 0 6px 0">互相关明细</h3>
         <table id="xcorrTable"></table>
       </div>
       <div>
-        <h3 style="margin: 0 0 6px 0;">Granger 因果检验</h3>
+        <h3 style="margin: 0 0 6px 0">Granger 因果检验</h3>
         <table id="grangerTable"></table>
       </div>
     </div>
 
     <div class="panel two">
       <div>
-        <h3 style="margin: 0 0 6px 0;">交易可用性：方向命中率/混淆矩阵</h3>
+        <h3 style="margin: 0 0 6px 0">交易可用性：方向命中率/混淆矩阵</h3>
         <table id="tradeTable"></table>
       </div>
       <div>
-        <h3 style="margin: 0 0 6px 0;">条件分布（按 VIX 次日信号涨/跌分组）</h3>
+        <h3 style="margin: 0 0 6px 0">条件分布（按 VIX 次日信号涨/跌分组）</h3>
         <table id="condTable"></table>
       </div>
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">简单策略回测（risk-on/off，含换仓成本）</h3>
+      <h3 style="margin: 0 0 6px 0">简单策略回测（risk-on/off，含换仓成本）</h3>
       <div id="stratChart"></div>
-      <div class="muted" id="stratMetrics" style="margin-top:6px;"></div>
+      <div class="muted" id="stratMetrics" style="margin-top: 6px"></div>
     </div>
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">市场状态划分（统一前端模块）</h3>
-      <div class="row" style="margin-bottom:8px;">
-        <div><label>slope_window</label><input id="regimeSlopeWin" value="20" /></div>
-        <div><label>vol_window</label><input id="regimeVolWin" value="20" /></div>
-        <div><label>direction_threshold_ann</label><input id="regimeSlopeThr" value="0.03" /></div>
-        <div><label>vol_quantile</label><input id="regimeVolQ" value="0.50" /></div>
+      <h3 style="margin: 0 0 6px 0">市场状态划分（统一前端模块）</h3>
+      <div class="row" style="margin-bottom: 8px">
+        <div>
+          <label>slope_window</label><input id="regimeSlopeWin" value="20" />
+        </div>
+        <div>
+          <label>vol_window</label><input id="regimeVolWin" value="20" />
+        </div>
+        <div>
+          <label>direction_threshold_ann</label
+          ><input id="regimeSlopeThr" value="0.03" />
+        </div>
+        <div>
+          <label>vol_quantile</label><input id="regimeVolQ" value="0.50" />
+        </div>
         <div><label>future_n</label><input id="regimeNAhead" value="5" /></div>
       </div>
       <div id="regimeHint" class="muted"></div>
-      <div id="regimeLegend" class="muted" style="margin-top:6px;"></div>
-      <div id="regimeTimeline" style="height:260px; margin-top:8px;"></div>
-      <table id="regimeStats" style="margin-top:8px;"></table>
-      <div id="regimeFuture" style="height:300px; margin-top:8px;"></div>
-      <table id="regimeFutureStats" style="margin-top:8px;"></table>
+      <div id="regimeLegend" class="muted" style="margin-top: 6px"></div>
+      <div id="regimeTimeline" style="height: 260px; margin-top: 8px"></div>
+      <table id="regimeStats" style="margin-top: 8px"></table>
+      <div id="regimeFuture" style="height: 300px; margin-top: 8px"></div>
+      <table id="regimeFutureStats" style="margin-top: 8px"></table>
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">择时策略绩效对比（开启择时后）</h3>
+      <h3 style="margin: 0 0 6px 0">择时策略绩效对比（开启择时后）</h3>
       <table id="timingCompare"></table>
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">实盘信号回测（VXN 次日 BUY/SELL/HOLD）</h3>
-      <div class="row" style="margin-bottom: 8px;">
+      <h3 style="margin: 0 0 6px 0">实盘信号回测（VXN 次日 BUY/SELL/HOLD）</h3>
+      <div class="row" style="margin-bottom: 8px">
         <div>
           <label>初始仓位</label>
           <select id="vixInitPos">
@@ -343,21 +405,31 @@
         </div>
         <div>
           <label>日志显示条数</label>
-          <input id="vixLogLimit" value="300" title="页面只渲染最近 N 条（按日期倒序），接口会返回全量。" />
+          <input
+            id="vixLogLimit"
+            value="300"
+            title="页面只渲染最近 N 条（按日期倒序），接口会返回全量。"
+          />
         </div>
         <button id="runVixBt">运行信号回测</button>
       </div>
       <div id="vixBtChart"></div>
-      <div class="muted" id="vixBtMetrics" style="margin-top:6px;"></div>
-      <div class="panel two" style="margin-top:10px;">
+      <div class="muted" id="vixBtMetrics" style="margin-top: 6px"></div>
+      <div class="panel two" style="margin-top: 10px">
         <div>
-          <h3 style="margin: 10px 0 6px 0; font-size: 15px;">双周对比（VXN vs NAV）</h3>
-          <div class="muted" style="margin-bottom:6px;">每约 10 个交易日抽样一次，便于直观对比 VXN 与策略/基准净值变化。</div>
+          <h3 style="margin: 10px 0 6px 0; font-size: 15px">
+            双周对比（VXN vs NAV）
+          </h3>
+          <div class="muted" style="margin-bottom: 6px">
+            每约 10 个交易日抽样一次，便于直观对比 VXN 与策略/基准净值变化。
+          </div>
           <div id="vixBtBiweeklyChart"></div>
         </div>
         <div>
-          <h3 style="margin: 10px 0 6px 0; font-size: 15px;">分周期收益与分布（含超额）</h3>
-          <div class="row" style="margin-bottom:6px;">
+          <h3 style="margin: 10px 0 6px 0; font-size: 15px">
+            分周期收益与分布（含超额）
+          </h3>
+          <div class="row" style="margin-bottom: 6px">
             <div>
               <label>周期</label>
               <select id="vixPerfFreq">
@@ -371,30 +443,34 @@
           </div>
           <div id="vixPerfHist"></div>
           <table id="vixPerfStats"></table>
-          <div class="panel" style="margin-top:10px;">
-            <h3 style="margin: 10px 0 6px 0; font-size: 14px;">分周期收益表（最近 200 条）</h3>
+          <div class="panel" style="margin-top: 10px">
+            <h3 style="margin: 10px 0 6px 0; font-size: 14px">
+              分周期收益表（最近 200 条）
+            </h3>
             <table id="vixPerfTable"></table>
           </div>
         </div>
       </div>
       <div class="panel">
-        <h3 style="margin: 10px 0 6px 0; font-size: 15px;">信号/交易日志（日期倒序）</h3>
+        <h3 style="margin: 10px 0 6px 0; font-size: 15px">
+          信号/交易日志（日期倒序）
+        </h3>
         <table id="vixBtTrades"></table>
       </div>
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">滚动稳定性（窗口=252）</h3>
+      <h3 style="margin: 0 0 6px 0">滚动稳定性（窗口=252）</h3>
       <div id="rollingChart"></div>
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">Walk-forward（训练选参 → 测试验证）</h3>
+      <h3 style="margin: 0 0 6px 0">Walk-forward（训练选参 → 测试验证）</h3>
       <table id="wfTable"></table>
     </div>
 
     <div class="panel">
-      <h3 style="margin: 0 0 6px 0;">指数分布统计（GVZ / VXN）</h3>
+      <h3 style="margin: 0 0 6px 0">指数分布统计（GVZ / VXN）</h3>
       <div class="row">
         <div>
           <label>指数</label>
@@ -417,19 +493,25 @@
       </div>
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">指数水平分布（close）</h3>
+          <h3 style="margin: 0 0 6px 0">指数水平分布（close）</h3>
           <div id="distCloseChart"></div>
           <table id="distCloseTable"></table>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">日收益分布（log-ret）</h3>
+          <h3 style="margin: 0 0 6px 0">日收益分布（log-ret）</h3>
           <div id="distRetChart"></div>
           <table id="distRetTable"></table>
         </div>
       </div>
-      <div class="panel" style="margin-top:10px;">
-        <h3 style="margin: 0 0 6px 0;">指数水平（对数坐标）+ 布林带（log空间）</h3>
-        <div class="muted" style="margin-bottom:6px;">布林带按 log(close) 计算：mid=MA20(logP)，upper/lower=mid±2σ，再指数还原到价格轴；y 轴为对数坐标。</div>
+      <div class="panel" style="margin-top: 10px">
+        <h3 style="margin: 0 0 6px 0">
+          指数水平（对数坐标）+ 布林带（log空间）
+        </h3>
+        <div class="muted" style="margin-bottom: 6px">
+          布林带按 log(close)
+          计算：mid=MA20(logP)，upper/lower=mid±2σ，再指数还原到价格轴；y
+          轴为对数坐标。
+        </div>
         <div id="distLogBbChart"></div>
       </div>
     </div>
@@ -441,39 +523,59 @@
         const isLight = () => html.getAttribute("data-theme") === "light";
         const setTheme = (theme) => {
           html.setAttribute("data-theme", theme);
-          try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+          try {
+            localStorage.setItem(THEME_KEY, theme);
+          } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
           document.dispatchEvent(new CustomEvent("themechange"));
         };
 
-        const cssVar = (name, fallback) => (getComputedStyle(html).getPropertyValue(name).trim() || fallback);
+        const cssVar = (name, fallback) =>
+          getComputedStyle(html).getPropertyValue(name).trim() || fallback;
         const plotTheme = () => ({
           paper_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
           plot_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
-          font: { color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb") },
-          legend: { font: { color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb") } },
+          font: {
+            color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+          },
+          legend: {
+            font: {
+              color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+            },
+          },
           axis: {
             color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
             gridcolor: cssVar("--plot-grid", isLight() ? "#d1d5db" : "#334155"),
-            zerolinecolor: cssVar("--plot-grid", isLight() ? "#d1d5db" : "#334155"),
+            zerolinecolor: cssVar(
+              "--plot-grid",
+              isLight() ? "#d1d5db" : "#334155",
+            ),
           },
         });
         const patchBlack = (color) => {
           if (!color || typeof color !== "string") return color;
           const c = color.replace(/\s+/g, "").toLowerCase();
-          if (c === "#111" || c === "#111111" || c.startsWith("rgba(17,17,17")) {
+          if (
+            c === "#111" ||
+            c === "#111111" ||
+            c.startsWith("rgba(17,17,17")
+          ) {
             return cssVar("--plot-fg", "#e5e7eb");
           }
           return color;
         };
-        const themedData = (data) => (data || []).map((trace) => {
-          const t = { ...trace };
-          if (t.line && typeof t.line === "object") t.line = { ...t.line, color: patchBlack(t.line.color) };
-          if (t.marker && typeof t.marker === "object") t.marker = { ...t.marker, color: patchBlack(t.marker.color) };
-          if (typeof t.fillcolor === "string") t.fillcolor = patchBlack(t.fillcolor);
-          return t;
-        });
+        const themedData = (data) =>
+          (data || []).map((trace) => {
+            const t = { ...trace };
+            if (t.line && typeof t.line === "object")
+              t.line = { ...t.line, color: patchBlack(t.line.color) };
+            if (t.marker && typeof t.marker === "object")
+              t.marker = { ...t.marker, color: patchBlack(t.marker.color) };
+            if (typeof t.fillcolor === "string")
+              t.fillcolor = patchBlack(t.fillcolor);
+            return t;
+          });
         const themedLayout = (layout) => {
           const base = plotTheme();
           const next = { ...(layout || {}) };
@@ -481,9 +583,12 @@
           next.plot_bgcolor = base.plot_bgcolor;
           next.font = { ...base.font, ...(next.font || {}) };
           next.legend = { ...base.legend, ...(next.legend || {}) };
-          const keys = Object.keys(next).filter((k) => /^xaxis\d*$|^yaxis\d*$/.test(k));
+          const keys = Object.keys(next).filter((k) =>
+            /^xaxis\d*$|^yaxis\d*$/.test(k),
+          );
           const axisKeys = keys.length ? keys : ["xaxis", "yaxis"];
-          for (const k of axisKeys) next[k] = { ...base.axis, ...(next[k] || {}) };
+          for (const k of axisKeys)
+            next[k] = { ...base.axis, ...(next[k] || {}) };
           return next;
         };
         const refreshPlotlyTheme = () => {
@@ -496,7 +601,9 @@
               "font.color": base.font.color,
               "legend.font.color": base.font.color,
             };
-            const keys = Object.keys(gd.layout || {}).filter((k) => /^xaxis\d*$|^yaxis\d*$/.test(k));
+            const keys = Object.keys(gd.layout || {}).filter((k) =>
+              /^xaxis\d*$|^yaxis\d*$/.test(k),
+            );
             for (const k of keys) {
               patch[`${k}.color`] = base.axis.color;
               patch[`${k}.gridcolor`] = base.axis.gridcolor;
@@ -511,7 +618,9 @@
           btn.id = "themeToggle";
           btn.className = "theme-toggle";
           btn.type = "button";
-          btn.addEventListener("click", () => setTheme(isLight() ? "dark" : "light"));
+          btn.addEventListener("click", () =>
+            setTheme(isLight() ? "dark" : "light"),
+          );
           document.body.appendChild(btn);
           setTheme(html.getAttribute("data-theme") || "dark");
 
@@ -528,7 +637,11 @@
         document.addEventListener("themechange", refreshPlotlyTheme);
       })();
 
-      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const api = (path, opts) =>
+        fetch(`/api${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
       const $ = (id) => document.getElementById(id);
       const setMsg = (t) => ($("msg").textContent = t || "");
 
@@ -540,12 +653,13 @@
         return `${y}${m}${dd}`;
       }
 
-      function fmt(x, k=4) {
+      function fmt(x, k = 4) {
         const n = Number(x);
         if (!Number.isFinite(n)) return "";
         return n.toFixed(k);
       }
-      const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+      const fmtPct = (x) =>
+        Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "";
 
       function renderRegimeModuleForSeries({ dates, close, titlePrefix }) {
         if (!window.MarketRegimeUI) return;
@@ -556,7 +670,12 @@
         const fst = $("regimeFutureStats");
         const hint = $("regimeHint");
         if (!tl) return;
-        if (!Array.isArray(dates) || !Array.isArray(close) || dates.length < 10 || dates.length !== close.length) {
+        if (
+          !Array.isArray(dates) ||
+          !Array.isArray(close) ||
+          dates.length < 10 ||
+          dates.length !== close.length
+        ) {
           tl.innerHTML = "<div class='muted'>暂无可用状态数据</div>";
           if (lg) lg.innerHTML = "";
           if (st) st.innerHTML = "";
@@ -566,148 +685,248 @@
           return;
         }
         const params = {
-          slope_window: Math.max(5, Number(($("regimeSlopeWin") && $("regimeSlopeWin").value) || 20)),
-          vol_window: Math.max(5, Number(($("regimeVolWin") && $("regimeVolWin").value) || 20)),
-          direction_threshold_ann: Math.max(0, Number(($("regimeSlopeThr") && $("regimeSlopeThr").value) || 0.03)),
-          vol_quantile: Math.max(0.01, Math.min(0.99, Number(($("regimeVolQ") && $("regimeVolQ").value) || 0.5))),
+          slope_window: Math.max(
+            5,
+            Number(($("regimeSlopeWin") && $("regimeSlopeWin").value) || 20),
+          ),
+          vol_window: Math.max(
+            5,
+            Number(($("regimeVolWin") && $("regimeVolWin").value) || 20),
+          ),
+          direction_threshold_ann: Math.max(
+            0,
+            Number(($("regimeSlopeThr") && $("regimeSlopeThr").value) || 0.03),
+          ),
+          vol_quantile: Math.max(
+            0.01,
+            Math.min(
+              0.99,
+              Number(($("regimeVolQ") && $("regimeVolQ").value) || 0.5),
+            ),
+          ),
         };
-        const nAhead = Math.max(1, Number(($("regimeNAhead") && $("regimeNAhead").value) || 5));
-        const rows = window.MarketRegimeUI.computeRows({ dates, close, ...params });
+        const nAhead = Math.max(
+          1,
+          Number(($("regimeNAhead") && $("regimeNAhead").value) || 5),
+        );
+        const rows = window.MarketRegimeUI.computeRows({
+          dates,
+          close,
+          ...params,
+        });
         const stateOrder = window.MarketRegimeUI.STATE_ORDER || [];
         const stateLabel = window.MarketRegimeUI.STATE_LABEL || {};
-        const selected = window.__nasdaqRegimeSelected instanceof Set ? window.__nasdaqRegimeSelected : new Set(stateOrder);
+        const selected =
+          window.__nasdaqRegimeSelected instanceof Set
+            ? window.__nasdaqRegimeSelected
+            : new Set(stateOrder);
         window.__nasdaqRegimeSelected = selected;
         window.MarketRegimeUI.renderLegend(
           lg,
           selected,
           (s) => {
-            if (selected.has(s)) selected.delete(s); else selected.add(s);
-            if (selected.size === 0) for (const x of stateOrder) selected.add(x);
+            if (selected.has(s)) selected.delete(s);
+            else selected.add(s);
+            if (selected.size === 0)
+              for (const x of stateOrder) selected.add(x);
             renderRegimeModuleForSeries({ dates, close, titlePrefix });
           },
           (s) => {
-            selected.clear(); selected.add(s);
+            selected.clear();
+            selected.add(s);
             renderRegimeModuleForSeries({ dates, close, titlePrefix });
-          }
+          },
         );
-        window.MarketRegimeUI.renderTimeline("regimeTimeline", rows, selected, `${titlePrefix}市场状态区间`, titlePrefix);
+        window.MarketRegimeUI.renderTimeline(
+          "regimeTimeline",
+          rows,
+          selected,
+          `${titlePrefix}市场状态区间`,
+          titlePrefix,
+        );
         const byState = window.MarketRegimeUI.summarizeStateStats(rows);
         if (st) {
-          st.innerHTML = "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
-            stateOrder.map((s) => {
-              const xs = ((byState[s] || {}).rets || []).filter(Number.isFinite);
-              const n = xs.length;
-              const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
-              const w = n ? xs.filter((x) => x > 0).length / n : NaN;
-              const v = n > 1 ? Math.sqrt(xs.reduce((p, x) => p + (x - m) * (x - m), 0) / (n - 1)) : NaN;
-              return `<tr><td>${stateLabel[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
-            }).join("");
+          st.innerHTML =
+            "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
+            stateOrder
+              .map((s) => {
+                const xs = ((byState[s] || {}).rets || []).filter(
+                  Number.isFinite,
+                );
+                const n = xs.length;
+                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                const v =
+                  n > 1
+                    ? Math.sqrt(
+                        xs.reduce((p, x) => p + (x - m) * (x - m), 0) / (n - 1),
+                      )
+                    : NaN;
+                return `<tr><td>${stateLabel[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
+              })
+              .join("");
         }
         const fwd = window.MarketRegimeUI.summarizeForwardByState(rows, nAhead);
-        window.MarketRegimeUI.renderForwardBox("regimeFuture", fwd, nAhead, selected);
+        window.MarketRegimeUI.renderForwardBox(
+          "regimeFuture",
+          fwd,
+          nAhead,
+          selected,
+        );
         if (fst) {
-          fst.innerHTML = "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
-            stateOrder.map((s) => {
-              const xs = (fwd[s] || []).filter(Number.isFinite);
-              const n = xs.length;
-              const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
-              const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.10) : NaN;
-              const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.50) : NaN;
-              const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.90) : NaN;
-              const w = n ? xs.filter((x) => x > 0).length / n : NaN;
-              return `<tr><td>${stateLabel[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
-            }).join("");
+          fst.innerHTML =
+            "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
+            stateOrder
+              .map((s) => {
+                const xs = (fwd[s] || []).filter(Number.isFinite);
+                const n = xs.length;
+                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.1) : NaN;
+                const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.5) : NaN;
+                const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.9) : NaN;
+                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                return `<tr><td>${stateLabel[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
+              })
+              .join("");
         }
-        if (hint) hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
+        if (hint)
+          hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
       }
 
       function renderTables(res) {
-        const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-        const best = (res && res.corr && res.corr.best) ? res.corr.best : null;
-        const rel = (res && res.corr && res.corr.relation) ? res.corr.relation : "";
-        let html = "<tr><th>lag</th><th>corr</th><th>pvalue</th><th>n</th></tr>";
+        const xs = res && res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+        const best = res && res.corr && res.corr.best ? res.corr.best : null;
+        const rel =
+          res && res.corr && res.corr.relation ? res.corr.relation : "";
+        let html =
+          "<tr><th>lag</th><th>corr</th><th>pvalue</th><th>n</th></tr>";
         for (const r of xs) {
           const isBest = best && Number(r.lag) === Number(best.lag);
-          html += `<tr${isBest ? ' style="background:var(--highlight-bg)"' : ""}><td>${r.lag}</td><td>${fmt(r.corr,4)}</td><td>${fmt(r.pvalue,4)}</td><td>${r.n}</td></tr>`;
+          html += `<tr${isBest ? ' style="background:var(--highlight-bg)"' : ""}><td>${r.lag}</td><td>${fmt(r.corr, 4)}</td><td>${fmt(r.pvalue, 4)}</td><td>${r.n}</td></tr>`;
         }
         $("xcorrTable").innerHTML = html;
 
-        const g1 = (res && res.granger && res.granger.idx_to_etf) ? res.granger.idx_to_etf : [];
-        const g2 = (res && res.granger && res.granger.etf_to_idx) ? res.granger.etf_to_idx : [];
-        let ghtml = "<tr><th>p</th><th>idx→etf pvalue</th><th>etf→idx pvalue</th></tr>";
+        const g1 =
+          res && res.granger && res.granger.idx_to_etf
+            ? res.granger.idx_to_etf
+            : [];
+        const g2 =
+          res && res.granger && res.granger.etf_to_idx
+            ? res.granger.etf_to_idx
+            : [];
+        let ghtml =
+          "<tr><th>p</th><th>idx→etf pvalue</th><th>etf→idx pvalue</th></tr>";
         const n = Math.max(g1.length, g2.length);
         for (let i = 0; i < n; i++) {
           const a = g1[i] || {};
           const b = g2[i] || {};
-          ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue,4)}</td><td>${fmt(b.pvalue,4)}</td></tr>`;
+          ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue, 4)}</td><td>${fmt(b.pvalue, 4)}</td></tr>`;
         }
         $("grangerTable").innerHTML = ghtml;
 
-        const s = (res && res.granger && res.granger.summary) ? res.granger.summary : {};
+        const s =
+          res && res.granger && res.granger.summary ? res.granger.summary : {};
         setMsg(
           `结论（粗略）：relation=${rel}\n` +
-          `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}\n` +
-          `granger idx→etf min_p=${fmt(s.idx_causes_etf_min_p,4)}; etf→idx min_p=${fmt(s.etf_causes_idx_min_p,4)} (alpha=${fmt(s.alpha,4)})`
+            `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr, 4) : ""}, best_p=${best ? fmt(best.pvalue, 4) : ""}\n` +
+            `granger idx→etf min_p=${fmt(s.idx_causes_etf_min_p, 4)}; etf→idx min_p=${fmt(s.etf_causes_idx_min_p, 4)} (alpha=${fmt(s.alpha, 4)})`,
         );
       }
 
       function renderTrade(res) {
-        const t = (res && res.trade) ? res.trade : null;
+        const t = res && res.trade ? res.trade : null;
         if (!t) return;
         const d = t.direction || {};
         $("tradeTable").innerHTML =
           "<tr><th>样本数</th><th>命中率</th><th>TP</th><th>TN</th><th>FP</th><th>FN</th></tr>" +
-          `<tr><td>${d.n ?? ""}</td><td>${fmt(d.hit_rate,4)}</td><td>${d.tp ?? ""}</td><td>${d.tn ?? ""}</td><td>${d.fp ?? ""}</td><td>${d.fn ?? ""}</td></tr>`;
+          `<tr><td>${d.n ?? ""}</td><td>${fmt(d.hit_rate, 4)}</td><td>${d.tp ?? ""}</td><td>${d.tn ?? ""}</td><td>${d.fp ?? ""}</td><td>${d.fn ?? ""}</td></tr>`;
 
         const c = t.conditional || {};
         const up = c.idx_up || {};
         const dn = c.idx_down || {};
         $("condTable").innerHTML =
           "<tr><th>分组</th><th>n</th><th>mean</th><th>q5</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr>" +
-          `<tr><td>VIX↑(信号日)</td><td>${up.n ?? ""}</td><td>${fmt(up.mean,6)}</td><td>${fmt(up.q5,6)}</td><td>${fmt(up.q25,6)}</td><td>${fmt(up.q50,6)}</td><td>${fmt(up.q75,6)}</td><td>${fmt(up.q95,6)}</td></tr>` +
-          `<tr><td>VIX↓(信号日)</td><td>${dn.n ?? ""}</td><td>${fmt(dn.mean,6)}</td><td>${fmt(dn.q5,6)}</td><td>${fmt(dn.q25,6)}</td><td>${fmt(dn.q50,6)}</td><td>${fmt(dn.q75,6)}</td><td>${fmt(dn.q95,6)}</td></tr>`;
+          `<tr><td>VIX↑(信号日)</td><td>${up.n ?? ""}</td><td>${fmt(up.mean, 6)}</td><td>${fmt(up.q5, 6)}</td><td>${fmt(up.q25, 6)}</td><td>${fmt(up.q50, 6)}</td><td>${fmt(up.q75, 6)}</td><td>${fmt(up.q95, 6)}</td></tr>` +
+          `<tr><td>VIX↓(信号日)</td><td>${dn.n ?? ""}</td><td>${fmt(dn.mean, 6)}</td><td>${fmt(dn.q5, 6)}</td><td>${fmt(dn.q25, 6)}</td><td>${fmt(dn.q50, 6)}</td><td>${fmt(dn.q75, 6)}</td><td>${fmt(dn.q95, 6)}</td></tr>`;
 
         const s = t.strategy || {};
         const dates = s.dates || [];
         const navS = s.nav_strategy || [];
         const navB = s.nav_buy_hold || [];
         const traces = [
-          { x: dates, y: navS, name: "信号策略NAV", type: "scatter", mode: "lines" },
-          { x: dates, y: navB, name: "买入持有NAV", type: "scatter", mode: "lines" },
+          {
+            x: dates,
+            y: navS,
+            name: "信号策略NAV",
+            type: "scatter",
+            mode: "lines",
+          },
+          {
+            x: dates,
+            y: navB,
+            name: "买入持有NAV",
+            type: "scatter",
+            mode: "lines",
+          },
         ];
         const vt = t.vol_timing || null;
         if (vt && vt.ok) {
           const vDates = vt.dates || [];
           const vNav = vt.nav_strategy || [];
-          traces.unshift({ x: vDates, y: vNav, name: "波动率择时NAV", type: "scatter", mode: "lines" });
+          traces.unshift({
+            x: vDates,
+            y: vNav,
+            name: "波动率择时NAV",
+            type: "scatter",
+            mode: "lines",
+          });
         }
-        Plotly.newPlot("stratChart", traces, { margin: { t: 20 } }, { displayModeBar: false });
+        Plotly.newPlot(
+          "stratChart",
+          traces,
+          { margin: { t: 20 } },
+          { displayModeBar: false },
+        );
 
-        const m = (s.metrics || {});
-        const ms = (m.strategy || {});
-        const mb = (m.buy_hold || {});
-        const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+        const m = s.metrics || {};
+        const ms = m.strategy || {};
+        const mb = m.buy_hold || {};
+        const fmtPct = (x) =>
+          Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "";
         let metricsLine =
-          `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
-          `买入持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe,2)} MDD=${fmtPct(mb.max_drawdown)}`;
+          `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe, 2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
+          `买入持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe, 2)} MDD=${fmtPct(mb.max_drawdown)}`;
         if (vt && vt.ok) {
-          const vms = (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {};
+          const vms =
+            vt.metrics && vt.metrics.strategy ? vt.metrics.strategy : {};
           metricsLine =
-            `波动率择时：CAGR=${fmtPct(vms.cagr)} Vol=${fmtPct(vms.vol)} Sharpe=${fmt(vms.sharpe,2)} MDD=${fmtPct(vms.max_drawdown)} | ` +
+            `波动率择时：CAGR=${fmtPct(vms.cagr)} Vol=${fmtPct(vms.vol)} Sharpe=${fmt(vms.sharpe, 2)} MDD=${fmtPct(vms.max_drawdown)} | ` +
             metricsLine;
         }
         $("stratMetrics").textContent = metricsLine;
-        window.__nasdaqRegimeSeries = { dates: (dates || []).slice(), close: (navB || []).slice(), titlePrefix: "买入持有NAV-" };
+        window.__nasdaqRegimeSeries = {
+          dates: (dates || []).slice(),
+          close: (navB || []).slice(),
+          titlePrefix: "买入持有NAV-",
+        };
         renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
         if (!window.__nasdaqRegimeBound) {
-          for (const id of ["regimeSlopeWin", "regimeVolWin", "regimeSlopeThr", "regimeVolQ", "regimeNAhead"]) {
+          for (const id of [
+            "regimeSlopeWin",
+            "regimeVolWin",
+            "regimeSlopeThr",
+            "regimeVolQ",
+            "regimeNAhead",
+          ]) {
             const el = $(id);
             if (!el) continue;
             el.addEventListener("change", () => {
-              if (window.__nasdaqRegimeSeries) renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
+              if (window.__nasdaqRegimeSeries)
+                renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
             });
             el.addEventListener("input", () => {
-              if (window.__nasdaqRegimeSeries) renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
+              if (window.__nasdaqRegimeSeries)
+                renderRegimeModuleForSeries(window.__nasdaqRegimeSeries);
             });
           }
           window.__nasdaqRegimeBound = true;
@@ -715,37 +934,71 @@
 
         const r = t.rolling || {};
         const rd = r.dates || [];
-        Plotly.newPlot("rollingChart", [
-          { x: rd, y: (r.corr || []), name: "rolling corr(etf_ret, vix_ret_lag)", type: "scatter", mode: "lines" },
-          { x: rd, y: (r.hit_rate || []), name: "rolling hit_rate", yaxis: "y2", type: "scatter", mode: "lines" },
-        ], { margin: { t: 20 }, yaxis: { title: "corr" }, yaxis2: { title: "hit", overlaying: "y", side: "right" } }, { displayModeBar: false });
+        Plotly.newPlot(
+          "rollingChart",
+          [
+            {
+              x: rd,
+              y: r.corr || [],
+              name: "rolling corr(etf_ret, vix_ret_lag)",
+              type: "scatter",
+              mode: "lines",
+            },
+            {
+              x: rd,
+              y: r.hit_rate || [],
+              name: "rolling hit_rate",
+              yaxis: "y2",
+              type: "scatter",
+              mode: "lines",
+            },
+          ],
+          {
+            margin: { t: 20 },
+            yaxis: { title: "corr" },
+            yaxis2: { title: "hit", overlaying: "y", side: "right" },
+          },
+          { displayModeBar: false },
+        );
 
         // threshold + walk-forward summary
         const th = t.threshold || {};
         const wf = t.walk_forward || {};
         const thStrat = th.strategy ? th.strategy : null;
-        const thM = thStrat && thStrat.metrics ? thStrat.metrics.strategy : null;
+        const thM =
+          thStrat && thStrat.metrics ? thStrat.metrics.strategy : null;
         const thLine = thStrat
-          ? `threshold(q=${fmt(th.quantile,2)} abs=${fmt(thStrat.threshold_abs,6)} active_rate=${fmt(thStrat.active_rate,3)}): ` +
-            `CAGR=${fmtPct(thM && thM.cagr)} Sharpe=${fmt(thM && thM.sharpe,2)} MDD=${fmtPct(thM && thM.max_drawdown)}`
-          : `threshold(q=${fmt(th.quantile,2)}): 无法计算（样本不足或缺失）`;
+          ? `threshold(q=${fmt(th.quantile, 2)} abs=${fmt(thStrat.threshold_abs, 6)} active_rate=${fmt(thStrat.active_rate, 3)}): ` +
+            `CAGR=${fmtPct(thM && thM.cagr)} Sharpe=${fmt(thM && thM.sharpe, 2)} MDD=${fmtPct(thM && thM.max_drawdown)}`
+          : `threshold(q=${fmt(th.quantile, 2)}): 无法计算（样本不足或缺失）`;
 
         let wfHtml = "<tr><th>项</th><th>内容</th></tr>";
         wfHtml += `<tr><td>阈值信号</td><td>${thLine}</td></tr>`;
         if (vt) {
           if (vt.ok) {
-            const vms = (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {};
-            const thrAbs = (vt.thresholds_abs_train || vt.thresholds_abs || []).map(x => fmt(x, 6)).join(", ");
-            const exps = (vt.exposures || []).map(x => fmt(x, 3)).join(", ");
-            const rates = (vt.bucket_rates || []).map(x => fmt(x, 3)).join(", ");
-            wfHtml += `<tr><td>波动率择时(全样本)</td><td>quantiles=${(vt.quantiles || []).map(x => fmt(x, 2)).join(", ")}; thresholds_abs=[${thrAbs}]; exposures=[${exps}]; bucket_rates=[${rates}] | CAGR=${fmtPct(vms.cagr)} Sharpe=${fmt(vms.sharpe,2)} MDD=${fmtPct(vms.max_drawdown)}</td></tr>`;
+            const vms =
+              vt.metrics && vt.metrics.strategy ? vt.metrics.strategy : {};
+            const thrAbs = (vt.thresholds_abs_train || vt.thresholds_abs || [])
+              .map((x) => fmt(x, 6))
+              .join(", ");
+            const exps = (vt.exposures || []).map((x) => fmt(x, 3)).join(", ");
+            const rates = (vt.bucket_rates || [])
+              .map((x) => fmt(x, 3))
+              .join(", ");
+            wfHtml += `<tr><td>波动率择时(全样本)</td><td>quantiles=${(vt.quantiles || []).map((x) => fmt(x, 2)).join(", ")}; thresholds_abs=[${thrAbs}]; exposures=[${exps}]; bucket_rates=[${rates}] | CAGR=${fmtPct(vms.cagr)} Sharpe=${fmt(vms.sharpe, 2)} MDD=${fmtPct(vms.max_drawdown)}</td></tr>`;
             const vwf = vt.walk_forward || null;
             if (vwf && vwf.ok) {
-              const trn2 = (vwf.train && vwf.train.metrics && vwf.train.metrics.strategy) ? vwf.train.metrics.strategy : {};
-              const tst2 = (vwf.test && vwf.test.metrics && vwf.test.metrics.strategy) ? vwf.test.metrics.strategy : {};
-              wfHtml += `<tr><td>波动率择时(WF)</td><td>train_ratio=${fmt(vwf.train_ratio,2)}; thr_train=[${(vwf.thresholds_abs_train || []).map(x => fmt(x,6)).join(", ")}]</td></tr>`;
-              wfHtml += `<tr><td>WF训练段</td><td>CAGR=${fmtPct(trn2.cagr)} Sharpe=${fmt(trn2.sharpe,2)} MDD=${fmtPct(trn2.max_drawdown)}</td></tr>`;
-              wfHtml += `<tr><td>WF测试段</td><td>CAGR=${fmtPct(tst2.cagr)} Sharpe=${fmt(tst2.sharpe,2)} MDD=${fmtPct(tst2.max_drawdown)}</td></tr>`;
+              const trn2 =
+                vwf.train && vwf.train.metrics && vwf.train.metrics.strategy
+                  ? vwf.train.metrics.strategy
+                  : {};
+              const tst2 =
+                vwf.test && vwf.test.metrics && vwf.test.metrics.strategy
+                  ? vwf.test.metrics.strategy
+                  : {};
+              wfHtml += `<tr><td>波动率择时(WF)</td><td>train_ratio=${fmt(vwf.train_ratio, 2)}; thr_train=[${(vwf.thresholds_abs_train || []).map((x) => fmt(x, 6)).join(", ")}]</td></tr>`;
+              wfHtml += `<tr><td>WF训练段</td><td>CAGR=${fmtPct(trn2.cagr)} Sharpe=${fmt(trn2.sharpe, 2)} MDD=${fmtPct(trn2.max_drawdown)}</td></tr>`;
+              wfHtml += `<tr><td>WF测试段</td><td>CAGR=${fmtPct(tst2.cagr)} Sharpe=${fmt(tst2.sharpe, 2)} MDD=${fmtPct(tst2.max_drawdown)}</td></tr>`;
             } else if (vwf) {
               wfHtml += `<tr><td>波动率择时(WF)</td><td>无法计算（${vwf.reason || "样本不足"}）</td></tr>`;
             }
@@ -755,11 +1008,23 @@
         }
         if (wf && wf.ok) {
           const ch = wf.chosen || {};
-          const trn = (wf.train && wf.train.strategy && wf.train.strategy.metrics && wf.train.strategy.metrics.strategy) ? wf.train.strategy.metrics.strategy : {};
-          const tst = (wf.test && wf.test.strategy && wf.test.strategy.metrics && wf.test.strategy.metrics.strategy) ? wf.test.strategy.metrics.strategy : {};
-          wfHtml += `<tr><td>Walk-forward 选参</td><td>objective=${wf.objective}, lag=${ch.lag}, thr_q=${ch.thr_q}, thr_abs=${fmt(ch.thr_abs,6)}, corr_train=${fmt(ch.corr_train,4)}</td></tr>`;
-          wfHtml += `<tr><td>训练段</td><td>${wf.train.start} ~ ${wf.train.end} | CAGR=${fmtPct(trn.cagr)} Sharpe=${fmt(trn.sharpe,2)} MDD=${fmtPct(trn.max_drawdown)}</td></tr>`;
-          wfHtml += `<tr><td>测试段</td><td>${wf.test.start} ~ ${wf.test.end} | CAGR=${fmtPct(tst.cagr)} Sharpe=${fmt(tst.sharpe,2)} MDD=${fmtPct(tst.max_drawdown)}</td></tr>`;
+          const trn =
+            wf.train &&
+            wf.train.strategy &&
+            wf.train.strategy.metrics &&
+            wf.train.strategy.metrics.strategy
+              ? wf.train.strategy.metrics.strategy
+              : {};
+          const tst =
+            wf.test &&
+            wf.test.strategy &&
+            wf.test.strategy.metrics &&
+            wf.test.strategy.metrics.strategy
+              ? wf.test.strategy.metrics.strategy
+              : {};
+          wfHtml += `<tr><td>Walk-forward 选参</td><td>objective=${wf.objective}, lag=${ch.lag}, thr_q=${ch.thr_q}, thr_abs=${fmt(ch.thr_abs, 6)}, corr_train=${fmt(ch.corr_train, 4)}</td></tr>`;
+          wfHtml += `<tr><td>训练段</td><td>${wf.train.start} ~ ${wf.train.end} | CAGR=${fmtPct(trn.cagr)} Sharpe=${fmt(trn.sharpe, 2)} MDD=${fmtPct(trn.max_drawdown)}</td></tr>`;
+          wfHtml += `<tr><td>测试段</td><td>${wf.test.start} ~ ${wf.test.end} | CAGR=${fmtPct(tst.cagr)} Sharpe=${fmt(tst.sharpe, 2)} MDD=${fmtPct(tst.max_drawdown)}</td></tr>`;
         } else {
           wfHtml += `<tr><td>Walk-forward</td><td>无法计算（${wf && wf.reason ? wf.reason : "样本不足"}）</td></tr>`;
         }
@@ -770,10 +1035,12 @@
           const el = $("timingCompare");
           if (!el) return;
           if (!rows || !rows.length) {
-            el.innerHTML = "<tr><td class='muted'>未启用择时或样本不足</td></tr>";
+            el.innerHTML =
+              "<tr><td class='muted'>未启用择时或样本不足</td></tr>";
             return;
           }
-          let html = "<tr><th>策略</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>备注</th></tr>";
+          let html =
+            "<tr><th>策略</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>备注</th></tr>";
           for (const r of rows) {
             html += `<tr><td>${r.name}</td><td>${r.cagr}</td><td>${r.vol}</td><td>${r.sharpe}</td><td>${r.mdd}</td><td>${r.note || ""}</td></tr>`;
           }
@@ -781,7 +1048,10 @@
         }
 
         function metricRow(name, ms, note) {
-          const fmtPct2 = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+          const fmtPct2 = (x) =>
+            Number.isFinite(Number(x))
+              ? (Number(x) * 100).toFixed(2) + "%"
+              : "";
           return {
             name,
             cagr: fmtPct2(ms && ms.cagr),
@@ -793,28 +1063,42 @@
         }
 
         async function runProxyTimingCompare() {
-          const enabled = Boolean($("volOn").checked) && Boolean($("proxyOn").checked);
+          const enabled =
+            Boolean($("volOn").checked) && Boolean($("proxyOn").checked);
           if (!enabled) {
             renderTimingCompare([]);
             return;
           }
           const rows = [];
           if (vt && vt.ok) {
-            rows.push(metricRow("指数波动择时(VXN)", (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {}, "index_level"));
+            rows.push(
+              metricRow(
+                "指数波动择时(VXN)",
+                vt.metrics && vt.metrics.strategy ? vt.metrics.strategy : {},
+                "index_level",
+              ),
+            );
           }
 
           const asset_provider = ($("assetProvider").value || "db").trim();
           if (asset_provider !== "db") {
-            rows.push({ name: "现货波动择时(ETFOHLC)", cagr: "", vol: "", sharpe: "", mdd: "", note: "跳过：仅支持 DB 的 513100" });
+            rows.push({
+              name: "现货波动择时(ETFOHLC)",
+              cagr: "",
+              vol: "",
+              sharpe: "",
+              mdd: "",
+              note: "跳过：仅支持 DB 的 513100",
+            });
             renderTimingCompare(rows);
             return;
           }
 
           const parseNums = (s) =>
-            (String(s || "")
+            String(s || "")
               .split(",")
-              .map(x => Number(String(x).trim()))
-              .filter(x => Number.isFinite(x)));
+              .map((x) => Number(String(x).trim()))
+              .filter((x) => Number.isFinite(x));
           const level_quantiles = parseNums(($("volQs").value || "").trim());
           const level_exposures = parseNums(($("volExps").value || "").trim());
           const level_window = ($("volWindow").value || "all").trim();
@@ -825,7 +1109,7 @@
           const adjust = ($("adjust").value || "hfq").trim();
 
           const methods = [];
-          const add = (id, name, kind, extra={}) => {
+          const add = (id, name, kind, extra = {}) => {
             if (!$(id) || !$(id).checked) return;
             methods.push({ name, kind, window: 20, ann: 252, ...extra });
           };
@@ -833,13 +1117,17 @@
           add("proxy_yz20", "YZ20", "yang_zhang");
           add("proxy_gk20", "GK20", "garman_klass");
           add("proxy_ewma094", "EWMA094", "ewma_close", { ewma_lambda: 0.94 });
-          add("proxy_har252", "HAR252", "har_rv", { har_train_window: 252, har_horizons: [1,5,22] });
+          add("proxy_har252", "HAR252", "har_rv", {
+            har_train_window: 252,
+            har_horizons: [1, 5, 22],
+          });
 
           if (!methods.length) {
             renderTimingCompare(rows);
             return;
           }
-          $("timingCompare").innerHTML = "<tr><td class='muted'>现货波动择时计算中...</td></tr>";
+          $("timingCompare").innerHTML =
+            "<tr><td class='muted'>现货波动择时计算中...</td></tr>";
           try {
             const resp2 = await api("/analysis/vol-proxy-timing", {
               method: "POST",
@@ -859,22 +1147,52 @@
             });
             const d2 = await resp2.json();
             if (!d2 || !d2.ok) {
-              rows.push({ name: "现货波动择时(ETFOHLC)", cagr: "", vol: "", sharpe: "", mdd: "", note: `失败：${d2 && (d2.error || "unknown")}` });
+              rows.push({
+                name: "现货波动择时(ETFOHLC)",
+                cagr: "",
+                vol: "",
+                sharpe: "",
+                mdd: "",
+                note: `失败：${d2 && (d2.error || "unknown")}`,
+              });
               renderTimingCompare(rows);
               return;
             }
             const ms = d2.methods || {};
             for (const [k, v] of Object.entries(ms)) {
               if (!v || !v.ok) {
-                rows.push({ name: `现货波动择时(${k})`, cagr: "", vol: "", sharpe: "", mdd: "", note: `失败：${v && v.error ? v.error : "bad"}` });
+                rows.push({
+                  name: `现货波动择时(${k})`,
+                  cagr: "",
+                  vol: "",
+                  sharpe: "",
+                  mdd: "",
+                  note: `失败：${v && v.error ? v.error : "bad"}`,
+                });
                 continue;
               }
-              const mstr = (v.metrics && v.metrics.strategy) ? v.metrics.strategy : {};
-              rows.push(metricRow(`现货波动择时(${k})`, mstr, (v.thresholds_abs_train ? `thr=${(v.thresholds_abs_train || []).map(x => fmt(x,3)).join(",")}` : "")));
+              const mstr =
+                v.metrics && v.metrics.strategy ? v.metrics.strategy : {};
+              rows.push(
+                metricRow(
+                  `现货波动择时(${k})`,
+                  mstr,
+                  v.thresholds_abs_train
+                    ? `thr=${(v.thresholds_abs_train || []).map((x) => fmt(x, 3)).join(",")}`
+                    : "",
+                ),
+              );
             }
             renderTimingCompare(rows);
           } catch (e) {
-            rows.push({ name: "现货波动择时(ETFOHLC)", cagr: "", vol: "", sharpe: "", mdd: "", note: `异常：${e && e.message ? e.message : String(e)}` });
+            rows.push({
+              name: "现货波动择时(ETFOHLC)",
+              cagr: "",
+              vol: "",
+              sharpe: "",
+              mdd: "",
+              note: `异常：${e && e.message ? e.message : String(e)}`,
+            });
             renderTimingCompare(rows);
           }
         }
@@ -883,33 +1201,94 @@
       }
 
       function renderCharts(res) {
-        const dates = (res && res.series && res.series.dates) ? res.series.dates : [];
-        const etfClose = (res && res.series && res.series.etf_close) ? res.series.etf_close : [];
-        const idxClose = (res && res.series && res.series.idx_close) ? res.series.idx_close : [];
-        const etfRet = (res && res.series && res.series.etf_ret) ? res.series.etf_ret : [];
-        const idxRet = (res && res.series && res.series.idx_ret) ? res.series.idx_ret : [];
+        const dates =
+          res && res.series && res.series.dates ? res.series.dates : [];
+        const etfClose =
+          res && res.series && res.series.etf_close ? res.series.etf_close : [];
+        const idxClose =
+          res && res.series && res.series.idx_close ? res.series.idx_close : [];
+        const etfRet =
+          res && res.series && res.series.etf_ret ? res.series.etf_ret : [];
+        const idxRet =
+          res && res.series && res.series.idx_ret ? res.series.idx_ret : [];
 
         const etf0 = Number(etfClose[0] || 1);
         const idx0 = Number(idxClose[0] || 1);
-        const etfNorm = etfClose.map(v => Number(v) / etf0);
-        const idxNorm = idxClose.map(v => Number(v) / idx0);
-        const assetName = (res && res.meta && (res.meta.asset_symbol || res.meta.etf_code)) ? (res.meta.asset_symbol || res.meta.etf_code) : "ASSET";
-        const idxName = (res && res.meta && (res.meta.index || res.meta.symbol || res.meta.series_id)) ? (res.meta.index || res.meta.symbol || res.meta.series_id) : "INDEX";
+        const etfNorm = etfClose.map((v) => Number(v) / etf0);
+        const idxNorm = idxClose.map((v) => Number(v) / idx0);
+        const assetName =
+          res && res.meta && (res.meta.asset_symbol || res.meta.etf_code)
+            ? res.meta.asset_symbol || res.meta.etf_code
+            : "ASSET";
+        const idxName =
+          res &&
+          res.meta &&
+          (res.meta.index || res.meta.symbol || res.meta.series_id)
+            ? res.meta.index || res.meta.symbol || res.meta.series_id
+            : "INDEX";
 
-        Plotly.newPlot("pxChart", [
-          { x: dates, y: etfNorm, name: `${assetName} close(归一化)`, type: "scatter", mode: "lines" },
-          { x: dates, y: idxNorm, name: `${idxName} close(归一化)`, type: "scatter", mode: "lines" },
-        ], { margin: { t: 20 } }, { displayModeBar: false });
+        Plotly.newPlot(
+          "pxChart",
+          [
+            {
+              x: dates,
+              y: etfNorm,
+              name: `${assetName} close(归一化)`,
+              type: "scatter",
+              mode: "lines",
+            },
+            {
+              x: dates,
+              y: idxNorm,
+              name: `${idxName} close(归一化)`,
+              type: "scatter",
+              mode: "lines",
+            },
+          ],
+          { margin: { t: 20 } },
+          { displayModeBar: false },
+        );
 
-        Plotly.newPlot("retChart", [
-          { x: dates, y: etfRet, name: "ETF log-ret", type: "scatter", mode: "lines" },
-          { x: dates, y: idxRet, name: "Index log-ret", type: "scatter", mode: "lines" },
-        ], { margin: { t: 20 } }, { displayModeBar: false });
+        Plotly.newPlot(
+          "retChart",
+          [
+            {
+              x: dates,
+              y: etfRet,
+              name: "ETF log-ret",
+              type: "scatter",
+              mode: "lines",
+            },
+            {
+              x: dates,
+              y: idxRet,
+              name: "Index log-ret",
+              type: "scatter",
+              mode: "lines",
+            },
+          ],
+          { margin: { t: 20 } },
+          { displayModeBar: false },
+        );
 
-        const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-        Plotly.newPlot("xcorrChart", [
-          { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
-        ], { margin: { t: 20 }, xaxis: { title: "lag (days)" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+        const xs = res && res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+        Plotly.newPlot(
+          "xcorrChart",
+          [
+            {
+              x: xs.map((r) => r.lag),
+              y: xs.map((r) => r.corr),
+              type: "bar",
+              name: "corr",
+            },
+          ],
+          {
+            margin: { t: 20 },
+            xaxis: { title: "lag (days)" },
+            yaxis: { title: "corr" },
+          },
+          { displayModeBar: false },
+        );
       }
 
       function _renderQuantTable(elId, q) {
@@ -926,15 +1305,15 @@
         if (!d || !d.ok) return;
         const m = d.meta || {};
         const s = d.series || {};
-        const c = (d.close || {});
-        const r = (d.ret_log || {});
-        const ch = (c.hist || {});
-        const rh = (r.hist || {});
+        const c = d.close || {};
+        const r = d.ret_log || {};
+        const ch = c.hist || {};
+        const rh = r.hist || {};
 
         const _qShapes = (q, cur) => {
           const qs = q || {};
           const out = [];
-          const mk = (x, color, dash="dot", width=1.5) => {
+          const mk = (x, color, dash = "dot", width = 1.5) => {
             const v = Number(x);
             if (!Number.isFinite(v)) return;
             out.push({
@@ -964,27 +1343,40 @@
         const cbins = ch.bins || [];
         const ccounts = ch.counts || [];
         const cx = cbins.slice(0, Math.max(0, cbins.length - 1));
-        Plotly.newPlot("distCloseChart", [
-          { x: cx, y: ccounts, type: "bar", name: `${m.symbol || ""} close` },
-        ], {
-          margin: { t: 20 },
-          xaxis: { title: "close" },
-          yaxis: { title: "count" },
-          shapes: _qShapes(c.quantiles || {}, c.current),
-        }, { displayModeBar: false });
+        Plotly.newPlot(
+          "distCloseChart",
+          [{ x: cx, y: ccounts, type: "bar", name: `${m.symbol || ""} close` }],
+          {
+            margin: { t: 20 },
+            xaxis: { title: "close" },
+            yaxis: { title: "count" },
+            shapes: _qShapes(c.quantiles || {}, c.current),
+          },
+          { displayModeBar: false },
+        );
         _renderQuantTable("distCloseTable", c.quantiles || {});
 
         const rbins = rh.bins || [];
         const rcounts = rh.counts || [];
         const rx = rbins.slice(0, Math.max(0, rbins.length - 1));
-        Plotly.newPlot("distRetChart", [
-          { x: rx, y: rcounts, type: "bar", name: `${m.symbol || ""} log-ret` },
-        ], {
-          margin: { t: 20 },
-          xaxis: { title: "log-ret" },
-          yaxis: { title: "count" },
-          shapes: _qShapes(r.quantiles || {}, r.current),
-        }, { displayModeBar: false });
+        Plotly.newPlot(
+          "distRetChart",
+          [
+            {
+              x: rx,
+              y: rcounts,
+              type: "bar",
+              name: `${m.symbol || ""} log-ret`,
+            },
+          ],
+          {
+            margin: { t: 20 },
+            xaxis: { title: "log-ret" },
+            yaxis: { title: "count" },
+            shapes: _qShapes(r.quantiles || {}, r.current),
+          },
+          { displayModeBar: false },
+        );
         _renderQuantTable("distRetTable", r.quantiles || {});
 
         // log-scale close + Bollinger Bands (computed in log space)
@@ -993,41 +1385,89 @@
         if (dates.length >= 30 && close.length === dates.length) {
           const W = 20;
           const K = 2.0;
-          const lc = close.map(v => {
+          const lc = close.map((v) => {
             const x = Number(v);
-            return (Number.isFinite(x) && x > 0) ? Math.log(x) : null;
+            return Number.isFinite(x) && x > 0 ? Math.log(x) : null;
           });
           const mid = new Array(lc.length).fill(null);
           const upp = new Array(lc.length).fill(null);
           const low = new Array(lc.length).fill(null);
           for (let i = 0; i < lc.length; i++) {
             if (i + 1 < W) continue;
-            let sum = 0.0, sum2 = 0.0, n = 0;
+            let sum = 0.0,
+              sum2 = 0.0,
+              n = 0;
             for (let j = i - W + 1; j <= i; j++) {
               const v = lc[j];
               if (v == null || !Number.isFinite(v)) continue;
-              sum += v; sum2 += v * v; n += 1;
+              sum += v;
+              sum2 += v * v;
+              n += 1;
             }
             if (n < Math.max(10, Math.floor(W * 0.6))) continue;
             const mu = sum / n;
-            const var0 = Math.max(0.0, (sum2 / n) - mu * mu);
+            const var0 = Math.max(0.0, sum2 / n - mu * mu);
             const sd = Math.sqrt(var0);
             mid[i] = Math.exp(mu);
             upp[i] = Math.exp(mu + K * sd);
             low[i] = Math.exp(mu - K * sd);
           }
-          Plotly.newPlot("distLogBbChart", [
-            { x: dates, y: upp, name: "BB upper", type: "scatter", mode: "lines", line: { color: "rgba(255,127,14,0.75)", width: 1.2 } },
-            { x: dates, y: low, name: "BB lower", type: "scatter", mode: "lines", fill: "tonexty", fillcolor: "rgba(255,127,14,0.15)", line: { color: "rgba(255,127,14,0.75)", width: 1.2 } },
-            { x: dates, y: mid, name: "BB mid", type: "scatter", mode: "lines", line: { color: "rgba(31,119,180,0.9)", width: 1.4, dash: "dot" } },
-            { x: dates, y: close, name: `${m.symbol || ""} close`, type: "scatter", mode: "lines", line: { color: "rgba(17,17,17,0.9)", width: 1.6 } },
-          ], {
-            margin: { t: 20 },
-            yaxis: { type: "log", title: "close（log）" },
-            xaxis: { title: "date" },
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "distLogBbChart",
+            [
+              {
+                x: dates,
+                y: upp,
+                name: "BB upper",
+                type: "scatter",
+                mode: "lines",
+                line: { color: "rgba(255,127,14,0.75)", width: 1.2 },
+              },
+              {
+                x: dates,
+                y: low,
+                name: "BB lower",
+                type: "scatter",
+                mode: "lines",
+                fill: "tonexty",
+                fillcolor: "rgba(255,127,14,0.15)",
+                line: { color: "rgba(255,127,14,0.75)", width: 1.2 },
+              },
+              {
+                x: dates,
+                y: mid,
+                name: "BB mid",
+                type: "scatter",
+                mode: "lines",
+                line: {
+                  color: "rgba(31,119,180,0.9)",
+                  width: 1.4,
+                  dash: "dot",
+                },
+              },
+              {
+                x: dates,
+                y: close,
+                name: `${m.symbol || ""} close`,
+                type: "scatter",
+                mode: "lines",
+                line: { color: "rgba(17,17,17,0.9)", width: 1.6 },
+              },
+            ],
+            {
+              margin: { t: 20 },
+              yaxis: { type: "log", title: "close（log）" },
+              xaxis: { title: "date" },
+            },
+            { displayModeBar: false },
+          );
         } else {
-          Plotly.newPlot("distLogBbChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+          Plotly.newPlot(
+            "distLogBbChart",
+            [],
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
         }
       }
 
@@ -1039,22 +1479,53 @@
         const navB = s.nav_buy_hold || [];
         const navX = s.nav_excess || [];
         const idxClose = s.idx_close || [];
-        Plotly.newPlot("vixBtChart", [
-          { x: dates, y: navS, name: "信号策略NAV", type: "scatter", mode: "lines" },
-          { x: dates, y: navB, name: "买入并持有NAV", type: "scatter", mode: "lines" },
-          ...(navX && navX.length ? [{ x: dates, y: navX, name: "超额NAV", type: "scatter", mode: "lines", line: { dash: "dot" } }] : []),
-        ], { margin: { t: 20 } }, { displayModeBar: false });
+        Plotly.newPlot(
+          "vixBtChart",
+          [
+            {
+              x: dates,
+              y: navS,
+              name: "信号策略NAV",
+              type: "scatter",
+              mode: "lines",
+            },
+            {
+              x: dates,
+              y: navB,
+              name: "买入并持有NAV",
+              type: "scatter",
+              mode: "lines",
+            },
+            ...(navX && navX.length
+              ? [
+                  {
+                    x: dates,
+                    y: navX,
+                    name: "超额NAV",
+                    type: "scatter",
+                    mode: "lines",
+                    line: { dash: "dot" },
+                  },
+                ]
+              : []),
+          ],
+          { margin: { t: 20 } },
+          { displayModeBar: false },
+        );
 
         const m = bt.metrics || {};
         const ms = m.strategy || {};
         const mb = m.buy_hold || {};
         const mx = m.excess || {};
-        const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
-        const irTxt = (Number.isFinite(Number(mx.information_ratio)) ? fmt(mx.information_ratio, 2) : "");
+        const fmtPct = (x) =>
+          Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "";
+        const irTxt = Number.isFinite(Number(mx.information_ratio))
+          ? fmt(mx.information_ratio, 2)
+          : "";
         $("vixBtMetrics").textContent =
-          `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} Sortino=${fmt(ms.sortino,2)} Calmar=${fmt(ms.calmar,2)} ` +
-          `MDD=${fmtPct(ms.max_drawdown)} UI=${fmt(ms.ulcer_index,2)} UPI=${fmt(ms.ulcer_performance_index,2)} | ` +
-          `买入并持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe,2)} MDD=${fmtPct(mb.max_drawdown)} | ` +
+          `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe, 2)} Sortino=${fmt(ms.sortino, 2)} Calmar=${fmt(ms.calmar, 2)} ` +
+          `MDD=${fmtPct(ms.max_drawdown)} UI=${fmt(ms.ulcer_index, 2)} UPI=${fmt(ms.ulcer_performance_index, 2)} | ` +
+          `买入并持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe, 2)} MDD=${fmtPct(mb.max_drawdown)} | ` +
           `超额：IR=${irTxt}`;
 
         // Biweekly (approx) compare: sample every ~10 trading days
@@ -1065,24 +1536,53 @@
           const bNavB = [];
           const bIdx = [];
           for (let i = 0; i < dates.length; i++) {
-            if (i === 0 || i === dates.length - 1 || (i % step === 0)) {
+            if (i === 0 || i === dates.length - 1 || i % step === 0) {
               bd.push(dates[i]);
               bNavS.push(navS[i]);
               bNavB.push(navB[i]);
               bIdx.push(idxClose[i]);
             }
           }
-          Plotly.newPlot("vixBtBiweeklyChart", [
-            { x: bd, y: bIdx, name: "VXN(level,对齐后)", type: "scatter", mode: "lines+markers", yaxis: "y2" },
-            { x: bd, y: bNavS, name: "策略NAV", type: "scatter", mode: "lines+markers" },
-            { x: bd, y: bNavB, name: "买入持有NAV", type: "scatter", mode: "lines+markers" },
-          ], {
-            margin: { t: 20 },
-            yaxis: { title: "NAV" },
-            yaxis2: { title: "VXN", overlaying: "y", side: "right" },
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "vixBtBiweeklyChart",
+            [
+              {
+                x: bd,
+                y: bIdx,
+                name: "VXN(level,对齐后)",
+                type: "scatter",
+                mode: "lines+markers",
+                yaxis: "y2",
+              },
+              {
+                x: bd,
+                y: bNavS,
+                name: "策略NAV",
+                type: "scatter",
+                mode: "lines+markers",
+              },
+              {
+                x: bd,
+                y: bNavB,
+                name: "买入持有NAV",
+                type: "scatter",
+                mode: "lines+markers",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              yaxis: { title: "NAV" },
+              yaxis2: { title: "VXN", overlaying: "y", side: "right" },
+            },
+            { displayModeBar: false },
+          );
         } catch {
-          Plotly.newPlot("vixBtBiweeklyChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+          Plotly.newPlot(
+            "vixBtBiweeklyChart",
+            [],
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
         }
 
         // Period return stats & distributions (strategy/buy_hold/excess)
@@ -1098,27 +1598,33 @@
         }
 
         const trades = bt.trades || [];
-        const lim = Math.max(1, Number(($("vixLogLimit").value || "300").trim()));
+        const lim = Math.max(
+          1,
+          Number(($("vixLogLimit").value || "300").trim()),
+        );
         const shown = trades.slice(0, lim);
-        let html = "<tr><th>date(CN)</th><th>action</th><th>pos</th><th>IDX_us_date</th><th>IDX_close</th><th>IDX_log_ret</th><th>thr</th><th>active</th><th>ETF_open</th><th>ETF_ret(exec)</th><th>NAV</th><th>BH_NAV</th><th>EX_NAV</th></tr>";
+        let html =
+          "<tr><th>date(CN)</th><th>action</th><th>pos</th><th>IDX_us_date</th><th>IDX_close</th><th>IDX_log_ret</th><th>thr</th><th>active</th><th>ETF_open</th><th>ETF_ret(exec)</th><th>NAV</th><th>BH_NAV</th><th>EX_NAV</th></tr>";
         for (const r of shown) {
           const act = (r.action || "").toUpperCase();
-          const bg = act === "BUY" ? "#e6fffb" : (act === "SELL" ? "#fff1f0" : "");
-          html += `<tr${bg ? ` style="background:${bg}"` : ""}>` +
+          const bg =
+            act === "BUY" ? "#e6fffb" : act === "SELL" ? "#fff1f0" : "";
+          html +=
+            `<tr${bg ? ` style="background:${bg}"` : ""}>` +
             `<td>${r.date || ""}</td>` +
             `<td>${act}</td>` +
             `<td>${r.position || ""}</td>` +
             `<td>${r.idx_us_date || ""}</td>` +
-            `<td>${fmt(r.idx_close,2)}</td>` +
-            `<td>${fmt(r.idx_log_ret,6)}</td>` +
-            `<td>${fmt(r.thr_eff,6)}</td>` +
+            `<td>${fmt(r.idx_close, 2)}</td>` +
+            `<td>${fmt(r.idx_log_ret, 6)}</td>` +
+            `<td>${fmt(r.thr_eff, 6)}</td>` +
             `<td>${r.sig_active ? "Y" : ""}</td>` +
-            `<td>${fmt(r.etf_open,4)}</td>` +
-            `<td>${fmt(r.etf_ret_exec,6)}</td>` +
-            `<td>${fmt(r.nav_strategy,4)}</td>` +
-            `<td>${fmt(r.nav_buy_hold,4)}</td>` +
-            `<td>${fmt(r.nav_excess,4)}</td>` +
-          `</tr>`;
+            `<td>${fmt(r.etf_open, 4)}</td>` +
+            `<td>${fmt(r.etf_ret_exec, 6)}</td>` +
+            `<td>${fmt(r.nav_strategy, 4)}</td>` +
+            `<td>${fmt(r.nav_buy_hold, 4)}</td>` +
+            `<td>${fmt(r.nav_excess, 4)}</td>` +
+            `</tr>`;
         }
         const note = `<tr><td colspan="13" class="muted">总记录=${trades.length}，当前显示前 ${shown.length} 条（按日期倒序）。</td></tr>`;
         $("vixBtTrades").innerHTML = html + note;
@@ -1133,26 +1639,66 @@
 
         // histogram (overlay three)
         try {
-          const s1 = (one.strategy || []).map(r => Number(r.return)).filter(Number.isFinite);
-          const b1 = (one.buy_hold || []).map(r => Number(r.return)).filter(Number.isFinite);
-          const x1 = (one.excess || []).map(r => Number(r.return)).filter(Number.isFinite);
-          Plotly.newPlot("vixPerfHist", [
-            { x: s1, type: "histogram", name: "策略", opacity: 0.55 },
-            { x: b1, type: "histogram", name: "买入持有", opacity: 0.45 },
-            { x: x1, type: "histogram", name: "超额", opacity: 0.45 },
-          ], { margin: { t: 20 }, barmode: "overlay", xaxis: { title: "return" }, yaxis: { title: "count" } }, { displayModeBar: false });
+          const s1 = (one.strategy || [])
+            .map((r) => Number(r.return))
+            .filter(Number.isFinite);
+          const b1 = (one.buy_hold || [])
+            .map((r) => Number(r.return))
+            .filter(Number.isFinite);
+          const x1 = (one.excess || [])
+            .map((r) => Number(r.return))
+            .filter(Number.isFinite);
+          Plotly.newPlot(
+            "vixPerfHist",
+            [
+              { x: s1, type: "histogram", name: "策略", opacity: 0.55 },
+              { x: b1, type: "histogram", name: "买入持有", opacity: 0.45 },
+              { x: x1, type: "histogram", name: "超额", opacity: 0.45 },
+            ],
+            {
+              margin: { t: 20 },
+              barmode: "overlay",
+              xaxis: { title: "return" },
+              yaxis: { title: "count" },
+            },
+            { displayModeBar: false },
+          );
         } catch {
-          Plotly.newPlot("vixPerfHist", [], { margin: { t: 20 } }, { displayModeBar: false });
+          Plotly.newPlot(
+            "vixPerfHist",
+            [],
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
         }
 
         // stats table
-        const keys = ["count","mean","std","min","p01","p05","p10","p25","p50","p75","p90","p95","p99","max","pos_ratio"];
+        const keys = [
+          "count",
+          "mean",
+          "std",
+          "min",
+          "p01",
+          "p05",
+          "p10",
+          "p25",
+          "p50",
+          "p75",
+          "p90",
+          "p95",
+          "p99",
+          "max",
+          "pos_ratio",
+        ];
         function row(name, s) {
           let tds = `<td>${name}</td>`;
           for (const k of keys) tds += `<td>${fmt(s ? s[k] : null, 6)}</td>`;
           return `<tr>${tds}</tr>`;
         }
-        let html = "<tr><th>组</th>" + keys.map(k => `<th>${k}</th>`).join("") + "</tr>";
+        let html =
+          "<tr><th>组</th>" +
+          keys.map((k) => `<th>${k}</th>`).join("") +
+          "</tr>";
         html += row("策略", d1.strategy || {});
         html += row("买入持有", d1.buy_hold || {});
         html += row("超额", d1.excess || {});
@@ -1163,7 +1709,8 @@
         const rows = (one.strategy || []).slice(-lim).reverse();
         const rowsB = (one.buy_hold || []).slice(-lim).reverse();
         const rowsX = (one.excess || []).slice(-lim).reverse();
-        let h2 = "<tr><th>period_end</th><th>策略</th><th>买入持有</th><th>超额</th></tr>";
+        let h2 =
+          "<tr><th>period_end</th><th>策略</th><th>买入持有</th><th>超额</th></tr>";
         const n = Math.max(rows.length, rowsB.length, rowsX.length);
         for (let i = 0; i < n; i++) {
           const a = rows[i] || {};
@@ -1190,17 +1737,23 @@
         const walk_objective = ($("wfObj").value || "sharpe").trim();
         const vol_timing = Boolean($("volOn").checked);
         const parseNums = (s) =>
-          (String(s || "")
+          String(s || "")
             .split(",")
-            .map(x => Number(String(x).trim()))
-            .filter(x => Number.isFinite(x)));
+            .map((x) => Number(String(x).trim()))
+            .filter((x) => Number.isFinite(x));
         const vol_level_quantiles = parseNums(($("volQs").value || "").trim());
-        const vol_level_exposures = parseNums(($("volExps").value || "").trim());
+        const vol_level_exposures = parseNums(
+          ($("volExps").value || "").trim(),
+        );
         const vol_level_window = ($("volWindow").value || "all").trim();
         const asset_provider = ($("assetProvider").value || "db").trim();
         const asset_symbol = ($("assetSymbol").value || "").trim();
         const preset = ($("assetPreset").value || "").trim();
-        const label = preset.includes("stooq:^ndx") ? "NDX" : (preset.includes("stooq:qqq.us") ? "QQQ" : "513100");
+        const label = preset.includes("stooq:^ndx")
+          ? "NDX"
+          : preset.includes("stooq:qqq.us")
+            ? "QQQ"
+            : "513100";
 
         setMsg("运行中...");
         const resp = await api("/analysis/leadlag", {
@@ -1250,7 +1803,9 @@
         });
         const data = await resp.json();
         if (!data || !data.ok) {
-          setMsg(`分布统计失败：${data && (data.error || JSON.stringify(data))}`);
+          setMsg(
+            `分布统计失败：${data && (data.error || JSON.stringify(data))}`,
+          );
           return;
         }
         renderIndexDist(data);
@@ -1336,4 +1891,3 @@
     </script>
   </body>
 </html>
-

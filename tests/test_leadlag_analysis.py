@@ -19,7 +19,15 @@ def test_leadlag_detects_leading_relation_by_best_lag():
     idx_close = pd.Series(np.exp(np.cumsum(idx_ret)), index=list(dates))
     etf_close = pd.Series(np.exp(np.cumsum(etf_ret)), index=list(dates))
 
-    out = compute_lead_lag(LeadLagInputs(etf_close=etf_close, idx_close=idx_close, max_lag=5, granger_max_lag=3, alpha=0.2))
+    out = compute_lead_lag(
+        LeadLagInputs(
+            etf_close=etf_close,
+            idx_close=idx_close,
+            max_lag=5,
+            granger_max_lag=3,
+            alpha=0.2,
+        )
+    )
     assert out["ok"] is True
     best = out["corr"]["best"]
     assert int(best["lag"]) == 1
@@ -33,4 +41,3 @@ def test_leadlag_cn_next_trading_day_alignment_moves_friday_to_monday():
     aligned = align_us_close_to_cn_next_trading_day(idx_close)
     assert aligned.index.tolist() == [pd.Timestamp("2024-01-08").date()]
     assert float(aligned.iloc[0]) == 10.0
-

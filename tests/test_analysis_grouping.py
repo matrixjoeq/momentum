@@ -26,7 +26,9 @@ def test_suggest_asset_groups_returns_mapping(session_factory):
             base = 100.0 + i * 0.5
             _add_price(db, code="A1", day=d, close=base)
             _add_price(db, code="A2", day=d, close=base * 1.001)
-            _add_price(db, code="B1", day=d, close=90.0 + i * 0.1 + (1 if (i % 2 == 0) else -1))
+            _add_price(
+                db, code="B1", day=d, close=90.0 + i * 0.1 + (1 if (i % 2 == 0) else -1)
+            )
         db.commit()
 
         out = suggest_asset_groups(

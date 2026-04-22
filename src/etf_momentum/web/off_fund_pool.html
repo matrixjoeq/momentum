@@ -34,14 +34,17 @@
   </head>
   <body>
     <h2>场外基金候选池配置</h2>
-    <div class="muted">数据源：AkShare/Eastmoney。落库到独立表（off_fund_*），与 ETF 与宏观数据完全隔离。</div>
+    <div class="muted">
+      数据源：AkShare/Eastmoney。落库到独立表（off_fund_*），与 ETF
+      与宏观数据完全隔离。
+    </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/">ETF 候选池</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/futures-pool">期货标的池</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research">ETF 研究</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research/off-fund">场外基金研究</a>
     </div>
 
@@ -91,10 +94,13 @@
       (function initThemeToggle() {
         const key = `theme:${location.pathname}`;
         const html = document.documentElement;
-        const nextTheme = () => (html.getAttribute("data-theme") === "light" ? "dark" : "light");
+        const nextTheme = () =>
+          html.getAttribute("data-theme") === "light" ? "dark" : "light";
         const apply = (theme) => {
           html.setAttribute("data-theme", theme);
-          try { localStorage.setItem(key, theme); } catch (_) {}
+          try {
+            localStorage.setItem(key, theme);
+          } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
         };
@@ -109,7 +115,11 @@
         });
       })();
 
-      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const api = (path, opts) =>
+        fetch(`/api${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
       const $ = (id) => document.getElementById(id);
       const setMsg = (t) => ($("msg").textContent = t || "");
       const selected = new Set();
@@ -140,7 +150,10 @@
         for (const it of data) {
           const tr = document.createElement("tr");
           const cfgRange = `${it.start_date || "-"} ~ ${it.end_date || "-"}`;
-          const dataRange = it.last_data_start_date && it.last_data_end_date ? `${it.last_data_start_date} ~ ${it.last_data_end_date}` : "没有";
+          const dataRange =
+            it.last_data_start_date && it.last_data_end_date
+              ? `${it.last_data_start_date} ~ ${it.last_data_end_date}`
+              : "没有";
           const st = it.last_fetch_status || "";
           const msg = it.last_fetch_message || "";
           const checked = selected.has(it.code) ? "checked" : "";
@@ -172,16 +185,25 @@
           start_date: $("start").value.trim() || null,
           end_date: $("end").value.trim() || null,
         };
-        const resp = await api("/off-fund", { method: "POST", body: JSON.stringify(payload) });
+        const resp = await api("/off-fund", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
-        $("code").value = ""; $("name").value = ""; $("start").value = ""; $("end").value = "";
+        $("code").value = "";
+        $("name").value = "";
+        $("start").value = "";
+        $("end").value = "";
         await refresh();
       });
 
       $("fetchAll").addEventListener("click", async () => {
         setMsg("off-fund fetch-all...");
-        const resp = await api("/off-fund/fetch-all", { method: "POST", body: "{}" });
+        const resp = await api("/off-fund/fetch-all", {
+          method: "POST",
+          body: "{}",
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -215,7 +237,10 @@
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何基金。");
         setMsg(`off-fund fetch-selected: ${codes.join(", ")} ...`);
-        const resp = await api("/off-fund/fetch-selected", { method: "POST", body: JSON.stringify({ codes }) });
+        const resp = await api("/off-fund/fetch-selected", {
+          method: "POST",
+          body: JSON.stringify({ codes }),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -225,11 +250,14 @@
       $("deleteSelected").addEventListener("click", async () => {
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何基金。");
-        if (!confirm(
-          `确认彻底删除所选 ${codes.length} 个场外基金？\n${codes.join(", ")}\n\n` +
-          `将删除：\n- 候选池记录\n- 全部净值数据（none/qfq/hfq）\n- 分红/拆分事件数据\n\n` +
-          `此操作不可恢复。`
-        )) return;
+        if (
+          !confirm(
+            `确认彻底删除所选 ${codes.length} 个场外基金？\n${codes.join(", ")}\n\n` +
+              `将删除：\n- 候选池记录\n- 全部净值数据（none/qfq/hfq）\n- 分红/拆分事件数据\n\n` +
+              `此操作不可恢复。`,
+          )
+        )
+          return;
         setMsg(`正在删除所选 ${codes.length} 个基金...`);
         const failed = [];
         for (const code of codes) {
@@ -247,7 +275,9 @@
         }
         await refresh();
         if (failed.length > 0) {
-          setMsg(`部分删除失败（${failed.length}/${codes.length}）：${failed.join(" | ")}`);
+          setMsg(
+            `部分删除失败（${failed.length}/${codes.length}）：${failed.join(" | ")}`,
+          );
         } else {
           setMsg(`删除成功：共 ${codes.length} 个基金。`);
         }
@@ -269,11 +299,14 @@
         const tr = btn.closest("tr");
         const it = tr && tr.dataset.item ? JSON.parse(tr.dataset.item) : null;
         if (act === "del") {
-          if (!confirm(
-            `将彻底删除 ${code}：\n\n` +
-            `- 候选池记录\n- 全部净值数据（none/qfq/hfq）\n- 分红/拆分事件数据\n\n` +
-            `此操作不可恢复，确认继续？`
-          )) return;
+          if (
+            !confirm(
+              `将彻底删除 ${code}：\n\n` +
+                `- 候选池记录\n- 全部净值数据（none/qfq/hfq）\n- 分红/拆分事件数据\n\n` +
+                `此操作不可恢复，确认继续？`,
+            )
+          )
+            return;
           const resp = await api(`/off-fund/${code}`, { method: "DELETE" });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
@@ -290,7 +323,10 @@
         }
         if (act === "fetch") {
           setMsg(`off-fund fetch ${code}...`);
-          const resp = await api(`/off-fund/${code}/fetch`, { method: "POST", body: "{}" });
+          const resp = await api(`/off-fund/${code}/fetch`, {
+            method: "POST",
+            body: "{}",
+          });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
           setMsg(text);
@@ -302,5 +338,4 @@
       refresh().catch((e) => setMsg(String(e)));
     </script>
   </body>
-  </html>
-
+</html>

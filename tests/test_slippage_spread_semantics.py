@@ -3,8 +3,12 @@ from __future__ import annotations
 import pandas as pd
 
 from etf_momentum.analysis.execution_timing import slippage_return_from_turnover
-from etf_momentum.analysis.trend import _trade_returns_from_weight_series as trend_trade_returns
-from etf_momentum.strategy.rotation import _trade_returns_from_weight_series as rotation_trade_returns
+from etf_momentum.analysis.trend import (
+    _trade_returns_from_weight_series as trend_trade_returns,
+)
+from etf_momentum.strategy.rotation import (
+    _trade_returns_from_weight_series as rotation_trade_returns,
+)
 
 
 def test_slippage_spread_scales_with_execution_price():
@@ -13,8 +17,12 @@ def test_slippage_spread_scales_with_execution_price():
     px_low = pd.Series([1.0, 1.0], index=idx, dtype=float)
     px_high = pd.Series([100.0, 100.0], index=idx, dtype=float)
 
-    slip_low = slippage_return_from_turnover(turnover, slippage_spread=0.001, exec_price=px_low)
-    slip_high = slippage_return_from_turnover(turnover, slippage_spread=0.001, exec_price=px_high)
+    slip_low = slippage_return_from_turnover(
+        turnover, slippage_spread=0.001, exec_price=px_low
+    )
+    slip_high = slippage_return_from_turnover(
+        turnover, slippage_spread=0.001, exec_price=px_high
+    )
 
     assert float(slip_low.iloc[0]) == 0.0005
     assert float(slip_high.iloc[0]) == 0.000005

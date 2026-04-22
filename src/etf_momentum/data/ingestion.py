@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught
+
 import datetime as dt
 from dataclasses import dataclass
 
@@ -21,7 +23,12 @@ from ..db.repo import (
     upsert_prices,
 )
 from ..settings import get_settings
-from ..validation.price_validate import PricePoint, ValidationError, ValidationPolicyParams, validate_price_series
+from ..validation.price_validate import (
+    PricePoint,
+    ValidationError,
+    ValidationPolicyParams,
+    validate_price_series,
+)
 
 
 @dataclass(frozen=True)
@@ -38,13 +45,23 @@ def _parse_yyyymmdd(x: str) -> dt.date:
 
 
 def _policy_params_for_pool(db: Session, pool: EtfPool) -> ValidationPolicyParams:
-    policy = get_validation_policy_by_id(db, pool.validation_policy_id) if pool.validation_policy_id else None
+    policy = (
+        get_validation_policy_by_id(db, pool.validation_policy_id)
+        if pool.validation_policy_id
+        else None
+    )
     if policy is None:
         # safe default
         # For ingestion robustness (esp. around splits/dividends or cross-market ETFs),
         # keep a permissive abs-return default; stricter policies can be set per ETF pool.
-        return ValidationPolicyParams(max_abs_return=2.0, max_hl_spread=0.6, max_gap_days=15)
-    max_abs_return = pool.max_abs_return_override if pool.max_abs_return_override is not None else policy.max_abs_return
+        return ValidationPolicyParams(
+            max_abs_return=2.0, max_hl_spread=0.6, max_gap_days=15
+        )
+    max_abs_return = (
+        pool.max_abs_return_override
+        if pool.max_abs_return_override is not None
+        else policy.max_abs_return
+    )
     return ValidationPolicyParams(
         max_abs_return=max_abs_return,
         max_hl_spread=policy.max_hl_spread,
@@ -99,7 +116,9 @@ def ingest_one_etf(
         start_d = _parse_yyyymmdd(start)
         end_d = _parse_yyyymmdd(end)
 
-        pre_fp = compute_price_fingerprint(db, code=code, start_date=start_d, end_date=end_d, adjust=adj)
+        pre_fp = compute_price_fingerprint(
+            db, code=code, start_date=start_d, end_date=end_d, adjust=adj
+        )
 
         rows, fetch_meta = fetch_etf_daily_with_fallback(
             ak=ak,
@@ -137,9 +156,14 @@ def ingest_one_etf(
         ]
 
         # fetch existing rows for touched dates to audit + determine insert/update
-        existing_rows = list_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adj, limit=1000000)
+        existing_rows = list_prices(
+            db, code=code, start_date=start_d, end_date=end_d, adjust=adj, limit=1000000
+        )
         existing_by_date = {r.trade_date: r for r in existing_rows}
-        touched = [(r.trade_date, "update" if r.trade_date in existing_by_date else "insert") for r in rows]
+        touched = [
+            (r.trade_date, "update" if r.trade_date in existing_by_date else "insert")
+            for r in rows
+        ]
 
         # Build series to validate: we validate only fetched rows for now (MVP)
         points = [
@@ -157,7 +181,11 @@ def ingest_one_etf(
         validate_price_series(points, policy=policy_params)
 
         # Audit previous values for those we will update
-        audit_rows = [existing_by_date[r.trade_date] for r in rows if r.trade_date in existing_by_date]
+        audit_rows = [
+            existing_by_date[r.trade_date]
+            for r in rows
+            if r.trade_date in existing_by_date
+        ]
         record_price_audit(db, batch_id=batch.id, rows=audit_rows)
 
         # Record ingestion items
@@ -204,11 +232,20 @@ def ingest_one_etf(
         ]
         validate_price_series(merged_points, policy=policy_params)
 
-        post_fp = compute_price_fingerprint(db, code=code, start_date=start_d, end_date=end_d, adjust=adj)
+        post_fp = compute_price_fingerprint(
+            db, code=code, start_date=start_d, end_date=end_d, adjust=adj
+        )
         # enrich message with fetch-meta (which source used)
-        used_src = (rows[0].source if rows else None)
+        used_src = rows[0].source if rows else None
         msg = f"rows={len(rows)} upserted={n} source={used_src or 'auto'} fallback={bool(fetch_meta.get('fallback_used'))}"
-        update_ingestion_batch(db, batch_id=batch.id, status="success", message=msg, pre_fingerprint=pre_fp, post_fingerprint=post_fp)
+        update_ingestion_batch(
+            db,
+            batch_id=batch.id,
+            status="success",
+            message=msg,
+            pre_fingerprint=pre_fp,
+            post_fingerprint=post_fp,
+        )
         db.commit()
         return IngestResult(batch_id=batch.id, code=code, upserted=n, status="success")
     except Exception as e:  # pylint: disable=broad-exception-caught
@@ -217,5 +254,6 @@ def ingest_one_etf(
         msg = e.to_json() if isinstance(e, ValidationError) else str(e)
         update_ingestion_batch(db, batch_id=batch.id, status="failed", message=msg)
         db.commit()
-        return IngestResult(batch_id=batch.id, code=code, upserted=0, status="failed", message=msg)
-
+        return IngestResult(
+            batch_id=batch.id, code=code, upserted=0, status="failed", message=msg
+        )

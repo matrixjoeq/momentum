@@ -56,7 +56,9 @@ def test_compute_baseline_basic_metrics(session_factory):
     assert out["nav"]["dates"][0] == "2024-01-01"
     assert "EW" in out["nav"]["series"]
     assert out["nav"]["series"]["EW"][0] == pytest.approx(1.0)
-    assert out["metrics"]["cumulative_return"] == pytest.approx(out["nav"]["series"]["EW"][-1] - 1.0, rel=1e-12)
+    assert out["metrics"]["cumulative_return"] == pytest.approx(
+        out["nav"]["series"]["EW"][-1] - 1.0, rel=1e-12
+    )
     assert out["metrics"]["max_drawdown"] <= 0.0
     assert "ulcer_index" in out["metrics"]
     assert out["metrics"]["ulcer_index"] >= 0.0
@@ -166,7 +168,14 @@ def test_compute_baseline_includes_macd_v_distributions(session_factory):
     high_s = close_s * 1.01
     low_s = close_s * 0.99
     prev_close = close_s.shift(1)
-    tr = pd.concat([(high_s - low_s).abs(), (high_s - prev_close).abs(), (low_s - prev_close).abs()], axis=1).max(axis=1)
+    tr = pd.concat(
+        [
+            (high_s - low_s).abs(),
+            (high_s - prev_close).abs(),
+            (low_s - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
     atr26 = tr.ewm(alpha=1.0 / 26.0, adjust=False, min_periods=26).mean()
     ema12 = close_s.ewm(span=12, adjust=False, min_periods=12).mean()
     ema26 = close_s.ewm(span=26, adjust=False, min_periods=26).mean()
@@ -224,8 +233,14 @@ def test_compute_baseline_includes_bias_v_distribution(session_factory):
     low_s = close_s * 0.99
     ma20 = close_s.rolling(window=20, min_periods=5).mean()
     prev_close = close_s.shift(1)
-    tr = pd.concat([(high_s - low_s).abs(), (high_s - prev_close).abs(), (low_s - prev_close).abs()], axis=1).max(axis=1)
+    tr = pd.concat(
+        [
+            (high_s - low_s).abs(),
+            (high_s - prev_close).abs(),
+            (low_s - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
     atr20 = tr.ewm(alpha=1.0 / 20.0, adjust=False, min_periods=20).mean()
     bias_v_s = ((close_s - ma20) / atr20.replace(0.0, pd.NA)).dropna()
     assert bias_v["current"] == pytest.approx(float(bias_v_s.iloc[-1]), rel=1e-12)
-

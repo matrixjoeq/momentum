@@ -18,8 +18,24 @@ def test_backtest_rotation_basic_outputs(session_factory):
         for i, d in enumerate(dates):
             # AAA trends up, BBB flat
             for adj in ("hfq", "qfq", "none"):
-                db.add(EtfPrice(code="AAA", trade_date=d, close=100 + i, source="eastmoney", adjust=adj))
-                db.add(EtfPrice(code="BBB", trade_date=d, close=100, source="eastmoney", adjust=adj))
+                db.add(
+                    EtfPrice(
+                        code="AAA",
+                        trade_date=d,
+                        close=100 + i,
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+                db.add(
+                    EtfPrice(
+                        code="BBB",
+                        trade_date=d,
+                        close=100,
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
         db.commit()
 
         out = backtest_rotation(
@@ -56,8 +72,13 @@ def test_backtest_rotation_basic_outputs(session_factory):
     assert "event_study" in out
     assert (out.get("market_regime") or {}).get("enabled") is True
     assert "strategy_by_dominant_state" in (out.get("market_regime") or {})
-    assert set((out["event_study"] or {}).get("windows", {}).keys()) >= {"1d", "5d", "10d", "20d"}
-    ev1 = (((out.get("event_study") or {}).get("windows") or {}).get("1d") or {})
+    assert set((out["event_study"] or {}).get("windows", {}).keys()) >= {
+        "1d",
+        "5d",
+        "10d",
+        "20d",
+    }
+    ev1 = ((out.get("event_study") or {}).get("windows") or {}).get("1d") or {}
     assert "profit_frequency" in (ev1.get("signal") or {})
     assert "bucket_probabilities" in (ev1.get("signal") or {})
     assert "bucket_profiles" in (ev1.get("signal") or {})
@@ -83,9 +104,33 @@ def test_rotation_close_exec_uses_forward_corp_action_fallback(session_factory):
         none_px = [100.0, 101.0, 102.0, 10.2, 10.3, 10.4, 10.5, 10.6]
         hfq_px = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0]
         for d, p_none, p_hfq in zip(dates, none_px, hfq_px):
-            db.add(EtfPrice(code=code, trade_date=d, close=float(p_none), source="eastmoney", adjust="none"))
-            db.add(EtfPrice(code=code, trade_date=d, close=float(p_hfq), source="eastmoney", adjust="hfq"))
-            db.add(EtfPrice(code=code, trade_date=d, close=float(p_hfq), source="eastmoney", adjust="qfq"))
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(p_none),
+                    source="eastmoney",
+                    adjust="none",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(p_hfq),
+                    source="eastmoney",
+                    adjust="hfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(p_hfq),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
         db.commit()
 
         out = backtest_rotation(
@@ -128,7 +173,9 @@ def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
     with sf() as db:
         n = max(1, len(dates) - 1)
         for k, code in enumerate(codes):
-            drift = 0.00010 + 0.00003 * float(k)  # higher-index codes have stronger trend
+            drift = 0.00010 + 0.00003 * float(
+                k
+            )  # higher-index codes have stronger trend
             for i, d in enumerate(dates):
                 px = 100.0 * ((1.0 + drift) ** (float(i) / float(n) * float(n)))
                 add_price_all_adjustments(
@@ -170,20 +217,20 @@ def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
                 chop_filter=False,
             ),
         )
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
     assert int(overall.get("total_trades") or 0) > 0
     assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())
-    rs = (out.get("r_statistics") or {})
+    rs = out.get("r_statistics") or {}
     assert int(((rs.get("overall") or {}).get("trade_count") or 0) > 0)
     assert "recent_100" in rs
     assert int(((rs.get("recent_100") or {}).get("effective_count") or 0) > 0)
-    assert "sqn" in ((rs.get("overall") or {}))
-    score_pack = (rs.get("trade_system_score") or {})
+    assert "sqn" in (rs.get("overall") or {})
+    score_pack = rs.get("trade_system_score") or {}
     assert "overall" in score_pack
     assert "weights" in score_pack
-    first_trade = ((ts.get("trades") or [None])[0] or {})
+    first_trade = (ts.get("trades") or [None])[0] or {}
     assert "initial_r_amount" in first_trade
     assert "r_multiple" in first_trade
 
@@ -477,7 +524,9 @@ def test_rotation_floating_topk_fallback_to_benchmark_and_anchor_start(session_f
                 slippage_rate=0.0,
             ),
         )
-    assert ((out.get("date_range") or {}).get("start")) == bench_start.strftime("%Y%m%d")
+    assert ((out.get("date_range") or {}).get("start")) == bench_start.strftime(
+        "%Y%m%d"
+    )
     periods = out.get("holdings") or []
     assert periods
     last_picks = sorted([str(x) for x in (periods[-1].get("picks") or [])])

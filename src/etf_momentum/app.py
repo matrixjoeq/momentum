@@ -17,7 +17,9 @@ from .settings import get_settings
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level.upper(), logging.INFO)
+    )
 
     @asynccontextmanager
     async def lifespan(fastapi_app: FastAPI):
@@ -26,11 +28,15 @@ def create_app() -> FastAPI:
         yield
         await stop_auto_sync(fastapi_app)
 
-    fastapi_app = FastAPI(title="ETF Momentum - Pool & Data Service", version="0.1.0", lifespan=lifespan)
+    fastapi_app = FastAPI(
+        title="ETF Momentum - Pool & Data Service", version="0.1.0", lifespan=lifespan
+    )
 
     _web_dir = Path(__file__).resolve().parent / "web"
     if _web_dir.is_dir():
-        fastapi_app.mount("/static", StaticFiles(directory=str(_web_dir)), name="static")
+        fastapi_app.mount(
+            "/static", StaticFiles(directory=str(_web_dir)), name="static"
+        )
 
     @fastapi_app.get("/")
     def index():
@@ -142,4 +148,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

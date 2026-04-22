@@ -4,10 +4,15 @@ const KEY_PID = "portfolio_id";
 
 async function ensureBootstrap() {
   async function ensureVariants(pid) {
-    const vs = await request(`/sim/portfolio/${pid}/variants`, { method: "GET" });
-    const items = (vs && vs.variants) ? vs.variants : [];
+    const vs = await request(`/sim/portfolio/${pid}/variants`, {
+      method: "GET",
+    });
+    const items = vs && vs.variants ? vs.variants : [];
     if (Array.isArray(items) && items.length > 0) return pid;
-    await request(`/sim/portfolio/${pid}/init-fixed-strategy`, { method: "POST", data: {} });
+    await request(`/sim/portfolio/${pid}/init-fixed-strategy`, {
+      method: "POST",
+      data: {},
+    });
     return pid;
   }
 
@@ -19,7 +24,9 @@ async function ensureBootstrap() {
       return cached;
     } catch (e) {
       // cached pid might be invalid (DB reset) or missing variants; fall through
-      try { wx.removeStorageSync(KEY_PID); } catch (_) {}
+      try {
+        wx.removeStorageSync(KEY_PID);
+      } catch (_) {}
     }
   }
 
@@ -33,7 +40,10 @@ async function ensureBootstrap() {
   }
 
   // 3) create default portfolio
-  const created = await request("/sim/portfolio", { method: "POST", data: { name: "默认账户", initial_cash: 1000000 } });
+  const created = await request("/sim/portfolio", {
+    method: "POST",
+    data: { name: "默认账户", initial_cash: 1000000 },
+  });
   const pid = created.id;
   wx.setStorageSync(KEY_PID, pid);
 
@@ -43,4 +53,3 @@ async function ensureBootstrap() {
 }
 
 module.exports = { ensureBootstrap };
-

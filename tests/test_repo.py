@@ -17,7 +17,13 @@ from etf_momentum.db.repo import (
 
 def test_etf_pool_crud(session_factory: sessionmaker) -> None:
     with session_factory() as db:
-        obj = upsert_etf_pool(db, code="510300", name="沪深300ETF", start_date="20200101", end_date="20201231")
+        obj = upsert_etf_pool(
+            db,
+            code="510300",
+            name="沪深300ETF",
+            start_date="20200101",
+            end_date="20201231",
+        )
         db.commit()
         assert obj.id > 0
 
@@ -26,7 +32,9 @@ def test_etf_pool_crud(session_factory: sessionmaker) -> None:
         assert [i.code for i in items] == ["510300"]
 
         # update
-        obj2 = upsert_etf_pool(db, code="510300", name="沪深300ETF(更新)", start_date=None, end_date=None)
+        obj2 = upsert_etf_pool(
+            db, code="510300", name="沪深300ETF(更新)", start_date=None, end_date=None
+        )
         db.commit()
         assert obj2.name == "沪深300ETF(更新)"
 
@@ -101,4 +109,3 @@ def test_list_and_delete_prices(session_factory: sessionmaker) -> None:
     with session_factory() as db:
         got2 = list_prices(db, code="510300")
         assert [x.trade_date.isoformat() for x in got2] == ["2024-01-03"]
-

@@ -5,4 +5,3 @@ __all__ = [
     "akshare_tencent_fetcher",
     "multi_source_fetcher",
 ]
-

@@ -46,7 +46,9 @@ def is_trading_day(d: dt.date, *, cal: str = "XSHG") -> bool:
         return True
 
 
-def shift_to_trading_day(d: dt.date, *, shift: str = "prev", cal: str = "XSHG") -> dt.date:
+def shift_to_trading_day(
+    d: dt.date, *, shift: str = "prev", cal: str = "XSHG"
+) -> dt.date:
     """
     If d is a non-trading day, shift to prev/next trading day.
     """
@@ -85,4 +87,3 @@ def trading_days(start: dt.date, end: dt.date, *, cal: str = "XSHG") -> list[dt.
     except xcals.errors.DateOutOfBounds:
         # Fallback: approximate with business days if calendar is out-of-bounds.
         return [x.date() for x in pd.bdate_range(s, e)]
-

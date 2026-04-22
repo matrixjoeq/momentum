@@ -47,12 +47,12 @@ class UniverseConfig:
     name: str = "Custom Universe"
     codes: List[str] = field(default_factory=list)
     description: str = ""
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "codes": self.codes, "description": self.description}
 
 
-@dataclass 
+@dataclass
 class RotationStrategyConfig:
     universe: UniverseConfig = field(default_factory=UniverseConfig)
     score_method: str = "multi_factor"
@@ -69,7 +69,7 @@ class RotationStrategyConfig:
     mom_weight: float = 0.4
     trend_weight: float = 0.3
     vol_weight: float = 0.3
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "universe": self.universe.to_dict(),
@@ -77,15 +77,31 @@ class RotationStrategyConfig:
             "lookback_days": self.lookback_days,
             "top_k": self.top_k,
             "rebalance": self.rebalance,
-            "factor_weights": {"momentum": self.mom_weight, "trend": self.trend_weight, "volatility": self.vol_weight},
+            "factor_weights": {
+                "momentum": self.mom_weight,
+                "trend": self.trend_weight,
+                "volatility": self.vol_weight,
+            },
             "risk_control": {"trend": self.enable_trend_filter},
         }
 
 
 PRESET_UNIVERSES = {
-    "crude_oil": UniverseConfig(name="原油ETF", codes=["501018", "160723", "161129", "160416", "162719", "163208", "162411"], description="7只原油/油气LOF"),
-    "a_core": UniverseConfig(name="A股核心", codes=["510300", "510500", "510880", "510900", "511660"], description="核心A股ETF"),
-    "sector": UniverseConfig(name="行业轮动", codes=["512880", "512690", "512760", "512800", "512780"], description="5大行业ETF"),
+    "crude_oil": UniverseConfig(
+        name="原油ETF",
+        codes=["501018", "160723", "161129", "160416", "162719", "163208", "162411"],
+        description="7只原油/油气LOF",
+    ),
+    "a_core": UniverseConfig(
+        name="A股核心",
+        codes=["510300", "510500", "510880", "510900", "511660"],
+        description="核心A股ETF",
+    ),
+    "sector": UniverseConfig(
+        name="行业轮动",
+        codes=["512880", "512690", "512760", "512800", "512780"],
+        description="5大行业ETF",
+    ),
 }
 
 

@@ -47,7 +47,9 @@ def test_futures_research_groups_state_and_correlation(api_client: TestClient) -
     assert len(data["matrix"]) == 2
     assert len(data["matrix"][0]) == 2
 
-    cov = client.post("/api/futures/research/coverage-summary", json={"range_key": "all"})
+    cov = client.post(
+        "/api/futures/research/coverage-summary", json={"range_key": "all"}
+    )
     assert cov.status_code == 200
     cs = cov.json()
     assert cs["ok"] is True
@@ -71,7 +73,9 @@ def test_futures_research_groups_state_and_correlation(api_client: TestClient) -
     assert "avg_abs_corr" in ps["items"][0]
 
 
-def test_futures_research_groups_import_export_overwrite(api_client: TestClient) -> None:
+def test_futures_research_groups_import_export_overwrite(
+    api_client: TestClient,
+) -> None:
     client = api_client
     post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
     post_json_ok(client, "/api/futures", {"code": "IF0", "name": "股指主连"})
@@ -184,7 +188,9 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert out_open["meta"]["benchmark_price_basis"] == "open"
 
 
-def test_futures_trend_backtest_rejects_invalid_semantics(api_client: TestClient) -> None:
+def test_futures_trend_backtest_rejects_invalid_semantics(
+    api_client: TestClient,
+) -> None:
     client = api_client
     post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
     post_json_ok(client, "/api/futures/RB0/fetch", {})
@@ -196,7 +202,13 @@ def test_futures_trend_backtest_rejects_invalid_semantics(api_client: TestClient
 
     bad_exec = client.post(
         "/api/futures/research/trend-backtest",
-        json={"range_key": "all", "exec_price": "oc2", "fast_ma": 2, "slow_ma": 3, "min_points": 2},
+        json={
+            "range_key": "all",
+            "exec_price": "oc2",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+        },
     )
     assert bad_exec.status_code == 200
     assert bad_exec.json()["ok"] is False

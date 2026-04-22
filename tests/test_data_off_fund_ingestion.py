@@ -48,4 +48,3 @@ def test_build_adjusted_by_events_dividend_adjusts_past_only() -> None:
     assert qfq[dt.date(2024, 1, 2)] < unit[dt.date(2024, 1, 2)]
     # hfq is positive and available
     assert hfq[dt.date(2024, 1, 1)] > 0
-

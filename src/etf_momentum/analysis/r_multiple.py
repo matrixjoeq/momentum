@@ -43,7 +43,9 @@ def _dist_stats(values: list[float]) -> dict[str, Any]:
     }
 
 
-def _lookup_value(data: pd.Series | pd.DataFrame | None, when: pd.Timestamp, code: str | None = None) -> float:
+def _lookup_value(
+    data: pd.Series | pd.DataFrame | None, when: pd.Timestamp, code: str | None = None
+) -> float:
     if data is None:
         return float("nan")
     if isinstance(data, pd.Series):
@@ -63,8 +65,16 @@ def _group_code(trade: dict[str, Any], default_code: str | None) -> str:
 
 
 def _summarize_group(trades: list[dict[str, Any]]) -> dict[str, Any]:
-    init_r = [float(t["initial_r_amount"]) for t in trades if t.get("initial_r_amount") is not None]
-    init_r_pct = [float(t["initial_r_pct_nav"]) for t in trades if t.get("initial_r_pct_nav") is not None]
+    init_r = [
+        float(t["initial_r_amount"])
+        for t in trades
+        if t.get("initial_r_amount") is not None
+    ]
+    init_r_pct = [
+        float(t["initial_r_pct_nav"])
+        for t in trades
+        if t.get("initial_r_pct_nav") is not None
+    ]
     r_mult = [float(t["r_multiple"]) for t in trades if t.get("r_multiple") is not None]
     out = {
         "trade_count": int(len(trades)),
@@ -123,12 +133,16 @@ def _sqn_grade(sqn: float | None) -> str | None:
     return "圣杯"
 
 
-def _sqn_summary(trades: list[dict[str, Any]], *, min_trades: int = 30, max_trades: int = 100) -> dict[str, Any]:
+def _sqn_summary(
+    trades: list[dict[str, Any]], *, min_trades: int = 30, max_trades: int = 100
+) -> dict[str, Any]:
     cap = max(1, int(max_trades))
     min_n = max(1, int(min_trades))
     total_n = int(len(trades))
     sampled = _recent_n_trades(trades, cap)
-    r_vals = [float(t["r_multiple"]) for t in sampled if t.get("r_multiple") is not None]
+    r_vals = [
+        float(t["r_multiple"]) for t in sampled if t.get("r_multiple") is not None
+    ]
     used_n = int(len(r_vals))
     if used_n < min_n:
         return {
@@ -175,7 +189,9 @@ def _sqn_summary(trades: list[dict[str, Any]], *, min_trades: int = 30, max_trad
     }
 
 
-def _annualized_sqn_from_summary(sqn_obj: dict[str, Any], annual_trade_count: float | None) -> float | None:
+def _annualized_sqn_from_summary(
+    sqn_obj: dict[str, Any], annual_trade_count: float | None
+) -> float | None:
     s = sqn_obj if isinstance(sqn_obj, dict) else {}
     if not bool(s.get("applicable")):
         return None
@@ -241,7 +257,13 @@ def _trade_system_composite_score(
         }
     n_eff = float(max(0.0, n_used if n_used is not None else 0.0))
     # Clip exponent input to avoid numerical overflow.
-    z = float(np.clip((float(sqn_ann) - float(sqn_center)) / max(float(sqn_scale), 1e-9), -60.0, 60.0))
+    z = float(
+        np.clip(
+            (float(sqn_ann) - float(sqn_center)) / max(float(sqn_scale), 1e-9),
+            -60.0,
+            60.0,
+        )
+    )
     s_sqn = float(1.0 / (1.0 + np.exp(-z)))
     s_ui = float(np.exp(-float(ui) / max(float(ui_tau), 1e-9)))
     c_n = float(min(1.0, np.sqrt(n_eff / 50.0)))
@@ -285,8 +307,12 @@ def _attach_trade_system_scores(
 ) -> dict[str, Any]:
     out = dict(statistics or {})
     overall = (out.get("overall") or {}) if isinstance(out.get("overall"), dict) else {}
-    recent = (out.get("recent_100") or {}) if isinstance(out.get("recent_100"), dict) else {}
-    recent_overall = (recent.get("overall") or {}) if isinstance(recent.get("overall"), dict) else {}
+    recent = (
+        (out.get("recent_100") or {}) if isinstance(out.get("recent_100"), dict) else {}
+    )
+    recent_overall = (
+        (recent.get("overall") or {}) if isinstance(recent.get("overall"), dict) else {}
+    )
 
     overall_score = _trade_system_composite_score(
         sqn_obj=(overall.get("sqn") or {}),
@@ -334,8 +360,16 @@ def _summarize_mfe_group(
     *,
     thresholds: list[float],
 ) -> dict[str, Any]:
-    mfe_vals = [float(t["mfe_r_multiple"]) for t in trades if t.get("mfe_r_multiple") is not None]
-    pullback_vals = [float(t["mfe_drawdown_to_exit_ratio"]) for t in trades if t.get("mfe_drawdown_to_exit_ratio") is not None]
+    mfe_vals = [
+        float(t["mfe_r_multiple"])
+        for t in trades
+        if t.get("mfe_r_multiple") is not None
+    ]
+    pullback_vals = [
+        float(t["mfe_drawdown_to_exit_ratio"])
+        for t in trades
+        if t.get("mfe_drawdown_to_exit_ratio") is not None
+    ]
     out: dict[str, Any] = {
         "trade_count": int(len(trades)),
         "valid_mfe_count": int(len(mfe_vals)),
@@ -380,8 +414,14 @@ def build_trade_mfe_r_distribution(
     recent_window: int = 100,
 ) -> dict[str, Any]:
     atr_n = float(atr_mult) if np.isfinite(float(atr_mult)) else float("nan")
-    thr_src = thresholds if isinstance(thresholds, list) and thresholds else _mfe_default_thresholds()
-    thr = sorted({float(x) for x in thr_src if np.isfinite(float(x)) and float(x) > 0.0})
+    thr_src = (
+        thresholds
+        if isinstance(thresholds, list) and thresholds
+        else _mfe_default_thresholds()
+    )
+    thr = sorted(
+        {float(x) for x in thr_src if np.isfinite(float(x)) and float(x) > 0.0}
+    )
     if not thr:
         thr = _mfe_default_thresholds()
     eps = 1e-12
@@ -403,14 +443,23 @@ def build_trade_mfe_r_distribution(
             continue
         px_entry = _lookup_value(close, entry_ts, code if code != "_ALL_" else None)
         atr_entry = _lookup_value(atr, entry_ts, code if code != "_ALL_" else None)
-        if (not np.isfinite(px_entry)) or px_entry <= 0.0 or (not np.isfinite(atr_n)) or atr_n <= 0.0:
+        if (
+            (not np.isfinite(px_entry))
+            or px_entry <= 0.0
+            or (not np.isfinite(atr_n))
+            or atr_n <= 0.0
+        ):
             tr["mfe_r_multiple"] = None
             tr["exit_close_r_multiple"] = None
             tr["mfe_drawdown_to_exit_ratio"] = None
             out_trades.append(tr)
             grouped.setdefault(code, []).append(tr)
             continue
-        init_r_pct = float(atr_n) * float(atr_entry) / float(px_entry) if (np.isfinite(atr_entry) and atr_entry > 0.0) else float("nan")
+        init_r_pct = (
+            float(atr_n) * float(atr_entry) / float(px_entry)
+            if (np.isfinite(atr_entry) and atr_entry > 0.0)
+            else float("nan")
+        )
         if (not np.isfinite(init_r_pct)) or init_r_pct <= eps:
             tr["mfe_r_multiple"] = None
             tr["exit_close_r_multiple"] = None
@@ -422,13 +471,22 @@ def build_trade_mfe_r_distribution(
         hi_max = float("nan")
         if isinstance(high, pd.Series):
             if (entry_ts in high.index) and (exit_ts in high.index):
-                hi_seg = pd.to_numeric(high.loc[entry_ts:exit_ts], errors="coerce").astype(float)
+                hi_seg = pd.to_numeric(
+                    high.loc[entry_ts:exit_ts], errors="coerce"
+                ).astype(float)
                 if not hi_seg.empty:
                     hi_max = float(hi_seg.max())
         elif isinstance(high, pd.DataFrame):
             key = code if code != "_ALL_" else default_code
-            if key is not None and key in high.columns and (entry_ts in high.index) and (exit_ts in high.index):
-                hi_seg = pd.to_numeric(high.loc[entry_ts:exit_ts, key], errors="coerce").astype(float)
+            if (
+                key is not None
+                and key in high.columns
+                and (entry_ts in high.index)
+                and (exit_ts in high.index)
+            ):
+                hi_seg = pd.to_numeric(
+                    high.loc[entry_ts:exit_ts, key], errors="coerce"
+                ).astype(float)
                 if not hi_seg.empty:
                     hi_max = float(hi_seg.max())
         if not np.isfinite(hi_max):
@@ -466,7 +524,10 @@ def build_trade_mfe_r_distribution(
             "effective_count": int(len(recent)),
             "total_trade_count": int(len(out_trades)),
             "overall": _summarize_mfe_group(recent, thresholds=thr),
-            "by_code": {k: _summarize_mfe_group(v, thresholds=thr) for k, v in grouped_recent.items()},
+            "by_code": {
+                k: _summarize_mfe_group(v, thresholds=thr)
+                for k, v in grouped_recent.items()
+            },
         },
     }
 
@@ -491,10 +552,16 @@ def enrich_trades_with_r_metrics(
     score_ulcer_weight: float = 0.40,
 ) -> dict[str, Any]:
     atr_n = float(atr_mult) if np.isfinite(float(atr_mult)) else float("nan")
-    rb = float(risk_budget_pct) if (risk_budget_pct is not None and np.isfinite(float(risk_budget_pct))) else float("nan")
+    rb = (
+        float(risk_budget_pct)
+        if (risk_budget_pct is not None and np.isfinite(float(risk_budget_pct)))
+        else float("nan")
+    )
     c_bps = max(0.0, float(cost_bps)) if np.isfinite(float(cost_bps)) else 0.0
     slip = max(0.0, float(slippage_rate)) if np.isfinite(float(slippage_rate)) else 0.0
-    gap = max(0.0, float(gap_buffer_rate)) if np.isfinite(float(gap_buffer_rate)) else 0.0
+    gap = (
+        max(0.0, float(gap_buffer_rate)) if np.isfinite(float(gap_buffer_rate)) else 0.0
+    )
 
     nav_s = pd.to_numeric(nav, errors="coerce").astype(float)
     trades_out: list[dict[str, Any]] = []
@@ -530,14 +597,25 @@ def enrich_trades_with_r_metrics(
         nav_entry = _lookup_value(nav_s, entry_ts)
         if (not np.isfinite(nav_entry)) or nav_entry <= 0.0:
             nav_entry = 1.0
-        w_entry = abs(_lookup_value(weights, entry_ts, code if code != "_ALL_" else None))
+        w_entry = abs(
+            _lookup_value(weights, entry_ts, code if code != "_ALL_" else None)
+        )
         w_entry = w_entry if np.isfinite(w_entry) else 0.0
-        px_entry = _lookup_value(exec_price, entry_ts, code if code != "_ALL_" else None)
+        px_entry = _lookup_value(
+            exec_price, entry_ts, code if code != "_ALL_" else None
+        )
         atr_entry = _lookup_value(atr, entry_ts, code if code != "_ALL_" else None)
 
         d_price = float("nan")
         method = "unavailable"
-        if np.isfinite(atr_entry) and atr_entry > 0.0 and np.isfinite(px_entry) and px_entry > 0.0 and np.isfinite(atr_n) and atr_n > 0.0:
+        if (
+            np.isfinite(atr_entry)
+            and atr_entry > 0.0
+            and np.isfinite(px_entry)
+            and px_entry > 0.0
+            and np.isfinite(atr_n)
+            and atr_n > 0.0
+        ):
             d_price = float(atr_n) * float(atr_entry) / float(px_entry)
             method = "atr_proxy"
         elif np.isfinite(rb) and rb > 0.0 and w_entry > eps:
@@ -550,13 +628,21 @@ def enrich_trades_with_r_metrics(
         cost_buffer = float(nav_entry) * float(w_entry) * (float(c_bps) / 10000.0)
         slippage_buffer = 0.0
         if np.isfinite(px_entry) and px_entry > 0.0:
-            slippage_buffer = float(nav_entry) * float(w_entry) * (float(slip) / float(px_entry))
+            slippage_buffer = (
+                float(nav_entry) * float(w_entry) * (float(slip) / float(px_entry))
+            )
         gap_buffer = float(nav_entry) * float(w_entry) * float(gap)
 
         initial_r = float("nan")
         if np.isfinite(price_risk_amount):
-            initial_r = float(price_risk_amount + cost_buffer + slippage_buffer + gap_buffer)
-        initial_r_pct = float(initial_r / nav_entry) if np.isfinite(initial_r) and nav_entry > eps else float("nan")
+            initial_r = float(
+                price_risk_amount + cost_buffer + slippage_buffer + gap_buffer
+            )
+        initial_r_pct = (
+            float(initial_r / nav_entry)
+            if np.isfinite(initial_r) and nav_entry > eps
+            else float("nan")
+        )
 
         tr_ret = _to_num_or_none(tr.get("return"))
         pnl_amount = float("nan")

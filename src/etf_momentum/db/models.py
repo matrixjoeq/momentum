@@ -2,7 +2,18 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from etf_momentum.db.base import Base
@@ -14,7 +25,9 @@ class ValidationPolicy(Base):
     __tablename__ = "validation_policy"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False
+    )
     description: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     # Example: 0.12 for 12% max abs daily return used in anomaly detection.
@@ -30,7 +43,10 @@ class ValidationPolicy(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -38,7 +54,9 @@ class EtfPool(Base):
     __tablename__ = "etf_pool"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    code: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, nullable=False
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
 
     start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
@@ -49,7 +67,9 @@ class EtfPool(Base):
     )
     max_abs_return_override: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
@@ -61,13 +81,20 @@ class EtfPool(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
 class EtfPrice(Base):
     __tablename__ = "etf_prices"
-    __table_args__ = (UniqueConstraint("code", "trade_date", "adjust", name="uq_etf_prices_code_trade_date_adjust"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "code", "trade_date", "adjust", name="uq_etf_prices_code_trade_date_adjust"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
@@ -115,20 +142,31 @@ class IngestionBatch(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
 class IngestionItem(Base):
     __tablename__ = "ingestion_item"
-    __table_args__ = (UniqueConstraint("batch_id", "trade_date", name="uq_ingestion_item_batch_trade_date"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id", "trade_date", name="uq_ingestion_item_batch_trade_date"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("ingestion_batch.id"), index=True, nullable=False)
+    batch_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("ingestion_batch.id"), index=True, nullable=False
+    )
 
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
-    action: Mapped[str] = mapped_column(String(16), nullable=False)  # "insert" | "update"
+    action: Mapped[str] = mapped_column(
+        String(16), nullable=False
+    )  # "insert" | "update"
 
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -137,10 +175,16 @@ class IngestionItem(Base):
 
 class EtfPriceAudit(Base):
     __tablename__ = "etf_price_audit"
-    __table_args__ = (UniqueConstraint("batch_id", "code", "trade_date", name="uq_audit_batch_code_trade_date"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id", "code", "trade_date", name="uq_audit_batch_code_trade_date"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("ingestion_batch.id"), index=True, nullable=False)
+    batch_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("ingestion_batch.id"), index=True, nullable=False
+    )
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
 
@@ -167,13 +211,17 @@ class OffFundPool(Base):
     __tablename__ = "off_fund_pool"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    code: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, nullable=False
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
 
     start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
     end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
 
-    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
@@ -184,7 +232,10 @@ class OffFundPool(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -198,7 +249,14 @@ class OffFundNav(Base):
     """
 
     __tablename__ = "off_fund_navs"
-    __table_args__ = (UniqueConstraint("code", "trade_date", "adjust", name="uq_off_fund_navs_code_trade_date_adjust"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "code",
+            "trade_date",
+            "adjust",
+            name="uq_off_fund_navs_code_trade_date_adjust",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
@@ -221,16 +279,30 @@ class OffFundEvent(Base):
     """
 
     __tablename__ = "off_fund_events"
-    __table_args__ = (UniqueConstraint("code", "effective_date", "event_type", "event_key", name="uq_off_fund_events_key"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "code",
+            "effective_date",
+            "event_type",
+            "event_key",
+            name="uq_off_fund_events_key",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     effective_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
-    event_type: Mapped[str] = mapped_column(String(16), nullable=False)  # dividend|split
+    event_type: Mapped[str] = mapped_column(
+        String(16), nullable=False
+    )  # dividend|split
     event_key: Mapped[str] = mapped_column(String(128), nullable=False, default="")
 
-    cash_dividend: Mapped[float | None] = mapped_column(Float, nullable=True)  # cash per share
-    split_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)  # e.g. 1.2 means 1 -> 1.2
+    cash_dividend: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )  # cash per share
+    split_ratio: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )  # e.g. 1.2 means 1 -> 1.2
     raw_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="eastmoney")
 
@@ -248,7 +320,9 @@ class FuturesPool(Base):
     __tablename__ = "futures_pool"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
+    code: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, nullable=False
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
 
     start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
@@ -259,24 +333,37 @@ class FuturesPool(Base):
     min_price_tick: Mapped[float | None] = mapped_column(Float, nullable=True)
     tags_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     last_data_start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
     last_data_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
-    contract_extend_calendar_days: Mapped[int] = mapped_column(Integer, nullable=False, default=366)
+    contract_extend_calendar_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=366
+    )
     contract_parallel: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    last_contract_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_contract_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    last_contract_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    last_contract_fetch_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_contract_fetch_status: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    last_contract_fetch_message: Mapped[str | None] = mapped_column(
+        String(512), nullable=True
+    )
 
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -287,11 +374,21 @@ class FuturesPrice(Base):
     """
 
     __tablename__ = "futures_prices"
-    __table_args__ = (UniqueConstraint("code", "trade_date", "adjust", name="uq_futures_prices_code_trade_date_adjust"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "code",
+            "trade_date",
+            "adjust",
+            name="uq_futures_prices_code_trade_date_adjust",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     pool_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("futures_pool.id", ondelete="SET NULL"), index=True, nullable=True
+        Integer,
+        ForeignKey("futures_pool.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
     )
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
@@ -320,18 +417,28 @@ class FuturesContractFetchStatus(Base):
 
     __tablename__ = "futures_contract_fetch_status"
     __table_args__ = (
-        UniqueConstraint("pool_id", "contract_code", name="uq_futures_contract_fetch_pool_contract"),
+        UniqueConstraint(
+            "pool_id", "contract_code", name="uq_futures_contract_fetch_pool_contract"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    pool_id: Mapped[int] = mapped_column(Integer, ForeignKey("futures_pool.id", ondelete="CASCADE"), index=True, nullable=False)
+    pool_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("futures_pool.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
     contract_code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
     rows_upserted: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_data_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -343,13 +450,18 @@ class FuturesResearchGroup(Base):
     __tablename__ = "futures_research_group"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(
+        String(128), unique=True, index=True, nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -359,10 +471,16 @@ class FuturesResearchGroupItem(Base):
     """
 
     __tablename__ = "futures_research_group_item"
-    __table_args__ = (UniqueConstraint("group_id", "code", name="uq_futures_research_group_item_group_code"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "group_id", "code", name="uq_futures_research_group_item_group_code"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    group_id: Mapped[int] = mapped_column(Integer, ForeignKey("futures_research_group.id"), index=True, nullable=False)
+    group_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("futures_research_group.id"), index=True, nullable=False
+    )
     code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -375,13 +493,20 @@ class FuturesResearchState(Base):
 
     __tablename__ = "futures_research_state"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False, default=1
+    )
     start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
     end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    dynamic_universe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    dynamic_universe: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
     quick_range_key: Mapped[str | None] = mapped_column(String(16), nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -391,49 +516,79 @@ class SimPortfolio(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False, default="默认账户")
     base_ccy: Mapped[str] = mapped_column(String(16), nullable=False, default="CNY")
-    initial_cash: Mapped[float] = mapped_column(Float, nullable=False, default=1_000_000.0)
+    initial_cash: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1_000_000.0
+    )
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class SimStrategyConfig(Base):
     __tablename__ = "sim_strategy_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    portfolio_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_portfolio.id"), index=True, nullable=False)
+    portfolio_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sim_portfolio.id"), index=True, nullable=False
+    )
 
     codes_json: Mapped[str] = mapped_column(String(512), nullable=False)  # json list
     rebalance: Mapped[str] = mapped_column(String(16), nullable=False, default="weekly")
     lookback_days: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
     top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     exec_price: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
-    rebalance_shift: Mapped[str] = mapped_column(String(8), nullable=False, default="prev")
-    risk_controls_json: Mapped[str] = mapped_column(String(1024), nullable=False, default="{}")
+    rebalance_shift: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="prev"
+    )
+    risk_controls_json: Mapped[str] = mapped_column(
+        String(1024), nullable=False, default="{}"
+    )
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class SimVariant(Base):
     __tablename__ = "sim_variant"
-    __table_args__ = (UniqueConstraint("portfolio_id", "anchor_weekday", name="uq_sim_variant_portfolio_anchor"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "portfolio_id", "anchor_weekday", name="uq_sim_variant_portfolio_anchor"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    portfolio_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_portfolio.id"), index=True, nullable=False)
-    config_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_strategy_config.id"), index=True, nullable=False)
+    portfolio_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sim_portfolio.id"), index=True, nullable=False
+    )
+    config_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sim_strategy_config.id"), index=True, nullable=False
+    )
 
     anchor_weekday: Mapped[int] = mapped_column(Integer, nullable=False)  # 1..5
     label: Mapped[str] = mapped_column(String(8), nullable=False)  # MON..FRI
-    is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0/1 for sqlite simplicity
+    is_active: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # 0/1 for sqlite simplicity
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class SimDecision(Base):
     __tablename__ = "sim_decision"
-    __table_args__ = (UniqueConstraint("variant_id", "decision_date", name="uq_sim_decision_variant_date"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "variant_id", "decision_date", name="uq_sim_decision_variant_date"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    variant_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_variant.id"), index=True, nullable=False)
+    variant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sim_variant.id"), index=True, nullable=False
+    )
 
     decision_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
     effective_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
@@ -442,38 +597,56 @@ class SimDecision(Base):
     prev_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     reason_json: Mapped[str] = mapped_column(String(2048), nullable=False, default="{}")
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class SimTrade(Base):
     __tablename__ = "sim_trade"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    variant_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_variant.id"), index=True, nullable=False)
+    variant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sim_variant.id"), index=True, nullable=False
+    )
     trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
     code: Mapped[str] = mapped_column(String(32), nullable=False)
     side: Mapped[str] = mapped_column(String(8), nullable=False)  # BUY/SELL
     price: Mapped[float] = mapped_column(Float, nullable=False)
     qty: Mapped[float] = mapped_column(Float, nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
-    decision_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sim_decision.id"), index=True, nullable=True)
+    decision_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("sim_decision.id"), index=True, nullable=True
+    )
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class SimPositionDaily(Base):
     __tablename__ = "sim_position_daily"
-    __table_args__ = (UniqueConstraint("variant_id", "trade_date", name="uq_sim_position_variant_date"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "variant_id", "trade_date", name="uq_sim_position_variant_date"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    variant_id: Mapped[int] = mapped_column(Integer, ForeignKey("sim_variant.id"), index=True, nullable=False)
+    variant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sim_variant.id"), index=True, nullable=False
+    )
     trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
-    positions_json: Mapped[str] = mapped_column(String(4096), nullable=False, default="{}")
+    positions_json: Mapped[str] = mapped_column(
+        String(4096), nullable=False, default="{}"
+    )
     cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     nav: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     mdd: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class SyncJob(Base):
@@ -485,22 +658,34 @@ class SyncJob(Base):
     __table_args__ = (UniqueConstraint("dedupe_key", name="uq_sync_job_dedupe_key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    job_type: Mapped[str] = mapped_column(String(32), index=True, nullable=False, default="sync_fixed_pool")
+    job_type: Mapped[str] = mapped_column(
+        String(32), index=True, nullable=False, default="sync_fixed_pool"
+    )
     dedupe_key: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
 
-    status: Mapped[str] = mapped_column(String(16), index=True, nullable=False, default="queued")  # queued|running|success|failed
+    status: Mapped[str] = mapped_column(
+        String(16), index=True, nullable=False, default="queued"
+    )  # queued|running|success|failed
 
     run_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     full_refresh: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    adjusts: Mapped[str] = mapped_column(String(64), nullable=False, default="qfq,hfq,none")  # comma-separated
+    adjusts: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="qfq,hfq,none"
+    )  # comma-separated
 
     progress_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class MacroSeriesMeta(Base):
@@ -517,9 +702,13 @@ class MacroSeriesMeta(Base):
     __tablename__ = "macro_series_meta"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    series_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    series_id: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False
+    )
     name: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    category: Mapped[str | None] = mapped_column(String(64), nullable=True)  # rates|fx|gold_spot|gold_fut|...
+    category: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )  # rates|fx|gold_spot|gold_fut|...
 
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     provider_symbol: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -529,9 +718,14 @@ class MacroSeriesMeta(Base):
     calendar: Mapped[str | None] = mapped_column(String(32), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -542,7 +736,11 @@ class MacroPrice(Base):
     """
 
     __tablename__ = "macro_prices"
-    __table_args__ = (UniqueConstraint("series_id", "trade_date", name="uq_macro_prices_series_id_trade_date"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "series_id", "trade_date", name="uq_macro_prices_series_id_trade_date"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     series_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
@@ -556,7 +754,9 @@ class MacroPrice(Base):
     open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     source: Mapped[str] = mapped_column(String(32), nullable=False)
-    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ingested_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class MacroIngestionBatch(Base):
@@ -567,8 +767,14 @@ class MacroIngestionBatch(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     start_date: Mapped[str] = mapped_column(String(8), nullable=False)  # YYYYMMDD
     end_date: Mapped[str] = mapped_column(String(8), nullable=False)  # YYYYMMDD
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running|success|failed
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="running"
+    )  # running|success|failed
     message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

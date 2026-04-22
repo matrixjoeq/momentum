@@ -9,7 +9,11 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from ..calendar.trading_calendar import is_trading_day, shift_to_trading_day, trading_days
+from ..calendar.trading_calendar import (
+    is_trading_day,
+    shift_to_trading_day,
+    trading_days,
+)
 from .baseline import (
     TRADING_DAYS_PER_YEAR,
     _annualized_return,
@@ -44,7 +48,9 @@ class CalendarTimingStrategyInputs:
     dynamic_universe: bool = False
     exec_price: str = "open"  # open | close
     cost_bps: float = 2.0
-    slippage_rate: float = 0.001  # one-way adverse slippage spread (absolute price diff)
+    slippage_rate: float = (
+        0.001  # one-way adverse slippage spread (absolute price diff)
+    )
     rebalance_shift: str = "prev"  # prev | next | skip
     risk_free_rate: float = 0.025
     cal: str = "XSHG"
@@ -78,7 +84,9 @@ def _periodic_returns(nav: pd.Series, freq: str) -> list[dict[str, Any]]:
         return []
     s = nav.resample(freq).last().dropna()
     r = s.pct_change().dropna()
-    return [{"period_end": d.strftime("%Y-%m-%d"), "return": float(v)} for d, v in r.items()]
+    return [
+        {"period_end": d.strftime("%Y-%m-%d"), "return": float(v)} for d, v in r.items()
+    ]
 
 
 def _dist_stats(values: list[float]) -> dict[str, Any]:
@@ -90,7 +98,10 @@ def _dist_stats(values: list[float]) -> dict[str, Any]:
             "std": None,
             "min": None,
             "max": None,
-            "quantiles": {k: None for k in ["p01", "p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]},
+            "quantiles": {
+                k: None
+                for k in ["p01", "p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]
+            },
         }
     qv = np.percentile(xs, [1, 5, 10, 25, 50, 75, 90, 95, 99]).tolist()
     return {
@@ -124,7 +135,12 @@ def _trade_stats(values: list[float], *, flat_eps: float = 1e-12) -> dict[str, A
     if wins and losses:
         avg_win = float(np.mean(np.asarray(wins, dtype=float)))
         avg_loss_abs = float(abs(np.mean(np.asarray(losses, dtype=float))))
-        if np.isfinite(avg_win) and np.isfinite(avg_loss_abs) and avg_win > 0.0 and avg_loss_abs > 0.0:
+        if (
+            np.isfinite(avg_win)
+            and np.isfinite(avg_loss_abs)
+            and avg_win > 0.0
+            and avg_loss_abs > 0.0
+        ):
             b = float(avg_win / avg_loss_abs)
             p = float(len(wins) / (len(wins) + len(losses)))
             win_rate_ex_zero = p
@@ -145,11 +161,19 @@ def _trade_stats(values: list[float], *, flat_eps: float = 1e-12) -> dict[str, A
     }
 
 
-def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingStrategyInputs) -> dict[str, Any]:
+def compute_calendar_timing_strategy_backtest(
+    db: Session, inp: CalendarTimingStrategyInputs
+) -> dict[str, Any]:
     mode = str(inp.mode or "portfolio").strip().lower()
     if mode not in {"portfolio", "single"}:
         raise ValueError("mode must be one of: portfolio|single")
-    codes = [str(inp.code).strip()] if mode == "single" else list(dict.fromkeys([str(x).strip() for x in (inp.codes or []) if str(x).strip()]))
+    codes = (
+        [str(inp.code).strip()]
+        if mode == "single"
+        else list(
+            dict.fromkeys([str(x).strip() for x in (inp.codes or []) if str(x).strip()])
+        )
+    )
     if not codes:
         raise ValueError("codes is empty")
     if inp.decision_day == 0 or inp.decision_day < -28 or inp.decision_day > 28:
@@ -173,7 +197,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
     if risk_budget_atr_window < 2:
         raise ValueError("risk_budget_atr_window must be >= 2")
     risk_budget_pct = float(getattr(inp, "risk_budget_pct", 0.01) or 0.01)
-    if (not np.isfinite(risk_budget_pct)) or risk_budget_pct < 0.001 or risk_budget_pct > 0.02:
+    if (
+        (not np.isfinite(risk_budget_pct))
+        or risk_budget_pct < 0.001
+        or risk_budget_pct > 0.02
+    ):
         raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
     cost_rate = float(inp.cost_bps) / 10000.0
     slip_spread = float(inp.slippage_rate)
@@ -185,8 +213,12 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
     # Price-adjustment policy (mandatory):
     # - Strategy NAV: none prices preferred, with hfq return fallback on corporate-action cliff days.
     # - Benchmark NAV: always hfq close (buy&hold total-return proxy).
-    ohlc_none = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
-    ohlc_hfq = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="hfq")
+    ohlc_none = load_ohlc_prices(
+        db, codes=codes, start=inp.start, end=inp.end, adjust="none"
+    )
+    ohlc_hfq = load_ohlc_prices(
+        db, codes=codes, start=inp.start, end=inp.end, adjust="hfq"
+    )
     close_none = (
         ohlc_none.get("close", pd.DataFrame())
         .sort_index()
@@ -203,8 +235,14 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
     )
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
-    miss_exec = [c for c in codes if c not in close_none.columns or close_none[c].dropna().empty]
-    miss_hfq = [c for c in codes if c not in close_hfq_base.columns or close_hfq_base[c].dropna().empty]
+    miss_exec = [
+        c for c in codes if c not in close_none.columns or close_none[c].dropna().empty
+    ]
+    miss_hfq = [
+        c
+        for c in codes
+        if c not in close_hfq_base.columns or close_hfq_base[c].dropna().empty
+    ]
     if (miss_exec or miss_hfq) and (not dynamic_universe):
         if miss_exec:
             raise ValueError(f"missing execution data (none) for: {miss_exec}")
@@ -288,8 +326,12 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
     if not dynamic_universe:
         ch_bench = ch_bench.ffill()
     close_hfq_exec = hfq_close_grid.ffill()
-    high_none_exec = high_none_exec.astype(float).combine_first(close_none_exec.astype(float))
-    low_none_exec = low_none_exec.astype(float).combine_first(close_none_exec.astype(float))
+    high_none_exec = high_none_exec.astype(float).combine_first(
+        close_none_exec.astype(float)
+    )
+    low_none_exec = low_none_exec.astype(float).combine_first(
+        close_none_exec.astype(float)
+    )
     close_hfq = close_hfq_exec.astype(float)
 
     close_none_f = close_none.astype(float).reindex(idx).reindex(columns=codes).ffill()
@@ -300,46 +342,132 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
         exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
         # open execution uses holding return from open[t] -> open[t+1]
-        ret_none = (exec_o_none.shift(-1).div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_hfq_exec = (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_none = (
+            (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_hfq_exec = (
+            (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         # decomposition for open mode: intraday[t] + overnight[t->t+1] + interaction
-        ret_intraday_none = (exec_c_none.div(exec_o_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_none = (exec_o_none.shift(-1).div(exec_c_none) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_intraday_hfq = (exec_c_hfq.div(exec_o_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_overnight_hfq = (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_intraday_none = (
+            (exec_c_none.div(exec_o_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_none = (
+            (exec_o_none.shift(-1).div(exec_c_none) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_hfq = (
+            (exec_c_hfq.div(exec_o_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_hfq = (
+            (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         px_slip_none = exec_o_none.astype(float)
         px_slip_hfq = exec_o_hfq.astype(float)
     else:
         px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
         px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
-        ret_none = (px_none_exec.shift(-1).div(px_none_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
-        ret_hfq_exec = (px_hfq_exec.shift(-1).div(px_hfq_exec) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        ret_none = (
+            (px_none_exec.shift(-1).div(px_none_exec) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_hfq_exec = (
+            (px_hfq_exec.shift(-1).div(px_hfq_exec) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         # close mode: close[t] -> next open + next intraday + interaction
         ret_overnight_none = (
-            open_none.astype(float).combine_first(close_none_f).shift(-1).div(close_none_exec.astype(float).combine_first(close_none_f)) - 1.0
-        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            (
+                open_none.astype(float)
+                .combine_first(close_none_f)
+                .shift(-1)
+                .div(close_none_exec.astype(float).combine_first(close_none_f))
+                - 1.0
+            )
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         ret_intraday_none = (
-            close_none_exec.astype(float).combine_first(close_none_f).shift(-1).div(open_none.astype(float).combine_first(close_none_f).shift(-1)) - 1.0
-        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            (
+                close_none_exec.astype(float)
+                .combine_first(close_none_f)
+                .shift(-1)
+                .div(open_none.astype(float).combine_first(close_none_f).shift(-1))
+                - 1.0
+            )
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         ret_overnight_hfq = (
-            open_hfq.astype(float).combine_first(close_hfq_f).shift(-1).div(close_hfq_exec.astype(float).combine_first(close_hfq_f)) - 1.0
-        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            (
+                open_hfq.astype(float)
+                .combine_first(close_hfq_f)
+                .shift(-1)
+                .div(close_hfq_exec.astype(float).combine_first(close_hfq_f))
+                - 1.0
+            )
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         ret_intraday_hfq = (
-            close_hfq_exec.astype(float).combine_first(close_hfq_f).shift(-1).div(open_hfq.astype(float).combine_first(close_hfq_f).shift(-1)) - 1.0
-        ).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            (
+                close_hfq_exec.astype(float)
+                .combine_first(close_hfq_f)
+                .shift(-1)
+                .div(open_hfq.astype(float).combine_first(close_hfq_f).shift(-1))
+                - 1.0
+            )
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
         px_slip_none = px_none_exec.astype(float)
         px_slip_hfq = px_hfq_exec.astype(float)
     gross_none = (1.0 + ret_none).astype(float)
     gross_hfq = (1.0 + ret_hfq_exec).astype(float)
     _corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_hfq_exec).astype(float)
-    ret_overnight = ret_overnight_none.where(~ca_mask.fillna(False), other=ret_overnight_hfq).astype(float)
-    ret_intraday = ret_intraday_none.where(~ca_mask.fillna(False), other=ret_intraday_hfq).astype(float)
-    px_exec_slip = px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq).replace([np.inf, -np.inf], np.nan).ffill()
+    ret_overnight = ret_overnight_none.where(
+        ~ca_mask.fillna(False), other=ret_overnight_hfq
+    ).astype(float)
+    ret_intraday = ret_intraday_none.where(
+        ~ca_mask.fillna(False), other=ret_intraday_hfq
+    ).astype(float)
+    px_exec_slip = (
+        px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
     if mode == "single":
         bench_ret_series = hfq_close_buy_hold_returns(ch_bench.iloc[:, 0])
     else:
-        bench_ret_series = hfq_close_daily_equal_weight_returns(ch_bench, dynamic_universe=dynamic_universe)
+        bench_ret_series = hfq_close_daily_equal_weight_returns(
+            ch_bench, dynamic_universe=dynamic_universe
+        )
     bench_ret_series = bench_ret_series.reindex(idx).fillna(0.0)
 
     # Build monthly decision dates on natural calendar, then map to trading day.
@@ -354,7 +482,9 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             m = 1
         else:
             m += 1
-    all_trade_days = trading_days(inp.start - dt.timedelta(days=40), inp.end + dt.timedelta(days=240), cal=inp.cal)
+    all_trade_days = trading_days(
+        inp.start - dt.timedelta(days=40), inp.end + dt.timedelta(days=240), cal=inp.cal
+    )
     all_trade_days = sorted(set(all_trade_days))
     trade_pos = {d: i for i, d in enumerate(all_trade_days)}
 
@@ -413,7 +543,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         tr3 = (low_none_exec - prev_close).abs()
         tr = pd.concat([tr1, tr2, tr3], axis=0).groupby(level=0).max()
         atr_df = (
-            tr.ewm(alpha=1.0 / float(max(2, int(risk_budget_atr_window))), adjust=False, min_periods=max(2, int(risk_budget_atr_window)))
+            tr.ewm(
+                alpha=1.0 / float(max(2, int(risk_budget_atr_window))),
+                adjust=False,
+                min_periods=max(2, int(risk_budget_atr_window)),
+            )
             .mean()
             .replace([np.inf, -np.inf], np.nan)
             .astype(float)
@@ -424,12 +558,24 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         if exposure <= 0.0 or n_codes <= 0:
             return out
         if position_mode == "risk_budget":
-            mask = active_mask[int(i)] if (dynamic_universe and 0 <= int(i) < len(active_mask)) else np.ones(n_codes, dtype=bool)
+            mask = (
+                active_mask[int(i)]
+                if (dynamic_universe and 0 <= int(i) < len(active_mask))
+                else np.ones(n_codes, dtype=bool)
+            )
             for j in range(n_codes):
                 if not bool(mask[j]):
                     continue
-                px = float(close_none_exec.iloc[int(i), j]) if np.isfinite(float(close_none_exec.iloc[int(i), j])) else float("nan")
-                a = float(atr_df.iloc[int(i), j]) if np.isfinite(float(atr_df.iloc[int(i), j])) else float("nan")
+                px = (
+                    float(close_none_exec.iloc[int(i), j])
+                    if np.isfinite(float(close_none_exec.iloc[int(i), j]))
+                    else float("nan")
+                )
+                a = (
+                    float(atr_df.iloc[int(i), j])
+                    if np.isfinite(float(atr_df.iloc[int(i), j]))
+                    else float("nan")
+                )
                 if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
                     out[j] = float(risk_budget_pct) * float(px) / float(a)
             out = np.clip(out, 0.0, None)
@@ -438,7 +584,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
                 out = out / s
             return out
         if dynamic_universe:
-            mask = active_mask[int(i)] if 0 <= int(i) < len(active_mask) else np.zeros(n_codes, dtype=bool)
+            mask = (
+                active_mask[int(i)]
+                if 0 <= int(i) < len(active_mask)
+                else np.zeros(n_codes, dtype=bool)
+            )
             n_act = int(mask.sum())
             if n_act > 0:
                 out[mask] = float(exposure) / float(n_act)
@@ -455,7 +605,7 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         if ei is None:
             continue
         tr["entry_idx"] = int(ei)
-        tr["exit_idx"] = (int(xi) if xi is not None else None)
+        tr["exit_idx"] = int(xi) if xi is not None else None
         entry_by_i[int(ei)] = tr
         if xi is not None:
             exit_by_i[int(xi)] = tr
@@ -511,7 +661,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
                         first_weak_date = d0
                     # dynamic-universe compatible equal-weight at weak-phase start
                     if dynamic_universe:
-                        mask_i = active_mask[int(i)] if 0 <= int(i) < len(active_mask) else np.zeros(n_codes, dtype=bool)
+                        mask_i = (
+                            active_mask[int(i)]
+                            if 0 <= int(i) < len(active_mask)
+                            else np.zeros(n_codes, dtype=bool)
+                        )
                         n_act = int(np.sum(mask_i))
                         weak_w = np.zeros(n_codes, dtype=float)
                         if n_act > 0:
@@ -538,7 +692,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             if ep == "open" and i in entry_by_i and float(np.sum(tgt)) > 1e-12:
                 # Open-buy: count same-day open->close on entry execution day (align with rotation/trend engines).
                 sdn = (
-                    (close_none_exec.iloc[i].astype(float) / open_none.iloc[i].astype(float) - 1.0)
+                    (
+                        close_none_exec.iloc[i].astype(float)
+                        / open_none.iloc[i].astype(float)
+                        - 1.0
+                    )
                     .replace([np.inf, -np.inf], np.nan)
                     .fillna(0.0)
                     .reindex(codes)
@@ -546,7 +704,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
                     .to_numpy(dtype=float)
                 )
                 sdh = (
-                    (close_hfq_exec.iloc[i].astype(float) / open_hfq.iloc[i].astype(float) - 1.0)
+                    (
+                        close_hfq_exec.iloc[i].astype(float)
+                        / open_hfq.iloc[i].astype(float)
+                        - 1.0
+                    )
                     .replace([np.inf, -np.inf], np.nan)
                     .fillna(0.0)
                     .reindex(codes)
@@ -586,21 +748,33 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
                         alloc = 0.0
                         if exposure > 0.0 and abs_sum > 0.0:
                             invested_base = max(float(w_cur[j]), float(tgt[j]), 1e-12)
-                            alloc = (float(abs_delta[j]) / float(abs_sum)) * float(cost_today) / invested_base
+                            alloc = (
+                                (float(abs_delta[j]) / float(abs_sum))
+                                * float(cost_today)
+                                / invested_base
+                            )
                         cnet = rc - alloc
                         active_trade["by_code_factor"][c] *= float(1.0 + cnet)
 
             w_cur = w_next
-            if active_trade is not None and active_trade["exit_idx"] is not None and i >= int(active_trade["exit_idx"]):
+            if (
+                active_trade is not None
+                and active_trade["exit_idx"] is not None
+                and i >= int(active_trade["exit_idx"])
+            ):
                 trade_returns.append(float(active_trade["factor"] - 1.0))
                 for c in codes:
-                    trade_returns_by_code[c].append(float(active_trade["by_code_factor"][c] - 1.0))
+                    trade_returns_by_code[c].append(
+                        float(active_trade["by_code_factor"][c] - 1.0)
+                    )
                 active_trade = None
 
         if active_trade is not None:
             trade_returns.append(float(active_trade["factor"] - 1.0))
             for c in codes:
-                trade_returns_by_code[c].append(float(active_trade["by_code_factor"][c] - 1.0))
+                trade_returns_by_code[c].append(
+                    float(active_trade["by_code_factor"][c] - 1.0)
+                )
         return {
             "strat_ret": pd.Series(strat_ret, index=idx, dtype=float),
             "bench_ret": pd.Series(bench_ret, index=idx, dtype=float),
@@ -626,7 +800,11 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         }
 
     sim_pack = _simulate_with_gate(np.ones(len(idx), dtype=float))
-    bench_nav = (1.0 + pd.Series(sim_pack["bench_ret"], index=idx, dtype=float)).cumprod().astype(float)
+    bench_nav = (
+        (1.0 + pd.Series(sim_pack["bench_ret"], index=idx, dtype=float))
+        .cumprod()
+        .astype(float)
+    )
     if len(bench_nav) > 0:
         bench_nav.iloc[0] = 1.0
     strat_ret = pd.Series(sim_pack["strat_ret"], index=idx, dtype=float)
@@ -637,35 +815,54 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
     decomp_pack = dict(sim_pack.get("decomposition") or {})
 
     strat_nav = pd.Series((1.0 + strat_ret).cumprod(), index=idx, dtype=float)
-    asset_nav_exec = (1.0 + ret_exec).cumprod().replace([np.inf, -np.inf], np.nan).ffill()
+    asset_nav_exec = (
+        (1.0 + ret_exec).cumprod().replace([np.inf, -np.inf], np.nan).ffill()
+    )
     strat_nav.iloc[0] = 1.0
-    excess_nav = (strat_nav / bench_nav.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).ffill().fillna(1.0)
+    excess_nav = (
+        (strat_nav / bench_nav.replace(0.0, np.nan))
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+        .fillna(1.0)
+    )
 
     sret = strat_nav.pct_change().fillna(0.0).astype(float)
     bret = bench_nav.pct_change().fillna(0.0).astype(float)
     exret = excess_nav.pct_change().fillna(0.0).astype(float)
 
-    def _metrics(nav: pd.Series, daily: pd.Series, *, rf: float, active: pd.Series | None = None) -> dict[str, Any]:
+    def _metrics(
+        nav: pd.Series, daily: pd.Series, *, rf: float, active: pd.Series | None = None
+    ) -> dict[str, Any]:
         ann_ret = _annualized_return(nav, ann_factor=TRADING_DAYS_PER_YEAR)
         ann_vol = _annualized_vol(daily, ann_factor=TRADING_DAYS_PER_YEAR)
         mdd = _max_drawdown(nav)
         mdd_days = _max_drawdown_duration_days(nav)
         sharpe = _sharpe(daily, rf=rf, ann_factor=TRADING_DAYS_PER_YEAR)
         sortino = _sortino(daily, rf=rf, ann_factor=TRADING_DAYS_PER_YEAR)
-        calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and mdd < 0 else float("nan")
+        calmar = (
+            float(ann_ret / abs(mdd)) if np.isfinite(mdd) and mdd < 0 else float("nan")
+        )
         ui = _ulcer_index(nav, in_percent=True)
         ui_den = ui / 100.0
         upi = float((ann_ret - rf) / ui_den) if ui_den > 0 else float("nan")
-        ir = float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)) if active is not None else float("nan")
+        ir = (
+            float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR))
+            if active is not None
+            else float("nan")
+        )
         sample_days = int(len(nav))
         complete_trade_count = int(len(trade_returns))
         avg_daily_turnover = float(np.mean(turnover[1:])) if len(turnover) > 1 else 0.0
         avg_annual_turnover = float(avg_daily_turnover * TRADING_DAYS_PER_YEAR)
-        avg_daily_trade_count = float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+        avg_daily_trade_count = (
+            float(complete_trade_count / sample_days) if sample_days > 0 else 0.0
+        )
         avg_annual_trade_count = float(avg_daily_trade_count * TRADING_DAYS_PER_YEAR)
         return {
             "sample_days": int(len(nav)),
-            "cumulative_return": float(nav.iloc[-1] - 1.0) if len(nav) else float("nan"),
+            "cumulative_return": float(nav.iloc[-1] - 1.0)
+            if len(nav)
+            else float("nan"),
             "annualized_return": float(ann_ret),
             "annualized_volatility": float(ann_vol),
             "max_drawdown": float(mdd),
@@ -683,7 +880,9 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             "avg_annual_trade_count": float(avg_annual_trade_count),
         }
 
-    m_strat = _metrics(strat_nav, sret, rf=float(inp.risk_free_rate), active=(sret - bret))
+    m_strat = _metrics(
+        strat_nav, sret, rf=float(inp.risk_free_rate), active=(sret - bret)
+    )
     m_bench = _metrics(bench_nav, bret, rf=float(inp.risk_free_rate), active=None)
     m_ex = _metrics(excess_nav, exret, rf=0.0, active=exret)
 
@@ -710,9 +909,21 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
                 wj = float(w_cur[j])
                 if wj <= 1e-12:
                     continue
-                nav0 = float(asset_nav_exec[c].iloc[cur_entry_idx]) if np.isfinite(float(asset_nav_exec[c].iloc[cur_entry_idx])) else np.nan
-                nav1 = float(asset_nav_exec[c].iloc[-1]) if np.isfinite(float(asset_nav_exec[c].iloc[-1])) else np.nan
-                hr = float(nav1 / nav0 - 1.0) if (np.isfinite(nav0) and np.isfinite(nav1) and nav0 > 0) else float("nan")
+                nav0 = (
+                    float(asset_nav_exec[c].iloc[cur_entry_idx])
+                    if np.isfinite(float(asset_nav_exec[c].iloc[cur_entry_idx]))
+                    else np.nan
+                )
+                nav1 = (
+                    float(asset_nav_exec[c].iloc[-1])
+                    if np.isfinite(float(asset_nav_exec[c].iloc[-1]))
+                    else np.nan
+                )
+                hr = (
+                    float(nav1 / nav0 - 1.0)
+                    if (np.isfinite(nav0) and np.isfinite(nav1) and nav0 > 0)
+                    else float("nan")
+                )
                 current_holdings.append(
                     {
                         "code": c,
@@ -725,7 +936,12 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
 
     # Next execution plan (entry or exit) after end date.
     asof = dates[-1]
-    next_plan: dict[str, Any] = {"has_execution_plan": False, "asof_date": str(asof), "next_trading_day": None, "plan": None}
+    next_plan: dict[str, Any] = {
+        "has_execution_plan": False,
+        "asof_date": str(asof),
+        "next_trading_day": None,
+        "plan": None,
+    }
     future_trade_days = [d for d in all_trade_days if d > asof]
     if future_trade_days:
         # compute future entries.
@@ -760,11 +976,17 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             # infer current open trade exit from schedule/trade days
             for tr in reversed(trades_sched):
                 xi = tr.get("exit_exec_date")
-                if xi is not None and tr.get("entry_exec_date") is not None and tr["entry_exec_date"] <= asof <= xi:
+                if (
+                    xi is not None
+                    and tr.get("entry_exec_date") is not None
+                    and tr["entry_exec_date"] <= asof <= xi
+                ):
                     next_exit = xi if xi > asof else None
                     break
 
-        candidate: tuple[str, dt.date, dt.date | None] | None = None  # (type, exec_date, decision_date)
+        candidate: tuple[str, dt.date, dt.date | None] | None = (
+            None  # (type, exec_date, decision_date)
+        )
         if next_entry is not None:
             candidate = ("entry", next_entry[1], next_entry[0])
         if next_exit is not None and (candidate is None or next_exit < candidate[1]):
@@ -775,11 +997,21 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
             next_plan["next_trading_day"] = str(exec_d)
             if ev_type == "entry":
                 w_plan = _weights_for_day(len(idx) - 1)
-                buys = [{"code": c, "target_weight": float(w_plan[j]), "buy_weight": float(w_plan[j])} for j, c in enumerate(codes) if float(w_plan[j]) > 1e-12]
+                buys = [
+                    {
+                        "code": c,
+                        "target_weight": float(w_plan[j]),
+                        "buy_weight": float(w_plan[j]),
+                    }
+                    for j, c in enumerate(codes)
+                    if float(w_plan[j]) > 1e-12
+                ]
                 planned_exit_date: str | None = None
                 p_exec = trade_pos.get(exec_d)
                 if p_exec is not None:
-                    x_pos = min(int(p_exec) + int(inp.hold_days), len(all_trade_days) - 1)
+                    x_pos = min(
+                        int(p_exec) + int(inp.hold_days), len(all_trade_days) - 1
+                    )
                     planned_exit_date = str(all_trade_days[x_pos])
                 next_plan["has_execution_plan"] = len(buys) > 0
                 next_plan["plan"] = {
@@ -791,7 +1023,15 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
                     "sells": [],
                 }
             else:
-                sells = [{"code": c, "current_weight": float(w_cur[j]), "sell_weight": float(w_cur[j])} for j, c in enumerate(codes) if float(w_cur[j]) > 1e-12]
+                sells = [
+                    {
+                        "code": c,
+                        "current_weight": float(w_cur[j]),
+                        "sell_weight": float(w_cur[j]),
+                    }
+                    for j, c in enumerate(codes)
+                    if float(w_cur[j]) > 1e-12
+                ]
                 next_plan["has_execution_plan"] = len(sells) > 0
                 next_plan["plan"] = {
                     "type": "exit",
@@ -856,21 +1096,128 @@ def compute_calendar_timing_strategy_backtest(db: Session, inp: CalendarTimingSt
         "return_decomposition": {
             "dates": [str(d.date()) for d in idx],
             "series": {
-                "overnight": [float(x) for x in (decomp_pack.get("overnight") if isinstance(decomp_pack.get("overnight"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
-                "intraday": [float(x) for x in (decomp_pack.get("intraday") if isinstance(decomp_pack.get("intraday"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
-                "interaction": [float(x) for x in (decomp_pack.get("interaction") if isinstance(decomp_pack.get("interaction"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
-                "cost": [float(x) for x in (decomp_pack.get("cost") if isinstance(decomp_pack.get("cost"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
-                "gross": [float(x) for x in (decomp_pack.get("gross") if isinstance(decomp_pack.get("gross"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
-                "net": [float(x) for x in (decomp_pack.get("net") if isinstance(decomp_pack.get("net"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).to_numpy(dtype=float)],
+                "overnight": [
+                    float(x)
+                    for x in (
+                        decomp_pack.get("overnight")
+                        if isinstance(decomp_pack.get("overnight"), pd.Series)
+                        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                    ).to_numpy(dtype=float)
+                ],
+                "intraday": [
+                    float(x)
+                    for x in (
+                        decomp_pack.get("intraday")
+                        if isinstance(decomp_pack.get("intraday"), pd.Series)
+                        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                    ).to_numpy(dtype=float)
+                ],
+                "interaction": [
+                    float(x)
+                    for x in (
+                        decomp_pack.get("interaction")
+                        if isinstance(decomp_pack.get("interaction"), pd.Series)
+                        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                    ).to_numpy(dtype=float)
+                ],
+                "cost": [
+                    float(x)
+                    for x in (
+                        decomp_pack.get("cost")
+                        if isinstance(decomp_pack.get("cost"), pd.Series)
+                        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                    ).to_numpy(dtype=float)
+                ],
+                "gross": [
+                    float(x)
+                    for x in (
+                        decomp_pack.get("gross")
+                        if isinstance(decomp_pack.get("gross"), pd.Series)
+                        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                    ).to_numpy(dtype=float)
+                ],
+                "net": [
+                    float(x)
+                    for x in (
+                        decomp_pack.get("net")
+                        if isinstance(decomp_pack.get("net"), pd.Series)
+                        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                    ).to_numpy(dtype=float)
+                ],
             },
             "summary": {
-                "ann_overnight": float(np.mean((decomp_pack.get("overnight") if isinstance(decomp_pack.get("overnight"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
-                "ann_intraday": float(np.mean((decomp_pack.get("intraday") if isinstance(decomp_pack.get("intraday"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
-                "ann_interaction": float(np.mean((decomp_pack.get("interaction") if isinstance(decomp_pack.get("interaction"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
-                "ann_cost": float(np.mean((decomp_pack.get("cost") if isinstance(decomp_pack.get("cost"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
-                "ann_gross": float(np.mean((decomp_pack.get("gross") if isinstance(decomp_pack.get("gross"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
-                "ann_net": float(np.mean((decomp_pack.get("net") if isinstance(decomp_pack.get("net"), pd.Series) else pd.Series(np.zeros(len(idx), dtype=float), index=idx)).iloc[1:]) * TRADING_DAYS_PER_YEAR) if len(idx) > 1 else 0.0,
+                "ann_overnight": float(
+                    np.mean(
+                        (
+                            decomp_pack.get("overnight")
+                            if isinstance(decomp_pack.get("overnight"), pd.Series)
+                            else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                        ).iloc[1:]
+                    )
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(idx) > 1
+                else 0.0,
+                "ann_intraday": float(
+                    np.mean(
+                        (
+                            decomp_pack.get("intraday")
+                            if isinstance(decomp_pack.get("intraday"), pd.Series)
+                            else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                        ).iloc[1:]
+                    )
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(idx) > 1
+                else 0.0,
+                "ann_interaction": float(
+                    np.mean(
+                        (
+                            decomp_pack.get("interaction")
+                            if isinstance(decomp_pack.get("interaction"), pd.Series)
+                            else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                        ).iloc[1:]
+                    )
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(idx) > 1
+                else 0.0,
+                "ann_cost": float(
+                    np.mean(
+                        (
+                            decomp_pack.get("cost")
+                            if isinstance(decomp_pack.get("cost"), pd.Series)
+                            else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                        ).iloc[1:]
+                    )
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(idx) > 1
+                else 0.0,
+                "ann_gross": float(
+                    np.mean(
+                        (
+                            decomp_pack.get("gross")
+                            if isinstance(decomp_pack.get("gross"), pd.Series)
+                            else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                        ).iloc[1:]
+                    )
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(idx) > 1
+                else 0.0,
+                "ann_net": float(
+                    np.mean(
+                        (
+                            decomp_pack.get("net")
+                            if isinstance(decomp_pack.get("net"), pd.Series)
+                            else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                        ).iloc[1:]
+                    )
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(idx) > 1
+                else 0.0,
             },
         },
     }
-

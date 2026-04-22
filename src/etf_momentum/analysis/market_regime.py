@@ -71,7 +71,11 @@ def _segment_perf_stats(r: pd.Series, ann_factor: int) -> dict[str, float | int 
     cum = float((1.0 + rr).prod() - 1.0)
     ann_ret = _annualized_return_from_returns(rr, ann_factor)
     ann_vol = float(rr.std(ddof=0) * np.sqrt(float(ann_factor)))
-    sharpe = float((rr.mean() / rr.std(ddof=0)) * np.sqrt(float(ann_factor))) if float(rr.std(ddof=0)) > 0 else float("nan")
+    sharpe = (
+        float((rr.mean() / rr.std(ddof=0)) * np.sqrt(float(ann_factor)))
+        if float(rr.std(ddof=0)) > 0
+        else float("nan")
+    )
     mdd = _max_drawdown_from_returns(rr)
     win = float((rr > 0).mean())
     avg = float(rr.mean())
@@ -103,7 +107,9 @@ def _classify_regimes(
     vw = max(5, int(vol_window))
     minp = max(5, sw // 2)
     logp = np.log(c.clip(lower=1e-12))
-    slope = logp.rolling(window=sw, min_periods=minp).apply(_rolling_linreg_slope, raw=True)
+    slope = logp.rolling(window=sw, min_periods=minp).apply(
+        _rolling_linreg_slope, raw=True
+    )
     slope_ann = slope * float(ann_factor)
 
     direction = pd.DataFrame("SIDE", index=c.index, columns=c.columns, dtype=object)
@@ -111,12 +117,18 @@ def _classify_regimes(
     direction = direction.mask(slope_ann < -float(direction_threshold_ann), "DOWN")
 
     h = (
-        high.reindex(index=c.index, columns=c.columns).astype(float).replace([np.inf, -np.inf], np.nan).combine_first(c)
+        high.reindex(index=c.index, columns=c.columns)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .combine_first(c)
         if high is not None
         else c.copy()
     )
     low_px = (
-        low.reindex(index=c.index, columns=c.columns).astype(float).replace([np.inf, -np.inf], np.nan).combine_first(c)
+        low.reindex(index=c.index, columns=c.columns)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .combine_first(c)
         if low is not None
         else c.copy()
     )
@@ -128,7 +140,11 @@ def _classify_regimes(
     vol_metric = tr.div(prev.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
     vol_metric = vol_metric.rolling(window=vw, min_periods=max(5, vw // 2)).mean()
 
-    vol_thresh = vol_metric.expanding(min_periods=max(vw, 30)).quantile(float(vol_quantile)).shift(1)
+    vol_thresh = (
+        vol_metric.expanding(min_periods=max(vw, 30))
+        .quantile(float(vol_quantile))
+        .shift(1)
+    )
     amplitude = pd.DataFrame("NARROW", index=c.index, columns=c.columns, dtype=object)
     amplitude = amplitude.mask(vol_metric >= vol_thresh, "WIDE")
 
@@ -163,7 +179,9 @@ def build_market_regime_report(
     r = r.reindex(index=dates, columns=cols).fillna(0.0)
     c = close.reindex(index=dates, columns=cols).astype(float)
     h = None if high is None else high.reindex(index=dates, columns=cols).astype(float)
-    low_px = None if low is None else low.reindex(index=dates, columns=cols).astype(float)
+    low_px = (
+        None if low is None else low.reindex(index=dates, columns=cols).astype(float)
+    )
 
     regimes, slope_ann, vol_metric = _classify_regimes(
         c,
@@ -194,24 +212,39 @@ def build_market_regime_report(
         pnl_sum = float(pnl_s.sum())
         by_state[state] = {
             "sample_days_with_exposure": int((expo_s > 1e-12).sum()),
-            "exposure_time_share": (float(expo_sum / exposure_total) if exposure_total > 0 else None),
+            "exposure_time_share": (
+                float(expo_sum / exposure_total) if exposure_total > 0 else None
+            ),
             "total_contribution_return": pnl_sum,
             "annualized_contribution_return": float(pnl_s.mean() * float(ann_factor)),
-            "contribution_volatility_ann": float(pnl_s.std(ddof=0) * np.sqrt(float(ann_factor))),
+            "contribution_volatility_ann": float(
+                pnl_s.std(ddof=0) * np.sqrt(float(ann_factor))
+            ),
             "avg_weighted_asset_return_on_exposed_days": (
-                float(weighted_ret_s.dropna().mean()) if int(weighted_ret_s.notna().sum()) > 0 else None
+                float(weighted_ret_s.dropna().mean())
+                if int(weighted_ret_s.notna().sum()) > 0
+                else None
             ),
             "win_rate_on_exposed_days": (
-                float((pnl_s[expo_s > 1e-12] > 0).mean()) if int((expo_s > 1e-12).sum()) > 0 else None
+                float((pnl_s[expo_s > 1e-12] > 0).mean())
+                if int((expo_s > 1e-12).sum()) > 0
+                else None
             ),
         }
         exposure_series_by_state[state] = expo_s
         weighted_series_by_state[state] = weighted_ret_s
 
-    dom_expo = pd.DataFrame({k: exposure_series_by_state[k] for k in REGIME_ORDER}, index=dates).astype(float)
+    dom_expo = pd.DataFrame(
+        {k: exposure_series_by_state[k] for k in REGIME_ORDER}, index=dates
+    ).astype(float)
     dominant = dom_expo.idxmax(axis=1)
     dominant = dominant.where(dom_expo.max(axis=1) > 1e-12, other=UNCLASSIFIED)
-    strat = strategy_returns.reindex(dates).astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    strat = (
+        strategy_returns.reindex(dates)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
     dominant_partition = {
         s: _segment_perf_stats(strat[dominant == s], int(ann_factor))
         for s in states_full
@@ -230,7 +263,9 @@ def build_market_regime_report(
             one[s] = {
                 "sample_days": int(m.sum()),
                 "avg_asset_return": (float(rr.mean()) if len(rr) else None),
-                "annualized_asset_return": (float(rr.mean() * float(ann_factor)) if len(rr) else None),
+                "annualized_asset_return": (
+                    float(rr.mean() * float(ann_factor)) if len(rr) else None
+                ),
                 "avg_weight_when_state": (float(ww.mean()) if len(ww) else None),
             }
         by_asset[str(c0)] = one
@@ -255,19 +290,27 @@ def build_market_regime_report(
         "states_order": REGIME_ORDER,
         "series": {
             "dates": dates.date.astype(str).tolist(),
-            "regime_by_asset": {str(c0): regimes[c0].astype(str).tolist() for c0 in cols},
+            "regime_by_asset": {
+                str(c0): regimes[c0].astype(str).tolist() for c0 in cols
+            },
             "dominant_regime": dominant.astype(str).tolist(),
             "exposure_share_by_state": {
-                s: exposure_series_by_state[s].astype(float).tolist() for s in REGIME_ORDER
-            },
-            "weighted_asset_return_by_state": {
-                s: weighted_series_by_state[s].astype(float).where(
-                    np.isfinite(weighted_series_by_state[s]), np.nan
-                ).tolist()
+                s: exposure_series_by_state[s].astype(float).tolist()
                 for s in REGIME_ORDER
             },
-            "slope_ann_by_asset": {str(c0): slope_ann[c0].astype(float).tolist() for c0 in cols},
-            "vol_metric_by_asset": {str(c0): vol_metric[c0].astype(float).tolist() for c0 in cols},
+            "weighted_asset_return_by_state": {
+                s: weighted_series_by_state[s]
+                .astype(float)
+                .where(np.isfinite(weighted_series_by_state[s]), np.nan)
+                .tolist()
+                for s in REGIME_ORDER
+            },
+            "slope_ann_by_asset": {
+                str(c0): slope_ann[c0].astype(float).tolist() for c0 in cols
+            },
+            "vol_metric_by_asset": {
+                str(c0): vol_metric[c0].astype(float).tolist() for c0 in cols
+            },
         },
         "strategy_state_contribution": by_state,
         "strategy_by_dominant_state": dominant_partition,

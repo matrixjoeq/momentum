@@ -23,4 +23,3 @@ def test_session_scope_rolls_back_on_error(session_factory: sessionmaker) -> Non
     with session_factory() as db:
         rows = db.execute(text("SELECT COUNT(*) FROM t")).fetchone()
         assert rows[0] == 0
-

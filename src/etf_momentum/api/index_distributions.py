@@ -30,7 +30,11 @@ def _hist(samples: np.ndarray, *, bins: int) -> dict[str, Any]:
         return {"bins": [], "counts": [], "n": 0}
     b = int(max(10, min(200, bins)))
     counts, edges = np.histogram(x, bins=b)
-    return {"bins": edges.astype(float).tolist(), "counts": counts.astype(int).tolist(), "n": int(x.size)}
+    return {
+        "bins": edges.astype(float).tolist(),
+        "counts": counts.astype(int).tolist(),
+        "n": int(x.size),
+    }
 
 
 def _qs(samples: np.ndarray, qs: tuple[float, ...]) -> dict[str, float]:
@@ -50,11 +54,19 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
 
     end = inp.end_date or dt.date.today()
     # fetch a wide range, then slice by window
-    df = fetch_cboe_daily_close(CboeFetchRequest(index=sym, start_date="19900101", end_date=end.strftime("%Y%m%d")))
+    df = fetch_cboe_daily_close(
+        CboeFetchRequest(
+            index=sym, start_date="19900101", end_date=end.strftime("%Y%m%d")
+        )
+    )
     if df is None or df.empty:
         return {"ok": False, "error": "empty_series", "meta": {"symbol": sym}}
 
-    s = pd.Series(df["close"].to_numpy(dtype=float), index=pd.to_datetime(df["date"]).dt.date.to_list(), dtype=float).dropna()
+    s = pd.Series(
+        df["close"].to_numpy(dtype=float),
+        index=pd.to_datetime(df["date"]).dt.date.to_list(),
+        dtype=float,
+    ).dropna()
     if s.empty:
         return {"ok": False, "error": "empty_close", "meta": {"symbol": sym}}
 
@@ -64,7 +76,11 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
         s = s[s.index >= start]
 
     if s.empty or len(s) < 20:
-        return {"ok": False, "error": "insufficient_window", "meta": {"symbol": sym, "window": inp.window}}
+        return {
+            "ok": False,
+            "error": "insufficient_window",
+            "meta": {"symbol": sym, "window": inp.window},
+        }
 
     close = s.to_numpy(dtype=float)
     close_dates = list(s.index)
@@ -74,7 +90,12 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
     # log returns aligned to the "to" date
     ret_s = np.log(pd.Series(close, index=pd.to_datetime(close_dates))).diff()
     ret_s.index = pd.to_datetime(close_dates)
-    ret_s = pd.to_numeric(ret_s, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    ret_s = (
+        pd.to_numeric(ret_s, errors="coerce")
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
     ret = ret_s.to_numpy(dtype=float)
     ret_current = float(ret_s.iloc[-1]) if not ret_s.empty else float("nan")
     ret_current_date = ret_s.index[-1].date().isoformat() if not ret_s.empty else None
@@ -90,7 +111,6 @@ def compute_cboe_index_distribution(inp: IndexDistributionInputs) -> dict[str, A
         hist_close = _hist(log_close, bins=int(inp.bins))
         quant_close = _qs(log_close, inp.quantiles)
         close_current = float(np.log(close[-1])) if close[-1] > 0 else float("nan")
-        close_current_date = close_current_date
 
     out = {
         "ok": True,

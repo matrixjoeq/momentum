@@ -33,4 +33,3 @@ def upsert_and_fetch_etfs(
             },
         )
         assert client.post(f"/api/etf/{code}/fetch").status_code == 200
-

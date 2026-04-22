@@ -48,8 +48,10 @@ def test_schema_adds_ingestion_batch_validation_columns(tmp_path) -> None:
     ensure_sqlite_schema(engine)
 
     with engine.connect() as conn:
-        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(ingestion_batch)")).fetchall()]
+        cols = [
+            r[1]
+            for r in conn.execute(text("PRAGMA table_info(ingestion_batch)")).fetchall()
+        ]
     assert "val_max_abs_return" in cols
     assert "val_max_hl_spread" in cols
     assert "val_max_gap_days" in cols
-

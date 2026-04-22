@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from etf_momentum.analysis.erc_weights import erc_weights_from_return_history, solve_erc_weights
+from etf_momentum.analysis.erc_weights import (
+    erc_weights_from_return_history,
+    solve_erc_weights,
+)
 
 
 def test_solve_erc_diagonal_covariance_matches_inverse_volatility_weights() -> None:

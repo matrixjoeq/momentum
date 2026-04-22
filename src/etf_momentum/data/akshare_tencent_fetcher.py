@@ -53,16 +53,24 @@ def fetch_etf_daily_tencent(
 
     df: pd.DataFrame
     try:
-        df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=req.start_date, end_date=req.end_date, adjust=tx_adj)
+        df = ak.stock_zh_a_hist_tx(
+            symbol=sym, start_date=req.start_date, end_date=req.end_date, adjust=tx_adj
+        )
     except Exception:  # pylint: disable=broad-exception-caught
         # fallback: qfq may fail or behave like none; retry with ""
-        df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=req.start_date, end_date=req.end_date, adjust="")
+        df = ak.stock_zh_a_hist_tx(
+            symbol=sym, start_date=req.start_date, end_date=req.end_date, adjust=""
+        )
 
     if df is None or df.empty:
         return []
 
     # expected cols: date/open/close/high/low/amount (but amount behaves like volume-lots for ETFs)
-    if "date" not in df.columns or "open" not in df.columns or "close" not in df.columns:
+    if (
+        "date" not in df.columns
+        or "open" not in df.columns
+        or "close" not in df.columns
+    ):
         return []
 
     df2 = df.copy()
@@ -92,4 +100,3 @@ def fetch_etf_daily_tencent(
 
     dedup: dict[dt.date, PriceRow] = {rr.trade_date: rr for rr in rows}
     return [dedup[d] for d in sorted(dedup)]
-

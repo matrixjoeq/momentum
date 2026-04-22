@@ -44,4 +44,3 @@ def test_static_shared_terminal_css(api_client: TestClient) -> None:
     assert resp.status_code == 200
     assert ":root" in resp.text
     assert "Noto Sans SC" in resp.text
-

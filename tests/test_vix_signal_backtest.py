@@ -42,7 +42,10 @@ def test_backtest_returns_desc_trades_and_nav_lengths():
     )
     assert out["ok"] is True
     series = out["series"]
-    assert len(series["dates"]) == len(series["nav_strategy"]) == len(series["nav_buy_hold"])
+    assert (
+        len(series["dates"])
+        == len(series["nav_strategy"])
+        == len(series["nav_buy_hold"])
+    )
     trades = out["trades"]
     assert trades[0]["date"] >= trades[-1]["date"]  # desc
-

@@ -73,9 +73,9 @@ def align_us_close_to_cn_next_trading_day(
 def _quantiles(x: np.ndarray, qs: list[float]) -> dict[str, float]:
     xx = x[np.isfinite(x)]
     if xx.size == 0:
-        return {f"q{int(q*100)}": float("nan") for q in qs}
+        return {f"q{int(q * 100)}": float("nan") for q in qs}
     vals = np.quantile(xx, qs)
-    return {f"q{int(q*100)}": float(v) for q, v in zip(qs, vals, strict=False)}
+    return {f"q{int(q * 100)}": float(v) for q, v in zip(qs, vals, strict=False)}
 
 
 def _annualized_from_daily(simple_ret: np.ndarray, ann: int = 252) -> dict[str, float]:
@@ -86,7 +86,11 @@ def _annualized_from_daily(simple_ret: np.ndarray, ann: int = 252) -> dict[str, 
     years = (len(nav) - 1) / float(ann)
     cagr = float(nav[-1] ** (1.0 / years) - 1.0) if years > 0 else float("nan")
     vol = float(np.std(r, ddof=1) * math.sqrt(ann)) if r.size >= 2 else float("nan")
-    sharpe = float((np.mean(r) / np.std(r, ddof=1)) * math.sqrt(ann)) if np.std(r, ddof=1) > 0 else float("nan")
+    sharpe = (
+        float((np.mean(r) / np.std(r, ddof=1)) * math.sqrt(ann))
+        if np.std(r, ddof=1) > 0
+        else float("nan")
+    )
     return {"cagr": cagr, "vol": vol, "sharpe": sharpe}
 
 
@@ -137,13 +141,13 @@ def _trade_diagnostics(
     m = np.isfinite(y) & np.isfinite(x) & (y != 0) & (x != 0)
     yy = y[m]
     xx = x[m]
-    pred = (xx if same else -xx)
-    hit = (np.sign(pred) == np.sign(yy))
+    pred = xx if same else -xx
+    hit = np.sign(pred) == np.sign(yy)
     hit_rate = float(np.mean(hit)) if hit.size else float("nan")
 
     # confusion matrix for predicting "up" (1) vs "down" (-1)
-    y_up = (yy > 0)
-    p_up = (pred > 0)
+    y_up = yy > 0
+    p_up = pred > 0
     tp = int(np.sum(y_up & p_up))
     tn = int(np.sum((~y_up) & (~p_up)))
     fp = int(np.sum((~y_up) & p_up))
@@ -160,8 +164,16 @@ def _trade_diagnostics(
     dn_mask = v < 0
     qs = [0.05, 0.25, 0.5, 0.75, 0.95]
     cond = {
-        "idx_up": {"n": int(np.sum(up_mask)), "mean": float(np.mean(e[up_mask])) if np.any(up_mask) else float("nan"), **_quantiles(e[up_mask], qs)},
-        "idx_down": {"n": int(np.sum(dn_mask)), "mean": float(np.mean(e[dn_mask])) if np.any(dn_mask) else float("nan"), **_quantiles(e[dn_mask], qs)},
+        "idx_up": {
+            "n": int(np.sum(up_mask)),
+            "mean": float(np.mean(e[up_mask])) if np.any(up_mask) else float("nan"),
+            **_quantiles(e[up_mask], qs),
+        },
+        "idx_down": {
+            "n": int(np.sum(dn_mask)),
+            "mean": float(np.mean(e[dn_mask])) if np.any(dn_mask) else float("nan"),
+            **_quantiles(e[dn_mask], qs),
+        },
     }
 
     def _strategy_for(
@@ -173,7 +185,7 @@ def _trade_diagnostics(
     ) -> dict[str, Any]:
         x_full = idx_sig_series.to_numpy(dtype=float)
         sgn = np.sign(x_full)
-        pred_full = (sgn if same_sign else -sgn)
+        pred_full = sgn if same_sign else -sgn
 
         active = np.isfinite(pred_full)
         thr_used = None
@@ -202,15 +214,25 @@ def _trade_diagnostics(
         ok2 = np.isfinite(r_strat) & np.isfinite(r_etf)
         r_strat_ok = r_strat[ok2]
         r_etf_ok = r_etf[ok2]
-        nav_strat = np.cumprod(1.0 + r_strat_ok) if r_strat_ok.size else np.array([], dtype=float)
-        nav_etf = np.cumprod(1.0 + r_etf_ok) if r_etf_ok.size else np.array([], dtype=float)
+        nav_strat = (
+            np.cumprod(1.0 + r_strat_ok)
+            if r_strat_ok.size
+            else np.array([], dtype=float)
+        )
+        nav_etf = (
+            np.cumprod(1.0 + r_etf_ok) if r_etf_ok.size else np.array([], dtype=float)
+        )
 
         strat_stats = _annualized_from_daily(r_strat_ok)
         bh_stats = _annualized_from_daily(r_etf_ok)
         strat_stats["max_drawdown"] = _max_drawdown(nav_strat)
         bh_stats["max_drawdown"] = _max_drawdown(nav_etf)
 
-        act_rate = float(np.mean(active[np.isfinite(active)])) if np.any(np.isfinite(active)) else float("nan")
+        act_rate = (
+            float(np.mean(active[np.isfinite(active)]))
+            if np.any(np.isfinite(active))
+            else float("nan")
+        )
         return {
             "threshold_abs": thr_used,
             "active_rate": act_rate,
@@ -232,15 +254,38 @@ def _trade_diagnostics(
         thresholds_abs: list[float],
         exposures: list[float],
     ) -> dict[str, Any]:
-        th = [float(x) for x in (thresholds_abs or []) if x is not None and np.isfinite(float(x))]
+        th = [
+            float(x)
+            for x in (thresholds_abs or [])
+            if x is not None and np.isfinite(float(x))
+        ]
         th = sorted(th)
-        exps = [float(x) for x in (exposures or []) if x is not None and np.isfinite(float(x))]
+        exps = [
+            float(x)
+            for x in (exposures or [])
+            if x is not None and np.isfinite(float(x))
+        ]
         if len(exps) != len(th) + 1:
-            return {"ok": False, "error": "bad_tier_exposures_len", "thresholds_abs": th, "exposures": exps}
+            return {
+                "ok": False,
+                "error": "bad_tier_exposures_len",
+                "thresholds_abs": th,
+                "exposures": exps,
+            }
         if any((x < 0.0 or x > 1.0) for x in exps):
-            return {"ok": False, "error": "exposures_out_of_range", "thresholds_abs": th, "exposures": exps}
+            return {
+                "ok": False,
+                "error": "exposures_out_of_range",
+                "thresholds_abs": th,
+                "exposures": exps,
+            }
         if any(th[i] > th[i + 1] for i in range(len(th) - 1)):
-            return {"ok": False, "error": "thresholds_not_sorted", "thresholds_abs": th, "exposures": exps}
+            return {
+                "ok": False,
+                "error": "thresholds_not_sorted",
+                "thresholds_abs": th,
+                "exposures": exps,
+            }
 
         x = pd.to_numeric(levels, errors="coerce")
         xv = x.to_numpy(dtype=float)
@@ -264,8 +309,14 @@ def _trade_diagnostics(
         ok2 = np.isfinite(r_strat) & np.isfinite(r_etf) & np.isfinite(exp)
         r_strat_ok = r_strat[ok2]
         r_etf_ok = r_etf[ok2]
-        nav_strat = np.cumprod(1.0 + r_strat_ok) if r_strat_ok.size else np.array([], dtype=float)
-        nav_etf = np.cumprod(1.0 + r_etf_ok) if r_etf_ok.size else np.array([], dtype=float)
+        nav_strat = (
+            np.cumprod(1.0 + r_strat_ok)
+            if r_strat_ok.size
+            else np.array([], dtype=float)
+        )
+        nav_etf = (
+            np.cumprod(1.0 + r_etf_ok) if r_etf_ok.size else np.array([], dtype=float)
+        )
 
         strat_stats = _annualized_from_daily(r_strat_ok)
         bh_stats = _annualized_from_daily(r_etf_ok)
@@ -280,7 +331,10 @@ def _trade_diagnostics(
             bucket_total += 1
             j = int(np.searchsorted(th_arr, xv[i], side="left")) if th_arr.size else 0
             bucket_counts[j] += 1
-        bucket_rates = [float(c) / float(bucket_total) if bucket_total > 0 else float("nan") for c in bucket_counts]
+        bucket_rates = [
+            float(c) / float(bucket_total) if bucket_total > 0 else float("nan")
+            for c in bucket_counts
+        ]
 
         return {
             "ok": True,
@@ -340,27 +394,52 @@ def _trade_diagnostics(
                     continue
                 if score > best_score:
                     best_score = score
-                    best_params = {"lag": int(lag2), "same_sign": same2, "thr_abs": thr2, "thr_q": tq, "corr_train": float(corr_tr)}
+                    best_params = {
+                        "lag": int(lag2),
+                        "same_sign": same2,
+                        "thr_abs": thr2,
+                        "thr_q": tq,
+                        "corr_train": float(corr_tr),
+                    }
 
         if best_params is not None:
             lag_star = int(best_params["lag"])
             idx_sig_tr2 = train_df["idx_ret"].shift(lag_star)
             idx_sig_te2 = test_df["idx_ret"].shift(lag_star)
-            s_tr2 = _strategy_for(train_df, idx_sig_tr2, same_sign=bool(best_params["same_sign"]), thr=best_params["thr_abs"])
-            s_te2 = _strategy_for(test_df, idx_sig_te2, same_sign=bool(best_params["same_sign"]), thr=best_params["thr_abs"])
+            s_tr2 = _strategy_for(
+                train_df,
+                idx_sig_tr2,
+                same_sign=bool(best_params["same_sign"]),
+                thr=best_params["thr_abs"],
+            )
+            s_te2 = _strategy_for(
+                test_df,
+                idx_sig_te2,
+                same_sign=bool(best_params["same_sign"]),
+                thr=best_params["thr_abs"],
+            )
             walk = {
                 "ok": True,
                 "objective": obj,
                 "best_score_train": float(best_score),
                 "chosen": best_params,
-                "train": {"start": train_df.index.min().isoformat(), "end": train_df.index.max().isoformat(), "strategy": s_tr2},
-                "test": {"start": test_df.index.min().isoformat(), "end": test_df.index.max().isoformat(), "strategy": s_te2},
+                "train": {
+                    "start": train_df.index.min().isoformat(),
+                    "end": train_df.index.max().isoformat(),
+                    "strategy": s_tr2,
+                },
+                "test": {
+                    "start": test_df.index.min().isoformat(),
+                    "end": test_df.index.max().isoformat(),
+                    "strategy": s_te2,
+                },
             }
         else:
             walk = {"ok": False, "reason": "no_valid_params"}
 
     vol_out: dict[str, Any] | None = None
     if bool(vol_timing):
+
         def _vol_window_days(key: str) -> int | None:
             k = str(key or "all").strip().lower()
             if k == "static_all":
@@ -377,14 +456,22 @@ def _trade_diagnostics(
                 return 10 * 252
             return None
 
-        qs_in = [float(q) for q in (vol_level_quantiles or []) if q is not None and np.isfinite(float(q))]
+        qs_in = [
+            float(q)
+            for q in (vol_level_quantiles or [])
+            if q is not None and np.isfinite(float(q))
+        ]
         qs = sorted([float(min(max(q, 0.01), 0.99)) for q in qs_in])
         lv = pd.to_numeric(df2["idx_close"], errors="coerce").to_numpy(dtype=float)
         lv = lv[np.isfinite(lv)]
         if len(qs) == 0:
             vol_out = {"ok": False, "error": "empty_vol_level_quantiles"}
         elif lv.size < 20:
-            vol_out = {"ok": False, "error": "insufficient_level_samples", "n": int(lv.size)}
+            vol_out = {
+                "ok": False,
+                "error": "insufficient_level_samples",
+                "n": int(lv.size),
+            }
         else:
             levels = pd.to_numeric(df2["idx_close"], errors="coerce")
             win_key = str(vol_level_window or "all").strip().lower()
@@ -438,7 +525,9 @@ def _trade_diagnostics(
                 cut = int(max(20, min(len(df2) - 20, int(len(df2) * tr))))
                 train_df = df2.iloc[:cut].copy()
                 test_df = df2.iloc[cut:].copy()
-                lv_tr = pd.to_numeric(train_df["idx_close"], errors="coerce").to_numpy(dtype=float)
+                lv_tr = pd.to_numeric(train_df["idx_close"], errors="coerce").to_numpy(
+                    dtype=float
+                )
                 lv_tr = lv_tr[np.isfinite(lv_tr)]
                 if lv_tr.size >= 20:
                     thr_tr = [float(np.quantile(lv_tr, q)) for q in qs]
@@ -460,7 +549,11 @@ def _trade_diagnostics(
                         ),
                     }
                 else:
-                    vol_walk = {"ok": False, "reason": "insufficient_train_level_samples", "n": int(lv_tr.size)}
+                    vol_walk = {
+                        "ok": False,
+                        "reason": "insufficient_train_level_samples",
+                        "n": int(lv_tr.size),
+                    }
             elif bool(walk_forward) and win_key != "static_all":
                 vol_walk = {"ok": False, "reason": f"{win_key}_window_mode"}
             vol_out["walk_forward"] = vol_walk
@@ -471,6 +564,7 @@ def _trade_diagnostics(
     s1 = df2["etf_ret"]
     s2 = idx_sig
     roll_corr = s1.rolling(rw).corr(s2)
+
     # rolling hit-rate
     def _roll_hit(a: pd.Series, b: pd.Series) -> float:
         aa = np.sign(a.to_numpy(dtype=float))
@@ -478,7 +572,7 @@ def _trade_diagnostics(
         mm2 = np.isfinite(aa) & np.isfinite(bb) & (aa != 0) & (bb != 0)
         if not np.any(mm2):
             return float("nan")
-        pp = (bb if same else -bb)
+        pp = bb if same else -bb
         return float(np.mean(np.sign(pp[mm2]) == np.sign(aa[mm2])))
 
     roll_hit = df2["etf_ret"].rolling(rw).apply(lambda _: np.nan, raw=False)
@@ -493,11 +587,29 @@ def _trade_diagnostics(
     roll_hit = pd.Series(roll_hit_vals, index=df2.index)
 
     return {
-        "signal": {"lag_used": lag, "same_sign": same, "cost_bps": float(cost_bps), "rolling_window": rw},
-        "direction": {"n": total, "hit_rate": hit_rate, "tp": tp, "tn": tn, "fp": fp, "fn": fn},
+        "signal": {
+            "lag_used": lag,
+            "same_sign": same,
+            "cost_bps": float(cost_bps),
+            "rolling_window": rw,
+        },
+        "direction": {
+            "n": total,
+            "hit_rate": hit_rate,
+            "tp": tp,
+            "tn": tn,
+            "fp": fp,
+            "fn": fn,
+        },
         "conditional": cond,
         "strategy": strat,
-        "threshold": {"enabled": bool(enable_threshold), "quantile": float(threshold_quantile), "strategy": strat_thr} if bool(enable_threshold) else {"enabled": False},
+        "threshold": {
+            "enabled": bool(enable_threshold),
+            "quantile": float(threshold_quantile),
+            "strategy": strat_thr,
+        }
+        if bool(enable_threshold)
+        else {"enabled": False},
         "walk_forward": walk,
         "vol_timing": vol_out,
         "rolling": {
@@ -515,7 +627,9 @@ def _safe_corr(a: pd.Series, b: pd.Series) -> tuple[float, int]:
     n = int(m.sum())
     if n < 3:
         return float("nan"), n
-    return float(np.corrcoef(x[m].to_numpy(dtype=float), y[m].to_numpy(dtype=float))[0, 1]), n
+    return float(
+        np.corrcoef(x[m].to_numpy(dtype=float), y[m].to_numpy(dtype=float))[0, 1]
+    ), n
 
 
 def _corr_pvalue(r: float, n: int) -> float:
@@ -536,7 +650,15 @@ def _granger_f_test(y: np.ndarray, x: np.ndarray, p: int) -> dict[str, Any]:
     """
     n = len(y)
     if p <= 0 or n <= (2 * p + 3):
-        return {"ok": False, "p": p, "n": n, "pvalue": None, "f": None, "df1": p, "df2": None}
+        return {
+            "ok": False,
+            "p": p,
+            "n": n,
+            "pvalue": None,
+            "f": None,
+            "df1": p,
+            "df2": None,
+        }
 
     # Build design matrices
     # rows correspond to t = p..n-1
@@ -563,11 +685,27 @@ def _granger_f_test(y: np.ndarray, x: np.ndarray, p: int) -> dict[str, Any]:
     df1 = p
     df2 = (n - p) - Xu.shape[1]
     if df2 <= 0 or rss_u <= 0:
-        return {"ok": False, "p": p, "n": n, "pvalue": None, "f": None, "df1": df1, "df2": df2}
+        return {
+            "ok": False,
+            "p": p,
+            "n": n,
+            "pvalue": None,
+            "f": None,
+            "df1": df1,
+            "df2": df2,
+        }
 
     f = ((rss_r - rss_u) / df1) / (rss_u / df2)
     pval = float(stats.f.sf(f, df1, df2)) if np.isfinite(f) else float("nan")
-    return {"ok": True, "p": p, "n": n, "pvalue": pval, "f": float(f), "df1": df1, "df2": int(df2)}
+    return {
+        "ok": True,
+        "p": p,
+        "n": n,
+        "pvalue": pval,
+        "f": float(f),
+        "df1": df1,
+        "df2": int(df2),
+    }
 
 
 def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
@@ -579,7 +717,10 @@ def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
     """
     etf = pd.to_numeric(inputs.etf_close, errors="coerce").dropna()
     idx = pd.to_numeric(inputs.idx_close, errors="coerce").dropna()
-    if str(getattr(inputs, "index_align", "none") or "none").strip().lower() == "cn_next_trading_day":
+    if (
+        str(getattr(inputs, "index_align", "none") or "none").strip().lower()
+        == "cn_next_trading_day"
+    ):
         idx = align_us_close_to_cn_next_trading_day(idx)
     if etf.empty or idx.empty:
         return {"ok": False, "reason": "empty_series"}
@@ -604,8 +745,14 @@ def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
 
     # pick best lag by absolute correlation (break ties by smaller |lag|)
     finite = [x for x in rows if np.isfinite(x["corr"])]
-    finite_sorted = sorted(finite, key=lambda x: (-abs(float(x["corr"])), abs(int(x["lag"]))))
-    best = finite_sorted[0] if finite_sorted else {"lag": 0, "corr": float("nan"), "n": 0, "pvalue": float("nan")}
+    finite_sorted = sorted(
+        finite, key=lambda x: (-abs(float(x["corr"])), abs(int(x["lag"])))
+    )
+    best = (
+        finite_sorted[0]
+        if finite_sorted
+        else {"lag": 0, "corr": float("nan"), "n": 0, "pvalue": float("nan")}
+    )
 
     lag0_corr, lag0_n = _safe_corr(df2["etf_ret"], df2["idx_ret"])
     lag0_p = _corr_pvalue(lag0_corr, lag0_n)
@@ -635,7 +782,13 @@ def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
 
     # summary strings
     def _min_p(tests: list[dict[str, Any]]) -> float | None:
-        ps = [float(t["pvalue"]) for t in tests if t.get("ok") and t.get("pvalue") is not None and np.isfinite(float(t["pvalue"]))]
+        ps = [
+            float(t["pvalue"])
+            for t in tests
+            if t.get("ok")
+            and t.get("pvalue") is not None
+            and np.isfinite(float(t["pvalue"]))
+        ]
         return None if not ps else float(min(ps))
 
     min_p_xy = _min_p(granger_xy)
@@ -659,8 +812,12 @@ def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
         walk_objective=str(getattr(inputs, "walk_objective", "sharpe") or "sharpe"),
         max_lag=int(getattr(inputs, "max_lag", 20) or 20),
         vol_timing=bool(getattr(inputs, "vol_timing", False)),
-        vol_level_quantiles=list(getattr(inputs, "vol_level_quantiles", [0.8]) or [0.8]),
-        vol_level_exposures=list(getattr(inputs, "vol_level_exposures", [1.0, 0.5]) or [1.0, 0.5]),
+        vol_level_quantiles=list(
+            getattr(inputs, "vol_level_quantiles", [0.8]) or [0.8]
+        ),
+        vol_level_exposures=list(
+            getattr(inputs, "vol_level_exposures", [1.0, 0.5]) or [1.0, 0.5]
+        ),
         vol_level_window=str(getattr(inputs, "vol_level_window", "all") or "all"),
     )
 
@@ -692,4 +849,3 @@ def compute_lead_lag(inputs: LeadLagInputs) -> dict[str, Any]:
         },
         "trade": trade,
     }
-

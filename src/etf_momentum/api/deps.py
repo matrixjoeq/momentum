@@ -21,7 +21,10 @@ def build_engine() -> Engine:
 
 
 def init_app_state(app: FastAPI) -> None:
-    if getattr(app.state, "engine", None) is not None and getattr(app.state, "session_factory", None) is not None:
+    if (
+        getattr(app.state, "engine", None) is not None
+        and getattr(app.state, "session_factory", None) is not None
+    ):
         return
 
     engine = build_engine()
@@ -45,4 +48,3 @@ def get_session(request: Request) -> Generator[Session, None, None]:
 
 def get_akshare():
     return ak
-

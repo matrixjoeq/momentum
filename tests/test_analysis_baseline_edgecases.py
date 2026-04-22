@@ -26,7 +26,14 @@ def test_helper_metrics_zero_std_returns_nan():
 
 
 def test_max_drawdown_duration_with_recovery():
-    idx = pd.to_datetime([dt.date(2024, 1, 1), dt.date(2024, 1, 2), dt.date(2024, 1, 3), dt.date(2024, 1, 4)])
+    idx = pd.to_datetime(
+        [
+            dt.date(2024, 1, 1),
+            dt.date(2024, 1, 2),
+            dt.date(2024, 1, 3),
+            dt.date(2024, 1, 4),
+        ]
+    )
     nav = pd.Series([1.0, 0.8, 0.9, 1.1], index=idx)
     assert bl._max_drawdown(nav) == pytest.approx(-0.2)
     assert bl._max_drawdown_duration_days(nav) == 2
@@ -35,7 +42,9 @@ def test_max_drawdown_duration_with_recovery():
 def test_compute_custom_weight_nav_weekly_rebalance_no_numpy_iloc_crash():
     """Regression: custom weights + periodic rebalance must not assume ndarray has .iloc."""
     idx = pd.date_range("2024-01-02", periods=10, freq="B")
-    daily_ret = pd.DataFrame(0.001, index=idx, columns=["510300", "511010", "513100", "518880"])
+    daily_ret = pd.DataFrame(
+        0.001, index=idx, columns=["510300", "511010", "513100", "518880"]
+    )
     tw = pd.Series({"510300": 0.3, "511010": 0.3, "513100": 0.3, "518880": 0.1})
     nav, w = bl._compute_custom_weight_nav_and_weights(
         daily_ret,
@@ -51,9 +60,19 @@ def test_compute_baseline_errors(session_factory):
     sf = session_factory
     with sf() as db:
         with pytest.raises(ValueError, match="codes is empty"):
-            compute_baseline(db, BaselineInputs(codes=[], start=dt.date(2024, 1, 1), end=dt.date(2024, 1, 2)))
+            compute_baseline(
+                db,
+                BaselineInputs(
+                    codes=[], start=dt.date(2024, 1, 1), end=dt.date(2024, 1, 2)
+                ),
+            )
         with pytest.raises(ValueError, match="no price data"):
-            compute_baseline(db, BaselineInputs(codes=["AAA"], start=dt.date(2024, 1, 1), end=dt.date(2024, 1, 2)))
+            compute_baseline(
+                db,
+                BaselineInputs(
+                    codes=["AAA"], start=dt.date(2024, 1, 1), end=dt.date(2024, 1, 2)
+                ),
+            )
 
 
 def test_compute_baseline_rolling_and_missing_benchmark(session_factory):
@@ -64,8 +83,24 @@ def test_compute_baseline_rolling_and_missing_benchmark(session_factory):
         dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(300)]
         # create a gently trending series
         for i, d in enumerate(dates):
-            db.add(EtfPrice(code=code_a, trade_date=d, close=100.0 + i, source="eastmoney", adjust="qfq"))
-            db.add(EtfPrice(code=code_b, trade_date=d, close=200.0 + i * 0.5, source="eastmoney", adjust="qfq"))
+            db.add(
+                EtfPrice(
+                    code=code_a,
+                    trade_date=d,
+                    close=100.0 + i,
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code=code_b,
+                    trade_date=d,
+                    close=200.0 + i * 0.5,
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
         db.commit()
 
         out = compute_baseline(
@@ -99,23 +134,55 @@ def test_compute_baseline_dynamic_universe_uses_union_start(session_factory):
         code_b = "BBB"
         dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(120)]
         for i, d in enumerate(dates):
-            db.add(EtfPrice(code=code_a, trade_date=d, close=100.0 + i, source="eastmoney", adjust="qfq"))
+            db.add(
+                EtfPrice(
+                    code=code_a,
+                    trade_date=d,
+                    close=100.0 + i,
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
             # BBB starts later
             if i >= 80:
-                db.add(EtfPrice(code=code_b, trade_date=d, close=50.0 + (i - 80) * 0.7, source="eastmoney", adjust="qfq"))
+                db.add(
+                    EtfPrice(
+                        code=code_b,
+                        trade_date=d,
+                        close=50.0 + (i - 80) * 0.7,
+                        source="eastmoney",
+                        adjust="qfq",
+                    )
+                )
         db.commit()
 
         out_inter = compute_baseline(
             db,
-            BaselineInputs(codes=[code_a, code_b], start=dates[0], end=dates[-1], adjust="qfq", dynamic_universe=False),
+            BaselineInputs(
+                codes=[code_a, code_b],
+                start=dates[0],
+                end=dates[-1],
+                adjust="qfq",
+                dynamic_universe=False,
+            ),
         )
         out_union = compute_baseline(
             db,
-            BaselineInputs(codes=[code_a, code_b], start=dates[0], end=dates[-1], adjust="qfq", dynamic_universe=True),
+            BaselineInputs(
+                codes=[code_a, code_b],
+                start=dates[0],
+                end=dates[-1],
+                adjust="qfq",
+                dynamic_universe=True,
+            ),
         )
 
-    assert out_inter["date_range"]["mode_start"] == out_inter["date_range"]["common_start"]
-    assert out_union["date_range"]["mode_start"] <= out_union["date_range"]["common_start"]
+    assert (
+        out_inter["date_range"]["mode_start"] == out_inter["date_range"]["common_start"]
+    )
+    assert (
+        out_union["date_range"]["mode_start"] <= out_union["date_range"]["common_start"]
+    )
     # In dynamic mode, early days only one asset is active.
     vals = out_union["active_count"]["values"]
     assert vals and max(vals) >= 2 and 1 in vals
@@ -127,12 +194,26 @@ def test_compute_baseline_single_asset_portfolios_track_asset_nav(session_factor
         code = "AAA"
         dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(60)]
         for i, d in enumerate(dates):
-            db.add(EtfPrice(code=code, trade_date=d, close=100.0 + i, source="eastmoney", adjust="qfq"))
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=100.0 + i,
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
         db.commit()
 
         out = compute_baseline(
             db,
-            BaselineInputs(codes=[code], start=dates[0], end=dates[-1], adjust="qfq", dynamic_universe=False),
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                adjust="qfq",
+                dynamic_universe=False,
+            ),
         )
 
     ew = out["nav"]["series"]["EW"]
@@ -143,4 +224,3 @@ def test_compute_baseline_single_asset_portfolios_track_asset_nav(session_factor
     assert float(rp[-1]) == pytest.approx(expected_last, rel=1e-9)
     m = out.get("metrics") or {}
     assert float(m.get("cumulative_return") or 0.0) > 0.0
-

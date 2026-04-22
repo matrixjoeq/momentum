@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught
+
 import datetime as dt
 import json
 import re
@@ -81,7 +83,9 @@ def _pick_col(columns: list[str], keywords: tuple[str, ...]) -> str | None:
     return None
 
 
-def _parse_series_df(df: pd.DataFrame, *, value_keywords: tuple[str, ...]) -> dict[dt.date, float]:
+def _parse_series_df(
+    df: pd.DataFrame, *, value_keywords: tuple[str, ...]
+) -> dict[dt.date, float]:
     if df is None or df.empty:
         return {}
     cols = [str(c) for c in list(df.columns)]
@@ -170,7 +174,9 @@ def _parse_fund_events(ak: Any, *, code: str) -> list[FundEvent]:
             if d is None:
                 continue
             cash = _to_float(r.get(cash_col) if cash_col else None)
-            payload = {k: (None if pd.isna(v) else str(v)) for k, v in r.to_dict().items()}
+            payload = {
+                k: (None if pd.isna(v) else str(v)) for k, v in r.to_dict().items()
+            }
             events.append(
                 FundEvent(
                     effective_date=d,
@@ -192,7 +198,9 @@ def _parse_fund_events(ak: Any, *, code: str) -> list[FundEvent]:
             if d is None:
                 continue
             ratio = _parse_split_ratio(r.get(ratio_col) if ratio_col else None)
-            payload = {k: (None if pd.isna(v) else str(v)) for k, v in r.to_dict().items()}
+            payload = {
+                k: (None if pd.isna(v) else str(v)) for k, v in r.to_dict().items()
+            }
             events.append(
                 FundEvent(
                     effective_date=d,
@@ -207,7 +215,9 @@ def _parse_fund_events(ak: Any, *, code: str) -> list[FundEvent]:
     return events
 
 
-def _build_adjusted_by_accum(unit_by_date: dict[dt.date, float], accum_by_date: dict[dt.date, float]) -> tuple[dict[dt.date, float], dict[dt.date, float]]:
+def _build_adjusted_by_accum(
+    unit_by_date: dict[dt.date, float], accum_by_date: dict[dt.date, float]
+) -> tuple[dict[dt.date, float], dict[dt.date, float]]:
     common_dates = sorted(set(unit_by_date.keys()) & set(accum_by_date.keys()))
     if not common_dates:
         return ({}, {})
@@ -238,7 +248,9 @@ def _build_adjusted_by_accum(unit_by_date: dict[dt.date, float], accum_by_date: 
     return (qfq, hfq)
 
 
-def _build_adjusted_by_events(unit_by_date: dict[dt.date, float], events: list[FundEvent]) -> tuple[dict[dt.date, float], dict[dt.date, float], str]:
+def _build_adjusted_by_events(
+    unit_by_date: dict[dt.date, float], events: list[FundEvent]
+) -> tuple[dict[dt.date, float], dict[dt.date, float], str]:
     """
     Fallback adjustment reconstruction when cumulative NAV is unavailable.
     Uses dividend/split events to build multiplicative adjustment steps.
@@ -273,7 +285,11 @@ def _build_adjusted_by_events(unit_by_date: dict[dt.date, float], events: list[F
             c = float(ev.cash_dividend)
             if c >= 0 and c < prev_p:
                 r *= (prev_p - c) / prev_p
-        if ev.event_type == "split" and ev.split_ratio is not None and ev.split_ratio > 0:
+        if (
+            ev.event_type == "split"
+            and ev.split_ratio is not None
+            and ev.split_ratio > 0
+        ):
             r *= 1.0 / float(ev.split_ratio)
         if r <= 0 or not pd.notna(r) or abs(r - 1.0) < 1e-12:
             continue
@@ -324,7 +340,11 @@ def ingest_one_off_fund(
 
     # optional cumulative NAV (preferred for adjustment)
     accum_df = _call_fund_open_info(ak, code=code, indicator="累计净值走势")
-    accum_by_date = _parse_series_df(accum_df, value_keywords=("累计净值",)) if accum_df is not None else {}
+    accum_by_date = (
+        _parse_series_df(accum_df, value_keywords=("累计净值",))
+        if accum_df is not None
+        else {}
+    )
 
     # restrict by requested range
     unit_by_date = {d: v for d, v in unit_by_date.items() if start_d <= d <= end_d}
@@ -411,5 +431,6 @@ def ingest_one_off_fund(
     msg = f"none={len(rows_none)},qfq={len(rows_qfq)},hfq={len(rows_hfq)},adj_method={adj_method},events={len(ev_rows)}"
     mark_off_fund_fetch_status(db, code=code, status="success", message=msg)
     db.commit()
-    return IngestOffFundResult(code=code, upserted=int(n0 + n1 + n2), status="success", message=msg)
-
+    return IngestOffFundResult(
+        code=code, upserted=int(n0 + n1 + n2), status="success", message=msg
+    )

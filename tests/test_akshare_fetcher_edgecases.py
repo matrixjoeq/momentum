@@ -21,7 +21,9 @@ class FakeAk:
 
 def test_fetch_returns_empty_on_empty_df() -> None:
     ak = FakeAk(pd.DataFrame(), supports_range=True)
-    rows = fetch_etf_daily_qfq(ak, FetchRequest(code="510300", start_date="20240101", end_date="20240131"))
+    rows = fetch_etf_daily_qfq(
+        ak, FetchRequest(code="510300", start_date="20240101", end_date="20240131")
+    )
     assert rows == []
 
 
@@ -29,7 +31,9 @@ def test_fetch_raises_on_missing_required_columns() -> None:
     df = pd.DataFrame({"日期": ["2024-01-02"], "开盘": [1.0]})
     ak = FakeAk(df)
     with pytest.raises(ValueError):
-        fetch_etf_daily_qfq(ak, FetchRequest(code="510300", start_date="20240101", end_date="20240131"))
+        fetch_etf_daily_qfq(
+            ak, FetchRequest(code="510300", start_date="20240101", end_date="20240131")
+        )
 
 
 def test_fetch_parses_datetime_and_date_objects() -> None:
@@ -43,6 +47,7 @@ def test_fetch_parses_datetime_and_date_objects() -> None:
         }
     )
     ak = FakeAk(df)
-    rows = fetch_etf_daily_qfq(ak, FetchRequest(code="510300", start_date="20240101", end_date="20240131"))
+    rows = fetch_etf_daily_qfq(
+        ak, FetchRequest(code="510300", start_date="20240101", end_date="20240131")
+    )
     assert [r.trade_date.isoformat() for r in rows] == ["2024-01-02", "2024-01-03"]
-

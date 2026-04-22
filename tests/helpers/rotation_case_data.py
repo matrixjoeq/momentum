@@ -12,7 +12,9 @@ from etf_momentum.db.session import make_session_factory
 FIXED_MINIPROGRAM_CODES = ["159915", "511010", "513100", "518880"]
 
 
-def seed_prices(engine, *, code_to_series: dict[str, list[float]], dates: list[dt.date]) -> None:
+def seed_prices(
+    engine, *, code_to_series: dict[str, list[float]], dates: list[dt.date]
+) -> None:
     """Seed test prices for none/hfq/qfq adjustments."""
     sf = make_session_factory(engine)
     with sf() as db:
@@ -41,7 +43,9 @@ def build_rotation_case_series() -> tuple[list[dt.date], dict[str, list[float]]]
     """
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-07-31", freq="B")]
 
-    def _spike(base: float, slope: float, spike_start: int, spike_slope: float) -> list[float]:
+    def _spike(
+        base: float, slope: float, spike_start: int, spike_slope: float
+    ) -> list[float]:
         out: list[float] = []
         for i, _ in enumerate(dates):
             v = base + i * slope
@@ -60,7 +64,9 @@ def build_rotation_case_series() -> tuple[list[dt.date], dict[str, list[float]]]
     return dates, series
 
 
-def map_case_series_to_miniprogram_codes(src: dict[str, list[float]]) -> dict[str, list[float]]:
+def map_case_series_to_miniprogram_codes(
+    src: dict[str, list[float]],
+) -> dict[str, list[float]]:
     """Map synthetic A/B/C/D series to fixed mini-program ETF codes."""
     return {
         "159915": src["A"],
@@ -100,7 +106,9 @@ def make_rotation_base_payload(
     }
 
 
-def make_trend_rule(*, stage: str, op: str = ">=", trend_sma_window: int = 5, trend_ma_type: str = "ema") -> dict[str, object]:
+def make_trend_rule(
+    *, stage: str, op: str = ">=", trend_sma_window: int = 5, trend_ma_type: str = "ema"
+) -> dict[str, object]:
     return {
         "code": "*",
         "stage": str(stage),
@@ -133,7 +141,9 @@ def make_bias_rule(
 
 
 def mc_metric_mean(data: dict, metric: str = "annualized_return") -> float:
-    raw = (((data.get("mc") or {}).get("strategy") or {}).get("metrics", {})).get(metric, 0.0)
+    raw = (((data.get("mc") or {}).get("strategy") or {}).get("metrics", {})).get(
+        metric, 0.0
+    )
     if isinstance(raw, dict):
         return float(raw.get("mean", 0.0))
     return float(raw or 0.0)
@@ -249,7 +259,9 @@ def delete_response(
     )
 
 
-def post_json(api_client, path: str, payload: dict[str, object], *, expected_status: int = 200) -> dict | list:
+def post_json(
+    api_client, path: str, payload: dict[str, object], *, expected_status: int = 200
+) -> dict | list:
     return request_json(
         api_client,
         method="post",
@@ -259,7 +271,13 @@ def post_json(api_client, path: str, payload: dict[str, object], *, expected_sta
     )
 
 
-def get_json(api_client, path: str, *, expected_status: int = 200, params: dict[str, object] | None = None) -> dict | list:
+def get_json(
+    api_client,
+    path: str,
+    *,
+    expected_status: int = 200,
+    params: dict[str, object] | None = None,
+) -> dict | list:
     return request_json(
         api_client,
         method="get",
@@ -269,7 +287,13 @@ def get_json(api_client, path: str, *, expected_status: int = 200, params: dict[
     )
 
 
-def delete_json(api_client, path: str, *, expected_status: int = 200, params: dict[str, object] | None = None) -> dict | list:
+def delete_json(
+    api_client,
+    path: str,
+    *,
+    expected_status: int = 200,
+    params: dict[str, object] | None = None,
+) -> dict | list:
     return request_json(
         api_client,
         method="delete",
@@ -292,7 +316,9 @@ def make_entry_filters_payload(*, bias_fixed_value: float = 1.5) -> dict[str, ob
         "trend_filter": True,
         "bias_filter": True,
         "asset_trend_rules": [make_trend_rule(stage="entry")],
-        "asset_bias_rules": [make_bias_rule(stage="entry", op="<=", fixed_value=bias_fixed_value)],
+        "asset_bias_rules": [
+            make_bias_rule(stage="entry", op="<=", fixed_value=bias_fixed_value)
+        ],
     }
 
 
@@ -306,7 +332,10 @@ def make_entry_exit_filters_payload(
         "bias_filter": True,
         "trend_exit_filter": True,
         "bias_exit_filter": True,
-        "asset_trend_rules": [make_trend_rule(stage="entry"), make_trend_rule(stage="exit")],
+        "asset_trend_rules": [
+            make_trend_rule(stage="entry"),
+            make_trend_rule(stage="exit"),
+        ],
         "asset_bias_rules": [
             make_bias_rule(stage="entry", op="<=", fixed_value=entry_bias_fixed_value),
             make_bias_rule(stage="exit", op=">=", fixed_value=exit_bias_fixed_value),

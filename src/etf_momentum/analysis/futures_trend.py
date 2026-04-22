@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught,attribute-defined-outside-init
+
 import datetime as dt
 from dataclasses import dataclass
 from typing import Literal
@@ -103,7 +105,11 @@ def _build_cost_profile(
         spread_ratio = float(slippage_value)
     else:
         # absolute price spread -> relative spread against price reference
-        spread_ratio = (float(slippage_value) / float(price_reference)) if price_reference > 0 else 0.0
+        spread_ratio = (
+            (float(slippage_value) / float(price_reference))
+            if price_reference > 0
+            else 0.0
+        )
     spread_per_fill = _normalize_per_fill(spread_ratio, slippage_side)
     return CostProfile(
         commission_per_fill=float(max(0.0, commission_per_fill)),
@@ -116,7 +122,9 @@ def _build_cost_profile(
     )
 
 
-def _combine_group_returns(ret_df: pd.DataFrame, *, dynamic_universe: bool) -> pd.Series:
+def _combine_group_returns(
+    ret_df: pd.DataFrame, *, dynamic_universe: bool
+) -> pd.Series:
     if ret_df.empty:
         return pd.Series(dtype=float)
     if dynamic_universe:
@@ -171,7 +179,11 @@ def _run_symbol_backtest(
             exec_price=exec_price,
         )
         nav = (1.0 + ret.fillna(0.0)).cumprod()
-        return nav, {"engine": "fallback_vectorized", "trades": 0, "ret_total": float(nav.iloc[-1] - 1.0)}
+        return nav, {
+            "engine": "fallback_vectorized",
+            "trades": 0,
+            "ret_total": float(nav.iloc[-1] - 1.0),
+        }
 
     try:
         import talib
@@ -185,19 +197,30 @@ def _run_symbol_backtest(
 
         def init(self) -> None:
             close_arr = np.asarray(self.data.Close, dtype=float)
-            if talib is not None:
-                self.fast_ma = self.I(talib.SMA, close_arr, int(self.fast))
-                self.slow_ma = self.I(talib.SMA, close_arr, int(self.slow))
+            sma_fn = getattr(talib, "SMA", None) if talib is not None else None
+            if callable(sma_fn):
+                self.fast_ma = self.I(sma_fn, close_arr, int(self.fast))
+                self.slow_ma = self.I(sma_fn, close_arr, int(self.slow))
             else:
                 # Fallback only when TA-Lib is unavailable.
                 s = pd.Series(close_arr, dtype=float)
                 self.fast_ma = self.I(
-                    lambda x, n: pd.Series(x, dtype=float).rolling(n, min_periods=n).mean().to_numpy(),
+                    lambda x, n: (
+                        pd.Series(x, dtype=float)
+                        .rolling(n, min_periods=n)
+                        .mean()
+                        .to_numpy()
+                    ),
                     s.to_numpy(),
                     int(self.fast),
                 )
                 self.slow_ma = self.I(
-                    lambda x, n: pd.Series(x, dtype=float).rolling(n, min_periods=n).mean().to_numpy(),
+                    lambda x, n: (
+                        pd.Series(x, dtype=float)
+                        .rolling(n, min_periods=n)
+                        .mean()
+                        .to_numpy()
+                    ),
                     s.to_numpy(),
                     int(self.slow),
                 )
@@ -209,8 +232,16 @@ def _run_symbol_backtest(
             sig_idx = -2 if exec_price == "close" else -1
             if sig_idx == -2 and len(self.data.Close) < 2:
                 return
-            f = float(self.fast_ma[sig_idx]) if not pd.isna(self.fast_ma[sig_idx]) else np.nan
-            s = float(self.slow_ma[sig_idx]) if not pd.isna(self.slow_ma[sig_idx]) else np.nan
+            f = (
+                float(self.fast_ma[sig_idx])
+                if not pd.isna(self.fast_ma[sig_idx])
+                else np.nan
+            )
+            s = (
+                float(self.slow_ma[sig_idx])
+                if not pd.isna(self.slow_ma[sig_idx])
+                else np.nan
+            )
             if np.isnan(f) or np.isnan(s):
                 return
             if f > s and not self.position:
@@ -231,15 +262,28 @@ def _run_symbol_backtest(
     stats = bt.run(fast=int(fast_ma), slow=int(slow_ma), size_pct=float(order_size))
     eq = stats.get("_equity_curve")
     if eq is None or "Equity" not in eq:
-        ret = _run_vectorized_fallback(df, fast_ma=fast_ma, slow_ma=slow_ma, exec_price=exec_price)
+        ret = _run_vectorized_fallback(
+            df, fast_ma=fast_ma, slow_ma=slow_ma, exec_price=exec_price
+        )
         nav = (1.0 + ret.fillna(0.0)).cumprod()
-        return nav, {"engine": "fallback_vectorized", "trades": 0, "ret_total": float(nav.iloc[-1] - 1.0)}
-    equity = pd.Series(eq["Equity"], index=pd.to_datetime(eq.index), dtype=float).sort_index()
+        return nav, {
+            "engine": "fallback_vectorized",
+            "trades": 0,
+            "ret_total": float(nav.iloc[-1] - 1.0),
+        }
+    equity = pd.Series(
+        eq["Equity"], index=pd.to_datetime(eq.index), dtype=float
+    ).sort_index()
     nav = (equity / float(equity.iloc[0])).ffill().fillna(1.0)
     trades = int(stats.get("# Trades", 0) or 0)
     ret_total = float(nav.iloc[-1] - 1.0)
     win_rate = float(stats.get("Win Rate [%]", 0.0) or 0.0) / 100.0
-    return nav, {"engine": "backtesting", "trades": trades, "ret_total": ret_total, "win_rate": win_rate}
+    return nav, {
+        "engine": "backtesting",
+        "trades": trades,
+        "ret_total": ret_total,
+        "win_rate": win_rate,
+    }
 
 
 def compute_futures_group_trend_backtest(
@@ -325,12 +369,19 @@ def compute_futures_group_trend_backtest(
         return {
             "ok": False,
             "error": "insufficient_data",
-            "meta": {"group_name": group.name, "start": start, "end": end, "errors": errors},
+            "meta": {
+                "group_name": group.name,
+                "start": start,
+                "end": end,
+                "errors": errors,
+            },
         }
 
     nav_df = pd.DataFrame(nav_by_symbol).sort_index()
     strat_ret = nav_df.pct_change()
-    group_ret = _combine_group_returns(strat_ret, dynamic_universe=bool(dynamic_universe))
+    group_ret = _combine_group_returns(
+        strat_ret, dynamic_universe=bool(dynamic_universe)
+    )
     group_nav = (1.0 + group_ret).cumprod()
 
     bench_close_df = pd.DataFrame(bench_price_by_symbol).sort_index()
@@ -381,7 +432,9 @@ def compute_futures_group_trend_backtest(
         "summary": {
             "strategy_total_return": float(group_nav.iloc[-1] - 1.0),
             "benchmark_total_return": float(bench_nav.iloc[-1] - 1.0),
-            "excess_total_return": float((group_nav.iloc[-1] / bench_nav.iloc[-1]) - 1.0),
+            "excess_total_return": float(
+                (group_nav.iloc[-1] / bench_nav.iloc[-1]) - 1.0
+            ),
         },
         "symbols": symbol_stats,
     }

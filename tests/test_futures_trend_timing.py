@@ -12,7 +12,14 @@ from etf_momentum.analysis.futures_trend import (
 
 def _build_monotonic_ohlc() -> pd.DataFrame:
     idx = pd.to_datetime(
-        ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09"]
+        [
+            "2024-01-02",
+            "2024-01-03",
+            "2024-01-04",
+            "2024-01-05",
+            "2024-01-08",
+            "2024-01-09",
+        ]
     )
     close = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]
     return pd.DataFrame(

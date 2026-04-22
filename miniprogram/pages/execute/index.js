@@ -35,11 +35,22 @@ Page({
       const st = await request(`/sim/variant/${id}/status`);
       const decisionId = await this._pickLatestDecisionId();
       if (!decisionId) {
-        this.setData({ label: st.label, decisionId: null, tradeDate: "-", currentCode: null, targetCode: null, sells: [], buys: [] });
+        this.setData({
+          label: st.label,
+          decisionId: null,
+          tradeDate: "-",
+          currentCode: null,
+          targetCode: null,
+          sells: [],
+          buys: [],
+        });
         wx.showToast({ title: "暂无决策，请先生成决策", icon: "none" });
         return;
       }
-      const prev = await request("/sim/trade/preview", { method: "POST", data: { variant_id: id, decision_id: decisionId } });
+      const prev = await request("/sim/trade/preview", {
+        method: "POST",
+        data: { variant_id: id, decision_id: decisionId },
+      });
       this.setData({
         label: st.label,
         decisionId,
@@ -61,7 +72,10 @@ Page({
     if (!decisionId) return;
     try {
       wx.showLoading({ title: "提交中..." });
-      await request("/sim/trade/confirm", { method: "POST", data: { variant_id: id, decision_id: decisionId } });
+      await request("/sim/trade/confirm", {
+        method: "POST",
+        data: { variant_id: id, decision_id: decisionId },
+      });
       wx.hideLoading();
       wx.showToast({ title: "已确认", icon: "success" });
       await this.onRefresh();
@@ -71,4 +85,3 @@ Page({
     }
   },
 });
-

@@ -28,4 +28,3 @@ def test_api_rotation_weekly5_open_sim(api_client):
     assert "ROTATION" in one["nav"]["series"]
     assert "EW_REBAL" in one["nav"]["series"]
     assert "EXCESS" in one["nav"]["series"]
-

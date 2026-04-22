@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=unused-argument
+
 import datetime as dt
 from dataclasses import dataclass
 from typing import Any
@@ -53,7 +55,9 @@ def _decision_dates_for_rebalance(
     """
     r = (rebalance or "weekly").strip().lower()
     if r not in {"weekly", "monthly", "quarterly", "yearly"}:
-        raise ValueError(f"invalid rebalance={rebalance} (expected weekly/monthly/quarterly/yearly)")
+        raise ValueError(
+            f"invalid rebalance={rebalance} (expected weekly/monthly/quarterly/yearly)"
+        )
     if dates.empty:
         return []
 
@@ -176,7 +180,9 @@ def _pick_exec_price(ohlc: dict[str, pd.DataFrame], *, exec_price: str) -> pd.Da
 
 
 def _common_start_from_prices(px: pd.DataFrame, codes: list[str]) -> pd.Timestamp:
-    first_valid = {c: (px[c].first_valid_index() if c in px.columns else None) for c in codes}
+    first_valid = {
+        c: (px[c].first_valid_index() if c in px.columns else None) for c in codes
+    }
     valid = [d for d in first_valid.values() if d is not None]
     if not valid:
         raise ValueError("no valid price data")
@@ -196,7 +202,9 @@ class BaselineCalendarEffectInputs:
     exec_prices: list[str] | None = None  # open/close/ohlc4
 
 
-def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInputs) -> dict[str, Any]:
+def compute_baseline_calendar_effect(
+    db: Session, inp: BaselineCalendarEffectInputs
+) -> dict[str, Any]:
     codes = list(dict.fromkeys(inp.codes))
     if not codes:
         raise ValueError("codes is empty")
@@ -205,12 +213,16 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
     anchors = inp.anchors or ([1, 2, 3, 4, 5] if reb == "weekly" else [1])
     exec_prices = inp.exec_prices or ["open", "close", "oc2"]
 
-    ohlc = load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust=inp.adjust)
+    ohlc = load_ohlc_prices(
+        db, codes=codes, start=inp.start, end=inp.end, adjust=inp.adjust
+    )
     if ohlc["close"].empty:
         raise ValueError("no price data for given range")
 
     # Benchmark for information ratio: same-frequency EW rebalancing on hfq close.
-    bench_close_hfq = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="hfq")
+    bench_close_hfq = load_close_prices(
+        db, codes=codes, start=inp.start, end=inp.end, adjust="hfq"
+    )
 
     grid: list[dict[str, Any]] = []
     # rolling return stability diagnostics (1/3/5 years)
@@ -227,7 +239,17 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
     def _stats(x: pd.Series) -> dict[str, float | int | None]:
         v = x.replace([np.inf, -np.inf], np.nan).dropna().astype(float)
         if v.empty:
-            return {"count": 0, "mean": None, "std": None, "min": None, "p10": None, "p50": None, "p90": None, "max": None, "pos_ratio": None}
+            return {
+                "count": 0,
+                "mean": None,
+                "std": None,
+                "min": None,
+                "p10": None,
+                "p50": None,
+                "p90": None,
+                "max": None,
+                "pos_ratio": None,
+            }
         arr = v.to_numpy(dtype=float)
         return {
             "count": int(len(arr)),
@@ -240,6 +262,7 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             "max": float(np.max(arr)),
             "pos_ratio": float(np.mean(arr > 0.0)),
         }
+
     for a in anchors:
         for ep in exec_prices:
             ep_l = str(ep).strip().lower()
@@ -247,10 +270,27 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                 oo = ohlc.get("open", pd.DataFrame())
                 cc = ohlc.get("close", pd.DataFrame())
                 if oo.empty or cc.empty:
-                    grid.append({"anchor": int(a), "exec_price": str(ep), "ok": False, "reason": "empty open/close for oc2"})
+                    grid.append(
+                        {
+                            "anchor": int(a),
+                            "exec_price": str(ep),
+                            "ok": False,
+                            "reason": "empty open/close for oc2",
+                        }
+                    )
                     continue
-                oo = oo.sort_index().reindex(columns=codes).replace([np.inf, -np.inf], np.nan).ffill()
-                cc = cc.sort_index().reindex(columns=codes).replace([np.inf, -np.inf], np.nan).ffill()
+                oo = (
+                    oo.sort_index()
+                    .reindex(columns=codes)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .ffill()
+                )
+                cc = (
+                    cc.sort_index()
+                    .reindex(columns=codes)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .ffill()
+                )
                 missing = [
                     c
                     for c in codes
@@ -273,18 +313,31 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                 px_common = cc.loc[common_start:, codes]
                 oo_c = oo.reindex(px_common.index).ffill().reindex(columns=codes)
                 cc_c = cc.reindex(px_common.index).ffill().reindex(columns=codes)
-                daily_ret_o = oo_c.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-                daily_ret_c = cc_c.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                daily_ret_o = (
+                    oo_c.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                )
+                daily_ret_c = (
+                    cc_c.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                )
                 daily_ret = (0.5 * (daily_ret_o + daily_ret_c)).astype(float)
                 ret_aligned = None
             else:
                 px = _pick_exec_price(ohlc, exec_price=str(ep))
                 if px.empty:
-                    grid.append({"anchor": int(a), "exec_price": str(ep), "ok": False, "reason": "empty price matrix"})
+                    grid.append(
+                        {
+                            "anchor": int(a),
+                            "exec_price": str(ep),
+                            "ok": False,
+                            "reason": "empty price matrix",
+                        }
+                    )
                     continue
 
                 px = px.sort_index()
-                missing = [c for c in codes if c not in px.columns or px[c].dropna().empty]
+                missing = [
+                    c for c in codes if c not in px.columns or px[c].dropna().empty
+                ]
                 if missing:
                     grid.append(
                         {
@@ -299,12 +352,23 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                 px_ff = px.ffill()
                 common_start = _common_start_from_prices(px, codes)
                 px_common = px_ff.loc[common_start:, codes]
-                daily_ret = px_common.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                daily_ret = (
+                    px_common.pct_change()
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                )
                 ret_aligned = None
 
-            decision_dates = _decision_dates_for_rebalance(px_common.index, rebalance=reb, anchor=int(a), shift=str(inp.rebalance_shift))
+            decision_dates = _decision_dates_for_rebalance(
+                px_common.index,
+                rebalance=reb,
+                anchor=int(a),
+                shift=str(inp.rebalance_shift),
+            )
             if ep_l == "open":
-                ret_fwd = forward_align_returns(daily_ret[codes].astype(float).fillna(0.0))
+                ret_fwd = forward_align_returns(
+                    daily_ret[codes].astype(float).fillna(0.0)
+                )
                 idx = px_common.index
                 exec_day_positions = set()
                 for d in decision_dates:
@@ -316,23 +380,40 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                 if exec_day_positions and "open" in ohlc and "close" in ohlc:
                     co = ohlc["close"][codes].reindex(idx).ffill()
                     oo = ohlc["open"][codes].reindex(idx).ffill()
-                    same_day = (co / oo - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+                    same_day = (
+                        (co / oo - 1.0)
+                        .replace([np.inf, -np.inf], np.nan)
+                        .fillna(0.0)
+                        .astype(float)
+                    )
                     for j in exec_day_positions:
                         ret_fwd.iloc[j] = same_day.iloc[j]
                 ret_aligned = ret_fwd
             ew_nav, ew_w = _ew_nav_and_weights_by_decision_dates(
-                daily_ret[codes], decision_dates=decision_dates, exec_price=str(ep), ret_aligned=ret_aligned
+                daily_ret[codes],
+                decision_dates=decision_dates,
+                exec_price=str(ep),
+                ret_aligned=ret_aligned,
             )
             ew_ret = ew_nav.pct_change().fillna(0.0)
 
             # Benchmark: daily HFQ close equal-weight (no costs), same calendar as strategy grid.
-            bench_ch = bench_close_hfq.sort_index().reindex(px_common.index).reindex(columns=codes).ffill()
-            bench_daily = hfq_close_daily_equal_weight_returns(bench_ch, dynamic_universe=False)
+            bench_ch = (
+                bench_close_hfq.sort_index()
+                .reindex(px_common.index)
+                .reindex(columns=codes)
+                .ffill()
+            )
+            bench_daily = hfq_close_daily_equal_weight_returns(
+                bench_ch, dynamic_universe=False
+            )
             bench_nav = (1.0 + bench_daily).cumprod().astype(float)
             if len(bench_nav) > 0:
                 bench_nav.iloc[0] = 1.0
             active_daily = (ew_ret - bench_daily).astype(float)
-            info_ratio = _information_ratio(active_daily, ann_factor=TRADING_DAYS_PER_YEAR)
+            info_ratio = _information_ratio(
+                active_daily, ann_factor=TRADING_DAYS_PER_YEAR
+            )
 
             # implied turnover from weights (same definition as rotation module)
             w_prev = ew_w.shift(1).fillna(0.0)
@@ -342,12 +423,24 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             ann_vol = _annualized_vol(ew_ret, ann_factor=TRADING_DAYS_PER_YEAR)
             mdd = _max_drawdown(ew_nav)
             mdd_dur = _max_drawdown_duration_days(ew_nav)
-            sharpe = _sharpe(ew_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)
-            sortino = _sortino(ew_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR)
-            calmar = float(ann_ret / abs(mdd)) if np.isfinite(mdd) and float(mdd) < 0 else float("nan")
+            sharpe = _sharpe(
+                ew_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
+            )
+            sortino = _sortino(
+                ew_ret, rf=float(inp.risk_free_rate), ann_factor=TRADING_DAYS_PER_YEAR
+            )
+            calmar = (
+                float(ann_ret / abs(mdd))
+                if np.isfinite(mdd) and float(mdd) < 0
+                else float("nan")
+            )
             ui = _ulcer_index(ew_nav, in_percent=True)
             ui_den = ui / 100.0
-            upi = float((ann_ret - float(inp.risk_free_rate)) / ui_den) if ui_den > 0 else float("nan")
+            upi = (
+                float((ann_ret - float(inp.risk_free_rate)) / ui_den)
+                if ui_den > 0
+                else float("nan")
+            )
 
             grid.append(
                 {
@@ -355,7 +448,9 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                     "exec_price": str(ep),
                     "ok": True,
                     "metrics": {
-                        "cumulative_return": float(ew_nav.iloc[-1] - 1.0) if len(ew_nav) else float("nan"),
+                        "cumulative_return": float(ew_nav.iloc[-1] - 1.0)
+                        if len(ew_nav)
+                        else float("nan"),
                         "annualized_return": float(ann_ret),
                         "annualized_volatility": float(ann_vol),
                         "max_drawdown": float(mdd),
@@ -366,7 +461,9 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                         "ulcer_index": float(ui),
                         "ulcer_performance_index": float(upi),
                         "information_ratio": float(info_ratio),
-                        "avg_daily_turnover": float(turnover.mean()) if len(turnover) else float("nan"),
+                        "avg_daily_turnover": float(turnover.mean())
+                        if len(turnover)
+                        else float("nan"),
                     },
                 }
             )
@@ -380,7 +477,10 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
             for y, w in zip(years_list, win_days):
                 rr = _rolling_return(ew_nav, w)
                 rr_ds = rr.iloc[::roll_step].replace([np.inf, -np.inf], np.nan)
-                rolling_series[key][f"{int(y)}y"] = [None if pd.isna(v) else float(v) for v in rr_ds.to_numpy(dtype=float)]
+                rolling_series[key][f"{int(y)}y"] = [
+                    None if pd.isna(v) else float(v)
+                    for v in rr_ds.to_numpy(dtype=float)
+                ]
                 rolling_stats[key][f"{int(y)}y"] = _stats(rr)
 
     return {
@@ -400,7 +500,11 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
         "grid": grid,
         "rolling": {"dates": (rolling_dates or []), "series": rolling_series},
         "rolling_stats": rolling_stats,
-        "exec_price_map": {"open": "开盘", "close": "收盘", "oc2": "OC2(50%开+50%收日收益)"},
+        "exec_price_map": {
+            "open": "开盘",
+            "close": "收盘",
+            "oc2": "OC2(50%开+50%收日收益)",
+        },
     }
 
 
@@ -436,7 +540,17 @@ def compute_rotation_calendar_effect(
     def _stats(x: pd.Series) -> dict[str, float | int | None]:
         v = x.replace([np.inf, -np.inf], np.nan).dropna().astype(float)
         if v.empty:
-            return {"count": 0, "mean": None, "std": None, "min": None, "p10": None, "p50": None, "p90": None, "max": None, "pos_ratio": None}
+            return {
+                "count": 0,
+                "mean": None,
+                "std": None,
+                "min": None,
+                "p10": None,
+                "p50": None,
+                "p90": None,
+                "max": None,
+                "pos_ratio": None,
+            }
         arr = v.to_numpy(dtype=float)
         return {
             "count": int(len(arr)),
@@ -466,7 +580,9 @@ def compute_rotation_calendar_effect(
                 strat = (res.get("metrics") or {}).get("strategy") or {}
 
                 nav_dates = (res.get("nav") or {}).get("dates") or []
-                nav_series = ((res.get("nav") or {}).get("series") or {}).get("ROTATION") or []
+                nav_series = ((res.get("nav") or {}).get("series") or {}).get(
+                    "ROTATION"
+                ) or []
                 grid.append(
                     {
                         "anchor": int(a),
@@ -481,17 +597,29 @@ def compute_rotation_calendar_effect(
                     rolling_dates = [str(x) for x in nav_dates[::roll_step]]
                 if nav_dates and nav_series:
                     idx = pd.to_datetime(nav_dates)
-                    nav = pd.Series([float(x) for x in nav_series], index=idx, dtype=float)
+                    nav = pd.Series(
+                        [float(x) for x in nav_series], index=idx, dtype=float
+                    )
                     key = f"{int(a)}|{str(ep)}"
                     rolling_series[key] = {}
                     rolling_stats[key] = {}
                     for y, w in zip(years_list, win_days):
                         rr = _rolling_return(nav, w)
                         rr_ds = rr.iloc[::roll_step].replace([np.inf, -np.inf], np.nan)
-                        rolling_series[key][f"{int(y)}y"] = [None if pd.isna(v) else float(v) for v in rr_ds.to_numpy(dtype=float)]
+                        rolling_series[key][f"{int(y)}y"] = [
+                            None if pd.isna(v) else float(v)
+                            for v in rr_ds.to_numpy(dtype=float)
+                        ]
                         rolling_stats[key][f"{int(y)}y"] = _stats(rr)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                grid.append({"anchor": int(a), "exec_price": str(ep), "ok": False, "reason": str(e)})
+                grid.append(
+                    {
+                        "anchor": int(a),
+                        "exec_price": str(ep),
+                        "ok": False,
+                        "reason": str(e),
+                    }
+                )
 
     return {
         "meta": {
@@ -509,7 +637,9 @@ def compute_rotation_calendar_effect(
         "grid": grid,
         "rolling": {"dates": (rolling_dates or []), "series": rolling_series},
         "rolling_stats": rolling_stats,
-        "exec_price_map": {"open": "开盘", "close": "收盘", "oc2": "OC2(50%开+50%收日收益)"},
+        "exec_price_map": {
+            "open": "开盘",
+            "close": "收盘",
+            "oc2": "OC2(50%开+50%收日收益)",
+        },
     }
-
-

@@ -459,7 +459,9 @@ def _load_price_df(db: Session, *, code: str, adjust: str) -> pd.DataFrame:
     return df[["date", *NUM_COLS]].sort_values("date")
 
 
-def _build_joined_for_error(replay88_df: pd.DataFrame, main_df: pd.DataFrame) -> pd.DataFrame:
+def _build_joined_for_error(
+    replay88_df: pd.DataFrame, main_df: pd.DataFrame
+) -> pd.DataFrame:
     if replay88_df.empty or main_df.empty:
         return pd.DataFrame()
     left = replay88_df.copy().set_index("date")
@@ -547,9 +549,8 @@ def _evaluate_usability(err_df: pd.DataFrame, *, compare_ok: bool) -> dict[str, 
         p95 = float(r.get("p95_ape", np.nan))
         item = {"field": f, "n": n, "mape": mape, "p95_ape": p95}
         covered.append(item)
-        if (
-            (not np.isnan(mape) and mape > USABLE_REL_MEAN_MAX)
-            or (not np.isnan(p95) and p95 > USABLE_REL_P95_MAX)
+        if (not np.isnan(mape) and mape > USABLE_REL_MEAN_MAX) or (
+            not np.isnan(p95) and p95 > USABLE_REL_P95_MAX
         ):
             failed.append(item)
     usable = len(covered) >= USABLE_MIN_FIELDS and len(failed) == 0
@@ -641,8 +642,12 @@ def validate_synthesized_for_pool(db: Session, pool: FuturesPool) -> dict[str, A
             ),
             "missing_days": int(len(missing)),
             "extra_days": int(len(extra)),
-            "missing_dates_sample": [str(pd.Timestamp(x).date()) for x in list(missing[:5])],
-            "extra_dates_sample": [str(pd.Timestamp(x).date()) for x in list(extra[:5])],
+            "missing_dates_sample": [
+                str(pd.Timestamp(x).date()) for x in list(missing[:5])
+            ],
+            "extra_dates_sample": [
+                str(pd.Timestamp(x).date()) for x in list(extra[:5])
+            ],
             "same_span": bool(
                 len(adj_dates) > 0
                 and pd.Timestamp(adj_dates.min()) == none_start
@@ -669,7 +674,9 @@ def validate_synthesized_for_pool(db: Session, pool: FuturesPool) -> dict[str, A
 
     overall_pass = bool(coverage_pass and error_pass)
     status = "passed" if overall_pass else "failed"
-    conclusion = "通过：合成数据校验通过" if overall_pass else "失败：合成数据校验未通过"
+    conclusion = (
+        "通过：合成数据校验通过" if overall_pass else "失败：合成数据校验未通过"
+    )
 
     compare_summary: dict[str, Any]
     if compare_ok:
@@ -677,9 +684,10 @@ def validate_synthesized_for_pool(db: Session, pool: FuturesPool) -> dict[str, A
         joined_x["close_abs_diff"] = (
             joined_x["close_replay88"] - joined_x["close_main0"]
         ).abs()
-        joined_x["close_rel_diff"] = joined_x["close_abs_diff"] / joined_x[
-            "close_main0"
-        ].replace(0, np.nan).abs()
+        joined_x["close_rel_diff"] = (
+            joined_x["close_abs_diff"]
+            / joined_x["close_main0"].replace(0, np.nan).abs()
+        )
         compare_summary = {
             "ok": True,
             "overlap_days": int(len(joined_x)),
@@ -716,24 +724,14 @@ def validate_synthesized_for_pool(db: Session, pool: FuturesPool) -> dict[str, A
                         {
                             "field": str(r["field"]),
                             "n": int(r["n"]),
-                            "mae": (
-                                None if pd.isna(r["mae"]) else float(r["mae"])
-                            ),
-                            "rmse": (
-                                None if pd.isna(r["rmse"]) else float(r["rmse"])
-                            ),
+                            "mae": (None if pd.isna(r["mae"]) else float(r["mae"])),
+                            "rmse": (None if pd.isna(r["rmse"]) else float(r["rmse"])),
                             "max_abs": (
-                                None
-                                if pd.isna(r["max_abs"])
-                                else float(r["max_abs"])
+                                None if pd.isna(r["max_abs"]) else float(r["max_abs"])
                             ),
-                            "mape": (
-                                None if pd.isna(r["mape"]) else float(r["mape"])
-                            ),
+                            "mape": (None if pd.isna(r["mape"]) else float(r["mape"])),
                             "p95_ape": (
-                                None
-                                if pd.isna(r["p95_ape"])
-                                else float(r["p95_ape"])
+                                None if pd.isna(r["p95_ape"]) else float(r["p95_ape"])
                             ),
                         }
                         for _, r in err_df.iterrows()

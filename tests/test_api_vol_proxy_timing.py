@@ -34,4 +34,3 @@ def test_api_vol_proxy_timing_smoke(api_client) -> None:
     # It may be ok=false due to insufficient samples, but must return a structured response.
     assert "ok" in data
     assert "error" in data or "methods" in data
-

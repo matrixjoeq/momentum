@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 def test_deps_get_engine_and_get_session() -> None:
     from fastapi import FastAPI
     from sqlalchemy import text
@@ -37,4 +38,3 @@ def test_deps_get_akshare_returns_module() -> None:
 
     ak = deps.get_akshare()
     assert hasattr(ak, "fund_etf_hist_em")
-

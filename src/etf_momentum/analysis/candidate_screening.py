@@ -29,7 +29,12 @@ class RotationCandidateScreenInputs:
 
 
 def _max_drawdown_from_nav(nav: pd.Series) -> float:
-    s = pd.to_numeric(nav, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    s = (
+        pd.to_numeric(nav, errors="coerce")
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
     if s.empty:
         return float("nan")
     peak = s.cummax()
@@ -54,7 +59,11 @@ def _pval_norm_2sided_from_t(t: float) -> float:
 
 def _infer_category(code: str, name: str) -> str:
     txt = f"{str(code or '').upper()}|{str(name or '').upper()}"
-    if ("国债ETF" in txt) or ("30年国债" in txt) or ("债" in txt and "可转债" not in txt):
+    if (
+        ("国债ETF" in txt)
+        or ("30年国债" in txt)
+        or ("债" in txt and "可转债" not in txt)
+    ):
         return "BOND"
     if "可转债" in txt:
         return "CONVERTIBLE_BOND"
@@ -64,20 +73,38 @@ def _infer_category(code: str, name: str) -> str:
         return "COMMODITY"
     if ("恒生" in txt) or ("港股" in txt):
         return "HK_EQ"
-    if ("纳指" in txt) or ("标普" in txt) or ("道琼斯" in txt) or ("US" in txt and "ETF" in txt):
+    if (
+        ("纳指" in txt)
+        or ("标普" in txt)
+        or ("道琼斯" in txt)
+        or ("US" in txt and "ETF" in txt)
+    ):
         return "US_EQ"
     if ("日经" in txt) or ("东证" in txt) or ("日本" in txt):
         return "JP_EQ"
     if ("德国" in txt) or ("法国" in txt) or ("欧洲" in txt) or ("EURO" in txt):
         return "EU_EQ"
-    if ("东南亚" in txt) or ("亚太" in txt) or ("新兴亚洲" in txt) or ("沙特" in txt) or ("巴西" in txt):
+    if (
+        ("东南亚" in txt)
+        or ("亚太" in txt)
+        or ("新兴亚洲" in txt)
+        or ("沙特" in txt)
+        or ("巴西" in txt)
+    ):
         return "EM_EQ"
     return "CN_EQ"
 
 
 def _normalize_factor_weights(raw: dict[str, float] | None) -> dict[str, float]:
     keys = ["mom_63", "mom_126", "sharpe", "win_rate", "liquidity", "mdd"]
-    base = {"mom_63": 0.25, "mom_126": 0.25, "sharpe": 0.20, "win_rate": 0.10, "liquidity": 0.10, "mdd": 0.10}
+    base = {
+        "mom_63": 0.25,
+        "mom_126": 0.25,
+        "sharpe": 0.20,
+        "win_rate": 0.10,
+        "liquidity": 0.10,
+        "mdd": 0.10,
+    }
     if not raw:
         return base
     out = {}
@@ -96,7 +123,9 @@ def _normalize_factor_weights(raw: dict[str, float] | None) -> dict[str, float]:
     return out
 
 
-def _is_corr_ok(c: str, selected: list[str], corr: pd.DataFrame, max_corr: float) -> tuple[bool, float, str]:
+def _is_corr_ok(
+    c: str, selected: list[str], corr: pd.DataFrame, max_corr: float
+) -> tuple[bool, float, str]:
     if not selected:
         return True, 0.0, ""
     max_abs = -1.0
@@ -110,8 +139,12 @@ def _is_corr_ok(c: str, selected: list[str], corr: pd.DataFrame, max_corr: float
     return (max_abs <= max_corr), max_abs, max_with
 
 
-def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) -> dict[str, Any]:
-    codes = list(dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()]))
+def screen_rotation_candidates(
+    db: Session, inp: RotationCandidateScreenInputs
+) -> dict[str, Any]:
+    codes = list(
+        dict.fromkeys([str(c).strip() for c in (inp.codes or []) if str(c).strip()])
+    )
     if len(codes) < 2:
         raise ValueError("codes must have at least 2 assets")
     lb = int(inp.lookback_days)
@@ -132,12 +165,18 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
     if horizon < 5:
         raise ValueError("signif_horizon_days must be >= 5")
     factor_w = _normalize_factor_weights(inp.factor_weights)
-    quotas = {str(k).strip().upper(): int(v) for k, v in (inp.category_quotas or {}).items() if str(k).strip()}
+    quotas = {
+        str(k).strip().upper(): int(v)
+        for k, v in (inp.category_quotas or {}).items()
+        if str(k).strip()
+    }
     for k, v in quotas.items():
         if v < 0:
             raise ValueError(f"category quota must be >=0: {k}")
 
-    close = load_close_prices(db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq"))
+    close = load_close_prices(
+        db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq")
+    )
     if close.empty:
         raise ValueError("no price data in selected range")
     close = close.sort_index().ffill().replace([np.inf, -np.inf], np.nan)
@@ -166,7 +205,9 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
         mdd[c] = _max_drawdown_from_nav(nav)
     mdd_s = pd.Series(mdd, dtype=float)
 
-    vol, amount = load_volume_amount(db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq"))
+    vol, amount = load_volume_amount(
+        db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq")
+    )
     liq = pd.Series(index=codes, dtype=float)
     if amount is not None and not amount.empty:
         amt = amount.reindex(px.index).ffill()
@@ -174,14 +215,16 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
     elif vol is not None and not vol.empty:
         vv = vol.reindex(px.index).ffill()
         liq = vv.tail(lb).median(axis=0)
-    liq = pd.to_numeric(liq, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan)
+    liq = (
+        pd.to_numeric(liq, errors="coerce")
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+    )
 
     # Name/category metadata.
     name_by_code: dict[str, str] = {c: "" for c in codes}
     rows_pool = (
-        db.query(EtfPool.code, EtfPool.name)
-        .filter(EtfPool.code.in_(codes))
-        .all()
+        db.query(EtfPool.code, EtfPool.name).filter(EtfPool.code.in_(codes)).all()
     )
     for c0, n0 in rows_pool:
         c = str(c0 or "").strip()
@@ -198,7 +241,9 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
             "sharpe_rank": _rank01(sharpe, ascending=True),
             "win_rate_rank": _rank01(win_rate, ascending=True),
             "liq_rank": _rank01(np.log1p(liq.clip(lower=0.0)), ascending=True),
-            "mdd_rank": _rank01(mdd_s, ascending=False),  # less negative drawdown is better
+            "mdd_rank": _rank01(
+                mdd_s, ascending=False
+            ),  # less negative drawdown is better
         }
     ).reindex(codes)
     score_raw = (
@@ -213,7 +258,9 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
 
     # Advanced momentum significance: does momentum state predict near-future return?
     mom_sig = (px / px.shift(63) - 1.0).astype(float)
-    fwd_ret = np.log(px.shift(-horizon) / px).replace([np.inf, -np.inf], np.nan).astype(float)
+    fwd_ret = (
+        np.log(px.shift(-horizon) / px).replace([np.inf, -np.inf], np.nan).astype(float)
+    )
     signif_by_code: dict[str, dict[str, float | int | None | bool]] = {}
     for c in codes:
         m = pd.to_numeric(mom_sig[c], errors="coerce").astype(float)
@@ -244,8 +291,16 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
         v1 = float(y_pos.var(ddof=1)) if n1 > 1 else float("nan")
         v0 = float(y_non.var(ddof=1)) if n0 > 1 else float("nan")
         spread = (m1 - m0) if (np.isfinite(m1) and np.isfinite(m0)) else float("nan")
-        denom = math.sqrt(max(1e-18, (v1 / max(1, n1)) + (v0 / max(1, n0)))) if (np.isfinite(v1) and np.isfinite(v0)) else float("nan")
-        t_stat = (spread / denom) if (np.isfinite(spread) and np.isfinite(denom) and denom > 0) else float("nan")
+        denom = (
+            math.sqrt(max(1e-18, (v1 / max(1, n1)) + (v0 / max(1, n0))))
+            if (np.isfinite(v1) and np.isfinite(v0))
+            else float("nan")
+        )
+        t_stat = (
+            (spread / denom)
+            if (np.isfinite(spread) and np.isfinite(denom) and denom > 0)
+            else float("nan")
+        )
         pval = _pval_norm_2sided_from_t(t_stat)
         ic = float(m.corr(y)) if len(m) > 2 else float("nan")
         signif_by_code[c] = {
@@ -257,7 +312,9 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
             "t_stat": (None if not np.isfinite(t_stat) else float(t_stat)),
             "p_value": (None if not np.isfinite(pval) else float(pval)),
             "ic": (None if not np.isfinite(ic) else float(ic)),
-            "significant_5pct": bool(np.isfinite(pval) and pval < 0.05 and np.isfinite(spread) and spread > 0),
+            "significant_5pct": bool(
+                np.isfinite(pval) and pval < 0.05 and np.isfinite(spread) and spread > 0
+            ),
         }
 
     corr = ret[codes].corr().fillna(0.0).astype(float)
@@ -266,14 +323,20 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
     eligible = {c: bool(int(obs_count.get(c, 0)) >= min_obs) for c in codes}
     eligible_codes = [c for c in codes if eligible.get(c, False)]
     if not eligible_codes:
-        raise ValueError(f"insufficient samples: no assets have >= {min_obs} valid daily-return observations")
+        raise ValueError(
+            f"insufficient samples: no assets have >= {min_obs} valid daily-return observations"
+        )
 
-    ordered = sorted(eligible_codes, key=lambda c: float(score_raw.get(c, 0.0)), reverse=True)
+    ordered = sorted(
+        eligible_codes, key=lambda c: float(score_raw.get(c, 0.0)), reverse=True
+    )
     selected: list[str] = []
     blocked_by: dict[str, str] = {}
     max_corr_to_sel: dict[str, float | None] = {}
     selected_set: set[str] = set()
-    non_selected_reason: dict[str, str] = {c: "insufficient_samples" for c in codes if not eligible.get(c, False)}
+    non_selected_reason: dict[str, str] = {
+        c: "insufficient_samples" for c in codes if not eligible.get(c, False)
+    }
 
     top_n_eff = min(int(top_n), len(eligible_codes))
     min_n_eff = min(int(min_n), len(eligible_codes))
@@ -354,11 +417,21 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
                 "score": float(score_raw.get(c, 0.0)),
                 "mom_63": (None if pd.isna(mom_63.get(c)) else float(mom_63.get(c))),
                 "mom_126": (None if pd.isna(mom_126.get(c)) else float(mom_126.get(c))),
-                "sharpe_like": (None if pd.isna(sharpe.get(c)) else float(sharpe.get(c))),
-                "win_rate": (None if pd.isna(win_rate.get(c)) else float(win_rate.get(c))),
-                "max_drawdown": (None if pd.isna(mdd_s.get(c)) else float(mdd_s.get(c))),
+                "sharpe_like": (
+                    None if pd.isna(sharpe.get(c)) else float(sharpe.get(c))
+                ),
+                "win_rate": (
+                    None if pd.isna(win_rate.get(c)) else float(win_rate.get(c))
+                ),
+                "max_drawdown": (
+                    None if pd.isna(mdd_s.get(c)) else float(mdd_s.get(c))
+                ),
                 "liquidity_proxy": (None if pd.isna(liq.get(c)) else float(liq.get(c))),
-                "max_abs_corr_to_selected": (None if max_corr_to_sel.get(c) is None else float(max_corr_to_sel[c])),
+                "max_abs_corr_to_selected": (
+                    None
+                    if max_corr_to_sel.get(c) is None
+                    else float(max_corr_to_sel[c])
+                ),
                 "blocked_by_code": blocked_by.get(c),
                 "not_selected_reason": (None if c in sel_set else reason),
                 "significance": signif_by_code.get(c, {}),
@@ -380,9 +453,15 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
                 "score": float(score_raw.get(c, 0.0)),
                 "mom_63": (None if pd.isna(mom_63.get(c)) else float(mom_63.get(c))),
                 "mom_126": (None if pd.isna(mom_126.get(c)) else float(mom_126.get(c))),
-                "sharpe_like": (None if pd.isna(sharpe.get(c)) else float(sharpe.get(c))),
-                "win_rate": (None if pd.isna(win_rate.get(c)) else float(win_rate.get(c))),
-                "max_drawdown": (None if pd.isna(mdd_s.get(c)) else float(mdd_s.get(c))),
+                "sharpe_like": (
+                    None if pd.isna(sharpe.get(c)) else float(sharpe.get(c))
+                ),
+                "win_rate": (
+                    None if pd.isna(win_rate.get(c)) else float(win_rate.get(c))
+                ),
+                "max_drawdown": (
+                    None if pd.isna(mdd_s.get(c)) else float(mdd_s.get(c))
+                ),
                 "liquidity_proxy": (None if pd.isna(liq.get(c)) else float(liq.get(c))),
                 "max_abs_corr_to_selected": None,
                 "blocked_by_code": None,
@@ -432,7 +511,13 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
             "input_count": int(len(codes)),
             "selected_count": int(len(selected)),
             "selected_by_category": {
-                cat: int(sum(1 for c in selected if str(category_by_code.get(c, "OTHER")) == cat))
+                cat: int(
+                    sum(
+                        1
+                        for c in selected
+                        if str(category_by_code.get(c, "OTHER")) == cat
+                    )
+                )
                 for cat in sorted(set(category_by_code.values()))
             },
         },
@@ -440,8 +525,16 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
         "details": rows,
         "significance_report": {
             "summary": {
-                "significant_count_5pct": int(sum(1 for r in signif_rows if bool(r["significant_5pct"]))),
-                "selected_significant_count_5pct": int(sum(1 for r in signif_rows if bool(r["selected"]) and bool(r["significant_5pct"]))),
+                "significant_count_5pct": int(
+                    sum(1 for r in signif_rows if bool(r["significant_5pct"]))
+                ),
+                "selected_significant_count_5pct": int(
+                    sum(
+                        1
+                        for r in signif_rows
+                        if bool(r["selected"]) and bool(r["significant_5pct"])
+                    )
+                ),
             },
             "rows": signif_rows,
         },

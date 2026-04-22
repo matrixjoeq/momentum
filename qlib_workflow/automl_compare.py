@@ -56,9 +56,13 @@ def init_qlib(cfg: QlibConfig) -> None:
 
 
 def load_close_prices(symbols: list[str], start: str, end: str) -> pd.DataFrame:
-    df = D.features(symbols, fields=["$close"], start_time=start, end_time=end, freq="day")
+    df = D.features(
+        symbols, fields=["$close"], start_time=start, end_time=end, freq="day"
+    )
     if df is None or df.empty:
-        raise ValueError("qlib returned empty price data; check provider_uri and symbols")
+        raise ValueError(
+            "qlib returned empty price data; check provider_uri and symbols"
+        )
     df = df.reset_index()
     df = df.pivot(index="datetime", columns="instrument", values="$close").sort_index()
     return df.astype(float)
@@ -71,9 +75,19 @@ def _trading_days(index: pd.DatetimeIndex) -> list[pd.Timestamp]:
 def _calc_metrics(nav: pd.Series, rf: float) -> dict:
     ret = nav.pct_change().fillna(0.0)
     ann_factor = 252.0
-    ann_ret = float((1.0 + ret.mean()) ** ann_factor - 1.0) if len(ret) else float("nan")
+    ann_ret = (
+        float((1.0 + ret.mean()) ** ann_factor - 1.0) if len(ret) else float("nan")
+    )
     ann_vol = float(ret.std(ddof=1) * np.sqrt(ann_factor)) if len(ret) else float("nan")
-    sharpe = float((ret.mean() - rf / ann_factor) / (ret.std(ddof=1) or np.nan) * np.sqrt(ann_factor)) if len(ret) else float("nan")
+    sharpe = (
+        float(
+            (ret.mean() - rf / ann_factor)
+            / (ret.std(ddof=1) or np.nan)
+            * np.sqrt(ann_factor)
+        )
+        if len(ret)
+        else float("nan")
+    )
     cum = float(nav.iloc[-1] / nav.iloc[0] - 1.0) if len(nav) else float("nan")
     return {
         "cumulative_return": cum,
@@ -93,9 +107,13 @@ def _score_momentum(close: pd.DataFrame, decision_idx: int, lookback: int) -> pd
     return score
 
 
-def run_rotation(close: pd.DataFrame, cfg: BacktestConfig) -> tuple[pd.Series, list[dict]]:
+def run_rotation(
+    close: pd.DataFrame, cfg: BacktestConfig
+) -> tuple[pd.Series, list[dict]]:
     idx = _trading_days(close.index)
-    exec_days = [i for i, d in enumerate(idx) if int(d.weekday()) == int(cfg.rebalance_weekday)]
+    exec_days = [
+        i for i, d in enumerate(idx) if int(d.weekday()) == int(cfg.rebalance_weekday)
+    ]
     if not exec_days:
         raise ValueError("no execution days for given weekday")
 
@@ -111,7 +129,11 @@ def run_rotation(close: pd.DataFrame, cfg: BacktestConfig) -> tuple[pd.Series, l
         pick = score.sort_values(ascending=False).head(cfg.topk).index.tolist()
         w = 1.0 / float(len(pick)) if pick else 0.0
         start_i = exec_i
-        end_i = (exec_days[j + 1] - 1) if j + 1 < len(exec_days) else min(len(idx) - 1, exec_i + cfg.hold_days - 1)
+        end_i = (
+            (exec_days[j + 1] - 1)
+            if j + 1 < len(exec_days)
+            else min(len(idx) - 1, exec_i + cfg.hold_days - 1)
+        )
         weights.loc[close.index[start_i] : close.index[end_i], pick] = w
         trades.append(
             {
@@ -151,7 +173,11 @@ def run_baseline_api(start: str, end: str, exec_weekday: int, db_url: str) -> di
     from fastapi.testclient import TestClient
     from etf_momentum.app import app
 
-    payload = {"start": start.replace("-", ""), "end": end.replace("-", ""), "anchor_weekday": int(exec_weekday)}
+    payload = {
+        "start": start.replace("-", ""),
+        "end": end.replace("-", ""),
+        "anchor_weekday": int(exec_weekday),
+    }
     c = TestClient(app)
     r = c.post("/api/analysis/rotation/weekly5-open", json=payload)
     r.raise_for_status()
@@ -163,7 +189,9 @@ def run_baseline_api(start: str, end: str, exec_weekday: int, db_url: str) -> di
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
+    parser.add_argument(
+        "--config", default=str(Path(__file__).with_name("config.toml"))
+    )
     parser.add_argument("--experiment", default="qlib_rotation_automl")
     args = parser.parse_args()
 
@@ -186,13 +214,25 @@ def main() -> int:
     )
 
     opt_cfg = OptimizeConfig(**cfg["optimize"])
-    out_dir = Path(__file__).with_name("outputs") / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = Path(__file__).with_name("outputs") / dt.datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
     _ensure_dir(out_dir)
 
     results: list[dict] = []
-    for lookback, topk, wd in _grid([opt_cfg.lookback_days, opt_cfg.topk, opt_cfg.rebalance_weekday]):
-        cfg_i = dataclasses.replace(bt_cfg, lookback_days=int(lookback), topk=int(topk), rebalance_weekday=int(wd))
-        with R.start(experiment_name=args.experiment, recorder_name=f"wd{wd}_lb{lookback}_k{topk}"):
+    for lookback, topk, wd in _grid(
+        [opt_cfg.lookback_days, opt_cfg.topk, opt_cfg.rebalance_weekday]
+    ):
+        cfg_i = dataclasses.replace(
+            bt_cfg,
+            lookback_days=int(lookback),
+            topk=int(topk),
+            rebalance_weekday=int(wd),
+        )
+        with R.start(
+            experiment_name=args.experiment,
+            recorder_name=f"wd{wd}_lb{lookback}_k{topk}",
+        ):
             R.log_params(
                 start=cfg_i.start,
                 end=cfg_i.end,
@@ -214,7 +254,12 @@ def main() -> int:
         )
 
     metric = opt_cfg.metric
-    results.sort(key=lambda r: (r.get(metric) if np.isfinite(r.get(metric, float("nan"))) else -1e18), reverse=True)
+    results.sort(
+        key=lambda r: (
+            r.get(metric) if np.isfinite(r.get(metric, float("nan"))) else -1e18
+        ),
+        reverse=True,
+    )
     _write_csv(results, out_dir / "grid_results.csv")
 
     best = results[0] if results else {}
@@ -223,7 +268,12 @@ def main() -> int:
     ds = cfg.get("data_source", {})
     db_path = str(ds.get("sqlite_path", "")).strip()
     if db_path:
-        baseline = run_baseline_api(start=start, end=end, exec_weekday=int(bt_cfg.rebalance_weekday), db_url=f"sqlite:///{db_path}")
+        baseline = run_baseline_api(
+            start=start,
+            end=end,
+            exec_weekday=int(bt_cfg.rebalance_weekday),
+            db_url=f"sqlite:///{db_path}",
+        )
         _write_csv([baseline], out_dir / "baseline.csv")
         if best:
             compare = {

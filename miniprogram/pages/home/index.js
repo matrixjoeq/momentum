@@ -30,7 +30,10 @@ Page({
     } else if (app && app.globalData && app.globalData.portfolioReady) {
       await app.globalData.portfolioReady;
     }
-    return (app && app.globalData && app.globalData.portfolioId) || wx.getStorageSync("portfolio_id");
+    return (
+      (app && app.globalData && app.globalData.portfolioId) ||
+      wx.getStorageSync("portfolio_id")
+    );
   },
 
   async onRefresh() {
@@ -46,9 +49,12 @@ Page({
       for (const v of items) {
         const st = await request(`/sim/variant/${v.id}/status`);
         const positions = st.positions || {};
-        const posText = Object.keys(positions).length === 0
-          ? "现金"
-          : Object.entries(positions).map(([k, q]) => `${k}:${Number(q).toFixed(2)}`).join(" ");
+        const posText =
+          Object.keys(positions).length === 0
+            ? "现金"
+            : Object.entries(positions)
+                .map(([k, q]) => `${k}:${Number(q).toFixed(2)}`)
+                .join(" ");
         out.push({
           id: v.id,
           label: v.label,
@@ -99,7 +105,10 @@ Page({
         return `${y}${m}${dd}`;
       };
       wx.showLoading({ title: "生成中..." });
-      await request("/sim/decision/generate", { method: "POST", data: { portfolio_id: pid, start: fmtYmd(start), end: fmtYmd(end) } });
+      await request("/sim/decision/generate", {
+        method: "POST",
+        data: { portfolio_id: pid, start: fmtYmd(start), end: fmtYmd(end) },
+      });
       wx.hideLoading();
       wx.showToast({ title: "OK", icon: "success" });
     } catch (e) {
@@ -119,8 +128,11 @@ Page({
         return `${y}${m}${dd}`;
       };
       wx.showLoading({ title: "更新中..." });
-      for (const v of (this.data.variants || [])) {
-        await request(`/sim/mark-to-market?variant_id=${v.id}&start=${fmtYmd(start)}&end=${fmtYmd(end)}`, { method: "POST" });
+      for (const v of this.data.variants || []) {
+        await request(
+          `/sim/mark-to-market?variant_id=${v.id}&start=${fmtYmd(start)}&end=${fmtYmd(end)}`,
+          { method: "POST" },
+        );
       }
       wx.hideLoading();
       await this.onRefresh();
@@ -130,4 +142,3 @@ Page({
     }
   },
 });
-

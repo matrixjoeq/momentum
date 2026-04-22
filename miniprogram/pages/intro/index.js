@@ -33,12 +33,12 @@ Page({
   },
 
   onAcknowledgeChange(e) {
-    const vals = (e.detail && e.detail.value) ? e.detail.value : [];
+    const vals = e.detail && e.detail.value ? e.detail.value : [];
     this.setData({ acknowledged: vals.includes("ack") });
   },
 
   onSkipChange(e) {
-    const vals = (e.detail && e.detail.value) ? e.detail.value : [];
+    const vals = e.detail && e.detail.value ? e.detail.value : [];
     this.setData({ skipNext: vals.includes("skip") });
   },
 
@@ -53,4 +53,3 @@ Page({
     goDefault();
   },
 });
-

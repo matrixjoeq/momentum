@@ -72,8 +72,12 @@ def test_monthly_anchor_non_trading_day_shift_modes(session_factory):
             lookback_days=3,
         )
         out_prev = backtest_rotation(db, base)
-        out_next = backtest_rotation(db, RotationInputs(**{**base.__dict__, "rebalance_shift": "next"}))
-        out_skip = backtest_rotation(db, RotationInputs(**{**base.__dict__, "rebalance_shift": "skip"}))
+        out_next = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "rebalance_shift": "next"})
+        )
+        out_skip = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "rebalance_shift": "skip"})
+        )
 
     assert _first_start_date(out_prev) == "2024-01-08"
     assert _first_start_date(out_next) == "2024-01-09"

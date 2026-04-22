@@ -36,7 +36,9 @@ def test_vix_signal_backtest_open_open_does_not_eat_gap_before_entry():
     # Mapping: CN date = US date + 1 (next trading day).
     drop_us_date = dates[jump_i] - dt.timedelta(days=1)
     drop_idx = us_dates.index(drop_us_date)
-    vals[drop_idx] = vals[drop_idx - 1] - 1.0  # drop vs prev => negative idx_log_ret on jump day
+    vals[drop_idx] = (
+        vals[drop_idx - 1] - 1.0
+    )  # drop vs prev => negative idx_log_ret on jump day
     idx_close_us = pd.Series(vals, index=us_dates, dtype=float)
 
     out = backtest_vix_next_day_signal(
@@ -69,4 +71,3 @@ def test_vix_signal_backtest_open_open_does_not_eat_gap_before_entry():
 
     trades = out.get("trades") or []
     assert any(str(t.get("action")).upper() == "BUY" for t in trades)
-

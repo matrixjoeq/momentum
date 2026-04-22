@@ -43,5 +43,7 @@ def test_futures_research_state_concurrent_init_singleton(tmp_path) -> None:
     assert ids == [1] * workers
 
     with sf() as db:
-        cnt = db.execute(select(func.count()).select_from(FuturesResearchState)).scalar_one()
+        cnt = db.execute(
+            select(func.count()).select_from(FuturesResearchState)
+        ).scalar_one()
         assert int(cnt) == 1

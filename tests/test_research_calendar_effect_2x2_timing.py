@@ -23,19 +23,47 @@ def test_monthday_2x2_entry_exit_price_is_strict_trade_interval() -> None:
     i, j = 1, 3
 
     # open -> open
-    r_oo = _trade_ret(opens=opens, closes=closes, entry_idx=i, exit_idx=j, entry_px="open", exit_px="open")
+    r_oo = _trade_ret(
+        opens=opens,
+        closes=closes,
+        entry_idx=i,
+        exit_idx=j,
+        entry_px="open",
+        exit_px="open",
+    )
     assert r_oo == (opens[j] / opens[i] - 1.0)
 
     # open -> close
-    r_oc = _trade_ret(opens=opens, closes=closes, entry_idx=i, exit_idx=j, entry_px="open", exit_px="close")
+    r_oc = _trade_ret(
+        opens=opens,
+        closes=closes,
+        entry_idx=i,
+        exit_idx=j,
+        entry_px="open",
+        exit_px="close",
+    )
     assert r_oc == (closes[j] / opens[i] - 1.0)
 
     # close -> open
-    r_co = _trade_ret(opens=opens, closes=closes, entry_idx=i, exit_idx=j, entry_px="close", exit_px="open")
+    r_co = _trade_ret(
+        opens=opens,
+        closes=closes,
+        entry_idx=i,
+        exit_idx=j,
+        entry_px="close",
+        exit_px="open",
+    )
     assert r_co == (opens[j] / closes[i] - 1.0)
 
     # close -> close
-    r_cc = _trade_ret(opens=opens, closes=closes, entry_idx=i, exit_idx=j, entry_px="close", exit_px="close")
+    r_cc = _trade_ret(
+        opens=opens,
+        closes=closes,
+        entry_idx=i,
+        exit_idx=j,
+        entry_px="close",
+        exit_px="close",
+    )
     assert r_cc == (closes[j] / closes[i] - 1.0)
 
     # Guard against accidental inclusion of pre-entry segment (day0->day1 gap).
@@ -48,6 +76,11 @@ def test_research_html_uses_trade_return_helper_for_2x2_calendar_effect() -> Non
     assert "const _tradeRet = (i, j, pxE0, pxX0) => {" in html
     assert "const r = _tradeRet(i, j, pxE, pxX);" in html
     # Previous inline formula path should not exist anymore.
-    assert 'const e = (pxE === "close") ? Number(closes[i]) : Number(opens[i]);' not in html
-    assert 'const x = (pxX === "close") ? Number(closes[j]) : Number(opens[j]);' not in html
-
+    assert (
+        'const e = (pxE === "close") ? Number(closes[i]) : Number(opens[i]);'
+        not in html
+    )
+    assert (
+        'const x = (pxX === "close") ? Number(closes[j]) : Number(opens[j]);'
+        not in html
+    )

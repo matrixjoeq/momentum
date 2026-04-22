@@ -46,7 +46,13 @@ def test_api_baseline_calendar_effect(api_client):
     ok = next((x for x in data["grid"] if x.get("ok")), None)
     assert ok is not None
     m = ok.get("metrics") or {}
-    for k in ["calmar_ratio", "sortino_ratio", "ulcer_index", "ulcer_performance_index", "information_ratio"]:
+    for k in [
+        "calmar_ratio",
+        "sortino_ratio",
+        "ulcer_index",
+        "ulcer_performance_index",
+        "information_ratio",
+    ]:
         assert k in m
 
 
@@ -84,7 +90,13 @@ def test_api_rotation_calendar_effect(api_client):
     ok = next((x for x in data["grid"] if x.get("ok")), None)
     assert ok is not None
     m = ok.get("metrics") or {}
-    for k in ["calmar_ratio", "sortino_ratio", "ulcer_index", "ulcer_performance_index", "information_ratio"]:
+    for k in [
+        "calmar_ratio",
+        "sortino_ratio",
+        "ulcer_index",
+        "ulcer_performance_index",
+        "information_ratio",
+    ]:
         assert k in m
 
 
@@ -94,7 +106,9 @@ def test_api_rotation_calendar_effect_entry_param_combo_diff(api_client, engine)
 
     c = api_client
     base = {
-        **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"),
+        **make_rotation_base_payload(
+            codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"
+        ),
         "rebalance": "weekly",
         "anchors": [2],
         "exec_prices": ["close"],
@@ -104,8 +118,12 @@ def test_api_rotation_calendar_effect_entry_param_combo_diff(api_client, engine)
         "asset_bias_rules": [make_bias_rule(stage="entry", op="<=", fixed_value=1.5)],
     }
 
-    d_and = post_json_ok(c, "/api/analysis/rotation/calendar-effect", {**base, "entry_match_n": 0})
-    d_nofm = post_json_ok(c, "/api/analysis/rotation/calendar-effect", {**base, "entry_match_n": 1})
+    d_and = post_json_ok(
+        c, "/api/analysis/rotation/calendar-effect", {**base, "entry_match_n": 0}
+    )
+    d_nofm = post_json_ok(
+        c, "/api/analysis/rotation/calendar-effect", {**base, "entry_match_n": 1}
+    )
     assert ((d_and.get("grid") or [])[0] or {}).get("ok") is True
     assert ((d_nofm.get("grid") or [])[0] or {}).get("ok") is True
     ar_and = first_grid_metric(d_and, "annualized_return")
@@ -119,16 +137,29 @@ def test_api_rotation_calendar_effect_exit_param_combo_diff(api_client, engine):
 
     c = api_client
     base = {
-        **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"),
+        **make_rotation_base_payload(
+            codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"
+        ),
         "rebalance": "weekly",
         "anchors": [2],
         "exec_prices": ["close"],
         "entry_match_n": 1,
         **make_entry_filters_payload(bias_fixed_value=1.5),
-        "asset_trend_rules": [make_trend_rule(stage="entry"), make_trend_rule(stage="exit")],
+        "asset_trend_rules": [
+            make_trend_rule(stage="entry"),
+            make_trend_rule(stage="exit"),
+        ],
     }
-    d_off = post_json_ok(c, "/api/analysis/rotation/calendar-effect", {**base, "trend_exit_filter": False})
-    d_on = post_json_ok(c, "/api/analysis/rotation/calendar-effect", {**base, "trend_exit_filter": True, "exit_match_n": 1})
+    d_off = post_json_ok(
+        c,
+        "/api/analysis/rotation/calendar-effect",
+        {**base, "trend_exit_filter": False},
+    )
+    d_on = post_json_ok(
+        c,
+        "/api/analysis/rotation/calendar-effect",
+        {**base, "trend_exit_filter": True, "exit_match_n": 1},
+    )
     assert ((d_off.get("grid") or [])[0] or {}).get("ok") is True
     assert ((d_on.get("grid") or [])[0] or {}).get("ok") is True
     ar_off = first_grid_metric(d_off, "annualized_return")
@@ -142,20 +173,26 @@ def test_api_rotation_calendar_effect_entry_exit_nofm_combo_diff(api_client, eng
 
     c = api_client
     payload = {
-        **make_rotation_base_payload(codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"),
+        **make_rotation_base_payload(
+            codes=["A", "B", "C", "D", "E"], dates=dates, rebalance="weekly"
+        ),
         "rebalance": "weekly",
         "anchors": [2],
         "exec_prices": ["close"],
         "entry_match_n": 1,
-        **make_entry_exit_filters_payload(entry_bias_fixed_value=1.5, exit_bias_fixed_value=99.0),
+        **make_entry_exit_filters_payload(
+            entry_bias_fixed_value=1.5, exit_bias_fixed_value=99.0
+        ),
     }
 
-    d_and = post_json_ok(c, "/api/analysis/rotation/calendar-effect", {**payload, "exit_match_n": 0})
-    d_nofm = post_json_ok(c, "/api/analysis/rotation/calendar-effect", {**payload, "exit_match_n": 1})
+    d_and = post_json_ok(
+        c, "/api/analysis/rotation/calendar-effect", {**payload, "exit_match_n": 0}
+    )
+    d_nofm = post_json_ok(
+        c, "/api/analysis/rotation/calendar-effect", {**payload, "exit_match_n": 1}
+    )
     assert ((d_and.get("grid") or [])[0] or {}).get("ok") is True
     assert ((d_nofm.get("grid") or [])[0] or {}).get("ok") is True
     ar_and = first_grid_metric(d_and, "annualized_return")
     ar_nofm = first_grid_metric(d_nofm, "annualized_return")
     assert ar_nofm <= ar_and
-
-

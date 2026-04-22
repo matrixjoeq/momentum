@@ -35,4 +35,3 @@ def test_trade_eval_includes_threshold_and_walkforward():
     assert "threshold" in trade
     assert "walk_forward" in trade
     assert trade["walk_forward"] is None or isinstance(trade["walk_forward"], dict)
-

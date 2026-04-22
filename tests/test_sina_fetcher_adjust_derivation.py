@@ -1,6 +1,9 @@
 import pandas as pd
 
-from etf_momentum.data.akshare_sina_fetcher import FetchRequest, fetch_etf_daily_sina_none_and_adjusted
+from etf_momentum.data.akshare_sina_fetcher import (
+    FetchRequest,
+    fetch_etf_daily_sina_none_and_adjusted,
+)
 
 
 class _AkMock:
@@ -30,7 +33,9 @@ def test_sina_derives_hfq_and_qfq_from_none_and_dividend_factor():
     div = pd.DataFrame({"日期": ["2024-01-02", "2024-01-03"], "累计分红": [0.0, 0.2]})
     ak = _AkMock(hist, div)
 
-    packs = fetch_etf_daily_sina_none_and_adjusted(ak, FetchRequest(code="159915", start_date="20240102", end_date="20240104"))
+    packs = fetch_etf_daily_sina_none_and_adjusted(
+        ak, FetchRequest(code="159915", start_date="20240102", end_date="20240104")
+    )
     none_rows = packs["none"]
     hfq_rows = packs["hfq"]
     qfq_rows = packs["qfq"]
@@ -45,4 +50,3 @@ def test_sina_derives_hfq_and_qfq_from_none_and_dividend_factor():
 
     # qfq is scaled so last close matches raw last close
     assert abs(qfq_rows[-1].close - none_rows[-1].close) < 1e-12
-

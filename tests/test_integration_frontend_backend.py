@@ -51,4 +51,3 @@ def test_frontend_backend_contract_smoke(api_client: TestClient) -> None:
     assert "futures-research:corr-range" in fut_research
     assert "trendRuleBadge" in fut_research
     assert "rule-badge" in fut_research
-

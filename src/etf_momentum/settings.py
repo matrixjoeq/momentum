@@ -89,4 +89,3 @@ def get_settings() -> Settings:
                 f"@{s.mysql_host}:{int(s.mysql_port)}/{s.mysql_db}?charset=utf8mb4"
             )
     return s
-

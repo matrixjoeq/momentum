@@ -80,7 +80,9 @@ def _parse_cboe_history_csv(text: str) -> pd.DataFrame:
     return out[["date", "close"]]
 
 
-def fetch_cboe_daily_close(req: FetchRequest, *, timeout_s: float = 15.0, retries: int = 2) -> pd.DataFrame:
+def fetch_cboe_daily_close(
+    req: FetchRequest, *, timeout_s: float = 15.0, retries: int = 2
+) -> pd.DataFrame:
     idx = str(req.index or "").strip().upper()
     url = _CBOE_CSV.get(idx)
     if not url:
@@ -111,4 +113,3 @@ def fetch_cboe_daily_close(req: FetchRequest, *, timeout_s: float = 15.0, retrie
     if last_err is not None:
         return pd.DataFrame()
     return pd.DataFrame()
-

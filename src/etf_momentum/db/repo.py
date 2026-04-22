@@ -78,7 +78,9 @@ def upsert_etf_pool(
     validation_policy_id: int | None = None,
     max_abs_return_override: float | None = None,
 ) -> EtfPool:
-    existing = db.execute(select(EtfPool).where(EtfPool.code == code)).scalar_one_or_none()
+    existing = db.execute(
+        select(EtfPool).where(EtfPool.code == code)
+    ).scalar_one_or_none()
     if existing is None:
         obj = EtfPool(
             code=code,
@@ -102,14 +104,18 @@ def upsert_etf_pool(
 
 
 def list_etf_pool(db: Session) -> list[EtfPool]:
-    return list(db.execute(select(EtfPool).order_by(EtfPool.code.asc())).scalars().all())
+    return list(
+        db.execute(select(EtfPool).order_by(EtfPool.code.asc())).scalars().all()
+    )
 
 
 def get_etf_pool_by_code(db: Session, code: str) -> EtfPool | None:
     return db.execute(select(EtfPool).where(EtfPool.code == code)).scalar_one_or_none()
 
 
-def update_etf_pool_data_range(db: Session, *, code: str) -> tuple[str | None, str | None]:
+def update_etf_pool_data_range(
+    db: Session, *, code: str
+) -> tuple[str | None, str | None]:
     """
     Update etf_pool.last_data_start_date/last_data_end_date from etf_prices.
     Returns (start_yyyymmdd, end_yyyymmdd).
@@ -119,7 +125,9 @@ def update_etf_pool_data_range(db: Session, *, code: str) -> tuple[str | None, s
         return (None, None)
 
     start_d, end_d = db.execute(
-        select(func.min(EtfPrice.trade_date), func.max(EtfPrice.trade_date)).where(EtfPrice.code == code)
+        select(func.min(EtfPrice.trade_date), func.max(EtfPrice.trade_date)).where(
+            EtfPrice.code == code
+        )
     ).one()
     if start_d is None or end_d is None:
         obj.last_data_start_date = None
@@ -133,10 +141,14 @@ def update_etf_pool_data_range(db: Session, *, code: str) -> tuple[str | None, s
     return (obj.last_data_start_date, obj.last_data_end_date)
 
 
-def get_price_date_range(db: Session, *, code: str, adjust: str) -> tuple[str | None, str | None]:
+def get_price_date_range(
+    db: Session, *, code: str, adjust: str
+) -> tuple[str | None, str | None]:
     adj = normalize_adjust(adjust)
     start_d, end_d = db.execute(
-        select(func.min(EtfPrice.trade_date), func.max(EtfPrice.trade_date)).where(EtfPrice.code == code, EtfPrice.adjust == adj)
+        select(func.min(EtfPrice.trade_date), func.max(EtfPrice.trade_date)).where(
+            EtfPrice.code == code, EtfPrice.adjust == adj
+        )
     ).one()
     if start_d is None or end_d is None:
         return (None, None)
@@ -161,7 +173,11 @@ def purge_etf_data(db: Session, *, code: str) -> dict[str, int]:
 
     Returns deletion counts.
     """
-    batches = list(db.execute(select(IngestionBatch).where(IngestionBatch.code == code)).scalars().all())
+    batches = list(
+        db.execute(select(IngestionBatch).where(IngestionBatch.code == code))
+        .scalars()
+        .all()
+    )
     snapshot_paths = [b.snapshot_path for b in batches if b.snapshot_path]
 
     # Delete child tables first (safe even if FK constraints are enabled).
@@ -192,15 +208,23 @@ def purge_etf_data(db: Session, *, code: str) -> dict[str, int]:
 
 
 def list_validation_policies(db: Session) -> list[ValidationPolicy]:
-    return list(db.execute(select(ValidationPolicy).order_by(ValidationPolicy.name.asc())).scalars().all())
+    return list(
+        db.execute(select(ValidationPolicy).order_by(ValidationPolicy.name.asc()))
+        .scalars()
+        .all()
+    )
 
 
 def get_validation_policy_by_name(db: Session, name: str) -> ValidationPolicy | None:
-    return db.execute(select(ValidationPolicy).where(ValidationPolicy.name == name)).scalar_one_or_none()
+    return db.execute(
+        select(ValidationPolicy).where(ValidationPolicy.name == name)
+    ).scalar_one_or_none()
 
 
 def get_validation_policy_by_id(db: Session, policy_id: int) -> ValidationPolicy | None:
-    return db.execute(select(ValidationPolicy).where(ValidationPolicy.id == policy_id)).scalar_one_or_none()
+    return db.execute(
+        select(ValidationPolicy).where(ValidationPolicy.id == policy_id)
+    ).scalar_one_or_none()
 
 
 def mark_fetch_status(
@@ -392,16 +416,25 @@ def update_ingestion_batch(
     stmt = (
         update(IngestionBatch)
         .where(IngestionBatch.id == batch_id)
-        .values(status=status, message=_clip(message, 512), pre_fingerprint=pre_fingerprint, post_fingerprint=post_fingerprint)
+        .values(
+            status=status,
+            message=_clip(message, 512),
+            pre_fingerprint=pre_fingerprint,
+            post_fingerprint=post_fingerprint,
+        )
     )
     db.execute(stmt)
 
 
 def get_ingestion_batch(db: Session, batch_id: int) -> IngestionBatch | None:
-    return db.execute(select(IngestionBatch).where(IngestionBatch.id == batch_id)).scalar_one_or_none()
+    return db.execute(
+        select(IngestionBatch).where(IngestionBatch.id == batch_id)
+    ).scalar_one_or_none()
 
 
-def list_ingestion_batches(db: Session, *, code: str | None = None, limit: int = 50) -> list[IngestionBatch]:
+def list_ingestion_batches(
+    db: Session, *, code: str | None = None, limit: int = 50
+) -> list[IngestionBatch]:
     stmt = select(IngestionBatch).order_by(IngestionBatch.id.desc()).limit(limit)
     if code:
         stmt = stmt.where(IngestionBatch.code == code)
@@ -438,7 +471,14 @@ def compute_price_fingerprint(
     end_date: dt.date,
     adjust: str,
 ) -> str:
-    rows = list_prices(db, code=code, start_date=start_date, end_date=end_date, adjust=adjust, limit=1000000)
+    rows = list_prices(
+        db,
+        code=code,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust,
+        limit=1000000,
+    )
     return _price_fingerprint_rows(rows)
 
 
@@ -450,7 +490,11 @@ def record_ingestion_items(
     items: list[tuple[dt.date, str]],
 ) -> None:
     for trade_date, action in items:
-        db.add(IngestionItem(batch_id=batch_id, code=code, trade_date=trade_date, action=action))
+        db.add(
+            IngestionItem(
+                batch_id=batch_id, code=code, trade_date=trade_date, action=action
+            )
+        )
     db.flush()
 
 
@@ -561,9 +605,13 @@ def list_macro_prices(
     return list(db.execute(stmt).scalars().all())
 
 
-def get_macro_date_range(db: Session, *, series_id: str) -> tuple[str | None, str | None]:
+def get_macro_date_range(
+    db: Session, *, series_id: str
+) -> tuple[str | None, str | None]:
     start_d, end_d = db.execute(
-        select(func.min(MacroPrice.trade_date), func.max(MacroPrice.trade_date)).where(MacroPrice.series_id == series_id)
+        select(func.min(MacroPrice.trade_date), func.max(MacroPrice.trade_date)).where(
+            MacroPrice.series_id == series_id
+        )
     ).one()
     if start_d is None or end_d is None:
         return (None, None)
@@ -583,9 +631,13 @@ def upsert_macro_series_meta(
     calendar: str | None = None,
     notes: str | None = None,
 ) -> MacroSeriesMeta:
-    obj = db.execute(select(MacroSeriesMeta).where(MacroSeriesMeta.series_id == series_id)).scalar_one_or_none()
+    obj = db.execute(
+        select(MacroSeriesMeta).where(MacroSeriesMeta.series_id == series_id)
+    ).scalar_one_or_none()
     if obj is None:
-        obj = MacroSeriesMeta(series_id=series_id, provider=provider, provider_symbol=provider_symbol)
+        obj = MacroSeriesMeta(
+            series_id=series_id, provider=provider, provider_symbol=provider_symbol
+        )
         db.add(obj)
     obj.provider = provider
     obj.provider_symbol = provider_symbol
@@ -607,7 +659,13 @@ def create_macro_ingestion_batch(
     start_date: str,
     end_date: str,
 ) -> MacroIngestionBatch:
-    b = MacroIngestionBatch(series_id=series_id, provider=provider, start_date=start_date, end_date=end_date, status="running")
+    b = MacroIngestionBatch(
+        series_id=series_id,
+        provider=provider,
+        start_date=start_date,
+        end_date=end_date,
+        status="running",
+    )
     db.add(b)
     db.flush()
     return b
@@ -633,15 +691,24 @@ def update_macro_ingestion_batch(
     stmt = (
         update(MacroIngestionBatch)
         .where(MacroIngestionBatch.id == batch_id)
-        .values(status=status, message=_clip(message, 1024), finished_at=dt.datetime.now(dt.timezone.utc) if status in {"success", "failed"} else None)
+        .values(
+            status=status,
+            message=_clip(message, 1024),
+            finished_at=dt.datetime.now(dt.timezone.utc)
+            if status in {"success", "failed"}
+            else None,
+        )
     )
     db.execute(stmt)
 
 
 # -------------------- Sync job helpers (async admin tasks) --------------------
 
+
 def get_sync_job_by_dedupe_key(db: Session, dedupe_key: str) -> SyncJob | None:
-    return db.execute(select(SyncJob).where(SyncJob.dedupe_key == str(dedupe_key))).scalar_one_or_none()
+    return db.execute(
+        select(SyncJob).where(SyncJob.dedupe_key == str(dedupe_key))
+    ).scalar_one_or_none()
 
 
 def _next_retry_dedupe_key(db: Session, base: str) -> str:
@@ -654,7 +721,11 @@ def _next_retry_dedupe_key(db: Session, base: str) -> str:
     base = str(base)
     # Count existing retries (best-effort) to pick a starting N.
     n = int(
-        db.execute(select(func.count()).select_from(SyncJob).where(SyncJob.dedupe_key.like(f"{base}#retry%"))).scalar()  # pylint: disable=not-callable
+        db.execute(
+            select(func.count())
+            .select_from(SyncJob)
+            .where(SyncJob.dedupe_key.like(f"{base}#retry%"))
+        ).scalar()  # pylint: disable=not-callable
         or 0
     )
     # Probe until unused (handles concurrent creators).
@@ -663,7 +734,7 @@ def _next_retry_dedupe_key(db: Session, base: str) -> str:
         if get_sync_job_by_dedupe_key(db, cand) is None:
             return cand
     # last resort: include timestamp-ish suffix
-    return f"{base}#retry{n+50}"
+    return f"{base}#retry{n + 50}"
 
 
 def create_sync_job(
@@ -693,7 +764,9 @@ def create_sync_job(
         dedupe_key=str(dedupe_key),
         run_date=run_date,
         full_refresh=bool(full_refresh),
-        adjusts=",".join([str(x).strip().lower() for x in (adjusts or []) if str(x).strip()]),
+        adjusts=",".join(
+            [str(x).strip().lower() for x in (adjusts or []) if str(x).strip()]
+        ),
         status="queued",
         progress_json=None,
         result_json=None,
@@ -705,7 +778,9 @@ def create_sync_job(
 
 
 def get_sync_job(db: Session, job_id: int) -> SyncJob | None:
-    return db.execute(select(SyncJob).where(SyncJob.id == int(job_id))).scalar_one_or_none()
+    return db.execute(
+        select(SyncJob).where(SyncJob.id == int(job_id))
+    ).scalar_one_or_none()
 
 
 def update_sync_job(
@@ -741,4 +816,3 @@ def update_sync_job(
     if error_message is not None:
         obj.error_message = str(error_message)[:1024]
     db.flush()
-

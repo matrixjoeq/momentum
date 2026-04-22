@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=broad-exception-caught
+
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -24,7 +26,9 @@ class MonteCarloConfig:
     seed: int | None = None
 
 
-def _circular_block_bootstrap_indices(n: int, *, block_size: int, rng: np.random.Generator) -> np.ndarray:
+def _circular_block_bootstrap_indices(
+    n: int, *, block_size: int, rng: np.random.Generator
+) -> np.ndarray:
     if n <= 0:
         return np.array([], dtype=int)
     b = int(block_size)
@@ -61,7 +65,9 @@ def _summarize(samples: np.ndarray, *, observed: float) -> dict[str, Any]:
     }
 
 
-def _histogram(samples: np.ndarray, *, bins: int = 40, clip_q: tuple[float, float] = (0.01, 0.99)) -> dict[str, Any]:
+def _histogram(
+    samples: np.ndarray, *, bins: int = 40, clip_q: tuple[float, float] = (0.01, 0.99)
+) -> dict[str, Any]:
     x = np.asarray(samples, dtype=float)
     x = x[np.isfinite(x)]
     if x.size == 0:
@@ -119,7 +125,9 @@ def _stats(x: np.ndarray) -> dict[str, Any]:
     }
 
 
-def _anderson_darling_stat(x: np.ndarray, cdf: Callable[[np.ndarray], np.ndarray]) -> float:
+def _anderson_darling_stat(
+    x: np.ndarray, cdf: Callable[[np.ndarray], np.ndarray]
+) -> float:
     # Generic AD statistic (no p-value). Assumes continuous distribution.
     xs = np.asarray(x, dtype=float)
     xs = xs[np.isfinite(xs)]
@@ -176,7 +184,12 @@ def _fit_one_distribution(x: np.ndarray, dist: str) -> dict[str, Any]:
             "ks": {"stat": float(ks.statistic), "p_value": float(ks.pvalue)},
             "ad": {"stat": float(ad)},
         }
-    except (ValueError, TypeError, ZeroDivisionError, FloatingPointError) as e:  # pragma: no cover
+    except (
+        ValueError,
+        TypeError,
+        ZeroDivisionError,
+        FloatingPointError,
+    ) as e:  # pragma: no cover
         return {"ok": False, "error": str(e)}
 
 
@@ -255,10 +268,16 @@ def bootstrap_metrics_from_daily_returns(
         nav = (1.0 + rr).cumprod()
         nav.iloc[0] = 1.0
         sims["cumulative_return"].append(float(nav.iloc[-1] - 1.0))
-        sims["annualized_return"].append(float(_annualized_return(nav, ann_factor=ann_factor)))
-        sims["annualized_volatility"].append(float(_annualized_vol(rr, ann_factor=ann_factor)))
+        sims["annualized_return"].append(
+            float(_annualized_return(nav, ann_factor=ann_factor))
+        )
+        sims["annualized_volatility"].append(
+            float(_annualized_vol(rr, ann_factor=ann_factor))
+        )
         sims["max_drawdown"].append(float(_max_drawdown(nav)))
-        sims["sharpe_ratio"].append(float(_sharpe(rr, rf=float(rf), ann_factor=ann_factor)))
+        sims["sharpe_ratio"].append(
+            float(_sharpe(rr, rf=float(rf), ann_factor=ann_factor))
+        )
         for k, fn in extra_metrics.items():
             try:
                 sims[k].append(float(fn(rr, nav)))
@@ -267,9 +286,17 @@ def bootstrap_metrics_from_daily_returns(
 
         if period_freq:
             try:
-                pr = nav.resample(str(period_freq)).last().pct_change().dropna().to_numpy(dtype=float)
+                pr = (
+                    nav.resample(str(period_freq))
+                    .last()
+                    .pct_change()
+                    .dropna()
+                    .to_numpy(dtype=float)
+                )
                 if pr.size:
-                    period_samples.extend([float(x) for x in pr if np.isfinite(float(x))])
+                    period_samples.extend(
+                        [float(x) for x in pr if np.isfinite(float(x))]
+                    )
             except Exception:  # pragma: no cover
                 pass
 
@@ -282,7 +309,11 @@ def bootstrap_metrics_from_daily_returns(
         out[k]["hist"] = _histogram(arr, bins=40, clip_q=(0.01, 0.99))
         fits = {d: _fit_one_distribution(arr, d) for d in candidates}
         # Determine best by BIC among ok fits
-        ok = [(d, fits[d].get("bic")) for d in candidates if fits[d].get("ok") and np.isfinite(fits[d].get("bic"))]
+        ok = [
+            (d, fits[d].get("bic"))
+            for d in candidates
+            if fits[d].get("ok") and np.isfinite(fits[d].get("bic"))
+        ]
         ok.sort(key=lambda x: x[1])
         best = ok[0][0] if ok else None
         # attach QQ points for each dist (limited points)
@@ -294,26 +325,54 @@ def bootstrap_metrics_from_daily_returns(
             # rebuild frozen from params for qq
             try:
                 if d == "normal":
-                    frozen = st.norm(loc=fits[d]["params"]["mu"], scale=fits[d]["params"]["sigma"])
+                    frozen = st.norm(
+                        loc=fits[d]["params"]["mu"], scale=fits[d]["params"]["sigma"]
+                    )
                 elif d == "t":
-                    frozen = st.t(df=fits[d]["params"]["df"], loc=fits[d]["params"]["loc"], scale=fits[d]["params"]["scale"])
+                    frozen = st.t(
+                        df=fits[d]["params"]["df"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
                 else:
-                    frozen = st.lognorm(s=fits[d]["params"]["s"], loc=fits[d]["params"]["loc"], scale=fits[d]["params"]["scale"])
+                    frozen = st.lognorm(
+                        s=fits[d]["params"]["s"],
+                        loc=fits[d]["params"]["loc"],
+                        scale=fits[d]["params"]["scale"],
+                    )
                 qq[d] = _qq_points(arr, frozen, n_points=80)
-            except (ValueError, TypeError, ZeroDivisionError, FloatingPointError):  # pragma: no cover
+            except (
+                ValueError,
+                TypeError,
+                ZeroDivisionError,
+                FloatingPointError,
+            ):  # pragma: no cover
                 qq[d] = {"p": [], "emp": [], "theory": []}
-        out[k]["fit"] = {"candidates": candidates, "best_by_bic": best, "dists": fits, "qq": qq}
+        out[k]["fit"] = {
+            "candidates": candidates,
+            "best_by_bic": best,
+            "dists": fits,
+            "qq": qq,
+        }
     period_out = None
     if period_freq:
         try:
-            obs_pr = nav_obs.resample(str(period_freq)).last().pct_change().dropna().to_numpy(dtype=float)
+            obs_pr = (
+                nav_obs.resample(str(period_freq))
+                .last()
+                .pct_change()
+                .dropna()
+                .to_numpy(dtype=float)
+            )
         except Exception:  # pragma: no cover
             obs_pr = np.asarray([], dtype=float)
         period_out = {
             "freq": str(period_freq),
             "observed": _stats(obs_pr),
             "simulated": _stats(np.asarray(period_samples, dtype=float)),
-            "hist": _histogram(np.asarray(period_samples, dtype=float), bins=60, clip_q=(0.01, 0.99)),
+            "hist": _histogram(
+                np.asarray(period_samples, dtype=float), bins=60, clip_q=(0.01, 0.99)
+            ),
         }
 
     return {
@@ -325,4 +384,3 @@ def bootstrap_metrics_from_daily_returns(
         "metrics": out,
         "period_return": period_out,
     }
-

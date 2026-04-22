@@ -79,7 +79,9 @@ def corporate_action_mask(
     corp_factor = (gh / gn).replace([np.inf, -np.inf], np.nan)
     dev = (corp_factor - 1.0).abs()
     rt = float(ratio_threshold)
-    mask = (dev > float(dev_threshold)) | (corp_factor > rt) | (corp_factor < (1.0 / rt))
+    mask = (
+        (dev > float(dev_threshold)) | (corp_factor > rt) | (corp_factor < (1.0 / rt))
+    )
     return corp_factor, mask
 
 
@@ -108,4 +110,3 @@ def slippage_return_from_turnover(
     px = px.where(px > 0.0)
     ratio = (spread / px).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
     return (t * ratio).fillna(0.0).astype(float)
-

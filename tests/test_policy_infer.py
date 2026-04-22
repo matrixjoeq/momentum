@@ -26,4 +26,3 @@ def test_infer_qdii_commod() -> None:
 def test_infer_default() -> None:
     r = infer_policy_name(code="510300", name="沪深300ETF")
     assert r.policy_name == "cn_stock_etf_10"
-

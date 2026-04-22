@@ -4,7 +4,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from etf_momentum.analysis.trend import TrendPortfolioInputs, compute_trend_portfolio_backtest
+from etf_momentum.analysis.trend import (
+    TrendPortfolioInputs,
+    compute_trend_portfolio_backtest,
+)
 from tests.helpers.price_seed import add_price_all_adjustments
 
 
@@ -20,7 +23,9 @@ def _add_price(db, *, code: str, day: dt.date, close: float) -> None:
     )
 
 
-def _add_price_hl(db, *, code: str, day: dt.date, close: float, high: float, low: float) -> None:
+def _add_price_hl(
+    db, *, code: str, day: dt.date, close: float, high: float, low: float
+) -> None:
     add_price_all_adjustments(
         db,
         code=code,
@@ -136,7 +141,7 @@ def test_trend_portfolio_er_entry_filter_blocks_choppy_entries(session_factory):
     assert not w_no.empty
     assert any(float(v) > 0.0 for v in w_no.to_numpy().ravel())
     assert all(float(v) == 0.0 for v in w_yes.to_numpy().ravel())
-    params = ((out_with_filter.get("meta") or {}).get("params") or {})
+    params = (out_with_filter.get("meta") or {}).get("params") or {}
     assert params.get("er_filter") is True
     assert int(params.get("er_window") or 0) == 10
 
@@ -168,10 +173,10 @@ def test_trend_portfolio_impulse_entry_filter_blocks_entries(session_factory):
     w = pd.DataFrame(((out.get("weights") or {}).get("series") or {}))
     assert not w.empty
     assert all(float(v) == 0.0 for v in w.to_numpy().ravel())
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert params.get("impulse_entry_filter") is True
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
     blocked = int(overall.get("impulse_filter_blocked_entry_count") or 0)
     attempted = int(overall.get("impulse_filter_attempted_entry_count") or 0)
     rate = float(overall.get("impulse_filter_blocked_entry_rate") or 0.0)
@@ -186,16 +191,18 @@ def test_trend_portfolio_impulse_entry_filter_blocks_entries(session_factory):
     if attempted > 0:
         assert rate == pytest.approx(blocked / attempted, rel=1e-6, abs=1e-9)
     assert blocked_split == blocked
-    by_code = (ts.get("by_code") or {})
+    by_code = ts.get("by_code") or {}
     for k in ("I1", "I2"):
-        one = (by_code.get(k) or {})
+        one = by_code.get(k) or {}
         one_blocked = int(one.get("impulse_filter_blocked_entry_count") or 0)
         one_attempted = int(one.get("impulse_filter_attempted_entry_count") or 0)
         one_rate = float(one.get("impulse_filter_blocked_entry_rate") or 0.0)
         assert one_attempted >= one_blocked >= 0
         assert 0.0 <= one_rate <= 1.0
         if one_attempted > 0:
-            assert one_rate == pytest.approx(one_blocked / one_attempted, rel=1e-6, abs=1e-9)
+            assert one_rate == pytest.approx(
+                one_blocked / one_attempted, rel=1e-6, abs=1e-9
+            )
 
 
 def test_trend_portfolio_ma_cross_supports_ema_type(session_factory):
@@ -222,7 +229,9 @@ def test_trend_portfolio_ma_cross_supports_ema_type(session_factory):
     assert ((out.get("meta") or {}).get("params") or {}).get("ma_type") == "ema"
 
 
-def test_trend_portfolio_fixed_ratio_skip_respects_weight_and_holding_caps(session_factory):
+def test_trend_portfolio_fixed_ratio_skip_respects_weight_and_holding_caps(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-02-29", freq="B")]
     with sf() as db:
@@ -246,7 +255,7 @@ def test_trend_portfolio_fixed_ratio_skip_respects_weight_and_holding_caps(sessi
                 cost_bps=0.0,
             ),
         )
-    ext = ((out.get("risk_controls") or {}).get("position_extension") or {})
+    ext = (out.get("risk_controls") or {}).get("position_extension") or {}
     assert ext.get("position_sizing") == "fixed_ratio"
     assert int(ext.get("skipped_count") or 0) > 0
     assert int(ext.get("skipped_over_weight_count") or 0) > 0
@@ -258,7 +267,9 @@ def test_trend_portfolio_fixed_ratio_skip_respects_weight_and_holding_caps(sessi
         assert max_cnt <= 2
 
 
-def test_trend_portfolio_fixed_ratio_extend_allows_weight_and_holding_overcaps(session_factory):
+def test_trend_portfolio_fixed_ratio_extend_allows_weight_and_holding_overcaps(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", "2024-02-29", freq="B")]
     with sf() as db:
@@ -282,8 +293,8 @@ def test_trend_portfolio_fixed_ratio_extend_allows_weight_and_holding_overcaps(s
                 cost_bps=0.0,
             ),
         )
-    ext = ((out.get("risk_controls") or {}).get("position_extension") or {})
-    usage = ((out.get("risk_controls") or {}).get("position_usage") or {})
+    ext = (out.get("risk_controls") or {}).get("position_extension") or {}
+    usage = (out.get("risk_controls") or {}).get("position_usage") or {}
     assert int(ext.get("extension_count") or 0) > 0
     assert int(ext.get("extension_over_weight_count") or 0) > 0
     assert int(ext.get("extension_over_count_count") or 0) > 0
@@ -295,7 +306,9 @@ def test_trend_portfolio_fixed_ratio_extend_allows_weight_and_holding_overcaps(s
         assert max_cnt > 2
 
 
-def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(session_factory):
+def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=8, freq="B")]
     # Decision-day jump on d3 for both assets. If wrongly counted on decision day, NAV would jump sharply there.
@@ -307,10 +320,28 @@ def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(session
         ("donchian", {"donchian_entry": 2, "donchian_exit": 2}),
         ("tsmom", {"mom_lookback": 2}),
         ("linreg_slope", {"sma_window": 3}),
-        ("bias", {"bias_ma_window": 2, "bias_entry": 1.0, "bias_hot": 50.0, "bias_cold": -10.0, "bias_pos_mode": "binary"}),
+        (
+            "bias",
+            {
+                "bias_ma_window": 2,
+                "bias_entry": 1.0,
+                "bias_hot": 50.0,
+                "bias_cold": -10.0,
+                "bias_pos_mode": "binary",
+            },
+        ),
         ("macd_cross", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
         ("macd_zero_filter", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2}),
-        ("macd_v", {"macd_fast": 2, "macd_slow": 3, "macd_signal": 2, "macd_v_atr_window": 2, "macd_v_scale": 100.0}),
+        (
+            "macd_v",
+            {
+                "macd_fast": 2,
+                "macd_slow": 3,
+                "macd_signal": 2,
+                "macd_v_atr_window": 2,
+                "macd_v_scale": 100.0,
+            },
+        ),
     ]
 
     with sf() as db:
@@ -334,7 +365,9 @@ def test_trend_portfolio_excludes_decision_day_return_for_all_strategies(session
             )
             nav = [float(x) for x in out["nav"]["series"]["STRAT"]]
             assert len(nav) >= 4
-            assert nav[3] <= 1.0000001, f"{strat} appears to include portfolio decision-day return"
+            assert nav[3] <= 1.0000001, (
+                f"{strat} appears to include portfolio decision-day return"
+            )
 
 
 def test_trend_portfolio_random_entry_seed_controls_reproducibility(session_factory):
@@ -386,7 +419,7 @@ def test_trend_portfolio_random_entry_seed_controls_reproducibility(session_fact
     wc = (out_c.get("weights") or {}).get("series") or {}
     assert wa == wb
     assert wa != wc
-    params = ((out_a.get("meta") or {}).get("params") or {})
+    params = (out_a.get("meta") or {}).get("params") or {}
     assert int(params.get("random_hold_days") or 0) == 20
     assert int(params.get("random_seed") or -1) == 42
 
@@ -411,7 +444,7 @@ def test_trend_portfolio_random_entry_allows_system_random_seed(session_factory)
                 cost_bps=0.0,
             ),
         )
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert params.get("random_seed") is None
 
 
@@ -440,7 +473,7 @@ def test_trend_portfolio_group_enforce_respects_group_cap(session_factory):
             ),
         )
 
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert params.get("group_enforce") is True
     assert params.get("group_pick_policy") == "highest_sharpe"
     assert int(params.get("group_max_holdings") or 0) == 1
@@ -491,23 +524,23 @@ def test_trend_portfolio_trade_statistics_have_samples_user_case_like(session_fa
                 slippage_rate=0.001,
             ),
         )
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
-    ecs = (ts.get("entry_condition_stats") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
+    ecs = ts.get("entry_condition_stats") or {}
     assert int(overall.get("total_trades") or 0) > 0
     assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())
     assert "overall" in ecs
     assert "by_code" in ecs
-    assert "momentum" in ((ecs.get("overall") or {}))
+    assert "momentum" in (ecs.get("overall") or {})
     assert any(str(k).startswith("T") for k in (ecs.get("by_code") or {}).keys())
-    rs = (out.get("r_statistics") or {})
+    rs = out.get("r_statistics") or {}
     assert int(((rs.get("overall") or {}).get("trade_count") or 0) > 0)
     assert "recent_100" in rs
     assert int(((rs.get("recent_100") or {}).get("effective_count") or 0) > 0)
-    assert "sqn" in ((rs.get("overall") or {}))
+    assert "sqn" in (rs.get("overall") or {})
     assert "trade_system_score" not in rs
-    first_trade = ((ts.get("trades") or [None])[0] or {})
+    first_trade = (ts.get("trades") or [None])[0] or {}
     assert "initial_r_amount" in first_trade
     assert "r_multiple" in first_trade
 
@@ -535,7 +568,7 @@ def test_trend_portfolio_risk_budget_position_sizing(session_factory):
                 slippage_rate=0.0,
             ),
         )
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert str(params.get("position_sizing") or "") == "risk_budget"
     w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
     if not w.empty:
@@ -554,7 +587,9 @@ def test_trend_portfolio_quick_mode_contains_mfe_r_distribution(session_factory)
                 up = i * (0.25 + 0.04 * j)
                 down = (70 * (0.25 + 0.04 * j)) - (i - 70) * (0.35 + 0.05 * j)
                 close = 100.0 + (up if i < 70 else down)
-                _add_price_hl(db, code=c, day=d, close=close, high=close * 1.015, low=close * 0.99)
+                _add_price_hl(
+                    db, code=c, day=d, close=close, high=close * 1.015, low=close * 0.99
+                )
         db.commit()
         out = compute_trend_portfolio_backtest(
             db,
@@ -579,7 +614,9 @@ def test_trend_portfolio_quick_mode_contains_mfe_r_distribution(session_factory)
     assert int(overall.get("trade_count") or 0) > 0
     assert int(overall.get("valid_mfe_count") or 0) > 0
     assert all(str(c) in by_code for c in codes)
-    assert int(recent.get("effective_count") or 0) <= int(overall.get("trade_count") or 0)
+    assert int(recent.get("effective_count") or 0) <= int(
+        overall.get("trade_count") or 0
+    )
     assert ts.get("trades") == []
 
 
@@ -612,7 +649,9 @@ def test_trend_portfolio_risk_budget_pct_upper_bound(session_factory):
             assert "risk_budget_pct must be in [0.001, 0.02]" in str(exc)
 
 
-def test_trend_portfolio_risk_budget_overcap_skip_records_decision_and_episode(session_factory):
+def test_trend_portfolio_risk_budget_overcap_skip_records_decision_and_episode(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
     with sf() as db:
@@ -637,20 +676,25 @@ def test_trend_portfolio_risk_budget_overcap_skip_records_decision_and_episode(s
                 slippage_rate=0.0,
             ),
         )
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert str(params.get("risk_budget_overcap_policy") or "") == "skip_entry"
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
     dcnt = int(overall.get("vol_risk_overcap_skip_entry_decision_count") or 0)
     ecnt = int(overall.get("vol_risk_overcap_skip_entry_episode_count") or 0)
     assert dcnt > 0
     assert ecnt > 0
     assert dcnt >= ecnt
-    assert any(int(((v or {}).get("vol_risk_overcap_skip_entry_decision_count") or 0)) > 0 for v in by_code.values())
+    assert any(
+        int(((v or {}).get("vol_risk_overcap_skip_entry_decision_count") or 0)) > 0
+        for v in by_code.values()
+    )
 
 
-def test_trend_portfolio_risk_budget_overcap_replace_records_in_out_counts(session_factory):
+def test_trend_portfolio_risk_budget_overcap_replace_records_in_out_counts(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
     with sf() as db:
@@ -675,22 +719,36 @@ def test_trend_portfolio_risk_budget_overcap_replace_records_in_out_counts(sessi
                 slippage_rate=0.0,
             ),
         )
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert str(params.get("risk_budget_overcap_policy") or "") == "replace_entry"
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
     rep = int(overall.get("vol_risk_overcap_replace_entry_count") or 0)
     rep_out = int(overall.get("vol_risk_overcap_replace_out_count") or 0)
     rep_in = int(overall.get("vol_risk_overcap_replace_in_count") or 0)
     assert rep > 0
     assert rep_out == rep
     assert rep_in == rep
-    assert sum(int(((v or {}).get("vol_risk_overcap_replace_out_count") or 0)) for v in by_code.values()) == rep
-    assert sum(int(((v or {}).get("vol_risk_overcap_replace_in_count") or 0)) for v in by_code.values()) == rep
+    assert (
+        sum(
+            int(((v or {}).get("vol_risk_overcap_replace_out_count") or 0))
+            for v in by_code.values()
+        )
+        == rep
+    )
+    assert (
+        sum(
+            int(((v or {}).get("vol_risk_overcap_replace_in_count") or 0))
+            for v in by_code.values()
+        )
+        == rep
+    )
 
 
-def test_trend_portfolio_risk_budget_overcap_leverage_records_usage_and_max_multiple(session_factory):
+def test_trend_portfolio_risk_budget_overcap_leverage_records_usage_and_max_multiple(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
     with sf() as db:
@@ -714,28 +772,36 @@ def test_trend_portfolio_risk_budget_overcap_leverage_records_usage_and_max_mult
                 slippage_rate=0.0,
             ),
         )
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert str(params.get("risk_budget_overcap_policy") or "") == "leverage_entry"
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
     lev_n = int(overall.get("vol_risk_overcap_leverage_usage_count") or 0)
     lev_max = float(overall.get("vol_risk_overcap_leverage_max_multiple") or 0.0)
     assert lev_n > 0
     assert lev_max > 1.0
-    assert any(int(((v or {}).get("vol_risk_overcap_leverage_usage_count") or 0)) > 0 for v in by_code.values())
-    rc_vol = ((out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {})
+    assert any(
+        int(((v or {}).get("vol_risk_overcap_leverage_usage_count") or 0)) > 0
+        for v in by_code.values()
+    )
+    rc_vol = (out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
     daily = list((rc_vol.get("overcap_daily_counts") or []))
     assert isinstance(daily, list)
     assert sum(int((x or {}).get("leverage_entry") or 0) for x in daily) == lev_n
-    assert max(float((x or {}).get("leverage_multiple_max") or 0.0) for x in daily) >= lev_max
+    assert (
+        max(float((x or {}).get("leverage_multiple_max") or 0.0) for x in daily)
+        >= lev_max
+    )
     w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
     if not w.empty:
         expo = w.sum(axis=1)
         assert float(expo.max()) > 1.0
 
 
-def test_trend_portfolio_risk_budget_leverage_respects_max_multiple_and_fallback_counts(session_factory):
+def test_trend_portfolio_risk_budget_leverage_respects_max_multiple_and_fallback_counts(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
     with sf() as db:
@@ -760,23 +826,26 @@ def test_trend_portfolio_risk_budget_leverage_respects_max_multiple_and_fallback
                 slippage_rate=0.0,
             ),
         )
-    params = ((out.get("meta") or {}).get("params") or {})
+    params = (out.get("meta") or {}).get("params") or {}
     assert str(params.get("risk_budget_overcap_policy") or "") == "leverage_entry"
     assert float(params.get("risk_budget_max_leverage_multiple") or 0.0) == 1.2
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
     lev_n = int(overall.get("vol_risk_overcap_leverage_usage_count") or 0)
     scale_n = int(overall.get("vol_risk_overcap_scale_count") or 0)
     lev_max = float(overall.get("vol_risk_overcap_leverage_max_multiple") or 0.0)
     assert lev_n > 0
     assert scale_n > 0
     assert lev_max <= 1.2000001
-    rc_vol = ((out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {})
+    rc_vol = (out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
     daily = list((rc_vol.get("overcap_daily_counts") or []))
     assert isinstance(daily, list)
     # fallback-to-scale should contribute to scale counts while keeping daily leverage at final landed value
     assert sum(int((x or {}).get("scale") or 0) for x in daily) >= scale_n
-    assert max(float((x or {}).get("leverage_multiple_max") or 0.0) for x in daily) <= 1.2000001
+    assert (
+        max(float((x or {}).get("leverage_multiple_max") or 0.0) for x in daily)
+        <= 1.2000001
+    )
     w = pd.DataFrame((out.get("weights") or {}).get("series") or {})
     if not w.empty:
         expo = w.sum(axis=1)
@@ -810,9 +879,9 @@ def test_trend_portfolio_monthly_risk_budget_blocks_entries(session_factory):
                 slippage_rate=0.0,
             ),
         )
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
     assert int(overall.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
     attempted = int(overall.get("monthly_risk_budget_attempted_entry_count") or 0)
     blocked = int(overall.get("monthly_risk_budget_blocked_entry_count") or 0)
@@ -822,15 +891,17 @@ def test_trend_portfolio_monthly_risk_budget_blocks_entries(session_factory):
     if attempted > 0:
         assert rate == pytest.approx(blocked / attempted, rel=1e-6, abs=1e-9)
     for k in ("A1", "A2"):
-        one = (by_code.get(k) or {})
+        one = by_code.get(k) or {}
         one_attempted = int(one.get("monthly_risk_budget_attempted_entry_count") or 0)
         one_blocked = int(one.get("monthly_risk_budget_blocked_entry_count") or 0)
         one_rate = float(one.get("monthly_risk_budget_blocked_entry_rate") or 0.0)
         assert one_attempted >= one_blocked >= 0
         assert 0.0 <= one_rate <= 1.0
         if one_attempted > 0:
-            assert one_rate == pytest.approx(one_blocked / one_attempted, rel=1e-6, abs=1e-9)
-    m = ((out.get("metrics") or {}).get("strategy") or {})
+            assert one_rate == pytest.approx(
+                one_blocked / one_attempted, rel=1e-6, abs=1e-9
+            )
+    m = (out.get("metrics") or {}).get("strategy") or {}
     assert int(m.get("monthly_risk_budget_blocked_entry_count") or 0) > 0
 
 
@@ -910,27 +981,27 @@ def test_trend_portfolio_exposes_r_take_profit_controls(session_factory):
                 slippage_rate=0.0,
             ),
         )
-    rc = (out.get("risk_controls") or {})
-    rtp = (rc.get("r_take_profit") or {})
+    rc = out.get("risk_controls") or {}
+    rtp = rc.get("r_take_profit") or {}
     assert bool(rtp.get("enabled")) is True
     assert str(rtp.get("initial_r_mode") or "") == "virtual_atr_fallback"
     assert isinstance((rtp.get("tier_trigger_counts") or {}), dict)
-    params = (((out.get("meta") or {}).get("params") or {}))
+    params = (out.get("meta") or {}).get("params") or {}
     assert bool(params.get("r_take_profit_enabled")) is True
     assert bool(params.get("bias_v_take_profit_enabled")) is True
-    metrics = ((out.get("metrics") or {}).get("strategy") or {})
+    metrics = (out.get("metrics") or {}).get("strategy") or {}
     assert "r_take_profit_trigger_count" in metrics
     assert "bias_v_take_profit_trigger_count" in metrics
     assert isinstance((metrics.get("r_take_profit_tier_trigger_counts") or {}), dict)
-    ts = (out.get("trade_statistics") or {})
-    overall = (ts.get("overall") or {})
-    by_code = (ts.get("by_code") or {})
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
     assert "atr_stop_trigger_count" in overall
     assert "r_take_profit_trigger_count" in overall
     assert "bias_v_take_profit_trigger_count" in overall
     assert isinstance((overall.get("r_take_profit_tier_trigger_counts") or {}), dict)
     for c in ["A1", "A2"]:
-        one = (by_code.get(c) or {})
+        one = by_code.get(c) or {}
         assert "atr_stop_trigger_count" in one
         assert "r_take_profit_trigger_count" in one
         assert "bias_v_take_profit_trigger_count" in one
@@ -978,12 +1049,28 @@ def test_trend_portfolio_kama_std_band_reduces_trades(session_factory):
                 slippage_rate=0.0,
             ),
         )
-    lo_trades = int((((out_lo.get("trade_statistics") or {}).get("overall") or {}).get("total_trades") or 0))
-    hi_trades = int((((out_hi.get("trade_statistics") or {}).get("overall") or {}).get("total_trades") or 0))
+    lo_trades = int(
+        (
+            ((out_lo.get("trade_statistics") or {}).get("overall") or {}).get(
+                "total_trades"
+            )
+            or 0
+        )
+    )
+    hi_trades = int(
+        (
+            ((out_hi.get("trade_statistics") or {}).get("overall") or {}).get(
+                "total_trades"
+            )
+            or 0
+        )
+    )
     assert hi_trades <= lo_trades
 
 
-def test_trend_portfolio_next_plan_exposes_strict_entry_exec_price_with_slippage(session_factory):
+def test_trend_portfolio_next_plan_exposes_strict_entry_exec_price_with_slippage(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=14, freq="B")]
     open_a = [100.0 + i * 0.6 for i in range(len(dates))]
@@ -1023,9 +1110,11 @@ def test_trend_portfolio_next_plan_exposes_strict_entry_exec_price_with_slippage
             ),
         )
 
-    w = ((out.get("weights") or {}).get("series") or {})
+    w = (out.get("weights") or {}).get("series") or {}
     assert w
-    entry_map = (((out.get("next_plan") or {}).get("entry_exec_price_with_slippage_by_asset")) or {})
+    entry_map = (
+        (out.get("next_plan") or {}).get("entry_exec_price_with_slippage_by_asset")
+    ) or {}
     assert isinstance(entry_map, dict)
     open_by_code = {"A1": open_a, "A2": open_b}
     for code in ("A1", "A2"):
@@ -1042,4 +1131,3 @@ def test_trend_portfolio_next_plan_exposes_strict_entry_exec_price_with_slippage
         assert code in entry_map
         expected = float(open_by_code[code][int(entry_idx)] + 0.1)
         assert float(entry_map[code]) == pytest.approx(expected)
-

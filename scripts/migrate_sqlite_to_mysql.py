@@ -35,7 +35,9 @@ def _sqlite_engine(sqlite_path: str) -> Engine:
 def _mysql_engine() -> Engine:
     settings = get_settings()
     if not settings.db_url:
-        raise ValueError("missing MySQL db_url (check data/.env.local or MOMENTUM_DB_URL)")
+        raise ValueError(
+            "missing MySQL db_url (check data/.env.local or MOMENTUM_DB_URL)"
+        )
     # Use SQLAlchemy engine settings consistent with runtime
     from etf_momentum.db.session import make_engine  # noqa: E402
 
@@ -180,7 +182,9 @@ def migrate_sqlite_to_mysql(*, sqlite_path: str, force: bool, chunk_size: int) -
 
         dst_n = _rowcount(mysql, t)
         if dst_n != src_n:
-            raise SystemExit(f"rowcount mismatch table={t} sqlite={src_n} mysql={dst_n}")
+            raise SystemExit(
+                f"rowcount mismatch table={t} sqlite={src_n} mysql={dst_n}"
+            )
         print(f"[{_utc_now()}] table={t} ok (inserted={inserted})")
 
     print(f"[{_utc_now()}] resetting AUTO_INCREMENT ...")
@@ -195,16 +199,27 @@ def _insert_sql(table: str, cols: list[str]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Migrate data/etf_momentum.sqlite3 into local MySQL (same schema).")
-    ap.add_argument("--sqlite", default="data/etf_momentum.sqlite3", help="Path to source sqlite file")
-    ap.add_argument("--force", action="store_true", help="Wipe target MySQL tables before migration")
+    ap = argparse.ArgumentParser(
+        description="Migrate data/etf_momentum.sqlite3 into local MySQL (same schema)."
+    )
+    ap.add_argument(
+        "--sqlite",
+        default="data/etf_momentum.sqlite3",
+        help="Path to source sqlite file",
+    )
+    ap.add_argument(
+        "--force", action="store_true", help="Wipe target MySQL tables before migration"
+    )
     ap.add_argument("--chunk-size", type=int, default=2000, help="Insert batch size")
     args = ap.parse_args(argv)
 
-    migrate_sqlite_to_mysql(sqlite_path=str(args.sqlite), force=bool(args.force), chunk_size=int(args.chunk_size))
+    migrate_sqlite_to_mysql(
+        sqlite_path=str(args.sqlite),
+        force=bool(args.force),
+        chunk_size=int(args.chunk_size),
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

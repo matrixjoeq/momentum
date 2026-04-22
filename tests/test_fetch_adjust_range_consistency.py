@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from etf_momentum.app import create_app
 from etf_momentum.db.init_db import init_db
 from etf_momentum.db.seed import ensure_default_policies
-from etf_momentum.db.session import make_session_factory, make_sqlite_engine, session_scope
+from etf_momentum.db.session import (
+    make_session_factory,
+    make_sqlite_engine,
+    session_scope,
+)
 
 
 def test_fetch_fails_if_adjust_ranges_mismatch(tmp_path: pathlib.Path):
@@ -55,11 +59,18 @@ def test_fetch_fails_if_adjust_ranges_mismatch(tmp_path: pathlib.Path):
     app.dependency_overrides[routes.get_akshare] = override_get_akshare
 
     with TestClient(app) as c:
-        c.post("/api/etf", json={"code": "510300", "name": "沪深300", "start_date": "20240102", "end_date": "20240103"})
+        c.post(
+            "/api/etf",
+            json={
+                "code": "510300",
+                "name": "沪深300",
+                "start_date": "20240102",
+                "end_date": "20240103",
+            },
+        )
         r = c.post("/api/etf/510300/fetch")
         assert r.status_code == 500
         # fetch status should be failed with range_check info
         etfs = c.get("/api/etf?adjust=hfq").json()
         assert etfs[0]["last_fetch_status"] == "failed"
         assert "range_check:failed" in (etfs[0]["last_fetch_message"] or "")
-

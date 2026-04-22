@@ -8,7 +8,9 @@ from sqlalchemy.engine import Engine
 def _sqlite_has_column(engine: Engine, table: str, column: str) -> bool:
     with engine.connect() as conn:
         rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    return any(r[1] == column for r in rows)  # (cid, name, type, notnull, dflt_value, pk)
+    return any(
+        r[1] == column for r in rows
+    )  # (cid, name, type, notnull, dflt_value, pk)
 
 
 def _sqlite_add_column(engine: Engine, table: str, ddl: str) -> None:
@@ -63,7 +65,10 @@ def _ensure_etf_prices_unique_on_adjust(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE etf_prices RENAME TO etf_prices_old"))
         # capture legacy columns (some old DBs may miss OHLCV fields)
-        old_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(etf_prices_old)")).fetchall()]
+        old_cols = [
+            r[1]
+            for r in conn.execute(text("PRAGMA table_info(etf_prices_old)")).fetchall()
+        ]
 
         conn.execute(
             text(
@@ -118,8 +123,14 @@ def _ensure_etf_prices_unique_on_adjust(engine: Engine) -> None:
         )
         conn.execute(text("DROP TABLE etf_prices_old"))
         # indexes (best-effort; matches SQLAlchemy index=True fields)
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_etf_prices_code ON etf_prices(code)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_etf_prices_trade_date ON etf_prices(trade_date)"))
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_etf_prices_code ON etf_prices(code)")
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_etf_prices_trade_date ON etf_prices(trade_date)"
+            )
+        )
 
 
 def ensure_sqlite_schema(engine: Engine) -> None:
@@ -200,9 +211,15 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 continue
             _add_column(engine, "futures_prices", ddl)
         # Backfill hold from legacy open_interest when available.
-        if _has_column(engine, "futures_prices", "hold") and _has_column(engine, "futures_prices", "open_interest"):
+        if _has_column(engine, "futures_prices", "hold") and _has_column(
+            engine, "futures_prices", "open_interest"
+        ):
             with engine.begin() as conn:
-                conn.execute(text("UPDATE futures_prices SET hold = open_interest WHERE hold IS NULL AND open_interest IS NOT NULL"))
+                conn.execute(
+                    text(
+                        "UPDATE futures_prices SET hold = open_interest WHERE hold IS NULL AND open_interest IS NOT NULL"
+                    )
+                )
 
     if inspect(engine).has_table("futures_pool"):
         futures_pool_more = {
@@ -233,7 +250,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
                     )
                 )
 
-    if inspect(engine).has_table("futures_prices") and not _has_column(engine, "futures_prices", "pool_id"):
+    if inspect(engine).has_table("futures_prices") and not _has_column(
+        engine, "futures_prices", "pool_id"
+    ):
         _add_column(engine, "futures_prices", "pool_id INTEGER")
 
     # Older deployments may have run ALTERs before FuturesContractFetchStatus existed in metadata.
@@ -243,4 +262,3 @@ def ensure_runtime_schema(engine: Engine) -> None:
         from .models import FuturesContractFetchStatus
 
         FuturesContractFetchStatus.__table__.create(bind=engine, checkfirst=True)
-

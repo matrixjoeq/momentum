@@ -67,7 +67,9 @@ def _load_close_series(
     e_d = parse_yyyymmdd(end)
     out: dict[str, pd.Series] = {}
     for code in codes:
-        rows = list_futures_prices(db, code=code, adjust="none", start_date=s_d, end_date=e_d, limit=200000)
+        rows = list_futures_prices(
+            db, code=code, adjust="none", start_date=s_d, end_date=e_d, limit=200000
+        )
         idx = [r.trade_date for r in rows]
         vals = [float(r.close) if r.close is not None else float("nan") for r in rows]
         s = pd.Series(vals, index=idx, dtype=float).sort_index()
@@ -128,7 +130,9 @@ def compute_futures_group_correlation(
             row.append(v)
         matrix.append(row)
 
-    used_dates = [d.isoformat() for d in ret_used.index.to_list()] if len(ret_used.index) else []
+    used_dates = (
+        [d.isoformat() for d in ret_used.index.to_list()] if len(ret_used.index) else []
+    )
     return {
         "ok": True,
         "meta": {

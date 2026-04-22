@@ -4,7 +4,9 @@ from etf_momentum.analysis.sim_gbm import SimConfig, simulate_gbm_prices
 
 
 def test_sim_gbm_prices_positive_and_uncorrelated_ish():
-    out = simulate_gbm_prices(start="19900101", end="19900131", cfg=SimConfig(n_assets=2, seed=1))
+    out = simulate_gbm_prices(
+        start="19900101", end="19900131", cfg=SimConfig(n_assets=2, seed=1)
+    )
     assert out["ok"] is True
     codes = out["assets"]["codes"]
     assert len(codes) == 2
@@ -17,7 +19,9 @@ def test_sim_gbm_prices_positive_and_uncorrelated_ish():
 
 
 def test_sim_gbm_mu_monotonic_with_vol():
-    out = simulate_gbm_prices(start="19900101", end="19900131", cfg=SimConfig(n_assets=8, seed=42))
+    out = simulate_gbm_prices(
+        start="19900101", end="19900131", cfg=SimConfig(n_assets=8, seed=42)
+    )
     assert out["ok"] is True
     assert out["meta"]["mu_vol_rule"] == "monotonic_rank"
     codes = out["assets"]["codes"]

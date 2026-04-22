@@ -143,7 +143,9 @@ def _run_checks(
             if asset_domain == "etf":
                 for required_adj in ("none", "qfq", "hfq"):
                     if int(series.get(required_adj, {}).get("points", 0)) <= 0:
-                        errors.append(f"etf:{code} missing required adjust={required_adj}")
+                        errors.append(
+                            f"etf:{code} missing required adjust={required_adj}"
+                        )
 
             by_code_alignment_dates[code] = alignment_dates
             union_dates.update(alignment_dates)

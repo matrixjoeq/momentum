@@ -98,50 +98,71 @@
     <div class="muted">
       <div>
         <a href="/">返回候选池</a>
-        <span style="margin: 0 6px;">|</span>
+        <span style="margin: 0 6px">|</span>
         <a href="/research">返回研究主页</a>
       </div>
-      <div style="margin-top: 6px;">
+      <div style="margin-top: 6px">
         说明：本页将原先的 Step1-4 研究页合并到同一页面；分析 API 仍保持不变。
       </div>
     </div>
 
     <div class="tabs">
-      <button class="tabBtn" data-tab="etf" id="tabBtn_etf">ETF × 外盘指标（含GVZ等）</button>
-      <button class="tabBtn" data-tab="step1" id="tabBtn_step1">Step1：国际金价 × 美债 × DXY</button>
-      <button class="tabBtn" data-tab="step2" id="tabBtn_step2">Step2：国内金价 × CNH × 国债</button>
-      <button class="tabBtn" data-tab="step3" id="tabBtn_step3">Step3：国内金价 × 国际金价</button>
-      <button class="tabBtn" data-tab="step4" id="tabBtn_step4">Step4：黄金ETF × 国内现货金</button>
+      <button class="tabBtn" data-tab="etf" id="tabBtn_etf">
+        ETF × 外盘指标（含GVZ等）
+      </button>
+      <button class="tabBtn" data-tab="step1" id="tabBtn_step1">
+        Step1：国际金价 × 美债 × DXY
+      </button>
+      <button class="tabBtn" data-tab="step2" id="tabBtn_step2">
+        Step2：国内金价 × CNH × 国债
+      </button>
+      <button class="tabBtn" data-tab="step3" id="tabBtn_step3">
+        Step3：国内金价 × 国际金价
+      </button>
+      <button class="tabBtn" data-tab="step4" id="tabBtn_step4">
+        Step4：黄金ETF × 国内现货金
+      </button>
     </div>
 
     <!-- -------------------- TAB: ETF x 外盘指标（原 research_gold_gvx） -------------------- -->
     <section class="tab" id="tab_etf">
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">ETF × 外盘指标（可选）</h3>
+        <h3 style="margin: 0 0 6px 0">ETF × 外盘指标（可选）</h3>
         <div class="muted">
-          目标：检查 ETF 价格涨跌与“外盘指标”涨跌的相关性、领先/同步/滞后关系，以及 Granger 因果检验（收益率层面）。
+          目标：检查 ETF
+          价格涨跌与“外盘指标”涨跌的相关性、领先/同步/滞后关系，以及 Granger
+          因果检验（收益率层面）。
         </div>
       </div>
 
       <div class="panel">
         <details>
-          <summary style="cursor:pointer; user-select:none;">结果解读说明（点击展开）</summary>
-          <div class="muted" style="margin-top: 8px; line-height: 1.65;">
+          <summary style="cursor: pointer; user-select: none">
+            结果解读说明（点击展开）
+          </summary>
+          <div class="muted" style="margin-top: 8px; line-height: 1.65">
             <div><b>1) relation / best_lag / best_corr</b></div>
             <div>
-              - 我们用“日收益率（log-ret）”做互相关。<br/>
-              - <b>best_lag=1</b> 表示：用 <b>指标 的 t-1</b> 去对齐 <b>ETF 的 t</b>，此时相关最强（=指标领先 1 个交易日）。<br/>
-              - <b>best_corr 为负</b>：指标上升往往对应 ETF 下跌/走弱；指标下降往往对应 ETF 上涨/走强（具体方向以结果为准）。<br/>
-              - pvalue 很小只说明“统计显著相关”，<b>不等于充要指标/稳定可交易</b>。
+              - 我们用“日收益率（log-ret）”做互相关。<br />
+              - <b>best_lag=1</b> 表示：用 <b>指标 的 t-1</b> 去对齐
+              <b>ETF 的 t</b>，此时相关最强（=指标领先 1 个交易日）。<br />
+              - <b>best_corr 为负</b>：指标上升往往对应 ETF
+              下跌/走弱；指标下降往往对应 ETF
+              上涨/走强（具体方向以结果为准）。<br />
+              - pvalue
+              很小只说明“统计显著相关”，<b>不等于充要指标/稳定可交易</b>。
             </div>
-            <div style="margin-top: 8px;"><b>2) Granger（因果检验）</b></div>
+            <div style="margin-top: 8px"><b>2) Granger（因果检验）</b></div>
             <div>
-              - idx→etf 显著：在“线性+滞后项”的模型下，加入指标的过去值能提升对 ETF 收益的预测（Granger 意义）。<br/>
+              - idx→etf 显著：在“线性+滞后项”的模型下，加入指标的过去值能提升对
+              ETF 收益的预测（Granger 意义）。<br />
               - 若 etf→idx 也显著：更像是反馈/共同驱动，而非单向因果。
             </div>
-            <div style="margin-top: 8px;"><b>3) 日期对齐（很重要）</b></div>
+            <div style="margin-top: 8px"><b>3) 日期对齐（很重要）</b></div>
             <div>
-              - 对于“美股/外盘收盘后发布”的指标，若你做 A 股 ETF 实盘，通常应选择 <b>“收盘顺延到中国下一交易日”</b>，更贴近可用信息集。<br/>
+              - 对于“美股/外盘收盘后发布”的指标，若你做 A 股 ETF
+              实盘，通常应选择
+              <b>“收盘顺延到中国下一交易日”</b>，更贴近可用信息集。<br />
             </div>
           </div>
         </details>
@@ -166,7 +187,10 @@
         </div>
         <div>
           <label>指标预设</label>
-          <select id="etf_idxPreset" title="选择预设会自动填充 provider 和 symbol；也可选择 custom 自定义。">
+          <select
+            id="etf_idxPreset"
+            title="选择预设会自动填充 provider 和 symbol；也可选择 custom 自定义。"
+          >
             <option value="cboe:GVZ" selected>GVZ（Cboe 黄金波动率）</option>
             <option value="cboe:VXN">VXN（Cboe 恐慌指数）</option>
             <option value="cboe:OVX">OVX（Cboe 原油波动率）</option>
@@ -187,7 +211,10 @@
         </div>
         <div>
           <label>数据源 provider</label>
-          <select id="etf_idxProvider" title="auto 会根据 symbol 自动选择。FRED 需要设置 MOMENTUM_FRED_API_KEY。">
+          <select
+            id="etf_idxProvider"
+            title="auto 会根据 symbol 自动选择。FRED 需要设置 MOMENTUM_FRED_API_KEY。"
+          >
             <option value="auto" selected>auto（自动）</option>
             <option value="cboe">cboe</option>
             <option value="fred">fred</option>
@@ -199,7 +226,9 @@
         <div>
           <label>日期对齐</label>
           <select id="etf_align">
-            <option value="cn_next_trading_day" selected>US 收盘顺延到中国下一交易日（推荐）</option>
+            <option value="cn_next_trading_day" selected>
+              US 收盘顺延到中国下一交易日（推荐）
+            </option>
             <option value="none">不做顺延（原始日期）</option>
           </select>
         </div>
@@ -234,14 +263,18 @@
             <option value="cagr">最大化 CAGR</option>
           </select>
         </div>
-        <div style="min-width: 220px;">
+        <div style="min-width: 220px">
           <label>波动率择时（按指标 level 分位数分段仓位）</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <label style="margin:0; font-size:12px; color:#444;">
+          <div style="display: flex; gap: 8px; align-items: center">
+            <label style="margin: 0; font-size: 12px; color: #444">
               <input type="checkbox" id="etf_volOn" />
               启用
             </label>
-            <span class="muted" title="示例：分位数=0.8,0.9；仓位=1,0.5,0.2（长度=分位数+1）">说明</span>
+            <span
+              class="muted"
+              title="示例：分位数=0.8,0.9；仓位=1,0.5,0.2（长度=分位数+1）"
+              >说明</span
+            >
           </div>
         </div>
         <div>
@@ -254,44 +287,61 @@
         </div>
         <div>
           <label>分位数窗口（用于 GVZ/现货波动 level）</label>
-          <select id="etf_volWindow" title="all=expanding分位数(无前视)；static_all=全样本固定阈值(有前视,研究口径)；1y/3y/5y/10y=滚动窗口分位数（按交易日近似）。">
-            <option value="all" selected>全区间（all，无前视/expanding）</option>
-            <option value="static_all">全样本固定（static_all，研究口径）</option>
+          <select
+            id="etf_volWindow"
+            title="all=expanding分位数(无前视)；static_all=全样本固定阈值(有前视,研究口径)；1y/3y/5y/10y=滚动窗口分位数（按交易日近似）。"
+          >
+            <option value="all" selected>
+              全区间（all，无前视/expanding）
+            </option>
+            <option value="static_all">
+              全样本固定（static_all，研究口径）
+            </option>
             <option value="1y">近1年（1y）</option>
             <option value="3y">近3年（3y）</option>
             <option value="5y">近5年（5y）</option>
             <option value="10y">近10年（10y）</option>
           </select>
         </div>
-        <div style="min-width: 260px;">
+        <div style="min-width: 260px">
           <label>同时对比：现货波动择时（仅用 ETF 价格）</label>
-          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <label style="margin:0; font-size:12px; color:#444;">
+          <div
+            style="
+              display: flex;
+              gap: 10px;
+              align-items: center;
+              flex-wrap: wrap;
+            "
+          >
+            <label style="margin: 0; font-size: 12px; color: #444">
               <input type="checkbox" id="etf_proxyOn" checked />
               启用对比
             </label>
-            <label style="margin:0; font-size:12px; color:#444;">
+            <label style="margin: 0; font-size: 12px; color: #444">
               <input type="checkbox" id="etf_proxy_rv20" checked />
               RV20
             </label>
-            <label style="margin:0; font-size:12px; color:#444;">
+            <label style="margin: 0; font-size: 12px; color: #444">
               <input type="checkbox" id="etf_proxy_yz20" checked />
               Yang-Zhang20
             </label>
-            <label style="margin:0; font-size:12px; color:#444;">
+            <label style="margin: 0; font-size: 12px; color: #444">
               <input type="checkbox" id="etf_proxy_gk20" />
               Garman-Klass20
             </label>
-            <label style="margin:0; font-size:12px; color:#444;">
+            <label style="margin: 0; font-size: 12px; color: #444">
               <input type="checkbox" id="etf_proxy_ewma094" checked />
               EWMA(0.94)
             </label>
-            <label style="margin:0; font-size:12px; color:#444;">
+            <label style="margin: 0; font-size: 12px; color: #444">
               <input type="checkbox" id="etf_proxy_har252" checked />
               HAR(252)
             </label>
           </div>
-          <div class="muted" style="margin-top:6px;">说明：上述方法用 ETF 日线 OHLC 计算“年化波动 level”，再按同一组分位数/仓位做分段择时；用于与 GVZ 择时对比。</div>
+          <div class="muted" style="margin-top: 6px">
+            说明：上述方法用 ETF 日线 OHLC 计算“年化波动
+            level”，再按同一组分位数/仓位做分段择时；用于与 GVZ 择时对比。
+          </div>
         </div>
         <button id="etf_run">运行分析</button>
       </div>
@@ -300,81 +350,101 @@
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+          <h3 style="margin: 0 0 6px 0">价格（归一化）</h3>
           <div id="etf_pxChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">日收益率</h3>
+          <h3 style="margin: 0 0 6px 0">日收益率</h3>
           <div id="etf_retChart"></div>
         </div>
       </div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">互相关（正滞后 = 指数领先 ETF）</h3>
+        <h3 style="margin: 0 0 6px 0">互相关（正滞后 = 指数领先 ETF）</h3>
         <div id="etf_xcorrChart"></div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">互相关明细</h3>
+          <h3 style="margin: 0 0 6px 0">互相关明细</h3>
           <table id="etf_xcorrTable"></table>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">Granger 因果检验</h3>
+          <h3 style="margin: 0 0 6px 0">Granger 因果检验</h3>
           <table id="etf_grangerTable"></table>
         </div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">交易可用性：方向命中率/混淆矩阵</h3>
+          <h3 style="margin: 0 0 6px 0">交易可用性：方向命中率/混淆矩阵</h3>
           <table id="etf_tradeTable"></table>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">条件分布（按 指标 次日信号涨/跌分组）</h3>
+          <h3 style="margin: 0 0 6px 0">
+            条件分布（按 指标 次日信号涨/跌分组）
+          </h3>
           <table id="etf_condTable"></table>
         </div>
       </div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">简单策略回测（risk-on/off，含换仓成本）</h3>
+        <h3 style="margin: 0 0 6px 0">
+          简单策略回测（risk-on/off，含换仓成本）
+        </h3>
         <div id="etf_stratChart"></div>
-        <div class="muted" id="etf_stratMetrics" style="margin-top:6px;"></div>
+        <div class="muted" id="etf_stratMetrics" style="margin-top: 6px"></div>
       </div>
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">市场状态划分（统一前端模块）</h3>
-        <div class="row" style="margin-bottom:8px;">
-          <div><label>slope_window</label><input id="etf_regimeSlopeWin" value="20" /></div>
-          <div><label>vol_window</label><input id="etf_regimeVolWin" value="20" /></div>
-          <div><label>direction_threshold_ann</label><input id="etf_regimeSlopeThr" value="0.03" /></div>
-          <div><label>vol_quantile</label><input id="etf_regimeVolQ" value="0.50" /></div>
-          <div><label>future_n</label><input id="etf_regimeNAhead" value="5" /></div>
+        <h3 style="margin: 0 0 6px 0">市场状态划分（统一前端模块）</h3>
+        <div class="row" style="margin-bottom: 8px">
+          <div>
+            <label>slope_window</label
+            ><input id="etf_regimeSlopeWin" value="20" />
+          </div>
+          <div>
+            <label>vol_window</label><input id="etf_regimeVolWin" value="20" />
+          </div>
+          <div>
+            <label>direction_threshold_ann</label
+            ><input id="etf_regimeSlopeThr" value="0.03" />
+          </div>
+          <div>
+            <label>vol_quantile</label
+            ><input id="etf_regimeVolQ" value="0.50" />
+          </div>
+          <div>
+            <label>future_n</label><input id="etf_regimeNAhead" value="5" />
+          </div>
         </div>
         <div id="etf_regimeHint" class="muted"></div>
-        <div id="etf_regimeLegend" class="muted" style="margin-top:6px;"></div>
-        <div id="etf_regimeTimeline" style="height:260px; margin-top:8px;"></div>
-        <table id="etf_regimeStats" style="margin-top:8px;"></table>
-        <div id="etf_regimeFuture" style="height:300px; margin-top:8px;"></div>
-        <table id="etf_regimeFutureStats" style="margin-top:8px;"></table>
+        <div id="etf_regimeLegend" class="muted" style="margin-top: 6px"></div>
+        <div
+          id="etf_regimeTimeline"
+          style="height: 260px; margin-top: 8px"
+        ></div>
+        <table id="etf_regimeStats" style="margin-top: 8px"></table>
+        <div id="etf_regimeFuture" style="height: 300px; margin-top: 8px"></div>
+        <table id="etf_regimeFutureStats" style="margin-top: 8px"></table>
       </div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">择时策略绩效对比（开启择时后）</h3>
+        <h3 style="margin: 0 0 6px 0">择时策略绩效对比（开启择时后）</h3>
         <table id="etf_timingCompare"></table>
       </div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">滚动稳定性（窗口=252）</h3>
+        <h3 style="margin: 0 0 6px 0">滚动稳定性（窗口=252）</h3>
         <div id="etf_rollingChart"></div>
       </div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">Walk-forward（训练选参 → 测试验证）</h3>
+        <h3 style="margin: 0 0 6px 0">Walk-forward（训练选参 → 测试验证）</h3>
         <table id="etf_wfTable"></table>
       </div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">指数分布统计（GVZ / VXN）</h3>
+        <h3 style="margin: 0 0 6px 0">指数分布统计（GVZ / VXN）</h3>
         <div class="row">
           <div>
             <label>指数</label>
@@ -397,7 +467,10 @@
           </div>
           <div>
             <label>模式</label>
-            <select id="etf_distMode" title="分布模式：原始值(raw)或对数值(log)；默认原始值。">
+            <select
+              id="etf_distMode"
+              title="分布模式：原始值(raw)或对数值(log)；默认原始值。"
+            >
               <option value="raw" selected>原始值</option>
               <option value="log">对数值</option>
             </select>
@@ -406,19 +479,25 @@
         </div>
         <div class="panel two">
           <div>
-            <h3 style="margin: 0 0 6px 0;">指数水平分布（close）</h3>
+            <h3 style="margin: 0 0 6px 0">指数水平分布（close）</h3>
             <div id="etf_distCloseChart"></div>
             <table id="etf_distCloseTable"></table>
           </div>
           <div>
-            <h3 style="margin: 0 0 6px 0;">日收益分布（log-ret）</h3>
+            <h3 style="margin: 0 0 6px 0">日收益分布（log-ret）</h3>
             <div id="etf_distRetChart"></div>
             <table id="etf_distRetTable"></table>
           </div>
         </div>
-        <div class="panel" style="margin-top:10px;">
-          <h3 style="margin: 0 0 6px 0;">指数水平（对数坐标）+ 布林带（log空间）</h3>
-          <div class="muted" style="margin-bottom:6px;">布林带按 log(close) 计算：mid=MA20(logP)，upper/lower=mid±2σ，再指数还原到价格轴；y 轴为对数坐标。</div>
+        <div class="panel" style="margin-top: 10px">
+          <h3 style="margin: 0 0 6px 0">
+            指数水平（对数坐标）+ 布林带（log空间）
+          </h3>
+          <div class="muted" style="margin-bottom: 6px">
+            布林带按 log(close)
+            计算：mid=MA20(logP)，upper/lower=mid±2σ，再指数还原到价格轴；y
+            轴为对数坐标。
+          </div>
           <div id="etf_distLogBbChart"></div>
         </div>
       </div>
@@ -427,16 +506,33 @@
     <!-- -------------------- TAB: Step1 -------------------- -->
     <section class="tab" id="tab_step1">
       <div class="panel">
-        <h3 style="margin:0 0 6px 0;">Step 1：国际金价（现货/期货）× 美债收益率 × 美元指数</h3>
-        <div class="muted">说明：本页<strong>只读取本地数据库</strong>（macro_prices / etf_prices），不触发联网更新。</div>
+        <h3 style="margin: 0 0 6px 0">
+          Step 1：国际金价（现货/期货）× 美债收益率 × 美元指数
+        </h3>
+        <div class="muted">
+          说明：本页<strong>只读取本地数据库</strong>（macro_prices /
+          etf_prices），不触发联网更新。
+        </div>
       </div>
 
       <div class="panel row">
-        <div><label>开始日期</label><input id="s1_start" placeholder="YYYYMMDD" /></div>
-        <div><label>结束日期</label><input id="s1_end" placeholder="YYYYMMDD" /></div>
-        <div><label>现货金 series_id</label><input id="s1_goldSpot" value="XAUUSD" /></div>
-        <div><label>期货金 series_id（可选）</label><input id="s1_goldFut" value="GC_FUT" /></div>
-        <div><label>DXY series_id</label><input id="s1_dxy" value="DINIW" /></div>
+        <div>
+          <label>开始日期</label><input id="s1_start" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>结束日期</label><input id="s1_end" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>现货金 series_id</label
+          ><input id="s1_goldSpot" value="XAUUSD" />
+        </div>
+        <div>
+          <label>期货金 series_id（可选）</label
+          ><input id="s1_goldFut" value="GC_FUT" />
+        </div>
+        <div>
+          <label>DXY series_id</label><input id="s1_dxy" value="DINIW" />
+        </div>
         <div>
           <label>美债收益率 series_id</label>
           <select id="s1_yld">
@@ -454,29 +550,35 @@
           </select>
         </div>
         <div><label>max_lag</label><input id="s1_maxLag" value="20" /></div>
-        <div><label>Granger max_lag</label><input id="s1_grangerLag" value="10" /></div>
+        <div>
+          <label>Granger max_lag</label><input id="s1_grangerLag" value="10" />
+        </div>
         <button id="s1_run">运行分析</button>
       </div>
 
       <div id="s1_msg" class="msg panel"></div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <h3 style="margin: 0 0 6px 0">价格（归一化）</h3>
         <div id="s1_pxChart"></div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">选择查看的 pair</h3>
-          <select id="s1_pairSel" style="min-width: 360px;"></select>
-          <div class="muted" style="margin-top:6px;">互相关图：正滞后 = B 领先 A</div>
+          <h3 style="margin: 0 0 6px 0">选择查看的 pair</h3>
+          <select id="s1_pairSel" style="min-width: 360px"></select>
+          <div class="muted" style="margin-top: 6px">
+            互相关图：正滞后 = B 领先 A
+          </div>
           <div id="s1_xcorrChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">pair 摘要</h3>
+          <h3 style="margin: 0 0 6px 0">pair 摘要</h3>
           <div id="s1_pairMsg" class="msg"></div>
           <div class="panel">
-            <h3 style="margin: 10px 0 6px 0; font-size: 15px;">Granger（p-value）</h3>
+            <h3 style="margin: 10px 0 6px 0; font-size: 15px">
+              Granger（p-value）
+            </h3>
             <table id="s1_grangerTable"></table>
           </div>
         </div>
@@ -484,20 +586,27 @@
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
-          <div class="muted">用左右纵轴展示两条“原始 close”序列，避免归一化后某些变量看起来像一条直线。</div>
+          <h3 style="margin: 0 0 6px 0">原始尺度（双纵轴）</h3>
+          <div class="muted">
+            用左右纵轴展示两条“原始
+            close”序列，避免归一化后某些变量看起来像一条直线。
+          </div>
           <div id="s1_rawPairChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <h3 style="margin: 0 0 6px 0">
+            滚动稳定性（rolling corr / hit_rate）
+          </h3>
           <div id="s1_rollingChart"></div>
         </div>
       </div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">两两比值曲线</h3>
-        <div class="muted">两种模式：<b>归一化</b>：ratio=(A/A0)/(B/B0)；<b>原始</b>：ratio=A/B。</div>
-        <div class="row" style="margin-top:8px;">
+        <h3 style="margin: 0 0 6px 0">两两比值曲线</h3>
+        <div class="muted">
+          两种模式：<b>归一化</b>：ratio=(A/A0)/(B/B0)；<b>原始</b>：ratio=A/B。
+        </div>
+        <div class="row" style="margin-top: 8px">
           <div>
             <label>A（分子）</label>
             <select id="s1_ratioA"></select>
@@ -517,13 +626,18 @@
         </div>
         <div id="s1_ratioMsg" class="msg panel"></div>
         <div id="s1_ratioChart"></div>
-        <div class="panel two" style="margin-top: 10px;">
+        <div class="panel two" style="margin-top: 10px">
           <div>
-            <h3 style="margin: 0 0 6px 0; font-size: 15px;">比值分布直方图（含分位数/现值标识）</h3>
-            <div class="row" style="margin: 6px 0 6px 0;">
+            <h3 style="margin: 0 0 6px 0; font-size: 15px">
+              比值分布直方图（含分位数/现值标识）
+            </h3>
+            <div class="row" style="margin: 6px 0 6px 0">
               <div>
                 <label>直方图模式</label>
-                <select id="s1_ratioHistMode" title="默认对数分布更接近对称、便于看尾部风险。">
+                <select
+                  id="s1_ratioHistMode"
+                  title="默认对数分布更接近对称、便于看尾部风险。"
+                >
                   <option value="log" selected>比值对数（log(ratio)）</option>
                   <option value="raw">比值原始值（ratio）</option>
                 </select>
@@ -532,7 +646,7 @@
             <div id="s1_ratioHist"></div>
           </div>
           <div>
-            <h3 style="margin: 0 0 6px 0; font-size: 15px;">统计表</h3>
+            <h3 style="margin: 0 0 6px 0; font-size: 15px">统计表</h3>
             <table id="s1_ratioTable"></table>
           </div>
         </div>
@@ -542,48 +656,70 @@
     <!-- -------------------- TAB: Step2 -------------------- -->
     <section class="tab" id="tab_step2">
       <div class="panel">
-        <h3 style="margin:0 0 6px 0;">Step 2：国内金价（现货/期货）× CNH × 国债收益率</h3>
-        <div class="muted">说明：series_id 取决于你如何落库（macro_prices）。默认值可按需修改。</div>
+        <h3 style="margin: 0 0 6px 0">
+          Step 2：国内金价（现货/期货）× CNH × 国债收益率
+        </h3>
+        <div class="muted">
+          说明：series_id 取决于你如何落库（macro_prices）。默认值可按需修改。
+        </div>
       </div>
 
       <div class="panel row">
-        <div><label>开始日期</label><input id="s2_start" placeholder="YYYYMMDD" /></div>
-        <div><label>结束日期</label><input id="s2_end" placeholder="YYYYMMDD" /></div>
-        <div><label>国内现货金 series_id</label><input id="s2_cnSpot" value="SGE_AU9999" /></div>
-        <div><label>国内期货金 series_id（可选）</label><input id="s2_cnFut" value="SHFE_AU" /></div>
-        <div><label>CNH series_id</label><input id="s2_cnh" value="USDCNH" /></div>
-        <div><label>国债收益率 series_id</label><input id="s2_yld" value="CN10Y" /></div>
+        <div>
+          <label>开始日期</label><input id="s2_start" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>结束日期</label><input id="s2_end" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>国内现货金 series_id</label
+          ><input id="s2_cnSpot" value="SGE_AU9999" />
+        </div>
+        <div>
+          <label>国内期货金 series_id（可选）</label
+          ><input id="s2_cnFut" value="SHFE_AU" />
+        </div>
+        <div>
+          <label>CNH series_id</label><input id="s2_cnh" value="USDCNH" />
+        </div>
+        <div>
+          <label>国债收益率 series_id</label><input id="s2_yld" value="CN10Y" />
+        </div>
         <div><label>max_lag</label><input id="s2_maxLag" value="20" /></div>
-        <div><label>Granger max_lag</label><input id="s2_grangerLag" value="10" /></div>
+        <div>
+          <label>Granger max_lag</label><input id="s2_grangerLag" value="10" />
+        </div>
         <button id="s2_run">运行分析</button>
       </div>
 
       <div id="s2_msg" class="msg panel"></div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <h3 style="margin: 0 0 6px 0">价格（归一化）</h3>
         <div id="s2_pxChart"></div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">选择查看的 pair</h3>
-          <select id="s2_pairSel" style="min-width: 360px;"></select>
+          <h3 style="margin: 0 0 6px 0">选择查看的 pair</h3>
+          <select id="s2_pairSel" style="min-width: 360px"></select>
           <div id="s2_xcorrChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">pair 摘要</h3>
+          <h3 style="margin: 0 0 6px 0">pair 摘要</h3>
           <div id="s2_pairMsg" class="msg"></div>
         </div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
+          <h3 style="margin: 0 0 6px 0">原始尺度（双纵轴）</h3>
           <div id="s2_rawPairChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <h3 style="margin: 0 0 6px 0">
+            滚动稳定性（rolling corr / hit_rate）
+          </h3>
           <div id="s2_rollingChart"></div>
         </div>
       </div>
@@ -592,45 +728,62 @@
     <!-- -------------------- TAB: Step3 -------------------- -->
     <section class="tab" id="tab_step3">
       <div class="panel">
-        <h3 style="margin:0 0 6px 0;">Step 3：国内金价 × 国际金价（可选：国际金价×汇率）</h3>
-        <div class="muted">说明：本页会额外计算一个派生序列 <code>global_gold * fx</code>（仅用于可视化与 pair 分析）。</div>
+        <h3 style="margin: 0 0 6px 0">
+          Step 3：国内金价 × 国际金价（可选：国际金价×汇率）
+        </h3>
+        <div class="muted">
+          说明：本页会额外计算一个派生序列
+          <code>global_gold * fx</code>（仅用于可视化与 pair 分析）。
+        </div>
       </div>
 
       <div class="panel row">
-        <div><label>开始日期</label><input id="s3_start" placeholder="YYYYMMDD" /></div>
-        <div><label>结束日期</label><input id="s3_end" placeholder="YYYYMMDD" /></div>
-        <div><label>国内金 series_id</label><input id="s3_cn" value="SGE_AU9999" /></div>
-        <div><label>国际金 series_id</label><input id="s3_glb" value="XAUUSD" /></div>
-        <div><label>汇率 series_id</label><input id="s3_fx" value="USDCNH" /></div>
+        <div>
+          <label>开始日期</label><input id="s3_start" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>结束日期</label><input id="s3_end" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>国内金 series_id</label><input id="s3_cn" value="SGE_AU9999" />
+        </div>
+        <div>
+          <label>国际金 series_id</label><input id="s3_glb" value="XAUUSD" />
+        </div>
+        <div>
+          <label>汇率 series_id</label><input id="s3_fx" value="USDCNH" />
+        </div>
         <button id="s3_run">运行分析</button>
       </div>
 
       <div id="s3_msg" class="msg panel"></div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <h3 style="margin: 0 0 6px 0">价格（归一化）</h3>
         <div id="s3_pxChart"></div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">选择查看的 pair</h3>
-          <select id="s3_pairSel" style="min-width: 360px;"></select>
+          <h3 style="margin: 0 0 6px 0">选择查看的 pair</h3>
+          <select id="s3_pairSel" style="min-width: 360px"></select>
           <div id="s3_xcorrChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">pair 摘要</h3>
+          <h3 style="margin: 0 0 6px 0">pair 摘要</h3>
           <div id="s3_pairMsg" class="msg"></div>
         </div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
+          <h3 style="margin: 0 0 6px 0">原始尺度（双纵轴）</h3>
           <div id="s3_rawPairChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <h3 style="margin: 0 0 6px 0">
+            滚动稳定性（rolling corr / hit_rate）
+          </h3>
           <div id="s3_rollingChart"></div>
         </div>
       </div>
@@ -639,13 +792,20 @@
     <!-- -------------------- TAB: Step4 -------------------- -->
     <section class="tab" id="tab_step4">
       <div class="panel">
-        <h3 style="margin:0 0 6px 0;">Step 4：国内黄金 ETF × 国内现货金</h3>
-        <div class="muted">说明：ETF 来自 <code>etf_prices</code>，现货金来自 <code>macro_prices</code>。</div>
+        <h3 style="margin: 0 0 6px 0">Step 4：国内黄金 ETF × 国内现货金</h3>
+        <div class="muted">
+          说明：ETF 来自 <code>etf_prices</code>，现货金来自
+          <code>macro_prices</code>。
+        </div>
       </div>
 
       <div class="panel row">
-        <div><label>开始日期</label><input id="s4_start" placeholder="YYYYMMDD" /></div>
-        <div><label>结束日期</label><input id="s4_end" placeholder="YYYYMMDD" /></div>
+        <div>
+          <label>开始日期</label><input id="s4_start" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>结束日期</label><input id="s4_end" placeholder="YYYYMMDD" />
+        </div>
         <div><label>ETF code</label><input id="s4_etf" value="518880" /></div>
         <div>
           <label>ETF 复权</label>
@@ -655,7 +815,10 @@
             <option value="none">none</option>
           </select>
         </div>
-        <div><label>国内现货金 series_id</label><input id="s4_spot" value="SGE_AU9999" /></div>
+        <div>
+          <label>国内现货金 series_id</label
+          ><input id="s4_spot" value="SGE_AU9999" />
+        </div>
         <div>
           <label>对齐</label>
           <select id="s4_align">
@@ -664,35 +827,39 @@
           </select>
         </div>
         <div><label>max_lag</label><input id="s4_maxLag" value="20" /></div>
-        <div><label>Granger max_lag</label><input id="s4_grangerLag" value="10" /></div>
+        <div>
+          <label>Granger max_lag</label><input id="s4_grangerLag" value="10" />
+        </div>
         <button id="s4_run">运行分析</button>
       </div>
 
       <div id="s4_msg" class="msg panel"></div>
 
       <div class="panel">
-        <h3 style="margin: 0 0 6px 0;">价格（归一化）</h3>
+        <h3 style="margin: 0 0 6px 0">价格（归一化）</h3>
         <div id="s4_pxChart"></div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">互相关（正滞后 = Spot 领先 ETF）</h3>
+          <h3 style="margin: 0 0 6px 0">互相关（正滞后 = Spot 领先 ETF）</h3>
           <div id="s4_xcorrChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">摘要</h3>
+          <h3 style="margin: 0 0 6px 0">摘要</h3>
           <div id="s4_pairMsg" class="msg"></div>
         </div>
       </div>
 
       <div class="panel two">
         <div>
-          <h3 style="margin: 0 0 6px 0;">原始尺度（双纵轴）</h3>
+          <h3 style="margin: 0 0 6px 0">原始尺度（双纵轴）</h3>
           <div id="s4_rawPairChart"></div>
         </div>
         <div>
-          <h3 style="margin: 0 0 6px 0;">滚动稳定性（rolling corr / hit_rate）</h3>
+          <h3 style="margin: 0 0 6px 0">
+            滚动稳定性（rolling corr / hit_rate）
+          </h3>
           <div id="s4_rollingChart"></div>
         </div>
       </div>
@@ -705,38 +872,58 @@
         const isLight = () => html.getAttribute("data-theme") === "light";
         const setTheme = (theme) => {
           html.setAttribute("data-theme", theme);
-          try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+          try {
+            localStorage.setItem(THEME_KEY, theme);
+          } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
           document.dispatchEvent(new CustomEvent("themechange"));
         };
-        const cssVar = (name, fallback) => (getComputedStyle(html).getPropertyValue(name).trim() || fallback);
+        const cssVar = (name, fallback) =>
+          getComputedStyle(html).getPropertyValue(name).trim() || fallback;
         const plotTheme = () => ({
           paper_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
           plot_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
-          font: { color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb") },
-          legend: { font: { color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb") } },
+          font: {
+            color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+          },
+          legend: {
+            font: {
+              color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+            },
+          },
           axis: {
             color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
             gridcolor: cssVar("--plot-grid", isLight() ? "#d1d5db" : "#334155"),
-            zerolinecolor: cssVar("--plot-grid", isLight() ? "#d1d5db" : "#334155"),
+            zerolinecolor: cssVar(
+              "--plot-grid",
+              isLight() ? "#d1d5db" : "#334155",
+            ),
           },
         });
         const patchBlack = (color) => {
           if (!color || typeof color !== "string") return color;
           const c = color.replace(/\s+/g, "").toLowerCase();
-          if (c === "#111" || c === "#111111" || c.startsWith("rgba(17,17,17")) {
+          if (
+            c === "#111" ||
+            c === "#111111" ||
+            c.startsWith("rgba(17,17,17")
+          ) {
             return cssVar("--plot-fg", "#e5e7eb");
           }
           return color;
         };
-        const themedData = (data) => (data || []).map((trace) => {
-          const t = { ...trace };
-          if (t.line && typeof t.line === "object") t.line = { ...t.line, color: patchBlack(t.line.color) };
-          if (t.marker && typeof t.marker === "object") t.marker = { ...t.marker, color: patchBlack(t.marker.color) };
-          if (typeof t.fillcolor === "string") t.fillcolor = patchBlack(t.fillcolor);
-          return t;
-        });
+        const themedData = (data) =>
+          (data || []).map((trace) => {
+            const t = { ...trace };
+            if (t.line && typeof t.line === "object")
+              t.line = { ...t.line, color: patchBlack(t.line.color) };
+            if (t.marker && typeof t.marker === "object")
+              t.marker = { ...t.marker, color: patchBlack(t.marker.color) };
+            if (typeof t.fillcolor === "string")
+              t.fillcolor = patchBlack(t.fillcolor);
+            return t;
+          });
         const themedLayout = (layout) => {
           const base = plotTheme();
           const next = { ...(layout || {}) };
@@ -744,9 +931,12 @@
           next.plot_bgcolor = base.plot_bgcolor;
           next.font = { ...base.font, ...(next.font || {}) };
           next.legend = { ...base.legend, ...(next.legend || {}) };
-          const keys = Object.keys(next).filter((k) => /^xaxis\d*$|^yaxis\d*$/.test(k));
+          const keys = Object.keys(next).filter((k) =>
+            /^xaxis\d*$|^yaxis\d*$/.test(k),
+          );
           const axisKeys = keys.length ? keys : ["xaxis", "yaxis"];
-          for (const k of axisKeys) next[k] = { ...base.axis, ...(next[k] || {}) };
+          for (const k of axisKeys)
+            next[k] = { ...base.axis, ...(next[k] || {}) };
           return next;
         };
         const refreshPlotlyTheme = () => {
@@ -759,7 +949,9 @@
               "font.color": base.font.color,
               "legend.font.color": base.font.color,
             };
-            const keys = Object.keys(gd.layout || {}).filter((k) => /^xaxis\d*$|^yaxis\d*$/.test(k));
+            const keys = Object.keys(gd.layout || {}).filter((k) =>
+              /^xaxis\d*$|^yaxis\d*$/.test(k),
+            );
             for (const k of keys) {
               patch[`${k}.color`] = base.axis.color;
               patch[`${k}.gridcolor`] = base.axis.gridcolor;
@@ -775,7 +967,9 @@
           btn.id = "themeToggle";
           btn.className = "theme-toggle";
           btn.type = "button";
-          btn.addEventListener("click", () => setTheme(isLight() ? "dark" : "light"));
+          btn.addEventListener("click", () =>
+            setTheme(isLight() ? "dark" : "light"),
+          );
           document.body.appendChild(btn);
           setTheme(html.getAttribute("data-theme") || "dark");
 
@@ -792,7 +986,11 @@
         document.addEventListener("themechange", refreshPlotlyTheme);
       })();
 
-      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const api = (path, opts) =>
+        fetch(`/api${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
       const $ = (id) => document.getElementById(id);
 
       function ymdTodayMinus(days) {
@@ -803,19 +1001,21 @@
         return `${y}${m}${dd}`;
       }
 
-      function fmt(x, k=4) {
+      function fmt(x, k = 4) {
         const n = Number(x);
         if (!Number.isFinite(n)) return "";
         return n.toFixed(k);
       }
       function fmtPct(x) {
-        return Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "";
+        return Number.isFinite(Number(x))
+          ? (Number(x) * 100).toFixed(2) + "%"
+          : "";
       }
 
       function norm(arr) {
         if (!arr || arr.length === 0) return [];
         const x0 = Number(arr[0] || 1);
-        return arr.map(v => Number(v) / x0);
+        return arr.map((v) => Number(v) / x0);
       }
 
       function parsePairKey(key) {
@@ -824,7 +1024,9 @@
       }
 
       function inferTickFormat(arr) {
-        const xs = (arr || []).map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0);
+        const xs = (arr || [])
+          .map((v) => Number(v))
+          .filter((v) => Number.isFinite(v) && v > 0);
         if (!xs.length) return ",.2f";
         const maxv = Math.max(...xs);
         if (maxv < 20) return ".2f";
@@ -834,14 +1036,19 @@
 
       function formatTick(v, fmt) {
         const s = String(fmt || "");
-        const dec = s.includes(".2f") ? 2 : (s.includes(".1f") ? 1 : 0);
+        const dec = s.includes(".2f") ? 2 : s.includes(".1f") ? 1 : 0;
         const n = Number(v);
         if (!Number.isFinite(n)) return "";
-        return n.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        return n.toLocaleString(undefined, {
+          minimumFractionDigits: dec,
+          maximumFractionDigits: dec,
+        });
       }
 
       function buildLogTicks(arr, fmt) {
-        const xs = (arr || []).map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0);
+        const xs = (arr || [])
+          .map((v) => Number(v))
+          .filter((v) => Number.isFinite(v) && v > 0);
         if (!xs.length) return {};
         const minv = Math.min(...xs);
         const maxv = Math.max(...xs);
@@ -849,7 +1056,7 @@
         const kmin = Math.floor(Math.log10(minv));
         const kmax = Math.ceil(Math.log10(maxv));
         const decades = Math.max(0, kmax - kmin);
-        const mults = decades <= 1 ? [1,2,3,4,5,6,7,8,9] : [1,2,5];
+        const mults = decades <= 1 ? [1, 2, 3, 4, 5, 6, 7, 8, 9] : [1, 2, 5];
         const tickvals = [];
         const ticktext = [];
         for (let k = kmin; k <= kmax; k++) {
@@ -869,11 +1076,34 @@
         const ticks = buildLogTicks(arr, fmt);
         return {
           ...ticks,
-          title: { text: title || "", font: { color: color || (window.themeCssVar ? window.themeCssVar("--plot-fg", "#111827") : "#111827") } },
+          title: {
+            text: title || "",
+            font: {
+              color:
+                color ||
+                (window.themeCssVar
+                  ? window.themeCssVar("--plot-fg", "#111827")
+                  : "#111827"),
+            },
+          },
           type: "log",
-          tickfont: { color: color || (window.themeCssVar ? window.themeCssVar("--plot-fg", "#111827") : "#111827") },
-          tickcolor: color || (window.themeCssVar ? window.themeCssVar("--plot-fg", "#111827") : "#111827"),
-          linecolor: color || (window.themeCssVar ? window.themeCssVar("--plot-fg", "#111827") : "#111827"),
+          tickfont: {
+            color:
+              color ||
+              (window.themeCssVar
+                ? window.themeCssVar("--plot-fg", "#111827")
+                : "#111827"),
+          },
+          tickcolor:
+            color ||
+            (window.themeCssVar
+              ? window.themeCssVar("--plot-fg", "#111827")
+              : "#111827"),
+          linecolor:
+            color ||
+            (window.themeCssVar
+              ? window.themeCssVar("--plot-fg", "#111827")
+              : "#111827"),
           ticks: "outside",
           ticklen: 4,
           showexponent: "none",
@@ -883,64 +1113,115 @@
 
       function renderRawDualAxis(divId, dates, aClose, aLabel, bClose, bLabel) {
         const x = dates || [];
-        const y1 = (aClose || []).map(v => {
+        const y1 = (aClose || []).map((v) => {
           const n = Number(v);
           if (!Number.isFinite(n) || n <= 0) return null; // log axis can't show non-positive values
           return n;
         });
-        const y2 = (bClose || []).map(v => {
+        const y2 = (bClose || []).map((v) => {
           const n = Number(v);
           if (!Number.isFinite(n) || n <= 0) return null; // log axis can't show non-positive values
           return n;
         });
         const c1 = "#1f77b4";
         const c2 = "#ff7f0e";
-        Plotly.newPlot(divId, [
-          { x, y: y1, name: aLabel || "A", type: "scatter", mode: "lines", line: { color: c1 } },
-          { x, y: y2, name: bLabel || "B", type: "scatter", mode: "lines", yaxis: "y2", line: { color: c2 } },
-        ], {
-          margin: { t: 20 },
-          yaxis: axisLogStyle(aLabel || "A", c1, y1),
-          yaxis2: { ...axisLogStyle(bLabel || "B", c2, y2), overlaying: "y", side: "right" },
-        }, { displayModeBar: false });
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              x,
+              y: y1,
+              name: aLabel || "A",
+              type: "scatter",
+              mode: "lines",
+              line: { color: c1 },
+            },
+            {
+              x,
+              y: y2,
+              name: bLabel || "B",
+              type: "scatter",
+              mode: "lines",
+              yaxis: "y2",
+              line: { color: c2 },
+            },
+          ],
+          {
+            margin: { t: 20 },
+            yaxis: axisLogStyle(aLabel || "A", c1, y1),
+            yaxis2: {
+              ...axisLogStyle(bLabel || "B", c2, y2),
+              overlaying: "y",
+              side: "right",
+            },
+          },
+          { displayModeBar: false },
+        );
       }
 
       function renderRollingStability(divId, rolling) {
         if (!rolling || !Array.isArray(rolling.dates)) {
-          Plotly.newPlot(divId, [], { margin: { t: 20 } }, { displayModeBar: false });
+          Plotly.newPlot(
+            divId,
+            [],
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
           return;
         }
-        Plotly.newPlot(divId, [
-          { x: rolling.dates, y: (rolling.corr || []), name: "rolling corr", type: "scatter", mode: "lines" },
-          { x: rolling.dates, y: (rolling.hit_rate || []), name: "rolling hit_rate", yaxis: "y2", type: "scatter", mode: "lines" },
-        ], {
-          margin: { t: 20 },
-          yaxis: { title: "corr" },
-          yaxis2: { title: "hit_rate", overlaying: "y", side: "right" },
-        }, { displayModeBar: false });
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              x: rolling.dates,
+              y: rolling.corr || [],
+              name: "rolling corr",
+              type: "scatter",
+              mode: "lines",
+            },
+            {
+              x: rolling.dates,
+              y: rolling.hit_rate || [],
+              name: "rolling hit_rate",
+              yaxis: "y2",
+              type: "scatter",
+              mode: "lines",
+            },
+          ],
+          {
+            margin: { t: 20 },
+            yaxis: { title: "corr" },
+            yaxis2: { title: "hit_rate", overlaying: "y", side: "right" },
+          },
+          { displayModeBar: false },
+        );
       }
 
       function buildUnionSeries(aSeries, bSeries) {
-        const aDates = (aSeries && aSeries.dates) ? aSeries.dates : [];
-        const aClose = (aSeries && aSeries.close) ? aSeries.close : [];
-        const bDates = (bSeries && bSeries.dates) ? bSeries.dates : [];
-        const bClose = (bSeries && bSeries.close) ? bSeries.close : [];
+        const aDates = aSeries && aSeries.dates ? aSeries.dates : [];
+        const aClose = aSeries && aSeries.close ? aSeries.close : [];
+        const bDates = bSeries && bSeries.dates ? bSeries.dates : [];
+        const bClose = bSeries && bSeries.close ? bSeries.close : [];
 
         const amap = new Map();
-        for (let i = 0; i < aDates.length; i++) amap.set(String(aDates[i]), aClose[i]);
+        for (let i = 0; i < aDates.length; i++)
+          amap.set(String(aDates[i]), aClose[i]);
         const bmap = new Map();
-        for (let i = 0; i < bDates.length; i++) bmap.set(String(bDates[i]), bClose[i]);
+        for (let i = 0; i < bDates.length; i++)
+          bmap.set(String(bDates[i]), bClose[i]);
 
         const dset = new Set([...amap.keys(), ...bmap.keys()]);
         const dates = Array.from(dset.values()).sort();
-        const av = dates.map(d => (amap.has(d) ? amap.get(d) : null));
-        const bv = dates.map(d => (bmap.has(d) ? bmap.get(d) : null));
+        const av = dates.map((d) => (amap.has(d) ? amap.get(d) : null));
+        const bv = dates.map((d) => (bmap.has(d) ? bmap.get(d) : null));
         return { dates, aClose: av, bClose: bv };
       }
 
       function setActiveTab(name) {
-        for (const el of document.querySelectorAll(".tab")) el.classList.remove("active");
-        for (const el of document.querySelectorAll(".tabBtn")) el.classList.remove("active");
+        for (const el of document.querySelectorAll(".tab"))
+          el.classList.remove("active");
+        for (const el of document.querySelectorAll(".tabBtn"))
+          el.classList.remove("active");
         const tab = $("tab_" + name);
         const btn = $("tabBtn_" + name);
         if (tab) tab.classList.add("active");
@@ -955,7 +1236,10 @@
           btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
         }
         const h = (location.hash || "").replace("#", "").trim().toLowerCase();
-        const initial = h && ["etf","step1","step2","step3","step4"].includes(h) ? h : "etf";
+        const initial =
+          h && ["etf", "step1", "step2", "step3", "step4"].includes(h)
+            ? h
+            : "etf";
         setActiveTab(initial);
       }
 
@@ -963,7 +1247,9 @@
       (function initEtfTab() {
         const setMsg = (t) => ($("etf_msg").textContent = t || "");
         const idxLabel = (provider, symbol) => {
-          const p = String(provider || "").trim().toLowerCase();
+          const p = String(provider || "")
+            .trim()
+            .toLowerCase();
           const s = String(symbol || "").trim();
           if (!s) return "";
           if (p === "cboe") return s.toUpperCase();
@@ -981,7 +1267,12 @@
           const fst = $("etf_regimeFutureStats");
           const hint = $("etf_regimeHint");
           if (!tl) return;
-          if (!Array.isArray(dates) || !Array.isArray(close) || dates.length < 10 || dates.length !== close.length) {
+          if (
+            !Array.isArray(dates) ||
+            !Array.isArray(close) ||
+            dates.length < 10 ||
+            dates.length !== close.length
+          ) {
             tl.innerHTML = "<div class='muted'>暂无可用状态数据</div>";
             if (lg) lg.innerHTML = "";
             if (st) st.innerHTML = "";
@@ -991,142 +1282,267 @@
             return;
           }
           const params = {
-            slope_window: Math.max(5, Number(($("etf_regimeSlopeWin") && $("etf_regimeSlopeWin").value) || 20)),
-            vol_window: Math.max(5, Number(($("etf_regimeVolWin") && $("etf_regimeVolWin").value) || 20)),
-            direction_threshold_ann: Math.max(0, Number(($("etf_regimeSlopeThr") && $("etf_regimeSlopeThr").value) || 0.03)),
-            vol_quantile: Math.max(0.01, Math.min(0.99, Number(($("etf_regimeVolQ") && $("etf_regimeVolQ").value) || 0.5))),
+            slope_window: Math.max(
+              5,
+              Number(
+                ($("etf_regimeSlopeWin") && $("etf_regimeSlopeWin").value) ||
+                  20,
+              ),
+            ),
+            vol_window: Math.max(
+              5,
+              Number(
+                ($("etf_regimeVolWin") && $("etf_regimeVolWin").value) || 20,
+              ),
+            ),
+            direction_threshold_ann: Math.max(
+              0,
+              Number(
+                ($("etf_regimeSlopeThr") && $("etf_regimeSlopeThr").value) ||
+                  0.03,
+              ),
+            ),
+            vol_quantile: Math.max(
+              0.01,
+              Math.min(
+                0.99,
+                Number(
+                  ($("etf_regimeVolQ") && $("etf_regimeVolQ").value) || 0.5,
+                ),
+              ),
+            ),
           };
-          const nAhead = Math.max(1, Number(($("etf_regimeNAhead") && $("etf_regimeNAhead").value) || 5));
-          const rows = window.MarketRegimeUI.computeRows({ dates, close, ...params });
+          const nAhead = Math.max(
+            1,
+            Number(($("etf_regimeNAhead") && $("etf_regimeNAhead").value) || 5),
+          );
+          const rows = window.MarketRegimeUI.computeRows({
+            dates,
+            close,
+            ...params,
+          });
           const order = window.MarketRegimeUI.STATE_ORDER || [];
           const labels = window.MarketRegimeUI.STATE_LABEL || {};
-          const selected = window.__goldEtfRegimeSelected instanceof Set ? window.__goldEtfRegimeSelected : new Set(order);
+          const selected =
+            window.__goldEtfRegimeSelected instanceof Set
+              ? window.__goldEtfRegimeSelected
+              : new Set(order);
           window.__goldEtfRegimeSelected = selected;
           window.MarketRegimeUI.renderLegend(
-            lg, selected,
-            (s) => { if (selected.has(s)) selected.delete(s); else selected.add(s); if (selected.size === 0) for (const x of order) selected.add(x); renderEtfRegimePanel({ dates, close }); },
-            (s) => { selected.clear(); selected.add(s); renderEtfRegimePanel({ dates, close }); }
+            lg,
+            selected,
+            (s) => {
+              if (selected.has(s)) selected.delete(s);
+              else selected.add(s);
+              if (selected.size === 0) for (const x of order) selected.add(x);
+              renderEtfRegimePanel({ dates, close });
+            },
+            (s) => {
+              selected.clear();
+              selected.add(s);
+              renderEtfRegimePanel({ dates, close });
+            },
           );
-          window.MarketRegimeUI.renderTimeline("etf_regimeTimeline", rows, selected, "ETF市场状态区间", "ETF");
+          window.MarketRegimeUI.renderTimeline(
+            "etf_regimeTimeline",
+            rows,
+            selected,
+            "ETF市场状态区间",
+            "ETF",
+          );
           const by = window.MarketRegimeUI.summarizeStateStats(rows);
           if (st) {
-            st.innerHTML = "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
-              order.map((s) => {
-                const xs = ((by[s] || {}).rets || []).filter(Number.isFinite);
-                const n = xs.length;
-                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
-                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
-                const v = n > 1 ? Math.sqrt(xs.reduce((p, x) => p + (x - m) * (x - m), 0) / (n - 1)) : NaN;
-                return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
-              }).join("");
+            st.innerHTML =
+              "<tr><th>状态</th><th>样本</th><th>占比</th><th>平均日收益</th><th>胜率</th><th>日波动</th></tr>" +
+              order
+                .map((s) => {
+                  const xs = ((by[s] || {}).rets || []).filter(Number.isFinite);
+                  const n = xs.length;
+                  const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                  const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                  const v =
+                    n > 1
+                      ? Math.sqrt(
+                          xs.reduce((p, x) => p + (x - m) * (x - m), 0) /
+                            (n - 1),
+                        )
+                      : NaN;
+                  return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(rows.length ? n / rows.length : NaN)}</td><td>${fmtPct(m)}</td><td>${fmtPct(w)}</td><td>${fmtPct(v)}</td></tr>`;
+                })
+                .join("");
           }
-          const fwd = window.MarketRegimeUI.summarizeForwardByState(rows, nAhead);
-          window.MarketRegimeUI.renderForwardBox("etf_regimeFuture", fwd, nAhead, selected);
+          const fwd = window.MarketRegimeUI.summarizeForwardByState(
+            rows,
+            nAhead,
+          );
+          window.MarketRegimeUI.renderForwardBox(
+            "etf_regimeFuture",
+            fwd,
+            nAhead,
+            selected,
+          );
           if (fst) {
-            fst.innerHTML = "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
-              order.map((s) => {
-                const xs = (fwd[s] || []).filter(Number.isFinite);
-                const n = xs.length;
-                const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
-                const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.1) : NaN;
-                const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.5) : NaN;
-                const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.9) : NaN;
-                const w = n ? xs.filter((x) => x > 0).length / n : NaN;
-                return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
-              }).join("");
+            fst.innerHTML =
+              "<tr><th>状态</th><th>样本</th><th>均值</th><th>P10</th><th>P50</th><th>P90</th><th>胜率</th></tr>" +
+              order
+                .map((s) => {
+                  const xs = (fwd[s] || []).filter(Number.isFinite);
+                  const n = xs.length;
+                  const m = n ? xs.reduce((a, b) => a + b, 0) / n : NaN;
+                  const p10 = n ? window.MarketRegimeUI.quantile(xs, 0.1) : NaN;
+                  const p50 = n ? window.MarketRegimeUI.quantile(xs, 0.5) : NaN;
+                  const p90 = n ? window.MarketRegimeUI.quantile(xs, 0.9) : NaN;
+                  const w = n ? xs.filter((x) => x > 0).length / n : NaN;
+                  return `<tr><td>${labels[s] || s}</td><td>${n}</td><td>${fmtPct(m)}</td><td>${fmtPct(p10)}</td><td>${fmtPct(p50)}</td><td>${fmtPct(p90)}</td><td>${fmtPct(w)}</td></tr>`;
+                })
+                .join("");
           }
-          if (hint) hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
+          if (hint)
+            hint.textContent = `params: slope_window=${params.slope_window}, vol_window=${params.vol_window}, direction_threshold_ann=${Number(params.direction_threshold_ann).toFixed(4)}, vol_quantile=${Number(params.vol_quantile).toFixed(2)}, future_n=${nAhead}`;
         }
 
         function renderTables(res) {
-          const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-          const best = (res && res.corr && res.corr.best) ? res.corr.best : null;
-          const rel = (res && res.corr && res.corr.relation) ? res.corr.relation : "";
-          let html = "<tr><th>lag</th><th>corr</th><th>pvalue</th><th>n</th></tr>";
+          const xs = res && res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+          const best = res && res.corr && res.corr.best ? res.corr.best : null;
+          const rel =
+            res && res.corr && res.corr.relation ? res.corr.relation : "";
+          let html =
+            "<tr><th>lag</th><th>corr</th><th>pvalue</th><th>n</th></tr>";
           for (const r of xs) {
             const isBest = best && Number(r.lag) === Number(best.lag);
-            html += `<tr${isBest ? ' style="background:var(--highlight-bg)"' : ""}><td>${r.lag}</td><td>${fmt(r.corr,4)}</td><td>${fmt(r.pvalue,4)}</td><td>${r.n}</td></tr>`;
+            html += `<tr${isBest ? ' style="background:var(--highlight-bg)"' : ""}><td>${r.lag}</td><td>${fmt(r.corr, 4)}</td><td>${fmt(r.pvalue, 4)}</td><td>${r.n}</td></tr>`;
           }
           $("etf_xcorrTable").innerHTML = html;
 
-          const g1 = (res && res.granger && res.granger.idx_to_etf) ? res.granger.idx_to_etf : [];
-          const g2 = (res && res.granger && res.granger.etf_to_idx) ? res.granger.etf_to_idx : [];
-          let ghtml = "<tr><th>p</th><th>idx→etf pvalue</th><th>etf→idx pvalue</th></tr>";
+          const g1 =
+            res && res.granger && res.granger.idx_to_etf
+              ? res.granger.idx_to_etf
+              : [];
+          const g2 =
+            res && res.granger && res.granger.etf_to_idx
+              ? res.granger.etf_to_idx
+              : [];
+          let ghtml =
+            "<tr><th>p</th><th>idx→etf pvalue</th><th>etf→idx pvalue</th></tr>";
           const n = Math.max(g1.length, g2.length);
           for (let i = 0; i < n; i++) {
             const a = g1[i] || {};
             const b = g2[i] || {};
-            ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue,4)}</td><td>${fmt(b.pvalue,4)}</td></tr>`;
+            ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue, 4)}</td><td>${fmt(b.pvalue, 4)}</td></tr>`;
           }
           $("etf_grangerTable").innerHTML = ghtml;
 
-          const s = (res && res.granger && res.granger.summary) ? res.granger.summary : {};
+          const s =
+            res && res.granger && res.granger.summary
+              ? res.granger.summary
+              : {};
           setMsg(
             `结论（粗略）：relation=${rel}\n` +
-            `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}\n` +
-            `granger idx→etf min_p=${fmt(s.idx_causes_etf_min_p,4)}; etf→idx min_p=${fmt(s.etf_causes_idx_min_p,4)} (alpha=${fmt(s.alpha,4)})`
+              `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr, 4) : ""}, best_p=${best ? fmt(best.pvalue, 4) : ""}\n` +
+              `granger idx→etf min_p=${fmt(s.idx_causes_etf_min_p, 4)}; etf→idx min_p=${fmt(s.etf_causes_idx_min_p, 4)} (alpha=${fmt(s.alpha, 4)})`,
           );
         }
 
         function renderTrade(res) {
-          const t = (res && res.trade) ? res.trade : null;
+          const t = res && res.trade ? res.trade : null;
           if (!t) return;
-          const meta = (res && res.meta) ? res.meta : {};
-          const lab = idxLabel(meta.provider, meta.index || meta.series_id || meta.symbol || "");
+          const meta = res && res.meta ? res.meta : {};
+          const lab = idxLabel(
+            meta.provider,
+            meta.index || meta.series_id || meta.symbol || "",
+          );
           const d = t.direction || {};
           $("etf_tradeTable").innerHTML =
             "<tr><th>样本数</th><th>命中率</th><th>TP</th><th>TN</th><th>FP</th><th>FN</th></tr>" +
-            `<tr><td>${d.n ?? ""}</td><td>${fmt(d.hit_rate,4)}</td><td>${d.tp ?? ""}</td><td>${d.tn ?? ""}</td><td>${d.fp ?? ""}</td><td>${d.fn ?? ""}</td></tr>`;
+            `<tr><td>${d.n ?? ""}</td><td>${fmt(d.hit_rate, 4)}</td><td>${d.tp ?? ""}</td><td>${d.tn ?? ""}</td><td>${d.fp ?? ""}</td><td>${d.fn ?? ""}</td></tr>`;
 
           const c = t.conditional || {};
           const up = c.idx_up || {};
           const dn = c.idx_down || {};
           $("etf_condTable").innerHTML =
             "<tr><th>分组</th><th>n</th><th>mean</th><th>q5</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr>" +
-            `<tr><td>${lab}↑(信号日)</td><td>${up.n ?? ""}</td><td>${fmt(up.mean,6)}</td><td>${fmt(up.q5,6)}</td><td>${fmt(up.q25,6)}</td><td>${fmt(up.q50,6)}</td><td>${fmt(up.q75,6)}</td><td>${fmt(up.q95,6)}</td></tr>` +
-            `<tr><td>${lab}↓(信号日)</td><td>${dn.n ?? ""}</td><td>${fmt(dn.mean,6)}</td><td>${fmt(dn.q5,6)}</td><td>${fmt(dn.q25,6)}</td><td>${fmt(dn.q50,6)}</td><td>${fmt(dn.q75,6)}</td><td>${fmt(dn.q95,6)}</td></tr>`;
+            `<tr><td>${lab}↑(信号日)</td><td>${up.n ?? ""}</td><td>${fmt(up.mean, 6)}</td><td>${fmt(up.q5, 6)}</td><td>${fmt(up.q25, 6)}</td><td>${fmt(up.q50, 6)}</td><td>${fmt(up.q75, 6)}</td><td>${fmt(up.q95, 6)}</td></tr>` +
+            `<tr><td>${lab}↓(信号日)</td><td>${dn.n ?? ""}</td><td>${fmt(dn.mean, 6)}</td><td>${fmt(dn.q5, 6)}</td><td>${fmt(dn.q25, 6)}</td><td>${fmt(dn.q50, 6)}</td><td>${fmt(dn.q75, 6)}</td><td>${fmt(dn.q95, 6)}</td></tr>`;
 
           const s = t.strategy || {};
           const dates = s.dates || [];
           const navS = s.nav_strategy || [];
           const navB = s.nav_buy_hold || [];
           const traces = [
-            { x: dates, y: navS, name: "信号策略NAV", type: "scatter", mode: "lines" },
-            { x: dates, y: navB, name: "买入持有NAV", type: "scatter", mode: "lines" },
+            {
+              x: dates,
+              y: navS,
+              name: "信号策略NAV",
+              type: "scatter",
+              mode: "lines",
+            },
+            {
+              x: dates,
+              y: navB,
+              name: "买入持有NAV",
+              type: "scatter",
+              mode: "lines",
+            },
           ];
           const vt = t.vol_timing || null;
           if (vt && vt.ok) {
             const vDates = vt.dates || [];
             const vNav = vt.nav_strategy || [];
-            traces.unshift({ x: vDates, y: vNav, name: "波动率择时NAV", type: "scatter", mode: "lines" });
+            traces.unshift({
+              x: vDates,
+              y: vNav,
+              name: "波动率择时NAV",
+              type: "scatter",
+              mode: "lines",
+            });
           }
-          Plotly.newPlot("etf_stratChart", traces, { margin: { t: 20 } }, { displayModeBar: false });
+          Plotly.newPlot(
+            "etf_stratChart",
+            traces,
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
 
-          const m = (s.metrics || {});
-          const ms = (m.strategy || {});
-          const mb = (m.buy_hold || {});
-          const fmtPct = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+          const m = s.metrics || {};
+          const ms = m.strategy || {};
+          const mb = m.buy_hold || {};
+          const fmtPct = (x) =>
+            Number.isFinite(Number(x))
+              ? (Number(x) * 100).toFixed(2) + "%"
+              : "";
           let metricsLine =
-            `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe,2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
-            `买入持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe,2)} MDD=${fmtPct(mb.max_drawdown)}`;
+            `信号策略：CAGR=${fmtPct(ms.cagr)} Vol=${fmtPct(ms.vol)} Sharpe=${fmt(ms.sharpe, 2)} MDD=${fmtPct(ms.max_drawdown)} | ` +
+            `买入持有：CAGR=${fmtPct(mb.cagr)} Vol=${fmtPct(mb.vol)} Sharpe=${fmt(mb.sharpe, 2)} MDD=${fmtPct(mb.max_drawdown)}`;
           if (vt && vt.ok) {
-            const vms = (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {};
+            const vms =
+              vt.metrics && vt.metrics.strategy ? vt.metrics.strategy : {};
             metricsLine =
-              `波动率择时：CAGR=${fmtPct(vms.cagr)} Vol=${fmtPct(vms.vol)} Sharpe=${fmt(vms.sharpe,2)} MDD=${fmtPct(vms.max_drawdown)} | ` +
+              `波动率择时：CAGR=${fmtPct(vms.cagr)} Vol=${fmtPct(vms.vol)} Sharpe=${fmt(vms.sharpe, 2)} MDD=${fmtPct(vms.max_drawdown)} | ` +
               metricsLine;
           }
           $("etf_stratMetrics").textContent = metricsLine;
-          window.__goldEtfRegimeSeries = { dates: (dates || []).slice(), close: (navB || []).slice() };
+          window.__goldEtfRegimeSeries = {
+            dates: (dates || []).slice(),
+            close: (navB || []).slice(),
+          };
           renderEtfRegimePanel(window.__goldEtfRegimeSeries);
           if (!window.__goldEtfRegimeBound) {
-            for (const id of ["etf_regimeSlopeWin", "etf_regimeVolWin", "etf_regimeSlopeThr", "etf_regimeVolQ", "etf_regimeNAhead"]) {
+            for (const id of [
+              "etf_regimeSlopeWin",
+              "etf_regimeVolWin",
+              "etf_regimeSlopeThr",
+              "etf_regimeVolQ",
+              "etf_regimeNAhead",
+            ]) {
               const el = $(id);
               if (!el) continue;
               el.addEventListener("change", () => {
-                if (window.__goldEtfRegimeSeries) renderEtfRegimePanel(window.__goldEtfRegimeSeries);
+                if (window.__goldEtfRegimeSeries)
+                  renderEtfRegimePanel(window.__goldEtfRegimeSeries);
               });
               el.addEventListener("input", () => {
-                if (window.__goldEtfRegimeSeries) renderEtfRegimePanel(window.__goldEtfRegimeSeries);
+                if (window.__goldEtfRegimeSeries)
+                  renderEtfRegimePanel(window.__goldEtfRegimeSeries);
               });
             }
             window.__goldEtfRegimeBound = true;
@@ -1137,10 +1553,12 @@
             const el = $("etf_timingCompare");
             if (!el) return;
             if (!rows || !rows.length) {
-              el.innerHTML = "<tr><td class='muted'>未启用择时或样本不足</td></tr>";
+              el.innerHTML =
+                "<tr><td class='muted'>未启用择时或样本不足</td></tr>";
               return;
             }
-            let html = "<tr><th>策略</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>备注</th></tr>";
+            let html =
+              "<tr><th>策略</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>MDD</th><th>备注</th></tr>";
             for (const r of rows) {
               html += `<tr><td>${r.name}</td><td>${r.cagr}</td><td>${r.vol}</td><td>${r.sharpe}</td><td>${r.mdd}</td><td>${r.note || ""}</td></tr>`;
             }
@@ -1148,7 +1566,10 @@
           }
 
           function metricRow(name, ms, note) {
-            const fmtPct2 = (x) => (Number.isFinite(Number(x)) ? (Number(x) * 100).toFixed(2) + "%" : "");
+            const fmtPct2 = (x) =>
+              Number.isFinite(Number(x))
+                ? (Number(x) * 100).toFixed(2) + "%"
+                : "";
             return {
               name,
               cagr: fmtPct2(ms && ms.cagr),
@@ -1160,7 +1581,9 @@
           }
 
           async function runProxyTimingCompare() {
-            const enabled = Boolean($("etf_volOn").checked) && Boolean($("etf_proxyOn").checked);
+            const enabled =
+              Boolean($("etf_volOn").checked) &&
+              Boolean($("etf_proxyOn").checked);
             if (!enabled) {
               renderTimingCompare([]);
               return;
@@ -1168,37 +1591,57 @@
             // implied-vol timing row (GVZ) from leadlag response (already computed)
             const rows = [];
             if (vt && vt.ok) {
-              rows.push(metricRow(`指数波动择时(${lab})`, (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {}, "index_level"));
+              rows.push(
+                metricRow(
+                  `指数波动择时(${lab})`,
+                  vt.metrics && vt.metrics.strategy ? vt.metrics.strategy : {},
+                  "index_level",
+                ),
+              );
             }
 
             const parseNums = (s) =>
-              (String(s || "")
+              String(s || "")
                 .split(",")
-                .map(x => Number(String(x).trim()))
-                .filter(x => Number.isFinite(x)));
-            const level_quantiles = parseNums(($("etf_volQs").value || "").trim());
-            const level_exposures = parseNums(($("etf_volExps").value || "").trim());
+                .map((x) => Number(String(x).trim()))
+                .filter((x) => Number.isFinite(x));
+            const level_quantiles = parseNums(
+              ($("etf_volQs").value || "").trim(),
+            );
+            const level_exposures = parseNums(
+              ($("etf_volExps").value || "").trim(),
+            );
             const level_window = ($("etf_volWindow").value || "all").trim();
-            const trade_cost_bps = Number(($("etf_costBps").value || "0").trim());
-            const train_ratio = Number(($("etf_trainRatio").value || "0.6").trim());
+            const trade_cost_bps = Number(
+              ($("etf_costBps").value || "0").trim(),
+            );
+            const train_ratio = Number(
+              ($("etf_trainRatio").value || "0.6").trim(),
+            );
 
             const methods = [];
-            const add = (id, name, kind, extra={}) => {
+            const add = (id, name, kind, extra = {}) => {
               if (!$(id) || !$(id).checked) return;
               methods.push({ name, kind, window: 20, ann: 252, ...extra });
             };
             add("etf_proxy_rv20", "RV20", "rv_close");
             add("etf_proxy_yz20", "YZ20", "yang_zhang");
             add("etf_proxy_gk20", "GK20", "garman_klass");
-            add("etf_proxy_ewma094", "EWMA094", "ewma_close", { ewma_lambda: 0.94 });
-            add("etf_proxy_har252", "HAR252", "har_rv", { har_train_window: 252, har_horizons: [1,5,22] });
+            add("etf_proxy_ewma094", "EWMA094", "ewma_close", {
+              ewma_lambda: 0.94,
+            });
+            add("etf_proxy_har252", "HAR252", "har_rv", {
+              har_train_window: 252,
+              har_horizons: [1, 5, 22],
+            });
 
             if (!methods.length) {
               renderTimingCompare(rows);
               return;
             }
             // show loading state
-            $("etf_timingCompare").innerHTML = "<tr><td class='muted'>现货波动择时计算中...</td></tr>";
+            $("etf_timingCompare").innerHTML =
+              "<tr><td class='muted'>现货波动择时计算中...</td></tr>";
 
             try {
               const resp2 = await api("/analysis/vol-proxy-timing", {
@@ -1219,22 +1662,52 @@
               });
               const d2 = await resp2.json();
               if (!d2 || !d2.ok) {
-                rows.push({ name: "现货波动择时(ETFOHLC)", cagr: "", vol: "", sharpe: "", mdd: "", note: `失败：${d2 && (d2.error || "unknown")}` });
+                rows.push({
+                  name: "现货波动择时(ETFOHLC)",
+                  cagr: "",
+                  vol: "",
+                  sharpe: "",
+                  mdd: "",
+                  note: `失败：${d2 && (d2.error || "unknown")}`,
+                });
                 renderTimingCompare(rows);
                 return;
               }
               const ms = d2.methods || {};
               for (const [k, v] of Object.entries(ms)) {
                 if (!v || !v.ok) {
-                  rows.push({ name: `现货波动择时(${k})`, cagr: "", vol: "", sharpe: "", mdd: "", note: `失败：${v && v.error ? v.error : "bad"}` });
+                  rows.push({
+                    name: `现货波动择时(${k})`,
+                    cagr: "",
+                    vol: "",
+                    sharpe: "",
+                    mdd: "",
+                    note: `失败：${v && v.error ? v.error : "bad"}`,
+                  });
                   continue;
                 }
-                const mstr = (v.metrics && v.metrics.strategy) ? v.metrics.strategy : {};
-                rows.push(metricRow(`现货波动择时(${k})`, mstr, (v.thresholds_abs_train ? `thr=${(v.thresholds_abs_train || []).map(x => fmt(x,3)).join(",")}` : "")));
+                const mstr =
+                  v.metrics && v.metrics.strategy ? v.metrics.strategy : {};
+                rows.push(
+                  metricRow(
+                    `现货波动择时(${k})`,
+                    mstr,
+                    v.thresholds_abs_train
+                      ? `thr=${(v.thresholds_abs_train || []).map((x) => fmt(x, 3)).join(",")}`
+                      : "",
+                  ),
+                );
               }
               renderTimingCompare(rows);
             } catch (e) {
-              rows.push({ name: "现货波动择时(ETFOHLC)", cagr: "", vol: "", sharpe: "", mdd: "", note: `异常：${e && e.message ? e.message : String(e)}` });
+              rows.push({
+                name: "现货波动择时(ETFOHLC)",
+                cagr: "",
+                vol: "",
+                sharpe: "",
+                mdd: "",
+                note: `异常：${e && e.message ? e.message : String(e)}`,
+              });
               renderTimingCompare(rows);
             }
           }
@@ -1244,36 +1717,76 @@
 
           const r = t.rolling || {};
           const rd = r.dates || [];
-          Plotly.newPlot("etf_rollingChart", [
-            { x: rd, y: (r.corr || []), name: "rolling corr(etf_ret, idx_ret_lag)", type: "scatter", mode: "lines" },
-            { x: rd, y: (r.hit_rate || []), name: "rolling hit_rate", yaxis: "y2", type: "scatter", mode: "lines" },
-          ], { margin: { t: 20 }, yaxis: { title: "corr" }, yaxis2: { title: "hit", overlaying: "y", side: "right" } }, { displayModeBar: false });
+          Plotly.newPlot(
+            "etf_rollingChart",
+            [
+              {
+                x: rd,
+                y: r.corr || [],
+                name: "rolling corr(etf_ret, idx_ret_lag)",
+                type: "scatter",
+                mode: "lines",
+              },
+              {
+                x: rd,
+                y: r.hit_rate || [],
+                name: "rolling hit_rate",
+                yaxis: "y2",
+                type: "scatter",
+                mode: "lines",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              yaxis: { title: "corr" },
+              yaxis2: { title: "hit", overlaying: "y", side: "right" },
+            },
+            { displayModeBar: false },
+          );
 
           const th = t.threshold || {};
           const wf = t.walk_forward || {};
           const thStrat = th.strategy ? th.strategy : null;
-          const thM = thStrat && thStrat.metrics ? thStrat.metrics.strategy : null;
+          const thM =
+            thStrat && thStrat.metrics ? thStrat.metrics.strategy : null;
           const thLine = thStrat
-            ? `threshold(q=${fmt(th.quantile,2)} abs=${fmt(thStrat.threshold_abs,6)} active_rate=${fmt(thStrat.active_rate,3)}): ` +
-              `CAGR=${fmtPct(thM && thM.cagr)} Sharpe=${fmt(thM && thM.sharpe,2)} MDD=${fmtPct(thM && thM.max_drawdown)}`
-            : `threshold(q=${fmt(th.quantile,2)}): 无法计算（样本不足或缺失）`;
+            ? `threshold(q=${fmt(th.quantile, 2)} abs=${fmt(thStrat.threshold_abs, 6)} active_rate=${fmt(thStrat.active_rate, 3)}): ` +
+              `CAGR=${fmtPct(thM && thM.cagr)} Sharpe=${fmt(thM && thM.sharpe, 2)} MDD=${fmtPct(thM && thM.max_drawdown)}`
+            : `threshold(q=${fmt(th.quantile, 2)}): 无法计算（样本不足或缺失）`;
 
           let wfHtml = "<tr><th>项</th><th>内容</th></tr>";
           wfHtml += `<tr><td>阈值信号</td><td>${thLine}</td></tr>`;
           if (vt) {
             if (vt.ok) {
-              const vms = (vt.metrics && vt.metrics.strategy) ? vt.metrics.strategy : {};
-              const thrAbs = (vt.thresholds_abs_train || vt.thresholds_abs || []).map(x => fmt(x, 6)).join(", ");
-              const exps = (vt.exposures || []).map(x => fmt(x, 3)).join(", ");
-              const rates = (vt.bucket_rates || []).map(x => fmt(x, 3)).join(", ");
-              wfHtml += `<tr><td>波动率择时(全样本)</td><td>quantiles=${(vt.quantiles || []).map(x => fmt(x, 2)).join(", ")}; thresholds_abs=[${thrAbs}]; exposures=[${exps}]; bucket_rates=[${rates}] | CAGR=${fmtPct(vms.cagr)} Sharpe=${fmt(vms.sharpe,2)} MDD=${fmtPct(vms.max_drawdown)}</td></tr>`;
+              const vms =
+                vt.metrics && vt.metrics.strategy ? vt.metrics.strategy : {};
+              const thrAbs = (
+                vt.thresholds_abs_train ||
+                vt.thresholds_abs ||
+                []
+              )
+                .map((x) => fmt(x, 6))
+                .join(", ");
+              const exps = (vt.exposures || [])
+                .map((x) => fmt(x, 3))
+                .join(", ");
+              const rates = (vt.bucket_rates || [])
+                .map((x) => fmt(x, 3))
+                .join(", ");
+              wfHtml += `<tr><td>波动率择时(全样本)</td><td>quantiles=${(vt.quantiles || []).map((x) => fmt(x, 2)).join(", ")}; thresholds_abs=[${thrAbs}]; exposures=[${exps}]; bucket_rates=[${rates}] | CAGR=${fmtPct(vms.cagr)} Sharpe=${fmt(vms.sharpe, 2)} MDD=${fmtPct(vms.max_drawdown)}</td></tr>`;
               const vwf = vt.walk_forward || null;
               if (vwf && vwf.ok) {
-                const trn2 = (vwf.train && vwf.train.metrics && vwf.train.metrics.strategy) ? vwf.train.metrics.strategy : {};
-                const tst2 = (vwf.test && vwf.test.metrics && vwf.test.metrics.strategy) ? vwf.test.metrics.strategy : {};
-                wfHtml += `<tr><td>波动率择时(WF)</td><td>train_ratio=${fmt(vwf.train_ratio,2)}; thr_train=[${(vwf.thresholds_abs_train || []).map(x => fmt(x,6)).join(", ")}]</td></tr>`;
-                wfHtml += `<tr><td>WF训练段</td><td>CAGR=${fmtPct(trn2.cagr)} Sharpe=${fmt(trn2.sharpe,2)} MDD=${fmtPct(trn2.max_drawdown)}</td></tr>`;
-                wfHtml += `<tr><td>WF测试段</td><td>CAGR=${fmtPct(tst2.cagr)} Sharpe=${fmt(tst2.sharpe,2)} MDD=${fmtPct(tst2.max_drawdown)}</td></tr>`;
+                const trn2 =
+                  vwf.train && vwf.train.metrics && vwf.train.metrics.strategy
+                    ? vwf.train.metrics.strategy
+                    : {};
+                const tst2 =
+                  vwf.test && vwf.test.metrics && vwf.test.metrics.strategy
+                    ? vwf.test.metrics.strategy
+                    : {};
+                wfHtml += `<tr><td>波动率择时(WF)</td><td>train_ratio=${fmt(vwf.train_ratio, 2)}; thr_train=[${(vwf.thresholds_abs_train || []).map((x) => fmt(x, 6)).join(", ")}]</td></tr>`;
+                wfHtml += `<tr><td>WF训练段</td><td>CAGR=${fmtPct(trn2.cagr)} Sharpe=${fmt(trn2.sharpe, 2)} MDD=${fmtPct(trn2.max_drawdown)}</td></tr>`;
+                wfHtml += `<tr><td>WF测试段</td><td>CAGR=${fmtPct(tst2.cagr)} Sharpe=${fmt(tst2.sharpe, 2)} MDD=${fmtPct(tst2.max_drawdown)}</td></tr>`;
               } else if (vwf) {
                 wfHtml += `<tr><td>波动率择时(WF)</td><td>无法计算（${vwf.reason || "样本不足"}）</td></tr>`;
               }
@@ -1283,11 +1796,23 @@
           }
           if (wf && wf.ok) {
             const ch = wf.chosen || {};
-            const trn = (wf.train && wf.train.strategy && wf.train.strategy.metrics && wf.train.strategy.metrics.strategy) ? wf.train.strategy.metrics.strategy : {};
-            const tst = (wf.test && wf.test.strategy && wf.test.strategy.metrics && wf.test.strategy.metrics.strategy) ? wf.test.strategy.metrics.strategy : {};
-            wfHtml += `<tr><td>Walk-forward 选参</td><td>objective=${wf.objective}, lag=${ch.lag}, thr_q=${ch.thr_q}, thr_abs=${fmt(ch.thr_abs,6)}, corr_train=${fmt(ch.corr_train,4)}</td></tr>`;
-            wfHtml += `<tr><td>训练段</td><td>${wf.train.start} ~ ${wf.train.end} | CAGR=${fmtPct(trn.cagr)} Sharpe=${fmt(trn.sharpe,2)} MDD=${fmtPct(trn.max_drawdown)}</td></tr>`;
-            wfHtml += `<tr><td>测试段</td><td>${wf.test.start} ~ ${wf.test.end} | CAGR=${fmtPct(tst.cagr)} Sharpe=${fmt(tst.sharpe,2)} MDD=${fmtPct(tst.max_drawdown)}</td></tr>`;
+            const trn =
+              wf.train &&
+              wf.train.strategy &&
+              wf.train.strategy.metrics &&
+              wf.train.strategy.metrics.strategy
+                ? wf.train.strategy.metrics.strategy
+                : {};
+            const tst =
+              wf.test &&
+              wf.test.strategy &&
+              wf.test.strategy.metrics &&
+              wf.test.strategy.metrics.strategy
+                ? wf.test.strategy.metrics.strategy
+                : {};
+            wfHtml += `<tr><td>Walk-forward 选参</td><td>objective=${wf.objective}, lag=${ch.lag}, thr_q=${ch.thr_q}, thr_abs=${fmt(ch.thr_abs, 6)}, corr_train=${fmt(ch.corr_train, 4)}</td></tr>`;
+            wfHtml += `<tr><td>训练段</td><td>${wf.train.start} ~ ${wf.train.end} | CAGR=${fmtPct(trn.cagr)} Sharpe=${fmt(trn.sharpe, 2)} MDD=${fmtPct(trn.max_drawdown)}</td></tr>`;
+            wfHtml += `<tr><td>测试段</td><td>${wf.test.start} ~ ${wf.test.end} | CAGR=${fmtPct(tst.cagr)} Sharpe=${fmt(tst.sharpe, 2)} MDD=${fmtPct(tst.max_drawdown)}</td></tr>`;
           } else {
             wfHtml += `<tr><td>Walk-forward</td><td>无法计算（${wf && wf.reason ? wf.reason : "样本不足"}）</td></tr>`;
           }
@@ -1295,41 +1820,101 @@
         }
 
         function renderCharts(res) {
-          const dates = (res && res.series && res.series.dates) ? res.series.dates : [];
-          const etfClose = (res && res.series && res.series.etf_close) ? res.series.etf_close : [];
-          const idxClose = (res && res.series && res.series.idx_close) ? res.series.idx_close : [];
-          const etfRet = (res && res.series && res.series.etf_ret) ? res.series.etf_ret : [];
-          const idxRet = (res && res.series && res.series.idx_ret) ? res.series.idx_ret : [];
-          const meta = (res && res.meta) ? res.meta : {};
-          const lab = idxLabel(meta.provider, meta.index || meta.series_id || meta.symbol || "");
+          const dates =
+            res && res.series && res.series.dates ? res.series.dates : [];
+          const etfClose =
+            res && res.series && res.series.etf_close
+              ? res.series.etf_close
+              : [];
+          const idxClose =
+            res && res.series && res.series.idx_close
+              ? res.series.idx_close
+              : [];
+          const etfRet =
+            res && res.series && res.series.etf_ret ? res.series.etf_ret : [];
+          const idxRet =
+            res && res.series && res.series.idx_ret ? res.series.idx_ret : [];
+          const meta = res && res.meta ? res.meta : {};
+          const lab = idxLabel(
+            meta.provider,
+            meta.index || meta.series_id || meta.symbol || "",
+          );
 
           const etf0 = Number(etfClose[0] || 1);
           const idx0 = Number(idxClose[0] || 1);
-          const etfNorm = etfClose.map(v => Number(v) / etf0);
-          const idxNorm = idxClose.map(v => Number(v) / idx0);
+          const etfNorm = etfClose.map((v) => Number(v) / etf0);
+          const idxNorm = idxClose.map((v) => Number(v) / idx0);
 
-          Plotly.newPlot("etf_pxChart", [
-            { x: dates, y: etfNorm, name: "黄金ETF(518880) close(归一化)", type: "scatter", mode: "lines" },
-            { x: dates, y: idxNorm, name: `${lab} close(归一化)`, type: "scatter", mode: "lines" },
-          ], {
-            margin: { t: 20 },
-            yaxis: {
-              type: "log",
-              tickformat: ".2f",
-              showexponent: "none",
-              exponentformat: "none",
+          Plotly.newPlot(
+            "etf_pxChart",
+            [
+              {
+                x: dates,
+                y: etfNorm,
+                name: "黄金ETF(518880) close(归一化)",
+                type: "scatter",
+                mode: "lines",
+              },
+              {
+                x: dates,
+                y: idxNorm,
+                name: `${lab} close(归一化)`,
+                type: "scatter",
+                mode: "lines",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              yaxis: {
+                type: "log",
+                tickformat: ".2f",
+                showexponent: "none",
+                exponentformat: "none",
+              },
             },
-          }, { displayModeBar: false });
+            { displayModeBar: false },
+          );
 
-          Plotly.newPlot("etf_retChart", [
-            { x: dates, y: etfRet, name: "ETF log-ret", type: "scatter", mode: "lines" },
-            { x: dates, y: idxRet, name: "Index log-ret", type: "scatter", mode: "lines" },
-          ], { margin: { t: 20 } }, { displayModeBar: false });
+          Plotly.newPlot(
+            "etf_retChart",
+            [
+              {
+                x: dates,
+                y: etfRet,
+                name: "ETF log-ret",
+                type: "scatter",
+                mode: "lines",
+              },
+              {
+                x: dates,
+                y: idxRet,
+                name: "Index log-ret",
+                type: "scatter",
+                mode: "lines",
+              },
+            ],
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
 
-          const xs = (res && res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-          Plotly.newPlot("etf_xcorrChart", [
-            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
-          ], { margin: { t: 20 }, xaxis: { title: "lag (days)" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+          const xs = res && res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+          Plotly.newPlot(
+            "etf_xcorrChart",
+            [
+              {
+                x: xs.map((r) => r.lag),
+                y: xs.map((r) => r.corr),
+                type: "bar",
+                name: "corr",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              xaxis: { title: "lag (days)" },
+              yaxis: { title: "corr" },
+            },
+            { displayModeBar: false },
+          );
         }
 
         function applyPreset() {
@@ -1358,22 +1943,34 @@
               $("etf_idx").value = index_symbol;
             }
           }
-          const index_align = ($("etf_align").value || "cn_next_trading_day").trim();
+          const index_align = (
+            $("etf_align").value || "cn_next_trading_day"
+          ).trim();
           const max_lag = Number(($("etf_maxLag").value || "20").trim());
-          const granger_max_lag = Number(($("etf_grangerLag").value || "10").trim());
+          const granger_max_lag = Number(
+            ($("etf_grangerLag").value || "10").trim(),
+          );
           const alpha = Number(($("etf_alpha").value || "0.05").trim());
           const trade_cost_bps = Number(($("etf_costBps").value || "0").trim());
-          const threshold_quantile = Number(($("etf_thrQ").value || "0.8").trim());
-          const train_ratio = Number(($("etf_trainRatio").value || "0.6").trim());
+          const threshold_quantile = Number(
+            ($("etf_thrQ").value || "0.8").trim(),
+          );
+          const train_ratio = Number(
+            ($("etf_trainRatio").value || "0.6").trim(),
+          );
           const walk_objective = ($("etf_wfObj").value || "sharpe").trim();
           const vol_timing = Boolean($("etf_volOn").checked);
           const parseNums = (s) =>
-            (String(s || "")
+            String(s || "")
               .split(",")
-              .map(x => Number(String(x).trim()))
-              .filter(x => Number.isFinite(x)));
-          const vol_level_quantiles = parseNums(($("etf_volQs").value || "").trim());
-          const vol_level_exposures = parseNums(($("etf_volExps").value || "").trim());
+              .map((x) => Number(String(x).trim()))
+              .filter((x) => Number.isFinite(x));
+          const vol_level_quantiles = parseNums(
+            ($("etf_volQs").value || "").trim(),
+          );
+          const vol_level_exposures = parseNums(
+            ($("etf_volExps").value || "").trim(),
+          );
           const vol_level_window = ($("etf_volWindow").value || "all").trim();
 
           setMsg("运行中...");
@@ -1416,28 +2013,37 @@
         function percentileFromQuantiles(value, quant) {
           if (!Number.isFinite(Number(value)) || !quant) return null;
           const map = [
-            { p: 1, key: "q1" }, { p: 5, key: "q5" },
-            { p: 10, key: "q10" }, { p: 25, key: "q25" },
-            { p: 50, key: "q50" }, { p: 75, key: "q75" },
-            { p: 90, key: "q90" }, { p: 95, key: "q95" },
+            { p: 1, key: "q1" },
+            { p: 5, key: "q5" },
+            { p: 10, key: "q10" },
+            { p: 25, key: "q25" },
+            { p: 50, key: "q50" },
+            { p: 75, key: "q75" },
+            { p: 90, key: "q90" },
+            { p: 95, key: "q95" },
             { p: 99, key: "q99" },
           ];
-          const pts = map.map(m => {
-            const v = quant[m.key];
-            return (typeof v === 'number' && Number.isFinite(v)) ? { p: m.p, v } : null;
-          }).filter(x => x);
+          const pts = map
+            .map((m) => {
+              const v = quant[m.key];
+              return typeof v === "number" && Number.isFinite(v)
+                ? { p: m.p, v }
+                : null;
+            })
+            .filter((x) => x);
           if (!pts.length) return null;
           const val = Number(value);
           if (val <= pts[0].v) return pts[0].p;
           for (let i = 1; i < pts.length; i++) {
             if (val <= pts[i].v) {
-              const a = pts[i-1], b = pts[i];
-              const denom = (b.v - a.v) || 1e-12;
+              const a = pts[i - 1],
+                b = pts[i];
+              const denom = b.v - a.v || 1e-12;
               const t = (val - a.v) / denom;
               return a.p + (b.p - a.p) * t;
             }
           }
-          return pts[pts.length-1].p;
+          return pts[pts.length - 1].p;
         }
 
         function renderQuantTable(elId, q, currentValue) {
@@ -1456,19 +2062,22 @@
         }
 
         function renderIndexDist(d) {
-          const mode = ((d && d.meta && d.meta.mode) ? String(d.meta.mode).toLowerCase() : "raw");
+          const mode =
+            d && d.meta && d.meta.mode
+              ? String(d.meta.mode).toLowerCase()
+              : "raw";
           if (!d || !d.ok) return;
           const m = d.meta || {};
           const s = d.series || {};
-          const c = (d.close || {});
-          const r = (d.ret_log || {});
-          const ch = (c.hist || {});
-          const rh = (r.hist || {});
+          const c = d.close || {};
+          const r = d.ret_log || {};
+          const ch = c.hist || {};
+          const rh = r.hist || {};
 
           const _qShapes = (q, cur) => {
             const qs = q || {};
             const out = [];
-            const mk = (x, color, dash="dot", width=1.5) => {
+            const mk = (x, color, dash = "dot", width = 1.5) => {
               const v = Number(x);
               if (!Number.isFinite(v)) return;
               out.push({
@@ -1498,28 +2107,48 @@
           const cbins = ch.bins || [];
           const ccounts = ch.counts || [];
           const cx = cbins.slice(0, Math.max(0, cbins.length - 1));
-          const xTitle = (mode === "log" ? "log(close)" : "close");
-          Plotly.newPlot("etf_distCloseChart", [
-            { x: cx, y: ccounts, type: "bar", name: `${m.symbol || ""} close` },
-          ], {
-            margin: { t: 20 },
-            xaxis: { title: xTitle },
-            yaxis: { title: "count" },
-            shapes: _qShapes(c.quantiles || {}, c.current),
-          }, { displayModeBar: false });
+          const xTitle = mode === "log" ? "log(close)" : "close";
+          Plotly.newPlot(
+            "etf_distCloseChart",
+            [
+              {
+                x: cx,
+                y: ccounts,
+                type: "bar",
+                name: `${m.symbol || ""} close`,
+              },
+            ],
+            {
+              margin: { t: 20 },
+              xaxis: { title: xTitle },
+              yaxis: { title: "count" },
+              shapes: _qShapes(c.quantiles || {}, c.current),
+            },
+            { displayModeBar: false },
+          );
           renderQuantTable("etf_distCloseTable", c.quantiles || {}, c.current);
 
           const rbins = rh.bins || [];
           const rcounts = rh.counts || [];
           const rx = rbins.slice(0, Math.max(0, rbins.length - 1));
-          Plotly.newPlot("etf_distRetChart", [
-            { x: rx, y: rcounts, type: "bar", name: `${m.symbol || ""} log-ret` },
-          ], {
-            margin: { t: 20 },
-            xaxis: { title: "log-ret" },
-            yaxis: { title: "count" },
-            shapes: _qShapes(r.quantiles || {}, r.current),
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "etf_distRetChart",
+            [
+              {
+                x: rx,
+                y: rcounts,
+                type: "bar",
+                name: `${m.symbol || ""} log-ret`,
+              },
+            ],
+            {
+              margin: { t: 20 },
+              xaxis: { title: "log-ret" },
+              yaxis: { title: "count" },
+              shapes: _qShapes(r.quantiles || {}, r.current),
+            },
+            { displayModeBar: false },
+          );
           renderQuantTable("etf_distRetTable", r.quantiles || {}, r.current);
 
           // log-scale close + Bollinger Bands (computed in log space)
@@ -1528,41 +2157,89 @@
           if (dates.length >= 30 && close.length === dates.length) {
             const W = 20;
             const K = 2.0;
-            const lc = close.map(v => {
+            const lc = close.map((v) => {
               const x = Number(v);
-              return (Number.isFinite(x) && x > 0) ? Math.log(x) : null;
+              return Number.isFinite(x) && x > 0 ? Math.log(x) : null;
             });
             const mid = new Array(lc.length).fill(null);
             const upp = new Array(lc.length).fill(null);
             const low = new Array(lc.length).fill(null);
             for (let i = 0; i < lc.length; i++) {
               if (i + 1 < W) continue;
-              let sum = 0.0, sum2 = 0.0, n = 0;
+              let sum = 0.0,
+                sum2 = 0.0,
+                n = 0;
               for (let j = i - W + 1; j <= i; j++) {
                 const v = lc[j];
                 if (v == null || !Number.isFinite(v)) continue;
-                sum += v; sum2 += v * v; n += 1;
+                sum += v;
+                sum2 += v * v;
+                n += 1;
               }
               if (n < Math.max(10, Math.floor(W * 0.6))) continue;
               const mu = sum / n;
-              const var0 = Math.max(0.0, (sum2 / n) - mu * mu);
+              const var0 = Math.max(0.0, sum2 / n - mu * mu);
               const sd = Math.sqrt(var0);
               mid[i] = Math.exp(mu);
               upp[i] = Math.exp(mu + K * sd);
               low[i] = Math.exp(mu - K * sd);
             }
-            Plotly.newPlot("etf_distLogBbChart", [
-              { x: dates, y: upp, name: "BB upper", type: "scatter", mode: "lines", line: { color: "rgba(255,127,14,0.75)", width: 1.2 } },
-              { x: dates, y: low, name: "BB lower", type: "scatter", mode: "lines", fill: "tonexty", fillcolor: "rgba(255,127,14,0.15)", line: { color: "rgba(255,127,14,0.75)", width: 1.2 } },
-              { x: dates, y: mid, name: "BB mid", type: "scatter", mode: "lines", line: { color: "rgba(31,119,180,0.9)", width: 1.4, dash: "dot" } },
-              { x: dates, y: close, name: `${m.symbol || ""} close`, type: "scatter", mode: "lines", line: { color: "rgba(17,17,17,0.9)", width: 1.6 } },
-            ], {
-              margin: { t: 20 },
-              yaxis: { type: "log", title: "close（log）" },
-              xaxis: { title: "date" },
-            }, { displayModeBar: false });
+            Plotly.newPlot(
+              "etf_distLogBbChart",
+              [
+                {
+                  x: dates,
+                  y: upp,
+                  name: "BB upper",
+                  type: "scatter",
+                  mode: "lines",
+                  line: { color: "rgba(255,127,14,0.75)", width: 1.2 },
+                },
+                {
+                  x: dates,
+                  y: low,
+                  name: "BB lower",
+                  type: "scatter",
+                  mode: "lines",
+                  fill: "tonexty",
+                  fillcolor: "rgba(255,127,14,0.15)",
+                  line: { color: "rgba(255,127,14,0.75)", width: 1.2 },
+                },
+                {
+                  x: dates,
+                  y: mid,
+                  name: "BB mid",
+                  type: "scatter",
+                  mode: "lines",
+                  line: {
+                    color: "rgba(31,119,180,0.9)",
+                    width: 1.4,
+                    dash: "dot",
+                  },
+                },
+                {
+                  x: dates,
+                  y: close,
+                  name: `${m.symbol || ""} close`,
+                  type: "scatter",
+                  mode: "lines",
+                  line: { color: "rgba(17,17,17,0.9)", width: 1.6 },
+                },
+              ],
+              {
+                margin: { t: 20 },
+                yaxis: { type: "log", title: "close（log）" },
+                xaxis: { title: "date" },
+              },
+              { displayModeBar: false },
+            );
           } else {
-            Plotly.newPlot("etf_distLogBbChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot(
+              "etf_distLogBbChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
           }
         }
 
@@ -1576,7 +2253,9 @@
           });
           const data = await resp.json();
           if (!data || !data.ok) {
-            setMsg(`分布统计失败：${data && (data.error || JSON.stringify(data))}`);
+            setMsg(
+              `分布统计失败：${data && (data.error || JSON.stringify(data))}`,
+            );
             return;
           }
           renderIndexDist(data);
@@ -1602,59 +2281,123 @@
         function renderPrice(series) {
           const traces = [];
           for (const [sid, s] of Object.entries(series || {})) {
-            traces.push({ x: (s.dates || []), y: norm(s.close || []), name: sid, type: "scatter", mode: "lines" });
+            traces.push({
+              x: s.dates || [],
+              y: norm(s.close || []),
+              name: sid,
+              type: "scatter",
+              mode: "lines",
+            });
           }
-          Plotly.newPlot("s1_pxChart", traces, {
-            margin: { t: 20 },
-            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "s1_pxChart",
+            traces,
+            {
+              margin: { t: 20 },
+              yaxis: {
+                type: "log",
+                tickformat: ".2f",
+                showexponent: "none",
+                exponentformat: "none",
+              },
+            },
+            { displayModeBar: false },
+          );
         }
 
         function renderPair(key, pairs) {
           const { a, b } = parsePairKey(key);
           const res = pairs ? pairs[key] : null;
           if (!res || !res.ok) {
-            setPairMsg(`pair=${key}\n失败：${res ? (res.reason || JSON.stringify(res)) : "empty"}`);
-            Plotly.newPlot("s1_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            setPairMsg(
+              `pair=${key}\n失败：${res ? res.reason || JSON.stringify(res) : "empty"}`,
+            );
+            Plotly.newPlot(
+              "s1_xcorrChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
             $("s1_grangerTable").innerHTML = "";
-            Plotly.newPlot("s1_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
-            Plotly.newPlot("s1_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot(
+              "s1_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
+            Plotly.newPlot(
+              "s1_rollingChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
             return;
           }
           const best = res.corr && res.corr.best ? res.corr.best : null;
           const rel = res.corr && res.corr.relation ? res.corr.relation : "";
-          const gsum = res.granger && res.granger.summary ? res.granger.summary : {};
+          const gsum =
+            res.granger && res.granger.summary ? res.granger.summary : {};
           setPairMsg(
             `pair=${key}\n` +
-            `relation=${rel}\n` +
-            `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}\n` +
-            `granger idx→a min_p=${fmt(gsum.idx_causes_etf_min_p,4)}; a→idx min_p=${fmt(gsum.etf_causes_idx_min_p,4)}`
+              `relation=${rel}\n` +
+              `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr, 4) : ""}, best_p=${best ? fmt(best.pvalue, 4) : ""}\n` +
+              `granger idx→a min_p=${fmt(gsum.idx_causes_etf_min_p, 4)}; a→idx min_p=${fmt(gsum.etf_causes_idx_min_p, 4)}`,
           );
-          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-          Plotly.newPlot("s1_xcorrChart", [
-            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
-          ], { margin: { t: 20 }, xaxis: { title: "lag (days)" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+          const xs = res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+          Plotly.newPlot(
+            "s1_xcorrChart",
+            [
+              {
+                x: xs.map((r) => r.lag),
+                y: xs.map((r) => r.corr),
+                type: "bar",
+                name: "corr",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              xaxis: { title: "lag (days)" },
+              yaxis: { title: "corr" },
+            },
+            { displayModeBar: false },
+          );
 
-          const g1 = (res.granger && res.granger.idx_to_etf) ? res.granger.idx_to_etf : [];
-          const g2 = (res.granger && res.granger.etf_to_idx) ? res.granger.etf_to_idx : [];
-          let ghtml = "<tr><th>p</th><th>b→a pvalue</th><th>a→b pvalue</th></tr>";
+          const g1 =
+            res.granger && res.granger.idx_to_etf ? res.granger.idx_to_etf : [];
+          const g2 =
+            res.granger && res.granger.etf_to_idx ? res.granger.etf_to_idx : [];
+          let ghtml =
+            "<tr><th>p</th><th>b→a pvalue</th><th>a→b pvalue</th></tr>";
           const n = Math.max(g1.length, g2.length);
           for (let i = 0; i < n; i++) {
             const a = g1[i] || {};
             const b = g2[i] || {};
-            ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue,4)}</td><td>${fmt(b.pvalue,4)}</td></tr>`;
+            ghtml += `<tr><td>${a.p ?? b.p ?? ""}</td><td>${fmt(a.pvalue, 4)}</td><td>${fmt(b.pvalue, 4)}</td></tr>`;
           }
           $("s1_grangerTable").innerHTML = ghtml;
 
           // 原始尺度：双纵轴（A=etf_close, B=idx_close）
           if (lastSeries && lastSeries[a] && lastSeries[b]) {
             const u = buildUnionSeries(lastSeries[a], lastSeries[b]);
-            renderRawDualAxis("s1_rawPairChart", u.dates, u.aClose, a, u.bClose, b);
+            renderRawDualAxis(
+              "s1_rawPairChart",
+              u.dates,
+              u.aClose,
+              a,
+              u.bClose,
+              b,
+            );
           } else {
-            Plotly.newPlot("s1_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot(
+              "s1_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
           }
           // 滚动稳定性：直接复用后端计算结果（best_lag 对齐）
-          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          const roll =
+            res.trade && res.trade.rolling ? res.trade.rolling : null;
           renderRollingStability("s1_rollingChart", roll);
         }
 
@@ -1663,17 +2406,31 @@
           const end = ($("s1_end").value || "").trim();
           const gold_spot_series_id = ($("s1_goldSpot").value || "").trim();
           const gold_fut_series_id_raw = ($("s1_goldFut").value || "").trim();
-          const gold_fut_series_id = gold_fut_series_id_raw ? gold_fut_series_id_raw : null;
+          const gold_fut_series_id = gold_fut_series_id_raw
+            ? gold_fut_series_id_raw
+            : null;
           const dxy_series_id = ($("s1_dxy").value || "").trim();
           const yield_series_id = ($("s1_yld").value || "DGS10").trim();
           const index_align = ($("s1_align").value || "none").trim();
           const max_lag = Number(($("s1_maxLag").value || "20").trim());
-          const granger_max_lag = Number(($("s1_grangerLag").value || "10").trim());
+          const granger_max_lag = Number(
+            ($("s1_grangerLag").value || "10").trim(),
+          );
 
           setMsg("运行中...");
           const resp = await api("/analysis/macro/step1", {
             method: "POST",
-            body: JSON.stringify({ start, end, gold_spot_series_id, gold_fut_series_id, dxy_series_id, yield_series_id, index_align, max_lag, granger_max_lag }),
+            body: JSON.stringify({
+              start,
+              end,
+              gold_spot_series_id,
+              gold_fut_series_id,
+              dxy_series_id,
+              yield_series_id,
+              index_align,
+              max_lag,
+              granger_max_lag,
+            }),
           });
           const data = await resp.json();
           if (!data || !data.ok) {
@@ -1684,16 +2441,19 @@
           lastSeries = data.series || null;
           renderPrice(data.series);
           const keys = Object.keys(data.pairs || {});
-          $("s1_pairSel").innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+          $("s1_pairSel").innerHTML = keys
+            .map((k) => `<option value="${k}">${k}</option>`)
+            .join("");
           if (keys.length) {
             $("s1_pairSel").value = keys[0];
             renderPair(keys[0], data.pairs);
           }
-          $("s1_pairSel").onchange = () => renderPair(($("s1_pairSel").value || "").trim(), data.pairs);
+          $("s1_pairSel").onchange = () =>
+            renderPair(($("s1_pairSel").value || "").trim(), data.pairs);
         }
 
         function _firstFinite(arr) {
-          for (const v of (arr || [])) {
+          for (const v of arr || []) {
             const x = Number(v);
             if (Number.isFinite(x) && x !== 0) return x;
           }
@@ -1724,11 +2484,14 @@
             outB.push(Number(bv));
           }
           // ensure ascending by date string (YYYY-MM-DD)
-          const idx = outDates.map((d, i) => [d, i]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))).map(x => x[1]);
+          const idx = outDates
+            .map((d, i) => [d, i])
+            .sort((x, y) => String(x[0]).localeCompare(String(y[0])))
+            .map((x) => x[1]);
           return {
-            dates: idx.map(i => outDates[i]),
-            a: idx.map(i => outA[i]),
-            b: idx.map(i => outB[i]),
+            dates: idx.map((i) => outDates[i]),
+            a: idx.map((i) => outA[i]),
+            b: idx.map((i) => outB[i]),
           };
         }
 
@@ -1747,25 +2510,38 @@
         }
 
         function _ratioDistributionAndTable(values, currentValue, histMode) {
-          const hm = String(histMode || "log").trim().toLowerCase();
+          const hm = String(histMode || "log")
+            .trim()
+            .toLowerCase();
           const isLog = hm === "log";
-          const xs0 = (values || []).map(v => Number(v)).filter(v => Number.isFinite(v));
-          const xs = isLog ? xs0.filter(v => v > 0).map(v => Math.log(v)) : xs0;
+          const xs0 = (values || [])
+            .map((v) => Number(v))
+            .filter((v) => Number.isFinite(v));
+          const xs = isLog
+            ? xs0.filter((v) => v > 0).map((v) => Math.log(v))
+            : xs0;
           xs.sort((a, b) => a - b);
           const qs = [
-            { q: 0.01, label: "1%" , color: "rgba(214,39,40,0.95)" },
-            { q: 0.05, label: "5%" , color: "rgba(255,127,14,0.95)" },
-            { q: 0.10, label: "10%", color: "rgba(255,206,86,0.95)" },
+            { q: 0.01, label: "1%", color: "rgba(214,39,40,0.95)" },
+            { q: 0.05, label: "5%", color: "rgba(255,127,14,0.95)" },
+            { q: 0.1, label: "10%", color: "rgba(255,206,86,0.95)" },
             { q: 0.25, label: "25%", color: "rgba(44,160,44,0.95)" },
-            { q: 0.50, label: "50%", color: "rgba(31,119,180,0.95)" },
+            { q: 0.5, label: "50%", color: "rgba(31,119,180,0.95)" },
             { q: 0.75, label: "75%", color: "rgba(44,160,44,0.95)" },
-            { q: 0.90, label: "90%", color: "rgba(255,206,86,0.95)" },
+            { q: 0.9, label: "90%", color: "rgba(255,206,86,0.95)" },
             { q: 0.95, label: "95%", color: "rgba(255,127,14,0.95)" },
             { q: 0.99, label: "99%", color: "rgba(214,39,40,0.95)" },
           ];
-          const qvals = qs.map(it => ({ ...it, value: _quantileSorted(xs, it.q) }));
+          const qvals = qs.map((it) => ({
+            ...it,
+            value: _quantileSorted(xs, it.q),
+          }));
           const cur0 = Number(currentValue);
-          const cur = isLog ? (cur0 > 0 ? Math.log(cur0) : Number("nan")) : cur0;
+          const cur = isLog
+            ? cur0 > 0
+              ? Math.log(cur0)
+              : Number("nan")
+            : cur0;
           const curOk = Number.isFinite(cur);
 
           // histogram
@@ -1799,7 +2575,8 @@
           // table
           let html = "<tr><th>项</th><th>值</th></tr>";
           html += `<tr><td>样本数</td><td>${xs.length}</td></tr>`;
-          if (curOk) html += `<tr><td><b>现值</b></td><td><b>${fmt(cur, 6)}</b></td></tr>`;
+          if (curOk)
+            html += `<tr><td><b>现值</b></td><td><b>${fmt(cur, 6)}</b></td></tr>`;
           for (const it of qvals) {
             html += `<tr><td>${it.label}</td><td>${fmt(it.value, 6)}</td></tr>`;
           }
@@ -1812,14 +2589,17 @@
           const cur = lastRatioCurrent;
           const dist = _ratioDistributionAndTable(ratio, cur, mode);
           const xTitle = mode === "log" ? "log(ratio)" : "ratio";
-          Plotly.newPlot("s1_ratioHist", [
-            { x: dist.xs, type: "histogram", name: xTitle, opacity: 0.75 },
-          ], {
-            margin: { t: 20 },
-            shapes: dist.shapes,
-            xaxis: { title: xTitle },
-            yaxis: { title: "count" },
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "s1_ratioHist",
+            [{ x: dist.xs, type: "histogram", name: xTitle, opacity: 0.75 }],
+            {
+              margin: { t: 20 },
+              shapes: dist.shapes,
+              xaxis: { title: xTitle },
+              yaxis: { title: "count" },
+            },
+            { displayModeBar: false },
+          );
           $("s1_ratioTable").innerHTML = dist.tableHtml;
         }
 
@@ -1844,8 +2624,15 @@
             });
             const data = await resp.json();
             if (!data || !data.ok) {
-              setRatioMsg(`失败：${data && (data.error || JSON.stringify(data))}`);
-              Plotly.newPlot("s1_ratioChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+              setRatioMsg(
+                `失败：${data && (data.error || JSON.stringify(data))}`,
+              );
+              Plotly.newPlot(
+                "s1_ratioChart",
+                [],
+                { margin: { t: 20 } },
+                { displayModeBar: false },
+              );
               return;
             }
             const sa = (data.series || {})[aId];
@@ -1854,7 +2641,12 @@
               setRatioMsg("失败：后端未返回完整序列。");
               return;
             }
-            const u = _alignedIntersection(sa.dates || [], sa.close || [], sb.dates || [], sb.close || []);
+            const u = _alignedIntersection(
+              sa.dates || [],
+              sa.close || [],
+              sb.dates || [],
+              sb.close || [],
+            );
             if (!u.dates.length) {
               setRatioMsg("失败：两序列无重叠日期。");
               return;
@@ -1865,20 +2657,30 @@
               ratio = u.a.map((av, i) => {
                 const bv = Number(u.b[i]);
                 const a1 = Number(av);
-                if (!Number.isFinite(a1) || !Number.isFinite(bv) || bv === 0) return null;
+                if (!Number.isFinite(a1) || !Number.isFinite(bv) || bv === 0)
+                  return null;
                 return a1 / bv;
               });
               label = `${aId}/${bId}（原始）`;
             } else {
               const a0 = _firstFinite(u.a);
               const b0 = _firstFinite(u.b);
-              if (!Number.isFinite(a0) || !Number.isFinite(b0) || a0 === 0 || b0 === 0) {
+              if (
+                !Number.isFinite(a0) ||
+                !Number.isFinite(b0) ||
+                a0 === 0 ||
+                b0 === 0
+              ) {
                 setRatioMsg("失败：无法归一化（首个有效值缺失/为0）。");
                 return;
               }
-              const aN = u.a.map(v => Number(v) / Number(a0));
-              const bN = u.b.map(v => Number(v) / Number(b0));
-              ratio = aN.map((v, i) => (Number.isFinite(v) && Number.isFinite(bN[i]) && bN[i] !== 0) ? (v / bN[i]) : null);
+              const aN = u.a.map((v) => Number(v) / Number(a0));
+              const bN = u.b.map((v) => Number(v) / Number(b0));
+              ratio = aN.map((v, i) =>
+                Number.isFinite(v) && Number.isFinite(bN[i]) && bN[i] !== 0
+                  ? v / bN[i]
+                  : null,
+              );
               label = `${aId}/${bId}（归一化）`;
             }
 
@@ -1886,24 +2688,40 @@
             let cur = null;
             for (let i = ratio.length - 1; i >= 0; i--) {
               const x = Number(ratio[i]);
-              if (Number.isFinite(x)) { cur = x; break; }
+              if (Number.isFinite(x)) {
+                cur = x;
+                break;
+              }
             }
             lastRatioValues = ratio;
             lastRatioCurrent = cur;
 
-            Plotly.newPlot("s1_ratioChart", [
-              { x: u.dates, y: ratio, name: label, type: "scatter", mode: "lines" },
-            ], {
-              margin: { t: 20 },
-              yaxis: { title: "ratio", tickformat: ".4f" },
-              xaxis: { title: "date" },
-            }, { displayModeBar: false });
+            Plotly.newPlot(
+              "s1_ratioChart",
+              [
+                {
+                  x: u.dates,
+                  y: ratio,
+                  name: label,
+                  type: "scatter",
+                  mode: "lines",
+                },
+              ],
+              {
+                margin: { t: 20 },
+                yaxis: { title: "ratio", tickformat: ".4f" },
+                xaxis: { title: "date" },
+              },
+              { displayModeBar: false },
+            );
 
             // histogram + table (quantiles + current), mode-controlled (raw vs log)
             renderRatioDist();
 
             const rng = `区间=${u.dates[0]}~${u.dates[u.dates.length - 1]}`;
-            setRatioMsg(`完成：A=${aId}, B=${bId}, mode=${mode}，样本数=${u.dates.length}，${rng}，现值=${(cur == null ? "" : fmt(cur, 6))}`);
+            setRatioMsg(
+              `完成：A=${aId}, B=${bId}, mode=${mode}，样本数=${u.dates.length}，${rng}，现值=${cur == null ? "" : fmt(cur, 6)}`,
+            );
           } catch (e) {
             setRatioMsg(`异常：${e && e.message ? e.message : String(e)}`);
           }
@@ -1928,8 +2746,12 @@
           { id: "DGS10", name: "美债10Y DGS10" },
           { id: "DGS30", name: "美债30Y DGS30" },
         ];
-        $("s1_ratioA").innerHTML = ratioOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join("");
-        $("s1_ratioB").innerHTML = ratioOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join("");
+        $("s1_ratioA").innerHTML = ratioOpts
+          .map((o) => `<option value="${o.id}">${o.name}</option>`)
+          .join("");
+        $("s1_ratioB").innerHTML = ratioOpts
+          .map((o) => `<option value="${o.id}">${o.name}</option>`)
+          .join("");
         $("s1_ratioA").value = "XAUUSD";
         $("s1_ratioB").value = "DINIW";
         $("s1_ratioRun").addEventListener("click", runRatio);
@@ -1951,39 +2773,97 @@
         function renderPrice(series) {
           const traces = [];
           for (const [sid, s] of Object.entries(series || {})) {
-            traces.push({ x: (s.dates || []), y: norm(s.close || []), name: sid, type: "scatter", mode: "lines" });
+            traces.push({
+              x: s.dates || [],
+              y: norm(s.close || []),
+              name: sid,
+              type: "scatter",
+              mode: "lines",
+            });
           }
-          Plotly.newPlot("s2_pxChart", traces, {
-            margin: { t: 20 },
-            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "s2_pxChart",
+            traces,
+            {
+              margin: { t: 20 },
+              yaxis: {
+                type: "log",
+                tickformat: ".2f",
+                showexponent: "none",
+                exponentformat: "none",
+              },
+            },
+            { displayModeBar: false },
+          );
         }
 
         function renderPair(key, pairs) {
           const { a, b } = parsePairKey(key);
           const res = pairs ? pairs[key] : null;
           if (!res || !res.ok) {
-            setPairMsg(`pair=${key}\n失败：${res ? (res.reason || JSON.stringify(res)) : "empty"}`);
-            Plotly.newPlot("s2_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
-            Plotly.newPlot("s2_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
-            Plotly.newPlot("s2_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            setPairMsg(
+              `pair=${key}\n失败：${res ? res.reason || JSON.stringify(res) : "empty"}`,
+            );
+            Plotly.newPlot(
+              "s2_xcorrChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
+            Plotly.newPlot(
+              "s2_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
+            Plotly.newPlot(
+              "s2_rollingChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
             return;
           }
           const best = res.corr && res.corr.best ? res.corr.best : null;
           const rel = res.corr && res.corr.relation ? res.corr.relation : "";
-          setPairMsg(`pair=${key}\nrelation=${rel}\nbest_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}`);
-          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-          Plotly.newPlot("s2_xcorrChart", [
-            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
-          ], { margin: { t: 20 } }, { displayModeBar: false });
+          setPairMsg(
+            `pair=${key}\nrelation=${rel}\nbest_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr, 4) : ""}, best_p=${best ? fmt(best.pvalue, 4) : ""}`,
+          );
+          const xs = res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+          Plotly.newPlot(
+            "s2_xcorrChart",
+            [
+              {
+                x: xs.map((r) => r.lag),
+                y: xs.map((r) => r.corr),
+                type: "bar",
+                name: "corr",
+              },
+            ],
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
 
           if (lastSeries && lastSeries[a] && lastSeries[b]) {
             const u = buildUnionSeries(lastSeries[a], lastSeries[b]);
-            renderRawDualAxis("s2_rawPairChart", u.dates, u.aClose, a, u.bClose, b);
+            renderRawDualAxis(
+              "s2_rawPairChart",
+              u.dates,
+              u.aClose,
+              a,
+              u.bClose,
+              b,
+            );
           } else {
-            Plotly.newPlot("s2_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot(
+              "s2_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
           }
-          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          const roll =
+            res.trade && res.trade.rolling ? res.trade.rolling : null;
           renderRollingStability("s2_rollingChart", roll);
         }
 
@@ -1992,16 +2872,29 @@
           const end = ($("s2_end").value || "").trim();
           const cn_spot_series_id = ($("s2_cnSpot").value || "").trim();
           const cn_fut_series_id_raw = ($("s2_cnFut").value || "").trim();
-          const cn_fut_series_id = cn_fut_series_id_raw ? cn_fut_series_id_raw : null;
+          const cn_fut_series_id = cn_fut_series_id_raw
+            ? cn_fut_series_id_raw
+            : null;
           const cnh_series_id = ($("s2_cnh").value || "").trim();
           const yield_series_id = ($("s2_yld").value || "").trim();
           const max_lag = Number(($("s2_maxLag").value || "20").trim());
-          const granger_max_lag = Number(($("s2_grangerLag").value || "10").trim());
+          const granger_max_lag = Number(
+            ($("s2_grangerLag").value || "10").trim(),
+          );
 
           setMsg("运行中...");
           const resp = await api("/analysis/macro/step2", {
             method: "POST",
-            body: JSON.stringify({ start, end, cn_spot_series_id, cn_fut_series_id, cnh_series_id, yield_series_id, max_lag, granger_max_lag }),
+            body: JSON.stringify({
+              start,
+              end,
+              cn_spot_series_id,
+              cn_fut_series_id,
+              cnh_series_id,
+              yield_series_id,
+              max_lag,
+              granger_max_lag,
+            }),
           });
           const data = await resp.json();
           if (!data || !data.ok) {
@@ -2012,12 +2905,15 @@
           lastSeries = data.series || null;
           renderPrice(data.series);
           const keys = Object.keys(data.pairs || {});
-          $("s2_pairSel").innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+          $("s2_pairSel").innerHTML = keys
+            .map((k) => `<option value="${k}">${k}</option>`)
+            .join("");
           if (keys.length) {
             $("s2_pairSel").value = keys[0];
             renderPair(keys[0], data.pairs);
           }
-          $("s2_pairSel").onchange = () => renderPair(($("s2_pairSel").value || "").trim(), data.pairs);
+          $("s2_pairSel").onchange = () =>
+            renderPair(($("s2_pairSel").value || "").trim(), data.pairs);
         }
 
         $("s2_end").value = ymdTodayMinus(0);
@@ -2034,39 +2930,97 @@
         function renderPrice(series) {
           const traces = [];
           for (const [sid, s] of Object.entries(series || {})) {
-            traces.push({ x: (s.dates || []), y: norm(s.close || []), name: sid, type: "scatter", mode: "lines" });
+            traces.push({
+              x: s.dates || [],
+              y: norm(s.close || []),
+              name: sid,
+              type: "scatter",
+              mode: "lines",
+            });
           }
-          Plotly.newPlot("s3_pxChart", traces, {
-            margin: { t: 20 },
-            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "s3_pxChart",
+            traces,
+            {
+              margin: { t: 20 },
+              yaxis: {
+                type: "log",
+                tickformat: ".2f",
+                showexponent: "none",
+                exponentformat: "none",
+              },
+            },
+            { displayModeBar: false },
+          );
         }
 
         function renderPair(key, pairs) {
           const { a, b } = parsePairKey(key);
           const res = pairs ? pairs[key] : null;
           if (!res || !res.ok) {
-            setPairMsg(`pair=${key}\n失败：${res ? (res.reason || JSON.stringify(res)) : "empty"}`);
-            Plotly.newPlot("s3_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
-            Plotly.newPlot("s3_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
-            Plotly.newPlot("s3_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            setPairMsg(
+              `pair=${key}\n失败：${res ? res.reason || JSON.stringify(res) : "empty"}`,
+            );
+            Plotly.newPlot(
+              "s3_xcorrChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
+            Plotly.newPlot(
+              "s3_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
+            Plotly.newPlot(
+              "s3_rollingChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
             return;
           }
           const best = res.corr && res.corr.best ? res.corr.best : null;
           const rel = res.corr && res.corr.relation ? res.corr.relation : "";
-          setPairMsg(`pair=${key}\nrelation=${rel}\nbest_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}`);
-          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-          Plotly.newPlot("s3_xcorrChart", [
-            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
-          ], { margin: { t: 20 } }, { displayModeBar: false });
+          setPairMsg(
+            `pair=${key}\nrelation=${rel}\nbest_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr, 4) : ""}, best_p=${best ? fmt(best.pvalue, 4) : ""}`,
+          );
+          const xs = res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+          Plotly.newPlot(
+            "s3_xcorrChart",
+            [
+              {
+                x: xs.map((r) => r.lag),
+                y: xs.map((r) => r.corr),
+                type: "bar",
+                name: "corr",
+              },
+            ],
+            { margin: { t: 20 } },
+            { displayModeBar: false },
+          );
 
           if (lastSeries && lastSeries[a] && lastSeries[b]) {
             const u = buildUnionSeries(lastSeries[a], lastSeries[b]);
-            renderRawDualAxis("s3_rawPairChart", u.dates, u.aClose, a, u.bClose, b);
+            renderRawDualAxis(
+              "s3_rawPairChart",
+              u.dates,
+              u.aClose,
+              a,
+              u.bClose,
+              b,
+            );
           } else {
-            Plotly.newPlot("s3_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot(
+              "s3_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
           }
-          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          const roll =
+            res.trade && res.trade.rolling ? res.trade.rolling : null;
           renderRollingStability("s3_rollingChart", roll);
         }
 
@@ -2079,7 +3033,13 @@
           setMsg("运行中...");
           const resp = await api("/analysis/macro/step3", {
             method: "POST",
-            body: JSON.stringify({ start, end, cn_gold_series_id, global_gold_series_id, fx_series_id }),
+            body: JSON.stringify({
+              start,
+              end,
+              cn_gold_series_id,
+              global_gold_series_id,
+              fx_series_id,
+            }),
           });
           const data = await resp.json();
           if (!data || !data.ok) {
@@ -2090,12 +3050,15 @@
           lastSeries = data.series || null;
           renderPrice(data.series);
           const keys = Object.keys(data.pairs || {});
-          $("s3_pairSel").innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+          $("s3_pairSel").innerHTML = keys
+            .map((k) => `<option value="${k}">${k}</option>`)
+            .join("");
           if (keys.length) {
             $("s3_pairSel").value = keys[0];
             renderPair(keys[0], data.pairs);
           }
-          $("s3_pairSel").onchange = () => renderPair(($("s3_pairSel").value || "").trim(), data.pairs);
+          $("s3_pairSel").onchange = () =>
+            renderPair(($("s3_pairSel").value || "").trim(), data.pairs);
         }
 
         $("s3_end").value = ymdTodayMinus(0);
@@ -2111,44 +3074,110 @@
         let lastSpotSeries = null;
 
         function renderPrice(etf, spot) {
-          Plotly.newPlot("s4_pxChart", [
-            { x: etf.dates || [], y: norm(etf.close || []), name: `ETF ${etf.code} (${etf.adjust})`, type: "scatter", mode: "lines" },
-            { x: spot.dates || [], y: norm(spot.close || []), name: `Spot ${spot.series_id}`, type: "scatter", mode: "lines" },
-          ], {
-            margin: { t: 20 },
-            yaxis: { type: "log", tickformat: ".2f", showexponent: "none", exponentformat: "none" },
-          }, { displayModeBar: false });
+          Plotly.newPlot(
+            "s4_pxChart",
+            [
+              {
+                x: etf.dates || [],
+                y: norm(etf.close || []),
+                name: `ETF ${etf.code} (${etf.adjust})`,
+                type: "scatter",
+                mode: "lines",
+              },
+              {
+                x: spot.dates || [],
+                y: norm(spot.close || []),
+                name: `Spot ${spot.series_id}`,
+                type: "scatter",
+                mode: "lines",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              yaxis: {
+                type: "log",
+                tickformat: ".2f",
+                showexponent: "none",
+                exponentformat: "none",
+              },
+            },
+            { displayModeBar: false },
+          );
         }
 
         function renderPair(res) {
           if (!res || !res.ok) {
-            setPairMsg(`失败：${res ? (res.error || JSON.stringify(res)) : "empty"}`);
-            Plotly.newPlot("s4_xcorrChart", [], { margin: { t: 20 } }, { displayModeBar: false });
-            Plotly.newPlot("s4_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
-            Plotly.newPlot("s4_rollingChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            setPairMsg(
+              `失败：${res ? res.error || JSON.stringify(res) : "empty"}`,
+            );
+            Plotly.newPlot(
+              "s4_xcorrChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
+            Plotly.newPlot(
+              "s4_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
+            Plotly.newPlot(
+              "s4_rollingChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
             return;
           }
           const best = res.corr && res.corr.best ? res.corr.best : null;
           const rel = res.corr && res.corr.relation ? res.corr.relation : "";
           setPairMsg(
             `relation=${rel}\n` +
-            `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr,4) : ""}, best_p=${best ? fmt(best.pvalue,4) : ""}`
+              `best_lag=${best ? best.lag : ""}, best_corr=${best ? fmt(best.corr, 4) : ""}, best_p=${best ? fmt(best.pvalue, 4) : ""}`,
           );
-          const xs = (res.corr && res.corr.by_lag) ? res.corr.by_lag : [];
-          Plotly.newPlot("s4_xcorrChart", [
-            { x: xs.map(r => r.lag), y: xs.map(r => r.corr), type: "bar", name: "corr" },
-          ], { margin: { t: 20 }, xaxis: { title: "lag" }, yaxis: { title: "corr" } }, { displayModeBar: false });
+          const xs = res.corr && res.corr.by_lag ? res.corr.by_lag : [];
+          Plotly.newPlot(
+            "s4_xcorrChart",
+            [
+              {
+                x: xs.map((r) => r.lag),
+                y: xs.map((r) => r.corr),
+                type: "bar",
+                name: "corr",
+              },
+            ],
+            {
+              margin: { t: 20 },
+              xaxis: { title: "lag" },
+              yaxis: { title: "corr" },
+            },
+            { displayModeBar: false },
+          );
 
           // Step4: 原始尺度用“未对齐的原始 close”（union），保证峰值不会被交集过滤掉
           const aLab = `ETF ${($("s4_etf").value || "").trim()}`;
           const bLab = `Spot ${($("s4_spot").value || "").trim()}`;
           if (lastEtfSeries && lastSpotSeries) {
             const u = buildUnionSeries(lastEtfSeries, lastSpotSeries);
-            renderRawDualAxis("s4_rawPairChart", u.dates, u.aClose, aLab, u.bClose, bLab);
+            renderRawDualAxis(
+              "s4_rawPairChart",
+              u.dates,
+              u.aClose,
+              aLab,
+              u.bClose,
+              bLab,
+            );
           } else {
-            Plotly.newPlot("s4_rawPairChart", [], { margin: { t: 20 } }, { displayModeBar: false });
+            Plotly.newPlot(
+              "s4_rawPairChart",
+              [],
+              { margin: { t: 20 } },
+              { displayModeBar: false },
+            );
           }
-          const roll = (res.trade && res.trade.rolling) ? res.trade.rolling : null;
+          const roll =
+            res.trade && res.trade.rolling ? res.trade.rolling : null;
           renderRollingStability("s4_rollingChart", roll);
         }
 
@@ -2160,12 +3189,23 @@
           const cn_spot_series_id = ($("s4_spot").value || "").trim();
           const index_align = ($("s4_align").value || "none").trim();
           const max_lag = Number(($("s4_maxLag").value || "20").trim());
-          const granger_max_lag = Number(($("s4_grangerLag").value || "10").trim());
+          const granger_max_lag = Number(
+            ($("s4_grangerLag").value || "10").trim(),
+          );
 
           setMsg("运行中...");
           const resp = await api("/analysis/macro/step4", {
             method: "POST",
-            body: JSON.stringify({ start, end, etf_code, adjust, cn_spot_series_id, index_align, max_lag, granger_max_lag }),
+            body: JSON.stringify({
+              start,
+              end,
+              etf_code,
+              adjust,
+              cn_spot_series_id,
+              index_align,
+              max_lag,
+              granger_max_lag,
+            }),
           });
           const data = await resp.json();
           if (!data || !data.ok) {
@@ -2189,9 +3229,9 @@
       // if user lands on old per-step links, map them to the new tab names
       window.addEventListener("hashchange", () => {
         const h = (location.hash || "").replace("#", "").trim().toLowerCase();
-        if (h && ["etf","step1","step2","step3","step4"].includes(h)) setActiveTab(h);
+        if (h && ["etf", "step1", "step2", "step3", "step4"].includes(h))
+          setActiveTab(h);
       });
     </script>
   </body>
 </html>
-

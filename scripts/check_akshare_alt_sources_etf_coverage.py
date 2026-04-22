@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Check whether AkShare alternative sources can cover Eastmoney ETF price content.
 
@@ -14,6 +12,8 @@ Notes:
 - AkShare does NOT expose "163/sohu/xueqiu" ETF daily K-line APIs in your current version.
 - This script reports per-source availability, date-range coverage, and available columns.
 """
+
+from __future__ import annotations
 
 import argparse
 import datetime as dt
@@ -81,10 +81,18 @@ def _summarize_df(df: pd.DataFrame, date_col_candidates: list[str]) -> FetchResu
     dates = df[dcol].apply(_parse_any_date).dropna()
     if dates.empty:
         return FetchResult(ok=True, rows=int(len(df)), start=None, end=None, cols=cols)
-    return FetchResult(ok=True, rows=int(len(df)), start=min(dates).isoformat(), end=max(dates).isoformat(), cols=cols)
+    return FetchResult(
+        ok=True,
+        rows=int(len(df)),
+        start=min(dates).isoformat(),
+        end=max(dates).isoformat(),
+        cols=cols,
+    )
 
 
-def _try_fetch(fn: Callable[[], pd.DataFrame]) -> tuple[pd.DataFrame | None, str | None]:
+def _try_fetch(
+    fn: Callable[[], pd.DataFrame],
+) -> tuple[pd.DataFrame | None, str | None]:
     try:
         df = fn()
         if not isinstance(df, pd.DataFrame):
@@ -96,10 +104,17 @@ def _try_fetch(fn: Callable[[], pd.DataFrame]) -> tuple[pd.DataFrame | None, str
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--codes", default=",".join(DEFAULT_CODES), help="comma-separated ETF codes")
+    ap.add_argument(
+        "--codes", default=",".join(DEFAULT_CODES), help="comma-separated ETF codes"
+    )
     ap.add_argument("--start", default="20240101", help="YYYYMMDD")
     ap.add_argument("--end", default=_ymd(dt.date.today()), help="YYYYMMDD")
-    ap.add_argument("--adjust", default="qfq", choices=["qfq", "hfq", "none"], help="adjust basis to request when supported")
+    ap.add_argument(
+        "--adjust",
+        default="qfq",
+        choices=["qfq", "hfq", "none"],
+        help="adjust basis to request when supported",
+    )
     args = ap.parse_args()
 
     import akshare as ak  # local import
@@ -137,12 +152,24 @@ def main() -> int:
         print(f"--- {code} ---")
 
         if has_em:
-            df, err = _try_fetch(lambda: ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start, end_date=end, adjust=adj))
+            df, err = _try_fetch(
+                lambda: ak.fund_etf_hist_em(
+                    symbol=code,
+                    period="daily",
+                    start_date=start,
+                    end_date=end,
+                    adjust=adj,
+                )
+            )
             if err:
-                r = FetchResult(ok=False, rows=0, start=None, end=None, cols=[], err=err)
+                r = FetchResult(
+                    ok=False, rows=0, start=None, end=None, cols=[], err=err
+                )
             else:
                 r = _summarize_df(df, ["日期", "date"])
-            print(f"[eastmoney/fund_etf_hist_em] ok={r.ok} rows={r.rows} range={r.start}..{r.end} cols={r.cols[:8]}{'...' if len(r.cols)>8 else ''} err={r.err}")
+            print(
+                f"[eastmoney/fund_etf_hist_em] ok={r.ok} rows={r.rows} range={r.start}..{r.end} cols={r.cols[:8]}{'...' if len(r.cols) > 8 else ''} err={r.err}"
+            )
         else:
             print("[eastmoney/fund_etf_hist_em] not available")
 
@@ -151,10 +178,14 @@ def main() -> int:
             sym = _with_ex(code)
             df, err = _try_fetch(lambda: ak.fund_etf_hist_sina(symbol=sym))
             if err:
-                r = FetchResult(ok=False, rows=0, start=None, end=None, cols=[], err=err)
+                r = FetchResult(
+                    ok=False, rows=0, start=None, end=None, cols=[], err=err
+                )
             else:
                 r = _summarize_df(df, ["date", "日期"])
-            print(f"[sina/fund_etf_hist_sina] symbol={sym} ok={r.ok} rows={r.rows} range={r.start}..{r.end} cols={r.cols[:8]}{'...' if len(r.cols)>8 else ''} err={r.err}")
+            print(
+                f"[sina/fund_etf_hist_sina] symbol={sym} ok={r.ok} rows={r.rows} range={r.start}..{r.end} cols={r.cols[:8]}{'...' if len(r.cols) > 8 else ''} err={r.err}"
+            )
         else:
             print("[sina/fund_etf_hist_sina] not available")
 
@@ -163,27 +194,39 @@ def main() -> int:
             # Some versions accept adjust like 'qfq'/'hfq'/'': we try with period and adjust if supported.
             def _tx_call():
                 try:
-                    return ak.stock_zh_a_hist_tx(symbol=_with_ex(code), start_date=start, end_date=end, adjust=adj)
+                    return ak.stock_zh_a_hist_tx(
+                        symbol=_with_ex(code),
+                        start_date=start,
+                        end_date=end,
+                        adjust=adj,
+                    )
                 except TypeError:
                     return ak.stock_zh_a_hist_tx(symbol=_with_ex(code))
 
             df, err = _try_fetch(_tx_call)
             if err:
-                r = FetchResult(ok=False, rows=0, start=None, end=None, cols=[], err=err)
+                r = FetchResult(
+                    ok=False, rows=0, start=None, end=None, cols=[], err=err
+                )
             else:
                 r = _summarize_df(df, ["date", "日期"])
-            print(f"[tencent/stock_zh_a_hist_tx] ok={r.ok} rows={r.rows} range={r.start}..{r.end} cols={r.cols[:8]}{'...' if len(r.cols)>8 else ''} err={r.err}")
+            print(
+                f"[tencent/stock_zh_a_hist_tx] ok={r.ok} rows={r.rows} range={r.start}..{r.end} cols={r.cols[:8]}{'...' if len(r.cols) > 8 else ''} err={r.err}"
+            )
         else:
             print("[tencent/stock_zh_a_hist_tx] not available")
 
         print("")
 
     print("=== Notes ===")
-    print("- Your installed akshare does not expose 163/sohu/xueqiu ETF daily K-line APIs (no matching functions).")
-    print("- If you need those sources, we'd need to use non-akshare clients or upgrade/change akshare version.")
+    print(
+        "- Your installed akshare does not expose 163/sohu/xueqiu ETF daily K-line APIs (no matching functions)."
+    )
+    print(
+        "- If you need those sources, we'd need to use non-akshare clients or upgrade/change akshare version."
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -4,7 +4,11 @@ from fastapi.testclient import TestClient
 from etf_momentum.app import create_app
 from etf_momentum.db.init_db import init_db
 from etf_momentum.db.seed import ensure_default_policies
-from etf_momentum.db.session import make_session_factory, make_sqlite_engine, session_scope
+from etf_momentum.db.session import (
+    make_session_factory,
+    make_sqlite_engine,
+    session_scope,
+)
 from tests.helpers.rotation_case_data import post_json_ok
 
 
@@ -22,7 +26,12 @@ def client_with_seeded_prices(monkeypatch):
         db.commit()
 
         code = "513100"
-        days = [d.date() for d in __import__("pandas").date_range("2024-01-02", periods=120, freq="B")]
+        days = [
+            d.date()
+            for d in __import__("pandas").date_range(
+                "2024-01-02", periods=120, freq="B"
+            )
+        ]
         for i, d in enumerate(days):
             px = 100.0 + 0.1 * i
             db.add(
@@ -47,7 +56,9 @@ def client_with_seeded_prices(monkeypatch):
 
         us_days = pd.date_range("2023-01-02", "2024-12-31", freq="B")
         close = 20.0 + 0.001 * pd.Series(range(len(us_days)), dtype=float)
-        return pd.DataFrame({"date": us_days.date, "close": close.to_numpy(dtype=float)})
+        return pd.DataFrame(
+            {"date": us_days.date, "close": close.to_numpy(dtype=float)}
+        )
 
     monkeypatch.setattr(routes, "fetch_cboe_daily_close", fake_fetch_cboe_daily_close)
 
@@ -93,4 +104,3 @@ def test_api_vix_signal_backtest_returns_extended_payload(client_with_seeded_pri
     trades = data.get("trades") or []
     assert len(trades) > 0
     assert "etf_ret_exec" in trades[0]
-

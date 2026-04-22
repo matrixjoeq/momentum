@@ -63,16 +63,24 @@
   </head>
   <body>
     <h2>期货标的池配置</h2>
-    <div class="muted">主连：AkShare 新浪期货日线。交割月合约：默认与主连同源（新浪 per 合约日线，<code>none</code>）；无数据则视为该交割月代码不存在，继续下一枚举合约，不会自动改用交易所接口。若显式设置 <code>MOMENTUM_FUTURES_CONTRACT_USE_OFFICIAL_EXCHANGE=1</code>，则交割月全程改用交易所日表（AkShare <code>get_*_daily</code>，按交易日逐请求，较慢）。均为串行、合约间隔 1 秒、失败即停；<code>pool_id</code> 关联标的池。CTP 为期货公司二进制通道，非 HTTP，此处未接入。与 ETF/场外基金/宏观数据隔离。</div>
+    <div class="muted">
+      主连：AkShare 新浪期货日线。交割月合约：默认与主连同源（新浪 per
+      合约日线，<code>none</code>）；无数据则视为该交割月代码不存在，继续下一枚举合约，不会自动改用交易所接口。若显式设置
+      <code>MOMENTUM_FUTURES_CONTRACT_USE_OFFICIAL_EXCHANGE=1</code
+      >，则交割月全程改用交易所日表（AkShare
+      <code>get_*_daily</code>，按交易日逐请求，较慢）。均为串行、合约间隔 1
+      秒、失败即停；<code>pool_id</code> 关联标的池。CTP
+      为期货公司二进制通道，非 HTTP，此处未接入。与 ETF/场外基金/宏观数据隔离。
+    </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/">ETF 候选池</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/off-fund-pool">场外基金候选池</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research/futures">期货研究</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research">ETF 研究</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research/off-fund">场外基金研究</a>
     </div>
 
@@ -109,17 +117,32 @@
         <label>最低保证金率</label>
         <input id="minMarginRatio" placeholder="如 0.12（12%）" />
       </div>
-      <div style="min-width: 320px;">
+      <div style="min-width: 320px">
         <label>标签（逗号分隔）</label>
         <input id="tags" placeholder="留空将按品种自动分类" />
       </div>
       <div>
         <label>合约扩展（天）</label>
-        <input id="contractExtendDays" type="number" min="1" max="5000" value="366" title="主连终止日之后按自然日顺延，用于枚举交割月合约" />
+        <input
+          id="contractExtendDays"
+          type="number"
+          min="1"
+          max="5000"
+          value="366"
+          title="主连终止日之后按自然日顺延，用于枚举交割月合约"
+        />
       </div>
       <div>
         <label>合约并行数</label>
-        <input id="contractParallel" type="number" min="1" max="1" value="1" readonly title="AkShare 交割月抓取固定串行，并行数恒为 1" />
+        <input
+          id="contractParallel"
+          type="number"
+          min="1"
+          max="1"
+          value="1"
+          readonly
+          title="AkShare 交割月抓取固定串行，并行数恒为 1"
+        />
       </div>
       <button id="save">保存/更新</button>
       <div>
@@ -130,8 +153,15 @@
         </select>
       </div>
       <button id="fetchAll">抓取全部</button>
-      <button id="synthesizeAll" title="使用已抓取的交割月合约数据合成主力连续价格（88/888/889）">合成全部</button>
-      <button id="validateAll" title="对所有标的执行合成数据一致性与误差校验">校验全部</button>
+      <button
+        id="synthesizeAll"
+        title="使用已抓取的交割月合约数据合成主力连续价格（88/888/889）"
+      >
+        合成全部
+      </button>
+      <button id="validateAll" title="对所有标的执行合成数据一致性与误差校验">
+        校验全部
+      </button>
       <button id="selectAll">全选</button>
       <button id="selectNone">取消全选</button>
       <button id="selectInvert">反选</button>
@@ -161,10 +191,13 @@
       (function initThemeToggle() {
         const key = `theme:${location.pathname}`;
         const html = document.documentElement;
-        const nextTheme = () => (html.getAttribute("data-theme") === "light" ? "dark" : "light");
+        const nextTheme = () =>
+          html.getAttribute("data-theme") === "light" ? "dark" : "light";
         const apply = (theme) => {
           html.setAttribute("data-theme", theme);
-          try { localStorage.setItem(key, theme); } catch (_) {}
+          try {
+            localStorage.setItem(key, theme);
+          } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
         };
@@ -182,7 +215,10 @@
       const api = (path, opts) =>
         fetch(`/api${path}`, {
           cache: "no-store",
-          headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+          },
           ...opts,
         });
       const $ = (id) => document.getElementById(id);
@@ -200,11 +236,18 @@
       const parseTags = () => {
         const raw = String(($("tags") && $("tags").value) || "").trim();
         if (!raw) return null;
-        const vals = raw.split(",").map((x) => x.trim()).filter(Boolean);
+        const vals = raw
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean);
         return vals.length ? vals : null;
       };
       const getFetchType = () => {
-        const v = String(($("fetchType") && $("fetchType").value) || "incremental").trim().toLowerCase();
+        const v = String(
+          ($("fetchType") && $("fetchType").value) || "incremental",
+        )
+          .trim()
+          .toLowerCase();
         return v === "full" ? "full" : "incremental";
       };
 
@@ -225,7 +268,9 @@
       }
 
       function contractPoolSummary(status, message) {
-        const st = String(status || "").trim().toLowerCase();
+        const st = String(status || "")
+          .trim()
+          .toLowerCase();
         if (!st) return "未触发";
         if (st === "running") return "进行中";
         if (st === "failed") return "失败";
@@ -235,8 +280,12 @@
       }
 
       function fetchStatusText(status, message) {
-        const st = String(status || "").trim().toLowerCase();
-        const msg = String(message || "").trim().toLowerCase();
+        const st = String(status || "")
+          .trim()
+          .toLowerCase();
+        const msg = String(message || "")
+          .trim()
+          .toLowerCase();
 
         if (!st) return "未抓取";
         if (st === "failed") return "抓取失败";
@@ -245,7 +294,8 @@
         if (msg.includes("mode=incremental->full")) return "增量回退全量成功";
         if (
           msg.includes("no new futures data to fetch") ||
-          (msg.includes("no futures data in requested range") && msg.includes("mode=incremental"))
+          (msg.includes("no futures data in requested range") &&
+            msg.includes("mode=incremental"))
         ) {
           return "增量无新数据";
         }
@@ -275,14 +325,16 @@
         const cmp = details.main_compare_check || {};
         const cmpSummary = cmp.summary || {};
         const usability = cmp.usability || {};
-        const failedFields = Array.isArray(usability.failed_fields) ? usability.failed_fields : [];
+        const failedFields = Array.isArray(usability.failed_fields)
+          ? usability.failed_fields
+          : [];
         const failedText =
           failedFields.length === 0
             ? "无"
             : failedFields
                 .map(
                   (x) =>
-                    `${escHtml(x.field)}(MAPE=${fmtPct(x.mape)}, P95=${fmtPct(x.p95_ape)})`
+                    `${escHtml(x.field)}(MAPE=${fmtPct(x.mape)}, P95=${fmtPct(x.p95_ape)})`,
                 )
                 .join("；");
         const qfq = cov.qfq || {};
@@ -305,49 +357,72 @@
         if (refreshInFlight) return;
         refreshInFlight = true;
         try {
-        const resp = await api(`/futures?adjust=none`, { method: "GET" });
-        if (!resp.ok) {
-          const text = await resp.text();
-          setMsg(text || `刷新失败: HTTP ${resp.status}`);
-          return;
-        }
-        const data = await resp.json();
-        contractPollingEnabled =
-          Array.isArray(data) &&
-          data.some((x) => String(x?.last_contract_fetch_status || "").trim().toLowerCase() === "running");
-        const tbody = $("tbody");
-        tbody.innerHTML = "";
-        if (!Array.isArray(data) || data.length === 0) {
-          contractPollingEnabled = false;
-          tbody.innerHTML = `<tr><td colspan="8" class="muted">候选池为空：请先保存代码/名称。</td></tr>`;
-          syncBulkActionButtons();
-          return;
-        }
-        for (const it of data) {
-          const tr = document.createElement("tr");
-          const cfgRange = `${it.start_date || "-"} ~ ${it.end_date || "-"}`;
-          const dataRange = it.last_data_start_date && it.last_data_end_date ? `${it.last_data_start_date} ~ ${it.last_data_end_date}` : "没有";
-          const st = it.last_fetch_status || "";
-          const msg = it.last_fetch_message || "";
-          const stText = fetchStatusText(st, msg);
-          const checked = selected.has(it.code) ? "checked" : "";
-          const margin = (it.min_margin_ratio == null || !Number.isFinite(Number(it.min_margin_ratio)))
-            ? "-"
-            : `${(Number(it.min_margin_ratio) * 100).toFixed(2)}%`;
-          const multiplier = (it.contract_multiplier == null || !Number.isFinite(Number(it.contract_multiplier)))
-            ? "-"
-            : String(Number(it.contract_multiplier));
-          const tick = (it.min_price_tick == null || !Number.isFinite(Number(it.min_price_tick)))
-            ? "-"
-            : String(Number(it.min_price_tick));
-          const punit = it.price_unit ? String(it.price_unit) : "-";
-          const tags = Array.isArray(it.tags) && it.tags.length ? it.tags.join(", ") : "-";
-          const ext = Number.isFinite(Number(it.contract_extend_calendar_days)) ? Number(it.contract_extend_calendar_days) : 366;
-          const par = Number.isFinite(Number(it.contract_parallel)) ? Number(it.contract_parallel) : 1;
-          const cst = it.last_contract_fetch_status || "";
-          const cmsg = it.last_contract_fetch_message || "";
-          const cstText = contractPoolSummary(cst, cmsg);
-          tr.innerHTML = `
+          const resp = await api(`/futures?adjust=none`, { method: "GET" });
+          if (!resp.ok) {
+            const text = await resp.text();
+            setMsg(text || `刷新失败: HTTP ${resp.status}`);
+            return;
+          }
+          const data = await resp.json();
+          contractPollingEnabled =
+            Array.isArray(data) &&
+            data.some(
+              (x) =>
+                String(x?.last_contract_fetch_status || "")
+                  .trim()
+                  .toLowerCase() === "running",
+            );
+          const tbody = $("tbody");
+          tbody.innerHTML = "";
+          if (!Array.isArray(data) || data.length === 0) {
+            contractPollingEnabled = false;
+            tbody.innerHTML = `<tr><td colspan="8" class="muted">候选池为空：请先保存代码/名称。</td></tr>`;
+            syncBulkActionButtons();
+            return;
+          }
+          for (const it of data) {
+            const tr = document.createElement("tr");
+            const cfgRange = `${it.start_date || "-"} ~ ${it.end_date || "-"}`;
+            const dataRange =
+              it.last_data_start_date && it.last_data_end_date
+                ? `${it.last_data_start_date} ~ ${it.last_data_end_date}`
+                : "没有";
+            const st = it.last_fetch_status || "";
+            const msg = it.last_fetch_message || "";
+            const stText = fetchStatusText(st, msg);
+            const checked = selected.has(it.code) ? "checked" : "";
+            const margin =
+              it.min_margin_ratio == null ||
+              !Number.isFinite(Number(it.min_margin_ratio))
+                ? "-"
+                : `${(Number(it.min_margin_ratio) * 100).toFixed(2)}%`;
+            const multiplier =
+              it.contract_multiplier == null ||
+              !Number.isFinite(Number(it.contract_multiplier))
+                ? "-"
+                : String(Number(it.contract_multiplier));
+            const tick =
+              it.min_price_tick == null ||
+              !Number.isFinite(Number(it.min_price_tick))
+                ? "-"
+                : String(Number(it.min_price_tick));
+            const punit = it.price_unit ? String(it.price_unit) : "-";
+            const tags =
+              Array.isArray(it.tags) && it.tags.length
+                ? it.tags.join(", ")
+                : "-";
+            const ext = Number.isFinite(
+              Number(it.contract_extend_calendar_days),
+            )
+              ? Number(it.contract_extend_calendar_days)
+              : 366;
+            const par = Number.isFinite(Number(it.contract_parallel))
+              ? Number(it.contract_parallel)
+              : 1;
+            const cst = it.last_contract_fetch_status || "";
+            const cmsg = it.last_contract_fetch_message || "";
+            const cstText = contractPoolSummary(cst, cmsg);
+            tr.innerHTML = `
             <td><input type="checkbox" data-act="sel" data-code="${it.code}" ${checked} /></td>
             <td>${it.code}</td>
             <td>${it.name}</td>
@@ -374,10 +449,10 @@
               </div>
             </td>
           `;
-          tr.dataset.item = JSON.stringify(it);
-          tbody.appendChild(tr);
-        }
-        syncBulkActionButtons();
+            tr.dataset.item = JSON.stringify(it);
+            tbody.appendChild(tr);
+          }
+          syncBulkActionButtons();
         } finally {
           refreshInFlight = false;
         }
@@ -385,7 +460,9 @@
 
       $("save").addEventListener("click", async () => {
         setMsg("");
-        const extRaw = String(($("contractExtendDays") && $("contractExtendDays").value) || "").trim();
+        const extRaw = String(
+          ($("contractExtendDays") && $("contractExtendDays").value) || "",
+        ).trim();
         const extNum = extRaw ? Number(extRaw) : 366;
         const payload = {
           code: $("code").value.trim(),
@@ -397,10 +474,15 @@
           price_unit: $("priceUnit").value.trim() || null,
           min_price_tick: parseNullableNumber("minPriceTick"),
           tags: parseTags(),
-          contract_extend_calendar_days: Number.isFinite(extNum) ? Math.min(5000, Math.max(1, Math.floor(extNum))) : 366,
+          contract_extend_calendar_days: Number.isFinite(extNum)
+            ? Math.min(5000, Math.max(1, Math.floor(extNum)))
+            : 366,
           contract_parallel: 1,
         };
-        const resp = await api("/futures", { method: "POST", body: JSON.stringify(payload) });
+        const resp = await api("/futures", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         $("code").value = "";
@@ -418,7 +500,10 @@
       $("fetchAll").addEventListener("click", async () => {
         const fetchType = getFetchType();
         setMsg(`futures fetch-all (${fetchType})...`);
-        const resp = await api("/futures/fetch-all", { method: "POST", body: JSON.stringify({ fetch_type: fetchType }) });
+        const resp = await api("/futures/fetch-all", {
+          method: "POST",
+          body: JSON.stringify({ fetch_type: fetchType }),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -432,7 +517,9 @@
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
           const result = JSON.parse(text);
-          setMsg(`合成完成：成功 ${result.succeeded || 0} 个，失败 ${result.failed || 0} 个${result.errors ? '，错误：' + result.errors.join('; ') : ''}`);
+          setMsg(
+            `合成完成：成功 ${result.succeeded || 0} 个，失败 ${result.failed || 0} 个${result.errors ? "，错误：" + result.errors.join("; ") : ""}`,
+          );
         } catch (e) {
           setMsg("合成失败：" + String(e));
         }
@@ -454,7 +541,7 @@
             synthValidationReports.set(code, it);
           }
           setMsg(
-            `校验完成：总计 ${result.total || 0}，通过 ${result.passed || 0}，失败 ${result.failed || 0}，跳过 ${result.skipped || 0}`
+            `校验完成：总计 ${result.total || 0}，通过 ${result.passed || 0}，失败 ${result.failed || 0}，跳过 ${result.skipped || 0}`,
           );
         } catch (e) {
           setMsg("校验失败：" + String(e));
@@ -489,7 +576,9 @@
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何期货标的。");
         const fetchType = getFetchType();
-        setMsg(`futures fetch-selected (${fetchType}): ${codes.join(", ")} ...`);
+        setMsg(
+          `futures fetch-selected (${fetchType}): ${codes.join(", ")} ...`,
+        );
         const resp = await api("/futures/fetch-selected", {
           method: "POST",
           body: JSON.stringify({ codes, fetch_type: fetchType }),
@@ -503,7 +592,12 @@
       $("deleteSelected").addEventListener("click", async () => {
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何期货标的。");
-        if (!confirm(`确认删除所选 ${codes.length} 个期货标的池记录？\n${codes.join(", ")}`)) return;
+        if (
+          !confirm(
+            `确认删除所选 ${codes.length} 个期货标的池记录？\n${codes.join(", ")}`,
+          )
+        )
+          return;
         setMsg(`正在删除所选 ${codes.length} 个标的...`);
         const failed = [];
         for (const code of codes) {
@@ -521,7 +615,9 @@
         }
         await refresh();
         if (failed.length > 0) {
-          setMsg(`部分删除失败（${failed.length}/${codes.length}）：${failed.join(" | ")}`);
+          setMsg(
+            `部分删除失败（${failed.length}/${codes.length}）：${failed.join(" | ")}`,
+          );
         } else {
           setMsg(`删除成功：共 ${codes.length} 个标的。`);
         }
@@ -531,14 +627,21 @@
         "toggle",
         async (e) => {
           const det = e.target;
-          if (!det || !det.classList || !det.classList.contains("contract-fetch-details")) return;
+          if (
+            !det ||
+            !det.classList ||
+            !det.classList.contains("contract-fetch-details")
+          )
+            return;
           if (!det.open) return;
           const body = det.querySelector(".contract-fetch-body");
           if (!body || body.dataset.loaded === "1") return;
           const code = det.getAttribute("data-code") || "";
           body.textContent = "加载中…";
           try {
-            const resp = await api(`/futures/${encodeURIComponent(code)}/contracts/fetch-status`);
+            const resp = await api(
+              `/futures/${encodeURIComponent(code)}/contracts/fetch-status`,
+            );
             const text = await resp.text();
             if (!resp.ok) {
               body.textContent = text || `HTTP ${resp.status}`;
@@ -551,12 +654,16 @@
                 '<span class="muted">暂无记录。主连抓取成功后会自动跑后台任务拉取交割月合约。</span>';
             } else {
               const deliveryMonthKey = (code) => {
-                const s = String(code == null ? "" : code).trim().toUpperCase();
+                const s = String(code == null ? "" : code)
+                  .trim()
+                  .toUpperCase();
                 const m = s.match(/(\d{3,4})$/);
                 return m ? parseInt(m[1], 10) : 0;
               };
               const sorted = [...rows].sort(
-                (a, b) => deliveryMonthKey(b.contract_code) - deliveryMonthKey(a.contract_code)
+                (a, b) =>
+                  deliveryMonthKey(b.contract_code) -
+                  deliveryMonthKey(a.contract_code),
               );
               body.innerHTML =
                 '<div class="contract-fetch-scroll-wrap">' +
@@ -564,7 +671,7 @@
                 sorted
                   .map(
                     (r) =>
-                      `<tr><td>${escHtml(r.contract_code)}</td><td>${escHtml(r.last_fetch_status)}</td><td>${escHtml(r.last_fetch_message)}</td></tr>`
+                      `<tr><td>${escHtml(r.contract_code)}</td><td>${escHtml(r.last_fetch_status)}</td><td>${escHtml(r.last_fetch_message)}</td></tr>`,
                   )
                   .join("") +
                 "</tbody></table></div>";
@@ -575,7 +682,7 @@
             body.dataset.loaded = "1";
           }
         },
-        true
+        true,
       );
 
       $("tbody").addEventListener("click", async (e) => {
@@ -594,7 +701,12 @@
         const tr = btn.closest("tr");
         const it = tr && tr.dataset.item ? JSON.parse(tr.dataset.item) : null;
         if (act === "del") {
-          if (!confirm(`删除期货标的 ${code}？\n\n注意：会同时删除期货标的池记录与期货价格表数据（none）。`)) return;
+          if (
+            !confirm(
+              `删除期货标的 ${code}？\n\n注意：会同时删除期货标的池记录与期货价格表数据（none）。`,
+            )
+          )
+            return;
           const resp = await api(`/futures/${code}`, { method: "DELETE" });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
@@ -607,12 +719,21 @@
           $("name").value = it.name;
           $("start").value = it.start_date || "";
           $("end").value = it.end_date || "";
-          $("minMarginRatio").value = it.min_margin_ratio == null ? "" : String(it.min_margin_ratio);
-          $("contractMultiplier").value = it.contract_multiplier == null ? "" : String(it.contract_multiplier);
+          $("minMarginRatio").value =
+            it.min_margin_ratio == null ? "" : String(it.min_margin_ratio);
+          $("contractMultiplier").value =
+            it.contract_multiplier == null
+              ? ""
+              : String(it.contract_multiplier);
           $("priceUnit").value = it.price_unit || "";
-          $("minPriceTick").value = it.min_price_tick == null ? "" : String(it.min_price_tick);
+          $("minPriceTick").value =
+            it.min_price_tick == null ? "" : String(it.min_price_tick);
           $("tags").value = Array.isArray(it.tags) ? it.tags.join(", ") : "";
-          if ($("contractExtendDays")) $("contractExtendDays").value = it.contract_extend_calendar_days != null ? String(it.contract_extend_calendar_days) : "366";
+          if ($("contractExtendDays"))
+            $("contractExtendDays").value =
+              it.contract_extend_calendar_days != null
+                ? String(it.contract_extend_calendar_days)
+                : "366";
           if ($("contractParallel")) $("contractParallel").value = "1";
           setMsg("已载入到表单，修改后点“保存/更新”。");
         }

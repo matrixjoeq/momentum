@@ -58,9 +58,13 @@ def init_qlib(cfg: QlibConfig) -> None:
 
 def load_close_prices(symbols: list[str], start: str, end: str) -> pd.DataFrame:
     # qlib returns MultiIndex (instrument, datetime) by default
-    df = D.features(symbols, fields=["$close"], start_time=start, end_time=end, freq="day")
+    df = D.features(
+        symbols, fields=["$close"], start_time=start, end_time=end, freq="day"
+    )
     if df is None or df.empty:
-        raise ValueError("qlib returned empty price data; check provider_uri and symbols")
+        raise ValueError(
+            "qlib returned empty price data; check provider_uri and symbols"
+        )
     df = df.reset_index()
     if "instrument" not in df.columns or "datetime" not in df.columns:
         raise ValueError("unexpected qlib features format")
@@ -75,9 +79,19 @@ def _trading_days(index: pd.DatetimeIndex) -> list[pd.Timestamp]:
 def _calc_metrics(nav: pd.Series, rf: float) -> dict:
     ret = nav.pct_change().fillna(0.0)
     ann_factor = 252.0
-    ann_ret = float((1.0 + ret.mean()) ** ann_factor - 1.0) if len(ret) else float("nan")
+    ann_ret = (
+        float((1.0 + ret.mean()) ** ann_factor - 1.0) if len(ret) else float("nan")
+    )
     ann_vol = float(ret.std(ddof=1) * np.sqrt(ann_factor)) if len(ret) else float("nan")
-    sharpe = float((ret.mean() - rf / ann_factor) / (ret.std(ddof=1) or np.nan) * np.sqrt(ann_factor)) if len(ret) else float("nan")
+    sharpe = (
+        float(
+            (ret.mean() - rf / ann_factor)
+            / (ret.std(ddof=1) or np.nan)
+            * np.sqrt(ann_factor)
+        )
+        if len(ret)
+        else float("nan")
+    )
     cum = float(nav.iloc[-1] / nav.iloc[0] - 1.0) if len(nav) else float("nan")
     return {
         "cumulative_return": cum,
@@ -106,7 +120,9 @@ def run_rotation(
         raise ValueError("no trading days")
 
     # execution days: match weekday on trading calendar
-    exec_days = [i for i, d in enumerate(idx) if int(d.weekday()) == int(cfg.rebalance_weekday)]
+    exec_days = [
+        i for i, d in enumerate(idx) if int(d.weekday()) == int(cfg.rebalance_weekday)
+    ]
     if not exec_days:
         raise ValueError("no execution days for given weekday")
 
@@ -125,7 +141,11 @@ def run_rotation(
         w = 1.0 / float(len(pick)) if pick else 0.0
 
         start_i = exec_i
-        end_i = (exec_days[j + 1] - 1) if j + 1 < len(exec_days) else min(len(idx) - 1, exec_i + cfg.hold_days - 1)
+        end_i = (
+            (exec_days[j + 1] - 1)
+            if j + 1 < len(exec_days)
+            else min(len(idx) - 1, exec_i + cfg.hold_days - 1)
+        )
         weights.loc[close.index[start_i] : close.index[end_i], pick] = w
 
         trades.append(
@@ -156,8 +176,12 @@ def optimize(
     opt: OptimizeConfig,
 ) -> list[dict]:
     results: list[dict] = []
-    for lookback, topk, wd in _grid([opt.lookback_days, opt.topk, opt.rebalance_weekday]):
-        cfg = dataclasses.replace(base, lookback_days=int(lookback), topk=int(topk), rebalance_weekday=int(wd))
+    for lookback, topk, wd in _grid(
+        [opt.lookback_days, opt.topk, opt.rebalance_weekday]
+    ):
+        cfg = dataclasses.replace(
+            base, lookback_days=int(lookback), topk=int(topk), rebalance_weekday=int(wd)
+        )
         nav, _ = run_rotation(close, cfg)
         metrics = _calc_metrics(nav, cfg.risk_free)
         results.append(
@@ -169,7 +193,12 @@ def optimize(
             }
         )
     metric = opt.metric
-    results.sort(key=lambda r: (r.get(metric) if np.isfinite(r.get(metric, float("nan"))) else -1e18), reverse=True)
+    results.sort(
+        key=lambda r: (
+            r.get(metric) if np.isfinite(r.get(metric, float("nan"))) else -1e18
+        ),
+        reverse=True,
+    )
     return results
 
 
@@ -188,7 +217,9 @@ def _write_csv(rows: list[dict], path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
+    parser.add_argument(
+        "--config", default=str(Path(__file__).with_name("config.toml"))
+    )
     parser.add_argument("--mode", choices=["backtest", "optimize"], default="optimize")
     args = parser.parse_args()
 
@@ -210,7 +241,9 @@ def main() -> int:
         risk_free=float(cfg["backtest"]["risk_free"]),
     )
 
-    out_dir = Path(__file__).with_name("outputs") / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = Path(__file__).with_name("outputs") / dt.datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
     _ensure_dir(out_dir)
 
     if args.mode == "backtest":

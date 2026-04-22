@@ -38,21 +38,105 @@ class MacroSeriesSpec:
 
 
 MACRO_SERIES: list[MacroSeriesSpec] = [
-    MacroSeriesSpec(series_id="DGS2", provider="fred", provider_symbol="DGS2", name="US Treasury 2Y", category="rates", unit="%"),
-    MacroSeriesSpec(series_id="DGS5", provider="fred", provider_symbol="DGS5", name="US Treasury 5Y", category="rates", unit="%"),
-    MacroSeriesSpec(series_id="DGS10", provider="fred", provider_symbol="DGS10", name="US Treasury 10Y", category="rates", unit="%"),
-    MacroSeriesSpec(series_id="DGS30", provider="fred", provider_symbol="DGS30", name="US Treasury 30Y", category="rates", unit="%"),
+    MacroSeriesSpec(
+        series_id="DGS2",
+        provider="fred",
+        provider_symbol="DGS2",
+        name="US Treasury 2Y",
+        category="rates",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="DGS5",
+        provider="fred",
+        provider_symbol="DGS5",
+        name="US Treasury 5Y",
+        category="rates",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="DGS10",
+        provider="fred",
+        provider_symbol="DGS10",
+        name="US Treasury 10Y",
+        category="rates",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="DGS30",
+        provider="fred",
+        provider_symbol="DGS30",
+        name="US Treasury 30Y",
+        category="rates",
+        unit="%",
+    ),
     # DXY / USDX: use Sina's DINIW which matches common quote conventions (e.g. ~96 not ~62).
-    MacroSeriesSpec(series_id="DINIW", provider="sina", provider_symbol="DINIW", name="US Dollar Index (DXY)", category="fx", unit="index"),
-    MacroSeriesSpec(series_id="XAUUSD", provider="stooq", provider_symbol="XAUUSD", name="Gold Spot (XAUUSD)", category="gold_spot", unit="USD/oz"),
+    MacroSeriesSpec(
+        series_id="DINIW",
+        provider="sina",
+        provider_symbol="DINIW",
+        name="US Dollar Index (DXY)",
+        category="fx",
+        unit="index",
+    ),
+    MacroSeriesSpec(
+        series_id="XAUUSD",
+        provider="stooq",
+        provider_symbol="XAUUSD",
+        name="Gold Spot (XAUUSD)",
+        category="gold_spot",
+        unit="USD/oz",
+    ),
     # Gold futures: use Yahoo symbol "GC=F".
-    MacroSeriesSpec(series_id="GC_FUT", provider="yahoo", provider_symbol="GC=F", name="Gold Futures (GC=F)", category="gold_fut", unit="USD/oz"),
+    MacroSeriesSpec(
+        series_id="GC_FUT",
+        provider="yahoo",
+        provider_symbol="GC=F",
+        name="Gold Futures (GC=F)",
+        category="gold_fut",
+        unit="USD/oz",
+    ),
     # Silver spot (London) and key global futures (Yahoo).
-    MacroSeriesSpec(series_id="XAGUSD", provider="stooq", provider_symbol="XAGUSD", name="Silver Spot (XAGUSD)", category="silver_spot", unit="USD/oz"),
-    MacroSeriesSpec(series_id="SI_FUT", provider="yahoo", provider_symbol="SI=F", name="Silver Futures (SI=F)", category="silver_fut", unit="USD/oz"),
-    MacroSeriesSpec(series_id="HG_FUT", provider="yahoo", provider_symbol="HG=F", name="Copper Futures (HG=F)", category="copper_fut", unit="USD/lb"),
-    MacroSeriesSpec(series_id="BRENT_FUT", provider="yahoo", provider_symbol="BZ=F", name="Brent Crude Oil Futures (BZ=F)", category="oil", unit="USD/bbl"),
-    MacroSeriesSpec(series_id="WTI_FUT", provider="yahoo", provider_symbol="CL=F", name="WTI Crude Oil Futures (CL=F)", category="oil", unit="USD/bbl"),
+    MacroSeriesSpec(
+        series_id="XAGUSD",
+        provider="stooq",
+        provider_symbol="XAGUSD",
+        name="Silver Spot (XAGUSD)",
+        category="silver_spot",
+        unit="USD/oz",
+    ),
+    MacroSeriesSpec(
+        series_id="SI_FUT",
+        provider="yahoo",
+        provider_symbol="SI=F",
+        name="Silver Futures (SI=F)",
+        category="silver_fut",
+        unit="USD/oz",
+    ),
+    MacroSeriesSpec(
+        series_id="HG_FUT",
+        provider="yahoo",
+        provider_symbol="HG=F",
+        name="Copper Futures (HG=F)",
+        category="copper_fut",
+        unit="USD/lb",
+    ),
+    MacroSeriesSpec(
+        series_id="BRENT_FUT",
+        provider="yahoo",
+        provider_symbol="BZ=F",
+        name="Brent Crude Oil Futures (BZ=F)",
+        category="oil",
+        unit="USD/bbl",
+    ),
+    MacroSeriesSpec(
+        series_id="WTI_FUT",
+        provider="yahoo",
+        provider_symbol="CL=F",
+        name="WTI Crude Oil Futures (CL=F)",
+        category="oil",
+        unit="USD/bbl",
+    ),
 ]
 
 
@@ -60,7 +144,9 @@ def _parse_yyyymmdd(s: str) -> dt.date:
     return dt.datetime.strptime(str(s), "%Y%m%d").date()
 
 
-def _df_to_rows(df: pd.DataFrame, *, series_id: str, source: str) -> list[MacroPriceRow]:
+def _df_to_rows(
+    df: pd.DataFrame, *, series_id: str, source: str
+) -> list[MacroPriceRow]:
     if df is None or df.empty:
         return []
     out: list[MacroPriceRow] = []
@@ -75,7 +161,9 @@ def _df_to_rows(df: pd.DataFrame, *, series_id: str, source: str) -> list[MacroP
                 fv = float(v)
             except (TypeError, ValueError):
                 fv = None
-        out.append(MacroPriceRow(series_id=series_id, trade_date=d, close=fv, source=source))
+        out.append(
+            MacroPriceRow(series_id=series_id, trade_date=d, close=fv, source=source)
+        )
     return out
 
 
@@ -97,13 +185,23 @@ def fetch_macro_daily_close(
             retries=4,
         )
     if prov == "sina":
-        return fetch_sina_forex_day_kline_daily_close(SinaFetchRequest(symbol=sym, start_date=start, end_date=end))
+        return fetch_sina_forex_day_kline_daily_close(
+            SinaFetchRequest(symbol=sym, start_date=start, end_date=end)
+        )
     if prov == "stooq":
-        return fetch_stooq_daily_close(StooqFetchRequest(symbol=sym, start_date=start, end_date=end))
+        return fetch_stooq_daily_close(
+            StooqFetchRequest(symbol=sym, start_date=start, end_date=end)
+        )
     if prov == "yahoo":
-        df = fetch_yahoo_daily_close(YahooFetchRequest(symbol=sym, start_date=start, end_date=end))
+        df = fetch_yahoo_daily_close(
+            YahooFetchRequest(symbol=sym, start_date=start, end_date=end)
+        )
         return df, {"provider": "yahoo", "symbol": sym}
-    return pd.DataFrame(), {"provider": prov, "symbol": sym, "error": "unsupported_provider"}
+    return pd.DataFrame(), {
+        "provider": prov,
+        "symbol": sym,
+        "error": "unsupported_provider",
+    }
 
 
 def ingest_macro_series(
@@ -117,7 +215,13 @@ def ingest_macro_series(
     Full refresh ingestion: fetch [start,end] and upsert into macro_prices.
     Conflicts are overwritten by fetched data (updated wins).
     """
-    b = create_macro_ingestion_batch(db, series_id=spec.series_id, provider=spec.provider, start_date=start, end_date=end)
+    b = create_macro_ingestion_batch(
+        db,
+        series_id=spec.series_id,
+        provider=spec.provider,
+        start_date=start,
+        end_date=end,
+    )
     db.commit()
 
     upsert_macro_series_meta(
@@ -139,16 +243,43 @@ def ingest_macro_series(
         err = str(e)
         update_macro_ingestion_batch(db, batch_id=b.id, status="failed", message=err)
         db.commit()
-        return {"ok": False, "batch_id": b.id, "series_id": spec.series_id, "error": err, "meta": {"provider": spec.provider, "symbol": spec.provider_symbol, "error": err}}
+        return {
+            "ok": False,
+            "batch_id": b.id,
+            "series_id": spec.series_id,
+            "error": err,
+            "meta": {
+                "provider": spec.provider,
+                "symbol": spec.provider_symbol,
+                "error": err,
+            },
+        }
     if df is None or df.empty:
         err = str((meta or {}).get("error") or "empty_fetch")
         update_macro_ingestion_batch(db, batch_id=b.id, status="failed", message=err)
         db.commit()
-        return {"ok": False, "batch_id": b.id, "series_id": spec.series_id, "error": err, "meta": meta}
+        return {
+            "ok": False,
+            "batch_id": b.id,
+            "series_id": spec.series_id,
+            "error": err,
+            "meta": meta,
+        }
 
-    rows = _df_to_rows(df, series_id=spec.series_id, source=str((meta or {}).get("provider") or spec.provider))
+    rows = _df_to_rows(
+        df,
+        series_id=spec.series_id,
+        source=str((meta or {}).get("provider") or spec.provider),
+    )
     n = upsert_macro_prices(db, rows)
-    update_macro_ingestion_batch(db, batch_id=b.id, status="success", message=f"rows={len(rows)} upserted={n}")
+    update_macro_ingestion_batch(
+        db, batch_id=b.id, status="success", message=f"rows={len(rows)} upserted={n}"
+    )
     db.commit()
-    return {"ok": True, "batch_id": b.id, "series_id": spec.series_id, "upserted": n, "meta": meta}
-
+    return {
+        "ok": True,
+        "batch_id": b.id,
+        "series_id": spec.series_id,
+        "upserted": n,
+        "meta": meta,
+    }

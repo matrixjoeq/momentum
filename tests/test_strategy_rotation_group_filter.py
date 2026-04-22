@@ -104,7 +104,9 @@ def test_rotation_top_k_capped_to_pool_size_holds_available_names(session_factor
             lookback_days=3,
         )
         out = backtest_rotation(db, base)
-        out_big_k = backtest_rotation(db, RotationInputs(**{**base.__dict__, "top_k": 5}))
+        out_big_k = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "top_k": 5})
+        )
 
     assert out["holdings"] and out_big_k["holdings"]
     for h in out["holdings"]:
@@ -118,7 +120,9 @@ def test_rotation_entry_backfill_refills_filtered_topk(session_factory):
     with sf() as db:
         dates = [d.date() for d in pd.date_range("2024-01-01", "2024-04-30", freq="B")]
         for i, d in enumerate(dates):
-            _add_price(db, code="A1", day=d, close=100.0 + i * 1.2)  # strongest, but will be blocked by RSI rule
+            _add_price(
+                db, code="A1", day=d, close=100.0 + i * 1.2
+            )  # strongest, but will be blocked by RSI rule
             _add_price(db, code="B1", day=d, close=100.0 + i * 0.9)
             _add_price(db, code="C1", day=d, close=100.0 + i * 0.6)
         db.commit()
@@ -156,9 +160,13 @@ def test_rotation_entry_backfill_refills_filtered_topk(session_factory):
             ],
         )
         out_no_fill = backtest_rotation(db, base)
-        out_fill = backtest_rotation(db, RotationInputs(**{**base.__dict__, "entry_backfill": True}))
+        out_fill = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "entry_backfill": True})
+        )
 
-    h_no = next((x for x in out_no_fill["holdings"] if x.get("mode") == "risk_on"), None)
+    h_no = next(
+        (x for x in out_no_fill["holdings"] if x.get("mode") == "risk_on"), None
+    )
     h_yes = next((x for x in out_fill["holdings"] if x.get("mode") == "risk_on"), None)
     assert h_no is not None and h_yes is not None
     assert "A1" not in (h_no.get("picks") or [])
@@ -173,7 +181,9 @@ def test_rotation_position_mode_fixed_vs_adaptive_changes_exposure(session_facto
     with sf() as db:
         dates = [d.date() for d in pd.date_range("2024-01-01", "2024-04-30", freq="B")]
         for i, d in enumerate(dates):
-            _add_price(db, code="A1", day=d, close=100.0 + i * 1.2)  # blocked by RSI rule
+            _add_price(
+                db, code="A1", day=d, close=100.0 + i * 1.2
+            )  # blocked by RSI rule
             _add_price(db, code="B1", day=d, close=100.0 + i * 0.9)
             _add_price(db, code="C1", day=d, close=100.0 + i * 0.6)
             _add_price(db, code="D1", day=d, close=100.0 + i * 0.4)
@@ -194,15 +204,35 @@ def test_rotation_position_mode_fixed_vs_adaptive_changes_exposure(session_facto
             rsi_block_overbought=True,
             rsi_block_oversold=False,
             asset_rsi_rules=[
-                {"code": "*", "rsi_window": 14, "rsi_overbought": 100.0, "rsi_oversold": 0.0, "rsi_block_overbought": True, "rsi_block_oversold": False},
-                {"code": "A1", "rsi_window": 14, "rsi_overbought": 0.0, "rsi_oversold": 0.0, "rsi_block_overbought": True, "rsi_block_oversold": False},
+                {
+                    "code": "*",
+                    "rsi_window": 14,
+                    "rsi_overbought": 100.0,
+                    "rsi_oversold": 0.0,
+                    "rsi_block_overbought": True,
+                    "rsi_block_oversold": False,
+                },
+                {
+                    "code": "A1",
+                    "rsi_window": 14,
+                    "rsi_overbought": 0.0,
+                    "rsi_oversold": 0.0,
+                    "rsi_block_overbought": True,
+                    "rsi_block_oversold": False,
+                },
             ],
         )
         out_adapt = backtest_rotation(db, base)
-        out_fixed = backtest_rotation(db, RotationInputs(**{**base.__dict__, "position_mode": "fixed"}))
+        out_fixed = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "position_mode": "fixed"})
+        )
 
-    h_adapt = next((x for x in out_adapt["holdings"] if x.get("mode") == "risk_on"), None)
-    h_fixed = next((x for x in out_fixed["holdings"] if x.get("mode") == "risk_on"), None)
+    h_adapt = next(
+        (x for x in out_adapt["holdings"] if x.get("mode") == "risk_on"), None
+    )
+    h_fixed = next(
+        (x for x in out_fixed["holdings"] if x.get("mode") == "risk_on"), None
+    )
     assert h_adapt is not None and h_fixed is not None
     assert len(h_adapt.get("picks") or []) == 2
     assert len(h_fixed.get("picks") or []) == 2
@@ -217,7 +247,9 @@ def test_rotation_entry_match_n_can_relax_from_and_to_nofm(session_factory):
         for i, d in enumerate(dates):
             _add_price(db, code="A1", day=d, close=100.0 + i * 1.4)  # highest momentum
             _add_price(db, code="C1", day=d, close=100.0 + i * 0.9)  # medium momentum
-            _add_price(db, code="B1", day=d, close=100.0 + i * 0.1)  # low momentum (near flat)
+            _add_price(
+                db, code="B1", day=d, close=100.0 + i * 0.1
+            )  # low momentum (near flat)
         db.commit()
 
         base = RotationInputs(
@@ -236,12 +268,28 @@ def test_rotation_entry_match_n_can_relax_from_and_to_nofm(session_factory):
             rsi_block_overbought=True,
             rsi_block_oversold=False,
             asset_rsi_rules=[
-                {"code": "*", "rsi_window": 14, "rsi_overbought": 100.0, "rsi_oversold": 0.0, "rsi_block_overbought": True, "rsi_block_oversold": False},
-                {"code": "A1", "rsi_window": 14, "rsi_overbought": 0.0, "rsi_oversold": 0.0, "rsi_block_overbought": True, "rsi_block_oversold": False},
+                {
+                    "code": "*",
+                    "rsi_window": 14,
+                    "rsi_overbought": 100.0,
+                    "rsi_oversold": 0.0,
+                    "rsi_block_overbought": True,
+                    "rsi_block_oversold": False,
+                },
+                {
+                    "code": "A1",
+                    "rsi_window": 14,
+                    "rsi_overbought": 0.0,
+                    "rsi_oversold": 0.0,
+                    "rsi_block_overbought": True,
+                    "rsi_block_oversold": False,
+                },
             ],
         )
         out_and = backtest_rotation(db, base)
-        out_nofm = backtest_rotation(db, RotationInputs(**{**base.__dict__, "entry_match_n": 1}))
+        out_nofm = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "entry_match_n": 1})
+        )
 
     picks_and = [tuple(x.get("picks") or []) for x in out_and["holdings"]]
     picks_nofm = [tuple(x.get("picks") or []) for x in out_nofm["holdings"]]
@@ -271,8 +319,20 @@ def test_rotation_momentum_exit_rule_generates_daily_exit_event(session_factory)
                 top_k=1,
                 lookback_days=20,
                 asset_momentum_floor_rules=[
-                    {"code": "*", "stage": "entry", "op": ">", "threshold": 0.0, "threshold_unit": "raw"},
-                    {"code": "A1", "stage": "exit", "op": "<", "threshold": 0.02, "threshold_unit": "raw"},
+                    {
+                        "code": "*",
+                        "stage": "entry",
+                        "op": ">",
+                        "threshold": 0.0,
+                        "threshold_unit": "raw",
+                    },
+                    {
+                        "code": "A1",
+                        "stage": "exit",
+                        "op": "<",
+                        "threshold": 0.02,
+                        "threshold_unit": "raw",
+                    },
                 ],
             ),
         )
@@ -440,7 +500,13 @@ def test_rotation_exit_match_n_zero_is_and_over_enabled_exit_filters(session_fac
             # - momentum exit: intentionally hard-to-hit, usually False
             # - bias exit: should hit during late spike
             asset_momentum_floor_rules=[
-                {"code": "*", "stage": "exit", "op": "<", "threshold": -0.99, "threshold_unit": "raw"}
+                {
+                    "code": "*",
+                    "stage": "exit",
+                    "op": "<",
+                    "threshold": -0.99,
+                    "threshold_unit": "raw",
+                }
             ],
             bias_exit_filter=True,
             asset_bias_rules=[
@@ -456,8 +522,12 @@ def test_rotation_exit_match_n_zero_is_and_over_enabled_exit_filters(session_fac
             ],
         )
 
-        out_and = backtest_rotation(db, RotationInputs(**{**base.__dict__, "exit_match_n": 0}))
-        out_nofm = backtest_rotation(db, RotationInputs(**{**base.__dict__, "exit_match_n": 1}))
+        out_and = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "exit_match_n": 0})
+        )
+        out_nofm = backtest_rotation(
+            db, RotationInputs(**{**base.__dict__, "exit_match_n": 1})
+        )
 
     ev_and = out_and.get("daily_exit_events") or []
     ev_nofm = out_nofm.get("daily_exit_events") or []

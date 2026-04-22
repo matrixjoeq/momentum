@@ -39,20 +39,23 @@
   </head>
   <body>
     <h2>ETF 候选池配置</h2>
-    <div class="muted">数据源：多源回退（腾讯/新浪/东财），日频，qfq/hfq/none 均抓取，落地数据库。</div>
+    <div class="muted">
+      数据源：多源回退（腾讯/新浪/东财），日频，qfq/hfq/none
+      均抓取，落地数据库。
+    </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/off-fund-pool">场外基金候选池配置</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/futures-pool">期货标的池配置</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research/futures">期货研究</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research">ETF 研究</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research/off-fund">场外基金研究</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research/gold">研究：黄金（ETF/全球/国内）</a>
-      <span style="margin: 0 6px;">|</span>
+      <span style="margin: 0 6px">|</span>
       <a href="/research/nasdaq-vix">研究：纳指ETF × VIX（Cboe）</a>
     </div>
 
@@ -75,7 +78,7 @@
       </div>
       <div>
         <label>校验策略</label>
-        <select id="policy" style="padding: 8px; min-width: 220px;"></select>
+        <select id="policy" style="padding: 8px; min-width: 220px"></select>
       </div>
       <div>
         <label>收益跳变覆盖</label>
@@ -90,7 +93,15 @@
       </div>
       <div id="parallelWorkersWrap">
         <label>并行标的数</label>
-        <input type="number" id="parallelWorkers" min="2" max="5" step="1" value="2" style="min-width: 5rem" />
+        <input
+          type="number"
+          id="parallelWorkers"
+          min="2"
+          max="5"
+          step="1"
+          value="2"
+          style="min-width: 5rem"
+        />
       </div>
       <button id="save">保存/更新</button>
       <button id="fetchAll">抓取全部</button>
@@ -122,10 +133,13 @@
       (function initThemeToggle() {
         const key = `theme:${location.pathname}`;
         const html = document.documentElement;
-        const nextTheme = () => (html.getAttribute("data-theme") === "light" ? "dark" : "light");
+        const nextTheme = () =>
+          html.getAttribute("data-theme") === "light" ? "dark" : "light";
         const apply = (theme) => {
           html.setAttribute("data-theme", theme);
-          try { localStorage.setItem(key, theme); } catch (_) {}
+          try {
+            localStorage.setItem(key, theme);
+          } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
         };
@@ -140,7 +154,11 @@
         });
       })();
 
-      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const api = (path, opts) =>
+        fetch(`/api${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
       const $ = (id) => document.getElementById(id);
       const setMsg = (t) => ($("msg").textContent = t || "");
       let policies = [];
@@ -170,7 +188,10 @@
         try {
           clampParallelWorkers();
           localStorage.setItem(FETCH_MODE_KEY, $("fetchMode").value);
-          localStorage.setItem(FETCH_WORKERS_KEY, String(Number($("parallelWorkers").value)));
+          localStorage.setItem(
+            FETCH_WORKERS_KEY,
+            String(Number($("parallelWorkers").value)),
+          );
         } catch (_) {}
       }
 
@@ -181,7 +202,8 @@
           const w = localStorage.getItem(FETCH_WORKERS_KEY);
           if (w != null) {
             const n = parseInt(w, 10);
-            if (Number.isFinite(n) && n >= 2 && n <= 5) $("parallelWorkers").value = String(n);
+            if (Number.isFinite(n) && n >= 2 && n <= 5)
+              $("parallelWorkers").value = String(n);
           }
         } catch (_) {}
         clampParallelWorkers();
@@ -214,7 +236,8 @@
           const o = document.createElement("option");
           o.value = String(p.id);
           o.textContent = `${p.name} (max_abs_return=${p.max_abs_return})`;
-          if (selectedId && String(selectedId) === String(p.id)) o.selected = true;
+          if (selectedId && String(selectedId) === String(p.id))
+            o.selected = true;
           sel.appendChild(o);
         }
       }
@@ -239,12 +262,21 @@
         for (const it of data) {
           const tr = document.createElement("tr");
           const cfgRange = `${it.start_date || "-"} ~ ${it.end_date || "-"}`;
-          const dataRange = it.last_data_start_date && it.last_data_end_date ? `${it.last_data_start_date} ~ ${it.last_data_end_date}` : "没有";
+          const dataRange =
+            it.last_data_start_date && it.last_data_end_date
+              ? `${it.last_data_start_date} ~ ${it.last_data_end_date}`
+              : "没有";
           const st = it.last_fetch_status || "";
           const msg = it.last_fetch_message || "";
           const pol = it.validation_policy ? it.validation_policy.name : "自动";
-          const eff = it.max_abs_return_effective != null ? it.max_abs_return_effective : "-";
-          const ov = it.max_abs_return_override != null ? it.max_abs_return_override : "";
+          const eff =
+            it.max_abs_return_effective != null
+              ? it.max_abs_return_effective
+              : "-";
+          const ov =
+            it.max_abs_return_override != null
+              ? it.max_abs_return_override
+              : "";
           const checked = selected.has(it.code) ? "checked" : "";
           tr.innerHTML = `
             <td><input type="checkbox" data-act="sel" data-code="${it.code}" ${checked} /></td>
@@ -277,12 +309,19 @@
           start_date: $("start").value.trim() || null,
           end_date: $("end").value.trim() || null,
           validation_policy_id: policyId,
-          max_abs_return_override: maxAbsReturn === "" ? null : Number(maxAbsReturn),
+          max_abs_return_override:
+            maxAbsReturn === "" ? null : Number(maxAbsReturn),
         };
-        const resp = await api("/etf", { method: "POST", body: JSON.stringify(payload) });
+        const resp = await api("/etf", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
-        $("code").value = ""; $("name").value = ""; $("start").value = ""; $("end").value = "";
+        $("code").value = "";
+        $("name").value = "";
+        $("start").value = "";
+        $("end").value = "";
         $("maxAbsReturn").value = "";
         renderPolicySelect(null);
         await refresh();
@@ -297,7 +336,10 @@
 
       $("fetchAll").addEventListener("click", async () => {
         setMsg("fetch-all...");
-        const resp = await api("/fetch-all", { method: "POST", body: JSON.stringify(etfFetchBatchBody()) });
+        const resp = await api("/fetch-all", {
+          method: "POST",
+          body: JSON.stringify(etfFetchBatchBody()),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -333,7 +375,10 @@
         const codes = Array.from(selected);
         if (codes.length === 0) return setMsg("未选择任何标的。");
         setMsg(`fetch-selected: ${codes.join(", ")} ...`);
-        const resp = await api("/fetch-selected", { method: "POST", body: JSON.stringify({ codes, ...etfFetchBatchBody() }) });
+        const resp = await api("/fetch-selected", {
+          method: "POST",
+          body: JSON.stringify({ codes, ...etfFetchBatchBody() }),
+        });
         const text = await resp.text();
         if (!resp.ok) return setMsg(text);
         setMsg(text);
@@ -345,9 +390,9 @@
         if (codes.length === 0) return setMsg("未选择任何标的。");
         const ok = confirm(
           `将删除所选 ${codes.length} 个标的：\n${codes.join(", ")}\n\n` +
-          `每个标的将执行“删除”同等操作（purge=true）：\n` +
-          `- 候选池记录\n- 全部已抓取价格数据（hfq/qfq/none）\n- 对应 ingestion batch 记录（含回滚审计/记录）\n` +
-          `此操作不可恢复，确认继续？`
+            `每个标的将执行“删除”同等操作（purge=true）：\n` +
+            `- 候选池记录\n- 全部已抓取价格数据（hfq/qfq/none）\n- 对应 ingestion batch 记录（含回滚审计/记录）\n` +
+            `此操作不可恢复，确认继续？`,
         );
         if (!ok) return;
         setMsg(`正在删除所选 ${codes.length} 个标的...`);
@@ -367,7 +412,9 @@
         }
         await refresh();
         if (failed.length > 0) {
-          setMsg(`部分删除失败（${failed.length}/${codes.length}）：${failed.join(" | ")}`);
+          setMsg(
+            `部分删除失败（${failed.length}/${codes.length}）：${failed.join(" | ")}`,
+          );
         } else {
           setMsg(`删除成功：共 ${codes.length} 个标的。`);
         }
@@ -390,7 +437,7 @@
         const it = tr && tr.dataset.item ? JSON.parse(tr.dataset.item) : null;
         if (act === "del") {
           const ok = confirm(
-            `将彻底删除：${code}\n\n- 候选池记录\n- 全部已抓取价格数据（hfq/qfq/none）\n- 对应 ingestion batch 记录（含回滚审计/记录）\n- 若存在，会删除 batch 备份快照文件\n\n此操作不可恢复，确认继续？`
+            `将彻底删除：${code}\n\n- 候选池记录\n- 全部已抓取价格数据（hfq/qfq/none）\n- 对应 ingestion batch 记录（含回滚审计/记录）\n- 若存在，会删除 batch 备份快照文件\n\n此操作不可恢复，确认继续？`,
           );
           if (!ok) return;
           const resp = await api(`/etf/${code}`, { method: "DELETE" });
@@ -399,7 +446,9 @@
           try {
             const data = JSON.parse(text);
             if (data && data.purged) {
-              setMsg(`删除成功：prices=${data.purged.prices}, batches=${data.purged.batches}, items=${data.purged.items}, audits=${data.purged.audits}, snapshots=${data.purged.snapshots}`);
+              setMsg(
+                `删除成功：prices=${data.purged.prices}, batches=${data.purged.batches}, items=${data.purged.items}, audits=${data.purged.audits}, snapshots=${data.purged.snapshots}`,
+              );
             } else {
               setMsg("删除成功。");
             }
@@ -414,13 +463,21 @@
           $("name").value = it.name;
           $("start").value = it.start_date || "";
           $("end").value = it.end_date || "";
-          $("maxAbsReturn").value = it.max_abs_return_override != null ? String(it.max_abs_return_override) : "";
-          renderPolicySelect(it.validation_policy ? it.validation_policy.id : null);
+          $("maxAbsReturn").value =
+            it.max_abs_return_override != null
+              ? String(it.max_abs_return_override)
+              : "";
+          renderPolicySelect(
+            it.validation_policy ? it.validation_policy.id : null,
+          );
           setMsg("已载入到表单，修改后点“保存/更新”。");
         }
         if (act === "fetch") {
           setMsg(`fetch ${code}...`);
-          const resp = await api(`/etf/${code}/fetch`, { method: "POST", body: "{}" });
+          const resp = await api(`/etf/${code}/fetch`, {
+            method: "POST",
+            body: "{}",
+          });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
           setMsg(text);
@@ -436,4 +493,3 @@
     </script>
   </body>
 </html>
-

@@ -80,6 +80,6 @@ Outputs are saved under `qlib_workflow/outputs/YYYYMMDD_HHMMSS/`.
 
 ## Notes
 
-- `rebalance_weekday` is the *execution day* (0=Mon..4=Fri).
+- `rebalance_weekday` is the _execution day_ (0=Mon..4=Fri).
 - Decision day is the previous trading day close, so the signal does not use
   the execution day's price data.

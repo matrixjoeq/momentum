@@ -91,7 +91,9 @@ def build_port_config(cfg: dict, signal) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
+    parser.add_argument(
+        "--config", default=str(Path(__file__).with_name("config.toml"))
+    )
     args = parser.parse_args()
 
     cfg = _load_toml(Path(args.config))
@@ -104,7 +106,9 @@ def main() -> int:
     dataset = init_instance_by_config(task["dataset"])
 
     ml = cfg["ml_pipeline"]
-    with R.start(experiment_name=ml["experiment_name"], recorder_name=ml["recorder_name"]):
+    with R.start(
+        experiment_name=ml["experiment_name"], recorder_name=ml["recorder_name"]
+    ):
         R.log_params(**task)
         model.fit(dataset)
         recorder = R.get_recorder()

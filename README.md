@@ -1,9 +1,11 @@
 # momentum
+
 ETF动量轮动策略研究
 
 ## 开始使用（候选池配置 + 数据入库 MVP）
 
 ### 环境准备
+
 - 使用项目内虚拟环境（避免 macOS PEP668 限制）：
 
 ```bash
@@ -51,6 +53,7 @@ python3 -m venv .venv
 - API 文档：打开 `http://127.0.0.1:8000/docs`
 
 ### API（简要）
+
 - `GET /api/etf`：列出候选池
 - `POST /api/etf`：新增/更新候选（code, name, start_date, end_date）
 - `DELETE /api/etf/{code}`：删除候选
@@ -58,6 +61,7 @@ python3 -m venv .venv
 - `POST /api/fetch-all`：抓取全部候选并入库
 
 ### 数据落地
+
 - 默认 SQLite 路径：`data/etf_momentum.sqlite3`
 - 可通过环境变量覆盖：
   - `MOMENTUM_SQLITE_PATH`：SQLite 文件路径

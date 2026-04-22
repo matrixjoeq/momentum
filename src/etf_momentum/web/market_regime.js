@@ -1,7 +1,14 @@
 (function () {
   "use strict";
 
-  const STATE_ORDER = ["UP_NARROW", "UP_WIDE", "DOWN_NARROW", "DOWN_WIDE", "SIDE_NARROW", "SIDE_WIDE"];
+  const STATE_ORDER = [
+    "UP_NARROW",
+    "UP_WIDE",
+    "DOWN_NARROW",
+    "DOWN_WIDE",
+    "SIDE_NARROW",
+    "SIDE_WIDE",
+  ];
   const STATE_LABEL = {
     UP_NARROW: "上升-窄幅",
     UP_WIDE: "上升-宽幅",
@@ -36,7 +43,10 @@
   }
 
   function _quantile(xs, q) {
-    const arr = (Array.isArray(xs) ? xs : []).map(_num).filter(Number.isFinite).sort((a, b) => a - b);
+    const arr = (Array.isArray(xs) ? xs : [])
+      .map(_num)
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
     if (!arr.length) return NaN;
     const qq = Math.max(0, Math.min(1, _num(q)));
     const pos = (arr.length - 1) * qq;
@@ -96,14 +106,24 @@
 
   function _buildTrPct(close, high, low) {
     const n = close.length;
-    const hi = (Array.isArray(high) && high.length === n) ? high.map(_num) : close.map(_num);
-    const lo = (Array.isArray(low) && low.length === n) ? low.map(_num) : close.map(_num);
+    const hi =
+      Array.isArray(high) && high.length === n
+        ? high.map(_num)
+        : close.map(_num);
+    const lo =
+      Array.isArray(low) && low.length === n ? low.map(_num) : close.map(_num);
     const tr = new Array(n).fill(NaN);
     for (let i = 1; i < n; i++) {
       const prev = _num(close[i - 1]);
       const h = Number.isFinite(hi[i]) ? hi[i] : _num(close[i]);
       const l = Number.isFinite(lo[i]) ? lo[i] : _num(close[i]);
-      if (!Number.isFinite(prev) || prev <= 0 || !Number.isFinite(h) || !Number.isFinite(l)) continue;
+      if (
+        !Number.isFinite(prev) ||
+        prev <= 0 ||
+        !Number.isFinite(h) ||
+        !Number.isFinite(l)
+      )
+        continue;
       const tr1 = Math.abs(h - l);
       const tr2 = Math.abs(h - prev);
       const tr3 = Math.abs(l - prev);
@@ -114,16 +134,32 @@
 
   function computeRows(input) {
     const dates = Array.isArray(input && input.dates) ? input.dates : [];
-    const close = Array.isArray(input && input.close) ? input.close.map(_num) : [];
+    const close = Array.isArray(input && input.close)
+      ? input.close.map(_num)
+      : [];
     const high = Array.isArray(input && input.high) ? input.high : null;
     const low = Array.isArray(input && input.low) ? input.low : null;
     if (!dates.length || dates.length !== close.length) return [];
-    const slopeWindow = Math.max(5, Math.round(_num((input && input.slope_window) || 20) || 20));
-    const volWindow = Math.max(5, Math.round(_num((input && input.vol_window) || 20) || 20));
-    const directionThresholdAnn = Math.max(0, _num((input && input.direction_threshold_ann) || 0.03) || 0.03);
-    const volQuantile = Math.max(0.01, Math.min(0.99, _num((input && input.vol_quantile) || 0.5) || 0.5));
+    const slopeWindow = Math.max(
+      5,
+      Math.round(_num((input && input.slope_window) || 20) || 20),
+    );
+    const volWindow = Math.max(
+      5,
+      Math.round(_num((input && input.vol_window) || 20) || 20),
+    );
+    const directionThresholdAnn = Math.max(
+      0,
+      _num((input && input.direction_threshold_ann) || 0.03) || 0.03,
+    );
+    const volQuantile = Math.max(
+      0.01,
+      Math.min(0.99, _num((input && input.vol_quantile) || 0.5) || 0.5),
+    );
 
-    const logClose = close.map((v) => (Number.isFinite(v) && v > 0 ? Math.log(v) : NaN));
+    const logClose = close.map((v) =>
+      Number.isFinite(v) && v > 0 ? Math.log(v) : NaN,
+    );
     const trPct = _buildTrPct(close, high, low);
     const volMetric = new Array(close.length).fill(NaN);
     const volThreshold = new Array(close.length).fill(NaN);
@@ -138,13 +174,15 @@
         const v = _num(trPct[j]);
         if (Number.isFinite(v)) xs.push(v);
       }
-      if (xs.length >= minVol) volMetric[i] = xs.reduce((a, b) => a + b, 0) / xs.length;
+      if (xs.length >= minVol)
+        volMetric[i] = xs.reduce((a, b) => a + b, 0) / xs.length;
       // Keep an expanding sorted history for quantile lookup in O(log n) insertion.
       if (i > 0) {
         const prev = _num(volMetric[i - 1]);
         if (Number.isFinite(prev)) _sortedInsert(histSorted, prev);
       }
-      if (histSorted.length >= minExpQ) volThreshold[i] = _quantileFromSorted(histSorted, volQuantile);
+      if (histSorted.length >= minExpQ)
+        volThreshold[i] = _quantileFromSorted(histSorted, volQuantile);
     }
 
     const rows = [];
@@ -155,7 +193,10 @@
       else if (Number.isFinite(sl) && sl < -directionThresholdAnn) dir = "DOWN";
       const vm = _num(volMetric[i]);
       const vt = _num(volThreshold[i]);
-      const amp = Number.isFinite(vm) && Number.isFinite(vt) && vm >= vt ? "WIDE" : "NARROW";
+      const amp =
+        Number.isFinite(vm) && Number.isFinite(vt) && vm >= vt
+          ? "WIDE"
+          : "NARROW";
       rows.push({
         date: String(dates[i] || ""),
         close: _num(close[i]),
@@ -216,11 +257,13 @@
   function renderLegend(container, selected, onToggle, onIsolate) {
     if (!container) return;
     const sel = selected || new Set(STATE_ORDER);
-    container.innerHTML = STATE_ORDER.map((st) => {
-      const on = sel.has(st);
-      const style = `display:inline-flex;align-items:center;gap:6px;margin:2px 8px 2px 0;padding:4px 8px;border-radius:12px;border:1px solid #999;cursor:pointer;opacity:${on ? "1" : "0.35"};`;
-      return `<span data-regime-chip="${st}" style="${style}"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${STATE_COLOR[st]};"></span>${STATE_LABEL[st]}</span>`;
-    }).join("") + `<span class="muted" style="margin-left:8px;">点击筛选；双击仅保留。</span>`;
+    container.innerHTML =
+      STATE_ORDER.map((st) => {
+        const on = sel.has(st);
+        const style = `display:inline-flex;align-items:center;gap:6px;margin:2px 8px 2px 0;padding:4px 8px;border-radius:12px;border:1px solid #999;cursor:pointer;opacity:${on ? "1" : "0.35"};`;
+        return `<span data-regime-chip="${st}" style="${style}"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${STATE_COLOR[st]};"></span>${STATE_LABEL[st]}</span>`;
+      }).join("") +
+      `<span class="muted" style="margin-left:8px;">点击筛选；双击仅保留。</span>`;
     const chips = Array.from(container.querySelectorAll("[data-regime-chip]"));
     chips.forEach((el) => {
       const st = String(el.getAttribute("data-regime-chip") || "");
@@ -232,11 +275,13 @@
   function renderImpulseLegend(container, selected, onToggle, onIsolate) {
     if (!container) return;
     const sel = selected || new Set(IMPULSE_ORDER);
-    container.innerHTML = IMPULSE_ORDER.map((st) => {
-      const on = sel.has(st);
-      const style = `display:inline-flex;align-items:center;gap:6px;margin:2px 8px 2px 0;padding:4px 8px;border-radius:12px;border:1px solid #999;cursor:pointer;opacity:${on ? "1" : "0.35"};`;
-      return `<span data-impulse-chip="${st}" style="${style}"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${IMPULSE_COLOR[st]};"></span>${IMPULSE_LABEL[st]}</span>`;
-    }).join("") + `<span class="muted" style="margin-left:8px;">点击筛选；双击仅保留。</span>`;
+    container.innerHTML =
+      IMPULSE_ORDER.map((st) => {
+        const on = sel.has(st);
+        const style = `display:inline-flex;align-items:center;gap:6px;margin:2px 8px 2px 0;padding:4px 8px;border-radius:12px;border:1px solid #999;cursor:pointer;opacity:${on ? "1" : "0.35"};`;
+        return `<span data-impulse-chip="${st}" style="${style}"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${IMPULSE_COLOR[st]};"></span>${IMPULSE_LABEL[st]}</span>`;
+      }).join("") +
+      `<span class="muted" style="margin-left:8px;">点击筛选；双击仅保留。</span>`;
     const chips = Array.from(container.querySelectorAll("[data-impulse-chip]"));
     chips.forEach((el) => {
       const st = String(el.getAttribute("data-impulse-chip") || "");
@@ -257,7 +302,10 @@
     const close = rows.map((r) => r.close);
     const traces = [
       {
-        x: dates, y: close, type: "scatter", mode: "lines",
+        x: dates,
+        y: close,
+        type: "scatter",
+        mode: "lines",
         name: `${codeName || "标的"}（全样本）`,
         line: { color: "rgba(31,119,180,0.30)", width: 1.2 },
         hovertemplate: "%{x}<br>close=%{y:.4f}<extra></extra>",
@@ -278,7 +326,10 @@
     }
     const layout = {
       margin: { t: 30, b: 40, l: 55, r: 15 },
-      title: { text: title || "市场状态区间（图例可点击筛选）", font: { size: 13 } },
+      title: {
+        text: title || "市场状态区间（图例可点击筛选）",
+        font: { size: 13 },
+      },
       yaxis: { title: "价格" },
       xaxis: { title: "日期" },
       legend: { orientation: "h", y: 1.18 },
@@ -308,7 +359,10 @@
     }));
     const layout = {
       margin: { t: 30, b: 55, l: 55, r: 15 },
-      title: { text: `按状态分组的未来 ${nAhead} 日收益分布`, font: { size: 13 } },
+      title: {
+        text: `按状态分组的未来 ${nAhead} 日收益分布`,
+        font: { size: 13 },
+      },
       yaxis: { title: "未来收益", tickformat: ".1%" },
       xaxis: { title: "市场状态" },
       showlegend: false,
@@ -338,7 +392,10 @@
     }));
     const layout = {
       margin: { t: 30, b: 55, l: 55, r: 15 },
-      title: { text: `按动力状态分组的未来 ${nAhead} 日收益分布`, font: { size: 13 } },
+      title: {
+        text: `按动力状态分组的未来 ${nAhead} 日收益分布`,
+        font: { size: 13 },
+      },
       yaxis: { title: "未来收益", tickformat: ".1%" },
       xaxis: { title: "动力状态" },
       showlegend: false,
@@ -371,24 +428,38 @@
 
   function computeImpulseRows(input) {
     const dates = Array.isArray(input && input.dates) ? input.dates : [];
-    const close = Array.isArray(input && input.close) ? input.close.map(_num) : [];
+    const close = Array.isArray(input && input.close)
+      ? input.close.map(_num)
+      : [];
     if (!dates.length || dates.length !== close.length) return [];
-    const emaWin = Math.max(2, Math.round(_num((input && input.ema_window) || 13) || 13));
-    const fast = Math.max(2, Math.round(_num((input && input.macd_fast) || 12) || 12));
-    const slow = Math.max(3, Math.round(_num((input && input.macd_slow) || 26) || 26));
-    const sig = Math.max(2, Math.round(_num((input && input.macd_signal) || 9) || 9));
+    const emaWin = Math.max(
+      2,
+      Math.round(_num((input && input.ema_window) || 13) || 13),
+    );
+    const fast = Math.max(
+      2,
+      Math.round(_num((input && input.macd_fast) || 12) || 12),
+    );
+    const slow = Math.max(
+      3,
+      Math.round(_num((input && input.macd_slow) || 26) || 26),
+    );
+    const sig = Math.max(
+      2,
+      Math.round(_num((input && input.macd_signal) || 9) || 9),
+    );
     const ema = _ema(close, emaWin);
     const ef = _ema(close, fast);
     const es = _ema(close, slow);
     const macd = close.map((_, i) => {
       const a = _num(ef[i]);
       const b = _num(es[i]);
-      return (Number.isFinite(a) && Number.isFinite(b)) ? (a - b) : NaN;
+      return Number.isFinite(a) && Number.isFinite(b) ? a - b : NaN;
     });
     const dea = _ema(macd, sig);
     const hist = macd.map((v, i) => {
       const d = _num(dea[i]);
-      return (Number.isFinite(v) && Number.isFinite(d)) ? (v - d) : NaN;
+      return Number.isFinite(v) && Number.isFinite(d) ? v - d : NaN;
     });
     const rows = [];
     for (let i = 0; i < close.length; i++) {
@@ -397,7 +468,12 @@
       const h0 = _num(hist[i]);
       const h1 = _num(i > 0 ? hist[i - 1] : NaN);
       let st = "NEUTRAL";
-      if (Number.isFinite(e0) && Number.isFinite(e1) && Number.isFinite(h0) && Number.isFinite(h1)) {
+      if (
+        Number.isFinite(e0) &&
+        Number.isFinite(e1) &&
+        Number.isFinite(h0) &&
+        Number.isFinite(h1)
+      ) {
         const emaUp = e0 > e1;
         const emaDn = e0 < e1;
         const histUp = h0 > h1;
@@ -443,7 +519,10 @@
     const close = rows.map((r) => r.close);
     const traces = [
       {
-        x: dates, y: close, type: "scatter", mode: "lines",
+        x: dates,
+        y: close,
+        type: "scatter",
+        mode: "lines",
         name: `${codeName || "标的"}（全样本）`,
         line: { color: "rgba(31,119,180,0.30)", width: 1.2 },
         hovertemplate: "%{x}<br>close=%{y:.4f}<extra></extra>",
@@ -464,7 +543,10 @@
     }
     const layout = {
       margin: { t: 30, b: 40, l: 55, r: 15 },
-      title: { text: title || "动力监控状态区间（图例可点击筛选）", font: { size: 13 } },
+      title: {
+        text: title || "动力监控状态区间（图例可点击筛选）",
+        font: { size: 13 },
+      },
       yaxis: { title: "价格" },
       xaxis: { title: "日期" },
       legend: { orientation: "h", y: 1.18 },

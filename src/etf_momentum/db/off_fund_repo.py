@@ -50,9 +50,13 @@ def upsert_off_fund_pool(
     start_date: str | None,
     end_date: str | None,
 ) -> OffFundPool:
-    existing = db.execute(select(OffFundPool).where(OffFundPool.code == code)).scalar_one_or_none()
+    existing = db.execute(
+        select(OffFundPool).where(OffFundPool.code == code)
+    ).scalar_one_or_none()
     if existing is None:
-        obj = OffFundPool(code=code, name=name, start_date=start_date, end_date=end_date)
+        obj = OffFundPool(
+            code=code, name=name, start_date=start_date, end_date=end_date
+        )
         db.add(obj)
         db.flush()
         return obj
@@ -64,11 +68,15 @@ def upsert_off_fund_pool(
 
 
 def list_off_fund_pool(db: Session) -> list[OffFundPool]:
-    return list(db.execute(select(OffFundPool).order_by(OffFundPool.code.asc())).scalars().all())
+    return list(
+        db.execute(select(OffFundPool).order_by(OffFundPool.code.asc())).scalars().all()
+    )
 
 
 def get_off_fund_pool_by_code(db: Session, code: str) -> OffFundPool | None:
-    return db.execute(select(OffFundPool).where(OffFundPool.code == code)).scalar_one_or_none()
+    return db.execute(
+        select(OffFundPool).where(OffFundPool.code == code)
+    ).scalar_one_or_none()
 
 
 def delete_off_fund_pool(db: Session, code: str) -> bool:
@@ -174,7 +182,9 @@ def upsert_off_fund_navs(db: Session, rows: list[OffFundNavRow]) -> int:
     return int(getattr(res, "rowcount", 0) or 0)
 
 
-def replace_off_fund_events(db: Session, *, code: str, events: list[OffFundEventRow]) -> int:
+def replace_off_fund_events(
+    db: Session, *, code: str, events: list[OffFundEventRow]
+) -> int:
     db.execute(delete(OffFundEvent).where(OffFundEvent.code == code))
     if not events:
         return 0
@@ -206,7 +216,12 @@ def replace_off_fund_events(db: Session, *, code: str, events: list[OffFundEvent
     else:
         stmt = sqlite_insert(OffFundEvent).values(values)
         stmt = stmt.on_conflict_do_update(
-            index_elements=[OffFundEvent.code, OffFundEvent.effective_date, OffFundEvent.event_type, OffFundEvent.event_key],
+            index_elements=[
+                OffFundEvent.code,
+                OffFundEvent.effective_date,
+                OffFundEvent.event_type,
+                OffFundEvent.event_key,
+            ],
             set_={
                 "cash_dividend": stmt.excluded.cash_dividend,
                 "split_ratio": stmt.excluded.split_ratio,
@@ -219,7 +234,9 @@ def replace_off_fund_events(db: Session, *, code: str, events: list[OffFundEvent
     return int(getattr(res, "rowcount", 0) or 0)
 
 
-def get_off_fund_date_range(db: Session, *, code: str, adjust: str = "none") -> tuple[str | None, str | None]:
+def get_off_fund_date_range(
+    db: Session, *, code: str, adjust: str = "none"
+) -> tuple[str | None, str | None]:
     adj = normalize_adjust(adjust)
     start_d, end_d = db.execute(
         select(func.min(OffFundNav.trade_date), func.max(OffFundNav.trade_date)).where(
@@ -232,7 +249,9 @@ def get_off_fund_date_range(db: Session, *, code: str, adjust: str = "none") -> 
     return (start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d"))
 
 
-def update_off_fund_pool_data_range(db: Session, *, code: str, adjust: str = "hfq") -> tuple[str | None, str | None]:
+def update_off_fund_pool_data_range(
+    db: Session, *, code: str, adjust: str = "hfq"
+) -> tuple[str | None, str | None]:
     obj = get_off_fund_pool_by_code(db, code)
     if obj is None:
         return (None, None)
@@ -261,4 +280,3 @@ def mark_off_fund_fetch_status(
     obj.last_fetch_status = status
     obj.last_fetch_message = msg
     db.flush()
-

@@ -40,7 +40,9 @@ def _format_date(dt_series: pd.Series) -> pd.Series:
     return pd.to_datetime(dt_series).dt.strftime("%Y-%m-%d")
 
 
-def export_csv(db_path: str, adjust: str, symbol_map: dict[str, str], out_dir: Path) -> None:
+def export_csv(
+    db_path: str, adjust: str, symbol_map: dict[str, str], out_dir: Path
+) -> None:
     _ensure_dir(out_dir)
     codes = list(symbol_map.keys())
     df = _fetch_prices(db_path, codes=codes, adjust=adjust)
@@ -61,7 +63,9 @@ def export_csv(db_path: str, adjust: str, symbol_map: dict[str, str], out_dir: P
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
+    parser.add_argument(
+        "--config", default=str(Path(__file__).with_name("config.toml"))
+    )
     args = parser.parse_args()
 
     cfg = _load_toml(Path(args.config))

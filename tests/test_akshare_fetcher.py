@@ -11,7 +11,9 @@ class FakeAk:
         self._supports_range = supports_range
 
     def fund_etf_hist_em(self, **kwargs):
-        if not self._supports_range and ("start_date" in kwargs or "end_date" in kwargs):
+        if not self._supports_range and (
+            "start_date" in kwargs or "end_date" in kwargs
+        ):
             raise TypeError("no start/end support")
         return self._df
 
@@ -29,7 +31,9 @@ def test_fetch_filters_and_maps_columns() -> None:
         }
     )
     ak = FakeAk(df, supports_range=False)
-    req = FetchRequest(code="510300", start_date="20240103", end_date="20240104", adjust="qfq")
+    req = FetchRequest(
+        code="510300", start_date="20240103", end_date="20240104", adjust="qfq"
+    )
     rows = fetch_etf_daily_qfq(ak, req)
     assert [r.trade_date.isoformat() for r in rows] == ["2024-01-03", "2024-01-04"]
     assert rows[0].open == 2.0
@@ -47,8 +51,9 @@ def test_fetch_dedup_by_trade_date_last_wins() -> None:
         }
     )
     ak = FakeAk(df, supports_range=True)
-    req = FetchRequest(code="510300", start_date="20240101", end_date="20240131", adjust="qfq")
+    req = FetchRequest(
+        code="510300", start_date="20240101", end_date="20240131", adjust="qfq"
+    )
     rows = fetch_etf_daily_qfq(ak, req)
     assert len(rows) == 1
     assert rows[0].open == 9.0
-

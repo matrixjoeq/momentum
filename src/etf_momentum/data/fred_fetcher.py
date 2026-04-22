@@ -71,11 +71,22 @@ def fetch_fred_daily_close(
     for attempt in range(max(1, int(retries) + 1)):
         try:
             timeout = httpx.Timeout(float(timeout_s), connect=float(timeout_s))
-            r = httpx.get(url, params=params, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+            r = httpx.get(
+                url,
+                params=params,
+                timeout=timeout,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
             r.raise_for_status()
             payload = r.json()
-            if isinstance(payload, dict) and (payload.get("error_code") or payload.get("error_message")):
-                msg = str(payload.get("error_message") or payload.get("error_code") or "fred_error")
+            if isinstance(payload, dict) and (
+                payload.get("error_code") or payload.get("error_message")
+            ):
+                msg = str(
+                    payload.get("error_message")
+                    or payload.get("error_code")
+                    or "fred_error"
+                )
                 return pd.DataFrame(), {**meta, "error": msg}
             obs = payload.get("observations") if isinstance(payload, dict) else None
             if not isinstance(obs, list) or not obs:
@@ -94,7 +105,9 @@ def fetch_fred_daily_close(
                     continue
                 # FRED uses "." for missing
                 v = pd.to_numeric(v0 if v0 != "." else None, errors="coerce")
-                rows.append({"date": d.date(), "close": float(v) if pd.notna(v) else None})
+                rows.append(
+                    {"date": d.date(), "close": float(v) if pd.notna(v) else None}
+                )
 
             df = pd.DataFrame(rows)
             if df.empty:
@@ -106,14 +119,19 @@ def fetch_fred_daily_close(
             if df.empty:
                 return pd.DataFrame(), {**meta, "error": "empty_in_range"}
             return df[["date", "close"]], meta
-        except (httpx.HTTPError, TimeoutError, ValueError, TypeError, json.JSONDecodeError) as e:
+        except (
+            httpx.HTTPError,
+            TimeoutError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as e:
             last_err = e
             if attempt < max(1, int(retries) + 1) - 1:
                 # light exponential backoff to avoid hammering FRED
-                time.sleep(min(2.0 ** attempt, 8.0))
+                time.sleep(min(2.0**attempt, 8.0))
                 continue
             logger.warning("fred fetch failed series_id=%s err=%s", series_id, e)
             break
 
     return pd.DataFrame(), {**meta, "error": str(last_err) if last_err else "failed"}
-

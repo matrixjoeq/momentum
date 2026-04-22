@@ -16,7 +16,13 @@ def test_gbm_ab_significance_structure_and_ranges():
         vol_low=0.05,
         vol_high=0.30,
         seed=123,
-        strategy_a={"lookback_days": 2, "top_k": 1, "trend_filter": True, "trend_sma_window": 2, "trend_ma_type": "vma"},
+        strategy_a={
+            "lookback_days": 2,
+            "top_k": 1,
+            "trend_filter": True,
+            "trend_sma_window": 2,
+            "trend_ma_type": "vma",
+        },
         strategy_b={"lookback_days": 2, "top_k": 1, "trend_filter": False},
         n_perm=_MIN_PERM,
         n_boot=_MIN_BOOT,
@@ -189,8 +195,16 @@ def test_gbm_ab_significance_accepts_holding_strategy_params():
         strategy_b={"lookback_days": 2, "top_k": 1},
         target_a="equal_weight",
         target_b="risk_parity",
-        holding_strategy_a={"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 2},
-        holding_strategy_b={"rebalance": "monthly", "cost_bps": 6.0, "rp_vol_window": 2},
+        holding_strategy_a={
+            "rebalance": "monthly",
+            "cost_bps": 6.0,
+            "rp_vol_window": 2,
+        },
+        holding_strategy_b={
+            "rebalance": "monthly",
+            "cost_bps": 6.0,
+            "rp_vol_window": 2,
+        },
         n_perm=_MIN_PERM,
         n_boot=_MIN_BOOT,
         n_jobs=1,
@@ -220,7 +234,7 @@ def test_gbm_ab_significance_seed_stability_enabled():
         n_jobs=1,
     )
     assert out["ok"] is True
-    stab = ((out.get("robustness") or {}).get("seed_stability") or {})
+    stab = (out.get("robustness") or {}).get("seed_stability") or {}
     assert stab.get("enabled") is True
     assert int(stab.get("repeats") or 0) == 1
     assert len(stab.get("mean_diff") or []) == 1

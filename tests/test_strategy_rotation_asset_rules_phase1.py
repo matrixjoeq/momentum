@@ -93,8 +93,17 @@ def test_rsi_asset_rule_overrides_global_threshold_and_excludes(session_factory)
                 rsi_block_overbought=True,
                 # per-asset rules: AAA is strict and should be excluded
                 asset_rsi_rules=[
-                    {"code": "*", "rsi_window": 14, "rsi_overbought": 100.0, "rsi_block_overbought": True},
-                    {"code": "AAA", "rsi_overbought": 55.0, "rsi_block_overbought": True},
+                    {
+                        "code": "*",
+                        "rsi_window": 14,
+                        "rsi_overbought": 100.0,
+                        "rsi_block_overbought": True,
+                    },
+                    {
+                        "code": "AAA",
+                        "rsi_overbought": 55.0,
+                        "rsi_block_overbought": True,
+                    },
                 ],
             ),
         )
@@ -104,7 +113,10 @@ def test_rsi_asset_rule_overrides_global_threshold_and_excludes(session_factory)
     # Current gate behavior: when strict per-asset RSI excludes the top candidate,
     # entry gate blocks the whole period rather than backfilling to a new risk_on pick.
     assert all(str(r.get("mode")) == "cash" for r in rows)
-    assert any("rsi_exclude:AAA" in ((r.get("risk_controls") or {}).get("reasons") or []) for r in rows)
+    assert any(
+        "rsi_exclude:AAA" in ((r.get("risk_controls") or {}).get("reasons") or [])
+        for r in rows
+    )
 
 
 def test_rsi_asset_rules_multiple_matches_use_worst_case(session_factory):
@@ -137,10 +149,23 @@ def test_rsi_asset_rules_multiple_matches_use_worst_case(session_factory):
                 rsi_overbought=100.0,
                 rsi_block_overbought=True,
                 asset_rsi_rules=[
-                    {"code": "*", "rsi_window": 14, "rsi_overbought": 100.0, "rsi_block_overbought": True},
+                    {
+                        "code": "*",
+                        "rsi_window": 14,
+                        "rsi_overbought": 100.0,
+                        "rsi_block_overbought": True,
+                    },
                     # Two matching rules for AAA: one blocks, one doesn't -> worst-case => block
-                    {"code": "AAA", "rsi_overbought": 55.0, "rsi_block_overbought": True},
-                    {"code": "AAA", "rsi_overbought": 100.0, "rsi_block_overbought": False},
+                    {
+                        "code": "AAA",
+                        "rsi_overbought": 55.0,
+                        "rsi_block_overbought": True,
+                    },
+                    {
+                        "code": "AAA",
+                        "rsi_overbought": 100.0,
+                        "rsi_block_overbought": False,
+                    },
                 ],
             ),
         )
@@ -148,7 +173,10 @@ def test_rsi_asset_rules_multiple_matches_use_worst_case(session_factory):
     rows = out["holdings"] or []
     assert rows
     assert all(str(r.get("mode")) == "cash" for r in rows)
-    assert any("rsi_exclude:AAA" in ((r.get("risk_controls") or {}).get("reasons") or []) for r in rows)
+    assert any(
+        "rsi_exclude:AAA" in ((r.get("risk_controls") or {}).get("reasons") or [])
+        for r in rows
+    )
 
 
 def test_momentum_floor_asset_rule_excludes_specific_code(session_factory):
@@ -188,4 +216,3 @@ def test_momentum_floor_asset_rule_excludes_specific_code(session_factory):
     picks = [p.get("picks") for p in out["holdings"] if p.get("mode") == "risk_on"]
     assert picks, "expected some risk_on periods"
     assert any("AAA" not in (ps or []) for ps in picks)
-

@@ -1,6 +1,7 @@
 AGENTS.md
 
 Overview
+
 - This file documents how coding agents should build, lint, test, and style this codebase.
 - It also defines naming, error handling, and import conventions to keep the project coherent across contributors.
 - **Skill installation:** Any request to install a Skill must follow the mandatory “Installing Skills” workflow in § Security and secrets (vet → report → confirm → install only after approval).
@@ -8,6 +9,7 @@ Overview
 - Cursor rules and Copilot guidelines are included if present in the repository. If not, note their absence.
 
 Quick Start: local dev setup
+
 - Create a virtual environment: `python -m venv .venv`.
 - Activate it: `source .venv/bin/activate` (Unix) or `.venv\Scripts\activate` (Windows).
 - Install development dependencies: `pip install -e '.[dev]'`.
@@ -16,8 +18,9 @@ Quick Start: local dev setup
 
 Note: the project uses setuptools with a pyproject.toml and dev extras for tests.
 
-1) Build / Lint / Test commands
-- Build distributions: `python -m build` (produces dist/*.whl and dist/*.tar.gz).
+1. Build / Lint / Test commands
+
+- Build distributions: `python -m build` (produces dist/_.whl and dist/_.tar.gz).
 - Install in editable mode (dev): `pip install -e '.[dev]'`.
 - **pytest:** Always run tests with the project virtualenv’s Python (not a system interpreter and not bare `pytest` on PATH unless you know it is this venv). After `pip install -e '.[dev]'`, use:
   - Unix / macOS: `.venv/bin/python3 -m pytest …`
@@ -36,7 +39,8 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 - Quick full verify (lint + tests):
   - `ruff check src tests && .venv/bin/python3 -m pytest -q --maxfail=1 --disable-warnings`
 
-2) Code style guidelines
+2. Code style guidelines
+
 - Goals: readability, reproducibility, and minimal surprises for new contributors.
 
 - Imports
@@ -130,7 +134,7 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
   - **Strategy research parity rule (mandatory):** Every strategy research section on `research.html` must provide all three capabilities at the same time: (1) quick-jump navigation entry, (2) candidate-pool group preset selector, and (3) fixed-strategy library + MIX composition support. New strategy sections are not complete unless these three are implemented together.
   - **Strategy baseline charting/reporting rule (mandatory):** Every strategy page/output (single strategy and portfolio strategy) must include the following baseline analytics set, with benchmark/excess parts shown only when benchmark exists:
     1. Strategy NAV curve and benchmark NAV curve (if any) using log scale; subplot shows strategy NAV RSI.
-    2. Strategy-vs-benchmark ratio curve (if benchmark exists) using log scale; main ratio chart must support Bollinger Bands using three middle-band MA windows (MA60, MA120, MA250). Default visible band is MA250; MA60 and MA120 are available as optional overlays. For each MA window, upper/lower bands must be computed from the same window's rolling mean and rolling std (mean ± 2*std). Subplot shows ratio RSI.
+    2. Strategy-vs-benchmark ratio curve (if benchmark exists) using log scale; main ratio chart must support Bollinger Bands using three middle-band MA windows (MA60, MA120, MA250). Default visible band is MA250; MA60 and MA120 are available as optional overlays. For each MA window, upper/lower bands must be computed from the same window's rolling mean and rolling std (mean ± 2\*std). Subplot shows ratio RSI.
     3. Strategy and benchmark (if any) drawdown curves.
     4. 40-day return spread between strategy and benchmark (if benchmark exists).
     5. Strategy rolling returns for 6m/1y/2y/3y.
@@ -156,22 +160,26 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 - Copilot rules
   - Copilot instruction file: not present in this repository.
 
-3) Where to put rules (and how to extend)
+3. Where to put rules (and how to extend)
+
 - If you add Cursor rules: create `.cursor/rules/your-rule.md` and reference them in this file.
 - If you add Copilot rules: add `.github/copilot-instructions.md` with guidance for code generation.
 
-4) Quick wins for maintainers
+4. Quick wins for maintainers
+
 - Run `.venv/bin/python3 -m pytest -q` locally to verify core behavior before submitting PRs (see the **pytest** bullet in section 1).
 - Run `ruff check` and `black --check` to keep code style consistent.
 - Add small, focused tests for any new feature or bug fix.
 - When adding or changing an API route, add or extend an HTTP-level contract test so every method/path remains covered (see **API contract test rule** above).
 
 Appendix: repository references
+
 - Tests live under `/tests`.
 - Source code lives under `/src` with top-level package `etf_momentum`.
 - The project uses pyproject.toml to declare packaging and pytest config.
 
 Appendix: web UI (shared stylesheet)
+
 - **Shared theme:** `src/etf_momentum/web/terminal.css` holds the common “research terminal” styles (CSS variables, typography tokens, panels, forms, tables, theme toggle, print rules, and components used by the main research page such as `.tabBtn` / `.reportCard`). Prefer editing this file when changing cross-page look-and-feel instead of duplicating large `<style>` blocks.
 - **Serving:** The FastAPI app mounts the `web/` directory at **`/static`** (when that directory exists). Pages load the sheet with `<link rel="stylesheet" href="/static/terminal.css" />`. Example URL: `GET /static/terminal.css`. Contract coverage for this path lives in `tests/test_app_root.py` (`test_static_shared_terminal_css`).
 - **Per-page overrides:** Each HTML file should keep a small inline `<style>` after the link for page-only rules (chart heights, tab layout differences, margins). Use the local/system font stack defined in `terminal.css`; do not add external font dependencies (e.g., Google Fonts) in page `<head>`.

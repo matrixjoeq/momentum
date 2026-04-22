@@ -11,7 +11,12 @@ def test_futures_pool_crud_and_fetch_contract(api_client: TestClient) -> None:
     up = post_json_ok(
         client,
         "/api/futures",
-        {"code": "RB0", "name": "螺纹钢主连", "start_date": "20240101", "end_date": "20241231"},
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "start_date": "20240101",
+            "end_date": "20241231",
+        },
     )
     assert up["code"] == "RB0"
     assert up["name"] == "螺纹钢主连"
@@ -49,16 +54,22 @@ def test_futures_pool_crud_and_fetch_contract(api_client: TestClient) -> None:
     assert body["purged"]["prices"] >= 0
 
 
-def test_futures_fetch_selected_partial_failure_contract(api_client: TestClient) -> None:
+def test_futures_fetch_selected_partial_failure_contract(
+    api_client: TestClient,
+) -> None:
     client = api_client
     client.post("/api/futures", json={"code": "IF0", "name": "股指主连"})
-    out = post_json_ok(client, "/api/futures/fetch-selected", {"codes": ["NOPE", "IF0"]})
+    out = post_json_ok(
+        client, "/api/futures/fetch-selected", {"codes": ["NOPE", "IF0"]}
+    )
     assert {x["code"] for x in out} == {"NOPE", "IF0"}
     assert any(x["code"] == "NOPE" and x["status"] == "failed" for x in out)
     assert any(x["code"] == "IF0" and x["status"] in {"success", "failed"} for x in out)
 
 
-def test_futures_pool_auto_tag_classification_when_tags_empty(api_client: TestClient) -> None:
+def test_futures_pool_auto_tag_classification_when_tags_empty(
+    api_client: TestClient,
+) -> None:
     client = api_client
     rb = post_json_ok(
         client,
@@ -94,20 +105,31 @@ def test_futures_pool_auto_tag_classification_when_tags_empty(api_client: TestCl
     assert by_code["IF0"]["tags"] == ["股指期货"]
 
 
-def test_futures_fetch_incremental_fallback_and_full_modes_contract(api_client: TestClient) -> None:
+def test_futures_fetch_incremental_fallback_and_full_modes_contract(
+    api_client: TestClient,
+) -> None:
     client = api_client
     post_json_ok(
         client,
         "/api/futures",
-        {"code": "RB0", "name": "螺纹钢主连", "start_date": "20240101", "end_date": "20241231"},
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "start_date": "20240101",
+            "end_date": "20241231",
+        },
     )
 
-    first = post_json_ok(client, "/api/futures/RB0/fetch", {"fetch_type": "incremental"})
+    first = post_json_ok(
+        client, "/api/futures/RB0/fetch", {"fetch_type": "incremental"}
+    )
     assert first["status"] == "success"
     assert first["inserted_or_updated"] >= 1
     assert "mode=incremental->full" in (first.get("message") or "")
 
-    second = post_json_ok(client, "/api/futures/RB0/fetch", {"fetch_type": "incremental"})
+    second = post_json_ok(
+        client, "/api/futures/RB0/fetch", {"fetch_type": "incremental"}
+    )
     assert second["status"] == "success"
     assert second["inserted_or_updated"] == 0
     assert "mode=incremental" in (second.get("message") or "")
@@ -123,7 +145,12 @@ def test_futures_synthesize_all_api_contract(api_client: TestClient) -> None:
     post_json_ok(
         client,
         "/api/futures",
-        {"code": "RB0", "name": "螺纹钢主连", "start_date": "20240101", "end_date": "20241231"},
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "start_date": "20240101",
+            "end_date": "20241231",
+        },
     )
     fetched = post_json_ok(client, "/api/futures/RB0/fetch", {"fetch_type": "full"})
     assert fetched["status"] == "success"
@@ -152,7 +179,12 @@ def test_futures_validate_all_api_contract(api_client: TestClient) -> None:
     post_json_ok(
         client,
         "/api/futures",
-        {"code": "RB0", "name": "螺纹钢主连", "start_date": "20240101", "end_date": "20241231"},
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "start_date": "20240101",
+            "end_date": "20241231",
+        },
     )
     fetched = post_json_ok(client, "/api/futures/RB0/fetch", {"fetch_type": "full"})
     assert fetched["status"] == "success"

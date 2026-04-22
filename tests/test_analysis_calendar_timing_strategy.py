@@ -8,7 +8,9 @@ from etf_momentum.analysis.calendar_timing_strategy import (
 from etf_momentum.db.models import EtfPrice
 
 
-def test_calendar_timing_uses_hfq_benchmark_and_none_with_fallback_for_strategy(session_factory):
+def test_calendar_timing_uses_hfq_benchmark_and_none_with_fallback_for_strategy(
+    session_factory,
+):
     sf = session_factory
     code = "AAA"
     dates = [d.date() for d in pd.date_range("2024-01-02", periods=60, freq="B")]
@@ -82,19 +84,23 @@ def test_calendar_timing_uses_hfq_benchmark_and_none_with_fallback_for_strategy(
     meta = out.get("meta") or {}
     assert "hfq" in str(meta.get("benchmark_price_basis") or "").lower()
     assert "none" in str(meta.get("strategy_price_basis") or "").lower()
-    m = ((out.get("metrics") or {}).get("strategy") or {})
+    m = (out.get("metrics") or {}).get("strategy") or {}
     assert "avg_daily_turnover" in m
     assert "avg_annual_turnover" in m
     assert "avg_daily_trade_count" in m
     assert "avg_annual_trade_count" in m
 
-    bench_nav = [float(x) for x in (out.get("nav") or {}).get("series", {}).get("BUY_HOLD", [])]
+    bench_nav = [
+        float(x) for x in (out.get("nav") or {}).get("series", {}).get("BUY_HOLD", [])
+    ]
     assert len(bench_nav) == len(dates)
     # Benchmark: single-asset HFQ close buy-and-hold (calendar close-to-close).
     expected_final_bench = float(hfq_px[-1] / hfq_px[0])
     assert bench_nav[-1] == pytest.approx(expected_final_bench, rel=1e-8)
 
-    strat_nav = [float(x) for x in (out.get("nav") or {}).get("series", {}).get("STRAT", [])]
+    strat_nav = [
+        float(x) for x in (out.get("nav") or {}).get("series", {}).get("STRAT", [])
+    ]
     assert strat_nav
     # Without none->hfq fallback on the split day, strategy NAV would collapse deeply when in position.
     assert min(strat_nav) > 0.80
@@ -172,8 +178,15 @@ def test_calendar_timing_dynamic_universe_uses_union_interval(session_factory):
             ),
         )
 
-    n_inter = int(((out_intersection.get("metrics") or {}).get("strategy") or {}).get("sample_days") or 0)
-    n_union = int(((out_union.get("metrics") or {}).get("strategy") or {}).get("sample_days") or 0)
+    n_inter = int(
+        ((out_intersection.get("metrics") or {}).get("strategy") or {}).get(
+            "sample_days"
+        )
+        or 0
+    )
+    n_union = int(
+        ((out_union.get("metrics") or {}).get("strategy") or {}).get("sample_days") or 0
+    )
     assert n_union > n_inter
     assert bool((out_union.get("meta") or {}).get("dynamic_universe")) is True
 
@@ -217,7 +230,7 @@ def test_calendar_timing_next_plan_includes_current_month_decision(session_facto
             ),
         )
 
-    plan = ((out.get("next_execution_plan") or {}).get("plan") or {})
+    plan = (out.get("next_execution_plan") or {}).get("plan") or {}
     assert str(plan.get("type") or "") == "entry"
     # 2026-03-31 is the next trading day after natural decision day 2026-03-30.
     assert str(plan.get("decision_date") or "") == "2026-03-30"
@@ -267,7 +280,7 @@ def test_calendar_timing_trade_stats_by_code_no_extreme_explosions(session_facto
             ),
         )
 
-    by_code = (((out.get("trade_statistics") or {}).get("by_code")) or {})
+    by_code = ((out.get("trade_statistics") or {}).get("by_code")) or {}
     for c, st in by_code.items():
         all_stats = (st or {}).get("all_stats") or {}
         mn = all_stats.get("min")
@@ -318,13 +331,15 @@ def test_calendar_timing_close_exec_does_not_include_post_exit_return(session_fa
             ),
         )
 
-    rs = (((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or [])
+    rs = ((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or []
     assert rs, "expected at least one trade sample"
     # If close-exit leaks post-exit close->next-close return, this trade would be ~+100%.
     assert max(float(x) for x in rs) < 0.2
 
 
-def test_calendar_timing_open_exec_does_not_include_decision_day_intraday_return(session_factory):
+def test_calendar_timing_open_exec_does_not_include_decision_day_intraday_return(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2026-03-02", "2026-04-10", freq="B")]
     with sf() as db:
@@ -369,13 +384,15 @@ def test_calendar_timing_open_exec_does_not_include_decision_day_intraday_return
             ),
         )
 
-    rs = (((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or [])
+    rs = ((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or []
     assert rs, "expected at least one trade sample"
     # If decision-day intraday return leaks, trade return would be huge positive.
     assert max(float(x) for x in rs) < 0.2
 
 
-def test_calendar_timing_open_exec_does_not_include_exit_day_intraday_return(session_factory):
+def test_calendar_timing_open_exec_does_not_include_exit_day_intraday_return(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2026-03-02", "2026-04-10", freq="B")]
     with sf() as db:
@@ -419,7 +436,7 @@ def test_calendar_timing_open_exec_does_not_include_exit_day_intraday_return(ses
             ),
         )
 
-    rs = (((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or [])
+    rs = ((out.get("trade_statistics") or {}).get("overall") or {}).get("returns") or []
     assert rs, "expected at least one trade sample"
     # If exit-day intraday return leaks, trade return would be huge positive.
     assert max(float(x) for x in rs) < 0.2
@@ -472,7 +489,9 @@ def test_calendar_timing_risk_budget_position_mode(session_factory):
         assert sum(float(x.get("weight") or 0.0) for x in holds) <= 1.0000001
 
 
-def test_calendar_timing_return_decomposition_open_includes_overnight_component(session_factory):
+def test_calendar_timing_return_decomposition_open_includes_overnight_component(
+    session_factory,
+):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2026-03-02", periods=80, freq="B")]
     with sf() as db:
@@ -521,5 +540,7 @@ def test_calendar_timing_return_decomposition_open_includes_overnight_component(
     # Open execution should still include overnight contribution when holding across days.
     assert max(abs(x) for x in overnight) > 1e-8
     for i in range(len(gross)):
-        assert gross[i] == pytest.approx(overnight[i] + intraday[i] + interaction[i], abs=1e-12)
+        assert gross[i] == pytest.approx(
+            overnight[i] + intraday[i] + interaction[i], abs=1e-12
+        )
         assert net[i] == pytest.approx(gross[i] - cost[i], abs=1e-12)

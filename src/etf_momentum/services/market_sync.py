@@ -21,7 +21,12 @@ _DEFAULT_ADJUSTS = ("qfq", "hfq", "none")
 
 # fixed mini-program pool
 FIXED_CODES = ["159915", "511010", "513100", "518880"]
-FIXED_NAMES = {"159915": "创业板ETF", "511010": "国债ETF", "513100": "纳指ETF", "518880": "黄金ETF"}
+FIXED_NAMES = {
+    "159915": "创业板ETF",
+    "511010": "国债ETF",
+    "513100": "纳指ETF",
+    "518880": "黄金ETF",
+}
 
 
 def _ymd(d: dt.date) -> str:
@@ -60,9 +65,13 @@ def sync_fixed_pool_prices(
     if not adj_list:
         adj_list = list(_DEFAULT_ADJUSTS)
     if any(x not in set(_DEFAULT_ADJUSTS) for x in adj_list):
-        raise ValueError(f"adjusts must be subset of {_DEFAULT_ADJUSTS}; got {adj_list}")
+        raise ValueError(
+            f"adjusts must be subset of {_DEFAULT_ADJUSTS}; got {adj_list}"
+        )
 
-    do_full = bool(settings.auto_sync_full_refresh if full_refresh is None else full_refresh)
+    do_full = bool(
+        settings.auto_sync_full_refresh if full_refresh is None else full_refresh
+    )
 
     out: dict[str, object] = {
         "date": _ymd(run_date),
@@ -75,7 +84,13 @@ def sync_fixed_pool_prices(
     # ensure pool entries exist
     for code in FIXED_CODES:
         if get_etf_pool_by_code(db, code) is None:
-            upsert_etf_pool(db, code=code, name=FIXED_NAMES.get(code, code), start_date=None, end_date=None)
+            upsert_etf_pool(
+                db,
+                code=code,
+                name=FIXED_NAMES.get(code, code),
+                start_date=None,
+                end_date=None,
+            )
     db.flush()
 
     step_total = len(FIXED_CODES) * max(1, len(adj_list))
@@ -86,7 +101,9 @@ def sync_fixed_pool_prices(
         for adj in adj_list:
             try:
                 pool = get_etf_pool_by_code(db, code)
-                pool_start = (pool.start_date if pool is not None and pool.start_date else None) or settings.default_start_date
+                pool_start = (
+                    pool.start_date if pool is not None and pool.start_date else None
+                ) or settings.default_start_date
 
                 if do_full:
                     start = pool_start
@@ -95,10 +112,17 @@ def sync_fixed_pool_prices(
                     start = _next_day_ymd(last) if last else pool_start
                 end = _ymd(run_date)
                 if start > end:
-                    code_out["adjusts"][adj] = {"skipped": True, "reason": "up_to_date", "start": start, "end": end}
+                    code_out["adjusts"][adj] = {
+                        "skipped": True,
+                        "reason": "up_to_date",
+                        "start": start,
+                        "end": end,
+                    }
                     continue
 
-                res = ingest_one_etf(db, ak=ak, code=code, start_date=start, end_date=end, adjust=adj)
+                res = ingest_one_etf(
+                    db, ak=ak, code=code, start_date=start, end_date=end, adjust=adj
+                )
                 code_out["adjusts"][adj] = {
                     "skipped": False,
                     "status": res.status,
@@ -121,8 +145,14 @@ def sync_fixed_pool_prices(
                     code_out["ok"] = False
                     out["ok"] = False
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.exception("sync_fixed_pool_prices failed: code=%s adj=%s", code, adj)
-                code_out["adjusts"][adj] = {"skipped": False, "status": "failed", "error": str(e)}
+                logger.exception(
+                    "sync_fixed_pool_prices failed: code=%s adj=%s", code, adj
+                )
+                code_out["adjusts"][adj] = {
+                    "skipped": False,
+                    "status": "failed",
+                    "error": str(e),
+                }
                 code_out["ok"] = False
                 out["ok"] = False
 
@@ -151,4 +181,3 @@ def sync_fixed_pool_prices(
         out["codes"][code] = code_out
 
     return out
-

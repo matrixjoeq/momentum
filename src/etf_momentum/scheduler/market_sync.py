@@ -32,9 +32,13 @@ def _next_day_ymd(s: str) -> str:
     return _ymd(d + dt.timedelta(days=1))
 
 
-def _compute_next_run(now: dt.datetime, *, hour: int, minute: int, tz: ZoneInfo) -> dt.datetime:
+def _compute_next_run(
+    now: dt.datetime, *, hour: int, minute: int, tz: ZoneInfo
+) -> dt.datetime:
     local_now = now.astimezone(tz)
-    target = local_now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+    target = local_now.replace(
+        hour=int(hour), minute=int(minute), second=0, microsecond=0
+    )
     if target <= local_now:
         target = target + dt.timedelta(days=1)
     return target
@@ -65,7 +69,14 @@ async def _market_sync_loop(app: FastAPI) -> None:
     hour = int(settings.auto_sync_hour)
     minute = int(settings.auto_sync_minute)
 
-    logger.info("auto_sync scheduler started (tz=%s time=%02d:%02d cal=%s enabled=%s)", settings.auto_sync_tz, hour, minute, cal, settings.auto_sync_enabled)
+    logger.info(
+        "auto_sync scheduler started (tz=%s time=%02d:%02d cal=%s enabled=%s)",
+        settings.auto_sync_tz,
+        hour,
+        minute,
+        cal,
+        settings.auto_sync_enabled,
+    )
 
     # serialize runs in-process
     lock = asyncio.Lock()
@@ -91,10 +102,20 @@ async def _market_sync_loop(app: FastAPI) -> None:
             # Create/lookup job row (unique on dedupe_key).
             sf = app.state.session_factory
             with _session_cm(sf) as db:
-                job = create_sync_job(db, dedupe_key=dedupe, run_date=run_date, full_refresh=full_refresh, adjusts=adjusts)
+                job = create_sync_job(
+                    db,
+                    dedupe_key=dedupe,
+                    run_date=run_date,
+                    full_refresh=full_refresh,
+                    adjusts=adjusts,
+                )
                 # If already finished, skip (avoid duplicate runs if instance restarts within the window)
                 if job.finished_at is not None:
-                    logger.info("auto_sync: job already finished (job_id=%s status=%s); skip", int(job.id), job.status)
+                    logger.info(
+                        "auto_sync: job already finished (job_id=%s status=%s); skip",
+                        int(job.id),
+                        job.status,
+                    )
                     continue
                 update_sync_job(
                     db,
@@ -135,11 +156,18 @@ async def _market_sync_loop(app: FastAPI) -> None:
                     status=("success" if ok else "failed"),
                     finished_at=dt.datetime.now(dt.timezone.utc),
                     result=dict(res),
-                    error_message=(None if ok else "auto_sync failed; see result.codes for details"),
+                    error_message=(
+                        None if ok else "auto_sync failed; see result.codes for details"
+                    ),
                     progress={"phase": "done", "ok": ok},
                 )
                 db4.commit()
-            logger.info("auto_sync: done sync for %s ok=%s job_id=%s", run_date.isoformat(), ok, int(job.id))
+            logger.info(
+                "auto_sync: done sync for %s ok=%s job_id=%s",
+                run_date.isoformat(),
+                ok,
+                int(job.id),
+            )
 
 
 def start_auto_sync(app: FastAPI) -> None:
@@ -173,4 +201,3 @@ async def stop_auto_sync(app: FastAPI) -> None:
         pass
     finally:
         app.state.auto_sync_task = None
-

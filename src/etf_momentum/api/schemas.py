@@ -130,11 +130,24 @@ class FuturesPoolUpsert(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     start_date: str | None = Field(default=None, description="YYYYMMDD")
     end_date: str | None = Field(default=None, description="YYYYMMDD")
-    min_margin_ratio: float | None = Field(default=None, ge=0.0, le=1.0, description="Minimum margin ratio, decimal in [0,1]")
-    contract_multiplier: float | None = Field(default=None, gt=0.0, description="Contract multiplier (trading unit)")
-    price_unit: str | None = Field(default=None, max_length=64, description="Quoted price unit, e.g. 元/吨")
-    min_price_tick: float | None = Field(default=None, gt=0.0, description="Minimum tick size")
-    tags: list[str] | None = Field(default=None, description="Optional tags; empty means auto category tag")
+    min_margin_ratio: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Minimum margin ratio, decimal in [0,1]",
+    )
+    contract_multiplier: float | None = Field(
+        default=None, gt=0.0, description="Contract multiplier (trading unit)"
+    )
+    price_unit: str | None = Field(
+        default=None, max_length=64, description="Quoted price unit, e.g. 元/吨"
+    )
+    min_price_tick: float | None = Field(
+        default=None, gt=0.0, description="Minimum tick size"
+    )
+    tags: list[str] | None = Field(
+        default=None, description="Optional tags; empty means auto category tag"
+    )
     contract_extend_calendar_days: int | None = Field(
         default=None,
         ge=1,
@@ -238,8 +251,12 @@ class FuturesPriceOut(BaseModel):
 
 class FuturesResearchGroupUpsert(BaseModel):
     name: str = Field(min_length=1, max_length=128, description="Group name")
-    codes: list[str] = Field(default_factory=list, description="Futures symbols in group")
-    set_active: bool = Field(default=True, description="If true, set this group as current active group")
+    codes: list[str] = Field(
+        default_factory=list, description="Futures symbols in group"
+    )
+    set_active: bool = Field(
+        default=True, description="If true, set this group as current active group"
+    )
 
 
 class FuturesResearchGroupOut(BaseModel):
@@ -249,8 +266,12 @@ class FuturesResearchGroupOut(BaseModel):
 
 
 class FuturesResearchGroupsImportRequest(BaseModel):
-    groups: dict[str, list[str]] = Field(description="Mapping: group name -> symbol list")
-    active_group: str | None = Field(default=None, description="Optional active group name")
+    groups: dict[str, list[str]] = Field(
+        description="Mapping: group name -> symbol list"
+    )
+    active_group: str | None = Field(
+        default=None, description="Optional active group name"
+    )
 
 
 class FuturesResearchStateUpdate(BaseModel):
@@ -269,28 +290,46 @@ class FuturesResearchStateOut(BaseModel):
 
 
 class FuturesCorrelationRequest(BaseModel):
-    group_name: str | None = Field(default=None, description="If null, use active group")
+    group_name: str | None = Field(
+        default=None, description="If null, use active group"
+    )
     range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
-    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    start_date: str | None = Field(
+        default=None, description="Optional explicit YYYYMMDD"
+    )
     end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
-    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+    dynamic_universe: bool | None = Field(
+        default=None, description="If null, use saved global setting"
+    )
     min_obs: int = Field(default=20, ge=2, le=2520)
 
 
 class FuturesCoverageSummaryRequest(BaseModel):
-    group_name: str | None = Field(default=None, description="If null, use active group")
+    group_name: str | None = Field(
+        default=None, description="If null, use active group"
+    )
     range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
-    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    start_date: str | None = Field(
+        default=None, description="Optional explicit YYYYMMDD"
+    )
     end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
-    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+    dynamic_universe: bool | None = Field(
+        default=None, description="If null, use saved global setting"
+    )
 
 
 class FuturesCorrelationSelectRequest(BaseModel):
-    group_name: str | None = Field(default=None, description="If null, use active group")
+    group_name: str | None = Field(
+        default=None, description="If null, use active group"
+    )
     range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
-    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    start_date: str | None = Field(
+        default=None, description="Optional explicit YYYYMMDD"
+    )
     end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
-    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+    dynamic_universe: bool | None = Field(
+        default=None, description="If null, use saved global setting"
+    )
     min_obs: int = Field(default=2, ge=2, le=2520)
     mode: str = Field(default="lowest", description="lowest|highest")
     score_basis: str = Field(default="mean", description="mean|mean_abs")
@@ -298,20 +337,33 @@ class FuturesCorrelationSelectRequest(BaseModel):
 
 
 class FuturesTrendBacktestRequest(BaseModel):
-    group_name: str | None = Field(default=None, description="If null, use active group")
+    group_name: str | None = Field(
+        default=None, description="If null, use active group"
+    )
     range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
-    start_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    start_date: str | None = Field(
+        default=None, description="Optional explicit YYYYMMDD"
+    )
     end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
-    dynamic_universe: bool | None = Field(default=None, description="If null, use saved global setting")
+    dynamic_universe: bool | None = Field(
+        default=None, description="If null, use saved global setting"
+    )
     exec_price: str = Field(default="close", description="open|close")
     fast_ma: int = Field(default=20, ge=2, le=500)
     slow_ma: int = Field(default=60, ge=3, le=800)
     position_size_pct: float = Field(default=1.0, gt=0.0, le=1.0)
     min_points: int = Field(default=120, ge=2, le=100000)
-    cost_bps: float = Field(default=5.0, ge=0.0, le=2000.0, description="Commission bps with fee_side semantics")
+    cost_bps: float = Field(
+        default=5.0,
+        ge=0.0,
+        le=2000.0,
+        description="Commission bps with fee_side semantics",
+    )
     fee_side: str = Field(default="two_way", description="one_way|two_way")
     slippage_type: str = Field(default="percent", description="percent|price_spread")
-    slippage_value: float = Field(default=0.0005, ge=0.0, description="percent ratio or absolute price spread")
+    slippage_value: float = Field(
+        default=0.0005, ge=0.0, description="percent ratio or absolute price spread"
+    )
     slippage_side: str = Field(default="two_way", description="one_way|two_way")
 
 
@@ -338,10 +390,21 @@ class SyncFixedPoolRequest(BaseModel):
     Intended to be invoked by WeChat Cloud scheduled trigger (HTTP).
     """
 
-    token: str | None = Field(default=None, description="Optional sync token. If MOMENTUM_SYNC_TOKEN is set, token is required.")
-    date: str | None = Field(default=None, description="YYYYMMDD; default=server today (Asia/Shanghai)")
-    adjusts: list[str] = Field(default_factory=lambda: ["qfq", "hfq", "none"], description="Adjust list: subset of qfq/hfq/none")
-    full_refresh: bool | None = Field(default=None, description="If true, refresh full history every run; if null, use server default.")
+    token: str | None = Field(
+        default=None,
+        description="Optional sync token. If MOMENTUM_SYNC_TOKEN is set, token is required.",
+    )
+    date: str | None = Field(
+        default=None, description="YYYYMMDD; default=server today (Asia/Shanghai)"
+    )
+    adjusts: list[str] = Field(
+        default_factory=lambda: ["qfq", "hfq", "none"],
+        description="Adjust list: subset of qfq/hfq/none",
+    )
+    full_refresh: bool | None = Field(
+        default=None,
+        description="If true, refresh full history every run; if null, use server default.",
+    )
     force_new: bool = Field(
         default=False,
         description="If true, always create a new job id (retry suffix) even if an identical job is already queued/running.",
@@ -379,13 +442,16 @@ class SyncJobOut(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
 
+
 class BaselineAnalysisRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     benchmark_code: str | None = None
     adjust: str = Field(default="hfq", description="qfq/hfq/none (global)")
-    rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly/none")
+    rebalance: str = Field(
+        default="weekly", description="daily/weekly/monthly/quarterly/yearly/none"
+    )
     risk_free_rate: float = Field(
         default=0.025,
         description="Annualized risk-free rate for Sharpe/Sortino (decimal). Default 0.025 ~= 2.5% (CN 0-1y gov).",
@@ -397,15 +463,25 @@ class BaselineAnalysisRequest(BaseModel):
         default_factory=lambda: [252, 126],
         description="FFT rolling windows in trading days, e.g. [252,126] -> last_252 and last_126 summaries",
     )
-    fft_roll: bool = Field(default=True, description="If true, compute rolling FFT time series for EW (downsampled by fft_roll_step)")
-    fft_roll_step: int = Field(default=5, ge=1, description="Compute rolling FFT features every N trading days to reduce runtime")
+    fft_roll: bool = Field(
+        default=True,
+        description="If true, compute rolling FFT time series for EW (downsampled by fft_roll_step)",
+    )
+    fft_roll_step: int = Field(
+        default=5,
+        ge=1,
+        description="Compute rolling FFT features every N trading days to reduce runtime",
+    )
     rp_window_days: int = Field(
         default=60,
         ge=2,
         le=2520,
         description="ERC / inverse-vol rolling window (trading days): sample covariance for RP (ERC) and vol for IVOL",
     )
-    holding_mode: str = Field(default="EW", description="Holding strategy mode: EW|RP (ERC)|IVOL (inverse-vol)|CUSTOM")
+    holding_mode: str = Field(
+        default="EW",
+        description="Holding strategy mode: EW|RP (ERC)|IVOL (inverse-vol)|CUSTOM",
+    )
     custom_weights: dict[str, float] | None = Field(
         default=None,
         description="Custom target weights by code in decimal (e.g. {'510300':0.4,'518880':0.3}); leftover to cash.",
@@ -430,8 +506,13 @@ class LeadLagAnalysisRequest(BaseModel):
     Lead/lag and causality study between an ETF and a volatility index (VIX/GVZ).
     """
 
-    etf_code: str = Field(min_length=1, description="ETF code (db mode) or a label for the asset (external mode), e.g. 518880")
-    asset_provider: str = Field(default="db", description="db|stooq|yahoo|auto (asset side)")
+    etf_code: str = Field(
+        min_length=1,
+        description="ETF code (db mode) or a label for the asset (external mode), e.g. 518880",
+    )
+    asset_provider: str = Field(
+        default="db", description="db|stooq|yahoo|auto (asset side)"
+    )
     asset_symbol: str | None = Field(
         default=None,
         description="When asset_provider != db, the provider symbol to fetch as the asset close series, e.g. qqq.us or ^ndx",
@@ -440,25 +521,60 @@ class LeadLagAnalysisRequest(BaseModel):
         min_length=1,
         description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD (Stooq), GC.F (Stooq), GC=F (Yahoo).",
     )
-    index_provider: str = Field(default="cboe", description="cboe|yahoo|fred|stooq|sina|auto")
-    index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
+    index_provider: str = Field(
+        default="cboe", description="cboe|yahoo|fred|stooq|sina|auto"
+    )
+    index_align: str = Field(
+        default="cn_next_trading_day", description="none|cn_next_trading_day"
+    )
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
-    max_lag: int = Field(default=20, ge=0, le=252, description="Cross-correlation lag window (+/- trading days)")
-    granger_max_lag: int = Field(default=10, ge=1, le=60, description="Max lag order for Granger causality tests")
+    max_lag: int = Field(
+        default=20,
+        ge=0,
+        le=252,
+        description="Cross-correlation lag window (+/- trading days)",
+    )
+    granger_max_lag: int = Field(
+        default=10, ge=1, le=60, description="Max lag order for Granger causality tests"
+    )
     alpha: float = Field(default=0.05, gt=0.0, lt=1.0, description="Significance level")
     # Trading usefulness evaluation
-    trade_cost_bps: float = Field(default=2.0, ge=0.0, description="Per-switch cost (bps) for the toy strategy")
-    rolling_window: int = Field(default=252, ge=20, le=2520, description="Rolling window for stability charts (trading days)")
-    enable_threshold: bool = Field(default=True, description="If true, add threshold-gated signal evaluation")
-    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_ret| to trigger signals")
-    walk_forward: bool = Field(default=True, description="If true, run walk-forward (train->test) parameter selection")
-    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9, description="Train split ratio for walk-forward")
-    walk_objective: str = Field(default="sharpe", description="Walk-forward objective: sharpe|cagr")
+    trade_cost_bps: float = Field(
+        default=2.0, ge=0.0, description="Per-switch cost (bps) for the toy strategy"
+    )
+    rolling_window: int = Field(
+        default=252,
+        ge=20,
+        le=2520,
+        description="Rolling window for stability charts (trading days)",
+    )
+    enable_threshold: bool = Field(
+        default=True, description="If true, add threshold-gated signal evaluation"
+    )
+    threshold_quantile: float = Field(
+        default=0.80,
+        gt=0.0,
+        lt=1.0,
+        description="Quantile on |index_ret| to trigger signals",
+    )
+    walk_forward: bool = Field(
+        default=True,
+        description="If true, run walk-forward (train->test) parameter selection",
+    )
+    train_ratio: float = Field(
+        default=0.60, gt=0.1, lt=0.9, description="Train split ratio for walk-forward"
+    )
+    walk_objective: str = Field(
+        default="sharpe", description="Walk-forward objective: sharpe|cagr"
+    )
 
     # Volatility-timing strategy (level-based, tiered exposure), e.g. GVZ high -> reduce exposure
-    vol_timing: bool = Field(default=False, description="If true, backtest tiered exposure based on index close level quantiles")
+    vol_timing: bool = Field(
+        default=False,
+        description="If true, backtest tiered exposure based on index close level quantiles",
+    )
     vol_level_quantiles: list[float] = Field(
         default_factory=lambda: [0.8],
         description="Quantile cut points on index close level, ascending. Example: [0.7,0.85,0.95]",
@@ -474,7 +590,10 @@ class LeadLagAnalysisRequest(BaseModel):
     )
 
     # Volatility-timing strategy (level-based, tiered exposure), e.g. GVZ high -> reduce exposure
-    vol_timing: bool = Field(default=False, description="If true, backtest tiered exposure based on index close level quantiles")
+    vol_timing: bool = Field(
+        default=False,
+        description="If true, backtest tiered exposure based on index close level quantiles",
+    )
     vol_level_quantiles: list[float] = Field(
         default_factory=lambda: [0.8],
         description="Quantile cut points on index close level, ascending. Example: [0.7,0.85,0.95]",
@@ -496,8 +615,12 @@ class LeadLagAnalysisResponse(BaseModel):
 
 
 class MacroPairLeadLagRequest(BaseModel):
-    a_series_id: str = Field(min_length=1, description="Series A (target) id, e.g. XAUUSD")
-    b_series_id: str = Field(min_length=1, description="Series B (indicator) id, e.g. DGS10 or DINIW")
+    a_series_id: str = Field(
+        min_length=1, description="Series A (target) id, e.g. XAUUSD"
+    )
+    b_series_id: str = Field(
+        min_length=1, description="Series B (indicator) id, e.g. DGS10 or DINIW"
+    )
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     index_align: str = Field(default="none", description="none|cn_next_trading_day")
@@ -533,9 +656,13 @@ class MacroStep1Request(BaseModel):
     end: str = Field(description="YYYYMMDD")
 
     gold_spot_series_id: str = Field(default="XAUUSD", min_length=1)
-    gold_fut_series_id: str | None = Field(default="GC_FUT", description="Optional, e.g. GC_FUT")
+    gold_fut_series_id: str | None = Field(
+        default="GC_FUT", description="Optional, e.g. GC_FUT"
+    )
     dxy_series_id: str = Field(default="DINIW", min_length=1)
-    yield_series_id: str = Field(default="DGS10", min_length=1, description="One tenor to focus on, e.g. DGS10")
+    yield_series_id: str = Field(
+        default="DGS10", min_length=1, description="One tenor to focus on, e.g. DGS10"
+    )
 
     index_align: str = Field(default="none", description="none|cn_next_trading_day")
     max_lag: int = Field(default=20, ge=0, le=252)
@@ -561,7 +688,9 @@ class MacroSeriesBatchRequest(BaseModel):
     # Optional: if omitted/null/empty, backend will auto-use each series' full stored date range.
     start: str | None = Field(default=None, description="YYYYMMDD (optional)")
     end: str | None = Field(default=None, description="YYYYMMDD (optional)")
-    series_ids: list[str] = Field(min_length=1, description="macro series_id list to fetch from macro_prices")
+    series_ids: list[str] = Field(
+        min_length=1, description="macro series_id list to fetch from macro_prices"
+    )
 
 
 class MacroSeriesBatchResponse(BaseModel):
@@ -573,39 +702,93 @@ class MacroSeriesBatchResponse(BaseModel):
 
 class SimGbmPhase1Request(BaseModel):
     start: str = Field(default="19900101", description="YYYYMMDD")
-    end: str | None = Field(default=None, description="YYYYMMDD; default=last business day")
+    end: str | None = Field(
+        default=None, description="YYYYMMDD; default=last business day"
+    )
     n_assets: int = Field(default=4, ge=2, le=20)
     vol_low: float = Field(default=0.05, gt=0.0, lt=2.0)
     vol_high: float = Field(default=0.30, gt=0.0, lt=2.0)
-    corr_low: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation lower bound; unset means uncorrelated")
-    corr_high: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation upper bound; unset means uncorrelated")
-    mu_low: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift lower bound; unset uses random default range")
-    mu_high: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift upper bound; unset uses random default range")
+    corr_low: float | None = Field(
+        default=None,
+        ge=-0.99,
+        lt=0.99,
+        description="Optional pairwise correlation lower bound; unset means uncorrelated",
+    )
+    corr_high: float | None = Field(
+        default=None,
+        ge=-0.99,
+        lt=0.99,
+        description="Optional pairwise correlation upper bound; unset means uncorrelated",
+    )
+    mu_low: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=3.0,
+        description="Optional annual drift lower bound; unset uses random default range",
+    )
+    mu_high: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=3.0,
+        description="Optional annual drift upper bound; unset uses random default range",
+    )
     seed: int | None = Field(default=None)
 
 
 class SimGbmHoldingStrategyParams(BaseModel):
-    rebalance: str = Field(default="weekly", description="daily|weekly|monthly|quarterly|yearly|none")
-    cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
-    rp_vol_window: int = Field(default=20, ge=2, le=2520, description="Rolling vol window for risk-parity allocation")
+    rebalance: str = Field(
+        default="weekly", description="daily|weekly|monthly|quarterly|yearly|none"
+    )
+    cost_bps: float = Field(
+        default=2.0,
+        ge=0.0,
+        description="Round-trip transaction cost in bps per turnover",
+    )
+    rp_vol_window: int = Field(
+        default=20,
+        ge=2,
+        le=2520,
+        description="Rolling vol window for risk-parity allocation",
+    )
 
 
 class SimGbmPhase2Request(SimGbmPhase1Request):
     lookback_days: int = Field(default=20, ge=2, le=2520)
-    strategy_a: dict | None = Field(default=None, description="Optional rotation strategy params (same semantics as A/B strategy A)")
-    strategy_b: dict | None = Field(default=None, description="Optional rotation strategy params for B variant")
-    target_a: str | None = Field(default=None, description="Compare target A: cash|equal_weight|risk_parity|rotation_a|rotation_b")
-    target_b: str | None = Field(default=None, description="Compare target B: cash|equal_weight|risk_parity|rotation_a|rotation_b")
-    holding_strategy: SimGbmHoldingStrategyParams = Field(default_factory=SimGbmHoldingStrategyParams)
+    strategy_a: dict | None = Field(
+        default=None,
+        description="Optional rotation strategy params (same semantics as A/B strategy A)",
+    )
+    strategy_b: dict | None = Field(
+        default=None, description="Optional rotation strategy params for B variant"
+    )
+    target_a: str | None = Field(
+        default=None,
+        description="Compare target A: cash|equal_weight|risk_parity|rotation_a|rotation_b",
+    )
+    target_b: str | None = Field(
+        default=None,
+        description="Compare target B: cash|equal_weight|risk_parity|rotation_a|rotation_b",
+    )
+    holding_strategy: SimGbmHoldingStrategyParams = Field(
+        default_factory=SimGbmHoldingStrategyParams
+    )
     holding_strategy_a: SimGbmHoldingStrategyParams | None = Field(default=None)
     holding_strategy_b: SimGbmHoldingStrategyParams | None = Field(default=None)
-    phase1_base: dict | None = Field(default=None, description="Optional phase1 payload to reuse generated GBM world directly")
+    phase1_base: dict | None = Field(
+        default=None,
+        description="Optional phase1 payload to reuse generated GBM world directly",
+    )
 
 
 class SimGbmPhase3Request(SimGbmPhase2Request):
     n_sims: int = Field(default=10000, ge=8, le=50000)
     chunk_size: int = Field(default=200, ge=1, le=2000)
-    n_jobs: int = Field(default=0, ge=0, le=64, description="Parallel workers for Monte Carlo runs; 0=auto")
+    n_jobs: int = Field(
+        default=0,
+        ge=0,
+        le=64,
+        description="Parallel workers for Monte Carlo runs; 0=auto",
+    )
 
 
 class SimGbmPhase4Request(SimGbmPhase3Request):
@@ -614,7 +797,9 @@ class SimGbmPhase4Request(SimGbmPhase3Request):
 
 
 class SimGbmAbStrategyParams(BaseModel):
-    rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly")
+    rebalance: str = Field(
+        default="weekly", description="daily/weekly/monthly/quarterly/yearly"
+    )
     rebalance_anchor: int | None = Field(default=None)
     rebalance_shift: str = Field(default="prev")
     exec_price: str = Field(default="open", description="open|close|oc2")
@@ -634,7 +819,9 @@ class SimGbmAbStrategyParams(BaseModel):
     trend_filter: bool = Field(default=False)
     trend_exit_filter: bool = Field(default=False)
     trend_sma_window: int = Field(default=20, ge=1)
-    trend_ma_type: str = Field(default="sma", description="sma|ema|vma(variable/adaptive)")
+    trend_ma_type: str = Field(
+        default="sma", description="sma|ema|vma(variable/adaptive)"
+    )
     bias_filter: bool = Field(default=False)
     bias_exit_filter: bool = Field(default=False)
     bias_type: str = Field(default="bias", description="BIAS signal type: bias|bias_v")
@@ -648,7 +835,9 @@ class SimGbmAbStrategyParams(BaseModel):
     group_pick_policy: str = Field(default="strongest_score")
     asset_groups: dict[str, str] | None = Field(default=None)
     dynamic_universe: bool = Field(default=False)
-    asset_momentum_floor_rules: list[AssetMomentumFloorRule] | None = Field(default=None)
+    asset_momentum_floor_rules: list[AssetMomentumFloorRule] | None = Field(
+        default=None
+    )
     asset_trend_rules: list[AssetTrendRule] | None = Field(default=None)
     asset_bias_rules: list[AssetBiasRule] | None = Field(default=None)
     asset_vol_index_rules: list[AssetVolIndexTimingRule] | None = Field(default=None)
@@ -662,21 +851,62 @@ class SimGbmAbStrategyParams(BaseModel):
 
 class SimGbmAbSignificanceRequest(BaseModel):
     start: str = Field(default="19900101", description="YYYYMMDD")
-    end: str | None = Field(default=None, description="YYYYMMDD; default=last business day")
+    end: str | None = Field(
+        default=None, description="YYYYMMDD; default=last business day"
+    )
     n_worlds: int = Field(default=3000, ge=2, le=20000)
     n_assets: int = Field(default=4, ge=2, le=20)
     vol_low: float = Field(default=0.05, gt=0.0, lt=2.0)
     vol_high: float = Field(default=0.30, gt=0.0, lt=2.0)
-    corr_low: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation lower bound; unset means uncorrelated")
-    corr_high: float | None = Field(default=None, ge=-0.99, lt=0.99, description="Optional pairwise correlation upper bound; unset means uncorrelated")
-    mu_low: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift lower bound; unset uses random default range")
-    mu_high: float | None = Field(default=None, ge=-1.0, le=3.0, description="Optional annual drift upper bound; unset uses random default range")
+    corr_low: float | None = Field(
+        default=None,
+        ge=-0.99,
+        lt=0.99,
+        description="Optional pairwise correlation lower bound; unset means uncorrelated",
+    )
+    corr_high: float | None = Field(
+        default=None,
+        ge=-0.99,
+        lt=0.99,
+        description="Optional pairwise correlation upper bound; unset means uncorrelated",
+    )
+    mu_low: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=3.0,
+        description="Optional annual drift lower bound; unset uses random default range",
+    )
+    mu_high: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=3.0,
+        description="Optional annual drift upper bound; unset uses random default range",
+    )
     seed: int | None = Field(default=None)
-    n_perm: int = Field(default=5000, ge=200, le=20000, description="Permutations; UI default is high; tests may use fewer")
-    n_boot: int = Field(default=3000, ge=200, le=20000, description="Bootstrap resamples; UI default is high; tests may use fewer")
-    n_jobs: int = Field(default=1, ge=0, le=64, description="Parallel workers for world evaluation; 0=auto")
-    stability_repeats: int = Field(default=0, ge=0, le=30, description="Seed stability repeats; 0 disables")
-    stability_worlds: int = Field(default=100, ge=2, le=2000, description="Worlds per seed stability repeat")
+    n_perm: int = Field(
+        default=5000,
+        ge=200,
+        le=20000,
+        description="Permutations; UI default is high; tests may use fewer",
+    )
+    n_boot: int = Field(
+        default=3000,
+        ge=200,
+        le=20000,
+        description="Bootstrap resamples; UI default is high; tests may use fewer",
+    )
+    n_jobs: int = Field(
+        default=1,
+        ge=0,
+        le=64,
+        description="Parallel workers for world evaluation; 0=auto",
+    )
+    stability_repeats: int = Field(
+        default=0, ge=0, le=30, description="Seed stability repeats; 0 disables"
+    )
+    stability_worlds: int = Field(
+        default=100, ge=2, le=2000, description="Worlds per seed stability repeat"
+    )
     target_a: str | None = Field(
         default=None,
         description="A target: cash|equal_weight|risk_parity|rotation_a|rotation_b",
@@ -691,8 +921,12 @@ class SimGbmAbSignificanceRequest(BaseModel):
     )
     strategy_a: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
     strategy_b: SimGbmAbStrategyParams = Field(default_factory=SimGbmAbStrategyParams)
-    holding_strategy_a: SimGbmHoldingStrategyParams = Field(default_factory=SimGbmHoldingStrategyParams)
-    holding_strategy_b: SimGbmHoldingStrategyParams = Field(default_factory=SimGbmHoldingStrategyParams)
+    holding_strategy_a: SimGbmHoldingStrategyParams = Field(
+        default_factory=SimGbmHoldingStrategyParams
+    )
+    holding_strategy_b: SimGbmHoldingStrategyParams = Field(
+        default_factory=SimGbmHoldingStrategyParams
+    )
 
 
 class MacroStep2Request(BaseModel):
@@ -739,7 +973,9 @@ class MacroStep3Request(BaseModel):
 
     cn_gold_series_id: str = Field(default="SGE_AU9999", min_length=1)
     global_gold_series_id: str = Field(default="XAUUSD", min_length=1)
-    fx_series_id: str = Field(default="USDCNH", min_length=1, description="FX to convert global->CNY")
+    fx_series_id: str = Field(
+        default="USDCNH", min_length=1, description="FX to convert global->CNY"
+    )
 
     index_align: str = Field(default="none", description="none|cn_next_trading_day")
     max_lag: int = Field(default=20, ge=0, le=252)
@@ -770,7 +1006,9 @@ class MacroStep4Request(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
 
-    etf_code: str = Field(default="518880", min_length=1, description="ETF code in etf_pool/etf_prices")
+    etf_code: str = Field(
+        default="518880", min_length=1, description="ETF code in etf_pool/etf_prices"
+    )
     adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
     cn_spot_series_id: str = Field(default="SGE_AU9999", min_length=1)
 
@@ -793,25 +1031,47 @@ class MacroStep4Response(BaseModel):
     pair: dict | None = None
     error: str | None = None
 
+
 class VixNextActionRequest(BaseModel):
     """
     Live-tradable next-day instruction for CN ETF using VIX/GVZ (Cboe).
     """
 
-    etf_code: str = Field(default="513100", description="A-share ETF code (default: Nasdaq ETF)")
+    etf_code: str = Field(
+        default="513100", description="A-share ETF code (default: Nasdaq ETF)"
+    )
     index: str = Field(default="VIX", description="Vol index: VIX|GVZ")
-    index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
-    calendar: str = Field(default="XSHG", description="Exchange calendar for CN trading days")
+    index_align: str = Field(
+        default="cn_next_trading_day", description="none|cn_next_trading_day"
+    )
+    calendar: str = Field(
+        default="XSHG", description="Exchange calendar for CN trading days"
+    )
     current_position: str = Field(default="unknown", description="long|cash|unknown")
-    lookback_window: int = Field(default=252, ge=20, le=2520, description="Lookback window for threshold estimation")
-    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_ret| (past window) to trigger trades")
-    min_abs_ret: float = Field(default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold")
+    lookback_window: int = Field(
+        default=252,
+        ge=20,
+        le=2520,
+        description="Lookback window for threshold estimation",
+    )
+    threshold_quantile: float = Field(
+        default=0.80,
+        gt=0.0,
+        lt=1.0,
+        description="Quantile on |index_ret| (past window) to trigger trades",
+    )
+    min_abs_ret: float = Field(
+        default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold"
+    )
     mode: str = Field(
         default="next_cn_day",
         description="next_cn_day|latest_available. next_cn_day: return action for next CN trading day; "
         "if signal not ready, return error.",
     )
-    target_cn_trade_date: str | None = Field(default=None, description="Optional CN trade date YYYYMMDD; if null use latest available mapped date")
+    target_cn_trade_date: str | None = Field(
+        default=None,
+        description="Optional CN trade date YYYYMMDD; if null use latest available mapped date",
+    )
 
 
 class VixNextActionResponse(BaseModel):
@@ -829,19 +1089,43 @@ class VixNextActionResponse(BaseModel):
 
 
 class VixSignalBacktestRequest(BaseModel):
-    etf_code: str = Field(default="513100", description="A-share ETF code (default: Nasdaq ETF)")
+    etf_code: str = Field(
+        default="513100", description="A-share ETF code (default: Nasdaq ETF)"
+    )
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
     index: str = Field(default="VIX", description="Vol index: VIX|GVZ")
-    index_align: str = Field(default="cn_next_trading_day", description="none|cn_next_trading_day")
-    calendar: str = Field(default="XSHG", description="Exchange calendar for CN trading days")
-    exec_model: str = Field(default="open_open", description="Execution/return model: open_open|close_close")
-    lookback_window: int = Field(default=252, ge=20, le=2520, description="Lookback window for threshold estimation")
-    threshold_quantile: float = Field(default=0.80, gt=0.0, lt=1.0, description="Quantile on |index_log_ret| to trigger trades")
-    min_abs_ret: float = Field(default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold")
-    trade_cost_bps: float = Field(default=2.0, ge=0.0, description="Per-switch cost (bps) when position changes")
-    initial_position: str = Field(default="long", description="long|cash starting position at start date")
+    index_align: str = Field(
+        default="cn_next_trading_day", description="none|cn_next_trading_day"
+    )
+    calendar: str = Field(
+        default="XSHG", description="Exchange calendar for CN trading days"
+    )
+    exec_model: str = Field(
+        default="open_open", description="Execution/return model: open_open|close_close"
+    )
+    lookback_window: int = Field(
+        default=252,
+        ge=20,
+        le=2520,
+        description="Lookback window for threshold estimation",
+    )
+    threshold_quantile: float = Field(
+        default=0.80,
+        gt=0.0,
+        lt=1.0,
+        description="Quantile on |index_log_ret| to trigger trades",
+    )
+    min_abs_ret: float = Field(
+        default=0.0, ge=0.0, description="Hard minimum abs(log-ret) threshold"
+    )
+    trade_cost_bps: float = Field(
+        default=2.0, ge=0.0, description="Per-switch cost (bps) when position changes"
+    )
+    initial_position: str = Field(
+        default="long", description="long|cash starting position at start date"
+    )
     initial_nav: float = Field(default=1.0, gt=0.0, description="Initial NAV")
 
 
@@ -879,16 +1163,27 @@ class VolProxyMethod(BaseModel):
     Output level is annualized volatility (decimal), intended for level-based tier timing.
     """
 
-    name: str = Field(min_length=1, description="Unique method name in response, e.g. rv20, yz20, har252")
+    name: str = Field(
+        min_length=1,
+        description="Unique method name in response, e.g. rv20, yz20, har252",
+    )
     kind: str = Field(
         description="rv_close|ewma_close|parkinson|garman_klass|rogers_satchell|yang_zhang|har_rv"
     )
-    window: int = Field(default=20, ge=2, le=2520, description="Rolling window (trading days)")
+    window: int = Field(
+        default=20, ge=2, le=2520, description="Rolling window (trading days)"
+    )
     ann: int = Field(default=252, ge=50, le=400, description="Annualization factor")
 
-    ewma_lambda: float = Field(default=0.94, gt=0.0, lt=1.0, description="EWMA decay (ewma_close only)")
-    har_train_window: int = Field(default=252, ge=30, le=2520, description="Rolling train window (har_rv only)")
-    har_horizons: list[int] = Field(default_factory=lambda: [1, 5, 22], description="HAR horizons (har_rv only)")
+    ewma_lambda: float = Field(
+        default=0.94, gt=0.0, lt=1.0, description="EWMA decay (ewma_close only)"
+    )
+    har_train_window: int = Field(
+        default=252, ge=30, le=2520, description="Rolling train window (har_rv only)"
+    )
+    har_horizons: list[int] = Field(
+        default_factory=lambda: [1, 5, 22], description="HAR horizons (har_rv only)"
+    )
 
 
 class VolProxyTimingRequest(BaseModel):
@@ -897,19 +1192,33 @@ class VolProxyTimingRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
     adjust: str = Field(default="hfq", description="qfq/hfq/none for ETF prices")
 
-    methods: list[VolProxyMethod] = Field(min_length=1, description="Vol proxy variants to compute and backtest")
+    methods: list[VolProxyMethod] = Field(
+        min_length=1, description="Vol proxy variants to compute and backtest"
+    )
 
     # Tiering config (same semantics as leadlag vol_timing)
-    level_quantiles: list[float] = Field(default_factory=lambda: [0.8, 0.9], description="Quantiles on level (train)")
-    level_exposures: list[float] = Field(default_factory=lambda: [1.0, 0.5, 0.2], description="Tier exposures, len=quantiles+1")
+    level_quantiles: list[float] = Field(
+        default_factory=lambda: [0.8, 0.9], description="Quantiles on level (train)"
+    )
+    level_exposures: list[float] = Field(
+        default_factory=lambda: [1.0, 0.5, 0.2],
+        description="Tier exposures, len=quantiles+1",
+    )
     level_window: str = Field(
         default="all",
         description="Quantile window for levels: all(expanding,no-lookahead)|static_all(full-sample,lookahead)|1y|3y|5y|10y",
     )
-    trade_cost_bps: float = Field(default=2.0, ge=0.0, description="Per-switch cost in bps")
+    trade_cost_bps: float = Field(
+        default=2.0, ge=0.0, description="Per-switch cost in bps"
+    )
 
-    walk_forward: bool = Field(default=True, description="If true, split train/test and apply train thresholds to test")
-    train_ratio: float = Field(default=0.60, gt=0.1, lt=0.9, description="Train ratio for walk-forward")
+    walk_forward: bool = Field(
+        default=True,
+        description="If true, split train/test and apply train thresholds to test",
+    )
+    train_ratio: float = Field(
+        default=0.60, gt=0.1, lt=0.9, description="Train ratio for walk-forward"
+    )
 
 
 class VolProxyTimingResponse(BaseModel):
@@ -925,7 +1234,10 @@ class BaselineCalendarEffectRequest(BaseModel):
     end: str = Field(description="YYYYMMDD")
     adjust: str = Field(default="hfq", description="qfq/hfq/none (global)")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    rebalance: str = Field(default="weekly", description="weekly/monthly/quarterly/yearly (calendar-effect study)")
+    rebalance: str = Field(
+        default="weekly",
+        description="weekly/monthly/quarterly/yearly (calendar-effect study)",
+    )
     rebalance_shift: str = Field(
         default="prev",
         description="If anchor falls on non-trading day: prev -> shift to previous trading day (default); next -> shift to next trading day.",
@@ -934,35 +1246,69 @@ class BaselineCalendarEffectRequest(BaseModel):
         default_factory=lambda: [0, 1, 2, 3, 4],
         description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
     )
-    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
+    exec_prices: list[str] = Field(
+        default_factory=lambda: ["open", "close", "oc2"],
+        description="Execution price list: open|close|oc2 (OC average)",
+    )
 
 
 class CalendarTimingStrategyRequest(BaseModel):
     mode: str = Field(default="portfolio", description="portfolio|single")
     code: str | None = Field(default=None, description="Single-asset mode code")
-    codes: list[str] | None = Field(default=None, description="Portfolio mode candidate codes")
+    codes: list[str] | None = Field(
+        default=None, description="Portfolio mode candidate codes"
+    )
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
-    adjust: str = Field(default="none", description="qfq/hfq/none for execution price series")
+    adjust: str = Field(
+        default="none", description="qfq/hfq/none for execution price series"
+    )
     decision_day: int = Field(
         default=1,
         description="Monthly natural decision day in [-28,28] excluding 0. Negative means from month-end.",
     )
-    hold_days: int = Field(default=1, ge=1, le=252, description="Holding days from execution day")
-    position_mode: str = Field(default="equal", description="equal|fixed_ratio|risk_budget")
-    fixed_pos_ratio: float = Field(default=1.0, ge=0.0, le=1.0, description="Exposure when position_mode=fixed_ratio")
-    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_mode=risk_budget")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
-    dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate coverage over union interval")
+    hold_days: int = Field(
+        default=1, ge=1, le=252, description="Holding days from execution day"
+    )
+    position_mode: str = Field(
+        default="equal", description="equal|fixed_ratio|risk_budget"
+    )
+    fixed_pos_ratio: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Exposure when position_mode=fixed_ratio",
+    )
+    risk_budget_atr_window: int = Field(
+        default=20, ge=2, description="ATR window when position_mode=risk_budget"
+    )
+    risk_budget_pct: float = Field(
+        default=0.01,
+        ge=0.001,
+        le=0.02,
+        description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)",
+    )
+    dynamic_universe: bool = Field(
+        default=False,
+        description="If true, allow dynamic candidate coverage over union interval",
+    )
     exec_price: str = Field(default="open", description="open|close")
-    cost_bps: float = Field(default=2.0, ge=0.0, description="Two-way transaction cost in bps")
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
+    cost_bps: float = Field(
+        default=2.0, ge=0.0, description="Two-way transaction cost in bps"
+    )
+    slippage_rate: float = Field(
+        default=0.001,
+        ge=0.0,
+        description="One-way adverse slippage spread (absolute price diff)",
+    )
     rebalance_shift: str = Field(
         default="prev",
         description="If decision day is non-trading: prev|next|skip",
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    calendar: str = Field(default="XSHG", description="Trading calendar used by decision-day shift")
+    calendar: str = Field(
+        default="XSHG", description="Trading calendar used by decision-day shift"
+    )
 
 
 class AssetRiskControlRule(BaseModel):
@@ -975,11 +1321,31 @@ class AssetRiskControlRule(BaseModel):
     code: str = Field(min_length=1, description="ETF code")
     sig_type: str = Field(description="return|volatility|downside_vol|drawdown")
     k: int = Field(ge=2, le=2520, description="Signal lookback window in trading days")
-    p_in: float = Field(gt=0.0, lt=100.0, description="Trigger percentile (0-100). For return, low-tail is used (100-p_in).")
-    reduce_pct: float = Field(ge=0.0, le=100.0, description="Reduce percent on trigger: exposure = 1 - reduce_pct/100")
-    recovery_mode: str = Field(default="immediate", description="immediate|hysteresis|cooldown")
-    p_out: float | None = Field(default=None, gt=0.0, lt=100.0, description="Recovery percentile for hysteresis mode")
-    cooldown_days: int = Field(default=0, ge=0, le=2520, description="Minimum days to keep reduced exposure (cooldown mode)")
+    p_in: float = Field(
+        gt=0.0,
+        lt=100.0,
+        description="Trigger percentile (0-100). For return, low-tail is used (100-p_in).",
+    )
+    reduce_pct: float = Field(
+        ge=0.0,
+        le=100.0,
+        description="Reduce percent on trigger: exposure = 1 - reduce_pct/100",
+    )
+    recovery_mode: str = Field(
+        default="immediate", description="immediate|hysteresis|cooldown"
+    )
+    p_out: float | None = Field(
+        default=None,
+        gt=0.0,
+        lt=100.0,
+        description="Recovery percentile for hysteresis mode",
+    )
+    cooldown_days: int = Field(
+        default=0,
+        ge=0,
+        le=2520,
+        description="Minimum days to keep reduced exposure (cooldown mode)",
+    )
 
 
 class AssetVolIndexTimingRule(BaseModel):
@@ -991,7 +1357,9 @@ class AssetVolIndexTimingRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code")
-    index: str = Field(description="Vol index code: VIX|GVZ (Cboe) | WAVOL (asset weekly rolling ann vol)")
+    index: str = Field(
+        description="Vol index code: VIX|GVZ (Cboe) | WAVOL (asset weekly rolling ann vol)"
+    )
     level_window: str = Field(
         default="all",
         description="Quantile lookback window: 30d|90d|180d|1y|3y|5y|10y|all (all=expanding; non-static to avoid lookahead).",
@@ -1004,7 +1372,12 @@ class AssetVolIndexTimingRule(BaseModel):
         default_factory=lambda: [1.0, 0.5],
         description="Tier exposures in [0,1], length must be len(level_quantiles)+1. Example [1.0,0.5].",
     )
-    min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations before thresholds become active.")
+    min_periods: int = Field(
+        default=20,
+        ge=2,
+        le=2520,
+        description="Minimum observations before thresholds become active.",
+    )
 
 
 class AssetTrendRule(BaseModel):
@@ -1013,10 +1386,18 @@ class AssetTrendRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
-    op: str = Field(default=">", description="Comparison operator between close and MA: = | != | > | < | >= | <=")
+    op: str = Field(
+        default=">",
+        description="Comparison operator between close and MA: = | != | > | < | >= | <=",
+    )
     stage: str = Field(default="entry", description="Rule stage: entry | exit | both")
-    trend_sma_window: int = Field(default=20, ge=1, description="MA window (trading days, qfq close-based)")
-    trend_ma_type: str = Field(default="sma", description="MA type: sma|ema|vma(variable/adaptive) (self close vs self MA)")
+    trend_sma_window: int = Field(
+        default=20, ge=1, description="MA window (trading days, qfq close-based)"
+    )
+    trend_ma_type: str = Field(
+        default="sma",
+        description="MA type: sma|ema|vma(variable/adaptive) (self close vs self MA)",
+    )
 
 
 class AssetBiasRule(BaseModel):
@@ -1026,15 +1407,36 @@ class AssetBiasRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
-    op: str = Field(default=">", description="Comparison operator: = | != | > | < | >= | <=")
+    op: str = Field(
+        default=">", description="Comparison operator: = | != | > | < | >= | <="
+    )
     stage: str = Field(default="entry", description="Rule stage: entry | exit | both")
     bias_type: str = Field(default="bias", description="BIAS signal type: bias|bias_v")
-    bias_ma_window: int = Field(default=20, ge=2, description="MA window (trading days)")
-    level_window: str = Field(default="all", description="Threshold lookback window: 30d|90d|180d|1y|3y|5y|10y|all(expanding)")
+    bias_ma_window: int = Field(
+        default=20, ge=2, description="MA window (trading days)"
+    )
+    level_window: str = Field(
+        default="all",
+        description="Threshold lookback window: 30d|90d|180d|1y|3y|5y|10y|all(expanding)",
+    )
     threshold_type: str = Field(default="quantile", description="quantile|fixed")
-    quantile: float = Field(default=95.0, gt=0.0, lt=100.0, description="Percentile value when threshold_type=quantile, e.g. 95")
-    fixed_value: float = Field(default=10.0, ge=0.0, description="Fixed threshold (%) when threshold_type=fixed, e.g. 10 means 10%")
-    min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations before quantile threshold becomes active")
+    quantile: float = Field(
+        default=95.0,
+        gt=0.0,
+        lt=100.0,
+        description="Percentile value when threshold_type=quantile, e.g. 95",
+    )
+    fixed_value: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="Fixed threshold (%) when threshold_type=fixed, e.g. 10 means 10%",
+    )
+    min_periods: int = Field(
+        default=20,
+        ge=2,
+        le=2520,
+        description="Minimum observations before quantile threshold becomes active",
+    )
 
 
 class AssetRsiRule(BaseModel):
@@ -1043,11 +1445,17 @@ class AssetRsiRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
-    rsi_window: int = Field(default=14, ge=1, description="RSI window (trading days, fixed to 14)")
+    rsi_window: int = Field(
+        default=14, ge=1, description="RSI window (trading days, fixed to 14)"
+    )
     rsi_overbought: float = Field(default=70.0, ge=0.0, le=100.0)
     rsi_oversold: float = Field(default=30.0, ge=0.0, le=100.0)
-    rsi_block_overbought: bool = Field(default=True, description="If true, exclude assets with RSI > overbought")
-    rsi_block_oversold: bool = Field(default=False, description="If true, exclude assets with RSI < oversold")
+    rsi_block_overbought: bool = Field(
+        default=True, description="If true, exclude assets with RSI > overbought"
+    )
+    rsi_block_oversold: bool = Field(
+        default=False, description="If true, exclude assets with RSI < oversold"
+    )
 
 
 class AssetChopRule(BaseModel):
@@ -1057,10 +1465,18 @@ class AssetChopRule(BaseModel):
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
     chop_mode: str = Field(default="er", description="er|adx")
-    chop_window: int = Field(default=20, ge=2, description="Efficiency Ratio window (trading days)")
-    chop_er_threshold: float = Field(default=0.25, gt=0.0, description="ER < threshold => choppy => exclude")
-    chop_adx_window: int = Field(default=20, ge=2, description="ADX window (trading days)")
-    chop_adx_threshold: float = Field(default=20.0, gt=0.0, description="ADX < threshold => choppy => exclude")
+    chop_window: int = Field(
+        default=20, ge=2, description="Efficiency Ratio window (trading days)"
+    )
+    chop_er_threshold: float = Field(
+        default=0.25, gt=0.0, description="ER < threshold => choppy => exclude"
+    )
+    chop_adx_window: int = Field(
+        default=20, ge=2, description="ADX window (trading days)"
+    )
+    chop_adx_threshold: float = Field(
+        default=20.0, gt=0.0, description="ADX < threshold => choppy => exclude"
+    )
 
 
 class AssetVolMonitorRule(BaseModel):
@@ -1069,9 +1485,17 @@ class AssetVolMonitorRule(BaseModel):
     """
 
     code: str = Field(min_length=1, description="ETF code or '*' for default rule")
-    vol_window: int = Field(default=20, ge=1, description="Realized vol window (trading days)")
-    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for sizing")
-    vol_max_ann: float = Field(default=0.60, gt=0.0, description="Annualized hard stop vol; above -> no risk position")
+    vol_window: int = Field(
+        default=20, ge=1, description="Realized vol window (trading days)"
+    )
+    vol_target_ann: float = Field(
+        default=0.20, gt=0.0, description="Annualized target vol for sizing"
+    )
+    vol_max_ann: float = Field(
+        default=0.60,
+        gt=0.0,
+        description="Annualized hard stop vol; above -> no risk position",
+    )
 
 
 class AssetMomentumFloorRule(BaseModel):
@@ -1108,7 +1532,9 @@ class RotationBacktestRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
-    rebalance: str = Field(default="weekly", description="daily/weekly/monthly/quarterly/yearly")
+    rebalance: str = Field(
+        default="weekly", description="daily/weekly/monthly/quarterly/yearly"
+    )
     rebalance_anchor: int | None = Field(
         default=None,
         description=(
@@ -1148,8 +1574,15 @@ class RotationBacktestRequest(BaseModel):
         default="adaptive",
         description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/|top_k|) | risk_budget(ATR risk budget).",
     )
-    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window for risk-budget sizing")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
+    risk_budget_atr_window: int = Field(
+        default=20, ge=2, description="ATR window for risk-budget sizing"
+    )
+    risk_budget_pct: float = Field(
+        default=0.01,
+        ge=0.001,
+        le=0.02,
+        description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)",
+    )
     entry_backfill: bool = Field(
         default=False,
         description="If true, refill from lower-ranked candidates when top_k assets are excluded by entry filters.",
@@ -1178,27 +1611,85 @@ class RotationBacktestRequest(BaseModel):
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0)
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
-    atr_stop_mode: str = Field(default="none", description="Universal ATR stop mode: none|static|trailing|tightening")
-    atr_stop_atr_basis: str = Field(default="latest", description="ATR basis for dynamic modes: entry|latest")
-    atr_stop_reentry_mode: str = Field(default="reenter", description="Re-entry after ATR stop: reenter|wait_next_entry")
-    atr_stop_window: int = Field(default=14, ge=2, description="ATR window for universal stop")
-    atr_stop_n: float = Field(default=2.0, gt=0.0, description="ATR stop distance multiplier n")
-    atr_stop_m: float = Field(default=0.5, gt=0.0, description="ATR tightening step m (used by tightening mode)")
+    slippage_rate: float = Field(
+        default=0.001,
+        ge=0.0,
+        description="One-way adverse slippage spread (absolute price diff)",
+    )
+    atr_stop_mode: str = Field(
+        default="none",
+        description="Universal ATR stop mode: none|static|trailing|tightening",
+    )
+    atr_stop_atr_basis: str = Field(
+        default="latest", description="ATR basis for dynamic modes: entry|latest"
+    )
+    atr_stop_reentry_mode: str = Field(
+        default="reenter",
+        description="Re-entry after ATR stop: reenter|wait_next_entry",
+    )
+    atr_stop_window: int = Field(
+        default=14, ge=2, description="ATR window for universal stop"
+    )
+    atr_stop_n: float = Field(
+        default=2.0, gt=0.0, description="ATR stop distance multiplier n"
+    )
+    atr_stop_m: float = Field(
+        default=0.5,
+        gt=0.0,
+        description="ATR tightening step m (used by tightening mode)",
+    )
     # Pre-trade risk controls (all optional; defaults keep previous behavior)
-    trend_filter: bool = Field(default=False, description="Enable trend filter gating (pre-trade)")
-    trend_exit_filter: bool = Field(default=False, description="Enable trend-based daily exit gating (post-entry; next-day execution)")
-    trend_sma_window: int = Field(default=20, ge=1, description="MA window for trend filter (trading days, qfq close-based)")
-    trend_ma_type: str = Field(default="sma", description="Trend MA type: sma|ema|vma(variable/adaptive) (self close vs self MA)")
-    bias_filter: bool = Field(default=False, description="Enable BIAS filter gating (pre-trade)")
-    bias_exit_filter: bool = Field(default=False, description="Enable BIAS-based daily exit gating (post-entry; next-day execution)")
+    trend_filter: bool = Field(
+        default=False, description="Enable trend filter gating (pre-trade)"
+    )
+    trend_exit_filter: bool = Field(
+        default=False,
+        description="Enable trend-based daily exit gating (post-entry; next-day execution)",
+    )
+    trend_sma_window: int = Field(
+        default=20,
+        ge=1,
+        description="MA window for trend filter (trading days, qfq close-based)",
+    )
+    trend_ma_type: str = Field(
+        default="sma",
+        description="Trend MA type: sma|ema|vma(variable/adaptive) (self close vs self MA)",
+    )
+    bias_filter: bool = Field(
+        default=False, description="Enable BIAS filter gating (pre-trade)"
+    )
+    bias_exit_filter: bool = Field(
+        default=False,
+        description="Enable BIAS-based daily exit gating (post-entry; next-day execution)",
+    )
     bias_type: str = Field(default="bias", description="BIAS signal type: bias|bias_v")
-    bias_ma_window: int = Field(default=20, ge=2, description="BIAS MA window (trading days)")
-    bias_level_window: str = Field(default="all", description="BIAS threshold lookback window: 30d|90d|180d|1y|3y|5y|10y|all")
-    bias_threshold_type: str = Field(default="quantile", description="BIAS threshold type: quantile|fixed")
-    bias_quantile: float = Field(default=95.0, gt=0.0, lt=100.0, description="BIAS percentile threshold (0,100), e.g. 95")
-    bias_fixed_value: float = Field(default=10.0, ge=0.0, description="BIAS fixed threshold in percent, e.g. 10 means 10%")
-    bias_min_periods: int = Field(default=20, ge=2, le=2520, description="Minimum observations for BIAS quantile threshold")
+    bias_ma_window: int = Field(
+        default=20, ge=2, description="BIAS MA window (trading days)"
+    )
+    bias_level_window: str = Field(
+        default="all",
+        description="BIAS threshold lookback window: 30d|90d|180d|1y|3y|5y|10y|all",
+    )
+    bias_threshold_type: str = Field(
+        default="quantile", description="BIAS threshold type: quantile|fixed"
+    )
+    bias_quantile: float = Field(
+        default=95.0,
+        gt=0.0,
+        lt=100.0,
+        description="BIAS percentile threshold (0,100), e.g. 95",
+    )
+    bias_fixed_value: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="BIAS fixed threshold in percent, e.g. 10 means 10%",
+    )
+    bias_min_periods: int = Field(
+        default=20,
+        ge=2,
+        le=2520,
+        description="Minimum observations for BIAS quantile threshold",
+    )
     group_enforce: bool = Field(
         default=False,
         description="Enable hard group constraint: at most one selected asset per group.",
@@ -1249,12 +1740,22 @@ class RotationBacktestRequest(BaseModel):
         else:
             bm_code = str(getattr(self, "floating_benchmark_code", "") or "").strip()
             if not bm_code:
-                raise ValueError("floating_benchmark_code is required when top_k_mode=floating")
+                raise ValueError(
+                    "floating_benchmark_code is required when top_k_mode=floating"
+                )
             if bm_code not in [str(x) for x in (self.codes or [])]:
-                raise ValueError("floating_benchmark_code must be in codes when top_k_mode=floating")
-        bm = str(getattr(self, "benchmark_mode", "EW_REBAL") or "EW_REBAL").strip().upper()
+                raise ValueError(
+                    "floating_benchmark_code must be in codes when top_k_mode=floating"
+                )
+        bm = (
+            str(getattr(self, "benchmark_mode", "EW_REBAL") or "EW_REBAL")
+            .strip()
+            .upper()
+        )
         if bm not in {"EW_REBAL", "RP_REBAL", "IVOL_REBAL", "ALL"}:
-            raise ValueError("benchmark_mode must be one of: EW_REBAL|RP_REBAL|IVOL_REBAL|ALL")
+            raise ValueError(
+                "benchmark_mode must be one of: EW_REBAL|RP_REBAL|IVOL_REBAL|ALL"
+            )
         return self
 
 
@@ -1263,7 +1764,10 @@ class RotationCalendarEffectRequest(RotationBacktestRequest):
         default_factory=lambda: [0, 1, 2, 3, 4],
         description="Anchor list depends on rebalance: weekly -> weekday 0=Mon..4=Fri; monthly -> day-of-month 1..28; quarterly/yearly -> Nth trading day in period (1..)",
     )
-    exec_prices: list[str] = Field(default_factory=lambda: ["open", "close", "oc2"], description="Execution price list: open|close|oc2 (OC average)")
+    exec_prices: list[str] = Field(
+        default_factory=lambda: ["open", "close", "oc2"],
+        description="Execution price list: open|close|oc2 (OC average)",
+    )
 
 
 class RotationWeekly5OpenSimRequest(RotationBacktestRequest):
@@ -1297,12 +1801,16 @@ class RotationNextPlanRequest(BaseModel):
     """
 
     anchor_weekday: int = Field(ge=1, le=5, description="1=Mon..5=Fri")
-    asof: str = Field(description="YYYYMMDD (usually the latest available trading day in backtest range)")
+    asof: str = Field(
+        description="YYYYMMDD (usually the latest available trading day in backtest range)"
+    )
 
 
 class SimPortfolioCreateRequest(BaseModel):
     name: str = Field(default="默认账户", description="Portfolio name")
-    initial_cash: float = Field(default=1_000_000.0, gt=0.0, description="Initial cash (base_ccy units)")
+    initial_cash: float = Field(
+        default=1_000_000.0, gt=0.0, description="Initial cash (base_ccy units)"
+    )
 
 
 class SimPortfolioOut(BaseModel):
@@ -1344,7 +1852,9 @@ class BaselineWeekly5EWDashboardRequest(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    rebalance_shift: str = Field(default="prev", description="prev|next when anchor falls on non-trading day")
+    rebalance_shift: str = Field(
+        default="prev", description="prev|next when anchor falls on non-trading day"
+    )
     anchor_weekday: int | None = Field(
         default=None,
         ge=1,
@@ -1354,12 +1864,23 @@ class BaselineWeekly5EWDashboardRequest(BaseModel):
 
 
 class RTakeProfitTier(BaseModel):
-    r_multiple: float = Field(gt=0.0, description="Activate drawdown take-profit when peak floating profit reaches this R multiple")
-    retrace_ratio: float = Field(gt=0.0, lt=1.0, description="Allowed pullback ratio from peak floating profit once activated")
+    r_multiple: float = Field(
+        gt=0.0,
+        description="Activate drawdown take-profit when peak floating profit reaches this R multiple",
+    )
+    retrace_ratio: float = Field(
+        gt=0.0,
+        lt=1.0,
+        description="Allowed pullback ratio from peak floating profit once activated",
+    )
 
 
 class TrendBacktestRequest(BaseModel):
-    code: str = Field(min_length=1, max_length=32, description="Single ETF code for trend-following backtest")
+    code: str = Field(
+        min_length=1,
+        max_length=32,
+        description="Single ETF code for trend-following backtest",
+    )
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     adjust: str = Field(
@@ -1367,88 +1888,283 @@ class TrendBacktestRequest(BaseModel):
         description="[deprecated] Trend research uses mixed basis like rotation: signal=qfq, nav=none with hfq fallback, benchmark=hfq.",
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
+    cost_bps: float = Field(
+        default=2.0,
+        ge=0.0,
+        description="Round-trip transaction cost in bps per turnover",
+    )
+    slippage_rate: float = Field(
+        default=0.001,
+        ge=0.0,
+        description="One-way adverse slippage spread (absolute price diff)",
+    )
     exec_price: str = Field(default="open", description="open|close|oc2")
-    engine: str | None = Field(default=None, description="Backtest engine switch: legacy|bt; null uses server default")
+    engine: str | None = Field(
+        default=None,
+        description="Backtest engine switch: legacy|bt; null uses server default",
+    )
     strategy: str = Field(
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry (long/cash); ma_filter uses ma_type sma|ema|kama",
     )
-    position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
-    vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
-    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling")
-    fixed_pos_ratio: float = Field(default=0.04, gt=0.0, description="Fixed position ratio when position_sizing=fixed_ratio")
-    fixed_overcap_policy: str = Field(default="skip", description="Over-cap policy placeholder: skip|extend")
-    fixed_max_holdings: int = Field(default=10, ge=1, description="Max holdings placeholder for unified payload schema")
-    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_sizing=risk_budget")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="NAV risk budget for 1 ATR move (0.01 = 1%)")
-    risk_budget_overcap_policy: str = Field(default="scale", description="When risk-budget new entry exceeds total 100% exposure: scale|skip_entry|replace_entry|leverage_entry")
-    risk_budget_max_leverage_multiple: float = Field(default=2.0, ge=1.0, le=10.0, description="Max leverage multiple when risk_budget_overcap_policy=leverage_entry")
-    vol_regime_risk_mgmt_enabled: bool = Field(default=False, description="Enable post-entry volatility-regime risk management in risk_budget sizing")
-    vol_ratio_fast_atr_window: int = Field(default=5, ge=2, description="Fast ATR window for volatility ratio ATR(fast)/ATR(slow)")
-    vol_ratio_slow_atr_window: int = Field(default=50, ge=2, description="Slow ATR window for volatility ratio ATR(fast)/ATR(slow)")
-    vol_ratio_expand_threshold: float = Field(default=1.45, gt=0.0, description="If ATR ratio > threshold, volatility is expanded and de-risk is triggered")
-    vol_ratio_contract_threshold: float = Field(default=0.65, gt=0.0, description="If ATR ratio < threshold, volatility is contracted and add-risk is triggered")
-    vol_ratio_normal_threshold: float = Field(default=1.05, gt=0.0, description="Normal-zone recovery threshold used after expanded/contracted states")
+    position_sizing: str = Field(
+        default="equal", description="equal|vol_target|fixed_ratio|risk_budget"
+    )
+    vol_window: int = Field(
+        default=20, ge=2, description="Rolling vol window for vol-target sizing"
+    )
+    vol_target_ann: float = Field(
+        default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling"
+    )
+    fixed_pos_ratio: float = Field(
+        default=0.04,
+        gt=0.0,
+        description="Fixed position ratio when position_sizing=fixed_ratio",
+    )
+    fixed_overcap_policy: str = Field(
+        default="skip", description="Over-cap policy placeholder: skip|extend"
+    )
+    fixed_max_holdings: int = Field(
+        default=10,
+        ge=1,
+        description="Max holdings placeholder for unified payload schema",
+    )
+    risk_budget_atr_window: int = Field(
+        default=20, ge=2, description="ATR window when position_sizing=risk_budget"
+    )
+    risk_budget_pct: float = Field(
+        default=0.01,
+        ge=0.001,
+        le=0.02,
+        description="NAV risk budget for 1 ATR move (0.01 = 1%)",
+    )
+    risk_budget_overcap_policy: str = Field(
+        default="scale",
+        description="When risk-budget new entry exceeds total 100% exposure: scale|skip_entry|replace_entry|leverage_entry",
+    )
+    risk_budget_max_leverage_multiple: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=10.0,
+        description="Max leverage multiple when risk_budget_overcap_policy=leverage_entry",
+    )
+    vol_regime_risk_mgmt_enabled: bool = Field(
+        default=False,
+        description="Enable post-entry volatility-regime risk management in risk_budget sizing",
+    )
+    vol_ratio_fast_atr_window: int = Field(
+        default=5,
+        ge=2,
+        description="Fast ATR window for volatility ratio ATR(fast)/ATR(slow)",
+    )
+    vol_ratio_slow_atr_window: int = Field(
+        default=50,
+        ge=2,
+        description="Slow ATR window for volatility ratio ATR(fast)/ATR(slow)",
+    )
+    vol_ratio_expand_threshold: float = Field(
+        default=1.45,
+        gt=0.0,
+        description="If ATR ratio > threshold, volatility is expanded and de-risk is triggered",
+    )
+    vol_ratio_contract_threshold: float = Field(
+        default=0.65,
+        gt=0.0,
+        description="If ATR ratio < threshold, volatility is contracted and add-risk is triggered",
+    )
+    vol_ratio_normal_threshold: float = Field(
+        default=1.05,
+        gt=0.0,
+        description="Normal-zone recovery threshold used after expanded/contracted states",
+    )
     # parameters (some are strategy-specific)
-    sma_window: int = Field(default=200, ge=2, description="MA filter window (trading days)")
-    fast_window: int = Field(default=50, ge=2, description="Fast MA window (trading days)")
-    slow_window: int = Field(default=200, ge=2, description="Slow MA window (trading days)")
-    ma_type: str = Field(default="sma", description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema")
-    kama_er_window: int = Field(default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)")
-    kama_fast_window: int = Field(default=2, ge=1, description="KAMA fast smoothing window (used when ma_type=kama)")
-    kama_slow_window: int = Field(default=30, ge=2, description="KAMA slow smoothing window (used when ma_type=kama)")
-    kama_std_window: int = Field(default=20, ge=2, description="KAMA std window for hysteresis band: KAMA ± coef*std(KAMA)")
-    kama_std_coef: float = Field(default=1.0, ge=0.0, le=3.0, description="KAMA std filter coefficient in [0,3]")
-    donchian_entry: int = Field(default=20, ge=2, description="Donchian entry window (trading days)")
-    donchian_exit: int = Field(default=10, ge=2, description="Donchian exit window (trading days)")
-    mom_lookback: int = Field(default=252, ge=2, description="TS momentum lookback (trading days)")
-    tsmom_entry_threshold: float = Field(default=0.0, description="TSMOM entry threshold on momentum score; enter when score > threshold")
-    tsmom_exit_threshold: float = Field(default=0.0, description="TSMOM exit threshold on momentum score; exit when score <= threshold")
-    atr_stop_mode: str = Field(default="none", description="Universal ATR stop mode: none|static|trailing|tightening")
-    atr_stop_atr_basis: str = Field(default="latest", description="ATR basis for dynamic modes: entry|latest")
-    atr_stop_reentry_mode: str = Field(default="reenter", description="Re-entry after ATR stop: reenter|wait_next_entry")
-    atr_stop_window: int = Field(default=14, ge=2, description="ATR window for universal stop")
-    atr_stop_n: float = Field(default=2.0, gt=0.0, description="ATR stop distance multiplier n")
-    atr_stop_m: float = Field(default=0.5, gt=0.0, description="ATR tightening step m (used by tightening mode)")
-    r_take_profit_enabled: bool = Field(default=False, description="Enable universal R-multiple drawdown take-profit overlay")
-    r_take_profit_reentry_mode: str = Field(default="reenter", description="Re-entry after R take-profit: reenter|wait_next_entry")
+    sma_window: int = Field(
+        default=200, ge=2, description="MA filter window (trading days)"
+    )
+    fast_window: int = Field(
+        default=50, ge=2, description="Fast MA window (trading days)"
+    )
+    slow_window: int = Field(
+        default=200, ge=2, description="Slow MA window (trading days)"
+    )
+    ma_type: str = Field(
+        default="sma",
+        description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema",
+    )
+    kama_er_window: int = Field(
+        default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)"
+    )
+    kama_fast_window: int = Field(
+        default=2,
+        ge=1,
+        description="KAMA fast smoothing window (used when ma_type=kama)",
+    )
+    kama_slow_window: int = Field(
+        default=30,
+        ge=2,
+        description="KAMA slow smoothing window (used when ma_type=kama)",
+    )
+    kama_std_window: int = Field(
+        default=20,
+        ge=2,
+        description="KAMA std window for hysteresis band: KAMA ± coef*std(KAMA)",
+    )
+    kama_std_coef: float = Field(
+        default=1.0, ge=0.0, le=3.0, description="KAMA std filter coefficient in [0,3]"
+    )
+    donchian_entry: int = Field(
+        default=20, ge=2, description="Donchian entry window (trading days)"
+    )
+    donchian_exit: int = Field(
+        default=10, ge=2, description="Donchian exit window (trading days)"
+    )
+    mom_lookback: int = Field(
+        default=252, ge=2, description="TS momentum lookback (trading days)"
+    )
+    tsmom_entry_threshold: float = Field(
+        default=0.0,
+        description="TSMOM entry threshold on momentum score; enter when score > threshold",
+    )
+    tsmom_exit_threshold: float = Field(
+        default=0.0,
+        description="TSMOM exit threshold on momentum score; exit when score <= threshold",
+    )
+    atr_stop_mode: str = Field(
+        default="none",
+        description="Universal ATR stop mode: none|static|trailing|tightening",
+    )
+    atr_stop_atr_basis: str = Field(
+        default="latest", description="ATR basis for dynamic modes: entry|latest"
+    )
+    atr_stop_reentry_mode: str = Field(
+        default="reenter",
+        description="Re-entry after ATR stop: reenter|wait_next_entry",
+    )
+    atr_stop_window: int = Field(
+        default=14, ge=2, description="ATR window for universal stop"
+    )
+    atr_stop_n: float = Field(
+        default=2.0, gt=0.0, description="ATR stop distance multiplier n"
+    )
+    atr_stop_m: float = Field(
+        default=0.5,
+        gt=0.0,
+        description="ATR tightening step m (used by tightening mode)",
+    )
+    r_take_profit_enabled: bool = Field(
+        default=False,
+        description="Enable universal R-multiple drawdown take-profit overlay",
+    )
+    r_take_profit_reentry_mode: str = Field(
+        default="reenter",
+        description="Re-entry after R take-profit: reenter|wait_next_entry",
+    )
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(
         default=None,
         description="Tiered config: peak>=R multiple activates pullback-exit threshold, e.g. [{r_multiple:2,retrace_ratio:0.5}]",
     )
-    bias_v_take_profit_enabled: bool = Field(default=False, description="Enable universal BIAS-V take-profit overlay")
-    bias_v_take_profit_reentry_mode: str = Field(default="reenter", description="Re-entry after BIAS-V take-profit: reenter|wait_next_entry")
-    bias_v_ma_window: int = Field(default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR")
-    bias_v_atr_window: int = Field(default=20, ge=2, description="ATR window in BIAS-V=(close-MA)/ATR")
-    bias_v_take_profit_threshold: float = Field(default=5.0, gt=0.0, description="Trigger BIAS-V take-profit when BIAS-V >= threshold")
-    monthly_risk_budget_enabled: bool = Field(default=False, description="Enable account-level monthly max-loss risk budget gate before new entries")
-    monthly_risk_budget_pct: float = Field(default=0.06, ge=0.01, le=0.06, description="Monthly max-loss budget on account NAV (0.06 = 6%)")
-    monthly_risk_budget_include_new_trade_risk: bool = Field(default=False, description="If true, include candidate new-trade risk in monthly budget check")
+    bias_v_take_profit_enabled: bool = Field(
+        default=False, description="Enable universal BIAS-V take-profit overlay"
+    )
+    bias_v_take_profit_reentry_mode: str = Field(
+        default="reenter",
+        description="Re-entry after BIAS-V take-profit: reenter|wait_next_entry",
+    )
+    bias_v_ma_window: int = Field(
+        default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"
+    )
+    bias_v_atr_window: int = Field(
+        default=20, ge=2, description="ATR window in BIAS-V=(close-MA)/ATR"
+    )
+    bias_v_take_profit_threshold: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Trigger BIAS-V take-profit when BIAS-V >= threshold",
+    )
+    monthly_risk_budget_enabled: bool = Field(
+        default=False,
+        description="Enable account-level monthly max-loss risk budget gate before new entries",
+    )
+    monthly_risk_budget_pct: float = Field(
+        default=0.06,
+        ge=0.01,
+        le=0.06,
+        description="Monthly max-loss budget on account NAV (0.06 = 6%)",
+    )
+    monthly_risk_budget_include_new_trade_risk: bool = Field(
+        default=False,
+        description="If true, include candidate new-trade risk in monthly budget check",
+    )
     # BIAS strategy params
-    bias_ma_window: int = Field(default=20, ge=2, description="EMA window N in BIAS=(LN(C)-LN(EMA(C,N)))*100 (trading days)")
-    bias_entry: float = Field(default=2.0, description="Enter when BIAS > entry (percent)")
-    bias_hot: float = Field(default=10.0, description="Take-profit exit when BIAS >= hot (percent)")
-    bias_cold: float = Field(default=-2.0, description="Stop-loss exit when BIAS <= cold (percent)")
-    bias_pos_mode: str = Field(default="binary", description="Position mode for BIAS strategy: binary|continuous")
+    bias_ma_window: int = Field(
+        default=20,
+        ge=2,
+        description="EMA window N in BIAS=(LN(C)-LN(EMA(C,N)))*100 (trading days)",
+    )
+    bias_entry: float = Field(
+        default=2.0, description="Enter when BIAS > entry (percent)"
+    )
+    bias_hot: float = Field(
+        default=10.0, description="Take-profit exit when BIAS >= hot (percent)"
+    )
+    bias_cold: float = Field(
+        default=-2.0, description="Stop-loss exit when BIAS <= cold (percent)"
+    )
+    bias_pos_mode: str = Field(
+        default="binary",
+        description="Position mode for BIAS strategy: binary|continuous",
+    )
     macd_fast: int = Field(default=12, ge=2, description="MACD fast EMA window")
     macd_slow: int = Field(default=26, ge=2, description="MACD slow EMA window")
     macd_signal: int = Field(default=9, ge=2, description="MACD signal EMA window")
-    macd_v_atr_window: int = Field(default=26, ge=2, description="ATR window used by MACD-V normalization")
-    macd_v_scale: float = Field(default=100.0, gt=0.0, description="Scale factor for MACD-V")
-    er_filter: bool = Field(default=False, description="Universal ER entry filter switch (when true, allow entry only if ER >= threshold)")
-    er_window: int = Field(default=10, ge=2, description="ER lookback window (trading days)")
-    er_threshold: float = Field(default=0.30, ge=0.0, le=1.0, description="ER entry threshold in [0,1]")
-    impulse_entry_filter: bool = Field(default=False, description="Universal Impulse entry filter switch (Elder Impulse System)")
-    impulse_allow_bull: bool = Field(default=True, description="Allow new long entries in BULL impulse state")
-    impulse_allow_bear: bool = Field(default=False, description="Allow new long entries in BEAR impulse state")
-    impulse_allow_neutral: bool = Field(default=False, description="Allow new long entries in NEUTRAL impulse state")
-    er_exit_filter: bool = Field(default=False, description="Universal ER exit filter switch (when true, exit if ER >= threshold)")
-    er_exit_window: int = Field(default=10, ge=2, description="ER exit filter lookback window (trading days)")
-    er_exit_threshold: float = Field(default=0.88, ge=0.0, le=1.0, description="ER exit threshold in [0,1]")
-    random_hold_days: int = Field(default=20, ge=1, description="Random-entry strategy base exit: hold N trading days after entry")
-    random_seed: int | None = Field(default=42, description="Random-entry strategy seed for reproducible coin-toss signals; null means system random seed")
+    macd_v_atr_window: int = Field(
+        default=26, ge=2, description="ATR window used by MACD-V normalization"
+    )
+    macd_v_scale: float = Field(
+        default=100.0, gt=0.0, description="Scale factor for MACD-V"
+    )
+    er_filter: bool = Field(
+        default=False,
+        description="Universal ER entry filter switch (when true, allow entry only if ER >= threshold)",
+    )
+    er_window: int = Field(
+        default=10, ge=2, description="ER lookback window (trading days)"
+    )
+    er_threshold: float = Field(
+        default=0.30, ge=0.0, le=1.0, description="ER entry threshold in [0,1]"
+    )
+    impulse_entry_filter: bool = Field(
+        default=False,
+        description="Universal Impulse entry filter switch (Elder Impulse System)",
+    )
+    impulse_allow_bull: bool = Field(
+        default=True, description="Allow new long entries in BULL impulse state"
+    )
+    impulse_allow_bear: bool = Field(
+        default=False, description="Allow new long entries in BEAR impulse state"
+    )
+    impulse_allow_neutral: bool = Field(
+        default=False, description="Allow new long entries in NEUTRAL impulse state"
+    )
+    er_exit_filter: bool = Field(
+        default=False,
+        description="Universal ER exit filter switch (when true, exit if ER >= threshold)",
+    )
+    er_exit_window: int = Field(
+        default=10, ge=2, description="ER exit filter lookback window (trading days)"
+    )
+    er_exit_threshold: float = Field(
+        default=0.88, ge=0.0, le=1.0, description="ER exit threshold in [0,1]"
+    )
+    random_hold_days: int = Field(
+        default=20,
+        ge=1,
+        description="Random-entry strategy base exit: hold N trading days after entry",
+    )
+    random_seed: int | None = Field(
+        default=42,
+        description="Random-entry strategy seed for reproducible coin-toss signals; null means system random seed",
+    )
     quick_mode: bool = Field(
         default=False,
         description="If true, skip heavy post analyses (return decomposition, entry-condition causal stats, trade_statistics raw traces, event study).",
@@ -1460,62 +2176,182 @@ class TrendPortfolioBacktestRequest(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
-    cost_bps: float = Field(default=2.0, ge=0.0, description="Round-trip transaction cost in bps per turnover")
-    slippage_rate: float = Field(default=0.001, ge=0.0, description="One-way adverse slippage spread (absolute price diff)")
+    cost_bps: float = Field(
+        default=2.0,
+        ge=0.0,
+        description="Round-trip transaction cost in bps per turnover",
+    )
+    slippage_rate: float = Field(
+        default=0.001,
+        ge=0.0,
+        description="One-way adverse slippage spread (absolute price diff)",
+    )
     exec_price: str = Field(default="open", description="open|close|oc2")
-    engine: str | None = Field(default=None, description="Backtest engine switch: legacy|bt; null uses server default")
+    engine: str | None = Field(
+        default=None,
+        description="Backtest engine switch: legacy|bt; null uses server default",
+    )
     strategy: str = Field(
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry; ma_filter uses ma_type sma|ema|kama",
     )
-    position_sizing: str = Field(default="equal", description="equal|vol_target|fixed_ratio|risk_budget")
-    vol_window: int = Field(default=20, ge=2, description="Rolling vol window for vol-target sizing")
-    vol_target_ann: float = Field(default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling")
-    fixed_pos_ratio: float = Field(default=0.04, gt=0.0, description="Fixed position ratio per active asset when position_sizing=fixed_ratio")
-    fixed_overcap_policy: str = Field(default="skip", description="When fixed-ratio entry exceeds constraints: skip|extend")
-    fixed_max_holdings: int = Field(default=10, ge=1, description="Max number of held assets when position_sizing=fixed_ratio")
-    risk_budget_atr_window: int = Field(default=20, ge=2, description="ATR window when position_sizing=risk_budget")
-    risk_budget_pct: float = Field(default=0.01, ge=0.001, le=0.02, description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)")
-    risk_budget_overcap_policy: str = Field(default="scale", description="When risk-budget new entry exceeds total 100% exposure: scale|skip_entry|replace_entry|leverage_entry")
-    risk_budget_max_leverage_multiple: float = Field(default=2.0, ge=1.0, le=10.0, description="Max leverage multiple when risk_budget_overcap_policy=leverage_entry")
-    vol_regime_risk_mgmt_enabled: bool = Field(default=False, description="Enable post-entry volatility-regime risk management in risk_budget sizing")
-    vol_ratio_fast_atr_window: int = Field(default=5, ge=2, description="Fast ATR window for volatility ratio ATR(fast)/ATR(slow)")
-    vol_ratio_slow_atr_window: int = Field(default=50, ge=2, description="Slow ATR window for volatility ratio ATR(fast)/ATR(slow)")
-    vol_ratio_expand_threshold: float = Field(default=1.45, gt=0.0, description="If ATR ratio > threshold, volatility is expanded and de-risk is triggered")
-    vol_ratio_contract_threshold: float = Field(default=0.65, gt=0.0, description="If ATR ratio < threshold, volatility is contracted and add-risk is triggered")
-    vol_ratio_normal_threshold: float = Field(default=1.05, gt=0.0, description="Normal-zone recovery threshold used after expanded/contracted states")
-    dynamic_universe: bool = Field(default=False, description="If true, allow dynamic candidate pool by period over union interval")
+    position_sizing: str = Field(
+        default="equal", description="equal|vol_target|fixed_ratio|risk_budget"
+    )
+    vol_window: int = Field(
+        default=20, ge=2, description="Rolling vol window for vol-target sizing"
+    )
+    vol_target_ann: float = Field(
+        default=0.20, gt=0.0, description="Annualized target vol for portfolio scaling"
+    )
+    fixed_pos_ratio: float = Field(
+        default=0.04,
+        gt=0.0,
+        description="Fixed position ratio per active asset when position_sizing=fixed_ratio",
+    )
+    fixed_overcap_policy: str = Field(
+        default="skip",
+        description="When fixed-ratio entry exceeds constraints: skip|extend",
+    )
+    fixed_max_holdings: int = Field(
+        default=10,
+        ge=1,
+        description="Max number of held assets when position_sizing=fixed_ratio",
+    )
+    risk_budget_atr_window: int = Field(
+        default=20, ge=2, description="ATR window when position_sizing=risk_budget"
+    )
+    risk_budget_pct: float = Field(
+        default=0.01,
+        ge=0.001,
+        le=0.02,
+        description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)",
+    )
+    risk_budget_overcap_policy: str = Field(
+        default="scale",
+        description="When risk-budget new entry exceeds total 100% exposure: scale|skip_entry|replace_entry|leverage_entry",
+    )
+    risk_budget_max_leverage_multiple: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=10.0,
+        description="Max leverage multiple when risk_budget_overcap_policy=leverage_entry",
+    )
+    vol_regime_risk_mgmt_enabled: bool = Field(
+        default=False,
+        description="Enable post-entry volatility-regime risk management in risk_budget sizing",
+    )
+    vol_ratio_fast_atr_window: int = Field(
+        default=5,
+        ge=2,
+        description="Fast ATR window for volatility ratio ATR(fast)/ATR(slow)",
+    )
+    vol_ratio_slow_atr_window: int = Field(
+        default=50,
+        ge=2,
+        description="Slow ATR window for volatility ratio ATR(fast)/ATR(slow)",
+    )
+    vol_ratio_expand_threshold: float = Field(
+        default=1.45,
+        gt=0.0,
+        description="If ATR ratio > threshold, volatility is expanded and de-risk is triggered",
+    )
+    vol_ratio_contract_threshold: float = Field(
+        default=0.65,
+        gt=0.0,
+        description="If ATR ratio < threshold, volatility is contracted and add-risk is triggered",
+    )
+    vol_ratio_normal_threshold: float = Field(
+        default=1.05,
+        gt=0.0,
+        description="Normal-zone recovery threshold used after expanded/contracted states",
+    )
+    dynamic_universe: bool = Field(
+        default=False,
+        description="If true, allow dynamic candidate pool by period over union interval",
+    )
     sma_window: int = Field(default=200, ge=2)
     fast_window: int = Field(default=50, ge=2)
     slow_window: int = Field(default=200, ge=2)
-    ma_type: str = Field(default="sma", description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema")
-    kama_er_window: int = Field(default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)")
-    kama_fast_window: int = Field(default=2, ge=1, description="KAMA fast smoothing window (used when ma_type=kama)")
-    kama_slow_window: int = Field(default=30, ge=2, description="KAMA slow smoothing window (used when ma_type=kama)")
-    kama_std_window: int = Field(default=20, ge=2, description="KAMA std window for hysteresis band: KAMA ± coef*std(KAMA)")
-    kama_std_coef: float = Field(default=1.0, ge=0.0, le=3.0, description="KAMA std filter coefficient in [0,3]")
+    ma_type: str = Field(
+        default="sma",
+        description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema",
+    )
+    kama_er_window: int = Field(
+        default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)"
+    )
+    kama_fast_window: int = Field(
+        default=2,
+        ge=1,
+        description="KAMA fast smoothing window (used when ma_type=kama)",
+    )
+    kama_slow_window: int = Field(
+        default=30,
+        ge=2,
+        description="KAMA slow smoothing window (used when ma_type=kama)",
+    )
+    kama_std_window: int = Field(
+        default=20,
+        ge=2,
+        description="KAMA std window for hysteresis band: KAMA ± coef*std(KAMA)",
+    )
+    kama_std_coef: float = Field(
+        default=1.0, ge=0.0, le=3.0, description="KAMA std filter coefficient in [0,3]"
+    )
     donchian_entry: int = Field(default=20, ge=2)
     donchian_exit: int = Field(default=10, ge=2)
     mom_lookback: int = Field(default=252, ge=2)
     tsmom_entry_threshold: float = Field(default=0.0)
     tsmom_exit_threshold: float = Field(default=0.0)
-    atr_stop_mode: str = Field(default="none", description="none|static|trailing|tightening")
+    atr_stop_mode: str = Field(
+        default="none", description="none|static|trailing|tightening"
+    )
     atr_stop_atr_basis: str = Field(default="latest", description="entry|latest")
-    atr_stop_reentry_mode: str = Field(default="reenter", description="reenter|wait_next_entry")
+    atr_stop_reentry_mode: str = Field(
+        default="reenter", description="reenter|wait_next_entry"
+    )
     atr_stop_window: int = Field(default=14, ge=2)
     atr_stop_n: float = Field(default=2.0, gt=0.0)
     atr_stop_m: float = Field(default=0.5, gt=0.0)
-    r_take_profit_enabled: bool = Field(default=False, description="Enable universal R-multiple drawdown take-profit overlay")
-    r_take_profit_reentry_mode: str = Field(default="reenter", description="reenter|wait_next_entry")
+    r_take_profit_enabled: bool = Field(
+        default=False,
+        description="Enable universal R-multiple drawdown take-profit overlay",
+    )
+    r_take_profit_reentry_mode: str = Field(
+        default="reenter", description="reenter|wait_next_entry"
+    )
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(default=None)
-    bias_v_take_profit_enabled: bool = Field(default=False, description="Enable universal BIAS-V take-profit overlay")
-    bias_v_take_profit_reentry_mode: str = Field(default="reenter", description="reenter|wait_next_entry")
-    bias_v_ma_window: int = Field(default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR")
-    bias_v_atr_window: int = Field(default=20, ge=2, description="ATR window in BIAS-V=(close-MA)/ATR")
-    bias_v_take_profit_threshold: float = Field(default=5.0, gt=0.0, description="Trigger BIAS-V take-profit when BIAS-V >= threshold")
-    monthly_risk_budget_enabled: bool = Field(default=False, description="Enable account-level monthly max-loss risk budget gate before new entries")
-    monthly_risk_budget_pct: float = Field(default=0.06, ge=0.01, le=0.06, description="Monthly max-loss budget on account NAV (0.06 = 6%)")
-    monthly_risk_budget_include_new_trade_risk: bool = Field(default=False, description="If true, include candidate new-trade risk in monthly budget check")
+    bias_v_take_profit_enabled: bool = Field(
+        default=False, description="Enable universal BIAS-V take-profit overlay"
+    )
+    bias_v_take_profit_reentry_mode: str = Field(
+        default="reenter", description="reenter|wait_next_entry"
+    )
+    bias_v_ma_window: int = Field(
+        default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"
+    )
+    bias_v_atr_window: int = Field(
+        default=20, ge=2, description="ATR window in BIAS-V=(close-MA)/ATR"
+    )
+    bias_v_take_profit_threshold: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Trigger BIAS-V take-profit when BIAS-V >= threshold",
+    )
+    monthly_risk_budget_enabled: bool = Field(
+        default=False,
+        description="Enable account-level monthly max-loss risk budget gate before new entries",
+    )
+    monthly_risk_budget_pct: float = Field(
+        default=0.06,
+        ge=0.01,
+        le=0.06,
+        description="Monthly max-loss budget on account NAV (0.06 = 6%)",
+    )
+    monthly_risk_budget_include_new_trade_risk: bool = Field(
+        default=False,
+        description="If true, include candidate new-trade risk in monthly budget check",
+    )
     bias_ma_window: int = Field(default=20, ge=2)
     bias_entry: float = Field(default=2.0)
     bias_hot: float = Field(default=10.0)
@@ -1526,14 +2362,27 @@ class TrendPortfolioBacktestRequest(BaseModel):
     macd_signal: int = Field(default=9, ge=2)
     macd_v_atr_window: int = Field(default=26, ge=2)
     macd_v_scale: float = Field(default=100.0, gt=0.0)
-    er_filter: bool = Field(default=False, description="Universal ER entry filter switch")
+    er_filter: bool = Field(
+        default=False, description="Universal ER entry filter switch"
+    )
     er_window: int = Field(default=10, ge=2)
     er_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
-    impulse_entry_filter: bool = Field(default=False, description="Universal Impulse entry filter switch (Elder Impulse System)")
-    impulse_allow_bull: bool = Field(default=True, description="Allow new long entries in BULL impulse state")
-    impulse_allow_bear: bool = Field(default=False, description="Allow new long entries in BEAR impulse state")
-    impulse_allow_neutral: bool = Field(default=False, description="Allow new long entries in NEUTRAL impulse state")
-    er_exit_filter: bool = Field(default=False, description="Universal ER exit filter switch")
+    impulse_entry_filter: bool = Field(
+        default=False,
+        description="Universal Impulse entry filter switch (Elder Impulse System)",
+    )
+    impulse_allow_bull: bool = Field(
+        default=True, description="Allow new long entries in BULL impulse state"
+    )
+    impulse_allow_bear: bool = Field(
+        default=False, description="Allow new long entries in BEAR impulse state"
+    )
+    impulse_allow_neutral: bool = Field(
+        default=False, description="Allow new long entries in NEUTRAL impulse state"
+    )
+    er_exit_filter: bool = Field(
+        default=False, description="Universal ER exit filter switch"
+    )
     er_exit_window: int = Field(default=10, ge=2)
     er_exit_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
     random_hold_days: int = Field(default=20, ge=1)
@@ -1563,24 +2412,59 @@ class TrendPortfolioBacktestRequest(BaseModel):
 
 
 class AssetGroupSuggestRequest(BaseModel):
-    codes: list[str] = Field(min_length=2, description="Candidate codes for auto grouping")
+    codes: list[str] = Field(
+        min_length=2, description="Candidate codes for auto grouping"
+    )
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
-    adjust: str = Field(default="hfq", description="Price adjust basis for correlation clustering")
-    lookback_days: int = Field(default=252, ge=20, description="Rolling lookback days for correlation matrix")
-    corr_threshold: float = Field(default=0.75, ge=0.0, le=0.99, description="Absolute correlation threshold for linking two assets")
+    adjust: str = Field(
+        default="hfq", description="Price adjust basis for correlation clustering"
+    )
+    lookback_days: int = Field(
+        default=252, ge=20, description="Rolling lookback days for correlation matrix"
+    )
+    corr_threshold: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=0.99,
+        description="Absolute correlation threshold for linking two assets",
+    )
 
 
 class RotationCandidateScreenRequest(BaseModel):
-    codes: list[str] = Field(min_length=2, description="Candidate codes from preset pool")
+    codes: list[str] = Field(
+        min_length=2, description="Candidate codes from preset pool"
+    )
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     adjust: str = Field(default="hfq", description="Price adjust basis")
-    lookback_days: int = Field(default=252, ge=20, le=2520, description="Lookback window for scoring/correlation")
-    top_n: int = Field(default=12, ge=2, le=200, description="Max number of selected assets")
-    min_n: int = Field(default=4, ge=1, le=200, description="Minimum selected assets (fallback fill by score)")
-    max_pair_corr: float = Field(default=0.75, ge=0.0, le=0.99, description="Max absolute pairwise correlation among selected assets")
-    signif_horizon_days: int = Field(default=20, ge=5, le=252, description="Forward horizon for momentum significance test")
+    lookback_days: int = Field(
+        default=252,
+        ge=20,
+        le=2520,
+        description="Lookback window for scoring/correlation",
+    )
+    top_n: int = Field(
+        default=12, ge=2, le=200, description="Max number of selected assets"
+    )
+    min_n: int = Field(
+        default=4,
+        ge=1,
+        le=200,
+        description="Minimum selected assets (fallback fill by score)",
+    )
+    max_pair_corr: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=0.99,
+        description="Max absolute pairwise correlation among selected assets",
+    )
+    signif_horizon_days: int = Field(
+        default=20,
+        ge=5,
+        le=252,
+        description="Forward horizon for momentum significance test",
+    )
     factor_weights: dict[str, float] | None = Field(
         default=None,
         description="Optional factor weights, keys: mom_63,mom_126,sharpe,win_rate,liquidity,mdd",
@@ -1592,9 +2476,15 @@ class RotationCandidateScreenRequest(BaseModel):
 
 
 class MonteCarloRequest(BaseModel):
-    n_sims: int = Field(default=10000, ge=50, le=50000, description="Number of Monte Carlo simulations")
-    block_size: int = Field(default=5, ge=1, le=252, description="Circular block size in trading days")
-    seed: int | None = Field(default=None, description="Optional RNG seed for reproducibility")
+    n_sims: int = Field(
+        default=10000, ge=50, le=50000, description="Number of Monte Carlo simulations"
+    )
+    block_size: int = Field(
+        default=5, ge=1, le=252, description="Circular block size in trading days"
+    )
+    seed: int | None = Field(
+        default=None, description="Optional RNG seed for reproducibility"
+    )
     sample_window_days: int | None = Field(
         default=None,
         ge=2,
@@ -1617,10 +2507,20 @@ class RotationOosBootstrapRequest(BaseModel):
     codes: list[str] = Field(min_length=1, description="Universe codes")
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
-    oos_ratio: float = Field(default=0.3, gt=0.0, lt=1.0, description="Fraction of period for OOS (at end)")
-    n_bootstrap: int = Field(default=50, ge=5, le=500, description="Number of bootstrap resamples")
-    block_size: int = Field(default=21, ge=1, description="Block size for circular block bootstrap (trading days)")
-    seed: int | None = Field(default=None, description="Random seed for reproducibility")
+    oos_ratio: float = Field(
+        default=0.3, gt=0.0, lt=1.0, description="Fraction of period for OOS (at end)"
+    )
+    n_bootstrap: int = Field(
+        default=50, ge=5, le=500, description="Number of bootstrap resamples"
+    )
+    block_size: int = Field(
+        default=21,
+        ge=1,
+        description="Block size for circular block bootstrap (trading days)",
+    )
+    seed: int | None = Field(
+        default=None, description="Random seed for reproducibility"
+    )
     cost_bps: float = Field(default=3.0, ge=0.0)
     param_grid: dict[str, list[Any]] | None = Field(
         default=None,
@@ -1637,10 +2537,20 @@ class TrendOosBootstrapRequest(BaseModel):
     codes: list[str] = Field(min_length=1, description="Portfolio codes")
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
-    oos_ratio: float = Field(default=0.3, gt=0.0, lt=1.0, description="Fraction of period for OOS (at end)")
-    n_bootstrap: int = Field(default=50, ge=5, le=500, description="Number of bootstrap resamples")
-    block_size: int = Field(default=21, ge=1, description="Block size for circular block bootstrap (trading days)")
-    seed: int | None = Field(default=None, description="Random seed for reproducibility")
+    oos_ratio: float = Field(
+        default=0.3, gt=0.0, lt=1.0, description="Fraction of period for OOS (at end)"
+    )
+    n_bootstrap: int = Field(
+        default=50, ge=5, le=500, description="Number of bootstrap resamples"
+    )
+    block_size: int = Field(
+        default=21,
+        ge=1,
+        description="Block size for circular block bootstrap (trading days)",
+    )
+    seed: int | None = Field(
+        default=None, description="Random seed for reproducibility"
+    )
     strategy: str = Field(
         default="ma_filter",
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry",
@@ -1648,9 +2558,11 @@ class TrendOosBootstrapRequest(BaseModel):
     cost_bps: float = Field(default=2.0, ge=0.0)
     risk_free_rate: float = Field(default=0.025)
     exec_price: str = Field(default="open", description="open|close|oc2")
-    engine: str | None = Field(default=None, description="Backtest engine switch: legacy|bt; null uses server default")
+    engine: str | None = Field(
+        default=None,
+        description="Backtest engine switch: legacy|bt; null uses server default",
+    )
     param_grid: dict[str, list[Any]] | None = Field(
         default=None,
         description="Optional param grid per strategy; if omitted, a default grid is used.",
     )
-

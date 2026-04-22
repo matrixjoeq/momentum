@@ -18,7 +18,9 @@ class FakeAk:
         return self.df
 
 
-def test_logical_rollback_restores_updated_and_deletes_inserted(session_factory: sessionmaker) -> None:
+def test_logical_rollback_restores_updated_and_deletes_inserted(
+    session_factory: sessionmaker,
+) -> None:
     df1 = pd.DataFrame(
         {
             "日期": ["2024-01-02", "2024-01-03"],
@@ -39,23 +41,45 @@ def test_logical_rollback_restores_updated_and_deletes_inserted(session_factory:
     )
 
     with session_factory() as db:
-        upsert_etf_pool(db, code="510300", name="沪深300ETF", start_date="20240101", end_date="20240131")
+        upsert_etf_pool(
+            db,
+            code="510300",
+            name="沪深300ETF",
+            start_date="20240101",
+            end_date="20240131",
+        )
         db.commit()
 
     with session_factory() as db:
-        b1 = ingest_one_etf(db, ak=FakeAk(df1), code="510300", start_date="20240101", end_date="20240131")
+        b1 = ingest_one_etf(
+            db,
+            ak=FakeAk(df1),
+            code="510300",
+            start_date="20240101",
+            end_date="20240131",
+        )
         assert b1.status == "success"
 
     with session_factory() as db:
-        before = [(p.trade_date.isoformat(), p.close) for p in list_prices(db, code="510300")]
+        before = [
+            (p.trade_date.isoformat(), p.close) for p in list_prices(db, code="510300")
+        ]
         assert before == [("2024-01-02", 1.02), ("2024-01-03", 1.03)]
 
     with session_factory() as db:
-        b2 = ingest_one_etf(db, ak=FakeAk(df2), code="510300", start_date="20240101", end_date="20240131")
+        b2 = ingest_one_etf(
+            db,
+            ak=FakeAk(df2),
+            code="510300",
+            start_date="20240101",
+            end_date="20240131",
+        )
         assert b2.status == "success"
 
     with session_factory() as db:
-        mid = [(p.trade_date.isoformat(), p.close) for p in list_prices(db, code="510300")]
+        mid = [
+            (p.trade_date.isoformat(), p.close) for p in list_prices(db, code="510300")
+        ]
         assert mid == [("2024-01-02", 1.01), ("2024-01-03", 1.01), ("2024-01-04", 1.01)]
 
     with session_factory() as db:
@@ -63,22 +87,58 @@ def test_logical_rollback_restores_updated_and_deletes_inserted(session_factory:
         assert rb.status == "success"
 
     with session_factory() as db:
-        after = [(p.trade_date.isoformat(), p.close) for p in list_prices(db, code="510300")]
+        after = [
+            (p.trade_date.isoformat(), p.close) for p in list_prices(db, code="510300")
+        ]
         assert after == before
 
 
 def test_rollback_fails_if_audit_missing(session_factory: sessionmaker) -> None:
-    df1 = pd.DataFrame({"日期": ["2024-01-02"], "开盘": [1.0], "最高": [1.05], "最低": [0.98], "收盘": [1.02]})
-    df2 = pd.DataFrame({"日期": ["2024-01-02"], "开盘": [1.0], "最高": [1.05], "最低": [0.98], "收盘": [1.01]})
+    df1 = pd.DataFrame(
+        {
+            "日期": ["2024-01-02"],
+            "开盘": [1.0],
+            "最高": [1.05],
+            "最低": [0.98],
+            "收盘": [1.02],
+        }
+    )
+    df2 = pd.DataFrame(
+        {
+            "日期": ["2024-01-02"],
+            "开盘": [1.0],
+            "最高": [1.05],
+            "最低": [0.98],
+            "收盘": [1.01],
+        }
+    )
 
     with session_factory() as db:
-        upsert_etf_pool(db, code="510300", name="沪深300ETF", start_date="20240101", end_date="20240131")
+        upsert_etf_pool(
+            db,
+            code="510300",
+            name="沪深300ETF",
+            start_date="20240101",
+            end_date="20240131",
+        )
         db.commit()
-        b1 = ingest_one_etf(db, ak=FakeAk(df1), code="510300", start_date="20240101", end_date="20240131")
+        b1 = ingest_one_etf(
+            db,
+            ak=FakeAk(df1),
+            code="510300",
+            start_date="20240101",
+            end_date="20240131",
+        )
         assert b1.status == "success"
 
     with session_factory() as db:
-        b2 = ingest_one_etf(db, ak=FakeAk(df2), code="510300", start_date="20240101", end_date="20240131")
+        b2 = ingest_one_etf(
+            db,
+            ak=FakeAk(df2),
+            code="510300",
+            start_date="20240101",
+            end_date="20240131",
+        )
         assert b2.status == "success"
 
     # sabotage audit so logical rollback can't restore old values -> fingerprint mismatch
@@ -93,5 +153,3 @@ def test_rollback_fails_if_audit_missing(session_factory: sessionmaker) -> None:
     with session_factory() as db:
         prices = list_prices(db, code="510300")
         assert prices[0].close == 1.01
-
-

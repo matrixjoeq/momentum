@@ -55,7 +55,9 @@ def ensure_default_policies(db: Session) -> None:
 
     # Update existing policies to match current defaults (safe, deterministic).
     for p in DEFAULT_POLICIES:
-        obj = db.execute(select(ValidationPolicy).where(ValidationPolicy.name == p["name"])).scalar_one_or_none()
+        obj = db.execute(
+            select(ValidationPolicy).where(ValidationPolicy.name == p["name"])
+        ).scalar_one_or_none()
         if obj is None:
             continue
         obj.description = p.get("description")
@@ -64,4 +66,3 @@ def ensure_default_policies(db: Session) -> None:
         obj.max_gap_days = p["max_gap_days"]
 
     db.flush()
-

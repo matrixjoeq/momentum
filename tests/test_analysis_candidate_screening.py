@@ -2,7 +2,10 @@ import datetime as dt
 
 import pandas as pd
 
-from etf_momentum.analysis.candidate_screening import RotationCandidateScreenInputs, screen_rotation_candidates
+from etf_momentum.analysis.candidate_screening import (
+    RotationCandidateScreenInputs,
+    screen_rotation_candidates,
+)
 from etf_momentum.db.models import EtfPool
 from tests.helpers.price_seed import add_price_all_adjustments
 
