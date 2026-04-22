@@ -20,4 +20,8 @@ def test_api_baseline_weekly5_ew_dashboard_smoke(api_client):
     assert data["meta"]["type"] == "baseline_weekly5_ew_dashboard"
     assert "by_anchor" in data
     assert set(data["by_anchor"].keys()) == {"1", "2", "3", "4", "5"}
+    for k in ["1", "2", "3", "4", "5"]:
+        corr = data["by_anchor"][k]["correlation"]
+        assert corr["method"] == "pearson_log_return"
+        assert isinstance(corr["n_obs"], int)
 

@@ -2086,7 +2086,7 @@ def backtest_rotation(
 
     def _pair_corr_qfq(*, code_a: str, code_b: str, end_pos: int) -> float | None:
         """
-        Pearson corr of daily returns (pct_change) for qfq close over a lookback window ending at end_pos.
+        Pearson corr of daily log returns for qfq close over a lookback window ending at end_pos.
         end_pos is an integer index into `dates` (aligned calendar).
         """
         if code_a == code_b:
@@ -2099,8 +2099,8 @@ def backtest_rotation(
             return None
         pa = close_qfq[code_a].iloc[start_pos : end_pos + 1].astype(float)
         pb = close_qfq[code_b].iloc[start_pos : end_pos + 1].astype(float)
-        ra = pa.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
-        rb = pb.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+        ra = np.log(pa).diff().replace([np.inf, -np.inf], np.nan).dropna()
+        rb = np.log(pb).diff().replace([np.inf, -np.inf], np.nan).dropna()
         idx = ra.index.intersection(rb.index)
         if len(idx) < 3:
             return None

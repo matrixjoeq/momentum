@@ -308,9 +308,9 @@ def compute_baseline_calendar_effect(db: Session, inp: BaselineCalendarEffectInp
                 idx = px_common.index
                 exec_day_positions = set()
                 for d in decision_dates:
-                    dt = pd.to_datetime(d)
-                    if dt in idx:
-                        pos = idx.get_loc(dt)
+                    decision_ts = pd.to_datetime(d)
+                    if decision_ts in idx:
+                        pos = idx.get_loc(decision_ts)
                         if pos + 1 < len(idx):
                             exec_day_positions.add(int(pos) + 1)
                 if exec_day_positions and "open" in ohlc and "close" in ohlc:

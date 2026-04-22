@@ -92,6 +92,7 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert any(k.startswith("BENCH:") for k in data["nav"]["series"].keys())
     assert "quarterly" in data["period_returns"]
     assert "correlation" in data
+    assert data["correlation"]["method"] == "pearson_log_return"
     assert data["correlation"]["codes"] == ["510300", "511010"]
     assert len(data["correlation"]["matrix"]) == 2
     assert "fft" in data

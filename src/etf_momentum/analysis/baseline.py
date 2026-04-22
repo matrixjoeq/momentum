@@ -2094,14 +2094,19 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         amount = amount.sort_index()
         amount_common = amount.loc[start_idx:]
 
-    # correlation matrix
-    corr_ret = ret_common[codes_eff].astype(float)
+    # correlation matrix (log returns for research consistency)
+    if dynamic_universe:
+        corr_px = close_common[codes_eff].astype(float)
+        corr_ret = np.log(corr_px).diff().replace([np.inf, -np.inf], np.nan)
+    else:
+        corr_px = close_ff_common[codes_eff].astype(float)
+        corr_ret = np.log(corr_px).diff().replace([np.inf, -np.inf], np.nan)
     if dynamic_universe:
         corr = corr_ret.corr(method="pearson", min_periods=corr_min_obs)
     else:
         corr = corr_ret.corr(method="pearson")
     corr_out = {
-        "method": "pearson",
+        "method": "pearson_log_return",
         "n_obs": int(len(corr_ret.index)),
         "min_pair_obs": int(corr_min_obs),
         "codes": [c for c in codes_eff if c in corr.columns],

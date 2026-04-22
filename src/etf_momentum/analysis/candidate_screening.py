@@ -142,7 +142,8 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
         raise ValueError("no price data in selected range")
     close = close.sort_index().ffill().replace([np.inf, -np.inf], np.nan)
     close = close[codes]
-    ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
+    # Research correlation uses log returns across modules.
+    ret = np.log(close).diff().replace([np.inf, -np.inf], np.nan)
     if len(ret) > lb:
         ret = ret.iloc[-lb:]
     ret = ret.dropna(how="all")
@@ -212,7 +213,7 @@ def screen_rotation_candidates(db: Session, inp: RotationCandidateScreenInputs) 
 
     # Advanced momentum significance: does momentum state predict near-future return?
     mom_sig = (px / px.shift(63) - 1.0).astype(float)
-    fwd_ret = (px.shift(-horizon) / px - 1.0).astype(float)
+    fwd_ret = np.log(px.shift(-horizon) / px).replace([np.inf, -np.inf], np.nan).astype(float)
     signif_by_code: dict[str, dict[str, float | int | None | bool]] = {}
     for c in codes:
         m = pd.to_numeric(mom_sig[c], errors="coerce").astype(float)

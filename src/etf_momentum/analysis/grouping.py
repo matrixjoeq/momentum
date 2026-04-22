@@ -35,7 +35,7 @@ def suggest_asset_groups(db: Session, inp: AssetGroupSuggestInputs) -> dict[str,
     if close.empty:
         raise ValueError("no price data in selected range")
     close = close.sort_index().ffill()
-    ret = close.pct_change().replace([np.inf, -np.inf], np.nan)
+    ret = np.log(close).diff().replace([np.inf, -np.inf], np.nan)
     if int(inp.lookback_days) > 0 and len(ret) > int(inp.lookback_days):
         ret = ret.iloc[-int(inp.lookback_days) :]
     ret = ret.dropna(how="all")

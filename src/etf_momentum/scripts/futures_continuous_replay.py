@@ -421,13 +421,13 @@ def _plot_kline(df: pd.DataFrame, title: str, out_png: Path) -> None:
     x = pd.to_datetime(df["date"])
     o = pd.to_numeric(df["open"], errors="coerce")
     h = pd.to_numeric(df["high"], errors="coerce")
-    l = pd.to_numeric(df["low"], errors="coerce")
+    l = pd.to_numeric(df["low"], errors="coerce")  # noqa: E741
     c = pd.to_numeric(df["close"], errors="coerce")
     valid = x.notna() & o.notna() & h.notna() & l.notna() & c.notna()
     x = x[valid]
     o = o[valid]
     h = h[valid]
-    l = l[valid]
+    l = l[valid]  # noqa: E741
     c = c[valid]
     if len(x) == 0:
         return

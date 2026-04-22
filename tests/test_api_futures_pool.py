@@ -116,3 +116,60 @@ def test_futures_fetch_incremental_fallback_and_full_modes_contract(api_client: 
     assert third["status"] == "success"
     assert third["inserted_or_updated"] >= 1
     assert "mode=full" in (third.get("message") or "")
+
+
+def test_futures_synthesize_all_api_contract(api_client: TestClient) -> None:
+    client = api_client
+    post_json_ok(
+        client,
+        "/api/futures",
+        {"code": "RB0", "name": "螺纹钢主连", "start_date": "20240101", "end_date": "20241231"},
+    )
+    fetched = post_json_ok(client, "/api/futures/RB0/fetch", {"fetch_type": "full"})
+    assert fetched["status"] == "success"
+
+    resp = client.post("/api/futures/synthesize-all")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"succeeded", "failed", "errors"}
+    assert isinstance(body["succeeded"], int)
+    assert isinstance(body["failed"], int)
+    assert isinstance(body["errors"], list)
+    assert body["succeeded"] >= 1
+
+    # 88 uses adjust=none and should be queryable from public API.
+    p88 = client.get("/api/futures/RB88/prices?adjust=none")
+    assert p88.status_code == 200
+    rows_88 = p88.json()
+    assert isinstance(rows_88, list)
+    assert len(rows_88) >= 1
+    assert all(r["code"] == "RB88" for r in rows_88)
+    assert all(r["adjust"] == "none" for r in rows_88)
+
+
+def test_futures_validate_all_api_contract(api_client: TestClient) -> None:
+    client = api_client
+    post_json_ok(
+        client,
+        "/api/futures",
+        {"code": "RB0", "name": "螺纹钢主连", "start_date": "20240101", "end_date": "20241231"},
+    )
+    fetched = post_json_ok(client, "/api/futures/RB0/fetch", {"fetch_type": "full"})
+    assert fetched["status"] == "success"
+    synth = client.post("/api/futures/synthesize-all")
+    assert synth.status_code == 200
+
+    resp = client.post("/api/futures/validate-all")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"total", "passed", "failed", "skipped", "items"}
+    assert isinstance(body["total"], int)
+    assert isinstance(body["passed"], int)
+    assert isinstance(body["failed"], int)
+    assert isinstance(body["skipped"], int)
+    assert isinstance(body["items"], list)
+    if body["items"]:
+        item = body["items"][0]
+        assert set(item.keys()) == {"code", "status", "conclusion", "details"}
+        assert item["status"] in {"passed", "failed", "skipped"}
+        assert isinstance(item["details"], dict)

@@ -206,6 +206,21 @@ class FuturesFetchSelectedRequest(BaseModel):
     )
 
 
+class FuturesSynthesisValidationItemOut(BaseModel):
+    code: str
+    status: Literal["passed", "failed", "skipped"]
+    conclusion: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class FuturesSynthesisValidationAllOut(BaseModel):
+    total: int
+    passed: int
+    failed: int
+    skipped: int
+    items: list[FuturesSynthesisValidationItemOut] = Field(default_factory=list)
+
+
 class FuturesPriceOut(BaseModel):
     code: str
     trade_date: str  # YYYY-MM-DD

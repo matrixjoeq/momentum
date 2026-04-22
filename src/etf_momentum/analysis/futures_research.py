@@ -4,6 +4,7 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
@@ -95,7 +96,12 @@ def compute_futures_group_correlation(
             "error": "empty_prices",
             "meta": {"group_name": group.name, "start": start, "end": end},
         }
-    rets = px.pct_change()
+    rets = pd.DataFrame(index=px.index, columns=px.columns, dtype=float)
+    for c in px.columns:
+        s = pd.to_numeric(px[c], errors="coerce").astype(float)
+        # Correlation research uses log returns for consistency across modules.
+        rets[c] = np.log(s).diff()
+    rets = rets.replace([np.inf, -np.inf], pd.NA)
     if dynamic_universe:
         corr_df = rets.corr(min_periods=max(2, int(min_obs)))
         ret_used = rets.dropna(how="all")

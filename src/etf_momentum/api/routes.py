@@ -88,6 +88,8 @@ from .schemas import (
     FuturesFetchRequest,
     FuturesFetchResult,
     FuturesFetchSelectedRequest,
+    FuturesSynthesisValidationAllOut,
+    FuturesSynthesisValidationItemOut,
     FuturesContractFetchStatusOut,
     FuturesPoolOut,
     FuturesPoolUpsert,
@@ -249,14 +251,16 @@ from ..db.off_fund_repo import (
     upsert_off_fund_pool,
 )
 from ..db.futures_repo import (
-    FuturesPriceRow,
+    delete_futures_pool,
     delete_futures_prices,
+    deserialize_futures_tags,
+    get_futures_date_range,
     get_futures_pool_by_code,
     list_contract_fetch_statuses,
     list_futures_pool,
     list_futures_prices,
-    normalize_futures_adjust,
-    upsert_futures_prices,
+    mark_futures_contract_pool_fetch,
+    upsert_futures_pool,
 )
 from ..db.futures_research_repo import (
     delete_futures_group,
@@ -1520,8 +1524,6 @@ def trend_portfolio_oos_bootstrap(
     payload: TrendOosBootstrapRequest, db: Session = Depends(get_session)
 ) -> dict:
     """Out-of-sample bootstrap parameter optimisation for trend (portfolio) strategies (Carver-style)."""
-    import datetime as dt
-
     try:
         start_d = dt.datetime.strptime(payload.start, "%Y%m%d").date()
         end_d = dt.datetime.strptime(payload.end, "%Y%m%d").date()
@@ -4053,11 +4055,12 @@ def baseline_weekly5_ew_dashboard(
             "ulcer_performance_index": float(upi),
         }
 
-        # attribution + correlation (on daily returns)
-        corr = daily_ret[codes].corr(method="pearson")
+        # attribution (simple returns) + correlation (log returns)
+        corr_ret = np.log(px[codes].astype(float)).diff().replace([np.inf, -np.inf], np.nan)
+        corr = corr_ret.corr(method="pearson")
         corr_out = {
-            "method": "pearson",
-            "n_obs": int(len(daily_ret)),
+            "method": "pearson_log_return",
+            "n_obs": int(len(corr_ret)),
             "codes": codes,
             "matrix": corr.to_numpy(dtype=float).tolist(),
         }
@@ -4476,10 +4479,11 @@ def baseline_weekly5_ew_dashboard_combo(
         "ulcer_performance_index": float(upi),
     }
 
-    corr = daily_ret[codes].corr(method="pearson")
+    corr_ret = np.log(px[codes].astype(float)).diff().replace([np.inf, -np.inf], np.nan)
+    corr = corr_ret.corr(method="pearson")
     corr_out = {
-        "method": "pearson",
-        "n_obs": int(len(daily_ret)),
+        "method": "pearson_log_return",
+        "n_obs": int(len(corr_ret)),
         "codes": codes,
         "matrix": corr.to_numpy(dtype=float).tolist(),
     }
@@ -4608,8 +4612,6 @@ def sim_init_fixed_strategy(
     db.flush()
 
     # Create config snapshot (fixed params).
-    import json
-
     cfg = SimStrategyConfig(
         portfolio_id=int(p.id),
         codes_json=json.dumps(_FIXED_CODES, ensure_ascii=False),
@@ -4781,8 +4783,6 @@ def sim_generate_decisions(
     )
     by_anchor = sim_res.get("by_anchor") or {}
 
-    import json
-
     inserted = 0
     for wd_s, res in by_anchor.items():
         wd = int(wd_s)
@@ -4914,8 +4914,6 @@ def sim_trade_preview(
     pos = _latest_position(
         db, variant_id=int(payload.variant_id), before_or_on=d.effective_date
     )
-    import json
-
     cur_positions = {}
     cur_cash = None
     if pos is not None:
@@ -4968,8 +4966,6 @@ def sim_trade_confirm(
 
     trade_date = d.effective_date
     pos0 = _latest_position(db, variant_id=int(v.id), before_or_on=trade_date)
-    import json
-
     if pos0 is None:
         # Initialize from portfolio cash.
         p = db.query(SimPortfolio).filter(SimPortfolio.id == int(v.portfolio_id)).one()
@@ -5068,8 +5064,6 @@ def sim_mark_to_market(
     if not days:
         return {"ok": True, "updated": 0}
 
-    import json
-
     # Start from latest snapshot before the first day; if none, use portfolio initial cash.
     pos0 = _latest_position(db, variant_id=int(v.id), before_or_on=days[0])
     if pos0 is None:
@@ -5130,8 +5124,6 @@ def sim_variant_status(variant_id: int, db: Session = Depends(get_session)) -> d
     if v is None:
         raise HTTPException(status_code=404, detail="variant not found")
     pos = _latest_position(db, variant_id=int(v.id), before_or_on=None)
-    import json
-
     if pos is None:
         p = db.query(SimPortfolio).filter(SimPortfolio.id == int(v.portfolio_id)).one()
         return {
@@ -5221,8 +5213,6 @@ def baseline_montecarlo(
     # reuse baseline computation to ensure exact same portfolio construction
     base = baseline_analysis(payload, db=db)
     try:
-        import pandas as pd
-
         nav = pd.Series(
             base["nav"]["series"]["EW"],
             index=pd.to_datetime(base["nav"]["dates"]),
@@ -5273,8 +5263,6 @@ def rotation_oos_bootstrap(
     payload: RotationOosBootstrapRequest, db: Session = Depends(get_session)
 ) -> dict:
     """Out-of-sample bootstrap parameter optimisation for rotation (Carver-style)."""
-    import datetime as dt
-
     from etf_momentum.strategy.rotation_research_config import UniverseConfig
     from etf_momentum.scripts.rotation_research_runner import (
         run_rotation_oos_bootstrap_research,
@@ -5309,8 +5297,6 @@ def rotation_montecarlo(
 ) -> dict:
     rot = rotation_backtest(payload, db=db)
     try:
-        import pandas as pd
-
         nav = pd.Series(
             rot["nav"]["series"]["ROTATION"],
             index=pd.to_datetime(rot["nav"]["dates"]),
@@ -6348,6 +6334,12 @@ def _schedule_contract_fetch_sequential(
     )
 
 
+def _mark_contract_fetch_enqueued(db: Session, *, code: str, fetch_type: str) -> None:
+    ft = str(fetch_type or "incremental").strip().lower()
+    msg = f"queued by main fetch ({ft})"
+    mark_futures_contract_pool_fetch(db, code=code, status="running", message=msg)
+
+
 @router.get("/futures", response_model=list[FuturesPoolOut])
 def get_futures(
     adjust: str = "none", db: Session = Depends(get_session)
@@ -6426,6 +6418,8 @@ def fetch_one_futures(
     )
     if res.status != "success":
         raise HTTPException(status_code=500, detail=res.message or "ingestion failed")
+    _mark_contract_fetch_enqueued(db, code=code, fetch_type=payload.fetch_type)
+    db.commit()
     _schedule_contract_fetch(background_tasks, request, code, payload.fetch_type)
     return FuturesFetchResult(
         code=code,
@@ -6445,6 +6439,7 @@ def fetch_all_futures(
 ) -> list[FuturesFetchResult]:
     out: list[FuturesFetchResult] = []
     items = list_futures_pool(db)
+    ok_codes: list[str] = []
     for item in items:
         res = ingest_one_futures(
             db,
@@ -6464,7 +6459,13 @@ def fetch_all_futures(
                 message=res.message,
             )
         )
-    ok_codes = [it.code for it, r in zip(items, out) if r.status == "success"]
+        if res.status == "success":
+            ok_codes.append(item.code)
+            _mark_contract_fetch_enqueued(
+                db, code=item.code, fetch_type=payload.fetch_type
+            )
+    if ok_codes:
+        db.commit()
     _schedule_contract_fetch_sequential(
         background_tasks, request, ok_codes, payload.fetch_type
     )
@@ -6481,6 +6482,7 @@ def fetch_selected_futures(
 ) -> list[FuturesFetchResult]:
     pool_by_code = {x.code: x for x in list_futures_pool(db)}
     out: list[FuturesFetchResult] = []
+    ok_codes: list[str] = []
     for code in payload.codes:
         item = pool_by_code.get(code)
         if item is None:
@@ -6511,7 +6513,13 @@ def fetch_selected_futures(
                 message=res.message,
             )
         )
-    ok_codes = [code for code, r in zip(payload.codes, out) if r.status == "success"]
+        if res.status == "success":
+            ok_codes.append(code)
+            _mark_contract_fetch_enqueued(
+                db, code=code, fetch_type=payload.fetch_type
+            )
+    if ok_codes:
+        db.commit()
     _schedule_contract_fetch_sequential(
         background_tasks, request, ok_codes, payload.fetch_type
     )
@@ -6546,6 +6554,63 @@ def synthesize_all_futures(
             errors.append(f"{item.code}: {str(e)}")
 
     return {"succeeded": succeeded, "failed": failed, "errors": errors}
+
+
+@router.post(
+    "/futures/validate-all",
+    response_model=FuturesSynthesisValidationAllOut,
+)
+def validate_all_futures_synthesis(
+    db: Session = Depends(get_session),
+) -> FuturesSynthesisValidationAllOut:
+    """
+    Validate synthesized futures series for all pool symbols.
+    """
+    from ..data.futures_synthesize import validate_synthesized_for_pool
+
+    items = list_futures_pool(db)
+    reports: list[FuturesSynthesisValidationItemOut] = []
+    passed = 0
+    failed = 0
+    skipped = 0
+
+    for item in items:
+        try:
+            rep = validate_synthesized_for_pool(db, item)
+            status = str(rep.get("status", "")).strip().lower()
+            out = FuturesSynthesisValidationItemOut(
+                code=str(rep.get("code") or item.code),
+                status=(
+                    status
+                    if status in {"passed", "failed", "skipped"}
+                    else "failed"
+                ),
+                conclusion=str(rep.get("conclusion") or "校验失败"),
+                details=rep.get("details") or {},
+            )
+        except (ValueError, TypeError, RuntimeError, DBAPIError, OperationalError) as e:
+            out = FuturesSynthesisValidationItemOut(
+                code=item.code,
+                status="failed",
+                conclusion=f"失败：校验执行异常（{e}）",
+                details={"error": str(e)},
+            )
+
+        if out.status == "passed":
+            passed += 1
+        elif out.status == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+        reports.append(out)
+
+    return FuturesSynthesisValidationAllOut(
+        total=len(reports),
+        passed=passed,
+        failed=failed,
+        skipped=skipped,
+        items=reports,
+    )
 
 
 @router.get(

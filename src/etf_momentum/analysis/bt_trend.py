@@ -238,7 +238,7 @@ def _macd_core_fallback(close: pd.Series, *, fast: int, slow: int, signal: int) 
 
 def _atr_from_hlc_fallback(high: pd.Series, low: pd.Series, close: pd.Series, *, window: int) -> pd.Series:
     h = _as_float_series(high)
-    l = _as_float_series(low).reindex(h.index).combine_first(h)
+    l = _as_float_series(low).reindex(h.index).combine_first(h)  # noqa: E741
     c = _as_float_series(close).reindex(h.index).ffill()
     prev_close = c.shift(1)
     tr = pd.concat(
@@ -275,7 +275,7 @@ def _prefer_legacy_on_diff(
     tol: float = 1e-12,
 ) -> pd.Series:
     o = _as_float_series(out).reindex(legacy.index)
-    l = _as_float_series(legacy)
+    l = _as_float_series(legacy)  # noqa: E741
     merged = o.combine_first(l)
     mask = (
         merged.notna()
@@ -390,7 +390,7 @@ def _macd_core(close: pd.Series, *, fast: int, slow: int, signal: int) -> tuple[
 
 def _atr_from_hlc(high: pd.Series, low: pd.Series, close: pd.Series, *, window: int) -> pd.Series:
     h = _as_float_series(high)
-    l = _as_float_series(low).reindex(h.index).combine_first(h)
+    l = _as_float_series(low).reindex(h.index).combine_first(h)  # noqa: E741
     c = _as_float_series(close).reindex(h.index).ffill()
     w = max(2, int(window))
     legacy = _atr_from_hlc_fallback(h, l, c, window=w)
@@ -1900,7 +1900,7 @@ def _apply_r_multiple_take_profit(
         o = float(op.iloc[i]) if np.isfinite(float(op.iloc[i])) else float("nan")
         c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
         h = float(hi.iloc[i]) if np.isfinite(float(hi.iloc[i])) else float("nan")
-        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")
+        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
         d = bp.index[i]
         ds = d.date().isoformat() if hasattr(d, "date") else str(d)
@@ -2165,7 +2165,7 @@ def _apply_atr_stop(
         b: float,
         c: float | None,
         o: float | None,
-        l: float | None,
+        l: float | None,  # noqa: E741
         a: float | None,
         stop_before: float | None,
         stop_candidate: float | None,
@@ -2309,7 +2309,7 @@ def _apply_atr_stop(
         b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
         o = float(op.iloc[i]) if np.isfinite(float(op.iloc[i])) else float("nan")
         c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
-        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")
+        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
         base_entry_event = bool((b > 0.0) and (prev_base <= 0.0))
 
@@ -2721,7 +2721,7 @@ def _apply_bias_v_take_profit(
         o = float(op.iloc[i]) if np.isfinite(float(op.iloc[i])) else float("nan")
         c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
         h = float(hi.iloc[i]) if np.isfinite(float(hi.iloc[i])) else float("nan")
-        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")
+        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
         m = float(ma.iloc[i]) if np.isfinite(float(ma.iloc[i])) else float("nan")
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
         v = float(bias_v.iloc[i]) if np.isfinite(float(bias_v.iloc[i])) else float("nan")
@@ -3079,7 +3079,7 @@ def _risk_budget_frozen_weight(
     sig = pd.to_numeric(signal, errors="coerce").astype(float).fillna(0.0).clip(lower=0.0)
     c = pd.to_numeric(close, errors="coerce").astype(float).reindex(sig.index).ffill()
     h = pd.to_numeric(high, errors="coerce").astype(float).reindex(sig.index).ffill().combine_first(c)
-    l = pd.to_numeric(low, errors="coerce").astype(float).reindex(sig.index).ffill().combine_first(c)
+    l = pd.to_numeric(low, errors="coerce").astype(float).reindex(sig.index).ffill().combine_first(c)  # noqa: E741
     atr = _atr_from_hlc(h, l, c, window=max(2, int(atr_window)))
     out = np.zeros(len(sig), dtype=float)
     in_pos = False
@@ -3715,7 +3715,6 @@ def _run_single_backtesting(
     bh_nav = _as_nav(bh_ret)
     excess_nav = (nav / bh_nav.replace(0.0, np.nan)).fillna(1.0)
     excess_ret = _tsmom_rocp(excess_nav, 1).fillna(0.0).astype(float)
-    active_ret = (strat_ret.reindex(nav.index).astype(float) - bh_ret.reindex(nav.index).astype(float)).fillna(0.0).astype(float)
 
     trades_df = stats.get("_trades")
     trades: list[dict[str, Any]] = []

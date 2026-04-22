@@ -12,21 +12,28 @@ respectively, and code suffixes 88, 888, 889.
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
+import re
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.futures_repo import FuturesPriceRow, upsert_futures_prices
-from ..db.models import FuturesPool
+from ..db.models import FuturesPool, FuturesPrice
 
 logger = logging.getLogger(__name__)
 
 NUM_COLS = ["open", "high", "low", "close", "volume", "hold", "settle", "amount"]
 PRICE_COLS = ["open", "high", "low", "close", "settle"]
+ERROR_FIELDS = ["open", "high", "low", "close", "volume", "amount", "hold", "settle"]
+KEY_FIELDS = ["open", "high", "low", "close", "settle"]
+
+USABLE_REL_MEAN_MAX = 0.005
+USABLE_REL_P95_MAX = 0.02
+USABLE_MIN_FIELDS = 4
 
 
 def _symbol_root_from_main(code: str) -> str:
@@ -57,15 +64,13 @@ def _month_iter(start_yymm: str, end_yymm: str) -> list[str]:
 
 def _load_contract_data(
     db: Session,
-    pool_id: int,
-    root: str,
     contract_codes: list[str],
-    start_date: dt.date,
-    end_date: dt.date,
 ) -> dict[str, pd.DataFrame]:
     """
     Load price data for given contract codes from the database.
-    Returns a dict mapping contract_code -> DataFrame with date index.
+    Returns a dict mapping contract_code -> DataFrame with `date` column.
+    This intentionally matches futures_continuous_replay.py so downstream
+    hold-table and quote-panel logic stay consistent.
     """
     from ..db.futures_repo import list_futures_prices
 
@@ -74,8 +79,6 @@ def _load_contract_data(
         rows = list_futures_prices(
             db,
             code=contract_code,
-            start_date=start_date,
-            end_date=end_date,
             adjust="none",
             limit=100000,
         )
@@ -100,18 +103,52 @@ def _load_contract_data(
         if df.empty:
             continue
         df["date"] = pd.to_datetime(df["date"])
-        df = df.set_index("date").sort_index()
+        df = df.sort_values("date")
         data[contract_code] = df
     return data
+
+
+def _discover_contract_codes(db: Session, *, pool: FuturesPool, root: str) -> list[str]:
+    """
+    Discover deliverable-month contract codes already stored for this pool.
+    This avoids requiring pool.start_date/end_date.
+    """
+    pid = int(pool.id)
+    pool_code = str(pool.code or "").strip().upper()
+    root_u = str(root or "").strip().upper()
+    patt = re.compile(rf"^{re.escape(root_u)}(\d{{3,4}})$")
+
+    rows = db.execute(
+        select(FuturesPrice.code).where(
+            FuturesPrice.pool_id == pid,
+            FuturesPrice.adjust == "none",
+        )
+    ).all()
+    seen: set[str] = set()
+    out: list[str] = []
+    for (code_raw,) in rows:
+        code = str(code_raw or "").strip().upper()
+        if not code or code == pool_code:
+            continue
+        m = patt.match(code)
+        if m is None:
+            continue
+        suffix = m.group(1)
+        if suffix in {"88", "888", "889"}:
+            continue
+        if code not in seen:
+            seen.add(code)
+            out.append(code)
+    return sorted(out)
 
 
 def _build_hold_table(contract_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Build a pivot table of holdings by date and contract."""
     pieces: list[pd.DataFrame] = []
     for sym, df in contract_data.items():
-        if "hold" not in df.columns:
+        if "date" not in df.columns or "hold" not in df.columns:
             continue
-        x = df[["hold"]].copy()
+        x = df[["date", "hold"]].copy()
         x["symbol"] = sym
         pieces.append(x)
     if not pieces:
@@ -129,7 +166,7 @@ def _build_quote_panel(
     """Build a dict of quote panels indexed by date."""
     out: dict[str, pd.DataFrame] = {}
     for sym, df in contract_data.items():
-        out[sym] = df.copy()
+        out[sym] = df.copy().set_index("date").sort_index()
     return out
 
 
@@ -339,32 +376,13 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
     """
     root = _symbol_root_from_main(pool.code)
 
-    # Determine date range from pool
-    start_date = pool.start_date
-    end_date = pool.end_date
-    if not start_date or not end_date:
-        return {"ok": False, "error": "pool missing start_date or end_date"}
-
-    try:
-        start_dt = dt.datetime.strptime(str(start_date), "%Y%m%d").date()
-        end_dt = dt.datetime.strptime(str(end_date), "%Y%m%d").date()
-    except ValueError:
-        return {"ok": False, "error": "invalid date format"}
-
-    # Extend end date for contract enumeration
-    extend_days = pool.contract_extend_calendar_days or 366
-    end_with_extend = end_dt + dt.timedelta(days=extend_days)
-
-    # Generate contract codes to try
-    start_yymm = start_dt.strftime("%y%m")
-    end_yymm = end_with_extend.strftime("%y%m")
-    contract_yyMMs = _month_iter(start_yymm, end_yymm)
-    contract_codes = [f"{root}{m}" for m in contract_yyMMs]
+    # Discover contract codes from already fetched/landed data for this pool.
+    contract_codes = _discover_contract_codes(db, pool=pool, root=root)
+    if not contract_codes:
+        return {"ok": False, "error": "no deliverable contract data found"}
 
     # Load contract data from database
-    contract_data = _load_contract_data(
-        db, int(pool.id), root, contract_codes, start_dt, end_dt
-    )
+    contract_data = _load_contract_data(db, contract_codes)
     if not contract_data:
         return {"ok": False, "error": "no contract data found"}
 
@@ -405,5 +423,322 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
             "88": len(rows_88),
             "888": len(rows_888),
             "889": len(rows_889),
+        },
+    }
+
+
+def _load_price_df(db: Session, *, code: str, adjust: str) -> pd.DataFrame:
+    from ..db.futures_repo import list_futures_prices
+
+    rows = list_futures_prices(db, code=code, adjust=adjust, limit=200000)
+    if not rows:
+        return pd.DataFrame(columns=["date", *NUM_COLS])
+    df = pd.DataFrame(
+        [
+            {
+                "date": r.trade_date,
+                "open": r.open,
+                "high": r.high,
+                "low": r.low,
+                "close": r.close,
+                "settle": r.settle,
+                "volume": r.volume,
+                "amount": r.amount,
+                "hold": r.hold,
+            }
+            for r in rows
+        ]
+    )
+    if df.empty:
+        return pd.DataFrame(columns=["date", *NUM_COLS])
+    df["date"] = pd.to_datetime(df["date"])
+    for c in NUM_COLS:
+        if c not in df.columns:
+            df[c] = np.nan
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df[["date", *NUM_COLS]].sort_values("date")
+
+
+def _build_joined_for_error(replay88_df: pd.DataFrame, main_df: pd.DataFrame) -> pd.DataFrame:
+    if replay88_df.empty or main_df.empty:
+        return pd.DataFrame()
+    left = replay88_df.copy().set_index("date")
+    right = main_df.copy().set_index("date")
+    return left.join(right, how="inner", lsuffix="_replay88", rsuffix="_main0")
+
+
+def _calc_error_stats(joined_df: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for f in ERROR_FIELDS:
+        col_a = f"{f}_replay88"
+        col_b = f"{f}_main0"
+        a_raw = (
+            joined_df[col_a]
+            if col_a in joined_df.columns
+            else pd.Series(np.nan, index=joined_df.index)
+        )
+        b_raw = (
+            joined_df[col_b]
+            if col_b in joined_df.columns
+            else pd.Series(np.nan, index=joined_df.index)
+        )
+        a = pd.to_numeric(a_raw, errors="coerce")
+        b = pd.to_numeric(b_raw, errors="coerce")
+        valid = a.notna() & b.notna()
+        n = int(valid.sum())
+        if n == 0:
+            rows.append(
+                {
+                    "field": f,
+                    "n": 0,
+                    "mae": np.nan,
+                    "rmse": np.nan,
+                    "max_abs": np.nan,
+                    "mape": np.nan,
+                    "p95_ape": np.nan,
+                }
+            )
+            continue
+        diff = (a[valid] - b[valid]).astype(float)
+        abs_diff = diff.abs()
+        denom = b[valid].replace(0, np.nan).abs()
+        ape = abs_diff / denom
+        mape = ape.mean(skipna=True)
+        p95_ape = ape.quantile(0.95)
+        rows.append(
+            {
+                "field": f,
+                "n": n,
+                "mae": float(abs_diff.mean()),
+                "rmse": float(np.sqrt((diff**2).mean())),
+                "max_abs": float(abs_diff.max()),
+                "mape": float(mape) if pd.notna(mape) else np.nan,
+                "p95_ape": float(p95_ape) if pd.notna(p95_ape) else np.nan,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _evaluate_usability(err_df: pd.DataFrame, *, compare_ok: bool) -> dict[str, Any]:
+    if not compare_ok:
+        return {
+            "usable": False,
+            "reason": "comparison not available",
+            "rule": {
+                "rel_mean_max": USABLE_REL_MEAN_MAX,
+                "rel_p95_max": USABLE_REL_P95_MAX,
+                "min_fields": USABLE_MIN_FIELDS,
+            },
+            "covered_fields": [],
+            "failed_fields": [],
+        }
+
+    covered: list[dict[str, object]] = []
+    failed: list[dict[str, object]] = []
+    for f in KEY_FIELDS:
+        row = err_df[err_df["field"] == f]
+        if row.empty:
+            continue
+        r = row.iloc[0]
+        n = int(r.get("n", 0) or 0)
+        if n <= 0:
+            continue
+        mape = float(r.get("mape", np.nan))
+        p95 = float(r.get("p95_ape", np.nan))
+        item = {"field": f, "n": n, "mape": mape, "p95_ape": p95}
+        covered.append(item)
+        if (
+            (not np.isnan(mape) and mape > USABLE_REL_MEAN_MAX)
+            or (not np.isnan(p95) and p95 > USABLE_REL_P95_MAX)
+        ):
+            failed.append(item)
+    usable = len(covered) >= USABLE_MIN_FIELDS and len(failed) == 0
+    reason = (
+        "pass"
+        if usable
+        else (
+            "insufficient covered fields"
+            if len(covered) < USABLE_MIN_FIELDS
+            else "relative error threshold exceeded"
+        )
+    )
+    return {
+        "usable": usable,
+        "reason": reason,
+        "rule": {
+            "rel_mean_max": USABLE_REL_MEAN_MAX,
+            "rel_p95_max": USABLE_REL_P95_MAX,
+            "min_fields": USABLE_MIN_FIELDS,
+        },
+        "covered_fields": covered,
+        "failed_fields": failed,
+    }
+
+
+def validate_synthesized_for_pool(db: Session, pool: FuturesPool) -> dict[str, Any]:
+    """
+    Validate synthesized continuous futures for one pool.
+    Skip when no synthesized data exists.
+    """
+    root = _symbol_root_from_main(pool.code)
+    code_main = str(pool.code or "").strip().upper()
+    code_88 = f"{root}88"
+    code_888 = f"{root}888"
+    code_889 = f"{root}889"
+
+    df_88 = _load_price_df(db, code=code_88, adjust="none")
+    df_888 = _load_price_df(db, code=code_888, adjust="qfq")
+    df_889 = _load_price_df(db, code=code_889, adjust="hfq")
+
+    if df_88.empty and df_888.empty and df_889.empty:
+        return {
+            "code": code_main,
+            "status": "skipped",
+            "conclusion": "跳过：无合成数据",
+            "details": {"reason": "no synthesized data"},
+        }
+
+    if df_88.empty:
+        return {
+            "code": code_main,
+            "status": "failed",
+            "conclusion": "失败：缺少无复权合成数据",
+            "details": {"reason": "missing none-adjust synthesized series"},
+        }
+
+    none_dates = pd.Index(sorted(pd.to_datetime(df_88["date"]).dropna().unique()))
+    if none_dates.empty:
+        return {
+            "code": code_main,
+            "status": "failed",
+            "conclusion": "失败：无复权合成数据为空",
+            "details": {"reason": "empty none-adjust synthesized date set"},
+        }
+    none_start = pd.Timestamp(none_dates.min())
+    none_end = pd.Timestamp(none_dates.max())
+
+    def _coverage_for(df_adj: pd.DataFrame, adj_name: str) -> dict[str, Any]:
+        adj_dates = pd.Index([])
+        if not df_adj.empty:
+            all_dates = pd.to_datetime(df_adj["date"]).dropna()
+            in_span = all_dates[(all_dates >= none_start) & (all_dates <= none_end)]
+            adj_dates = pd.Index(sorted(in_span.unique()))
+        missing = none_dates.difference(adj_dates)
+        extra = adj_dates.difference(none_dates)
+        return {
+            "adjust": adj_name,
+            "rows_total": int(len(df_adj)),
+            "rows_in_none_span": int(len(adj_dates)),
+            "start": (
+                str(pd.Timestamp(adj_dates.min()).date())
+                if len(adj_dates) > 0
+                else None
+            ),
+            "end": (
+                str(pd.Timestamp(adj_dates.max()).date())
+                if len(adj_dates) > 0
+                else None
+            ),
+            "missing_days": int(len(missing)),
+            "extra_days": int(len(extra)),
+            "missing_dates_sample": [str(pd.Timestamp(x).date()) for x in list(missing[:5])],
+            "extra_dates_sample": [str(pd.Timestamp(x).date()) for x in list(extra[:5])],
+            "same_span": bool(
+                len(adj_dates) > 0
+                and pd.Timestamp(adj_dates.min()) == none_start
+                and pd.Timestamp(adj_dates.max()) == none_end
+            ),
+            "same_date_set": bool(len(missing) == 0 and len(extra) == 0),
+        }
+
+    cov_888 = _coverage_for(df_888, "qfq")
+    cov_889 = _coverage_for(df_889, "hfq")
+    coverage_pass = bool(
+        cov_888["same_date_set"]
+        and cov_888["same_span"]
+        and cov_889["same_date_set"]
+        and cov_889["same_span"]
+    )
+
+    df_main = _load_price_df(db, code=code_main, adjust="none")
+    joined = _build_joined_for_error(df_88, df_main)
+    compare_ok = not joined.empty
+    err_df = _calc_error_stats(joined) if compare_ok else pd.DataFrame()
+    usability = _evaluate_usability(err_df, compare_ok=compare_ok)
+    error_pass = bool(usability.get("usable", False))
+
+    overall_pass = bool(coverage_pass and error_pass)
+    status = "passed" if overall_pass else "failed"
+    conclusion = "通过：合成数据校验通过" if overall_pass else "失败：合成数据校验未通过"
+
+    compare_summary: dict[str, Any]
+    if compare_ok:
+        joined_x = joined.copy()
+        joined_x["close_abs_diff"] = (
+            joined_x["close_replay88"] - joined_x["close_main0"]
+        ).abs()
+        joined_x["close_rel_diff"] = joined_x["close_abs_diff"] / joined_x[
+            "close_main0"
+        ].replace(0, np.nan).abs()
+        compare_summary = {
+            "ok": True,
+            "overlap_days": int(len(joined_x)),
+            "date_start": str(pd.Timestamp(joined_x.index.min()).date()),
+            "date_end": str(pd.Timestamp(joined_x.index.max()).date()),
+            "close_rel_diff_mean": float(joined_x["close_rel_diff"].mean(skipna=True)),
+            "close_rel_diff_p95": float(joined_x["close_rel_diff"].quantile(0.95)),
+        }
+    else:
+        compare_summary = {"ok": False, "reason": "no overlap with main0"}
+
+    return {
+        "code": code_main,
+        "status": status,
+        "conclusion": conclusion,
+        "details": {
+            "rule_source": "futures_continuous_replay.py usability thresholds",
+            "coverage_check": {
+                "none_start": str(none_start.date()),
+                "none_end": str(none_end.date()),
+                "none_days": int(len(none_dates)),
+                "qfq": cov_888,
+                "hfq": cov_889,
+                "passed": coverage_pass,
+            },
+            "main_compare_check": {
+                "passed": error_pass,
+                "summary": compare_summary,
+                "usability": usability,
+                "error_fields": (
+                    []
+                    if err_df.empty
+                    else [
+                        {
+                            "field": str(r["field"]),
+                            "n": int(r["n"]),
+                            "mae": (
+                                None if pd.isna(r["mae"]) else float(r["mae"])
+                            ),
+                            "rmse": (
+                                None if pd.isna(r["rmse"]) else float(r["rmse"])
+                            ),
+                            "max_abs": (
+                                None
+                                if pd.isna(r["max_abs"])
+                                else float(r["max_abs"])
+                            ),
+                            "mape": (
+                                None if pd.isna(r["mape"]) else float(r["mape"])
+                            ),
+                            "p95_ape": (
+                                None
+                                if pd.isna(r["p95_ape"])
+                                else float(r["p95_ape"])
+                            ),
+                        }
+                        for _, r in err_df.iterrows()
+                    ]
+                ),
+            },
         },
     }

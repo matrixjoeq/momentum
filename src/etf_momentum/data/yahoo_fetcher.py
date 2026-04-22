@@ -49,8 +49,8 @@ def _extract_chart_series(payload: dict[str, Any]) -> pd.DataFrame:
 
     ts = r0.get("timestamp") or []
     ind = r0.get("indicators") or {}
-    quote = (ind.get("quote") if isinstance(ind, dict) else None) or []
-    q0 = quote[0] if quote and isinstance(quote[0], dict) else None
+    quote_rows = (ind.get("quote") if isinstance(ind, dict) else None) or []
+    q0 = quote_rows[0] if quote_rows and isinstance(quote_rows[0], dict) else None
     if not q0:
         return pd.DataFrame()
 

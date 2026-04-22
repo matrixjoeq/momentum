@@ -1814,7 +1814,7 @@ def _apply_atr_stop(
         b: float,
         c: float | None,
         o: float | None,
-        l: float | None,
+        l: float | None,  # noqa: E741
         a: float | None,
         stop_before: float | None,
         stop_candidate: float | None,
@@ -1957,7 +1957,7 @@ def _apply_atr_stop(
         b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
         o = float(op.iloc[i]) if np.isfinite(float(op.iloc[i])) else float("nan")
         c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
-        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")
+        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
         base_entry_event = bool((b > 0.0) and (prev_base <= 0.0))
 
@@ -2423,7 +2423,7 @@ def _apply_r_multiple_take_profit(
         o = float(op.iloc[i]) if np.isfinite(float(op.iloc[i])) else float("nan")
         c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
         h = float(hi.iloc[i]) if np.isfinite(float(hi.iloc[i])) else float("nan")
-        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")
+        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
         d = bp.index[i]
         ds = d.date().isoformat() if hasattr(d, "date") else str(d)
@@ -2727,7 +2727,7 @@ def _apply_bias_v_take_profit(
         o = float(op.iloc[i]) if np.isfinite(float(op.iloc[i])) else float("nan")
         c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
         h = float(hi.iloc[i]) if np.isfinite(float(hi.iloc[i])) else float("nan")
-        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")
+        l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
         m = float(ma.iloc[i]) if np.isfinite(float(ma.iloc[i])) else float("nan")
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
         v = float(bias_v.iloc[i]) if np.isfinite(float(bias_v.iloc[i])) else float("nan")

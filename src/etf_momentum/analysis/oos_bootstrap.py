@@ -283,11 +283,9 @@ def _load_trend_in_sample_data(
     need_hist: int,
 ) -> Optional[Dict[str, Any]]:
     """Load close/high/low and returns for in-sample period for trend portfolio bootstrap."""
-    import datetime as _dt
-
     from .baseline import load_close_prices, load_high_low_prices
 
-    ext_start = start_in - _dt.timedelta(days=int(need_hist) * 2)
+    ext_start = start_in - datetime.timedelta(days=int(need_hist) * 2)
     close_qfq = load_close_prices(db, codes=codes, start=ext_start, end=end_in, adjust="qfq").sort_index()
     close_hfq = load_close_prices(db, codes=codes, start=ext_start, end=end_in, adjust="hfq").sort_index()
     high_qfq_df, low_qfq_df = load_high_low_prices(db, codes=codes, start=ext_start, end=end_in, adjust="qfq")

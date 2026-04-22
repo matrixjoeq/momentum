@@ -56,6 +56,9 @@
       .contract-fetch-status-table tbody td {
         padding: 4px 6px;
       }
+      .status-running {
+        color: #d97706;
+      }
     </style>
   </head>
   <body>
@@ -128,6 +131,7 @@
       </div>
       <button id="fetchAll">抓取全部</button>
       <button id="synthesizeAll" title="使用已抓取的交割月合约数据合成主力连续价格（88/888/889）">合成全部</button>
+      <button id="validateAll" title="对所有标的执行合成数据一致性与误差校验">校验全部</button>
       <button id="selectAll">全选</button>
       <button id="selectNone">取消全选</button>
       <button id="selectInvert">反选</button>
@@ -175,10 +179,18 @@
         });
       })();
 
-      const api = (path, opts) => fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+      const api = (path, opts) =>
+        fetch(`/api${path}`, {
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+          ...opts,
+        });
       const $ = (id) => document.getElementById(id);
       const setMsg = (t) => ($("msg").textContent = t || "");
       const selected = new Set();
+      const synthValidationReports = new Map();
+      let refreshInFlight = false;
+      let contractPollingEnabled = false;
       const parseNullableNumber = (id) => {
         const raw = String(($(id) && $(id).value) || "").trim();
         if (!raw) return null;
@@ -205,13 +217,17 @@
       function statusClass(s) {
         if (!s) return "status-null";
         if (s === "success") return "status-success";
+        if (s === "passed") return "status-success";
         if (s === "failed") return "status-failed";
+        if (s === "running") return "status-running";
+        if (s === "skipped") return "status-null";
         return "";
       }
 
       function contractPoolSummary(status, message) {
         const st = String(status || "").trim().toLowerCase();
         if (!st) return "未触发";
+        if (st === "running") return "进行中";
         if (st === "failed") return "失败";
         if (st === "skipped") return "跳过";
         if (st === "success") return "成功";
@@ -238,12 +254,71 @@
         return "抓取成功";
       }
 
+      function escHtml(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      function fmtPct(v, digits = 3) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "-";
+        return `${(n * 100).toFixed(digits)}%`;
+      }
+
+      function renderValidationDetails(code) {
+        const rep = synthValidationReports.get(code);
+        if (!rep) return '<div class="muted">未执行校验。</div>';
+        const details = rep.details || {};
+        const cov = details.coverage_check || {};
+        const cmp = details.main_compare_check || {};
+        const cmpSummary = cmp.summary || {};
+        const usability = cmp.usability || {};
+        const failedFields = Array.isArray(usability.failed_fields) ? usability.failed_fields : [];
+        const failedText =
+          failedFields.length === 0
+            ? "无"
+            : failedFields
+                .map(
+                  (x) =>
+                    `${escHtml(x.field)}(MAPE=${fmtPct(x.mape)}, P95=${fmtPct(x.p95_ape)})`
+                )
+                .join("；");
+        const qfq = cov.qfq || {};
+        const hfq = cov.hfq || {};
+        return (
+          `<div><strong>结论：</strong><span class="${statusClass(rep.status)}">${escHtml(rep.conclusion || "")}</span></div>` +
+          `<div class="muted" style="margin-top:4px;">规则：${escHtml(details.rule_source || "-")}</div>` +
+          `<div style="margin-top:6px;"><strong>1) 覆盖一致性</strong>：${cov.passed ? "通过" : "未通过"}</div>` +
+          `<div class="muted">基准(88-none)：${escHtml(cov.none_start || "-")} ~ ${escHtml(cov.none_end || "-")}，交易日 ${escHtml(cov.none_days || 0)}</div>` +
+          `<div class="muted">888-qfq：same_span=${qfq.same_span ? "Y" : "N"}，same_date_set=${qfq.same_date_set ? "Y" : "N"}，missing=${escHtml(qfq.missing_days || 0)}，extra=${escHtml(qfq.extra_days || 0)}</div>` +
+          `<div class="muted">889-hfq：same_span=${hfq.same_span ? "Y" : "N"}，same_date_set=${hfq.same_date_set ? "Y" : "N"}，missing=${escHtml(hfq.missing_days || 0)}，extra=${escHtml(hfq.extra_days || 0)}</div>` +
+          `<div style="margin-top:6px;"><strong>2) 88 vs 主连误差</strong>：${cmp.passed ? "通过" : "未通过"}</div>` +
+          `<div class="muted">重叠区间：${escHtml(cmpSummary.date_start || "-")} ~ ${escHtml(cmpSummary.date_end || "-")}，重叠天数 ${escHtml(cmpSummary.overlap_days || 0)}</div>` +
+          `<div class="muted">close 平均相对误差=${fmtPct(cmpSummary.close_rel_diff_mean)}，close P95 相对误差=${fmtPct(cmpSummary.close_rel_diff_p95)}</div>` +
+          `<div class="muted">可用性判定：${usability.usable ? "通过" : "未通过"}（原因：${escHtml(usability.reason || "-")}；失败字段：${failedText}）</div>`
+        );
+      }
+
       async function refresh() {
+        if (refreshInFlight) return;
+        refreshInFlight = true;
+        try {
         const resp = await api(`/futures?adjust=none`, { method: "GET" });
+        if (!resp.ok) {
+          const text = await resp.text();
+          setMsg(text || `刷新失败: HTTP ${resp.status}`);
+          return;
+        }
         const data = await resp.json();
+        contractPollingEnabled =
+          Array.isArray(data) &&
+          data.some((x) => String(x?.last_contract_fetch_status || "").trim().toLowerCase() === "running");
         const tbody = $("tbody");
         tbody.innerHTML = "";
         if (!Array.isArray(data) || data.length === 0) {
+          contractPollingEnabled = false;
           tbody.innerHTML = `<tr><td colspan="8" class="muted">候选池为空：请先保存代码/名称。</td></tr>`;
           syncBulkActionButtons();
           return;
@@ -286,6 +361,10 @@
                 <summary style="cursor:pointer;">各交割月合约状态</summary>
                 <div class="contract-fetch-body muted" style="margin-top:6px;">展开后加载…</div>
               </details>
+              <details class="synth-validate-details" data-code="${it.code}" style="margin-top:6px;">
+                <summary style="cursor:pointer;">合成校验报告</summary>
+                <div class="synth-validate-body muted" style="margin-top:6px;">${renderValidationDetails(it.code)}</div>
+              </details>
             </td>
             <td>
               <div class="actions">
@@ -299,6 +378,9 @@
           tbody.appendChild(tr);
         }
         syncBulkActionButtons();
+        } finally {
+          refreshInFlight = false;
+        }
       }
 
       $("save").addEventListener("click", async () => {
@@ -344,7 +426,6 @@
       });
 
       $("synthesizeAll").addEventListener("click", async () => {
-        if (!confirm("确认使用已抓取的交割月合约数据合成主力连续价格（88/888/889）？\n此操作将为标的池中所有已抓取合约数据的期货标的合成三种复权价格。")) return;
         setMsg("正在合成主力连续价格数据...");
         try {
           const resp = await api("/futures/synthesize-all", { method: "POST" });
@@ -354,6 +435,29 @@
           setMsg(`合成完成：成功 ${result.succeeded || 0} 个，失败 ${result.failed || 0} 个${result.errors ? '，错误：' + result.errors.join('; ') : ''}`);
         } catch (e) {
           setMsg("合成失败：" + String(e));
+        }
+        await refresh();
+      });
+
+      $("validateAll").addEventListener("click", async () => {
+        setMsg("正在校验全部标的的合成数据...");
+        try {
+          const resp = await api("/futures/validate-all", { method: "POST" });
+          const text = await resp.text();
+          if (!resp.ok) return setMsg(text);
+          const result = JSON.parse(text);
+          const items = Array.isArray(result.items) ? result.items : [];
+          synthValidationReports.clear();
+          for (const it of items) {
+            const code = String(it?.code || "").trim();
+            if (!code) continue;
+            synthValidationReports.set(code, it);
+          }
+          setMsg(
+            `校验完成：总计 ${result.total || 0}，通过 ${result.passed || 0}，失败 ${result.failed || 0}，跳过 ${result.skipped || 0}`
+          );
+        } catch (e) {
+          setMsg("校验失败：" + String(e));
         }
         await refresh();
       });
@@ -446,11 +550,6 @@
               body.innerHTML =
                 '<span class="muted">暂无记录。主连抓取成功后会自动跑后台任务拉取交割月合约。</span>';
             } else {
-              const esc = (s) =>
-                String(s == null ? "" : s)
-                  .replace(/&/g, "&amp;")
-                  .replace(/</g, "&lt;")
-                  .replace(/>/g, "&gt;");
               const deliveryMonthKey = (code) => {
                 const s = String(code == null ? "" : code).trim().toUpperCase();
                 const m = s.match(/(\d{3,4})$/);
@@ -465,7 +564,7 @@
                 sorted
                   .map(
                     (r) =>
-                      `<tr><td>${esc(r.contract_code)}</td><td>${esc(r.last_fetch_status)}</td><td>${esc(r.last_fetch_message)}</td></tr>`
+                      `<tr><td>${escHtml(r.contract_code)}</td><td>${escHtml(r.last_fetch_status)}</td><td>${escHtml(r.last_fetch_message)}</td></tr>`
                   )
                   .join("") +
                 "</tbody></table></div>";
@@ -533,6 +632,12 @@
 
       syncBulkActionButtons();
       refresh().catch((e) => setMsg(String(e)));
+      // Poll only while at least one pool shows contract-fetch status=running.
+      setInterval(() => {
+        if (document.hidden) return;
+        if (!contractPollingEnabled) return;
+        refresh().catch(() => {});
+      }, 15000);
     </script>
   </body>
 </html>
