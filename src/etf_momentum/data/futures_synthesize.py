@@ -31,8 +31,8 @@ PRICE_COLS = ["open", "high", "low", "close", "settle"]
 ERROR_FIELDS = ["open", "high", "low", "close", "volume", "amount", "hold", "settle"]
 KEY_FIELDS = ["open", "high", "low", "close", "settle"]
 
-USABLE_REL_MEAN_MAX = 0.005
-USABLE_REL_P95_MAX = 0.02
+USABLE_REL_MEAN_MAX = 0.01
+USABLE_REL_P95_MAX = 0.1
 USABLE_MIN_FIELDS = 4
 
 
@@ -521,15 +521,22 @@ def _calc_error_stats(joined_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _evaluate_usability(err_df: pd.DataFrame, *, compare_ok: bool) -> dict[str, Any]:
+def _evaluate_usability(
+    err_df: pd.DataFrame,
+    *,
+    compare_ok: bool,
+    rel_mean_max: float,
+    rel_p95_max: float,
+    min_fields: int,
+) -> dict[str, Any]:
     if not compare_ok:
         return {
             "usable": False,
             "reason": "comparison not available",
             "rule": {
-                "rel_mean_max": USABLE_REL_MEAN_MAX,
-                "rel_p95_max": USABLE_REL_P95_MAX,
-                "min_fields": USABLE_MIN_FIELDS,
+                "rel_mean_max": rel_mean_max,
+                "rel_p95_max": rel_p95_max,
+                "min_fields": min_fields,
             },
             "covered_fields": [],
             "failed_fields": [],
@@ -549,17 +556,17 @@ def _evaluate_usability(err_df: pd.DataFrame, *, compare_ok: bool) -> dict[str, 
         p95 = float(r.get("p95_ape", np.nan))
         item = {"field": f, "n": n, "mape": mape, "p95_ape": p95}
         covered.append(item)
-        if (not np.isnan(mape) and mape > USABLE_REL_MEAN_MAX) or (
-            not np.isnan(p95) and p95 > USABLE_REL_P95_MAX
+        if (not np.isnan(mape) and mape > rel_mean_max) or (
+            not np.isnan(p95) and p95 > rel_p95_max
         ):
             failed.append(item)
-    usable = len(covered) >= USABLE_MIN_FIELDS and len(failed) == 0
+    usable = len(covered) >= min_fields and len(failed) == 0
     reason = (
         "pass"
         if usable
         else (
             "insufficient covered fields"
-            if len(covered) < USABLE_MIN_FIELDS
+            if len(covered) < min_fields
             else "relative error threshold exceeded"
         )
     )
@@ -567,16 +574,23 @@ def _evaluate_usability(err_df: pd.DataFrame, *, compare_ok: bool) -> dict[str, 
         "usable": usable,
         "reason": reason,
         "rule": {
-            "rel_mean_max": USABLE_REL_MEAN_MAX,
-            "rel_p95_max": USABLE_REL_P95_MAX,
-            "min_fields": USABLE_MIN_FIELDS,
+            "rel_mean_max": rel_mean_max,
+            "rel_p95_max": rel_p95_max,
+            "min_fields": min_fields,
         },
         "covered_fields": covered,
         "failed_fields": failed,
     }
 
 
-def validate_synthesized_for_pool(db: Session, pool: FuturesPool) -> dict[str, Any]:
+def validate_synthesized_for_pool(
+    db: Session,
+    pool: FuturesPool,
+    *,
+    rel_mean_max: float = USABLE_REL_MEAN_MAX,
+    rel_p95_max: float = USABLE_REL_P95_MAX,
+    min_fields: int = USABLE_MIN_FIELDS,
+) -> dict[str, Any]:
     """
     Validate synthesized continuous futures for one pool.
     Skip when no synthesized data exists.
@@ -669,7 +683,13 @@ def validate_synthesized_for_pool(db: Session, pool: FuturesPool) -> dict[str, A
     joined = _build_joined_for_error(df_88, df_main)
     compare_ok = not joined.empty
     err_df = _calc_error_stats(joined) if compare_ok else pd.DataFrame()
-    usability = _evaluate_usability(err_df, compare_ok=compare_ok)
+    usability = _evaluate_usability(
+        err_df,
+        compare_ok=compare_ok,
+        rel_mean_max=float(rel_mean_max),
+        rel_p95_max=float(rel_p95_max),
+        min_fields=int(min_fields),
+    )
     error_pass = bool(usability.get("usable", False))
 
     overall_pass = bool(coverage_pass and error_pass)

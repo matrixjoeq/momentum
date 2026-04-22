@@ -90,6 +90,7 @@ from .schemas import (
     FuturesFetchRequest,
     FuturesFetchResult,
     FuturesFetchSelectedRequest,
+    FuturesSynthesisValidationRequest,
     FuturesSynthesisValidationAllOut,
     FuturesSynthesisValidationItemOut,
     FuturesContractFetchStatusOut,
@@ -6563,6 +6564,9 @@ def synthesize_all_futures(
     response_model=FuturesSynthesisValidationAllOut,
 )
 def validate_all_futures_synthesis(
+    payload: FuturesSynthesisValidationRequest = Body(
+        default_factory=FuturesSynthesisValidationRequest
+    ),
     db: Session = Depends(get_session),
 ) -> FuturesSynthesisValidationAllOut:
     """
@@ -6578,7 +6582,12 @@ def validate_all_futures_synthesis(
 
     for item in items:
         try:
-            rep = validate_synthesized_for_pool(db, item)
+            rep = validate_synthesized_for_pool(
+                db,
+                item,
+                rel_mean_max=float(payload.rel_mean_max),
+                rel_p95_max=float(payload.rel_p95_max),
+            )
             status = str(rep.get("status", "")).strip().lower()
             out = FuturesSynthesisValidationItemOut(
                 code=str(rep.get("code") or item.code),

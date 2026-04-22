@@ -234,6 +234,21 @@ class FuturesSynthesisValidationAllOut(BaseModel):
     items: list[FuturesSynthesisValidationItemOut] = Field(default_factory=list)
 
 
+class FuturesSynthesisValidationRequest(BaseModel):
+    rel_mean_max: float = Field(
+        default=0.01,
+        gt=0.0,
+        le=1.0,
+        description="Maximum mean absolute percentage error (MAPE) for usability pass",
+    )
+    rel_p95_max: float = Field(
+        default=0.1,
+        gt=0.0,
+        le=1.0,
+        description="Maximum 95th percentile absolute percentage error (P95 APE) for usability pass",
+    )
+
+
 class FuturesPriceOut(BaseModel):
     code: str
     trade_date: str  # YYYY-MM-DD

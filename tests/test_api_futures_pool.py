@@ -205,3 +205,34 @@ def test_futures_validate_all_api_contract(api_client: TestClient) -> None:
         assert set(item.keys()) == {"code", "status", "conclusion", "details"}
         assert item["status"] in {"passed", "failed", "skipped"}
         assert isinstance(item["details"], dict)
+        u = (
+            ((item.get("details") or {}).get("main_compare_check") or {}).get(
+                "usability"
+            )
+        ) or {}
+        rule = u.get("rule") or {}
+        # default thresholds are configurable but must be exposed in response details
+        if rule:
+            assert float(rule.get("rel_mean_max")) == 0.01
+            assert float(rule.get("rel_p95_max")) == 0.1
+
+    # custom thresholds should be accepted and echoed in report details
+    resp_custom = client.post(
+        "/api/futures/validate-all",
+        json={"rel_mean_max": 0.02, "rel_p95_max": 0.2},
+    )
+    assert resp_custom.status_code == 200
+    body_custom = resp_custom.json()
+    if body_custom["items"]:
+        item0 = body_custom["items"][0]
+        rule0 = (
+            (
+                ((item0.get("details") or {}).get("main_compare_check") or {}).get(
+                    "usability"
+                )
+                or {}
+            ).get("rule")
+        ) or {}
+        if rule0:
+            assert float(rule0.get("rel_mean_max")) == 0.02
+            assert float(rule0.get("rel_p95_max")) == 0.2

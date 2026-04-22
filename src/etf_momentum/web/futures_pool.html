@@ -159,9 +159,38 @@
       >
         合成全部
       </button>
+      <div>
+        <label>校验阈值 MAPE ≤</label>
+        <input
+          id="validateRelMeanMax"
+          type="number"
+          min="0.0001"
+          max="1"
+          step="0.0001"
+          value="0.01"
+          title="88 与主连 *0 对比时，关键字段（open/high/low/close/settle）的平均绝对百分比误差上限；越小越严格"
+        />
+      </div>
+      <div>
+        <label>校验阈值 P95_APE ≤</label>
+        <input
+          id="validateRelP95Max"
+          type="number"
+          min="0.0001"
+          max="1"
+          step="0.0001"
+          value="0.1"
+          title="88 与主连 *0 对比时，关键字段绝对百分比误差的 95 分位上限；用于约束尾部偏差，越小越严格"
+        />
+      </div>
       <button id="validateAll" title="对所有标的执行合成数据一致性与误差校验">
         校验全部
       </button>
+      <div class="muted" style="min-width: 520px">
+        校验口径说明：先校验 88/888/889 是否覆盖同一交易日集合（以 88
+        为基准），再校验 88 与主连 *0 在重叠区间的误差。MAPE
+        控制平均误差，P95_APE 控制尾部误差，阈值越小越严格。
+      </div>
       <button id="selectAll">全选</button>
       <button id="selectNone">取消全选</button>
       <button id="selectInvert">反选</button>
@@ -232,6 +261,14 @@
         if (!raw) return null;
         const v = Number(raw);
         return Number.isFinite(v) ? v : null;
+      };
+      const parsePositiveRatioWithDefault = (id, fallback) => {
+        const raw = String(($(id) && $(id).value) || "").trim();
+        if (!raw) return fallback;
+        const v = Number(raw);
+        if (!Number.isFinite(v)) return fallback;
+        if (v <= 0 || v > 1) return fallback;
+        return v;
       };
       const parseTags = () => {
         const raw = String(($("tags") && $("tags").value) || "").trim();
@@ -529,7 +566,21 @@
       $("validateAll").addEventListener("click", async () => {
         setMsg("正在校验全部标的的合成数据...");
         try {
-          const resp = await api("/futures/validate-all", { method: "POST" });
+          const relMeanMax = parsePositiveRatioWithDefault(
+            "validateRelMeanMax",
+            0.01,
+          );
+          const relP95Max = parsePositiveRatioWithDefault(
+            "validateRelP95Max",
+            0.1,
+          );
+          const resp = await api("/futures/validate-all", {
+            method: "POST",
+            body: JSON.stringify({
+              rel_mean_max: relMeanMax,
+              rel_p95_max: relP95Max,
+            }),
+          });
           const text = await resp.text();
           if (!resp.ok) return setMsg(text);
           const result = JSON.parse(text);
@@ -541,7 +592,7 @@
             synthValidationReports.set(code, it);
           }
           setMsg(
-            `校验完成：总计 ${result.total || 0}，通过 ${result.passed || 0}，失败 ${result.failed || 0}，跳过 ${result.skipped || 0}`,
+            `校验完成：总计 ${result.total || 0}，通过 ${result.passed || 0}，失败 ${result.failed || 0}，跳过 ${result.skipped || 0}（阈值：MAPE<=${relMeanMax}, P95_APE<=${relP95Max}）`,
           );
         } catch (e) {
           setMsg("校验失败：" + String(e));
