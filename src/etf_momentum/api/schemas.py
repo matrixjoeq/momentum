@@ -363,6 +363,68 @@ class FuturesTrendBacktestRequest(BaseModel):
     dynamic_universe: bool | None = Field(
         default=None, description="If null, use saved global setting"
     )
+    backtest_mode: str = Field(
+        default="portfolio",
+        description="portfolio|single — single-asset uses full allocation; "
+        "portfolio enables sizing",
+    )
+    single_code: str | None = Field(
+        default=None,
+        description="Required when backtest_mode=single; must be in the group",
+    )
+    position_sizing: str = Field(
+        default="equal",
+        description="equal|risk_budget — portfolio only; ignored for single",
+    )
+    risk_budget_atr_window: int = Field(
+        default=20,
+        ge=2,
+        le=500,
+        description="ATR window for risk-budget sizing (portfolio + risk_budget)",
+    )
+    risk_budget_pct: float = Field(
+        default=0.01,
+        ge=0.001,
+        le=0.03,
+        description="Per-asset risk budget as fraction of NAV (1% => 0.01)",
+    )
+    risk_budget_overcap_policy: str = Field(
+        default="scale",
+        description="scale|skip_entry|replace_entry|leverage_entry",
+    )
+    risk_budget_max_leverage_multiple: float = Field(
+        default=2.0,
+        gt=1.0,
+        le=10.0,
+        description="Cap when policy=leverage_entry; above cap, scale to this gross",
+    )
+    monthly_risk_budget_enabled: bool = Field(
+        default=False,
+        description="Portfolio only: ETF-aligned monthly max-loss gate on new entries",
+    )
+    monthly_risk_budget_pct: float = Field(
+        default=0.06,
+        ge=0.01,
+        le=0.06,
+        description="Monthly budget as fraction of NAV (6% => 0.06), same range as ETF trend portfolio",
+    )
+    monthly_risk_budget_include_new_trade_risk: bool = Field(
+        default=False,
+        description="If true, count candidate new-trade risk against monthly budget headroom",
+    )
+    atr_stop_mode: str = Field(
+        default="none",
+        description="Monthly gate holding-risk model: none|static|trailing|tightening "
+        "(same semantics as ETF trend bt_trend)",
+    )
+    atr_stop_atr_basis: str = Field(default="latest", description="entry|latest")
+    atr_stop_window: int = Field(
+        default=14,
+        ge=2,
+        description="ATR window used for monthly gate ATR series (not risk_budget_atr_window)",
+    )
+    atr_stop_n: float = Field(default=2.0, gt=0.0)
+    atr_stop_m: float = Field(default=0.5, gt=0.0)
     exec_price: str = Field(default="close", description="open|close")
     fast_ma: int = Field(default=20, ge=2, le=500)
     slow_ma: int = Field(default=60, ge=3, le=800)

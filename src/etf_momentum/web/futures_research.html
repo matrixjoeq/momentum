@@ -203,8 +203,152 @@
       <div id="covTableWrap"></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="trendParamsPanel">
       <h3>趋势回测（TA-Lib + backtesting）</h3>
+      <p class="muted" style="margin: 8px 0 12px">
+        价格口径：已完成合成连续时，基准用后复权连续（889），信号用前复权连续（888）
+        收盘价，成交与策略收益用无复权连续（88）；仅有主连数据时三段均退回主连无复权。
+      </p>
+      <div class="row" style="flex-wrap: wrap">
+        <div>
+          <label>回测模式</label>
+          <select
+            id="trendBacktestMode"
+            title="组合=多标的；单标的=仅跑一个合约"
+          >
+            <option value="portfolio" selected>组合</option>
+            <option value="single">单标的</option>
+          </select>
+        </div>
+        <div id="trendSingleWrap" style="display: none">
+          <label>单标的代码</label>
+          <select id="trendSingleCode"></select>
+        </div>
+        <div id="trendSizingRow">
+          <label
+            >仓位法（仅组合）
+            <span
+              class="muted"
+              style="font-weight: normal"
+              title="与 ETF 研究页趋势组合一致：等权=当日仅对 MA 做多的标的各 1/k；风险预算=ATR 反推权重并可选用超限处理"
+              >?</span
+            ></label
+          >
+          <select id="trendPositionSizing">
+            <option value="equal" selected>等权</option>
+            <option value="risk_budget">风险预算(ATR)</option>
+          </select>
+        </div>
+      </div>
+      <div
+        class="row"
+        id="trendRiskBudgetRow"
+        style="flex-wrap: wrap; display: none"
+      >
+        <div>
+          <label>风险预算ATR周期</label>
+          <input id="trendRbAtrWin" type="number" min="2" step="1" value="20" />
+        </div>
+        <div>
+          <label>风险预算%</label>
+          <input
+            id="trendRbPct"
+            type="number"
+            min="0.1"
+            max="3"
+            step="0.1"
+            value="1"
+            title="百分数，例如 1 表示 1%，后端用 0.01"
+          />
+        </div>
+        <div>
+          <label>超限处理</label>
+          <select id="trendRbOvercap" style="min-width: 160px">
+            <option value="scale" selected>等比例缩放</option>
+            <option value="skip_entry">跳过开仓</option>
+            <option value="replace_entry">替换开仓</option>
+            <option value="leverage_entry">杠杆开仓</option>
+          </select>
+        </div>
+        <div>
+          <label>最大杠杆倍数</label>
+          <input
+            id="trendRbMaxLev"
+            type="number"
+            min="1.01"
+            max="10"
+            step="0.1"
+            value="2"
+            title="仅 leverage_entry 生效；超过则先缩放到该倍数"
+          />
+        </div>
+      </div>
+      <div class="row" id="trendMonthlyRbRow" style="flex-wrap: wrap">
+        <div>
+          <label>月度风险预算</label>
+          <select
+            id="trendMonthlyRbEnable"
+            title="仅组合模式生效；与 ETF 趋势组合一致"
+          >
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>月内最大亏损预算%</label>
+          <input
+            id="trendMonthlyRbPct"
+            type="number"
+            min="1"
+            max="6"
+            step="0.5"
+            value="6"
+            title="占账户净值比例，1–6；对应后端 0.01–0.06"
+          />
+        </div>
+        <div>
+          <label>计入拟开仓风险</label>
+          <select id="trendMonthlyRbNewRisk">
+            <option value="false" selected>否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+      </div>
+      <div
+        id="trendMonthlyRbExplain"
+        class="muted"
+        style="margin: 4px 0 10px; max-width: 820px"
+      >
+        月度门控（与 ETF 研究页一致）：自然月内累计已实现亏损
+        max(0,-realized)；跨月持仓在新月仍计入持仓风险占用；新开仓当 budget_used
+        + 拟开仓风险 ≥ 月度上限时否决（含等号边界）。持仓风险与拟开仓风险按 ATR
+        止损参数换算，见下行。
+      </div>
+      <div
+        class="row"
+        id="trendMonthlyGateStopRow"
+        style="flex-wrap: wrap; display: none"
+      >
+        <div>
+          <label>门控止损模式</label>
+          <select id="trendAtrStopMode" style="min-width: 140px">
+            <option value="none" selected>无（每户口固定 2%）</option>
+            <option value="static">静态止损</option>
+            <option value="trailing">移动止损</option>
+            <option value="tightening">收紧止损</option>
+          </select>
+        </div>
+        <div>
+          <label>门控ATR周期</label>
+          <input
+            id="trendAtrStopWin"
+            type="number"
+            min="2"
+            step="1"
+            value="14"
+          />
+        </div>
+      </div>
       <div class="row">
         <div>
           <label>执行价</label>
@@ -274,6 +418,7 @@
       const corrRangeStorageKey = `futures-research:corr-range:${location.pathname}`;
       const corrPickBasisStorageKey = `futures-research:corr-pick-basis:${location.pathname}`;
       const corrPickNStorageKey = `futures-research:corr-pick-n:${location.pathname}`;
+      const trendParamsStorageKey = `futures-research:trend-params:${location.pathname}`;
       const corrRangeAllowed = new Set([
         "1m",
         "3m",
@@ -352,6 +497,116 @@
           localStorage.setItem(corrPickNStorageKey, String(value));
         } catch (_) {}
         return value;
+      }
+
+      function readTrendParamsFromForm() {
+        return {
+          v: 1,
+          backtestMode: String($("trendBacktestMode")?.value || "portfolio"),
+          singleCode: String($("trendSingleCode")?.value || ""),
+          positionSizing: String($("trendPositionSizing")?.value || "equal"),
+          rbAtrWin: String($("trendRbAtrWin")?.value ?? "20"),
+          rbPct: String($("trendRbPct")?.value ?? "1"),
+          rbOvercap: String($("trendRbOvercap")?.value || "scale"),
+          rbMaxLev: String($("trendRbMaxLev")?.value ?? "2"),
+          monthlyRbEnable: String($("trendMonthlyRbEnable")?.value || "false"),
+          monthlyRbPct: String($("trendMonthlyRbPct")?.value ?? "6"),
+          monthlyRbNewRisk: String(
+            $("trendMonthlyRbNewRisk")?.value || "false",
+          ),
+          atrStopMode: String($("trendAtrStopMode")?.value || "none"),
+          atrStopWin: String($("trendAtrStopWin")?.value ?? "14"),
+          execPrice: String($("trendExecPrice")?.value || "close"),
+          fastMa: String($("trendFastMa")?.value ?? "20"),
+          slowMa: String($("trendSlowMa")?.value ?? "60"),
+        };
+      }
+
+      function saveTrendParams() {
+        try {
+          localStorage.setItem(
+            trendParamsStorageKey,
+            JSON.stringify(readTrendParamsFromForm()),
+          );
+        } catch (_) {}
+      }
+
+      function setSelectIfOptionExists(id, val) {
+        const el = $(id);
+        if (!el) return;
+        const s = String(val ?? "");
+        const opts = [...el.options].map((o) => o.value);
+        if (opts.includes(s)) el.value = s;
+      }
+
+      function applyTrendParams(p) {
+        if (!p || typeof p !== "object") return;
+        const setNum = (id, val, fallback) => {
+          const el = $(id);
+          if (!el) return;
+          const v =
+            val != null && String(val).trim() !== ""
+              ? String(val)
+              : String(fallback);
+          el.value = v;
+        };
+        if (p.backtestMode === "portfolio" || p.backtestMode === "single") {
+          const el = $("trendBacktestMode");
+          if (el) el.value = p.backtestMode;
+        }
+        if (
+          p.positionSizing === "equal" ||
+          p.positionSizing === "risk_budget"
+        ) {
+          const el = $("trendPositionSizing");
+          if (el) el.value = p.positionSizing;
+        }
+        setSelectIfOptionExists("trendRbOvercap", p.rbOvercap);
+        if (p.monthlyRbEnable === "true" || p.monthlyRbEnable === "false") {
+          const el = $("trendMonthlyRbEnable");
+          if (el) el.value = p.monthlyRbEnable;
+        }
+        setNum("trendMonthlyRbPct", p.monthlyRbPct, "6");
+        if (p.monthlyRbNewRisk === "true" || p.monthlyRbNewRisk === "false") {
+          const el = $("trendMonthlyRbNewRisk");
+          if (el) el.value = p.monthlyRbNewRisk;
+        }
+        const asm = String(p.atrStopMode || "");
+        if (
+          asm === "none" ||
+          asm === "static" ||
+          asm === "trailing" ||
+          asm === "tightening"
+        ) {
+          const el = $("trendAtrStopMode");
+          if (el) el.value = asm;
+        }
+        setNum("trendAtrStopWin", p.atrStopWin, "14");
+        if (p.execPrice === "close" || p.execPrice === "open") {
+          const el = $("trendExecPrice");
+          if (el) el.value = p.execPrice;
+        }
+        setNum("trendRbAtrWin", p.rbAtrWin, "20");
+        setNum("trendRbPct", p.rbPct, "1");
+        setNum("trendRbMaxLev", p.rbMaxLev, "2");
+        setNum("trendFastMa", p.fastMa, "20");
+        setNum("trendSlowMa", p.slowMa, "60");
+        const sel = $("trendSingleCode");
+        if (sel && sel.options.length) {
+          const want = String(p.singleCode || "");
+          const opts = [...sel.options].map((o) => o.value);
+          if (want && opts.includes(want)) sel.value = want;
+          else sel.selectedIndex = 0;
+        }
+      }
+
+      function loadTrendParams() {
+        try {
+          const raw = localStorage.getItem(trendParamsStorageKey);
+          if (!raw) return;
+          const p = JSON.parse(raw);
+          applyTrendParams(p);
+        } catch (_) {}
       }
 
       function esc(s) {
@@ -446,6 +701,9 @@
         const resp = await api("/futures/research/groups", { method: "GET" });
         groups = await resp.json();
         renderGroupSelect();
+        refreshTrendSingleOptions();
+        loadTrendParams();
+        syncTrendSizingVisibility();
       }
 
       async function loadState() {
@@ -463,6 +721,42 @@
       function hasActiveGroupWithCodes() {
         const g = getActiveGroup();
         return !!(g && Array.isArray(g.codes) && g.codes.length > 0);
+      }
+
+      function refreshTrendSingleOptions() {
+        const g = getActiveGroup();
+        const codes = g && Array.isArray(g.codes) ? g.codes : [];
+        const sel = $("trendSingleCode");
+        if (!sel) return;
+        sel.innerHTML = codes
+          .map(
+            (c) =>
+              `<option value="${esc(String(c))}">${esc(String(c))}</option>`,
+          )
+          .join("");
+      }
+
+      function syncTrendSizingVisibility() {
+        const modeEl = $("trendBacktestMode");
+        const mode = modeEl ? String(modeEl.value || "portfolio") : "portfolio";
+        const portfolio = mode === "portfolio";
+        const srow = $("trendSizingRow");
+        const swrap = $("trendSingleWrap");
+        const rb = $("trendRiskBudgetRow");
+        const mrow = $("trendMonthlyRbRow");
+        const mex = $("trendMonthlyRbExplain");
+        if (srow) srow.style.display = portfolio ? "" : "none";
+        if (swrap) swrap.style.display = portfolio ? "none" : "";
+        const ps = $("trendPositionSizing");
+        const isRb = ps && String(ps.value || "") === "risk_budget";
+        if (rb) rb.style.display = portfolio && isRb ? "" : "none";
+        if (mrow) mrow.style.display = portfolio ? "" : "none";
+        if (mex) mex.style.display = portfolio ? "" : "none";
+        const monOn =
+          $("trendMonthlyRbEnable") &&
+          String($("trendMonthlyRbEnable").value || "") === "true";
+        const gsr = $("trendMonthlyGateStopRow");
+        if (gsr) gsr.style.display = portfolio && monOn ? "" : "none";
       }
 
       function corrColor(v) {
@@ -589,8 +883,17 @@
           execPrice === "open" ? "rule-badge-open" : "rule-badge-close";
         $("trendRuleBadge").innerHTML =
           `<span class="rule-badge ${badgeClass}">执行规则：${esc(signalRule)}</span>`;
+        const mode = m.backtest_mode || "-";
+        const ps = m.position_sizing;
+        const psStr = ps == null || ps === "" ? "-" : String(ps);
+        const mon =
+          m.monthly_risk_budget_effective === true
+            ? "开"
+            : m.monthly_risk_budget_enabled === true
+              ? "仅配置"
+              : "关";
         $("trendMeta").textContent =
-          `分组=${m.group_name || "-"} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+          `分组=${m.group_name || "-"} | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
         const s = out.summary || {};
         $("trendSummaryWrap").innerHTML =
           `<table class="corr"><thead><tr><th>策略累计收益</th><th>基准累计收益</th><th>超额累计收益</th></tr></thead>` +
@@ -697,6 +1000,15 @@
           });
           return;
         }
+        refreshTrendSingleOptions();
+        const btMode = String($("trendBacktestMode").value || "portfolio");
+        if (btMode === "single" && !$("trendSingleCode").value) {
+          renderTrendBacktest({
+            ok: false,
+            error: "请选择单标的代码",
+          });
+          return;
+        }
         let fast = Number($("trendFastMa").value);
         let slow = Number($("trendSlowMa").value);
         if (!Number.isFinite(fast) || fast < 2) fast = 20;
@@ -706,20 +1018,62 @@
         if (slow <= fast) slow = fast + 1;
         $("trendFastMa").value = String(fast);
         $("trendSlowMa").value = String(slow);
+        let rbPct = Number($("trendRbPct").value);
+        if (!Number.isFinite(rbPct) || rbPct <= 0) rbPct = 1;
+        rbPct = Math.min(3, Math.max(0.1, rbPct));
+        $("trendRbPct").value = String(rbPct);
+        let rbLev = Number($("trendRbMaxLev").value);
+        if (!Number.isFinite(rbLev) || rbLev <= 1) rbLev = 2;
+        rbLev = Math.min(10, Math.max(1.01, rbLev));
+        $("trendRbMaxLev").value = String(rbLev);
+        let rbWin = Number($("trendRbAtrWin").value);
+        if (!Number.isFinite(rbWin) || rbWin < 2) rbWin = 20;
+        rbWin = Math.floor(rbWin);
+        $("trendRbAtrWin").value = String(rbWin);
+        let monthlyPct = Number($("trendMonthlyRbPct").value);
+        if (!Number.isFinite(monthlyPct) || monthlyPct < 1) monthlyPct = 6;
+        monthlyPct = Math.min(6, Math.max(1, monthlyPct));
+        $("trendMonthlyRbPct").value = String(monthlyPct);
+        let asw = Number($("trendAtrStopWin").value);
+        if (!Number.isFinite(asw) || asw < 2) asw = 14;
+        $("trendAtrStopWin").value = String(Math.floor(asw));
+        saveTrendParams();
+        const payload = {
+          range_key: corrRangeKey,
+          exec_price: String($("trendExecPrice").value || "close"),
+          fast_ma: fast,
+          slow_ma: slow,
+          min_points: 120,
+          cost_bps: 5.0,
+          fee_side: "two_way",
+          slippage_type: "percent",
+          slippage_value: 0.0005,
+          slippage_side: "two_way",
+          backtest_mode: btMode,
+          position_sizing: String($("trendPositionSizing").value || "equal"),
+          risk_budget_atr_window: rbWin,
+          risk_budget_pct: rbPct / 100.0,
+          risk_budget_overcap_policy: String(
+            $("trendRbOvercap").value || "scale",
+          ),
+          risk_budget_max_leverage_multiple: rbLev,
+          monthly_risk_budget_enabled:
+            String($("trendMonthlyRbEnable").value || "") === "true",
+          monthly_risk_budget_pct: monthlyPct / 100.0,
+          monthly_risk_budget_include_new_trade_risk:
+            String($("trendMonthlyRbNewRisk").value || "") === "true",
+          atr_stop_mode: String($("trendAtrStopMode").value || "none"),
+          atr_stop_window: Math.floor(asw),
+          atr_stop_atr_basis: "latest",
+          atr_stop_n: 2.0,
+          atr_stop_m: 0.5,
+        };
+        if (btMode === "single") {
+          payload.single_code = String($("trendSingleCode").value || "").trim();
+        }
         const resp = await api("/futures/research/trend-backtest", {
           method: "POST",
-          body: JSON.stringify({
-            range_key: corrRangeKey,
-            exec_price: String($("trendExecPrice").value || "close"),
-            fast_ma: fast,
-            slow_ma: slow,
-            min_points: 120,
-            cost_bps: 5.0,
-            fee_side: "two_way",
-            slippage_type: "percent",
-            slippage_value: 0.0005,
-            slippage_side: "two_way",
-          }),
+          body: JSON.stringify(payload),
         });
         const out = await resp.json();
         if (!resp.ok) {
@@ -916,6 +1270,23 @@
       $("runTrendBacktest").addEventListener("click", async () => {
         await runTrendBacktest();
       });
+
+      const _trendPanel = $("trendParamsPanel");
+      if (_trendPanel) {
+        _trendPanel.addEventListener("input", saveTrendParams);
+        _trendPanel.addEventListener("change", (ev) => {
+          saveTrendParams();
+          const t = ev.target;
+          if (
+            t &&
+            (t.id === "trendBacktestMode" ||
+              t.id === "trendPositionSizing" ||
+              t.id === "trendMonthlyRbEnable")
+          ) {
+            syncTrendSizingVisibility();
+          }
+        });
+      }
 
       async function bootstrap() {
         try {

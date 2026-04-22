@@ -7091,6 +7091,39 @@ def futures_research_trend_backtest_api(
         slippage_type=str(payload.slippage_type or "percent").strip().lower(),  # type: ignore[arg-type]
         slippage_value=float(payload.slippage_value),
         slippage_side=str(payload.slippage_side or "two_way").strip().lower(),  # type: ignore[arg-type]
+        backtest_mode=str(payload.backtest_mode or "portfolio").strip().lower(),
+        single_code=(
+            None
+            if getattr(payload, "single_code", None) is None
+            else str(payload.single_code).strip().upper()
+        ),
+        position_sizing=str(payload.position_sizing or "equal").strip().lower(),
+        risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
+        risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
+        risk_budget_overcap_policy=str(
+            getattr(payload, "risk_budget_overcap_policy", "scale") or "scale"
+        )
+        .strip()
+        .lower(),
+        risk_budget_max_leverage_multiple=float(
+            getattr(payload, "risk_budget_max_leverage_multiple", 2.0)
+        ),
+        monthly_risk_budget_enabled=bool(
+            getattr(payload, "monthly_risk_budget_enabled", False)
+        ),
+        monthly_risk_budget_pct=float(
+            getattr(payload, "monthly_risk_budget_pct", 0.06) or 0.06
+        ),
+        monthly_risk_budget_include_new_trade_risk=bool(
+            getattr(payload, "monthly_risk_budget_include_new_trade_risk", False)
+        ),
+        atr_stop_mode=str(getattr(payload, "atr_stop_mode", "none") or "none"),
+        atr_stop_atr_basis=str(
+            getattr(payload, "atr_stop_atr_basis", "latest") or "latest"
+        ),
+        atr_stop_window=int(getattr(payload, "atr_stop_window", 14) or 14),
+        atr_stop_n=float(getattr(payload, "atr_stop_n", 2.0) or 2.0),
+        atr_stop_m=float(getattr(payload, "atr_stop_m", 0.5) or 0.5),
     )
     out["meta"] = {
         **(out.get("meta") or {}),

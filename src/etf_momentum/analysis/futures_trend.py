@@ -1,17 +1,45 @@
+"""
+Futures trend backtest (research) — price series policy
+------------------------------------------------------
+When **synthesized continuous** rows exist for a symbol (codes ``{root}88`` /
+``{root}888`` / ``{root}889`` under the same ``Date`` calendar), we apply:
+
+- **Benchmark (buy-and-hold comparison):** synthetic **backward-adjusted**
+  (**hfq**, e.g. ``{root}889``) OHLC; compare NAV uses the same open/close basis
+  as ``exec_price`` on this hfq series.
+- **Signals** (here: TA-Lib SMA crossover on “close”): synthetic **forward-adjusted**
+  (**qfq**, e.g. ``{root}888``) **close**, aligned on trading dates with execution data.
+- **Trade execution & strategy return compounding:** synthetic **no-adjust**
+  (**none**, e.g. ``{root}88``) OHLCV passed into ``backtesting.py``.
+
+If ``{root}88`` is missing (no synthesis yet), we fall back to the group’s listed
+contract code (typically main ``*0``) **none** rows only; signals and benchmark then
+also use that same none series (see per-symbol ``trend_resolution`` in the API).
+"""
+
 from __future__ import annotations
 
 # pylint: disable=broad-exception-caught,attribute-defined-outside-init
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from ..data.futures_synthesize import _symbol_root_from_main
 from ..db.futures_repo import list_futures_prices
 from ..db.futures_research_repo import FuturesGroupData
+from .bt_trend import _apply_monthly_risk_budget_gate
+from .futures_trend_portfolio_weights import (
+    atr_ewm_wilder,
+    build_ma_panels,
+    combine_weighted_returns,
+    equal_weights_from_signals,
+    risk_budget_weights,
+)
 
 ExecPrice = Literal["open", "close"]
 FeeSide = Literal["one_way", "two_way"]
@@ -62,13 +90,15 @@ def _load_futures_ohlcv(
     code: str,
     start: str,
     end: str,
+    adjust: str = "none",
 ) -> pd.DataFrame:
+    """Load OHLCV for ``code`` + ``adjust`` into a backtesting-compatible frame."""
     s_d = _parse_yyyymmdd(start)
     e_d = _parse_yyyymmdd(end)
     rows = list_futures_prices(
         db,
         code=code,
-        adjust="none",
+        adjust=adjust,
         start_date=s_d,
         end_date=e_d,
         limit=300000,
@@ -88,6 +118,92 @@ def _load_futures_ohlcv(
     df = df.sort_index()
     df = df.dropna(subset=["Open", "High", "Low", "Close"], how="any")
     return df
+
+
+def _align_futures_trend_inputs(
+    db: Session,
+    *,
+    pool_code: str,
+    start: str,
+    end: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]] | None:
+    """
+    Build execution OHLCV (none) + benchmark OHLC (hfq when available) +
+    attach ``SignalClose`` (qfq when available) for the same calendar.
+
+    Returns ``None`` when no usable none-style series exists in range.
+    """
+    root = _symbol_root_from_main(pool_code)
+    code_88 = f"{root}88"
+    code_888 = f"{root}888"
+    code_889 = f"{root}889"
+
+    df88 = _load_futures_ohlcv(db, code=code_88, start=start, end=end, adjust="none")
+    df888 = _load_futures_ohlcv(db, code=code_888, start=start, end=end, adjust="qfq")
+    df889 = _load_futures_ohlcv(db, code=code_889, start=start, end=end, adjust="hfq")
+
+    if df88.empty:
+        df_main = _load_futures_ohlcv(
+            db, code=pool_code, start=start, end=end, adjust="none"
+        )
+        if df_main.empty:
+            return None
+        out = df_main.copy()
+        out["SignalClose"] = out["Close"].astype(float)
+        detail: dict[str, Any] = {
+            "trend_resolution": "main_contract_none",
+            "execution_symbol": pool_code,
+            "signal_symbol": pool_code,
+            "benchmark_symbol": pool_code,
+            "signal_adjust": "none",
+            "benchmark_adjust": "none",
+        }
+        return out, out.copy(), detail
+
+    idx = df88.index
+    detail_a: dict[str, Any] = {
+        "execution_symbol": code_88,
+        "signal_adjust": "qfq",
+        "benchmark_adjust": "hfq",
+    }
+    if not df888.empty:
+        idx = idx.intersection(df888.index)
+    else:
+        detail_a["signal_adjust"] = "none_fallback"
+
+    if not df889.empty:
+        idx = idx.intersection(df889.index)
+    else:
+        detail_a["benchmark_adjust"] = "none_fallback"
+
+    idx = idx.sort_values()
+    if len(idx) == 0:
+        return None
+
+    exec_df = df88.loc[idx].copy()
+    if not df888.empty:
+        exec_df["SignalClose"] = df888.loc[idx, "Close"].astype(float).values
+        detail_a["signal_symbol"] = code_888
+    else:
+        exec_df["SignalClose"] = exec_df["Close"].astype(float)
+        detail_a["signal_symbol"] = code_88
+
+    if not df889.empty:
+        bench_df = df889.loc[idx].copy()
+        detail_a["benchmark_symbol"] = code_889
+    else:
+        bench_df = exec_df[["Open", "High", "Low", "Close", "Volume"]].copy()
+        detail_a["benchmark_symbol"] = code_88
+
+    if (
+        detail_a.get("signal_adjust") == "qfq"
+        and detail_a.get("benchmark_adjust") == "hfq"
+    ):
+        detail_a["trend_resolution"] = "synthetic_triple"
+    else:
+        detail_a["trend_resolution"] = "synthetic_partial"
+
+    return exec_df, bench_df, detail_a
 
 
 def _build_cost_profile(
@@ -141,7 +257,10 @@ def _run_vectorized_fallback(
     slow_ma: int,
     exec_price: ExecPrice,
 ) -> pd.Series:
-    close = df["Close"].astype(float)
+    if "SignalClose" in df.columns:
+        close = df["SignalClose"].astype(float)
+    else:
+        close = df["Close"].astype(float)
     fast = close.rolling(window=int(fast_ma), min_periods=int(fast_ma)).mean()
     slow = close.rolling(window=int(slow_ma), min_periods=int(slow_ma)).mean()
     signal = (fast > slow).astype(float).fillna(0.0)
@@ -196,7 +315,11 @@ def _run_symbol_backtest(
         size_pct = 0.999999
 
         def init(self) -> None:
-            close_arr = np.asarray(self.data.Close, dtype=float)
+            sig = getattr(self.data, "SignalClose", None)
+            close_arr = np.asarray(
+                sig if sig is not None else self.data.Close,
+                dtype=float,
+            )
             sma_fn = getattr(talib, "SMA", None) if talib is not None else None
             if callable(sma_fn):
                 self.fast_ma = self.I(sma_fn, close_arr, int(self.fast))
@@ -303,6 +426,21 @@ def compute_futures_group_trend_backtest(
     slippage_type: SlippageType = "percent",
     slippage_value: float = 0.0005,
     slippage_side: FeeSide = "two_way",
+    backtest_mode: str = "portfolio",
+    single_code: str | None = None,
+    position_sizing: str = "equal",
+    risk_budget_atr_window: int = 20,
+    risk_budget_pct: float = 0.01,
+    risk_budget_overcap_policy: str = "scale",
+    risk_budget_max_leverage_multiple: float = 2.0,
+    monthly_risk_budget_enabled: bool = False,
+    monthly_risk_budget_pct: float = 0.06,
+    monthly_risk_budget_include_new_trade_risk: bool = False,
+    atr_stop_mode: str = "none",
+    atr_stop_atr_basis: str = "latest",
+    atr_stop_window: int = 14,
+    atr_stop_n: float = 2.0,
+    atr_stop_m: float = 0.5,
 ) -> dict:
     codes = [str(c).strip().upper() for c in group.codes if str(c).strip()]
     if len(codes) == 0:
@@ -320,17 +458,41 @@ def compute_futures_group_trend_backtest(
     if position_size_pct <= 0 or position_size_pct > 1:
         return {"ok": False, "error": "invalid_position_size_pct"}
 
+    bm = str(backtest_mode or "portfolio").strip().lower()
+    if bm not in {"portfolio", "single"}:
+        return {"ok": False, "error": "invalid_backtest_mode"}
+    ps = str(position_sizing or "equal").strip().lower()
+    if bm == "portfolio" and ps not in {"equal", "risk_budget"}:
+        return {"ok": False, "error": "invalid_position_sizing"}
+    rb_pol = str(risk_budget_overcap_policy or "scale").strip().lower()
+    if rb_pol not in {"scale", "skip_entry", "replace_entry", "leverage_entry"}:
+        return {"ok": False, "error": "invalid_risk_budget_overcap_policy"}
+
+    codes_run = codes
+    if bm == "single":
+        sc = str(single_code or "").strip().upper()
+        if not sc:
+            return {"ok": False, "error": "missing_single_code"}
+        if sc not in set(codes):
+            return {"ok": False, "error": "single_code_not_in_group"}
+        codes_run = [sc]
+
     nav_by_symbol: dict[str, pd.Series] = {}
     bench_price_by_symbol: dict[str, pd.Series] = {}
+    exec_by_code: dict[str, pd.DataFrame] = {}
     symbol_stats: list[dict] = []
     errors: list[str] = []
 
-    for code in codes:
-        df = _load_futures_ohlcv(db, code=code, start=start, end=end)
-        if len(df.index) < int(min_points):
+    for code in codes_run:
+        aligned = _align_futures_trend_inputs(db, pool_code=code, start=start, end=end)
+        if aligned is None:
+            errors.append(f"{code}:no_price_rows")
+            continue
+        df_exec, df_bench, trend_detail = aligned
+        if len(df_exec.index) < int(min_points):
             errors.append(f"{code}:points<{int(min_points)}")
             continue
-        price_ref = float(df["Close"].median()) if len(df.index) else 0.0
+        price_ref = float(df_exec["Close"].median()) if len(df_exec.index) else 0.0
         cost = _build_cost_profile(
             cost_bps=cost_bps,
             fee_side=fee_side,
@@ -340,7 +502,7 @@ def compute_futures_group_trend_backtest(
             price_reference=price_ref,
         )
         nav, st = _run_symbol_backtest(
-            df,
+            df_exec,
             fast_ma=int(fast_ma),
             slow_ma=int(slow_ma),
             exec_price=exec_price,
@@ -348,20 +510,25 @@ def compute_futures_group_trend_backtest(
             cost=cost,
         )
         nav_by_symbol[code] = nav
+        exec_by_code[code] = df_exec.copy()
         bench_col = "Open" if exec_price == "open" else "Close"
-        bench_price_by_symbol[code] = df[bench_col].astype(float)
+        bench_price_by_symbol[code] = df_bench[bench_col].astype(float)
         symbol_stats.append(
             {
                 "code": code,
-                "points": int(len(df.index)),
-                "start": str(df.index.min().date()),
-                "end": str(df.index.max().date()),
+                "points": int(len(df_exec.index)),
+                "start": str(df_exec.index.min().date()),
+                "end": str(df_exec.index.max().date()),
                 "ret_total": float(st.get("ret_total", 0.0)),
                 "trades": int(st.get("trades", 0)),
                 "win_rate": float(st.get("win_rate", 0.0)),
                 "engine": str(st.get("engine", "unknown")),
                 "commission_per_fill": float(cost.commission_per_fill),
                 "spread_per_fill": float(cost.spread_per_fill),
+                "trend_resolution": trend_detail.get("trend_resolution"),
+                "trend_execution_symbol": trend_detail.get("execution_symbol"),
+                "trend_signal_adjust": trend_detail.get("signal_adjust"),
+                "trend_benchmark_adjust": trend_detail.get("benchmark_adjust"),
             }
         )
 
@@ -377,23 +544,134 @@ def compute_futures_group_trend_backtest(
             },
         }
 
-    nav_df = pd.DataFrame(nav_by_symbol).sort_index()
-    strat_ret = nav_df.pct_change()
-    group_ret = _combine_group_returns(
-        strat_ret, dynamic_universe=bool(dynamic_universe)
-    )
-    group_nav = (1.0 + group_ret).cumprod()
+    common_idx: pd.DatetimeIndex | None = None
+    for nav in nav_by_symbol.values():
+        common_idx = (
+            nav.index if common_idx is None else common_idx.intersection(nav.index)
+        )
+    if common_idx is None or len(common_idx) < 2:
+        return {
+            "ok": False,
+            "error": "insufficient_overlap",
+            "meta": {
+                "group_name": group.name,
+                "start": start,
+                "end": end,
+                "errors": errors,
+            },
+        }
+    common_idx = common_idx.sort_values()
 
-    bench_close_df = pd.DataFrame(bench_price_by_symbol).sort_index()
+    ret_parts: dict[str, pd.Series] = {}
+    for c, nav in nav_by_symbol.items():
+        nv = nav.reindex(common_idx).ffill()
+        ret_parts[str(c)] = nv.pct_change().fillna(0.0)
+    ret_mat = pd.DataFrame(ret_parts).sort_index().astype(float)
+
+    exec_aligned = {c: exec_by_code[c].reindex(common_idx) for c in exec_by_code}
+
+    portfolio_meta: dict[str, Any] = {}
+    if bm == "single":
+        group_ret = ret_mat.iloc[:, 0].astype(float)
+        portfolio_meta["allocation"] = "single_asset_full_notional"
+    else:
+        if ps == "equal":
+            _, sig_df = build_ma_panels(
+                exec_aligned,
+                common_idx=common_idx,
+                fast_ma=int(fast_ma),
+                slow_ma=int(slow_ma),
+            )
+            w_df = equal_weights_from_signals(sig_df)
+            portfolio_meta["position_sizing"] = "equal"
+            portfolio_meta["note"] = (
+                "equal weight among MA-long symbols each day; weights lagged one day "
+                "into returns"
+            )
+        else:
+            score_df, sig_df = build_ma_panels(
+                exec_aligned,
+                common_idx=common_idx,
+                fast_ma=int(fast_ma),
+                slow_ma=int(slow_ma),
+            )
+            w_df, rb_stats = risk_budget_weights(
+                sig_binary_df=sig_df,
+                score_df=score_df,
+                exec_by_code=exec_aligned,
+                common_idx=common_idx,
+                risk_budget_atr_window=int(risk_budget_atr_window),
+                risk_budget_pct=float(risk_budget_pct),
+                policy=rb_pol,
+                max_leverage_multiple=float(risk_budget_max_leverage_multiple),
+            )
+            portfolio_meta["position_sizing"] = "risk_budget"
+            portfolio_meta["risk_budget"] = rb_stats
+
+        if bm == "portfolio" and bool(monthly_risk_budget_enabled):
+            cc = [str(c) for c in ret_mat.columns]
+            close_df = pd.DataFrame(
+                {
+                    c: exec_aligned[c]["Close"].astype(float)
+                    for c in cc
+                    if c in exec_aligned
+                },
+                index=common_idx,
+            )
+            atr_gate = pd.DataFrame(index=common_idx, columns=cc, dtype=float)
+            w_atr = max(2, int(atr_stop_window))
+            for c in cc:
+                if c not in exec_aligned:
+                    continue
+                ex = exec_aligned[c]
+                atr_gate[c] = atr_ewm_wilder(
+                    ex["High"].astype(float),
+                    ex["Low"].astype(float),
+                    ex["Close"].astype(float),
+                    window=w_atr,
+                )
+            atm = str(atr_stop_mode or "none").strip().lower()
+            w_df, gate_stats = _apply_monthly_risk_budget_gate(
+                w_df.reindex(index=close_df.index, columns=close_df.columns)
+                .astype(float)
+                .fillna(0.0),
+                close=close_df.astype(float),
+                atr=atr_gate.astype(float),
+                enabled=True,
+                budget_pct=float(monthly_risk_budget_pct),
+                include_new_trade_risk=bool(monthly_risk_budget_include_new_trade_risk),
+                atr_stop_enabled=(atm != "none"),
+                atr_mode=atm,
+                atr_basis=str(atr_stop_atr_basis or "latest"),
+                atr_n=float(atr_stop_n),
+                atr_m=float(atr_stop_m),
+                fallback_position_risk=0.02,
+            )
+            portfolio_meta["monthly_risk_budget_gate"] = gate_stats
+            portfolio_meta["monthly_risk_budget_atr_stop"] = {
+                "atr_stop_mode": atm,
+                "atr_stop_atr_basis": str(atr_stop_atr_basis or "latest"),
+                "atr_stop_window": int(w_atr),
+                "atr_stop_n": float(atr_stop_n),
+                "atr_stop_m": float(atr_stop_m),
+            }
+
+        group_ret = combine_weighted_returns(ret_mat, w_df)
+
+    group_nav = (1.0 + group_ret.fillna(0.0)).cumprod()
+
+    bench_close_df = (
+        pd.DataFrame(bench_price_by_symbol).sort_index().reindex(common_idx).ffill()
+    )
     bench_ret = _combine_group_returns(
         bench_close_df.pct_change(),
         dynamic_universe=bool(dynamic_universe),
     )
-    bench_nav = (1.0 + bench_ret).cumprod()
+    bench_nav = (1.0 + bench_ret.fillna(0.0)).cumprod()
 
-    common_idx = group_nav.index.union(bench_nav.index).sort_values()
-    group_nav = group_nav.reindex(common_idx).ffill().fillna(1.0)
-    bench_nav = bench_nav.reindex(common_idx).ffill().fillna(1.0)
+    align_idx = group_nav.index.union(bench_nav.index).sort_values()
+    group_nav = group_nav.reindex(align_idx).ffill().fillna(1.0)
+    bench_nav = bench_nav.reindex(align_idx).ffill().fillna(1.0)
 
     def _series_rows(series: pd.Series) -> list[dict]:
         return [
@@ -422,6 +700,39 @@ def compute_futures_group_trend_backtest(
             "signal_execution_rule": f"signal_t_execute_t_plus_1_{exec_price}",
             "signal_lag_trading_days": 1,
             "benchmark_price_basis": ("open" if exec_price == "open" else "close"),
+            "trend_series_policy": {
+                "benchmark": "synthetic_hfq_continuous (889) when present; "
+                "else none (fallback)",
+                "signals": "synthetic_qfq_continuous (888) close when present; "
+                "else none on execution series",
+                "execution_and_returns": "synthetic_none_continuous (88) when "
+                "present; else main contract none",
+            },
+            "backtest_mode": bm,
+            "single_code": (
+                str(single_code or "").strip().upper() if bm == "single" else None
+            ),
+            "position_sizing": (ps if bm == "portfolio" else None),
+            "portfolio": portfolio_meta,
+            "risk_budget_atr_window": int(risk_budget_atr_window),
+            "risk_budget_pct": float(risk_budget_pct),
+            "risk_budget_overcap_policy": rb_pol,
+            "risk_budget_max_leverage_multiple": float(
+                risk_budget_max_leverage_multiple
+            ),
+            "monthly_risk_budget_enabled": bool(monthly_risk_budget_enabled),
+            "monthly_risk_budget_effective": bool(
+                bm == "portfolio" and monthly_risk_budget_enabled
+            ),
+            "monthly_risk_budget_pct": float(monthly_risk_budget_pct),
+            "monthly_risk_budget_include_new_trade_risk": bool(
+                monthly_risk_budget_include_new_trade_risk
+            ),
+            "atr_stop_mode": str(atr_stop_mode or "none"),
+            "atr_stop_atr_basis": str(atr_stop_atr_basis or "latest"),
+            "atr_stop_window": int(atr_stop_window),
+            "atr_stop_n": float(atr_stop_n),
+            "atr_stop_m": float(atr_stop_m),
             "effective_symbols": int(len(nav_by_symbol)),
             "skipped": errors,
         },

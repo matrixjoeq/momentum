@@ -182,6 +182,69 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert out["meta"]["slippage_type"] == "percent"
     assert out["meta"]["signal_execution_rule"] == "signal_t_execute_t_plus_1_close"
     assert out["meta"]["signal_lag_trading_days"] == 1
+    tsp = out["meta"].get("trend_series_policy") or {}
+    assert isinstance(tsp, dict)
+    assert "benchmark" in tsp and "signals" in tsp and "execution_and_returns" in tsp
+    syms = out.get("symbols") or []
+    assert syms and syms[0].get("trend_resolution") == "main_contract_none"
+    assert out["meta"].get("backtest_mode") == "portfolio"
+    assert out["meta"].get("position_sizing") == "equal"
+    assert out["meta"].get("monthly_risk_budget_enabled") is False
+    assert out["meta"].get("monthly_risk_budget_effective") is False
+
+    resp_mon = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+            "monthly_risk_budget_enabled": True,
+            "monthly_risk_budget_pct": 0.06,
+            "monthly_risk_budget_include_new_trade_risk": False,
+            "atr_stop_mode": "none",
+            "atr_stop_window": 14,
+        },
+    )
+    assert resp_mon.status_code == 200
+    mon_j = resp_mon.json()
+    assert mon_j["ok"] is True
+    assert mon_j["meta"]["monthly_risk_budget_effective"] is True
+    port_m = mon_j["meta"].get("portfolio") or {}
+    gate = port_m.get("monthly_risk_budget_gate") or {}
+    assert gate.get("enabled") is True
+
+    resp_single = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+            "backtest_mode": "single",
+            "single_code": "RB0",
+        },
+    )
+    assert resp_single.status_code == 200
+    one = resp_single.json()
+    assert one["ok"] is True
+    assert one["meta"]["backtest_mode"] == "single"
+    assert one["meta"]["single_code"] == "RB0"
+    assert one["meta"]["position_sizing"] is None
+    assert len(one.get("symbols") or []) == 1
+    assert one["meta"].get("monthly_risk_budget_effective") is False
 
     resp_open = client.post(
         "/api/futures/research/trend-backtest",
@@ -203,6 +266,34 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert out_open["ok"] is True
     assert out_open["meta"]["exec_price"] == "open"
     assert out_open["meta"]["benchmark_price_basis"] == "open"
+
+
+def test_futures_trend_backtest_rejects_invalid_position_sizing(
+    api_client: TestClient,
+) -> None:
+    client = api_client
+    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
+    post_json_ok(client, "/api/futures/RB0/fetch", {})
+    post_json_ok(
+        client,
+        "/api/futures/research/groups",
+        {"name": "趋势组", "codes": ["RB0"], "set_active": True},
+    )
+    bad_ps = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "backtest_mode": "portfolio",
+            "position_sizing": "vol_target",
+        },
+    )
+    assert bad_ps.status_code == 200
+    assert bad_ps.json()["ok"] is False
+    assert bad_ps.json()["error"] == "invalid_position_sizing"
 
 
 def test_futures_trend_backtest_rejects_invalid_semantics(
