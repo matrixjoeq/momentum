@@ -74,7 +74,7 @@ class TrendInputs:
     sma_window: int = 200  # ma_filter
     fast_window: int = 50  # ma_cross
     slow_window: int = 200  # ma_cross
-    ma_type: str = "sma"  # ma_filter: sma | ema | kama; ma_cross: sma | ema
+    ma_type: str = "sma"  # ma_filter: sma | ema | kama; ma_cross: sma | ema | wma
     kama_er_window: int = 10
     kama_fast_window: int = 2
     kama_slow_window: int = 30
@@ -189,7 +189,7 @@ class TrendPortfolioInputs:
     sma_window: int = 200
     fast_window: int = 50
     slow_window: int = 200
-    ma_type: str = "sma"  # ma_filter: sma | ema | kama; ma_cross: sma | ema
+    ma_type: str = "sma"  # ma_filter: sma | ema | kama; ma_cross: sma | ema | wma
     kama_er_window: int = 10
     kama_fast_window: int = 2
     kama_slow_window: int = 30
@@ -719,7 +719,7 @@ def _position_risk_from_stop_params(
     curr_close: float,
     curr_atr: float,
     position_weight: float,
-    fallback_position_risk: float = 0.02,
+    fallback_position_risk: float = 0.01,
 ) -> float:
     """
     Return one position's risk contribution as NAV fraction.
@@ -728,7 +728,7 @@ def _position_risk_from_stop_params(
     """
     fb = float(fallback_position_risk)
     if (not np.isfinite(fb)) or fb < 0.0:
-        fb = 0.02
+        fb = 0.01
     w = float(position_weight) if np.isfinite(float(position_weight)) else 0.0
     w = max(0.0, w)
     if not atr_stop_enabled:
@@ -785,7 +785,7 @@ def _apply_monthly_risk_budget_gate(
     atr_basis: str,
     atr_n: float,
     atr_m: float,
-    fallback_position_risk: float = 0.02,
+    fallback_position_risk: float = 0.01,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Block new entries when monthly risk budget is exhausted."""
     w = (
@@ -1951,6 +1951,21 @@ def _moving_average(
     t = str(ma_type or "sma").strip().lower()
     if t == "ema":
         return _ema(s, int(window))
+    if t == "wma":
+        w = max(2, int(window))
+        weights = np.arange(1, w + 1, dtype=float)
+
+        def _wma_window(arr: np.ndarray) -> float:
+            if arr.size != w or not np.all(np.isfinite(arr)):
+                return float("nan")
+            return float(np.dot(arr.astype(float), weights) / weights.sum())
+
+        return (
+            pd.to_numeric(s, errors="coerce")
+            .astype(float)
+            .rolling(window=w, min_periods=w)
+            .apply(_wma_window, raw=True)
+        )
     if t == "kama":
         return _kama(
             s,
@@ -2073,6 +2088,7 @@ def _apply_atr_stop(
     atr_window: int,
     n_mult: float,
     m_step: float,
+    same_day_stop: bool = False,
 ) -> tuple[pd.Series, dict[str, Any]]:
     """
     Apply universal ATR stop-loss overlay on top of base strategy position:
@@ -2084,8 +2100,10 @@ def _apply_atr_stop(
     where ATR(ref) is chosen by atr_basis:
     - entry: use ATR at entry for all dynamic updates
     - latest: use current/latest ATR for dynamic updates
-    Stop trigger rule: from the next trading day after entry, if today's low <= stop,
-    stop is triggered intraday and exits on the same day.
+    Stop trigger rule: by default (same_day_stop=False, ETF), the entry bar does not
+    evaluate the stop; from the following session onward, if today's low <= stop,
+    the stop is triggered intraday and exits on the same day. If same_day_stop=True
+    (e.g. futures T+0), the entry session also evaluates low <= stop.
     Fill rule:
     - normal touch: fill at stop price
     - gap-down open below stop: fill at today's open
@@ -2231,6 +2249,7 @@ def _apply_atr_stop(
             "wait_next_entry_lock_active": False,
             "trigger_rule": "low_le_stop_same_day_exit",
             "fill_rule": "fill=min(stop_price,open_price) for long",
+            "same_day_stop": bool(same_day_stop),
             "trace_last_rows": trace_rows[-80:],
             "trade_records": [],
         }
@@ -2333,7 +2352,8 @@ def _apply_atr_stop(
             if len(trace_last_rows) > 120:
                 trace_last_rows = trace_last_rows[-120:]
             prev_base = b
-            continue
+            if not same_day_stop:
+                continue
 
         # If base strategy already exits, clear stop state directly.
         if b <= 0.0:
@@ -2551,6 +2571,7 @@ def _apply_atr_stop(
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
         "trigger_rule": "low_le_stop_same_day_exit",
         "fill_rule": "fill=min(stop_price,open_price) for long",
+        "same_day_stop": bool(same_day_stop),
         "trace_last_rows": trace_last_rows[-80:],
         "trade_records": trade_records,
     }
@@ -3575,8 +3596,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("fast_window must be < slow_window")
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
-    if ma_type not in {"sma", "ema", "kama"}:
-        raise ValueError("ma_type must be one of: sma|ema|kama")
+    if strat == "ma_cross":
+        if ma_type not in {"sma", "ema", "wma"}:
+            raise ValueError("ma_type must be one of: sma|ema|wma for ma_cross")
+    elif strat == "ma_filter":
+        if ma_type not in {"sma", "ema", "kama"}:
+            raise ValueError("ma_type must be one of: sma|ema|kama for ma_filter")
     kama_er_window = int(getattr(inp, "kama_er_window", 10) or 10)
     kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
     kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
@@ -4431,7 +4456,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             atr_basis=str(atr_basis),
             atr_n=float(inp.atr_stop_n),
             atr_m=float(inp.atr_stop_m),
-            fallback_position_risk=0.02,
+            fallback_position_risk=0.01,
         )
         raw_pos = gated_w_df[code].astype(float)
 
@@ -5658,8 +5683,12 @@ def compute_trend_portfolio_backtest(
         )
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
-    if ma_type not in {"sma", "ema", "kama"}:
-        raise ValueError("ma_type must be one of: sma|ema|kama")
+    if strat == "ma_cross":
+        if ma_type not in {"sma", "ema", "wma"}:
+            raise ValueError("ma_type must be one of: sma|ema|wma for ma_cross")
+    elif strat == "ma_filter":
+        if ma_type not in {"sma", "ema", "kama"}:
+            raise ValueError("ma_type must be one of: sma|ema|kama for ma_filter")
     kama_er_window = int(getattr(inp, "kama_er_window", 10) or 10)
     kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
     kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
@@ -7128,7 +7157,7 @@ def compute_trend_portfolio_backtest(
             atr_basis=str(atr_basis),
             atr_n=float(inp.atr_stop_n),
             atr_m=float(inp.atr_stop_m),
-            fallback_position_risk=0.02,
+            fallback_position_risk=0.01,
         )
         # Rebuild holdings timeline from gated decision weights.
         holdings = []
@@ -8174,6 +8203,115 @@ def compute_trend_portfolio_backtest(
         if one is not None:
             entry_exec_price_with_slippage_by_asset[str(c)] = float(one)
 
+    portfolio_next_plan: dict[str, Any] = {
+        "decision_date": (str(nav.index[-1].date()) if len(nav.index) else None),
+        "entry_exec_price_with_slippage_by_asset": entry_exec_price_with_slippage_by_asset,
+        "position_sizing": str(ps),
+        "notes": (
+            "effective_weights_last_close：决策日收盘时持仓权重（含盘中止损等）；"
+            "decision_weights_next_exec：下一执行时点（通常为下一交易日开盘）目标权重。"
+            "二者之差包含波动率目标(vol_target)、风险预算及波动状态机等风控带来的调仓。"
+            "若仅波动状态切换而风险预算名义目标未变，可能出现权重差分为零。"
+        ),
+    }
+    if len(nav.index) > 0:
+        ld = nav.index[-1]
+        w_eff_last = w.loc[ld]
+        w_dec_last = w_decision.loc[ld]
+        portfolio_next_plan["effective_weights_last_close"] = {
+            str(c): float(w_eff_last[c]) for c in codes
+        }
+        portfolio_next_plan["decision_weights_next_exec"] = {
+            str(c): float(w_dec_last[c]) for c in codes
+        }
+        deltas_m: dict[str, float] = {}
+        for c in codes:
+            du = float(w_dec_last[c]) - float(w_eff_last[c])
+            if abs(du) > 1e-14:
+                deltas_m[str(c)] = du
+        portfolio_next_plan["weight_delta_next_exec_by_code"] = deltas_m
+
+        if str(ps) == "vol_target":
+            active_codes_vt = [str(c) for c in codes if float(w_dec_last[c]) > 1e-12]
+            inv_vt: dict[str, float] = {}
+            ann_by: dict[str, float] = {}
+            for c in active_codes_vt:
+                try:
+                    av = float(vol_ann.loc[ld, c])
+                except (TypeError, ValueError, KeyError):
+                    av = float("nan")
+                ann_by[str(c)] = av
+                if (not np.isfinite(av)) or av <= 0:
+                    inv_vt[c] = 0.0
+                else:
+                    inv_vt[c] = 1.0 / av
+            den_vt = float(sum(inv_vt.values()))
+            port_vol_est = float("nan")
+            scale_vt = 1.0
+            if den_vt > 0 and active_codes_vt:
+                raw_vt = {
+                    c: float(inv_vt[c]) / den_vt
+                    for c in active_codes_vt
+                    if float(inv_vt.get(c, 0.0)) > 0.0
+                }
+                s_var = 0.0
+                for c in raw_vt:
+                    vx = float(vol_ann.loc[ld, c])
+                    if np.isfinite(vx):
+                        s_var += float(raw_vt[c] ** 2) * float(vx**2)
+                port_vol_est = float(np.sqrt(s_var)) if s_var > 0 else float("nan")
+                vt_ann = float(inp.vol_target_ann)
+                scale_vt = (
+                    1.0
+                    if (not np.isfinite(port_vol_est)) or port_vol_est <= 1e-12
+                    else min(1.0, vt_ann / port_vol_est)
+                )
+            portfolio_next_plan["vol_target_snapshot"] = {
+                "vol_target_ann": float(inp.vol_target_ann),
+                "vol_window": int(inp.vol_window),
+                "portfolio_vol_annualized_est": port_vol_est,
+                "gross_leverage_scalar": float(scale_vt),
+                "by_code_ann_vol": ann_by,
+            }
+
+        if str(ps) == "risk_budget" and bool(vol_regime_risk_mgmt_enabled):
+            by_c_vm: dict[str, dict[str, Any]] = {}
+            for c in codes:
+                af = (
+                    float(atr_ratio_fast_df.loc[ld, c])
+                    if (
+                        c in atr_ratio_fast_df.columns and ld in atr_ratio_fast_df.index
+                    )
+                    else float("nan")
+                )
+                sl = (
+                    float(atr_ratio_slow_df.loc[ld, c])
+                    if (
+                        c in atr_ratio_slow_df.columns and ld in atr_ratio_slow_df.index
+                    )
+                    else float("nan")
+                )
+                ratio_vm = (
+                    (af / sl)
+                    if (np.isfinite(af) and np.isfinite(sl) and sl > 0.0)
+                    else float("nan")
+                )
+                by_c_vm[str(c)] = {
+                    "vol_regime_state": str(rb_state_by_code.get(str(c), "FLAT")),
+                    "atr_fast": af,
+                    "atr_slow": sl,
+                    "atr_fast_over_slow": ratio_vm,
+                }
+            portfolio_next_plan["risk_budget_volatility_regime"] = {
+                "enabled": True,
+                "fast_atr_window": int(vol_ratio_fast_atr_window),
+                "slow_atr_window": int(vol_ratio_slow_atr_window),
+                "expand_threshold": float(vol_ratio_expand_threshold),
+                "contract_threshold": float(vol_ratio_contract_threshold),
+                "normal_threshold": float(vol_ratio_normal_threshold),
+                "by_code": by_c_vm,
+            }
+
     return {
         "meta": {
             "type": "trend_portfolio_backtest",
@@ -8284,10 +8422,7 @@ def compute_trend_portfolio_backtest(
                 for c in codes
             },
         },
-        "next_plan": {
-            "decision_date": (str(nav.index[-1].date()) if len(nav.index) else None),
-            "entry_exec_price_with_slippage_by_asset": entry_exec_price_with_slippage_by_asset,
-        },
+        "next_plan": portfolio_next_plan,
         "holdings": holdings,
         "period_returns": {
             "weekly": weekly.to_dict(orient="records"),

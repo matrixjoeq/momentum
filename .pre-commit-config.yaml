@@ -3,12 +3,12 @@ repos:
     hooks:
       - id: ruff-check-fix
         name: ruff check (auto-fix)
-        entry: .venv/bin/python3 -m ruff check --fix
+        entry: python3 -m ruff check --fix
         language: system
         types_or: [python, pyi]
       - id: ruff-format
         name: ruff format
-        entry: .venv/bin/python3 -m ruff format
+        entry: python3 -m ruff format
         language: system
         types_or: [python, pyi]
       - id: prettier-web-format

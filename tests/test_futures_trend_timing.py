@@ -36,20 +36,20 @@ def _build_monotonic_ohlc() -> pd.DataFrame:
 
 def test_vectorized_fallback_uses_next_day_execution_lag_for_close() -> None:
     df = _build_monotonic_ohlc()
-    ret = _run_vectorized_fallback(df, fast_ma=1, slow_ma=2, exec_price="close")
+    ret = _run_vectorized_fallback(df, fast_ma=2, slow_ma=3, exec_price="close")
     non_zero_dates = [d for d, v in ret.items() if abs(float(v)) > 0]
     assert non_zero_dates, "expected non-zero returns after signal activation"
-    # Signal turns valid from 2nd bar onward; with t+1 execution and close-close legs,
-    # first realized return appears on the 4th bar.
-    assert non_zero_dates[0] == df.index[3]
+    # Fast/slow crossover valid after slow MA warms up; with t+1 execution and close legs,
+    # first realized non-zero return appears on bar index 4 for this synthetic path.
+    assert non_zero_dates[0] == df.index[4]
 
 
 def test_vectorized_fallback_uses_next_day_execution_lag_for_open() -> None:
     df = _build_monotonic_ohlc()
-    ret = _run_vectorized_fallback(df, fast_ma=1, slow_ma=2, exec_price="open")
+    ret = _run_vectorized_fallback(df, fast_ma=2, slow_ma=3, exec_price="open")
     non_zero_dates = [d for d, v in ret.items() if abs(float(v)) > 0]
     assert non_zero_dates, "expected non-zero returns after signal activation"
-    assert non_zero_dates[0] == df.index[3]
+    assert non_zero_dates[0] == df.index[4]
 
 
 def test_resolve_order_size_maps_full_position_to_fractional_equity_size() -> None:

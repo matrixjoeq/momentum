@@ -71,6 +71,9 @@
       <code>get_*_daily</code>，按交易日逐请求，较慢）。均为串行、合约间隔 1
       秒、失败即停；<code>pool_id</code> 关联标的池。CTP
       为期货公司二进制通道，非 HTTP，此处未接入。与 ETF/场外基金/宏观数据隔离。
+      校验口径说明：先校验 88/888/889 是否覆盖同一交易日集合（以 88
+      为基准），再校验 88 与主连 *0 在重叠区间的误差。MAPE 控制平均误差，P95_APE
+      控制尾部误差，阈值越小越严格。
     </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/">ETF 候选池</a>
@@ -186,11 +189,6 @@
       <button id="validateAll" title="对所有标的执行合成数据一致性与误差校验">
         校验全部
       </button>
-      <div class="muted" style="min-width: 520px">
-        校验口径说明：先校验 88/888/889 是否覆盖同一交易日集合（以 88
-        为基准），再校验 88 与主连 *0 在重叠区间的误差。MAPE
-        控制平均误差，P95_APE 控制尾部误差，阈值越小越严格。
-      </div>
       <button id="selectAll">全选</button>
       <button id="selectNone">取消全选</button>
       <button id="selectInvert">反选</button>

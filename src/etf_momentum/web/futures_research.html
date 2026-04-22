@@ -97,6 +97,38 @@
       #msg {
         margin-top: 8px;
       }
+      .trend-sizing-rb-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 16px 28px;
+        margin-bottom: 10px;
+      }
+      .trend-risk-budget-group {
+        flex: 1 1 280px;
+        max-width: 720px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: rgba(128, 128, 128, 0.07);
+      }
+      .trend-group-heading {
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .trend-order-exec-panel {
+        margin: 12px 0 14px;
+        padding: 10px 12px;
+        border: 1px dashed var(--line);
+        border-radius: var(--radius-sm);
+      }
+      .trend-order-exec-panel > h4 {
+        margin: 0 0 6px;
+        font-size: 13px;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body>
@@ -224,6 +256,8 @@
           <label>单标的代码</label>
           <select id="trendSingleCode"></select>
         </div>
+      </div>
+      <div class="trend-sizing-rb-wrap">
         <div id="trendSizingRow">
           <label
             >仓位法（仅组合）
@@ -239,48 +273,57 @@
             <option value="risk_budget">风险预算(ATR)</option>
           </select>
         </div>
-      </div>
-      <div
-        class="row"
-        id="trendRiskBudgetRow"
-        style="flex-wrap: wrap; display: none"
-      >
-        <div>
-          <label>风险预算ATR周期</label>
-          <input id="trendRbAtrWin" type="number" min="2" step="1" value="20" />
-        </div>
-        <div>
-          <label>风险预算%</label>
-          <input
-            id="trendRbPct"
-            type="number"
-            min="0.1"
-            max="3"
-            step="0.1"
-            value="1"
-            title="百分数，例如 1 表示 1%，后端用 0.01"
-          />
-        </div>
-        <div>
-          <label>超限处理</label>
-          <select id="trendRbOvercap" style="min-width: 160px">
-            <option value="scale" selected>等比例缩放</option>
-            <option value="skip_entry">跳过开仓</option>
-            <option value="replace_entry">替换开仓</option>
-            <option value="leverage_entry">杠杆开仓</option>
-          </select>
-        </div>
-        <div>
-          <label>最大杠杆倍数</label>
-          <input
-            id="trendRbMaxLev"
-            type="number"
-            min="1.01"
-            max="10"
-            step="0.1"
-            value="2"
-            title="仅 leverage_entry 生效；超过则先缩放到该倍数"
-          />
+        <div
+          id="trendRiskBudgetRow"
+          class="trend-risk-budget-group"
+          style="display: none"
+        >
+          <div class="trend-group-heading muted">风险预算（ATR）</div>
+          <div class="row" style="flex-wrap: wrap">
+            <div>
+              <label>ATR周期</label>
+              <input
+                id="trendRbAtrWin"
+                type="number"
+                min="2"
+                step="1"
+                value="20"
+              />
+            </div>
+            <div>
+              <label>风险预算%</label>
+              <input
+                id="trendRbPct"
+                type="number"
+                min="0.1"
+                max="3"
+                step="0.1"
+                value="1"
+                title="百分数，例如 1 表示 1%，后端用 0.01"
+              />
+            </div>
+            <div>
+              <label>超限处理</label>
+              <select id="trendRbOvercap" style="min-width: 160px">
+                <option value="scale" selected>等比例缩放</option>
+                <option value="skip_entry">跳过开仓</option>
+                <option value="replace_entry">替换开仓</option>
+                <option value="leverage_entry">杠杆开仓</option>
+              </select>
+            </div>
+            <div>
+              <label>最大杠杆倍数</label>
+              <input
+                id="trendRbMaxLev"
+                type="number"
+                min="1.01"
+                max="10"
+                step="0.1"
+                value="2"
+                title="仅 leverage_entry 生效；超过则先缩放到该倍数"
+              />
+            </div>
+          </div>
         </div>
       </div>
       <div class="row" id="trendMonthlyRbRow" style="flex-wrap: wrap">
@@ -317,52 +360,170 @@
       <div
         id="trendMonthlyRbExplain"
         class="muted"
-        style="margin: 4px 0 10px; max-width: 820px"
+        style="margin: 4px 0 10px; max-width: 920px"
       >
-        月度门控（与 ETF 研究页一致）：自然月内累计已实现亏损
+        月度门控（仅组合、且上方选择「开启」时生效）：自然月内累计已实现亏损
         max(0,-realized)；跨月持仓在新月仍计入持仓风险占用；新开仓当 budget_used
-        + 拟开仓风险 ≥ 月度上限时否决（含等号边界）。持仓风险与拟开仓风险按 ATR
-        止损参数换算，见下行。
+        + 拟开仓风险 ≥ 月度上限时否决（含等号边界）。若通用 ATR
+        止损模式为「关闭」，持仓名义风险按每标的约 1% 计；否则按 ATR、基准、n、m
+        换算。门控不使用「止损后重入」分支。
+      </div>
+      <div class="trend-order-exec-panel" id="trendOrderExecPanel">
+        <h4>下单执行</h4>
+        <p
+          class="muted"
+          style="margin: 0 0 10px; font-size: 12px; max-width: 920px"
+        >
+          执行价与交易成本决定撮合与费用口径；当前接口仍按请求中的默认手续费与滑点计算，本节用于集中配置「如何下单」。手续费与滑点将与后端字段打通后可在此编辑。
+        </p>
+        <div class="row" style="flex-wrap: wrap; align-items: flex-end">
+          <div>
+            <label>执行价</label>
+            <select id="trendExecPrice">
+              <option value="open" selected>开盘执行</option>
+              <option value="close">收盘执行</option>
+            </select>
+          </div>
+          <div>
+            <label
+              title="将与 POST /futures/research/trend-backtest 的 cost_bps 等对齐"
+              >手续费</label
+            >
+            <input
+              type="text"
+              readonly
+              tabindex="-1"
+              value=""
+              placeholder="默认按请求（后续开放）"
+              style="opacity: 0.88; cursor: not-allowed"
+            />
+          </div>
+          <div>
+            <label title="将与 slippage_type / slippage_value 等对齐"
+              >滑点</label
+            >
+            <input
+              type="text"
+              readonly
+              tabindex="-1"
+              value=""
+              placeholder="默认按请求（后续开放）"
+              style="opacity: 0.88; cursor: not-allowed"
+            />
+          </div>
+        </div>
+      </div>
+      <div
+        id="trendUniversalAtrExplain"
+        class="muted"
+        style="margin: 4px 0 8px; max-width: 920px"
+      >
+        通用 ATR 止损（单标的与组合均支持）：开启非「关闭」模式时，MA
+        多空信号先经过与 ETF 相同的通用 ATR 成交价止损
+        overlay，再参与等权/风险预算或单标的全仓权重；触发当日收益按执行价规则用止损价修正。期货为
+        T+0，入场当日即参与 low≤stop 判定（ETF
+        趋势为入场后下一交易日起）。与月度门控独立；仅当开启「月度风险预算」时，门控才用上述参数估算持仓/拟开仓风险。
       </div>
       <div
         class="row"
-        id="trendMonthlyGateStopRow"
+        id="trendUniversalAtrStopRow"
         style="flex-wrap: wrap; display: none"
       >
         <div>
-          <label>门控止损模式</label>
+          <label
+            >通用ATR止损模式
+            <span
+              class="muted"
+              style="font-weight: normal"
+              title="与 ETF 趋势研究一致：关闭/静态/动态跟随/动态收紧"
+              >?</span
+            ></label
+          >
           <select id="trendAtrStopMode" style="min-width: 140px">
-            <option value="none" selected>无（每户口固定 2%）</option>
-            <option value="static">静态止损</option>
-            <option value="trailing">移动止损</option>
-            <option value="tightening">收紧止损</option>
+            <option value="none" selected>关闭</option>
+            <option value="static">静态</option>
+            <option value="trailing">动态跟随</option>
+            <option value="tightening">动态收紧</option>
           </select>
         </div>
         <div>
-          <label>门控ATR周期</label>
+          <label>ATR基准</label>
+          <select id="trendAtrStopBasis" style="min-width: 120px">
+            <option value="latest" selected>最新</option>
+            <option value="entry">入场</option>
+          </select>
+        </div>
+        <div>
+          <label>止损后重入</label>
+          <select id="trendAtrStopReentry" style="min-width: 150px">
+            <option value="reenter" selected>允许重返</option>
+            <option value="wait_next_entry">等待下一次入场</option>
+          </select>
+        </div>
+        <div>
+          <label>ATR周期</label>
           <input
             id="trendAtrStopWin"
             type="number"
             min="2"
             step="1"
             value="14"
+            title="ATR 计算窗口；启用月度门控时亦用于门控内的风险换算"
+          />
+        </div>
+        <div>
+          <label>止损倍数 n</label>
+          <input
+            id="trendAtrStopN"
+            type="number"
+            min="0.1"
+            step="0.1"
+            value="2.0"
+          />
+        </div>
+        <div>
+          <label>收紧步长 m</label>
+          <input
+            id="trendAtrStopM"
+            type="number"
+            min="0.05"
+            step="0.05"
+            value="0.5"
           />
         </div>
       </div>
+      <div style="margin: 12px 0 6px; font-size: 13px; font-weight: 700">
+        策略信号
+      </div>
       <div class="row">
         <div>
-          <label>执行价</label>
-          <select id="trendExecPrice">
-            <option value="close" selected>收盘执行（默认）</option>
-            <option value="open">开盘执行</option>
+          <label
+            >趋势策略
+            <span
+              class="muted"
+              style="font-weight: normal"
+              title="与 ETF 趋势策略回测中「均线交叉」一致；快慢线与均线类型决定信号"
+              >?</span
+            ></label
+          >
+          <select id="trendStrategy">
+            <option value="ma_cross" selected>均线交叉</option>
           </select>
         </div>
         <div>
-          <label>快线MA</label>
+          <label>均线类型</label>
+          <select id="trendMaType" title="与 ETF ma_cross：SMA / EMA / WMA">
+            <option value="sma" selected>SMA</option>
+            <option value="ema">EMA</option>
+            <option value="wma">WMA</option>
+          </select>
+        </div>
+        <div>
+          <label>快线周期</label>
           <input id="trendFastMa" type="number" min="2" step="1" value="20" />
         </div>
         <div>
-          <label>慢线MA</label>
+          <label>慢线周期</label>
           <input id="trendSlowMa" type="number" min="3" step="1" value="60" />
         </div>
         <button id="runTrendBacktest">刷新趋势回测</button>
@@ -515,8 +676,14 @@
             $("trendMonthlyRbNewRisk")?.value || "false",
           ),
           atrStopMode: String($("trendAtrStopMode")?.value || "none"),
+          atrStopBasis: String($("trendAtrStopBasis")?.value || "latest"),
+          atrStopReentry: String($("trendAtrStopReentry")?.value || "reenter"),
           atrStopWin: String($("trendAtrStopWin")?.value ?? "14"),
+          atrStopN: String($("trendAtrStopN")?.value ?? "2.0"),
+          atrStopM: String($("trendAtrStopM")?.value ?? "0.5"),
           execPrice: String($("trendExecPrice")?.value || "close"),
+          trendStrategy: String($("trendStrategy")?.value || "ma_cross"),
+          maType: String($("trendMaType")?.value || "sma"),
           fastMa: String($("trendFastMa")?.value ?? "20"),
           slowMa: String($("trendSlowMa")?.value ?? "60"),
         };
@@ -581,11 +748,25 @@
           const el = $("trendAtrStopMode");
           if (el) el.value = asm;
         }
+        const asb = String(p.atrStopBasis || "");
+        if (asb === "latest" || asb === "entry") {
+          const el = $("trendAtrStopBasis");
+          if (el) el.value = asb;
+        }
+        const asr = String(p.atrStopReentry || "");
+        if (asr === "reenter" || asr === "wait_next_entry") {
+          const el = $("trendAtrStopReentry");
+          if (el) el.value = asr;
+        }
         setNum("trendAtrStopWin", p.atrStopWin, "14");
+        setNum("trendAtrStopN", p.atrStopN, "2.0");
+        setNum("trendAtrStopM", p.atrStopM, "0.5");
         if (p.execPrice === "close" || p.execPrice === "open") {
           const el = $("trendExecPrice");
           if (el) el.value = p.execPrice;
         }
+        setSelectIfOptionExists("trendStrategy", p.trendStrategy);
+        setSelectIfOptionExists("trendMaType", p.maType);
         setNum("trendRbAtrWin", p.rbAtrWin, "20");
         setNum("trendRbPct", p.rbPct, "1");
         setNum("trendRbMaxLev", p.rbMaxLev, "2");
@@ -752,11 +933,10 @@
         if (rb) rb.style.display = portfolio && isRb ? "" : "none";
         if (mrow) mrow.style.display = portfolio ? "" : "none";
         if (mex) mex.style.display = portfolio ? "" : "none";
-        const monOn =
-          $("trendMonthlyRbEnable") &&
-          String($("trendMonthlyRbEnable").value || "") === "true";
-        const gsr = $("trendMonthlyGateStopRow");
-        if (gsr) gsr.style.display = portfolio && monOn ? "" : "none";
+        const uatr = $("trendUniversalAtrStopRow");
+        if (uatr) uatr.style.display = portfolio ? "" : "none";
+        const uex = $("trendUniversalAtrExplain");
+        if (uex) uex.style.display = portfolio ? "" : "none";
       }
 
       function corrColor(v) {
@@ -892,8 +1072,11 @@
             : m.monthly_risk_budget_enabled === true
               ? "仅配置"
               : "关";
+        const ts = String(m.trend_strategy || "ma_cross");
+        const stratLabel = ts === "ma_cross" ? "均线交叉" : ts;
+        const maLbl = String(m.ma_type || "sma").toUpperCase();
         $("trendMeta").textContent =
-          `分组=${m.group_name || "-"} | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+          `分组=${m.group_name || "-"} | 策略=${stratLabel}(${maLbl} ${Number(m.fast_ma || 0)}/${Number(m.slow_ma || 0)}) | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
         const s = out.summary || {};
         $("trendSummaryWrap").innerHTML =
           `<table class="corr"><thead><tr><th>策略累计收益</th><th>基准累计收益</th><th>超额累计收益</th></tr></thead>` +
@@ -1037,10 +1220,18 @@
         let asw = Number($("trendAtrStopWin").value);
         if (!Number.isFinite(asw) || asw < 2) asw = 14;
         $("trendAtrStopWin").value = String(Math.floor(asw));
+        let asn = Number($("trendAtrStopN").value);
+        if (!Number.isFinite(asn) || asn <= 0) asn = 2.0;
+        $("trendAtrStopN").value = String(asn);
+        let asmStep = Number($("trendAtrStopM").value);
+        if (!Number.isFinite(asmStep) || asmStep <= 0) asmStep = 0.5;
+        $("trendAtrStopM").value = String(asmStep);
         saveTrendParams();
         const payload = {
           range_key: corrRangeKey,
           exec_price: String($("trendExecPrice").value || "close"),
+          trend_strategy: String($("trendStrategy").value || "ma_cross"),
+          ma_type: String($("trendMaType").value || "sma"),
           fast_ma: fast,
           slow_ma: slow,
           min_points: 120,
@@ -1064,9 +1255,12 @@
             String($("trendMonthlyRbNewRisk").value || "") === "true",
           atr_stop_mode: String($("trendAtrStopMode").value || "none"),
           atr_stop_window: Math.floor(asw),
-          atr_stop_atr_basis: "latest",
-          atr_stop_n: 2.0,
-          atr_stop_m: 0.5,
+          atr_stop_atr_basis: String($("trendAtrStopBasis").value || "latest"),
+          atr_stop_reentry_mode: String(
+            $("trendAtrStopReentry").value || "reenter",
+          ),
+          atr_stop_n: asn,
+          atr_stop_m: asmStep,
         };
         if (btMode === "single") {
           payload.single_code = String($("trendSingleCode").value || "").trim();

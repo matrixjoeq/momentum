@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .trend import _moving_average
+
 
 def atr_ewm_wilder(
     high: pd.Series, low: pd.Series, close: pd.Series, *, window: int
@@ -43,12 +45,14 @@ def build_ma_panels(
     common_idx: pd.DatetimeIndex,
     fast_ma: int,
     slow_ma: int,
+    ma_type: str = "sma",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (score_df fast-slow, sig_binary_df 0/1 long intent by MA cross)."""
     cols = sorted(exec_by_code.keys())
     score_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
     sig_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
     f, s = int(fast_ma), int(slow_ma)
+    mt = str(ma_type or "sma").strip().lower()
     for code in cols:
         df = exec_by_code[str(code)].reindex(common_idx)
         close = (
@@ -56,8 +60,8 @@ def build_ma_panels(
             if "SignalClose" in df.columns
             else df["Close"].astype(float)
         )
-        fast = close.rolling(f, min_periods=f).mean()
-        slow = close.rolling(s, min_periods=s).mean()
+        fast = _moving_average(close, window=f, ma_type=mt)
+        slow = _moving_average(close, window=s, ma_type=mt)
         score_df[code] = (fast - slow).astype(float)
         sig_df[code] = (fast > slow).astype(float)
     return score_df, sig_df

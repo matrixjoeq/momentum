@@ -140,6 +140,46 @@ def test_trailing_stop_latest_atr_can_rise_when_price_drops() -> None:
     assert float(out_pos.iloc[-1]) == 1.0
 
 
+def test_same_day_stop_triggers_on_entry_session_for_futures_t0() -> None:
+    idx = pd.date_range("2024-01-01", periods=5, freq="B")
+    base_pos = pd.Series([0.0, 0.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 100.0, 100.0, 100.0], index=idx, dtype=float)
+    high = pd.Series([106.0, 106.0, 106.0, 106.0, 106.0], index=idx, dtype=float)
+    low = pd.Series([100.0, 100.0, 97.6, 96.0, 96.0], index=idx, dtype=float)
+    open_ = pd.Series([100.0, 100.0, 100.0, 98.0, 100.0], index=idx, dtype=float)
+    out_nd, _ = _apply_atr_stop(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+        same_day_stop=False,
+    )
+    out_sd, stats_sd = _apply_atr_stop(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+        same_day_stop=True,
+    )
+    assert float(out_nd.iloc[2]) == 1.0
+    assert float(out_sd.iloc[2]) == 0.0
+    assert int(stats_sd.get("trigger_count") or 0) >= 1
+
+
 def test_atr_stop_intraday_trigger_on_low_and_gap_open_fill() -> None:
     idx = pd.date_range("2024-01-01", periods=4, freq="B")
     base_pos = pd.Series([1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
@@ -782,11 +822,11 @@ def test_monthly_risk_position_formula_with_and_without_valid_stop() -> None:
         curr_close=100.0,
         curr_atr=5.0,
         position_weight=0.30,
-        fallback_position_risk=0.02,
+        fallback_position_risk=0.01,
     )
     assert r_with_stop == pytest.approx(0.03, rel=0.0, abs=1e-12)
 
-    # No valid stop case (e.g. ATR stop disabled): fixed 2% per position, independent of weight.
+    # No valid stop case (e.g. ATR stop disabled): fixed 1% per position, independent of weight.
     r_no_stop_w10 = _position_risk_from_stop_params(
         atr_stop_enabled=False,
         atr_mode="none",
@@ -798,7 +838,7 @@ def test_monthly_risk_position_formula_with_and_without_valid_stop() -> None:
         curr_close=100.0,
         curr_atr=5.0,
         position_weight=0.10,
-        fallback_position_risk=0.02,
+        fallback_position_risk=0.01,
     )
     r_no_stop_w60 = _position_risk_from_stop_params(
         atr_stop_enabled=False,
@@ -811,10 +851,10 @@ def test_monthly_risk_position_formula_with_and_without_valid_stop() -> None:
         curr_close=100.0,
         curr_atr=5.0,
         position_weight=0.60,
-        fallback_position_risk=0.02,
+        fallback_position_risk=0.01,
     )
-    assert r_no_stop_w10 == pytest.approx(0.02, rel=0.0, abs=1e-12)
-    assert r_no_stop_w60 == pytest.approx(0.02, rel=0.0, abs=1e-12)
+    assert r_no_stop_w10 == pytest.approx(0.01, rel=0.0, abs=1e-12)
+    assert r_no_stop_w60 == pytest.approx(0.01, rel=0.0, abs=1e-12)
 
 
 def test_trend_single_risk_budget_vol_regime_dynamic_adjust_counts(session_factory):
@@ -871,7 +911,7 @@ def test_monthly_risk_position_formula_entry_le_stop_returns_zero_not_fallback()
 ):
     # Trailing mode with entry basis can produce stop >= entry when price rises enough.
     # Example: entry=100, entry_atr=5, n=2 => stop = curr_close - 10.
-    # Use curr_close=120 => stop=110 >= entry, so risk must be 0 (not fallback 2%).
+    # Use curr_close=120 => stop=110 >= entry, so risk must be 0 (not fallback 1%).
     r = _position_risk_from_stop_params(
         atr_stop_enabled=True,
         atr_mode="trailing",
@@ -883,7 +923,7 @@ def test_monthly_risk_position_formula_entry_le_stop_returns_zero_not_fallback()
         curr_close=120.0,
         curr_atr=5.0,
         position_weight=0.40,
-        fallback_position_risk=0.02,
+        fallback_position_risk=0.01,
     )
     assert r == pytest.approx(0.0, rel=0.0, abs=1e-12)
 

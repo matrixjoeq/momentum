@@ -177,6 +177,8 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert "benchmark_nav" in out["series"]
     assert "summary" in out
     assert out["meta"]["exec_price"] == "close"
+    assert out["meta"]["trend_strategy"] == "ma_cross"
+    assert out["meta"]["ma_type"] == "sma"
     assert out["meta"]["benchmark_price_basis"] == "close"
     assert out["meta"]["fee_side"] == "two_way"
     assert out["meta"]["slippage_type"] == "percent"
@@ -219,6 +221,9 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     port_m = mon_j["meta"].get("portfolio") or {}
     gate = port_m.get("monthly_risk_budget_gate") or {}
     assert gate.get("enabled") is True
+    atr_gate_cfg = port_m.get("monthly_risk_budget_atr_stop") or {}
+    assert atr_gate_cfg.get("fallback_position_risk") == 0.01
+    assert mon_j["meta"].get("atr_stop_reentry_mode") == "reenter"
 
     resp_single = client.post(
         "/api/futures/research/trend-backtest",
@@ -336,3 +341,33 @@ def test_futures_trend_backtest_rejects_invalid_semantics(
     assert bad_fee.status_code == 200
     assert bad_fee.json()["ok"] is False
     assert bad_fee.json()["error"] == "invalid_fee_side"
+
+    bad_ma = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "ma_type": "kama",
+        },
+    )
+    assert bad_ma.status_code == 200
+    assert bad_ma.json()["ok"] is False
+    assert bad_ma.json()["error"] == "invalid_ma_type"
+
+    bad_ts = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "trend_strategy": "donchian",
+        },
+    )
+    assert bad_ts.status_code == 200
+    assert bad_ts.json()["ok"] is False
+    assert bad_ts.json()["error"] == "unsupported_trend_strategy"

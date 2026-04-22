@@ -7082,8 +7082,12 @@ def futures_research_trend_backtest_api(
         end=rr.end,
         dynamic_universe=dyn,
         exec_price=str(payload.exec_price or "close").strip().lower(),  # type: ignore[arg-type]
+        trend_strategy=str(
+            getattr(payload, "trend_strategy", "ma_cross") or "ma_cross"
+        ),
         fast_ma=int(payload.fast_ma),
         slow_ma=int(payload.slow_ma),
+        ma_type=str(getattr(payload, "ma_type", "sma") or "sma"),
         position_size_pct=float(payload.position_size_pct),
         min_points=int(payload.min_points),
         cost_bps=float(payload.cost_bps),
@@ -7120,6 +7124,9 @@ def futures_research_trend_backtest_api(
         atr_stop_mode=str(getattr(payload, "atr_stop_mode", "none") or "none"),
         atr_stop_atr_basis=str(
             getattr(payload, "atr_stop_atr_basis", "latest") or "latest"
+        ),
+        atr_stop_reentry_mode=str(
+            getattr(payload, "atr_stop_reentry_mode", "reenter") or "reenter"
         ),
         atr_stop_window=int(getattr(payload, "atr_stop_window", 14) or 14),
         atr_stop_n=float(getattr(payload, "atr_stop_n", 2.0) or 2.0),

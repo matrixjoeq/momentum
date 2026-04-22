@@ -414,18 +414,35 @@ class FuturesTrendBacktestRequest(BaseModel):
     )
     atr_stop_mode: str = Field(
         default="none",
-        description="Monthly gate holding-risk model: none|static|trailing|tightening "
-        "(same semantics as ETF trend bt_trend)",
+        description="Universal ATR stop (aligned with ETF trend): none|static|trailing|tightening. "
+        "Independent of monthly_risk_budget_enabled; futures engine applies these only when the monthly gate runs.",
     )
-    atr_stop_atr_basis: str = Field(default="latest", description="entry|latest")
+    atr_stop_atr_basis: str = Field(
+        default="latest",
+        description="entry|latest — ATR reference for trailing/tightening (ETF-aligned).",
+    )
+    atr_stop_reentry_mode: str = Field(
+        default="reenter",
+        description="reenter|wait_next_entry — aligned with ETF trend UI; "
+        "monthly gate ignores reentry (same as ETF portfolio monthly gate).",
+    )
     atr_stop_window: int = Field(
         default=14,
         ge=2,
-        description="ATR window used for monthly gate ATR series (not risk_budget_atr_window)",
+        description="ATR window for universal params (distinct from risk_budget_atr_window); "
+        "used by monthly gate when that gate is enabled.",
     )
     atr_stop_n: float = Field(default=2.0, gt=0.0)
     atr_stop_m: float = Field(default=0.5, gt=0.0)
     exec_price: str = Field(default="close", description="open|close")
+    trend_strategy: str = Field(
+        default="ma_cross",
+        description="Trend signal family; currently only ma_cross (fast vs slow MA)",
+    )
+    ma_type: str = Field(
+        default="sma",
+        description="For ma_cross: sma|ema|wma (aligned with ETF trend ma_cross)",
+    )
     fast_ma: int = Field(default=20, ge=2, le=500)
     slow_ma: int = Field(default=60, ge=3, le=800)
     position_size_pct: float = Field(default=1.0, gt=0.0, le=1.0)
@@ -2066,7 +2083,7 @@ class TrendBacktestRequest(BaseModel):
     )
     ma_type: str = Field(
         default="sma",
-        description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema",
+        description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema|wma",
     )
     kama_er_window: int = Field(
         default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)"
@@ -2352,7 +2369,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     slow_window: int = Field(default=200, ge=2)
     ma_type: str = Field(
         default="sma",
-        description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema",
+        description="MA type: ma_filter supports sma|ema|kama; ma_cross supports sma|ema|wma",
     )
     kama_er_window: int = Field(
         default=10, ge=2, description="KAMA ER lookback window (used when ma_type=kama)"

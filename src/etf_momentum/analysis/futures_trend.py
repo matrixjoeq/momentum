@@ -32,13 +32,17 @@ from sqlalchemy.orm import Session
 from ..data.futures_synthesize import _symbol_root_from_main
 from ..db.futures_repo import list_futures_prices
 from ..db.futures_research_repo import FuturesGroupData
-from .bt_trend import _apply_monthly_risk_budget_gate
 from .futures_trend_portfolio_weights import (
     atr_ewm_wilder,
     build_ma_panels,
-    combine_weighted_returns,
     equal_weights_from_signals,
     risk_budget_weights,
+)
+from .trend import (
+    _apply_atr_stop,
+    _apply_intraday_stop_execution_portfolio,
+    _apply_monthly_risk_budget_gate,
+    _moving_average,
 )
 
 ExecPrice = Literal["open", "close"]
@@ -256,13 +260,15 @@ def _run_vectorized_fallback(
     fast_ma: int,
     slow_ma: int,
     exec_price: ExecPrice,
+    ma_type: str = "sma",
 ) -> pd.Series:
     if "SignalClose" in df.columns:
         close = df["SignalClose"].astype(float)
     else:
         close = df["Close"].astype(float)
-    fast = close.rolling(window=int(fast_ma), min_periods=int(fast_ma)).mean()
-    slow = close.rolling(window=int(slow_ma), min_periods=int(slow_ma)).mean()
+    mt = str(ma_type or "sma").strip().lower()
+    fast = _moving_average(close, window=int(fast_ma), ma_type=mt)
+    slow = _moving_average(close, window=int(slow_ma), ma_type=mt)
     signal = (fast > slow).astype(float).fillna(0.0)
     # Strict anti-lookahead rule: signal on t executes on t+1.
     # Using close-close/open-open return legs implies first active return is t+2.
@@ -285,6 +291,7 @@ def _run_symbol_backtest(
     exec_price: ExecPrice,
     position_size_pct: float,
     cost: CostProfile,
+    ma_type: str = "sma",
 ) -> tuple[pd.Series, dict]:
     order_size = _resolve_order_size(position_size_pct)
 
@@ -296,6 +303,7 @@ def _run_symbol_backtest(
             fast_ma=fast_ma,
             slow_ma=slow_ma,
             exec_price=exec_price,
+            ma_type=ma_type,
         )
         nav = (1.0 + ret.fillna(0.0)).cumprod()
         return nav, {
@@ -309,9 +317,10 @@ def _run_symbol_backtest(
     except Exception:  # pragma: no cover - fallback only when lib unavailable
         talib = None
 
-    class TalibSmaTrend(Strategy):
+    class TalibMaCrossTrend(Strategy):
         fast = 20
         slow = 60
+        ma_kind = "sma"
         size_pct = 0.999999
 
         def init(self) -> None:
@@ -320,33 +329,24 @@ def _run_symbol_backtest(
                 sig if sig is not None else self.data.Close,
                 dtype=float,
             )
-            sma_fn = getattr(talib, "SMA", None) if talib is not None else None
-            if callable(sma_fn):
-                self.fast_ma = self.I(sma_fn, close_arr, int(self.fast))
-                self.slow_ma = self.I(sma_fn, close_arr, int(self.slow))
+            mt = str(self.ma_kind or "sma").strip().lower()
+            talib_ma = None
+            if talib is not None:
+                if mt == "sma":
+                    talib_ma = getattr(talib, "SMA", None)
+                elif mt == "ema":
+                    talib_ma = getattr(talib, "EMA", None)
+                elif mt == "wma":
+                    talib_ma = getattr(talib, "WMA", None)
+            if callable(talib_ma):
+                self.fast_ma = self.I(talib_ma, close_arr, int(self.fast))
+                self.slow_ma = self.I(talib_ma, close_arr, int(self.slow))
             else:
-                # Fallback only when TA-Lib is unavailable.
-                s = pd.Series(close_arr, dtype=float)
-                self.fast_ma = self.I(
-                    lambda x, n: (
-                        pd.Series(x, dtype=float)
-                        .rolling(n, min_periods=n)
-                        .mean()
-                        .to_numpy()
-                    ),
-                    s.to_numpy(),
-                    int(self.fast),
-                )
-                self.slow_ma = self.I(
-                    lambda x, n: (
-                        pd.Series(x, dtype=float)
-                        .rolling(n, min_periods=n)
-                        .mean()
-                        .to_numpy()
-                    ),
-                    s.to_numpy(),
-                    int(self.slow),
-                )
+                cs = pd.Series(close_arr, dtype=float)
+                fv = _moving_average(cs, window=int(self.fast), ma_type=mt).to_numpy()
+                sv = _moving_average(cs, window=int(self.slow), ma_type=mt).to_numpy()
+                self.fast_ma = self.I(lambda: fv)
+                self.slow_ma = self.I(lambda: sv)
 
         def next(self) -> None:
             # Strict anti-lookahead rule:
@@ -374,7 +374,7 @@ def _run_symbol_backtest(
 
     bt = Backtest(
         df,
-        TalibSmaTrend,
+        TalibMaCrossTrend,
         cash=1_000_000.0,
         trade_on_close=(exec_price == "close"),
         commission=float(cost.commission_per_fill),
@@ -382,11 +382,20 @@ def _run_symbol_backtest(
         exclusive_orders=True,
         finalize_trades=True,
     )
-    stats = bt.run(fast=int(fast_ma), slow=int(slow_ma), size_pct=float(order_size))
+    stats = bt.run(
+        fast=int(fast_ma),
+        slow=int(slow_ma),
+        ma_kind=str(ma_type),
+        size_pct=float(order_size),
+    )
     eq = stats.get("_equity_curve")
     if eq is None or "Equity" not in eq:
         ret = _run_vectorized_fallback(
-            df, fast_ma=fast_ma, slow_ma=slow_ma, exec_price=exec_price
+            df,
+            fast_ma=fast_ma,
+            slow_ma=slow_ma,
+            exec_price=exec_price,
+            ma_type=ma_type,
         )
         nav = (1.0 + ret.fillna(0.0)).cumprod()
         return nav, {
@@ -417,8 +426,10 @@ def compute_futures_group_trend_backtest(
     end: str,
     dynamic_universe: bool,
     exec_price: ExecPrice = "close",
+    trend_strategy: str = "ma_cross",
     fast_ma: int = 20,
     slow_ma: int = 60,
+    ma_type: str = "sma",
     position_size_pct: float = 1.0,
     min_points: int = 120,
     cost_bps: float = 5.0,
@@ -438,6 +449,7 @@ def compute_futures_group_trend_backtest(
     monthly_risk_budget_include_new_trade_risk: bool = False,
     atr_stop_mode: str = "none",
     atr_stop_atr_basis: str = "latest",
+    atr_stop_reentry_mode: str = "reenter",
     atr_stop_window: int = 14,
     atr_stop_n: float = 2.0,
     atr_stop_m: float = 0.5,
@@ -447,6 +459,12 @@ def compute_futures_group_trend_backtest(
         return {"ok": False, "error": "empty_group", "meta": {"group_name": group.name}}
     if int(fast_ma) < 2 or int(slow_ma) <= int(fast_ma):
         return {"ok": False, "error": "invalid_ma_windows"}
+    ts_raw = str(trend_strategy or "ma_cross").strip().lower()
+    if ts_raw != "ma_cross":
+        return {"ok": False, "error": "unsupported_trend_strategy"}
+    mt_eff = str(ma_type or "sma").strip().lower()
+    if mt_eff not in {"sma", "ema", "wma"}:
+        return {"ok": False, "error": "invalid_ma_type"}
     if exec_price not in {"open", "close"}:
         return {"ok": False, "error": "invalid_exec_price"}
     if fee_side not in {"one_way", "two_way"}:
@@ -467,6 +485,16 @@ def compute_futures_group_trend_backtest(
     rb_pol = str(risk_budget_overcap_policy or "scale").strip().lower()
     if rb_pol not in {"scale", "skip_entry", "replace_entry", "leverage_entry"}:
         return {"ok": False, "error": "invalid_risk_budget_overcap_policy"}
+
+    atm_raw = str(atr_stop_mode or "none").strip().lower()
+    if atm_raw not in {"none", "static", "trailing", "tightening"}:
+        return {"ok": False, "error": "invalid_atr_stop_mode"}
+    ab_raw = str(atr_stop_atr_basis or "latest").strip().lower()
+    if ab_raw not in {"entry", "latest"}:
+        return {"ok": False, "error": "invalid_atr_stop_atr_basis"}
+    arm_raw = str(atr_stop_reentry_mode or "reenter").strip().lower()
+    if arm_raw not in {"reenter", "wait_next_entry"}:
+        return {"ok": False, "error": "invalid_atr_stop_reentry_mode"}
 
     codes_run = codes
     if bm == "single":
@@ -508,6 +536,7 @@ def compute_futures_group_trend_backtest(
             exec_price=exec_price,
             position_size_pct=float(position_size_pct),
             cost=cost,
+            ma_type=mt_eff,
         )
         nav_by_symbol[code] = nav
         exec_by_code[code] = df_exec.copy()
@@ -571,17 +600,117 @@ def compute_futures_group_trend_backtest(
     exec_aligned = {c: exec_by_code[c].reindex(common_idx) for c in exec_by_code}
 
     portfolio_meta: dict[str, Any] = {}
+    atr_stop_by_asset: dict[str, dict[str, Any]] = {}
     if bm == "single":
-        group_ret = ret_mat.iloc[:, 0].astype(float)
         portfolio_meta["allocation"] = "single_asset_full_notional"
-    else:
-        if ps == "equal":
-            _, sig_df = build_ma_panels(
-                exec_aligned,
-                common_idx=common_idx,
-                fast_ma=int(fast_ma),
-                slow_ma=int(slow_ma),
+        code = str(codes_run[0])
+        _, sig_df = build_ma_panels(
+            exec_aligned,
+            common_idx=common_idx,
+            fast_ma=int(fast_ma),
+            slow_ma=int(slow_ma),
+            ma_type=mt_eff,
+        )
+        if atm_raw != "none":
+            ex = exec_aligned.get(code)
+            if ex is not None:
+                out_s, st = _apply_atr_stop(
+                    sig_df[code].astype(float).reindex(common_idx).fillna(0.0),
+                    open_=ex["Open"].reindex(common_idx).astype(float),
+                    close=ex["Close"].reindex(common_idx).astype(float),
+                    high=ex["High"].reindex(common_idx).astype(float),
+                    low=ex["Low"].reindex(common_idx).astype(float),
+                    mode=atm_raw,
+                    atr_basis=ab_raw,
+                    reentry_mode=arm_raw,
+                    atr_window=int(atr_stop_window),
+                    n_mult=float(atr_stop_n),
+                    m_step=float(atr_stop_m),
+                    same_day_stop=True,
+                )
+                sig_df = sig_df.copy()
+                sig_df[code] = out_s.reindex(sig_df.index).fillna(0.0).astype(float)
+                atr_stop_by_asset[code] = st
+        w_df = equal_weights_from_signals(sig_df)
+        portfolio_meta["universal_atr_stop"] = {
+            "applied": atm_raw != "none",
+            "same_day_stop": True,
+            "per_symbol_stats_keys": sorted(atr_stop_by_asset.keys()),
+        }
+        portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_raw != "none")
+
+        w_eff = (
+            w_df.reindex(index=ret_mat.index, columns=ret_mat.columns)
+            .fillna(0.0)
+            .astype(float)
+            .shift(1)
+            .fillna(0.0)
+        )
+        atr_override = pd.Series(0.0, index=ret_mat.index, dtype=float)
+        if atm_raw != "none" and atr_stop_by_asset:
+            open_df = pd.DataFrame(
+                {
+                    str(code): exec_aligned[code]["Open"].astype(float),
+                },
+                index=common_idx,
             )
+            close_df_exec = pd.DataFrame(
+                {
+                    str(code): exec_aligned[code]["Close"].astype(float),
+                },
+                index=common_idx,
+            )
+            w_eff, atr_override = _apply_intraday_stop_execution_portfolio(
+                weights=w_eff,
+                atr_stop_by_asset=atr_stop_by_asset,
+                exec_price=str(exec_price),
+                open_sig_df=open_df.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+                close_sig_df=close_df_exec.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+            )
+        group_ret = (w_eff * ret_mat.astype(float)).sum(axis=1).astype(float).fillna(
+            0.0
+        ) + atr_override.reindex(ret_mat.index).fillna(0.0).astype(float)
+    else:
+        score_df, sig_df = build_ma_panels(
+            exec_aligned,
+            common_idx=common_idx,
+            fast_ma=int(fast_ma),
+            slow_ma=int(slow_ma),
+            ma_type=mt_eff,
+        )
+        if atm_raw != "none":
+            sig_adj = sig_df.copy()
+            for c in list(sig_df.columns):
+                ex = exec_aligned.get(c)
+                if ex is None:
+                    continue
+                o_ = ex["Open"].reindex(common_idx).astype(float)
+                cl_ = ex["Close"].reindex(common_idx).astype(float)
+                hi_ = ex["High"].reindex(common_idx).astype(float)
+                lo_ = ex["Low"].reindex(common_idx).astype(float)
+                out_s, st = _apply_atr_stop(
+                    sig_df[c].astype(float).reindex(common_idx).fillna(0.0),
+                    open_=o_,
+                    close=cl_,
+                    high=hi_,
+                    low=lo_,
+                    mode=atm_raw,
+                    atr_basis=ab_raw,
+                    reentry_mode=arm_raw,
+                    atr_window=int(atr_stop_window),
+                    n_mult=float(atr_stop_n),
+                    m_step=float(atr_stop_m),
+                    same_day_stop=True,
+                )
+                sig_adj[c] = out_s.reindex(sig_adj.index).fillna(0.0).astype(float)
+                atr_stop_by_asset[str(c)] = st
+            sig_df = sig_adj
+
+        if ps == "equal":
             w_df = equal_weights_from_signals(sig_df)
             portfolio_meta["position_sizing"] = "equal"
             portfolio_meta["note"] = (
@@ -589,12 +718,6 @@ def compute_futures_group_trend_backtest(
                 "into returns"
             )
         else:
-            score_df, sig_df = build_ma_panels(
-                exec_aligned,
-                common_idx=common_idx,
-                fast_ma=int(fast_ma),
-                slow_ma=int(slow_ma),
-            )
             w_df, rb_stats = risk_budget_weights(
                 sig_binary_df=sig_df,
                 score_df=score_df,
@@ -607,6 +730,13 @@ def compute_futures_group_trend_backtest(
             )
             portfolio_meta["position_sizing"] = "risk_budget"
             portfolio_meta["risk_budget"] = rb_stats
+
+        portfolio_meta["universal_atr_stop"] = {
+            "applied": atm_raw != "none",
+            "same_day_stop": True,
+            "per_symbol_stats_keys": sorted(atr_stop_by_asset.keys()),
+        }
+        portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_raw != "none")
 
         if bm == "portfolio" and bool(monthly_risk_budget_enabled):
             cc = [str(c) for c in ret_mat.columns]
@@ -630,7 +760,7 @@ def compute_futures_group_trend_backtest(
                     ex["Close"].astype(float),
                     window=w_atr,
                 )
-            atm = str(atr_stop_mode or "none").strip().lower()
+            atm = atm_raw
             w_df, gate_stats = _apply_monthly_risk_budget_gate(
                 w_df.reindex(index=close_df.index, columns=close_df.columns)
                 .astype(float)
@@ -642,21 +772,61 @@ def compute_futures_group_trend_backtest(
                 include_new_trade_risk=bool(monthly_risk_budget_include_new_trade_risk),
                 atr_stop_enabled=(atm != "none"),
                 atr_mode=atm,
-                atr_basis=str(atr_stop_atr_basis or "latest"),
+                atr_basis=ab_raw,
                 atr_n=float(atr_stop_n),
                 atr_m=float(atr_stop_m),
-                fallback_position_risk=0.02,
+                fallback_position_risk=0.01,
             )
             portfolio_meta["monthly_risk_budget_gate"] = gate_stats
             portfolio_meta["monthly_risk_budget_atr_stop"] = {
                 "atr_stop_mode": atm,
-                "atr_stop_atr_basis": str(atr_stop_atr_basis or "latest"),
+                "atr_stop_atr_basis": ab_raw,
+                "atr_stop_reentry_mode": arm_raw,
                 "atr_stop_window": int(w_atr),
                 "atr_stop_n": float(atr_stop_n),
                 "atr_stop_m": float(atr_stop_m),
+                "fallback_position_risk": 0.01,
             }
 
-        group_ret = combine_weighted_returns(ret_mat, w_df)
+        w_eff = (
+            w_df.reindex(index=ret_mat.index, columns=ret_mat.columns)
+            .fillna(0.0)
+            .astype(float)
+            .shift(1)
+            .fillna(0.0)
+        )
+        atr_override = pd.Series(0.0, index=ret_mat.index, dtype=float)
+        if atm_raw != "none" and atr_stop_by_asset:
+            open_df = pd.DataFrame(
+                {
+                    str(c): exec_aligned[c]["Open"].astype(float)
+                    for c in ret_mat.columns
+                    if c in exec_aligned
+                },
+                index=common_idx,
+            )
+            close_df_exec = pd.DataFrame(
+                {
+                    str(c): exec_aligned[c]["Close"].astype(float)
+                    for c in ret_mat.columns
+                    if c in exec_aligned
+                },
+                index=common_idx,
+            )
+            w_eff, atr_override = _apply_intraday_stop_execution_portfolio(
+                weights=w_eff,
+                atr_stop_by_asset=atr_stop_by_asset,
+                exec_price=str(exec_price),
+                open_sig_df=open_df.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+                close_sig_df=close_df_exec.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+            )
+        group_ret = (w_eff * ret_mat.astype(float)).sum(axis=1).astype(float).fillna(
+            0.0
+        ) + atr_override.reindex(ret_mat.index).fillna(0.0).astype(float)
 
     group_nav = (1.0 + group_ret.fillna(0.0)).cumprod()
 
@@ -688,6 +858,8 @@ def compute_futures_group_trend_backtest(
             "end": end,
             "dynamic_universe": bool(dynamic_universe),
             "exec_price": exec_price,
+            "trend_strategy": str(ts_raw),
+            "ma_type": str(mt_eff),
             "fast_ma": int(fast_ma),
             "slow_ma": int(slow_ma),
             "position_size_pct": float(position_size_pct),
@@ -728,8 +900,9 @@ def compute_futures_group_trend_backtest(
             "monthly_risk_budget_include_new_trade_risk": bool(
                 monthly_risk_budget_include_new_trade_risk
             ),
-            "atr_stop_mode": str(atr_stop_mode or "none"),
-            "atr_stop_atr_basis": str(atr_stop_atr_basis or "latest"),
+            "atr_stop_mode": str(atm_raw),
+            "atr_stop_atr_basis": str(ab_raw),
+            "atr_stop_reentry_mode": str(arm_raw),
             "atr_stop_window": int(atr_stop_window),
             "atr_stop_n": float(atr_stop_n),
             "atr_stop_m": float(atr_stop_m),
