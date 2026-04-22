@@ -34,8 +34,9 @@ def normalize_futures_adjust(adjust: str | None) -> str:
     a = str(adjust or "none").strip().lower()
     if a in {"", "raw", "nfq"}:
         a = "none"
-    if a != "none":
-        raise ValueError(f"invalid adjust={adjust}; futures only support none")
+    # Support none, qfq, hfq for synthetic continuous contracts
+    if a not in {"none", "qfq", "hfq"}:
+        raise ValueError(f"invalid adjust={adjust}; futures only support none/qfq/hfq")
     return a
 
 
@@ -59,9 +60,40 @@ def infer_futures_default_tag(code: str, name: str | None = None) -> str:
         return "黑色系"
     if root in {"SC", "LU", "FU", "BU", "PG"}:
         return "能源化工"
-    if root in {"RU", "NR", "SP", "L", "V", "PP", "EB", "EG", "TA", "MA", "SA", "FG", "UR"}:
+    if root in {
+        "RU",
+        "NR",
+        "SP",
+        "L",
+        "V",
+        "PP",
+        "EB",
+        "EG",
+        "TA",
+        "MA",
+        "SA",
+        "FG",
+        "UR",
+    }:
         return "化工建材"
-    if root in {"A", "B", "M", "Y", "P", "OI", "RM", "C", "CS", "JD", "LH", "AP", "CJ", "CF", "SR", "PK"}:
+    if root in {
+        "A",
+        "B",
+        "M",
+        "Y",
+        "P",
+        "OI",
+        "RM",
+        "C",
+        "CS",
+        "JD",
+        "LH",
+        "AP",
+        "CJ",
+        "CF",
+        "SR",
+        "PK",
+    }:
         return "农产品"
     if root in {"SI", "LC"}:
         return "新能源金属"
@@ -75,7 +107,7 @@ def infer_futures_default_tag(code: str, name: str | None = None) -> str:
 
 def _normalize_futures_tags(code: str, name: str, tags: list[str] | None) -> list[str]:
     cleaned: list[str] = []
-    for t in (tags or []):
+    for t in tags or []:
         s = str(t or "").strip()
         if not s:
             continue
@@ -104,7 +136,9 @@ def deserialize_futures_tags(raw: str | None, *, code: str, name: str) -> list[s
     try:
         v = json.loads(txt)
         if isinstance(v, list):
-            return _normalize_futures_tags(code=code, name=name, tags=[str(x) for x in v])
+            return _normalize_futures_tags(
+                code=code, name=name, tags=[str(x) for x in v]
+            )
     except (TypeError, ValueError):
         pass
     return _normalize_futures_tags(code=code, name=name, tags=[txt])
@@ -125,11 +159,17 @@ def upsert_futures_pool(
     contract_extend_calendar_days: int | None = None,
     contract_parallel: int | None = None,
 ) -> FuturesPool:
-    ext_days = int(contract_extend_calendar_days) if contract_extend_calendar_days is not None else 366
+    ext_days = (
+        int(contract_extend_calendar_days)
+        if contract_extend_calendar_days is not None
+        else 366
+    )
     if contract_parallel is not None:
         int(contract_parallel)
     par = 1  # deliverable-month fetch uses AkShare serial-only policy (see futures_contract_ingestion)
-    existing = db.execute(select(FuturesPool).where(FuturesPool.code == code)).scalar_one_or_none()
+    existing = db.execute(
+        select(FuturesPool).where(FuturesPool.code == code)
+    ).scalar_one_or_none()
     if existing is None:
         obj = FuturesPool(
             code=code,
@@ -163,11 +203,15 @@ def upsert_futures_pool(
 
 
 def list_futures_pool(db: Session) -> list[FuturesPool]:
-    return list(db.execute(select(FuturesPool).order_by(FuturesPool.code.asc())).scalars().all())
+    return list(
+        db.execute(select(FuturesPool).order_by(FuturesPool.code.asc())).scalars().all()
+    )
 
 
 def get_futures_pool_by_code(db: Session, code: str) -> FuturesPool | None:
-    return db.execute(select(FuturesPool).where(FuturesPool.code == code)).scalar_one_or_none()
+    return db.execute(
+        select(FuturesPool).where(FuturesPool.code == code)
+    ).scalar_one_or_none()
 
 
 def delete_futures_pool(db: Session, code: str) -> bool:
@@ -175,7 +219,11 @@ def delete_futures_pool(db: Session, code: str) -> bool:
     if obj is None:
         return False
     pid = int(obj.id)
-    db.execute(delete(FuturesContractFetchStatus).where(FuturesContractFetchStatus.pool_id == pid))
+    db.execute(
+        delete(FuturesContractFetchStatus).where(
+            FuturesContractFetchStatus.pool_id == pid
+        )
+    )
     db.execute(delete(FuturesPrice).where(FuturesPrice.pool_id == pid))
     delete_futures_prices(db, code=code)
     db.delete(obj)
@@ -226,7 +274,11 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
     else:
         stmt = sqlite_insert(FuturesPrice).values(values)
         stmt = stmt.on_conflict_do_update(
-            index_elements=[FuturesPrice.code, FuturesPrice.trade_date, FuturesPrice.adjust],
+            index_elements=[
+                FuturesPrice.code,
+                FuturesPrice.trade_date,
+                FuturesPrice.adjust,
+            ],
             set_={
                 "pool_id": stmt.excluded.pool_id,
                 "open": stmt.excluded.open,
@@ -256,7 +308,9 @@ def list_futures_prices(
     limit: int = 5000,
 ) -> list[FuturesPrice]:
     adj = normalize_futures_adjust(adjust)
-    stmt = select(FuturesPrice).where(FuturesPrice.code == code, FuturesPrice.adjust == adj)
+    stmt = select(FuturesPrice).where(
+        FuturesPrice.code == code, FuturesPrice.adjust == adj
+    )
     if start_date is not None:
         stmt = stmt.where(FuturesPrice.trade_date >= start_date)
     if end_date is not None:
@@ -284,10 +338,14 @@ def delete_futures_prices(
     return int(getattr(res, "rowcount", 0) or 0)
 
 
-def get_futures_date_range(db: Session, *, code: str, adjust: str = "none") -> tuple[str | None, str | None]:
+def get_futures_date_range(
+    db: Session, *, code: str, adjust: str = "none"
+) -> tuple[str | None, str | None]:
     adj = normalize_futures_adjust(adjust)
     start_d, end_d = db.execute(
-        select(func.min(FuturesPrice.trade_date), func.max(FuturesPrice.trade_date)).where(
+        select(
+            func.min(FuturesPrice.trade_date), func.max(FuturesPrice.trade_date)
+        ).where(
             FuturesPrice.code == code,
             FuturesPrice.adjust == adj,
         )
@@ -297,7 +355,9 @@ def get_futures_date_range(db: Session, *, code: str, adjust: str = "none") -> t
     return (start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d"))
 
 
-def get_futures_last_trade_date(db: Session, *, code: str, adjust: str = "none") -> dt.date | None:
+def get_futures_last_trade_date(
+    db: Session, *, code: str, adjust: str = "none"
+) -> dt.date | None:
     adj = normalize_futures_adjust(adjust)
     end_d = db.execute(
         select(func.max(FuturesPrice.trade_date)).where(
@@ -308,7 +368,9 @@ def get_futures_last_trade_date(db: Session, *, code: str, adjust: str = "none")
     return end_d
 
 
-def update_futures_pool_data_range(db: Session, *, code: str, adjust: str = "none") -> tuple[str | None, str | None]:
+def update_futures_pool_data_range(
+    db: Session, *, code: str, adjust: str = "none"
+) -> tuple[str | None, str | None]:
     obj = get_futures_pool_by_code(db, code)
     if obj is None:
         return (None, None)
@@ -398,7 +460,9 @@ def record_contract_fetch_status(
     db.flush()
 
 
-def delete_contract_fetch_status(db: Session, *, pool_id: int, contract_code: str) -> None:
+def delete_contract_fetch_status(
+    db: Session, *, pool_id: int, contract_code: str
+) -> None:
     """Remove per-contract status when there is no price data to surface (see contract ingestion)."""
     code_u = str(contract_code).strip().upper()
     obj = db.execute(
@@ -413,7 +477,9 @@ def delete_contract_fetch_status(db: Session, *, pool_id: int, contract_code: st
     db.flush()
 
 
-def list_contract_fetch_statuses(db: Session, *, pool_id: int) -> list[FuturesContractFetchStatus]:
+def list_contract_fetch_statuses(
+    db: Session, *, pool_id: int
+) -> list[FuturesContractFetchStatus]:
     return list(
         db.execute(
             select(FuturesContractFetchStatus)

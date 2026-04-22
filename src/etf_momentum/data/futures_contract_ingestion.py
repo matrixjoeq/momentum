@@ -168,7 +168,7 @@ def _official_daily_series(
             d += dt.timedelta(days=1)
             continue
         if not first_http:
-            time.sleep(1.0)
+            time.sleep(0.1)
         first_http = False
         df = _invoke_official_daily(ak, exchange=exchange, date_str=ds)
         if df.empty:
@@ -351,7 +351,7 @@ def ingest_contracts_for_pool(
     ok = 0
     for idx, w in enumerate(planned):
         if idx > 0:
-            time.sleep(1.0)
+            time.sleep(0.1)
         try:
             norm, src = _fetch_contract_series(
                 ak,
