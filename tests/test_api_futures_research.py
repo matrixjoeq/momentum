@@ -72,6 +72,23 @@ def test_futures_research_groups_state_and_correlation(api_client: TestClient) -
     assert "avg_corr" in ps["items"][0]
     assert "avg_abs_corr" in ps["items"][0]
 
+    # Regression: non-all ranges should not become empty when state end is in future.
+    s_future = client.put(
+        "/api/futures/research/state",
+        json={
+            "start_date": "20240101",
+            "end_date": "20991231",
+            "dynamic_universe": True,
+            "quick_range_key": "all",
+        },
+    )
+    assert s_future.status_code == 200
+    c_1m = client.post("/api/futures/research/correlation", json={"range_key": "1m"})
+    assert c_1m.status_code == 200
+    d_1m = c_1m.json()
+    assert d_1m["ok"] is True
+    assert d_1m["meta"]["range_key"] == "1m"
+
 
 def test_futures_research_groups_import_export_overwrite(
     api_client: TestClient,

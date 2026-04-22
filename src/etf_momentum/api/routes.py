@@ -6685,6 +6685,39 @@ def _default_futures_research_dates() -> tuple[str, str]:
     return (str(s.default_futures_start_date), str(s.default_end_date))
 
 
+def _clip_futures_research_window_to_data(
+    db: Session,
+    *,
+    codes: list[str],
+    start_eff: str,
+    end_eff: str,
+) -> tuple[str, str]:
+    """
+    Clip requested research window to available data range for selected symbols.
+    Prevents short quick-ranges (e.g. 1m) from landing in future empty windows.
+    """
+    data_starts: list[str] = []
+    data_ends: list[str] = []
+    for code in codes:
+        s, e = get_futures_date_range(db, code=str(code), adjust="none")
+        if s and e:
+            data_starts.append(str(s))
+            data_ends.append(str(e))
+    if not data_ends:
+        return (start_eff, end_eff)
+
+    eff_start = str(start_eff)
+    eff_end = str(end_eff)
+    max_data_end = max(data_ends)
+    if eff_end > max_data_end:
+        eff_end = max_data_end
+
+    if eff_start > eff_end:
+        min_data_start = min(data_starts) if data_starts else eff_end
+        eff_start = min_data_start if min_data_start <= eff_end else eff_end
+    return (eff_start, eff_end)
+
+
 @router.get("/futures/research/state", response_model=FuturesResearchStateOut)
 def get_futures_research_state_api(
     db: Session = Depends(get_session),
@@ -6858,6 +6891,9 @@ def futures_research_correlation_api(
     base_start, base_end = _default_futures_research_dates()
     start_eff = str(payload.start_date or st.start_date or base_start)
     end_eff = str(payload.end_date or st.end_date or base_end)
+    start_eff, end_eff = _clip_futures_research_window_to_data(
+        db, codes=list(group.codes), start_eff=start_eff, end_eff=end_eff
+    )
     range_key = str(payload.range_key or "all").strip().lower()
     if range_key not in RANGE_KEYS:
         raise HTTPException(
@@ -6907,6 +6943,9 @@ def futures_research_coverage_summary_api(
     base_start, base_end = _default_futures_research_dates()
     start_eff = str(payload.start_date or st.start_date or base_start)
     end_eff = str(payload.end_date or st.end_date or base_end)
+    start_eff, end_eff = _clip_futures_research_window_to_data(
+        db, codes=list(group.codes), start_eff=start_eff, end_eff=end_eff
+    )
     range_key = str(payload.range_key or "all").strip().lower()
     if range_key not in RANGE_KEYS:
         raise HTTPException(
@@ -6955,6 +6994,9 @@ def futures_research_correlation_select_api(
     base_start, base_end = _default_futures_research_dates()
     start_eff = str(payload.start_date or st.start_date or base_start)
     end_eff = str(payload.end_date or st.end_date or base_end)
+    start_eff, end_eff = _clip_futures_research_window_to_data(
+        db, codes=list(group.codes), start_eff=start_eff, end_eff=end_eff
+    )
     range_key = str(payload.range_key or "all").strip().lower()
     if range_key not in RANGE_KEYS:
         raise HTTPException(
@@ -7018,6 +7060,9 @@ def futures_research_trend_backtest_api(
     base_start, base_end = _default_futures_research_dates()
     start_eff = str(payload.start_date or st.start_date or base_start)
     end_eff = str(payload.end_date or st.end_date or base_end)
+    start_eff, end_eff = _clip_futures_research_window_to_data(
+        db, codes=list(group.codes), start_eff=start_eff, end_eff=end_eff
+    )
     range_key = str(payload.range_key or "all").strip().lower()
     if range_key not in RANGE_KEYS:
         raise HTTPException(
