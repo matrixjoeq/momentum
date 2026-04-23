@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from etf_momentum.analysis.futures_trend import (
     _build_cost_profile,
@@ -56,6 +57,57 @@ def test_resolve_order_size_maps_full_position_to_fractional_equity_size() -> No
     assert _resolve_order_size(1.0) < 1.0
     assert _resolve_order_size(1.0) > 0.9
     assert _resolve_order_size(0.25) == 0.25
+
+
+def test_build_cost_profile_tick_multiple_uses_min_price_tick_per_fill() -> None:
+    cp = _build_cost_profile(
+        cost_bps=4.0,
+        fee_side="one_way",
+        slippage_type="tick_multiple",
+        slippage_value=2.0,
+        slippage_side="one_way",
+        price_reference=4000.0,
+        contract_multiplier=10.0,
+        min_price_tick=0.5,
+    )
+    assert cp.slippage_tick_multiple == 2
+    assert cp.tick_value_per_lot == pytest.approx(5.0)
+    # per-fill adverse return ≈ 2 * 0.5 / 4000
+    assert cp.spread_per_fill == pytest.approx(0.00025)
+    assert cp.commission_per_fill == pytest.approx(0.0004)
+
+
+def test_build_cost_profile_tick_multiple_rejects_non_integer_multiple() -> None:
+    with pytest.raises(ValueError, match="integer"):
+        _build_cost_profile(
+            cost_bps=0.0,
+            fee_side="one_way",
+            slippage_type="tick_multiple",
+            slippage_value=1.5,
+            slippage_side="one_way",
+            price_reference=100.0,
+            min_price_tick=1.0,
+        )
+
+
+def test_vectorized_fallback_accepts_cost_profile() -> None:
+    df = _build_monotonic_ohlc()
+    cost = _build_cost_profile(
+        cost_bps=10.0,
+        fee_side="one_way",
+        slippage_type="percent",
+        slippage_value=0.0,
+        slippage_side="one_way",
+        price_reference=float(df["Close"].median()),
+    )
+    ret = _run_vectorized_fallback(
+        df,
+        fast_ma=2,
+        slow_ma=3,
+        exec_price="close",
+        cost=cost,
+    )
+    assert len(ret) == len(df.index)
 
 
 def test_symbol_backtest_finalizes_open_trade_for_stats() -> None:

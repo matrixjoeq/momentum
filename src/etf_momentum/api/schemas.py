@@ -440,6 +440,11 @@ class FuturesTrendBacktestRequest(BaseModel):
         default="ma_cross",
         description="Trend signal family; currently only ma_cross (fast vs slow MA)",
     )
+    trade_direction: str = Field(
+        default="long_only",
+        description="Ma_cross: long_only | short_only | both "
+        "(risk_budget sizing allows long_only only)",
+    )
     ma_type: str = Field(
         default="sma",
         description="For ma_cross: sma|ema|wma (aligned with ETF trend ma_cross)",
@@ -449,17 +454,29 @@ class FuturesTrendBacktestRequest(BaseModel):
     position_size_pct: float = Field(default=1.0, gt=0.0, le=1.0)
     min_points: int = Field(default=120, ge=2, le=100000)
     cost_bps: float = Field(
-        default=5.0,
+        default=4.0,
         ge=0.0,
         le=2000.0,
-        description="Commission bps with fee_side semantics",
+        description="Commission bps; with fee_side=one_way each open/close fill pays full bps (default).",
     )
-    fee_side: str = Field(default="two_way", description="one_way|two_way")
-    slippage_type: str = Field(default="percent", description="percent|price_spread")
+    fee_side: str = Field(
+        default="one_way",
+        description="one_way: bps per fill (open+close each pay cost_bps); "
+        "two_way: cost_bps is round-trip total, halved per fill",
+    )
+    slippage_type: str = Field(
+        default="tick_multiple",
+        description="percent|price_spread|tick_multiple — tick_multiple uses pool min_price_tick",
+    )
     slippage_value: float = Field(
-        default=0.0005, ge=0.0, description="percent ratio or absolute price spread"
+        default=1.0,
+        ge=0.0,
+        description="percent ratio, absolute price spread, or integer tick multiple (tick_multiple)",
     )
-    slippage_side: str = Field(default="two_way", description="one_way|two_way")
+    slippage_side: str = Field(
+        default="one_way",
+        description="one_way|two_way — same semantics as fee_side for spread ratio per fill",
+    )
 
 
 class IngestionBatchOut(BaseModel):

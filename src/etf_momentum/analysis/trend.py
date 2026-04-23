@@ -2091,22 +2091,25 @@ def _apply_atr_stop(
     same_day_stop: bool = False,
 ) -> tuple[pd.Series, dict[str, Any]]:
     """
-    Apply universal ATR stop-loss overlay on top of base strategy position:
-    - static: stop = entry_price - n * ATR(entry), fixed after entry
-    - trailing: compute stop_candidate = close - n * ATR(ref) each in-position day;
-      update stop only when candidate is higher than current stop
-    - tightening: trailing + tighten stop distance by m ATR(ref) for each +m * ATR(ref)
-      rise from entry; minimum distance is floored at m * ATR(ref).
-    where ATR(ref) is chosen by atr_basis:
-    - entry: use ATR at entry for all dynamic updates
-    - latest: use current/latest ATR for dynamic updates
-    Stop trigger rule: by default (same_day_stop=False, ETF), the entry bar does not
-    evaluate the stop; from the following session onward, if today's low <= stop,
-    the stop is triggered intraday and exits on the same day. If same_day_stop=True
-    (e.g. futures T+0), the entry session also evaluates low <= stop.
-    Fill rule:
-    - normal touch: fill at stop price
-    - gap-down open below stop: fill at today's open
+    Apply universal ATR stop-loss overlay on top of base strategy position.
+
+    Long (base_pos > 0): stop below entry; intraday trigger when low <= stop.
+    Short (base_pos < 0): stop above entry; intraday trigger when high >= stop.
+
+    Modes:
+    - static: stop distance fixed from entry (long: entry - n*ATR(entry); short: entry + n*ATR(entry))
+    - trailing: long uses stop_candidate = close - n*ATR(ref), ratcheting stop up only;
+      short uses stop_candidate = close + n*ATR(ref), ratcheting stop down only
+    - tightening: trailing plus tighten distance using favorable move in ATR units from entry
+      (long: rise from entry; short: fall from entry)
+
+    ATR(ref) by atr_basis: entry uses ATR at entry; latest uses current ATR.
+
+    Same-day evaluation: if same_day_stop=False (typical ETF), the entry session does not
+    evaluate the stop; if True (e.g. futures T+0), the entry session does.
+
+    Fill: long — touch at stop; gap-down open at or below stop fills at open.
+    Short — touch at stop; gap-up open at or above stop fills at open.
     """
     mode_v = str(mode or "none").strip().lower()
     atr_basis_v = str(atr_basis or "latest").strip().lower()
@@ -2176,9 +2179,12 @@ def _apply_atr_stop(
         for i in range(len(bp)):
             b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
             d = bp.index[i]
-            base_entry_event = bool((b > 0.0) and (prev_b <= 0.0))
-            base_exit_event = bool((b <= 0.0) and (prev_b > 0.0))
-            if base_entry_event:
+            base_entry_long = bool((b > 0.0) and (prev_b <= 0.0))
+            base_entry_short = bool((b < 0.0) and (prev_b >= 0.0))
+            base_exit_long = bool((b <= 0.0) and (prev_b > 0.0))
+            base_exit_short = bool((b >= 0.0) and (prev_b < 0.0))
+            base_entry_event = bool(base_entry_long or base_entry_short)
+            if base_entry_long or base_entry_short:
                 trace_rows.append(
                     _event_row(
                         idx=d,
@@ -2194,7 +2200,7 @@ def _apply_atr_stop(
                         stop_trigger_source=None,
                         gap_open_triggered=None,
                         decision_pos=b,
-                        in_pos_after=bool(b > 0.0),
+                        in_pos_after=bool(b != 0.0),
                         wait_lock=False,
                         event_type="entry",
                         event_reason="base_entry_signal",
@@ -2202,7 +2208,7 @@ def _apply_atr_stop(
                         stop_triggered=False,
                     )
                 )
-            elif base_exit_event:
+            elif base_exit_long or base_exit_short:
                 trace_rows.append(
                     _event_row(
                         idx=d,
@@ -2218,7 +2224,7 @@ def _apply_atr_stop(
                         stop_trigger_source=None,
                         gap_open_triggered=None,
                         decision_pos=b,
-                        in_pos_after=bool(b > 0.0),
+                        in_pos_after=bool(b != 0.0),
                         wait_lock=False,
                         event_type="exit",
                         event_reason="base_exit_signal",
@@ -2227,6 +2233,9 @@ def _apply_atr_stop(
                     )
                 )
             prev_b = b
+        flat_prev = out_none.shift(1).fillna(0.0)
+        entries = int(((out_none != 0.0) & (flat_prev == 0.0)).sum())
+        exits = int(((out_none == 0.0) & (flat_prev != 0.0)).sum())
         return out_none, {
             "enabled": False,
             "mode": "none",
@@ -2237,18 +2246,14 @@ def _apply_atr_stop(
             "trigger_events": [],
             "first_trigger_date": None,
             "last_trigger_date": None,
-            "entries": int(
-                ((out_none > 0.0) & (out_none.shift(1).fillna(0.0) <= 0.0)).sum()
-            ),
-            "exits": int(
-                ((out_none <= 0.0) & (out_none.shift(1).fillna(0.0) > 0.0)).sum()
-            ),
+            "entries": entries,
+            "exits": exits,
             "trigger_exit_share": 0.0,
             "latest_stop_price": None,
             "latest_stop_date": None,
             "wait_next_entry_lock_active": False,
-            "trigger_rule": "low_le_stop_same_day_exit",
-            "fill_rule": "fill=min(stop_price,open_price) for long",
+            "trigger_rule": "long_low_le_stop_short_high_ge_stop",
+            "fill_rule": "long_gap_down_open_short_gap_up_open",
             "same_day_stop": bool(same_day_stop),
             "trace_last_rows": trace_rows[-80:],
             "trade_records": [],
@@ -2268,14 +2273,16 @@ def _apply_atr_stop(
     )
     cl = close.astype(float)
     lo = low.astype(float)
+    hi = high.astype(float)
 
     out = np.zeros(len(bp), dtype=float)
-    in_pos = False
+    pos_side = 0
     stop_px = float("nan")
     entry_px = float("nan")
     entry_atr = float("nan")
     prev_base = 0.0
-    wait_next_entry_lock = False
+    wait_lock_long = False
+    wait_lock_short = False
     trigger_dates: list[str] = []
     trigger_events: list[dict[str, Any]] = []
     trade_records: list[dict[str, Any]] = []
@@ -2289,41 +2296,312 @@ def _apply_atr_stop(
         o = float(op.iloc[i]) if np.isfinite(float(op.iloc[i])) else float("nan")
         c = float(cl.iloc[i]) if np.isfinite(float(cl.iloc[i])) else float("nan")
         l = float(lo.iloc[i]) if np.isfinite(float(lo.iloc[i])) else float("nan")  # noqa: E741
+        h = float(hi.iloc[i]) if np.isfinite(float(hi.iloc[i])) else float("nan")
         a = float(atr.iloc[i]) if np.isfinite(float(atr.iloc[i])) else float("nan")
-        base_entry_event = bool((b > 0.0) and (prev_base <= 0.0))
+        base_entry_long = bool((b > 0.0) and (prev_base <= 0.0))
+        base_entry_short = bool((b < 0.0) and (prev_base >= 0.0))
+        base_entry_event = bool(base_entry_long or base_entry_short)
 
-        if not in_pos:
-            if b <= 0.0 or (not np.isfinite(c)) or (not np.isfinite(a)) or a <= 0.0:
-                out[i] = 0.0
-                prev_base = b
-                continue
-            if (
-                reentry_v == "wait_next_entry"
-                and wait_next_entry_lock
-                and (not base_entry_event)
-            ):
-                out[i] = 0.0
-                prev_base = b
-                continue
-            in_pos = True
-            wait_next_entry_lock = False
-            entry_px = c
-            entry_atr = a
-            stop_px = entry_px - float(n_mult) * a
-            entry_decision_date = (
-                bp.index[i].date().isoformat()
-                if hasattr(bp.index[i], "date")
-                else str(bp.index[i])
-            )
-            initial_stop_price = (
-                float(stop_px) if np.isfinite(stop_px) else float("nan")
-            )
-            out[i] = b
-            if np.isfinite(stop_px):
-                d = bp.index[i]
-                latest_stop_date = (
-                    d.date().isoformat() if hasattr(d, "date") else str(d)
+        if pos_side == 0:
+            if b > 0.0:
+                if (not np.isfinite(c)) or (not np.isfinite(a)) or a <= 0.0:
+                    out[i] = 0.0
+                    prev_base = b
+                    continue
+                if (
+                    reentry_v == "wait_next_entry"
+                    and wait_lock_long
+                    and (not base_entry_long)
+                ):
+                    out[i] = 0.0
+                    prev_base = b
+                    continue
+                pos_side = 1
+                wait_lock_long = False
+                entry_px = c
+                entry_atr = a
+                stop_px = entry_px - float(n_mult) * a
+                entry_decision_date = (
+                    bp.index[i].date().isoformat()
+                    if hasattr(bp.index[i], "date")
+                    else str(bp.index[i])
                 )
+                initial_stop_price = (
+                    float(stop_px) if np.isfinite(stop_px) else float("nan")
+                )
+                out[i] = b
+                if np.isfinite(stop_px):
+                    d_ent = bp.index[i]
+                    latest_stop_date = (
+                        d_ent.date().isoformat()
+                        if hasattr(d_ent, "date")
+                        else str(d_ent)
+                    )
+                trace_last_rows.append(
+                    _event_row(
+                        idx=bp.index[i],
+                        b=b,
+                        c=c,
+                        o=o,
+                        l=l,
+                        a=a,
+                        stop_before=None,
+                        stop_candidate=(
+                            float(stop_px) if np.isfinite(stop_px) else None
+                        ),
+                        stop_after=(float(stop_px) if np.isfinite(stop_px) else None),
+                        stop_fill_price=None,
+                        stop_trigger_source=None,
+                        gap_open_triggered=None,
+                        decision_pos=float(out[i]),
+                        in_pos_after=True,
+                        wait_lock=bool(wait_lock_long or wait_lock_short),
+                        event_type="entry",
+                        event_reason=(
+                            "base_entry_signal" if base_entry_long else "stop_reentry"
+                        ),
+                        base_entry_event=bool(base_entry_event),
+                        stop_triggered=False,
+                    )
+                )
+                if len(trace_last_rows) > 120:
+                    trace_last_rows = trace_last_rows[-120:]
+                prev_base = b
+                if not same_day_stop:
+                    continue
+            elif b < 0.0:
+                if (not np.isfinite(c)) or (not np.isfinite(a)) or a <= 0.0:
+                    out[i] = 0.0
+                    prev_base = b
+                    continue
+                if (
+                    reentry_v == "wait_next_entry"
+                    and wait_lock_short
+                    and (not base_entry_short)
+                ):
+                    out[i] = 0.0
+                    prev_base = b
+                    continue
+                pos_side = -1
+                wait_lock_short = False
+                entry_px = c
+                entry_atr = a
+                stop_px = entry_px + float(n_mult) * a
+                entry_decision_date = (
+                    bp.index[i].date().isoformat()
+                    if hasattr(bp.index[i], "date")
+                    else str(bp.index[i])
+                )
+                initial_stop_price = (
+                    float(stop_px) if np.isfinite(stop_px) else float("nan")
+                )
+                out[i] = b
+                if np.isfinite(stop_px):
+                    d_ent = bp.index[i]
+                    latest_stop_date = (
+                        d_ent.date().isoformat()
+                        if hasattr(d_ent, "date")
+                        else str(d_ent)
+                    )
+                trace_last_rows.append(
+                    _event_row(
+                        idx=bp.index[i],
+                        b=b,
+                        c=c,
+                        o=o,
+                        l=l,
+                        a=a,
+                        stop_before=None,
+                        stop_candidate=(
+                            float(stop_px) if np.isfinite(stop_px) else None
+                        ),
+                        stop_after=(float(stop_px) if np.isfinite(stop_px) else None),
+                        stop_fill_price=None,
+                        stop_trigger_source=None,
+                        gap_open_triggered=None,
+                        decision_pos=float(out[i]),
+                        in_pos_after=True,
+                        wait_lock=bool(wait_lock_long or wait_lock_short),
+                        event_type="entry",
+                        event_reason=(
+                            "base_entry_signal" if base_entry_short else "stop_reentry"
+                        ),
+                        base_entry_event=bool(base_entry_event),
+                        stop_triggered=False,
+                    )
+                )
+                if len(trace_last_rows) > 120:
+                    trace_last_rows = trace_last_rows[-120:]
+                prev_base = b
+                if not same_day_stop:
+                    continue
+            else:
+                out[i] = 0.0
+                prev_base = b
+                continue
+
+        if pos_side == 1:
+            if b <= 0.0:
+                stop_before = float(stop_px) if np.isfinite(stop_px) else None
+                pos_side = 0
+                out[i] = 0.0
+                stop_px = float("nan")
+                entry_px = float("nan")
+                entry_atr = float("nan")
+                entry_decision_date = None
+                initial_stop_price = float("nan")
+                trace_last_rows.append(
+                    _event_row(
+                        idx=bp.index[i],
+                        b=b,
+                        c=c,
+                        o=o,
+                        l=l,
+                        a=a,
+                        stop_before=stop_before,
+                        stop_candidate=None,
+                        stop_after=None,
+                        stop_fill_price=None,
+                        stop_trigger_source=None,
+                        gap_open_triggered=None,
+                        decision_pos=float(out[i]),
+                        in_pos_after=False,
+                        wait_lock=bool(wait_lock_long or wait_lock_short),
+                        event_type="exit",
+                        event_reason="base_exit_signal",
+                        base_entry_event=bool(base_entry_event),
+                        stop_triggered=False,
+                    )
+                )
+                if len(trace_last_rows) > 120:
+                    trace_last_rows = trace_last_rows[-120:]
+                prev_base = b
+                continue
+
+            stop_before = float(stop_px) if np.isfinite(stop_px) else None
+            if np.isfinite(l) and np.isfinite(stop_px) and (l <= stop_px):
+                pos_side = 0
+                out[i] = 0.0
+                d = bp.index[i]
+                ds = d.date().isoformat() if hasattr(d, "date") else str(d)
+                trigger_dates.append(ds)
+                gap_open_triggered = bool(np.isfinite(o) and (o <= stop_px))
+                fill_price = (
+                    float(o)
+                    if gap_open_triggered and np.isfinite(o)
+                    else float(stop_px)
+                )
+                trigger_source = (
+                    "gap_open_below_stop" if gap_open_triggered else "low_touch_stop"
+                )
+                trigger_events.append(
+                    {
+                        "date": ds,
+                        "stop_price": (
+                            float(stop_px) if np.isfinite(stop_px) else None
+                        ),
+                        "open_price": (float(o) if np.isfinite(o) else None),
+                        "low_price": (float(l) if np.isfinite(l) else None),
+                        "high_price": None,
+                        "fill_price": (
+                            float(fill_price) if np.isfinite(fill_price) else None
+                        ),
+                        "trigger_source": trigger_source,
+                        "gap_open_triggered": bool(gap_open_triggered),
+                    }
+                )
+                trade_records.append(
+                    {
+                        "entry_decision_date": entry_decision_date,
+                        "entry_execution_date": None,
+                        "entry_execution_price": None,
+                        "initial_stop_price": (
+                            float(initial_stop_price)
+                            if np.isfinite(initial_stop_price)
+                            else None
+                        ),
+                        "trigger_stop_price": (
+                            float(stop_px) if np.isfinite(stop_px) else None
+                        ),
+                        "execution_stop_price": (
+                            float(fill_price) if np.isfinite(fill_price) else None
+                        ),
+                        "trigger_date": ds,
+                    }
+                )
+                if reentry_v == "wait_next_entry":
+                    wait_lock_long = True
+                stop_px = float("nan")
+                entry_px = float("nan")
+                entry_atr = float("nan")
+                entry_decision_date = None
+                initial_stop_price = float("nan")
+                trace_last_rows.append(
+                    _event_row(
+                        idx=bp.index[i],
+                        b=b,
+                        c=c,
+                        o=o,
+                        l=l,
+                        a=a,
+                        stop_before=stop_before,
+                        stop_candidate=None,
+                        stop_after=None,
+                        stop_fill_price=(
+                            float(fill_price) if np.isfinite(fill_price) else None
+                        ),
+                        stop_trigger_source=trigger_source,
+                        gap_open_triggered=bool(gap_open_triggered),
+                        decision_pos=float(out[i]),
+                        in_pos_after=False,
+                        wait_lock=bool(wait_lock_long or wait_lock_short),
+                        event_type="exit",
+                        event_reason="atr_stop",
+                        base_entry_event=bool(base_entry_event),
+                        stop_triggered=True,
+                    )
+                )
+                if len(trace_last_rows) > 120:
+                    trace_last_rows = trace_last_rows[-120:]
+                prev_base = b
+                continue
+
+            stop_candidate: float | None = None
+            if (
+                mode_v in {"trailing", "tightening"}
+                and np.isfinite(c)
+                and np.isfinite(a)
+                and a > 0.0
+            ):
+                atr_ref = (
+                    float(entry_atr)
+                    if (
+                        atr_basis_v == "entry"
+                        and np.isfinite(entry_atr)
+                        and float(entry_atr) > 0.0
+                    )
+                    else float(a)
+                )
+                dist_mult = float(n_mult)
+                if mode_v == "tightening":
+                    rise_in_atr = max(0.0, (c - entry_px) / max(atr_ref, 1e-12))
+                    steps = (
+                        int(np.floor(rise_in_atr / float(m_step)))
+                        if float(m_step) > 0
+                        else 0
+                    )
+                    dist_mult = max(
+                        float(m_step), float(n_mult) - steps * float(m_step)
+                    )
+                stop_candidate_v = c - dist_mult * atr_ref
+                stop_candidate = (
+                    float(stop_candidate_v) if np.isfinite(stop_candidate_v) else None
+                )
+                if np.isfinite(stop_candidate_v) and (
+                    (not np.isfinite(stop_px)) or (stop_candidate_v > stop_px)
+                ):
+                    stop_px = stop_candidate_v
+
             trace_last_rows.append(
                 _event_row(
                     idx=bp.index[i],
@@ -2332,33 +2610,37 @@ def _apply_atr_stop(
                     o=o,
                     l=l,
                     a=a,
-                    stop_before=None,
-                    stop_candidate=(float(stop_px) if np.isfinite(stop_px) else None),
+                    stop_before=stop_before,
+                    stop_candidate=stop_candidate,
                     stop_after=(float(stop_px) if np.isfinite(stop_px) else None),
                     stop_fill_price=None,
                     stop_trigger_source=None,
                     gap_open_triggered=None,
-                    decision_pos=float(out[i]),
-                    in_pos_after=bool(in_pos),
-                    wait_lock=bool(wait_next_entry_lock),
-                    event_type="entry",
-                    event_reason=(
-                        "base_entry_signal" if base_entry_event else "stop_reentry"
-                    ),
+                    decision_pos=float(b),
+                    in_pos_after=True,
+                    wait_lock=bool(wait_lock_long or wait_lock_short),
+                    event_type="hold",
+                    event_reason="atr_update",
                     base_entry_event=bool(base_entry_event),
                     stop_triggered=False,
                 )
             )
             if len(trace_last_rows) > 120:
                 trace_last_rows = trace_last_rows[-120:]
-            prev_base = b
-            if not same_day_stop:
-                continue
 
-        # If base strategy already exits, clear stop state directly.
-        if b <= 0.0:
+            out[i] = b
+            if np.isfinite(stop_px):
+                d = bp.index[i]
+                latest_stop_date = (
+                    d.date().isoformat() if hasattr(d, "date") else str(d)
+                )
+            prev_base = b
+            continue
+
+        # pos_side == -1 (short)
+        if b >= 0.0:
             stop_before = float(stop_px) if np.isfinite(stop_px) else None
-            in_pos = False
+            pos_side = 0
             out[i] = 0.0
             stop_px = float("nan")
             entry_px = float("nan")
@@ -2380,8 +2662,8 @@ def _apply_atr_stop(
                     stop_trigger_source=None,
                     gap_open_triggered=None,
                     decision_pos=float(out[i]),
-                    in_pos_after=bool(in_pos),
-                    wait_lock=bool(wait_next_entry_lock),
+                    in_pos_after=False,
+                    wait_lock=bool(wait_lock_long or wait_lock_short),
                     event_type="exit",
                     event_reason="base_exit_signal",
                     base_entry_event=bool(base_entry_event),
@@ -2393,27 +2675,27 @@ def _apply_atr_stop(
             prev_base = b
             continue
 
-        # Stop trigger uses intraday low <= stop (same-day execution).
         stop_before = float(stop_px) if np.isfinite(stop_px) else None
-        if np.isfinite(l) and np.isfinite(stop_px) and (l <= stop_px):
-            in_pos = False
+        if np.isfinite(h) and np.isfinite(stop_px) and (h >= stop_px):
+            pos_side = 0
             out[i] = 0.0
             d = bp.index[i]
             ds = d.date().isoformat() if hasattr(d, "date") else str(d)
             trigger_dates.append(ds)
-            gap_open_triggered = bool(np.isfinite(o) and (o <= stop_px))
+            gap_open_triggered = bool(np.isfinite(o) and (o >= stop_px))
             fill_price = (
                 float(o) if gap_open_triggered and np.isfinite(o) else float(stop_px)
             )
             trigger_source = (
-                "gap_open_below_stop" if gap_open_triggered else "low_touch_stop"
+                "gap_open_above_stop" if gap_open_triggered else "high_touch_stop"
             )
             trigger_events.append(
                 {
                     "date": ds,
                     "stop_price": (float(stop_px) if np.isfinite(stop_px) else None),
                     "open_price": (float(o) if np.isfinite(o) else None),
-                    "low_price": (float(l) if np.isfinite(l) else None),
+                    "low_price": None,
+                    "high_price": (float(h) if np.isfinite(h) else None),
                     "fill_price": (
                         float(fill_price) if np.isfinite(fill_price) else None
                     ),
@@ -2441,7 +2723,7 @@ def _apply_atr_stop(
                 }
             )
             if reentry_v == "wait_next_entry":
-                wait_next_entry_lock = True
+                wait_lock_short = True
             stop_px = float("nan")
             entry_px = float("nan")
             entry_atr = float("nan")
@@ -2464,8 +2746,8 @@ def _apply_atr_stop(
                     stop_trigger_source=trigger_source,
                     gap_open_triggered=bool(gap_open_triggered),
                     decision_pos=float(out[i]),
-                    in_pos_after=bool(in_pos),
-                    wait_lock=bool(wait_next_entry_lock),
+                    in_pos_after=False,
+                    wait_lock=bool(wait_lock_long or wait_lock_short),
                     event_type="exit",
                     event_reason="atr_stop",
                     base_entry_event=bool(base_entry_event),
@@ -2477,7 +2759,7 @@ def _apply_atr_stop(
             prev_base = b
             continue
 
-        stop_candidate: float | None = None
+        stop_candidate = None
         if (
             mode_v in {"trailing", "tightening"}
             and np.isfinite(c)
@@ -2495,19 +2777,19 @@ def _apply_atr_stop(
             )
             dist_mult = float(n_mult)
             if mode_v == "tightening":
-                rise_in_atr = max(0.0, (c - entry_px) / max(atr_ref, 1e-12))
+                fall_in_atr = max(0.0, (entry_px - c) / max(atr_ref, 1e-12))
                 steps = (
-                    int(np.floor(rise_in_atr / float(m_step)))
+                    int(np.floor(fall_in_atr / float(m_step)))
                     if float(m_step) > 0
                     else 0
                 )
                 dist_mult = max(float(m_step), float(n_mult) - steps * float(m_step))
-            stop_candidate_v = c - dist_mult * atr_ref
+            stop_candidate_v = c + dist_mult * atr_ref
             stop_candidate = (
                 float(stop_candidate_v) if np.isfinite(stop_candidate_v) else None
             )
             if np.isfinite(stop_candidate_v) and (
-                (not np.isfinite(stop_px)) or (stop_candidate_v > stop_px)
+                (not np.isfinite(stop_px)) or (stop_candidate_v < stop_px)
             ):
                 stop_px = stop_candidate_v
 
@@ -2526,8 +2808,8 @@ def _apply_atr_stop(
                 stop_trigger_source=None,
                 gap_open_triggered=None,
                 decision_pos=float(b),
-                in_pos_after=bool(in_pos),
-                wait_lock=bool(wait_next_entry_lock),
+                in_pos_after=True,
+                wait_lock=bool(wait_lock_long or wait_lock_short),
                 event_type="hold",
                 event_reason="atr_update",
                 base_entry_event=bool(base_entry_event),
@@ -2544,8 +2826,9 @@ def _apply_atr_stop(
         prev_base = b
 
     out_s = pd.Series(out, index=base_pos.index, dtype=float)
-    entries = int(((out_s > 0.0) & (out_s.shift(1).fillna(0.0) <= 0.0)).sum())
-    exits = int(((out_s <= 0.0) & (out_s.shift(1).fillna(0.0) > 0.0)).sum())
+    flat_prev = out_s.shift(1).fillna(0.0)
+    entries = int(((out_s != 0.0) & (flat_prev == 0.0)).sum())
+    exits = int(((out_s == 0.0) & (flat_prev != 0.0)).sum())
     trigger_count = int(len(trigger_dates))
     stats = {
         "enabled": True,
@@ -2563,14 +2846,14 @@ def _apply_atr_stop(
             float(trigger_count) / float(exits) if exits > 0 else 0.0
         ),
         "latest_stop_price": (
-            float(stop_px) if (in_pos and np.isfinite(stop_px)) else None
+            float(stop_px) if (pos_side != 0 and np.isfinite(stop_px)) else None
         ),
         "latest_stop_date": (
-            latest_stop_date if (in_pos and np.isfinite(stop_px)) else None
+            latest_stop_date if (pos_side != 0 and np.isfinite(stop_px)) else None
         ),
-        "wait_next_entry_lock_active": bool(wait_next_entry_lock),
-        "trigger_rule": "low_le_stop_same_day_exit",
-        "fill_rule": "fill=min(stop_price,open_price) for long",
+        "wait_next_entry_lock_active": bool(wait_lock_long or wait_lock_short),
+        "trigger_rule": "long_low_le_stop_short_high_ge_stop",
+        "fill_rule": "long_gap_down_open_short_gap_up_open",
         "same_day_stop": bool(same_day_stop),
         "trace_last_rows": trace_last_rows[-80:],
         "trade_records": trade_records,
@@ -2633,7 +2916,7 @@ def _apply_intraday_stop_execution_single(
         if d not in w_adj.index:
             continue
         wv = float(w_adj.loc[d]) if np.isfinite(float(w_adj.loc[d])) else 0.0
-        if wv <= 1e-12:
+        if abs(wv) <= 1e-12:
             continue
         fill_raw = e.get("fill_price")
         try:
@@ -2686,7 +2969,7 @@ def _apply_intraday_stop_execution_portfolio(
             if d not in w_adj.index:
                 continue
             wv = float(w_adj.loc[d, c]) if np.isfinite(float(w_adj.loc[d, c])) else 0.0
-            if wv <= 1e-12:
+            if abs(wv) <= 1e-12:
                 continue
             fill_raw = e.get("fill_price")
             try:

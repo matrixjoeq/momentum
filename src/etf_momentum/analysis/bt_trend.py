@@ -6719,6 +6719,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "stop_price",
         "open_price",
         "low_price",
+        "high_price",
         "fill_price",
         "trigger_source",
         "gap_open_triggered",

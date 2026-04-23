@@ -46,13 +46,23 @@ def build_ma_panels(
     fast_ma: int,
     slow_ma: int,
     ma_type: str = "sma",
+    trade_direction: str = "long_only",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (score_df fast-slow, sig_binary_df 0/1 long intent by MA cross)."""
+    """Return (score_df fast-slow, sig_direction_df signed MA regime).
+
+    ``sig_df`` values: **+1** long regime, **-1** short regime, **0** flat (ties).
+    ``trade_direction`` maps regimes to allowed sides:
+
+    - ``long_only``: +1 when fast > slow, else 0
+    - ``short_only``: -1 when fast < slow, else 0
+    - ``both``: sign(fast - slow) as +1 / -1 / 0
+    """
     cols = sorted(exec_by_code.keys())
     score_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
     sig_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
     f, s = int(fast_ma), int(slow_ma)
     mt = str(ma_type or "sma").strip().lower()
+    td = str(trade_direction or "long_only").strip().lower()
     for code in cols:
         df = exec_by_code[str(code)].reindex(common_idx)
         close = (
@@ -63,24 +73,33 @@ def build_ma_panels(
         fast = _moving_average(close, window=f, ma_type=mt)
         slow = _moving_average(close, window=s, ma_type=mt)
         score_df[code] = (fast - slow).astype(float)
-        sig_df[code] = (fast > slow).astype(float)
+        if td == "short_only":
+            sig_df[code] = -(fast < slow).astype(float)
+        elif td == "both":
+            diff = fast.astype(float) - slow.astype(float)
+            sig_df[code] = np.sign(diff).astype(float)
+        else:
+            sig_df[code] = (fast > slow).astype(float)
     return score_df, sig_df
 
 
-def equal_weights_from_signals(sig_binary_df: pd.DataFrame) -> pd.DataFrame:
-    """1/k among symbols with MA long signal that day."""
+def equal_weights_from_signals(sig_direction_df: pd.DataFrame) -> pd.DataFrame:
+    """Equal absolute weight 1/k among symbols with non-zero directional signal."""
     w = pd.DataFrame(
-        0.0, index=sig_binary_df.index, columns=sig_binary_df.columns, dtype=float
+        0.0,
+        index=sig_direction_df.index,
+        columns=sig_direction_df.columns,
+        dtype=float,
     )
-    for d in sig_binary_df.index:
-        row = sig_binary_df.loc[d].astype(float)
-        active = row[row > 0.5].index.tolist()
-        if not active:
+    for d in sig_direction_df.index:
+        row = sig_direction_df.loc[d].astype(float)
+        active_s = row[row.abs() > 0.5]
+        if active_s.empty:
             continue
-        per = 1.0 / float(len(active))
-        for c in active:
+        per = 1.0 / float(len(active_s))
+        for c, v in active_s.items():
             if c in w.columns:
-                w.loc[d, c] = float(per)
+                w.loc[d, c] = float(v) * float(per)
     return w
 
 

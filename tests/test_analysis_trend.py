@@ -229,6 +229,55 @@ def test_atr_stop_intraday_trigger_on_low_and_gap_open_fill() -> None:
     assert float(ev_gap[0].get("fill_price")) == pytest.approx(96.8)
 
 
+def test_atr_stop_short_intraday_trigger_on_high_and_gap_open_fill() -> None:
+    idx = pd.date_range("2024-01-01", periods=4, freq="B")
+    base_pos = pd.Series([-1.0, -1.0, -1.0, -1.0], index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 100.0, 100.0], index=idx, dtype=float)
+    high = pd.Series([106.0, 106.0, 102.5, 106.0], index=idx, dtype=float)
+    low = pd.Series([94.0, 96.0, 96.0, 96.0], index=idx, dtype=float)
+    open_touch = pd.Series([100.0, 98.0, 99.0, 100.0], index=idx, dtype=float)
+    out_touch, stats_touch = _apply_atr_stop(
+        base_pos,
+        open_=open_touch,
+        close=close,
+        high=high,
+        low=low,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+    )
+    assert float(out_touch.iloc[2]) == 0.0
+    ev_touch = list(stats_touch.get("trigger_events") or [])
+    assert ev_touch
+    assert str(ev_touch[0].get("trigger_source")) == "high_touch_stop"
+    assert float(ev_touch[0].get("fill_price")) == pytest.approx(102.2)
+
+    open_gap = pd.Series([100.0, 98.0, 103.0, 100.0], index=idx, dtype=float)
+    low_gap = pd.Series([94.0, 96.0, 95.0, 96.0], index=idx, dtype=float)
+    out_gap, stats_gap = _apply_atr_stop(
+        base_pos,
+        open_=open_gap,
+        close=close,
+        high=high,
+        low=low_gap,
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+    )
+    assert float(out_gap.iloc[2]) == 0.0
+    ev_gap = list(stats_gap.get("trigger_events") or [])
+    assert ev_gap
+    assert str(ev_gap[0].get("trigger_source")) == "gap_open_above_stop"
+    assert bool(ev_gap[0].get("gap_open_triggered")) is True
+    assert float(ev_gap[0].get("fill_price")) == pytest.approx(103.0)
+
+
 def test_static_atr_stop_is_fixed_and_ignores_atr_basis() -> None:
     idx = pd.date_range("2024-01-01", periods=6, freq="B")
     base_pos = pd.Series([1.0] * len(idx), index=idx, dtype=float)

@@ -7232,10 +7232,10 @@ def futures_research_trend_backtest_api(
         position_size_pct=float(payload.position_size_pct),
         min_points=int(payload.min_points),
         cost_bps=float(payload.cost_bps),
-        fee_side=str(payload.fee_side or "two_way").strip().lower(),  # type: ignore[arg-type]
-        slippage_type=str(payload.slippage_type or "percent").strip().lower(),  # type: ignore[arg-type]
+        fee_side=str(payload.fee_side or "one_way").strip().lower(),  # type: ignore[arg-type]
+        slippage_type=str(payload.slippage_type or "tick_multiple").strip().lower(),  # type: ignore[arg-type]
         slippage_value=float(payload.slippage_value),
-        slippage_side=str(payload.slippage_side or "two_way").strip().lower(),  # type: ignore[arg-type]
+        slippage_side=str(payload.slippage_side or "one_way").strip().lower(),  # type: ignore[arg-type]
         backtest_mode=str(payload.backtest_mode or "portfolio").strip().lower(),
         single_code=(
             None
@@ -7272,6 +7272,11 @@ def futures_research_trend_backtest_api(
         atr_stop_window=int(getattr(payload, "atr_stop_window", 14) or 14),
         atr_stop_n=float(getattr(payload, "atr_stop_n", 2.0) or 2.0),
         atr_stop_m=float(getattr(payload, "atr_stop_m", 0.5) or 0.5),
+        trade_direction=str(
+            getattr(payload, "trade_direction", "long_only") or "long_only"
+        )
+        .strip()
+        .lower(),
     )
     out["meta"] = {
         **(out.get("meta") or {}),

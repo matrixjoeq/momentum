@@ -591,6 +591,17 @@
           <label>慢线周期</label>
           <input id="trendSlowMa" type="number" min="3" step="1" value="60" />
         </div>
+        <div>
+          <label
+            title="仅多头：快&gt;慢持多；仅空头：快&lt;慢持空；多空双向：快&gt;慢多、快&lt;慢空。均线交叉策略下与快慢线多空含义一致。"
+            >交易方向</label
+          >
+          <select id="trendTradeDirection">
+            <option value="long_only" selected>仅多头</option>
+            <option value="short_only">仅空头</option>
+            <option value="both">多空双向</option>
+          </select>
+        </div>
         <button id="runTrendBacktest">刷新趋势回测</button>
       </div>
       <div id="trendMeta" class="muted"></div>
@@ -952,6 +963,9 @@
           maType: String($("trendMaType")?.value || "sma"),
           fastMa: String($("trendFastMa")?.value ?? "20"),
           slowMa: String($("trendSlowMa")?.value ?? "60"),
+          tradeDirection: String(
+            $("trendTradeDirection")?.value || "long_only",
+          ),
         };
       }
 
@@ -1038,6 +1052,7 @@
         setNum("trendRbMaxLev", p.rbMaxLev, "2");
         setNum("trendFastMa", p.fastMa, "20");
         setNum("trendSlowMa", p.slowMa, "60");
+        setSelectIfOptionExists("trendTradeDirection", p.tradeDirection);
         const sel = $("trendSingleCode");
         if (sel && sel.options.length) {
           const want = String(p.singleCode || "");
@@ -2849,6 +2864,9 @@
           range_key: corrRangeKey,
           exec_price: String($("trendExecPrice").value || "close"),
           trend_strategy: String($("trendStrategy").value || "ma_cross"),
+          trade_direction: String(
+            $("trendTradeDirection").value || "long_only",
+          ),
           ma_type: String($("trendMaType").value || "sma"),
           fast_ma: fast,
           slow_ma: slow,

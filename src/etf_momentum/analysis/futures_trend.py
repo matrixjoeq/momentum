@@ -19,6 +19,9 @@ When **synthesized continuous** rows exist for a symbol (codes ``{root}88`` /
   (**qfq**, e.g. ``{root}888``) **close**, aligned on trading dates with execution data.
 - **Trade execution & strategy return compounding:** synthetic **no-adjust**
   (**none**, e.g. ``{root}88``) OHLCV passed into ``backtesting.py``.
+- **Costs:** default **4 bps per fill** (``fee_side=one_way``, open and close each pay);
+  default slippage **tick_multiple** with integer multiple **N** vs pool ``min_price_tick``
+  (``tick_value_per_lot = contract_multiplier × min_price_tick`` for reporting).
 
 If ``{root}88`` is missing (no synthesis yet), we fall back to the group’s listed
 contract code (typically main ``*0``) **none** rows only; signals and benchmark then
@@ -38,7 +41,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from ..data.futures_synthesize import _symbol_root_from_main
-from ..db.futures_repo import list_futures_prices
+from ..db.futures_repo import get_futures_pool_by_code, list_futures_prices
 from ..db.futures_research_repo import FuturesGroupData
 from .futures_trend_portfolio_weights import (
     atr_ewm_wilder,
@@ -55,7 +58,7 @@ from .trend import (
 
 ExecPrice = Literal["open", "close"]
 FeeSide = Literal["one_way", "two_way"]
-SlippageType = Literal["percent", "price_spread"]
+SlippageType = Literal["percent", "price_spread", "tick_multiple"]
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,11 @@ class CostProfile:
     slippage_type: SlippageType
     slippage_input: float
     slippage_side: FeeSide
+    contract_multiplier: float | None = None
+    min_price_tick: float | None = None
+    tick_value_per_lot: float | None = None
+    slippage_tick_multiple: int | None = None
+    slippage_price_reference: float | None = None
 
 
 def _parse_yyyymmdd(value: str) -> dt.date:
@@ -88,7 +96,7 @@ def _coerce_trading_index(ix: pd.DatetimeIndex | pd.Index) -> pd.DatetimeIndex:
 def _normalize_per_fill(value: float, side: FeeSide) -> float:
     if side == "one_way":
         return float(value)
-    # two_way means the input is round-trip total, split per fill.
+    # two_way: input is a round-trip total, split equally per fill (open and close).
     return float(value) / 2.0
 
 
@@ -252,27 +260,81 @@ def _build_cost_profile(
     slippage_value: float,
     slippage_side: FeeSide,
     price_reference: float,
+    contract_multiplier: float | None = None,
+    min_price_tick: float | None = None,
 ) -> CostProfile:
     cost_ratio = float(cost_bps) / 10000.0
     commission_per_fill = _normalize_per_fill(cost_ratio, fee_side)
-    if slippage_type == "percent":
+    st = str(slippage_type or "percent").strip().lower()
+    m_tick: int | None = None
+    if st == "percent":
         spread_ratio = float(slippage_value)
-    else:
-        # absolute price spread -> relative spread against price reference
+    elif st == "price_spread":
         spread_ratio = (
             (float(slippage_value) / float(price_reference))
             if price_reference > 0
             else 0.0
         )
+    elif st == "tick_multiple":
+        if min_price_tick is None or (not np.isfinite(float(min_price_tick))):
+            raise ValueError("min_price_tick required for tick_multiple slippage")
+        tick = float(min_price_tick)
+        if tick <= 0.0:
+            raise ValueError("min_price_tick must be positive for tick_multiple")
+        m = int(round(float(slippage_value)))
+        if abs(float(slippage_value) - float(m)) > 1e-6:
+            raise ValueError(
+                "slippage_value must be a non-negative integer for tick_multiple"
+            )
+        m_tick = int(m)
+        if m_tick < 0:
+            raise ValueError("slippage tick multiple must be non-negative")
+        # Adverse one-way return ≈ m * (price tick) / quote; matches cash / notional since
+        # tick notional per lot uses multiplier * tick but (m*tick)/(price) = (m*mult*tick)/(price*mult).
+        spread_ratio = (
+            float(m_tick) * tick / float(price_reference)
+            if price_reference > 0
+            else 0.0
+        )
+    else:
+        spread_ratio = 0.0
     spread_per_fill = _normalize_per_fill(spread_ratio, slippage_side)
+    tick_val: float | None = None
+    if (
+        contract_multiplier is not None
+        and min_price_tick is not None
+        and np.isfinite(float(contract_multiplier))
+        and np.isfinite(float(min_price_tick))
+        and float(contract_multiplier) > 0.0
+        and float(min_price_tick) > 0.0
+    ):
+        tick_val = float(contract_multiplier) * float(min_price_tick)
     return CostProfile(
         commission_per_fill=float(max(0.0, commission_per_fill)),
         spread_per_fill=float(max(0.0, spread_per_fill)),
         commission_input_bps=float(cost_bps),
         fee_side=fee_side,
-        slippage_type=slippage_type,
+        slippage_type=st
+        if st in {"percent", "price_spread", "tick_multiple"}
+        else "percent",
         slippage_input=float(slippage_value),
         slippage_side=slippage_side,
+        contract_multiplier=(
+            float(contract_multiplier)
+            if contract_multiplier is not None
+            and np.isfinite(float(contract_multiplier))
+            else None
+        ),
+        min_price_tick=(
+            float(min_price_tick)
+            if min_price_tick is not None and np.isfinite(float(min_price_tick))
+            else None
+        ),
+        tick_value_per_lot=tick_val,
+        slippage_tick_multiple=m_tick,
+        slippage_price_reference=float(price_reference)
+        if np.isfinite(float(price_reference))
+        else None,
     )
 
 
@@ -298,9 +360,10 @@ def _apply_main_contract_roll_adjustments(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     On days where the stored 88 series marks a **main contract switch**, replace
-    that symbol's strategy daily return with the **execution** close-to-close
-    return on the stitched series and subtract **exit + re-entry** fill costs when
-    the lagged portfolio weight shows an open position.
+    that symbol's strategy daily return with the **execution** close-to-close move
+    on the stitched series (signed by **lagged weight**: long uses ``+r_cc``, short
+    uses ``-r_cc``) and subtract **exit + re-entry** fill costs when the lagged
+    portfolio weight is non-zero (``abs(w)``).
 
     The per-symbol Backtest NAV does not insert an extra trade when the MA signal
     is unchanged across the roll; this adjustment approximates mandatory roll
@@ -344,15 +407,16 @@ def _apply_main_contract_roll_adjustments(
         if col not in w_eff.columns:
             continue
         wcol = w_eff[col].reindex(idx).fillna(0.0).astype(float)
-        apply_m = roll_day.fillna(False) & (wcol > float(min_weight))
+        apply_m = roll_day.fillna(False) & (wcol.abs() > float(min_weight))
         if not bool(apply_m.any()):
             continue
 
         n = int(apply_m.sum())
         meta["per_symbol_roll_events"][str(c)] = n
         meta["total_roll_events"] += n
-        adj = r_cc - rt_fee
-        out.loc[apply_m, code] = adj.loc[apply_m].astype(float).values
+        # Long: ~ +close return; short: ~ −close return on the same stitched bar.
+        adj_series = (np.sign(wcol) * r_cc - rt_fee).astype(float)
+        out.loc[apply_m, code] = adj_series.loc[apply_m].astype(float).values
 
     if meta["total_roll_events"] == 0:
         meta["note"] = (
@@ -368,6 +432,8 @@ def _run_vectorized_fallback(
     slow_ma: int,
     exec_price: ExecPrice,
     ma_type: str = "sma",
+    trade_direction: str = "long_only",
+    cost: CostProfile | None = None,
 ) -> pd.Series:
     if "SignalClose" in df.columns:
         close = df["SignalClose"].astype(float)
@@ -376,18 +442,33 @@ def _run_vectorized_fallback(
     mt = str(ma_type or "sma").strip().lower()
     fast = _moving_average(close, window=int(fast_ma), ma_type=mt)
     slow = _moving_average(close, window=int(slow_ma), ma_type=mt)
-    signal = (fast > slow).astype(float).fillna(0.0)
+    td = str(trade_direction or "long_only").strip().lower()
+    if td == "short_only":
+        pos_raw = -(fast < slow).astype(float)
+    elif td == "both":
+        pos_raw = np.sign((fast - slow).astype(float)).fillna(0.0)
+    else:
+        pos_raw = (fast > slow).astype(float)
+    pos_raw = pos_raw.fillna(0.0)
     # Strict anti-lookahead rule: signal on t executes on t+1.
     # Using close-close/open-open return legs implies first active return is t+2.
     if exec_price == "close":
         px_ret = close.pct_change().fillna(0.0)
-        pos = signal.shift(2).fillna(0.0)
-        return pos * px_ret
-    # open execution approximation in fallback: open-open return with same lag rule.
-    open_px = df["Open"].astype(float)
-    px_ret = open_px.pct_change().fillna(0.0)
-    pos = signal.shift(2).fillna(0.0)
-    return pos * px_ret
+        pos = pos_raw.shift(2).fillna(0.0)
+        gross = pos * px_ret
+    else:
+        open_px = df["Open"].astype(float)
+        px_ret = open_px.pct_change().fillna(0.0)
+        pos = pos_raw.shift(2).fillna(0.0)
+        gross = pos * px_ret
+    if cost is not None:
+        cfill = float(max(0.0, cost.commission_per_fill)) + float(
+            max(0.0, cost.spread_per_fill)
+        )
+        if cfill > 0.0:
+            flip = pos.diff().abs().fillna(0.0)
+            gross = gross - flip * cfill
+    return gross
 
 
 def _run_symbol_backtest(
@@ -399,6 +480,7 @@ def _run_symbol_backtest(
     position_size_pct: float,
     cost: CostProfile,
     ma_type: str = "sma",
+    trade_direction: str = "long_only",
 ) -> tuple[pd.Series, dict]:
     order_size = _resolve_order_size(position_size_pct)
 
@@ -411,6 +493,8 @@ def _run_symbol_backtest(
             slow_ma=slow_ma,
             exec_price=exec_price,
             ma_type=ma_type,
+            trade_direction=trade_direction,
+            cost=cost,
         )
         nav = (1.0 + ret.fillna(0.0)).cumprod()
         return nav, {
@@ -429,6 +513,7 @@ def _run_symbol_backtest(
         slow = 60
         ma_kind = "sma"
         size_pct = 0.999999
+        trade_direction = "long_only"
 
         def init(self) -> None:
             sig = getattr(self.data, "SignalClose", None)
@@ -474,9 +559,29 @@ def _run_symbol_backtest(
             )
             if np.isnan(f) or np.isnan(s):
                 return
+            td = str(self.trade_direction or "long_only").strip().lower()
+            sz = float(self.size_pct)
+            if td == "short_only":
+                if f < s and not self.position:
+                    self.sell(size=sz)
+                elif f > s and self.position.is_short:
+                    self.position.close()
+                return
+            if td == "both":
+                if f > s:
+                    if self.position.is_short:
+                        self.position.close()
+                    elif not self.position:
+                        self.buy(size=sz)
+                elif f < s:
+                    if self.position.is_long:
+                        self.position.close()
+                    elif not self.position:
+                        self.sell(size=sz)
+                return
             if f > s and not self.position:
-                self.buy(size=float(self.size_pct))
-            elif f < s and self.position:
+                self.buy(size=sz)
+            elif f < s and self.position.is_long:
                 self.position.close()
 
     bt = Backtest(
@@ -494,6 +599,7 @@ def _run_symbol_backtest(
         slow=int(slow_ma),
         ma_kind=str(ma_type),
         size_pct=float(order_size),
+        trade_direction=str(trade_direction),
     )
     eq = stats.get("_equity_curve")
     if eq is None or "Equity" not in eq:
@@ -503,6 +609,8 @@ def _run_symbol_backtest(
             slow_ma=slow_ma,
             exec_price=exec_price,
             ma_type=ma_type,
+            trade_direction=trade_direction,
+            cost=cost,
         )
         nav = (1.0 + ret.fillna(0.0)).cumprod()
         return nav, {
@@ -540,11 +648,11 @@ def compute_futures_group_trend_backtest(
     ma_type: str = "sma",
     position_size_pct: float = 1.0,
     min_points: int = 120,
-    cost_bps: float = 5.0,
-    fee_side: FeeSide = "two_way",
-    slippage_type: SlippageType = "percent",
-    slippage_value: float = 0.0005,
-    slippage_side: FeeSide = "two_way",
+    cost_bps: float = 4.0,
+    fee_side: FeeSide = "one_way",
+    slippage_type: SlippageType = "tick_multiple",
+    slippage_value: float = 1.0,
+    slippage_side: FeeSide = "one_way",
     backtest_mode: str = "portfolio",
     single_code: str | None = None,
     position_sizing: str = "equal",
@@ -561,6 +669,7 @@ def compute_futures_group_trend_backtest(
     atr_stop_window: int = 14,
     atr_stop_n: float = 2.0,
     atr_stop_m: float = 0.5,
+    trade_direction: str = "long_only",
 ) -> dict:
     codes = [str(c).strip().upper() for c in group.codes if str(c).strip()]
     if len(codes) == 0:
@@ -579,8 +688,18 @@ def compute_futures_group_trend_backtest(
         return {"ok": False, "error": "invalid_fee_side"}
     if slippage_side not in {"one_way", "two_way"}:
         return {"ok": False, "error": "invalid_slippage_side"}
-    if slippage_type not in {"percent", "price_spread"}:
+    slip_raw = str(slippage_type or "tick_multiple").strip().lower()
+    if slip_raw not in {"percent", "price_spread", "tick_multiple"}:
         return {"ok": False, "error": "invalid_slippage_type"}
+    if slip_raw == "tick_multiple":
+        sv_chk = float(slippage_value)
+        if (not np.isfinite(sv_chk)) or sv_chk < 0:
+            return {"ok": False, "error": "invalid_slippage_tick_multiple"}
+        if abs(sv_chk - round(sv_chk)) > 1e-6:
+            return {
+                "ok": False,
+                "error": "slippage_tick_multiple_must_be_integer",
+            }
     if position_size_pct <= 0 or position_size_pct > 1:
         return {"ok": False, "error": "invalid_position_size_pct"}
 
@@ -590,6 +709,14 @@ def compute_futures_group_trend_backtest(
     ps = str(position_sizing or "equal").strip().lower()
     if bm == "portfolio" and ps not in {"equal", "risk_budget"}:
         return {"ok": False, "error": "invalid_position_sizing"}
+    td_norm = str(trade_direction or "long_only").strip().lower()
+    if td_norm not in {"long_only", "short_only", "both"}:
+        return {"ok": False, "error": "invalid_trade_direction"}
+    if ps == "risk_budget" and td_norm != "long_only":
+        return {
+            "ok": False,
+            "error": "risk_budget_requires_trade_direction_long_only",
+        }
     rb_pol = str(risk_budget_overcap_policy or "scale").strip().lower()
     if rb_pol not in {"scale", "skip_entry", "replace_entry", "leverage_entry"}:
         return {"ok": False, "error": "invalid_risk_budget_overcap_policy"}
@@ -603,6 +730,14 @@ def compute_futures_group_trend_backtest(
     arm_raw = str(atr_stop_reentry_mode or "reenter").strip().lower()
     if arm_raw not in {"reenter", "wait_next_entry"}:
         return {"ok": False, "error": "invalid_atr_stop_reentry_mode"}
+
+    compat_notes: list[str] = []
+    atm_eff: str = atm_raw
+    monthly_eff: bool = bool(monthly_risk_budget_enabled)
+    if td_norm != "long_only":
+        if monthly_eff:
+            compat_notes.append("monthly_risk_budget_disabled_non_long_trade_direction")
+            monthly_eff = False
 
     codes_run = codes
     if bm == "single":
@@ -630,14 +765,36 @@ def compute_futures_group_trend_backtest(
             errors.append(f"{code}:points<{int(min_points)}")
             continue
         price_ref = float(df_exec["Close"].median()) if len(df_exec.index) else 0.0
-        cost = _build_cost_profile(
-            cost_bps=cost_bps,
-            fee_side=fee_side,
-            slippage_type=slippage_type,
-            slippage_value=slippage_value,
-            slippage_side=slippage_side,
-            price_reference=price_ref,
+        pool_row = get_futures_pool_by_code(db, code)
+        cm = (
+            getattr(pool_row, "contract_multiplier", None)
+            if pool_row is not None
+            else None
         )
+        mpt = (
+            getattr(pool_row, "min_price_tick", None) if pool_row is not None else None
+        )
+        cm_f = float(cm) if cm is not None and np.isfinite(float(cm)) else None
+        mpt_f = float(mpt) if mpt is not None and np.isfinite(float(mpt)) else None
+        if slip_raw == "tick_multiple" and (
+            mpt_f is None or (not np.isfinite(float(mpt_f))) or float(mpt_f) <= 0.0
+        ):
+            errors.append(f"{code}:missing_min_price_tick_in_pool")
+            continue
+        try:
+            cost = _build_cost_profile(
+                cost_bps=cost_bps,
+                fee_side=fee_side,
+                slippage_type=slip_raw,  # type: ignore[arg-type]
+                slippage_value=slippage_value,
+                slippage_side=slippage_side,
+                price_reference=price_ref,
+                contract_multiplier=cm_f,
+                min_price_tick=mpt_f,
+            )
+        except ValueError as ex:
+            errors.append(f"{code}:cost_profile:{ex}")
+            continue
         cost_by_symbol[code] = cost
         nav, st = _run_symbol_backtest(
             df_exec,
@@ -647,6 +804,7 @@ def compute_futures_group_trend_backtest(
             position_size_pct=float(position_size_pct),
             cost=cost,
             ma_type=mt_eff,
+            trade_direction=td_norm,
         )
         nav_by_symbol[code] = nav
         exec_by_code[code] = df_exec.copy()
@@ -664,6 +822,10 @@ def compute_futures_group_trend_backtest(
                 "engine": str(st.get("engine", "unknown")),
                 "commission_per_fill": float(cost.commission_per_fill),
                 "spread_per_fill": float(cost.spread_per_fill),
+                "contract_multiplier": cost.contract_multiplier,
+                "min_price_tick": cost.min_price_tick,
+                "tick_value_per_lot": cost.tick_value_per_lot,
+                "slippage_tick_multiple": cost.slippage_tick_multiple,
                 "trend_resolution": trend_detail.get("trend_resolution"),
                 "trend_execution_symbol": trend_detail.get("execution_symbol"),
                 "trend_signal_adjust": trend_detail.get("signal_adjust"),
@@ -719,8 +881,9 @@ def compute_futures_group_trend_backtest(
             fast_ma=int(fast_ma),
             slow_ma=int(slow_ma),
             ma_type=mt_eff,
+            trade_direction=td_norm,
         )
-        if atm_raw != "none":
+        if atm_eff != "none":
             ex = exec_aligned.get(code)
             if ex is not None:
                 out_s, st = _apply_atr_stop(
@@ -729,7 +892,7 @@ def compute_futures_group_trend_backtest(
                     close=ex["Close"].reindex(common_idx).astype(float),
                     high=ex["High"].reindex(common_idx).astype(float),
                     low=ex["Low"].reindex(common_idx).astype(float),
-                    mode=atm_raw,
+                    mode=atm_eff,
                     atr_basis=ab_raw,
                     reentry_mode=arm_raw,
                     atr_window=int(atr_stop_window),
@@ -742,11 +905,11 @@ def compute_futures_group_trend_backtest(
                 atr_stop_by_asset[code] = st
         w_df = equal_weights_from_signals(sig_df)
         portfolio_meta["universal_atr_stop"] = {
-            "applied": atm_raw != "none",
+            "applied": atm_eff != "none",
             "same_day_stop": True,
             "per_symbol_stats_keys": sorted(atr_stop_by_asset.keys()),
         }
-        portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_raw != "none")
+        portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_eff != "none")
 
         w_eff = (
             w_df.reindex(index=ret_mat.index, columns=ret_mat.columns)
@@ -756,7 +919,7 @@ def compute_futures_group_trend_backtest(
             .fillna(0.0)
         )
         atr_override = pd.Series(0.0, index=ret_mat.index, dtype=float)
-        if atm_raw != "none" and atr_stop_by_asset:
+        if atm_eff != "none" and atr_stop_by_asset:
             open_df = pd.DataFrame(
                 {
                     str(code): exec_aligned[code]["Open"].astype(float),
@@ -797,8 +960,9 @@ def compute_futures_group_trend_backtest(
             fast_ma=int(fast_ma),
             slow_ma=int(slow_ma),
             ma_type=mt_eff,
+            trade_direction=td_norm,
         )
-        if atm_raw != "none":
+        if atm_eff != "none":
             sig_adj = sig_df.copy()
             for c in list(sig_df.columns):
                 ex = exec_aligned.get(c)
@@ -814,7 +978,7 @@ def compute_futures_group_trend_backtest(
                     close=cl_,
                     high=hi_,
                     low=lo_,
-                    mode=atm_raw,
+                    mode=atm_eff,
                     atr_basis=ab_raw,
                     reentry_mode=arm_raw,
                     atr_window=int(atr_stop_window),
@@ -830,8 +994,8 @@ def compute_futures_group_trend_backtest(
             w_df = equal_weights_from_signals(sig_df)
             portfolio_meta["position_sizing"] = "equal"
             portfolio_meta["note"] = (
-                "equal weight among MA-long symbols each day; weights lagged one day "
-                "into returns"
+                "equal |weight| among symbols with a non-flat MA regime that day "
+                "(sign follows trade_direction); weights lagged one day into returns"
             )
         else:
             w_df, rb_stats = risk_budget_weights(
@@ -848,13 +1012,13 @@ def compute_futures_group_trend_backtest(
             portfolio_meta["risk_budget"] = rb_stats
 
         portfolio_meta["universal_atr_stop"] = {
-            "applied": atm_raw != "none",
+            "applied": atm_eff != "none",
             "same_day_stop": True,
             "per_symbol_stats_keys": sorted(atr_stop_by_asset.keys()),
         }
-        portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_raw != "none")
+        portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_eff != "none")
 
-        if bm == "portfolio" and bool(monthly_risk_budget_enabled):
+        if bm == "portfolio" and monthly_eff:
             cc = [str(c) for c in ret_mat.columns]
             close_df = pd.DataFrame(
                 {
@@ -876,7 +1040,7 @@ def compute_futures_group_trend_backtest(
                     ex["Close"].astype(float),
                     window=w_atr,
                 )
-            atm = atm_raw
+            atm = atm_eff
             w_df, gate_stats = _apply_monthly_risk_budget_gate(
                 w_df.reindex(index=close_df.index, columns=close_df.columns)
                 .astype(float)
@@ -912,7 +1076,7 @@ def compute_futures_group_trend_backtest(
             .fillna(0.0)
         )
         atr_override = pd.Series(0.0, index=ret_mat.index, dtype=float)
-        if atm_raw != "none" and atr_stop_by_asset:
+        if atm_eff != "none" and atr_stop_by_asset:
             open_df = pd.DataFrame(
                 {
                     str(c): exec_aligned[c]["Open"].astype(float)
@@ -951,6 +1115,10 @@ def compute_futures_group_trend_backtest(
             0.0
         ) + atr_override.reindex(ret_mat.index).fillna(0.0).astype(float)
 
+    portfolio_meta.setdefault("trade_direction", td_norm)
+    if compat_notes:
+        portfolio_meta["trade_direction_compat"] = compat_notes
+
     group_nav = (1.0 + group_ret.fillna(0.0)).cumprod()
 
     bench_close_df = pd.DataFrame(bench_price_by_symbol).sort_index()
@@ -988,9 +1156,22 @@ def compute_futures_group_trend_backtest(
             "position_size_pct": float(position_size_pct),
             "cost_bps": float(cost_bps),
             "fee_side": fee_side,
-            "slippage_type": slippage_type,
+            "fee_side_semantics": (
+                "one_way: cost_bps applies to each fill (open and close each pay full bps); "
+                "two_way: cost_bps is round-trip total split equally per fill"
+            ),
+            "slippage_type": slip_raw,
             "slippage_value": float(slippage_value),
             "slippage_side": slippage_side,
+            "slippage_side_semantics": (
+                "one_way: full spread ratio per fill; "
+                "two_way: round-trip spread total split per fill"
+            ),
+            "tick_slippage_semantics": (
+                "slippage_value is integer N; per-fill adverse return ≈ N * min_price_tick / price "
+                "(min_price_tick from futures_pool; tick cash value per lot = contract_multiplier * "
+                "min_price_tick for reporting)"
+            ),
             "mode": "dynamic_union" if dynamic_universe else "static_intersection",
             "signal_execution_rule": f"signal_t_execute_t_plus_1_{exec_price}",
             "signal_lag_trading_days": 1,
@@ -1015,15 +1196,17 @@ def compute_futures_group_trend_backtest(
             "risk_budget_max_leverage_multiple": float(
                 risk_budget_max_leverage_multiple
             ),
-            "monthly_risk_budget_enabled": bool(monthly_risk_budget_enabled),
-            "monthly_risk_budget_effective": bool(
-                bm == "portfolio" and monthly_risk_budget_enabled
-            ),
+            "monthly_risk_budget_requested": bool(monthly_risk_budget_enabled),
+            "monthly_risk_budget_enabled": bool(monthly_eff),
+            "monthly_risk_budget_effective": bool(bm == "portfolio" and monthly_eff),
             "monthly_risk_budget_pct": float(monthly_risk_budget_pct),
             "monthly_risk_budget_include_new_trade_risk": bool(
                 monthly_risk_budget_include_new_trade_risk
             ),
-            "atr_stop_mode": str(atm_raw),
+            "trade_direction": td_norm,
+            "trade_direction_compat": compat_notes,
+            "atr_stop_mode_requested": str(atm_raw),
+            "atr_stop_mode": str(atm_eff),
             "atr_stop_atr_basis": str(ab_raw),
             "atr_stop_reentry_mode": str(arm_raw),
             "atr_stop_window": int(atr_stop_window),
