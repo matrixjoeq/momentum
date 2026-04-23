@@ -477,6 +477,23 @@ class FuturesTrendBacktestRequest(BaseModel):
         default="one_way",
         description="one_way|two_way — same semantics as fee_side for spread ratio per fill",
     )
+    account_capital_wan: float = Field(
+        default=500.0,
+        gt=0.0,
+        description="Initial account size in 万 RMB (×10000 → CNY for the lot engine)",
+    )
+    backtest_margin_rate_pct: float = Field(
+        default=15.0,
+        gt=0.0,
+        le=100.0,
+        description="Backtest-only margin rate % on settle×multiplier per lot (not pool min margin)",
+    )
+    reserve_margin_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        lt=1.0,
+        description="Min equity fraction kept unencumbered; max margin use = equity×(1−reserve)",
+    )
 
 
 class IngestionBatchOut(BaseModel):

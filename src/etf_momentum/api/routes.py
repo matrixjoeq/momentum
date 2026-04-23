@@ -7277,6 +7277,11 @@ def futures_research_trend_backtest_api(
         )
         .strip()
         .lower(),
+        account_capital_wan=float(getattr(payload, "account_capital_wan", 500.0)),
+        backtest_margin_rate_pct=float(
+            getattr(payload, "backtest_margin_rate_pct", 15.0)
+        ),
+        reserve_margin_ratio=float(getattr(payload, "reserve_margin_ratio", 0.5)),
     )
     out["meta"] = {
         **(out.get("meta") or {}),

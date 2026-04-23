@@ -4,13 +4,11 @@ Futures trend backtest (research) — price series policy
 When **synthesized continuous** rows exist for a symbol (codes ``{root}88`` /
 ``{root}888`` / ``{root}889`` under the same ``Date`` calendar), we apply:
 
-- **Main-contract roll (88 execution series):** if ``dominant_contract_suffix`` is
-  present on stored prices, **portfolio / single aggregate returns** treat each
-  roll day as closing the old lot and reopening the same strategy weight on the
-  new dominant: we use the **88** close-to-close return on that day and deduct a
-  **round-turn** commission+slippage bundle (exit + re-entry) whenever the prior
-  lagged weight shows an open position. This avoids implicitly “rolling” for free
-  when the MA engine does not fire a trade on the roll day.
+- **Main-contract roll (88 execution series):** group **strategy** P&L is driven by the
+  **discrete-lot account** simulator: MTM on stitched continuous prices plus
+  **round-turn** commission+slippage on ``dominant_contract_suffix`` changes (same
+  integer lots on exit and re-entry). Legacy per-bar return-matrix roll adjustments are
+  not applied once the lot engine is enabled.
 
 - **Benchmark (buy-and-hold comparison):** synthetic **backward-adjusted**
   (**hfq**, e.g. ``{root}889``) OHLC; compare NAV uses the same open/close basis
@@ -43,6 +41,7 @@ from sqlalchemy.orm import Session
 from ..data.futures_synthesize import _symbol_root_from_main
 from ..db.futures_repo import get_futures_pool_by_code, list_futures_prices
 from ..db.futures_research_repo import FuturesGroupData
+from .futures_lot_account import simulate_discrete_lot_portfolio
 from .futures_trend_portfolio_weights import (
     atr_ewm_wilder,
     build_ma_panels,
@@ -143,6 +142,13 @@ def _load_futures_ohlcv(
             "High": [float(r.high) if r.high is not None else np.nan for r in rows],
             "Low": [float(r.low) if r.low is not None else np.nan for r in rows],
             "Close": [float(r.close) if r.close is not None else np.nan for r in rows],
+            "Settle": [
+                float(r.settle)
+                if getattr(r, "settle", None) is not None
+                and np.isfinite(float(r.settle))
+                else np.nan
+                for r in rows
+            ],
             "Volume": [float(r.volume) if r.volume is not None else 0.0 for r in rows],
         },
         index=pd.to_datetime([r.trade_date for r in rows]),
@@ -192,6 +198,11 @@ def _align_futures_trend_inputs(
         if df_main.empty:
             return None
         out = df_main.copy()
+        if "Settle" not in out.columns:
+            out["Settle"] = out["Close"].astype(float)
+        else:
+            sc = pd.to_numeric(out["Settle"], errors="coerce")
+            out["Settle"] = sc.fillna(out["Close"].astype(float)).astype(float)
         out["SignalClose"] = out["Close"].astype(float)
         detail: dict[str, Any] = {
             "trend_resolution": "main_contract_none",
@@ -670,6 +681,9 @@ def compute_futures_group_trend_backtest(
     atr_stop_n: float = 2.0,
     atr_stop_m: float = 0.5,
     trade_direction: str = "long_only",
+    account_capital_wan: float = 500.0,
+    backtest_margin_rate_pct: float = 15.0,
+    reserve_margin_ratio: float = 0.5,
 ) -> dict:
     codes = [str(c).strip().upper() for c in group.codes if str(c).strip()]
     if len(codes) == 0:
@@ -702,6 +716,14 @@ def compute_futures_group_trend_backtest(
             }
     if position_size_pct <= 0 or position_size_pct > 1:
         return {"ok": False, "error": "invalid_position_size_pct"}
+    if float(account_capital_wan) <= 0:
+        return {"ok": False, "error": "invalid_account_capital_wan"}
+    bmr = float(backtest_margin_rate_pct)
+    if (not np.isfinite(bmr)) or bmr <= 0.0 or bmr > 100.0:
+        return {"ok": False, "error": "invalid_backtest_margin_rate_pct"}
+    rmr = float(reserve_margin_ratio)
+    if (not np.isfinite(rmr)) or rmr < 0.0 or rmr >= 1.0:
+        return {"ok": False, "error": "invalid_reserve_margin_ratio"}
 
     bm = str(backtest_mode or "portfolio").strip().lower()
     if bm not in {"portfolio", "single"}:
@@ -748,10 +770,10 @@ def compute_futures_group_trend_backtest(
             return {"ok": False, "error": "single_code_not_in_group"}
         codes_run = [sc]
 
-    nav_by_symbol: dict[str, pd.Series] = {}
     bench_price_by_symbol: dict[str, pd.Series] = {}
     exec_by_code: dict[str, pd.DataFrame] = {}
     cost_by_symbol: dict[str, CostProfile] = {}
+    mults_by_symbol: dict[str, float] = {}
     symbol_stats: list[dict] = []
     errors: list[str] = []
 
@@ -776,6 +798,9 @@ def compute_futures_group_trend_backtest(
         )
         cm_f = float(cm) if cm is not None and np.isfinite(float(cm)) else None
         mpt_f = float(mpt) if mpt is not None and np.isfinite(float(mpt)) else None
+        if cm_f is None or (not np.isfinite(float(cm_f))) or float(cm_f) <= 0.0:
+            errors.append(f"{code}:missing_contract_multiplier")
+            continue
         if slip_raw == "tick_multiple" and (
             mpt_f is None or (not np.isfinite(float(mpt_f))) or float(mpt_f) <= 0.0
         ):
@@ -796,17 +821,7 @@ def compute_futures_group_trend_backtest(
             errors.append(f"{code}:cost_profile:{ex}")
             continue
         cost_by_symbol[code] = cost
-        nav, st = _run_symbol_backtest(
-            df_exec,
-            fast_ma=int(fast_ma),
-            slow_ma=int(slow_ma),
-            exec_price=exec_price,
-            position_size_pct=float(position_size_pct),
-            cost=cost,
-            ma_type=mt_eff,
-            trade_direction=td_norm,
-        )
-        nav_by_symbol[code] = nav
+        mults_by_symbol[code] = float(cm_f)
         exec_by_code[code] = df_exec.copy()
         bench_col = "Open" if exec_price == "open" else "Close"
         bench_price_by_symbol[code] = df_bench[bench_col].astype(float)
@@ -816,10 +831,10 @@ def compute_futures_group_trend_backtest(
                 "points": int(len(df_exec.index)),
                 "start": str(df_exec.index.min().date()),
                 "end": str(df_exec.index.max().date()),
-                "ret_total": float(st.get("ret_total", 0.0)),
-                "trades": int(st.get("trades", 0)),
-                "win_rate": float(st.get("win_rate", 0.0)),
-                "engine": str(st.get("engine", "unknown")),
+                "ret_total": None,
+                "trades": None,
+                "win_rate": None,
+                "engine": "lot_account",
                 "commission_per_fill": float(cost.commission_per_fill),
                 "spread_per_fill": float(cost.spread_per_fill),
                 "contract_multiplier": cost.contract_multiplier,
@@ -833,7 +848,7 @@ def compute_futures_group_trend_backtest(
             }
         )
 
-    if not nav_by_symbol:
+    if not exec_by_code:
         return {
             "ok": False,
             "error": "insufficient_data",
@@ -846,10 +861,12 @@ def compute_futures_group_trend_backtest(
         }
 
     common_idx: pd.DatetimeIndex | None = None
-    for nav in nav_by_symbol.values():
-        ix = _coerce_trading_index(nav.index)
+    for code in codes_run:
+        if code not in exec_by_code:
+            continue
+        ix = _coerce_trading_index(exec_by_code[code].index)
         common_idx = ix if common_idx is None else common_idx.intersection(ix)
-    if common_idx is None or len(common_idx) < 2:
+    if common_idx is None or len(common_idx) < int(min_points):
         return {
             "ok": False,
             "error": "insufficient_overlap",
@@ -861,12 +878,6 @@ def compute_futures_group_trend_backtest(
             },
         }
     common_idx = common_idx.sort_values()
-
-    ret_parts: dict[str, pd.Series] = {}
-    for c, nav in nav_by_symbol.items():
-        nv = nav.reindex(common_idx).ffill()
-        ret_parts[str(c)] = nv.pct_change().fillna(0.0)
-    ret_mat = pd.DataFrame(ret_parts).sort_index().astype(float)
 
     exec_aligned = {c: exec_by_code[c].reindex(common_idx) for c in exec_by_code}
 
@@ -911,14 +922,15 @@ def compute_futures_group_trend_backtest(
         }
         portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_eff != "none")
 
+        _cols = list(w_df.columns)
         w_eff = (
-            w_df.reindex(index=ret_mat.index, columns=ret_mat.columns)
+            w_df.reindex(index=common_idx, columns=_cols)
             .fillna(0.0)
             .astype(float)
             .shift(1)
             .fillna(0.0)
         )
-        atr_override = pd.Series(0.0, index=ret_mat.index, dtype=float)
+        atr_override = pd.Series(0.0, index=common_idx, dtype=float)
         if atm_eff != "none" and atr_stop_by_asset:
             open_df = pd.DataFrame(
                 {
@@ -943,16 +955,6 @@ def compute_futures_group_trend_backtest(
                     index=w_eff.index, columns=w_eff.columns
                 ).astype(float),
             )
-        ret_mat, roll_adj_meta = _apply_main_contract_roll_adjustments(
-            ret_mat,
-            w_eff=w_eff,
-            exec_aligned=exec_aligned,
-            cost_by_symbol=cost_by_symbol,
-        )
-        portfolio_meta["main_contract_roll"] = roll_adj_meta
-        group_ret = (w_eff * ret_mat.astype(float)).sum(axis=1).astype(float).fillna(
-            0.0
-        ) + atr_override.reindex(ret_mat.index).fillna(0.0).astype(float)
     else:
         score_df, sig_df = build_ma_panels(
             exec_aligned,
@@ -1019,7 +1021,7 @@ def compute_futures_group_trend_backtest(
         portfolio_meta["universal_atr_stop_applied_in_engine"] = bool(atm_eff != "none")
 
         if bm == "portfolio" and monthly_eff:
-            cc = [str(c) for c in ret_mat.columns]
+            cc = [str(c) for c in w_df.columns]
             close_df = pd.DataFrame(
                 {
                     c: exec_aligned[c]["Close"].astype(float)
@@ -1068,19 +1070,20 @@ def compute_futures_group_trend_backtest(
                 "fallback_position_risk": 0.01,
             }
 
+        _cols_pf = list(w_df.columns)
         w_eff = (
-            w_df.reindex(index=ret_mat.index, columns=ret_mat.columns)
+            w_df.reindex(index=common_idx, columns=_cols_pf)
             .fillna(0.0)
             .astype(float)
             .shift(1)
             .fillna(0.0)
         )
-        atr_override = pd.Series(0.0, index=ret_mat.index, dtype=float)
+        atr_override = pd.Series(0.0, index=common_idx, dtype=float)
         if atm_eff != "none" and atr_stop_by_asset:
             open_df = pd.DataFrame(
                 {
                     str(c): exec_aligned[c]["Open"].astype(float)
-                    for c in ret_mat.columns
+                    for c in _cols_pf
                     if c in exec_aligned
                 },
                 index=common_idx,
@@ -1088,7 +1091,7 @@ def compute_futures_group_trend_backtest(
             close_df_exec = pd.DataFrame(
                 {
                     str(c): exec_aligned[c]["Close"].astype(float)
-                    for c in ret_mat.columns
+                    for c in _cols_pf
                     if c in exec_aligned
                 },
                 index=common_idx,
@@ -1104,16 +1107,35 @@ def compute_futures_group_trend_backtest(
                     index=w_eff.index, columns=w_eff.columns
                 ).astype(float),
             )
-        ret_mat, roll_adj_meta = _apply_main_contract_roll_adjustments(
-            ret_mat,
-            w_eff=w_eff,
-            exec_aligned=exec_aligned,
-            cost_by_symbol=cost_by_symbol,
-        )
-        portfolio_meta["main_contract_roll"] = roll_adj_meta
-        group_ret = (w_eff * ret_mat.astype(float)).sum(axis=1).astype(float).fillna(
-            0.0
-        ) + atr_override.reindex(ret_mat.index).fillna(0.0).astype(float)
+
+    codes_sorted = sorted(exec_by_code.keys())
+    ps_sim = ps if bm == "portfolio" else "equal"
+    equity_ser, lot_meta = simulate_discrete_lot_portfolio(
+        common_idx=common_idx,
+        exec_by_code=exec_aligned,
+        w_eff=w_eff,
+        cost_by_symbol=cost_by_symbol,
+        mults=mults_by_symbol,
+        margin_rate_frac=float(backtest_margin_rate_pct) / 100.0,
+        reserve_ratio=float(reserve_margin_ratio),
+        initial_equity_cny=float(account_capital_wan)
+        * 10000.0
+        * float(position_size_pct),
+        exec_price=str(exec_price),
+        position_sizing=str(ps_sim).strip().lower(),
+        codes_sorted=codes_sorted,
+    )
+    group_ret = equity_ser.pct_change().fillna(0.0).astype(float)
+    atr_adj = atr_override.reindex(group_ret.index).fillna(0.0).astype(float)
+    group_ret = (group_ret + atr_adj).astype(float)
+    portfolio_meta["lot_account"] = lot_meta
+    portfolio_meta["main_contract_roll"] = {
+        "mode": "embedded_in_lot_engine",
+        "notes": (
+            "Roll fees on dominant_contract_suffix changes and MTM on stitched "
+            "continuous prices; legacy ret_mat roll adjustment not applied."
+        ),
+    }
 
     portfolio_meta.setdefault("trade_direction", td_norm)
     if compat_notes:
@@ -1212,7 +1234,10 @@ def compute_futures_group_trend_backtest(
             "atr_stop_window": int(atr_stop_window),
             "atr_stop_n": float(atr_stop_n),
             "atr_stop_m": float(atr_stop_m),
-            "effective_symbols": int(len(nav_by_symbol)),
+            "effective_symbols": int(len(exec_by_code)),
+            "account_capital_wan": float(account_capital_wan),
+            "backtest_margin_rate_pct": float(backtest_margin_rate_pct),
+            "reserve_margin_ratio": float(reserve_margin_ratio),
             "skipped": errors,
         },
         "series": {

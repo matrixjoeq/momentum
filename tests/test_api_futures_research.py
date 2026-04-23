@@ -9,8 +9,26 @@ def test_futures_research_groups_state_and_correlation(api_client: TestClient) -
     client = api_client
 
     # Prepare pool and prices
-    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
-    post_json_ok(client, "/api/futures", {"code": "IF0", "name": "股指主连"})
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "IF0",
+            "name": "股指主连",
+            "contract_multiplier": 300.0,
+            "min_price_tick": 0.2,
+        },
+    )
     post_json_ok(client, "/api/futures/RB0/fetch", {})
     post_json_ok(client, "/api/futures/IF0/fetch", {})
 
@@ -94,8 +112,26 @@ def test_futures_research_groups_import_export_overwrite(
     api_client: TestClient,
 ) -> None:
     client = api_client
-    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
-    post_json_ok(client, "/api/futures", {"code": "IF0", "name": "股指主连"})
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "IF0",
+            "name": "股指主连",
+            "contract_multiplier": 300.0,
+            "min_price_tick": 0.2,
+        },
+    )
 
     post_json_ok(
         client,
@@ -134,8 +170,26 @@ def test_futures_research_groups_import_export_overwrite(
 
 def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     client = api_client
-    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
-    post_json_ok(client, "/api/futures", {"code": "IF0", "name": "股指主连"})
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "IF0",
+            "name": "股指主连",
+            "contract_multiplier": 300.0,
+            "min_price_tick": 0.2,
+        },
+    )
     post_json_ok(client, "/api/futures/RB0/fetch", {})
     post_json_ok(client, "/api/futures/IF0/fetch", {})
     post_json_ok(
@@ -277,7 +331,16 @@ def test_futures_trend_backtest_rejects_invalid_position_sizing(
     api_client: TestClient,
 ) -> None:
     client = api_client
-    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
     post_json_ok(client, "/api/futures/RB0/fetch", {})
     post_json_ok(
         client,
@@ -305,7 +368,16 @@ def test_futures_trend_backtest_rejects_invalid_semantics(
     api_client: TestClient,
 ) -> None:
     client = api_client
-    post_json_ok(client, "/api/futures", {"code": "RB0", "name": "螺纹钢主连"})
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
     post_json_ok(client, "/api/futures/RB0/fetch", {})
     post_json_ok(
         client,
