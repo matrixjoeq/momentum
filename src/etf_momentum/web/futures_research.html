@@ -3,6 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script
+      defer
+      src="https://cdn.plot.ly/plotly-cartesian-2.30.0.min.js"
+    ></script>
     <title>期货研究</title>
     <script>
       (function () {
@@ -129,6 +133,20 @@
         font-size: 13px;
         font-weight: 700;
       }
+      .panel.two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 16px;
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .panel.two {
+          grid-template-columns: 1fr;
+        }
+      }
+      #ftTrendDailyRetQuantiles {
+        min-height: 168px;
+      }
     </style>
   </head>
   <body>
@@ -233,6 +251,54 @@
       <h3>当前分组可交易覆盖摘要</h3>
       <div id="covMeta" class="muted"></div>
       <div id="covTableWrap"></div>
+    </div>
+
+    <div class="panel" id="symbolOhlcPanel">
+      <h3>标的行情统计（K 线）</h3>
+      <p class="muted" style="margin: 8px 0 12px; max-width: 920px">
+        从<strong>当前分组</strong>中选标的；日期可与「全局研究范围」一致，也可<strong>只填开始或只填结束</strong>，甚至<strong>暂空</strong>（后端按库内该序列实际起止再与你填写的范围求<strong>交集</strong>后绘图）。<strong>无复权</strong>与趋势回测一致：优先<strong>合成连续
+        88</strong>（库内有则始终用），否则回退主连/池代码；交割月合约（如 RB2505）直连该合约。若交集为空或无 OHLC，请检查区间与抓取/合成。
+      </p>
+      <div class="row" style="flex-wrap: wrap; align-items: flex-end">
+        <div>
+          <label>标的</label>
+          <select id="symbolOhlcCode" style="min-width: 180px"></select>
+        </div>
+        <div>
+          <label>复权类型</label>
+          <select id="symbolOhlcAdjust" style="min-width: 200px">
+            <option value="none" selected>无复权（none）</option>
+            <option value="qfq">前复权（qfq，合成连续 888）</option>
+            <option value="hfq">后复权（hfq，合成连续 889）</option>
+          </select>
+        </div>
+        <button id="symbolOhlcLoad" type="button">绘制 K 线</button>
+      </div>
+      <div id="symbolOhlcMeta" class="muted" style="margin-top: 8px"></div>
+      <details id="symbolOhlcDebugWrap" style="margin-top: 8px">
+        <summary style="cursor: pointer; font-weight: 600">
+          K 线调试追踪（点击展开）
+        </summary>
+        <pre
+          id="symbolOhlcDebug"
+          style="
+            white-space: pre-wrap;
+            font-size: 11px;
+            line-height: 1.45;
+            max-height: 280px;
+            overflow: auto;
+            background: rgba(128, 128, 128, 0.09);
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+          "
+        ></pre>
+      </details>
+      <div
+        id="symbolOhlcChart"
+        style="width: 100%; height: 560px; margin-top: 10px"
+      ></div>
     </div>
 
     <div class="panel" id="trendParamsPanel">
@@ -531,6 +597,76 @@
       <div id="trendMeta" class="muted"></div>
       <div id="trendRuleBadge"></div>
       <div id="trendSummaryWrap"></div>
+      <div id="futuresTrendChartsPanel" style="display: none; margin-top: 10px">
+        <div
+          class="panel two"
+          style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+        >
+          <div>
+            <h3 style="margin: 0">净值曲线（趋势 vs 基准）</h3>
+            <div
+              id="ftTrendChart"
+              style="width: 100%; height: 520px; margin-top: 8px"
+            ></div>
+            <h3 style="margin-top: 12px">回撤对比（趋势 vs 基准）</h3>
+            <div id="ftTrendDDCompare" style="width: 100%; height: 260px"></div>
+          </div>
+          <div>
+            <h3 style="margin: 0">超额净值（趋势 / 基准）</h3>
+            <div
+              id="ftTrendExcessChart"
+              style="width: 100%; height: 520px; margin-top: 8px"
+            ></div>
+            <h3 style="margin-top: 12px">40日收益差（趋势 - 基准）</h3>
+            <div
+              id="ftTrend40dExcessChart"
+              style="width: 100%; height: 260px"
+            ></div>
+          </div>
+        </div>
+        <div
+          class="panel two"
+          style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+        >
+          <div>
+            <h3>趋势策略滚动收益&amp;回撤（6个月/1年/2年/3年）</h3>
+            <div id="ftTrendRollingCombo" style="width: 100%; height: 520px"></div>
+          </div>
+          <div>
+            <h3>超额滚动收益&amp;回撤（6个月/1年/2年/3年）</h3>
+            <div
+              id="ftTrendExcessRollingCombo"
+              style="width: 100%; height: 520px"
+            ></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top: 10px">
+          <h3>日度收益率分布统计</h3>
+          <div class="row no-print" style="margin-top: 8px; align-items: end">
+            <div>
+              <label>分布口径</label>
+              <select id="ftTrendDailyRetMode">
+                <option value="simple" selected>普通收益率</option>
+                <option value="log">对数收益率</option>
+              </select>
+            </div>
+          </div>
+          <div
+            class="panel two"
+            style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+          >
+            <div>
+              <div
+                id="ftTrendDailyRetHist"
+                style="width: 100%; height: 360px"
+              ></div>
+            </div>
+            <div>
+              <table id="ftTrendDailyRetQuantiles" class="corr"></table>
+            </div>
+          </div>
+        </div>
+      </div>
       <div id="trendSeriesWrap"></div>
     </div>
 
@@ -561,11 +697,19 @@
         });
       })();
 
-      const api = (path, opts) =>
-        fetch(`/api${path}`, {
-          headers: { "Content-Type": "application/json" },
-          ...opts,
-        });
+      const api = (path, opts) => {
+        const o = { method: "GET", ...opts };
+        const method = String(o.method || "GET").toUpperCase();
+        const baseH = { ...(o.headers && typeof o.headers === "object" ? o.headers : {}) };
+        if (
+          method !== "GET" &&
+          !baseH["Content-Type"] &&
+          !baseH["content-type"]
+        ) {
+          baseH["Content-Type"] = "application/json";
+        }
+        return fetch(`/api${path}`, { ...o, headers: baseH });
+      };
       const $ = (id) => document.getElementById(id);
       const setMsg = (t) => {
         $("msg").textContent = t || "";
@@ -804,6 +948,881 @@
         );
       }
 
+
+      function fmtPct(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return "-";
+        return `${(v * 100).toFixed(2)}%`;
+      }
+
+      function fmtNum(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return "-";
+        return String(v.toFixed(4));
+      }
+
+      function _std(vals) {
+        const arr = vals.filter((x) => Number.isFinite(x));
+        if (arr.length < 2) return NaN;
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+        const v =
+          arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (arr.length - 1);
+        return Math.sqrt(v);
+      }
+
+      function _skewness(vals) {
+        const arr = vals.filter((x) => Number.isFinite(x));
+        const n = arr.length;
+        if (n < 3) return NaN;
+        const mean = arr.reduce((a, b) => a + b, 0) / n;
+        let m2 = 0;
+        let m3 = 0;
+        for (const x of arr) {
+          const d = x - mean;
+          m2 += d * d;
+          m3 += d * d * d;
+        }
+        m2 /= n;
+        m3 /= n;
+        if (!Number.isFinite(m2) || m2 <= 0) return NaN;
+        return m3 / Math.pow(m2, 1.5);
+      }
+
+      function _kurtosisExcess(vals) {
+        const arr = vals.filter((x) => Number.isFinite(x));
+        const n = arr.length;
+        if (n < 4) return NaN;
+        const mean = arr.reduce((a, b) => a + b, 0) / n;
+        let m2 = 0;
+        let m4 = 0;
+        for (const x of arr) {
+          const d = x - mean;
+          const d2 = d * d;
+          m2 += d2;
+          m4 += d2 * d2;
+        }
+        m2 /= n;
+        m4 /= n;
+        if (!Number.isFinite(m2) || m2 <= 0) return NaN;
+        return m4 / (m2 * m2) - 3.0;
+      }
+
+      function _percentile(vals, p) {
+        const arr = vals
+          .filter((x) => Number.isFinite(x))
+          .sort((a, b) => a - b);
+        if (arr.length === 0) return NaN;
+        const pos = (Math.min(Math.max(p, 0), 100) / 100) * (arr.length - 1);
+        const lo = Math.floor(pos);
+        const hi = Math.ceil(pos);
+        if (lo === hi) return arr[lo];
+        return arr[lo] + (arr[hi] - arr[lo]) * (pos - lo);
+      }
+
+      function _dailyReturnsFromNav(nav, dates) {
+        const outSimple = [];
+        const outLog = [];
+        let currentSimple = NaN;
+        let currentLog = NaN;
+        let currentDate = "";
+        if (!Array.isArray(nav) || nav.length < 2) {
+          return {
+            simple: outSimple,
+            log: outLog,
+            currentSimple,
+            currentLog,
+            currentDate,
+          };
+        }
+        for (let i = 1; i < nav.length; i++) {
+          const a = Number(nav[i - 1]);
+          const b = Number(nav[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0)
+            continue;
+          const r = b / a - 1.0;
+          const lr = Math.log(b / a);
+          if (!Number.isFinite(r) || !Number.isFinite(lr)) continue;
+          outSimple.push(r);
+          outLog.push(lr);
+          currentSimple = r;
+          currentLog = lr;
+          if (Array.isArray(dates) && dates[i]) currentDate = String(dates[i]);
+        }
+        return {
+          simple: outSimple,
+          log: outLog,
+          currentSimple,
+          currentLog,
+          currentDate,
+        };
+      }
+
+      function _renderFuturesDailyReturnDist(histId, tableId, payload, title, mode) {
+        const histEl = $(histId);
+        const tblEl = $(tableId);
+        if (!histEl || !tblEl) return;
+        const m = String(mode || "simple").toLowerCase();
+        const label = m === "log" ? "对数收益率(log return)" : "普通收益率";
+        const xsRaw =
+          payload && Array.isArray(payload[m === "log" ? "log" : "simple"])
+            ? payload[m === "log" ? "log" : "simple"]
+            : [];
+        const xs = xsRaw.filter((x) => Number.isFinite(Number(x))).map(Number);
+        const cur = Number(
+          payload && (m === "log" ? payload.currentLog : payload.currentSimple),
+        );
+        const curDate = String((payload && payload.currentDate) || "");
+        if (xs.length < 2) {
+          histEl.innerHTML = "<div class='muted'>样本不足</div>";
+          tblEl.innerHTML = "";
+          return;
+        }
+        Plotly.newPlot(
+          histId,
+          [
+            {
+              x: xs,
+              type: "histogram",
+              nbinsx: 60,
+              marker: { color: "#4c78a8" },
+              hovertemplate: "收益=%{x:.2%}<br>频数=%{y}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 40 },
+            title: { text: `${title}（${label}）`, font: { size: 14 } },
+            xaxis: { title: label, tickformat: ".2%" },
+            yaxis: { title: "频数" },
+            shapes: Number.isFinite(cur)
+              ? [
+                  {
+                    type: "line",
+                    xref: "x",
+                    yref: "paper",
+                    x0: cur,
+                    x1: cur,
+                    y0: 0,
+                    y1: 1,
+                    line: {
+                      color: "rgba(214,39,40,0.95)",
+                      width: 2.4,
+                      dash: "solid",
+                    },
+                  },
+                ]
+              : [],
+            annotations: Number.isFinite(cur)
+              ? [
+                  {
+                    xref: "paper",
+                    yref: "paper",
+                    x: 0.01,
+                    y: 0.98,
+                    showarrow: false,
+                    text: `当前值${curDate ? `（${esc(curDate)}）` : ""}：${fmtPct(cur)}`,
+                    font: { size: 11, color: "#666" },
+                  },
+                ]
+              : [],
+          },
+          { responsive: true, displayModeBar: false },
+        );
+        const q = (p) => _percentile(xs, p);
+        const s = {
+          count: xs.length,
+          mean: xs.reduce((a, b) => a + b, 0) / xs.length,
+          std: _std(xs),
+          skew: _skewness(xs),
+          kurt_excess: _kurtosisExcess(xs),
+          q01: q(1),
+          q05: q(5),
+          q10: q(10),
+          q25: q(25),
+          q50: q(50),
+          q75: q(75),
+          q90: q(90),
+          q95: q(95),
+          q99: q(99),
+        };
+        const curTxt = Number.isFinite(cur) ? fmtPct(cur) : "-";
+        tblEl.innerHTML =
+          `<tr><th>统计</th><th>值</th></tr>` +
+          `<tr><td>样本数</td><td>${s.count}</td></tr>` +
+          `<tr><td>均值</td><td>${fmtPct(s.mean)}</td></tr>` +
+          `<tr><td>标准差</td><td>${fmtPct(s.std)}</td></tr>` +
+          `<tr><td>偏度</td><td>${fmtNum(s.skew)}</td></tr>` +
+          `<tr><td>峰度(超额)</td><td>${fmtNum(s.kurt_excess)}</td></tr>` +
+          `<tr><td>1%</td><td>${fmtPct(s.q01)}</td></tr>` +
+          `<tr><td>5%</td><td>${fmtPct(s.q05)}</td></tr>` +
+          `<tr><td>10%</td><td>${fmtPct(s.q10)}</td></tr>` +
+          `<tr><td>25%</td><td>${fmtPct(s.q25)}</td></tr>` +
+          `<tr><td>50%</td><td>${fmtPct(s.q50)}</td></tr>` +
+          `<tr><td>75%</td><td>${fmtPct(s.q75)}</td></tr>` +
+          `<tr><td>90%</td><td>${fmtPct(s.q90)}</td></tr>` +
+          `<tr><td>95%</td><td>${fmtPct(s.q95)}</td></tr>` +
+          `<tr><td>99%</td><td>${fmtPct(s.q99)}</td></tr>` +
+          `<tr><td>当前值${curDate ? `（${esc(curDate)}）` : ""}</td><td>${curTxt}</td></tr>`;
+      }
+
+      function whenPlotlyReady(fn) {
+        if (window.Plotly) {
+          fn();
+          return;
+        }
+        let n = 0;
+        const t = setInterval(() => {
+          n += 1;
+          if (window.Plotly) {
+            clearInterval(t);
+            fn();
+          } else if (n > 400) {
+            clearInterval(t);
+            fn();
+          }
+        }, 25);
+      }
+
+      function alignFuturesTrendNavRows(strat, bench) {
+        const mb = new Map(
+          (bench || []).map((r) => [String(r.date), Number(r.value)]),
+        );
+        const dates = [];
+        const stratNav = [];
+        const benchNav = [];
+        for (const row of strat || []) {
+          const d = String(row.date);
+          if (!mb.has(d)) continue;
+          const sv = Number(row.value);
+          const bv = Number(mb.get(d));
+          if (!Number.isFinite(sv) || !Number.isFinite(bv)) continue;
+          dates.push(d);
+          stratNav.push(sv);
+          benchNav.push(bv);
+        }
+        return { dates, stratNav, benchNav };
+      }
+
+      function renderFuturesTrendDailyReturnDist() {
+        const d = window.__futuresTrendDist;
+        const modeSel = $("ftTrendDailyRetMode");
+        if (!d || !Array.isArray(d.stratNav) || d.stratNav.length < 2) return;
+        const payload = _dailyReturnsFromNav(d.stratNav, d.dates);
+        const mode = modeSel ? String(modeSel.value || "simple") : "simple";
+        _renderFuturesDailyReturnDist(
+          "ftTrendDailyRetHist",
+          "ftTrendDailyRetQuantiles",
+          payload,
+          "期货趋势策略",
+          mode,
+        );
+      }
+
+      function clearFuturesTrendCharts() {
+        const panel = $("futuresTrendChartsPanel");
+        if (panel) panel.style.display = "none";
+        window.__futuresTrendDist = null;
+        window.__lastFuturesTrendAligned = null;
+        if (!window.Plotly) return;
+        const ids = [
+          "ftTrendChart",
+          "ftTrendDDCompare",
+          "ftTrendExcessChart",
+          "ftTrend40dExcessChart",
+          "ftTrendRollingCombo",
+          "ftTrendExcessRollingCombo",
+          "ftTrendDailyRetHist",
+        ];
+        for (const id of ids) {
+          const gd = $(id);
+          if (gd) Plotly.purge(gd);
+        }
+        const q = $("ftTrendDailyRetQuantiles");
+        if (q) q.innerHTML = "";
+      }
+
+      function runFuturesTrendCharts(aligned) {
+        window.__lastFuturesTrendAligned = aligned;
+        window.__futuresTrendDist = {
+          stratNav: aligned.stratNav,
+          dates: aligned.dates,
+        };
+        const panel = $("futuresTrendChartsPanel");
+        if (panel) panel.style.display = "block";
+        whenPlotlyReady(() => {
+          try {
+            plotFuturesTrendAlignedCharts(aligned);
+          } catch (e) {
+            console.warn(e);
+          }
+          try {
+            renderFuturesTrendDailyReturnDist();
+          } catch (e) {
+            console.warn(e);
+          }
+        });
+      }
+
+
+      function plotFuturesTrendAlignedCharts(payload) {
+        const dates = Array.isArray(payload && payload.dates)
+          ? payload.dates
+          : [];
+        const stratNav = Array.isArray(payload && payload.stratNav)
+          ? payload.stratNav
+          : [];
+        const benchNav = Array.isArray(payload && payload.benchNav)
+          ? payload.benchNav
+          : [];
+        const rsiWins = [14];
+        const _rsiWilder = (arr, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(arr.length).fill(null);
+          if (arr.length < w + 1) return out;
+          let avgGain = null;
+          let avgLoss = null;
+          for (let i = 1; i < arr.length; i++) {
+            const prev = Number(arr[i - 1]);
+            const cur = Number(arr[i]);
+            if (
+              !Number.isFinite(prev) ||
+              !Number.isFinite(cur) ||
+              prev <= 0 ||
+              cur <= 0
+            )
+              continue;
+            const chg = cur - prev;
+            const gain = Math.max(0, chg);
+            const loss = Math.max(0, -chg);
+            if (i <= w) {
+              if (avgGain == null) {
+                avgGain = 0.0;
+                avgLoss = 0.0;
+              }
+              avgGain += gain;
+              avgLoss += loss;
+              if (i === w) {
+                avgGain = avgGain / w;
+                avgLoss = avgLoss / w;
+              }
+            } else {
+              avgGain = (avgGain * (w - 1) + gain) / w;
+              avgLoss = (avgLoss * (w - 1) + loss) / w;
+            }
+            if (i >= w && avgGain != null && avgLoss != null) {
+              if (avgLoss === 0 && avgGain === 0) out[i] = 50.0;
+              else if (avgLoss === 0) out[i] = 100.0;
+              else if (avgGain === 0) out[i] = 0.0;
+              else {
+                const rs = avgGain / avgLoss;
+                out[i] = 100.0 - 100.0 / (1.0 + rs);
+              }
+            }
+          }
+          return out;
+        };
+        const _drawdownFromNav = (nav) => {
+          let peak = -Infinity;
+          const out = [];
+          for (const v of nav) {
+            const x = Number(v);
+            if (!Number.isFinite(x) || x <= 0) {
+              out.push(null);
+              continue;
+            }
+            peak = Math.max(peak, x);
+            out.push(peak > 0 ? x / peak - 1.0 : null);
+          }
+          return out;
+        };
+        const _rollingReturn = (nav, window) => {
+          const w = Math.max(1, Number(window || 1));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w; i < nav.length; i++) {
+            const a = Number(nav[i - w]);
+            const b = Number(nav[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
+            out[i] = b / a - 1.0;
+          }
+          return out;
+        };
+        const _rollingDrawdown = (nav, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const out = new Array(nav.length).fill(null);
+          for (let i = w - 1; i < nav.length; i++) {
+            const start = i - w + 1;
+            let peak = -Infinity;
+            let ok = true;
+            for (let j = start; j <= i; j++) {
+              const x = Number(nav[j]);
+              if (!Number.isFinite(x) || x <= 0) {
+                ok = false;
+                break;
+              }
+              peak = Math.max(peak, x);
+            }
+            const cur = Number(nav[i]);
+            if (!ok || !Number.isFinite(cur) || peak <= 0) {
+              out[i] = null;
+              continue;
+            }
+            out[i] = cur / peak - 1.0;
+          }
+          return out;
+        };
+        const _rollingMeanStd = (arr, window) => {
+          const w = Math.max(2, Number(window || 2));
+          const mean = new Array(arr.length).fill(null);
+          const std = new Array(arr.length).fill(null);
+          let sum = 0.0;
+          let sumsq = 0.0;
+          let cnt = 0;
+          const q = [];
+          for (let i = 0; i < arr.length; i++) {
+            const x = Number(arr[i]);
+            q.push(x);
+            if (Number.isFinite(x)) {
+              sum += x;
+              sumsq += x * x;
+              cnt += 1;
+            }
+            if (q.length > w) {
+              const y = Number(q.shift());
+              if (Number.isFinite(y)) {
+                sum -= y;
+                sumsq -= y * y;
+                cnt -= 1;
+              }
+            }
+            if (q.length === w && cnt === w) {
+              const m = sum / w;
+              const v = Math.max(0.0, sumsq / w - m * m);
+              mean[i] = m;
+              std[i] = Math.sqrt(v);
+            }
+          }
+          return { mean, std };
+        };
+        const _rollingMean = (arr, window) => _rollingMeanStd(arr, window).mean;
+        const excessNav = stratNav.map((x, i) => {
+          const a = Number(x);
+          const b = Number(benchNav[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0)
+            return null;
+          return a / b;
+        });
+        const navTraces = [
+          {
+            x: dates,
+            y: stratNav,
+            mode: "lines",
+            name: "STRAT",
+            hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
+          },
+          {
+            x: dates,
+            y: benchNav,
+            mode: "lines",
+            name: "BENCH",
+            hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
+          },
+        ];
+        for (const w of rsiWins) {
+          navTraces.push({
+            x: dates,
+            y: _rsiWilder(stratNav, w),
+            mode: "lines",
+            name: `RSI${w}`,
+            yaxis: "y2",
+            line: { width: 1.1 },
+            hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>",
+          });
+        }
+        Plotly.newPlot(
+          "ftTrendChart",
+          navTraces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: {
+              type: "log",
+              tick0: 0,
+              dtick: Math.log10(2.0),
+              tickformat: ".0f",
+              gridcolor: "#eee",
+              domain: [0.32, 1.0],
+            },
+            yaxis2: {
+              title: "RSI",
+              range: [0, 100],
+              showgrid: false,
+              zeroline: false,
+              domain: [0.0, 0.25],
+            },
+            shapes: [
+              {
+                type: "line",
+                xref: "paper",
+                x0: 0,
+                x1: 1,
+                yref: "y2",
+                y0: 30,
+                y1: 30,
+                line: { color: "#999", width: 1, dash: "dot" },
+              },
+              {
+                type: "line",
+                xref: "paper",
+                x0: 0,
+                x1: 1,
+                yref: "y2",
+                y0: 70,
+                y1: 70,
+                line: { color: "#999", width: 1, dash: "dot" },
+              },
+            ],
+          },
+          { responsive: true },
+        );
+        Plotly.newPlot(
+          "ftTrendDDCompare",
+          [
+            {
+              x: dates,
+              y: _drawdownFromNav(stratNav),
+              mode: "lines",
+              name: "STRAT DD",
+              hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>",
+            },
+            {
+              x: dates,
+              y: _drawdownFromNav(benchNav),
+              mode: "lines",
+              name: "BENCH DD",
+              hovertemplate: "%{x}<br>%{y:.2%}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: {
+              tickformat: ".0%",
+              rangemode: "tozero",
+              gridcolor: "#eee",
+            },
+          },
+          { responsive: true },
+        );
+        const _bbTracesForExcess = (arr, win, opt = {}) => {
+          const isDefault = !!opt.isDefault;
+          const color = String(opt.color || "rgba(31,119,180,0.25)");
+          const ms = _rollingMeanStd(arr, win);
+          const ma = ms.mean;
+          const sd = ms.std;
+          const upper = ma.map((m, i) =>
+            m == null || sd[i] == null ? null : m + 2.0 * sd[i],
+          );
+          const lower = ma.map((m, i) =>
+            m == null || sd[i] == null ? null : m - 2.0 * sd[i],
+          );
+          const vis = isDefault ? true : "legendonly";
+          return [
+            {
+              x: dates,
+              y: lower,
+              mode: "lines",
+              name: `BB Lower(${win})`,
+              line: { color, width: 1 },
+              hoverinfo: "skip",
+              visible: vis,
+            },
+            {
+              x: dates,
+              y: upper,
+              mode: "lines",
+              name: `BB Upper(${win})`,
+              line: { color, width: 1 },
+              fill: "tonexty",
+              fillcolor: color.replace("0.25", "0.10"),
+              hoverinfo: "skip",
+              visible: vis,
+            },
+            {
+              x: dates,
+              y: ma,
+              mode: "lines",
+              name: `MA${win}`,
+              line: { color: color.replace("0.25", "0.85"), width: 1.5 },
+              hovertemplate: `%{x}<br>MA${win}=%{y:.4f}<extra></extra>`,
+              visible: vis,
+            },
+          ];
+        };
+        const exTraces = [
+          {
+            x: dates,
+            y: excessNav,
+            mode: "lines",
+            name: "EXCESS",
+            hovertemplate: "%{x}<br>%{y:.4f}<extra></extra>",
+          },
+          ..._bbTracesForExcess(excessNav, 60, {
+            isDefault: false,
+            color: "rgba(148,163,184,0.25)",
+          }),
+          ..._bbTracesForExcess(excessNav, 120, {
+            isDefault: false,
+            color: "rgba(34,197,94,0.25)",
+          }),
+          ..._bbTracesForExcess(excessNav, 242, {
+            isDefault: true,
+            color: "rgba(31,119,180,0.25)",
+          }),
+        ];
+        for (const w of rsiWins) {
+          exTraces.push({
+            x: dates,
+            y: _rsiWilder(excessNav, w),
+            mode: "lines",
+            name: `RSI${w}`,
+            yaxis: "y2",
+            line: { width: 1.1 },
+            hovertemplate: "%{x}<br>%{y:.1f}<extra></extra>",
+          });
+        }
+        Plotly.newPlot(
+          "ftTrendExcessChart",
+          exTraces,
+          {
+            margin: { t: 20 },
+            legend: { orientation: "h" },
+            yaxis: {
+              type: "log",
+              tick0: 0,
+              dtick: Math.log10(2.0),
+              tickformat: ".0f",
+              gridcolor: "#eee",
+              domain: [0.32, 1.0],
+            },
+            yaxis2: {
+              title: "RSI",
+              range: [0, 100],
+              showgrid: false,
+              zeroline: false,
+              domain: [0.0, 0.25],
+            },
+            shapes: [
+              {
+                type: "line",
+                xref: "paper",
+                x0: 0,
+                x1: 1,
+                yref: "y2",
+                y0: 30,
+                y1: 30,
+                line: { color: "#999", width: 1, dash: "dot" },
+              },
+              {
+                type: "line",
+                xref: "paper",
+                x0: 0,
+                x1: 1,
+                yref: "y2",
+                y0: 70,
+                y1: 70,
+                line: { color: "#999", width: 1, dash: "dot" },
+              },
+            ],
+          },
+          { responsive: true },
+        );
+        const rr40 = _rollingReturn(stratNav, 40);
+        const br40 = _rollingReturn(benchNav, 40);
+        const diff40 = rr40.map((x, i) => {
+          const a = Number(x);
+          const b = Number(br40[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+          return a - b;
+        });
+        const diff40Ma242 = _rollingMean(diff40, 242);
+        Plotly.newPlot(
+          "ftTrend40dExcessChart",
+          [
+            {
+              x: dates,
+              y: diff40,
+              mode: "lines",
+              name: "40D Δ",
+              line: { color: "rgba(214,39,40,0.85)", width: 1.5 },
+              hovertemplate: "%{x}<br>Δ=%{y:.2%}<extra></extra>",
+            },
+            {
+              x: dates,
+              y: diff40Ma242,
+              mode: "lines",
+              name: "MA242(Δ)",
+              line: { color: "rgba(214,39,40,0.45)", width: 1.2, dash: "dot" },
+              hovertemplate: "%{x}<br>MA242(Δ)=%{y:.2%}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 10, b: 30 },
+            legend: { orientation: "h" },
+            yaxis: {
+              tickformat: ".0%",
+              zeroline: true,
+              zerolinecolor: "#bbb",
+              gridcolor: "#eee",
+            },
+          },
+          { responsive: true },
+        );
+        const w6m = 126,
+          w1 = 252,
+          w2 = 252 * 2,
+          w3 = 252 * 3;
+        const _plotRollingCombo = (divId, nav, titlePrefix) => {
+          const r6m = _rollingReturn(nav, w6m),
+            r1 = _rollingReturn(nav, w1),
+            r2 = _rollingReturn(nav, w2),
+            r3 = _rollingReturn(nav, w3);
+          const d6m = _rollingDrawdown(nav, w6m),
+            d1 = _rollingDrawdown(nav, w1),
+            d2 = _rollingDrawdown(nav, w2),
+            d3 = _rollingDrawdown(nav, w3);
+          const c6m = "rgba(214,39,40,0.90)";
+          const c1 = "rgba(31,119,180,0.90)";
+          const c2 = "rgba(44,160,44,0.90)";
+          const c3 = "rgba(255,127,14,0.90)";
+          const ddMin = (() => {
+            let m = 0.0;
+            for (const arr of [d6m, d1, d2, d3]) {
+              for (const v of arr) {
+                const x = Number(v);
+                if (!Number.isFinite(x)) continue;
+                if (x < m) m = x;
+              }
+            }
+            return Math.min(-0.01, m - 0.02);
+          })();
+          Plotly.newPlot(
+            divId,
+            [
+              {
+                x: dates,
+                y: r6m,
+                mode: "lines",
+                name: `${titlePrefix} R(6M)`,
+                xaxis: "x2",
+                yaxis: "y",
+                line: { color: c6m, width: 1.4 },
+                hovertemplate: "%{x}<br>R6M=%{y:.1%}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: r1,
+                mode: "lines",
+                name: `${titlePrefix} R(1Y)`,
+                xaxis: "x2",
+                yaxis: "y",
+                line: { color: c1, width: 1.4 },
+                hovertemplate: "%{x}<br>R1Y=%{y:.1%}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: r2,
+                mode: "lines",
+                name: `${titlePrefix} R(2Y)`,
+                xaxis: "x2",
+                yaxis: "y",
+                line: { color: c2, width: 1.4 },
+                hovertemplate: "%{x}<br>R2Y=%{y:.1%}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: r3,
+                mode: "lines",
+                name: `${titlePrefix} R(3Y)`,
+                xaxis: "x2",
+                yaxis: "y",
+                line: { color: c3, width: 1.4 },
+                hovertemplate: "%{x}<br>R3Y=%{y:.1%}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: d6m,
+                mode: "lines",
+                name: `${titlePrefix} DD(6M)`,
+                xaxis: "x",
+                yaxis: "y2",
+                line: { color: c6m, width: 1.2, dash: "dot" },
+                hovertemplate: "%{x}<br>DD6M=%{y:.1%}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: d1,
+                mode: "lines",
+                name: `${titlePrefix} DD(1Y)`,
+                xaxis: "x",
+                yaxis: "y2",
+                line: { color: c1, width: 1.2, dash: "dot" },
+                hovertemplate: "%{x}<br>DD1Y=%{y:.1%}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: d2,
+                mode: "lines",
+                name: `${titlePrefix} DD(2Y)`,
+                xaxis: "x",
+                yaxis: "y2",
+                line: { color: c2, width: 1.2, dash: "dot" },
+                hovertemplate: "%{x}<br>DD2Y=%{y:.1%}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: d3,
+                mode: "lines",
+                name: `${titlePrefix} DD(3Y)`,
+                xaxis: "x",
+                yaxis: "y2",
+                line: { color: c3, width: 1.2, dash: "dot" },
+                hovertemplate: "%{x}<br>DD3Y=%{y:.1%}<extra></extra>",
+              },
+            ],
+            {
+              margin: { t: 10, b: 30 },
+              legend: { orientation: "h" },
+              xaxis: { domain: [0, 1], anchor: "y2" },
+              xaxis2: {
+                domain: [0, 1],
+                anchor: "y",
+                matches: "x",
+                showticklabels: false,
+              },
+              yaxis: {
+                title: "Rolling Return",
+                tickformat: ".0%",
+                domain: [0.55, 1.0],
+                zeroline: true,
+                zerolinecolor: "#bbb",
+                gridcolor: "#eee",
+              },
+              yaxis2: {
+                title: "Rolling Drawdown",
+                tickformat: ".0%",
+                domain: [0.0, 0.45],
+                range: [ddMin, 0],
+                zeroline: true,
+                zerolinecolor: "#bbb",
+                gridcolor: "#eee",
+              },
+            },
+            { responsive: true },
+          );
+        };
+        _plotRollingCombo("ftTrendRollingCombo", stratNav, "STRAT");
+        _plotRollingCombo("ftTrendExcessRollingCombo", excessNav, "EX");
+      }
+
       function selectedCodesFromPool() {
         const out = [];
         for (const el of document.querySelectorAll(
@@ -883,6 +1902,7 @@
         groups = await resp.json();
         renderGroupSelect();
         refreshTrendSingleOptions();
+        refreshSymbolOhlcOptions();
         loadTrendParams();
         syncTrendSizingVisibility();
       }
@@ -915,6 +1935,286 @@
               `<option value="${esc(String(c))}">${esc(String(c))}</option>`,
           )
           .join("");
+      }
+
+      function refreshSymbolOhlcOptions() {
+        const g = getActiveGroup();
+        const codes = g && Array.isArray(g.codes) ? g.codes : [];
+        const sel = $("symbolOhlcCode");
+        if (!sel) return;
+        const prev = String(sel.value || "");
+        sel.innerHTML = codes
+          .map(
+            (c) =>
+              `<option value="${esc(String(c))}">${esc(String(c))}</option>`,
+          )
+          .join("");
+        if (prev && codes.includes(prev)) sel.value = prev;
+        else if (codes.length) sel.selectedIndex = 0;
+        const m = $("symbolOhlcMeta");
+        if (m && !codes.length)
+          m.textContent = "当前分组无标的，请先在分组中维护代码。";
+      }
+
+      function parseFlexibleYmd(el) {
+        const raw = String(el && el.value ? el.value : "").trim();
+        if (!raw) return null;
+        const d = raw.replace(/\D/g, "");
+        if (d.length >= 8) return d.slice(0, 8);
+        const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return m[1] + m[2] + m[3];
+        return null;
+      }
+
+      /** 开始/结束可只填一端；均可缺省（由后端按标的实际区间取全集再与请求相交） */
+      function parseOhlcGlobalRange() {
+        return {
+          start: parseFlexibleYmd($("start")),
+          end: parseFlexibleYmd($("end")),
+        };
+      }
+
+      function futuresPriceSourceLabel(src) {
+        const m = {
+          synthetic_88: "合成连续88",
+          fallback_main: "无88·已回退主连/池代码",
+          delivery_contract: "交割合约",
+          as_requested: "按所选代码",
+        };
+        return m[String(src || "")] || String(src || "");
+      }
+
+      let _symbolOhlcDbgSeq = 0;
+      function symbolOhlcDbg(line, detail) {
+        _symbolOhlcDbgSeq += 1;
+        const el = $("symbolOhlcDebug");
+        const ts = new Date().toISOString().slice(11, 23);
+        let extra = "";
+        if (detail !== undefined) {
+          try {
+            extra =
+              " " +
+              (typeof detail === "object"
+                ? JSON.stringify(detail)
+                : String(detail));
+          } catch (_) {
+            extra = " [unserializable]";
+          }
+        }
+        const msg = `${_symbolOhlcDbgSeq}. [${ts}] ${line}${extra}`;
+        try {
+          console.warn("[futures K线]", msg);
+        } catch (_) {}
+        if (el) {
+          el.textContent += `${msg}\n`;
+          try {
+            const dw = $("symbolOhlcDebugWrap");
+            if (dw) dw.open = true;
+          } catch (_) {}
+        }
+      }
+
+      function symbolOhlcDbgReset() {
+        _symbolOhlcDbgSeq = 0;
+        const el = $("symbolOhlcDebug");
+        if (el) el.textContent = "";
+      }
+
+      async function loadSymbolOhlcChart() {
+        symbolOhlcDbgReset();
+        symbolOhlcDbg("loadSymbolOhlcChart() 开始", {
+          href: String(location.href || ""),
+          plotly: !!window.Plotly,
+        });
+        const chartEl = $("symbolOhlcChart");
+        const meta = $("symbolOhlcMeta");
+        symbolOhlcDbg("DOM", {
+          chartEl: !!chartEl,
+          meta: !!meta,
+          debugEl: !!$("symbolOhlcDebug"),
+        });
+        if (!hasActiveGroupWithCodes()) {
+          symbolOhlcDbg("中止：当前分组无标的");
+          if (meta) meta.textContent = "请使用非空当前分组。";
+          if (window.Plotly && chartEl) Plotly.purge(chartEl);
+          return;
+        }
+        const code = String($("symbolOhlcCode").value || "").trim();
+        if (!code) {
+          symbolOhlcDbg("中止：未选择标的代码");
+          if (meta) meta.textContent = "请先选择标的。";
+          return;
+        }
+        const ym = parseOhlcGlobalRange();
+        const adjust = String($("symbolOhlcAdjust").value || "none");
+        symbolOhlcDbg("请求参数", { code, adjust, ym });
+        if (meta) meta.textContent = "加载中…";
+        let rows;
+        let effFromApi = "";
+        let srcRaw = "";
+        let effWin = "";
+        try {
+          const qs = new URLSearchParams({ adjust, limit: "15000" });
+          if (ym.start) qs.set("start", ym.start);
+          if (ym.end) qs.set("end", ym.end);
+          const url = `/futures/${encodeURIComponent(code)}/prices?${qs}`;
+          symbolOhlcDbg("fetch", { path: `/api${url}` });
+          const resp = await api(url, { method: "GET" });
+          symbolOhlcDbg("HTTP 响应", {
+            ok: resp.ok,
+            status: resp.status,
+            ct: resp.headers.get("content-type"),
+          });
+          effFromApi = resp.headers.get("X-Futures-Effective-Code") || "";
+          srcRaw = resp.headers.get("X-Futures-Price-Source") || "";
+          effWin = resp.headers.get("X-Futures-Effective-Window") || "";
+          symbolOhlcDbg("响应头", {
+            effectiveCode: effFromApi,
+            source: srcRaw,
+            window: effWin,
+          });
+          const out = await resp.json();
+          symbolOhlcDbg("JSON 解析完成", {
+            type: Array.isArray(out) ? "array" : typeof out,
+            len: Array.isArray(out) ? out.length : null,
+          });
+          if (!resp.ok) {
+            let detail = "";
+            if (typeof out.detail === "string") detail = out.detail;
+            else if (Array.isArray(out.detail))
+              detail = out.detail.map((x) => x.msg || x).join("; ");
+            else detail = JSON.stringify(out.detail || out);
+            symbolOhlcDbg("请求失败（HTTP 非 OK）", detail);
+            if (meta) meta.textContent = `请求失败：${detail}`;
+            if (window.Plotly && chartEl) Plotly.purge(chartEl);
+            return;
+          }
+          rows = Array.isArray(out) ? out : [];
+        } catch (err) {
+          symbolOhlcDbg("fetch/json 异常", {
+            name: err && err.name,
+            message: err && err.message,
+            stack: err && err.stack,
+          });
+          if (meta) meta.textContent = String(err);
+          if (window.Plotly && chartEl) Plotly.purge(chartEl);
+          return;
+        }
+        const adjustLabel =
+          adjust === "qfq"
+            ? "前复权 qfq"
+            : adjust === "hfq"
+              ? "后复权 hfq"
+              : "无复权 none";
+        const effCode = effFromApi || code;
+        const xd = [];
+        const op = [];
+        const hi = [];
+        const lo = [];
+        const cl = [];
+        for (const r of rows) {
+          const o = Number(r.open);
+          const h = Number(r.high);
+          const l = Number(r.low);
+          const c = Number(r.close);
+          if (
+            ![o, h, l, c].every((x) => Number.isFinite(x))
+          )
+            continue;
+          xd.push(String(r.trade_date));
+          op.push(o);
+          hi.push(h);
+          lo.push(l);
+          cl.push(c);
+        }
+        if (meta) {
+          const pick =
+            effCode !== code
+              ? `所选 ${code} → 实际 ${effCode}`
+              : String(code);
+          const reqTxt =
+            ym.start || ym.end
+              ? `请求 ${ym.start || "…"}～${ym.end || "…"}`
+              : "请求区间（未填则仅用数据库区间）";
+          const winTxt = effWin
+            ? effWin.replace("/", "～")
+            : "（与库内区间无交集或无数据）";
+          meta.textContent =
+            `${pick} | ${futuresPriceSourceLabel(srcRaw)} | ${adjustLabel} | ${reqTxt} | 绘图 ${winTxt} | 有效根数 ${xd.length}`;
+        }
+        const runPlot = () => {
+          symbolOhlcDbg("runPlot() 进入", {
+            bars: xd.length,
+            plotly: !!window.Plotly,
+          });
+          if (!chartEl) {
+            symbolOhlcDbg("runPlot 中止：无 chart 容器");
+            return;
+          }
+          if (!window.Plotly) {
+            symbolOhlcDbg("中止：window.Plotly 不存在（CDN 未加载？）");
+            chartEl.innerHTML =
+              `<div class="muted">图表组件未加载，请刷新页面或检查网络。</div>`;
+            return;
+          }
+          if (xd.length < 1) {
+            symbolOhlcDbg("中止：有效 OHLC 为 0（检查区间交集与数据）");
+            Plotly.purge(chartEl);
+            chartEl.innerHTML =
+              `<div class="muted">所选区间或复权口径下暂无 OHLC 数据。</div>`;
+            return;
+          }
+          chartEl.innerHTML = "";
+          try {
+            Plotly.newPlot(
+              chartEl,
+              [
+                {
+                  type: "candlestick",
+                  name: effCode,
+                  x: xd,
+                  open: op,
+                  high: hi,
+                  low: lo,
+                  close: cl,
+                  increasing: { line: { color: "#26a69a" } },
+                  decreasing: { line: { color: "#ef5350" } },
+                },
+              ],
+              {
+                margin: { t: 36, r: 24, b: 44, l: 56 },
+                title: {
+                  text: `${effCode} · ${adjustLabel}`,
+                  font: { size: 14 },
+                },
+                xaxis: {
+                  title: "交易日",
+                  type: "date",
+                  rangeslider: { visible: false },
+                },
+                yaxis: {
+                  title: "价格",
+                  autorange: true,
+                  fixedrange: false,
+                },
+                dragmode: "pan",
+              },
+              { responsive: true, displayModeBar: true },
+            );
+            if (window.Plotly && chartEl) {
+              try {
+                window.Plotly.Plots.resize(chartEl);
+              } catch (_) {}
+            }
+            symbolOhlcDbg("Plotly.newPlot 成功");
+          } catch (e) {
+            symbolOhlcDbg("Plotly.newPlot 抛出", String(e));
+            chartEl.innerHTML = `<div class="muted">K 线渲染失败：${esc(String(e))}</div>`;
+          }
+        };
+        symbolOhlcDbg("调度 whenPlotlyReady(runPlot)");
+        whenPlotlyReady(runPlot);
+        symbolOhlcDbg("loadSymbolOhlcChart() 同步部分结束（Plotly 可能稍后异步绘制）");
       }
 
       function syncTrendSizingVisibility() {
@@ -1049,6 +2349,7 @@
 
       function renderTrendBacktest(out) {
         if (!out || out.ok !== true) {
+          clearFuturesTrendCharts();
           $("trendMeta").textContent =
             `趋势回测不可用：${(out && out.error) || "unknown"}`;
           $("trendRuleBadge").innerHTML = "";
@@ -1089,6 +2390,7 @@
           : [];
         const n = Math.max(strat.length, bench.length);
         if (!n) {
+          clearFuturesTrendCharts();
           $("trendSeriesWrap").innerHTML =
             `<div class="muted">暂无净值序列。</div>`;
           return;
@@ -1104,6 +2406,12 @@
         $("trendSeriesWrap").innerHTML =
           `<div class="muted">展示最近30个点位</div>` +
           `<table class="corr"><thead><tr><th>日期</th><th>策略NAV</th><th>基准NAV</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+        const aligned = alignFuturesTrendNavRows(strat, bench);
+        if (aligned.dates.length >= 2) {
+          runFuturesTrendCharts(aligned);
+        } else {
+          clearFuturesTrendCharts();
+        }
       }
 
       async function runCorrelation() {
@@ -1465,6 +2773,27 @@
         await runTrendBacktest();
       });
 
+      (function bindSymbolOhlcLoad() {
+        const btn = $("symbolOhlcLoad");
+        if (!btn) {
+          console.error("[futures K线] #symbolOhlcLoad 不存在，无法绑定点击");
+          return;
+        }
+        btn.addEventListener("click", async () => {
+          try {
+            await loadSymbolOhlcChart();
+          } catch (e) {
+            symbolOhlcDbg("loadSymbolOhlcChart 顶层未捕获异常", {
+              message: String(e && e.message),
+              stack: String(e && e.stack),
+            });
+            const meta = $("symbolOhlcMeta");
+            if (meta)
+              meta.textContent = `脚本异常：${String(e && e.message ? e.message : e)}`;
+          }
+        });
+      })();
+
       const _trendPanel = $("trendParamsPanel");
       if (_trendPanel) {
         _trendPanel.addEventListener("input", saveTrendParams);
@@ -1481,6 +2810,16 @@
           }
         });
       }
+
+      (function bindFuturesTrendDistMode() {
+        const el = $("ftTrendDailyRetMode");
+        if (el)
+          el.addEventListener("change", () => {
+            try {
+              renderFuturesTrendDailyReturnDist();
+            } catch (_) {}
+          });
+      })();
 
       async function bootstrap() {
         try {

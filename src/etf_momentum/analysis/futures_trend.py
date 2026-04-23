@@ -65,6 +65,18 @@ def _parse_yyyymmdd(value: str) -> dt.date:
     return dt.datetime.strptime(str(value), "%Y%m%d").date()
 
 
+def _coerce_trading_index(ix: pd.DatetimeIndex | pd.Index) -> pd.DatetimeIndex:
+    """
+    Normalize futures OHLC indexes to UTC-naive midnight so strategy NAV,
+    benchmark prices, and intersection calendars align (fixes flat benchmark
+    when mixing tz-aware / naive timestamps).
+    """
+    dti = pd.DatetimeIndex(ix)
+    if dti.tz is not None:
+        dti = dti.tz_convert("UTC").tz_localize(None)
+    return pd.DatetimeIndex(dti.normalize())
+
+
 def _normalize_per_fill(value: float, side: FeeSide) -> float:
     if side == "one_way":
         return float(value)
@@ -121,6 +133,7 @@ def _load_futures_ohlcv(
     )
     df = df.sort_index()
     df = df.dropna(subset=["Open", "High", "Low", "Close"], how="any")
+    df.index = _coerce_trading_index(df.index)
     return df
 
 
@@ -162,7 +175,10 @@ def _align_futures_trend_inputs(
             "signal_adjust": "none",
             "benchmark_adjust": "none",
         }
-        return out, out.copy(), detail
+        out.index = _coerce_trading_index(out.index)
+        ob = out.copy()
+        ob.index = _coerce_trading_index(ob.index)
+        return out, ob, detail
 
     idx = df88.index
     detail_a: dict[str, Any] = {
@@ -406,6 +422,7 @@ def _run_symbol_backtest(
     equity = pd.Series(
         eq["Equity"], index=pd.to_datetime(eq.index), dtype=float
     ).sort_index()
+    equity.index = _coerce_trading_index(equity.index)
     nav = (equity / float(equity.iloc[0])).ffill().fillna(1.0)
     trades = int(stats.get("# Trades", 0) or 0)
     ret_total = float(nav.iloc[-1] - 1.0)
@@ -575,9 +592,8 @@ def compute_futures_group_trend_backtest(
 
     common_idx: pd.DatetimeIndex | None = None
     for nav in nav_by_symbol.values():
-        common_idx = (
-            nav.index if common_idx is None else common_idx.intersection(nav.index)
-        )
+        ix = _coerce_trading_index(nav.index)
+        common_idx = ix if common_idx is None else common_idx.intersection(ix)
     if common_idx is None or len(common_idx) < 2:
         return {
             "ok": False,
@@ -830,9 +846,9 @@ def compute_futures_group_trend_backtest(
 
     group_nav = (1.0 + group_ret.fillna(0.0)).cumprod()
 
-    bench_close_df = (
-        pd.DataFrame(bench_price_by_symbol).sort_index().reindex(common_idx).ffill()
-    )
+    bench_close_df = pd.DataFrame(bench_price_by_symbol).sort_index()
+    bench_close_df.index = _coerce_trading_index(bench_close_df.index)
+    bench_close_df = bench_close_df.reindex(common_idx).ffill().bfill()
     bench_ret = _combine_group_returns(
         bench_close_df.pct_change(),
         dynamic_universe=bool(dynamic_universe),

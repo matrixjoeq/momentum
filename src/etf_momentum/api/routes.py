@@ -16,6 +16,7 @@ from fastapi import (
     HTTPException,
     Header,
     Request,
+    Response,
 )
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
@@ -253,6 +254,7 @@ from ..db.off_fund_repo import (
     purge_off_fund_data,
     upsert_off_fund_pool,
 )
+from ..data.futures_synthesize import _symbol_root_from_main
 from ..db.futures_repo import (
     delete_futures_pool,
     delete_futures_prices,
@@ -263,6 +265,7 @@ from ..db.futures_repo import (
     list_futures_pool,
     list_futures_prices,
     mark_futures_contract_pool_fetch,
+    normalize_futures_adjust,
     upsert_futures_pool,
 )
 from ..db.futures_research_repo import (
@@ -6645,22 +6648,143 @@ def get_futures_contract_fetch_status(
     ]
 
 
+def _looks_like_cn_futures_delivery_month(code_u: str) -> bool:
+    """True for RB2505-style (letter prefix + 4-digit month); False for RB0, RB88."""
+    i = 0
+    while i < len(code_u) and code_u[i].isalpha():
+        i += 1
+    suf = code_u[i:]
+    return len(suf) == 4 and suf.isdigit()
+
+
+def _parse_optional_yyyymmdd(value: str | None) -> dt.date | None:
+    """Accept YYYYMMDD, digits-only, or leading YYYY-MM-DD; return None if missing/invalid."""
+    if value is None:
+        return None
+    raw = "".join(c for c in str(value).strip() if c.isdigit())
+    if len(raw) < 8:
+        return None
+    try:
+        return dt.datetime.strptime(raw[:8], "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _intersect_closed_dates(
+    req_lo: dt.date | None,
+    req_hi: dt.date | None,
+    data_lo: dt.date,
+    data_hi: dt.date,
+) -> tuple[dt.date | None, dt.date | None]:
+    """
+    Intersect [req_lo, req_hi] with [data_lo, data_hi]; open-ended request uses data edge.
+    Returns (None, None) if intersection empty.
+    """
+    q_lo = req_lo if req_lo is not None else data_lo
+    q_hi = req_hi if req_hi is not None else data_hi
+    lo = max(q_lo, data_lo)
+    hi = min(q_hi, data_hi)
+    if lo > hi:
+        return (None, None)
+    return (lo, hi)
+
+
+def _list_futures_prices_rows(
+    db: Session,
+    *,
+    code: str,
+    adjust: str,
+    start_d: dt.date | None,
+    end_d: dt.date | None,
+    limit: int,
+):
+    return list_futures_prices(
+        db,
+        code=code,
+        start_date=start_d,
+        end_date=end_d,
+        adjust=adjust,
+        limit=limit,
+    )
+
+
 @router.get("/futures/{code}/prices", response_model=list[FuturesPriceOut])
 def get_futures_prices_api(
     code: str,
+    response: Response,
     start: str | None = None,
     end: str | None = None,
     adjust: str = "none",
     limit: int = 5000,
     db: Session = Depends(get_session),
 ) -> list[FuturesPriceOut]:
-    if str(adjust).strip().lower() != "none":
-        raise HTTPException(status_code=400, detail="futures only support adjust=none")
-    start_d = _parse_yyyymmdd(start) if start else None
-    end_d = _parse_yyyymmdd(end) if end else None
-    rows = list_futures_prices(
-        db, code=code, start_date=start_d, end_date=end_d, adjust="none", limit=limit
+    try:
+        adj = normalize_futures_adjust(adjust)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    req_start = _parse_optional_yyyymmdd(start)
+    req_end = _parse_optional_yyyymmdd(end)
+    if (
+        req_start is not None
+        and req_end is not None
+        and req_start > req_end
+    ):
+        req_start, req_end = req_end, req_start
+    code_u = str(code or "").strip().upper()
+
+    if adj == "none":
+        root = _symbol_root_from_main(code_u)
+        synth88 = f"{root}88"
+        if _looks_like_cn_futures_delivery_month(code_u):
+            eff = code_u
+            src = "delivery_contract"
+        else:
+            ds88, de88 = get_futures_date_range(db, code=synth88, adjust="none")
+            if ds88 is not None and de88 is not None:
+                eff = synth88
+                src = "synthetic_88"
+            else:
+                eff = code_u
+                src = "fallback_main"
+    else:
+        eff = code_u
+        src = "as_requested"
+
+    ds_s, de_s = get_futures_date_range(db, code=eff, adjust=adj)
+    if ds_s is None or de_s is None:
+        response.headers["X-Futures-Effective-Code"] = eff
+        response.headers["X-Futures-Price-Source"] = src
+        response.headers["X-Futures-Effective-Window"] = ""
+        response.headers["X-Futures-Requested-Window"] = ""
+        return []
+
+    data_min = dt.datetime.strptime(ds_s, "%Y%m%d").date()
+    data_max = dt.datetime.strptime(de_s, "%Y%m%d").date()
+    lo, hi = _intersect_closed_dates(req_start, req_end, data_min, data_max)
+    rw = ""
+    if req_start is not None or req_end is not None:
+        rs = req_start.isoformat() if req_start is not None else ""
+        re_ = req_end.isoformat() if req_end is not None else ""
+        rw = f"{rs}/{re_}"
+    response.headers["X-Futures-Requested-Window"] = rw
+    if lo is None or hi is None:
+        response.headers["X-Futures-Effective-Code"] = eff
+        response.headers["X-Futures-Price-Source"] = src
+        response.headers["X-Futures-Effective-Window"] = ""
+        return []
+
+    rows = _list_futures_prices_rows(
+        db,
+        code=eff,
+        adjust=adj,
+        start_d=lo,
+        end_d=hi,
+        limit=limit,
     )
+    response.headers["X-Futures-Effective-Code"] = eff
+    response.headers["X-Futures-Price-Source"] = src
+    response.headers["X-Futures-Effective-Window"] = f"{lo.isoformat()}/{hi.isoformat()}"
+
     return [
         FuturesPriceOut(
             code=r.code,
