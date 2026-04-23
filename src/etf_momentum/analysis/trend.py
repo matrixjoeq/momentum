@@ -2497,14 +2497,25 @@ def _apply_atr_stop(
                 trigger_events.append(
                     {
                         "date": ds,
+                        "position_side": "long",
                         "stop_price": (
                             float(stop_px) if np.isfinite(stop_px) else None
                         ),
+                        "close_price": (float(c) if np.isfinite(c) else None),
+                        "atr_value": (float(a) if np.isfinite(a) else None),
                         "open_price": (float(o) if np.isfinite(o) else None),
                         "low_price": (float(l) if np.isfinite(l) else None),
                         "high_price": None,
                         "fill_price": (
                             float(fill_price) if np.isfinite(fill_price) else None
+                        ),
+                        "stop_distance_atr": (
+                            float((c - stop_px) / a)
+                            if np.isfinite(c)
+                            and np.isfinite(stop_px)
+                            and np.isfinite(a)
+                            and a > 0
+                            else None
                         ),
                         "trigger_source": trigger_source,
                         "gap_open_triggered": bool(gap_open_triggered),
@@ -2692,12 +2703,23 @@ def _apply_atr_stop(
             trigger_events.append(
                 {
                     "date": ds,
+                    "position_side": "short",
                     "stop_price": (float(stop_px) if np.isfinite(stop_px) else None),
+                    "close_price": (float(c) if np.isfinite(c) else None),
+                    "atr_value": (float(a) if np.isfinite(a) else None),
                     "open_price": (float(o) if np.isfinite(o) else None),
                     "low_price": None,
                     "high_price": (float(h) if np.isfinite(h) else None),
                     "fill_price": (
                         float(fill_price) if np.isfinite(fill_price) else None
+                    ),
+                    "stop_distance_atr": (
+                        float((stop_px - c) / a)
+                        if np.isfinite(c)
+                        and np.isfinite(stop_px)
+                        and np.isfinite(a)
+                        and a > 0
+                        else None
                     ),
                     "trigger_source": trigger_source,
                     "gap_open_triggered": bool(gap_open_triggered),

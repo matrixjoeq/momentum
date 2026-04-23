@@ -105,7 +105,7 @@ def equal_weights_from_signals(sig_direction_df: pd.DataFrame) -> pd.DataFrame:
 
 def risk_budget_weights(
     *,
-    sig_binary_df: pd.DataFrame,
+    sig_direction_df: pd.DataFrame,
     score_df: pd.DataFrame,
     exec_by_code: dict[str, pd.DataFrame],
     common_idx: pd.DatetimeIndex,
@@ -126,7 +126,7 @@ def risk_budget_weights(
     if (not np.isfinite(max_lev)) or max_lev <= 1.0:
         max_lev = 2.0
 
-    cols = list(sig_binary_df.columns)
+    cols = list(sig_direction_df.columns)
     w_out = pd.DataFrame(0.0, index=common_idx, columns=cols, dtype=float)
 
     atr_budget_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
@@ -157,6 +157,7 @@ def risk_budget_weights(
     prev_rb_w = pd.Series(0.0, index=cols, dtype=float)
     rb_entry_price_by_code: dict[str, float] = {str(c): float("nan") for c in cols}
     rb_entry_seq_by_code: dict[str, int] = {str(c): -1 for c in cols}
+    rb_side_by_code: dict[str, int] = {str(c): 0 for c in cols}
     rb_state_by_code: dict[str, str] = {str(c): "FLAT" for c in cols}
     day_seq = 0
     overcap_skip_episode_active = {str(c): False for c in cols}
@@ -169,10 +170,17 @@ def risk_budget_weights(
         day_seq += 1
         d_key = str(pd.Timestamp(d).date())
         score_row = score_df.loc[d].astype(float).replace([np.inf, -np.inf], np.nan)
-        sig_row = sig_binary_df.loc[d].astype(float).clip(lower=0.0)
+        sig_row = (
+            sig_direction_df.loc[d]
+            .astype(float)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .clip(lower=-1.0, upper=1.0)
+        )
         active_codes = [
             str(c)
-            for c in score_row.where(sig_row > eps, other=np.nan)
+            for c in score_row.abs()
+            .where(sig_row.abs() > eps, other=np.nan)
             .dropna()
             .sort_values(ascending=False)
             .index.tolist()
@@ -203,16 +211,16 @@ def risk_budget_weights(
                 if np.isfinite(float(cap_multiple)) and float(cap_multiple) > 0.0
                 else 1.0
             )
-            s_now = float(w_row.sum())
+            s_now = float(w_row.abs().sum())
             if s_now <= cap_v + eps:
                 return
             w_row = (w_row * (cap_v / s_now)).astype(float)
             stats["overcap_scale_total"] = int(stats.get("overcap_scale_total", 0)) + 1
             _inc_overcap_daily("scale", 1)
 
-        def _set_new_risk_budget_entry(key: str, base_target: float) -> None:
+        def _set_new_risk_budget_entry(key: str, signed_target: float) -> None:
             nonlocal w_row
-            w_row.loc[key] = float(base_target)
+            w_row.loc[key] = float(signed_target)
             px_now = (
                 float(px_close_df.loc[d, key])
                 if key in px_close_df.columns
@@ -222,6 +230,7 @@ def risk_budget_weights(
                 float(px_now) if np.isfinite(px_now) and px_now > 0.0 else float("nan")
             )
             rb_entry_seq_by_code[key] = int(day_seq)
+            rb_side_by_code[key] = int(np.sign(float(signed_target)))
             rb_state_by_code[key] = "NORMAL"
 
         def _select_replace_out_code(new_code: str) -> str | None:
@@ -230,11 +239,14 @@ def risk_budget_weights(
                 key_cc = str(cc)
                 if key_cc == str(new_code):
                     continue
-                if float(w_row.loc[key_cc]) <= eps:
+                if abs(float(w_row.loc[key_cc])) <= eps:
                     continue
                 cur_px = float(px_close_df.loc[d, key_cc])
                 ent_px = float(rb_entry_price_by_code.get(key_cc, float("nan")))
-                ret = (
+                side = int(rb_side_by_code.get(key_cc, 0))
+                if side == 0:
+                    side = 1 if float(w_row.loc[key_cc]) > 0 else -1
+                raw_ret = (
                     ((cur_px / ent_px) - 1.0)
                     if (
                         np.isfinite(cur_px)
@@ -244,6 +256,7 @@ def risk_budget_weights(
                     )
                     else float("inf")
                 )
+                ret = float(side) * float(raw_ret)
                 seq = int(rb_entry_seq_by_code.get(key_cc, 10**9))
                 if seq < 0:
                     seq = 10**9
@@ -260,6 +273,7 @@ def risk_budget_weights(
                 rb_state_by_code[key_c] = "FLAT"
                 rb_entry_price_by_code[key_c] = float("nan")
                 rb_entry_seq_by_code[key_c] = -1
+                rb_side_by_code[key_c] = 0
 
         for c in active_codes:
             px = (
@@ -275,11 +289,22 @@ def risk_budget_weights(
             base_target = float("nan")
             if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
                 base_target = float(rb) * float(px) / float(a)
-            has_pos = bool(float(w_row.loc[c]) > eps)
+            sig_v = float(sig_row.get(c, 0.0))
+            side_target = 1.0 if sig_v > eps else (-1.0 if sig_v < -eps else 0.0)
+            signed_target = (
+                float(base_target) * float(side_target)
+                if np.isfinite(base_target)
+                and base_target > 0.0
+                and abs(side_target) > 0
+                else float("nan")
+            )
+            has_pos = bool(abs(float(w_row.loc[c])) > eps)
             key = str(c)
             if not has_pos:
-                if np.isfinite(base_target) and base_target > 0.0:
-                    proposed_total = float(w_row.sum() + float(base_target))
+                if np.isfinite(signed_target) and abs(float(signed_target)) > 0.0:
+                    proposed_total = float(
+                        w_row.abs().sum() + abs(float(signed_target))
+                    )
                     overcap_on_new_entry = bool(proposed_total > 1.0 + eps)
                     if overcap_on_new_entry and pol == "skip_entry":
                         stats["overcap_skip_decision_total"] = (
@@ -310,11 +335,11 @@ def risk_budget_weights(
                             overcap_replace_in_by_code[key] = int(
                                 overcap_replace_in_by_code.get(key, 0) + 1
                             )
-                    _set_new_risk_budget_entry(key, float(base_target))
+                    _set_new_risk_budget_entry(key, float(signed_target))
                     if overcap_on_new_entry and pol == "replace_entry":
                         _apply_overcap_scale_once()
                     elif overcap_on_new_entry and pol == "leverage_entry":
-                        lev_now = float(w_row.sum())
+                        lev_now = float(w_row.abs().sum())
                         if lev_now > 1.0 + eps:
                             stats["overcap_leverage_usage_total"] = (
                                 int(stats.get("overcap_leverage_usage_total", 0)) + 1
@@ -324,7 +349,6 @@ def risk_budget_weights(
                                 _apply_overcap_scale_once(float(max_lev))
                 continue
 
-        w_row = w_row.clip(lower=0.0)
         if pol != "leverage_entry":
             _apply_overcap_scale_once()
         for key_cc in cols:

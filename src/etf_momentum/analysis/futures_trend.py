@@ -163,6 +163,38 @@ def _load_futures_ohlcv(
                 t = str(raw).strip()
                 suf_cells.append(t if t else None)
         df["dominant_contract_suffix"] = suf_cells
+    if any(getattr(r, "roll_from_symbol", None) is not None for r in rows):
+        df["roll_from_symbol"] = [
+            (
+                None
+                if getattr(r, "roll_from_symbol", None) is None
+                else (str(getattr(r, "roll_from_symbol")).strip() or None)
+            )
+            for r in rows
+        ]
+    if any(getattr(r, "roll_to_symbol", None) is not None for r in rows):
+        df["roll_to_symbol"] = [
+            (
+                None
+                if getattr(r, "roll_to_symbol", None) is None
+                else (str(getattr(r, "roll_to_symbol")).strip() or None)
+            )
+            for r in rows
+        ]
+    for col, attr in (
+        ("roll_from_open", "roll_from_open"),
+        ("roll_from_close", "roll_from_close"),
+        ("roll_to_open", "roll_to_open"),
+        ("roll_to_close", "roll_to_close"),
+    ):
+        if any(getattr(r, attr, None) is not None for r in rows):
+            df[col] = [
+                float(getattr(r, attr))
+                if getattr(r, attr, None) is not None
+                and np.isfinite(float(getattr(r, attr)))
+                else np.nan
+                for r in rows
+            ]
     df = df.sort_index()
     df = df.dropna(subset=["Open", "High", "Low", "Close"], how="any")
     df.index = _coerce_trading_index(df.index)
@@ -359,6 +391,110 @@ def _combine_group_returns(
     else:
         out = ret_df.fillna(0.0).mean(axis=1)
     return out.fillna(0.0)
+
+
+def _dist_stats(values: list[float]) -> dict[str, Any]:
+    xs = np.asarray(
+        [float(v) for v in (values or []) if np.isfinite(float(v))], dtype=float
+    )
+    if xs.size == 0:
+        return {
+            "sample_size": 0,
+            "min": None,
+            "max": None,
+            "mean": None,
+            "std": None,
+            "quantiles": {
+                "p05": None,
+                "p10": None,
+                "p25": None,
+                "p50": None,
+                "p75": None,
+                "p90": None,
+                "p95": None,
+            },
+        }
+
+    def q(p: float) -> float:
+        return float(np.percentile(xs, p))
+
+    return {
+        "sample_size": int(xs.size),
+        "min": float(np.min(xs)),
+        "max": float(np.max(xs)),
+        "mean": float(np.mean(xs)),
+        "std": float(np.std(xs, ddof=1)) if xs.size >= 2 else 0.0,
+        "quantiles": {
+            "p05": q(5),
+            "p10": q(10),
+            "p25": q(25),
+            "p50": q(50),
+            "p75": q(75),
+            "p90": q(90),
+            "p95": q(95),
+        },
+    }
+
+
+def _trade_stats_from_returns(
+    values: list[float], *, flat_eps: float = 1e-12
+) -> dict[str, Any]:
+    rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
+    wins = [x for x in rs if x > float(flat_eps)]
+    losses = [x for x in rs if x < -float(flat_eps)]
+    flats = [x for x in rs if abs(float(x)) <= float(flat_eps)]
+    win_rate_ex_zero: float | None = None
+    payoff_ex_zero: float | None = None
+    kelly_ex_zero: float | None = None
+    if wins and losses:
+        avg_win = float(np.mean(np.asarray(wins, dtype=float)))
+        avg_loss_abs = float(abs(np.mean(np.asarray(losses, dtype=float))))
+        if (
+            np.isfinite(avg_win)
+            and np.isfinite(avg_loss_abs)
+            and avg_win > 0.0
+            and avg_loss_abs > 0.0
+        ):
+            b = float(avg_win / avg_loss_abs)
+            p = float(len(wins) / (len(wins) + len(losses)))
+            win_rate_ex_zero = p
+            payoff_ex_zero = b
+            kelly_ex_zero = float(p - (1.0 - p) / b)
+    all_stats = _dist_stats(rs)
+    p_stats = _dist_stats(wins)
+    l_stats = _dist_stats(losses)
+    return {
+        "total_trades": int(len(rs)),
+        "win_trades": int(len(wins)),
+        "loss_trades": int(len(losses)),
+        "flat_trades": int(len(flats)),
+        "win_rate_ex_zero": win_rate_ex_zero,
+        "payoff_ex_zero": payoff_ex_zero,
+        "kelly_ex_zero": kelly_ex_zero,
+        "returns": [float(x) for x in rs],
+        "all_stats": all_stats,
+        "profit_stats": p_stats,
+        "loss_stats": l_stats,
+        "min_return": all_stats.get("min"),
+        "max_return": all_stats.get("max"),
+        "mean_return": all_stats.get("mean"),
+        "std_return": all_stats.get("std"),
+        "return_quantiles": (all_stats.get("quantiles") or {}),
+        "profit_mean_return": p_stats.get("mean"),
+        "profit_std_return": p_stats.get("std"),
+        "profit_max_return": p_stats.get("max"),
+        "profit_min_return": p_stats.get("min"),
+        "loss_mean_return": l_stats.get("mean"),
+        "loss_std_return": l_stats.get("std"),
+        "loss_max_return": l_stats.get("max"),
+        "loss_min_return": l_stats.get("min"),
+    }
+
+
+def _safe_rate(num: int, den: int) -> float:
+    if den <= 0:
+        return 0.0
+    return float(num) / float(den)
 
 
 def _apply_main_contract_roll_adjustments(
@@ -734,11 +870,6 @@ def compute_futures_group_trend_backtest(
     td_norm = str(trade_direction or "long_only").strip().lower()
     if td_norm not in {"long_only", "short_only", "both"}:
         return {"ok": False, "error": "invalid_trade_direction"}
-    if ps == "risk_budget" and td_norm != "long_only":
-        return {
-            "ok": False,
-            "error": "risk_budget_requires_trade_direction_long_only",
-        }
     rb_pol = str(risk_budget_overcap_policy or "scale").strip().lower()
     if rb_pol not in {"scale", "skip_entry", "replace_entry", "leverage_entry"}:
         return {"ok": False, "error": "invalid_risk_budget_overcap_policy"}
@@ -1001,7 +1132,7 @@ def compute_futures_group_trend_backtest(
             )
         else:
             w_df, rb_stats = risk_budget_weights(
-                sig_binary_df=sig_df,
+                sig_direction_df=sig_df,
                 score_df=score_df,
                 exec_by_code=exec_aligned,
                 common_idx=common_idx,
@@ -1137,6 +1268,201 @@ def compute_futures_group_trend_backtest(
         ),
     }
 
+    lot_closed = list((lot_meta or {}).get("closed_trades") or [])
+    reserve_attempted_dir = (lot_meta or {}).get(
+        "reserve_margin_attempted_entry_count_by_direction"
+    ) or {}
+    reserve_blocked_dir = (lot_meta or {}).get(
+        "reserve_margin_blocked_entry_count_by_direction"
+    ) or {}
+    reserve_attempted_code = (lot_meta or {}).get(
+        "reserve_margin_attempted_entry_count_by_code"
+    ) or {}
+    reserve_blocked_code = (lot_meta or {}).get(
+        "reserve_margin_blocked_entry_count_by_code"
+    ) or {}
+    reserve_attempted_code_dir = (lot_meta or {}).get(
+        "reserve_margin_attempted_entry_count_by_code_direction"
+    ) or {}
+    reserve_blocked_code_dir = (lot_meta or {}).get(
+        "reserve_margin_blocked_entry_count_by_code_direction"
+    ) or {}
+    mon_gate = (
+        portfolio_meta.get("monthly_risk_budget_gate")
+        if isinstance(portfolio_meta.get("monthly_risk_budget_gate"), dict)
+        else {}
+    ) or {}
+    mon_attempted_total = int(mon_gate.get("attempted_entry_count", 0) or 0)
+    mon_blocked_total = int(mon_gate.get("blocked_entry_count", 0) or 0)
+    mon_attempted_code = {
+        str(k): int(v)
+        for k, v in ((mon_gate.get("attempted_entry_count_by_code") or {}).items())
+    }
+    mon_blocked_code = {
+        str(k): int(v)
+        for k, v in ((mon_gate.get("blocked_entry_count_by_code") or {}).items())
+    }
+
+    atr_count_by_dir: dict[str, int] = {"long": 0, "short": 0}
+    atr_count_by_code_dir: dict[str, dict[str, int]] = {
+        str(c): {"long": 0, "short": 0} for c in exec_by_code.keys()
+    }
+    atr_mult_by_dir: dict[str, list[float]] = {"long": [], "short": []}
+    atr_mult_by_code_dir: dict[str, dict[str, list[float]]] = {
+        str(c): {"long": [], "short": []} for c in exec_by_code.keys()
+    }
+    for c, st in atr_stop_by_asset.items():
+        evs = list((st or {}).get("trigger_events") or [])
+        for ev in evs:
+            side = str(ev.get("position_side") or "").strip().lower()
+            if side not in {"long", "short"}:
+                lp = ev.get("low_price")
+                hp = ev.get("high_price")
+                side = "long" if lp is not None and hp is None else "short"
+            atr_count_by_dir[side] = int(atr_count_by_dir.get(side, 0) + 1)
+            if str(c) not in atr_count_by_code_dir:
+                atr_count_by_code_dir[str(c)] = {"long": 0, "short": 0}
+                atr_mult_by_code_dir[str(c)] = {"long": [], "short": []}
+            atr_count_by_code_dir[str(c)][side] = int(
+                atr_count_by_code_dir[str(c)].get(side, 0) + 1
+            )
+            m_atr = ev.get("stop_distance_atr")
+            if m_atr is not None and np.isfinite(float(m_atr)):
+                val = float(m_atr)
+                atr_mult_by_dir[side].append(val)
+                atr_mult_by_code_dir[str(c)][side].append(val)
+
+    def _atr_mult_dist(vals: list[float]) -> dict[str, int]:
+        out = {
+            "<=0.5": 0,
+            "(0.5,1]": 0,
+            "(1,1.5]": 0,
+            "(1.5,2]": 0,
+            "(2,3]": 0,
+            "(3,5]": 0,
+            "(5,+inf)": 0,
+        }
+        for x in vals:
+            v = float(x)
+            if v <= 0.5:
+                out["<=0.5"] += 1
+            elif v <= 1.0:
+                out["(0.5,1]"] += 1
+            elif v <= 1.5:
+                out["(1,1.5]"] += 1
+            elif v <= 2.0:
+                out["(1.5,2]"] += 1
+            elif v <= 3.0:
+                out["(2,3]"] += 1
+            elif v <= 5.0:
+                out["(3,5]"] += 1
+            else:
+                out["(5,+inf)"] += 1
+        return out
+
+    def _monthly_dir_counts(direction: str, code: str | None = None) -> tuple[int, int]:
+        # Monthly gate currently only active under long_only compatibility.
+        if str(direction) == "short":
+            return 0, 0
+        if code is not None:
+            return int(mon_attempted_code.get(str(code), 0)), int(
+                mon_blocked_code.get(str(code), 0)
+            )
+        return int(mon_attempted_total), int(mon_blocked_total)
+
+    def _reserve_dir_counts(direction: str, code: str | None = None) -> tuple[int, int]:
+        if code is not None:
+            if direction == "both":
+                return int(reserve_attempted_code.get(str(code), 0)), int(
+                    reserve_blocked_code.get(str(code), 0)
+                )
+            ca = reserve_attempted_code_dir.get(str(code), {})
+            cb = reserve_blocked_code_dir.get(str(code), {})
+            return int(ca.get(direction, 0)), int(cb.get(direction, 0))
+        if direction == "both":
+            return int(sum(int(v) for v in reserve_attempted_dir.values())), int(
+                sum(int(v) for v in reserve_blocked_dir.values())
+            )
+        return int(reserve_attempted_dir.get(direction, 0)), int(
+            reserve_blocked_dir.get(direction, 0)
+        )
+
+    def _trade_stats_pack(direction: str, code: str | None = None) -> dict[str, Any]:
+        d = str(direction)
+        rows = [
+            r
+            for r in lot_closed
+            if (
+                (code is None or str(r.get("code")) == str(code))
+                and (d == "both" or str(r.get("direction") or "").strip().lower() == d)
+            )
+        ]
+        rs = [
+            float(r.get("return"))
+            for r in rows
+            if r.get("return") is not None and np.isfinite(float(r.get("return")))
+        ]
+        st = _trade_stats_from_returns(rs)
+        ra, rb = _reserve_dir_counts(d, code)
+        ma, mb = _monthly_dir_counts(d, code)
+        if code is None:
+            ac = (
+                int(atr_count_by_dir.get("long", 0) + atr_count_by_dir.get("short", 0))
+                if d == "both"
+                else int(atr_count_by_dir.get(d, 0))
+            )
+            am = (
+                list(atr_mult_by_dir.get("long", []))
+                + list(atr_mult_by_dir.get("short", []))
+                if d == "both"
+                else list(atr_mult_by_dir.get(d, []))
+            )
+        else:
+            cd = atr_count_by_code_dir.get(str(code), {"long": 0, "short": 0})
+            cm = atr_mult_by_code_dir.get(str(code), {"long": [], "short": []})
+            ac = (
+                int(cd.get("long", 0) + cd.get("short", 0))
+                if d == "both"
+                else int(cd.get(d, 0))
+            )
+            am = (
+                list(cm.get("long", [])) + list(cm.get("short", []))
+                if d == "both"
+                else list(cm.get(d, []))
+            )
+        st["reserve_margin_blocked_entry_count"] = int(rb)
+        st["reserve_margin_blocked_entry_rate"] = float(_safe_rate(int(rb), int(ra)))
+        st["monthly_risk_budget_blocked_entry_count"] = int(mb)
+        st["monthly_risk_budget_blocked_entry_rate"] = float(
+            _safe_rate(int(mb), int(ma))
+        )
+        st["atr_stop_trigger_count"] = int(ac)
+        st["atr_stop_trigger_rate"] = float(
+            _safe_rate(int(ac), int(st.get("total_trades", 0)))
+        )
+        st["atr_stop_trigger_multiple_distribution"] = _atr_mult_dist(am)
+        st["atr_stop_trigger_multiple_values"] = [
+            float(x) for x in am if np.isfinite(float(x))
+        ]
+        return st
+
+    trade_statistics = {
+        "overall": {
+            "both": _trade_stats_pack("both"),
+            "long": _trade_stats_pack("long"),
+            "short": _trade_stats_pack("short"),
+        },
+        "by_code": {
+            str(c): {
+                "both": _trade_stats_pack("both", str(c)),
+                "long": _trade_stats_pack("long", str(c)),
+                "short": _trade_stats_pack("short", str(c)),
+            }
+            for c in sorted(exec_by_code.keys())
+        },
+        "defaults": {"view_mode": "overall", "direction": "both"},
+    }
+
     portfolio_meta.setdefault("trade_direction", td_norm)
     if compat_notes:
         portfolio_meta["trade_direction_compat"] = compat_notes
@@ -1252,4 +1578,5 @@ def compute_futures_group_trend_backtest(
             ),
         },
         "symbols": symbol_stats,
+        "trade_statistics": trade_statistics,
     }

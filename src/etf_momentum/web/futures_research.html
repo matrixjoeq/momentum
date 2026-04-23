@@ -346,7 +346,7 @@
           <div class="trend-group-heading muted">风险预算（ATR）</div>
           <div class="row" style="flex-wrap: wrap">
             <div>
-              <label>ATR周期</label>
+              <label>风险预算 ATR 周期</label>
               <input
                 id="trendRbAtrWin"
                 type="number"
@@ -356,7 +356,7 @@
               />
             </div>
             <div>
-              <label>风险预算%</label>
+              <label>1ATR 变化对应总资金变化（%）</label>
               <input
                 id="trendRbPct"
                 type="number"
@@ -364,7 +364,7 @@
                 max="3"
                 step="0.1"
                 value="1"
-                title="百分数，例如 1 表示 1%，后端用 0.01"
+                title="即风险预算百分比：1 表示 1%，后端参数 risk_budget_pct=0.01"
               />
             </div>
             <div>
@@ -433,13 +433,70 @@
         止损模式为「关闭」，持仓名义风险按每标的约 1% 计；否则按 ATR、基准、n、m
         换算。门控不使用「止损后重入」分支。
       </div>
+      <div class="trend-capital-panel" style="margin-top: 12px">
+        <h4>资金管理</h4>
+        <p
+          class="muted"
+          style="margin: 0 0 10px; font-size: 12px; max-width: 920px"
+        >
+          初始资金（万元人民币）×
+          资金使用比例参与回测；预留保证金比例为权益中不参与「可开仓保证金预算」的比例（选
+          A： 最大保证金占用 ≤ 权益 × (1 − 预留比例)）。
+        </p>
+        <div class="row" style="flex-wrap: wrap; align-items: flex-end">
+          <div>
+            <label title="对应 account_capital_wan，实盘口径为万元人民币"
+              >初始资金（万）</label
+            >
+            <input
+              id="trendAccountCapitalWan"
+              type="number"
+              min="1"
+              step="1"
+              value="500"
+              style="width: 7rem"
+            />
+          </div>
+          <div>
+            <label title="对应 position_size_pct，100 表示全额使用账户名义"
+              >资金使用比例（%）</label
+            >
+            <input
+              id="trendPositionUsePct"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value="100"
+              style="width: 5rem"
+            />
+          </div>
+          <div>
+            <label
+              title="对应 reserve_margin_ratio，填 50 表示预留 50% 权益（不参与开仓保证金分配）"
+              >预留保证金比例（%）</label
+            >
+            <input
+              id="trendReserveMarginPct"
+              type="number"
+              min="0"
+              max="95"
+              step="1"
+              value="50"
+              style="width: 5rem"
+            />
+          </div>
+        </div>
+      </div>
       <div class="trend-order-exec-panel" id="trendOrderExecPanel">
         <h4>下单执行</h4>
         <p
           class="muted"
           style="margin: 0 0 10px; font-size: 12px; max-width: 920px"
         >
-          执行价与交易成本决定撮合与费用口径；当前接口仍按请求中的默认手续费与滑点计算，本节用于集中配置「如何下单」。手续费与滑点将与后端字段打通后可在此编辑。
+          执行价、手续费与滑点对应 POST
+          <code>/futures/research/trend-backtest</code
+          >；离散手数引擎按结算价×乘数×保证金率估算每手保证金（与品种池最低保证金无关）。
         </p>
         <div class="row" style="flex-wrap: wrap; align-items: flex-end">
           <div>
@@ -451,30 +508,74 @@
           </div>
           <div>
             <label
-              title="将与 POST /futures/research/trend-backtest 的 cost_bps 等对齐"
-              >手续费</label
+              title="backtest_margin_rate_pct：按结算价×合约乘数×该比例计算每手保证金"
+              >回测保证金率（%）</label
             >
             <input
-              type="text"
-              readonly
-              tabindex="-1"
-              value=""
-              placeholder="默认按请求（后续开放）"
-              style="opacity: 0.88; cursor: not-allowed"
+              id="trendBacktestMarginRatePct"
+              type="number"
+              min="0.1"
+              max="100"
+              step="0.1"
+              value="15"
+              style="width: 5rem"
             />
           </div>
           <div>
-            <label title="将与 slippage_type / slippage_value 等对齐"
-              >滑点</label
+            <label title="cost_bps">手续费（基点 / 口径见 fee_side）</label>
+            <input
+              id="trendCostBps"
+              type="number"
+              min="0"
+              max="2000"
+              step="0.5"
+              value="5"
+              style="width: 5rem"
+            />
+          </div>
+          <div>
+            <label
+              title="fee_side：单边=每笔全额 bps；双边=往返合计再分摊到每笔"
+              >手续费口径</label
+            >
+            <select id="trendFeeSide">
+              <option value="one_way">单边（每笔全额 bps）</option>
+              <option value="two_way" selected>双边（往返合计分摊）</option>
+            </select>
+          </div>
+        </div>
+        <div
+          class="row"
+          style="flex-wrap: wrap; align-items: flex-end; margin-top: 8px"
+        >
+          <div>
+            <label title="slippage_type">滑点类型</label>
+            <select id="trendSlippageType" style="min-width: 10rem">
+              <option value="percent" selected>比例（相对价格）</option>
+              <option value="price_spread">绝对价差（再除以现价）</option>
+              <option value="tick_multiple">最小变动价位倍数（整数）</option>
+            </select>
+          </div>
+          <div>
+            <label
+              title="percent/price_spread 为小数比例或价差；tick_multiple 须为非负整数"
+              >滑点数值</label
             >
             <input
-              type="text"
-              readonly
-              tabindex="-1"
-              value=""
-              placeholder="默认按请求（后续开放）"
-              style="opacity: 0.88; cursor: not-allowed"
+              id="trendSlippageValue"
+              type="number"
+              step="any"
+              min="0"
+              value="0.0005"
+              style="width: 8rem"
             />
+          </div>
+          <div>
+            <label title="slippage_side：与手续费类似">滑点口径</label>
+            <select id="trendSlippageSide">
+              <option value="one_way">单边</option>
+              <option value="two_way" selected>双边</option>
+            </select>
           </div>
         </div>
       </div>
@@ -607,6 +708,32 @@
       <div id="trendMeta" class="muted"></div>
       <div id="trendRuleBadge"></div>
       <div id="trendSummaryWrap"></div>
+      <div
+        class="row"
+        style="margin-top: 10px; flex-wrap: wrap; align-items: flex-end"
+      >
+        <div>
+          <label>交易特性视图</label>
+          <select id="futTradeStatsMode">
+            <option value="overall" selected>策略总体</option>
+            <option value="by_code">按标的</option>
+          </select>
+        </div>
+        <div id="futTradeStatsCodeWrap" style="display: none">
+          <label>标的</label>
+          <select id="futTradeStatsCode"></select>
+        </div>
+        <div>
+          <label>方向筛选</label>
+          <select id="futTradeStatsDirection">
+            <option value="both" selected>多空双向</option>
+            <option value="long">仅看多头</option>
+            <option value="short">仅看空头</option>
+          </select>
+        </div>
+      </div>
+      <div id="futTradeStatsWrap" style="margin-top: 8px"></div>
+      <div id="futTradeStatsAtrDist" style="width: 100%; height: 260px"></div>
       <div id="futuresTrendChartsPanel" style="display: none; margin-top: 10px">
         <div
           class="panel two"
@@ -853,6 +980,7 @@
       let state = null;
       let corrRangeKey = "all";
       let editorGroupName = "";
+      let latestFuturesTrendOut = null;
       const corrRangeStorageKey = `futures-research:corr-range:${location.pathname}`;
       const corrPickBasisStorageKey = `futures-research:corr-pick-basis:${location.pathname}`;
       const corrPickNStorageKey = `futures-research:corr-pick-n:${location.pathname}`;
@@ -939,7 +1067,7 @@
 
       function readTrendParamsFromForm() {
         return {
-          v: 1,
+          v: 2,
           backtestMode: String($("trendBacktestMode")?.value || "portfolio"),
           singleCode: String($("trendSingleCode")?.value || ""),
           positionSizing: String($("trendPositionSizing")?.value || "equal"),
@@ -966,6 +1094,19 @@
           tradeDirection: String(
             $("trendTradeDirection")?.value || "long_only",
           ),
+          accountCapitalWan: String(
+            $("trendAccountCapitalWan")?.value ?? "500",
+          ),
+          positionUsePct: String($("trendPositionUsePct")?.value ?? "100"),
+          reserveMarginPct: String($("trendReserveMarginPct")?.value ?? "50"),
+          backtestMarginRatePct: String(
+            $("trendBacktestMarginRatePct")?.value ?? "15",
+          ),
+          costBps: String($("trendCostBps")?.value ?? "5"),
+          feeSide: String($("trendFeeSide")?.value || "two_way"),
+          slippageType: String($("trendSlippageType")?.value || "percent"),
+          slippageValue: String($("trendSlippageValue")?.value ?? "0.0005"),
+          slippageSide: String($("trendSlippageSide")?.value || "two_way"),
         };
       }
 
@@ -1053,6 +1194,31 @@
         setNum("trendFastMa", p.fastMa, "20");
         setNum("trendSlowMa", p.slowMa, "60");
         setSelectIfOptionExists("trendTradeDirection", p.tradeDirection);
+        setNum("trendAccountCapitalWan", p.accountCapitalWan, "500");
+        setNum("trendPositionUsePct", p.positionUsePct, "100");
+        setNum("trendReserveMarginPct", p.reserveMarginPct, "50");
+        setNum("trendBacktestMarginRatePct", p.backtestMarginRatePct, "15");
+        setNum("trendCostBps", p.costBps, "5");
+        const fs = String(p.feeSide || "");
+        if (fs === "one_way" || fs === "two_way") {
+          const el = $("trendFeeSide");
+          if (el) el.value = fs;
+        }
+        const st = String(p.slippageType || "");
+        if (
+          st === "percent" ||
+          st === "price_spread" ||
+          st === "tick_multiple"
+        ) {
+          const el = $("trendSlippageType");
+          if (el) el.value = st;
+        }
+        setNum("trendSlippageValue", p.slippageValue, "0.0005");
+        const ss = String(p.slippageSide || "");
+        if (ss === "one_way" || ss === "two_way") {
+          const el = $("trendSlippageSide");
+          if (el) el.value = ss;
+        }
         const sel = $("trendSingleCode");
         if (sel && sel.options.length) {
           const want = String(p.singleCode || "");
@@ -2555,7 +2721,14 @@
         if (swrap) swrap.style.display = portfolio ? "none" : "";
         const ps = $("trendPositionSizing");
         const isRb = ps && String(ps.value || "") === "risk_budget";
-        if (rb) rb.style.display = portfolio && isRb ? "" : "none";
+        if (rb) {
+          rb.style.display = portfolio ? "" : "none";
+          rb.style.opacity = isRb ? "1" : "0.65";
+          const controls = rb.querySelectorAll("input, select");
+          controls.forEach((el) => {
+            el.disabled = !isRb;
+          });
+        }
         if (mrow) mrow.style.display = portfolio ? "" : "none";
         if (mex) mex.style.display = portfolio ? "" : "none";
         const uatr = $("trendUniversalAtrStopRow");
@@ -2672,7 +2845,138 @@
         return x || "-";
       }
 
+      function _vp(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return "-";
+        return `${(v * 100).toFixed(2)}%`;
+      }
+
+      function _nn(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return "-";
+        return String(Math.round(v));
+      }
+
+      function _fmtRet(x) {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return "-";
+        return `${(v * 100).toFixed(2)}%`;
+      }
+
+      function _futTradeStatsData(out) {
+        const ts =
+          out &&
+          out.trade_statistics &&
+          typeof out.trade_statistics === "object"
+            ? out.trade_statistics
+            : {};
+        const mode = String($("futTradeStatsMode")?.value || "overall");
+        const dir = String($("futTradeStatsDirection")?.value || "both");
+        if (mode === "by_code") {
+          const code = String($("futTradeStatsCode")?.value || "").trim();
+          const byCode =
+            ts.by_code && typeof ts.by_code === "object" ? ts.by_code : {};
+          const one =
+            byCode[code] && typeof byCode[code] === "object"
+              ? byCode[code]
+              : {};
+          return { stats: one[dir] || null, code };
+        }
+        const overall =
+          ts.overall && typeof ts.overall === "object" ? ts.overall : {};
+        return { stats: overall[dir] || null, code: null };
+      }
+
+      function _renderFutTradeStatsAtrChart(stats) {
+        const div = $("futTradeStatsAtrDist");
+        if (!div) return;
+        const dist =
+          stats &&
+          stats.atr_stop_trigger_multiple_distribution &&
+          typeof stats.atr_stop_trigger_multiple_distribution === "object"
+            ? stats.atr_stop_trigger_multiple_distribution
+            : null;
+        if (!dist) {
+          div.innerHTML =
+            "<div class='muted'>暂无 ATR 止损触发倍数分布。</div>";
+          return;
+        }
+        const labels = Object.keys(dist);
+        const ys = labels.map((k) => Number(dist[k] || 0));
+        if (!labels.length) {
+          div.innerHTML =
+            "<div class='muted'>暂无 ATR 止损触发倍数分布。</div>";
+          return;
+        }
+        Plotly.newPlot(
+          "futTradeStatsAtrDist",
+          [
+            {
+              type: "bar",
+              x: labels,
+              y: ys,
+              marker: { color: "#4c78a8" },
+              hovertemplate: "区间=%{x}<br>次数=%{y}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 20, b: 40 },
+            title: "ATR止损触发倍数分布（止损距离/ATR）",
+            xaxis: { title: "倍数区间" },
+            yaxis: { title: "触发次数" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function renderFutTradeStats() {
+        const wrap = $("futTradeStatsWrap");
+        const codeWrap = $("futTradeStatsCodeWrap");
+        if (codeWrap) {
+          codeWrap.style.display =
+            String($("futTradeStatsMode")?.value || "overall") === "by_code"
+              ? ""
+              : "none";
+        }
+        if (!wrap) return;
+        if (!latestFuturesTrendOut || latestFuturesTrendOut.ok !== true) {
+          wrap.innerHTML = "<div class='muted'>暂无交易特性统计数据。</div>";
+          const d = $("futTradeStatsAtrDist");
+          if (d) d.innerHTML = "";
+          return;
+        }
+        const { stats, code } = _futTradeStatsData(latestFuturesTrendOut);
+        if (!stats || typeof stats !== "object") {
+          wrap.innerHTML =
+            "<div class='muted'>当前筛选下暂无交易特性统计。</div>";
+          const d = $("futTradeStatsAtrDist");
+          if (d) d.innerHTML = "";
+          return;
+        }
+        wrap.innerHTML =
+          `<table class="corr"><thead><tr><th>指标</th><th>值</th></tr></thead><tbody>` +
+          `<tr><td>视图</td><td>${esc(code ? `按标的(${code})` : "策略总体")}</td></tr>` +
+          `<tr><td>总交易笔数</td><td>${_nn(stats.total_trades)}</td></tr>` +
+          `<tr><td>盈利/亏损/持平笔数</td><td>${_nn(stats.win_trades)} / ${_nn(stats.loss_trades)} / ${_nn(stats.flat_trades)}</td></tr>` +
+          `<tr><td>胜率（剔除零收益）</td><td>${_vp(stats.win_rate_ex_zero)}</td></tr>` +
+          `<tr><td>赔率（剔除零收益）</td><td>${stats.payoff_ex_zero == null ? "-" : Number(stats.payoff_ex_zero).toFixed(4)}</td></tr>` +
+          `<tr><td>凯利比（剔除零收益）</td><td>${stats.kelly_ex_zero == null ? "-" : Number(stats.kelly_ex_zero).toFixed(4)}</td></tr>` +
+          `<tr><td>每笔收益 最小 / 最大</td><td>${_fmtRet(stats.min_return)} / ${_fmtRet(stats.max_return)}</td></tr>` +
+          `<tr><td>每笔收益 均值 / 标准差</td><td>${_fmtRet(stats.mean_return)} / ${_fmtRet(stats.std_return)}</td></tr>` +
+          `<tr><td>每笔收益分位数 P05/P25/P50/P75/P95</td><td>${_fmtRet(stats.return_quantiles && stats.return_quantiles.p05)} / ${_fmtRet(stats.return_quantiles && stats.return_quantiles.p25)} / ${_fmtRet(stats.return_quantiles && stats.return_quantiles.p50)} / ${_fmtRet(stats.return_quantiles && stats.return_quantiles.p75)} / ${_fmtRet(stats.return_quantiles && stats.return_quantiles.p95)}</td></tr>` +
+          `<tr><td>盈利交易收益均值 / 标准差</td><td>${_fmtRet(stats.profit_mean_return)} / ${_fmtRet(stats.profit_std_return)}</td></tr>` +
+          `<tr><td>亏损交易收益均值 / 标准差</td><td>${_fmtRet(stats.loss_mean_return)} / ${_fmtRet(stats.loss_std_return)}</td></tr>` +
+          `<tr><td>盈利交易最大 / 最小收益</td><td>${_fmtRet(stats.profit_max_return)} / ${_fmtRet(stats.profit_min_return)}</td></tr>` +
+          `<tr><td>亏损交易最大 / 最小收益</td><td>${_fmtRet(stats.loss_max_return)} / ${_fmtRet(stats.loss_min_return)}</td></tr>` +
+          `<tr><td>预留保证金比例入场拦截 次数 / 拦截率</td><td>${_nn(stats.reserve_margin_blocked_entry_count)} / ${_vp(stats.reserve_margin_blocked_entry_rate)}</td></tr>` +
+          `<tr><td>月度风险预算入场拦截 次数 / 拦截率</td><td>${_nn(stats.monthly_risk_budget_blocked_entry_count)} / ${_vp(stats.monthly_risk_budget_blocked_entry_rate)}</td></tr>` +
+          `<tr><td>ATR止损触发 次数 / 触发率</td><td>${_nn(stats.atr_stop_trigger_count)} / ${_vp(stats.atr_stop_trigger_rate)}</td></tr>` +
+          `</tbody></table>`;
+        _renderFutTradeStatsAtrChart(stats);
+      }
+
       function renderTrendBacktest(out) {
+        latestFuturesTrendOut = out || null;
         if (!out || out.ok !== true) {
           clearFuturesTrendCharts();
           $("trendMeta").textContent =
@@ -2680,6 +2984,7 @@
           $("trendRuleBadge").innerHTML = "";
           $("trendSummaryWrap").innerHTML = "";
           $("trendSeriesWrap").innerHTML = "";
+          renderFutTradeStats();
           return;
         }
         const m = out.meta || {};
@@ -2701,8 +3006,27 @@
         const ts = String(m.trend_strategy || "ma_cross");
         const stratLabel = ts === "ma_cross" ? "均线交叉" : ts;
         const maLbl = String(m.ma_type || "sma").toUpperCase();
+        const acWan =
+          m.account_capital_wan != null
+            ? `${Number(m.account_capital_wan).toFixed(0)}万`
+            : "-";
+        const rsv =
+          m.reserve_margin_ratio != null
+            ? `${(Number(m.reserve_margin_ratio) * 100).toFixed(0)}%`
+            : "-";
+        const bmr =
+          m.backtest_margin_rate_pct != null
+            ? `${Number(m.backtest_margin_rate_pct).toFixed(1)}%`
+            : "-";
+        const psp =
+          m.position_size_pct != null
+            ? `${(Number(m.position_size_pct) * 100).toFixed(0)}%`
+            : "-";
+        const lotMeta = m.portfolio && m.portfolio.lot_account;
+        const lotM =
+          lotMeta && lotMeta.engine === "lot_account" ? "离散手数" : "-";
         $("trendMeta").textContent =
-          `分组=${m.group_name || "-"} | 策略=${stratLabel}(${maLbl} ${Number(m.fast_ma || 0)}/${Number(m.slow_ma || 0)}) | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+          `分组=${m.group_name || "-"} | 策略=${stratLabel}(${maLbl} ${Number(m.fast_ma || 0)}/${Number(m.slow_ma || 0)}) | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 资金=${acWan}×使用${psp} | 预留=${rsv} | 回测保证金率=${bmr} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 引擎=${lotM} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
         const s = out.summary || {};
         $("trendSummaryWrap").innerHTML =
           `<table class="corr"><thead><tr><th>策略累计收益</th><th>基准累计收益</th><th>超额累计收益</th></tr></thead>` +
@@ -2737,6 +3061,25 @@
         } else {
           clearFuturesTrendCharts();
         }
+        const tradeStatsRoot =
+          out.trade_statistics && typeof out.trade_statistics === "object"
+            ? out.trade_statistics
+            : {};
+        const byCode =
+          tradeStatsRoot.by_code && typeof tradeStatsRoot.by_code === "object"
+            ? tradeStatsRoot.by_code
+            : {};
+        const sel = $("futTradeStatsCode");
+        if (sel) {
+          const keys = Object.keys(byCode).sort();
+          const prev = String(sel.value || "");
+          sel.innerHTML = keys
+            .map((c) => `<option value="${esc(c)}">${esc(c)}</option>`)
+            .join("");
+          if (prev && keys.includes(prev)) sel.value = prev;
+          else if (keys.length) sel.value = keys[0];
+        }
+        renderFutTradeStats();
       }
 
       async function runCorrelation() {
@@ -2859,6 +3202,40 @@
         let asmStep = Number($("trendAtrStopM").value);
         if (!Number.isFinite(asmStep) || asmStep <= 0) asmStep = 0.5;
         $("trendAtrStopM").value = String(asmStep);
+        let accountWan = Number($("trendAccountCapitalWan").value);
+        if (!Number.isFinite(accountWan) || accountWan <= 0) accountWan = 500;
+        accountWan = Math.min(1e9, Math.max(0.01, accountWan));
+        $("trendAccountCapitalWan").value = String(accountWan);
+        let posUsePct = Number($("trendPositionUsePct").value);
+        if (!Number.isFinite(posUsePct) || posUsePct <= 0) posUsePct = 100;
+        posUsePct = Math.min(100, Math.max(1, posUsePct));
+        $("trendPositionUsePct").value = String(Math.floor(posUsePct));
+        let reservePct = Number($("trendReserveMarginPct").value);
+        if (!Number.isFinite(reservePct) || reservePct < 0) reservePct = 50;
+        reservePct = Math.min(95, Math.max(0, reservePct));
+        $("trendReserveMarginPct").value = String(Math.floor(reservePct));
+        const reserveMarginRatio = reservePct / 100;
+        let marginRatePct = Number($("trendBacktestMarginRatePct").value);
+        if (!Number.isFinite(marginRatePct) || marginRatePct <= 0)
+          marginRatePct = 15;
+        marginRatePct = Math.min(100, Math.max(0.1, marginRatePct));
+        $("trendBacktestMarginRatePct").value = String(marginRatePct);
+        let costBps = Number($("trendCostBps").value);
+        if (!Number.isFinite(costBps) || costBps < 0) costBps = 5;
+        costBps = Math.min(2000, Math.max(0, costBps));
+        $("trendCostBps").value = String(costBps);
+        const slipType = String(
+          $("trendSlippageType").value || "percent",
+        ).toLowerCase();
+        let slipVal = Number($("trendSlippageValue").value);
+        if (slipType === "tick_multiple") {
+          slipVal = Math.round(slipVal);
+          if (!Number.isFinite(slipVal) || slipVal < 0) slipVal = 1;
+          $("trendSlippageValue").value = String(slipVal);
+        } else {
+          if (!Number.isFinite(slipVal) || slipVal < 0) slipVal = 0.0005;
+          $("trendSlippageValue").value = String(slipVal);
+        }
         saveTrendParams();
         const payload = {
           range_key: corrRangeKey,
@@ -2871,11 +3248,15 @@
           fast_ma: fast,
           slow_ma: slow,
           min_points: 120,
-          cost_bps: 5.0,
-          fee_side: "two_way",
-          slippage_type: "percent",
-          slippage_value: 0.0005,
-          slippage_side: "two_way",
+          position_size_pct: posUsePct / 100.0,
+          account_capital_wan: accountWan,
+          reserve_margin_ratio: reserveMarginRatio,
+          backtest_margin_rate_pct: marginRatePct,
+          cost_bps: costBps,
+          fee_side: String($("trendFeeSide").value || "two_way"),
+          slippage_type: slipType,
+          slippage_value: slipVal,
+          slippage_side: String($("trendSlippageSide").value || "two_way"),
           backtest_mode: btMode,
           position_sizing: String($("trendPositionSizing").value || "equal"),
           risk_budget_atr_window: rbWin,
@@ -3100,6 +3481,24 @@
       $("runTrendBacktest").addEventListener("click", async () => {
         await runTrendBacktest();
       });
+      const _futTradeStatsMode = $("futTradeStatsMode");
+      if (_futTradeStatsMode) {
+        _futTradeStatsMode.addEventListener("change", () =>
+          renderFutTradeStats(),
+        );
+      }
+      const _futTradeStatsCode = $("futTradeStatsCode");
+      if (_futTradeStatsCode) {
+        _futTradeStatsCode.addEventListener("change", () =>
+          renderFutTradeStats(),
+        );
+      }
+      const _futTradeStatsDirection = $("futTradeStatsDirection");
+      if (_futTradeStatsDirection) {
+        _futTradeStatsDirection.addEventListener("change", () =>
+          renderFutTradeStats(),
+        );
+      }
 
       (function bindSymbolOhlcLoad() {
         const btn = $("symbolOhlcLoad");

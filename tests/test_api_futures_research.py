@@ -443,3 +443,44 @@ def test_futures_trend_backtest_rejects_invalid_semantics(
     assert bad_ts.status_code == 200
     assert bad_ts.json()["ok"] is False
     assert bad_ts.json()["error"] == "unsupported_trend_strategy"
+
+
+def test_futures_trend_backtest_risk_budget_accepts_both_direction(
+    api_client: TestClient,
+) -> None:
+    client = api_client
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
+    post_json_ok(client, "/api/futures/RB0/fetch", {})
+    post_json_ok(
+        client,
+        "/api/futures/research/groups",
+        {"name": "趋势组", "codes": ["RB0"], "set_active": True},
+    )
+    resp = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "position_sizing": "risk_budget",
+            "trade_direction": "both",
+            "risk_budget_pct": 0.01,
+            "risk_budget_atr_window": 20,
+        },
+    )
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["ok"] is True
+    assert out["meta"]["position_sizing"] == "risk_budget"
+    assert out["meta"]["trade_direction"] == "both"

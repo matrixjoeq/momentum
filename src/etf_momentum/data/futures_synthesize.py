@@ -95,6 +95,64 @@ def _attach_switch_suffix_column(
     return out
 
 
+def _attach_roll_execution_fields(
+    replay_df: pd.DataFrame,
+    switch_df: pd.DataFrame,
+    panel: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """
+    Attach old/new contract execution prices on roll day for exact roll accounting.
+
+    On each switch date T:
+    - old leg = from_symbol @ T (exit)
+    - new leg = to_symbol   @ T (entry)
+    """
+    out = replay_df.copy()
+    out["roll_from_symbol"] = None
+    out["roll_to_symbol"] = None
+    out["roll_from_open"] = np.nan
+    out["roll_from_close"] = np.nan
+    out["roll_to_open"] = np.nan
+    out["roll_to_close"] = np.nan
+    if switch_df is None or switch_df.empty:
+        return out
+
+    by_date: dict[pd.Timestamp, dict[str, Any]] = {}
+    for r in switch_df.itertuples(index=False):
+        d = pd.to_datetime(r.date)
+        from_sym = str(r.from_symbol)
+        to_sym = str(r.to_symbol)
+        rec: dict[str, Any] = {"roll_from_symbol": from_sym, "roll_to_symbol": to_sym}
+        from_df = panel.get(from_sym)
+        to_df = panel.get(to_sym)
+        if from_df is not None and d in from_df.index:
+            rec["roll_from_open"] = from_df.loc[d].get("open", np.nan)
+            rec["roll_from_close"] = from_df.loc[d].get("close", np.nan)
+        else:
+            rec["roll_from_open"] = np.nan
+            rec["roll_from_close"] = np.nan
+        if to_df is not None and d in to_df.index:
+            rec["roll_to_open"] = to_df.loc[d].get("open", np.nan)
+            rec["roll_to_close"] = to_df.loc[d].get("close", np.nan)
+        else:
+            rec["roll_to_open"] = np.nan
+            rec["roll_to_close"] = np.nan
+        by_date[d] = rec
+
+    for i, row in out.iterrows():
+        d = pd.to_datetime(row["date"])
+        rec = by_date.get(d)
+        if rec is None:
+            continue
+        out.at[i, "roll_from_symbol"] = rec.get("roll_from_symbol")
+        out.at[i, "roll_to_symbol"] = rec.get("roll_to_symbol")
+        out.at[i, "roll_from_open"] = rec.get("roll_from_open", np.nan)
+        out.at[i, "roll_from_close"] = rec.get("roll_from_close", np.nan)
+        out.at[i, "roll_to_open"] = rec.get("roll_to_open", np.nan)
+        out.at[i, "roll_to_close"] = rec.get("roll_to_close", np.nan)
+    return out
+
+
 def _month_iter(start_yymm: str, end_yymm: str) -> list[str]:
     """Generate list of YYMM strings from start to end (inclusive)."""
     sy = int(start_yymm[:2])
@@ -451,6 +509,24 @@ def _df_to_price_rows(
     df: pd.DataFrame, code: str, adjust: str, pool_id: int | None
 ) -> list[FuturesPriceRow]:
     """Convert DataFrame to list of FuturesPriceRow."""
+
+    def _num_or_none(v: Any) -> float | None:
+        if v is None:
+            return None
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return None
+        return float(fv) if np.isfinite(fv) else None
+
+    def _str_or_none(v: Any) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, float) and pd.isna(v):
+            return None
+        t = str(v).strip()
+        return t or None
+
     rows: list[FuturesPriceRow] = []
     if df.empty:
         return rows
@@ -460,24 +536,26 @@ def _df_to_price_rows(
             date_val = date_val.date()
         elif isinstance(date_val, str):
             date_val = pd.to_datetime(date_val).date()
-        raw_suf = r.get("dominant_contract_suffix")
-        if raw_suf is None or (isinstance(raw_suf, float) and pd.isna(raw_suf)):
-            suf = None
-        else:
-            suf = str(raw_suf).strip() or None
+        suf = _str_or_none(r.get("dominant_contract_suffix"))
         rows.append(
             FuturesPriceRow(
                 code=code,
                 trade_date=date_val,
-                open=r.get("open"),
-                high=r.get("high"),
-                low=r.get("low"),
-                close=r.get("close"),
-                settle=r.get("settle"),
-                volume=r.get("volume"),
-                amount=r.get("amount"),
-                hold=r.get("hold"),
+                open=_num_or_none(r.get("open")),
+                high=_num_or_none(r.get("high")),
+                low=_num_or_none(r.get("low")),
+                close=_num_or_none(r.get("close")),
+                settle=_num_or_none(r.get("settle")),
+                volume=_num_or_none(r.get("volume")),
+                amount=_num_or_none(r.get("amount")),
+                hold=_num_or_none(r.get("hold")),
                 dominant_contract_suffix=suf,
+                roll_from_symbol=_str_or_none(r.get("roll_from_symbol")),
+                roll_to_symbol=_str_or_none(r.get("roll_to_symbol")),
+                roll_from_open=_num_or_none(r.get("roll_from_open")),
+                roll_from_close=_num_or_none(r.get("roll_from_close")),
+                roll_to_open=_num_or_none(r.get("roll_to_open")),
+                roll_to_close=_num_or_none(r.get("roll_to_close")),
                 source="synthetic",
                 adjust=adjust,
                 pool_id=pool_id,
@@ -533,6 +611,7 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
 
     # Build quote panel
     panel = _build_quote_panel(contract_data)
+    replay_df = _attach_roll_execution_fields(replay_df, switch_df, panel)
 
     # Build adjusted series
     replay888_df, replay889_df = _build_adjusted_continuous(replay_df, switch_df, panel)

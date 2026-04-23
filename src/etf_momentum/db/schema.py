@@ -206,6 +206,12 @@ def ensure_runtime_schema(engine: Engine) -> None:
             "settle": "settle FLOAT",
             "hold": "hold FLOAT",
             "dominant_contract_suffix": "dominant_contract_suffix VARCHAR(16)",
+            "roll_from_symbol": "roll_from_symbol VARCHAR(32)",
+            "roll_to_symbol": "roll_to_symbol VARCHAR(32)",
+            "roll_from_open": "roll_from_open FLOAT",
+            "roll_from_close": "roll_from_close FLOAT",
+            "roll_to_open": "roll_to_open FLOAT",
+            "roll_to_close": "roll_to_close FLOAT",
         }
         for col, ddl in futures_price_cols.items():
             if _has_column(engine, "futures_prices", col):

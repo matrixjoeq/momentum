@@ -26,6 +26,12 @@ class FuturesPriceRow:
     amount: float | None = None
     hold: float | None = None
     dominant_contract_suffix: str | None = None
+    roll_from_symbol: str | None = None
+    roll_to_symbol: str | None = None
+    roll_from_open: float | None = None
+    roll_from_close: float | None = None
+    roll_to_open: float | None = None
+    roll_to_close: float | None = None
     source: str = "sina"
     adjust: str = "none"
     pool_id: int | None = None
@@ -249,6 +255,12 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
             "amount": r.amount,
             "hold": r.hold,
             "dominant_contract_suffix": r.dominant_contract_suffix,
+            "roll_from_symbol": r.roll_from_symbol,
+            "roll_to_symbol": r.roll_to_symbol,
+            "roll_from_open": r.roll_from_open,
+            "roll_from_close": r.roll_from_close,
+            "roll_to_open": r.roll_to_open,
+            "roll_to_close": r.roll_to_close,
             "source": r.source,
             "adjust": normalize_futures_adjust(r.adjust),
         }
@@ -269,6 +281,12 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
                 "amount": stmt.inserted.amount,
                 "hold": stmt.inserted.hold,
                 "dominant_contract_suffix": stmt.inserted.dominant_contract_suffix,
+                "roll_from_symbol": stmt.inserted.roll_from_symbol,
+                "roll_to_symbol": stmt.inserted.roll_to_symbol,
+                "roll_from_open": stmt.inserted.roll_from_open,
+                "roll_from_close": stmt.inserted.roll_from_close,
+                "roll_to_open": stmt.inserted.roll_to_open,
+                "roll_to_close": stmt.inserted.roll_to_close,
                 "source": stmt.inserted.source,
                 "adjust": stmt.inserted.adjust,
                 "ingested_at": dt.datetime.now(dt.timezone.utc),
@@ -293,6 +311,12 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
                 "amount": stmt.excluded.amount,
                 "hold": stmt.excluded.hold,
                 "dominant_contract_suffix": stmt.excluded.dominant_contract_suffix,
+                "roll_from_symbol": stmt.excluded.roll_from_symbol,
+                "roll_to_symbol": stmt.excluded.roll_to_symbol,
+                "roll_from_open": stmt.excluded.roll_from_open,
+                "roll_from_close": stmt.excluded.roll_from_close,
+                "roll_to_open": stmt.excluded.roll_to_open,
+                "roll_to_close": stmt.excluded.roll_to_close,
                 "source": stmt.excluded.source,
                 "adjust": stmt.excluded.adjust,
                 "ingested_at": dt.datetime.now(dt.timezone.utc),

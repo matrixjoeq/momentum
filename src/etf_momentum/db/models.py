@@ -405,6 +405,12 @@ class FuturesPrice(Base):
     dominant_contract_suffix: Mapped[str | None] = mapped_column(
         String(16), nullable=True
     )
+    roll_from_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    roll_to_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    roll_from_open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roll_from_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roll_to_open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roll_to_close: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="sina")
     adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="none")
