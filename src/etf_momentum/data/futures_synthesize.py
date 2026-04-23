@@ -1,13 +1,26 @@
 """
 Synthesize dominant continuous futures prices (88/888/889) from deliverable-month contract data.
 
-This module implements the logic from futures_continuous_replay.py to synthesize:
-- 88: synthetic no adjustment (raw/no adjustment)
-- 888: synthetic forward adjustment (qfq)
-- 889: synthetic backward adjustment (hfq)
+Specification (must stay aligned):
+- Narrative rules: ``docs/futures-continuous-rules.md`` (主力切换阈值、88/888/889 价差口径).
+- Executable dominant + adjustment algorithm: **identical** to
+  ``src/etf_momentum/scripts/futures_continuous_replay.py`` and
+  ``docs/futures-continuous-spec.md`` §7 (switch uses **previous** trading day’s
+  hold snapshot; threshold default 1.1).
 
-The synthesized data is stored in the same futures_prices table with adjust='none', 'qfq', 'hfq'
-respectively, and code suffixes 88, 888, 889.
+**88 — 简单主连（无复权）**
+按日取当日主力合约行情做拼接，不做复权平滑；与规则文档中「量价简单拼接」一致。
+
+**888 — 前复权（DB: adjust=qfq）**
+在每次换月时：取 **切换日 T 的前一交易日 T−1** 上，**旧主力与新主力收盘价之差**
+``close_old − close_new``，将该价差累加到主力连续序列中 **T−1 当日及以前** 的所有价格列
+（open/high/low/close/settle）；成交量、持仓不变；成交额置 0（规则：成交量、持仓均不作调整，成交额统一为 0）。
+
+**889 — 后复权（DB: adjust=hfq）**
+在每次换月时：取 **切换日 T** 上 **旧主力与新主力开盘价之差**
+``open_old − open_new``，将该价差累加到 **T 当日及以后** 的所有价格列；成交量、持仓不变；成交额置 0。
+
+Only 88/888/889 synthesis from this module is used by the project; 99 / 88A2 等不在此实现。
 """
 
 from __future__ import annotations
@@ -21,7 +34,11 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db.futures_repo import FuturesPriceRow, upsert_futures_prices
+from ..db.futures_repo import (
+    FuturesPriceRow,
+    delete_futures_prices,
+    upsert_futures_prices,
+)
 from ..db.models import FuturesPool, FuturesPrice
 
 logger = logging.getLogger(__name__)
@@ -43,6 +60,39 @@ def _symbol_root_from_main(code: str) -> str:
     while i < len(c) and c[i].isalpha():
         i += 1
     return c[:i] if i else c
+
+
+def _contract_yymm_suffix(contract_code: str, *, root: str) -> str | None:
+    """Digits after the symbol root (e.g. ``RB2606`` / root ``RB`` -> ``2606``)."""
+    c = str(contract_code or "").strip().upper()
+    r = str(root or "").strip().upper()
+    if not c.startswith(r):
+        return None
+    tail = c[len(r) :]
+    return tail if tail.isdigit() else None
+
+
+def _attach_switch_suffix_column(
+    replay_df: pd.DataFrame, switch_df: pd.DataFrame, *, root: str
+) -> pd.DataFrame:
+    """
+    On each roll date (first day of new dominant), set ``dominant_contract_suffix``
+    to the delivery month digits of ``to_symbol`` so 88 / 888 / 889 rows can persist it.
+    """
+    out = replay_df.copy()
+    suffix_by_date: dict[Any, str | None] = {}
+    if switch_df is not None and not switch_df.empty:
+        for row in switch_df.itertuples(index=False):
+            d = pd.to_datetime(row.date).date()
+            suf = _contract_yymm_suffix(str(row.to_symbol), root=root)
+            suffix_by_date[d] = suf
+
+    def _suffix_for(ts: Any) -> str | None:
+        key = pd.Timestamp(ts).date()
+        return suffix_by_date.get(key)
+
+    out["dominant_contract_suffix"] = out["date"].map(_suffix_for)
+    return out
 
 
 def _month_iter(start_yymm: str, end_yymm: str) -> list[str]:
@@ -178,11 +228,47 @@ def _argmax_hold(holds: pd.Series) -> str | None:
     return str(v.idxmax())
 
 
+def _argmax_hold_eligible(
+    holds: pd.Series,
+    *,
+    prev_dom: str | None,
+    ever_dominant: set[str],
+) -> str | None:
+    """
+    Max-hold contract among symbols allowed to be dominant on this step.
+
+    A symbol may appear iff it is ``prev_dom`` (continue current) or it has never
+    been dominant before (``docs/futures-continuous-rules.md``: 至多一次成为主力).
+    """
+    v = holds.dropna()
+    if v.empty:
+        return None
+    best_sym: str | None = None
+    best_val = -np.inf
+    for sym, raw in v.items():
+        sym = str(sym)
+        if sym != prev_dom and sym in ever_dominant:
+            continue
+        val = float(raw)
+        if val > best_val:
+            best_val = val
+            best_sym = sym
+    return best_sym
+
+
 def _replay_dominant(
     contract_data: dict[str, pd.DataFrame], switch_threshold: float = 1.1
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Replay dominant continuous contract based on open interest.
+    Replay dominant (main) continuous contract from daily hold (open interest).
+
+    Matches ``futures_continuous_replay._replay_dominant`` and
+    ``docs/futures-continuous-spec.md`` §7: from the second calendar row onward,
+    roll is decided on the **previous** trading day’s hold cross-section with
+    ``switch_threshold`` (default 1.1). Only contracts that have **never** been
+    dominant before may become dominant; the incumbent may stay
+    (``docs/futures-continuous-rules.md``).
+
     Returns (replay_df, switch_df).
     """
     holds_tbl = _build_hold_table(contract_data)
@@ -193,6 +279,7 @@ def _replay_dominant(
     dates = list(holds_tbl.index)
     chosen: list[str] = []
     prev_dom: str | None = None
+    ever_dominant: set[str] = set()
 
     for i, d in enumerate(dates):
         today_holds = holds_tbl.loc[d]
@@ -200,31 +287,42 @@ def _replay_dominant(
             cur = _argmax_hold(today_holds)
             if cur is None:
                 continue
+            ever_dominant.add(cur)
             chosen.append(cur)
             prev_dom = cur
             continue
 
-        prev_d = dates[i - 1]
-        prev_holds = holds_tbl.loc[prev_d]
+        prev_holds = holds_tbl.loc[dates[i - 1]]
         cur = prev_dom
         if cur is None:
-            cur = _argmax_hold(today_holds)
+            cur = _argmax_hold_eligible(
+                today_holds, prev_dom=None, ever_dominant=ever_dominant
+            )
+            if cur is None:
+                cur = _argmax_hold(today_holds)
         else:
             cur_hold = prev_holds.get(cur, np.nan)
-            best = _argmax_hold(prev_holds)
-            if best is not None and pd.notna(cur_hold):
-                best_hold = prev_holds.get(best, np.nan)
+            eligible_best = _argmax_hold_eligible(
+                prev_holds, prev_dom=cur, ever_dominant=ever_dominant
+            )
+            if eligible_best is not None and pd.notna(cur_hold):
+                eb_hold = prev_holds.get(eligible_best, np.nan)
                 if (
-                    best != cur
-                    and pd.notna(best_hold)
-                    and float(best_hold) > switch_threshold * float(cur_hold)
+                    eligible_best != cur
+                    and pd.notna(eb_hold)
+                    and float(eb_hold) > switch_threshold * float(cur_hold)
                 ):
-                    cur = best
+                    cur = eligible_best
         if cur is None or cur not in panel or d not in panel[cur].index:
-            fallback = _argmax_hold(today_holds)
+            fallback = _argmax_hold_eligible(
+                today_holds, prev_dom=prev_dom, ever_dominant=ever_dominant
+            )
+            if fallback is None:
+                fallback = _argmax_hold(today_holds)
             if fallback is None:
                 continue
             cur = fallback
+        ever_dominant.add(cur)
         chosen.append(cur)
         prev_dom = cur
 
@@ -289,6 +387,19 @@ def _build_adjusted_continuous(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build forward-adjusted (888/qfq) and backward-adjusted (889/hfq) continuous series.
+
+    Mirrors ``futures_continuous_replay._build_adjusted_continuous`` and
+    ``docs/futures-continuous-rules.md`` (IF888 / IF889 bullets):
+
+    - **888**: for each roll, gap = ``close[to] − close[from]`` at **T−1** (last day still
+      on old dominant in the stitched series); add gap cumulatively to all dates **≤ T−1**.
+    - **889**: for each roll, gap = ``open[from] − open[to]`` at **T** (first day on new
+      dominant); add gap cumulatively to all dates **≥ T**.
+
+    ``from_symbol`` / ``to_symbol`` are old / new dominant; diff order matches replay script.
+    Only ``PRICE_COLS`` are shifted; volume and hold are unchanged from 88; ``amount`` is set
+    to 0.0 on the adjusted rows. Non-price columns such as ``dominant_contract_suffix`` are
+    copied from the 88 frame unchanged.
     """
     if replay88_df.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -312,7 +423,7 @@ def _build_adjusted_continuous(
             prev_d = idx[i - 1]
             # Forward adjustment: apply diff before the switch date
             pre_delta = _calc_price_diff(
-                panel, r.from_symbol, r.to_symbol, prev_d, "close"
+                panel, r.to_symbol, r.from_symbol, prev_d, "close"
             )
             if pre_delta is not None:
                 pre_adj.loc[idx <= prev_d] += pre_delta
@@ -327,7 +438,7 @@ def _build_adjusted_continuous(
             if c not in out.columns:
                 continue
             out[c] = pd.to_numeric(out[c], errors="coerce") + adj
-        # amount is not adjusted
+        # Rules: do not adjust volume/hold; 成交额统一为 0 on 888/889.
         out["amount"] = 0.0
         return out.reset_index()
 
@@ -349,6 +460,11 @@ def _df_to_price_rows(
             date_val = date_val.date()
         elif isinstance(date_val, str):
             date_val = pd.to_datetime(date_val).date()
+        raw_suf = r.get("dominant_contract_suffix")
+        if raw_suf is None or (isinstance(raw_suf, float) and pd.isna(raw_suf)):
+            suf = None
+        else:
+            suf = str(raw_suf).strip() or None
         rows.append(
             FuturesPriceRow(
                 code=code,
@@ -361,6 +477,7 @@ def _df_to_price_rows(
                 volume=r.get("volume"),
                 amount=r.get("amount"),
                 hold=r.get("hold"),
+                dominant_contract_suffix=suf,
                 source="synthetic",
                 adjust=adjust,
                 pool_id=pool_id,
@@ -369,10 +486,31 @@ def _df_to_price_rows(
     return rows
 
 
+def _delete_existing_synthetic_continuous(db: Session, *, root: str) -> dict[str, int]:
+    """Remove prior rows for ``{root}88`` / ``888`` / ``889`` so each run replaces the full series."""
+    specs = (
+        (f"{root}88", "none"),
+        (f"{root}888", "qfq"),
+        (f"{root}889", "hfq"),
+    )
+    out: dict[str, int] = {}
+    for code, adj in specs:
+        n = delete_futures_prices(db, code=code, adjust=adj)
+        out[f"{code}:{adj}"] = int(n)
+    return out
+
+
 def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, Any]:
     """
     Synthesize dominant continuous prices (88/888/889) for a single futures pool.
-    Returns dict with 'ok', 'error', 'counts' keys.
+
+    Implementation follows ``docs/futures-continuous-rules.md`` and matches
+    ``futures_continuous_replay.py`` end-to-end for the three suffixes only.
+
+    Each successful run **deletes** all existing rows for ``{root}88`` / ``888`` / ``889``
+    then upserts the newly computed series (full replace per code/adjust).
+
+    Returns dict with ``ok``, ``error``, ``counts`` keys.
     """
     root = _symbol_root_from_main(pool.code)
 
@@ -391,6 +529,8 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
     if replay_df.empty:
         return {"ok": False, "error": "failed to replay dominant contract"}
 
+    replay_df = _attach_switch_suffix_column(replay_df, switch_df, root=root)
+
     # Build quote panel
     panel = _build_quote_panel(contract_data)
 
@@ -400,20 +540,16 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
     # Prepare to insert into database
     pool_id = int(pool.id)
 
-    # Insert 88 (synthetic none)
     rows_88 = _df_to_price_rows(replay_df, f"{root}88", "none", pool_id)
-    if rows_88:
-        upsert_futures_prices(db, rows_88)
-
-    # Insert 888 (synthetic qfq)
     rows_888 = _df_to_price_rows(replay888_df, f"{root}888", "qfq", pool_id)
-    if rows_888:
-        upsert_futures_prices(db, rows_888)
-
-    # Insert 889 (synthetic hfq)
     rows_889 = _df_to_price_rows(replay889_df, f"{root}889", "hfq", pool_id)
-    if rows_889:
-        upsert_futures_prices(db, rows_889)
+    if not rows_88 or not rows_888 or not rows_889:
+        return {"ok": False, "error": "synthesized row build produced empty series"}
+
+    deleted_by_code = _delete_existing_synthetic_continuous(db, root=root)
+    upsert_futures_prices(db, rows_88)
+    upsert_futures_prices(db, rows_888)
+    upsert_futures_prices(db, rows_889)
 
     db.commit()
 
@@ -424,6 +560,7 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
             "888": len(rows_888),
             "889": len(rows_889),
         },
+        "deleted_prior_rows": deleted_by_code,
     }
 
 

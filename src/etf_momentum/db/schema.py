@@ -205,6 +205,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
         futures_price_cols = {
             "settle": "settle FLOAT",
             "hold": "hold FLOAT",
+            "dominant_contract_suffix": "dominant_contract_suffix VARCHAR(16)",
         }
         for col, ddl in futures_price_cols.items():
             if _has_column(engine, "futures_prices", col):

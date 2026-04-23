@@ -25,6 +25,7 @@ class FuturesPriceRow:
     volume: float | None = None
     amount: float | None = None
     hold: float | None = None
+    dominant_contract_suffix: str | None = None
     source: str = "sina"
     adjust: str = "none"
     pool_id: int | None = None
@@ -247,6 +248,7 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
             "volume": r.volume,
             "amount": r.amount,
             "hold": r.hold,
+            "dominant_contract_suffix": r.dominant_contract_suffix,
             "source": r.source,
             "adjust": normalize_futures_adjust(r.adjust),
         }
@@ -266,6 +268,7 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
                 "volume": stmt.inserted.volume,
                 "amount": stmt.inserted.amount,
                 "hold": stmt.inserted.hold,
+                "dominant_contract_suffix": stmt.inserted.dominant_contract_suffix,
                 "source": stmt.inserted.source,
                 "adjust": stmt.inserted.adjust,
                 "ingested_at": dt.datetime.now(dt.timezone.utc),
@@ -289,6 +292,7 @@ def upsert_futures_prices(db: Session, rows: list[FuturesPriceRow]) -> int:
                 "volume": stmt.excluded.volume,
                 "amount": stmt.excluded.amount,
                 "hold": stmt.excluded.hold,
+                "dominant_contract_suffix": stmt.excluded.dominant_contract_suffix,
                 "source": stmt.excluded.source,
                 "adjust": stmt.excluded.adjust,
                 "ingested_at": dt.datetime.now(dt.timezone.utc),

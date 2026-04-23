@@ -44,8 +44,10 @@ def test_futures_pool_crud_and_fetch_contract(api_client: TestClient) -> None:
     assert cs.status_code == 200
     assert isinstance(cs.json(), list)
 
-    bad_adjust = client.get("/api/futures/RB0/prices?adjust=hfq")
-    assert bad_adjust.status_code == 400
+    # hfq 为合法口径；无 889 合成数据时返回 200 与空列表
+    hfq = client.get("/api/futures/RB0/prices?adjust=hfq")
+    assert hfq.status_code == 200
+    assert isinstance(hfq.json(), list)
 
     rm = client.delete("/api/futures/RB0")
     assert rm.status_code == 200

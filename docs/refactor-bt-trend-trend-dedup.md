@@ -22,14 +22,14 @@
 
 ## P0 — 高风险重复（优先收敛到 `trend`）
 
-| 区域 | `bt_trend` 中仍为独立副本的符号（示例） |
-|------|----------------------------------------|
-| 月度门控配套 | `_month_key`, `_position_risk_from_stop_params`, `_risk_budget_dynamic_weights` |
-| 止盈叠加 | `_normalize_r_take_profit_tiers`, `_apply_r_multiple_take_profit`, `_apply_bias_v_take_profit`, `_extract_atr_plan_stops_from_trace`, `_latest_entry_exec_price_with_slippage` |
-| 持仓/信号构造 | `_pos_from_donchian`, `_pos_from_tsmom`, `_pos_from_band`, `_pos_from_random_entry_hold`, `_stable_code_seed`（Donchian 辅助：`bt_trend` 另有 `_donchian_prev_high` / `_donchian_prev_low`） |
-| Impulse / ER | `_compute_impulse_state`, `_efficiency_ratio`, `_apply_er_entry_filter`, `_apply_er_exit_filter`, `_apply_impulse_entry_filter` |
-| 组合与权重 | `_reduce_active_codes_by_group`, `_trade_returns_from_weight_series`, `_trade_returns_from_weight_df` |
-| 统计与分桶 | `_dist_stats`, `_trade_stats_from_returns`, `_rolling_pack`, `_round_half_up`, `_bucketize_*`, `_series_index_to_date_str`, `_build_entry_signal_date_map`, `_attach_entry_condition_bins_to_trades`, `_normal_two_sided_p_from_z`, `_two_proportion_z_test`, `_welch_t_test_normal_approx`, `_bh_qvalues`, `_stratified_permutation_pvalue`, `_sorted_condition_buckets`, `_stable_seed_from_text`, `_build_entry_condition_stats` |
+| 区域          | `bt_trend` 中仍为独立副本的符号（示例）                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 月度门控配套  | `_month_key`, `_position_risk_from_stop_params`, `_risk_budget_dynamic_weights`                                                                                                                                                                                                                                                                                                                                                     |
+| 止盈叠加      | `_normalize_r_take_profit_tiers`, `_apply_r_multiple_take_profit`, `_apply_bias_v_take_profit`, `_extract_atr_plan_stops_from_trace`, `_latest_entry_exec_price_with_slippage`                                                                                                                                                                                                                                                      |
+| 持仓/信号构造 | `_pos_from_donchian`, `_pos_from_tsmom`, `_pos_from_band`, `_pos_from_random_entry_hold`, `_stable_code_seed`（Donchian 辅助：`bt_trend` 另有 `_donchian_prev_high` / `_donchian_prev_low`）                                                                                                                                                                                                                                        |
+| Impulse / ER  | `_compute_impulse_state`, `_efficiency_ratio`, `_apply_er_entry_filter`, `_apply_er_exit_filter`, `_apply_impulse_entry_filter`                                                                                                                                                                                                                                                                                                     |
+| 组合与权重    | `_reduce_active_codes_by_group`, `_trade_returns_from_weight_series`, `_trade_returns_from_weight_df`                                                                                                                                                                                                                                                                                                                               |
+| 统计与分桶    | `_dist_stats`, `_trade_stats_from_returns`, `_rolling_pack`, `_round_half_up`, `_bucketize_*`, `_series_index_to_date_str`, `_build_entry_signal_date_map`, `_attach_entry_condition_bins_to_trades`, `_normal_two_sided_p_from_z`, `_two_proportion_z_test`, `_welch_t_test_normal_approx`, `_bh_qvalues`, `_stratified_permutation_pvalue`, `_sorted_condition_buckets`, `_stable_seed_from_text`, `_build_entry_condition_stats` |
 
 ---
 
@@ -62,4 +62,4 @@
 
 ---
 
-*本文档由代码对比检查结论整理，用于跟踪后续重构；更新进度时请在本文件勾选或追加 PR 链接。*
+_本文档由代码对比检查结论整理，用于跟踪后续重构；更新进度时请在本文件勾选或追加 PR 链接。_

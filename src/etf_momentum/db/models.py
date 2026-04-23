@@ -402,6 +402,10 @@ class FuturesPrice(Base):
     amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     hold: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    dominant_contract_suffix: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="sina")
     adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="none")
 

@@ -6724,17 +6724,15 @@ def get_futures_prices_api(
         raise HTTPException(status_code=400, detail=str(e)) from e
     req_start = _parse_optional_yyyymmdd(start)
     req_end = _parse_optional_yyyymmdd(end)
-    if (
-        req_start is not None
-        and req_end is not None
-        and req_start > req_end
-    ):
+    if req_start is not None and req_end is not None and req_start > req_end:
         req_start, req_end = req_end, req_start
     code_u = str(code or "").strip().upper()
+    root = _symbol_root_from_main(code_u)
+    synth88 = f"{root}88"
+    synth888 = f"{root}888"
+    synth889 = f"{root}889"
 
     if adj == "none":
-        root = _symbol_root_from_main(code_u)
-        synth88 = f"{root}88"
         if _looks_like_cn_futures_delivery_month(code_u):
             eff = code_u
             src = "delivery_contract"
@@ -6746,6 +6744,22 @@ def get_futures_prices_api(
             else:
                 eff = code_u
                 src = "fallback_main"
+    elif adj == "qfq":
+        ds8, de8 = get_futures_date_range(db, code=synth888, adjust="qfq")
+        if ds8 is not None and de8 is not None:
+            eff = synth888
+            src = "synthetic_888"
+        else:
+            eff = code_u
+            src = "as_requested"
+    elif adj == "hfq":
+        ds9, de9 = get_futures_date_range(db, code=synth889, adjust="hfq")
+        if ds9 is not None and de9 is not None:
+            eff = synth889
+            src = "synthetic_889"
+        else:
+            eff = code_u
+            src = "as_requested"
     else:
         eff = code_u
         src = "as_requested"
@@ -6783,7 +6797,9 @@ def get_futures_prices_api(
     )
     response.headers["X-Futures-Effective-Code"] = eff
     response.headers["X-Futures-Price-Source"] = src
-    response.headers["X-Futures-Effective-Window"] = f"{lo.isoformat()}/{hi.isoformat()}"
+    response.headers["X-Futures-Effective-Window"] = (
+        f"{lo.isoformat()}/{hi.isoformat()}"
+    )
 
     return [
         FuturesPriceOut(
@@ -6797,6 +6813,7 @@ def get_futures_prices_api(
             volume=r.volume,
             amount=r.amount,
             hold=r.hold,
+            dominant_contract_suffix=r.dominant_contract_suffix,
             source=r.source,
             adjust=r.adjust,
         )

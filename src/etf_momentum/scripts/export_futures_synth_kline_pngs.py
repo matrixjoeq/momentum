@@ -7,6 +7,7 @@ Usage (from repo root, with DB configured in env / settings):
 
 Requires matplotlib (not in core pyproject; install if missing: python3 -m pip install matplotlib).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -72,11 +73,11 @@ def _plot_candles_png(
     fig, ax = plt.subplots(figsize=(fig_w, 7.0))
     x = list(range(len(idx)))
     for j, i in enumerate(idx):
-        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+        o, h, lo, c = opens[i], highs[i], lows[i], closes[i]
         col = "#e53935" if c >= o else "#26a69a"
-        ax.plot([j, j], [l, h], color=col, linewidth=0.6, solid_capstyle="round")
+        ax.plot([j, j], [lo, h], color=col, linewidth=0.6, solid_capstyle="round")
         bottom = min(o, c)
-        height = abs(c - o) if abs(c - o) > 1e-12 else 1e-9 * (h - l or 1.0)
+        height = abs(c - o) if abs(c - o) > 1e-12 else 1e-9 * (h - lo or 1.0)
         ax.add_patch(
             Rectangle(
                 (j - 0.35, bottom),
@@ -195,12 +196,7 @@ def main() -> None:
             l_: list[float] = []
             c_: list[float] = []
             for r in rows:
-                if (
-                    r.open is None
-                    or r.high is None
-                    or r.low is None
-                    or r.close is None
-                ):
+                if r.open is None or r.high is None or r.low is None or r.close is None:
                     continue
                 dates.append(r.trade_date)
                 o_.append(float(r.open))

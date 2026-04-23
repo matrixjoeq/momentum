@@ -10,9 +10,10 @@ Overview
 
 Quick Start: local dev setup
 
-- Create a virtual environment: `python -m venv .venv`.
+- Default PyPI index for this repo: Tsinghua mirror via root `pip.conf`. Before `pip` commands from the repo root: `export PIP_CONFIG_FILE="$(pwd)/pip.conf"` (Unix) or set `PIP_CONFIG_FILE` to the repo `pip.conf` path (Windows).
+- Create a virtual environment: `python3 -m venv .venv`.
 - Activate it: `source .venv/bin/activate` (Unix) or `.venv\Scripts\activate` (Windows).
-- Install development dependencies: `pip install -e '.[dev]'`.
+- Install development dependencies: `python3 -m pip install -e '.[dev]'` (with `PIP_CONFIG_FILE` set as above, or pass `-i https://pypi.tuna.tsinghua.edu.cn/simple`).
 - Optional: install tooling for formatting/checking: `pip install ruff black pytest-cov mypy`.
 - For packaging: `pip install build` and `python -m build`.
 
@@ -21,7 +22,7 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 1. Build / Lint / Test commands
 
 - Build distributions: `python -m build` (produces dist/_.whl and dist/_.tar.gz).
-- Install in editable mode (dev): `pip install -e '.[dev]'`.
+- Install in editable mode (dev): `python3 -m pip install -e '.[dev]'` (same index as above).
 - **pytest:** Always run tests with the project virtualenv’s Python (not a system interpreter and not bare `pytest` on PATH unless you know it is this venv). After `pip install -e '.[dev]'`, use:
   - Unix / macOS: `.venv/bin/python3 -m pytest …`
   - Windows: `.venv\Scripts\python.exe -m pytest …`

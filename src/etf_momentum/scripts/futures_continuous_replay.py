@@ -181,6 +181,29 @@ def _argmax_hold(holds: pd.Series) -> str | None:
     return str(v.idxmax())
 
 
+def _argmax_hold_eligible(
+    holds: pd.Series,
+    *,
+    prev_dom: str | None,
+    ever_dominant: set[str],
+) -> str | None:
+    """Max hold among symbols allowed to be dominant (see futures-continuous-rules.md)."""
+    v = holds.dropna()
+    if v.empty:
+        return None
+    best_sym: str | None = None
+    best_val = -np.inf
+    for sym, raw in v.items():
+        sym = str(sym)
+        if sym != prev_dom and sym in ever_dominant:
+            continue
+        val = float(raw)
+        if val > best_val:
+            best_val = val
+            best_sym = sym
+    return best_sym
+
+
 def _replay_dominant(
     cfg: ReplayConfig, contract_data: dict[str, pd.DataFrame]
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -192,6 +215,7 @@ def _replay_dominant(
     dates = list(holds_tbl.index)
     chosen: list[str] = []
     prev_dom: str | None = None
+    ever_dominant: set[str] = set()
 
     for i, d in enumerate(dates):
         today_holds = holds_tbl.loc[d]
@@ -199,31 +223,42 @@ def _replay_dominant(
             cur = _argmax_hold(today_holds)
             if cur is None:
                 continue
+            ever_dominant.add(cur)
             chosen.append(cur)
             prev_dom = cur
             continue
 
-        prev_d = dates[i - 1]
-        prev_holds = holds_tbl.loc[prev_d]
+        prev_holds = holds_tbl.loc[dates[i - 1]]
         cur = prev_dom
         if cur is None:
-            cur = _argmax_hold(today_holds)
+            cur = _argmax_hold_eligible(
+                today_holds, prev_dom=None, ever_dominant=ever_dominant
+            )
+            if cur is None:
+                cur = _argmax_hold(today_holds)
         else:
             cur_hold = prev_holds.get(cur, np.nan)
-            best = _argmax_hold(prev_holds)
-            if best is not None and pd.notna(cur_hold):
-                best_hold = prev_holds.get(best, np.nan)
+            eligible_best = _argmax_hold_eligible(
+                prev_holds, prev_dom=cur, ever_dominant=ever_dominant
+            )
+            if eligible_best is not None and pd.notna(cur_hold):
+                eb_hold = prev_holds.get(eligible_best, np.nan)
                 if (
-                    best != cur
-                    and pd.notna(best_hold)
-                    and float(best_hold) > cfg.switch_threshold * float(cur_hold)
+                    eligible_best != cur
+                    and pd.notna(eb_hold)
+                    and float(eb_hold) > cfg.switch_threshold * float(cur_hold)
                 ):
-                    cur = best
+                    cur = eligible_best
         if cur is None or cur not in panel or d not in panel[cur].index:
-            fallback = _argmax_hold(today_holds)
+            fallback = _argmax_hold_eligible(
+                today_holds, prev_dom=prev_dom, ever_dominant=ever_dominant
+            )
+            if fallback is None:
+                fallback = _argmax_hold(today_holds)
             if fallback is None:
                 continue
             cur = fallback
+        ever_dominant.add(cur)
         chosen.append(cur)
         prev_dom = cur
 
@@ -304,7 +339,7 @@ def _build_adjusted_continuous(
                 continue
             prev_d = idx[i - 1]
             pre_delta = _calc_price_diff(
-                panel, r.from_symbol, r.to_symbol, prev_d, "close"
+                panel, r.to_symbol, r.from_symbol, prev_d, "close"
             )
             if pre_delta is not None:
                 pre_adj.loc[idx <= prev_d] += pre_delta

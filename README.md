@@ -6,12 +6,19 @@ ETF动量轮动策略研究
 
 ### 环境准备
 
+- 默认使用清华 PyPI 镜像（项目根目录 `pip.conf`）。在项目根目录执行前先：
+
+```bash
+export PIP_CONFIG_FILE="$(pwd)/pip.conf"
+```
+
 - 使用项目内虚拟环境（避免 macOS PEP668 限制）：
 
 ```bash
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -U pip
-.venv/bin/python -m pip install -e ".[dev]"
+python3 -m venv .venv
+export PIP_CONFIG_FILE="$(pwd)/pip.conf"
+.venv/bin/python3 -m pip install -U pip setuptools wheel
+.venv/bin/python3 -m pip install -e ".[dev]"
 ```
 
 > 说明：目前 `akshare` 固定使用 `1.16.72`，以避免其新版本在部分环境中引入的 `curl_cffi` 构建问题。
@@ -27,7 +34,8 @@ python3.11 -m venv .venv
 
 ```powershell
 python3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -U pip
+$env:PIP_CONFIG_FILE = (Join-Path (Get-Location) "pip.conf")
+.\.venv\Scripts\python.exe -m pip install -U pip setuptools wheel
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
@@ -46,7 +54,7 @@ python3 -m venv .venv
 ### 运行服务
 
 ```bash
-.venv/bin/python -m uvicorn etf_momentum.app:app --reload --reload-dir ./src --reload-exclude "tests/*" --port 8000
+.venv/bin/python3 -m uvicorn etf_momentum.app:app --reload --reload-dir ./src --reload-exclude "tests/*" --port 8000
 ```
 
 - Web UI：打开 `http://127.0.0.1:8000/`
@@ -70,7 +78,7 @@ python3 -m venv .venv
 ### 运行测试
 
 ```bash
-.venv/bin/python -m pytest
+.venv/bin/python3 -m pytest
 ```
 
 ### 时序回归测试清单

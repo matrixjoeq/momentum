@@ -4,6 +4,14 @@ Futures trend backtest (research) — price series policy
 When **synthesized continuous** rows exist for a symbol (codes ``{root}88`` /
 ``{root}888`` / ``{root}889`` under the same ``Date`` calendar), we apply:
 
+- **Main-contract roll (88 execution series):** if ``dominant_contract_suffix`` is
+  present on stored prices, **portfolio / single aggregate returns** treat each
+  roll day as closing the old lot and reopening the same strategy weight on the
+  new dominant: we use the **88** close-to-close return on that day and deduct a
+  **round-turn** commission+slippage bundle (exit + re-entry) whenever the prior
+  lagged weight shows an open position. This avoids implicitly “rolling” for free
+  when the MA engine does not fire a trade on the roll day.
+
 - **Benchmark (buy-and-hold comparison):** synthetic **backward-adjusted**
   (**hfq**, e.g. ``{root}889``) OHLC; compare NAV uses the same open/close basis
   as ``exec_price`` on this hfq series.
@@ -131,6 +139,16 @@ def _load_futures_ohlcv(
         },
         index=pd.to_datetime([r.trade_date for r in rows]),
     )
+    if any(getattr(r, "dominant_contract_suffix", None) is not None for r in rows):
+        suf_cells: list[str | None] = []
+        for r in rows:
+            raw = getattr(r, "dominant_contract_suffix", None)
+            if raw is None:
+                suf_cells.append(None)
+            else:
+                t = str(raw).strip()
+                suf_cells.append(t if t else None)
+        df["dominant_contract_suffix"] = suf_cells
     df = df.sort_index()
     df = df.dropna(subset=["Open", "High", "Low", "Close"], how="any")
     df.index = _coerce_trading_index(df.index)
@@ -268,6 +286,79 @@ def _combine_group_returns(
     else:
         out = ret_df.fillna(0.0).mean(axis=1)
     return out.fillna(0.0)
+
+
+def _apply_main_contract_roll_adjustments(
+    ret_mat: pd.DataFrame,
+    *,
+    w_eff: pd.DataFrame,
+    exec_aligned: dict[str, pd.DataFrame],
+    cost_by_symbol: dict[str, CostProfile],
+    min_weight: float = 1e-12,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """
+    On days where the stored 88 series marks a **main contract switch**, replace
+    that symbol's strategy daily return with the **execution** close-to-close
+    return on the stitched series and subtract **exit + re-entry** fill costs when
+    the lagged portfolio weight shows an open position.
+
+    The per-symbol Backtest NAV does not insert an extra trade when the MA signal
+    is unchanged across the roll; this adjustment approximates mandatory roll
+    turnover while keeping position size (weight) unchanged after the roll.
+    """
+    out = ret_mat.copy().astype(float)
+    meta: dict[str, Any] = {
+        "enabled": True,
+        "per_symbol_roll_events": {},
+        "total_roll_events": 0,
+    }
+    if out.empty or w_eff.empty:
+        meta["enabled"] = False
+        return out, meta
+
+    idx = out.index
+    w_eff = w_eff.reindex(idx).fillna(0.0).astype(float)
+
+    for c in list(out.columns):
+        code = str(c)
+        ex = exec_aligned.get(code)
+        cost = cost_by_symbol.get(code)
+        if ex is None or cost is None:
+            continue
+        if "dominant_contract_suffix" not in ex.columns:
+            continue
+        suf = ex["dominant_contract_suffix"].reindex(idx)
+        st = suf.astype(str).str.strip()
+        roll_day = suf.notna() & st.ne("") & st.ne("nan") & st.ne("None")
+        if not bool(roll_day.any()):
+            continue
+
+        close = pd.to_numeric(ex["Close"], errors="coerce").astype(float).reindex(idx)
+        r_cc = close.pct_change().reindex(idx).astype(float)
+        rt_fee = 2.0 * (
+            float(max(0.0, cost.commission_per_fill))
+            + float(max(0.0, cost.spread_per_fill))
+        )
+
+        col = str(c)
+        if col not in w_eff.columns:
+            continue
+        wcol = w_eff[col].reindex(idx).fillna(0.0).astype(float)
+        apply_m = roll_day.fillna(False) & (wcol > float(min_weight))
+        if not bool(apply_m.any()):
+            continue
+
+        n = int(apply_m.sum())
+        meta["per_symbol_roll_events"][str(c)] = n
+        meta["total_roll_events"] += n
+        adj = r_cc - rt_fee
+        out.loc[apply_m, code] = adj.loc[apply_m].astype(float).values
+
+    if meta["total_roll_events"] == 0:
+        meta["note"] = (
+            "no_roll_events_in_sample_or_missing_dominant_contract_suffix_column"
+        )
+    return out, meta
 
 
 def _run_vectorized_fallback(
@@ -525,6 +616,7 @@ def compute_futures_group_trend_backtest(
     nav_by_symbol: dict[str, pd.Series] = {}
     bench_price_by_symbol: dict[str, pd.Series] = {}
     exec_by_code: dict[str, pd.DataFrame] = {}
+    cost_by_symbol: dict[str, CostProfile] = {}
     symbol_stats: list[dict] = []
     errors: list[str] = []
 
@@ -546,6 +638,7 @@ def compute_futures_group_trend_backtest(
             slippage_side=slippage_side,
             price_reference=price_ref,
         )
+        cost_by_symbol[code] = cost
         nav, st = _run_symbol_backtest(
             df_exec,
             fast_ma=int(fast_ma),
@@ -687,6 +780,13 @@ def compute_futures_group_trend_backtest(
                     index=w_eff.index, columns=w_eff.columns
                 ).astype(float),
             )
+        ret_mat, roll_adj_meta = _apply_main_contract_roll_adjustments(
+            ret_mat,
+            w_eff=w_eff,
+            exec_aligned=exec_aligned,
+            cost_by_symbol=cost_by_symbol,
+        )
+        portfolio_meta["main_contract_roll"] = roll_adj_meta
         group_ret = (w_eff * ret_mat.astype(float)).sum(axis=1).astype(float).fillna(
             0.0
         ) + atr_override.reindex(ret_mat.index).fillna(0.0).astype(float)
@@ -840,6 +940,13 @@ def compute_futures_group_trend_backtest(
                     index=w_eff.index, columns=w_eff.columns
                 ).astype(float),
             )
+        ret_mat, roll_adj_meta = _apply_main_contract_roll_adjustments(
+            ret_mat,
+            w_eff=w_eff,
+            exec_aligned=exec_aligned,
+            cost_by_symbol=cost_by_symbol,
+        )
+        portfolio_meta["main_contract_roll"] = roll_adj_meta
         group_ret = (w_eff * ret_mat.astype(float)).sum(axis=1).astype(float).fillna(
             0.0
         ) + atr_override.reindex(ret_mat.index).fillna(0.0).astype(float)

@@ -260,6 +260,7 @@ class FuturesPriceOut(BaseModel):
     volume: float | None
     amount: float | None
     hold: float | None
+    dominant_contract_suffix: str | None = None
     source: str
     adjust: str
 

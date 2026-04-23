@@ -3,10 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <script
-      defer
-      src="https://cdn.plot.ly/plotly-cartesian-2.30.0.min.js"
-    ></script>
+    <script defer src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
     <title>期货研究</title>
     <script>
       (function () {
@@ -256,8 +253,10 @@
     <div class="panel" id="symbolOhlcPanel">
       <h3>标的行情统计（K 线）</h3>
       <p class="muted" style="margin: 8px 0 12px; max-width: 920px">
-        从<strong>当前分组</strong>中选标的；日期可与「全局研究范围」一致，也可<strong>只填开始或只填结束</strong>，甚至<strong>暂空</strong>（后端按库内该序列实际起止再与你填写的范围求<strong>交集</strong>后绘图）。<strong>无复权</strong>与趋势回测一致：优先<strong>合成连续
-        88</strong>（库内有则始终用），否则回退主连/池代码；交割月合约（如 RB2505）直连该合约。若交集为空或无 OHLC，请检查区间与抓取/合成。
+        从<strong>当前分组</strong>中选标的；日期可与「全局研究范围」一致，也可<strong>只填开始或只填结束</strong>，甚至<strong>暂空</strong>（后端按库内该序列实际起止再与你填写的范围求<strong>交集</strong>后绘图）。<strong>无复权</strong>与趋势回测一致：优先<strong
+          >合成连续 88</strong
+        >（库内有则始终用），否则回退主连/池代码；交割月合约（如
+        RB2505）直连该合约。若交集为空或无 OHLC，请检查区间与抓取/合成。
       </p>
       <div class="row" style="flex-wrap: wrap; align-items: flex-end">
         <div>
@@ -630,7 +629,10 @@
         >
           <div>
             <h3>趋势策略滚动收益&amp;回撤（6个月/1年/2年/3年）</h3>
-            <div id="ftTrendRollingCombo" style="width: 100%; height: 520px"></div>
+            <div
+              id="ftTrendRollingCombo"
+              style="width: 100%; height: 520px"
+            ></div>
           </div>
           <div>
             <h3>超额滚动收益&amp;回撤（6个月/1年/2年/3年）</h3>
@@ -673,11 +675,10 @@
     <div id="msg"></div>
 
     <script>
-      (function initThemeToggle() {
+      (function initThemeAndPlotly() {
         const key = `theme:${location.pathname}`;
         const html = document.documentElement;
-        const nextTheme = () =>
-          html.getAttribute("data-theme") === "light" ? "dark" : "light";
+        const isLight = () => html.getAttribute("data-theme") === "light";
         const apply = (theme) => {
           html.setAttribute("data-theme", theme);
           try {
@@ -685,22 +686,143 @@
           } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+          document.dispatchEvent(new CustomEvent("themechange"));
+        };
+        const cssVar = (name, fallback) =>
+          getComputedStyle(html).getPropertyValue(name).trim() || fallback;
+        const plotTheme = () => ({
+          paper_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
+          plot_bgcolor: cssVar("--plot-bg", isLight() ? "#ffffff" : "#0f172a"),
+          font: {
+            color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+          },
+          legend: {
+            font: {
+              color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+            },
+          },
+          axis: {
+            color: cssVar("--plot-fg", isLight() ? "#111827" : "#e5e7eb"),
+            gridcolor: cssVar("--plot-grid", isLight() ? "#d1d5db" : "#334155"),
+            zerolinecolor: cssVar(
+              "--plot-grid",
+              isLight() ? "#d1d5db" : "#334155",
+            ),
+          },
+        });
+        const patchBlack = (color) => {
+          if (!color || typeof color !== "string") return color;
+          const c = color.replace(/\s+/g, "").toLowerCase();
+          if (
+            c === "#111" ||
+            c === "#111111" ||
+            c.startsWith("rgba(17,17,17")
+          ) {
+            return cssVar("--plot-fg", "#e5e7eb");
+          }
+          return color;
+        };
+        const themedData = (data) =>
+          (data || []).map((trace) => {
+            const t = { ...trace };
+            if (t.line && typeof t.line === "object")
+              t.line = { ...t.line, color: patchBlack(t.line.color) };
+            if (t.marker && typeof t.marker === "object")
+              t.marker = { ...t.marker, color: patchBlack(t.marker.color) };
+            if (typeof t.fillcolor === "string")
+              t.fillcolor = patchBlack(t.fillcolor);
+            return t;
+          });
+        const themedLayout = (layout) => {
+          const base = plotTheme();
+          const next = { ...(layout || {}) };
+          next.paper_bgcolor = base.paper_bgcolor;
+          next.plot_bgcolor = base.plot_bgcolor;
+          next.font = {
+            ...(next.font || {}),
+            color: base.font.color,
+          };
+          next.legend = {
+            ...(next.legend || {}),
+            font: {
+              ...((next.legend && next.legend.font) || {}),
+              color: base.legend.font.color,
+            },
+          };
+          if (next.title && typeof next.title === "object") {
+            next.title = {
+              ...next.title,
+              font: {
+                ...((next.title && next.title.font) || {}),
+                color: base.font.color,
+              },
+            };
+          }
+          const axisFromLayout = Object.keys(next).filter((k) =>
+            /^xaxis\d*$|^yaxis\d*$/.test(k),
+          );
+          const axisKeys =
+            axisFromLayout.length > 0 ? axisFromLayout : ["xaxis", "yaxis"];
+          for (const k of axisKeys) {
+            next[k] = { ...(next[k] || {}), ...base.axis };
+          }
+          return next;
+        };
+        const refreshPlotlyTheme = () => {
+          if (!window.Plotly) return;
+          const base = plotTheme();
+          for (const gd of document.querySelectorAll(".js-plotly-plot")) {
+            const patch = {
+              paper_bgcolor: base.paper_bgcolor,
+              plot_bgcolor: base.plot_bgcolor,
+              "font.color": base.font.color,
+              "legend.font.color": base.font.color,
+            };
+            if (gd.layout && gd.layout.title)
+              patch["title.font.color"] = base.font.color;
+            const keys = Object.keys(gd.layout || {}).filter((k) =>
+              /^xaxis\d*$|^yaxis\d*$/.test(k),
+            );
+            for (const k of keys) {
+              patch[`${k}.color`] = base.axis.color;
+              patch[`${k}.gridcolor`] = base.axis.gridcolor;
+              patch[`${k}.zerolinecolor`] = base.axis.zerolinecolor;
+            }
+            Plotly.relayout(gd, patch);
+          }
+        };
+        const patchPlotlyNewPlot = () => {
+          if (!window.Plotly || window.Plotly.__futuresResearchThemePatched)
+            return;
+          const rawNewPlot = window.Plotly.newPlot.bind(window.Plotly);
+          const rawReact = window.Plotly.react.bind(window.Plotly);
+          window.Plotly.newPlot = (gd, data, layout, config) =>
+            rawNewPlot(gd, themedData(data), themedLayout(layout), config);
+          window.Plotly.react = (gd, data, layout, config) =>
+            rawReact(gd, themedData(data), themedLayout(layout), config);
+          window.Plotly.__futuresResearchThemePatched = true;
         };
         document.addEventListener("DOMContentLoaded", () => {
           const btn = document.createElement("button");
           btn.id = "themeToggle";
           btn.className = "theme-toggle";
           btn.type = "button";
-          btn.addEventListener("click", () => apply(nextTheme()));
+          btn.addEventListener("click", () =>
+            apply(isLight() ? "dark" : "light"),
+          );
           document.body.appendChild(btn);
           apply(html.getAttribute("data-theme") || "dark");
+          patchPlotlyNewPlot();
         });
+        document.addEventListener("themechange", refreshPlotlyTheme);
       })();
 
       const api = (path, opts) => {
         const o = { method: "GET", ...opts };
         const method = String(o.method || "GET").toUpperCase();
-        const baseH = { ...(o.headers && typeof o.headers === "object" ? o.headers : {}) };
+        const baseH = {
+          ...(o.headers && typeof o.headers === "object" ? o.headers : {}),
+        };
         if (
           method !== "GET" &&
           !baseH["Content-Type"] &&
@@ -948,7 +1070,6 @@
         );
       }
 
-
       function fmtPct(x) {
         const v = Number(x);
         if (!Number.isFinite(v)) return "-";
@@ -1057,7 +1178,13 @@
         };
       }
 
-      function _renderFuturesDailyReturnDist(histId, tableId, payload, title, mode) {
+      function _renderFuturesDailyReturnDist(
+        histId,
+        tableId,
+        payload,
+        title,
+        mode,
+      ) {
         const histEl = $(histId);
         const tblEl = $(tableId);
         if (!histEl || !tblEl) return;
@@ -1261,7 +1388,6 @@
           }
         });
       }
-
 
       function plotFuturesTrendAlignedCharts(payload) {
         const dates = Array.isArray(payload && payload.dates)
@@ -1977,6 +2103,8 @@
       function futuresPriceSourceLabel(src) {
         const m = {
           synthetic_88: "合成连续88",
+          synthetic_888: "合成连续888(前复权)",
+          synthetic_889: "合成连续889(后复权)",
           fallback_main: "无88·已回退主连/池代码",
           delivery_contract: "交割合约",
           as_requested: "按所选代码",
@@ -1984,6 +2112,122 @@
         return m[String(src || "")] || String(src || "");
       }
 
+      /** K 线：解析为 UTC 当日正午 ms，避免字符串日期在 Plotly 上错轴。 */
+      function futuresTradeDateToUtcMs(v) {
+        if (v === null || v === undefined) return NaN;
+        const s = String(v).trim();
+        const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) {
+          const y = Number(iso[1]);
+          const mo = Number(iso[2]);
+          const d = Number(iso[3]);
+          if (
+            !Number.isFinite(y) ||
+            !Number.isFinite(mo) ||
+            !Number.isFinite(d)
+          )
+            return NaN;
+          return Date.UTC(y, mo - 1, d, 12, 0, 0);
+        }
+        const d8 = s.replace(/\D/g, "");
+        if (d8.length >= 8) {
+          const y = Number(d8.slice(0, 4));
+          const mo = Number(d8.slice(4, 6));
+          const d = Number(d8.slice(6, 8));
+          if (
+            !Number.isFinite(y) ||
+            !Number.isFinite(mo) ||
+            !Number.isFinite(d)
+          )
+            return NaN;
+          return Date.UTC(y, mo - 1, d, 12, 0, 0);
+        }
+        const t = Date.parse(s);
+        return Number.isFinite(t) ? t : NaN;
+      }
+
+      /**
+       * 从 API 行构造 OHLC 数组：横轴用数值型 UTC ms（Plotly date 轴官方推荐），
+       * 按时间升序；同一交易日保留最后一条。
+       */
+      function buildFuturesCandlestickArrays(rowsIn) {
+        if (!Array.isArray(rowsIn)) {
+          return {
+            xMs: [],
+            open: [],
+            high: [],
+            low: [],
+            close: [],
+            hiMax: NaN,
+            loMin: NaN,
+          };
+        }
+        const pick = (r, k) => {
+          const v = r[k];
+          if (v === null || v === undefined) return NaN;
+          const x = Number(v);
+          return Number.isFinite(x) ? x : NaN;
+        };
+        const tmp = [];
+        for (const r of rowsIn) {
+          if (!r || typeof r !== "object") continue;
+          const o = pick(r, "open");
+          const h = pick(r, "high");
+          const l = pick(r, "low");
+          const c = pick(r, "close");
+          if (![o, h, l, c].every((x) => Number.isFinite(x))) continue;
+          if (o <= 0 || h <= 0 || l <= 0 || c <= 0) continue;
+          const rawD = r.trade_date ?? r.date;
+          const xMs = futuresTradeDateToUtcMs(rawD);
+          if (!Number.isFinite(xMs)) continue;
+          tmp.push({ xMs, o, h, l, c });
+        }
+        tmp.sort((a, b) => a.xMs - b.xMs);
+        const dedup = [];
+        for (const row of tmp) {
+          if (dedup.length && dedup[dedup.length - 1].xMs === row.xMs) {
+            dedup[dedup.length - 1] = row;
+          } else {
+            dedup.push(row);
+          }
+        }
+        const xMs = dedup.map((b) => b.xMs);
+        const open = dedup.map((b) => b.o);
+        const high = dedup.map((b) => b.h);
+        const low = dedup.map((b) => b.l);
+        const close = dedup.map((b) => b.c);
+        let hiMax = NaN;
+        let loMin = NaN;
+        for (const b of dedup) {
+          hiMax = Number.isFinite(hiMax) ? Math.max(hiMax, b.h) : b.h;
+          loMin = Number.isFinite(loMin) ? Math.min(loMin, b.l) : b.l;
+        }
+        return { xMs, open, high, low, close, hiMax, loMin };
+      }
+
+      /**
+       * 切换日：API 在 dominant_contract_suffix 不为空时给出新主力交割月代码（如 2606）。
+       */
+      function collectFuturesRollMarks(rowsIn) {
+        if (!Array.isArray(rowsIn)) return [];
+        const byMs = new Map();
+        for (const r of rowsIn) {
+          if (!r || typeof r !== "object") continue;
+          const suf = String(
+            r.dominant_contract_suffix ?? r.dominantContractSuffix ?? "",
+          ).trim();
+          if (!suf) continue;
+          const rawD = r.trade_date ?? r.date;
+          const xMs = futuresTradeDateToUtcMs(rawD);
+          if (!Number.isFinite(xMs)) continue;
+          byMs.set(xMs, suf);
+        }
+        return Array.from(byMs.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([xMs, label]) => ({ xMs, label }));
+      }
+
+      let _symbolOhlcLoadSeq = 0;
       let _symbolOhlcDbgSeq = 0;
       function symbolOhlcDbg(line, detail) {
         _symbolOhlcDbgSeq += 1;
@@ -2021,10 +2265,12 @@
       }
 
       async function loadSymbolOhlcChart() {
+        const loadId = ++_symbolOhlcLoadSeq;
         symbolOhlcDbgReset();
         symbolOhlcDbg("loadSymbolOhlcChart() 开始", {
           href: String(location.href || ""),
           plotly: !!window.Plotly,
+          loadId,
         });
         const chartEl = $("symbolOhlcChart");
         const meta = $("symbolOhlcMeta");
@@ -2090,6 +2336,10 @@
             return;
           }
           rows = Array.isArray(out) ? out : [];
+          if (loadId !== _symbolOhlcLoadSeq) {
+            symbolOhlcDbg("忽略过期响应（已有更新的加载）", { loadId });
+            return;
+          }
         } catch (err) {
           symbolOhlcDbg("fetch/json 异常", {
             name: err && err.name,
@@ -2107,31 +2357,31 @@
               ? "后复权 hfq"
               : "无复权 none";
         const effCode = effFromApi || code;
-        const xd = [];
-        const op = [];
-        const hi = [];
-        const lo = [];
-        const cl = [];
-        for (const r of rows) {
-          const o = Number(r.open);
-          const h = Number(r.high);
-          const l = Number(r.low);
-          const c = Number(r.close);
-          if (
-            ![o, h, l, c].every((x) => Number.isFinite(x))
-          )
-            continue;
-          xd.push(String(r.trade_date));
-          op.push(o);
-          hi.push(h);
-          lo.push(l);
-          cl.push(c);
-        }
+        const {
+          xMs,
+          open: op,
+          high: hi,
+          low: lo,
+          close: cl,
+          hiMax,
+          loMin,
+        } = buildFuturesCandlestickArrays(rows);
+        const barCount = xMs.length;
+        const rollMarks = collectFuturesRollMarks(rows);
+        symbolOhlcDbg("OHLC 解析结果", {
+          bars: barCount,
+          hiMax,
+          loMin,
+          rollDays: rollMarks.length,
+          sameLen:
+            barCount === op.length &&
+            op.length === hi.length &&
+            hi.length === lo.length &&
+            lo.length === cl.length,
+        });
         if (meta) {
           const pick =
-            effCode !== code
-              ? `所选 ${code} → 实际 ${effCode}`
-              : String(code);
+            effCode !== code ? `所选 ${code} → 实际 ${effCode}` : String(code);
           const reqTxt =
             ym.start || ym.end
               ? `请求 ${ym.start || "…"}～${ym.end || "…"}`
@@ -2139,12 +2389,15 @@
           const winTxt = effWin
             ? effWin.replace("/", "～")
             : "（与库内区间无交集或无数据）";
-          meta.textContent =
-            `${pick} | ${futuresPriceSourceLabel(srcRaw)} | ${adjustLabel} | ${reqTxt} | 绘图 ${winTxt} | 有效根数 ${xd.length}`;
+          meta.textContent = `${pick} | ${futuresPriceSourceLabel(srcRaw)} | ${adjustLabel} | ${reqTxt} | 绘图 ${winTxt} | 有效根数 ${barCount}`;
         }
         const runPlot = () => {
+          if (loadId !== _symbolOhlcLoadSeq) {
+            symbolOhlcDbg("runPlot 跳过：已有更新的加载", { loadId });
+            return;
+          }
           symbolOhlcDbg("runPlot() 进入", {
-            bars: xd.length,
+            bars: barCount,
             plotly: !!window.Plotly,
           });
           if (!chartEl) {
@@ -2153,36 +2406,85 @@
           }
           if (!window.Plotly) {
             symbolOhlcDbg("中止：window.Plotly 不存在（CDN 未加载？）");
-            chartEl.innerHTML =
-              `<div class="muted">图表组件未加载，请刷新页面或检查网络。</div>`;
+            chartEl.innerHTML = `<div class="muted">图表组件未加载，请刷新页面或检查网络。</div>`;
             return;
           }
-          if (xd.length < 1) {
+          if (barCount < 1) {
             symbolOhlcDbg("中止：有效 OHLC 为 0（检查区间交集与数据）");
             Plotly.purge(chartEl);
-            chartEl.innerHTML =
-              `<div class="muted">所选区间或复权口径下暂无 OHLC 数据。</div>`;
+            chartEl.innerHTML = `<div class="muted">所选区间或复权口径下暂无 OHLC 数据。</div>`;
             return;
           }
           chartEl.innerHTML = "";
           try {
+            const htmlEl = document.documentElement;
+            const cssMuted =
+              getComputedStyle(htmlEl).getPropertyValue("--muted").trim() ||
+              "rgba(148,163,184,0.95)";
+            const cssFg =
+              getComputedStyle(htmlEl).getPropertyValue("--plot-fg").trim() ||
+              "#e5e7eb";
+            const cssSurface =
+              getComputedStyle(htmlEl).getPropertyValue("--surface").trim() ||
+              "rgba(18,26,43,0.92)";
+            const rollShapes = rollMarks.map((m) => ({
+              type: "line",
+              xref: "x",
+              x0: m.xMs,
+              x1: m.xMs,
+              yref: "paper",
+              y0: 0,
+              y1: 1,
+              layer: "below",
+              line: {
+                color: cssMuted,
+                width: 1.25,
+                dash: "dash",
+              },
+            }));
+            const rollAnnotations = rollMarks.map((m, i) => ({
+              xref: "x",
+              x: m.xMs,
+              yref: "paper",
+              y: 0.985 - (i % 16) * 0.038,
+              text: `主力 ${m.label}`,
+              showarrow: false,
+              xanchor: "center",
+              yanchor: "top",
+              font: { size: 10, color: cssFg },
+              bgcolor: cssSurface,
+              borderpad: 3,
+              bordercolor: cssMuted,
+              borderwidth: 1,
+            }));
             Plotly.newPlot(
               chartEl,
               [
                 {
                   type: "candlestick",
                   name: effCode,
-                  x: xd,
+                  x: xMs,
                   open: op,
                   high: hi,
                   low: lo,
                   close: cl,
-                  increasing: { line: { color: "#26a69a" } },
-                  decreasing: { line: { color: "#ef5350" } },
+                  increasing: {
+                    line: { color: "#e53935" },
+                    fillcolor: "#e53935",
+                  },
+                  decreasing: {
+                    line: { color: "#26a69a" },
+                    fillcolor: "#26a69a",
+                  },
                 },
               ],
               {
-                margin: { t: 36, r: 24, b: 44, l: 56 },
+                margin: {
+                  t: rollMarks.length ? 52 : 36,
+                  r: 24,
+                  b: 44,
+                  l: 56,
+                },
                 title: {
                   text: `${effCode} · ${adjustLabel}`,
                   font: { size: 14 },
@@ -2190,13 +2492,19 @@
                 xaxis: {
                   title: "交易日",
                   type: "date",
+                  tickformat: "%Y-%m-%d",
                   rangeslider: { visible: false },
                 },
                 yaxis: {
-                  title: "价格",
+                  title: "价格（对数刻度）",
+                  type: "log",
                   autorange: true,
                   fixedrange: false,
+                  tickformat: ",.2f",
+                  separatethousands: true,
                 },
+                shapes: rollShapes,
+                annotations: rollAnnotations,
                 dragmode: "pan",
               },
               { responsive: true, displayModeBar: true },
@@ -2214,7 +2522,9 @@
         };
         symbolOhlcDbg("调度 whenPlotlyReady(runPlot)");
         whenPlotlyReady(runPlot);
-        symbolOhlcDbg("loadSymbolOhlcChart() 同步部分结束（Plotly 可能稍后异步绘制）");
+        symbolOhlcDbg(
+          "loadSymbolOhlcChart() 同步部分结束（Plotly 可能稍后异步绘制）",
+        );
       }
 
       function syncTrendSizingVisibility() {
