@@ -3785,33 +3785,22 @@ def rotation_next_execution_plan(
     )
 
     try:
-        from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
-
-        inp = RotationInputs(
-            **{
-                **req.model_dump(exclude={"benchmark_mode"}),
-                "start": _parse_yyyymmdd(req.start),
-                "end": _parse_yyyymmdd(req.end),
-                "asset_momentum_floor_rules": [
-                    r.model_dump() for r in req.asset_momentum_floor_rules
-                ]
-                if req.asset_momentum_floor_rules
-                else None,
-                "asset_trend_rules": [r.model_dump() for r in req.asset_trend_rules]
-                if req.asset_trend_rules
-                else None,
-                "asset_bias_rules": [r.model_dump() for r in req.asset_bias_rules]
-                if req.asset_bias_rules
-                else None,
-                "asset_rc_rules": [r.model_dump() for r in req.asset_rc_rules]
-                if req.asset_rc_rules
-                else None,
-                "asset_vol_index_rules": asset_vol_rules,
-                "vol_index_close": vol_index_close,
-            }
+        inp = _rotation_inputs_from_payload(
+            req,
+            codes=codes,
+            start=_parse_yyyymmdd(req.start),
+            end=_parse_yyyymmdd(req.end),
+            asset_vol_rules=asset_vol_rules,
+            vol_index_close=vol_index_close,
         )
-        out = backtest_rotation(
-            db, inp, return_weights_end=True, allow_virtual_end=True
+        out = compute_rotation_backtest(
+            db,
+            inp,
+            benchmark_mode=str(
+                getattr(req, "benchmark_mode", "EW_REBAL") or "EW_REBAL"
+            ),
+            return_weights_end=True,
+            allow_virtual_end=True,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

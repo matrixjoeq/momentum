@@ -6,7 +6,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..strategy.rotation import RotationInputs, backtest_rotation
+from ..strategy import rotation as rotation_strategy
+from ..strategy.rotation import RotationInputs
 
 
 @dataclass(frozen=True)
@@ -93,11 +94,13 @@ def compute_rotation_backtest(
     *,
     include_benchmarks: bool = True,
     benchmark_mode: str = "EW_REBAL",
+    return_weights_end: bool = False,
+    allow_virtual_end: bool = False,
 ) -> dict[str, Any]:
     # Pylint may resolve imported dataclasses from an installed package instead of workspace source,
     # which can lag during local dev. Keep behavior correct; suppress false-positive for new fields.
     # pylint: disable=unexpected-keyword-arg
-    return backtest_rotation(
+    return rotation_strategy.backtest_rotation(
         db,
         RotationInputs(
             codes=inp.codes,
@@ -171,6 +174,8 @@ def compute_rotation_backtest(
             asset_vol_index_rules=inp.asset_vol_index_rules,
             vol_index_close=inp.vol_index_close,
         ),
+        return_weights_end=bool(return_weights_end),
+        allow_virtual_end=bool(allow_virtual_end),
         include_benchmarks=bool(include_benchmarks),
         benchmark_mode=str(benchmark_mode or "EW_REBAL"),
     )

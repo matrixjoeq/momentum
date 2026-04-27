@@ -91,7 +91,12 @@ def _attach_switch_suffix_column(
         key = pd.Timestamp(ts).date()
         return suffix_by_date.get(key)
 
-    out["dominant_contract_suffix"] = out["date"].map(_suffix_for)
+    # Avoid Series.map turning missing Python None into float NaN (JSON/metadata parity).
+    out["dominant_contract_suffix"] = pd.Series(
+        [_suffix_for(ts) for ts in out["date"]],
+        index=out.index,
+        dtype=object,
+    )
     return out
 
 

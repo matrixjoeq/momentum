@@ -42,11 +42,11 @@ def _compute_adx(
     high: pd.Series, low: pd.Series, close: pd.Series, *, window: int
 ) -> pd.Series:
     h = pd.to_numeric(high, errors="coerce")
-    l = pd.to_numeric(low, errors="coerce")
+    low_s = pd.to_numeric(low, errors="coerce")
     c = pd.to_numeric(close, errors="coerce")
 
     up_move = h.diff()
-    down_move = -l.diff()
+    down_move = -low_s.diff()
     plus_dm = pd.Series(
         np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=h.index
     )
@@ -56,7 +56,7 @@ def _compute_adx(
 
     prev_c = c.shift(1)
     tr = pd.concat(
-        [(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1
+        [(h - low_s).abs(), (h - prev_c).abs(), (low_s - prev_c).abs()], axis=1
     ).max(axis=1)
     atr = _wilder_mean(tr, window=window)
     plus_di = 100.0 * _wilder_mean(plus_dm, window=window) / atr.replace(0.0, np.nan)
@@ -173,7 +173,9 @@ def compute_range_state_monitor(
 
     state_hys, state_raw = _hysteresis_state(metric, enter=enter, exit_=exit_)
     score = _range_score(metric, enter=enter, exit_=exit_)
-    subscore_band = 1.0 - ((metric - (enter + exit_) / 2.0).abs() / max(1e-12, exit_ - enter))
+    subscore_band = 1.0 - (
+        (metric - (enter + exit_) / 2.0).abs() / max(1e-12, exit_ - enter)
+    )
     subscore_band = subscore_band.clip(lower=0.0, upper=1.0)
 
     last_valid_idx = metric.last_valid_index()
@@ -183,8 +185,12 @@ def compute_range_state_monitor(
         latest = {
             "date": str(pd.Timestamp(last_valid_idx).date()),
             "mode": mode,
-            "metric": None if not np.isfinite(metric.iloc[i]) else float(metric.iloc[i]),
-            "range_score": None if not np.isfinite(score.iloc[i]) else float(score.iloc[i]),
+            "metric": None
+            if not np.isfinite(metric.iloc[i])
+            else float(metric.iloc[i]),
+            "range_score": None
+            if not np.isfinite(score.iloc[i])
+            else float(score.iloc[i]),
             "subscore_band": (
                 None
                 if not np.isfinite(subscore_band.iloc[i])

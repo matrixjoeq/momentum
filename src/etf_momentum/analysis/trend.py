@@ -4462,6 +4462,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("fast_window must be < slow_window")
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
+    if strat == "ma_cross" and ma_type == "kama":
+        raise ValueError("ma_type=kama is only supported for ma_filter")
     if strat == "ma_cross":
         if ma_type not in {"sma", "ema", "wma"}:
             raise ValueError("ma_type must be one of: sma|ema|wma for ma_cross")
@@ -4485,8 +4487,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("kama_std_window must be >= 2")
     if (not np.isfinite(kama_std_coef)) or kama_std_coef < 0.0 or kama_std_coef > 3.0:
         raise ValueError("kama_std_coef must be in [0,3]")
-    if strat == "ma_cross" and ma_type == "kama":
-        raise ValueError("ma_type=kama is only supported for ma_filter")
     if not np.isfinite(float(inp.tsmom_entry_threshold)):
         raise ValueError("tsmom_entry_threshold must be finite")
     if not np.isfinite(float(inp.tsmom_exit_threshold)):
@@ -4891,10 +4891,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             .fillna(0.0)
             .astype(float)
         )
-        ret_intraday_none = ret_none.copy().astype(float)
-        ret_overnight_none = pd.Series(0.0, index=ret_none.index, dtype=float)
-        ret_intraday_hfq = ret_exec_hfq.copy().astype(float)
-        ret_overnight_hfq = pd.Series(0.0, index=ret_exec_hfq.index, dtype=float)
         px_slip_none = exec_o_none.astype(float)
         px_slip_hfq = exec_o_hfq.astype(float)
     elif ep == "close":
@@ -4909,30 +4905,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         )
         ret_exec_hfq = (
             (exec_hfq.div(exec_hfq.shift(1)) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_overnight_none = (
-            (o_none.div(c_none.shift(1)) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_intraday_none = (
-            (c_none.div(o_none) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_overnight_hfq = (
-            (o_hfq.div(c_hfq.shift(1)) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_intraday_hfq = (
-            (c_hfq.div(o_hfq) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
@@ -4971,20 +4943,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             .astype(float)
         )
         ret_exec_hfq = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
-        ret_overnight_none = (
-            (0.5 * (o_none.div(c_none.shift(1)) - 1.0))
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_intraday_none = ret_open_none.astype(float)
-        ret_overnight_hfq = (
-            (0.5 * (o_hfq.div(c_hfq.shift(1)) - 1.0))
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_intraday_hfq = ret_open_hfq.astype(float)
         px_slip_none = (0.5 * (exec_o_none + exec_c_none)).astype(float)
         px_slip_hfq = (0.5 * (exec_o_hfq + exec_c_hfq)).astype(float)
     ret_hfq = ret_exec_hfq.astype(float)
@@ -4992,12 +4950,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     gross_hfq = (1.0 + ret_hfq).astype(float)
     corp_factor, ca_mask = corporate_action_mask(gross_none, gross_hfq)
     ret_exec = ret_none.where(~ca_mask.fillna(False), other=ret_exec_hfq).astype(float)
-    ret_overnight = ret_overnight_none.where(
-        ~ca_mask.fillna(False), other=ret_overnight_hfq
-    ).astype(float)
-    ret_intraday = ret_intraday_none.where(
-        ~ca_mask.fillna(False), other=ret_intraday_hfq
-    ).astype(float)
     px_exec_slip = (
         px_slip_none.where(~ca_mask.fillna(False), other=px_slip_hfq)
         .replace([np.inf, -np.inf], np.nan)
@@ -6661,6 +6613,8 @@ def compute_trend_portfolio_backtest(
         raise ValueError("risk_of_ruin_maxrisk must be in (0, 1]")
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
+    if strat == "ma_cross" and ma_type == "kama":
+        raise ValueError("ma_type=kama is only supported for ma_filter")
     if strat == "ma_cross":
         if ma_type not in {"sma", "ema", "wma"}:
             raise ValueError("ma_type must be one of: sma|ema|wma for ma_cross")
@@ -6684,8 +6638,6 @@ def compute_trend_portfolio_backtest(
         raise ValueError("kama_std_window must be >= 2")
     if (not np.isfinite(kama_std_coef)) or kama_std_coef < 0.0 or kama_std_coef > 3.0:
         raise ValueError("kama_std_coef must be in [0,3]")
-    if strat == "ma_cross" and ma_type == "kama":
-        raise ValueError("ma_type=kama is only supported for ma_filter")
     atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
     if atr_mode not in {"none", "static", "trailing", "tightening"}:
         raise ValueError(

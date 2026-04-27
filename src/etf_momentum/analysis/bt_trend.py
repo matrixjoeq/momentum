@@ -31,13 +31,21 @@ from .event_study import compute_event_study, entry_dates_from_exposure
 from .market_regime import build_market_regime_report
 from .r_multiple import build_trade_mfe_r_distribution, enrich_trades_with_r_metrics
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
-from .trend import (
-    _apply_atr_stop,
-    _apply_bias_v_take_profit as _apply_bias_v_take_profit_shared,
-    _apply_intraday_stop_execution_portfolio,
-    _apply_intraday_stop_execution_single,
-    _apply_monthly_risk_budget_gate,
-    _apply_r_multiple_take_profit as _apply_r_multiple_take_profit_shared,
+from . import trend as _trend_semantic_helpers
+
+_apply_atr_stop = _trend_semantic_helpers._apply_atr_stop
+_apply_bias_v_take_profit_shared = _trend_semantic_helpers._apply_bias_v_take_profit
+_apply_intraday_stop_execution_portfolio = (
+    _trend_semantic_helpers._apply_intraday_stop_execution_portfolio
+)
+_apply_intraday_stop_execution_single = (
+    _trend_semantic_helpers._apply_intraday_stop_execution_single
+)
+_apply_monthly_risk_budget_gate = (
+    _trend_semantic_helpers._apply_monthly_risk_budget_gate
+)
+_apply_r_multiple_take_profit_shared = (
+    _trend_semantic_helpers._apply_r_multiple_take_profit
 )
 
 Session = Any
@@ -503,11 +511,8 @@ def _macd_core(
     legacy = _macd_core_fallback(x, fast=int(fast), slow=int(slow), signal=int(signal))
     if not _talib_enabled():
         return legacy
-    macd_fn = getattr(talib, "MACD", None)
-    if not callable(macd_fn):
-        return legacy
     try:
-        m, s, h = macd_fn(  # pylint: disable=not-callable
+        m, s, h = talib.MACD(
             x.to_numpy(dtype=float),
             fastperiod=max(2, int(fast)),
             slowperiod=max(2, int(slow)),
@@ -537,11 +542,8 @@ def _atr_from_hlc(
     legacy = _atr_from_hlc_fallback(h, l, c, window=w)
     if not _talib_enabled():
         return legacy
-    atr_fn = getattr(talib, "ATR", None)
-    if not callable(atr_fn):
-        return legacy
     try:
-        out = atr_fn(  # pylint: disable=not-callable
+        out = talib.ATR(
             h.to_numpy(dtype=float),
             l.to_numpy(dtype=float),
             c.to_numpy(dtype=float),
@@ -563,11 +565,8 @@ def _rolling_linreg_slope(s: pd.Series, window: int) -> pd.Series:
     )
     if not _talib_enabled():
         return legacy.astype(float)
-    lr_fn = getattr(talib, "LINEARREG_SLOPE", None)
-    if not callable(lr_fn):
-        return legacy.astype(float)
     try:
-        out = lr_fn(x.to_numpy(dtype=float), timeperiod=n)  # pylint: disable=not-callable
+        out = talib.LINEARREG_SLOPE(x.to_numpy(dtype=float), timeperiod=n)
         out_s = _prefer_legacy_on_diff(
             pd.Series(out, index=x.index, dtype=float), legacy.astype(float)
         )
@@ -609,11 +608,8 @@ def _momentum_delta(s: pd.Series, periods: int = 1) -> pd.Series:
     legacy = x.diff(n)
     if not _talib_enabled():
         return legacy.astype(float)
-    mom_fn = getattr(talib, "MOM", None)
-    if not callable(mom_fn):
-        return legacy.astype(float)
     try:
-        out = mom_fn(x.to_numpy(dtype=float), timeperiod=n)  # pylint: disable=not-callable
+        out = talib.MOM(x.to_numpy(dtype=float), timeperiod=n)
         out_s = pd.Series(out, index=x.index, dtype=float)
         return _prefer_legacy_on_diff(out_s, legacy.astype(float))
     except Exception:  # noqa: BLE001
@@ -633,11 +629,8 @@ def _rolling_std(
     legacy = x.rolling(window=w, min_periods=mp).std(ddof=int(ddof))
     if not _talib_enabled():
         return legacy.astype(float)
-    stddev_fn = getattr(talib, "STDDEV", None)
-    if not callable(stddev_fn):
-        return legacy.astype(float)
     try:
-        out = stddev_fn(x.to_numpy(dtype=float), timeperiod=w, nbdev=1)  # pylint: disable=not-callable
+        out = talib.STDDEV(x.to_numpy(dtype=float), timeperiod=w, nbdev=1)
         out_s = pd.Series(out, index=x.index, dtype=float)
         if int(ddof) == 1 and w > 1:
             out_s = out_s * float(np.sqrt(float(w) / float(w - 1)))
@@ -654,11 +647,8 @@ def _rolling_sma(s: pd.Series, *, window: int, min_periods: int) -> pd.Series:
     legacy = x.rolling(window=w, min_periods=mp).mean()
     if not _talib_enabled():
         return legacy.astype(float)
-    sma_fn = getattr(talib, "SMA", None)
-    if not callable(sma_fn):
-        return legacy.astype(float)
     try:
-        out = sma_fn(x.to_numpy(dtype=float), timeperiod=w)  # pylint: disable=not-callable
+        out = talib.SMA(x.to_numpy(dtype=float), timeperiod=w)
         out_s = pd.Series(out, index=x.index, dtype=float)
         return _prefer_legacy_on_diff(out_s, legacy.astype(float))
     except Exception:  # noqa: BLE001
@@ -676,19 +666,15 @@ def _efficiency_ratio(price: pd.Series, *, window: int) -> pd.Series:
     abs_diff = _momentum_delta(p, 1).abs().astype(float)
     vol_legacy = abs_diff.rolling(window=w, min_periods=w).sum()
     if _talib_enabled():
-        sum_fn = getattr(talib, "SUM", None)
-        if not callable(sum_fn):
+        try:
+            vol_ta = pd.Series(
+                talib.SUM(abs_diff.to_numpy(dtype=float), timeperiod=w),
+                index=p.index,
+                dtype=float,
+            )
+            volatility = _prefer_legacy_on_diff(vol_ta, vol_legacy.astype(float))
+        except Exception:  # noqa: BLE001
             volatility = vol_legacy.astype(float)
-        else:
-            try:
-                vol_ta = pd.Series(
-                    sum_fn(abs_diff.to_numpy(dtype=float), timeperiod=w),  # pylint: disable=not-callable
-                    index=p.index,
-                    dtype=float,
-                )
-                volatility = _prefer_legacy_on_diff(vol_ta, vol_legacy.astype(float))
-            except Exception:  # noqa: BLE001
-                volatility = vol_legacy.astype(float)
     else:
         volatility = vol_legacy.astype(float)
     out = (
@@ -1144,6 +1130,30 @@ def _risk_of_ruin_probability(
     if not np.isfinite(raw):
         return None
     return float(np.clip(raw, 0.0, 1.0))
+
+
+def _trade_marks_from_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Compact trade markers for API parity with legacy trend backtests."""
+    out: list[dict[str, Any]] = []
+    for tr in list(trades or []):
+        entry_date = str((tr or {}).get("entry_date") or "").strip()
+        exit_date = str((tr or {}).get("exit_date") or "").strip()
+        if not entry_date or not exit_date:
+            continue
+        ret_raw = (tr or {}).get("return")
+        ret_val = None
+        if ret_raw is not None and np.isfinite(float(ret_raw)):
+            ret_val = float(ret_raw)
+        out.append(
+            {
+                "entry_date": entry_date,
+                "exit_date": exit_date,
+                "return": ret_val,
+                "direction": str((tr or {}).get("direction") or ""),
+                "code": str((tr or {}).get("code") or ""),
+            }
+        )
+    return out
 
 
 def _trade_stats_from_returns(
@@ -3702,12 +3712,6 @@ def _run_single_backtesting(
     code: str,
     random_seed: int | None,
 ) -> dict[str, Any]:
-    use_backtesting = True
-    try:
-        from backtesting import Backtest, Strategy
-    except Exception:
-        use_backtesting = False
-
     bt_df, hfq_close = _build_bt_frame(db, code=code, start=inp.start, end=inp.end)
     if bt_df.empty:
         raise ValueError(f"no valid OHLC rows for {code}")
@@ -3785,17 +3789,11 @@ def _run_single_backtesting(
     )
     monthly_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
     ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
-    simple_backtesting_mode = bool(
-        use_backtesting
-        and ps == "equal"
-        and atr_mode == "none"
-        and (not rtp_enabled)
-        and (not bias_v_tp_enabled)
-        and (not monthly_enabled)
-        and float(raw_pos.max()) <= 1.0
-        and float(raw_pos.min()) >= 0.0
-        and float((raw_pos % 1.0).abs().sum()) <= 1e-12
-    )
+    # Legacy `compute_trend_backtest` compounds returns with explicit execution-day weight
+    # transitions (shift(1), open vs close vs oc2 legs). The optional Backtest.run fast path
+    # does not reproduce those semantics; keep it off so BT NAV matches legacy (see
+    # tests/test_strategy_execution_timing_regression.py).
+    simple_backtesting_mode = False
 
     atr_stop_stats: dict[str, Any] = {
         "enabled": False,
@@ -3983,58 +3981,8 @@ def _run_single_backtesting(
             raw_pos_for_exec = gated_df[code].astype(float)
 
     signal_pos = raw_pos_for_exec.astype(float).fillna(0.0)
-    bt_df["DesiredPos"] = (
-        (signal_pos > 0.0).astype(float)
-        if simple_backtesting_mode
-        else signal_pos.astype(float)
-    )
-    if simple_backtesting_mode:
-        signal_lookback = 2 if ep in {"close", "oc2"} else 1
-
-        class BtTrendStrategy(Strategy):
-            def init(self) -> None:
-                return
-
-            def next(self) -> None:
-                if len(self.data.Close) < signal_lookback:
-                    return
-                raw_target = float(self.data.DesiredPos[-signal_lookback])
-                target = raw_target if np.isfinite(raw_target) else 0.0
-                if target > 0.0 and not self.position:
-                    self.buy(size=0.999999)
-                elif target <= 0.0 and self.position:
-                    self.position.close()
-
-        trade_on_close = ep in {"close", "oc2"}
-        bt = Backtest(
-            bt_df,
-            BtTrendStrategy,
-            cash=1_000_000.0,
-            spread=float(getattr(inp, "slippage_rate", 0.0) or 0.0),
-            commission=float(getattr(inp, "cost_bps", 0.0) or 0.0) / 10000.0,
-            trade_on_close=trade_on_close,
-            exclusive_orders=True,
-            finalize_trades=True,
-        )
-        stats = bt.run()
-        equity_curve = stats.get("_equity_curve")
-        if equity_curve is None or "Equity" not in equity_curve:
-            raise ValueError(f"failed to build equity curve for {code}")
-        eq = pd.Series(
-            equity_curve["Equity"],
-            index=pd.to_datetime(equity_curve.index),
-            dtype=float,
-        ).sort_index()
-        nav = (eq / float(eq.iloc[0])).ffill().fillna(1.0)
-        strat_ret = _tsmom_rocp(nav, 1).fillna(0.0).astype(float)
-        pos_eff = bt_df["DesiredPos"].shift(1).fillna(0.0).astype(float)
-        atr_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
-        bias_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
-        rtp_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
-        w_ret = pos_eff.copy().astype(float)
-        ret_exec_day = ret_exec.reindex(nav.index).fillna(0.0).astype(float)
-        runtime_engine = "backtesting"
-    else:
+    bt_df["DesiredPos"] = signal_pos.astype(float)
+    if not simple_backtesting_mode:
         w_post = bt_df["DesiredPos"].shift(1).fillna(0.0).astype(float).clip(lower=0.0)
         open_sig_for_stop = bt_df["SigOpen"].astype(float)
         close_sig_for_stop = bt_df["SigClose"].astype(float)
@@ -4363,12 +4311,6 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     )
     ret_exec_open_day = (
         single.get("ret_exec_open_day", ret_exec_s)
-        .astype(float)
-        .reindex(nav.index)
-        .fillna(0.0)
-    )
-    ret_exec_close_day = (
-        single.get("ret_exec_close_day", ret_exec_s)
         .astype(float)
         .reindex(nav.index)
         .fillna(0.0)
@@ -4781,6 +4723,10 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "EXCESS": [float(x) for x in excess_nav.values],
             },
         },
+        "asset_nav_exec": {
+            "dates": single["dates"],
+            "series": {str(code): [float(x) for x in nav.values]},
+        },
         "signals": {
             "dates": single["dates"],
             "base_position": [float(x) for x in single["base_pos"].values],
@@ -4838,6 +4784,9 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
             "by_code": by_code_stats,
             "trades": trade_stats_trades,
             "trades_by_code": trade_stats_trades_by_code,
+            "trade_marks_by_code": {
+                str(code): _trade_marks_from_trades(list(trade_one.get("trades") or []))
+            },
             "mfe_r_distribution": mfe_r_distribution,
         },
         "r_statistics": r_stats_out,
@@ -4940,6 +4889,17 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 ),
                 "atr_stop_reentry_mode": str(
                     getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter"
+                ),
+                "atr_stop_execution_mode": str(
+                    getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
+                ),
+                "r_take_profit_execution_mode": str(
+                    getattr(inp, "r_take_profit_execution_mode", "intraday")
+                    or "intraday"
+                ),
+                "bias_v_take_profit_execution_mode": str(
+                    getattr(inp, "bias_v_take_profit_execution_mode", "intraday")
+                    or "intraday"
                 ),
                 "base_signal_prev": (
                     float(single["base_pos"].iloc[-2])
@@ -7344,6 +7304,90 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         if one is not None:
             entry_exec_price_with_slippage_by_asset[str(c)] = float(one)
 
+    portfolio_next_plan: dict[str, Any] = {
+        "decision_date": (str(nav.index[-1].date()) if len(nav.index) else None),
+        "entry_exec_price_with_slippage_by_asset": entry_exec_price_with_slippage_by_asset,
+        "position_sizing": str(ps),
+        "notes": (
+            "effective_weights_last_close：决策日收盘时持仓权重（含盘中止损等）；"
+            "decision_weights_next_exec：下一执行时点（通常为下一交易日开盘）目标权重。"
+            "二者之差包含波动率目标(vol_target)、风险预算及波动状态机等风控带来的调仓。"
+            "若仅波动状态切换而风险预算名义目标未变，可能出现权重差分为零。"
+        ),
+    }
+    if len(nav.index) > 0:
+        ld = nav.index[-1]
+        w_eff_last = w_eff.loc[ld]
+        w_dec_last = wdf.loc[ld]
+        portfolio_next_plan["effective_weights_last_close"] = {
+            str(c): float(w_eff_last[c]) for c in w_eff.columns
+        }
+        portfolio_next_plan["decision_weights_next_exec"] = {
+            str(c): float(w_dec_last[c]) for c in wdf.columns
+        }
+        deltas_m: dict[str, float] = {}
+        for c in wdf.columns:
+            du = float(w_dec_last[c]) - float(w_eff_last[c])
+            if abs(du) > 1e-14:
+                deltas_m[str(c)] = du
+        portfolio_next_plan["weight_delta_next_exec_by_code"] = deltas_m
+
+        if str(ps) == "vol_target":
+            vw = int(getattr(inp, "vol_window", 20) or 20)
+            vol_ann_np = pd.DataFrame(
+                index=ret_hfq_df.index, columns=ret_hfq_df.columns, dtype=float
+            )
+            for col in ret_hfq_df.columns:
+                vol_ann_np[col] = _rolling_std(
+                    ret_hfq_df[col].astype(float),
+                    window=vw,
+                    min_periods=max(3, vw // 2),
+                    ddof=1,
+                ) * np.sqrt(252.0)
+            active_codes_vt = [
+                str(c) for c in wdf.columns if float(w_dec_last[c]) > 1e-12
+            ]
+            inv_vt: dict[str, float] = {}
+            ann_by: dict[str, float] = {}
+            for c in active_codes_vt:
+                try:
+                    av = float(vol_ann_np.loc[ld, c])
+                except (TypeError, ValueError, KeyError):
+                    av = float("nan")
+                ann_by[str(c)] = av
+                if (not np.isfinite(av)) or av <= 0:
+                    inv_vt[c] = 0.0
+                else:
+                    inv_vt[c] = 1.0 / av
+            den_vt = float(sum(inv_vt.values()))
+            port_vol_est = float("nan")
+            scale_vt = 1.0
+            if den_vt > 0 and active_codes_vt:
+                raw_vt = {
+                    c: float(inv_vt[c]) / den_vt
+                    for c in active_codes_vt
+                    if float(inv_vt.get(c, 0.0)) > 0.0
+                }
+                s_var = 0.0
+                for c in raw_vt:
+                    vx = float(vol_ann_np.loc[ld, c])
+                    if np.isfinite(vx):
+                        s_var += float(raw_vt[c] ** 2) * float(vx**2)
+                port_vol_est = float(np.sqrt(s_var)) if s_var > 0 else float("nan")
+                vt_ann = float(getattr(inp, "vol_target_ann", 0.20) or 0.20)
+                scale_vt = (
+                    1.0
+                    if (not np.isfinite(port_vol_est)) or port_vol_est <= 1e-12
+                    else min(1.0, vt_ann / port_vol_est)
+                )
+            portfolio_next_plan["vol_target_snapshot"] = {
+                "vol_target_ann": float(getattr(inp, "vol_target_ann", 0.20) or 0.20),
+                "vol_window": int(getattr(inp, "vol_window", 20) or 20),
+                "portfolio_vol_annualized_est": port_vol_est,
+                "gross_leverage_scalar": float(scale_vt),
+                "by_code_ann_vol": ann_by,
+            }
+
     out = {
         "meta": {
             "type": "trend_portfolio_backtest",
@@ -7445,14 +7489,17 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             "by_code": by_code_stats,
             "trades": ([] if quick_mode else trades_with_r),
             "trades_by_code": trades_by_code,
+            "trade_marks_by_code": {
+                str(c): _trade_marks_from_trades(
+                    list((trade_pack.get("trades_by_code") or {}).get(str(c), []))
+                )
+                for c in wdf.columns
+            },
             "mfe_r_distribution": mfe_r_distribution,
         },
         "r_statistics": r_stats_out,
         "trades": ([] if quick_mode else trades_with_r),
-        "next_plan": {
-            "decision_date": (str(nav.index[-1].date()) if len(nav.index) else None),
-            "entry_exec_price_with_slippage_by_asset": entry_exec_price_with_slippage_by_asset,
-        },
+        "next_plan": portfolio_next_plan,
         "risk_controls": {
             "vol_regime_risk_mgmt": {
                 "enabled": bool(getattr(inp, "vol_regime_risk_mgmt_enabled", False)),
