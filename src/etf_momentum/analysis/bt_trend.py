@@ -33,9 +33,11 @@ from .r_multiple import build_trade_mfe_r_distribution, enrich_trades_with_r_met
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
 from .trend import (
     _apply_atr_stop,
+    _apply_bias_v_take_profit as _apply_bias_v_take_profit_shared,
     _apply_intraday_stop_execution_portfolio,
     _apply_intraday_stop_execution_single,
     _apply_monthly_risk_budget_gate,
+    _apply_r_multiple_take_profit as _apply_r_multiple_take_profit_shared,
 )
 
 Session = Any
@@ -78,6 +80,8 @@ DEFAULT_R_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
     {"r_multiple": 5.0, "retrace_ratio": 0.10},
     {"r_multiple": 6.0, "retrace_ratio": 0.05},
 ]
+STOP_EXECUTION_MODES: set[str] = {"intraday", "next_day"}
+VOL_REGIME_STATES: set[str] = {"NORMAL", "REDUCED", "INCREASED", "EXTREME"}
 
 
 def _talib_enabled() -> bool:
@@ -113,6 +117,105 @@ def _ratio_simple_return(
     if isinstance(n, pd.DataFrame) and isinstance(d, pd.DataFrame):
         d = d.reindex(columns=n.columns)
     return (n.div(d) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
+
+def _align_ca_mask_like(
+    target: pd.Series | pd.DataFrame,
+    ca_mask: pd.Series | pd.DataFrame | None,
+) -> pd.Series | pd.DataFrame:
+    if isinstance(target, pd.DataFrame):
+        if isinstance(ca_mask, pd.DataFrame):
+            return (
+                ca_mask.reindex(index=target.index, columns=target.columns)
+                .fillna(False)
+                .astype(bool)
+            )
+        if isinstance(ca_mask, pd.Series):
+            s = ca_mask.reindex(target.index).fillna(False).astype(bool)
+            return pd.DataFrame({c: s for c in target.columns}, index=target.index)
+        return pd.DataFrame(False, index=target.index, columns=target.columns)
+    if isinstance(ca_mask, pd.Series):
+        return ca_mask.reindex(target.index).fillna(False).astype(bool)
+    if isinstance(ca_mask, pd.DataFrame):
+        if ca_mask.shape[1] == 0:
+            return pd.Series(False, index=target.index, dtype=bool)
+        return ca_mask.iloc[:, 0].reindex(target.index).fillna(False).astype(bool)
+    return pd.Series(False, index=target.index, dtype=bool)
+
+
+def _build_execution_day_components(
+    *,
+    exec_price: str,
+    open_none: pd.Series | pd.DataFrame,
+    close_none: pd.Series | pd.DataFrame,
+    open_hfq: pd.Series | pd.DataFrame,
+    close_hfq: pd.Series | pd.DataFrame,
+) -> dict[str, pd.Series | pd.DataFrame]:
+    ep = str(exec_price or "open").strip().lower()
+    o_none = _as_float_like(open_none)
+    c_none = _as_float_like(close_none)
+    o_hfq = _as_float_like(open_hfq)
+    c_hfq = _as_float_like(close_hfq)
+
+    ret_exec_open_none = _ratio_simple_return(c_none, o_none).astype(float)
+    ret_exec_open_hfq = _ratio_simple_return(c_hfq, o_hfq).astype(float)
+    ret_exec_close_none = _ratio_simple_return(c_none, c_none.shift(1)).astype(float)
+    ret_exec_close_hfq = _ratio_simple_return(c_hfq, c_hfq.shift(1)).astype(float)
+
+    if ep == "open":
+        ret_none = ret_exec_open_none.astype(float)
+        ret_hfq = ret_exec_open_hfq.astype(float)
+        px_none_base = _as_float_like(o_none)
+        px_hfq_base = _as_float_like(o_hfq)
+    elif ep == "close":
+        ret_none = ret_exec_close_none.astype(float)
+        ret_hfq = ret_exec_close_hfq.astype(float)
+        px_none_base = _as_float_like(c_none)
+        px_hfq_base = _as_float_like(c_hfq)
+    else:
+        ret_none = (0.5 * (ret_exec_open_none + ret_exec_close_none)).astype(float)
+        ret_hfq = (0.5 * (ret_exec_open_hfq + ret_exec_close_hfq)).astype(float)
+        px_none_base = _as_float_like(0.5 * (o_none + c_none))
+        px_hfq_base = _as_float_like(0.5 * (o_hfq + c_hfq))
+
+    _, ca_mask_raw = corporate_action_mask(
+        (1.0 + ret_none).astype(float),
+        (1.0 + ret_hfq).astype(float),
+    )
+    ca_mask = _align_ca_mask_like(ret_none, ca_mask_raw)
+
+    ret_exec_day = ret_none.where(~ca_mask, other=ret_hfq).astype(float)
+    ret_exec_open_day = ret_exec_open_none.where(
+        ~ca_mask, other=ret_exec_open_hfq
+    ).astype(float)
+    ret_exec_close_day = ret_exec_close_none.where(
+        ~ca_mask, other=ret_exec_close_hfq
+    ).astype(float)
+    ret_overnight_close_none = _ratio_simple_return(o_none, c_none.shift(1)).astype(
+        float
+    )
+    ret_overnight_close_hfq = _ratio_simple_return(o_hfq, c_hfq.shift(1)).astype(float)
+    ret_overnight_close_day = ret_overnight_close_none.where(
+        ~ca_mask, other=ret_overnight_close_hfq
+    ).astype(float)
+    ret_intraday_close_day = ret_exec_open_day.astype(float)
+    px_exec_slip = (
+        px_none_base.where(~ca_mask, other=px_hfq_base)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+        .astype(float)
+    )
+    return {
+        "ret_none": ret_none.astype(float),
+        "ret_hfq": ret_hfq.astype(float),
+        "ret_exec_day": ret_exec_day.astype(float),
+        "ret_exec_open_day": ret_exec_open_day.astype(float),
+        "ret_exec_close_day": ret_exec_close_day.astype(float),
+        "ret_overnight_close_day": ret_overnight_close_day.astype(float),
+        "ret_intraday_close_day": ret_intraday_close_day.astype(float),
+        "px_exec_slip": px_exec_slip.astype(float),
+        "ca_mask": ca_mask,
+    }
 
 
 def _clone_like_input(inp: Any, **overrides: Any) -> Any:
@@ -1006,8 +1109,48 @@ def _dist_stats(values: list[float]) -> dict[str, Any]:
     }
 
 
+def _max_drawdown_from_trade_returns(values: list[float]) -> float | None:
+    arr = np.asarray(
+        [float(x) for x in (values or []) if np.isfinite(float(x))], dtype=float
+    )
+    if arr.size == 0:
+        return None
+    factors = np.maximum(1.0 + arr, 1e-12)
+    nav = np.cumprod(factors)
+    peaks = np.maximum.accumulate(nav)
+    dd = nav / np.maximum(peaks, 1e-12) - 1.0
+    if dd.size == 0:
+        return None
+    max_dd = float(abs(np.min(dd)))
+    return max_dd if np.isfinite(max_dd) else None
+
+
+def _risk_of_ruin_probability(
+    *,
+    p_win: float | None,
+    avg_loss_abs: float | None,
+    max_risk: float | None,
+) -> float | None:
+    p = float(p_win) if p_win is not None else float("nan")
+    a = float(avg_loss_abs) if avg_loss_abs is not None else float("nan")
+    mr = float(max_risk) if max_risk is not None else float("nan")
+    if not (np.isfinite(p) and np.isfinite(a) and np.isfinite(mr)):
+        return None
+    if p <= 0.0 or p >= 1.0 or a <= 0.0 or mr < 0.0:
+        return None
+    base = (1.0 - p) / p
+    exp = mr / a
+    raw = float(base**exp)
+    if not np.isfinite(raw):
+        return None
+    return float(np.clip(raw, 0.0, 1.0))
+
+
 def _trade_stats_from_returns(
-    values: list[float], *, flat_eps: float = 1e-12
+    values: list[float],
+    *,
+    flat_eps: float = 1e-12,
+    risk_of_ruin_maxrisk: float | None = None,
 ) -> dict[str, Any]:
     rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
     wins = [x for x in rs if x > float(flat_eps)]
@@ -1016,9 +1159,11 @@ def _trade_stats_from_returns(
     win_rate_ex_zero: float | None = None
     payoff_ex_zero: float | None = None
     kelly_ex_zero: float | None = None
+    avg_loss_abs_ex_zero: float | None = None
     if wins and losses:
         avg_win = float(np.mean(np.asarray(wins, dtype=float)))
         avg_loss_abs = float(abs(np.mean(np.asarray(losses, dtype=float))))
+        avg_loss_abs_ex_zero = avg_loss_abs
         if (
             np.isfinite(avg_win)
             and np.isfinite(avg_loss_abs)
@@ -1030,6 +1175,27 @@ def _trade_stats_from_returns(
             win_rate_ex_zero = p
             payoff_ex_zero = b
             kelly_ex_zero = float(p - (1.0 - p) / b)
+    max_risk_trade_nav = _max_drawdown_from_trade_returns(rs)
+    cfg_maxrisk = (
+        float(risk_of_ruin_maxrisk)
+        if risk_of_ruin_maxrisk is not None and np.isfinite(float(risk_of_ruin_maxrisk))
+        else None
+    )
+    maxrisk_for_formula = (
+        cfg_maxrisk
+        if cfg_maxrisk is not None and cfg_maxrisk > 0.0
+        else max_risk_trade_nav
+    )
+    maxrisk_basis = (
+        "configured_risk_of_ruin_maxrisk"
+        if cfg_maxrisk is not None and cfg_maxrisk > 0.0
+        else "max_drawdown_of_trade_return_nav"
+    )
+    risk_of_ruin = _risk_of_ruin_probability(
+        p_win=win_rate_ex_zero,
+        avg_loss_abs=avg_loss_abs_ex_zero,
+        max_risk=maxrisk_for_formula,
+    )
     return {
         "total_trades": int(len(rs)),
         "win_trades": int(len(wins)),
@@ -1042,6 +1208,96 @@ def _trade_stats_from_returns(
         "all_stats": _dist_stats(rs),
         "profit_stats": _dist_stats(wins),
         "loss_stats": _dist_stats(losses),
+        "risk_of_ruin": {
+            "formula": "((1-P)/P)^(maxrisk/A)",
+            "probability": risk_of_ruin,
+            "P": win_rate_ex_zero,
+            "A": avg_loss_abs_ex_zero,
+            "maxrisk": maxrisk_for_formula,
+            "P_basis": "win_rate_ex_zero",
+            "A_basis": "abs(mean_loss_ex_zero)",
+            "maxrisk_basis": maxrisk_basis,
+            "maxrisk_configured": cfg_maxrisk,
+            "maxrisk_drawdown_reference": max_risk_trade_nav,
+        },
+    }
+
+
+def _semi_variance_run_stats_from_returns(
+    values: list[float], *, flat_eps: float = 1e-12
+) -> dict[str, Any]:
+    rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
+    eps = float(abs(float(flat_eps)))
+    pos_daily = np.asarray([x for x in rs if x > eps], dtype=float)
+    neg_daily = np.asarray([x for x in rs if x < -eps], dtype=float)
+    upside_semivariance = (
+        float(np.mean(np.square(pos_daily))) if pos_daily.size > 0 else None
+    )
+    downside_semivariance = (
+        float(np.mean(np.square(neg_daily))) if neg_daily.size > 0 else None
+    )
+
+    run_returns: list[float] = []
+    profit_runs: list[float] = []
+    loss_runs: list[float] = []
+    profit_run_counts: list[int] = []
+    loss_run_counts: list[int] = []
+    run_sign = 0
+    run_values: list[float] = []
+
+    def _flush_run() -> None:
+        nonlocal run_sign, run_values
+        if run_sign == 0 or not run_values:
+            run_sign = 0
+            run_values = []
+            return
+        cum_ret = float(np.prod(1.0 + np.asarray(run_values, dtype=float)) - 1.0)
+        run_returns.append(cum_ret)
+        if run_sign > 0:
+            profit_runs.append(cum_ret)
+            profit_run_counts.append(int(len(run_values)))
+        else:
+            loss_runs.append(cum_ret)
+            loss_run_counts.append(int(len(run_values)))
+        run_sign = 0
+        run_values = []
+
+    for r in rs:
+        if r > eps:
+            sign = 1
+        elif r < -eps:
+            sign = -1
+        else:
+            sign = 0
+        if sign == 0:
+            _flush_run()
+            continue
+        if run_sign == 0:
+            run_sign = sign
+            run_values = [float(r)]
+            continue
+        if sign != run_sign:
+            _flush_run()
+            run_sign = sign
+            run_values = [float(r)]
+            continue
+        run_values.append(float(r))
+    _flush_run()
+
+    run_trade_stats = _trade_stats_from_returns(run_returns, flat_eps=eps)
+    return {
+        "total_segments": int(len(run_returns)),
+        "profit_segments": int(len(profit_runs)),
+        "loss_segments": int(len(loss_runs)),
+        "win_rate_ex_zero": run_trade_stats.get("win_rate_ex_zero"),
+        "payoff_ex_zero": run_trade_stats.get("payoff_ex_zero"),
+        "kelly_ex_zero": run_trade_stats.get("kelly_ex_zero"),
+        "upside_semivariance": upside_semivariance,
+        "downside_semivariance": downside_semivariance,
+        "profit_return_stats": _dist_stats(profit_runs),
+        "profit_count_stats": _dist_stats([float(x) for x in profit_run_counts]),
+        "loss_return_stats": _dist_stats(loss_runs),
+        "loss_count_stats": _dist_stats([float(x) for x in loss_run_counts]),
     }
 
 
@@ -1650,6 +1906,73 @@ def _reduce_active_codes_by_group(
     return reduced, meta
 
 
+def _vol_regime_state_from_ratio(
+    ratio: float,
+    *,
+    expand_threshold: float,
+    contract_threshold: float,
+    extreme_threshold: float,
+) -> str:
+    if not np.isfinite(float(ratio)):
+        return "NORMAL"
+    r = float(ratio)
+    if r > float(extreme_threshold):
+        return "EXTREME"
+    if r > float(expand_threshold):
+        return "REDUCED"
+    if r < float(contract_threshold):
+        return "INCREASED"
+    return "NORMAL"
+
+
+def _next_vol_regime_state(
+    current_state: str,
+    *,
+    ratio: float,
+    expand_threshold: float,
+    contract_threshold: float,
+    normal_threshold: float,
+    extreme_threshold: float,
+) -> str:
+    st = str(current_state or "NORMAL").strip().upper()
+    if st not in VOL_REGIME_STATES:
+        st = "NORMAL"
+    if not np.isfinite(float(ratio)):
+        return st
+    r = float(ratio)
+    if st == "NORMAL":
+        return _vol_regime_state_from_ratio(
+            r,
+            expand_threshold=float(expand_threshold),
+            contract_threshold=float(contract_threshold),
+            extreme_threshold=float(extreme_threshold),
+        )
+    if st == "REDUCED":
+        if r > float(extreme_threshold):
+            return "EXTREME"
+        if r < float(contract_threshold):
+            return "INCREASED"
+        if r < float(normal_threshold):
+            return "NORMAL"
+        return "REDUCED"
+    if st == "INCREASED":
+        if r > float(extreme_threshold):
+            return "EXTREME"
+        if r > float(expand_threshold):
+            return "REDUCED"
+        if r > float(normal_threshold):
+            return "NORMAL"
+        return "INCREASED"
+    # EXTREME
+    if r < float(contract_threshold):
+        return "INCREASED"
+    if r < float(normal_threshold):
+        return "NORMAL"
+    if r <= float(extreme_threshold):
+        return "REDUCED"
+    return "EXTREME"
+
+
 def _risk_budget_dynamic_weights(
     active_signal: pd.Series,
     *,
@@ -1662,6 +1985,7 @@ def _risk_budget_dynamic_weights(
     expand_threshold: float,
     contract_threshold: float,
     normal_threshold: float,
+    extreme_threshold: float,
 ) -> tuple[pd.Series, dict[str, int]]:
     idx = active_signal.index
     sig = active_signal.reindex(idx).astype(float).fillna(0.0).clip(lower=0.0)
@@ -1715,14 +2039,16 @@ def _risk_budget_dynamic_weights(
                     if np.isfinite(float(ratio.loc[d]))
                     else float("nan")
                 )
-                if np.isfinite(r) and r > float(expand_threshold):
-                    state = "REDUCED"
+                state = _vol_regime_state_from_ratio(
+                    r,
+                    expand_threshold=float(expand_threshold),
+                    contract_threshold=float(contract_threshold),
+                    extreme_threshold=float(extreme_threshold),
+                )
+                if state == "REDUCED":
                     stats["vol_risk_entry_state_reduce_on_expand_count"] += 1
-                elif np.isfinite(r) and r < float(contract_threshold):
-                    state = "INCREASED"
+                elif state == "INCREASED":
                     stats["vol_risk_entry_state_increase_on_contract_count"] += 1
-                else:
-                    state = "NORMAL"
             else:
                 state = "NORMAL"
             out.loc[d] = held_weight
@@ -1734,28 +2060,26 @@ def _risk_budget_dynamic_weights(
                 else float("nan")
             )
             can_recalc = np.isfinite(float(base_target.loc[d]))
-            if state == "NORMAL":
-                if np.isfinite(r) and r > float(expand_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "REDUCED"
-                    stats["vol_risk_adjust_total_count"] += 1
+            next_state = _next_vol_regime_state(
+                state,
+                ratio=r,
+                expand_threshold=float(expand_threshold),
+                contract_threshold=float(contract_threshold),
+                normal_threshold=float(normal_threshold),
+                extreme_threshold=float(extreme_threshold),
+            )
+            if can_recalc and next_state != state:
+                old_state = str(state)
+                held_weight = float(base_target.loc[d])
+                state = str(next_state)
+                stats["vol_risk_adjust_total_count"] += 1
+                if state == "REDUCED":
                     stats["vol_risk_adjust_reduce_on_expand_count"] += 1
-                elif np.isfinite(r) and r < float(contract_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "INCREASED"
-                    stats["vol_risk_adjust_total_count"] += 1
+                if state == "INCREASED":
                     stats["vol_risk_adjust_increase_on_contract_count"] += 1
-            elif state == "REDUCED":
-                if np.isfinite(r) and r < float(normal_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "NORMAL"
-                    stats["vol_risk_adjust_total_count"] += 1
+                if state == "NORMAL" and old_state in {"REDUCED", "EXTREME"}:
                     stats["vol_risk_adjust_recover_from_expand_count"] += 1
-            elif state == "INCREASED":
-                if np.isfinite(r) and r > float(normal_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "NORMAL"
-                    stats["vol_risk_adjust_total_count"] += 1
+                if state == "NORMAL" and old_state == "INCREASED":
                     stats["vol_risk_adjust_recover_from_contract_count"] += 1
         out.loc[d] = float(min(1.0, max(0.0, held_weight)))
     return out.astype(float), {k: int(v) for k, v in stats.items()}
@@ -2001,6 +2325,7 @@ def _apply_r_multiple_take_profit(
     entry_px = float("nan")
     initial_r_pct = float("nan")
     peak_profit_pct = float("nan")
+    entry_i = -1
     invalid_r_entries = 0
     eps = 1e-12
 
@@ -2031,6 +2356,7 @@ def _apply_r_multiple_take_profit(
             in_pos = True
             wait_next_entry_lock = False
             entry_px = c
+            entry_i = i
             initial_r_pct = (
                 float(atr_n) * a / c if (np.isfinite(a) and a > 0.0) else float("nan")
             )
@@ -2082,6 +2408,7 @@ def _apply_r_multiple_take_profit(
             entry_px = float("nan")
             initial_r_pct = float("nan")
             peak_profit_pct = float("nan")
+            entry_i = -1
             trace_last_rows.append(
                 {
                     "date": ds,
@@ -2151,8 +2478,10 @@ def _apply_r_multiple_take_profit(
             )
             else float("nan")
         )
+        tp_armed = bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
         tp_triggered = bool(
-            active_tier is not None
+            tp_armed
+            and active_tier is not None
             and np.isfinite(dd_from_peak)
             and dd_from_peak >= float(active_tier["retrace_ratio"])
         )
@@ -2258,6 +2587,7 @@ def _apply_r_multiple_take_profit(
             entry_px = float("nan")
             initial_r_pct = float("nan")
             peak_profit_pct = float("nan")
+            entry_i = -1
             prev_base = b
             continue
 
@@ -2407,6 +2737,7 @@ def _apply_bias_v_take_profit(
     wait_next_entry_lock = False
     entry_decision_date: str | None = None
     initial_tp_price: float = float("nan")
+    entry_i = -1
 
     for i in range(len(bp)):
         b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
@@ -2440,6 +2771,7 @@ def _apply_bias_v_take_profit(
                 continue
             in_pos = True
             wait_next_entry_lock = False
+            entry_i = i
             raw_px = (
                 float(m + float(threshold) * a)
                 if (np.isfinite(m) and np.isfinite(a))
@@ -2495,6 +2827,7 @@ def _apply_bias_v_take_profit(
             tp_line_px = float("nan")
             entry_decision_date = None
             initial_tp_price = float("nan")
+            entry_i = -1
             trace_last_rows.append(
                 {
                     "date": ds,
@@ -2539,8 +2872,12 @@ def _apply_bias_v_take_profit(
                 else max(float(tp_line_px), float(trigger_px_raw))
             )
         trigger_px = float(tp_line_px) if np.isfinite(tp_line_px) else float("nan")
+        tp_armed = bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
         tp_triggered = bool(
-            np.isfinite(h) and np.isfinite(trigger_px) and (h >= trigger_px)
+            tp_armed
+            and np.isfinite(h)
+            and np.isfinite(trigger_px)
+            and (h >= trigger_px)
         )
         if tp_triggered:
             in_pos = False
@@ -2641,6 +2978,7 @@ def _apply_bias_v_take_profit(
             tp_line_px = float("nan")
             entry_decision_date = None
             initial_tp_price = float("nan")
+            entry_i = -1
             prev_base = b
             continue
 
@@ -2733,10 +3071,18 @@ def _validate_bt_single_inputs(inp: Any) -> None:
         or risk_budget_pct > 0.02
     ):
         raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
+    risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
+    if (
+        (not np.isfinite(risk_of_ruin_maxrisk))
+        or risk_of_ruin_maxrisk <= 0.0
+        or risk_of_ruin_maxrisk > 1.0
+    ):
+        raise ValueError("risk_of_ruin_maxrisk must be in (0, 1]")
     if bool(getattr(inp, "vol_regime_risk_mgmt_enabled", False)):
         vt_expand = float(getattr(inp, "vol_ratio_expand_threshold", 1.45) or 1.45)
         vt_contract = float(getattr(inp, "vol_ratio_contract_threshold", 0.65) or 0.65)
         vt_normal = float(getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05)
+        vt_extreme = float(getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20)
         if vt_expand <= vt_normal:
             raise ValueError(
                 "vol_ratio_expand_threshold must be > vol_ratio_normal_threshold"
@@ -2745,6 +3091,35 @@ def _validate_bt_single_inputs(inp: Any) -> None:
             raise ValueError(
                 "vol_ratio_contract_threshold must be < vol_ratio_normal_threshold"
             )
+        if vt_extreme <= vt_expand:
+            raise ValueError(
+                "vol_ratio_extreme_threshold must be > vol_ratio_expand_threshold"
+            )
+    atr_exec_mode = (
+        str(getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if atr_exec_mode not in STOP_EXECUTION_MODES:
+        raise ValueError("atr_stop_execution_mode must be one of: intraday|next_day")
+    rtp_exec_mode = (
+        str(getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if rtp_exec_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "r_take_profit_execution_mode must be one of: intraday|next_day"
+        )
+    bv_exec_mode = (
+        str(getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if bv_exec_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "bias_v_take_profit_execution_mode must be one of: intraday|next_day"
+        )
 
 
 def _build_meta_params(inp: Any) -> dict[str, Any]:
@@ -2813,12 +3188,21 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "vol_ratio_normal_threshold": float(
             getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
         ),
+        "vol_ratio_extreme_threshold": float(
+            getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20
+        ),
+        "risk_of_ruin_maxrisk": float(
+            getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30
+        ),
         "atr_stop_mode": str(getattr(inp, "atr_stop_mode", "none") or "none"),
         "atr_stop_atr_basis": str(
             getattr(inp, "atr_stop_atr_basis", "latest") or "latest"
         ),
         "atr_stop_reentry_mode": str(
             getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter"
+        ),
+        "atr_stop_execution_mode": str(
+            getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
         ),
         "atr_stop_window": int(getattr(inp, "atr_stop_window", 14) or 14),
         "atr_stop_n": float(getattr(inp, "atr_stop_n", 2.0) or 2.0),
@@ -2827,11 +3211,17 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "r_take_profit_reentry_mode": str(
             getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter"
         ),
+        "r_take_profit_execution_mode": str(
+            getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday"
+        ),
         "bias_v_take_profit_enabled": bool(
             getattr(inp, "bias_v_take_profit_enabled", False)
         ),
         "bias_v_take_profit_reentry_mode": str(
             getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter"
+        ),
+        "bias_v_take_profit_execution_mode": str(
+            getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday"
         ),
         "bias_v_ma_window": int(getattr(inp, "bias_v_ma_window", 20) or 20),
         "bias_v_atr_window": int(getattr(inp, "bias_v_atr_window", 20) or 20),
@@ -3337,43 +3727,25 @@ def _run_single_backtesting(
         bt_df["HfqOpen"].astype(float).combine_first(bt_df["HfqClose"].astype(float))
     )
     close_hfq = bt_df["HfqClose"].astype(float)
-    if ep == "open":
-        ret_exec_none = _forward_simple_return(open_none)
-        ret_exec_hfq = _forward_simple_return(open_hfq)
-        px_exec_none = open_none.astype(float)
-        px_exec_hfq = open_hfq.astype(float)
-    elif ep == "oc2":
-        ret_open_none = _forward_simple_return(open_none)
-        ret_close_none = _forward_simple_return(close_none)
-        ret_open_hfq = _forward_simple_return(open_hfq)
-        ret_close_hfq = _forward_simple_return(close_hfq)
-        ret_exec_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
-        ret_exec_hfq = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
-        px_exec_none = (0.5 * (open_none + close_none)).astype(float)
-        px_exec_hfq = (0.5 * (open_hfq + close_hfq)).astype(float)
-    else:
-        ret_exec_none = _forward_simple_return(close_none)
-        ret_exec_hfq = _forward_simple_return(close_hfq)
-        px_exec_none = close_none.astype(float)
-        px_exec_hfq = close_hfq.astype(float)
+    exec_comp = _build_execution_day_components(
+        exec_price=ep,
+        open_none=open_none,
+        close_none=close_none,
+        open_hfq=open_hfq,
+        close_hfq=close_hfq,
+    )
+    ret_exec_none = exec_comp["ret_none"].astype(float)
+    ret_exec_hfq = exec_comp["ret_hfq"].astype(float)
+    ret_exec_open_day = exec_comp["ret_exec_open_day"].astype(float)
+    ret_exec_close_day = exec_comp["ret_exec_close_day"].astype(float)
+    ret_overnight_close_day = exec_comp["ret_overnight_close_day"].astype(float)
+    ret_intraday_close_day = exec_comp["ret_intraday_close_day"].astype(float)
+    ca_m = exec_comp["ca_mask"]
+    ret_exec = exec_comp["ret_exec_day"].astype(float)
+    ret_exec_raw = ret_exec.copy().astype(float)
+    px_exec_slip = exec_comp["px_exec_slip"].astype(float)
     gross_none = (1.0 + ret_exec_none).astype(float)
     gross_hfq = (1.0 + ret_exec_hfq).astype(float)
-    _, ca_mask = corporate_action_mask(
-        gross_none.to_frame(code), gross_hfq.to_frame(code)
-    )
-    ca_m = (
-        ca_mask[code].reindex(bt_df.index).fillna(False)
-        if isinstance(ca_mask, pd.DataFrame) and code in ca_mask.columns
-        else pd.Series(False, index=bt_df.index)
-    )
-    ret_exec = ret_exec_none.where(~ca_m, other=ret_exec_hfq).astype(float)
-    ret_exec_raw = ret_exec.copy().astype(float)
-    px_exec_slip = (
-        px_exec_none.where(~ca_m, other=px_exec_hfq)
-        .replace([np.inf, -np.inf], np.nan)
-        .ffill()
-        .astype(float)
-    )
 
     atr_mode = str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
     atr_basis = (
@@ -3384,15 +3756,30 @@ def _run_single_backtesting(
         .strip()
         .lower()
     )
+    atr_execution_mode = (
+        str(getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
     rtp_enabled = bool(getattr(inp, "r_take_profit_enabled", False))
     rtp_reentry_mode = (
         str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter")
         .strip()
         .lower()
     )
+    rtp_execution_mode = (
+        str(getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
     bias_v_tp_enabled = bool(getattr(inp, "bias_v_take_profit_enabled", False))
     bias_v_tp_reentry_mode = (
         str(getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter")
+        .strip()
+        .lower()
+    )
+    bias_v_tp_execution_mode = (
+        str(getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday")
         .strip()
         .lower()
     )
@@ -3462,6 +3849,7 @@ def _run_single_backtesting(
             mode=atr_mode,
             atr_basis=atr_basis,
             reentry_mode=atr_reentry_mode,
+            execution_mode=atr_execution_mode,
             atr_window=int(getattr(inp, "atr_stop_window", 14)),
             n_mult=float(getattr(inp, "atr_stop_n", 2.0)),
             m_step=float(getattr(inp, "atr_stop_m", 0.5)),
@@ -3470,7 +3858,7 @@ def _run_single_backtesting(
             **(atr_stop_stats or {}),
             **_extract_atr_plan_stops_from_trace(atr_stop_stats or {}),
         }
-        raw_pos_for_exec, bias_v_tp_stats = _apply_bias_v_take_profit(
+        raw_pos_for_exec, bias_v_tp_stats = _apply_bias_v_take_profit_shared(
             raw_pos_for_exec,
             open_=bt_df["SigOpen"].astype(float),
             close=bt_df["SigClose"].astype(float),
@@ -3478,11 +3866,12 @@ def _run_single_backtesting(
             low=bt_df["SigLow"].astype(float),
             enabled=bias_v_tp_enabled,
             reentry_mode=bias_v_tp_reentry_mode,
+            execution_mode=bias_v_tp_execution_mode,
             ma_window=int(getattr(inp, "bias_v_ma_window", 20)),
             atr_window=int(getattr(inp, "bias_v_atr_window", 20)),
             threshold=float(getattr(inp, "bias_v_take_profit_threshold", 5.0)),
         )
-        raw_pos_for_exec, r_take_profit_stats = _apply_r_multiple_take_profit(
+        raw_pos_for_exec, r_take_profit_stats = _apply_r_multiple_take_profit_shared(
             raw_pos_for_exec,
             open_=bt_df["SigOpen"].astype(float),
             close=bt_df["SigClose"].astype(float),
@@ -3490,6 +3879,7 @@ def _run_single_backtesting(
             low=bt_df["SigLow"].astype(float),
             enabled=rtp_enabled,
             reentry_mode=rtp_reentry_mode,
+            execution_mode=rtp_execution_mode,
             atr_window=int(getattr(inp, "atr_stop_window", 14)),
             atr_n=float(getattr(inp, "atr_stop_n", 2.0)),
             tiers=_normalize_r_take_profit_tiers(
@@ -3542,6 +3932,9 @@ def _run_single_backtesting(
                 ),
                 normal_threshold=float(
                     getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
+                ),
+                extreme_threshold=float(
+                    getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20
                 ),
             )
         elif ps == "vol_target":
@@ -3638,80 +4031,97 @@ def _run_single_backtesting(
         atr_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
         bias_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
         rtp_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
+        w_ret = pos_eff.copy().astype(float)
+        ret_exec_day = ret_exec.reindex(nav.index).fillna(0.0).astype(float)
         runtime_engine = "backtesting"
     else:
-        pos_eff = bt_df["DesiredPos"].shift(1).fillna(0.0).astype(float).clip(lower=0.0)
-        atr_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
-        bias_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
-        rtp_override_ret = pd.Series(0.0, index=bt_df.index, dtype=float)
-        if not simple_backtesting_mode:
-            pos_eff, atr_override_ret = _apply_intraday_stop_execution_single(
-                weights=pos_eff,
+        w_post = bt_df["DesiredPos"].shift(1).fillna(0.0).astype(float).clip(lower=0.0)
+        open_sig_for_stop = bt_df["SigOpen"].astype(float)
+        close_sig_for_stop = bt_df["SigClose"].astype(float)
+
+        def _apply_all_intraday_overlays(
+            weight_in: pd.Series,
+            *,
+            mode: str,
+        ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+            w_tmp = weight_in.astype(float).copy()
+            w_tmp, atr_over = _apply_intraday_stop_execution_single(
+                weights=w_tmp,
                 atr_stop_stats=atr_stop_stats,
-                exec_price=str(ep),
-                open_sig=bt_df["SigOpen"].astype(float),
-                close_sig=bt_df["SigClose"].astype(float),
+                exec_price=str(mode),
+                stop_execution_mode=atr_execution_mode,
+                open_sig=open_sig_for_stop,
+                close_sig=close_sig_for_stop,
             )
-            pos_eff, bias_override_ret = _apply_intraday_stop_execution_single(
-                weights=pos_eff,
+            w_tmp, bias_over = _apply_intraday_stop_execution_single(
+                weights=w_tmp,
                 atr_stop_stats=bias_v_tp_stats,
-                exec_price=str(ep),
-                open_sig=bt_df["SigOpen"].astype(float),
-                close_sig=bt_df["SigClose"].astype(float),
+                exec_price=str(mode),
+                stop_execution_mode=bias_v_tp_execution_mode,
+                open_sig=open_sig_for_stop,
+                close_sig=close_sig_for_stop,
             )
-            pos_eff, rtp_override_ret = _apply_intraday_stop_execution_single(
-                weights=pos_eff,
+            w_tmp, rtp_over = _apply_intraday_stop_execution_single(
+                weights=w_tmp,
                 atr_stop_stats=r_take_profit_stats,
-                exec_price=str(ep),
-                open_sig=bt_df["SigOpen"].astype(float),
-                close_sig=bt_df["SigClose"].astype(float),
+                exec_price=str(mode),
+                stop_execution_mode=rtp_execution_mode,
+                open_sig=open_sig_for_stop,
+                close_sig=close_sig_for_stop,
             )
-        ret_exec_use = ret_exec.copy().astype(float)
-        if ep in {"open", "oc2"}:
-            same_day_none = _ratio_simple_return(bt_df["Close"], bt_df["Open"])
-            same_day_hfq = _ratio_simple_return(bt_df["HfqClose"], bt_df["HfqOpen"])
-            open_fwd_none = _forward_simple_return(bt_df["Open"])
-            open_fwd_hfq = _forward_simple_return(bt_df["HfqOpen"])
-            close_fwd_none = _forward_simple_return(bt_df["Close"])
-            close_fwd_hfq = _forward_simple_return(bt_df["HfqClose"])
-            cm = ca_m.reindex(ret_exec_use.index).fillna(False).astype(bool)
-            w_ix = pos_eff.reindex(ret_exec_use.index).fillna(0.0).astype(float)
-            if ep == "open":
-                for d in ret_exec_use.index:
-                    if float(w_ix.loc[d]) <= 1e-12:
-                        continue
-                    ret_exec_use.loc[d] = (
-                        float(same_day_hfq.loc[d])
-                        if bool(cm.loc[d])
-                        else float(same_day_none.loc[d])
-                    )
-            else:
-                ret_blend_none = pd.Series(0.0, index=ret_exec_use.index, dtype=float)
-                ret_blend_hfq = pd.Series(0.0, index=ret_exec_use.index, dtype=float)
-                for d in ret_exec_use.index:
-                    hold = float(w_ix.loc[d]) > 1e-12
-                    po_n = (
-                        float(same_day_none.loc[d])
-                        if hold
-                        else float(open_fwd_none.loc[d])
-                    )
-                    po_h = (
-                        float(same_day_hfq.loc[d])
-                        if hold
-                        else float(open_fwd_hfq.loc[d])
-                    )
-                    cn = float(close_fwd_none.loc[d])
-                    ch = float(close_fwd_hfq.loc[d])
-                    ret_blend_none.loc[d] = 0.5 * (po_n + cn)
-                    ret_blend_hfq.loc[d] = 0.5 * (po_h + ch)
-                ret_exec_use = ret_blend_none.where(~cm, ret_blend_hfq).astype(float)
+            return (
+                w_tmp.astype(float),
+                atr_over.astype(float),
+                bias_over.astype(float),
+                rtp_over.astype(float),
+            )
+
+        open_leg_mode = "open" if ep == "oc2" else str(ep)
+        w_post, atr_over_post, bias_over_post, rtp_over_post = (
+            _apply_all_intraday_overlays(w_post, mode=open_leg_mode)
+        )
+        w = w_post.astype(float)
+        w_ret = w.copy().astype(float)
+        ret_exec_day = ret_exec_open_day.reindex(w.index).fillna(0.0).astype(float)
+        atr_override_ret = atr_over_post.reindex(w.index).fillna(0.0).astype(float)
+        bias_override_ret = bias_over_post.reindex(w.index).fillna(0.0).astype(float)
+        rtp_override_ret = rtp_over_post.reindex(w.index).fillna(0.0).astype(float)
+        if ep == "close":
+            w_close_base = w.shift(1).fillna(0.0).astype(float)
+            w_ret, atr_override_ret, bias_override_ret, rtp_override_ret = (
+                _apply_all_intraday_overlays(w_close_base, mode="close")
+            )
+            ret_exec_day = ret_exec_close_day.reindex(w.index).fillna(0.0).astype(float)
+        elif ep == "oc2":
+            w_close_base = w.shift(1).fillna(0.0).astype(float)
+            w_close, atr_over_close, bias_over_close, rtp_over_close = (
+                _apply_all_intraday_overlays(w_close_base, mode="close")
+            )
+            w_ret = (0.5 * (w + w_close)).astype(float)
+            ret_exec_day = (
+                0.5
+                * (
+                    ret_exec_open_day.reindex(w.index).fillna(0.0).astype(float)
+                    + ret_exec_close_day.reindex(w.index).fillna(0.0).astype(float)
+                )
+            ).astype(float)
+            atr_override_ret = (
+                0.5 * (atr_override_ret + atr_over_close.reindex(w.index).fillna(0.0))
+            ).astype(float)
+            bias_override_ret = (
+                0.5 * (bias_override_ret + bias_over_close.reindex(w.index).fillna(0.0))
+            ).astype(float)
+            rtp_override_ret = (
+                0.5 * (rtp_override_ret + rtp_over_close.reindex(w.index).fillna(0.0))
+            ).astype(float)
+        pos_eff = w.astype(float)
         base_ret = (
-            (pos_eff * ret_exec_use).astype(float)
+            (w_ret * ret_exec_day).astype(float)
             + atr_override_ret.astype(float)
             + bias_override_ret.astype(float)
             + rtp_override_ret.astype(float)
         )
-        turnover = pos_eff.diff().abs().fillna(pos_eff.abs()) / 2.0
+        turnover = (w - w.shift(1).fillna(0.0)).abs() / 2.0
         cost_comm = turnover * (float(getattr(inp, "cost_bps", 0.0) or 0.0) / 10000.0)
         cost_slip = slippage_return_from_turnover(
             turnover,
@@ -3720,7 +4130,7 @@ def _run_single_backtesting(
         )
         strat_ret = (base_ret - cost_comm - cost_slip).fillna(0.0).astype(float)
         nav = _as_nav(strat_ret)
-        ret_exec = ret_exec_use.astype(float)
+        ret_exec = ret_exec_day.astype(float)
         stats = {
             "_trades": pd.DataFrame(),
             "# Trades": int(
@@ -3729,32 +4139,26 @@ def _run_single_backtesting(
         }
         runtime_engine = "semantic_vectorized"
 
-    ret_hfq_cc = (
-        _tsmom_rocp(bt_df["HfqClose"].astype(float), 1).fillna(0.0).astype(float)
-    )
+    ret_hfq_cc = _ratio_simple_return(
+        bt_df["HfqClose"].astype(float),
+        bt_df["HfqClose"].astype(float).shift(1),
+    ).astype(float)
     cm_bh = ca_m.reindex(ret_hfq_cc.index).fillna(False).astype(bool)
     bh_same_none = _ratio_simple_return(bt_df["Close"], bt_df["Open"])
     bh_same_hfq = _ratio_simple_return(bt_df["HfqClose"], bt_df["HfqOpen"])
-    if ep == "close":
-        bh_ret = ret_hfq_cc.astype(float)
-    elif ep == "open":
-        bh_ret = (
-            bh_same_none.where(~cm_bh, bh_same_hfq)
-            .astype(float)
-            .reindex(ret_hfq_cc.index)
-            .fillna(0.0)
-        )
+    ret_bh_open = (
+        bh_same_none.where(~cm_bh, bh_same_hfq)
+        .astype(float)
+        .reindex(ret_hfq_cc.index)
+        .fillna(0.0)
+    )
+    ret_bh_close = ret_hfq_cc.astype(float).reindex(ret_hfq_cc.index).fillna(0.0)
+    if ep == "open":
+        bh_ret = ret_bh_open.astype(float)
+    elif ep == "close":
+        bh_ret = ret_bh_close.astype(float)
     else:
-        cf_none = _forward_simple_return(bt_df["Close"])
-        cf_hfq = _forward_simple_return(bt_df["HfqClose"])
-        blend_bh_none = (0.5 * (bh_same_none + cf_none)).astype(float)
-        blend_bh_hfq = (0.5 * (bh_same_hfq + cf_hfq)).astype(float)
-        bh_ret = (
-            blend_bh_none.where(~cm_bh, blend_bh_hfq)
-            .astype(float)
-            .reindex(ret_hfq_cc.index)
-            .fillna(0.0)
-        )
+        bh_ret = (0.5 * (ret_bh_open + ret_bh_close)).astype(float)
     bh_nav = _as_nav(bh_ret)
     excess_nav = (nav / bh_nav.replace(0.0, np.nan)).fillna(1.0)
     excess_ret = _tsmom_rocp(excess_nav, 1).fillna(0.0).astype(float)
@@ -3837,11 +4241,34 @@ def _run_single_backtesting(
         "desired_pos": bt_df["DesiredPos"].reindex(nav.index).fillna(0.0),
         "base_pos": base_pos.reindex(nav.index).fillna(0.0).astype(float),
         "signal_pos": signal_pos.reindex(nav.index).fillna(0.0).astype(float),
+        "effective_weight": pos_eff.reindex(nav.index).fillna(0.0).astype(float),
+        "return_weight": w_ret.reindex(nav.index).fillna(0.0).astype(float),
         "sig_open": bt_df["SigOpen"].reindex(nav.index).ffill(),
         "sig_close": bt_df["SigClose"].reindex(nav.index).ffill(),
         "sig_high": bt_df["SigHigh"].reindex(nav.index).ffill(),
         "sig_low": bt_df["SigLow"].reindex(nav.index).ffill(),
         "ret_exec": ret_exec.reindex(nav.index).fillna(0.0).astype(float),
+        "ret_exec_open_day": ret_exec_open_day.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
+        "ret_exec_close_day": ret_exec_close_day.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
+        "ret_overnight_close_day": ret_overnight_close_day.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
+        "ret_intraday_close_day": ret_intraday_close_day.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
+        "atr_override_ret": atr_override_ret.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
+        "bias_override_ret": bias_override_ret.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
+        "rtp_override_ret": rtp_override_ret.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
         "ret_exec_raw": ret_exec_raw.reindex(nav.index).fillna(0.0).astype(float),
         "px_exec_slip": px_exec_slip.reindex(nav.index).ffill().astype(float),
         "ret_exec_none": ret_exec_none.reindex(nav.index).fillna(0.0).astype(float),
@@ -3908,7 +4335,20 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         )
     else:
         weight_s = single["desired_pos"].astype(float)
-    w_eff = single["desired_pos"].shift(1).fillna(0.0).astype(float).clip(lower=0.0)
+    w_eff = (
+        single.get("effective_weight", single["desired_pos"].shift(1).fillna(0.0))
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+    w_ret = (
+        single.get("return_weight", w_eff)
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
     sig_open = (
         single.get("sig_open", single["sig_close"])
         .astype(float)
@@ -3921,6 +4361,33 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     ret_exec_s = (
         single.get("ret_exec", strat_ret).astype(float).reindex(nav.index).fillna(0.0)
     )
+    ret_exec_open_day = (
+        single.get("ret_exec_open_day", ret_exec_s)
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
+    ret_exec_close_day = (
+        single.get("ret_exec_close_day", ret_exec_s)
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
+    ret_overnight_close_day = (
+        single.get(
+            "ret_overnight_close_day",
+            _ratio_simple_return(sig_open, sig_close.shift(1)),
+        )
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
+    ret_intraday_close_day = (
+        single.get("ret_intraday_close_day", _ratio_simple_return(sig_close, sig_open))
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
     px_exec_s = (
         single.get("px_exec_slip", sig_close).astype(float).reindex(nav.index).ffill()
     )
@@ -3931,52 +4398,46 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         slippage_spread=float(getattr(inp, "slippage_rate", 0.0) or 0.0),
         exec_price=px_exec_s.astype(float),
     ).astype(float)
-    ret_overnight = (
-        (sig_open / sig_close.shift(1) - 1.0)
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-        .astype(float)
-    )
-    ret_intraday = (
-        (sig_close / sig_open - 1.0)
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-        .astype(float)
-    )
     sem_dbg = single.get("semantic_stats") or {}
-    atr_over = pd.Series(0.0, index=nav.index, dtype=float)
-    bv_over = pd.Series(0.0, index=nav.index, dtype=float)
-    rtp_over = pd.Series(0.0, index=nav.index, dtype=float)
-    if str(single.get("runtime_engine") or "") != "backtesting":
-        w_tmp = w_eff.copy()
-        w_tmp, atr_over = _apply_intraday_stop_execution_single(
-            weights=w_tmp,
-            atr_stop_stats=dict((sem_dbg.get("atr_stop") or {})),
-            exec_price=str(getattr(inp, "exec_price", "open") or "open"),
-            open_sig=sig_open,
-            close_sig=sig_close,
-        )
-        w_tmp, bv_over = _apply_intraday_stop_execution_single(
-            weights=w_tmp,
-            atr_stop_stats=dict((sem_dbg.get("bias_v_take_profit") or {})),
-            exec_price=str(getattr(inp, "exec_price", "open") or "open"),
-            open_sig=sig_open,
-            close_sig=sig_close,
-        )
-        w_tmp, rtp_over = _apply_intraday_stop_execution_single(
-            weights=w_tmp,
-            atr_stop_stats=dict((sem_dbg.get("r_take_profit") or {})),
-            exec_price=str(getattr(inp, "exec_price", "open") or "open"),
-            open_sig=sig_open,
-            close_sig=sig_close,
-        )
-        w_eff = w_tmp.astype(float)
+    atr_over = (
+        single.get("atr_override_ret", pd.Series(0.0, index=nav.index, dtype=float))
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
+    bv_over = (
+        single.get("bias_override_ret", pd.Series(0.0, index=nav.index, dtype=float))
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
+    rtp_over = (
+        single.get("rtp_override_ret", pd.Series(0.0, index=nav.index, dtype=float))
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
     return_decomposition = None
     quick_mode = bool(getattr(inp, "quick_mode", False))
     if not quick_mode:
-        decomp_overnight = (w_eff * ret_overnight).astype(float)
-        decomp_intraday = (w_eff * ret_intraday).astype(float)
-        decomp_interaction = (w_eff * ret_overnight * ret_intraday).astype(float)
+        if ep == "open":
+            decomp_overnight = pd.Series(0.0, index=nav.index, dtype=float)
+            decomp_intraday = (w_ret * ret_exec_open_day).astype(float)
+            decomp_interaction = pd.Series(0.0, index=nav.index, dtype=float)
+        elif ep == "close":
+            decomp_overnight = (w_ret * ret_overnight_close_day).astype(float)
+            decomp_intraday = (w_ret * ret_intraday_close_day).astype(float)
+            decomp_interaction = (
+                w_ret * ret_overnight_close_day * ret_intraday_close_day
+            ).astype(float)
+        else:
+            decomp_overnight = (0.5 * w_ret * ret_overnight_close_day).astype(float)
+            decomp_intraday = (
+                w_ret * (0.5 * ret_exec_open_day + 0.5 * ret_intraday_close_day)
+            ).astype(float)
+            decomp_interaction = (
+                0.5 * w_ret * ret_overnight_close_day * ret_intraday_close_day
+            ).astype(float)
         decomp_risk = (atr_over + bv_over + rtp_over).astype(float)
         decomp_cost = (cost_s + slip_s).astype(float)
         decomp_gross = (
@@ -4196,9 +4657,17 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     impulse_blocked = int(imp_stats.get("blocked_entry_count", 0))
     monthly_attempted = int(month_stats.get("attempted_entry_count", 0))
     monthly_blocked = int(month_stats.get("blocked_entry_count", 0))
+    risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
+    single_semi_variance_stats = _semi_variance_run_stats_from_returns(
+        strat_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
+    )
     overall_stats = {
-        **_trade_stats_from_returns(trade_one.get("returns", [])),
+        **_trade_stats_from_returns(
+            trade_one.get("returns", []),
+            risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+        ),
         "n": int(single["trade_count"]),
+        "semi_variance": dict(single_semi_variance_stats),
         "atr_stop_trigger_count": int(atr_stats.get("trigger_count", 0)),
         "r_take_profit_trigger_count": int(rtp_stats.get("trigger_count", 0)),
         "bias_v_take_profit_trigger_count": int(bv_stats.get("trigger_count", 0)),
@@ -4257,7 +4726,11 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     }
     by_code_stats = {
         str(code): {
-            **_trade_stats_from_returns(trade_one.get("returns", [])),
+            **_trade_stats_from_returns(
+                trade_one.get("returns", []),
+                risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+            ),
+            "semi_variance": dict(single_semi_variance_stats),
             **dict(overall_stats),
         }
     }
@@ -4294,7 +4767,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "benchmark_nav": {
                     "close": "HFQ close-to-close daily returns (BUY_HOLD line; excess vs strategy uses this series)",
                     "open": "same-day open→close (none; hfq on corporate-action days); BUY_HOLD aligned to open execution",
-                    "oc2": "50% same-day open→close + 50% HFQ close-to-close next day; BUY_HOLD aligned to OC2 execution",
+                    "oc2": "50% same-day open→close + 50% close-to-close (HFQ); BUY_HOLD aligned to OC2 execution",
                 }.get(ep, "unknown exec_price"),
             },
             "params": _build_meta_params(inp),
@@ -4386,6 +4859,9 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 ),
                 "normal_threshold": float(
                     getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
+                ),
+                "extreme_threshold": float(
+                    getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20
                 ),
                 "adjust_total_count": int(
                     vol_stats.get("vol_risk_adjust_total_count", 0)
@@ -4555,6 +5031,14 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         vol_ratio_expand_threshold=inp.vol_ratio_expand_threshold,
         vol_ratio_contract_threshold=inp.vol_ratio_contract_threshold,
         vol_ratio_normal_threshold=inp.vol_ratio_normal_threshold,
+        vol_ratio_extreme_threshold=getattr(inp, "vol_ratio_extreme_threshold", 2.20),
+        atr_stop_execution_mode=getattr(inp, "atr_stop_execution_mode", "intraday"),
+        r_take_profit_execution_mode=getattr(
+            inp, "r_take_profit_execution_mode", "intraday"
+        ),
+        bias_v_take_profit_execution_mode=getattr(
+            inp, "bias_v_take_profit_execution_mode", "intraday"
+        ),
     )
     _validate_bt_single_inputs(single_validation)
     strat = str(inp.strategy or "ma_filter").strip().lower()
@@ -4575,6 +5059,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     nav_map: dict[str, pd.Series] = {}
     weight_map: dict[str, pd.Series] = {}
     ret_exec_map: dict[str, pd.Series] = {}
+    ret_exec_open_day_map: dict[str, pd.Series] = {}
+    ret_exec_close_day_map: dict[str, pd.Series] = {}
+    ret_overnight_close_day_map: dict[str, pd.Series] = {}
+    ret_intraday_close_day_map: dict[str, pd.Series] = {}
     ret_hfq_map: dict[str, pd.Series] = {}
     px_exec_slip_map: dict[str, pd.Series] = {}
     sig_open_map: dict[str, pd.Series] = {}
@@ -4642,14 +5130,17 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             atr_stop_mode=inp.atr_stop_mode,
             atr_stop_atr_basis=inp.atr_stop_atr_basis,
             atr_stop_reentry_mode=inp.atr_stop_reentry_mode,
+            atr_stop_execution_mode=inp.atr_stop_execution_mode,
             atr_stop_window=inp.atr_stop_window,
             atr_stop_n=inp.atr_stop_n,
             atr_stop_m=inp.atr_stop_m,
             r_take_profit_enabled=inp.r_take_profit_enabled,
             r_take_profit_reentry_mode=inp.r_take_profit_reentry_mode,
+            r_take_profit_execution_mode=inp.r_take_profit_execution_mode,
             r_take_profit_tiers=inp.r_take_profit_tiers,
             bias_v_take_profit_enabled=inp.bias_v_take_profit_enabled,
             bias_v_take_profit_reentry_mode=inp.bias_v_take_profit_reentry_mode,
+            bias_v_take_profit_execution_mode=inp.bias_v_take_profit_execution_mode,
             bias_v_ma_window=inp.bias_v_ma_window,
             bias_v_atr_window=inp.bias_v_atr_window,
             bias_v_take_profit_threshold=inp.bias_v_take_profit_threshold,
@@ -4672,6 +5163,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             vol_ratio_expand_threshold=inp.vol_ratio_expand_threshold,
             vol_ratio_contract_threshold=inp.vol_ratio_contract_threshold,
             vol_ratio_normal_threshold=inp.vol_ratio_normal_threshold,
+            vol_ratio_extreme_threshold=getattr(
+                inp, "vol_ratio_extreme_threshold", 2.20
+            ),
             group_enforce=inp.group_enforce,
             group_pick_policy=inp.group_pick_policy,
             group_max_holdings=inp.group_max_holdings,
@@ -4710,7 +5204,35 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             "sig_close": one["sig_close"].reindex(trim_ix).ffill().astype(float),
             "sig_high": one["sig_high"].reindex(trim_ix).ffill().astype(float),
             "sig_low": one["sig_low"].reindex(trim_ix).ffill().astype(float),
+            "effective_weight": one.get("effective_weight", one["desired_pos"])
+            .reindex(trim_ix)
+            .fillna(0.0)
+            .astype(float),
+            "return_weight": one.get(
+                "return_weight", one.get("effective_weight", one["desired_pos"])
+            )
+            .reindex(trim_ix)
+            .fillna(0.0)
+            .astype(float),
             "ret_exec": one["ret_exec"].reindex(trim_ix).fillna(0.0).astype(float),
+            "ret_exec_open_day": one.get("ret_exec_open_day", one["ret_exec"])
+            .reindex(trim_ix)
+            .fillna(0.0)
+            .astype(float),
+            "ret_exec_close_day": one.get("ret_exec_close_day", one["ret_exec"])
+            .reindex(trim_ix)
+            .fillna(0.0)
+            .astype(float),
+            "ret_overnight_close_day": one.get(
+                "ret_overnight_close_day", pd.Series(0.0, index=one["ret_exec"].index)
+            )
+            .reindex(trim_ix)
+            .fillna(0.0)
+            .astype(float),
+            "ret_intraday_close_day": one.get("ret_intraday_close_day", one["ret_exec"])
+            .reindex(trim_ix)
+            .fillna(0.0)
+            .astype(float),
             "ret_exec_raw": one["ret_exec_raw"]
             .reindex(trim_ix)
             .fillna(0.0)
@@ -4738,93 +5260,13 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         }
         nav_map[c] = one["nav"]
         weight_map[c] = one["desired_pos"].astype(float)
-        ep_port = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
-        ps_port = (
-            str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
-        )
-        if ep_port == "open" and ps_port == "risk_budget":
-            ret_exec_map[c] = one["ret_exec"].astype(float)
-            ret_hfq_map[c] = one["ret_exec_hfq"].astype(float)
-            px_exec_slip_map[c] = one["px_exec_slip"].astype(float)
-            sig_open_map[c] = one["sig_open"].astype(float)
-            sig_close_map[c] = one["sig_close"].astype(float)
-            score_map[c] = one.get(
-                "signal_score", pd.Series(np.nan, index=one["nav"].index)
-            ).astype(float)
-            trades.extend(one["trades"])
-            runtime_engine = str(one.get("runtime_engine") or "unknown")
-            signal_debug_by_code[c] = dict(one.get("signal_debug") or {})
-            semantic_debug_by_code[c] = dict(one.get("semantic_stats") or {})
-            price_sig_by_code[c] = pd.DataFrame(
-                {
-                    "close": one["sig_close"].astype(float),
-                    "high": one["sig_high"].astype(float),
-                    "low": one["sig_low"].astype(float),
-                }
-            )
-            ca_mask_s = one.get("ca_mask", pd.Series(False, index=one["nav"].index))
-            for d in one["nav"].index:
-                if bool(ca_mask_s.loc[d]):
-                    corporate_actions_rows.append(
-                        {
-                            "date": d.strftime("%Y-%m-%d")
-                            if hasattr(d, "strftime")
-                            else str(d),
-                            "code": str(c),
-                            "none_return": float(one["ret_exec_none"].loc[d]),
-                            "hfq_return": float(one["ret_exec_hfq"].loc[d]),
-                            "corp_factor": (
-                                float(one["corp_factor"].loc[d])
-                                if np.isfinite(float(one["corp_factor"].loc[d]))
-                                else None
-                            ),
-                        }
-                    )
-            continue
-        open_none = one["exec_open_none"].astype(float)
-        close_none = one["exec_close_none"].astype(float)
-        open_hfq = one["exec_open_hfq"].astype(float)
-        close_hfq = one["exec_close_hfq"].astype(float)
-        if ep_port == "open":
-            ret_none_one = _forward_simple_return(open_none)
-            ret_hfq_one = _forward_simple_return(open_hfq)
-            px_none_one = open_none.astype(float)
-            px_hfq_one = open_hfq.astype(float)
-        elif ep_port == "close":
-            ret_none_one = _forward_simple_return(close_none)
-            ret_hfq_one = _forward_simple_return(close_hfq)
-            px_none_one = close_none.astype(float)
-            px_hfq_one = close_hfq.astype(float)
-        else:
-            ret_open_none_one = _forward_simple_return(open_none)
-            ret_close_none_one = _forward_simple_return(close_none)
-            ret_none_one = (0.5 * (ret_open_none_one + ret_close_none_one)).astype(
-                float
-            )
-            ret_open_hfq_one = _forward_simple_return(open_hfq)
-            ret_close_hfq_one = _forward_simple_return(close_hfq)
-            ret_hfq_one = (0.5 * (ret_open_hfq_one + ret_close_hfq_one)).astype(float)
-            px_none_one = (0.5 * (open_none + close_none)).astype(float)
-            px_hfq_one = (0.5 * (open_hfq + close_hfq)).astype(float)
-        gross_none_one = (1.0 + ret_none_one).astype(float).to_frame(c)
-        gross_hfq_one = (1.0 + ret_hfq_one).astype(float).to_frame(c)
-        _, ca_mask_one_df = corporate_action_mask(gross_none_one, gross_hfq_one)
-        if isinstance(ca_mask_one_df, pd.DataFrame) and c in ca_mask_one_df.columns:
-            ca_mask_one = (
-                ca_mask_one_df[c].reindex(ret_none_one.index).fillna(False).astype(bool)
-            )
-        else:
-            ca_mask_one = pd.Series(False, index=ret_none_one.index, dtype=bool)
-        ret_exec_map[c] = ret_none_one.where(~ca_mask_one, other=ret_hfq_one).astype(
-            float
-        )
-        ret_hfq_map[c] = ret_hfq_one.astype(float)
-        px_exec_slip_map[c] = (
-            px_none_one.where(~ca_mask_one, other=px_hfq_one)
-            .replace([np.inf, -np.inf], np.nan)
-            .ffill()
-            .astype(float)
-        )
+        ret_exec_map[c] = one["ret_exec"].astype(float)
+        ret_exec_open_day_map[c] = one["ret_exec_open_day"].astype(float)
+        ret_exec_close_day_map[c] = one["ret_exec_close_day"].astype(float)
+        ret_overnight_close_day_map[c] = one["ret_overnight_close_day"].astype(float)
+        ret_intraday_close_day_map[c] = one["ret_intraday_close_day"].astype(float)
+        ret_hfq_map[c] = one["ret_exec_hfq"].astype(float)
+        px_exec_slip_map[c] = one["px_exec_slip"].astype(float)
         sig_open_map[c] = one["sig_open"].astype(float)
         sig_close_map[c] = one["sig_close"].astype(float)
         score_map[c] = one.get(
@@ -5154,6 +5596,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         vol_ratio_normal_threshold = float(
             getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
         )
+        vol_ratio_extreme_threshold = float(
+            getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20
+        )
 
         atr_budget_df = pd.DataFrame(index=wdf.index, columns=wdf.columns, dtype=float)
         atr_ratio_fast_df = pd.DataFrame(
@@ -5298,14 +5743,12 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                         if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0)
                         else float("nan")
                     )
-                    if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
-                        rb_state_by_code[key] = "REDUCED"
-                    elif np.isfinite(ratio) and ratio < float(
-                        vol_ratio_contract_threshold
-                    ):
-                        rb_state_by_code[key] = "INCREASED"
-                    else:
-                        rb_state_by_code[key] = "NORMAL"
+                    rb_state_by_code[key] = _vol_regime_state_from_ratio(
+                        ratio,
+                        expand_threshold=float(vol_ratio_expand_threshold),
+                        contract_threshold=float(vol_ratio_contract_threshold),
+                        extreme_threshold=float(vol_ratio_extreme_threshold),
+                    )
                 else:
                     rb_state_by_code[key] = "NORMAL"
 
@@ -5479,23 +5922,17 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 )
                 if not np.isfinite(base_target):
                     continue
-                if st == "NORMAL":
-                    if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "REDUCED"
-                    elif np.isfinite(ratio) and ratio < float(
-                        vol_ratio_contract_threshold
-                    ):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "INCREASED"
-                elif st == "REDUCED":
-                    if np.isfinite(ratio) and ratio < float(vol_ratio_normal_threshold):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "NORMAL"
-                elif st == "INCREASED":
-                    if np.isfinite(ratio) and ratio > float(vol_ratio_normal_threshold):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "NORMAL"
+                next_state = _next_vol_regime_state(
+                    st,
+                    ratio=ratio,
+                    expand_threshold=float(vol_ratio_expand_threshold),
+                    contract_threshold=float(vol_ratio_contract_threshold),
+                    normal_threshold=float(vol_ratio_normal_threshold),
+                    extreme_threshold=float(vol_ratio_extreme_threshold),
+                )
+                if str(next_state) != st:
+                    w_row.loc[c] = float(base_target)
+                    rb_state_by_code[key] = str(next_state)
 
             w_row = w_row.clip(lower=0.0)
             if str(policy) != "leverage_entry":
@@ -5589,164 +6026,130 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         .ffill()
         .astype(float)
     )
-    ret_overnight_df_comp: pd.DataFrame | None = None
-    ret_intraday_df_comp: pd.DataFrame | None = None
-    try:
-        ccodes = [str(c) for c in wdf.columns]
-        idx = wdf.index
-        ep_port = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
-        ps_port = (
-            str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
-        )
-        if (
-            ep_port == "open"
-            and ps_port == "risk_budget"
-            and (not bool(getattr(inp, "quick_mode", False)))
-        ):
-            raise RuntimeError(
-                "keep single-derived mapping for open+risk_budget parity"
-            )
-        close_none_df = (
-            load_close_prices(
-                db, codes=ccodes, start=inp.start, end=inp.end, adjust="none"
-            )
-            .reindex(index=idx, columns=ccodes)
-            .ffill()
-            .astype(float)
-        )
-        close_hfq_df = (
-            load_close_prices(
-                db, codes=ccodes, start=inp.start, end=inp.end, adjust="hfq"
-            )
-            .reindex(index=idx, columns=ccodes)
-            .ffill()
-            .astype(float)
-        )
-        close_qfq_df = (
-            load_close_prices(
-                db, codes=ccodes, start=inp.start, end=inp.end, adjust="qfq"
-            )
-            .reindex(index=idx, columns=ccodes)
-            .ffill()
-            .astype(float)
-        )
-        ohlc_none = load_ohlc_prices(
-            db, codes=ccodes, start=inp.start, end=inp.end, adjust="none"
-        )
-        ohlc_hfq = load_ohlc_prices(
-            db, codes=ccodes, start=inp.start, end=inp.end, adjust="hfq"
-        )
-        ohlc_qfq = load_ohlc_prices(
-            db, codes=ccodes, start=inp.start, end=inp.end, adjust="qfq"
-        )
+    ret_exec_open_day_df = (
+        pd.DataFrame(ret_exec_open_day_map)
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_exec_close_day_df = (
+        pd.DataFrame(ret_exec_close_day_map)
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_overnight_close_day_df = (
+        pd.DataFrame(ret_overnight_close_day_map)
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_intraday_close_day_df = (
+        pd.DataFrame(ret_intraday_close_day_map)
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ep_port = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
+    ccodes = [str(c) for c in wdf.columns]
+    idx = wdf.index
+    close_none_df = (
+        load_close_prices(db, codes=ccodes, start=inp.start, end=inp.end, adjust="none")
+        .reindex(index=idx, columns=ccodes)
+        .ffill()
+        .astype(float)
+    )
+    close_hfq_df = (
+        load_close_prices(db, codes=ccodes, start=inp.start, end=inp.end, adjust="hfq")
+        .reindex(index=idx, columns=ccodes)
+        .ffill()
+        .astype(float)
+    )
+    ohlc_none = load_ohlc_prices(
+        db, codes=ccodes, start=inp.start, end=inp.end, adjust="none"
+    )
+    ohlc_hfq = load_ohlc_prices(
+        db, codes=ccodes, start=inp.start, end=inp.end, adjust="hfq"
+    )
 
-        def _raw_df(ohlc: dict[str, pd.DataFrame], field: str) -> pd.DataFrame:
-            df = (
-                ohlc.get(field, pd.DataFrame())
-                if isinstance(ohlc, dict)
-                else pd.DataFrame()
-            )
-            if df is None or df.empty:
-                return pd.DataFrame(index=idx, columns=ccodes, dtype=float)
-            return (
-                df.sort_index().reindex(index=idx, columns=ccodes).astype(float).ffill()
-            )
+    def _raw_df(ohlc: dict[str, pd.DataFrame], field: str) -> pd.DataFrame:
+        df = (
+            ohlc.get(field, pd.DataFrame())
+            if isinstance(ohlc, dict)
+            else pd.DataFrame()
+        )
+        if df is None or df.empty:
+            return pd.DataFrame(index=idx, columns=ccodes, dtype=float)
+        return df.sort_index().reindex(index=idx, columns=ccodes).astype(float).ffill()
 
-        open_none_raw = _raw_df(ohlc_none, "open")
-        close_none_raw = _raw_df(ohlc_none, "close")
-        open_hfq_raw = _raw_df(ohlc_hfq, "open")
-        close_hfq_raw = _raw_df(ohlc_hfq, "close")
-        open_qfq_raw = _raw_df(ohlc_qfq, "open")
-        close_qfq_raw = _raw_df(ohlc_qfq, "close")
-        open_none_exec = open_none_raw.combine_first(close_none_df)
-        close_none_exec = close_none_raw.combine_first(close_none_df)
-        open_hfq_exec = open_hfq_raw.combine_first(close_hfq_df)
-        close_hfq_exec = close_hfq_raw.combine_first(close_hfq_df)
-        if ep_port == "open":
-            ret_none_base = _forward_simple_return(open_none_exec)
-            ret_hfq_base = _forward_simple_return(open_hfq_exec)
-            px_none_base = open_none_exec.astype(float)
-            px_hfq_base = open_hfq_exec.astype(float)
-        elif ep_port == "close":
-            ret_none_base = _forward_simple_return(close_none_exec)
-            ret_hfq_base = _forward_simple_return(close_hfq_exec)
-            px_none_base = close_none_exec.astype(float)
-            px_hfq_base = close_hfq_exec.astype(float)
-        else:
-            ret_open_none_base = _forward_simple_return(open_none_exec)
-            ret_close_none_base = _forward_simple_return(close_none_exec)
-            ret_none_base = (0.5 * (ret_open_none_base + ret_close_none_base)).astype(
-                float
-            )
-            ret_open_hfq_base = _forward_simple_return(open_hfq_exec)
-            ret_close_hfq_base = _forward_simple_return(close_hfq_exec)
-            ret_hfq_base = (0.5 * (ret_open_hfq_base + ret_close_hfq_base)).astype(
-                float
-            )
-            px_none_base = (0.5 * (open_none_exec + close_none_exec)).astype(float)
-            px_hfq_base = (0.5 * (open_hfq_exec + close_hfq_exec)).astype(float)
-        _, ca_mask_base = corporate_action_mask(
-            (1.0 + ret_none_base).astype(float), (1.0 + ret_hfq_base).astype(float)
-        )
-        ca_mask_base = (
-            ca_mask_base.reindex(index=idx, columns=ccodes).fillna(False).astype(bool)
-        )
-        ret_exec_df = ret_none_base.where(~ca_mask_base, other=ret_hfq_base).astype(
-            float
-        )
-        px_exec_slip_df = (
-            px_none_base.where(~ca_mask_base, other=px_hfq_base)
-            .replace([np.inf, -np.inf], np.nan)
-            .ffill()
-            .astype(float)
-        )
-        open_sig_df = open_qfq_raw.astype(float)
-        close_sig_df = close_qfq_df.astype(float)
-        ret_overnight_none_close = _ratio_simple_return(
-            open_none_raw.shift(-1), close_none_raw
-        )
-        ret_intraday_none_close = _ratio_simple_return(
-            close_none_raw.shift(-1), open_none_raw.shift(-1)
-        )
-        ret_overnight_hfq_close = _ratio_simple_return(
-            open_hfq_raw.shift(-1), close_hfq_raw
-        )
-        ret_intraday_hfq_close = _ratio_simple_return(
-            close_hfq_raw.shift(-1), open_hfq_raw.shift(-1)
-        )
-        ret_intraday_none_open = _ratio_simple_return(close_none_raw, open_none_raw)
-        ret_overnight_none_open = _ratio_simple_return(
-            open_none_raw.shift(-1), close_none_raw
-        )
-        ret_intraday_hfq_open = _ratio_simple_return(close_hfq_raw, open_hfq_raw)
-        ret_overnight_hfq_open = _ratio_simple_return(
-            open_hfq_raw.shift(-1), close_hfq_raw
-        )
-        ret_overnight_close = ret_overnight_none_close.where(
-            ~ca_mask_base, other=ret_overnight_hfq_close
-        ).astype(float)
-        ret_intraday_close = ret_intraday_none_close.where(
-            ~ca_mask_base, other=ret_intraday_hfq_close
-        ).astype(float)
-        ret_overnight_open = ret_overnight_none_open.where(
-            ~ca_mask_base, other=ret_overnight_hfq_open
-        ).astype(float)
-        ret_intraday_open = ret_intraday_none_open.where(
-            ~ca_mask_base, other=ret_intraday_hfq_open
-        ).astype(float)
-        if ep_port == "open":
-            ret_overnight_df_comp = ret_overnight_open.astype(float)
-            ret_intraday_df_comp = ret_intraday_open.astype(float)
-        elif ep_port == "close":
-            ret_overnight_df_comp = ret_overnight_close.astype(float)
-            ret_intraday_df_comp = ret_intraday_close.astype(float)
-        else:
-            ret_overnight_df_comp = (0.5 * ret_overnight_close).astype(float)
-            ret_intraday_df_comp = (
-                0.5 * ret_exec_df + 0.5 * ret_intraday_close
-            ).astype(float)
-    except Exception:
-        pass
+    open_none_raw = _raw_df(ohlc_none, "open")
+    close_none_exec = _raw_df(ohlc_none, "close").combine_first(close_none_df)
+    open_hfq_raw = _raw_df(ohlc_hfq, "open")
+    close_hfq_exec = _raw_df(ohlc_hfq, "close").combine_first(close_hfq_df)
+    open_none_exec = open_none_raw.combine_first(close_none_df)
+    open_hfq_exec = open_hfq_raw.combine_first(close_hfq_df)
+    exec_comp_df = _build_execution_day_components(
+        exec_price=ep_port,
+        open_none=open_none_exec,
+        close_none=close_none_exec,
+        open_hfq=open_hfq_exec,
+        close_hfq=close_hfq_exec,
+    )
+    cm_exec = (
+        _align_ca_mask_like(close_none_exec, exec_comp_df.get("ca_mask"))
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(False)
+        .astype(bool)
+    )
+    ret_exec_open_none_day_df = (
+        _ratio_simple_return(close_none_exec, open_none_raw)
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_exec_open_hfq_day_df = (
+        _ratio_simple_return(close_hfq_exec, open_hfq_raw)
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_exec_df = (
+        exec_comp_df["ret_exec_day"]
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_exec_open_day_df = ret_exec_open_none_day_df.where(
+        ~cm_exec, ret_exec_open_hfq_day_df
+    ).astype(float)
+    ret_exec_close_day_df = (
+        exec_comp_df["ret_exec_close_day"]
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_overnight_close_none_day_df = (
+        _ratio_simple_return(open_none_raw, close_none_exec.shift(1))
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_overnight_close_hfq_day_df = (
+        _ratio_simple_return(open_hfq_raw, close_hfq_exec.shift(1))
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_overnight_close_day_df = ret_overnight_close_none_day_df.where(
+        ~cm_exec, ret_overnight_close_hfq_day_df
+    ).astype(float)
+    ret_intraday_close_day_df = ret_exec_open_day_df.astype(float)
+    px_exec_slip_df = (
+        exec_comp_df["px_exec_slip"]
+        .reindex(index=wdf.index, columns=wdf.columns)
+        .ffill()
+        .astype(float)
+    )
     atr_stop_by_asset = {
         str(c): dict(
             (semantic_debug_by_code.get(str(c), {}) or {}).get("atr_stop") or {}
@@ -5766,29 +6169,121 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         )
         for c in wdf.columns
     }
+    w_post = wdf.shift(1).fillna(0.0).astype(float).clip(lower=0.0)
 
-    w_eff = wdf.shift(1).fillna(0.0).astype(float).clip(lower=0.0)
-    w_eff, atr_stop_override_ret = _apply_intraday_stop_execution_portfolio(
-        weights=w_eff,
-        atr_stop_by_asset=atr_stop_by_asset,
-        exec_price=str(getattr(inp, "exec_price", "open") or "open"),
-        open_sig_df=open_sig_df,
-        close_sig_df=close_sig_df,
+    def _apply_all_intraday_overlays_df(
+        weight_in: pd.DataFrame,
+        *,
+        mode: str,
+    ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+        w_tmp = weight_in.astype(float).copy()
+        w_tmp, atr_over = _apply_intraday_stop_execution_portfolio(
+            weights=w_tmp,
+            atr_stop_by_asset=atr_stop_by_asset,
+            exec_price=str(mode),
+            stop_execution_mode=str(
+                getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
+            ),
+            open_sig_df=open_sig_df,
+            close_sig_df=close_sig_df,
+        )
+        w_tmp, bias_over = _apply_intraday_stop_execution_portfolio(
+            weights=w_tmp,
+            atr_stop_by_asset=bias_v_tp_by_asset,
+            exec_price=str(mode),
+            stop_execution_mode=str(
+                getattr(inp, "bias_v_take_profit_execution_mode", "intraday")
+                or "intraday"
+            ),
+            open_sig_df=open_sig_df,
+            close_sig_df=close_sig_df,
+        )
+        w_tmp, rtp_over = _apply_intraday_stop_execution_portfolio(
+            weights=w_tmp,
+            atr_stop_by_asset=rtp_by_asset,
+            exec_price=str(mode),
+            stop_execution_mode=str(
+                getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday"
+            ),
+            open_sig_df=open_sig_df,
+            close_sig_df=close_sig_df,
+        )
+        return (
+            w_tmp.astype(float),
+            atr_over.astype(float),
+            bias_over.astype(float),
+            rtp_over.astype(float),
+        )
+
+    open_leg_mode = "open" if ep_port == "oc2" else str(ep_port)
+    w_post, atr_over_post, bias_over_post, rtp_over_post = (
+        _apply_all_intraday_overlays_df(w_post, mode=open_leg_mode)
     )
-    w_eff, bias_v_take_profit_override_ret = _apply_intraday_stop_execution_portfolio(
-        weights=w_eff,
-        atr_stop_by_asset=bias_v_tp_by_asset,
-        exec_price=str(getattr(inp, "exec_price", "open") or "open"),
-        open_sig_df=open_sig_df,
-        close_sig_df=close_sig_df,
+    w_eff = w_post.astype(float)
+    w_ret = w_eff.copy().astype(float)
+    ret_exec_day_df = ret_exec_open_day_df.reindex(
+        index=w_eff.index, columns=w_eff.columns
     )
-    w_eff, r_take_profit_override_ret = _apply_intraday_stop_execution_portfolio(
-        weights=w_eff,
-        atr_stop_by_asset=rtp_by_asset,
-        exec_price=str(getattr(inp, "exec_price", "open") or "open"),
-        open_sig_df=open_sig_df,
-        close_sig_df=close_sig_df,
+    atr_stop_override_ret = atr_over_post.reindex(w_eff.index).fillna(0.0).astype(float)
+    bias_v_take_profit_override_ret = (
+        bias_over_post.reindex(w_eff.index).fillna(0.0).astype(float)
     )
+    r_take_profit_override_ret = (
+        rtp_over_post.reindex(w_eff.index).fillna(0.0).astype(float)
+    )
+    if ep_port == "close":
+        w_close_base = w_eff.shift(1).fillna(0.0).astype(float)
+        (
+            w_ret,
+            atr_stop_override_ret,
+            bias_v_take_profit_override_ret,
+            r_take_profit_override_ret,
+        ) = _apply_all_intraday_overlays_df(w_close_base, mode="close")
+        ret_exec_day_df = ret_exec_close_day_df.reindex(
+            index=w_eff.index, columns=w_eff.columns
+        ).astype(float)
+    elif ep_port == "oc2":
+        w_close_base = w_eff.shift(1).fillna(0.0).astype(float)
+        w_close, atr_over_close, bias_over_close, rtp_over_close = (
+            _apply_all_intraday_overlays_df(w_close_base, mode="close")
+        )
+        w_ret = (0.5 * (w_eff + w_close)).astype(float)
+        ret_exec_day_df = (
+            0.5
+            * (
+                ret_exec_open_day_df.reindex(index=w_eff.index, columns=w_eff.columns)
+                + ret_exec_close_day_df.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                )
+            )
+        ).astype(float)
+        atr_stop_override_ret = (
+            0.5
+            * (
+                atr_stop_override_ret
+                + atr_over_close.reindex(w_eff.index).fillna(0.0).astype(float)
+            )
+        ).astype(float)
+        bias_v_take_profit_override_ret = (
+            0.5
+            * (
+                bias_v_take_profit_override_ret
+                + bias_over_close.reindex(w_eff.index).fillna(0.0).astype(float)
+            )
+        ).astype(float)
+        r_take_profit_override_ret = (
+            0.5
+            * (
+                r_take_profit_override_ret
+                + rtp_over_close.reindex(w_eff.index).fillna(0.0).astype(float)
+            )
+        ).astype(float)
+    else:
+        ret_exec_day_df = ret_exec_open_day_df.reindex(
+            index=w_eff.index, columns=w_eff.columns
+        ).astype(float)
+
+    ret_exec_df = ret_exec_day_df.astype(float)
     turnover = (w_eff - w_eff.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     turnover_by_asset = (w_eff - w_eff.shift(1).fillna(0.0)).abs() / 2.0
     cost = turnover * (float(getattr(inp, "cost_bps", 0.0) or 0.0) / 10000.0)
@@ -5801,7 +6296,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         .sum(axis=1)
         .astype(float)
     )
-    base_ret = (w_eff * ret_exec_df).sum(axis=1).astype(float)
+    base_ret = (w_ret * ret_exec_df).sum(axis=1).astype(float)
     decomp_risk = (
         atr_stop_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
         + bias_v_take_profit_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
@@ -5809,46 +6304,43 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     ).astype(float)
     decomp_cost = (cost + slippage).astype(float)
     port_ret = (base_ret + decomp_risk - decomp_cost).fillna(0.0).astype(float)
-    _ep_rt = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
-    _ps_rt = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
-    _keep_base_port_ret = bool(_ep_rt == "open" and _ps_rt == "risk_budget")
-    if ret_overnight_df_comp is None or ret_intraday_df_comp is None:
-        ret_overnight_df = (
-            (open_sig_df / close_sig_df.shift(1) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_intraday_df = (
-            (close_sig_df / open_sig_df - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-    else:
-        ret_overnight_df = (
-            ret_overnight_df_comp.reindex(index=w_eff.index, columns=w_eff.columns)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_intraday_df = (
-            ret_intraday_df_comp.reindex(index=w_eff.index, columns=w_eff.columns)
-            .fillna(0.0)
-            .astype(float)
-        )
     return_decomposition = None
     if not bool(getattr(inp, "quick_mode", False)):
-        comp_overnight = (w_eff * ret_overnight_df).sum(axis=1).astype(float)
-        comp_intraday = (w_eff * ret_intraday_df).sum(axis=1).astype(float)
-        comp_interaction = (
-            (w_eff * ret_overnight_df * ret_intraday_df).sum(axis=1).astype(float)
-        )
+        if ep_port == "open":
+            comp_overnight = pd.Series(0.0, index=w_eff.index, dtype=float)
+            comp_intraday = (w_ret * ret_exec_open_day_df).sum(axis=1).astype(float)
+            comp_interaction = pd.Series(0.0, index=w_eff.index, dtype=float)
+        elif ep_port == "close":
+            comp_overnight = (
+                (w_ret * ret_overnight_close_day_df).sum(axis=1).astype(float)
+            )
+            comp_intraday = (
+                (w_ret * ret_intraday_close_day_df).sum(axis=1).astype(float)
+            )
+            comp_interaction = (
+                (w_ret * ret_overnight_close_day_df * ret_intraday_close_day_df)
+                .sum(axis=1)
+                .astype(float)
+            )
+        else:
+            comp_overnight = (
+                (0.5 * w_ret * ret_overnight_close_day_df).sum(axis=1).astype(float)
+            )
+            comp_intraday = (
+                (w_ret * (0.5 * ret_exec_open_day_df + 0.5 * ret_intraday_close_day_df))
+                .sum(axis=1)
+                .astype(float)
+            )
+            comp_interaction = (
+                (0.5 * w_ret * ret_overnight_close_day_df * ret_intraday_close_day_df)
+                .sum(axis=1)
+                .astype(float)
+            )
         decomp_gross = (
             comp_overnight + comp_intraday + comp_interaction + decomp_risk
         ).astype(float)
         decomp_net = (decomp_gross - decomp_cost).astype(float)
-        if not _keep_base_port_ret:
-            port_ret = decomp_net.fillna(0.0).astype(float)
+        port_ret = decomp_net.fillna(0.0).astype(float)
         return_decomposition = {
             "dates": [d.strftime("%Y-%m-%d") for d in w_eff.index],
             "series": {
@@ -6359,9 +6851,30 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         if monthly_attempted_total > 0
         else 0.0
     )
+    risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
+    portfolio_semi_variance_overall = _semi_variance_run_stats_from_returns(
+        port_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
+    )
+    ret_exec_for_runs = ret_exec_df.reindex(
+        index=nav.index, columns=wdf.columns
+    ).astype(float)
+    ret_exec_for_runs = ret_exec_for_runs.fillna(0.0)
+    portfolio_semi_variance_by_code: dict[str, dict[str, Any]] = {}
+    for c in wdf.columns:
+        ck = str(c)
+        code_ret = ret_exec_for_runs.get(c)
+        if not isinstance(code_ret, pd.Series):
+            code_ret = pd.Series(0.0, index=ret_exec_for_runs.index, dtype=float)
+        portfolio_semi_variance_by_code[ck] = _semi_variance_run_stats_from_returns(
+            code_ret.astype(float).fillna(0.0).tolist()
+        )
     overall_stats = {
-        **_trade_stats_from_returns(trade_pack.get("returns", [])),
+        **_trade_stats_from_returns(
+            trade_pack.get("returns", []),
+            risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+        ),
         "n": len(trades),
+        "semi_variance": dict(portfolio_semi_variance_overall),
         "atr_stop_trigger_count": int(atr_trigger_total),
         "r_take_profit_trigger_count": int(rtp_trigger_total),
         "bias_v_take_profit_trigger_count": int(bias_v_tp_trigger_total),
@@ -6485,9 +6998,11 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         )
         by_code_stats[str(c)] = {
             **_trade_stats_from_returns(
-                (trade_pack.get("returns_by_code") or {}).get(str(c), [])
+                (trade_pack.get("returns_by_code") or {}).get(str(c), []),
+                risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
             ),
             "n": int(sum(1 for t in trades if str(t.get("code")) == str(c))),
+            "semi_variance": dict(portfolio_semi_variance_by_code.get(str(c)) or {}),
             "atr_stop_trigger_count": int(
                 (sem.get("atr_stop") or {}).get("trigger_count", 0)
             ),
@@ -6956,6 +7471,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "normal_threshold": float(
                     getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
                 ),
+                "extreme_threshold": float(
+                    getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20
+                ),
                 "adjust_total_count": int(
                     overall_stats.get("vol_risk_adjust_total_count", 0)
                 ),
@@ -7035,6 +7553,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "reentry_mode": str(
                     getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter"
                 ),
+                "execution_mode": str(
+                    getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
+                ),
                 "trigger_count": int(atr_trigger_total),
                 "trigger_days": int(len(atr_trigger_dates)),
                 "first_trigger_date": (
@@ -7050,6 +7571,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "enabled": bool(getattr(inp, "r_take_profit_enabled", False)),
                 "reentry_mode": str(
                     getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter"
+                ),
+                "execution_mode": str(
+                    getattr(inp, "r_take_profit_execution_mode", "intraday")
+                    or "intraday"
                 ),
                 "tiers": _normalize_r_take_profit_tiers(
                     getattr(inp, "r_take_profit_tiers", None)
@@ -7084,6 +7609,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "reentry_mode": str(
                     getattr(inp, "bias_v_take_profit_reentry_mode", "reenter")
                     or "reenter"
+                ),
+                "execution_mode": str(
+                    getattr(inp, "bias_v_take_profit_execution_mode", "intraday")
+                    or "intraday"
                 ),
                 "ma_window": int(getattr(inp, "bias_v_ma_window", 20) or 20),
                 "atr_window": int(getattr(inp, "bias_v_atr_window", 20) or 20),

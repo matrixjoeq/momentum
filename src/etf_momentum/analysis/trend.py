@@ -55,6 +55,8 @@ DEFAULT_R_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
     {"r_multiple": 5.0, "retrace_ratio": 0.10},
     {"r_multiple": 6.0, "retrace_ratio": 0.05},
 ]
+STOP_EXECUTION_MODES: set[str] = {"intraday", "next_day"}
+VOL_REGIME_STATES: set[str] = {"NORMAL", "REDUCED", "INCREASED", "EXTREME"}
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,7 @@ class TrendInputs:
     slippage_rate: float = (
         0.001  # one-way adverse slippage spread (absolute price diff)
     )
-    exec_price: str = "open"  # open|close|oc2
+    exec_price: str = "open"  # open|close (oc2 deprecated; averaged open/close)
     # strategy selection
     strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | random_entry
     # parameters
@@ -88,14 +90,17 @@ class TrendInputs:
     atr_stop_mode: str = "none"  # none | static | trailing | tightening
     atr_stop_atr_basis: str = "latest"  # entry | latest (for trailing/tightening)
     atr_stop_reentry_mode: str = "reenter"  # reenter | wait_next_entry
+    atr_stop_execution_mode: str = "intraday"  # intraday | next_day (default intraday, armed from next day after entry)
     atr_stop_window: int = 14  # ATR lookback window
     atr_stop_n: float = 2.0  # stop distance multiplier by ATR
     atr_stop_m: float = 0.5  # tightening step in ATR multiples
     r_take_profit_enabled: bool = False
     r_take_profit_reentry_mode: str = "reenter"  # reenter | wait_next_entry
+    r_take_profit_execution_mode: str = "intraday"  # intraday | next_day
     r_take_profit_tiers: list[dict[str, float]] | None = None
     bias_v_take_profit_enabled: bool = False
     bias_v_take_profit_reentry_mode: str = "reenter"  # reenter | wait_next_entry
+    bias_v_take_profit_execution_mode: str = "intraday"  # intraday | next_day
     bias_v_ma_window: int = 20
     bias_v_atr_window: int = 20
     bias_v_take_profit_threshold: float = 5.0
@@ -131,6 +136,8 @@ class TrendInputs:
     vol_ratio_expand_threshold: float = 1.45
     vol_ratio_contract_threshold: float = 0.65
     vol_ratio_normal_threshold: float = 1.05
+    vol_ratio_extreme_threshold: float = 2.20
+    risk_of_ruin_maxrisk: float = 0.30
     group_enforce: bool = False
     group_pick_policy: str = "highest_sharpe"
     group_max_holdings: int = 4
@@ -158,7 +165,7 @@ class TrendPortfolioInputs:
     slippage_rate: float = (
         0.001  # one-way adverse slippage spread (absolute price diff)
     )
-    exec_price: str = "open"  # open|close|oc2
+    exec_price: str = "open"  # open|close (oc2 deprecated; averaged open/close)
     strategy: str = "ma_filter"
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
     vol_window: int = 20
@@ -184,6 +191,8 @@ class TrendPortfolioInputs:
     vol_ratio_expand_threshold: float = 1.45
     vol_ratio_contract_threshold: float = 0.65
     vol_ratio_normal_threshold: float = 1.05
+    vol_ratio_extreme_threshold: float = 2.20
+    risk_of_ruin_maxrisk: float = 0.30
     dynamic_universe: bool = False
     # single-strategy params
     sma_window: int = 200
@@ -203,14 +212,17 @@ class TrendPortfolioInputs:
     atr_stop_mode: str = "none"
     atr_stop_atr_basis: str = "latest"
     atr_stop_reentry_mode: str = "reenter"
+    atr_stop_execution_mode: str = "intraday"
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
     r_take_profit_enabled: bool = False
     r_take_profit_reentry_mode: str = "reenter"
+    r_take_profit_execution_mode: str = "intraday"
     r_take_profit_tiers: list[dict[str, float]] | None = None
     bias_v_take_profit_enabled: bool = False
     bias_v_take_profit_reentry_mode: str = "reenter"
+    bias_v_take_profit_execution_mode: str = "intraday"
     bias_v_ma_window: int = 20
     bias_v_atr_window: int = 20
     bias_v_take_profit_threshold: float = 5.0
@@ -586,6 +598,73 @@ def _month_key(d: Any) -> str:
         return ""
 
 
+def _vol_regime_state_from_ratio(
+    ratio: float,
+    *,
+    expand_threshold: float,
+    contract_threshold: float,
+    extreme_threshold: float,
+) -> str:
+    if not np.isfinite(float(ratio)):
+        return "NORMAL"
+    r = float(ratio)
+    if r > float(extreme_threshold):
+        return "EXTREME"
+    if r > float(expand_threshold):
+        return "REDUCED"
+    if r < float(contract_threshold):
+        return "INCREASED"
+    return "NORMAL"
+
+
+def _next_vol_regime_state(
+    current_state: str,
+    *,
+    ratio: float,
+    expand_threshold: float,
+    contract_threshold: float,
+    normal_threshold: float,
+    extreme_threshold: float,
+) -> str:
+    st = str(current_state or "NORMAL").strip().upper()
+    if st not in VOL_REGIME_STATES:
+        st = "NORMAL"
+    if not np.isfinite(float(ratio)):
+        return st
+    r = float(ratio)
+    if st == "NORMAL":
+        return _vol_regime_state_from_ratio(
+            r,
+            expand_threshold=float(expand_threshold),
+            contract_threshold=float(contract_threshold),
+            extreme_threshold=float(extreme_threshold),
+        )
+    if st == "REDUCED":
+        if r > float(extreme_threshold):
+            return "EXTREME"
+        if r < float(contract_threshold):
+            return "INCREASED"
+        if r < float(normal_threshold):
+            return "NORMAL"
+        return "REDUCED"
+    if st == "INCREASED":
+        if r > float(extreme_threshold):
+            return "EXTREME"
+        if r > float(expand_threshold):
+            return "REDUCED"
+        if r > float(normal_threshold):
+            return "NORMAL"
+        return "INCREASED"
+    # EXTREME
+    if r < float(contract_threshold):
+        return "INCREASED"
+    if r < float(normal_threshold):
+        return "NORMAL"
+    if r <= float(extreme_threshold):
+        return "REDUCED"
+    return "EXTREME"
+
+
 def _risk_budget_dynamic_weights(
     active_signal: pd.Series,
     *,
@@ -598,16 +677,16 @@ def _risk_budget_dynamic_weights(
     expand_threshold: float,
     contract_threshold: float,
     normal_threshold: float,
+    extreme_threshold: float,
 ) -> tuple[pd.Series, dict[str, int]]:
     """
     Risk-budget weights with post-entry volatility-regime adjustments.
 
     Base rule: target_weight = risk_budget_pct * close / ATR(budget_window), fixed after entry.
     Optional dynamic regime rule (while in position):
-    - NORMAL -> REDUCED when ATR(5)/ATR(50) > expand_threshold (de-risk)
-    - NORMAL -> INCREASED when ATR(5)/ATR(50) < contract_threshold (add risk)
-    - REDUCED -> NORMAL when ratio < normal_threshold
-    - INCREASED -> NORMAL when ratio > normal_threshold
+    - Supports four states: INCREASED / NORMAL / REDUCED / EXTREME.
+    - State changes can jump across any tiers in one step.
+    - Whenever state changes, rebalance once to latest base_target weight.
     """
     idx = active_signal.index
     sig = active_signal.reindex(idx).astype(float).fillna(0.0).clip(lower=0.0)
@@ -629,7 +708,7 @@ def _risk_budget_dynamic_weights(
     )
 
     out = pd.Series(0.0, index=idx, dtype=float)
-    state = "FLAT"  # FLAT | NORMAL | REDUCED | INCREASED
+    state = "FLAT"  # FLAT | NORMAL | REDUCED | INCREASED | EXTREME
     held_weight = 0.0
     stats = {
         "vol_risk_adjust_total_count": 0,
@@ -661,14 +740,16 @@ def _risk_budget_dynamic_weights(
                     if np.isfinite(float(ratio.loc[d]))
                     else float("nan")
                 )
-                if np.isfinite(r) and r > float(expand_threshold):
-                    state = "REDUCED"
+                state = _vol_regime_state_from_ratio(
+                    r,
+                    expand_threshold=float(expand_threshold),
+                    contract_threshold=float(contract_threshold),
+                    extreme_threshold=float(extreme_threshold),
+                )
+                if state == "REDUCED":
                     stats["vol_risk_entry_state_reduce_on_expand_count"] += 1
-                elif np.isfinite(r) and r < float(contract_threshold):
-                    state = "INCREASED"
+                elif state == "INCREASED":
                     stats["vol_risk_entry_state_increase_on_contract_count"] += 1
-                else:
-                    state = "NORMAL"
             else:
                 state = "NORMAL"
             out.loc[d] = held_weight
@@ -680,28 +761,26 @@ def _risk_budget_dynamic_weights(
                 else float("nan")
             )
             can_recalc = np.isfinite(float(base_target.loc[d]))
-            if state == "NORMAL":
-                if np.isfinite(r) and r > float(expand_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "REDUCED"
-                    stats["vol_risk_adjust_total_count"] += 1
+            next_state = _next_vol_regime_state(
+                state,
+                ratio=r,
+                expand_threshold=float(expand_threshold),
+                contract_threshold=float(contract_threshold),
+                normal_threshold=float(normal_threshold),
+                extreme_threshold=float(extreme_threshold),
+            )
+            if can_recalc and next_state != state:
+                old_state = str(state)
+                held_weight = float(base_target.loc[d])
+                state = str(next_state)
+                stats["vol_risk_adjust_total_count"] += 1
+                if state == "REDUCED":
                     stats["vol_risk_adjust_reduce_on_expand_count"] += 1
-                elif np.isfinite(r) and r < float(contract_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "INCREASED"
-                    stats["vol_risk_adjust_total_count"] += 1
+                if state == "INCREASED":
                     stats["vol_risk_adjust_increase_on_contract_count"] += 1
-            elif state == "REDUCED":
-                if np.isfinite(r) and r < float(normal_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "NORMAL"
-                    stats["vol_risk_adjust_total_count"] += 1
+                if state == "NORMAL" and old_state in {"REDUCED", "EXTREME"}:
                     stats["vol_risk_adjust_recover_from_expand_count"] += 1
-            elif state == "INCREASED":
-                if np.isfinite(r) and r > float(normal_threshold) and can_recalc:
-                    held_weight = float(base_target.loc[d])
-                    state = "NORMAL"
-                    stats["vol_risk_adjust_total_count"] += 1
+                if state == "NORMAL" and old_state == "INCREASED":
                     stats["vol_risk_adjust_recover_from_contract_count"] += 1
         out.loc[d] = float(min(1.0, max(0.0, held_weight)))
     return out.astype(float), {k: int(v) for k, v in stats.items()}
@@ -1068,10 +1147,18 @@ def _extract_atr_plan_stops_from_trace(
         stop_cur = _to_finite(prev.get("stop_after"))
     if (not np.isfinite(stop_cur)) and np.isfinite(stop_next):
         stop_cur = stop_next
+
     return {
         "plan_stop_current": (float(stop_cur) if np.isfinite(stop_cur) else None),
         "plan_stop_next": (float(stop_next) if np.isfinite(stop_next) else None),
     }
+
+
+def _next_trading_day_iso(index: pd.Index, i: int) -> str | None:
+    if i + 1 >= len(index):
+        return None
+    d = index[i + 1]
+    return d.date().isoformat() if hasattr(d, "date") else str(d)
 
 
 def _enrich_trade_records_with_engine_timeline(
@@ -1242,8 +1329,48 @@ def _dist_stats(values: list[float]) -> dict[str, Any]:
     }
 
 
+def _max_drawdown_from_trade_returns(values: list[float]) -> float | None:
+    arr = np.asarray(
+        [float(x) for x in (values or []) if np.isfinite(float(x))], dtype=float
+    )
+    if arr.size == 0:
+        return None
+    factors = np.maximum(1.0 + arr, 1e-12)
+    nav = np.cumprod(factors)
+    peaks = np.maximum.accumulate(nav)
+    dd = nav / np.maximum(peaks, 1e-12) - 1.0
+    if dd.size == 0:
+        return None
+    max_dd = float(abs(np.min(dd)))
+    return max_dd if np.isfinite(max_dd) else None
+
+
+def _risk_of_ruin_probability(
+    *,
+    p_win: float | None,
+    avg_loss_abs: float | None,
+    max_risk: float | None,
+) -> float | None:
+    p = float(p_win) if p_win is not None else float("nan")
+    a = float(avg_loss_abs) if avg_loss_abs is not None else float("nan")
+    mr = float(max_risk) if max_risk is not None else float("nan")
+    if not (np.isfinite(p) and np.isfinite(a) and np.isfinite(mr)):
+        return None
+    if p <= 0.0 or p >= 1.0 or a <= 0.0 or mr < 0.0:
+        return None
+    base = (1.0 - p) / p
+    exp = mr / a
+    raw = float(base**exp)
+    if not np.isfinite(raw):
+        return None
+    return float(np.clip(raw, 0.0, 1.0))
+
+
 def _trade_stats_from_returns(
-    values: list[float], *, flat_eps: float = 1e-12
+    values: list[float],
+    *,
+    flat_eps: float = 1e-12,
+    risk_of_ruin_maxrisk: float | None = None,
 ) -> dict[str, Any]:
     rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
     wins = [x for x in rs if x > float(flat_eps)]
@@ -1254,9 +1381,11 @@ def _trade_stats_from_returns(
     win_rate_ex_zero: float | None = None
     payoff_ex_zero: float | None = None
     kelly_ex_zero: float | None = None
+    avg_loss_abs_ex_zero: float | None = None
     if wins and losses:
         avg_win = float(np.mean(np.asarray(wins, dtype=float)))
         avg_loss_abs = float(abs(np.mean(np.asarray(losses, dtype=float))))
+        avg_loss_abs_ex_zero = avg_loss_abs
         if (
             np.isfinite(avg_win)
             and np.isfinite(avg_loss_abs)
@@ -1268,6 +1397,27 @@ def _trade_stats_from_returns(
             win_rate_ex_zero = p
             payoff_ex_zero = b
             kelly_ex_zero = float(p - (1.0 - p) / b)
+    max_risk_trade_nav = _max_drawdown_from_trade_returns(rs)
+    cfg_maxrisk = (
+        float(risk_of_ruin_maxrisk)
+        if risk_of_ruin_maxrisk is not None and np.isfinite(float(risk_of_ruin_maxrisk))
+        else None
+    )
+    maxrisk_for_formula = (
+        cfg_maxrisk
+        if cfg_maxrisk is not None and cfg_maxrisk > 0.0
+        else max_risk_trade_nav
+    )
+    maxrisk_basis = (
+        "configured_risk_of_ruin_maxrisk"
+        if cfg_maxrisk is not None and cfg_maxrisk > 0.0
+        else "max_drawdown_of_trade_return_nav"
+    )
+    risk_of_ruin = _risk_of_ruin_probability(
+        p_win=win_rate_ex_zero,
+        avg_loss_abs=avg_loss_abs_ex_zero,
+        max_risk=maxrisk_for_formula,
+    )
     return {
         "total_trades": int(len(rs)),
         "win_trades": int(len(wins)),
@@ -1280,6 +1430,97 @@ def _trade_stats_from_returns(
         "all_stats": _dist_stats(rs),
         "profit_stats": _dist_stats(wins),
         "loss_stats": _dist_stats(losses),
+        "risk_of_ruin": {
+            "formula": "((1-P)/P)^(maxrisk/A)",
+            "probability": risk_of_ruin,
+            "P": win_rate_ex_zero,
+            "A": avg_loss_abs_ex_zero,
+            "maxrisk": maxrisk_for_formula,
+            "P_basis": "win_rate_ex_zero",
+            "A_basis": "abs(mean_loss_ex_zero)",
+            "maxrisk_basis": maxrisk_basis,
+            "maxrisk_configured": cfg_maxrisk,
+            "maxrisk_drawdown_reference": max_risk_trade_nav,
+        },
+    }
+
+
+def _semi_variance_run_stats_from_returns(
+    values: list[float], *, flat_eps: float = 1e-12
+) -> dict[str, Any]:
+    rs = [float(x) for x in (values or []) if np.isfinite(float(x))]
+    eps = float(abs(float(flat_eps)))
+    pos_daily = np.asarray([x for x in rs if x > eps], dtype=float)
+    neg_daily = np.asarray([x for x in rs if x < -eps], dtype=float)
+
+    upside_semivariance = (
+        float(np.mean(np.square(pos_daily))) if pos_daily.size > 0 else None
+    )
+    downside_semivariance = (
+        float(np.mean(np.square(neg_daily))) if neg_daily.size > 0 else None
+    )
+
+    run_returns: list[float] = []
+    profit_runs: list[float] = []
+    loss_runs: list[float] = []
+    profit_run_counts: list[int] = []
+    loss_run_counts: list[int] = []
+    run_sign = 0  # +1 profit-run, -1 loss-run, 0 no run
+    run_values: list[float] = []
+
+    def _flush_run() -> None:
+        nonlocal run_sign, run_values
+        if run_sign == 0 or not run_values:
+            run_sign = 0
+            run_values = []
+            return
+        cum_ret = float(np.prod(1.0 + np.asarray(run_values, dtype=float)) - 1.0)
+        run_returns.append(cum_ret)
+        if run_sign > 0:
+            profit_runs.append(cum_ret)
+            profit_run_counts.append(int(len(run_values)))
+        else:
+            loss_runs.append(cum_ret)
+            loss_run_counts.append(int(len(run_values)))
+        run_sign = 0
+        run_values = []
+
+    for r in rs:
+        if r > eps:
+            sign = 1
+        elif r < -eps:
+            sign = -1
+        else:
+            sign = 0
+        if sign == 0:
+            _flush_run()
+            continue
+        if run_sign == 0:
+            run_sign = sign
+            run_values = [float(r)]
+            continue
+        if sign != run_sign:
+            _flush_run()
+            run_sign = sign
+            run_values = [float(r)]
+            continue
+        run_values.append(float(r))
+    _flush_run()
+
+    run_trade_stats = _trade_stats_from_returns(run_returns, flat_eps=eps)
+    return {
+        "total_segments": int(len(run_returns)),
+        "profit_segments": int(len(profit_runs)),
+        "loss_segments": int(len(loss_runs)),
+        "win_rate_ex_zero": run_trade_stats.get("win_rate_ex_zero"),
+        "payoff_ex_zero": run_trade_stats.get("payoff_ex_zero"),
+        "kelly_ex_zero": run_trade_stats.get("kelly_ex_zero"),
+        "upside_semivariance": upside_semivariance,
+        "downside_semivariance": downside_semivariance,
+        "profit_return_stats": _dist_stats(profit_runs),
+        "profit_count_stats": _dist_stats([float(x) for x in profit_run_counts]),
+        "loss_return_stats": _dist_stats(loss_runs),
+        "loss_count_stats": _dist_stats([float(x) for x in loss_run_counts]),
     }
 
 
@@ -1855,6 +2096,29 @@ def _trade_returns_from_weight_df(
     }
 
 
+def _trade_marks_from_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for tr in list(trades or []):
+        entry_date = str((tr or {}).get("entry_date") or "").strip()
+        exit_date = str((tr or {}).get("exit_date") or "").strip()
+        if not entry_date or not exit_date:
+            continue
+        ret_raw = (tr or {}).get("return")
+        ret_val = None
+        if ret_raw is not None and np.isfinite(float(ret_raw)):
+            ret_val = float(ret_raw)
+        out.append(
+            {
+                "entry_date": entry_date,
+                "exit_date": exit_date,
+                "return": ret_val,
+                "direction": str((tr or {}).get("direction") or ""),
+                "code": str((tr or {}).get("code") or ""),
+            }
+        )
+    return out
+
+
 def _pos_from_donchian(close: pd.Series, *, entry: int, exit_: int) -> pd.Series:
     """
     Long/cash Donchian channel:
@@ -2085,6 +2349,7 @@ def _apply_atr_stop(
     mode: str,
     atr_basis: str,
     reentry_mode: str,
+    execution_mode: str = "intraday",
     atr_window: int,
     n_mult: float,
     m_step: float,
@@ -2114,6 +2379,9 @@ def _apply_atr_stop(
     mode_v = str(mode or "none").strip().lower()
     atr_basis_v = str(atr_basis or "latest").strip().lower()
     reentry_v = str(reentry_mode or "reenter").strip().lower()
+    execution_v = str(execution_mode or "intraday").strip().lower()
+    if execution_v not in STOP_EXECUTION_MODES:
+        execution_v = "intraday"
 
     def _event_row(
         *,
@@ -2253,7 +2521,12 @@ def _apply_atr_stop(
             "latest_stop_date": None,
             "wait_next_entry_lock_active": False,
             "trigger_rule": "long_low_le_stop_short_high_ge_stop",
-            "fill_rule": "long_gap_down_open_short_gap_up_open",
+            "fill_rule": (
+                "intraday: long_gap_down_open_or_low_touch_stop; short_gap_up_open_or_high_touch_stop"
+                if execution_v == "intraday"
+                else "next_day: close_trigger_then_execute_next_day_by_exec_price"
+            ),
+            "execution_mode": execution_v,
             "same_day_stop": bool(same_day_stop),
             "trace_last_rows": trace_rows[-80:],
             "trade_records": [],
@@ -2280,6 +2553,7 @@ def _apply_atr_stop(
     stop_px = float("nan")
     entry_px = float("nan")
     entry_atr = float("nan")
+    entry_i = -1
     prev_base = 0.0
     wait_lock_long = False
     wait_lock_short = False
@@ -2320,6 +2594,7 @@ def _apply_atr_stop(
                 wait_lock_long = False
                 entry_px = c
                 entry_atr = a
+                entry_i = i
                 stop_px = entry_px - float(n_mult) * a
                 entry_decision_date = (
                     bp.index[i].date().isoformat()
@@ -2386,6 +2661,7 @@ def _apply_atr_stop(
                 wait_lock_short = False
                 entry_px = c
                 entry_atr = a
+                entry_i = i
                 stop_px = entry_px + float(n_mult) * a
                 entry_decision_date = (
                     bp.index[i].date().isoformat()
@@ -2448,6 +2724,7 @@ def _apply_atr_stop(
                 stop_px = float("nan")
                 entry_px = float("nan")
                 entry_atr = float("nan")
+                entry_i = -1
                 entry_decision_date = None
                 initial_stop_price = float("nan")
                 trace_last_rows.append(
@@ -2479,48 +2756,86 @@ def _apply_atr_stop(
                 continue
 
             stop_before = float(stop_px) if np.isfinite(stop_px) else None
-            if np.isfinite(l) and np.isfinite(stop_px) and (l <= stop_px):
+            stop_armed = bool(same_day_stop) or (
+                entry_i >= 0 and (i - int(entry_i)) >= 2
+            )
+            stop_triggered = False
+            if execution_v == "next_day":
+                stop_triggered = bool(
+                    stop_armed
+                    and np.isfinite(c)
+                    and np.isfinite(stop_px)
+                    and (c <= stop_px)
+                )
+            else:
+                stop_triggered = bool(
+                    stop_armed
+                    and np.isfinite(l)
+                    and np.isfinite(stop_px)
+                    and (l <= stop_px)
+                )
+            if stop_triggered:
                 pos_side = 0
-                out[i] = 0.0
                 d = bp.index[i]
                 ds = d.date().isoformat() if hasattr(d, "date") else str(d)
+                exec_ds = (
+                    _next_trading_day_iso(bp.index, i)
+                    if execution_v == "next_day"
+                    else ds
+                )
+                out[i] = (
+                    float(b)
+                    if (execution_v == "next_day" and exec_ds is not None)
+                    else 0.0
+                )
                 trigger_dates.append(ds)
-                gap_open_triggered = bool(np.isfinite(o) and (o <= stop_px))
-                fill_price = (
-                    float(o)
-                    if gap_open_triggered and np.isfinite(o)
-                    else float(stop_px)
-                )
-                trigger_source = (
-                    "gap_open_below_stop" if gap_open_triggered else "low_touch_stop"
-                )
-                trigger_events.append(
-                    {
-                        "date": ds,
-                        "position_side": "long",
-                        "stop_price": (
-                            float(stop_px) if np.isfinite(stop_px) else None
-                        ),
-                        "close_price": (float(c) if np.isfinite(c) else None),
-                        "atr_value": (float(a) if np.isfinite(a) else None),
-                        "open_price": (float(o) if np.isfinite(o) else None),
-                        "low_price": (float(l) if np.isfinite(l) else None),
-                        "high_price": None,
-                        "fill_price": (
-                            float(fill_price) if np.isfinite(fill_price) else None
-                        ),
-                        "stop_distance_atr": (
-                            float((c - stop_px) / a)
-                            if np.isfinite(c)
-                            and np.isfinite(stop_px)
-                            and np.isfinite(a)
-                            and a > 0
-                            else None
-                        ),
-                        "trigger_source": trigger_source,
-                        "gap_open_triggered": bool(gap_open_triggered),
-                    }
-                )
+                if execution_v == "next_day":
+                    gap_open_triggered = False
+                    fill_price = float("nan")
+                    trigger_source = "close_below_stop_next_day_exec"
+                else:
+                    gap_open_triggered = bool(np.isfinite(o) and (o <= stop_px))
+                    fill_price = (
+                        float(o)
+                        if gap_open_triggered and np.isfinite(o)
+                        else float(stop_px)
+                    )
+                    trigger_source = (
+                        "gap_open_below_stop"
+                        if gap_open_triggered
+                        else "low_touch_stop"
+                    )
+                if exec_ds is not None:
+                    trigger_events.append(
+                        {
+                            "date": exec_ds,
+                            "trigger_date": ds,
+                            "execution_date": exec_ds,
+                            "execution_mode": execution_v,
+                            "position_side": "long",
+                            "stop_price": (
+                                float(stop_px) if np.isfinite(stop_px) else None
+                            ),
+                            "close_price": (float(c) if np.isfinite(c) else None),
+                            "atr_value": (float(a) if np.isfinite(a) else None),
+                            "open_price": (float(o) if np.isfinite(o) else None),
+                            "low_price": (float(l) if np.isfinite(l) else None),
+                            "high_price": None,
+                            "fill_price": (
+                                float(fill_price) if np.isfinite(fill_price) else None
+                            ),
+                            "stop_distance_atr": (
+                                float((c - stop_px) / a)
+                                if np.isfinite(c)
+                                and np.isfinite(stop_px)
+                                and np.isfinite(a)
+                                and a > 0
+                                else None
+                            ),
+                            "trigger_source": trigger_source,
+                            "gap_open_triggered": bool(gap_open_triggered),
+                        }
+                    )
                 trade_records.append(
                     {
                         "entry_decision_date": entry_decision_date,
@@ -2538,6 +2853,8 @@ def _apply_atr_stop(
                             float(fill_price) if np.isfinite(fill_price) else None
                         ),
                         "trigger_date": ds,
+                        "execution_mode": execution_v,
+                        "scheduled_execution_date": exec_ds,
                     }
                 )
                 if reentry_v == "wait_next_entry":
@@ -2545,6 +2862,7 @@ def _apply_atr_stop(
                 stop_px = float("nan")
                 entry_px = float("nan")
                 entry_atr = float("nan")
+                entry_i = -1
                 entry_decision_date = None
                 initial_stop_price = float("nan")
                 trace_last_rows.append(
@@ -2656,6 +2974,7 @@ def _apply_atr_stop(
             stop_px = float("nan")
             entry_px = float("nan")
             entry_atr = float("nan")
+            entry_i = -1
             entry_decision_date = None
             initial_stop_price = float("nan")
             trace_last_rows.append(
@@ -2687,44 +3006,78 @@ def _apply_atr_stop(
             continue
 
         stop_before = float(stop_px) if np.isfinite(stop_px) else None
-        if np.isfinite(h) and np.isfinite(stop_px) and (h >= stop_px):
+        stop_armed = bool(same_day_stop) or (entry_i >= 0 and (i - int(entry_i)) >= 2)
+        stop_triggered = False
+        if execution_v == "next_day":
+            stop_triggered = bool(
+                stop_armed
+                and np.isfinite(c)
+                and np.isfinite(stop_px)
+                and (c >= stop_px)
+            )
+        else:
+            stop_triggered = bool(
+                stop_armed
+                and np.isfinite(h)
+                and np.isfinite(stop_px)
+                and (h >= stop_px)
+            )
+        if stop_triggered:
             pos_side = 0
-            out[i] = 0.0
             d = bp.index[i]
             ds = d.date().isoformat() if hasattr(d, "date") else str(d)
+            exec_ds = (
+                _next_trading_day_iso(bp.index, i) if execution_v == "next_day" else ds
+            )
+            out[i] = (
+                float(b) if (execution_v == "next_day" and exec_ds is not None) else 0.0
+            )
             trigger_dates.append(ds)
-            gap_open_triggered = bool(np.isfinite(o) and (o >= stop_px))
-            fill_price = (
-                float(o) if gap_open_triggered and np.isfinite(o) else float(stop_px)
-            )
-            trigger_source = (
-                "gap_open_above_stop" if gap_open_triggered else "high_touch_stop"
-            )
-            trigger_events.append(
-                {
-                    "date": ds,
-                    "position_side": "short",
-                    "stop_price": (float(stop_px) if np.isfinite(stop_px) else None),
-                    "close_price": (float(c) if np.isfinite(c) else None),
-                    "atr_value": (float(a) if np.isfinite(a) else None),
-                    "open_price": (float(o) if np.isfinite(o) else None),
-                    "low_price": None,
-                    "high_price": (float(h) if np.isfinite(h) else None),
-                    "fill_price": (
-                        float(fill_price) if np.isfinite(fill_price) else None
-                    ),
-                    "stop_distance_atr": (
-                        float((stop_px - c) / a)
-                        if np.isfinite(c)
-                        and np.isfinite(stop_px)
-                        and np.isfinite(a)
-                        and a > 0
-                        else None
-                    ),
-                    "trigger_source": trigger_source,
-                    "gap_open_triggered": bool(gap_open_triggered),
-                }
-            )
+            if execution_v == "next_day":
+                gap_open_triggered = False
+                fill_price = float("nan")
+                trigger_source = "close_above_stop_next_day_exec"
+            else:
+                gap_open_triggered = bool(np.isfinite(o) and (o >= stop_px))
+                fill_price = (
+                    float(o)
+                    if gap_open_triggered and np.isfinite(o)
+                    else float(stop_px)
+                )
+                trigger_source = (
+                    "gap_open_above_stop" if gap_open_triggered else "high_touch_stop"
+                )
+            if exec_ds is not None:
+                trigger_events.append(
+                    {
+                        "date": exec_ds,
+                        "trigger_date": ds,
+                        "execution_date": exec_ds,
+                        "execution_mode": execution_v,
+                        "position_side": "short",
+                        "stop_price": (
+                            float(stop_px) if np.isfinite(stop_px) else None
+                        ),
+                        "close_price": (float(c) if np.isfinite(c) else None),
+                        "atr_value": (float(a) if np.isfinite(a) else None),
+                        "open_price": (float(o) if np.isfinite(o) else None),
+                        "low_price": None,
+                        "high_price": (float(h) if np.isfinite(h) else None),
+                        "fill_price": (
+                            float(fill_price) if np.isfinite(fill_price) else None
+                        ),
+                        "stop_distance_atr": (
+                            float((stop_px - c) / a)
+                            if np.isfinite(c)
+                            and np.isfinite(stop_px)
+                            and np.isfinite(a)
+                            and a > 0
+                            else None
+                        ),
+                        "trigger_source": trigger_source,
+                        "gap_open_triggered": bool(gap_open_triggered),
+                    }
+                )
             trade_records.append(
                 {
                     "entry_decision_date": entry_decision_date,
@@ -2742,6 +3095,8 @@ def _apply_atr_stop(
                         float(fill_price) if np.isfinite(fill_price) else None
                     ),
                     "trigger_date": ds,
+                    "execution_mode": execution_v,
+                    "scheduled_execution_date": exec_ds,
                 }
             )
             if reentry_v == "wait_next_entry":
@@ -2749,6 +3104,7 @@ def _apply_atr_stop(
             stop_px = float("nan")
             entry_px = float("nan")
             entry_atr = float("nan")
+            entry_i = -1
             entry_decision_date = None
             initial_stop_price = float("nan")
             trace_last_rows.append(
@@ -2874,8 +3230,17 @@ def _apply_atr_stop(
             latest_stop_date if (pos_side != 0 and np.isfinite(stop_px)) else None
         ),
         "wait_next_entry_lock_active": bool(wait_lock_long or wait_lock_short),
-        "trigger_rule": "long_low_le_stop_short_high_ge_stop",
-        "fill_rule": "long_gap_down_open_short_gap_up_open",
+        "trigger_rule": (
+            "intraday: long_low_le_stop_short_high_ge_stop"
+            if execution_v == "intraday"
+            else "next_day: long_close_le_stop_short_close_ge_stop"
+        ),
+        "fill_rule": (
+            "intraday: long_gap_down_open_or_low_touch_stop; short_gap_up_open_or_high_touch_stop"
+            if execution_v == "intraday"
+            else "next_day: execute_on_next_trading_day_by_exec_price"
+        ),
+        "execution_mode": execution_v,
         "same_day_stop": bool(same_day_stop),
         "trace_last_rows": trace_last_rows[-80:],
         "trade_records": trade_records,
@@ -2886,32 +3251,43 @@ def _apply_atr_stop(
 def _stop_fill_return(
     *,
     exec_price: str,
+    execution_mode: str,
     open_px: float,
+    close_px: float,
     prev_close_px: float,
     fill_px: float,
 ) -> float:
+    mode = str(execution_mode or "intraday").strip().lower()
     ep = str(exec_price or "close").strip().lower()
-    if (not np.isfinite(fill_px)) or fill_px <= 0.0:
-        return 0.0
-    if ep == "open":
-        base = open_px
-        if (not np.isfinite(base)) or base <= 0.0:
+    if mode == "next_day":
+        exec_fill = float("nan")
+        if ep == "open":
+            exec_fill = float(open_px)
+        elif ep == "close":
+            exec_fill = float(close_px) if np.isfinite(close_px) else float(open_px)
+        elif ep == "oc2":
+            if np.isfinite(open_px) and np.isfinite(close_px):
+                exec_fill = float(0.5 * (open_px + close_px))
+            elif np.isfinite(open_px):
+                exec_fill = float(open_px)
+            elif np.isfinite(close_px):
+                exec_fill = float(close_px)
+        else:
+            exec_fill = float(close_px) if np.isfinite(close_px) else float(open_px)
+        if (not np.isfinite(exec_fill)) or exec_fill <= 0.0:
             return 0.0
-        return float(fill_px / base - 1.0)
-    if ep == "oc2":
-        r1 = 0.0
-        r2 = 0.0
-        if np.isfinite(open_px) and open_px > 0.0:
-            r1 = float(fill_px / open_px - 1.0)
-        if np.isfinite(prev_close_px) and prev_close_px > 0.0:
-            r2 = float(fill_px / prev_close_px - 1.0)
-        return float(0.5 * (r1 + r2))
+        fill_for_ret = float(exec_fill)
+    else:
+        if (not np.isfinite(fill_px)) or fill_px <= 0.0:
+            return 0.0
+        fill_for_ret = float(fill_px)
+
     base = prev_close_px
     if (not np.isfinite(base)) or base <= 0.0:
         base = open_px
     if (not np.isfinite(base)) or base <= 0.0:
         return 0.0
-    return float(fill_px / base - 1.0)
+    return float(fill_for_ret / base - 1.0)
 
 
 def _apply_intraday_stop_execution_single(
@@ -2919,6 +3295,7 @@ def _apply_intraday_stop_execution_single(
     weights: pd.Series,
     atr_stop_stats: dict[str, Any],
     exec_price: str,
+    stop_execution_mode: str | None = None,
     open_sig: pd.Series,
     close_sig: pd.Series,
 ) -> tuple[pd.Series, pd.Series]:
@@ -2930,7 +3307,12 @@ def _apply_intraday_stop_execution_single(
         return w_adj, override
     prev_close = close_sig.astype(float).shift(1)
     for e in events:
-        d_raw = e.get("date")
+        ev_mode = (
+            str(e.get("execution_mode") or stop_execution_mode or "intraday")
+            .strip()
+            .lower()
+        )
+        d_raw = e.get("execution_date") or e.get("date")
         try:
             d = pd.Timestamp(d_raw)
         except Exception:
@@ -2952,13 +3334,23 @@ def _apply_intraday_stop_execution_single(
             if (d in open_sig.index and np.isfinite(float(open_sig.loc[d])))
             else float("nan")
         )
+        cl = (
+            float(close_sig.loc[d])
+            if (d in close_sig.index and np.isfinite(float(close_sig.loc[d])))
+            else float("nan")
+        )
         pc = (
             float(prev_close.loc[d])
             if (d in prev_close.index and np.isfinite(float(prev_close.loc[d])))
             else float("nan")
         )
         day_ret = _stop_fill_return(
-            exec_price=exec_price, open_px=o, prev_close_px=pc, fill_px=fill_px
+            exec_price=exec_price,
+            execution_mode=ev_mode,
+            open_px=o,
+            close_px=cl,
+            prev_close_px=pc,
+            fill_px=fill_px,
         )
         override.loc[d] = float(override.loc[d] + wv * day_ret)
         w_adj.loc[d] = 0.0
@@ -2970,6 +3362,7 @@ def _apply_intraday_stop_execution_portfolio(
     weights: pd.DataFrame,
     atr_stop_by_asset: dict[str, dict[str, Any]],
     exec_price: str,
+    stop_execution_mode: str | None = None,
     open_sig_df: pd.DataFrame,
     close_sig_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.Series]:
@@ -2983,7 +3376,12 @@ def _apply_intraday_stop_execution_portfolio(
         if not events:
             continue
         for e in events:
-            d_raw = e.get("date")
+            ev_mode = (
+                str(e.get("execution_mode") or stop_execution_mode or "intraday")
+                .strip()
+                .lower()
+            )
+            d_raw = e.get("execution_date") or e.get("date")
             try:
                 d = pd.Timestamp(d_raw)
             except Exception:
@@ -3009,6 +3407,15 @@ def _apply_intraday_stop_execution_portfolio(
                 )
                 else float("nan")
             )
+            cl = (
+                float(close_sig_df.loc[d, c])
+                if (
+                    d in close_sig_df.index
+                    and c in close_sig_df.columns
+                    and np.isfinite(float(close_sig_df.loc[d, c]))
+                )
+                else float("nan")
+            )
             pc = (
                 float(prev_close_df.loc[d, c])
                 if (
@@ -3019,7 +3426,12 @@ def _apply_intraday_stop_execution_portfolio(
                 else float("nan")
             )
             day_ret = _stop_fill_return(
-                exec_price=exec_price, open_px=o, prev_close_px=pc, fill_px=fill_px
+                exec_price=exec_price,
+                execution_mode=ev_mode,
+                open_px=o,
+                close_px=cl,
+                prev_close_px=pc,
+                fill_px=fill_px,
             )
             override.loc[d] = float(override.loc[d] + wv * day_ret)
             w_adj.loc[d, c] = 0.0
@@ -3092,6 +3504,7 @@ def _apply_r_multiple_take_profit(
     low: pd.Series,
     enabled: bool,
     reentry_mode: str,
+    execution_mode: str = "intraday",
     atr_window: int,
     atr_n: float,
     tiers: list[dict[str, float]] | None,
@@ -3101,11 +3514,15 @@ def _apply_r_multiple_take_profit(
     reentry_v = str(reentry_mode or "reenter").strip().lower()
     if reentry_v not in {"reenter", "wait_next_entry"}:
         reentry_v = "reenter"
+    execution_v = str(execution_mode or "intraday").strip().lower()
+    if execution_v not in STOP_EXECUTION_MODES:
+        execution_v = "intraday"
     if not bool(enabled):
         out_none = base_pos.fillna(0.0).astype(float)
         return out_none, {
             "enabled": False,
             "reentry_mode": reentry_v,
+            "execution_mode": execution_v,
             "atr_window": int(atr_window),
             "atr_n": float(atr_n),
             "fallback_mode_used": False,
@@ -3125,8 +3542,16 @@ def _apply_r_multiple_take_profit(
             "wait_next_entry_lock_active": False,
             "tiers": tiers_v,
             "tier_trigger_counts": {},
-            "trigger_rule": "low_vs_peak_retrace_same_day_exit",
-            "fill_rule": "fill=min(trigger_price,open_price) for long",
+            "trigger_rule": (
+                "intraday: low_vs_peak_retrace"
+                if execution_v == "intraday"
+                else "next_day: close_vs_peak_retrace"
+            ),
+            "fill_rule": (
+                "intraday: fill=min(trigger_price,open_price)"
+                if execution_v == "intraday"
+                else "next_day: execute_on_next_trading_day_by_exec_price"
+            ),
             "trace_last_rows": [],
         }
     bp = base_pos.fillna(0.0).astype(float)
@@ -3150,6 +3575,7 @@ def _apply_r_multiple_take_profit(
     entry_px = float("nan")
     initial_r_pct = float("nan")
     peak_profit_pct = float("nan")
+    entry_i = -1
     invalid_r_entries = 0
     eps = 1e-12
 
@@ -3180,6 +3606,7 @@ def _apply_r_multiple_take_profit(
             in_pos = True
             wait_next_entry_lock = False
             entry_px = c
+            entry_i = i
             initial_r_pct = (
                 float(atr_n) * a / c if (np.isfinite(a) and a > 0.0) else float("nan")
             )
@@ -3231,6 +3658,7 @@ def _apply_r_multiple_take_profit(
             entry_px = float("nan")
             initial_r_pct = float("nan")
             peak_profit_pct = float("nan")
+            entry_i = -1
             trace_last_rows.append(
                 {
                     "date": ds,
@@ -3274,6 +3702,11 @@ def _apply_r_multiple_take_profit(
             if (np.isfinite(l) and np.isfinite(entry_px) and entry_px > eps)
             else float("nan")
         )
+        cur_close_profit_pct = (
+            (c / entry_px - 1.0)
+            if (np.isfinite(c) and np.isfinite(entry_px) and entry_px > eps)
+            else float("nan")
+        )
         if np.isfinite(cur_peak_profit_pct):
             peak_profit_pct = max(float(peak_profit_pct), float(cur_peak_profit_pct))
         peak_r_mult = (
@@ -3300,14 +3733,33 @@ def _apply_r_multiple_take_profit(
             )
             else float("nan")
         )
-        tp_triggered = bool(
-            active_tier is not None
-            and np.isfinite(dd_from_peak)
-            and dd_from_peak >= float(active_tier["retrace_ratio"])
+        dd_from_peak_close = (
+            (float(peak_profit_pct) - float(cur_close_profit_pct))
+            / float(peak_profit_pct)
+            if (
+                np.isfinite(peak_profit_pct)
+                and peak_profit_pct > eps
+                and np.isfinite(cur_close_profit_pct)
+            )
+            else float("nan")
         )
+        tp_armed = bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
+        if execution_v == "next_day":
+            tp_triggered = bool(
+                tp_armed
+                and active_tier is not None
+                and np.isfinite(dd_from_peak_close)
+                and dd_from_peak_close >= float(active_tier["retrace_ratio"])
+            )
+        else:
+            tp_triggered = bool(
+                tp_armed
+                and active_tier is not None
+                and np.isfinite(dd_from_peak)
+                and dd_from_peak >= float(active_tier["retrace_ratio"])
+            )
         if tp_triggered:
             in_pos = False
-            out[i] = 0.0
             trigger_profit_pct = float(peak_profit_pct) * (
                 1.0 - float(active_tier["retrace_ratio"])
             )
@@ -3316,42 +3768,62 @@ def _apply_r_multiple_take_profit(
                 if np.isfinite(entry_px) and np.isfinite(trigger_profit_pct)
                 else float("nan")
             )
-            gap_open_triggered = bool(
-                np.isfinite(o) and np.isfinite(trigger_px) and (o <= trigger_px)
+            exec_ds = (
+                _next_trading_day_iso(bp.index, i) if execution_v == "next_day" else ds
             )
-            fill_price = (
-                float(o) if gap_open_triggered and np.isfinite(o) else float(trigger_px)
+            out[i] = (
+                float(b) if (execution_v == "next_day" and exec_ds is not None) else 0.0
             )
-            trigger_source = (
-                "gap_open_below_tp" if gap_open_triggered else "low_touch_tp_retrace"
-            )
+            if execution_v == "next_day":
+                gap_open_triggered = False
+                fill_price = float("nan")
+                trigger_source = "close_retrace_next_day_exec"
+            else:
+                gap_open_triggered = bool(
+                    np.isfinite(o) and np.isfinite(trigger_px) and (o <= trigger_px)
+                )
+                fill_price = (
+                    float(o)
+                    if gap_open_triggered and np.isfinite(o)
+                    else float(trigger_px)
+                )
+                trigger_source = (
+                    "gap_open_below_tp"
+                    if gap_open_triggered
+                    else "low_touch_tp_retrace"
+                )
             if reentry_v == "wait_next_entry":
                 wait_next_entry_lock = True
             trigger_dates.append(ds)
-            trigger_events.append(
-                {
-                    "date": ds,
-                    "trigger_price": (
-                        float(trigger_px) if np.isfinite(trigger_px) else None
-                    ),
-                    "open_price": (float(o) if np.isfinite(o) else None),
-                    "low_price": (float(l) if np.isfinite(l) else None),
-                    "fill_price": (
-                        float(fill_price) if np.isfinite(fill_price) else None
-                    ),
-                    "trigger_source": trigger_source,
-                    "gap_open_triggered": bool(gap_open_triggered),
-                    "peak_r_multiple": (
-                        float(peak_r_mult) if np.isfinite(peak_r_mult) else None
-                    ),
-                    "active_tier_r": float(active_tier["r_multiple"])
-                    if active_tier
-                    else None,
-                    "active_tier_retrace": float(active_tier["retrace_ratio"])
-                    if active_tier
-                    else None,
-                }
-            )
+            if exec_ds is not None:
+                trigger_events.append(
+                    {
+                        "date": exec_ds,
+                        "trigger_date": ds,
+                        "execution_date": exec_ds,
+                        "execution_mode": execution_v,
+                        "trigger_price": (
+                            float(trigger_px) if np.isfinite(trigger_px) else None
+                        ),
+                        "open_price": (float(o) if np.isfinite(o) else None),
+                        "close_price": (float(c) if np.isfinite(c) else None),
+                        "low_price": (float(l) if np.isfinite(l) else None),
+                        "fill_price": (
+                            float(fill_price) if np.isfinite(fill_price) else None
+                        ),
+                        "trigger_source": trigger_source,
+                        "gap_open_triggered": bool(gap_open_triggered),
+                        "peak_r_multiple": (
+                            float(peak_r_mult) if np.isfinite(peak_r_mult) else None
+                        ),
+                        "active_tier_r": float(active_tier["r_multiple"])
+                        if active_tier
+                        else None,
+                        "active_tier_retrace": float(active_tier["retrace_ratio"])
+                        if active_tier
+                        else None,
+                    }
+                )
             tier_label = (
                 f"{float(active_tier['r_multiple']):g}R" if active_tier else "unknown"
             )
@@ -3382,7 +3854,17 @@ def _apply_r_multiple_take_profit(
                     if active_tier
                     else None,
                     "drawdown_from_peak": (
-                        float(dd_from_peak) if np.isfinite(dd_from_peak) else None
+                        float(
+                            dd_from_peak_close
+                            if execution_v == "next_day"
+                            else dd_from_peak
+                        )
+                        if np.isfinite(
+                            dd_from_peak_close
+                            if execution_v == "next_day"
+                            else dd_from_peak
+                        )
+                        else None
                     ),
                     "tp_triggered": True,
                     "open": (float(o) if np.isfinite(o) else None),
@@ -3407,6 +3889,7 @@ def _apply_r_multiple_take_profit(
             entry_px = float("nan")
             initial_r_pct = float("nan")
             peak_profit_pct = float("nan")
+            entry_i = -1
             prev_base = b
             continue
 
@@ -3435,7 +3918,17 @@ def _apply_r_multiple_take_profit(
                 if active_tier
                 else None,
                 "drawdown_from_peak": (
-                    float(dd_from_peak) if np.isfinite(dd_from_peak) else None
+                    float(
+                        dd_from_peak_close
+                        if execution_v == "next_day"
+                        else dd_from_peak
+                    )
+                    if np.isfinite(
+                        dd_from_peak_close
+                        if execution_v == "next_day"
+                        else dd_from_peak
+                    )
+                    else None
                 ),
                 "tp_triggered": False,
                 "open": (float(o) if np.isfinite(o) else None),
@@ -3476,11 +3969,20 @@ def _apply_r_multiple_take_profit(
             float(trigger_count) / float(exits) if exits > 0 else 0.0
         ),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
+        "execution_mode": execution_v,
         "tiers": tiers_v,
         "tier_trigger_counts": dict(tier_trigger_counts),
         "invalid_initial_r_entries": int(invalid_r_entries),
-        "trigger_rule": "low_vs_peak_retrace_same_day_exit",
-        "fill_rule": "fill=min(trigger_price,open_price) for long",
+        "trigger_rule": (
+            "intraday: low_vs_peak_retrace"
+            if execution_v == "intraday"
+            else "next_day: close_vs_peak_retrace"
+        ),
+        "fill_rule": (
+            "intraday: fill=min(trigger_price,open_price)"
+            if execution_v == "intraday"
+            else "next_day: execute_on_next_trading_day_by_exec_price"
+        ),
         "trace_last_rows": trace_last_rows[-80:],
     }
     return out_s, stats
@@ -3495,6 +3997,7 @@ def _apply_bias_v_take_profit(
     low: pd.Series,
     enabled: bool,
     reentry_mode: str,
+    execution_mode: str = "intraday",
     ma_window: int,
     atr_window: int,
     threshold: float,
@@ -3502,11 +4005,15 @@ def _apply_bias_v_take_profit(
     reentry_v = str(reentry_mode or "reenter").strip().lower()
     if reentry_v not in {"reenter", "wait_next_entry"}:
         reentry_v = "reenter"
+    execution_v = str(execution_mode or "intraday").strip().lower()
+    if execution_v not in STOP_EXECUTION_MODES:
+        execution_v = "intraday"
     if not bool(enabled):
         out_none = base_pos.fillna(0.0).astype(float)
         return out_none, {
             "enabled": False,
             "reentry_mode": reentry_v,
+            "execution_mode": execution_v,
             "ma_window": int(ma_window),
             "atr_window": int(atr_window),
             "threshold": float(threshold),
@@ -3523,8 +4030,16 @@ def _apply_bias_v_take_profit(
             ),
             "trigger_exit_share": 0.0,
             "wait_next_entry_lock_active": False,
-            "trigger_rule": "high_ge_threshold_same_day_exit",
-            "fill_rule": "fill=max(trigger_price,open_price) for long",
+            "trigger_rule": (
+                "intraday: high_ge_threshold"
+                if execution_v == "intraday"
+                else "next_day: close_ge_threshold"
+            ),
+            "fill_rule": (
+                "intraday: fill=max(trigger_price,open_price)"
+                if execution_v == "intraday"
+                else "next_day: execute_on_next_trading_day_by_exec_price"
+            ),
             "trace_last_rows": [],
             "trade_records": [],
         }
@@ -3559,6 +4074,7 @@ def _apply_bias_v_take_profit(
     wait_next_entry_lock = False
     entry_decision_date: str | None = None
     initial_tp_price: float = float("nan")
+    entry_i = -1
 
     for i in range(len(bp)):
         b = float(bp.iloc[i]) if np.isfinite(float(bp.iloc[i])) else 0.0
@@ -3592,6 +4108,7 @@ def _apply_bias_v_take_profit(
                 continue
             in_pos = True
             wait_next_entry_lock = False
+            entry_i = i
             raw_px = (
                 float(m + float(threshold) * a)
                 if (np.isfinite(m) and np.isfinite(a))
@@ -3647,6 +4164,7 @@ def _apply_bias_v_take_profit(
             tp_line_px = float("nan")
             entry_decision_date = None
             initial_tp_price = float("nan")
+            entry_i = -1
             trace_last_rows.append(
                 {
                     "date": ds,
@@ -3691,49 +4209,80 @@ def _apply_bias_v_take_profit(
                 else max(float(tp_line_px), float(trigger_px_raw))
             )
         trigger_px = float(tp_line_px) if np.isfinite(tp_line_px) else float("nan")
-        tp_triggered = bool(
-            np.isfinite(h) and np.isfinite(trigger_px) and (h >= trigger_px)
-        )
+        tp_armed = bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
+        if execution_v == "next_day":
+            tp_triggered = bool(
+                tp_armed
+                and np.isfinite(c)
+                and np.isfinite(trigger_px)
+                and (c >= trigger_px)
+            )
+        else:
+            tp_triggered = bool(
+                tp_armed
+                and np.isfinite(h)
+                and np.isfinite(trigger_px)
+                and (h >= trigger_px)
+            )
         if tp_triggered:
             in_pos = False
-            out[i] = 0.0
-            gap_open_triggered = bool(
-                np.isfinite(o) and np.isfinite(trigger_px) and (o >= trigger_px)
+            exec_ds = (
+                _next_trading_day_iso(bp.index, i) if execution_v == "next_day" else ds
             )
-            fill_price = (
-                float(o) if gap_open_triggered and np.isfinite(o) else float(trigger_px)
+            out[i] = (
+                float(b) if (execution_v == "next_day" and exec_ds is not None) else 0.0
             )
-            trigger_source = (
-                "gap_open_above_bias_v_tp"
-                if gap_open_triggered
-                else "high_touch_bias_v_tp"
-            )
+            if execution_v == "next_day":
+                gap_open_triggered = False
+                fill_price = float("nan")
+                trigger_source = "close_above_bias_v_tp_next_day_exec"
+            else:
+                gap_open_triggered = bool(
+                    np.isfinite(o) and np.isfinite(trigger_px) and (o >= trigger_px)
+                )
+                fill_price = (
+                    float(o)
+                    if gap_open_triggered and np.isfinite(o)
+                    else float(trigger_px)
+                )
+                trigger_source = (
+                    "gap_open_above_bias_v_tp"
+                    if gap_open_triggered
+                    else "high_touch_bias_v_tp"
+                )
             if reentry_v == "wait_next_entry":
                 wait_next_entry_lock = True
             trigger_dates.append(ds)
-            trigger_events.append(
-                {
-                    "date": ds,
-                    "trigger_price": (
-                        float(trigger_px) if np.isfinite(trigger_px) else None
-                    ),
-                    "trigger_price_raw": (
-                        float(trigger_px_raw) if np.isfinite(trigger_px_raw) else None
-                    ),
-                    "trigger_price_eff": (
-                        float(trigger_px) if np.isfinite(trigger_px) else None
-                    ),
-                    "open_price": (float(o) if np.isfinite(o) else None),
-                    "high_price": (float(h) if np.isfinite(h) else None),
-                    "fill_price": (
-                        float(fill_price) if np.isfinite(fill_price) else None
-                    ),
-                    "trigger_source": trigger_source,
-                    "gap_open_triggered": bool(gap_open_triggered),
-                    "threshold": float(threshold),
-                    "bias_v": (float(v) if np.isfinite(v) else None),
-                }
-            )
+            if exec_ds is not None:
+                trigger_events.append(
+                    {
+                        "date": exec_ds,
+                        "trigger_date": ds,
+                        "execution_date": exec_ds,
+                        "execution_mode": execution_v,
+                        "trigger_price": (
+                            float(trigger_px) if np.isfinite(trigger_px) else None
+                        ),
+                        "trigger_price_raw": (
+                            float(trigger_px_raw)
+                            if np.isfinite(trigger_px_raw)
+                            else None
+                        ),
+                        "trigger_price_eff": (
+                            float(trigger_px) if np.isfinite(trigger_px) else None
+                        ),
+                        "open_price": (float(o) if np.isfinite(o) else None),
+                        "close_price": (float(c) if np.isfinite(c) else None),
+                        "high_price": (float(h) if np.isfinite(h) else None),
+                        "fill_price": (
+                            float(fill_price) if np.isfinite(fill_price) else None
+                        ),
+                        "trigger_source": trigger_source,
+                        "gap_open_triggered": bool(gap_open_triggered),
+                        "threshold": float(threshold),
+                        "bias_v": (float(v) if np.isfinite(v) else None),
+                    }
+                )
             trade_records.append(
                 {
                     "entry_decision_date": entry_decision_date,
@@ -3751,6 +4300,8 @@ def _apply_bias_v_take_profit(
                         float(fill_price) if np.isfinite(fill_price) else None
                     ),
                     "trigger_date": ds,
+                    "execution_mode": execution_v,
+                    "scheduled_execution_date": exec_ds,
                 }
             )
             trace_last_rows.append(
@@ -3793,6 +4344,7 @@ def _apply_bias_v_take_profit(
             tp_line_px = float("nan")
             entry_decision_date = None
             initial_tp_price = float("nan")
+            entry_i = -1
             prev_base = b
             continue
 
@@ -3852,8 +4404,17 @@ def _apply_bias_v_take_profit(
             float(trigger_count) / float(exits) if exits > 0 else 0.0
         ),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
-        "trigger_rule": "high_ge_threshold_same_day_exit",
-        "fill_rule": "fill=max(trigger_price,open_price) for long",
+        "execution_mode": execution_v,
+        "trigger_rule": (
+            "intraday: high_ge_threshold"
+            if execution_v == "intraday"
+            else "next_day: close_ge_threshold"
+        ),
+        "fill_rule": (
+            "intraday: fill=max(trigger_price,open_price)"
+            if execution_v == "intraday"
+            else "next_day: execute_on_next_trading_day_by_exec_price"
+        ),
         "trace_last_rows": trace_last_rows[-80:],
         "trade_records": trade_records,
     }
@@ -3961,6 +4522,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError(
             "atr_stop_reentry_mode must be one of: reenter|wait_next_entry"
         )
+    atr_execution_mode = (
+        str(getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if atr_execution_mode not in STOP_EXECUTION_MODES:
+        raise ValueError("atr_stop_execution_mode must be one of: intraday|next_day")
     if int(inp.atr_stop_window) < 2:
         raise ValueError("atr_stop_window must be >= 2")
     if (not np.isfinite(float(inp.atr_stop_n))) or float(inp.atr_stop_n) <= 0:
@@ -3981,6 +4549,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError(
             "r_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
         )
+    rtp_execution_mode = (
+        str(getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if rtp_execution_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "r_take_profit_execution_mode must be one of: intraday|next_day"
+        )
     rtp_tiers = _normalize_r_take_profit_tiers(
         getattr(inp, "r_take_profit_tiers", None)
     )
@@ -3993,6 +4570,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if bias_v_tp_reentry_mode not in {"reenter", "wait_next_entry"}:
         raise ValueError(
             "bias_v_take_profit_reentry_mode must be one of: reenter|wait_next_entry"
+        )
+    bias_v_tp_execution_mode = (
+        str(getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if bias_v_tp_execution_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "bias_v_take_profit_execution_mode must be one of: intraday|next_day"
         )
     bias_v_tp_ma_window = int(getattr(inp, "bias_v_ma_window", 20) or 20)
     if bias_v_tp_ma_window < 2:
@@ -4136,6 +4722,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     vol_ratio_normal_threshold = float(
         getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
     )
+    vol_ratio_extreme_threshold = float(
+        getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20
+    )
     if vol_ratio_fast_atr_window < 2:
         raise ValueError("vol_ratio_fast_atr_window must be >= 2")
     if vol_ratio_slow_atr_window < 2:
@@ -4148,6 +4737,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("vol_ratio_contract_threshold must be > 0")
     if (not np.isfinite(vol_ratio_normal_threshold)) or vol_ratio_normal_threshold <= 0:
         raise ValueError("vol_ratio_normal_threshold must be > 0")
+    if (
+        not np.isfinite(vol_ratio_extreme_threshold)
+    ) or vol_ratio_extreme_threshold <= 0:
+        raise ValueError("vol_ratio_extreme_threshold must be > 0")
     if vol_ratio_expand_threshold <= vol_ratio_normal_threshold:
         raise ValueError(
             "vol_ratio_expand_threshold must be > vol_ratio_normal_threshold"
@@ -4156,6 +4749,17 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError(
             "vol_ratio_contract_threshold must be < vol_ratio_normal_threshold"
         )
+    if vol_ratio_extreme_threshold <= vol_ratio_expand_threshold:
+        raise ValueError(
+            "vol_ratio_extreme_threshold must be > vol_ratio_expand_threshold"
+        )
+    risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
+    if (
+        (not np.isfinite(risk_of_ruin_maxrisk))
+        or risk_of_ruin_maxrisk <= 0.0
+        or risk_of_ruin_maxrisk > 1.0
+    ):
+        raise ValueError("risk_of_ruin_maxrisk must be in (0, 1]")
     # Price basis consistent with rotation research:
     # - Signal/TA: qfq close
     # - Execution/NAV: none close, with hfq return fallback on corporate-action days to avoid false cliffs
@@ -4270,85 +4874,65 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     c_hfq = _pick_series(ohlc_hfq, "close", px_bh)
     o_qfq = _pick_series(ohlc_qfq, "open", px_sig)
     if ep == "open":
-        # Open execution holding return: open[t] -> open[t+1]
+        # Open execution: execution-day intraday return (open[t] -> close[t]).
         exec_o_none = o_none.combine_first(px_exec_none)
         exec_c_none = c_none.combine_first(px_exec_none)
         exec_o_hfq = o_hfq.combine_first(px_bh)
         exec_c_hfq = c_hfq.combine_first(px_bh)
         ret_none = (
-            (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+            (exec_c_none.div(exec_o_none) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_exec_hfq = (
-            (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+            (exec_c_hfq.div(exec_o_hfq) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
-        ret_intraday_none = (
-            (exec_c_none / exec_o_none - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_overnight_none = (
-            (exec_o_none.shift(-1).div(exec_c_none) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_intraday_hfq = (
-            (exec_c_hfq / exec_o_hfq - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        ret_overnight_hfq = (
-            (exec_o_hfq.shift(-1).div(exec_c_hfq) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
+        ret_intraday_none = ret_none.copy().astype(float)
+        ret_overnight_none = pd.Series(0.0, index=ret_none.index, dtype=float)
+        ret_intraday_hfq = ret_exec_hfq.copy().astype(float)
+        ret_overnight_hfq = pd.Series(0.0, index=ret_exec_hfq.index, dtype=float)
         px_slip_none = exec_o_none.astype(float)
         px_slip_hfq = exec_o_hfq.astype(float)
     elif ep == "close":
-        # Execution-day return when entering at close: close[t+1] / close[t] - 1
+        # Close execution: execution-day close-to-close return (close[t-1] -> close[t]).
         exec_none = c_none.combine_first(px_exec_none)
         exec_hfq = c_hfq.combine_first(px_bh)
         ret_none = (
-            (exec_none.shift(-1).div(exec_none) - 1.0)
+            (exec_none.div(exec_none.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_exec_hfq = (
-            (exec_hfq.shift(-1).div(exec_hfq) - 1.0)
+            (exec_hfq.div(exec_hfq.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_overnight_none = (
-            (o_none.shift(-1).div(c_none) - 1.0)
+            (o_none.div(c_none.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_intraday_none = (
-            (c_none.shift(-1).div(o_none.shift(-1)) - 1.0)
+            (c_none.div(o_none) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_overnight_hfq = (
-            (o_hfq.shift(-1).div(c_hfq) - 1.0)
+            (o_hfq.div(c_hfq.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_intraday_hfq = (
-            (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0)
+            (c_hfq.div(o_hfq) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
@@ -4356,67 +4940,51 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         px_slip_none = exec_none.astype(float)
         px_slip_hfq = exec_hfq.astype(float)
     else:
-        # OC2: 50% open-execution(open->open) + 50% close-execution(close->close)
+        # OC2: arithmetic average of open and close execution daily returns.
         exec_o_none = o_none.combine_first(px_exec_none)
         exec_c_none = c_none.combine_first(px_exec_none)
         exec_o_hfq = o_hfq.combine_first(px_bh)
         exec_c_hfq = c_hfq.combine_first(px_bh)
         ret_open_none = (
-            (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+            (exec_c_none.div(exec_o_none) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_close_none = (
-            (exec_c_none.shift(-1).div(exec_c_none) - 1.0)
+            (exec_c_none.div(exec_c_none.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
         ret_open_hfq = (
-            (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+            (exec_c_hfq.div(exec_o_hfq) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_close_hfq = (
-            (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0)
+            (exec_c_hfq.div(exec_c_hfq.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_exec_hfq = (0.5 * (ret_open_hfq + ret_close_hfq)).astype(float)
         ret_overnight_none = (
-            (0.5 * (o_none.shift(-1).div(c_none) - 1.0))
+            (0.5 * (o_none.div(c_none.shift(1)) - 1.0))
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
-        ret_intraday_none = (
-            (
-                0.5 * (c_none / o_none - 1.0)
-                + 0.5 * (c_none.shift(-1).div(o_none.shift(-1)) - 1.0)
-            )
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
+        ret_intraday_none = ret_open_none.astype(float)
         ret_overnight_hfq = (
-            (0.5 * (o_hfq.shift(-1).div(c_hfq) - 1.0))
+            (0.5 * (o_hfq.div(c_hfq.shift(1)) - 1.0))
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
-        ret_intraday_hfq = (
-            (
-                0.5 * (c_hfq / o_hfq - 1.0)
-                + 0.5 * (c_hfq.shift(-1).div(o_hfq.shift(-1)) - 1.0)
-            )
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
+        ret_intraday_hfq = ret_open_hfq.astype(float)
         px_slip_none = (0.5 * (exec_o_none + exec_c_none)).astype(float)
         px_slip_hfq = (0.5 * (exec_o_hfq + exec_c_hfq)).astype(float)
     ret_hfq = ret_exec_hfq.astype(float)
@@ -4623,6 +5191,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         mode=atr_mode,
         atr_basis=atr_basis,
         reentry_mode=atr_reentry_mode,
+        execution_mode=atr_execution_mode,
         atr_window=int(inp.atr_stop_window),
         n_mult=float(inp.atr_stop_n),
         m_step=float(inp.atr_stop_m),
@@ -4639,6 +5208,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         low=low_qfq,
         enabled=bias_v_tp_enabled,
         reentry_mode=bias_v_tp_reentry_mode,
+        execution_mode=bias_v_tp_execution_mode,
         ma_window=int(bias_v_tp_ma_window),
         atr_window=int(bias_v_tp_atr_window),
         threshold=float(bias_v_tp_threshold),
@@ -4651,6 +5221,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         low=low_qfq,
         enabled=rtp_enabled,
         reentry_mode=rtp_reentry_mode,
+        execution_mode=rtp_execution_mode,
         atr_window=int(inp.atr_stop_window),
         atr_n=float(inp.atr_stop_n),
         tiers=rtp_tiers,
@@ -4711,6 +5282,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             expand_threshold=float(vol_ratio_expand_threshold),
             contract_threshold=float(vol_ratio_contract_threshold),
             normal_threshold=float(vol_ratio_normal_threshold),
+            extreme_threshold=float(vol_ratio_extreme_threshold),
         )
     elif ps == "vol_target":
         asset_vol = (
@@ -4765,97 +5337,128 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         )
         raw_pos = gated_w_df[code].astype(float)
 
-    # Weights become effective on execution day; ret_exec is already aligned to execution-day semantics.
-    w = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
-    w, atr_stop_override_ret = _apply_intraday_stop_execution_single(
-        weights=w,
-        atr_stop_stats=atr_stop_stats,
-        exec_price=str(ep),
-        open_sig=o_qfq.reindex(w.index).astype(float).ffill(),
-        close_sig=px_sig.reindex(w.index).astype(float).ffill(),
+    # Post-trade weight on each day (open mode: after open trade, close mode: after close trade).
+    w_post = raw_pos.shift(1).fillna(0.0).astype(float).clip(lower=0.0, upper=1.0)
+    open_sig_for_stop = o_qfq.reindex(w_post.index).astype(float).ffill()
+    close_sig_for_stop = px_sig.reindex(w_post.index).astype(float).ffill()
+
+    def _apply_all_intraday_overlays(
+        weight_in: pd.Series,
+        *,
+        mode: str,
+    ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+        w_tmp = weight_in.astype(float).copy()
+        w_tmp, atr_over = _apply_intraday_stop_execution_single(
+            weights=w_tmp,
+            atr_stop_stats=atr_stop_stats,
+            exec_price=str(mode),
+            stop_execution_mode=atr_execution_mode,
+            open_sig=open_sig_for_stop,
+            close_sig=close_sig_for_stop,
+        )
+        w_tmp, bias_over = _apply_intraday_stop_execution_single(
+            weights=w_tmp,
+            atr_stop_stats=bias_v_take_profit_stats,
+            exec_price=str(mode),
+            stop_execution_mode=bias_v_tp_execution_mode,
+            open_sig=open_sig_for_stop,
+            close_sig=close_sig_for_stop,
+        )
+        w_tmp, rtp_over = _apply_intraday_stop_execution_single(
+            weights=w_tmp,
+            atr_stop_stats=r_take_profit_stats,
+            exec_price=str(mode),
+            stop_execution_mode=rtp_execution_mode,
+            open_sig=open_sig_for_stop,
+            close_sig=close_sig_for_stop,
+        )
+        return (
+            w_tmp.astype(float),
+            atr_over.astype(float),
+            bias_over.astype(float),
+            rtp_over.astype(float),
+        )
+
+    open_leg_mode = "open" if ep == "oc2" else str(ep)
+    w_post, atr_over_post, bias_over_post, rtp_over_post = _apply_all_intraday_overlays(
+        w_post, mode=open_leg_mode
     )
-    w, bias_v_take_profit_override_ret = _apply_intraday_stop_execution_single(
-        weights=w,
-        atr_stop_stats=bias_v_take_profit_stats,
-        exec_price=str(ep),
-        open_sig=o_qfq.reindex(w.index).astype(float).ffill(),
-        close_sig=px_sig.reindex(w.index).astype(float).ffill(),
+    w = w_post
+
+    cm = ca_mask.reindex(ret_exec.index).fillna(False).astype(bool)
+    ret_exec_open_none_day = (
+        (c_none / o_none - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
     )
-    w, r_take_profit_override_ret = _apply_intraday_stop_execution_single(
-        weights=w,
-        atr_stop_stats=r_take_profit_stats,
-        exec_price=str(ep),
-        open_sig=o_qfq.reindex(w.index).astype(float).ffill(),
-        close_sig=px_sig.reindex(w.index).astype(float).ffill(),
+    ret_exec_open_hfq_day = (
+        (c_hfq / o_hfq - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
     )
-    # Match rotation open/oc2 execution semantics (AGENTS strict execution-timing NAV rule):
-    # while long (w>0), open-leg day returns use same-day open->close (none; hfq on CA days),
-    # not forward open[t]->open[t+1]. Forward legs still apply on flat days (w=0) for series continuity.
-    if ep in {"open", "oc2"}:
-        same_day_none = (
-            (c_none / o_none - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
+    ret_exec_open_day = ret_exec_open_none_day.where(~cm, ret_exec_open_hfq_day).astype(
+        float
+    )
+    ret_exec_close_none_day = (
+        (c_none / c_none.shift(1) - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_exec_close_hfq_day = (
+        (c_hfq / c_hfq.shift(1) - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+    )
+    ret_exec_close_day = ret_exec_close_none_day.where(
+        ~cm, ret_exec_close_hfq_day
+    ).astype(float)
+
+    w_ret = w.copy()
+    ret_exec_day = ret_exec_open_day.copy().astype(float)
+    atr_stop_override_ret = atr_over_post.reindex(w.index).fillna(0.0).astype(float)
+    bias_v_take_profit_override_ret = (
+        bias_over_post.reindex(w.index).fillna(0.0).astype(float)
+    )
+    r_take_profit_override_ret = (
+        rtp_over_post.reindex(w.index).fillna(0.0).astype(float)
+    )
+
+    if ep == "close":
+        w_close_base = w.shift(1).fillna(0.0).astype(float)
+        (
+            w_ret,
+            atr_stop_override_ret,
+            bias_v_take_profit_override_ret,
+            r_take_profit_override_ret,
+        ) = _apply_all_intraday_overlays(w_close_base, mode="close")
+        ret_exec_day = ret_exec_close_day.astype(float)
+    elif ep == "oc2":
+        w_close_base = w.shift(1).fillna(0.0).astype(float)
+        w_close, atr_over_close, bias_over_close, rtp_over_close = (
+            _apply_all_intraday_overlays(w_close_base, mode="close")
         )
-        same_day_hfq = (
-            (c_hfq / o_hfq - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        open_fwd_none = (
-            (o_none.shift(-1).div(o_none) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        open_fwd_hfq = (
-            (o_hfq.shift(-1).div(o_hfq) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        close_fwd_none = (
-            (c_none.shift(-1).div(c_none) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        close_fwd_hfq = (
-            (c_hfq.shift(-1).div(c_hfq) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        cm = ca_mask.reindex(ret_exec.index).fillna(False)
-        w_ix = w.reindex(ret_exec.index).fillna(0.0)
-        if ep == "open":
-            for d in ret_exec.index:
-                if float(w_ix.loc[d]) <= 1e-12:
-                    continue
-                ret_exec.loc[d] = (
-                    float(same_day_hfq.loc[d])
-                    if bool(cm.loc[d])
-                    else float(same_day_none.loc[d])
-                )
-        else:
-            ret_blend_none = pd.Series(0.0, index=ret_exec.index, dtype=float)
-            ret_blend_hfq = pd.Series(0.0, index=ret_exec.index, dtype=float)
-            for d in ret_exec.index:
-                hold = float(w_ix.loc[d]) > 1e-12
-                po_n = (
-                    float(same_day_none.loc[d]) if hold else float(open_fwd_none.loc[d])
-                )
-                po_h = (
-                    float(same_day_hfq.loc[d]) if hold else float(open_fwd_hfq.loc[d])
-                )
-                cn = float(close_fwd_none.loc[d])
-                ch = float(close_fwd_hfq.loc[d])
-                ret_blend_none.loc[d] = 0.5 * (po_n + cn)
-                ret_blend_hfq.loc[d] = 0.5 * (po_h + ch)
-            ret_exec = ret_blend_none.where(~cm, ret_blend_hfq).astype(float)
-    ret_exec_day = ret_exec.astype(float)
+        w_ret = (0.5 * (w + w_close)).astype(float)
+        ret_exec_day = (0.5 * (ret_exec_open_day + ret_exec_close_day)).astype(float)
+        atr_stop_override_ret = (
+            0.5 * (atr_stop_override_ret + atr_over_close.reindex(w.index).fillna(0.0))
+        ).astype(float)
+        bias_v_take_profit_override_ret = (
+            0.5
+            * (
+                bias_v_take_profit_override_ret
+                + bias_over_close.reindex(w.index).fillna(0.0)
+            )
+        ).astype(float)
+        r_take_profit_override_ret = (
+            0.5
+            * (r_take_profit_override_ret + rtp_over_close.reindex(w.index).fillna(0.0))
+        ).astype(float)
+    else:
+        ret_exec_day = ret_exec_open_day.astype(float)
     # Buy-and-hold benchmark: always invested; align daily returns with exec_price (tests + rotation parity).
     cm_bh = ca_mask.reindex(ret_hfq.index)
     if isinstance(cm_bh, pd.DataFrame):
@@ -4878,36 +5481,25 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         .fillna(0.0)
         .astype(float)
     )
-    if ep == "close":
-        ret_bh = ret_hfq.astype(float)
-    elif ep == "open":
-        ret_bh = (
-            bh_same_none.where(~cm_bh, bh_same_hfq)
-            .astype(float)
-            .reindex(ret_hfq.index)
-            .fillna(0.0)
-        )
+    ret_bh_open = (
+        bh_same_none.where(~cm_bh, bh_same_hfq)
+        .astype(float)
+        .reindex(ret_hfq.index)
+        .fillna(0.0)
+    )
+    ret_bh_close = (
+        (c_hfq / c_hfq.shift(1) - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+        .reindex(ret_hfq.index)
+    )
+    if ep == "open":
+        ret_bh = ret_bh_open.astype(float)
+    elif ep == "close":
+        ret_bh = ret_bh_close.astype(float)
     else:
-        cf_none = (
-            (c_none.shift(-1).div(c_none) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        cf_hfq = (
-            (c_hfq.shift(-1).div(c_hfq) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
-        blend_bh_none = (0.5 * (bh_same_none + cf_none)).astype(float)
-        blend_bh_hfq = (0.5 * (bh_same_hfq + cf_hfq)).astype(float)
-        ret_bh = (
-            blend_bh_none.where(~cm_bh, blend_bh_hfq)
-            .astype(float)
-            .reindex(ret_hfq.index)
-            .fillna(0.0)
-        )
+        ret_bh = (0.5 * (ret_bh_open + ret_bh_close)).astype(float)
     cost = _turnover_cost_from_weights(w, cost_bps=float(inp.cost_bps))
     turnover = (w - w.shift(1).fillna(0.0)).abs() / 2.0
     slippage = slippage_return_from_turnover(
@@ -4915,23 +5507,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         slippage_spread=float(inp.slippage_rate),
         exec_price=px_exec_slip.reindex(turnover.index).ffill(),
     ).astype(float)
-    atr_stop_override_ret = (
-        atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
-    )
-    bias_v_take_profit_override_ret = (
-        bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-    )
-    r_take_profit_override_ret = (
-        r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-    )
     risk_exit_override_ret = (
         atr_stop_override_ret
         + bias_v_take_profit_override_ret
         + r_take_profit_override_ret
     ).astype(float)
-    strat_ret = (w * ret_exec_day + risk_exit_override_ret - cost - slippage).astype(
-        float
-    )
+    strat_ret = (
+        w_ret * ret_exec_day + risk_exit_override_ret - cost.astype(float) - slippage
+    ).astype(float)
     if not quick_mode:
         atr_stop_stats = {
             **(atr_stop_stats or {}),
@@ -4962,19 +5545,60 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     turnover_daily = ((w - w.shift(1).fillna(0.0)).abs() / 2.0).astype(float)
     return_decomposition: dict[str, Any] | None = None
     if not quick_mode:
-        decomp_overnight = (
-            w * ret_overnight.reindex(w.index).astype(float).fillna(0.0)
+        ret_overnight_close_none_day = (
+            (o_none / c_none.shift(1) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_close_hfq_day = (
+            (o_hfq / c_hfq.shift(1) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_overnight_close_day = ret_overnight_close_none_day.where(
+            ~cm, ret_overnight_close_hfq_day
         ).astype(float)
-        decomp_intraday = (
-            w * ret_intraday.reindex(w.index).astype(float).fillna(0.0)
-        ).astype(float)
-        decomp_interaction = (
-            w
-            * (
-                ret_overnight.reindex(w.index).astype(float).fillna(0.0)
-                * ret_intraday.reindex(w.index).astype(float).fillna(0.0)
-            )
-        ).astype(float)
+        ret_intraday_close_day = (
+            ret_exec_open_day.reindex(w.index).fillna(0.0).astype(float)
+        )
+        if ep == "open":
+            decomp_overnight = pd.Series(0.0, index=w.index, dtype=float)
+            decomp_intraday = (
+                w_ret * ret_exec_open_day.reindex(w.index).fillna(0.0).astype(float)
+            ).astype(float)
+            decomp_interaction = pd.Series(0.0, index=w.index, dtype=float)
+        elif ep == "close":
+            decomp_overnight = (
+                w_ret
+                * ret_overnight_close_day.reindex(w.index).fillna(0.0).astype(float)
+            ).astype(float)
+            decomp_intraday = (w_ret * ret_intraday_close_day).astype(float)
+            decomp_interaction = (
+                w_ret
+                * ret_overnight_close_day.reindex(w.index).fillna(0.0).astype(float)
+                * ret_intraday_close_day
+            ).astype(float)
+        else:
+            decomp_overnight = (
+                0.5
+                * w_ret
+                * ret_overnight_close_day.reindex(w.index).fillna(0.0).astype(float)
+            ).astype(float)
+            decomp_intraday = (
+                w_ret
+                * (
+                    0.5 * ret_exec_open_day.reindex(w.index).fillna(0.0).astype(float)
+                    + 0.5 * ret_intraday_close_day
+                )
+            ).astype(float)
+            decomp_interaction = (
+                0.5
+                * w_ret
+                * ret_overnight_close_day.reindex(w.index).fillna(0.0).astype(float)
+                * ret_intraday_close_day
+            ).astype(float)
         decomp_atr_stop_override = atr_stop_override_ret.astype(float)
         decomp_bias_v_take_profit_override = bias_v_take_profit_override_ret.astype(
             float
@@ -5260,15 +5884,33 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         atr_mult=float(inp.atr_stop_n),
         default_code=str(code),
     )
+    single_semi_variance_stats = _semi_variance_run_stats_from_returns(
+        strat_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
+    )
     trade_stats = {
-        "overall": _trade_stats_from_returns(trade_one.get("returns", [])),
-        "by_code": {str(code): _trade_stats_from_returns(trade_one.get("returns", []))},
+        "overall": _trade_stats_from_returns(
+            trade_one.get("returns", []),
+            risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+        ),
+        "by_code": {
+            str(code): _trade_stats_from_returns(
+                trade_one.get("returns", []),
+                risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+            )
+        },
         "trades": ([] if quick_mode else trades_with_r),
         "trades_by_code": (
             {str(code): []} if quick_mode else {str(code): trades_with_r}
         ),
+        "trade_marks_by_code": {
+            str(code): _trade_marks_from_trades(list(trade_one.get("trades") or []))
+        },
         "mfe_r_distribution": mfe_r_distribution,
     }
+    trade_stats["overall"]["semi_variance"] = dict(single_semi_variance_stats)
+    trade_stats["by_code"][str(code)]["semi_variance"] = dict(
+        single_semi_variance_stats
+    )
     impulse_attempted_overall = int(
         (impulse_filter_stats_overall or {}).get("attempted_entry_count", 0)
     )
@@ -5550,7 +6192,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "benchmark_nav": {
                     "close": "HFQ close-to-close daily returns (BUY_HOLD line; excess vs strategy uses this series)",
                     "open": "same-day open→close (none; hfq on corporate-action days); BUY_HOLD aligned to open execution",
-                    "oc2": "50% same-day open→close + 50% HFQ close-to-close next day; BUY_HOLD aligned to OC2 execution",
+                    "oc2": "arithmetic average of open execution and close execution daily return series",
                 }.get(ep, "unknown exec_price"),
             },
             "params": {
@@ -5571,14 +6213,17 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "atr_stop_mode": str(atr_mode),
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
+                "atr_stop_execution_mode": str(atr_execution_mode),
                 "atr_stop_window": int(inp.atr_stop_window),
                 "atr_stop_n": float(inp.atr_stop_n),
                 "atr_stop_m": float(inp.atr_stop_m),
                 "r_take_profit_enabled": bool(rtp_enabled),
                 "r_take_profit_reentry_mode": str(rtp_reentry_mode),
+                "r_take_profit_execution_mode": str(rtp_execution_mode),
                 "r_take_profit_tiers": rtp_tiers,
                 "bias_v_take_profit_enabled": bool(bias_v_tp_enabled),
                 "bias_v_take_profit_reentry_mode": str(bias_v_tp_reentry_mode),
+                "bias_v_take_profit_execution_mode": str(bias_v_tp_execution_mode),
                 "bias_v_ma_window": int(bias_v_tp_ma_window),
                 "bias_v_atr_window": int(bias_v_tp_atr_window),
                 "bias_v_take_profit_threshold": float(bias_v_tp_threshold),
@@ -5621,6 +6266,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "vol_ratio_expand_threshold": float(vol_ratio_expand_threshold),
                 "vol_ratio_contract_threshold": float(vol_ratio_contract_threshold),
                 "vol_ratio_normal_threshold": float(vol_ratio_normal_threshold),
+                "vol_ratio_extreme_threshold": float(vol_ratio_extreme_threshold),
+                "risk_of_ruin_maxrisk": float(risk_of_ruin_maxrisk),
                 "er_filter": bool(er_filter),
                 "er_window": int(er_window),
                 "er_threshold": float(er_threshold),
@@ -5645,6 +6292,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "BUY_HOLD": bh_nav.reindex(nav.index).astype(float).tolist(),
                 "EXCESS": excess_nav.reindex(nav.index).astype(float).tolist(),
             },
+        },
+        "asset_nav_exec": {
+            "dates": nav.index.date.astype(str).tolist(),
+            "series": {str(code): nav.astype(float).tolist()},
         },
         "signals": {
             "base_position": base_pos.reindex(nav.index).astype(float).tolist(),
@@ -5690,6 +6341,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "expand_threshold": float(vol_ratio_expand_threshold),
                 "contract_threshold": float(vol_ratio_contract_threshold),
                 "normal_threshold": float(vol_ratio_normal_threshold),
+                "extreme_threshold": float(vol_ratio_extreme_threshold),
                 "adjust_total_count": int(
                     (vol_risk_adjust_stats_overall or {}).get(
                         "vol_risk_adjust_total_count", 0
@@ -5755,6 +6407,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "atr_stop_mode": str(atr_mode),
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
+                "atr_stop_execution_mode": str(atr_execution_mode),
+                "r_take_profit_execution_mode": str(rtp_execution_mode),
+                "bias_v_take_profit_execution_mode": str(bias_v_tp_execution_mode),
                 "base_signal_today": (
                     float(base_pos.reindex(nav.index).iloc[-1])
                     if len(nav.index)
@@ -5966,6 +6621,9 @@ def compute_trend_portfolio_backtest(
     vol_ratio_normal_threshold = float(
         getattr(inp, "vol_ratio_normal_threshold", 1.05) or 1.05
     )
+    vol_ratio_extreme_threshold = float(
+        getattr(inp, "vol_ratio_extreme_threshold", 2.20) or 2.20
+    )
     if vol_ratio_fast_atr_window < 2:
         raise ValueError("vol_ratio_fast_atr_window must be >= 2")
     if vol_ratio_slow_atr_window < 2:
@@ -5978,6 +6636,10 @@ def compute_trend_portfolio_backtest(
         raise ValueError("vol_ratio_contract_threshold must be > 0")
     if (not np.isfinite(vol_ratio_normal_threshold)) or vol_ratio_normal_threshold <= 0:
         raise ValueError("vol_ratio_normal_threshold must be > 0")
+    if (
+        not np.isfinite(vol_ratio_extreme_threshold)
+    ) or vol_ratio_extreme_threshold <= 0:
+        raise ValueError("vol_ratio_extreme_threshold must be > 0")
     if vol_ratio_expand_threshold <= vol_ratio_normal_threshold:
         raise ValueError(
             "vol_ratio_expand_threshold must be > vol_ratio_normal_threshold"
@@ -5986,6 +6648,17 @@ def compute_trend_portfolio_backtest(
         raise ValueError(
             "vol_ratio_contract_threshold must be < vol_ratio_normal_threshold"
         )
+    if vol_ratio_extreme_threshold <= vol_ratio_expand_threshold:
+        raise ValueError(
+            "vol_ratio_extreme_threshold must be > vol_ratio_expand_threshold"
+        )
+    risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
+    if (
+        (not np.isfinite(risk_of_ruin_maxrisk))
+        or risk_of_ruin_maxrisk <= 0.0
+        or risk_of_ruin_maxrisk > 1.0
+    ):
+        raise ValueError("risk_of_ruin_maxrisk must be in (0, 1]")
     strat = str(inp.strategy or "ma_filter").strip().lower()
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if strat == "ma_cross":
@@ -6156,11 +6829,13 @@ def compute_trend_portfolio_backtest(
 
     if data_override is not None:
         dates = data_override["dates"]
-        close_qfq = (
-            data_override["close_qfq"].reindex(columns=codes).reindex(dates).ffill()
-        )
+        close_qfq_raw = data_override["close_qfq"].reindex(columns=codes).reindex(dates)
+        close_qfq = close_qfq_raw.ffill()
         close_hfq = (
             data_override["close_hfq"].reindex(columns=codes).reindex(dates).ffill()
+        )
+        asset_data_available = close_qfq_raw.notna().reindex(
+            index=dates, columns=codes, fill_value=False
         )
         open_qfq_df = close_qfq.copy()
         high_qfq_df = data_override.get("high_qfq_df")
@@ -6219,13 +6894,10 @@ def compute_trend_portfolio_backtest(
             + 60
         )
         ext_start = inp.start - dt.timedelta(days=int(need_hist) * 2)
-        close_none = (
-            load_close_prices(
-                db, codes=codes, start=inp.start, end=inp.end, adjust="none"
-            )
-            .sort_index()
-            .ffill()
-        )
+        close_none_raw = load_close_prices(
+            db, codes=codes, start=inp.start, end=inp.end, adjust="none"
+        ).sort_index()
+        close_none = close_none_raw.ffill()
         close_qfq = load_close_prices(
             db, codes=codes, start=ext_start, end=inp.end, adjust="qfq"
         ).sort_index()
@@ -6251,9 +6923,14 @@ def compute_trend_portfolio_backtest(
                 raise ValueError("no valid first trading date for selected codes")
             common_start = max(first_valid)
             close_none = close_none.loc[common_start:]
+            close_none_raw = close_none_raw.loc[common_start:]
             close_qfq = close_qfq.loc[common_start:]
             close_hfq = close_hfq.loc[common_start:]
         dates = close_none.index
+        close_none_raw = close_none_raw.reindex(index=dates).reindex(columns=codes)
+        asset_data_available = close_none_raw.notna().reindex(
+            index=dates, columns=codes, fill_value=False
+        )
         du_b = bool(getattr(inp, "dynamic_universe", False))
         ch_nb = close_hfq.reindex(dates).reindex(columns=codes).astype(float)
         if not du_b:
@@ -6327,18 +7004,19 @@ def compute_trend_portfolio_backtest(
         close_none_f = close_none.reindex(columns=codes).astype(float)
         close_hfq_f = close_hfq.reindex(columns=codes).astype(float)
         if ep == "open":
+            # Open execution: execution-day intraday return (open[t] -> close[t]).
             exec_o_none = open_none.astype(float).combine_first(close_none_f)
             exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
             exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
             exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
             ret_none = (
-                (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+                (exec_c_none.div(exec_o_none) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
             )
             ret_hfq_exec = (
-                (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+                (exec_c_hfq.div(exec_o_hfq) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
@@ -6346,16 +7024,17 @@ def compute_trend_portfolio_backtest(
             px_slip_none = exec_o_none.astype(float)
             px_slip_hfq = exec_o_hfq.astype(float)
         elif ep == "close":
+            # Close execution: execution-day close-to-close return (close[t-1] -> close[t]).
             px_none_exec = close_none_exec.astype(float).combine_first(close_none_f)
             px_hfq_exec = close_hfq_exec.astype(float).combine_first(close_hfq_f)
             ret_none = (
-                (px_none_exec.shift(-1).div(px_none_exec) - 1.0)
+                (px_none_exec.div(px_none_exec.shift(1)) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
             )
             ret_hfq_exec = (
-                (px_hfq_exec.shift(-1).div(px_hfq_exec) - 1.0)
+                (px_hfq_exec.div(px_hfq_exec.shift(1)) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
@@ -6363,31 +7042,32 @@ def compute_trend_portfolio_backtest(
             px_slip_none = px_none_exec.astype(float)
             px_slip_hfq = px_hfq_exec.astype(float)
         else:
+            # OC2: arithmetic average of open and close execution daily returns.
             exec_o_none = open_none.astype(float).combine_first(close_none_f)
             exec_c_none = close_none_exec.astype(float).combine_first(close_none_f)
             exec_o_hfq = open_hfq.astype(float).combine_first(close_hfq_f)
             exec_c_hfq = close_hfq_exec.astype(float).combine_first(close_hfq_f)
             ret_open_none = (
-                (exec_o_none.shift(-1).div(exec_o_none) - 1.0)
+                (exec_c_none.div(exec_o_none) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
             )
             ret_close_none = (
-                (exec_c_none.shift(-1).div(exec_c_none) - 1.0)
+                (exec_c_none.div(exec_c_none.shift(1)) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
             )
             ret_none = (0.5 * (ret_open_none + ret_close_none)).astype(float)
             ret_open_hfq = (
-                (exec_o_hfq.shift(-1).div(exec_o_hfq) - 1.0)
+                (exec_c_hfq.div(exec_o_hfq) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
             )
             ret_close_hfq = (
-                (exec_c_hfq.shift(-1).div(exec_c_hfq) - 1.0)
+                (exec_c_hfq.div(exec_c_hfq.shift(1)) - 1.0)
                 .replace([np.inf, -np.inf], np.nan)
                 .fillna(0.0)
                 .astype(float)
@@ -6408,25 +7088,25 @@ def compute_trend_portfolio_backtest(
             .ffill()
         )
         ret_overnight_none_close = (
-            (open_none.shift(-1).div(close_none_exec) - 1.0)
+            (open_none.div(close_none_exec.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_intraday_none_close = (
-            (close_none_exec.shift(-1).div(open_none.shift(-1)) - 1.0)
+            (close_none_exec.div(open_none) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_overnight_hfq_close = (
-            (open_hfq.shift(-1).div(close_hfq_exec) - 1.0)
+            (open_hfq.div(close_hfq_exec.shift(1)) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
         ret_intraday_hfq_close = (
-            (close_hfq_exec.shift(-1).div(open_hfq.shift(-1)) - 1.0)
+            (close_hfq_exec.div(open_hfq) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
@@ -6437,24 +7117,22 @@ def compute_trend_portfolio_backtest(
             .fillna(0.0)
             .astype(float)
         )
-        ret_overnight_none_open = (
-            (open_none.shift(-1).div(close_none_exec) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
+        ret_overnight_none_open = pd.DataFrame(
+            0.0,
+            index=ret_intraday_none_open.index,
+            columns=ret_intraday_none_open.columns,
+        ).astype(float)
         ret_intraday_hfq_open = (
             (close_hfq_exec.div(open_hfq) - 1.0)
             .replace([np.inf, -np.inf], np.nan)
             .fillna(0.0)
             .astype(float)
         )
-        ret_overnight_hfq_open = (
-            (open_hfq.shift(-1).div(close_hfq_exec) - 1.0)
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0.0)
-            .astype(float)
-        )
+        ret_overnight_hfq_open = pd.DataFrame(
+            0.0,
+            index=ret_intraday_hfq_open.index,
+            columns=ret_intraday_hfq_open.columns,
+        ).astype(float)
         ret_overnight_close = ret_overnight_none_close.where(
             ~ca_mask.fillna(False), other=ret_overnight_hfq_close
         ).astype(float)
@@ -6526,6 +7204,32 @@ def compute_trend_portfolio_backtest(
                 .reindex(index=dates, columns=codes)
                 .fillna(0.0)
             ).astype(float)
+
+    atr_execution_mode = (
+        str(getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if atr_execution_mode not in STOP_EXECUTION_MODES:
+        raise ValueError("atr_stop_execution_mode must be one of: intraday|next_day")
+    rtp_execution_mode = (
+        str(getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if rtp_execution_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "r_take_profit_execution_mode must be one of: intraday|next_day"
+        )
+    bias_v_tp_execution_mode = (
+        str(getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if bias_v_tp_execution_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "bias_v_take_profit_execution_mode must be one of: intraday|next_day"
+        )
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
@@ -6760,6 +7464,7 @@ def compute_trend_portfolio_backtest(
             mode=atr_mode,
             atr_basis=atr_basis,
             reentry_mode=atr_reentry_mode,
+            execution_mode=atr_execution_mode,
             atr_window=int(inp.atr_stop_window),
             n_mult=float(inp.atr_stop_n),
             m_step=float(inp.atr_stop_m),
@@ -6780,6 +7485,7 @@ def compute_trend_portfolio_backtest(
             low=low_px.astype(float).fillna(px),
             enabled=bias_v_tp_enabled,
             reentry_mode=bias_v_tp_reentry_mode,
+            execution_mode=bias_v_tp_execution_mode,
             ma_window=int(bias_v_tp_ma_window),
             atr_window=int(bias_v_tp_atr_window),
             threshold=float(bias_v_tp_threshold),
@@ -6796,6 +7502,7 @@ def compute_trend_portfolio_backtest(
             low=low_px.astype(float).fillna(px),
             enabled=rtp_enabled,
             reentry_mode=rtp_reentry_mode,
+            execution_mode=rtp_execution_mode,
             atr_window=int(inp.atr_stop_window),
             atr_n=float(inp.atr_stop_n),
             tiers=rtp_tiers,
@@ -7090,20 +7797,21 @@ def compute_trend_portfolio_backtest(
                         if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0)
                         else float("nan")
                     )
-                    if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
-                        rb_state_by_code[key] = "REDUCED"
+                    entry_state = _vol_regime_state_from_ratio(
+                        ratio,
+                        expand_threshold=float(vol_ratio_expand_threshold),
+                        contract_threshold=float(vol_ratio_contract_threshold),
+                        extreme_threshold=float(vol_ratio_extreme_threshold),
+                    )
+                    rb_state_by_code[key] = str(entry_state)
+                    if entry_state == "REDUCED":
                         vol_risk_adjust_by_asset[key][
                             "vol_risk_entry_state_reduce_on_expand_count"
                         ] += 1
-                    elif np.isfinite(ratio) and ratio < float(
-                        vol_ratio_contract_threshold
-                    ):
-                        rb_state_by_code[key] = "INCREASED"
+                    elif entry_state == "INCREASED":
                         vol_risk_adjust_by_asset[key][
                             "vol_risk_entry_state_increase_on_contract_count"
                         ] += 1
-                    else:
-                        rb_state_by_code[key] = "NORMAL"
                 else:
                     rb_state_by_code[key] = "NORMAL"
 
@@ -7313,44 +8021,31 @@ def compute_trend_portfolio_backtest(
                 )
                 if not np.isfinite(base_target):
                     continue
-                if st == "NORMAL":
-                    if np.isfinite(ratio) and ratio > float(vol_ratio_expand_threshold):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "REDUCED"
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_total_count"
-                        ] += 1
+                next_state = _next_vol_regime_state(
+                    st,
+                    ratio=ratio,
+                    expand_threshold=float(vol_ratio_expand_threshold),
+                    contract_threshold=float(vol_ratio_contract_threshold),
+                    normal_threshold=float(vol_ratio_normal_threshold),
+                    extreme_threshold=float(vol_ratio_extreme_threshold),
+                )
+                if str(next_state) != st:
+                    w_row.loc[c] = float(base_target)
+                    rb_state_by_code[key] = str(next_state)
+                    vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
+                    if next_state == "REDUCED":
                         vol_risk_adjust_by_asset[key][
                             "vol_risk_adjust_reduce_on_expand_count"
                         ] += 1
-                    elif np.isfinite(ratio) and ratio < float(
-                        vol_ratio_contract_threshold
-                    ):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "INCREASED"
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_total_count"
-                        ] += 1
+                    if next_state == "INCREASED":
                         vol_risk_adjust_by_asset[key][
                             "vol_risk_adjust_increase_on_contract_count"
                         ] += 1
-                elif st == "REDUCED":
-                    if np.isfinite(ratio) and ratio < float(vol_ratio_normal_threshold):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "NORMAL"
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_total_count"
-                        ] += 1
+                    if next_state == "NORMAL" and st in {"REDUCED", "EXTREME"}:
                         vol_risk_adjust_by_asset[key][
                             "vol_risk_adjust_recover_from_expand_count"
                         ] += 1
-                elif st == "INCREASED":
-                    if np.isfinite(ratio) and ratio > float(vol_ratio_normal_threshold):
-                        w_row.loc[c] = float(base_target)
-                        rb_state_by_code[key] = "NORMAL"
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_total_count"
-                        ] += 1
+                    if next_state == "NORMAL" and st == "INCREASED":
                         vol_risk_adjust_by_asset[key][
                             "vol_risk_adjust_recover_from_contract_count"
                         ] += 1
@@ -7496,42 +8191,177 @@ def compute_trend_portfolio_backtest(
                 )
                 prev_key = key
 
-    # Weights become effective on execution day; ret_exec is already execution-day aligned.
-    w = w_decision.shift(1).fillna(0.0).astype(float)
-    w, atr_stop_override_ret = _apply_intraday_stop_execution_portfolio(
-        weights=w,
-        atr_stop_by_asset=atr_stop_by_asset,
-        exec_price=str(ep),
-        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes)
-        .astype(float)
-        .ffill(),
-        close_sig_df=close_qfq.reindex(index=w.index, columns=codes)
-        .astype(float)
-        .ffill(),
+    # Post-trade weight on each day (open mode: after open trade, close mode: after close trade).
+    w_post = w_decision.shift(1).fillna(0.0).astype(float)
+    open_sig_df_for_stop = (
+        open_qfq_df.reindex(index=w_post.index, columns=codes).astype(float).ffill()
     )
-    w, bias_v_take_profit_override_ret = _apply_intraday_stop_execution_portfolio(
-        weights=w,
-        atr_stop_by_asset=bias_v_tp_by_asset,
-        exec_price=str(ep),
-        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes)
-        .astype(float)
-        .ffill(),
-        close_sig_df=close_qfq.reindex(index=w.index, columns=codes)
-        .astype(float)
-        .ffill(),
+    close_sig_df_for_stop = (
+        close_qfq.reindex(index=w_post.index, columns=codes).astype(float).ffill()
     )
-    w, r_take_profit_override_ret = _apply_intraday_stop_execution_portfolio(
-        weights=w,
-        atr_stop_by_asset=rtp_by_asset,
-        exec_price=str(ep),
-        open_sig_df=open_qfq_df.reindex(index=w.index, columns=codes)
-        .astype(float)
-        .ffill(),
-        close_sig_df=close_qfq.reindex(index=w.index, columns=codes)
-        .astype(float)
-        .ffill(),
+
+    def _apply_all_intraday_overlays_df(
+        weight_in: pd.DataFrame,
+        *,
+        mode: str,
+    ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+        w_tmp = weight_in.astype(float).copy()
+        w_tmp, atr_over = _apply_intraday_stop_execution_portfolio(
+            weights=w_tmp,
+            atr_stop_by_asset=atr_stop_by_asset,
+            exec_price=str(mode),
+            stop_execution_mode=atr_execution_mode,
+            open_sig_df=open_sig_df_for_stop,
+            close_sig_df=close_sig_df_for_stop,
+        )
+        w_tmp, bias_over = _apply_intraday_stop_execution_portfolio(
+            weights=w_tmp,
+            atr_stop_by_asset=bias_v_tp_by_asset,
+            exec_price=str(mode),
+            stop_execution_mode=bias_v_tp_execution_mode,
+            open_sig_df=open_sig_df_for_stop,
+            close_sig_df=close_sig_df_for_stop,
+        )
+        w_tmp, rtp_over = _apply_intraday_stop_execution_portfolio(
+            weights=w_tmp,
+            atr_stop_by_asset=rtp_by_asset,
+            exec_price=str(mode),
+            stop_execution_mode=rtp_execution_mode,
+            open_sig_df=open_sig_df_for_stop,
+            close_sig_df=close_sig_df_for_stop,
+        )
+        return (
+            w_tmp.astype(float),
+            atr_over.astype(float),
+            bias_over.astype(float),
+            rtp_over.astype(float),
+        )
+
+    open_leg_mode = "open" if ep == "oc2" else str(ep)
+    w_post, atr_over_post, bias_over_post, rtp_over_post = (
+        _apply_all_intraday_overlays_df(w_post, mode=open_leg_mode)
     )
-    ret_exec_day = ret_exec.astype(float)
+    w = w_post
+
+    if data_override is None:
+        cm = (
+            ca_mask.reindex(index=w.index, columns=codes).fillna(False).astype(bool)
+            if isinstance(ca_mask, pd.DataFrame)
+            else pd.DataFrame(False, index=w.index, columns=codes)
+        )
+        ret_exec_open_none_day = (
+            (close_none_exec / open_none - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .reindex(index=w.index, columns=codes)
+            .astype(float)
+        )
+        ret_exec_open_hfq_day = (
+            (close_hfq / open_hfq - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .reindex(index=w.index, columns=codes)
+            .astype(float)
+        )
+        ret_exec_open_day = ret_exec_open_none_day.where(
+            ~cm, ret_exec_open_hfq_day
+        ).astype(float)
+        ret_exec_close_none_day = (
+            (close_none_exec / close_none_exec.shift(1) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .reindex(index=w.index, columns=codes)
+            .astype(float)
+        )
+        ret_exec_close_hfq_day = (
+            (close_hfq / close_hfq.shift(1) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .reindex(index=w.index, columns=codes)
+            .astype(float)
+        )
+        ret_exec_close_day = ret_exec_close_none_day.where(
+            ~cm, ret_exec_close_hfq_day
+        ).astype(float)
+        ret_overnight_close_none_day = (
+            (open_none / close_none_exec.shift(1) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .reindex(index=w.index, columns=codes)
+            .astype(float)
+        )
+        ret_overnight_close_hfq_day = (
+            (open_hfq / close_hfq.shift(1) - 1.0)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .reindex(index=w.index, columns=codes)
+            .astype(float)
+        )
+        ret_overnight_close_day = ret_overnight_close_none_day.where(
+            ~cm, ret_overnight_close_hfq_day
+        ).astype(float)
+        ret_intraday_close_day = ret_exec_open_day.astype(float)
+    else:
+        ret_exec_open_day = (
+            ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0).astype(float)
+        )
+        ret_overnight_close_day = (
+            ret_overnight.reindex(index=w.index, columns=codes)
+            .fillna(0.0)
+            .astype(float)
+        )
+        ret_intraday_close_day = (
+            ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0).astype(float)
+        )
+        ret_exec_close_day = (
+            ret_overnight_close_day
+            + ret_intraday_close_day
+            + ret_overnight_close_day * ret_intraday_close_day
+        ).astype(float)
+
+    w_ret = w.copy()
+    ret_exec_day = ret_exec_open_day.astype(float)
+    atr_stop_override_ret = atr_over_post.reindex(w.index).fillna(0.0).astype(float)
+    bias_v_take_profit_override_ret = (
+        bias_over_post.reindex(w.index).fillna(0.0).astype(float)
+    )
+    r_take_profit_override_ret = (
+        rtp_over_post.reindex(w.index).fillna(0.0).astype(float)
+    )
+
+    if ep == "close":
+        w_close_base = w.shift(1).fillna(0.0).astype(float)
+        (
+            w_ret,
+            atr_stop_override_ret,
+            bias_v_take_profit_override_ret,
+            r_take_profit_override_ret,
+        ) = _apply_all_intraday_overlays_df(w_close_base, mode="close")
+        ret_exec_day = ret_exec_close_day.astype(float)
+    elif ep == "oc2":
+        w_close_base = w.shift(1).fillna(0.0).astype(float)
+        w_close, atr_over_close, bias_over_close, rtp_over_close = (
+            _apply_all_intraday_overlays_df(w_close_base, mode="close")
+        )
+        w_ret = (0.5 * (w + w_close)).astype(float)
+        ret_exec_day = (0.5 * (ret_exec_open_day + ret_exec_close_day)).astype(float)
+        atr_stop_override_ret = (
+            0.5 * (atr_stop_override_ret + atr_over_close.reindex(w.index).fillna(0.0))
+        ).astype(float)
+        bias_v_take_profit_override_ret = (
+            0.5
+            * (
+                bias_v_take_profit_override_ret
+                + bias_over_close.reindex(w.index).fillna(0.0)
+            )
+        ).astype(float)
+        r_take_profit_override_ret = (
+            0.5
+            * (r_take_profit_override_ret + rtp_over_close.reindex(w.index).fillna(0.0))
+        ).astype(float)
+    else:
+        ret_exec_day = ret_exec_open_day.astype(float)
+
     bench_ret = bench_ret.reindex(dates).fillna(0.0).astype(float)
     bench_nav = (1.0 + bench_ret).cumprod()
     if len(bench_nav) > 0:
@@ -7584,43 +8414,124 @@ def compute_trend_portfolio_backtest(
             atr_stop_by_asset[key] = {**one_atr, "trade_records": []}
             one_bv = bias_v_tp_by_asset.get(key) or {}
             bias_v_tp_by_asset[key] = {**one_bv, "trade_records": []}
+    decomp_atr_stop_override = (
+        atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
+    )
+    decomp_bias_v_take_profit_override = (
+        bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+    )
+    decomp_r_take_profit_override = (
+        r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
+    )
+    decomp_risk_exit_override = (
+        decomp_atr_stop_override
+        + decomp_bias_v_take_profit_override
+        + decomp_r_take_profit_override
+    ).astype(float)
+    port_base_ret = (w_ret * ret_exec_day).sum(axis=1).astype(float)
+    port_ret = (
+        port_base_ret
+        + decomp_risk_exit_override
+        - cost.astype(float)
+        - slippage.astype(float)
+    ).astype(float)
+
     return_decomposition: dict[str, Any] | None = None
     if not quick_mode:
-        comp_overnight = (
-            (w * ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0))
-            .sum(axis=1)
-            .astype(float)
-        )
-        comp_intraday = (
-            (w * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0))
-            .sum(axis=1)
-            .astype(float)
-        )
-        comp_interaction = (
-            (
-                w
-                * (
-                    ret_overnight.reindex(index=w.index, columns=codes).fillna(0.0)
-                    * ret_intraday.reindex(index=w.index, columns=codes).fillna(0.0)
+        if ep == "open":
+            comp_overnight = pd.Series(0.0, index=w.index, dtype=float)
+            comp_intraday = (
+                (
+                    w_ret
+                    * ret_exec_open_day.reindex(index=w.index, columns=codes).fillna(
+                        0.0
+                    )
                 )
+                .sum(axis=1)
+                .astype(float)
             )
-            .sum(axis=1)
-            .astype(float)
-        )
-        decomp_atr_stop_override = (
-            atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        )
-        decomp_bias_v_take_profit_override = (
-            bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        )
-        decomp_r_take_profit_override = (
-            r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        )
-        decomp_risk_exit_override = (
-            decomp_atr_stop_override
-            + decomp_bias_v_take_profit_override
-            + decomp_r_take_profit_override
-        ).astype(float)
+            comp_interaction = pd.Series(0.0, index=w.index, dtype=float)
+        elif ep == "close":
+            comp_overnight = (
+                (
+                    w_ret
+                    * ret_overnight_close_day.reindex(
+                        index=w.index, columns=codes
+                    ).fillna(0.0)
+                )
+                .sum(axis=1)
+                .astype(float)
+            )
+            comp_intraday = (
+                (
+                    w_ret
+                    * ret_intraday_close_day.reindex(
+                        index=w.index, columns=codes
+                    ).fillna(0.0)
+                )
+                .sum(axis=1)
+                .astype(float)
+            )
+            comp_interaction = (
+                (
+                    w_ret
+                    * (
+                        ret_overnight_close_day.reindex(
+                            index=w.index, columns=codes
+                        ).fillna(0.0)
+                        * ret_intraday_close_day.reindex(
+                            index=w.index, columns=codes
+                        ).fillna(0.0)
+                    )
+                )
+                .sum(axis=1)
+                .astype(float)
+            )
+        else:
+            comp_overnight = (
+                (
+                    0.5
+                    * w_ret
+                    * ret_overnight_close_day.reindex(
+                        index=w.index, columns=codes
+                    ).fillna(0.0)
+                )
+                .sum(axis=1)
+                .astype(float)
+            )
+            comp_intraday = (
+                (
+                    w_ret
+                    * (
+                        0.5
+                        * ret_exec_open_day.reindex(
+                            index=w.index, columns=codes
+                        ).fillna(0.0)
+                        + 0.5
+                        * ret_intraday_close_day.reindex(
+                            index=w.index, columns=codes
+                        ).fillna(0.0)
+                    )
+                )
+                .sum(axis=1)
+                .astype(float)
+            )
+            comp_interaction = (
+                (
+                    0.5
+                    * w_ret
+                    * (
+                        ret_overnight_close_day.reindex(
+                            index=w.index, columns=codes
+                        ).fillna(0.0)
+                        * ret_intraday_close_day.reindex(
+                            index=w.index, columns=codes
+                        ).fillna(0.0)
+                    )
+                )
+                .sum(axis=1)
+                .astype(float)
+            )
         decomp_cost = (cost + slippage).astype(float)
         decomp_gross = (
             comp_overnight
@@ -7696,27 +8607,6 @@ def compute_trend_portfolio_backtest(
                 else 0.0,
             },
         }
-    else:
-        decomp_atr_stop_override = (
-            atr_stop_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        )
-        decomp_bias_v_take_profit_override = (
-            bias_v_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        )
-        decomp_r_take_profit_override = (
-            r_take_profit_override_ret.reindex(w.index).fillna(0.0).astype(float)
-        )
-        decomp_risk_exit_override = (
-            decomp_atr_stop_override
-            + decomp_bias_v_take_profit_override
-            + decomp_r_take_profit_override
-        ).astype(float)
-        port_ret = (
-            (w * ret_exec_day).sum(axis=1).astype(float)
-            + decomp_risk_exit_override
-            - cost.astype(float)
-            - slippage.astype(float)
-        )
     nav = (1.0 + port_ret).cumprod()
     if len(nav) > 0:
         nav.iloc[0] = 1.0
@@ -7909,11 +8799,32 @@ def compute_trend_portfolio_backtest(
         atr_mult=float(inp.atr_stop_n),
         default_code=None,
     )
+    portfolio_semi_variance_overall = _semi_variance_run_stats_from_returns(
+        port_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
+    )
+    ret_exec_for_runs = (
+        ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
+    )
+    portfolio_semi_variance_by_code: dict[str, dict[str, Any]] = {}
+    for c in codes:
+        code_key = str(c)
+        code_ret = ret_exec_for_runs.get(c)
+        if not isinstance(code_ret, pd.Series):
+            code_ret = pd.Series(0.0, index=ret_exec_for_runs.index, dtype=float)
+        portfolio_semi_variance_by_code[code_key] = (
+            _semi_variance_run_stats_from_returns(
+                code_ret.astype(float).fillna(0.0).tolist()
+            )
+        )
     trade_stats = {
-        "overall": _trade_stats_from_returns(trade_pack.get("returns", [])),
+        "overall": _trade_stats_from_returns(
+            trade_pack.get("returns", []),
+            risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
+        ),
         "by_code": {
             str(c): _trade_stats_from_returns(
-                (trade_pack.get("returns_by_code") or {}).get(str(c), [])
+                (trade_pack.get("returns_by_code") or {}).get(str(c), []),
+                risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
             )
             for c in codes
         },
@@ -7921,8 +8832,22 @@ def compute_trend_portfolio_backtest(
         "trades_by_code": (
             {str(c): [] for c in codes} if quick_mode else trades_by_code
         ),
+        "trade_marks_by_code": {
+            str(c): _trade_marks_from_trades(
+                list((trade_pack.get("trades_by_code") or {}).get(str(c), []))
+            )
+            for c in codes
+        },
         "mfe_r_distribution": mfe_r_distribution,
     }
+    trade_stats["overall"]["semi_variance"] = dict(portfolio_semi_variance_overall)
+    for c in codes:
+        code_key = str(c)
+        one = trade_stats["by_code"].get(code_key)
+        if isinstance(one, dict):
+            one["semi_variance"] = dict(
+                portfolio_semi_variance_by_code.get(code_key) or {}
+            )
     event_study = None
     if not quick_mode:
         event_study = compute_event_study(
@@ -8614,8 +9539,30 @@ def compute_trend_portfolio_backtest(
                 "expand_threshold": float(vol_ratio_expand_threshold),
                 "contract_threshold": float(vol_ratio_contract_threshold),
                 "normal_threshold": float(vol_ratio_normal_threshold),
+                "extreme_threshold": float(vol_ratio_extreme_threshold),
                 "by_code": by_c_vm,
             }
+
+    asset_nav_exec_series: dict[str, list[float | None]] = {}
+    for c in codes:
+        nav_c = (1.0 + ret_exec_day[c].astype(float)).cumprod().astype(float)
+        avail_c = (
+            asset_data_available[c].astype(bool)
+            if c in asset_data_available.columns
+            else pd.Series(False, index=ret_exec_day.index)
+        )
+        if len(avail_c.index) != len(nav_c.index):
+            avail_c = avail_c.reindex(nav_c.index, fill_value=False).astype(bool)
+        if bool(avail_c.any()):
+            first_dt = avail_c[avail_c].index.min()
+            last_dt = avail_c[avail_c].index.max()
+            in_span = (nav_c.index >= first_dt) & (nav_c.index <= last_dt)
+            nav_c = nav_c.where(in_span)
+        else:
+            nav_c = nav_c.where(False)
+        asset_nav_exec_series[str(c)] = [
+            (None if not np.isfinite(float(v)) else float(v)) for v in nav_c.to_numpy()
+        ]
 
     return {
         "meta": {
@@ -8646,6 +9593,8 @@ def compute_trend_portfolio_backtest(
                 "vol_ratio_expand_threshold": float(vol_ratio_expand_threshold),
                 "vol_ratio_contract_threshold": float(vol_ratio_contract_threshold),
                 "vol_ratio_normal_threshold": float(vol_ratio_normal_threshold),
+                "vol_ratio_extreme_threshold": float(vol_ratio_extreme_threshold),
+                "risk_of_ruin_maxrisk": float(risk_of_ruin_maxrisk),
                 "selection_mode": "all_active_candidates",
                 "group_enforce": bool(group_enforce),
                 "group_pick_policy": str(group_pick_policy),
@@ -8680,14 +9629,17 @@ def compute_trend_portfolio_backtest(
                 "atr_stop_mode": str(atr_mode),
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
+                "atr_stop_execution_mode": str(atr_execution_mode),
                 "atr_stop_window": int(inp.atr_stop_window),
                 "atr_stop_n": float(inp.atr_stop_n),
                 "atr_stop_m": float(inp.atr_stop_m),
                 "r_take_profit_enabled": bool(rtp_enabled),
                 "r_take_profit_reentry_mode": str(rtp_reentry_mode),
+                "r_take_profit_execution_mode": str(rtp_execution_mode),
                 "r_take_profit_tiers": rtp_tiers,
                 "bias_v_take_profit_enabled": bool(bias_v_tp_enabled),
                 "bias_v_take_profit_reentry_mode": str(bias_v_tp_reentry_mode),
+                "bias_v_take_profit_execution_mode": str(bias_v_tp_execution_mode),
                 "bias_v_ma_window": int(bias_v_tp_ma_window),
                 "bias_v_atr_window": int(bias_v_tp_atr_window),
                 "bias_v_take_profit_threshold": float(bias_v_tp_threshold),
@@ -8719,13 +9671,7 @@ def compute_trend_portfolio_backtest(
         },
         "asset_nav_exec": {
             "dates": ret_exec_day.index.date.astype(str).tolist(),
-            "series": {
-                c: (1.0 + ret_exec_day[c].astype(float))
-                .cumprod()
-                .astype(float)
-                .tolist()
-                for c in codes
-            },
+            "series": asset_nav_exec_series,
         },
         "next_plan": portfolio_next_plan,
         "holdings": holdings,

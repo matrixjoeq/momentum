@@ -8,6 +8,7 @@ from etf_momentum.analysis.trend import (
     TrendPortfolioInputs,
     compute_trend_portfolio_backtest,
 )
+from etf_momentum.db.models import EtfPrice
 from tests.helpers.price_seed import add_price_all_adjustments
 
 
@@ -35,6 +36,90 @@ def _add_price_hl(
         high=float(high),
         low=float(low),
     )
+
+
+def _seed_one_exec_timing(
+    db,
+    *,
+    code: str,
+    dates: list[dt.date],
+    ohlc_none: list[tuple[float, float]],
+    close_qfq: list[float],
+) -> None:
+    for d, (o_n, c_n), c_q in zip(dates, ohlc_none, close_qfq, strict=True):
+        o_q = float(c_q)
+        h_q = max(o_q, float(c_q)) * 1.01
+        l_q = min(o_q, float(c_q)) * 0.99
+        db.add(
+            EtfPrice(
+                code=code,
+                trade_date=d,
+                open=o_q,
+                high=h_q,
+                low=l_q,
+                close=float(c_q),
+                source="eastmoney",
+                adjust="qfq",
+            )
+        )
+        h_n = max(float(o_n), float(c_n)) * 1.01
+        l_n = min(float(o_n), float(c_n)) * 0.99
+        for adj in ("none", "hfq"):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    open=float(o_n),
+                    high=h_n,
+                    low=l_n,
+                    close=float(c_n),
+                    source="eastmoney",
+                    adjust=adj,
+                )
+            )
+
+
+@pytest.mark.parametrize(
+    ("exec_price", "expected_nav"),
+    [
+        ("open", 1.148989898989899),
+        ("close", 7.0 / 13.0),
+        ("oc2", 0.8405812937062936),
+    ],
+)
+def test_trend_portfolio_exec_price_follows_execution_day_timing_rule(
+    session_factory, exec_price: str, expected_nav: float
+):
+    sf = session_factory
+    with sf() as db:
+        start = dt.date(2024, 1, 1)
+        dates = [start + dt.timedelta(days=i) for i in range(5)]
+        aaa_none = [(10.0, 10.0), (11.0, 12.0), (9.0, 9.0), (9.9, 13.0), (8.0, 7.0)]
+        aaa_qfq = [10.0, 11.0, 12.0, 13.0, 14.0]
+        _seed_one_exec_timing(
+            db,
+            code="AAA",
+            dates=dates,
+            ohlc_none=aaa_none,
+            close_qfq=aaa_qfq,
+        )
+        db.commit()
+
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["AAA"],
+                start=start,
+                end=dates[-1],
+                strategy="tsmom",
+                mom_lookback=2,
+                exec_price=exec_price,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    final_nav = float(out["nav"]["series"]["STRAT"][-1])
+    assert final_nav == pytest.approx(expected_nav, rel=0.0, abs=1e-12)
 
 
 def test_trend_portfolio_all_active_candidates_and_outputs(session_factory):

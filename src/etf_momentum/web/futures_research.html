@@ -734,6 +734,10 @@
       </div>
       <div id="futTradeStatsWrap" style="margin-top: 8px"></div>
       <div id="futTradeStatsAtrDist" style="width: 100%; height: 260px"></div>
+      <div
+        id="futTradeStatsTradeMarks"
+        style="width: 100%; height: 320px"
+      ></div>
       <div id="futuresTrendChartsPanel" style="display: none; margin-top: 10px">
         <div
           class="panel two"
@@ -2929,6 +2933,122 @@
         );
       }
 
+      function _renderFutTradeStatsTradeMarks(out, stats, code) {
+        const div = $("futTradeStatsTradeMarks");
+        if (!div) return;
+        if (!code) {
+          div.innerHTML =
+            "<div class='muted'>切换到“按标的”视图后展示净值交易标注图。</div>";
+          return;
+        }
+        const navMap =
+          out &&
+          out.series &&
+          out.series.symbol_nav_by_code &&
+          typeof out.series.symbol_nav_by_code === "object"
+            ? out.series.symbol_nav_by_code
+            : {};
+        const navRows = Array.isArray(navMap[code]) ? navMap[code] : [];
+        if (!navRows.length) {
+          div.innerHTML = "<div class='muted'>该标的暂无可用净值序列。</div>";
+          return;
+        }
+        const marks =
+          stats && Array.isArray(stats.trade_marks) ? stats.trade_marks : [];
+        const xs = [];
+        const ys = [];
+        const dateToNav = new Map();
+        for (const r of navRows) {
+          const d = String((r && r.date) || "");
+          const v = Number(r && r.value);
+          if (!d || !Number.isFinite(v)) continue;
+          xs.push(d);
+          ys.push(v);
+          dateToNav.set(d, v);
+        }
+        if (!xs.length) {
+          div.innerHTML = "<div class='muted'>该标的暂无可用净值序列。</div>";
+          return;
+        }
+        const entryX = [];
+        const entryY = [];
+        const exitX = [];
+        const exitY = [];
+        const shapes = [];
+        for (const t of marks) {
+          const d0 = String((t && t.entry_date) || "");
+          const d1 = String((t && t.exit_date) || "");
+          if (!d0 || !d1) continue;
+          shapes.push({
+            type: "rect",
+            xref: "x",
+            yref: "paper",
+            x0: d0,
+            x1: d1,
+            y0: 0,
+            y1: 1,
+            fillcolor: "rgba(255, 215, 0, 0.20)",
+            line: { width: 0 },
+            layer: "below",
+          });
+          const y0 = dateToNav.get(d0);
+          if (Number.isFinite(y0)) {
+            entryX.push(d0);
+            entryY.push(y0);
+          }
+          const y1 = dateToNav.get(d1);
+          if (Number.isFinite(y1)) {
+            exitX.push(d1);
+            exitY.push(y1);
+          }
+        }
+        Plotly.newPlot(
+          "futTradeStatsTradeMarks",
+          [
+            {
+              type: "scatter",
+              mode: "lines",
+              x: xs,
+              y: ys,
+              line: { color: "#1f77b4", width: 2 },
+              name: "净值",
+              hovertemplate: "日期=%{x}<br>净值=%{y:.4f}<extra></extra>",
+            },
+            {
+              type: "scatter",
+              mode: "markers+text",
+              x: entryX,
+              y: entryY,
+              text: entryX.map(() => "B"),
+              textposition: "top center",
+              marker: { color: "#2ca02c", size: 8, symbol: "triangle-up" },
+              name: "入场(B)",
+              hovertemplate: "入场=%{x}<br>净值=%{y:.4f}<extra></extra>",
+            },
+            {
+              type: "scatter",
+              mode: "markers+text",
+              x: exitX,
+              y: exitY,
+              text: exitX.map(() => "S"),
+              textposition: "bottom center",
+              marker: { color: "#d62728", size: 8, symbol: "triangle-down" },
+              name: "出场(S)",
+              hovertemplate: "出场=%{x}<br>净值=%{y:.4f}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 36, b: 40 },
+            title: `${code}净值与交易区间标注`,
+            xaxis: { title: "日期" },
+            yaxis: { title: "净值" },
+            shapes,
+            legend: { orientation: "h" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
       function renderFutTradeStats() {
         const wrap = $("futTradeStatsWrap");
         const codeWrap = $("futTradeStatsCodeWrap");
@@ -2943,6 +3063,8 @@
           wrap.innerHTML = "<div class='muted'>暂无交易特性统计数据。</div>";
           const d = $("futTradeStatsAtrDist");
           if (d) d.innerHTML = "";
+          const t = $("futTradeStatsTradeMarks");
+          if (t) t.innerHTML = "";
           return;
         }
         const { stats, code } = _futTradeStatsData(latestFuturesTrendOut);
@@ -2951,6 +3073,8 @@
             "<div class='muted'>当前筛选下暂无交易特性统计。</div>";
           const d = $("futTradeStatsAtrDist");
           if (d) d.innerHTML = "";
+          const t = $("futTradeStatsTradeMarks");
+          if (t) t.innerHTML = "";
           return;
         }
         wrap.innerHTML =
@@ -2973,6 +3097,7 @@
           `<tr><td>ATR止损触发 次数 / 触发率</td><td>${_nn(stats.atr_stop_trigger_count)} / ${_vp(stats.atr_stop_trigger_rate)}</td></tr>` +
           `</tbody></table>`;
         _renderFutTradeStatsAtrChart(stats);
+        _renderFutTradeStatsTradeMarks(latestFuturesTrendOut, stats, code);
       }
 
       function renderTrendBacktest(out) {

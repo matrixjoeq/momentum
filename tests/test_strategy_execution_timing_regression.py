@@ -107,10 +107,10 @@ def test_rotation_exec_price_uses_execution_day_forward_return(
     [
         ("open", 1.148989898989899),
         ("close", 7.0 / 13.0),
-        ("oc2", 0.8679341491841491),
+        ("oc2", 0.8405812937062936),
     ],
 )
-def test_trend_exec_price_uses_execution_day_forward_return(
+def test_trend_exec_price_uses_execution_day_timing_rule(
     session_factory, exec_price: str, expected_nav: float
 ):
     sf = session_factory

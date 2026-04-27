@@ -72,6 +72,8 @@ from .schemas import (
     IndexDistributionResponse,
     VolProxyTimingRequest,
     VolProxyTimingResponse,
+    RangeStateMonitorRequest,
+    RangeStateMonitorResponse,
     SimGbmPhase1Request,
     SimGbmPhase2Request,
     SimGbmPhase3Request,
@@ -194,6 +196,7 @@ from ..analysis.sim_gbm import (
     simulate_gbm_prices,
 )
 from ..analysis.vol_proxy import VolProxySpec, compute_vol_proxy_levels
+from ..analysis.range_state import RangeStateConfig, compute_range_state_monitor
 from ..analysis.vol_timing import (
     backtest_tiered_exposure_by_level,
     backtest_tiered_exposure_by_level_rolling_quantiles,
@@ -1276,12 +1279,18 @@ def trend_backtest(
         atr_stop_mode=payload.atr_stop_mode,
         atr_stop_atr_basis=payload.atr_stop_atr_basis,
         atr_stop_reentry_mode=payload.atr_stop_reentry_mode,
+        atr_stop_execution_mode=str(
+            getattr(payload, "atr_stop_execution_mode", "intraday")
+        ),
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
         r_take_profit_enabled=bool(getattr(payload, "r_take_profit_enabled", False)),
         r_take_profit_reentry_mode=str(
             getattr(payload, "r_take_profit_reentry_mode", "reenter")
+        ),
+        r_take_profit_execution_mode=str(
+            getattr(payload, "r_take_profit_execution_mode", "intraday")
         ),
         r_take_profit_tiers=(
             [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
@@ -1293,6 +1302,9 @@ def trend_backtest(
         ),
         bias_v_take_profit_reentry_mode=str(
             getattr(payload, "bias_v_take_profit_reentry_mode", "reenter")
+        ),
+        bias_v_take_profit_execution_mode=str(
+            getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
@@ -1348,6 +1360,10 @@ def trend_backtest(
         vol_ratio_normal_threshold=float(
             getattr(payload, "vol_ratio_normal_threshold", 1.05)
         ),
+        vol_ratio_extreme_threshold=float(
+            getattr(payload, "vol_ratio_extreme_threshold", 2.2)
+        ),
+        risk_of_ruin_maxrisk=float(getattr(payload, "risk_of_ruin_maxrisk", 0.30)),
         group_enforce=bool(getattr(payload, "group_enforce", False)),
         group_pick_policy=getattr(payload, "group_pick_policy", "highest_sharpe"),
         group_max_holdings=int(getattr(payload, "group_max_holdings", 4)),
@@ -1427,6 +1443,10 @@ def trend_portfolio_backtest(
         vol_ratio_normal_threshold=float(
             getattr(payload, "vol_ratio_normal_threshold", 1.05)
         ),
+        vol_ratio_extreme_threshold=float(
+            getattr(payload, "vol_ratio_extreme_threshold", 2.2)
+        ),
+        risk_of_ruin_maxrisk=float(getattr(payload, "risk_of_ruin_maxrisk", 0.30)),
         dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         sma_window=payload.sma_window,
         fast_window=payload.fast_window,
@@ -1445,12 +1465,18 @@ def trend_portfolio_backtest(
         atr_stop_mode=payload.atr_stop_mode,
         atr_stop_atr_basis=payload.atr_stop_atr_basis,
         atr_stop_reentry_mode=payload.atr_stop_reentry_mode,
+        atr_stop_execution_mode=str(
+            getattr(payload, "atr_stop_execution_mode", "intraday")
+        ),
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
         r_take_profit_enabled=bool(getattr(payload, "r_take_profit_enabled", False)),
         r_take_profit_reentry_mode=str(
             getattr(payload, "r_take_profit_reentry_mode", "reenter")
+        ),
+        r_take_profit_execution_mode=str(
+            getattr(payload, "r_take_profit_execution_mode", "intraday")
         ),
         r_take_profit_tiers=(
             [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
@@ -1462,6 +1488,9 @@ def trend_portfolio_backtest(
         ),
         bias_v_take_profit_reentry_mode=str(
             getattr(payload, "bias_v_take_profit_reentry_mode", "reenter")
+        ),
+        bias_v_take_profit_execution_mode=str(
+            getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
@@ -2148,6 +2177,68 @@ def analysis_vol_proxy_timing(
     if not results:
         return VolProxyTimingResponse(ok=False, error="no_methods_computed", meta=meta)
     return VolProxyTimingResponse(ok=True, meta=meta, methods=results)
+
+
+@router.post("/analysis/range-state-monitor", response_model=RangeStateMonitorResponse)
+def analysis_range_state_monitor(
+    payload: RangeStateMonitorRequest, db: Session = Depends(get_session)
+) -> RangeStateMonitorResponse:
+    start_d = _parse_yyyymmdd(payload.start)
+    end_d = _parse_yyyymmdd(payload.end)
+    code = str(payload.etf_code).strip()
+    adjust = str(payload.adjust or "qfq").strip().lower()
+    mode = str(payload.mode or "adx").strip().lower()
+    window = int(payload.window)
+    enter = float(payload.enter_threshold)
+    exit_ = float(payload.exit_threshold)
+
+    ohlc_mat = load_ohlc_prices(
+        db, codes=[code], start=start_d, end=end_d, adjust=adjust
+    )
+    close_s = (ohlc_mat.get("close", pd.DataFrame())).get(code)
+    if close_s is None or close_s.dropna().empty:
+        return RangeStateMonitorResponse(
+            ok=False,
+            error="empty_etf_ohlc",
+            meta={
+                "etf_code": code,
+                "adjust": adjust,
+                "start": payload.start,
+                "end": payload.end,
+            },
+        )
+    high_s = (ohlc_mat.get("high", pd.DataFrame())).get(code)
+    low_s = (ohlc_mat.get("low", pd.DataFrame())).get(code)
+    if high_s is None:
+        high_s = close_s
+    if low_s is None:
+        low_s = close_s
+
+    out = compute_range_state_monitor(
+        high=high_s,
+        low=low_s,
+        close=close_s,
+        config=RangeStateConfig(
+            mode=mode,
+            window=window,
+            enter_threshold=enter,
+            exit_threshold=exit_,
+        ),
+    )
+    meta = {
+        "etf_code": code,
+        "adjust": adjust,
+        "start": payload.start,
+        "end": payload.end,
+    }
+    meta.update(dict(out.get("meta") or {}))
+    return RangeStateMonitorResponse(
+        ok=True,
+        meta=meta,
+        series=out.get("series"),
+        latest=out.get("latest"),
+        summary=out.get("summary"),
+    )
 
 
 @router.post("/analysis/macro/pair-leadlag", response_model=MacroPairLeadLagResponse)
@@ -6345,7 +6436,41 @@ def _schedule_contract_fetch_sequential(
 def _mark_contract_fetch_enqueued(db: Session, *, code: str, fetch_type: str) -> None:
     ft = str(fetch_type or "incremental").strip().lower()
     msg = f"queued by main fetch ({ft})"
-    mark_futures_contract_pool_fetch(db, code=code, status="running", message=msg)
+    mark_futures_contract_pool_fetch(db, code=code, status="queued", message=msg)
+
+
+def _reconcile_stale_contract_fetch_statuses(db: Session) -> None:
+    """
+    Best-effort stale-status guard.
+    Background tasks are in-process; when dev reload/restart interrupts queued/running jobs,
+    statuses may remain "running" forever. Auto-demote very old running rows to failed.
+    """
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    now_local_naive = dt.datetime.now()
+    stale_after = dt.timedelta(minutes=90)
+    changed = False
+    for item in list_futures_pool(db):
+        st = str(getattr(item, "last_contract_fetch_status", "") or "").strip().lower()
+        at = getattr(item, "last_contract_fetch_at", None)
+        if st != "running" or at is None:
+            continue
+        # MySQL may return naive datetimes even for timezone=True columns.
+        if getattr(at, "tzinfo", None) is None:
+            age = now_local_naive - at
+        else:
+            age = now_utc - at.astimezone(dt.timezone.utc)
+        if age <= stale_after:
+            continue
+        mins = int(age.total_seconds() // 60)
+        mark_futures_contract_pool_fetch(
+            db,
+            code=item.code,
+            status="failed",
+            message=f"stale running status auto-reset after {mins}m",
+        )
+        changed = True
+    if changed:
+        db.commit()
 
 
 @router.get("/futures", response_model=list[FuturesPoolOut])
@@ -6354,6 +6479,7 @@ def get_futures(
 ) -> list[FuturesPoolOut]:
     if str(adjust).strip().lower() != "none":
         raise HTTPException(status_code=400, detail="futures only support adjust=none")
+    _reconcile_stale_contract_fetch_statuses(db)
     items = list_futures_pool(db)
     out: list[FuturesPoolOut] = []
     for i in items:

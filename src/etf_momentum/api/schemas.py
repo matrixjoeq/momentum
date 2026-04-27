@@ -931,7 +931,10 @@ class SimGbmAbStrategyParams(BaseModel):
     )
     rebalance_anchor: int | None = Field(default=None)
     rebalance_shift: str = Field(default="prev")
-    exec_price: str = Field(default="open", description="open|close|oc2")
+    exec_price: str = Field(
+        default="open",
+        description="open|close; oc2 is deprecated and computed as open/close arithmetic average",
+    )
     top_k: int = Field(
         default=1,
         description="Non-zero: top-K by momentum if positive, bottom-K (inverse) if negative; effective=min(|K|, pool).",
@@ -1357,6 +1360,45 @@ class VolProxyTimingResponse(BaseModel):
     error: str | None = None
 
 
+class RangeStateMonitorRequest(BaseModel):
+    etf_code: str = Field(min_length=1, description="ETF code, e.g. 510300")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: str = Field(default="qfq", description="qfq/hfq/none for ETF prices")
+    mode: str = Field(default="adx", description="adx|adxr|er")
+    window: int = Field(default=14, ge=2, le=252)
+    enter_threshold: float = Field(default=20.0)
+    exit_threshold: float = Field(default=25.0)
+
+    @model_validator(mode="after")
+    def _validate_range_state_monitor(self) -> RangeStateMonitorRequest:
+        mode = str(self.mode or "adx").strip().lower()
+        if mode not in {"adx", "adxr", "er"}:
+            raise ValueError("mode must be one of: adx|adxr|er")
+        if mode in {"adx", "adxr"}:
+            if not (0.0 <= float(self.enter_threshold) <= 100.0):
+                raise ValueError("enter_threshold must be in [0,100] for mode=adx|adxr")
+            if not (0.0 <= float(self.exit_threshold) <= 100.0):
+                raise ValueError("exit_threshold must be in [0,100] for mode=adx|adxr")
+        else:
+            if not (0.0 <= float(self.enter_threshold) <= 1.0):
+                raise ValueError("enter_threshold must be in [0,1] for mode=er")
+            if not (0.0 <= float(self.exit_threshold) <= 1.0):
+                raise ValueError("exit_threshold must be in [0,1] for mode=er")
+        if float(self.exit_threshold) < float(self.enter_threshold):
+            raise ValueError("exit_threshold must be >= enter_threshold")
+        return self
+
+
+class RangeStateMonitorResponse(BaseModel):
+    ok: bool
+    meta: dict | None = None
+    series: dict | None = None
+    latest: dict | None = None
+    summary: dict | None = None
+    error: str | None = None
+
+
 class BaselineCalendarEffectRequest(BaseModel):
     codes: list[str] = Field(min_length=1)
     start: str = Field(description="YYYYMMDD")
@@ -1756,6 +1798,10 @@ class RotationBacktestRequest(BaseModel):
         default="reenter",
         description="Re-entry after ATR stop: reenter|wait_next_entry",
     )
+    atr_stop_execution_mode: str = Field(
+        default="intraday",
+        description="ATR stop execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
     atr_stop_window: int = Field(
         default=14, ge=2, description="ATR window for universal stop"
     )
@@ -2027,7 +2073,10 @@ class TrendBacktestRequest(BaseModel):
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
     )
-    exec_price: str = Field(default="open", description="open|close|oc2")
+    exec_price: str = Field(
+        default="open",
+        description="open|close; oc2 is deprecated and computed as open/close arithmetic average",
+    )
     engine: str | None = Field(
         default=None,
         description="Backtest engine switch: legacy|bt; null uses server default",
@@ -2106,6 +2155,17 @@ class TrendBacktestRequest(BaseModel):
         gt=0.0,
         description="Normal-zone recovery threshold used after expanded/contracted states",
     )
+    vol_ratio_extreme_threshold: float = Field(
+        default=2.2,
+        gt=0.0,
+        description="If ATR ratio > threshold, enter extreme volatility tier above expanded state",
+    )
+    risk_of_ruin_maxrisk: float = Field(
+        default=0.30,
+        gt=0.0,
+        le=1.0,
+        description="Configured ruin threshold maxrisk used in RoR formula ((1-P)/P)^(maxrisk/A)",
+    )
     # parameters (some are strategy-specific)
     sma_window: int = Field(
         default=200, ge=2, description="MA filter window (trading days)"
@@ -2169,6 +2229,10 @@ class TrendBacktestRequest(BaseModel):
         default="reenter",
         description="Re-entry after ATR stop: reenter|wait_next_entry",
     )
+    atr_stop_execution_mode: str = Field(
+        default="intraday",
+        description="ATR stop execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
     atr_stop_window: int = Field(
         default=14, ge=2, description="ATR window for universal stop"
     )
@@ -2188,6 +2252,10 @@ class TrendBacktestRequest(BaseModel):
         default="reenter",
         description="Re-entry after R take-profit: reenter|wait_next_entry",
     )
+    r_take_profit_execution_mode: str = Field(
+        default="intraday",
+        description="R take-profit execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(
         default=None,
         description="Tiered config: peak>=R multiple activates pullback-exit threshold, e.g. [{r_multiple:2,retrace_ratio:0.5}]",
@@ -2198,6 +2266,10 @@ class TrendBacktestRequest(BaseModel):
     bias_v_take_profit_reentry_mode: str = Field(
         default="reenter",
         description="Re-entry after BIAS-V take-profit: reenter|wait_next_entry",
+    )
+    bias_v_take_profit_execution_mode: str = Field(
+        default="intraday",
+        description="BIAS-V take-profit execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
     )
     bias_v_ma_window: int = Field(
         default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"
@@ -2315,7 +2387,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
     )
-    exec_price: str = Field(default="open", description="open|close|oc2")
+    exec_price: str = Field(
+        default="open",
+        description="open|close; oc2 is deprecated and computed as open/close arithmetic average",
+    )
     engine: str | None = Field(
         default=None,
         description="Backtest engine switch: legacy|bt; null uses server default",
@@ -2395,6 +2470,17 @@ class TrendPortfolioBacktestRequest(BaseModel):
         gt=0.0,
         description="Normal-zone recovery threshold used after expanded/contracted states",
     )
+    vol_ratio_extreme_threshold: float = Field(
+        default=2.2,
+        gt=0.0,
+        description="If ATR ratio > threshold, enter extreme volatility tier above expanded state",
+    )
+    risk_of_ruin_maxrisk: float = Field(
+        default=0.30,
+        gt=0.0,
+        le=1.0,
+        description="Configured ruin threshold maxrisk used in RoR formula ((1-P)/P)^(maxrisk/A)",
+    )
     dynamic_universe: bool = Field(
         default=False,
         description="If true, allow dynamic candidate pool by period over union interval",
@@ -2439,6 +2525,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
     atr_stop_reentry_mode: str = Field(
         default="reenter", description="reenter|wait_next_entry"
     )
+    atr_stop_execution_mode: str = Field(
+        default="intraday",
+        description="intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
     atr_stop_window: int = Field(default=14, ge=2)
     atr_stop_n: float = Field(default=2.0, gt=0.0)
     atr_stop_m: float = Field(default=0.5, gt=0.0)
@@ -2449,12 +2539,20 @@ class TrendPortfolioBacktestRequest(BaseModel):
     r_take_profit_reentry_mode: str = Field(
         default="reenter", description="reenter|wait_next_entry"
     )
+    r_take_profit_execution_mode: str = Field(
+        default="intraday",
+        description="intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(default=None)
     bias_v_take_profit_enabled: bool = Field(
         default=False, description="Enable universal BIAS-V take-profit overlay"
     )
     bias_v_take_profit_reentry_mode: str = Field(
         default="reenter", description="reenter|wait_next_entry"
+    )
+    bias_v_take_profit_execution_mode: str = Field(
+        default="intraday",
+        description="intraday|next_day (intraday takes effect from next trading day after entry)",
     )
     bias_v_ma_window: int = Field(
         default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"

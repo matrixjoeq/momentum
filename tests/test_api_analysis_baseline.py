@@ -50,6 +50,49 @@ def _make_next_execution_plan_payload(
     }
 
 
+def _assert_semi_variance_stats_shape(stats: dict[str, object]) -> None:
+    semi = (stats or {}).get("semi_variance") or {}
+    assert isinstance(semi, dict)
+    assert "win_rate_ex_zero" in semi
+    assert "payoff_ex_zero" in semi
+    assert "kelly_ex_zero" in semi
+    assert "upside_semivariance" in semi
+    assert "downside_semivariance" in semi
+    for key in [
+        "profit_return_stats",
+        "profit_count_stats",
+        "loss_return_stats",
+        "loss_count_stats",
+    ]:
+        block = semi.get(key) or {}
+        assert isinstance(block, dict)
+        assert "max" in block
+        assert "min" in block
+        assert "mean" in block
+        q = block.get("quantiles") or {}
+        assert isinstance(q, dict)
+        assert "p25" in q
+        assert "p50" in q
+        assert "p75" in q
+
+
+def _assert_risk_of_ruin_stats_shape(
+    stats: dict[str, object], *, expected_maxrisk: float | None = None
+) -> None:
+    ror = (stats or {}).get("risk_of_ruin") or {}
+    assert isinstance(ror, dict)
+    assert str(ror.get("formula") or "") == "((1-P)/P)^(maxrisk/A)"
+    assert "probability" in ror
+    assert "P" in ror
+    assert "A" in ror
+    assert "maxrisk" in ror
+    if expected_maxrisk is not None:
+        assert float(ror.get("maxrisk") or 0.0) == pytest.approx(
+            float(expected_maxrisk), rel=0.0, abs=1e-12
+        )
+        assert str(ror.get("maxrisk_basis") or "") == "configured_risk_of_ruin_maxrisk"
+
+
 def test_api_baseline_analysis_happy_path(api_client):
     c = api_client
     upsert_and_fetch_etfs(
@@ -258,6 +301,86 @@ def test_api_trend_single_accepts_risk_budget_params(api_client):
     )
 
 
+def test_api_trend_single_accepts_stop_execution_modes(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "atr_stop_mode": "static",
+            "atr_stop_window": 2,
+            "atr_stop_n": 1.0,
+            "atr_stop_execution_mode": "next_day",
+            "r_take_profit_enabled": True,
+            "r_take_profit_tiers": [{"r_multiple": 1.5, "retrace_ratio": 0.5}],
+            "r_take_profit_execution_mode": "next_day",
+            "bias_v_take_profit_enabled": True,
+            "bias_v_ma_window": 2,
+            "bias_v_atr_window": 2,
+            "bias_v_take_profit_threshold": 0.5,
+            "bias_v_take_profit_execution_mode": "next_day",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = ((data or {}).get("meta") or {}).get("params") or {}
+    assert str(params.get("atr_stop_execution_mode") or "") == "next_day"
+    assert str(params.get("r_take_profit_execution_mode") or "") == "next_day"
+    assert str(params.get("bias_v_take_profit_execution_mode") or "") == "next_day"
+
+
+def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": _BASELINE_CODES,
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "atr_stop_mode": "static",
+            "atr_stop_window": 2,
+            "atr_stop_n": 1.0,
+            "atr_stop_execution_mode": "next_day",
+            "r_take_profit_enabled": True,
+            "r_take_profit_tiers": [{"r_multiple": 1.5, "retrace_ratio": 0.5}],
+            "r_take_profit_execution_mode": "next_day",
+            "bias_v_take_profit_enabled": True,
+            "bias_v_ma_window": 2,
+            "bias_v_atr_window": 2,
+            "bias_v_take_profit_threshold": 0.5,
+            "bias_v_take_profit_execution_mode": "next_day",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = ((data or {}).get("meta") or {}).get("params") or {}
+    assert str(params.get("atr_stop_execution_mode") or "") == "next_day"
+    assert str(params.get("r_take_profit_execution_mode") or "") == "next_day"
+    assert str(params.get("bias_v_take_profit_execution_mode") or "") == "next_day"
+
+
 def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
     c = api_client
     upsert_and_fetch_etfs(
@@ -354,6 +477,96 @@ def test_api_trend_portfolio_quick_mode_skips_heavy_sections(engine, api_client)
     assert "entry_condition_stats" not in ts
 
 
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_single_trade_stats_include_semi_variance(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    series = {"SVS1": [100.0 + i * 0.2 + (2.0 if i % 2 else -1.5) for i in range(120)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "code": "SVS1",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 3,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend", payload)
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = (ts.get("by_code") or {}).get("SVS1") or {}
+    _assert_semi_variance_stats_shape(overall)
+    _assert_semi_variance_stats_shape(by_code)
+    _assert_risk_of_ruin_stats_shape(overall, expected_maxrisk=0.30)
+    _assert_risk_of_ruin_stats_shape(by_code, expected_maxrisk=0.30)
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_portfolio_trade_stats_include_semi_variance(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    series = {
+        "SVP1": [100.0 + i * 0.3 + (1.0 if i % 3 else -1.2) for i in range(120)],
+        "SVP2": [90.0 + i * 0.25 + (1.3 if i % 4 else -1.0) for i in range(120)],
+    }
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "codes": ["SVP1", "SVP2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 3,
+        "position_sizing": "equal",
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend/portfolio", payload)
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = ts.get("by_code") or {}
+    _assert_semi_variance_stats_shape(overall)
+    _assert_semi_variance_stats_shape(by_code.get("SVP1") or {})
+    _assert_semi_variance_stats_shape(by_code.get("SVP2") or {})
+    _assert_risk_of_ruin_stats_shape(overall, expected_maxrisk=0.30)
+    _assert_risk_of_ruin_stats_shape(by_code.get("SVP1") or {}, expected_maxrisk=0.30)
+    _assert_risk_of_ruin_stats_shape(by_code.get("SVP2") or {}, expected_maxrisk=0.30)
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_single_trade_stats_accepts_custom_risk_of_ruin_maxrisk(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    series = {"SVR1": [100.0 + i * 0.18 + (1.5 if i % 2 else -1.1) for i in range(100)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "code": "SVR1",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 3,
+        "risk_of_ruin_maxrisk": 0.40,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend", payload)
+    ts = out.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    _assert_risk_of_ruin_stats_shape(overall, expected_maxrisk=0.40)
+
+
 def test_api_trend_single_risk_budget_vol_regime_stats_contract(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
     series = {"RBVS1": [100.0 + i * 0.5 for i, _ in enumerate(dates)]}
@@ -378,6 +591,7 @@ def test_api_trend_single_risk_budget_vol_regime_stats_contract(engine, api_clie
             "vol_ratio_expand_threshold": 1.45,
             "vol_ratio_contract_threshold": 0.65,
             "vol_ratio_normal_threshold": 1.05,
+            "vol_ratio_extreme_threshold": 2.0,
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
         },
@@ -394,6 +608,41 @@ def test_api_trend_single_risk_budget_vol_regime_stats_contract(engine, api_clie
     assert "vol_risk_entry_state_reduce_on_expand_count" in by_code
     rc = (out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
     assert rc.get("enabled") is True
+    assert float(rc.get("extreme_threshold") or 0.0) == pytest.approx(2.0)
+
+
+def test_api_trend_single_vol_regime_extreme_threshold_default_is_2_2(
+    engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    series = {"RBVS2": [100.0 + i * 0.5 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "RBVS2",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 20,
+            "risk_budget_pct": 0.01,
+            "vol_regime_risk_mgmt_enabled": True,
+            "vol_ratio_fast_atr_window": 5,
+            "vol_ratio_slow_atr_window": 50,
+            "vol_ratio_expand_threshold": 1.45,
+            "vol_ratio_contract_threshold": 0.65,
+            "vol_ratio_normal_threshold": 1.05,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    rc = (out.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
+    assert float(rc.get("extreme_threshold") or 0.0) == pytest.approx(2.2)
 
 
 def test_api_trend_single_rejects_invalid_vol_regime_threshold_relation(api_client):
@@ -427,6 +676,42 @@ def test_api_trend_single_rejects_invalid_vol_regime_threshold_relation(api_clie
         expected_status=400,
     )
     assert "vol_ratio_expand_threshold must be > vol_ratio_normal_threshold" in str(err)
+
+
+def test_api_trend_single_rejects_invalid_vol_regime_extreme_threshold(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 20,
+            "risk_budget_pct": 0.01,
+            "vol_regime_risk_mgmt_enabled": True,
+            "vol_ratio_expand_threshold": 1.45,
+            "vol_ratio_contract_threshold": 0.65,
+            "vol_ratio_normal_threshold": 1.05,
+            "vol_ratio_extreme_threshold": 1.40,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert "vol_ratio_extreme_threshold must be > vol_ratio_expand_threshold" in str(
+        err
+    )
 
 
 def test_api_trend_portfolio_risk_budget_freezes_weight_after_entry(engine, api_client):

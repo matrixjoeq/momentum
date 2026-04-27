@@ -851,6 +851,66 @@
         ></div>
         <table id="distImpulseFutureStats" style="margin-top: 8px"></table>
       </details>
+      <details class="panel" style="margin-top: 10px" open>
+        <summary>
+          <h4 style="display: inline; margin: 0">震荡状态识别（独立模块）</h4>
+        </summary>
+        <div class="muted" style="margin-top: 8px">
+          独立于策略引擎：基于价格序列识别 RANGE/TREND。第一阶段支持单指标 ADX
+          或 ER，并使用双阈值防抖。
+        </div>
+        <div class="row no-print" style="margin-top: 8px; align-items: end">
+          <div>
+            <label>识别模式</label>
+            <select id="distRangeStateMode" style="min-width: 130px">
+              <option value="adx" selected>ADX</option>
+              <option value="adxr">ADXR</option>
+              <option value="er">ER</option>
+            </select>
+          </div>
+          <div>
+            <label>窗口</label>
+            <input
+              id="distRangeStateWindow"
+              value="14"
+              style="min-width: 100px"
+            />
+          </div>
+          <div>
+            <label>进入阈值（RANGE）</label>
+            <input
+              id="distRangeStateEnter"
+              value="20"
+              style="min-width: 150px"
+            />
+          </div>
+          <div>
+            <label>退出阈值（TREND）</label>
+            <input
+              id="distRangeStateExit"
+              value="25"
+              style="min-width: 150px"
+            />
+          </div>
+          <div>
+            <button id="distRangeStateRefresh">刷新识别</button>
+          </div>
+        </div>
+        <div
+          id="distRangeStateHint"
+          class="muted"
+          style="margin-top: 6px"
+        ></div>
+        <div
+          id="distRangeStateTimeline"
+          style="width: 100%; height: 260px; margin-top: 8px"
+        ></div>
+        <div
+          id="distRangeStatePriceTimeline"
+          style="width: 100%; height: 280px; margin-top: 10px"
+        ></div>
+        <table id="distRangeStateStats" style="margin-top: 8px"></table>
+      </details>
       <div
         id="distHistogram"
         style="width: 100%; height: 420px; margin-top: 12px"
@@ -4617,6 +4677,10 @@
           <input id="trendVolRatioSlowAtrWindow" value="50" />
         </div>
         <div>
+          <label>极大波动阈值</label>
+          <input id="trendVolRatioExtremeThreshold" value="2.2" />
+        </div>
+        <div>
           <label>放大阈值</label>
           <input id="trendVolRatioExpandThreshold" value="1.45" />
         </div>
@@ -4663,7 +4727,6 @@
           <select id="trendExecPrice" style="min-width: 100px">
             <option value="open" selected>开盘</option>
             <option value="close">收盘</option>
-            <option value="oc2">OC均价</option>
           </select>
         </div>
         <div>
@@ -4715,6 +4778,10 @@
           ><input id="trendSlippage" value="0.001" />
         </div>
         <div>
+          <label>毁灭线（账户可承受最大回撤，%）</label>
+          <input id="trendRiskOfRuinMaxrisk" value="30" />
+        </div>
+        <div>
           <label>分组约束（组合）</label>
           <select id="trendGroupEnforce" style="min-width: 140px">
             <option value="false" selected>关闭</option>
@@ -4733,6 +4800,7 @@
           <input id="trendGroupMaxHoldings" value="4" />
         </div>
         <button id="runTrendResearch">运行趋势回测</button>
+        <button id="exportTrendParamsJson">导出参数(JSON)</button>
         <label
           style="display: flex; align-items: center; gap: 6px; min-height: 32px"
         >
@@ -4949,6 +5017,13 @@
           </select>
         </div>
         <div>
+          <label>ATR止损执行</label>
+          <select id="trendAtrStopExec" style="min-width: 190px">
+            <option value="intraday" selected>日内执行(入场后次日生效)</option>
+            <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
+        </div>
+        <div>
           <label>ATR周期</label><input id="trendAtrStopWin" value="14" />
         </div>
         <div>
@@ -4973,6 +5048,13 @@
             <option value="wait_next_entry">等待下一次入场</option>
           </select>
         </div>
+        <div>
+          <label>R止盈执行</label>
+          <select id="trendRTpExec" style="min-width: 190px">
+            <option value="intraday" selected>日内执行(入场后次日生效)</option>
+            <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
+        </div>
         <div style="min-width: 420px">
           <label>R阈值与允许回落（r:ratio，逗号分隔）</label>
           <input id="trendRTpTiers" value="2:0.5,3:0.3,4:0.2,5:0.1,6:0.05" />
@@ -4994,6 +5076,13 @@
           </select>
         </div>
         <div>
+          <label>BIAS-V止盈执行</label>
+          <select id="trendBiasVTpExec" style="min-width: 190px">
+            <option value="intraday" selected>日内执行(入场后次日生效)</option>
+            <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
+        </div>
+        <div>
           <label>BIAS-V MA窗口</label
           ><input id="trendBiasVTpMaWin" value="20" />
         </div>
@@ -5006,6 +5095,20 @@
           ><input id="trendBiasVTpThreshold" value="5.0" />
         </div>
       </div>
+      <details id="trendExportParamsWrap" style="margin-top: 8px">
+        <summary><b>趋势回测参数导出(JSON)</b></summary>
+        <textarea
+          id="trendExportParamsText"
+          rows="14"
+          readonly
+          style="
+            width: 100%;
+            margin-top: 8px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          "
+          placeholder="点击“导出参数(JSON)”后在这里生成内容"
+        ></textarea>
+      </details>
       <div id="trendStrategyDesc" class="muted" style="margin-top: 8px"></div>
       <div id="trendParamDesc" class="muted" style="margin-top: 6px"></div>
       <div
@@ -5104,6 +5207,10 @@
             ></div>
           </div>
         </div>
+        <div
+          id="trendTradeByCodeNavMarks"
+          style="width: 100%; height: 340px; margin-top: 10px"
+        ></div>
         <details id="trendRiskTradeRecordsWrap" style="margin-top: 8px">
           <summary><b>趋势策略：止盈止损逐笔明细（回测交易记录）</b></summary>
           <div
@@ -7486,6 +7593,7 @@
           "trendExecPrice",
           "trendCost",
           "trendSlippage",
+          "trendRiskOfRuinMaxrisk",
           "trendQuickMode",
           "trendSizing",
           "trendFixedPosRatio",
@@ -7501,6 +7609,7 @@
           "trendVolRatioExpandThreshold",
           "trendVolRatioContractThreshold",
           "trendVolRatioNormalThreshold",
+          "trendVolRatioExtremeThreshold",
           "trendSingleCode",
           "trendGroupEnforce",
           "trendGroupPolicy",
@@ -7535,14 +7644,17 @@
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
+          "trendAtrStopExec",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
           "trendRTpEnable",
           "trendRTpReentry",
+          "trendRTpExec",
           "trendRTpTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
+          "trendBiasVTpExec",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
           "trendBiasVTpThreshold",
@@ -10394,14 +10506,22 @@
         return { tiers };
       }
       function _syncRTpParamsUi() {
+        const atrModeEl = $("trendAtrStopMode");
+        const atrExecEl = $("trendAtrStopExec");
         const onEl = $("trendRTpEnable");
         const reEl = $("trendRTpReentry");
+        const exEl = $("trendRTpExec");
         const tEl = $("trendRTpTiers");
         const bvOnEl = $("trendBiasVTpEnable");
         const bvReEl = $("trendBiasVTpReentry");
+        const bvExEl = $("trendBiasVTpExec");
         const bvMaEl = $("trendBiasVTpMaWin");
         const bvAtrEl = $("trendBiasVTpAtrWin");
         const bvThrEl = $("trendBiasVTpThreshold");
+        const atrOn = !!(
+          atrModeEl &&
+          String(atrModeEl.value || "none").toLowerCase() !== "none"
+        );
         const on = !!(onEl && String(onEl.value || "false") === "true");
         const bvOn = !!(bvOnEl && String(bvOnEl.value || "false") === "true");
         const setEnabled = (el, enable) => {
@@ -10409,9 +10529,12 @@
           el.disabled = !enable;
           el.style.opacity = enable ? "1" : "0.55";
         };
+        setEnabled(atrExecEl, atrOn);
         setEnabled(reEl, on);
+        setEnabled(exEl, on);
         setEnabled(tEl, on);
         setEnabled(bvReEl, bvOn);
+        setEnabled(bvExEl, bvOn);
         setEnabled(bvMaEl, bvOn);
         setEnabled(bvAtrEl, bvOn);
         setEnabled(bvThrEl, bvOn);
@@ -10441,6 +10564,7 @@
         const volExpandEl = $("trendVolRatioExpandThreshold");
         const volContractEl = $("trendVolRatioContractThreshold");
         const volNormalEl = $("trendVolRatioNormalThreshold");
+        const volExtremeEl = $("trendVolRatioExtremeThreshold");
         const volMgmtOn =
           isRiskBudget &&
           volMgmtOnEl &&
@@ -10496,6 +10620,7 @@
           volExpandEl,
           volContractEl,
           volNormalEl,
+          volExtremeEl,
         ]) {
           if (!el) continue;
           el.disabled = !volMgmtOn;
@@ -10584,14 +10709,17 @@
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
+          "trendAtrStopExec",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
           "trendRTpEnable",
           "trendRTpReentry",
+          "trendRTpExec",
           "trendRTpTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
+          "trendBiasVTpExec",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
           "trendBiasVTpThreshold",
@@ -10601,6 +10729,8 @@
           "trendVolRatioExpandThreshold",
           "trendVolRatioContractThreshold",
           "trendVolRatioNormalThreshold",
+          "trendVolRatioExtremeThreshold",
+          "trendRiskOfRuinMaxrisk",
           "trendMonthlyRiskBudgetEnable",
           "trendMonthlyRiskBudgetPct",
           "trendMonthlyRiskBudgetIncludeNewRisk",
@@ -10619,14 +10749,17 @@
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
+          "trendAtrStopExec",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
           "trendRTpEnable",
           "trendRTpReentry",
+          "trendRTpExec",
           "trendRTpTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
+          "trendBiasVTpExec",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
           "trendBiasVTpThreshold",
@@ -10636,6 +10769,8 @@
           "trendVolRatioExpandThreshold",
           "trendVolRatioContractThreshold",
           "trendVolRatioNormalThreshold",
+          "trendVolRatioExtremeThreshold",
+          "trendRiskOfRuinMaxrisk",
           "trendMonthlyRiskBudgetEnable",
           "trendMonthlyRiskBudgetPct",
           "trendMonthlyRiskBudgetIncludeNewRisk",
@@ -10783,6 +10918,8 @@
             "ATR基准：动态跟随/动态收紧时，按入场ATR或最新ATR计算止损距离与收紧步长。",
           trendAtrStopReentry:
             "止损后重入：允许重返=只要基础信号为持有即可重入；等待下一次入场=必须等基础信号再次出现入场事件。",
+          trendAtrStopExec:
+            "ATR止损执行：日内执行=入场后下一交易日开始生效，按开盘/盘中触发；次日执行=当日收盘触发后下一交易日按策略执行价离场。",
           trendAtrStopWin: "ATR周期：用于止损距离计算的ATR窗口。",
           trendAtrStopN: "止损倍数n：基础止损距离为 n*ATR。",
           trendAtrStopM:
@@ -10791,12 +10928,16 @@
             "通用R乘数止盈：按初始风险R跟踪浮盈，达到分层后按允许回落比例触发离场。",
           trendRTpReentry:
             "止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
+          trendRTpExec:
+            "R止盈执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价离场。",
           trendRTpTiers:
             "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
           trendBiasVTpEnable:
             "通用BIAS-V止盈：当 BIAS-V=(close-MA)/ATR 大于等于阈值时触发止盈离场。",
           trendBiasVTpReentry:
             "BIAS-V止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
+          trendBiasVTpExec:
+            "BIAS-V止盈执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价离场。",
           trendBiasVTpMaWin: "BIAS-V MA窗口：BIAS-V分子中的 MA 窗口，默认20。",
           trendBiasVTpAtrWin:
             "BIAS-V ATR窗口：BIAS-V分母中的 ATR 窗口，默认20。",
@@ -10814,6 +10955,10 @@
             "缩小阈值：比率低于该值视为波动缩小，触发加仓。",
           trendVolRatioNormalThreshold:
             "回归正常阈值：放大后低于该值恢复加仓，缩小后高于该值恢复降仓。",
+          trendVolRatioExtremeThreshold:
+            "极大波动阈值：比率高于该值进入极大波动档位，支持从任意档位直接跳转。",
+          trendRiskOfRuinMaxrisk:
+            "毁灭线（账户可承受最大回撤）：用于 RoR 公式 ((1-P)/P)^(maxrisk/A)，可输入百分比（如30表示30%）。",
           trendRiskBudgetOvercapPolicy:
             "风险预算超限处理：等比例缩放/跳过开仓/替换开仓/杠杆开仓（仅组合风险预算生效）。",
           trendRiskBudgetMaxLeverage:
@@ -16465,7 +16610,13 @@
         const impulseLegend = $("distImpulseLegend");
         const impulseStats = $("distImpulseStats");
         const impulseFutureStats = $("distImpulseFutureStats");
-
+        const rangeStateModeInput = $("distRangeStateMode");
+        const rangeStateWindowInput = $("distRangeStateWindow");
+        const rangeStateEnterInput = $("distRangeStateEnter");
+        const rangeStateExitInput = $("distRangeStateExit");
+        const rangeStateRefreshBtn = $("distRangeStateRefresh");
+        const rangeStateHint = $("distRangeStateHint");
+        const rangeStateStats = $("distRangeStateStats");
         if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect)
           return;
         const _distAtrDerivedTypes = new Set([
@@ -17532,6 +17683,287 @@
           }
           if (impulseHint) {
             impulseHint.textContent = `统一口径参数：EMA(13) + MACD(12,26,9) Histogram；样本=${rows.length}天。`;
+          }
+        };
+
+        const _clearDistRangeStateMonitor = (msg) => {
+          const box = $("distRangeStateTimeline");
+          if (box)
+            box.innerHTML = `<div class='muted'>${esc(msg || "无数据")}</div>`;
+          const box2 = $("distRangeStatePriceTimeline");
+          if (box2)
+            box2.innerHTML = `<div class='muted'>${esc(msg || "无数据")}</div>`;
+          if (rangeStateHint) rangeStateHint.textContent = "";
+          if (rangeStateStats) rangeStateStats.innerHTML = "";
+        };
+
+        const _renderDistRangeStateMonitor = async () => {
+          const code = String(
+            codeSelect && codeSelect.value ? codeSelect.value : "",
+          ).trim();
+          const adjust = String((adjustSelect && adjustSelect.value) || "qfq")
+            .trim()
+            .toLowerCase();
+          const start = String((rangeStart && rangeStart.value) || "").trim();
+          const end = String((rangeEnd && rangeEnd.value) || "").trim();
+          const mode = String(
+            (rangeStateModeInput && rangeStateModeInput.value) || "adx",
+          )
+            .trim()
+            .toLowerCase();
+          const win = Math.max(
+            2,
+            Math.round(
+              Number(
+                (rangeStateWindowInput && rangeStateWindowInput.value) || 14,
+              ),
+            ),
+          );
+          const enter = Number(
+            (rangeStateEnterInput && rangeStateEnterInput.value) || "",
+          );
+          const exitV = Number(
+            (rangeStateExitInput && rangeStateExitInput.value) || "",
+          );
+          if (!code || !start || !end) {
+            _clearDistRangeStateMonitor("无可用震荡识别数据");
+            return;
+          }
+          if (
+            !Number.isFinite(enter) ||
+            !Number.isFinite(exitV) ||
+            exitV < enter
+          ) {
+            _clearDistRangeStateMonitor(
+              "阈值无效：请确保“退出阈值 >= 进入阈值”",
+            );
+            return;
+          }
+          const reqId = Number((window.__distRangeStateReqId || 0) + 1);
+          window.__distRangeStateReqId = reqId;
+          const box = $("distRangeStateTimeline");
+          if (box)
+            box.innerHTML = "<div class='muted'>加载震荡状态识别中...</div>";
+          let data = null;
+          try {
+            const res = await api("/analysis/range-state-monitor", {
+              method: "POST",
+              body: JSON.stringify({
+                etf_code: code,
+                start,
+                end,
+                adjust,
+                mode,
+                window: win,
+                enter_threshold: enter,
+                exit_threshold: exitV,
+              }),
+            });
+            data = await res.json();
+          } catch (e) {
+            if (reqId !== window.__distRangeStateReqId) return;
+            _clearDistRangeStateMonitor(
+              `震荡识别请求失败：${String(e && e.message ? e.message : e)}`,
+            );
+            return;
+          }
+          if (reqId !== window.__distRangeStateReqId) return;
+          if (!data || !data.ok) {
+            _clearDistRangeStateMonitor(
+              `震荡识别不可用：${esc(String((data && data.error) || "unknown_error"))}`,
+            );
+            return;
+          }
+          const series = data.series || {};
+          const dates = Array.isArray(series.dates) ? series.dates : [];
+          const metric = Array.isArray(series.metric) ? series.metric : [];
+          const rangeScore = Array.isArray(series.range_score)
+            ? series.range_score
+            : [];
+          const states = Array.isArray(series.state) ? series.state : [];
+          if (!dates.length || !rangeScore.length) {
+            _clearDistRangeStateMonitor("样本不足，无法识别震荡状态");
+            return;
+          }
+          const stateColor = (st) =>
+            st === "RANGE"
+              ? "#2ca02c"
+              : st === "TREND"
+                ? "#d62728"
+                : st === "TRANSITION"
+                  ? "#ff7f0e"
+                  : "#7f7f7f";
+          if (typeof Plotly === "undefined") {
+            _clearDistRangeStateMonitor("Plotly 未加载，无法绘图");
+            return;
+          }
+          Plotly.newPlot(
+            "distRangeStateTimeline",
+            [
+              {
+                x: dates,
+                y: rangeScore,
+                type: "scatter",
+                mode: "lines",
+                name: "震荡分数",
+                line: { width: 1.8, color: "#1f77b4" },
+                hovertemplate: "日期=%{x}<br>震荡分数=%{y:.3f}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: rangeScore,
+                type: "scatter",
+                mode: "markers",
+                name: "状态",
+                marker: {
+                  size: 5,
+                  color: states.map((st) => stateColor(String(st || ""))),
+                },
+                text: states.map((st) => String(st || "")),
+                hovertemplate:
+                  "日期=%{x}<br>状态=%{text}<br>震荡分数=%{y:.3f}<extra></extra>",
+              },
+              {
+                x: dates,
+                y: metric,
+                type: "scatter",
+                mode: "lines",
+                name: `${String(mode).toUpperCase()} 指标`,
+                yaxis: "y2",
+                line: { width: 1.2, color: "#9467bd", dash: "dot" },
+                hovertemplate: "日期=%{x}<br>指标值=%{y:.4f}<extra></extra>",
+              },
+            ],
+            {
+              margin: { t: 40 },
+              title: {
+                text: `${codeLabel(code)}：震荡状态识别（${String(mode).toUpperCase()}）`,
+                font: { size: 14 },
+              },
+              xaxis: { title: "日期" },
+              yaxis: { title: "震荡分数 [0,1]", range: [0, 1] },
+              yaxis2: {
+                title: `${String(mode).toUpperCase()} 指标`,
+                overlaying: "y",
+                side: "right",
+              },
+              legend: { orientation: "h" },
+            },
+            { responsive: true, displayModeBar: false },
+          );
+          let openSeries = (window.__distOpenByCode || {})[code] || null;
+          if (
+            !openSeries ||
+            !Array.isArray(openSeries.dates) ||
+            !Array.isArray(openSeries.close) ||
+            openSeries.dates.length !== openSeries.close.length
+          ) {
+            try {
+              openSeries = await _distFetchOpenSeriesByCode({
+                code,
+                start,
+                end,
+                adjust,
+              });
+              window.__distOpenByCode = window.__distOpenByCode || {};
+              window.__distOpenByCode[code] = openSeries;
+            } catch (_eOpen) {
+              openSeries = null;
+            }
+          }
+          if (
+            openSeries &&
+            Array.isArray(openSeries.dates) &&
+            Array.isArray(openSeries.close) &&
+            openSeries.dates.length === openSeries.close.length &&
+            openSeries.dates.length > 0
+          ) {
+            const closeByDate = new Map();
+            for (let i = 0; i < openSeries.dates.length; i++) {
+              const d0 = String(openSeries.dates[i] || "");
+              const c0 = Number(openSeries.close[i]);
+              if (!d0 || !Number.isFinite(c0)) continue;
+              closeByDate.set(d0, c0);
+            }
+            const pxDates = [];
+            const pxVals = [];
+            const pxStates = [];
+            for (let i = 0; i < dates.length; i++) {
+              const d0 = String(dates[i] || "");
+              const px = Number(closeByDate.get(d0));
+              if (!d0 || !Number.isFinite(px)) continue;
+              pxDates.push(d0);
+              pxVals.push(px);
+              pxStates.push(String(states[i] || ""));
+            }
+            if (pxDates.length >= 2) {
+              Plotly.newPlot(
+                "distRangeStatePriceTimeline",
+                [
+                  {
+                    x: pxDates,
+                    y: pxVals,
+                    type: "scatter",
+                    mode: "lines",
+                    name: "价格",
+                    line: { width: 1.8, color: "#4c78a8" },
+                    hovertemplate: "日期=%{x}<br>价格=%{y:.4f}<extra></extra>",
+                  },
+                  {
+                    x: pxDates,
+                    y: pxVals,
+                    type: "scatter",
+                    mode: "markers",
+                    name: "状态标识",
+                    marker: {
+                      size: 6,
+                      color: pxStates.map((st) => stateColor(st)),
+                    },
+                    text: pxStates,
+                    hovertemplate:
+                      "日期=%{x}<br>价格=%{y:.4f}<br>状态=%{text}<extra></extra>",
+                  },
+                ],
+                {
+                  margin: { t: 40 },
+                  title: {
+                    text: `${codeLabel(code)}：价格序列上的状态标识`,
+                    font: { size: 14 },
+                  },
+                  xaxis: { title: "日期" },
+                  yaxis: { title: "价格" },
+                  legend: { orientation: "h" },
+                },
+                { responsive: true, displayModeBar: false },
+              );
+            } else {
+              const pEl = $("distRangeStatePriceTimeline");
+              if (pEl)
+                pEl.innerHTML =
+                  "<div class='muted'>价格样本不足，无法绘图</div>";
+            }
+          } else {
+            const pEl = $("distRangeStatePriceTimeline");
+            if (pEl)
+              pEl.innerHTML =
+                "<div class='muted'>无可用价格序列，无法叠加状态</div>";
+          }
+          const latest = data.latest || {};
+          const summary = data.summary || {};
+          if (rangeStateStats) {
+            rangeStateStats.innerHTML =
+              "<tr><th>字段</th><th>值</th></tr>" +
+              `<tr><td>最新状态</td><td>${esc(String(latest.state || "-"))}</td></tr>` +
+              `<tr><td>最新指标值</td><td>${fmtNum(Number(latest.metric))}</td></tr>` +
+              `<tr><td>最新震荡分数</td><td>${fmtNum(Number(latest.range_score))}</td></tr>` +
+              `<tr><td>RANGE天数</td><td>${Number(summary.range_days || 0)}</td></tr>` +
+              `<tr><td>TREND天数</td><td>${Number(summary.trend_days || 0)}</td></tr>` +
+              `<tr><td>RANGE占比</td><td>${fmtPct(Number(summary.range_ratio))}</td></tr>`;
+          }
+          if (rangeStateHint) {
+            rangeStateHint.textContent = `参数：mode=${mode}, window=${win}, enter=${enter}, exit=${exitV}；样本=${dates.length}天；最新=${String(
+              latest.date || "-",
+            )}`;
           }
         };
 
@@ -20022,6 +20454,9 @@
             } catch (_eim0) {
               /* ignore */
             }
+            _renderDistRangeStateMonitor().catch(() => {
+              /* ignore */
+            });
             return;
           }
 
@@ -20101,6 +20536,9 @@
             } catch (_eim1) {
               /* ignore */
             }
+            _renderDistRangeStateMonitor().catch(() => {
+              /* ignore */
+            });
             return;
           }
 
@@ -20155,6 +20593,9 @@
             } catch (_eim2) {
               /* ignore */
             }
+            _renderDistRangeStateMonitor().catch(() => {
+              /* ignore */
+            });
             return;
           }
 
@@ -20407,6 +20848,9 @@
           } catch (_eim3) {
             /* ignore */
           }
+          _renderDistRangeStateMonitor().catch(() => {
+            /* ignore */
+          });
         };
 
         // Bind events (wire once)
@@ -20496,6 +20940,9 @@
                 } catch (_eim4) {
                   /* ignore */
                 }
+                _renderDistRangeStateMonitor().catch(() => {
+                  /* ignore */
+                });
                 return;
               }
               distByCode[c] = b.period_distributions[c];
@@ -20547,6 +20994,9 @@
               } catch (_eim5) {
                 /* ignore */
               }
+              _renderDistRangeStateMonitor().catch(() => {
+                /* ignore */
+              });
             }
           };
           const _syncRangeFromQuick = () => {
@@ -20598,6 +21048,19 @@
             _regimeInputTimer = setTimeout(() => {
               _regimeInputTimer = null;
               updateDisplay();
+            }, 120);
+          };
+          let _rangeStateInputTimer = null;
+          const _scheduleRangeStateUpdate = () => {
+            if (_rangeStateInputTimer) {
+              clearTimeout(_rangeStateInputTimer);
+              _rangeStateInputTimer = null;
+            }
+            _rangeStateInputTimer = setTimeout(() => {
+              _rangeStateInputTimer = null;
+              _renderDistRangeStateMonitor().catch(() => {
+                /* ignore */
+              });
             }, 120);
           };
 
@@ -20664,6 +21127,60 @@
             regimeVolQInput.addEventListener("input", () => {
               const v = Number(String(regimeVolQInput.value || "").trim());
               if (Number.isFinite(v) && v > 0 && v < 1) _scheduleRegimeUpdate();
+            });
+          }
+          if (rangeStateModeInput) {
+            rangeStateModeInput.addEventListener("change", () => {
+              const mode = String(
+                rangeStateModeInput.value || "adx",
+              ).toLowerCase();
+              if (mode === "er") {
+                if (rangeStateEnterInput) rangeStateEnterInput.value = "0.30";
+                if (rangeStateExitInput) rangeStateExitInput.value = "0.40";
+              } else {
+                if (rangeStateEnterInput) rangeStateEnterInput.value = "20";
+                if (rangeStateExitInput) rangeStateExitInput.value = "25";
+              }
+              _scheduleRangeStateUpdate();
+            });
+          }
+          if (rangeStateWindowInput) {
+            rangeStateWindowInput.addEventListener(
+              "change",
+              _scheduleRangeStateUpdate,
+            );
+            rangeStateWindowInput.addEventListener("input", () => {
+              const v = Number(
+                String(rangeStateWindowInput.value || "").trim(),
+              );
+              if (Number.isFinite(v) && v >= 2) _scheduleRangeStateUpdate();
+            });
+          }
+          if (rangeStateEnterInput) {
+            rangeStateEnterInput.addEventListener(
+              "change",
+              _scheduleRangeStateUpdate,
+            );
+            rangeStateEnterInput.addEventListener(
+              "input",
+              _scheduleRangeStateUpdate,
+            );
+          }
+          if (rangeStateExitInput) {
+            rangeStateExitInput.addEventListener(
+              "change",
+              _scheduleRangeStateUpdate,
+            );
+            rangeStateExitInput.addEventListener(
+              "input",
+              _scheduleRangeStateUpdate,
+            );
+          }
+          if (rangeStateRefreshBtn) {
+            rangeStateRefreshBtn.addEventListener("click", () => {
+              _renderDistRangeStateMonitor().catch(() => {
+                /* ignore */
+              });
             });
           }
           const wkSel = $("distWkdaySelect");
@@ -21090,6 +21607,23 @@
         const _vp = (x) =>
           x == null || !Number.isFinite(Number(x)) ? "-" : fmtPct(Number(x));
         const _obj = (x) => (x && typeof x === "object" ? x : {});
+        const _qText = (qObj, fmtFn, keys) =>
+          (Array.isArray(keys) ? keys : [])
+            .map((k) => fmtFn(qObj[k]))
+            .join(" / ");
+        const qLow = ["p01", "p05", "p10"];
+        const qMid = ["p25", "p50", "p75"];
+        const qHigh = ["p90", "p95", "p99"];
+        const semi = _obj(s.semi_variance);
+        const semiProfitRet = _obj(semi.profit_return_stats);
+        const semiProfitRetQ = _obj(semiProfitRet.quantiles);
+        const semiProfitCnt = _obj(semi.profit_count_stats);
+        const semiProfitCntQ = _obj(semiProfitCnt.quantiles);
+        const semiLossRet = _obj(semi.loss_return_stats);
+        const semiLossRetQ = _obj(semiLossRet.quantiles);
+        const semiLossCnt = _obj(semi.loss_count_stats);
+        const semiLossCntQ = _obj(semiLossCnt.quantiles);
+        const ror = _obj(s.risk_of_ruin);
         const erAttempt = Number(s.er_filter_attempted_entry_count);
         const erBlocked = Number(s.er_filter_blocked_entry_count);
         const erBlockRate =
@@ -21168,6 +21702,8 @@
           `<tr><td>胜率(剔除零收益)</td><td>${_v(s.win_rate_ex_zero)}</td></tr>` +
           `<tr><td>赔率(剔除零收益)</td><td>${_num(s.payoff_ex_zero)}</td></tr>` +
           `<tr><td>凯利比(剔除零收益)</td><td>${_v(s.kelly_ex_zero)}</td></tr>` +
+          `<tr><td>毁灭性风险概率</td><td>${_vp(ror.probability)}</td></tr>` +
+          `<tr><td>毁灭性风险参数 P / A / maxrisk</td><td>${_v(ror.P)} / ${_v(ror.A)} / ${_v(ror.maxrisk)}</td></tr>` +
           `<tr><td>每笔收益最大值</td><td>${_v(all.max)}</td></tr>` +
           `<tr><td>每笔收益最小值</td><td>${_v(all.min)}</td></tr>` +
           `<tr><td>每笔收益均值</td><td>${_v(all.mean)}</td></tr>` +
@@ -21179,6 +21715,27 @@
           `<tr><td>亏损交易均值 / 标准差</td><td>${_v(l.mean)} / ${_v(l.std)}</td></tr>` +
           `<tr><td>盈利交易最大 / 最小</td><td>${_v(p.max)} / ${_v(p.min)}</td></tr>` +
           `<tr><td>亏损交易最大 / 最小</td><td>${_v(l.max)} / ${_v(l.min)}</td></tr>` +
+          `<tr><td>连续盈亏段胜率(剔除零收益)</td><td>${_v(semi.win_rate_ex_zero)}</td></tr>` +
+          `<tr><td>连续盈亏段赔率(剔除零收益)</td><td>${_num(semi.payoff_ex_zero)}</td></tr>` +
+          `<tr><td>连续盈亏段凯利比(剔除零收益)</td><td>${_v(semi.kelly_ex_zero)}</td></tr>` +
+          `<tr><td>半方差（上行）</td><td>${_num(semi.upside_semivariance)}</td></tr>` +
+          `<tr><td>半方差（下行）</td><td>${_num(semi.downside_semivariance)}</td></tr>` +
+          `<tr><td>连续盈利最大值 / 最小值 / 均值</td><td>${_v(semiProfitRet.max)} / ${_v(semiProfitRet.min)} / ${_v(semiProfitRet.mean)}</td></tr>` +
+          `<tr><td>连续盈利分位数 P01 / P05 / P10</td><td>${_qText(semiProfitRetQ, _v, qLow)}</td></tr>` +
+          `<tr><td>连续盈利分位数 P25 / P50 / P75</td><td>${_qText(semiProfitRetQ, _v, qMid)}</td></tr>` +
+          `<tr><td>连续盈利分位数 P90 / P95 / P99</td><td>${_qText(semiProfitRetQ, _v, qHigh)}</td></tr>` +
+          `<tr><td>连续盈利最大次数 / 最小次数 / 次数均值</td><td>${_n(semiProfitCnt.max)} / ${_n(semiProfitCnt.min)} / ${_num(semiProfitCnt.mean)}</td></tr>` +
+          `<tr><td>连续盈利次数分位数 P01 / P05 / P10</td><td>${_qText(semiProfitCntQ, _num, qLow)}</td></tr>` +
+          `<tr><td>连续盈利次数分位数 P25 / P50 / P75</td><td>${_qText(semiProfitCntQ, _num, qMid)}</td></tr>` +
+          `<tr><td>连续盈利次数分位数 P90 / P95 / P99</td><td>${_qText(semiProfitCntQ, _num, qHigh)}</td></tr>` +
+          `<tr><td>连续亏损最大值 / 最小值 / 均值</td><td>${_v(semiLossRet.max)} / ${_v(semiLossRet.min)} / ${_v(semiLossRet.mean)}</td></tr>` +
+          `<tr><td>连续亏损分位数 P01 / P05 / P10</td><td>${_qText(semiLossRetQ, _v, qLow)}</td></tr>` +
+          `<tr><td>连续亏损分位数 P25 / P50 / P75</td><td>${_qText(semiLossRetQ, _v, qMid)}</td></tr>` +
+          `<tr><td>连续亏损分位数 P90 / P95 / P99</td><td>${_qText(semiLossRetQ, _v, qHigh)}</td></tr>` +
+          `<tr><td>连续亏损最大次数 / 最小次数 / 次数均值</td><td>${_n(semiLossCnt.max)} / ${_n(semiLossCnt.min)} / ${_num(semiLossCnt.mean)}</td></tr>` +
+          `<tr><td>连续亏损次数分位数 P01 / P05 / P10</td><td>${_qText(semiLossCntQ, _num, qLow)}</td></tr>` +
+          `<tr><td>连续亏损次数分位数 P25 / P50 / P75</td><td>${_qText(semiLossCntQ, _num, qMid)}</td></tr>` +
+          `<tr><td>连续亏损次数分位数 P90 / P95 / P99</td><td>${_qText(semiLossCntQ, _num, qHigh)}</td></tr>` +
           `<tr><td>动力入场拦截次数（总）</td><td>${_n(s.impulse_filter_blocked_entry_count)}</td></tr>` +
           `<tr><td>动力入场拦截次数（BULL）</td><td>${_n(s.impulse_filter_blocked_entry_count_bull)}</td></tr>` +
           `<tr><td>动力入场拦截次数（BEAR）</td><td>${_n(s.impulse_filter_blocked_entry_count_bear)}</td></tr>` +
@@ -21230,6 +21787,170 @@
             title,
             xaxis: { title: "每笔交易收益率", tickformat: ".1%" },
             yaxis: { title: "频数" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function _trendTradeMarksByCode(data) {
+        const stats =
+          data &&
+          data.trade_statistics &&
+          typeof data.trade_statistics === "object"
+            ? data.trade_statistics
+            : {};
+        const marksRoot =
+          stats.trade_marks_by_code &&
+          typeof stats.trade_marks_by_code === "object"
+            ? stats.trade_marks_by_code
+            : null;
+        if (marksRoot) return marksRoot;
+        const tradesByCode =
+          stats.trades_by_code && typeof stats.trades_by_code === "object"
+            ? stats.trades_by_code
+            : {};
+        const out = {};
+        for (const [code, rows] of Object.entries(tradesByCode)) {
+          const xs = Array.isArray(rows) ? rows : [];
+          out[String(code || "")] = xs
+            .map((tr) => ({
+              entry_date: String((tr && tr.entry_date) || ""),
+              exit_date: String((tr && tr.exit_date) || ""),
+              return: Number(tr && tr.return),
+              direction: String((tr && tr.direction) || ""),
+            }))
+            .filter((tr) => tr.entry_date && tr.exit_date);
+        }
+        return out;
+      }
+
+      function _renderTrendTradeByCodeNavMarks(data, code) {
+        const divId = "trendTradeByCodeNavMarks";
+        const div = $(divId);
+        if (!div) return;
+        const c = String(code || "").trim();
+        if (!c) {
+          div.innerHTML = "<div class='muted'>请选择标的。</div>";
+          return;
+        }
+        const navPack =
+          data && data.asset_nav_exec && typeof data.asset_nav_exec === "object"
+            ? data.asset_nav_exec
+            : {};
+        const navDates = Array.isArray(navPack.dates) ? navPack.dates : [];
+        const navSeriesRoot =
+          navPack.series && typeof navPack.series === "object"
+            ? navPack.series
+            : {};
+        let navSeries = Array.isArray(navSeriesRoot[c])
+          ? navSeriesRoot[c]
+          : null;
+        if (!navSeries || !navSeries.length) {
+          const strat =
+            data &&
+            data.nav &&
+            data.nav.series &&
+            Array.isArray(data.nav.series.STRAT)
+              ? data.nav.series.STRAT
+              : [];
+          navSeries = strat.length ? strat : null;
+        }
+        if (!navSeries || !navSeries.length || !navDates.length) {
+          div.innerHTML = "<div class='muted'>该标的暂无可用净值序列。</div>";
+          return;
+        }
+        const n = Math.min(navDates.length, navSeries.length);
+        const xs = [];
+        const ys = [];
+        const dateToNav = new Map();
+        for (let i = 0; i < n; i += 1) {
+          const d = String(navDates[i] || "");
+          const v = Number(navSeries[i]);
+          if (!d || !Number.isFinite(v)) continue;
+          xs.push(d);
+          ys.push(v);
+          dateToNav.set(d, v);
+        }
+        if (!xs.length) {
+          div.innerHTML = "<div class='muted'>该标的暂无可用净值序列。</div>";
+          return;
+        }
+        const markMap = _trendTradeMarksByCode(data);
+        const marks = Array.isArray(markMap[c]) ? markMap[c] : [];
+        const entryX = [];
+        const entryY = [];
+        const exitX = [];
+        const exitY = [];
+        const shapes = [];
+        for (const tr of marks) {
+          const d0 = String((tr && tr.entry_date) || "");
+          const d1 = String((tr && tr.exit_date) || "");
+          if (!d0 || !d1) continue;
+          shapes.push({
+            type: "rect",
+            xref: "x",
+            yref: "paper",
+            x0: d0,
+            x1: d1,
+            y0: 0,
+            y1: 1,
+            fillcolor: "rgba(255, 215, 0, 0.22)",
+            line: { width: 0 },
+            layer: "below",
+          });
+          const y0 = dateToNav.get(d0);
+          if (Number.isFinite(y0)) {
+            entryX.push(d0);
+            entryY.push(y0);
+          }
+          const y1 = dateToNav.get(d1);
+          if (Number.isFinite(y1)) {
+            exitX.push(d1);
+            exitY.push(y1);
+          }
+        }
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              type: "scatter",
+              mode: "lines",
+              x: xs,
+              y: ys,
+              line: { color: "#1f77b4", width: 2 },
+              name: "净值",
+              hovertemplate: "日期=%{x}<br>净值=%{y:.4f}<extra></extra>",
+            },
+            {
+              type: "scatter",
+              mode: "markers+text",
+              x: entryX,
+              y: entryY,
+              text: entryX.map(() => "B"),
+              textposition: "top center",
+              marker: { color: "#2ca02c", size: 8, symbol: "triangle-up" },
+              name: "入场(B)",
+              hovertemplate: "入场=%{x}<br>净值=%{y:.4f}<extra></extra>",
+            },
+            {
+              type: "scatter",
+              mode: "markers+text",
+              x: exitX,
+              y: exitY,
+              text: exitX.map(() => "S"),
+              textposition: "bottom center",
+              marker: { color: "#d62728", size: 8, symbol: "triangle-down" },
+              name: "出场(S)",
+              hovertemplate: "出场=%{x}<br>净值=%{y:.4f}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 34, b: 40 },
+            title: `${codeLabel(c)}：净值与逐笔交易(B/S)`,
+            xaxis: { title: "日期" },
+            yaxis: { title: "净值" },
+            shapes,
+            legend: { orientation: "h" },
           },
           { responsive: true, displayModeBar: false },
         );
@@ -22486,6 +23207,7 @@
           if ($(byCodeSel)) $(byCodeSel).innerHTML = "";
           _renderTradeStatsTable(byCodeTable, {});
           _renderTradeHist(byCodeHist, [], "无数据");
+          if (p === "trend") _renderTrendTradeByCodeNavMarks(null, "");
           _renderTradeStatsDebug(p, null);
           if (p === "trend") _renderTrendRiskTradeRecords(null);
           if (p === "trend") _renderTrendRiskBudgetOvercapDailyChart(null);
@@ -22521,12 +23243,14 @@
               s.returns || [],
               `${codeLabel(c)}：每笔交易收益分布`,
             );
+            if (p === "trend") _renderTrendTradeByCodeNavMarks(data, c);
           };
           sel.onchange = update;
           if (codes.length) update();
           else {
             _renderTradeStatsTable(byCodeTable, {});
             _renderTradeHist(byCodeHist, [], "无数据");
+            if (p === "trend") _renderTrendTradeByCodeNavMarks(data, "");
           }
         }
         _renderTradeStatsDebug(p, data);
@@ -27441,6 +28165,376 @@
         return data;
       }
 
+      function _collectTrendResearchParamsForExport() {
+        const mode =
+          $("trendMode") && $("trendMode").value
+            ? String($("trendMode").value)
+            : "single";
+        const strategy =
+          $("trendStrategy") && $("trendStrategy").value
+            ? String($("trendStrategy").value)
+            : "ma_filter";
+        const start = String(($("start") && $("start").value) || "").trim();
+        const end = String(($("end") && $("end").value) || "").trim();
+        const rfRaw = String(($("rf") && $("rf").value) || "").trim();
+        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
+        if (Number.isFinite(risk_free_rate) && risk_free_rate > 1.0) {
+          risk_free_rate = risk_free_rate / 100.0;
+        }
+        const position_sizing =
+          $("trendSizing") && $("trendSizing").value
+            ? String($("trendSizing").value)
+            : "equal";
+        const selectedCodes = _codesForStrategy("trend");
+        const singleSel = $("trendSingleCode");
+        const chosen = singleSel ? String(singleSel.value || "").trim() : "";
+        const singleCode =
+          chosen && selectedCodes.includes(chosen)
+            ? chosen
+            : selectedCodes.length > 0
+              ? selectedCodes[0]
+              : "";
+        const assetGroupsRaw =
+          $("trendAssetGroups") && $("trendAssetGroups").value
+            ? String($("trendAssetGroups").value)
+            : "";
+        const rTiersRaw =
+          $("trendRTpTiers") && $("trendRTpTiers").value
+            ? String($("trendRTpTiers").value)
+            : "";
+        const parsedRTiers = _parseRTpTiers(rTiersRaw);
+        const parsedAssetGroups =
+          mode === "portfolio"
+            ? _parseAssetGroupsFromText(assetGroupsRaw)
+            : null;
+        const common = {
+          start,
+          end,
+          risk_free_rate,
+          cost_bps: Number(($("trendCost").value || "2").trim()),
+          slippage_rate: Number(($("trendSlippage").value || "0.001").trim()),
+          quick_mode: !!($("trendQuickMode") && $("trendQuickMode").checked),
+          engine:
+            $("trendEngine") && $("trendEngine").value
+              ? String($("trendEngine").value).trim().toLowerCase()
+              : "legacy",
+          exec_price:
+            $("trendExecPrice") && $("trendExecPrice").value
+              ? String($("trendExecPrice").value)
+              : "open",
+          strategy,
+          sma_window: Number(($("trendSmaWin").value || "200").trim()),
+          fast_window: Number(($("trendFastWin").value || "50").trim()),
+          slow_window: Number(($("trendSlowWin").value || "200").trim()),
+          ma_type:
+            $("trendMaType") && $("trendMaType").value
+              ? String($("trendMaType").value)
+              : "sma",
+          kama_er_window: Number(($("trendKamaErWindow").value || "10").trim()),
+          kama_fast_window: Number(
+            ($("trendKamaFastWindow").value || "2").trim(),
+          ),
+          kama_slow_window: Number(
+            ($("trendKamaSlowWindow").value || "30").trim(),
+          ),
+          kama_std_window: Number(
+            ($("trendKamaStdWindow").value || "20").trim(),
+          ),
+          kama_std_coef: Number(($("trendKamaStdCoef").value || "1.0").trim()),
+          donchian_entry: Number(($("trendDonEntry").value || "20").trim()),
+          donchian_exit: Number(($("trendDonExit").value || "10").trim()),
+          mom_lookback: Number(($("trendMomLb").value || "252").trim()),
+          tsmom_entry_threshold: Number(
+            ($("trendMomEntryThr").value || "0.0").trim(),
+          ),
+          tsmom_exit_threshold: Number(
+            ($("trendMomExitThr").value || "0.0").trim(),
+          ),
+          impulse_entry_filter:
+            $("trendImpulseEntryFilterOn") &&
+            $("trendImpulseEntryFilterOn").value === "true",
+          impulse_allow_bull:
+            $("trendImpulseAllowBull") &&
+            $("trendImpulseAllowBull").value === "true",
+          impulse_allow_bear:
+            $("trendImpulseAllowBear") &&
+            $("trendImpulseAllowBear").value === "true",
+          impulse_allow_neutral:
+            $("trendImpulseAllowNeutral") &&
+            $("trendImpulseAllowNeutral").value === "true",
+          er_filter:
+            $("trendErFilterOn") && $("trendErFilterOn").value === "true",
+          er_window: Number(($("trendErWindow").value || "10").trim()),
+          er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),
+          er_exit_filter:
+            $("trendErExitFilterOn") &&
+            $("trendErExitFilterOn").value === "true",
+          er_exit_window: Number(($("trendErExitWindow").value || "10").trim()),
+          er_exit_threshold: Number(
+            ($("trendErExitThreshold").value || "0.88").trim(),
+          ),
+          bias_ma_window: Number(($("trendBiasMaWin").value || "20").trim()),
+          bias_entry: Number(($("trendBiasEntry").value || "2.0").trim()),
+          bias_hot: Number(($("trendBiasHot").value || "10.0").trim()),
+          bias_cold: Number(($("trendBiasCold").value || "-2.0").trim()),
+          bias_pos_mode:
+            $("trendBiasPosMode") && $("trendBiasPosMode").value
+              ? String($("trendBiasPosMode").value)
+              : "binary",
+          macd_fast: Number(($("trendMacdFast").value || "12").trim()),
+          macd_slow: Number(($("trendMacdSlow").value || "26").trim()),
+          macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
+          macd_v_atr_window: Number(($("trendMacdVAtr").value || "26").trim()),
+          macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
+          random_hold_days: Number(
+            ($("trendRandomHoldDays").value || "20").trim(),
+          ),
+          random_seed:
+            ($("trendRandomSeed").value || "").trim() === ""
+              ? null
+              : Number(($("trendRandomSeed").value || "").trim()),
+          atr_stop_mode:
+            $("trendAtrStopMode") && $("trendAtrStopMode").value
+              ? String($("trendAtrStopMode").value)
+              : "none",
+          atr_stop_atr_basis:
+            $("trendAtrStopBasis") && $("trendAtrStopBasis").value
+              ? String($("trendAtrStopBasis").value)
+              : "latest",
+          atr_stop_reentry_mode:
+            $("trendAtrStopReentry") && $("trendAtrStopReentry").value
+              ? String($("trendAtrStopReentry").value)
+              : "reenter",
+          atr_stop_execution_mode:
+            $("trendAtrStopExec") && $("trendAtrStopExec").value
+              ? String($("trendAtrStopExec").value)
+              : "intraday",
+          atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
+          atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
+          atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
+          r_take_profit_enabled:
+            $("trendRTpEnable") && $("trendRTpEnable").value
+              ? String($("trendRTpEnable").value) === "true"
+              : false,
+          r_take_profit_reentry_mode:
+            $("trendRTpReentry") && $("trendRTpReentry").value
+              ? String($("trendRTpReentry").value)
+              : "reenter",
+          r_take_profit_execution_mode:
+            $("trendRTpExec") && $("trendRTpExec").value
+              ? String($("trendRTpExec").value)
+              : "intraday",
+          r_take_profit_tiers:
+            parsedRTiers && !parsedRTiers.__error
+              ? parsedRTiers.tiers || []
+              : [],
+          bias_v_take_profit_enabled:
+            $("trendBiasVTpEnable") && $("trendBiasVTpEnable").value
+              ? String($("trendBiasVTpEnable").value) === "true"
+              : false,
+          bias_v_take_profit_reentry_mode:
+            $("trendBiasVTpReentry") && $("trendBiasVTpReentry").value
+              ? String($("trendBiasVTpReentry").value)
+              : "reenter",
+          bias_v_take_profit_execution_mode:
+            $("trendBiasVTpExec") && $("trendBiasVTpExec").value
+              ? String($("trendBiasVTpExec").value)
+              : "intraday",
+          bias_v_ma_window: Number(
+            ($("trendBiasVTpMaWin") && $("trendBiasVTpMaWin").value
+              ? $("trendBiasVTpMaWin").value
+              : "20"
+            ).trim(),
+          ),
+          bias_v_atr_window: Number(
+            ($("trendBiasVTpAtrWin") && $("trendBiasVTpAtrWin").value
+              ? $("trendBiasVTpAtrWin").value
+              : "20"
+            ).trim(),
+          ),
+          bias_v_take_profit_threshold: Number(
+            ($("trendBiasVTpThreshold") && $("trendBiasVTpThreshold").value
+              ? $("trendBiasVTpThreshold").value
+              : "5.0"
+            ).trim(),
+          ),
+          monthly_risk_budget_enabled:
+            $("trendMonthlyRiskBudgetEnable") &&
+            $("trendMonthlyRiskBudgetEnable").value
+              ? String($("trendMonthlyRiskBudgetEnable").value) === "true"
+              : false,
+          monthly_risk_budget_pct: Number(
+            ($("trendMonthlyRiskBudgetPct") &&
+            $("trendMonthlyRiskBudgetPct").value
+              ? $("trendMonthlyRiskBudgetPct").value
+              : "6"
+            ).trim(),
+          ),
+          monthly_risk_budget_include_new_trade_risk:
+            $("trendMonthlyRiskBudgetIncludeNewRisk") &&
+            $("trendMonthlyRiskBudgetIncludeNewRisk").value
+              ? String($("trendMonthlyRiskBudgetIncludeNewRisk").value) ===
+                "true"
+              : false,
+          fixed_pos_ratio: Number(
+            ($("trendFixedPosRatio") && $("trendFixedPosRatio").value
+              ? $("trendFixedPosRatio").value
+              : "0.04"
+            ).trim(),
+          ),
+          fixed_overcap_policy:
+            $("trendFixedOvercapPolicy") && $("trendFixedOvercapPolicy").value
+              ? String($("trendFixedOvercapPolicy").value)
+              : "skip",
+          fixed_max_holdings: Number(
+            ($("trendFixedMaxHoldings") && $("trendFixedMaxHoldings").value
+              ? $("trendFixedMaxHoldings").value
+              : "10"
+            ).trim(),
+          ),
+          risk_budget_atr_window: Number(
+            ($("trendRiskBudgetAtrWin") && $("trendRiskBudgetAtrWin").value
+              ? $("trendRiskBudgetAtrWin").value
+              : "20"
+            ).trim(),
+          ),
+          risk_budget_pct: Number(
+            ($("trendRiskBudgetPct") && $("trendRiskBudgetPct").value
+              ? $("trendRiskBudgetPct").value
+              : "1"
+            ).trim(),
+          ),
+          risk_budget_overcap_policy:
+            $("trendRiskBudgetOvercapPolicy") &&
+            $("trendRiskBudgetOvercapPolicy").value
+              ? String($("trendRiskBudgetOvercapPolicy").value)
+              : "scale",
+          risk_budget_max_leverage_multiple: Number(
+            ($("trendRiskBudgetMaxLeverage") &&
+            $("trendRiskBudgetMaxLeverage").value
+              ? $("trendRiskBudgetMaxLeverage").value
+              : "2.0"
+            ).trim(),
+          ),
+          vol_regime_risk_mgmt_enabled:
+            $("trendVolRegimeRiskMgmtEnable") &&
+            $("trendVolRegimeRiskMgmtEnable").value
+              ? String($("trendVolRegimeRiskMgmtEnable").value) === "true"
+              : false,
+          vol_ratio_fast_atr_window: Number(
+            ($("trendVolRatioFastAtrWindow") &&
+            $("trendVolRatioFastAtrWindow").value
+              ? $("trendVolRatioFastAtrWindow").value
+              : "5"
+            ).trim(),
+          ),
+          vol_ratio_slow_atr_window: Number(
+            ($("trendVolRatioSlowAtrWindow") &&
+            $("trendVolRatioSlowAtrWindow").value
+              ? $("trendVolRatioSlowAtrWindow").value
+              : "50"
+            ).trim(),
+          ),
+          vol_ratio_expand_threshold: Number(
+            ($("trendVolRatioExpandThreshold") &&
+            $("trendVolRatioExpandThreshold").value
+              ? $("trendVolRatioExpandThreshold").value
+              : "1.45"
+            ).trim(),
+          ),
+          vol_ratio_contract_threshold: Number(
+            ($("trendVolRatioContractThreshold") &&
+            $("trendVolRatioContractThreshold").value
+              ? $("trendVolRatioContractThreshold").value
+              : "0.65"
+            ).trim(),
+          ),
+          vol_ratio_normal_threshold: Number(
+            ($("trendVolRatioNormalThreshold") &&
+            $("trendVolRatioNormalThreshold").value
+              ? $("trendVolRatioNormalThreshold").value
+              : "0.95"
+            ).trim(),
+          ),
+          vol_ratio_extreme_threshold: Number(
+            ($("trendVolRatioExtremeThreshold") &&
+            $("trendVolRatioExtremeThreshold").value
+              ? $("trendVolRatioExtremeThreshold").value
+              : "2.2"
+            ).trim(),
+          ),
+          risk_of_ruin_maxrisk: Number(
+            ($("trendRiskOfRuinMaxrisk") && $("trendRiskOfRuinMaxrisk").value
+              ? $("trendRiskOfRuinMaxrisk").value
+              : "30"
+            ).trim(),
+          ),
+          group_enforce:
+            $("trendGroupEnforce") && $("trendGroupEnforce").value === "true",
+          group_pick_policy:
+            $("trendGroupPolicy") && $("trendGroupPolicy").value
+              ? String($("trendGroupPolicy").value)
+              : "highest_sharpe",
+          group_max_holdings: Number(
+            ($("trendGroupMaxHoldings") && $("trendGroupMaxHoldings").value
+              ? $("trendGroupMaxHoldings").value
+              : "4"
+            ).trim(),
+          ),
+          asset_groups:
+            mode === "portfolio" &&
+            parsedAssetGroups &&
+            !parsedAssetGroups.__error
+              ? parsedAssetGroups
+              : null,
+        };
+        const apiPayload =
+          mode === "portfolio"
+            ? {
+                codes: selectedCodes,
+                position_sizing,
+                dynamic_universe: isDynamicUniverseOn(),
+                ...common,
+              }
+            : {
+                code: singleCode,
+                position_sizing,
+                ...common,
+              };
+        return {
+          group_name: String(
+            ($("trendGroupPreset") && $("trendGroupPreset").value) || "",
+          ).trim(),
+          backtest_range: { start, end },
+          dynamic_universe: isDynamicUniverseOn(),
+          mode,
+          selected_codes: selectedCodes,
+          single_code: singleCode || null,
+          position_sizing,
+          asset_groups_text: assetGroupsRaw,
+          asset_groups_parse_error:
+            parsedAssetGroups && parsedAssetGroups.__error
+              ? String(parsedAssetGroups.__error)
+              : null,
+          r_take_profit_tiers_text: rTiersRaw,
+          r_take_profit_tiers_parse_error:
+            parsedRTiers && parsedRTiers.__error
+              ? String(parsedRTiers.__error)
+              : null,
+          exported_at: new Date().toISOString(),
+          api_payload: apiPayload,
+        };
+      }
+
+      function exportTrendParamsJson() {
+        const ta = $("trendExportParamsText");
+        const wrap = $("trendExportParamsWrap");
+        if (!ta) return;
+        const payload = _collectTrendResearchParamsForExport();
+        ta.value = JSON.stringify(payload, null, 2);
+        if (wrap) wrap.open = true;
+      }
+
       async function runTrendResearch() {
         const mode =
           $("trendMode") && $("trendMode").value
@@ -27561,6 +28655,10 @@
             $("trendAtrStopReentry") && $("trendAtrStopReentry").value
               ? String($("trendAtrStopReentry").value)
               : "reenter",
+          atr_stop_execution_mode:
+            $("trendAtrStopExec") && $("trendAtrStopExec").value
+              ? String($("trendAtrStopExec").value)
+              : "intraday",
           atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
           atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
           atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
@@ -27572,6 +28670,10 @@
             $("trendRTpReentry") && $("trendRTpReentry").value
               ? String($("trendRTpReentry").value)
               : "reenter",
+          r_take_profit_execution_mode:
+            $("trendRTpExec") && $("trendRTpExec").value
+              ? String($("trendRTpExec").value)
+              : "intraday",
           r_take_profit_tiers: [],
           bias_v_take_profit_enabled:
             $("trendBiasVTpEnable") && $("trendBiasVTpEnable").value
@@ -27581,6 +28683,10 @@
             $("trendBiasVTpReentry") && $("trendBiasVTpReentry").value
               ? String($("trendBiasVTpReentry").value)
               : "reenter",
+          bias_v_take_profit_execution_mode:
+            $("trendBiasVTpExec") && $("trendBiasVTpExec").value
+              ? String($("trendBiasVTpExec").value)
+              : "intraday",
           bias_v_ma_window: Number(
             ($("trendBiasVTpMaWin") && $("trendBiasVTpMaWin").value
               ? $("trendBiasVTpMaWin").value
@@ -27697,6 +28803,19 @@
               : "0.95"
             ).trim(),
           ),
+          vol_ratio_extreme_threshold: Number(
+            ($("trendVolRatioExtremeThreshold") &&
+            $("trendVolRatioExtremeThreshold").value
+              ? $("trendVolRatioExtremeThreshold").value
+              : "2.2"
+            ).trim(),
+          ),
+          risk_of_ruin_maxrisk: Number(
+            ($("trendRiskOfRuinMaxrisk") && $("trendRiskOfRuinMaxrisk").value
+              ? $("trendRiskOfRuinMaxrisk").value
+              : "30"
+            ).trim(),
+          ),
           group_enforce:
             $("trendGroupEnforce") && $("trendGroupEnforce").value === "true",
           group_pick_policy:
@@ -27751,6 +28870,13 @@
           return setMsg("止损后重入模式非法，请选择 允许重返/等待下一次入场");
         }
         if (
+          !["intraday", "next_day"].includes(
+            String(common.atr_stop_execution_mode),
+          )
+        ) {
+          return setMsg("ATR止损执行模式非法，请选择 日内执行/次日执行");
+        }
+        if (
           !Number.isFinite(common.atr_stop_window) ||
           common.atr_stop_window < 2
         ) {
@@ -27774,6 +28900,13 @@
           )
         ) {
           return setMsg("R止盈重入模式非法，请选择 允许重返/等待下一次入场");
+        }
+        if (
+          !["intraday", "next_day"].includes(
+            String(common.r_take_profit_execution_mode),
+          )
+        ) {
+          return setMsg("R止盈执行模式非法，请选择 日内执行/次日执行");
         }
         if (common.r_take_profit_enabled) {
           const parsed = _parseRTpTiers(
@@ -27800,6 +28933,13 @@
           return setMsg(
             "BIAS-V止盈重入模式非法，请选择 允许重返/等待下一次入场",
           );
+        }
+        if (
+          !["intraday", "next_day"].includes(
+            String(common.bias_v_take_profit_execution_mode),
+          )
+        ) {
+          return setMsg("BIAS-V止盈执行模式非法，请选择 日内执行/次日执行");
         }
         if (
           !Number.isFinite(common.bias_v_ma_window) ||
@@ -27869,6 +29009,19 @@
         if (common.risk_budget_pct < 0.001 || common.risk_budget_pct > 0.02) {
           return setMsg("风险预算%需在0.1%~2%之间");
         }
+        if (!Number.isFinite(common.risk_of_ruin_maxrisk)) {
+          return setMsg("毁灭阈值maxrisk需为数字");
+        }
+        common.risk_of_ruin_maxrisk =
+          common.risk_of_ruin_maxrisk > 1.0
+            ? common.risk_of_ruin_maxrisk / 100.0
+            : common.risk_of_ruin_maxrisk;
+        if (
+          common.risk_of_ruin_maxrisk <= 0.0 ||
+          common.risk_of_ruin_maxrisk > 1.0
+        ) {
+          return setMsg("毁灭阈值maxrisk需在(0,100]%之间");
+        }
         if (
           !["scale", "skip_entry", "replace_entry", "leverage_entry"].includes(
             String(common.risk_budget_overcap_policy),
@@ -27922,6 +29075,12 @@
           return setMsg("回归正常阈值需为>0数字");
         }
         if (
+          !Number.isFinite(common.vol_ratio_extreme_threshold) ||
+          common.vol_ratio_extreme_threshold <= 0
+        ) {
+          return setMsg("极大波动阈值需为>0数字");
+        }
+        if (
           !(
             common.vol_ratio_expand_threshold >
             common.vol_ratio_normal_threshold
@@ -27936,6 +29095,14 @@
           )
         ) {
           return setMsg("阈值约束错误：缩小阈值需小于回归正常阈值");
+        }
+        if (
+          !(
+            common.vol_ratio_extreme_threshold >
+            common.vol_ratio_expand_threshold
+          )
+        ) {
+          return setMsg("阈值约束错误：极大波动阈值需大于放大阈值");
         }
         if (
           !["earliest_entry", "highest_sharpe"].includes(
@@ -32680,6 +33847,11 @@
         $("runRotNextPlan").addEventListener("click", runRotNextExecutionPlan);
       if ($("runTrendResearch"))
         $("runTrendResearch").addEventListener("click", runTrendResearch);
+      if ($("exportTrendParamsJson"))
+        $("exportTrendParamsJson").addEventListener(
+          "click",
+          exportTrendParamsJson,
+        );
       if ($("runStrategyMix"))
         $("runStrategyMix").addEventListener("click", runStrategyMix);
       if ($("mixRefreshLeafStrategies")) {

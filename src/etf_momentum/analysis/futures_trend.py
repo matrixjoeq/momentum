@@ -1444,6 +1444,26 @@ def compute_futures_group_trend_backtest(
         st["atr_stop_trigger_multiple_values"] = [
             float(x) for x in am if np.isfinite(float(x))
         ]
+        st["trade_marks"] = [
+            {
+                "code": str(r.get("code") or ""),
+                "direction": str(r.get("direction") or ""),
+                "entry_date": str(r.get("entry_date") or ""),
+                "exit_date": str(r.get("exit_date") or ""),
+                "return": (
+                    None
+                    if r.get("return") is None
+                    else (
+                        float(r.get("return"))
+                        if np.isfinite(float(r.get("return")))
+                        else None
+                    )
+                ),
+            }
+            for r in rows
+            if str(r.get("entry_date") or "").strip()
+            and str(r.get("exit_date") or "").strip()
+        ]
         return st
 
     trade_statistics = {
@@ -1488,6 +1508,16 @@ def compute_futures_group_trend_backtest(
             for d, v in series.items()
             if pd.notna(v)
         ]
+
+    symbol_nav_by_code: dict[str, list[dict[str, Any]]] = {}
+    for c in sorted(exec_by_code.keys()):
+        ex = exec_aligned.get(c)
+        if ex is None or "Close" not in ex.columns:
+            continue
+        close_ser = ex["Close"].reindex(common_idx).astype(float)
+        ret_ser = close_ser.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        nav_ser = (1.0 + ret_ser).cumprod().fillna(1.0)
+        symbol_nav_by_code[str(c)] = _series_rows(nav_ser)
 
     return {
         "ok": True,
@@ -1569,6 +1599,7 @@ def compute_futures_group_trend_backtest(
         "series": {
             "strategy_nav": _series_rows(group_nav),
             "benchmark_nav": _series_rows(bench_nav),
+            "symbol_nav_by_code": symbol_nav_by_code,
         },
         "summary": {
             "strategy_total_return": float(group_nav.iloc[-1] - 1.0),

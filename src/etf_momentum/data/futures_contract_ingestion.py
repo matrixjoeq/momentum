@@ -293,6 +293,14 @@ def ingest_contracts_for_pool(
     pool = get_futures_pool_by_code(db, pool_code)
     if pool is None:
         return "pool not found"
+    ui_fetch_type = str(main_fetch_type or "incremental").strip().lower()
+    mark_futures_contract_pool_fetch(
+        db,
+        code=pool_code,
+        status="running",
+        message=f"started contract fetch ({ui_fetch_type})",
+    )
+    db.commit()
 
     main_rng = get_futures_date_range(db, code=pool_code, adjust="none")
     if main_rng[0] is None or main_rng[1] is None:
@@ -317,7 +325,6 @@ def ingest_contracts_for_pool(
         main_end=main_rng[1],
         extend_calendar_days=extend_days,
     )
-    ui_fetch_type = str(main_fetch_type or "incremental").strip().lower()
 
     if ui_fetch_type == "full":
         for c in contracts:
