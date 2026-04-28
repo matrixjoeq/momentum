@@ -3834,11 +3834,30 @@ def _apply_intraday_scaleout_execution_single(
     scaleout_stats: dict[str, Any],
     exec_price: str,
     execution_mode: str | None = None,
+    scale_multiplier_mode: str = "absolute",
     open_sig: pd.Series,
     close_sig: pd.Series,
 ) -> tuple[pd.Series, pd.Series]:
     w0 = weights.astype(float).copy()
-    mult = scale_multiplier.reindex(w0.index).astype(float).fillna(1.0).clip(lower=0.0)
+    mult_abs = (
+        scale_multiplier.reindex(w0.index).astype(float).fillna(1.0).clip(lower=0.0)
+    )
+    mult_mode_v = str(scale_multiplier_mode or "absolute").strip().lower()
+    if mult_mode_v not in {"absolute", "incremental_from_prev"}:
+        mult_mode_v = "absolute"
+    if mult_mode_v == "incremental_from_prev":
+        prev_mult = mult_abs.shift(1).fillna(1.0).clip(lower=0.0)
+        mult = (
+            (mult_abs / prev_mult.replace(0.0, np.nan))
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(1.0)
+            .clip(lower=0.0)
+            .astype(float)
+        )
+        sold_denom = prev_mult.astype(float)
+    else:
+        mult = mult_abs.astype(float)
+        sold_denom = pd.Series(1.0, index=w0.index, dtype=float)
     w_adj = (w0 * mult).astype(float)
     override = pd.Series(0.0, index=w0.index, dtype=float)
     events = list((scaleout_stats or {}).get("trigger_events") or [])
@@ -3863,7 +3882,17 @@ def _apply_intraday_scaleout_execution_single(
         base_w = float(w0.loc[d]) if np.isfinite(float(w0.loc[d])) else 0.0
         if base_w <= 1e-12:
             continue
-        sold_w = float(max(0.0, base_w) * sold_frac_f)
+        sold_denom_f = (
+            float(sold_denom.loc[d])
+            if (
+                d in sold_denom.index
+                and np.isfinite(float(sold_denom.loc[d]))
+                and float(sold_denom.loc[d]) > 1e-12
+            )
+            else 1.0
+        )
+        sold_w = float(max(0.0, base_w) * sold_frac_f / sold_denom_f)
+        sold_w = float(min(max(0.0, base_w), max(0.0, sold_w)))
         if sold_w <= 1e-12:
             continue
         fill_raw = e.get("fill_price")
@@ -3910,16 +3939,33 @@ def _apply_intraday_scaleout_execution_portfolio(
     scaleout_by_asset: dict[str, dict[str, Any]],
     exec_price: str,
     execution_mode: str | None = None,
+    scale_multiplier_mode: str = "absolute",
     open_sig_df: pd.DataFrame,
     close_sig_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.Series]:
     w0 = weights.astype(float).copy()
-    mult = (
+    mult_abs = (
         scale_multiplier_df.reindex(index=w0.index, columns=w0.columns)
         .astype(float)
         .fillna(1.0)
         .clip(lower=0.0)
     )
+    mult_mode_v = str(scale_multiplier_mode or "absolute").strip().lower()
+    if mult_mode_v not in {"absolute", "incremental_from_prev"}:
+        mult_mode_v = "absolute"
+    if mult_mode_v == "incremental_from_prev":
+        prev_mult = mult_abs.shift(1).fillna(1.0).clip(lower=0.0)
+        mult = (
+            (mult_abs / prev_mult.replace(0.0, np.nan))
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(1.0)
+            .clip(lower=0.0)
+            .astype(float)
+        )
+        sold_denom_df = prev_mult.astype(float)
+    else:
+        mult = mult_abs.astype(float)
+        sold_denom_df = pd.DataFrame(1.0, index=w0.index, columns=w0.columns)
     w_adj = (w0 * mult).astype(float)
     override = pd.Series(0.0, index=w0.index, dtype=float)
     prev_close_df = close_sig_df.astype(float).shift(1)
@@ -3946,7 +3992,18 @@ def _apply_intraday_scaleout_execution_portfolio(
             base_w = float(w0.loc[d, c]) if np.isfinite(float(w0.loc[d, c])) else 0.0
             if base_w <= 1e-12:
                 continue
-            sold_w = float(max(0.0, base_w) * sold_frac_f)
+            sold_denom_f = (
+                float(sold_denom_df.loc[d, c])
+                if (
+                    d in sold_denom_df.index
+                    and c in sold_denom_df.columns
+                    and np.isfinite(float(sold_denom_df.loc[d, c]))
+                    and float(sold_denom_df.loc[d, c]) > 1e-12
+                )
+                else 1.0
+            )
+            sold_w = float(max(0.0, base_w) * sold_frac_f / sold_denom_f)
+            sold_w = float(min(max(0.0, base_w), max(0.0, sold_w)))
             if sold_w <= 1e-12:
                 continue
             fill_raw = e.get("fill_price")
@@ -6247,6 +6304,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         weight_in: pd.Series,
         *,
         mode: str,
+        scale_multiplier_mode: str = "absolute",
     ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
         w_tmp = weight_in.astype(float).copy()
         w_tmp, atr_over = _apply_intraday_stop_execution_single(
@@ -6279,6 +6337,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             scaleout_stats=r_profit_scaleout_stats,
             exec_price=str(mode),
             execution_mode=rps_execution_mode,
+            scale_multiplier_mode=scale_multiplier_mode,
             open_sig=open_sig_for_stop,
             close_sig=close_sig_for_stop,
         )
@@ -6349,12 +6408,20 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             bias_v_take_profit_override_ret,
             r_take_profit_override_ret,
             r_profit_scaleout_override_ret,
-        ) = _apply_all_intraday_overlays(w_close_base, mode="close")
+        ) = _apply_all_intraday_overlays(
+            w_close_base,
+            mode="close",
+            scale_multiplier_mode="incremental_from_prev",
+        )
         ret_exec_day = ret_exec_close_day.astype(float)
     elif ep == "oc2":
         w_close_base = w.shift(1).fillna(0.0).astype(float)
         w_close, atr_over_close, bias_over_close, rtp_over_close, rps_over_close = (
-            _apply_all_intraday_overlays(w_close_base, mode="close")
+            _apply_all_intraday_overlays(
+                w_close_base,
+                mode="close",
+                scale_multiplier_mode="incremental_from_prev",
+            )
         )
         w_ret = (0.5 * (w + w_close)).astype(float)
         ret_exec_day = (0.5 * (ret_exec_open_day + ret_exec_close_day)).astype(float)
@@ -9307,6 +9374,7 @@ def compute_trend_portfolio_backtest(
         weight_in: pd.DataFrame,
         *,
         mode: str,
+        scale_multiplier_mode: str = "absolute",
     ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series]:
         w_tmp = weight_in.astype(float).copy()
         w_tmp, atr_over = _apply_intraday_stop_execution_portfolio(
@@ -9339,6 +9407,7 @@ def compute_trend_portfolio_backtest(
             scaleout_by_asset=r_profit_scaleout_by_asset,
             exec_price=str(mode),
             execution_mode=rps_execution_mode,
+            scale_multiplier_mode=scale_multiplier_mode,
             open_sig_df=open_sig_df_for_stop,
             close_sig_df=close_sig_df_for_stop,
         )
@@ -9453,12 +9522,20 @@ def compute_trend_portfolio_backtest(
             bias_v_take_profit_override_ret,
             r_take_profit_override_ret,
             r_profit_scaleout_override_ret,
-        ) = _apply_all_intraday_overlays_df(w_close_base, mode="close")
+        ) = _apply_all_intraday_overlays_df(
+            w_close_base,
+            mode="close",
+            scale_multiplier_mode="incremental_from_prev",
+        )
         ret_exec_day = ret_exec_close_day.astype(float)
     elif ep == "oc2":
         w_close_base = w.shift(1).fillna(0.0).astype(float)
         w_close, atr_over_close, bias_over_close, rtp_over_close, rps_over_close = (
-            _apply_all_intraday_overlays_df(w_close_base, mode="close")
+            _apply_all_intraday_overlays_df(
+                w_close_base,
+                mode="close",
+                scale_multiplier_mode="incremental_from_prev",
+            )
         )
         w_ret = (0.5 * (w + w_close)).astype(float)
         ret_exec_day = (0.5 * (ret_exec_open_day + ret_exec_close_day)).astype(float)

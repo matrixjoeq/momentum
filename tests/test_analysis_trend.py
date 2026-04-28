@@ -13,6 +13,8 @@ from etf_momentum.analysis.trend import (
     _apply_impulse_entry_filter,
     _apply_atr_stop,
     _apply_intraday_stop_execution_single,
+    _apply_intraday_scaleout_execution_single,
+    _apply_intraday_scaleout_execution_portfolio,
     _apply_r_multiple_take_profit,
     _apply_bias_v_take_profit,
     _position_risk_from_stop_params,
@@ -138,6 +140,106 @@ def test_vol_regime_state_machine_allows_direct_cross_tier_jumps() -> None:
         )
         == "INCREASED"
     )
+
+
+def test_scaleout_single_incremental_mode_respects_prior_remaining_fraction() -> None:
+    idx = pd.date_range("2024-01-01", periods=3, freq="B")
+    weights = pd.Series([0.0, 0.60, 0.45], index=idx, dtype=float)
+    scale_multiplier = pd.Series([0.60, 0.30, 0.10], index=idx, dtype=float)
+    scaleout_stats = {
+        "trigger_events": [
+            {
+                "date": idx[1].date().isoformat(),
+                "execution_date": idx[1].date().isoformat(),
+                "execution_mode": "intraday",
+                "fill_price": 110.0,
+                "reduce_fraction": 0.30,
+            },
+            {
+                "date": idx[2].date().isoformat(),
+                "execution_date": idx[2].date().isoformat(),
+                "execution_mode": "intraday",
+                "fill_price": 110.0,
+                "reduce_fraction": 0.20,
+            },
+        ]
+    }
+    open_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    close_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+
+    w_adj, override = _apply_intraday_scaleout_execution_single(
+        weights=weights,
+        scale_multiplier=scale_multiplier,
+        scaleout_stats=scaleout_stats,
+        exec_price="close",
+        execution_mode="intraday",
+        scale_multiplier_mode="incremental_from_prev",
+        open_sig=open_sig,
+        close_sig=close_sig,
+    )
+    assert float(w_adj.iloc[1]) == pytest.approx(0.30, abs=1e-12)
+    assert float(w_adj.iloc[2]) == pytest.approx(0.15, abs=1e-12)
+    assert float(override.iloc[1]) == pytest.approx(0.03, abs=1e-12)
+    assert float(override.iloc[2]) == pytest.approx(0.03, abs=1e-12)
+
+
+def test_scaleout_portfolio_incremental_mode_handles_dynamic_weight_path() -> None:
+    idx = pd.date_range("2024-01-01", periods=3, freq="B")
+    weights = pd.DataFrame(
+        {
+            "A": [0.0, 0.60, 0.45],
+            "B": [0.0, 0.20, 0.20],
+        },
+        index=idx,
+        dtype=float,
+    )
+    scale_multiplier_df = pd.DataFrame(
+        {
+            "A": [0.60, 0.30, 0.10],
+            "B": [1.00, 1.00, 1.00],
+        },
+        index=idx,
+        dtype=float,
+    )
+    scaleout_by_asset = {
+        "A": {
+            "trigger_events": [
+                {
+                    "date": idx[1].date().isoformat(),
+                    "execution_date": idx[1].date().isoformat(),
+                    "execution_mode": "intraday",
+                    "fill_price": 110.0,
+                    "reduce_fraction": 0.30,
+                },
+                {
+                    "date": idx[2].date().isoformat(),
+                    "execution_date": idx[2].date().isoformat(),
+                    "execution_mode": "intraday",
+                    "fill_price": 110.0,
+                    "reduce_fraction": 0.20,
+                },
+            ]
+        }
+    }
+    open_sig_df = pd.DataFrame(100.0, index=idx, columns=["A", "B"], dtype=float)
+    close_sig_df = pd.DataFrame(100.0, index=idx, columns=["A", "B"], dtype=float)
+
+    w_adj, override = _apply_intraday_scaleout_execution_portfolio(
+        weights=weights,
+        scale_multiplier_df=scale_multiplier_df,
+        scaleout_by_asset=scaleout_by_asset,
+        exec_price="close",
+        execution_mode="intraday",
+        scale_multiplier_mode="incremental_from_prev",
+        open_sig_df=open_sig_df,
+        close_sig_df=close_sig_df,
+    )
+    assert float(w_adj.loc[idx[1], "A"]) == pytest.approx(0.30, abs=1e-12)
+    assert float(w_adj.loc[idx[2], "A"]) == pytest.approx(0.15, abs=1e-12)
+    assert float(w_adj.loc[idx[1], "B"]) == pytest.approx(0.20, abs=1e-12)
+    assert float(w_adj.loc[idx[2], "B"]) == pytest.approx(0.20, abs=1e-12)
+    assert float(override.loc[idx[1]]) == pytest.approx(0.03, abs=1e-12)
+    assert float(override.loc[idx[2]]) == pytest.approx(0.03, abs=1e-12)
 
 
 def test_semi_variance_run_stats_split_continuous_profit_loss_segments() -> None:

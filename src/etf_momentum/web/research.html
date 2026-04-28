@@ -5033,6 +5033,19 @@
           <label>收紧步长 m</label><input id="trendAtrStopM" value="0.5" />
         </div>
       </div>
+      <p
+        class="muted"
+        style="
+          margin: 6px 0 0 0;
+          font-size: 12px;
+          line-height: 1.45;
+          max-width: 920px;
+        "
+      >
+        关联说明：开启「R乘数止盈」或「浮盈分档降仓」时，即使「通用ATR止损」选关闭，仍必须配置上方的
+        <b>ATR周期</b> 与 <b>止损倍数 n</b>：二者与 Wilder ATR
+        共同定义每笔持仓的初始风险与分层中的 R 含义；与是否启用 ATR 止损无关。
+      </p>
       <div class="row" style="margin-top: 8px; align-items: end">
         <div>
           <label>通用R乘数止盈</label>
@@ -10489,7 +10502,16 @@
           .toLowerCase();
         const isStatic = mode === "static";
         const isDynamic = mode === "trailing" || mode === "tightening";
-        const canEditWinN = isStatic || isDynamic;
+        let rMultNeedsAtrWinN = false;
+        if (prefix === "trend") {
+          const rtpEl = $("trendRTpEnable");
+          const rsEl = $("trendRScaleEnable");
+          rMultNeedsAtrWinN =
+            (rtpEl && String(rtpEl.value || "false") === "true") ||
+            (rsEl && String(rsEl.value || "false") === "true");
+        }
+        const canEditWinN = isStatic || isDynamic || rMultNeedsAtrWinN;
+        const canEditStopAux = isStatic || isDynamic;
         const canEditAll = isDynamic;
         const setEnabled = (el, on) => {
           if (!el) return;
@@ -10498,7 +10520,7 @@
         };
         setEnabled(winEl, canEditWinN);
         setEnabled(nEl, canEditWinN);
-        setEnabled(reentryEl, canEditWinN);
+        setEnabled(reentryEl, canEditStopAux);
         setEnabled(basisEl, canEditAll);
         setEnabled(mEl, canEditAll);
       }
@@ -10593,6 +10615,7 @@
         setEnabled(bvMaEl, bvOn);
         setEnabled(bvAtrEl, bvOn);
         setEnabled(bvThrEl, bvOn);
+        _syncAtrStopParamsUi("trend");
       }
       function updateTrendSizingUi() {
         const mode =
@@ -10883,8 +10906,9 @@
           el.disabled = !on;
           el.style.opacity = on ? "1" : "0.55";
         }
-        _syncAtrStopParamsUi("trend");
         _syncRTpParamsUi();
+        // Re-apply仓位/风险预算/波动率风控等联动禁用态（否则 alwaysEnabledIds 会把波动率参数全部置为可用）。
+        updateTrendSizingUi();
 
         const stratDesc = {
           ma_filter:
@@ -10974,19 +10998,22 @@
           trendMacdSignal: "MACD信号线：信号EMA窗口。",
           trendMacdVAtr: "MACD-V ATR窗口：归一化波动窗口。",
           trendMacdVScale: "MACD-V scale：归一化缩放系数。",
-          trendAtrStopMode: "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。",
+          trendAtrStopMode:
+            "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。关闭时若开启R乘数止盈或浮盈降仓，本行「ATR周期」「止损倍数n」仍生效，用于定义R的计量基准。",
           trendAtrStopBasis:
             "ATR基准：动态跟随/动态收紧时，按入场ATR或最新ATR计算止损距离与收紧步长。",
           trendAtrStopReentry:
             "止损后重入：允许重返=只要基础信号为持有即可重入；等待下一次入场=必须等基础信号再次出现入场事件。",
           trendAtrStopExec:
             "ATR止损执行：日内执行=入场后下一交易日开始生效，按开盘/盘中触发；次日执行=当日收盘触发后下一交易日按策略执行价离场。",
-          trendAtrStopWin: "ATR周期：用于止损距离计算的ATR窗口。",
-          trendAtrStopN: "止损倍数n：基础止损距离为 n*ATR。",
+          trendAtrStopWin:
+            "ATR周期：计算 Wilder ATR 的窗口。用于ATR止损距离；当止损关闭但开启R止盈/浮盈降仓时，仍用于定义该持仓的ATR与初始风险基准（与止损倍数n共同决定R）。",
+          trendAtrStopN:
+            "止损倍数n：止损距离为 n×ATR。当止损关闭但开启R止盈/浮盈降仓时，n仍参与初始风险/R基准（与ATR周期联动），分层阈值中的R相对于该基准。",
           trendAtrStopM:
             "收紧步长m：动态收紧模式下每上涨 m*ATR 收紧一次，且需 n>m。",
           trendRTpEnable:
-            "通用R乘数止盈：按初始风险R跟踪浮盈，达到分层后按允许回落比例触发离场。",
+            "通用R乘数止盈：按初始风险R跟踪浮盈，达到分层后按允许回落比例触发离场。若ATR止损关闭，R仍由本页「ATR周期」与「止损倍数n」定义的基准计量。",
           trendRTpReentry:
             "止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
           trendRTpExec:
@@ -10994,7 +11021,7 @@
           trendRTpTiers:
             "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
           trendRScaleEnable:
-            "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落。",
+            "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落。若ATR止损关闭，分层R仍由「ATR周期」与「止损倍数n」定义的基准计量。",
           trendRScaleExec:
             "降仓执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价成交。",
           trendRScaleTiers:
@@ -29497,7 +29524,7 @@
         const fallbackHint =
           (common.r_take_profit_enabled || common.r_profit_scaleout_enabled) &&
           String(common.atr_stop_mode || "none") === "none"
-            ? "提示：ATR止损关闭，R相关止盈/降仓将使用 virtual ATR 初始风险 fallback（入场ATR*n/入场价）。"
+            ? "提示：通用ATR止损为「关闭」时，R乘数止盈与浮盈分档降仓仍使用本页的「ATR周期」与「止损倍数n」：用该窗口的 Wilder ATR 与 n 定义每笔持仓的初始风险基准（与是否启用ATR止损无关）；分层阈值中的 R 相对于该基准计量。"
             : "";
         if (fallbackHint) setMsg(fallbackHint);
         const position_sizing =

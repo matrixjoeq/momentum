@@ -4100,6 +4100,7 @@ def _run_single_backtesting(
             weight_in: pd.Series,
             *,
             mode: str,
+            scale_multiplier_mode: str = "absolute",
         ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
             w_tmp = weight_in.astype(float).copy()
             w_tmp, atr_over = _apply_intraday_stop_execution_single(
@@ -4132,6 +4133,7 @@ def _run_single_backtesting(
                 scaleout_stats=r_profit_scaleout_stats,
                 exec_price=str(mode),
                 execution_mode=rps_execution_mode,
+                scale_multiplier_mode=scale_multiplier_mode,
                 open_sig=open_sig_for_stop,
                 close_sig=close_sig_for_stop,
             )
@@ -4162,12 +4164,20 @@ def _run_single_backtesting(
                 bias_override_ret,
                 rtp_override_ret,
                 rps_override_ret,
-            ) = _apply_all_intraday_overlays(w_close_base, mode="close")
+            ) = _apply_all_intraday_overlays(
+                w_close_base,
+                mode="close",
+                scale_multiplier_mode="incremental_from_prev",
+            )
             ret_exec_day = ret_exec_close_day.reindex(w.index).fillna(0.0).astype(float)
         elif ep == "oc2":
             w_close_base = w.shift(1).fillna(0.0).astype(float)
             w_close, atr_over_close, bias_over_close, rtp_over_close, rps_over_close = (
-                _apply_all_intraday_overlays(w_close_base, mode="close")
+                _apply_all_intraday_overlays(
+                    w_close_base,
+                    mode="close",
+                    scale_multiplier_mode="incremental_from_prev",
+                )
             )
             w_ret = (0.5 * (w + w_close)).astype(float)
             ret_exec_day = (
@@ -6402,6 +6412,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         weight_in: pd.DataFrame,
         *,
         mode: str,
+        scale_multiplier_mode: str = "absolute",
     ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series]:
         w_tmp = weight_in.astype(float).copy()
         w_tmp, atr_over = _apply_intraday_stop_execution_portfolio(
@@ -6446,6 +6457,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 getattr(inp, "r_profit_scaleout_execution_mode", "intraday")
                 or "intraday"
             ),
+            scale_multiplier_mode=scale_multiplier_mode,
             open_sig_df=open_sig_df,
             close_sig_df=close_sig_df,
         )
@@ -6484,14 +6496,22 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             bias_v_take_profit_override_ret,
             r_take_profit_override_ret,
             r_profit_scaleout_override_ret,
-        ) = _apply_all_intraday_overlays_df(w_close_base, mode="close")
+        ) = _apply_all_intraday_overlays_df(
+            w_close_base,
+            mode="close",
+            scale_multiplier_mode="incremental_from_prev",
+        )
         ret_exec_day_df = ret_exec_close_day_df.reindex(
             index=w_eff.index, columns=w_eff.columns
         ).astype(float)
     elif ep_port == "oc2":
         w_close_base = w_eff.shift(1).fillna(0.0).astype(float)
         w_close, atr_over_close, bias_over_close, rtp_over_close, rps_over_close = (
-            _apply_all_intraday_overlays_df(w_close_base, mode="close")
+            _apply_all_intraday_overlays_df(
+                w_close_base,
+                mode="close",
+                scale_multiplier_mode="incremental_from_prev",
+            )
         )
         w_ret = (0.5 * (w_eff + w_close)).astype(float)
         ret_exec_day_df = (
