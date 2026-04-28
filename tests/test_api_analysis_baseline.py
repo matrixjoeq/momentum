@@ -1894,7 +1894,9 @@ def test_api_trend_oos_bootstrap_rejects_invalid_engine(api_client, engine):
 
 def test_api_trend_oos_bootstrap_bt_legacy_consistency(api_client, engine):
     c = api_client
-    dates = [d.date() for d in pd.date_range("2023-01-02", periods=180, freq="B")]
+    # Keep enough history for block bootstrap (block_size 10, oos_ratio 0.3) while avoiding
+    # oversized payloads that dominated suite runtime (~200s+ per call before tuning).
+    dates = [d.date() for d in pd.date_range("2023-01-02", periods=126, freq="B")]
     seed_prices(
         engine,
         code_to_series={
@@ -1911,7 +1913,7 @@ def test_api_trend_oos_bootstrap_bt_legacy_consistency(api_client, engine):
         "start": dates[0].strftime("%Y%m%d"),
         "end": dates[-1].strftime("%Y%m%d"),
         "strategy": "ma_filter",
-        "n_bootstrap": 8,
+        "n_bootstrap": 5,
         "block_size": 10,
         "oos_ratio": 0.3,
         "seed": 7,

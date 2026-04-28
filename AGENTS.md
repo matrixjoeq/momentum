@@ -39,6 +39,9 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
   - `mypy src` (requires mypy config if used)
 - Quick full verify (lint + tests):
   - `ruff check src tests && .venv/bin/python3 -m pytest -q --maxfail=1 --disable-warnings`
+- Faster full-suite runs (same coverage: same tests, parallel workers):
+  - Multi-core machines: `.venv/bin/python3 -m pytest -q -n auto` (requires dev extra `pytest-xdist`, installed via `pip install -e '.[dev]'`).
+  - Rule of thumb: `-n auto` often cuts wall-clock roughly in proportion to usable CPU cores (minus overhead); use when debugging timeouts, not when diagnosing race/flake order issues.
 
 2. Code style guidelines
 
