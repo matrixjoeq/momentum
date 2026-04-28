@@ -93,6 +93,66 @@ def _assert_risk_of_ruin_stats_shape(
         assert str(ror.get("maxrisk_basis") or "") == "configured_risk_of_ruin_maxrisk"
 
 
+def _assert_dist_stats_shape(stats: dict[str, object]) -> None:
+    one = stats or {}
+    assert isinstance(one, dict)
+    assert "count" in one
+    assert "max" in one
+    assert "min" in one
+    assert "mean" in one
+    assert "std" in one
+    q = one.get("quantiles") or {}
+    assert isinstance(q, dict)
+    for k in ["p01", "p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]:
+        assert k in q
+
+
+def _assert_trade_extreme_stats_shape(stats: dict[str, object]) -> None:
+    one = stats or {}
+    assert isinstance(one, dict)
+    _assert_dist_stats_shape((one.get("max_possible_return_stats") or {}))
+    _assert_dist_stats_shape((one.get("max_possible_return_profit_stats") or {}))
+    _assert_dist_stats_shape((one.get("max_possible_return_loss_stats") or {}))
+    _assert_dist_stats_shape((one.get("min_possible_return_stats") or {}))
+    _assert_dist_stats_shape((one.get("min_possible_return_profit_stats") or {}))
+    _assert_dist_stats_shape((one.get("min_possible_return_loss_stats") or {}))
+    holding_days = one.get("holding_days_stats") or {}
+    assert isinstance(holding_days, dict)
+    _assert_dist_stats_shape((holding_days.get("overall") or {}))
+    _assert_dist_stats_shape((holding_days.get("profit_trades") or {}))
+    _assert_dist_stats_shape((holding_days.get("loss_trades") or {}))
+    entry_to_max_days = one.get("entry_to_max_days_stats") or {}
+    assert isinstance(entry_to_max_days, dict)
+    _assert_dist_stats_shape((entry_to_max_days.get("overall") or {}))
+    _assert_dist_stats_shape((entry_to_max_days.get("profit_trades") or {}))
+    _assert_dist_stats_shape((entry_to_max_days.get("loss_trades") or {}))
+    entry_to_min_days = one.get("entry_to_min_days_stats") or {}
+    assert isinstance(entry_to_min_days, dict)
+    _assert_dist_stats_shape((entry_to_min_days.get("overall") or {}))
+    _assert_dist_stats_shape((entry_to_min_days.get("profit_trades") or {}))
+    _assert_dist_stats_shape((entry_to_min_days.get("loss_trades") or {}))
+    max_to_exit_days = one.get("max_to_exit_days_stats") or {}
+    assert isinstance(max_to_exit_days, dict)
+    _assert_dist_stats_shape((max_to_exit_days.get("overall") or {}))
+    _assert_dist_stats_shape((max_to_exit_days.get("profit_trades") or {}))
+    _assert_dist_stats_shape((max_to_exit_days.get("loss_trades") or {}))
+    min_to_exit_days = one.get("min_to_exit_days_stats") or {}
+    assert isinstance(min_to_exit_days, dict)
+    _assert_dist_stats_shape((min_to_exit_days.get("overall") or {}))
+    _assert_dist_stats_shape((min_to_exit_days.get("profit_trades") or {}))
+    _assert_dist_stats_shape((min_to_exit_days.get("loss_trades") or {}))
+    # Signed semantics: losing-trade max_possible_return should be non-positive.
+    loss_n = int(one.get("loss_trades") or 0)
+    if loss_n > 0:
+        loss_max_stats = one.get("max_possible_return_loss_stats") or {}
+        loss_max_v = loss_max_stats.get("max")
+        loss_min_v = loss_max_stats.get("min")
+        if loss_max_v is not None:
+            assert float(loss_max_v) <= 1e-12
+        if loss_min_v is not None:
+            assert float(loss_min_v) <= 1e-12
+
+
 def test_api_baseline_analysis_happy_path(api_client):
     c = api_client
     upsert_and_fetch_etfs(
@@ -504,6 +564,8 @@ def test_api_trend_single_trade_stats_include_semi_variance(
     _assert_semi_variance_stats_shape(by_code)
     _assert_risk_of_ruin_stats_shape(overall, expected_maxrisk=0.30)
     _assert_risk_of_ruin_stats_shape(by_code, expected_maxrisk=0.30)
+    _assert_trade_extreme_stats_shape(overall)
+    _assert_trade_extreme_stats_shape(by_code)
 
 
 @pytest.mark.parametrize("runtime_engine", [None, "bt"])
@@ -539,6 +601,9 @@ def test_api_trend_portfolio_trade_stats_include_semi_variance(
     _assert_risk_of_ruin_stats_shape(overall, expected_maxrisk=0.30)
     _assert_risk_of_ruin_stats_shape(by_code.get("SVP1") or {}, expected_maxrisk=0.30)
     _assert_risk_of_ruin_stats_shape(by_code.get("SVP2") or {}, expected_maxrisk=0.30)
+    _assert_trade_extreme_stats_shape(overall)
+    _assert_trade_extreme_stats_shape(by_code.get("SVP1") or {})
+    _assert_trade_extreme_stats_shape(by_code.get("SVP2") or {})
 
 
 @pytest.mark.parametrize("runtime_engine", [None, "bt"])
@@ -1258,6 +1323,51 @@ def test_api_trend_single_ma_cross_rejects_kama_type(api_client):
     assert "ma_type=kama is only supported for ma_filter" in str(
         (err or {}).get("detail") or ""
     )
+
+
+def test_api_trend_single_rejects_conflicting_r_take_profit_modes(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 5,
+            "r_take_profit_enabled": True,
+            "r_profit_scaleout_enabled": True,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert isinstance(err, dict)
+    assert "cannot both be true" in str((err or {}).get("detail") or "")
+
+
+def test_api_trend_portfolio_rejects_conflicting_r_take_profit_modes(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300", "159915"],
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 5,
+            "position_sizing": "equal",
+            "r_take_profit_enabled": True,
+            "r_profit_scaleout_enabled": True,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=400,
+    )
+    assert isinstance(err, dict)
+    assert "cannot both be true" in str((err or {}).get("detail") or "")
 
 
 def test_api_trend_single_bt_engine_contract(api_client):

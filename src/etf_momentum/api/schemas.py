@@ -2050,6 +2050,18 @@ class RTakeProfitTier(BaseModel):
     )
 
 
+class RProfitScaleoutTier(BaseModel):
+    r_multiple: float = Field(
+        gt=0.0,
+        description="Activate tiered profit scale-out when floating profit reaches this R multiple",
+    )
+    reduce_fraction: float = Field(
+        gt=0.0,
+        le=1.0,
+        description="Position fraction to reduce at this tier, e.g. 0.4 means sell 40%",
+    )
+
+
 class TrendBacktestRequest(BaseModel):
     code: str = Field(
         min_length=1,
@@ -2259,6 +2271,18 @@ class TrendBacktestRequest(BaseModel):
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(
         default=None,
         description="Tiered config: peak>=R multiple activates pullback-exit threshold, e.g. [{r_multiple:2,retrace_ratio:0.5}]",
+    )
+    r_profit_scaleout_enabled: bool = Field(
+        default=False,
+        description="Enable tiered floating-profit scale-out overlay (sell on profit level, no pullback required)",
+    )
+    r_profit_scaleout_execution_mode: str = Field(
+        default="intraday",
+        description="Floating-profit scale-out execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    r_profit_scaleout_tiers: list[RProfitScaleoutTier] | None = Field(
+        default=None,
+        description="Tiered scale-out config, e.g. [{r_multiple:2,reduce_fraction:0.4},{r_multiple:3,reduce_fraction:0.3}]",
     )
     bias_v_take_profit_enabled: bool = Field(
         default=False, description="Enable universal BIAS-V take-profit overlay"
@@ -2544,6 +2568,15 @@ class TrendPortfolioBacktestRequest(BaseModel):
         description="intraday|next_day (intraday takes effect from next trading day after entry)",
     )
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(default=None)
+    r_profit_scaleout_enabled: bool = Field(
+        default=False,
+        description="Enable tiered floating-profit scale-out overlay (sell on profit level, no pullback required)",
+    )
+    r_profit_scaleout_execution_mode: str = Field(
+        default="intraday",
+        description="intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    r_profit_scaleout_tiers: list[RProfitScaleoutTier] | None = Field(default=None)
     bias_v_take_profit_enabled: bool = Field(
         default=False, description="Enable universal BIAS-V take-profit overlay"
     )

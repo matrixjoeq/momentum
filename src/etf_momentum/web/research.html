@@ -5062,6 +5062,26 @@
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
         <div>
+          <label>浮盈分档降仓</label>
+          <select id="trendRScaleEnable" style="min-width: 140px">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>降仓执行</label>
+          <select id="trendRScaleExec" style="min-width: 190px">
+            <option value="intraday" selected>日内执行(入场后次日生效)</option>
+            <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
+        </div>
+        <div style="min-width: 420px">
+          <label>R阈值与减仓比例（r:ratio，逗号分隔）</label>
+          <input id="trendRScaleTiers" value="2:0.4,3:0.3,4:0.2" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
+        <div>
           <label>通用BIAS-V止盈</label>
           <select id="trendBiasVTpEnable" style="min-width: 140px">
             <option value="false" selected>关闭</option>
@@ -7652,6 +7672,9 @@
           "trendRTpReentry",
           "trendRTpExec",
           "trendRTpTiers",
+          "trendRScaleEnable",
+          "trendRScaleExec",
+          "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
@@ -10505,6 +10528,32 @@
         tiers.sort((a, b) => Number(a.r_multiple) - Number(b.r_multiple));
         return { tiers };
       }
+      function _parseRScaleTiers(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return { __error: "浮盈降仓分层不能为空", tiers: [] };
+        const parts = s
+          .split(",")
+          .map((x) => String(x || "").trim())
+          .filter(Boolean);
+        const tiers = [];
+        for (const p of parts) {
+          const kv = p.split(":").map((x) => String(x || "").trim());
+          if (kv.length !== 2)
+            return {
+              __error: `浮盈降仓分层格式非法：${p}（应为 r:ratio）`,
+              tiers: [],
+            };
+          const r = Number(kv[0]);
+          const ratio = Number(kv[1]);
+          if (!Number.isFinite(r) || r <= 0)
+            return { __error: `R阈值需为>0数字：${p}`, tiers: [] };
+          if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1)
+            return { __error: `减仓比例需在(0,1]之间：${p}`, tiers: [] };
+          tiers.push({ r_multiple: r, reduce_fraction: ratio });
+        }
+        tiers.sort((a, b) => Number(a.r_multiple) - Number(b.r_multiple));
+        return { tiers };
+      }
       function _syncRTpParamsUi() {
         const atrModeEl = $("trendAtrStopMode");
         const atrExecEl = $("trendAtrStopExec");
@@ -10512,6 +10561,9 @@
         const reEl = $("trendRTpReentry");
         const exEl = $("trendRTpExec");
         const tEl = $("trendRTpTiers");
+        const rsOnEl = $("trendRScaleEnable");
+        const rsExecEl = $("trendRScaleExec");
+        const rsTiersEl = $("trendRScaleTiers");
         const bvOnEl = $("trendBiasVTpEnable");
         const bvReEl = $("trendBiasVTpReentry");
         const bvExEl = $("trendBiasVTpExec");
@@ -10523,6 +10575,7 @@
           String(atrModeEl.value || "none").toLowerCase() !== "none"
         );
         const on = !!(onEl && String(onEl.value || "false") === "true");
+        const rsOn = !!(rsOnEl && String(rsOnEl.value || "false") === "true");
         const bvOn = !!(bvOnEl && String(bvOnEl.value || "false") === "true");
         const setEnabled = (el, enable) => {
           if (!el) return;
@@ -10533,6 +10586,8 @@
         setEnabled(reEl, on);
         setEnabled(exEl, on);
         setEnabled(tEl, on);
+        setEnabled(rsExecEl, rsOn);
+        setEnabled(rsTiersEl, rsOn);
         setEnabled(bvReEl, bvOn);
         setEnabled(bvExEl, bvOn);
         setEnabled(bvMaEl, bvOn);
@@ -10717,6 +10772,9 @@
           "trendRTpReentry",
           "trendRTpExec",
           "trendRTpTiers",
+          "trendRScaleEnable",
+          "trendRScaleExec",
+          "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
@@ -10757,6 +10815,9 @@
           "trendRTpReentry",
           "trendRTpExec",
           "trendRTpTiers",
+          "trendRScaleEnable",
+          "trendRScaleExec",
+          "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
@@ -10932,6 +10993,12 @@
             "R止盈执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价离场。",
           trendRTpTiers:
             "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
+          trendRScaleEnable:
+            "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落。",
+          trendRScaleExec:
+            "降仓执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价成交。",
+          trendRScaleTiers:
+            "分层参数：格式 r:ratio（如 2:0.4,3:0.3,4:0.2），表示达到对应R后直接减仓对应比例。",
           trendBiasVTpEnable:
             "通用BIAS-V止盈：当 BIAS-V=(close-MA)/ATR 大于等于阈值时触发止盈离场。",
           trendBiasVTpReentry:
@@ -11710,6 +11777,10 @@
           (tr && tr.r_take_profit) ||
           ((data || {}).risk_controls || {}).r_take_profit ||
           {};
+        const rps =
+          (tr && tr.r_profit_scaleout) ||
+          ((data || {}).risk_controls || {}).r_profit_scaleout ||
+          {};
         const erExit =
           (tr && tr.er_exit_filter) ||
           ((data || {}).risk_controls || {}).er_exit_filter ||
@@ -12042,6 +12113,18 @@
           ["R止盈fallback", rtp.fallback_mode_used ? "是" : "否"],
           ["R止盈触发次数", String(Number(rtp.trigger_count || 0))],
           ["R止盈最近触发日", String(rtp.last_trigger_date || "-")],
+          ["浮盈降仓启用", rps.enabled ? "是" : "否"],
+          ["浮盈降仓初始风险口径", String(rps.initial_r_mode || "-")],
+          ["浮盈降仓fallback", rps.fallback_mode_used ? "是" : "否"],
+          ["浮盈降仓触发次数", String(Number(rps.trigger_count || 0))],
+          [
+            "浮盈降仓最近触发日",
+            String(
+              Array.isArray(rps.trigger_dates) && rps.trigger_dates.length
+                ? rps.trigger_dates[rps.trigger_dates.length - 1]
+                : "-",
+            ),
+          ],
           ["ER出场触发次数", String(Number(erExit.trigger_count || 0))],
           [
             "ER出场最近触发日",
@@ -21614,6 +21697,21 @@
         const qLow = ["p01", "p05", "p10"];
         const qMid = ["p25", "p50", "p75"];
         const qHigh = ["p90", "p95", "p99"];
+        const _hasDist = (st) => {
+          const one = st && typeof st === "object" ? st : {};
+          const n = Number(one.count);
+          return Number.isFinite(n) && n > 0;
+        };
+        const _distRows = (label, st, fmtFn) => {
+          const one = _obj(st);
+          const qq = _obj(one.quantiles);
+          return (
+            `<tr><td>${esc(label)}：最大 / 最小 / 均值 / 标准差</td><td>${fmtFn(one.max)} / ${fmtFn(one.min)} / ${fmtFn(one.mean)} / ${fmtFn(one.std)}</td></tr>` +
+            `<tr><td>${esc(label)}：分位数 P01 / P05 / P10</td><td>${_qText(qq, fmtFn, qLow)}</td></tr>` +
+            `<tr><td>${esc(label)}：分位数 P25 / P50 / P75</td><td>${_qText(qq, fmtFn, qMid)}</td></tr>` +
+            `<tr><td>${esc(label)}：分位数 P90 / P95 / P99</td><td>${_qText(qq, fmtFn, qHigh)}</td></tr>`
+          );
+        };
         const semi = _obj(s.semi_variance);
         const semiProfitRet = _obj(semi.profit_return_stats);
         const semiProfitRetQ = _obj(semiProfitRet.quantiles);
@@ -21658,6 +21756,128 @@
               Number.isFinite(monthlyBlocked)
             ? monthlyBlocked / monthlyAttempt
             : null;
+        const maxPossibleOverall = _obj(s.max_possible_return_stats);
+        const maxPossibleProfit = _obj(s.max_possible_return_profit_stats);
+        const maxPossibleLoss = _obj(s.max_possible_return_loss_stats);
+        const minPossibleOverall = _obj(s.min_possible_return_stats);
+        const minPossibleProfit = _obj(s.min_possible_return_profit_stats);
+        const minPossibleLoss = _obj(s.min_possible_return_loss_stats);
+        const holdingDaysPack = _obj(s.holding_days_stats);
+        const holdingDaysOverall = _obj(holdingDaysPack.overall);
+        const holdingDaysProfit = _obj(holdingDaysPack.profit_trades);
+        const holdingDaysLoss = _obj(holdingDaysPack.loss_trades);
+        const entryToMaxPack = _obj(s.entry_to_max_days_stats);
+        const entryToMaxOverall = _obj(entryToMaxPack.overall);
+        const entryToMaxProfit = _obj(entryToMaxPack.profit_trades);
+        const entryToMaxLoss = _obj(entryToMaxPack.loss_trades);
+        const entryToMinPack = _obj(s.entry_to_min_days_stats);
+        const entryToMinOverall = _obj(entryToMinPack.overall);
+        const entryToMinProfit = _obj(entryToMinPack.profit_trades);
+        const entryToMinLoss = _obj(entryToMinPack.loss_trades);
+        const maxToExitPack = _obj(s.max_to_exit_days_stats);
+        const maxToExitOverall = _obj(maxToExitPack.overall);
+        const maxToExitProfit = _obj(maxToExitPack.profit_trades);
+        const maxToExitLoss = _obj(maxToExitPack.loss_trades);
+        const minToExitPack = _obj(s.min_to_exit_days_stats);
+        const minToExitOverall = _obj(minToExitPack.overall);
+        const minToExitProfit = _obj(minToExitPack.profit_trades);
+        const minToExitLoss = _obj(minToExitPack.loss_trades);
+        const tradeExtremeRows =
+          _hasDist(maxPossibleOverall) ||
+          _hasDist(maxPossibleProfit) ||
+          _hasDist(maxPossibleLoss) ||
+          _hasDist(minPossibleOverall) ||
+          _hasDist(minPossibleProfit) ||
+          _hasDist(minPossibleLoss) ||
+          _hasDist(holdingDaysOverall) ||
+          _hasDist(holdingDaysProfit) ||
+          _hasDist(holdingDaysLoss) ||
+          _hasDist(entryToMaxOverall) ||
+          _hasDist(entryToMaxProfit) ||
+          _hasDist(entryToMaxLoss) ||
+          _hasDist(entryToMinOverall) ||
+          _hasDist(entryToMinProfit) ||
+          _hasDist(entryToMinLoss) ||
+          _hasDist(maxToExitOverall) ||
+          _hasDist(maxToExitProfit) ||
+          _hasDist(maxToExitLoss) ||
+          _hasDist(minToExitOverall) ||
+          _hasDist(minToExitProfit) ||
+          _hasDist(minToExitLoss)
+            ? _distRows("最大可能收益率（总体）", maxPossibleOverall, _v) +
+              _distRows("最大可能收益率（盈利交易）", maxPossibleProfit, _v) +
+              _distRows("最大可能收益率（亏损交易）", maxPossibleLoss, _v) +
+              _distRows("最小可能收益率（总体）", minPossibleOverall, _v) +
+              _distRows("最小可能收益率（盈利交易）", minPossibleProfit, _v) +
+              _distRows("最小可能收益率（亏损交易）", minPossibleLoss, _v) +
+              _distRows("持仓时长(交易日)（总体）", holdingDaysOverall, _num) +
+              _distRows(
+                "持仓时长(交易日)（盈利交易）",
+                holdingDaysProfit,
+                _num,
+              ) +
+              _distRows("持仓时长(交易日)（亏损交易）", holdingDaysLoss, _num) +
+              _distRows(
+                "入场到最高点时长(交易日)（总体）",
+                entryToMaxOverall,
+                _num,
+              ) +
+              _distRows(
+                "入场到最高点时长(交易日)（盈利交易）",
+                entryToMaxProfit,
+                _num,
+              ) +
+              _distRows(
+                "入场到最高点时长(交易日)（亏损交易）",
+                entryToMaxLoss,
+                _num,
+              ) +
+              _distRows(
+                "入场到最低点时长(交易日)（总体）",
+                entryToMinOverall,
+                _num,
+              ) +
+              _distRows(
+                "入场到最低点时长(交易日)（盈利交易）",
+                entryToMinProfit,
+                _num,
+              ) +
+              _distRows(
+                "入场到最低点时长(交易日)（亏损交易）",
+                entryToMinLoss,
+                _num,
+              ) +
+              _distRows(
+                "最高点到出场时长(交易日)（总体）",
+                maxToExitOverall,
+                _num,
+              ) +
+              _distRows(
+                "最高点到出场时长(交易日)（盈利交易）",
+                maxToExitProfit,
+                _num,
+              ) +
+              _distRows(
+                "最高点到出场时长(交易日)（亏损交易）",
+                maxToExitLoss,
+                _num,
+              ) +
+              _distRows(
+                "最低点到出场时长(交易日)（总体）",
+                minToExitOverall,
+                _num,
+              ) +
+              _distRows(
+                "最低点到出场时长(交易日)（盈利交易）",
+                minToExitProfit,
+                _num,
+              ) +
+              _distRows(
+                "最低点到出场时长(交易日)（亏损交易）",
+                minToExitLoss,
+                _num,
+              )
+            : "";
         const _tierText = (mp, totalTriggers) => {
           const obj = _obj(mp);
           const _tierR = (k) => {
@@ -21715,6 +21935,7 @@
           `<tr><td>亏损交易均值 / 标准差</td><td>${_v(l.mean)} / ${_v(l.std)}</td></tr>` +
           `<tr><td>盈利交易最大 / 最小</td><td>${_v(p.max)} / ${_v(p.min)}</td></tr>` +
           `<tr><td>亏损交易最大 / 最小</td><td>${_v(l.max)} / ${_v(l.min)}</td></tr>` +
+          tradeExtremeRows +
           `<tr><td>连续盈亏段胜率(剔除零收益)</td><td>${_v(semi.win_rate_ex_zero)}</td></tr>` +
           `<tr><td>连续盈亏段赔率(剔除零收益)</td><td>${_num(semi.payoff_ex_zero)}</td></tr>` +
           `<tr><td>连续盈亏段凯利比(剔除零收益)</td><td>${_v(semi.kelly_ex_zero)}</td></tr>` +
@@ -21758,6 +21979,8 @@
           `<tr><td>ATR止损触发次数</td><td>${_n(s.atr_stop_trigger_count)}</td></tr>` +
           `<tr><td>R止盈触发次数</td><td>${_n(s.r_take_profit_trigger_count)}</td></tr>` +
           `<tr><td>R止盈分段触发统计</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>` +
+          `<tr><td>浮盈降仓触发次数</td><td>${_n(s.r_profit_scaleout_trigger_count)}</td></tr>` +
+          `<tr><td>浮盈降仓分段触发统计</td><td>${_tierText(s.r_profit_scaleout_tier_trigger_counts, s.r_profit_scaleout_trigger_count)}</td></tr>` +
           `<tr><td>BIAS-V止盈触发次数</td><td>${_n(s.bias_v_take_profit_trigger_count)}</td></tr>`;
       }
 
@@ -28203,6 +28426,11 @@
             ? String($("trendRTpTiers").value)
             : "";
         const parsedRTiers = _parseRTpTiers(rTiersRaw);
+        const rScaleTiersRaw =
+          $("trendRScaleTiers") && $("trendRScaleTiers").value
+            ? String($("trendRScaleTiers").value)
+            : "";
+        const parsedRScaleTiers = _parseRScaleTiers(rScaleTiersRaw);
         const parsedAssetGroups =
           mode === "portfolio"
             ? _parseAssetGroupsFromText(assetGroupsRaw)
@@ -28327,6 +28555,18 @@
           r_take_profit_tiers:
             parsedRTiers && !parsedRTiers.__error
               ? parsedRTiers.tiers || []
+              : [],
+          r_profit_scaleout_enabled:
+            $("trendRScaleEnable") && $("trendRScaleEnable").value
+              ? String($("trendRScaleEnable").value) === "true"
+              : false,
+          r_profit_scaleout_execution_mode:
+            $("trendRScaleExec") && $("trendRScaleExec").value
+              ? String($("trendRScaleExec").value)
+              : "intraday",
+          r_profit_scaleout_tiers:
+            parsedRScaleTiers && !parsedRScaleTiers.__error
+              ? parsedRScaleTiers.tiers || []
               : [],
           bias_v_take_profit_enabled:
             $("trendBiasVTpEnable") && $("trendBiasVTpEnable").value
@@ -28521,6 +28761,11 @@
             parsedRTiers && parsedRTiers.__error
               ? String(parsedRTiers.__error)
               : null,
+          r_profit_scaleout_tiers_text: rScaleTiersRaw,
+          r_profit_scaleout_tiers_parse_error:
+            parsedRScaleTiers && parsedRScaleTiers.__error
+              ? String(parsedRScaleTiers.__error)
+              : null,
           exported_at: new Date().toISOString(),
           api_payload: apiPayload,
         };
@@ -28675,6 +28920,15 @@
               ? String($("trendRTpExec").value)
               : "intraday",
           r_take_profit_tiers: [],
+          r_profit_scaleout_enabled:
+            $("trendRScaleEnable") && $("trendRScaleEnable").value
+              ? String($("trendRScaleEnable").value) === "true"
+              : false,
+          r_profit_scaleout_execution_mode:
+            $("trendRScaleExec") && $("trendRScaleExec").value
+              ? String($("trendRScaleExec").value)
+              : "intraday",
+          r_profit_scaleout_tiers: [],
           bias_v_take_profit_enabled:
             $("trendBiasVTpEnable") && $("trendBiasVTpEnable").value
               ? String($("trendBiasVTpEnable").value) === "true"
@@ -28924,6 +29178,33 @@
           }
         } else {
           common.r_take_profit_tiers = [];
+        }
+        if (
+          !["intraday", "next_day"].includes(
+            String(common.r_profit_scaleout_execution_mode),
+          )
+        ) {
+          return setMsg("浮盈降仓执行模式非法，请选择 日内执行/次日执行");
+        }
+        if (common.r_profit_scaleout_enabled) {
+          const parsed = _parseRScaleTiers(
+            $("trendRScaleTiers") && $("trendRScaleTiers").value
+              ? $("trendRScaleTiers").value
+              : "",
+          );
+          if (parsed && parsed.__error) return setMsg(parsed.__error);
+          common.r_profit_scaleout_tiers = parsed.tiers || [];
+          if (
+            !Array.isArray(common.r_profit_scaleout_tiers) ||
+            common.r_profit_scaleout_tiers.length === 0
+          ) {
+            return setMsg("浮盈降仓分层至少配置1档");
+          }
+        } else {
+          common.r_profit_scaleout_tiers = [];
+        }
+        if (common.r_take_profit_enabled && common.r_profit_scaleout_enabled) {
+          return setMsg("R回落止盈 与 浮盈分档降仓 不能同时开启");
         }
         if (
           !["reenter", "wait_next_entry"].includes(
@@ -29214,9 +29495,9 @@
         $("status").textContent = "计算中...";
         setMsg("");
         const fallbackHint =
-          common.r_take_profit_enabled &&
+          (common.r_take_profit_enabled || common.r_profit_scaleout_enabled) &&
           String(common.atr_stop_mode || "none") === "none"
-            ? "提示：ATR止损关闭，R止盈将使用 virtual ATR 初始风险 fallback（入场ATR*n/入场价）。"
+            ? "提示：ATR止损关闭，R相关止盈/降仓将使用 virtual ATR 初始风险 fallback（入场ATR*n/入场价）。"
             : "";
         if (fallbackHint) setMsg(fallbackHint);
         const position_sizing =
@@ -34021,6 +34302,8 @@
         );
       if ($("trendRTpEnable"))
         $("trendRTpEnable").addEventListener("change", _syncRTpParamsUi);
+      if ($("trendRScaleEnable"))
+        $("trendRScaleEnable").addEventListener("change", _syncRTpParamsUi);
       if ($("trendBiasVTpEnable"))
         $("trendBiasVTpEnable").addEventListener("change", _syncRTpParamsUi);
       if ($("rotAtrStopMode"))

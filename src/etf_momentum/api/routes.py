@@ -1297,6 +1297,17 @@ def trend_backtest(
             if getattr(payload, "r_take_profit_tiers", None)
             else None
         ),
+        r_profit_scaleout_enabled=bool(
+            getattr(payload, "r_profit_scaleout_enabled", False)
+        ),
+        r_profit_scaleout_execution_mode=str(
+            getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
+        ),
+        r_profit_scaleout_tiers=(
+            [x.model_dump() for x in getattr(payload, "r_profit_scaleout_tiers", [])]
+            if getattr(payload, "r_profit_scaleout_tiers", None)
+            else None
+        ),
         bias_v_take_profit_enabled=bool(
             getattr(payload, "bias_v_take_profit_enabled", False)
         ),
@@ -1481,6 +1492,17 @@ def trend_portfolio_backtest(
         r_take_profit_tiers=(
             [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
             if getattr(payload, "r_take_profit_tiers", None)
+            else None
+        ),
+        r_profit_scaleout_enabled=bool(
+            getattr(payload, "r_profit_scaleout_enabled", False)
+        ),
+        r_profit_scaleout_execution_mode=str(
+            getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
+        ),
+        r_profit_scaleout_tiers=(
+            [x.model_dump() for x in getattr(payload, "r_profit_scaleout_tiers", [])]
+            if getattr(payload, "r_profit_scaleout_tiers", None)
             else None
         ),
         bias_v_take_profit_enabled=bool(
