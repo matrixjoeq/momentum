@@ -497,8 +497,14 @@ def test_api_trend_single_quick_mode_skips_heavy_sections(engine, api_client):
     assert params.get("quick_mode") is True
     assert out.get("return_decomposition") is None
     assert out.get("event_study") is None
-    assert list(ts.get("trades") or []) == []
-    assert list(((ts.get("trades_by_code") or {}).get("TQMS1")) or []) == []
+    overall_n = int((ts.get("overall") or {}).get("n") or 0)
+    trs = list(ts.get("trades") or [])
+    if overall_n > 0:
+        assert len(trs) == overall_n
+        assert (
+            len(list(((ts.get("trades_by_code") or {}).get("TQMS1")) or []))
+            == overall_n
+        )
     assert "entry_condition_stats" not in ts
 
 
@@ -531,9 +537,15 @@ def test_api_trend_portfolio_quick_mode_skips_heavy_sections(engine, api_client)
     assert params.get("quick_mode") is True
     assert out.get("return_decomposition") is None
     assert out.get("event_study") is None
-    assert list(ts.get("trades") or []) == []
-    assert list(trades_by_code.get("TQMP1") or []) == []
-    assert list(trades_by_code.get("TQMP2") or []) == []
+    overall_n = int((ts.get("overall") or {}).get("n") or 0)
+    trs = list(ts.get("trades") or [])
+    if overall_n > 0:
+        assert len(trs) == overall_n
+        assert (
+            len(list(trades_by_code.get("TQMP1") or []))
+            + len(list(trades_by_code.get("TQMP2") or []))
+            == overall_n
+        )
     assert "entry_condition_stats" not in ts
 
 

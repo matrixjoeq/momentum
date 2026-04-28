@@ -4747,6 +4747,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     er_exit_stats = sig_dbg.get("er_exit_filter") or {}
     atr_stats = sem_dbg.get("atr_stop") or {}
     rtp_stats = sem_dbg.get("r_take_profit") or {}
+    rps_stats = sem_dbg.get("r_profit_scaleout") or {}
     bv_stats = sem_dbg.get("bias_v_take_profit") or {}
     vol_stats = sem_dbg.get("vol_risk_adjust") or {}
     month_stats = sem_dbg.get("monthly_risk_budget_gate") or {}
@@ -4860,10 +4861,10 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
             **dict(overall_stats),
         }
     }
-    trade_stats_trades = [] if quick_mode else list(trades_with_r)
-    trade_stats_trades_by_code = {
-        str(code): ([] if quick_mode else list(trades_with_r))
-    }
+    # Keep enriched trades under trade_statistics even in quick_mode so UI R-
+    # distribution histograms have per-trade samples (top-level "trades" still omitted below).
+    trade_stats_trades = list(trades_with_r)
+    trade_stats_trades_by_code = {str(code): list(trades_with_r)}
     sample_days = int(len(strat_ret))
     complete_trade_count = int(len(trade_one.get("returns", [])))
     avg_daily_turnover = (
@@ -5123,8 +5124,21 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 ),
                 "strategy": str(strat),
                 "atr_stop": dict(atr_stats),
-                "bias_v_take_profit": dict(bv_stats),
                 "r_take_profit": dict(rtp_stats),
+                "r_profit_scaleout": {
+                    "enabled": bool((rps_stats or {}).get("enabled", False)),
+                    "initial_r_mode": (rps_stats or {}).get("initial_r_mode"),
+                    "fallback_mode_used": bool(
+                        (rps_stats or {}).get("fallback_mode_used", False)
+                    ),
+                    "trigger_count": int((rps_stats or {}).get("trigger_count", 0)),
+                    "tiers": (rps_stats or {}).get("tiers", []),
+                    "tier_trigger_counts": (
+                        (rps_stats or {}).get("tier_trigger_counts", {}) or {}
+                    ),
+                    "trace_last_rows": (rps_stats or {}).get("trace_last_rows", []),
+                },
+                "bias_v_take_profit": dict(bv_stats),
                 "er_exit_filter": {
                     "enabled": bool(getattr(inp, "er_exit_filter", False)),
                     "window": int(getattr(inp, "er_exit_window", 10) or 10),
@@ -7631,7 +7645,6 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     }
     if quick_mode:
         trades = []
-        trades_by_code = {str(c): [] for c in wdf.columns}
     entry_exec_price_with_slippage_by_asset: dict[str, float] = {}
     for c in w_eff.columns:
         one = _latest_entry_exec_price_with_slippage(
@@ -7827,10 +7840,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "rolling": _rolling_pack(nav),
         "attribution": attribution,
         "trade_statistics": {
-            "all": {"n": len(trades)},
+            "all": {"n": len(trades_with_r)},
             "overall": overall_stats,
             "by_code": by_code_stats,
-            "trades": ([] if quick_mode else trades_with_r),
+            "trades": list(trades_with_r),
             "trades_by_code": trades_by_code,
             "trade_marks_by_code": {
                 str(c): _trade_marks_from_trades(

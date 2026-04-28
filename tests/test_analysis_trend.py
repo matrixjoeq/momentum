@@ -1618,7 +1618,7 @@ def test_trend_quick_mode_contains_mfe_r_distribution(session_factory):
     assert int(recent.get("effective_count") or 0) <= int(
         overall.get("trade_count") or 0
     )
-    assert ts.get("trades") == []
+    assert len(ts.get("trades") or []) == int(overall.get("trade_count") or 0)
 
 
 def test_trend_ma_filter_kama_std_band_reduces_trades(session_factory):

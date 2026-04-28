@@ -6847,10 +6847,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 risk_of_ruin_maxrisk=risk_of_ruin_maxrisk,
             )
         },
-        "trades": ([] if quick_mode else trades_with_r),
-        "trades_by_code": (
-            {str(code): []} if quick_mode else {str(code): trades_with_r}
-        ),
+        "trades": list(trades_with_r),
+        "trades_by_code": {str(code): list(trades_with_r)},
         "trade_marks_by_code": {
             str(code): _trade_marks_from_trades(list(trade_one.get("trades") or []))
         },
@@ -9982,10 +9980,8 @@ def compute_trend_portfolio_backtest(
             )
             for c in codes
         },
-        "trades": ([] if quick_mode else trades_with_r),
-        "trades_by_code": (
-            {str(c): [] for c in codes} if quick_mode else trades_by_code
-        ),
+        "trades": list(trades_with_r),
+        "trades_by_code": dict(trades_by_code),
         "trade_marks_by_code": {
             str(c): _trade_marks_from_trades(
                 list((trade_pack.get("trades_by_code") or {}).get(str(c), []))
