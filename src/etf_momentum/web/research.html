@@ -23065,14 +23065,8 @@
             _renderMfeThresholdTable(
               mfeThrOverallTable,
               mfeThresholds,
-              p === "trend"
-                ? _buildMfeThresholdStatsFromTrades(activeTrades, mfeThresholds)
-                    .hitMap
-                : activeMfeOverall.hit_rate_by_threshold || {},
-              p === "trend"
-                ? _buildMfeThresholdStatsFromTrades(activeTrades, mfeThresholds)
-                    .pullbackByThr
-                : activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
+              activeMfeOverall.hit_rate_by_threshold || {},
+              activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
             );
             const oneMfe =
               activeMfeByCode &&
@@ -23131,37 +23125,15 @@
             _renderMfeThresholdTable(
               mfeThrByCodeTable,
               mfeThresholds,
-              p === "trend"
-                ? _buildMfeThresholdStatsFromTrades(
-                    activeTrades,
-                    mfeThresholds,
-                    c,
-                  ).hitMap
-                : oneMfe.hit_rate_by_threshold || {},
-              p === "trend"
-                ? _buildMfeThresholdStatsFromTrades(
-                    activeTrades,
-                    mfeThresholds,
-                    c,
-                  ).pullbackByThr
-                : oneMfe.pullback_to_exit_ratio_by_threshold || {},
+              oneMfe.hit_rate_by_threshold || {},
+              oneMfe.pullback_to_exit_ratio_by_threshold || {},
             );
-            const trendOverallMfeThresholdStats =
-              p === "trend"
-                ? _buildMfeThresholdStatsFromTrades(activeTrades, mfeThresholds)
-                : null;
             _renderTrendRTpSuggestion(
               rtpSuggestionSummary,
               rtpSuggestionTable,
               mfeThresholds,
-              p === "trend"
-                ? trendOverallMfeThresholdStats &&
-                    trendOverallMfeThresholdStats.hitMap
-                : activeMfeOverall.hit_rate_by_threshold || {},
-              p === "trend"
-                ? trendOverallMfeThresholdStats &&
-                    trendOverallMfeThresholdStats.pullbackByThr
-                : activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
+              activeMfeOverall.hit_rate_by_threshold || {},
+              activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
               scopeSuffix,
             );
           }
