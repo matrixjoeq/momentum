@@ -8269,6 +8269,11 @@
           /* ignore */
         }
         try {
+          _syncTrendFeatureToggleUi();
+        } catch {
+          /* ignore */
+        }
+        try {
           _syncAtrStopParamsUi("rot");
         } catch {
           /* ignore */
@@ -10617,6 +10622,30 @@
         setEnabled(bvThrEl, bvOn);
         _syncAtrStopParamsUi("trend");
       }
+      /** 动力/ER 入场与 ER 出场：主开关关闭时禁用后续参数，与 ATR/RTp 联动样式一致。 */
+      function _syncTrendImpulseErFiltersUi() {
+        const impulseOnEl = $("trendImpulseEntryFilterOn");
+        const erEntryOnEl = $("trendErFilterOn");
+        const erExitOnEl = $("trendErExitFilterOn");
+        const impulseOn =
+          impulseOnEl && String(impulseOnEl.value || "false") === "true";
+        const erEntryOn =
+          erEntryOnEl && String(erEntryOnEl.value || "false") === "true";
+        const erExitOn =
+          erExitOnEl && String(erExitOnEl.value || "false") === "true";
+        const setEnabled = (el, enable) => {
+          if (!el) return;
+          el.disabled = !enable;
+          el.style.opacity = enable ? "1" : "0.55";
+        };
+        setEnabled($("trendImpulseAllowBull"), impulseOn);
+        setEnabled($("trendImpulseAllowBear"), impulseOn);
+        setEnabled($("trendImpulseAllowNeutral"), impulseOn);
+        setEnabled($("trendErWindow"), erEntryOn);
+        setEnabled($("trendErThreshold"), erEntryOn);
+        setEnabled($("trendErExitWindow"), erExitOn);
+        setEnabled($("trendErExitThreshold"), erExitOn);
+      }
       function updateTrendSizingUi() {
         const mode =
           $("trendMode") && $("trendMode").value
@@ -10704,6 +10733,29 @@
           el.disabled = !volMgmtOn;
           el.style.opacity = volMgmtOn ? "1" : "0.55";
         }
+      }
+
+      function _syncTrendFeatureToggleUi() {
+        const monthlyRiskBudgetOn =
+          $("trendMonthlyRiskBudgetEnable") &&
+          String($("trendMonthlyRiskBudgetEnable").value || "false") === "true";
+        const groupEnforceOn =
+          $("trendGroupEnforce") &&
+          String($("trendGroupEnforce").value || "false") === "true";
+        const setEnabled = (el, enabled) => {
+          if (!el) return;
+          el.disabled = !enabled;
+          el.style.opacity = enabled ? "1" : "0.55";
+        };
+        setEnabled($("trendMonthlyRiskBudgetPct"), monthlyRiskBudgetOn);
+        setEnabled(
+          $("trendMonthlyRiskBudgetIncludeNewRisk"),
+          monthlyRiskBudgetOn,
+        );
+        setEnabled($("trendGroupPolicy"), groupEnforceOn);
+        setEnabled($("trendGroupMaxHoldings"), groupEnforceOn);
+        setEnabled($("trendAssetGroups"), groupEnforceOn);
+        setEnabled($("trendSuggestGroups"), groupEnforceOn);
       }
 
       function _syncRotPositionModeUi() {
@@ -10909,6 +10961,7 @@
         _syncRTpParamsUi();
         // Re-apply仓位/风险预算/波动率风控等联动禁用态（否则 alwaysEnabledIds 会把波动率参数全部置为可用）。
         updateTrendSizingUi();
+        _syncTrendImpulseErFiltersUi();
 
         const stratDesc = {
           ma_filter:
@@ -34319,6 +34372,16 @@
           "change",
           updateTrendSizingUi,
         );
+      if ($("trendMonthlyRiskBudgetEnable"))
+        $("trendMonthlyRiskBudgetEnable").addEventListener(
+          "change",
+          _syncTrendFeatureToggleUi,
+        );
+      if ($("trendGroupEnforce"))
+        $("trendGroupEnforce").addEventListener(
+          "change",
+          _syncTrendFeatureToggleUi,
+        );
       if ($("rotPositionMode"))
         $("rotPositionMode").addEventListener("change", _syncRotPositionModeUi);
       if ($("rotTopKMode"))
@@ -34333,6 +34396,21 @@
         $("trendRScaleEnable").addEventListener("change", _syncRTpParamsUi);
       if ($("trendBiasVTpEnable"))
         $("trendBiasVTpEnable").addEventListener("change", _syncRTpParamsUi);
+      if ($("trendImpulseEntryFilterOn"))
+        $("trendImpulseEntryFilterOn").addEventListener(
+          "change",
+          _syncTrendImpulseErFiltersUi,
+        );
+      if ($("trendErFilterOn"))
+        $("trendErFilterOn").addEventListener(
+          "change",
+          _syncTrendImpulseErFiltersUi,
+        );
+      if ($("trendErExitFilterOn"))
+        $("trendErExitFilterOn").addEventListener(
+          "change",
+          _syncTrendImpulseErFiltersUi,
+        );
       if ($("rotAtrStopMode"))
         $("rotAtrStopMode").addEventListener("change", () =>
           _syncAtrStopParamsUi("rot"),
@@ -34382,6 +34460,7 @@
       // Init trend strategy parameter enablement/description on page load.
       updateTrendStrategyParamsUi();
       updateTrendSizingUi();
+      _syncTrendFeatureToggleUi();
       _syncRTpParamsUi();
       _syncRotPositionModeUi();
       _syncAtrStopParamsUi("rot");
