@@ -4570,7 +4570,7 @@
       </div>
       <div class="row" style="align-items: end">
         <div>
-          <label>模式</label>
+          <label>回测模式</label>
           <select id="trendMode" style="min-width: 160px">
             <option value="single" selected>单标的</option>
             <option value="portfolio">组合</option>
@@ -4580,21 +4580,8 @@
           <label>单标的代码</label>
           <select id="trendSingleCode" style="min-width: 180px"></select>
         </div>
-        <div>
-          <label>策略</label>
-          <select id="trendStrategy" style="min-width: 190px">
-            <option value="ma_filter">均线过滤</option>
-            <option value="ma_cross">均线交叉</option>
-            <option value="donchian">唐奇安通道</option>
-            <option value="tsmom">时序动量</option>
-            <option value="linreg_slope">线性回归斜率</option>
-            <option value="random_entry">随机入市（抛硬币）</option>
-            <option value="bias">bias</option>
-            <option value="macd_cross">MACD金叉死叉</option>
-            <option value="macd_zero_filter">MACD零轴过滤</option>
-            <option value="macd_v">MACD-V</option>
-          </select>
-        </div>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
         <div>
           <label
             >仓位法（单标的/组合）
@@ -4661,6 +4648,8 @@
           <label>风险预算最大杠杆倍数(1~10)</label>
           <input id="trendRiskBudgetMaxLeverage" value="2.0" />
         </div>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
         <div>
           <label>波动率动态风控</label>
           <select id="trendVolRegimeRiskMgmtEnable" style="min-width: 140px">
@@ -4692,6 +4681,8 @@
           <label>回归正常阈值</label>
           <input id="trendVolRatioNormalThreshold" value="0.95" />
         </div>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
         <div>
           <label>月度风险预算</label>
           <select id="trendMonthlyRiskBudgetEnable" style="min-width: 140px">
@@ -4716,12 +4707,39 @@
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
         <div>
-          <label>趋势回测引擎</label>
-          <select id="trendEngine" style="min-width: 140px">
-            <option value="legacy" selected>legacy(自研)</option>
-            <option value="bt">bt(backtesting)</option>
+          <label>分组约束（组合）</label>
+          <select id="trendGroupEnforce" style="min-width: 140px">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
           </select>
         </div>
+        <div>
+          <label>组内优选（组合）</label>
+          <select id="trendGroupPolicy" style="min-width: 180px">
+            <option value="highest_sharpe" selected>夏普最高</option>
+            <option value="earliest_entry">最早入场（优先当前持仓）</option>
+          </select>
+        </div>
+        <div>
+          <label>每组持仓上限（1~10）</label>
+          <input id="trendGroupMaxHoldings" value="4" />
+        </div>
+        <button id="trendSuggestGroups">自动分组建议</button>
+        <span class="muted" id="trendSuggestGroupsHint"></span>
+      </div>
+      <div style="margin-top: 8px">
+        <label>趋势分组映射（代码=组ID，每行一条）</label>
+        <textarea
+          id="trendAssetGroups"
+          rows="3"
+          style="
+            width: 100%;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          "
+          placeholder="159915=CN_EQ&#10;510300=CN_EQ&#10;513100=US_EQ"
+        ></textarea>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
         <div>
           <label>成交价口径</label>
           <select id="trendExecPrice" style="min-width: 100px">
@@ -4777,52 +4795,22 @@
             </button></label
           ><input id="trendSlippage" value="0.001" />
         </div>
-        <div>
-          <label>毁灭线（账户可承受最大回撤，%）</label>
-          <input id="trendRiskOfRuinMaxrisk" value="30" />
-        </div>
-        <div>
-          <label>分组约束（组合）</label>
-          <select id="trendGroupEnforce" style="min-width: 140px">
-            <option value="false" selected>关闭</option>
-            <option value="true">开启</option>
-          </select>
-        </div>
-        <div>
-          <label>组内优选（组合）</label>
-          <select id="trendGroupPolicy" style="min-width: 180px">
-            <option value="highest_sharpe" selected>夏普最高</option>
-            <option value="earliest_entry">最早入场（优先当前持仓）</option>
-          </select>
-        </div>
-        <div>
-          <label>每组持仓上限（1~10）</label>
-          <input id="trendGroupMaxHoldings" value="4" />
-        </div>
-        <button id="runTrendResearch">运行趋势回测</button>
-        <button id="exportTrendParamsJson">导出参数(JSON)</button>
-        <label
-          style="display: flex; align-items: center; gap: 6px; min-height: 32px"
-        >
-          <input id="trendQuickMode" type="checkbox" />
-          <span>快速模式</span>
-        </label>
-        <span id="runTrendResearchHint" class="muted"></span>
       </div>
-      <div style="margin-top: 8px">
-        <label>趋势分组映射（代码=组ID，每行一条）</label>
-        <textarea
-          id="trendAssetGroups"
-          rows="3"
-          style="
-            width: 100%;
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          "
-          placeholder="159915=CN_EQ&#10;510300=CN_EQ&#10;513100=US_EQ"
-        ></textarea>
-        <div class="row" style="margin-top: 6px; align-items: center; gap: 8px">
-          <button id="trendSuggestGroups">自动分组建议</button>
-          <span class="muted" id="trendSuggestGroupsHint"></span>
+      <div class="row" style="margin-top: 8px; align-items: end">
+        <div>
+          <label>策略</label>
+          <select id="trendStrategy" style="min-width: 190px">
+            <option value="ma_filter">均线过滤</option>
+            <option value="ma_cross">均线交叉</option>
+            <option value="donchian">唐奇安通道</option>
+            <option value="tsmom">时序动量</option>
+            <option value="linreg_slope">线性回归斜率</option>
+            <option value="random_entry">随机入市（抛硬币）</option>
+            <option value="bias">bias</option>
+            <option value="macd_cross">MACD金叉死叉</option>
+            <option value="macd_zero_filter">MACD零轴过滤</option>
+            <option value="macd_v">MACD-V</option>
+          </select>
         </div>
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
@@ -5128,6 +5116,29 @@
           ><input id="trendBiasVTpThreshold" value="5.0" />
         </div>
       </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
+        <div>
+          <label>趋势回测引擎</label>
+          <select id="trendEngine" style="min-width: 140px">
+            <option value="legacy" selected>homemade</option>
+            <option value="bt">backtesting</option>
+          </select>
+        </div>
+        <div>
+          <label>毁灭线（账户可承受最大回撤，%）</label>
+          <input id="trendRiskOfRuinMaxrisk" value="30" />
+        </div>
+        <div>
+          <label>运行模式</label>
+          <select id="trendQuickMode" style="min-width: 140px">
+            <option value="compact" selected>精简模式</option>
+            <option value="detailed">详细模式</option>
+          </select>
+        </div>
+        <button id="exportTrendParamsJson">导出参数(JSON)</button>
+        <button id="runTrendResearch">运行趋势回测</button>
+        <span id="runTrendResearchHint" class="muted"></span>
+      </div>
       <details id="trendExportParamsWrap" style="margin-top: 8px">
         <summary><b>趋势回测参数导出(JSON)</b></summary>
         <textarea
@@ -5186,12 +5197,14 @@
           ></div>
         </div>
       </div>
-      <div class="panel" style="margin-top: 10px">
-        <h3>趋势策略：收益拆解（隔夜 / 日内 / 交互 / 成本）</h3>
+      <details class="panel" style="margin-top: 10px">
+        <summary>
+          <b>趋势策略：收益拆解（隔夜 / 日内 / 交互 / 成本）</b>
+        </summary>
         <div id="trendRetDecompChart" style="width: 100%; height: 320px"></div>
         <table id="trendRetDecompSummary" style="margin-top: 10px"></table>
         <table id="trendRetDecompShare" style="margin-top: 8px"></table>
-      </div>
+      </details>
       <h3 style="margin-top: 12px">趋势策略：日度收益率分布统计</h3>
       <div class="row no-print" style="margin-top: 8px; align-items: end">
         <div>
@@ -5342,8 +5355,8 @@
             style="margin-top: 6px"
           ></div>
         </details>
-        <div style="margin-top: 10px">
-          <div class="muted">事件研究（入市后 1/5/10/20 交易日）</div>
+        <details style="margin-top: 10px">
+          <summary><b>事件研究（入市后 1/5/10/20 交易日）</b></summary>
           <div class="row no-print" style="margin-top: 8px; align-items: end">
             <div>
               <label>分桶阈值档位</label>
@@ -5372,7 +5385,7 @@
             style="margin-top: 6px"
           ></div>
           <table id="trendEventStudyTable" style="margin-top: 8px"></table>
-        </div>
+        </details>
       </div>
       <div class="panel" style="margin-top: 10px">
         <h3>趋势策略：R 分布统计（初始风险质量 + R乘数）</h3>
@@ -22459,14 +22472,20 @@
             "<tr><th>阈值R</th><th>触达率</th><th>触达后回落P50</th><th>触达后回落P75</th><th>触达样本数</th></tr>";
           return;
         }
+        const maxThr = thrs.length ? Math.max(...thrs) : NaN;
         const rows = thrs
           .map((thr) => {
             const k = String(Number(thr).toString());
             const onePb = pb[k] && typeof pb[k] === "object" ? pb[k] : {};
             const n = Number(onePb.sample_size);
+            const isTop =
+              Number.isFinite(maxThr) && Math.abs(Number(thr) - maxThr) < 1e-12;
+            const thrLabel = isTop
+              ? `${esc(fmtNum(thr))}R及以上`
+              : `${esc(fmtNum(thr))}R`;
             return (
               `<tr>` +
-              `<td>${esc(fmtNum(thr))}R</td>` +
+              `<td>${thrLabel}</td>` +
               `<td>${fmtPct(Number(hm[k]))}</td>` +
               `<td>${fmtPct(Number(onePb.p50))}</td>` +
               `<td>${fmtPct(Number(onePb.p75))}</td>` +
@@ -22511,6 +22530,49 @@
         }
         rows.sort((a, b) => Number(a.r) - Number(b.r));
         return rows;
+      }
+
+      function _buildMfeThresholdStatsFromTrades(trades, thresholds, code) {
+        const outHit = {};
+        const outPullback = {};
+        const thrs = Array.isArray(thresholds)
+          ? thresholds
+              .map((x) => Number(x))
+              .filter((x) => Number.isFinite(x) && x > 0)
+          : [];
+        const rows = Array.isArray(trades)
+          ? trades.filter((tr) => {
+              if (!tr || typeof tr !== "object") return false;
+              if (code) return String(tr.code || "") === String(code);
+              return true;
+            })
+          : [];
+        const mfeVals = rows
+          .map((tr) => Number(tr && tr.mfe_r_multiple))
+          .filter(Number.isFinite);
+        for (const thr of thrs) {
+          const k = String(Number(thr).toString());
+          if (!mfeVals.length) {
+            outHit[k] = NaN;
+            outPullback[k] = {};
+            continue;
+          }
+          const hit = mfeVals.filter((x) => x >= Number(thr)).length;
+          outHit[k] = hit / mfeVals.length;
+          const pbVals = rows
+            .filter((tr) => Number(tr && tr.mfe_r_multiple) >= Number(thr))
+            .map((tr) => Number(tr && tr.mfe_drawdown_to_exit_ratio))
+            .filter(Number.isFinite)
+            .sort((a, b) => a - b);
+          const n = pbVals.length;
+          outPullback[k] = {
+            sample_size: n,
+            p25: n ? _percentile(pbVals, 25) : NaN,
+            p50: n ? _percentile(pbVals, 50) : NaN,
+            p75: n ? _percentile(pbVals, 75) : NaN,
+          };
+        }
+        return { hitMap: outHit, pullbackByThr: outPullback };
       }
 
       function _clampRetraceRatio(x) {
@@ -22807,10 +22869,15 @@
                   typeof mfePack.overall === "object"
                 ? mfePack.overall
                 : {};
+          const trendMfeThresholds = [
+            0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0,
+          ];
           const mfeThresholds =
-            mfePack && Array.isArray(mfePack.thresholds)
-              ? mfePack.thresholds
-              : [];
+            p === "trend"
+              ? trendMfeThresholds
+              : mfePack && Array.isArray(mfePack.thresholds)
+                ? mfePack.thresholds
+                : [];
           const scopeSuffix = useRecent ? "（近100次交易）" : "（全部交易）";
 
           const overallInit =
@@ -23003,8 +23070,14 @@
             _renderMfeThresholdTable(
               mfeThrOverallTable,
               mfeThresholds,
-              activeMfeOverall.hit_rate_by_threshold || {},
-              activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
+              p === "trend"
+                ? _buildMfeThresholdStatsFromTrades(activeTrades, mfeThresholds)
+                    .hitMap
+                : activeMfeOverall.hit_rate_by_threshold || {},
+              p === "trend"
+                ? _buildMfeThresholdStatsFromTrades(activeTrades, mfeThresholds)
+                    .pullbackByThr
+                : activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
             );
             const oneMfe =
               activeMfeByCode &&
@@ -23063,15 +23136,37 @@
             _renderMfeThresholdTable(
               mfeThrByCodeTable,
               mfeThresholds,
-              oneMfe.hit_rate_by_threshold || {},
-              oneMfe.pullback_to_exit_ratio_by_threshold || {},
+              p === "trend"
+                ? _buildMfeThresholdStatsFromTrades(
+                    activeTrades,
+                    mfeThresholds,
+                    c,
+                  ).hitMap
+                : oneMfe.hit_rate_by_threshold || {},
+              p === "trend"
+                ? _buildMfeThresholdStatsFromTrades(
+                    activeTrades,
+                    mfeThresholds,
+                    c,
+                  ).pullbackByThr
+                : oneMfe.pullback_to_exit_ratio_by_threshold || {},
             );
+            const trendOverallMfeThresholdStats =
+              p === "trend"
+                ? _buildMfeThresholdStatsFromTrades(activeTrades, mfeThresholds)
+                : null;
             _renderTrendRTpSuggestion(
               rtpSuggestionSummary,
               rtpSuggestionTable,
               mfeThresholds,
-              activeMfeOverall.hit_rate_by_threshold || {},
-              activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
+              p === "trend"
+                ? trendOverallMfeThresholdStats &&
+                    trendOverallMfeThresholdStats.hitMap
+                : activeMfeOverall.hit_rate_by_threshold || {},
+              p === "trend"
+                ? trendOverallMfeThresholdStats &&
+                    trendOverallMfeThresholdStats.pullbackByThr
+                : activeMfeOverall.pullback_to_exit_ratio_by_threshold || {},
               scopeSuffix,
             );
           }
@@ -28521,7 +28616,9 @@
           risk_free_rate,
           cost_bps: Number(($("trendCost").value || "2").trim()),
           slippage_rate: Number(($("trendSlippage").value || "0.001").trim()),
-          quick_mode: !!($("trendQuickMode") && $("trendQuickMode").checked),
+          quick_mode:
+            !($("trendQuickMode") && $("trendQuickMode").value) ||
+            String($("trendQuickMode").value) !== "detailed",
           engine:
             $("trendEngine") && $("trendEngine").value
               ? String($("trendEngine").value).trim().toLowerCase()
@@ -28894,7 +28991,9 @@
           risk_free_rate,
           cost_bps,
           slippage_rate,
-          quick_mode: !!($("trendQuickMode") && $("trendQuickMode").checked),
+          quick_mode:
+            !($("trendQuickMode") && $("trendQuickMode").value) ||
+            String($("trendQuickMode").value) !== "detailed",
           engine:
             $("trendEngine") && $("trendEngine").value
               ? String($("trendEngine").value).trim().toLowerCase()
