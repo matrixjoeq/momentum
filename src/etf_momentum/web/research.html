@@ -22158,19 +22158,9 @@
           navPack.series && typeof navPack.series === "object"
             ? navPack.series
             : {};
-        let navSeries = Array.isArray(navSeriesRoot[c])
+        const navSeries = Array.isArray(navSeriesRoot[c])
           ? navSeriesRoot[c]
           : null;
-        if (!navSeries || !navSeries.length) {
-          const strat =
-            data &&
-            data.nav &&
-            data.nav.series &&
-            Array.isArray(data.nav.series.STRAT)
-              ? data.nav.series.STRAT
-              : [];
-          navSeries = strat.length ? strat : null;
-        }
         if (!navSeries || !navSeries.length || !navDates.length) {
           div.innerHTML = "<div class='muted'>该标的暂无可用净值序列。</div>";
           return;
@@ -22181,7 +22171,9 @@
         const dateToNav = new Map();
         for (let i = 0; i < n; i += 1) {
           const d = String(navDates[i] || "");
-          const v = Number(navSeries[i]);
+          const rawV = navSeries[i];
+          if (rawV === null || rawV === undefined || rawV === "") continue;
+          const v = Number(rawV);
           if (!d || !Number.isFinite(v)) continue;
           xs.push(d);
           ys.push(v);
@@ -22263,7 +22255,10 @@
           {
             margin: { t: 34, b: 40 },
             title: `${codeLabel(c)}：净值与逐笔交易(B/S)`,
-            xaxis: { title: "日期" },
+            xaxis: {
+              title: "日期",
+              range: [xs[0], xs[xs.length - 1]],
+            },
             yaxis: { title: "净值" },
             shapes,
             legend: { orientation: "h" },
