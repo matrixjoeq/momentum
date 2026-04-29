@@ -10921,8 +10921,6 @@
           "trendVolRatioExtremeThreshold",
           "trendRiskOfRuinMaxrisk",
           "trendMonthlyRiskBudgetEnable",
-          "trendMonthlyRiskBudgetPct",
-          "trendMonthlyRiskBudgetIncludeNewRisk",
         ];
         const byStrat = {
           ma_filter: [
@@ -10975,6 +10973,7 @@
         // Re-apply仓位/风险预算/波动率风控等联动禁用态（否则 alwaysEnabledIds 会把波动率参数全部置为可用）。
         updateTrendSizingUi();
         _syncTrendImpulseErFiltersUi();
+        _syncTrendFeatureToggleUi();
 
         const stratDesc = {
           ma_filter:
