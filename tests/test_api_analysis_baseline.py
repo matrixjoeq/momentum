@@ -3,6 +3,8 @@ import datetime as dt
 import pandas as pd
 import pytest
 
+from etf_momentum.db.models import EtfPrice
+from etf_momentum.db.session import make_session_factory
 from tests.helpers.rotation_case_data import (
     build_rotation_case_series,
     fmt_ymd,
@@ -19,6 +21,41 @@ from tests.helpers.api_test_client import upsert_and_fetch_etfs
 
 _BASELINE_CODES = ["510300", "511010"]
 _BASELINE_NAMES = {"510300": "沪深300", "511010": "国债"}
+
+
+def _seed_trend_capacity_prices(
+    engine,
+    *,
+    code_to_series: dict[str, list[float]],
+    dates: list[dt.date],
+    with_amount: bool,
+) -> None:
+    sf = make_session_factory(engine)
+    with sf() as db:
+        for code, series in code_to_series.items():
+            for i, (d, px) in enumerate(zip(dates, series)):
+                vol = float(1_000_000.0 + i * 10_000.0)
+                amount = float(vol * px) if with_amount else None
+                o = float(px * 0.995)
+                h = float(px * 1.01)
+                low_px = float(px * 0.99)
+                c = float(px)
+                for adj in ("none", "hfq", "qfq"):
+                    db.add(
+                        EtfPrice(
+                            code=str(code),
+                            trade_date=d,
+                            open=o,
+                            high=h,
+                            low=low_px,
+                            close=c,
+                            volume=vol,
+                            amount=amount,
+                            source="eastmoney",
+                            adjust=adj,
+                        )
+                    )
+        db.commit()
 
 
 def _make_next_execution_plan_payload(
@@ -547,6 +584,84 @@ def test_api_trend_portfolio_quick_mode_skips_heavy_sections(engine, api_client)
             == overall_n
         )
     assert "entry_condition_stats" not in ts
+
+
+def test_api_trend_single_capacity_estimate_uses_volume_avg_price_fallback(
+    engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={"CAPS1": [100.0 + i * 0.3 for i in range(len(dates))]},
+        dates=dates,
+        with_amount=False,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "CAPS1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 3,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    cap = (out or {}).get("capacity_estimate") or {}
+    meta = cap.get("meta") or {}
+    scenarios = cap.get("scenarios") or []
+    assert str(meta.get("status") or "") == "ok"
+    assert len(scenarios) == 3
+    names = [str((x or {}).get("name") or "") for x in scenarios]
+    assert names == ["conservative", "balanced", "aggressive"]
+    assert all(int((x or {}).get("sample_days") or 0) >= 0 for x in scenarios)
+    src_stats = meta.get("source_stats") or {}
+    src = src_stats.get("sources") or {}
+    assert int(src.get("volume_avg_price") or 0) > 0
+
+
+def test_api_trend_portfolio_capacity_estimate_has_three_scenarios(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "CAPP1": [100.0 + i * 0.25 for i in range(len(dates))],
+            "CAPP2": [90.0 + i * 0.20 for i in range(len(dates))],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["CAPP1", "CAPP2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 3,
+            "position_sizing": "equal",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    cap = (out or {}).get("capacity_estimate") or {}
+    scenarios = cap.get("scenarios") or []
+    meta = cap.get("meta") or {}
+    assert len(scenarios) == 3
+    by_name = {str((x or {}).get("name") or ""): x for x in scenarios}
+    assert set(by_name.keys()) == {"conservative", "balanced", "aggressive"}
+    assert float(
+        (by_name["balanced"] or {}).get("participation_rate") or 0.0
+    ) == pytest.approx(0.10, rel=0.0, abs=1e-12)
+    assert int(meta.get("turnover_positive_days") or 0) > 0
+    assert float((by_name["aggressive"] or {}).get("aum_cap_p25") or 0.0) >= float(
+        (by_name["conservative"] or {}).get("aum_cap_p25") or 0.0
+    )
 
 
 @pytest.mark.parametrize("runtime_engine", [None, "bt"])

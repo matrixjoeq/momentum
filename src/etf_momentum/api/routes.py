@@ -523,6 +523,275 @@ def _resolve_trend_engine(
     return resolved_default, resolved_default
 
 
+def _parse_iso_date_index(dates: list[Any]) -> pd.DatetimeIndex:
+    if not isinstance(dates, list) or not dates:
+        return pd.DatetimeIndex([])
+    idx = pd.to_datetime(pd.Series(dates), errors="coerce").dropna()
+    if idx.empty:
+        return pd.DatetimeIndex([])
+    return pd.DatetimeIndex(idx)
+
+
+def _trend_weight_matrix_from_output(out: dict[str, Any]) -> pd.DataFrame:
+    nav_dates = (
+        ((out or {}).get("nav") or {}).get("dates")
+        if isinstance((out or {}).get("nav"), dict)
+        else None
+    )
+    idx = _parse_iso_date_index(list(nav_dates or []))
+    if idx.empty:
+        return pd.DataFrame()
+    weights = ((out or {}).get("weights") or {}).get("series")
+    if isinstance(weights, dict) and weights:
+        cols: dict[str, np.ndarray] = {}
+        for code, arr in weights.items():
+            s = pd.to_numeric(pd.Series(arr), errors="coerce")
+            if len(s) != len(idx):
+                s = s.reindex(range(len(idx)))
+            cols[str(code)] = s.fillna(0.0).astype(float).to_numpy(dtype=float)
+        if cols:
+            return pd.DataFrame(cols, index=idx).fillna(0.0).astype(float)
+    sig = (out or {}).get("signals") or {}
+    pos_eff = sig.get("position_effective") if isinstance(sig, dict) else None
+    if not isinstance(pos_eff, list):
+        return pd.DataFrame()
+    code = str((((out or {}).get("meta") or {}).get("code") or "")).strip() or "UNKNOWN"
+    s = pd.to_numeric(pd.Series(pos_eff), errors="coerce")
+    if len(s) != len(idx):
+        s = s.reindex(range(len(idx)))
+    return pd.DataFrame(
+        {code: s.fillna(0.0).astype(float).to_numpy(dtype=float)}, index=idx
+    )
+
+
+def _load_trend_daily_notional(
+    db: Session, *, codes: list[str], start: dt.date, end: dt.date
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not codes:
+        return pd.DataFrame(), {"data_rows": 0, "sources": {}}
+    rows = (
+        db.query(
+            EtfPrice.trade_date,
+            EtfPrice.code,
+            EtfPrice.amount,
+            EtfPrice.volume,
+            EtfPrice.open,
+            EtfPrice.high,
+            EtfPrice.low,
+            EtfPrice.close,
+            EtfPrice.adjust,
+        )
+        .filter(
+            EtfPrice.code.in_(codes),
+            EtfPrice.trade_date >= start,
+            EtfPrice.trade_date <= end,
+        )
+        .all()
+    )
+    if not rows:
+        return pd.DataFrame(), {"data_rows": 0, "sources": {}}
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "date",
+            "code",
+            "amount",
+            "volume",
+            "open",
+            "high",
+            "low",
+            "close",
+            "adjust",
+        ],
+    )
+    if df.empty:
+        return pd.DataFrame(), {"data_rows": 0, "sources": {}}
+    df_any = (
+        df.sort_values(["date", "code", "adjust"])
+        .groupby(["date", "code"], as_index=False)
+        .last()
+        .copy()
+    )
+    df_none = (
+        df[df["adjust"] == "none"]
+        .sort_values(["date", "code"])
+        .groupby(["date", "code"], as_index=False)
+        .last()
+        .copy()
+    )
+    base = df_any.copy()
+    if not df_none.empty:
+        key_cols = ["date", "code"]
+        none_idx = df_none.set_index(key_cols)
+        any_idx = df_any.set_index(key_cols)
+        merged = any_idx.copy()
+        for c in ["amount", "volume", "open", "high", "low", "close"]:
+            v_none = pd.to_numeric(none_idx.get(c), errors="coerce")
+            v_any = pd.to_numeric(any_idx.get(c), errors="coerce")
+            merged[c] = v_none.combine_first(v_any)
+        base = merged.reset_index()
+    for c in ["amount", "volume", "open", "high", "low", "close"]:
+        base[c] = pd.to_numeric(base[c], errors="coerce")
+    avg_px = base[["open", "high", "low", "close"]].mean(axis=1, skipna=True)
+    est_amount = base["volume"] * avg_px
+    amount = base["amount"].where(base["amount"] > 0.0, est_amount)
+    src = np.where(
+        base["amount"] > 0.0,
+        "amount",
+        np.where(
+            (base["volume"] > 0.0) & np.isfinite(avg_px), "volume_avg_price", "missing"
+        ),
+    )
+    base["liquidity_notional"] = amount
+    base["liquidity_source"] = src
+    notional = base.pivot_table(
+        index="date", columns="code", values="liquidity_notional", aggfunc="last"
+    ).sort_index()
+    src_cnt = base.groupby("liquidity_source", dropna=False)["code"].count().to_dict()
+    return notional, {
+        "data_rows": int(len(base)),
+        "sources": {str(k): int(v) for k, v in src_cnt.items()},
+    }
+
+
+def _build_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "method": "turnover_liquidity_daily",
+        "scenarios": [],
+        "series": {"dates": [], "by_scenario": {}},
+        "meta": {"status": "unavailable"},
+    }
+    w = _trend_weight_matrix_from_output(out)
+    if w.empty:
+        result["meta"] = {"status": "unavailable", "reason": "weights_missing"}
+        return result
+    idx = pd.DatetimeIndex(w.index)
+    if idx.empty:
+        result["meta"] = {"status": "unavailable", "reason": "dates_missing"}
+        return result
+    codes = [str(c) for c in w.columns]
+    notional_raw, src_meta = _load_trend_daily_notional(
+        db, codes=codes, start=idx.min().date(), end=idx.max().date()
+    )
+    if notional_raw.empty:
+        result["meta"] = {
+            "status": "unavailable",
+            "reason": "liquidity_data_missing",
+            "codes": codes,
+            "source_stats": src_meta,
+        }
+        return result
+    notional = (
+        notional_raw.reindex(index=idx, columns=codes)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    turnover_by_asset = (
+        (w.astype(float) - w.astype(float).shift(1).fillna(0.0)).abs() / 2.0
+    ).astype(float)
+    turnover_total = turnover_by_asset.sum(axis=1).astype(float)
+    # Ignore non-positive liquidity points; they are data-missing rather than true zero liquidity.
+    notional_pos = notional.where(notional > 0.0)
+    notional_total = notional_pos.sum(axis=1, min_count=1).astype(float)
+    scenarios = [
+        ("conservative", 0.05),
+        ("balanced", 0.10),
+        ("aggressive", 0.20),
+    ]
+    eps = 1e-12
+    scenario_rows: list[dict[str, Any]] = []
+    series_map: dict[str, dict[str, list[float | None]]] = {}
+    for name, p in scenarios:
+        traded_mask = turnover_total > eps
+        # Main capacity metric uses portfolio total liquidity / portfolio turnover.
+        daily_cap_total = (
+            (notional_total * float(p)).where(traded_mask)
+            / turnover_total.where(traded_mask)
+        ).replace([np.inf, -np.inf], np.nan)
+        # Keep bottleneck series for diagnostics (optional in panel).
+        traded_mask_by_asset = turnover_by_asset > eps
+        daily_cap_by_asset = (
+            (notional_pos * float(p)).where(traded_mask_by_asset)
+            / turnover_by_asset.where(traded_mask_by_asset)
+        ).replace([np.inf, -np.inf], np.nan)
+        daily_cap_bottleneck = daily_cap_by_asset.min(axis=1, skipna=True).replace(
+            [np.inf, -np.inf], np.nan
+        )
+        finite = daily_cap_total[np.isfinite(daily_cap_total) & (daily_cap_total > 0.0)]
+        if len(finite):
+            arr = finite.to_numpy(dtype=float)
+            p10 = float(np.nanpercentile(arr, 10))
+            p25 = float(np.nanpercentile(arr, 25))
+            p50 = float(np.nanpercentile(arr, 50))
+            p75 = float(np.nanpercentile(arr, 75))
+            sample_days = int(len(arr))
+        else:
+            p10 = p25 = p50 = p75 = None
+            sample_days = 0
+        scenario_rows.append(
+            {
+                "name": name,
+                "participation_rate": float(p),
+                "aum_cap_p10": p10,
+                "aum_cap_p25": p25,
+                "aum_cap_p50": p50,
+                "aum_cap_p75": p75,
+                "sample_days": sample_days,
+                "coverage_ratio": (
+                    float(sample_days) / float(len(idx)) if len(idx) else 0.0
+                ),
+            }
+        )
+        series_map[name] = {
+            "daily_aum_cap": [
+                (None if not np.isfinite(float(v)) else float(v))
+                for v in daily_cap_total.to_numpy(dtype=float)
+            ],
+            "daily_aum_cap_bottleneck": [
+                (None if not np.isfinite(float(v)) else float(v))
+                for v in daily_cap_bottleneck.to_numpy(dtype=float)
+            ],
+            "daily_turnover_one_way": [
+                float(v) for v in turnover_total.to_numpy(dtype=float)
+            ],
+            "daily_liquidity_notional": [
+                (None if not np.isfinite(float(v)) else float(v))
+                for v in notional_total.to_numpy(dtype=float)
+            ],
+        }
+    result["scenarios"] = scenario_rows
+    result["series"] = {
+        "dates": [d.strftime("%Y-%m-%d") for d in idx],
+        "by_scenario": series_map,
+    }
+    result["meta"] = {
+        "status": "ok",
+        "codes": codes,
+        "start": idx.min().strftime("%Y%m%d"),
+        "end": idx.max().strftime("%Y%m%d"),
+        "source_stats": src_meta,
+        "turnover_positive_days": int((turnover_total > eps).sum()),
+        "liquidity_positive_days": int((notional_total > 0.0).sum()),
+        "note": "amount preferred; fallback to volume * average(open,high,low,close)",
+    }
+    return result
+
+
+def _attach_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(out, dict):
+        return out
+    try:
+        out["capacity_estimate"] = _build_trend_capacity_estimate(db, out)
+    except Exception as exc:  # pragma: no cover
+        out["capacity_estimate"] = {
+            "method": "turnover_liquidity_daily",
+            "scenarios": [],
+            "series": {"dates": [], "by_scenario": {}},
+            "meta": {"status": "error", "reason": str(exc)},
+        }
+    return out
+
+
 _FIXED_CODES = ["159915", "511010", "513100", "518880"]
 _FIXED_NAMES = {
     "159915": "创业板ETF",
@@ -1402,6 +1671,7 @@ def trend_backtest(
             if engine == "bt"
             else compute_trend_backtest(db, inp)
         )
+        out = _attach_trend_capacity_estimate(db, out)
         meta = out.setdefault("meta", {})
         if isinstance(meta, dict):
             meta.setdefault("engine", engine)
@@ -1567,6 +1837,7 @@ def trend_portfolio_backtest(
             if engine == "bt"
             else compute_trend_portfolio_backtest(db, inp)
         )
+        out = _attach_trend_capacity_estimate(db, out)
         meta = out.setdefault("meta", {})
         if isinstance(meta, dict):
             meta.setdefault("engine", engine)
