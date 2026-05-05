@@ -31,6 +31,11 @@ from .event_study import compute_event_study, entry_dates_from_exposure
 from .market_regime import build_market_regime_report
 from .r_multiple import build_trade_mfe_r_distribution, enrich_trades_with_r_metrics
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
+from .account_lot import (
+    remap_return_weights,
+    resolve_max_leverage,
+    simulate_lot_account_weights,
+)
 from . import trend as _trend_semantic_helpers
 
 _apply_atr_stop = _trend_semantic_helpers._apply_atr_stop
@@ -58,6 +63,9 @@ _apply_intraday_scaleout_execution_single = (
 )
 _normalize_r_profit_scaleout_tiers = (
     _trend_semantic_helpers._normalize_r_profit_scaleout_tiers
+)
+_normalize_bias_v_take_profit_tiers = (
+    _trend_semantic_helpers._normalize_bias_v_take_profit_tiers
 )
 
 Session = Any
@@ -3231,6 +3239,11 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "risk_budget_max_leverage_multiple": float(
             getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0
         ),
+        "initial_account_amount": (
+            None
+            if getattr(inp, "initial_account_amount", None) is None
+            else float(getattr(inp, "initial_account_amount"))
+        ),
         "vol_regime_risk_mgmt_enabled": bool(
             getattr(inp, "vol_regime_risk_mgmt_enabled", False)
         ),
@@ -3292,8 +3305,8 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         ),
         "bias_v_ma_window": int(getattr(inp, "bias_v_ma_window", 20) or 20),
         "bias_v_atr_window": int(getattr(inp, "bias_v_atr_window", 20) or 20),
-        "bias_v_take_profit_threshold": float(
-            getattr(inp, "bias_v_take_profit_threshold", 5.0) or 5.0
+        "bias_v_take_profit_tiers": _normalize_bias_v_take_profit_tiers(
+            getattr(inp, "bias_v_take_profit_tiers", None),
         ),
         "monthly_risk_budget_enabled": bool(
             getattr(inp, "monthly_risk_budget_enabled", False)
@@ -3871,6 +3884,9 @@ def _run_single_backtesting(
         .strip()
         .lower()
     )
+    bias_v_tp_tiers = _normalize_bias_v_take_profit_tiers(
+        getattr(inp, "bias_v_take_profit_tiers", None),
+    )
     monthly_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
     ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
     # Legacy `compute_trend_backtest` compounds returns with explicit execution-day weight
@@ -3959,7 +3975,7 @@ def _run_single_backtesting(
             execution_mode=bias_v_tp_execution_mode,
             ma_window=int(getattr(inp, "bias_v_ma_window", 20)),
             atr_window=int(getattr(inp, "bias_v_atr_window", 20)),
-            threshold=float(getattr(inp, "bias_v_take_profit_threshold", 5.0)),
+            tiers=[dict(x) for x in bias_v_tp_tiers],
         )
         raw_pos_for_exec, r_take_profit_stats = _apply_r_multiple_take_profit_shared(
             raw_pos_for_exec,
@@ -4518,6 +4534,71 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         .reindex(nav.index)
         .fillna(0.0)
     )
+    account_lot_meta: dict[str, Any] | None = None
+    init_amt = getattr(inp, "initial_account_amount", None)
+    if init_amt is not None and np.isfinite(float(init_amt)) and float(init_amt) > 0.0:
+        max_lev = resolve_max_leverage(
+            position_sizing=str(getattr(inp, "position_sizing", "equal") or "equal"),
+            risk_budget_overcap_policy=str(
+                getattr(inp, "risk_budget_overcap_policy", "scale") or "scale"
+            ),
+            risk_budget_max_leverage_multiple=float(
+                getattr(inp, "risk_budget_max_leverage_multiple", 1.0) or 1.0
+            ),
+        )
+        w_eff_old = w_eff.copy().astype(float)
+        w_real, account_lot_meta = simulate_lot_account_weights(
+            target_weights=w_eff_old.to_frame(code),
+            exec_price=px_exec_s.to_frame(code),
+            initial_account_amount=float(init_amt),
+            max_leverage_multiple=float(max_lev),
+            lot_size_shares=100,
+        )
+        if not w_real.empty and code in w_real.columns:
+            w_new = (
+                w_real[code]
+                .reindex(w_eff_old.index)
+                .fillna(0.0)
+                .astype(float)
+                .to_frame(code)
+            )
+            w_ret_new_df, risk_scale = remap_return_weights(
+                w_eff_before=w_eff_old.to_frame(code),
+                w_eff_after=w_new,
+                w_ret_before=w_ret.to_frame(code).astype(float),
+            )
+            w_eff = w_new[code].astype(float)
+            w_ret = w_ret_new_df[code].astype(float)
+            atr_over = (atr_over * risk_scale).astype(float)
+            bv_over = (bv_over * risk_scale).astype(float)
+            rtp_over = (rtp_over * risk_scale).astype(float)
+            rps_over = (rps_over * risk_scale).astype(float)
+            turnover_one_way = (w_eff - w_eff.shift(1).fillna(0.0)).abs() / 2.0
+            cost_s = turnover_one_way * (
+                float(getattr(inp, "cost_bps", 0.0) or 0.0) / 10000.0
+            )
+            slip_s = slippage_return_from_turnover(
+                turnover_one_way.astype(float),
+                slippage_spread=float(getattr(inp, "slippage_rate", 0.0) or 0.0),
+                exec_price=px_exec_s.astype(float),
+            ).astype(float)
+            strat_ret = (
+                w_ret * ret_exec_s
+                + atr_over
+                + bv_over
+                + rtp_over
+                + rps_over
+                - cost_s
+                - slip_s
+            ).astype(float)
+            nav = _as_nav(strat_ret)
+            bh_nav = _as_nav(bench_ret.reindex(nav.index).astype(float).fillna(0.0))
+            excess_nav = (nav / bh_nav.replace(0.0, np.nan)).fillna(1.0)
+            excess_ret = _tsmom_rocp(excess_nav, 1).fillna(0.0).astype(float)
+            active_ret = (
+                strat_ret.reindex(nav.index).astype(float)
+                - bench_ret.reindex(nav.index).astype(float).fillna(0.0)
+            ).astype(float)
     return_decomposition = None
     quick_mode = bool(getattr(inp, "quick_mode", False))
     if not quick_mode:
@@ -4908,6 +4989,16 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 }.get(ep, "unknown exec_price"),
             },
             "params": _build_meta_params(inp),
+            "account_lot_sizing": account_lot_meta
+            or {
+                "enabled": False,
+                "initial_account_amount": (
+                    None
+                    if getattr(inp, "initial_account_amount", None) is None
+                    else float(getattr(inp, "initial_account_amount"))
+                ),
+                "lot_size_shares": 100,
+            },
             "limitations": [],
         },
         "nav": {
@@ -5340,7 +5431,6 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             bias_v_take_profit_execution_mode=inp.bias_v_take_profit_execution_mode,
             bias_v_ma_window=inp.bias_v_ma_window,
             bias_v_atr_window=inp.bias_v_atr_window,
-            bias_v_take_profit_threshold=inp.bias_v_take_profit_threshold,
             monthly_risk_budget_enabled=inp.monthly_risk_budget_enabled,
             monthly_risk_budget_pct=inp.monthly_risk_budget_pct,
             # Portfolio semantics: monthly risk budget gate is applied once at
@@ -6557,6 +6647,46 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         ).astype(float)
 
     ret_exec_df = ret_exec_day_df.astype(float)
+    account_lot_meta: dict[str, Any] | None = None
+    init_amt = getattr(inp, "initial_account_amount", None)
+    if init_amt is not None and np.isfinite(float(init_amt)) and float(init_amt) > 0.0:
+        w_eff_old = w_eff.copy().astype(float)
+        w_ret_old = w_ret.copy().astype(float)
+        max_lev = resolve_max_leverage(
+            position_sizing=str(getattr(inp, "position_sizing", "equal") or "equal"),
+            risk_budget_overcap_policy=str(
+                getattr(inp, "risk_budget_overcap_policy", "scale") or "scale"
+            ),
+            risk_budget_max_leverage_multiple=float(
+                getattr(inp, "risk_budget_max_leverage_multiple", 1.0) or 1.0
+            ),
+        )
+        w_real, account_lot_meta = simulate_lot_account_weights(
+            target_weights=w_eff_old,
+            exec_price=px_exec_slip_df.reindex(
+                index=w_eff_old.index, columns=w_eff_old.columns
+            ).astype(float),
+            initial_account_amount=float(init_amt),
+            max_leverage_multiple=float(max_lev),
+            lot_size_shares=100,
+        )
+        if not w_real.empty:
+            w_eff = w_real.astype(float).fillna(0.0)
+            w_ret, risk_scale = remap_return_weights(
+                w_eff_before=w_eff_old,
+                w_eff_after=w_eff,
+                w_ret_before=w_ret_old,
+            )
+            atr_stop_override_ret = (atr_stop_override_ret * risk_scale).astype(float)
+            bias_v_take_profit_override_ret = (
+                bias_v_take_profit_override_ret * risk_scale
+            ).astype(float)
+            r_take_profit_override_ret = (
+                r_take_profit_override_ret * risk_scale
+            ).astype(float)
+            r_profit_scaleout_override_ret = (
+                r_profit_scaleout_override_ret * risk_scale
+            ).astype(float)
     turnover = (w_eff - w_eff.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
     turnover_by_asset = (w_eff - w_eff.shift(1).fillna(0.0)).abs() / 2.0
     cost = turnover * (float(getattr(inp, "cost_bps", 0.0) or 0.0) / 10000.0)
@@ -7125,6 +7255,14 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         for k, v in dict(tiers).items():
             kk = str(k)
             rps_tier_counts[kk] = int(rps_tier_counts.get(kk, 0) + int(v))
+    bias_v_tp_tier_counts: dict[str, int] = {}
+    for c in semantic_debug_by_code:
+        tiers = (semantic_debug_by_code.get(c, {}).get("bias_v_take_profit") or {}).get(
+            "tier_trigger_counts"
+        ) or {}
+        for k, v in dict(tiers).items():
+            kk = str(k)
+            bias_v_tp_tier_counts[kk] = int(bias_v_tp_tier_counts.get(kk, 0) + int(v))
     if (
         not bool(getattr(inp, "monthly_risk_budget_enabled", False))
     ) and semantic_debug_by_code:
@@ -7197,6 +7335,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "r_take_profit_trigger_count": int(rtp_trigger_total),
         "r_profit_scaleout_trigger_count": int(rps_trigger_total),
         "bias_v_take_profit_trigger_count": int(bias_v_tp_trigger_total),
+        "bias_v_take_profit_tier_trigger_counts": dict(bias_v_tp_tier_counts),
         "r_take_profit_tier_trigger_counts": dict(rtp_tier_counts),
         "r_profit_scaleout_tier_trigger_counts": dict(rps_tier_counts),
         "er_filter_blocked_entry_count": int(er_blocked),
@@ -7335,6 +7474,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             ),
             "bias_v_take_profit_trigger_count": int(
                 (sem.get("bias_v_take_profit") or {}).get("trigger_count", 0)
+            ),
+            "bias_v_take_profit_tier_trigger_counts": dict(
+                (sem.get("bias_v_take_profit") or {}).get("tier_trigger_counts") or {}
             ),
             "r_take_profit_tier_trigger_counts": dict(
                 (sem.get("r_take_profit") or {}).get("tier_trigger_counts") or {}
@@ -7778,6 +7920,16 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 strat, ""
             ),
             "params": _build_meta_params(inp),
+            "account_lot_sizing": account_lot_meta
+            or {
+                "enabled": False,
+                "initial_account_amount": (
+                    None
+                    if getattr(inp, "initial_account_amount", None) is None
+                    else float(getattr(inp, "initial_account_amount"))
+                ),
+                "lot_size_shares": 100,
+            },
             "limitations": [],
         },
         "nav": {
@@ -7821,6 +7973,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "avg_annual_trade_count": float(avg_annual_trade_count),
                 "r_take_profit_tier_trigger_counts": dict(rtp_tier_counts),
                 "r_profit_scaleout_tier_trigger_counts": dict(rps_tier_counts),
+                "bias_v_take_profit_tier_trigger_counts": dict(bias_v_tp_tier_counts),
                 "r_take_profit_trigger_count": int(rtp_trigger_total),
                 "r_profit_scaleout_trigger_count": int(rps_trigger_total),
                 "bias_v_take_profit_trigger_count": int(bias_v_tp_trigger_total),
@@ -8073,9 +8226,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 ),
                 "ma_window": int(getattr(inp, "bias_v_ma_window", 20) or 20),
                 "atr_window": int(getattr(inp, "bias_v_atr_window", 20) or 20),
-                "threshold": float(
-                    getattr(inp, "bias_v_take_profit_threshold", 5.0) or 5.0
+                "tiers": _normalize_bias_v_take_profit_tiers(
+                    getattr(inp, "bias_v_take_profit_tiers", None),
                 ),
+                "tier_trigger_counts": dict(bias_v_tp_tier_counts),
                 "trigger_count": int(bias_v_tp_trigger_total),
                 "trigger_days": int(len(bias_v_tp_trigger_dates)),
                 "first_trigger_date": (

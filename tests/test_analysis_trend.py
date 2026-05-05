@@ -616,12 +616,12 @@ def test_bias_v_take_profit_intraday_high_trigger_and_gap_fill() -> None:
         reentry_mode="reenter",
         ma_window=2,
         atr_window=2,
-        threshold=0.5,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 1.0}],
     )
     assert float(out_touch.iloc[3]) == 0.0
     ev_touch = list(stats_touch.get("trigger_events") or [])
     assert ev_touch
-    assert str(ev_touch[0].get("trigger_source")) == "high_touch_bias_v_tp"
+    assert str(ev_touch[0].get("trigger_source")) == "high_touch_bias_v_tp_tier"
     assert 100.0 < float(ev_touch[0].get("fill_price")) < 108.0
 
     open_gap = pd.Series([100.0, 100.0, 100.0, 106.0, 104.0], index=idx, dtype=float)
@@ -635,12 +635,12 @@ def test_bias_v_take_profit_intraday_high_trigger_and_gap_fill() -> None:
         reentry_mode="reenter",
         ma_window=2,
         atr_window=2,
-        threshold=0.5,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 1.0}],
     )
     assert float(out_gap.iloc[3]) == 0.0
     ev_gap = list(stats_gap.get("trigger_events") or [])
     assert ev_gap
-    assert str(ev_gap[0].get("trigger_source")) == "gap_open_above_bias_v_tp"
+    assert str(ev_gap[0].get("trigger_source")) == "gap_open_above_bias_v_tp_tier"
     assert bool(ev_gap[0].get("gap_open_triggered")) is True
     assert float(ev_gap[0].get("fill_price")) == pytest.approx(106.0)
 
@@ -815,7 +815,7 @@ def test_bias_v_take_profit_requires_one_effective_holding_day_before_trigger() 
         reentry_mode="reenter",
         ma_window=2,
         atr_window=2,
-        threshold=0.5,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 1.0}],
     )
     # Bias trigger condition is met on t2 but can only execute from t3.
     assert float(out.iloc[2]) == 1.0
@@ -871,7 +871,7 @@ def test_bias_v_trade_records_capture_required_fields() -> None:
         reentry_mode="reenter",
         ma_window=2,
         atr_window=2,
-        threshold=0.5,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 1.0}],
     )
     recs = list(stats.get("trade_records") or [])
     assert recs
@@ -905,7 +905,7 @@ def test_bias_v_take_profit_trigger_price_is_non_decreasing_in_position() -> Non
         reentry_mode="wait_next_entry",
         ma_window=2,
         atr_window=2,
-        threshold=0.5,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 1.0}],
     )
     rows = [
         r
@@ -2248,7 +2248,6 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
                 bias_v_take_profit_reentry_mode="reenter",
                 bias_v_ma_window=20,
                 bias_v_atr_window=20,
-                bias_v_take_profit_threshold=3.0,
                 cost_bps=0.0,
             ),
         )

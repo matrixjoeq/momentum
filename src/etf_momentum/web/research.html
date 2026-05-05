@@ -1714,6 +1714,7 @@
               <select id="rotPositionMode" style="min-width: 170px">
                 <option value="adaptive" selected>自适应等权</option>
                 <option value="fixed">固定 1/K</option>
+                <option value="inverse_vol">波动率倒数加权</option>
                 <option value="risk_budget">风险预算(ATR)</option>
               </select>
             </div>
@@ -2750,6 +2751,25 @@
           </div>
           <div>
             <button id="runRotNextPlan">查询下一执行计划</button>
+          </div>
+        </div>
+        <div
+          class="panel two"
+          style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+        >
+          <div>
+            <h3 style="margin-top: 0">当前持仓标的列表</h3>
+            <table id="rotCurrentHoldingsTable"></table>
+          </div>
+          <div>
+            <h3 style="margin-top: 0">下一交易日执行计划</h3>
+            <div
+              id="rotNextPlanDate"
+              class="muted"
+              style="margin-bottom: 6px"
+            ></div>
+            <table id="rotNextBuyTable"></table>
+            <table id="rotNextSellTable" style="margin-top: 8px"></table>
           </div>
         </div>
         <div id="rotNextPlan" class="muted" style="margin-top: 8px"></div>
@@ -5111,9 +5131,9 @@
           <label>BIAS-V ATR窗口</label
           ><input id="trendBiasVTpAtrWin" value="20" />
         </div>
-        <div>
-          <label>BIAS-V止盈阈值</label
-          ><input id="trendBiasVTpThreshold" value="5.0" />
+        <div style="min-width: 420px">
+          <label>BIAS-V阈值与减仓比例（v:ratio，逗号分隔）</label>
+          <input id="trendBiasVTpTiers" value="5:0.5,7:0.3,9:0.2" />
         </div>
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
@@ -5134,6 +5154,10 @@
             <option value="compact" selected>精简模式</option>
             <option value="detailed">详细模式</option>
           </select>
+        </div>
+        <div>
+          <label>初始交易账户资金(可空)</label>
+          <input id="trendInitialAccountAmount" placeholder="留空=净值模式" />
         </div>
         <button id="exportTrendParamsJson">导出参数(JSON)</button>
         <button id="runTrendResearch">运行趋势回测</button>
@@ -7648,6 +7672,7 @@
           "trendSlippage",
           "trendRiskOfRuinMaxrisk",
           "trendQuickMode",
+          "trendInitialAccountAmount",
           "trendSizing",
           "trendFixedPosRatio",
           "trendFixedOvercapPolicy",
@@ -7713,7 +7738,7 @@
           "trendBiasVTpExec",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
-          "trendBiasVTpThreshold",
+          "trendBiasVTpTiers",
           "trendMonthlyRiskBudgetEnable",
           "trendMonthlyRiskBudgetPct",
           "trendMonthlyRiskBudgetIncludeNewRisk",
@@ -8674,9 +8699,10 @@
           body: `
             <div><b>adaptive</b>：在风险标的中自适应等权（每次按当期入选数量平分）。</div>
             <div style="margin-top:8px"><b>fixed</b>：固定每个入选标的权重为 1/|TopK|（入选不足时总仓位可低于100%，剩余视为现金）。</div>
+            <div style="margin-top:8px"><b>inverse_vol（波动率倒数加权）</b>：按近 N 日年化波动率的倒数分配权重，低波动标的权重更高，组合总权重归一到100%。</div>
             <div style="margin-top:8px"><b>risk_budget（风险预算）</b>：按 ATR 反推权重，令“标的波动 1 个 ATR 时对组合净值影响约为 x%”。</div>
             <div style="margin-top:8px"><b>公式</b>：w = x * Close / ATR(n)，并对全组合做上限约束（总权重&gt;100%时按比例缩放）。</div>
-            <div style="margin-top:8px"><b>参数</b>：ATR 窗口 n（默认20），风险预算 x（默认1%，范围0.1%~2%）。</div>
+            <div style="margin-top:8px"><b>参数</b>：inverse_vol 使用波动率窗口 N（复用“波动率窗口”参数）；risk_budget 使用 ATR 窗口 n（默认20）与风险预算 x（默认1%，范围0.1%~2%）。</div>
           `,
         },
         param_trend_position_sizing: {
@@ -10601,6 +10627,32 @@
         tiers.sort((a, b) => Number(a.r_multiple) - Number(b.r_multiple));
         return { tiers };
       }
+      function _parseBiasVTpTiers(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return { __error: "BIAS-V分档止盈分层不能为空", tiers: [] };
+        const parts = s
+          .split(",")
+          .map((x) => String(x || "").trim())
+          .filter(Boolean);
+        const tiers = [];
+        for (const p of parts) {
+          const kv = p.split(":").map((x) => String(x || "").trim());
+          if (kv.length !== 2)
+            return {
+              __error: `BIAS-V分层格式非法：${p}（应为 v:ratio）`,
+              tiers: [],
+            };
+          const threshold = Number(kv[0]);
+          const ratio = Number(kv[1]);
+          if (!Number.isFinite(threshold) || threshold <= 0)
+            return { __error: `BIAS-V阈值需为>0数字：${p}`, tiers: [] };
+          if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1)
+            return { __error: `减仓比例需在(0,1]之间：${p}`, tiers: [] };
+          tiers.push({ threshold, reduce_fraction: ratio });
+        }
+        tiers.sort((a, b) => Number(a.threshold) - Number(b.threshold));
+        return { tiers };
+      }
       function _syncRTpParamsUi() {
         const atrModeEl = $("trendAtrStopMode");
         const atrExecEl = $("trendAtrStopExec");
@@ -10616,7 +10668,7 @@
         const bvExEl = $("trendBiasVTpExec");
         const bvMaEl = $("trendBiasVTpMaWin");
         const bvAtrEl = $("trendBiasVTpAtrWin");
-        const bvThrEl = $("trendBiasVTpThreshold");
+        const bvTiersEl = $("trendBiasVTpTiers");
         const atrOn = !!(
           atrModeEl &&
           String(atrModeEl.value || "none").toLowerCase() !== "none"
@@ -10639,7 +10691,7 @@
         setEnabled(bvExEl, bvOn);
         setEnabled(bvMaEl, bvOn);
         setEnabled(bvAtrEl, bvOn);
-        setEnabled(bvThrEl, bvOn);
+        setEnabled(bvTiersEl, bvOn);
         _syncAtrStopParamsUi("trend");
       }
       /** 动力/ER 入场与 ER 出场：主开关关闭时禁用后续参数，与 ATR/RTp 联动样式一致。 */
@@ -10875,7 +10927,7 @@
           "trendBiasVTpExec",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
-          "trendBiasVTpThreshold",
+          "trendBiasVTpTiers",
           "trendVolRegimeRiskMgmtEnable",
           "trendVolRatioFastAtrWindow",
           "trendVolRatioSlowAtrWindow",
@@ -10918,7 +10970,7 @@
           "trendBiasVTpExec",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
-          "trendBiasVTpThreshold",
+          "trendBiasVTpTiers",
           "trendVolRegimeRiskMgmtEnable",
           "trendVolRatioFastAtrWindow",
           "trendVolRatioSlowAtrWindow",
@@ -11099,7 +11151,7 @@
           trendRScaleTiers:
             "分层参数：格式 r:ratio（如 2:0.4,3:0.3,4:0.2），表示达到对应R后直接减仓对应比例。",
           trendBiasVTpEnable:
-            "通用BIAS-V止盈：当 BIAS-V=(close-MA)/ATR 大于等于阈值时触发止盈离场。",
+            "通用BIAS-V分档止盈：按配置阈值分层减仓（可逐档部分减仓，累计可清仓）。",
           trendBiasVTpReentry:
             "BIAS-V止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
           trendBiasVTpExec:
@@ -11107,8 +11159,8 @@
           trendBiasVTpMaWin: "BIAS-V MA窗口：BIAS-V分子中的 MA 窗口，默认20。",
           trendBiasVTpAtrWin:
             "BIAS-V ATR窗口：BIAS-V分母中的 ATR 窗口，默认20。",
-          trendBiasVTpThreshold:
-            "BIAS-V止盈阈值：当 BIAS-V>=阈值 触发止盈，默认5.0。",
+          trendBiasVTpTiers:
+            "分层参数：格式 v:ratio（如 5:0.5,7:0.3,9:0.2），表示 BIAS-V 达到对应阈值时按比例减仓。",
           trendVolRegimeRiskMgmtEnable:
             "波动率动态风控：仅在风险预算仓位模式生效；持仓后按 ATR(5)/ATR(50) 判断放大/缩小并动态调仓。",
           trendVolRatioFastAtrWindow:
@@ -27861,8 +27913,14 @@
             : "1"
           ).trim(),
         );
-        if (!["adaptive", "fixed", "risk_budget"].includes(position_mode))
-          return setMsg("仓位比例模式仅支持 adaptive/fixed/risk_budget");
+        if (
+          !["adaptive", "fixed", "inverse_vol", "risk_budget"].includes(
+            position_mode,
+          )
+        )
+          return setMsg(
+            "仓位比例模式仅支持 adaptive/fixed/inverse_vol/risk_budget",
+          );
         if (position_mode === "risk_budget") {
           if (
             !Number.isFinite(risk_budget_atr_window) ||
@@ -28478,6 +28536,12 @@
         $("status").textContent = "";
         window.__lastRotationResultByBench[benchmark_mode] = data;
         window.__lastRotationResult = data;
+        _renderRotationCurrentHoldings(
+          Array.isArray(data.current_holdings) ? data.current_holdings : [],
+        );
+        _renderRotationNextPlanTables(
+          window.__lastRotationNextExecutionPlan || null,
+        );
         plotRotation(data);
         renderRotationMetrics(data.metrics || {}, data || {});
         _renderRotationReturnDecomposition(
@@ -28537,6 +28601,11 @@
           );
           bullets.push(
             `仓位管理：风险预算模式（ATR${Math.floor(rbWin)}，预算 ${fmtPct(rbPct)} / 标的 / ATR）。预算越高组合暴露越高，越低则更稳健。`,
+          );
+        } else if (rotPosMode === "inverse_vol") {
+          const vw = Number((data && data.vol_window) || vol_window || 20);
+          bullets.push(
+            `仓位管理：波动率倒数加权（窗口 ${Math.floor(vw)}）。低波动标的获得更高权重，权重按 1/波动率 归一化。`,
           );
         }
         setReport(
@@ -28648,14 +28717,25 @@
             ? String($("trendRScaleTiers").value)
             : "";
         const parsedRScaleTiers = _parseRScaleTiers(rScaleTiersRaw);
+        const biasVTiersRaw =
+          $("trendBiasVTpTiers") && $("trendBiasVTpTiers").value
+            ? String($("trendBiasVTpTiers").value)
+            : "";
+        const parsedBiasVTiers = _parseBiasVTpTiers(biasVTiersRaw);
         const parsedAssetGroups =
           mode === "portfolio"
             ? _parseAssetGroupsFromText(assetGroupsRaw)
             : null;
+        const initAccountAmountRaw =
+          $("trendInitialAccountAmount") && $("trendInitialAccountAmount").value
+            ? String($("trendInitialAccountAmount").value).trim()
+            : "";
         const common = {
           start,
           end,
           risk_free_rate,
+          initial_account_amount:
+            initAccountAmountRaw === "" ? null : Number(initAccountAmountRaw),
           cost_bps: Number(($("trendCost").value || "2").trim()),
           slippage_rate: Number(($("trendSlippage").value || "0.001").trim()),
           quick_mode:
@@ -28811,12 +28891,10 @@
               : "20"
             ).trim(),
           ),
-          bias_v_take_profit_threshold: Number(
-            ($("trendBiasVTpThreshold") && $("trendBiasVTpThreshold").value
-              ? $("trendBiasVTpThreshold").value
-              : "5.0"
-            ).trim(),
-          ),
+          bias_v_take_profit_tiers:
+            parsedBiasVTiers && !parsedBiasVTiers.__error
+              ? parsedBiasVTiers.tiers || []
+              : [],
           monthly_risk_budget_enabled:
             $("trendMonthlyRiskBudgetEnable") &&
             $("trendMonthlyRiskBudgetEnable").value
@@ -28985,6 +29063,11 @@
             parsedRScaleTiers && parsedRScaleTiers.__error
               ? String(parsedRScaleTiers.__error)
               : null,
+          bias_v_take_profit_tiers_text: biasVTiersRaw,
+          bias_v_take_profit_tiers_parse_error:
+            parsedBiasVTiers && parsedBiasVTiers.__error
+              ? String(parsedBiasVTiers.__error)
+              : null,
           exported_at: new Date().toISOString(),
           api_payload: apiPayload,
         };
@@ -29023,6 +29106,19 @@
         );
         if (!Number.isFinite(slippage_rate) || slippage_rate < 0)
           return setMsg("趋势滑点需为>=0数字（例如 0.001）");
+        const initAccountAmountRaw =
+          $("trendInitialAccountAmount") && $("trendInitialAccountAmount").value
+            ? String($("trendInitialAccountAmount").value).trim()
+            : "";
+        const initial_account_amount =
+          initAccountAmountRaw === "" ? null : Number(initAccountAmountRaw);
+        if (
+          initial_account_amount !== null &&
+          (!Number.isFinite(initial_account_amount) ||
+            initial_account_amount <= 0)
+        ) {
+          return setMsg("初始交易账户资金需为>0数字，或留空");
+        }
         const exec_price =
           $("trendExecPrice") && $("trendExecPrice").value
             ? String($("trendExecPrice").value)
@@ -29031,6 +29127,7 @@
           start,
           end,
           risk_free_rate,
+          initial_account_amount,
           cost_bps,
           slippage_rate,
           quick_mode:
@@ -29174,12 +29271,7 @@
               : "20"
             ).trim(),
           ),
-          bias_v_take_profit_threshold: Number(
-            ($("trendBiasVTpThreshold") && $("trendBiasVTpThreshold").value
-              ? $("trendBiasVTpThreshold").value
-              : "5.0"
-            ).trim(),
-          ),
+          bias_v_take_profit_tiers: [],
           monthly_risk_budget_enabled:
             $("trendMonthlyRiskBudgetEnable") &&
             $("trendMonthlyRiskBudgetEnable").value
@@ -29457,11 +29549,22 @@
           return setMsg("BIAS-V ATR窗口需为>=2数字");
         }
         common.bias_v_atr_window = Math.floor(common.bias_v_atr_window);
-        if (
-          !Number.isFinite(common.bias_v_take_profit_threshold) ||
-          common.bias_v_take_profit_threshold <= 0
-        ) {
-          return setMsg("BIAS-V止盈阈值需为>0数字");
+        if (common.bias_v_take_profit_enabled) {
+          const parsed = _parseBiasVTpTiers(
+            $("trendBiasVTpTiers") && $("trendBiasVTpTiers").value
+              ? $("trendBiasVTpTiers").value
+              : "",
+          );
+          if (parsed && parsed.__error) return setMsg(parsed.__error);
+          common.bias_v_take_profit_tiers = parsed.tiers || [];
+          if (
+            !Array.isArray(common.bias_v_take_profit_tiers) ||
+            common.bias_v_take_profit_tiers.length === 0
+          ) {
+            return setMsg("BIAS-V分档止盈分层至少配置1档");
+          }
+        } else {
+          common.bias_v_take_profit_tiers = [];
         }
         if (!Number.isFinite(common.monthly_risk_budget_pct)) {
           return setMsg("月度风险预算需为数字");
@@ -30320,11 +30423,13 @@
           asset_vol_index_rules: volIdx2 && volIdx2.__error ? null : volIdx2,
         };
         if (
-          !["adaptive", "fixed", "risk_budget"].includes(
+          !["adaptive", "fixed", "inverse_vol", "risk_budget"].includes(
             String(payload.position_mode || "adaptive"),
           )
         ) {
-          return setMsg("仓位比例模式仅支持 adaptive/fixed/risk_budget");
+          return setMsg(
+            "仓位比例模式仅支持 adaptive/fixed/inverse_vol/risk_budget",
+          );
         }
         if (String(payload.position_mode || "") === "risk_budget") {
           if (
@@ -30363,6 +30468,7 @@
         const data = JSON.parse(text);
         window.__lastRotationNextExecutionPlanByAnchor = null;
         window.__lastRotationNextExecutionPlan = data;
+        _renderRotationNextPlanTables(data);
         if (!box) return;
         const nextDay = data.next_trading_day || "-";
         if (!data.has_execution_plan) {
@@ -31242,8 +31348,14 @@
             : "1"
           ).trim(),
         );
-        if (!["adaptive", "fixed", "risk_budget"].includes(position_mode))
-          return setMsg("仓位比例模式仅支持 adaptive/fixed/risk_budget");
+        if (
+          !["adaptive", "fixed", "inverse_vol", "risk_budget"].includes(
+            position_mode,
+          )
+        )
+          return setMsg(
+            "仓位比例模式仅支持 adaptive/fixed/inverse_vol/risk_budget",
+          );
         if (position_mode === "risk_budget") {
           if (
             !Number.isFinite(risk_budget_atr_window) ||
@@ -31921,6 +32033,66 @@
         renderCtPeriodTable("monthly");
         renderCtPeriodTable("quarterly");
         renderCtPeriodTable("yearly");
+      }
+
+      function _renderRotationCurrentHoldings(rows) {
+        const xs = Array.isArray(rows) ? rows : [];
+        const el = $("rotCurrentHoldingsTable");
+        if (!el) return;
+        el.innerHTML =
+          `<tr><th>标的代码</th><th>入场日期</th><th>持仓时长(交易日)</th><th>持仓比例</th><th>持有收益</th></tr>` +
+          (xs.length
+            ? xs
+                .map(
+                  (x) =>
+                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${esc(x.entry_date || "-")}</td><td>${x.holding_days ?? "-"}</td><td>${fmtPct(x.weight)}</td><td>${x.holding_return == null ? "-" : fmtPct(x.holding_return)}</td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="5" class="muted">当前无持仓</td></tr>`);
+      }
+
+      function _renderRotationNextPlanTables(p) {
+        const dateEl = $("rotNextPlanDate");
+        const buyEl = $("rotNextBuyTable");
+        const sellEl = $("rotNextSellTable");
+        if (!dateEl || !buyEl || !sellEl) return;
+        const nextDay = (p && p.next_trading_day) || "-";
+        const hasPlan = !!(p && p.has_execution_plan && p.plan);
+        dateEl.textContent = hasPlan
+          ? `计划执行日（下一交易日）：${nextDay}`
+          : `下一交易日（${nextDay}）无执行计划`;
+        if (!hasPlan) {
+          buyEl.innerHTML =
+            `<tr><th>买入标的</th><th>当前比例</th><th>目标比例</th><th>买入比例</th></tr>` +
+            `<tr><td colspan="4" class="muted">无买入计划</td></tr>`;
+          sellEl.innerHTML =
+            `<tr><th>卖出标的</th><th>当前比例</th><th>目标比例</th><th>卖出比例</th></tr>` +
+            `<tr><td colspan="4" class="muted">无卖出计划</td></tr>`;
+          return;
+        }
+        const plan = p.plan || {};
+        const buys = Array.isArray(plan.buys) ? plan.buys : [];
+        const sells = Array.isArray(plan.sells) ? plan.sells : [];
+        buyEl.innerHTML =
+          `<tr><th>买入标的</th><th>当前比例</th><th>目标比例</th><th>买入比例</th></tr>` +
+          (buys.length
+            ? buys
+                .map(
+                  (x) =>
+                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${fmtPct(x.from_weight)}</td><td>${fmtPct(x.to_weight)}</td><td>${fmtPct(Math.abs(Number(x.delta_weight || 0)))}</td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="4" class="muted">无买入计划</td></tr>`);
+        sellEl.innerHTML =
+          `<tr><th>卖出标的</th><th>当前比例</th><th>目标比例</th><th>卖出比例</th></tr>` +
+          (sells.length
+            ? sells
+                .map(
+                  (x) =>
+                    `<tr><td>${esc(codeLabel(x.code || ""))}</td><td>${fmtPct(x.from_weight)}</td><td>${fmtPct(x.to_weight)}</td><td>${fmtPct(Math.abs(Number(x.delta_weight || 0)))}</td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="4" class="muted">无卖出计划</td></tr>`);
       }
 
       function _renderCalTimingCurrentHoldings(rows) {

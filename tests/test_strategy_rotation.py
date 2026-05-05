@@ -69,6 +69,8 @@ def test_backtest_rotation_basic_outputs(session_factory):
     assert "excess_vs_equal_weight" in out["metrics"]
     assert "period_returns" in out
     assert "weekly" in out["period_returns"]
+    assert "current_holdings" in out
+    assert isinstance(out.get("current_holdings"), list)
     assert "event_study" in out
     assert (out.get("market_regime") or {}).get("enabled") is True
     assert "strategy_by_dominant_state" in (out.get("market_regime") or {})
@@ -286,6 +288,71 @@ def test_rotation_risk_budget_position_mode_scales_by_atr(session_factory):
         expo = w.sum(axis=1)
         assert float(expo.max()) <= 1.0000001
         assert float(expo.max()) > 0.0
+
+
+def test_rotation_inverse_vol_position_mode_overweights_lower_vol_asset(
+    session_factory,
+):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + float(i) * 0.7 + (3.0 if (i % 2 == 0) else -3.0)
+            p2 = 95.0 + float(i) * 0.7 + (0.8 if (i % 2 == 0) else -0.8)
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(p1),
+                open_price=float(p1),
+                high=float(p1 * 1.01),
+                low=float(p1 * 0.99),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(p2),
+                open_price=float(p2),
+                high=float(p2 * 1.01),
+                low=float(p2 * 0.99),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["AAA", "BBB"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                top_k=2,
+                position_mode="inverse_vol",
+                vol_window=20,
+                lookback_days=10,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    assert str(out.get("position_mode") or "") == "inverse_vol"
+    iv_holds = [
+        h
+        for h in (out.get("holdings") or [])
+        if bool(
+            (((h.get("risk_controls") or {}).get("inverse_vol") or {}).get("enabled"))
+        )
+    ]
+    assert iv_holds
+    iv_meta = (iv_holds[0].get("risk_controls") or {}).get("inverse_vol") or {}
+    assert int(iv_meta.get("vol_window") or 0) == 20
+    by_code = iv_meta.get("by_code") or {}
+    if "AAA" in by_code and "BBB" in by_code:
+        inv_a = float((by_code.get("AAA") or {}).get("inv_vol_raw") or 0.0)
+        inv_b = float((by_code.get("BBB") or {}).get("inv_vol_raw") or 0.0)
+        if inv_a > 0.0 and inv_b > 0.0:
+            assert inv_b > inv_a
 
 
 def test_rotation_negative_top_k_selects_lower_momentum_names(session_factory):

@@ -1060,7 +1060,6 @@ def test_trend_portfolio_exposes_r_take_profit_controls(session_factory):
                 bias_v_take_profit_reentry_mode="reenter",
                 bias_v_ma_window=20,
                 bias_v_atr_window=20,
-                bias_v_take_profit_threshold=3.0,
                 position_sizing="equal",
                 cost_bps=0.0,
                 slippage_rate=0.0,

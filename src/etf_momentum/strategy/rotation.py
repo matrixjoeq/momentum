@@ -70,7 +70,7 @@ class RotationInputs:
     top_k: int = 1  # |K|>0: positive=top-K by score; negative=bottom-K (inverse); effective count=min(|K|, pool)
     top_k_mode: str = "fixed"  # fixed|floating
     floating_benchmark_code: str | None = None  # required when top_k_mode=floating
-    position_mode: str = "adaptive"  # adaptive | fixed | risk_budget (base sizing before other exposure controls)
+    position_mode: str = "adaptive"  # adaptive | fixed | risk_budget | inverse_vol (base sizing before other exposure controls)
     risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
     risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
     entry_backfill: bool = False  # if true, refill from lower-ranked candidates when top_k entries are filtered out
@@ -1383,6 +1383,60 @@ def _holding_streaks_from_weights(
     return out
 
 
+def _build_current_holdings_snapshot(
+    w: pd.DataFrame,
+    *,
+    codes: list[str],
+    asset_nav_exec: pd.DataFrame | None = None,
+    eps: float = 1e-12,
+) -> list[dict[str, Any]]:
+    """Build current holdings snapshot on the last backtest day."""
+    if w.empty:
+        return []
+    cols = [str(c) for c in codes if str(c) in w.columns]
+    if not cols:
+        return []
+    idx = pd.to_datetime(w.index)
+    last_i = len(idx) - 1
+    if last_i < 0:
+        return []
+    out: list[dict[str, Any]] = []
+    nav_df = (
+        asset_nav_exec.reindex(index=w.index, columns=cols).astype(float)
+        if isinstance(asset_nav_exec, pd.DataFrame) and (not asset_nav_exec.empty)
+        else pd.DataFrame(index=w.index, columns=cols, dtype=float)
+    )
+    for c in cols:
+        s_w = pd.to_numeric(w[c], errors="coerce").fillna(0.0).astype(float)
+        w_last = float(s_w.iloc[last_i])
+        if w_last <= float(eps):
+            continue
+        above = (s_w > float(eps)).tolist()
+        entry_i = last_i
+        while entry_i > 0 and bool(above[entry_i - 1]):
+            entry_i -= 1
+        entry_date = idx[entry_i].date().isoformat()
+        holding_days = int(last_i - entry_i + 1)
+        hold_ret: float | None = None
+        if c in nav_df.columns:
+            s_nav = pd.to_numeric(nav_df[c], errors="coerce").astype(float)
+            n0 = float(s_nav.iloc[entry_i]) if entry_i < len(s_nav) else float("nan")
+            n1 = float(s_nav.iloc[last_i]) if last_i < len(s_nav) else float("nan")
+            if np.isfinite(n0) and np.isfinite(n1) and n0 > 0.0:
+                hold_ret = float(n1 / n0 - 1.0)
+        out.append(
+            {
+                "code": str(c),
+                "entry_date": str(entry_date),
+                "holding_days": int(holding_days),
+                "weight": float(w_last),
+                "holding_return": hold_ret,
+            }
+        )
+    out.sort(key=lambda x: float(x.get("weight") or 0.0), reverse=True)
+    return out
+
+
 def backtest_rotation(
     db: Session,
     inp: RotationInputs,
@@ -1420,8 +1474,10 @@ def backtest_rotation(
     if bm_mode not in {"EW_REBAL", "RP_REBAL", "IVOL_REBAL", "ALL"}:
         bm_mode = "EW_REBAL"
     pos_mode = str(inp.position_mode or "adaptive").strip().lower()
-    if pos_mode not in {"adaptive", "fixed", "risk_budget"}:
-        raise ValueError("position_mode must be one of: adaptive|fixed|risk_budget")
+    if pos_mode not in {"adaptive", "fixed", "risk_budget", "inverse_vol"}:
+        raise ValueError(
+            "position_mode must be one of: adaptive|fixed|risk_budget|inverse_vol"
+        )
     risk_budget_atr_window = int(getattr(inp, "risk_budget_atr_window", 20) or 20)
     if risk_budget_atr_window < 2:
         raise ValueError("risk_budget_atr_window must be >= 2")
@@ -1829,6 +1885,7 @@ def backtest_rotation(
             and (("adx" in chop_modes) if use_chop_rules else (cm == "adx"))
         )
         or (pos_mode == "risk_budget")
+        or (pos_mode == "inverse_vol")
     )
     high_qfq, low_qfq = (
         _load_high_low_prices(
@@ -2097,7 +2154,7 @@ def backtest_rotation(
         if inp.rsi_filter:
             for w in sorted(set(int(x) for x in rsi_windows if int(x) > 0)):
                 rsi_by_window[w] = _rsi(ta_close, window=int(w))
-        if inp.vol_monitor:
+        if inp.vol_monitor or (pos_mode == "inverse_vol"):
             for w in sorted(set(int(x) for x in vol_windows if int(x) > 0)):
                 ann_vol_by_window[w] = _ann_realized_vol_from_close(
                     ta_close, window=int(w)
@@ -3961,6 +4018,47 @@ def backtest_rotation(
                         rb_meta["scaled_to_cap"] = True
                         rb_meta["raw_sum_before_cap"] = float(s_raw)
                     details["risk_budget"] = rb_meta
+                elif pos_mode == "inverse_vol":
+                    iv_window = int(inp.vol_window)
+                    iv_meta: dict[str, Any] = {
+                        "enabled": True,
+                        "vol_window": int(iv_window),
+                        "by_code": {},
+                        "fallback": None,
+                    }
+                    vol_df = ann_vol_by_window.get(int(iv_window))
+                    inv_raw_map: dict[str, float] = {}
+                    for p in risk_picks:
+                        v = (
+                            float(vol_df.loc[d, p])
+                            if (
+                                vol_df is not None
+                                and p in vol_df.columns
+                                and d in vol_df.index
+                                and np.isfinite(float(vol_df.loc[d, p]))
+                            )
+                            else float("nan")
+                        )
+                        inv_raw = (
+                            (1.0 / float(v)) if (np.isfinite(v) and v > 0.0) else 0.0
+                        )
+                        inv_raw_map[p] = float(max(0.0, inv_raw))
+                        iv_meta["by_code"][str(p)] = {
+                            "ann_vol": (None if (not np.isfinite(v)) else float(v)),
+                            "inv_vol_raw": float(inv_raw),
+                        }
+                    inv_sum = float(sum(inv_raw_map.values()))
+                    if inv_sum > 0.0:
+                        for p in risk_picks:
+                            base_weight_map[p] = float(inv_raw_map.get(p, 0.0)) / float(
+                                inv_sum
+                            )
+                    else:
+                        iv_meta["fallback"] = "equal_weight_on_missing_vol"
+                        per = 1.0 / float(len(risk_picks))
+                        for p in risk_picks:
+                            base_weight_map[p] = float(per)
+                    details["inverse_vol"] = iv_meta
                 else:
                     if not risk_picks:
                         per = 0.0
@@ -4668,7 +4766,6 @@ def backtest_rotation(
     )
     # Continuous holding streaks (by actual daily weights, not rebalance schedule).
     holding_streaks = _holding_streaks_from_weights(w, codes=codes, eps=1e-12)
-
     # Strategy-only fast path (used by rotation calendar-effect grid scan):
     # skip all benchmark NAV computation (EW/RP/IVOL and excess variants).
     if not bool(include_benchmarks):
@@ -4941,6 +5038,12 @@ def backtest_rotation(
     decomp_gross = (comp_overnight + comp_intraday + comp_interaction).astype(float)
     decomp_net = (decomp_gross - decomp_cost).astype(float)
     asset_nav_exec = (1.0 + ret_exec[codes].astype(float).fillna(0.0)).cumprod()
+    current_holdings = _build_current_holdings_snapshot(
+        w,
+        codes=codes,
+        asset_nav_exec=asset_nav_exec,
+        eps=1e-12,
+    )
     if not asset_nav_exec.empty:
         asset_nav_exec.iloc[0] = 1.0
     trade_pack = _trade_returns_from_weight_df(
@@ -5729,6 +5832,7 @@ def backtest_rotation(
         "rolling": rolling_out,
         "period_details": period_stats,
         "holdings": holdings["periods"],
+        "current_holdings": current_holdings,
         "holding_streaks": holding_streaks,
         "daily_exit_events": daily_exit_events,
         "corporate_actions": corporate_actions,

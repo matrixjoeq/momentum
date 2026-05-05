@@ -5,6 +5,7 @@ import pytest
 
 from etf_momentum.db.models import EtfPrice
 from etf_momentum.db.session import make_session_factory
+from etf_momentum.analysis.trend import _apply_intraday_stop_execution_single
 from tests.helpers.rotation_case_data import (
     build_rotation_case_series,
     fmt_ymd,
@@ -285,6 +286,8 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "nav_rsi" in data
     assert data["nav_rsi"]["windows"] == [14]
     assert "win_payoff" in data
+    assert "current_holdings" in data
+    assert isinstance(data.get("current_holdings"), list)
 
     data_rp = post_json_ok(
         c,
@@ -334,6 +337,37 @@ def test_api_rotation_backtest_accepts_negative_top_k(api_client) -> None:
         },
     )
     assert "nav" in data and "ROTATION" in data["nav"]["series"]
+
+
+def test_api_rotation_backtest_accepts_inverse_vol_position_mode(api_client) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20230102",
+        end_date="20240131",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240131",
+            "rebalance": "weekly",
+            "top_k": 2,
+            "position_mode": "inverse_vol",
+            "vol_window": 10,
+            "lookback_days": 5,
+            "skip_days": 0,
+            "risk_free_rate": 0.025,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str(data.get("position_mode") or "") == "inverse_vol"
+    assert "nav" in data and "ROTATION" in (data.get("nav") or {}).get("series", {})
 
 
 def test_api_rotation_backtest_rejects_zero_top_k(api_client) -> None:
@@ -426,7 +460,10 @@ def test_api_trend_single_accepts_stop_execution_modes(api_client):
             "bias_v_take_profit_enabled": True,
             "bias_v_ma_window": 2,
             "bias_v_atr_window": 2,
-            "bias_v_take_profit_threshold": 0.5,
+            "bias_v_take_profit_tiers": [
+                {"threshold": 0.5, "reduce_fraction": 0.6},
+                {"threshold": 0.8, "reduce_fraction": 0.4},
+            ],
             "bias_v_take_profit_execution_mode": "next_day",
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
@@ -436,6 +473,14 @@ def test_api_trend_single_accepts_stop_execution_modes(api_client):
     assert str(params.get("atr_stop_execution_mode") or "") == "next_day"
     assert str(params.get("r_take_profit_execution_mode") or "") == "next_day"
     assert str(params.get("bias_v_take_profit_execution_mode") or "") == "next_day"
+    assert "bias_v_take_profit_threshold" not in params
+    tiers = list(params.get("bias_v_take_profit_tiers") or [])
+    assert tiers == [
+        {"threshold": 0.5, "reduce_fraction": 0.6},
+        {"threshold": 0.8, "reduce_fraction": 0.4},
+    ]
+    rc = ((data or {}).get("risk_controls") or {}).get("bias_v_take_profit") or {}
+    assert "threshold" not in rc
 
 
 def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
@@ -466,7 +511,10 @@ def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
             "bias_v_take_profit_enabled": True,
             "bias_v_ma_window": 2,
             "bias_v_atr_window": 2,
-            "bias_v_take_profit_threshold": 0.5,
+            "bias_v_take_profit_tiers": [
+                {"threshold": 0.5, "reduce_fraction": 0.6},
+                {"threshold": 0.8, "reduce_fraction": 0.4},
+            ],
             "bias_v_take_profit_execution_mode": "next_day",
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
@@ -476,6 +524,14 @@ def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
     assert str(params.get("atr_stop_execution_mode") or "") == "next_day"
     assert str(params.get("r_take_profit_execution_mode") or "") == "next_day"
     assert str(params.get("bias_v_take_profit_execution_mode") or "") == "next_day"
+    assert "bias_v_take_profit_threshold" not in params
+    tiers = list(params.get("bias_v_take_profit_tiers") or [])
+    assert tiers == [
+        {"threshold": 0.5, "reduce_fraction": 0.6},
+        {"threshold": 0.8, "reduce_fraction": 0.4},
+    ]
+    rc = ((data or {}).get("risk_controls") or {}).get("bias_v_take_profit") or {}
+    assert "threshold" not in rc
 
 
 def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
@@ -661,6 +717,544 @@ def test_api_trend_portfolio_capacity_estimate_has_three_scenarios(engine, api_c
     assert int(meta.get("turnover_positive_days") or 0) > 0
     assert float((by_name["aggressive"] or {}).get("aum_cap_p25") or 0.0) >= float(
         (by_name["conservative"] or {}).get("aum_cap_p25") or 0.0
+    )
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_account_lot_sizing_enforces_100_share_lots(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2021-01-01", periods=120, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "LOT1": [20.0 + i * 0.05 for i in range(len(dates))],
+            "LOT2": [15.0 + i * 0.04 for i in range(len(dates))],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload = {
+        "codes": ["LOT1", "LOT2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 3,
+        "position_sizing": "equal",
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out_plain = post_json_ok(c, "/api/analysis/trend/portfolio", dict(payload))
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload, "initial_account_amount": 1_000_000},
+    )
+    meta = (out.get("meta") or {}).get("account_lot_sizing") or {}
+    assert bool(meta.get("enabled")) is True
+    assert int(meta.get("lot_size_shares") or 0) == 100
+    shares_by_code = meta.get("shares_by_code") or {}
+    assert isinstance(shares_by_code, dict) and shares_by_code
+    for arr in shares_by_code.values():
+        for v in list(arr or []):
+            assert int(v) % 100 == 0
+    strat_with = ((out or {}).get("metrics") or {}).get("strategy") or {}
+    strat_plain = ((out_plain or {}).get("metrics") or {}).get("strategy") or {}
+    cum_with = float(strat_with.get("cumulative_return") or 0.0)
+    cum_plain = float(strat_plain.get("cumulative_return") or 0.0)
+    if abs(cum_plain) > 1e-9:
+        rel_gap = abs(cum_with - cum_plain) / abs(cum_plain)
+        assert rel_gap < 0.10
+    else:
+        assert abs(cum_with - cum_plain) < 0.02
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_scaleout_zero_trigger_is_noop(runtime_engine, engine, api_client):
+    dates = [d.date() for d in pd.date_range("2021-01-01", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "SCL1": [
+                100.0 + i * 0.06 + ((i % 9) - 4) * 0.08 for i in range(len(dates))
+            ],
+            "SCL2": [
+                90.0 + i * 0.05 + ((i % 11) - 5) * 0.07 for i in range(len(dates))
+            ],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload_base = {
+        "codes": ["SCL1", "SCL2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "tsmom",
+        "mom_lookback": 20,
+        "tsmom_entry_threshold": 0.02,
+        "tsmom_exit_threshold": 0.0,
+        "position_sizing": "risk_budget",
+        "risk_budget_pct": 0.005,
+        "risk_budget_overcap_policy": "leverage_entry",
+        "risk_budget_max_leverage_multiple": 3.0,
+        "exec_price": "close",
+        "atr_stop_mode": "none",
+        "atr_stop_window": 20,
+        "atr_stop_n": 2000.0,
+        "r_profit_scaleout_execution_mode": "intraday",
+        "r_profit_scaleout_tiers": [
+            {"r_multiple": 2.0, "reduce_fraction": 0.5},
+            {"r_multiple": 3.0, "reduce_fraction": 0.3},
+        ],
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    if runtime_engine:
+        payload_base["engine"] = runtime_engine
+    out_off = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "r_profit_scaleout_enabled": False},
+    )
+    out_on = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "r_profit_scaleout_enabled": True},
+    )
+    trig = int(
+        (
+            ((out_on.get("trade_statistics") or {}).get("overall") or {}).get(
+                "r_profit_scaleout_trigger_count"
+            )
+            or 0
+        )
+    )
+    assert trig == 0
+    m_off = ((out_off.get("metrics") or {}).get("strategy")) or {}
+    m_on = ((out_on.get("metrics") or {}).get("strategy")) or {}
+    assert float(m_on.get("cumulative_return") or 0.0) == pytest.approx(
+        float(m_off.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("annualized_return") or 0.0) == pytest.approx(
+        float(m_off.get("annualized_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("max_drawdown") or 0.0) == pytest.approx(
+        float(m_off.get("max_drawdown") or 0.0), rel=0.0, abs=1e-12
+    )
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_bias_v_tier_zero_trigger_is_noop(runtime_engine, engine, api_client):
+    dates = [d.date() for d in pd.date_range("2021-01-01", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "BVT1": [
+                100.0 + i * 0.05 + ((i % 7) - 3) * 0.07 for i in range(len(dates))
+            ],
+            "BVT2": [
+                95.0 + i * 0.04 + ((i % 11) - 5) * 0.06 for i in range(len(dates))
+            ],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload_base = {
+        "codes": ["BVT1", "BVT2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 10,
+        "position_sizing": "equal",
+        "exec_price": "close",
+        "bias_v_take_profit_reentry_mode": "reenter",
+        "bias_v_take_profit_execution_mode": "intraday",
+        "bias_v_ma_window": 20,
+        "bias_v_atr_window": 20,
+        "bias_v_take_profit_tiers": [
+            {"threshold": 50.0, "reduce_fraction": 0.5},
+            {"threshold": 70.0, "reduce_fraction": 0.5},
+        ],
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    if runtime_engine:
+        payload_base["engine"] = runtime_engine
+    out_off = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "bias_v_take_profit_enabled": False},
+    )
+    out_on = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "bias_v_take_profit_enabled": True},
+    )
+    trig = int(
+        (
+            (
+                ((out_on.get("trade_statistics") or {}).get("overall") or {}).get(
+                    "bias_v_take_profit_trigger_count"
+                )
+            )
+            or 0
+        )
+    )
+    assert trig == 0
+    m_off = ((out_off.get("metrics") or {}).get("strategy")) or {}
+    m_on = ((out_on.get("metrics") or {}).get("strategy")) or {}
+    assert float(m_on.get("cumulative_return") or 0.0) == pytest.approx(
+        float(m_off.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("annualized_return") or 0.0) == pytest.approx(
+        float(m_off.get("annualized_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("max_drawdown") or 0.0) == pytest.approx(
+        float(m_off.get("max_drawdown") or 0.0), rel=0.0, abs=1e-12
+    )
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_bias_v_deprecated_threshold_is_ignored(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2022-01-03", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "BVC1": [
+                100.0 + i * 0.08 + ((i % 9) - 4) * 0.09 for i in range(len(dates))
+            ],
+            "BVC2": [95.0 + i * 0.05 + ((i % 7) - 3) * 0.07 for i in range(len(dates))],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload_base = {
+        "codes": ["BVC1", "BVC2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 15,
+        "position_sizing": "equal",
+        "exec_price": "close",
+        "bias_v_take_profit_enabled": True,
+        "bias_v_take_profit_reentry_mode": "reenter",
+        "bias_v_take_profit_execution_mode": "intraday",
+        "bias_v_ma_window": 20,
+        "bias_v_atr_window": 20,
+        "bias_v_take_profit_tiers": [
+            {"threshold": 2.0, "reduce_fraction": 0.5},
+            {"threshold": 4.0, "reduce_fraction": 0.5},
+        ],
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    if runtime_engine:
+        payload_base["engine"] = runtime_engine
+    out_no_deprecated = post_json_ok(c, "/api/analysis/trend/portfolio", payload_base)
+    out_with_deprecated = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "bias_v_take_profit_threshold": 999.0},
+    )
+
+    p0 = ((out_no_deprecated or {}).get("meta") or {}).get("params") or {}
+    p1 = ((out_with_deprecated or {}).get("meta") or {}).get("params") or {}
+    assert "bias_v_take_profit_threshold" not in p0
+    assert "bias_v_take_profit_threshold" not in p1
+
+    rc0 = ((out_no_deprecated or {}).get("risk_controls") or {}).get(
+        "bias_v_take_profit"
+    ) or {}
+    rc1 = ((out_with_deprecated or {}).get("risk_controls") or {}).get(
+        "bias_v_take_profit"
+    ) or {}
+    assert "threshold" not in rc0
+    assert "threshold" not in rc1
+
+    m0 = ((out_no_deprecated or {}).get("metrics") or {}).get("strategy") or {}
+    m1 = ((out_with_deprecated or {}).get("metrics") or {}).get("strategy") or {}
+    assert float(m1.get("cumulative_return") or 0.0) == pytest.approx(
+        float(m0.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m1.get("annualized_return") or 0.0) == pytest.approx(
+        float(m0.get("annualized_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m1.get("max_drawdown") or 0.0) == pytest.approx(
+        float(m0.get("max_drawdown") or 0.0), rel=0.0, abs=1e-12
+    )
+
+    nav0 = (((out_no_deprecated or {}).get("nav") or {}).get("series") or {}).get(
+        "STRAT"
+    ) or []
+    nav1 = (((out_with_deprecated or {}).get("nav") or {}).get("series") or {}).get(
+        "STRAT"
+    ) or []
+    assert len(nav1) == len(nav0)
+    for x, y in zip(nav0, nav1):
+        assert float(y) == pytest.approx(float(x), rel=0.0, abs=1e-12)
+
+
+def test_stop_execution_tier_reduce_fraction_is_absolute_on_same_day():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    weights = pd.Series([1.0, 1.0, 1.0], index=idx, dtype=float)
+    open_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    close_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    stats = {
+        "trigger_events": [
+            {
+                "execution_date": "2024-01-03",
+                "execution_mode": "intraday",
+                "reduce_fraction": 0.5,
+                "fill_price": 110.0,
+            },
+            {
+                "execution_date": "2024-01-03",
+                "execution_mode": "intraday",
+                "reduce_fraction": 0.5,
+                "fill_price": 120.0,
+            },
+        ]
+    }
+    w_adj, override = _apply_intraday_stop_execution_single(
+        weights=weights,
+        atr_stop_stats=stats,
+        exec_price="open",
+        stop_execution_mode="intraday",
+        open_sig=open_sig,
+        close_sig=close_sig,
+    )
+    d = pd.Timestamp("2024-01-03")
+    assert float(w_adj.loc[d]) == pytest.approx(0.0, rel=0.0, abs=1e-12)
+    assert float(override.loc[d]) == pytest.approx(0.15, rel=0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_atr_zero_trigger_is_noop(runtime_engine, engine, api_client):
+    dates = [d.date() for d in pd.date_range("2021-01-01", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "ATR1": [
+                100.0 + i * 0.05 + ((i % 9) - 4) * 0.06 for i in range(len(dates))
+            ],
+            "ATR2": [96.0 + i * 0.04 + ((i % 7) - 3) * 0.05 for i in range(len(dates))],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload_base = {
+        "codes": ["ATR1", "ATR2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "tsmom",
+        "mom_lookback": 30,
+        "tsmom_entry_threshold": 0.02,
+        "tsmom_exit_threshold": 0.0,
+        "position_sizing": "equal",
+        "exec_price": "close",
+        "atr_stop_reentry_mode": "reenter",
+        "atr_stop_execution_mode": "intraday",
+        "atr_stop_window": 20,
+        "atr_stop_n": 1000.0,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    if runtime_engine:
+        payload_base["engine"] = runtime_engine
+    out_off = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "atr_stop_mode": "none"},
+    )
+    out_on = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "atr_stop_mode": "static"},
+    )
+    trig = int(
+        (
+            (
+                ((out_on.get("trade_statistics") or {}).get("overall") or {}).get(
+                    "atr_stop_trigger_count"
+                )
+            )
+            or 0
+        )
+    )
+    assert trig == 0
+    m_off = ((out_off.get("metrics") or {}).get("strategy")) or {}
+    m_on = ((out_on.get("metrics") or {}).get("strategy")) or {}
+    assert float(m_on.get("cumulative_return") or 0.0) == pytest.approx(
+        float(m_off.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("annualized_return") or 0.0) == pytest.approx(
+        float(m_off.get("annualized_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("max_drawdown") or 0.0) == pytest.approx(
+        float(m_off.get("max_drawdown") or 0.0), rel=0.0, abs=1e-12
+    )
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_r_take_profit_zero_trigger_is_noop(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2021-01-01", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "RTP1": [
+                100.0 + i * 0.05 + ((i % 8) - 4) * 0.07 for i in range(len(dates))
+            ],
+            "RTP2": [
+                92.0 + i * 0.03 + ((i % 10) - 5) * 0.06 for i in range(len(dates))
+            ],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload_base = {
+        "codes": ["RTP1", "RTP2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 10,
+        "position_sizing": "equal",
+        "exec_price": "close",
+        "atr_stop_mode": "none",
+        "atr_stop_window": 20,
+        "atr_stop_n": 2.0,
+        "r_take_profit_reentry_mode": "reenter",
+        "r_take_profit_execution_mode": "intraday",
+        "r_take_profit_tiers": [
+            {"r_multiple": 1000.0, "retrace_ratio": 0.5},
+            {"r_multiple": 2000.0, "retrace_ratio": 0.5},
+        ],
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    if runtime_engine:
+        payload_base["engine"] = runtime_engine
+    out_off = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "r_take_profit_enabled": False},
+    )
+    out_on = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "r_take_profit_enabled": True},
+    )
+    trig = int(
+        (
+            (
+                ((out_on.get("trade_statistics") or {}).get("overall") or {}).get(
+                    "r_take_profit_trigger_count"
+                )
+            )
+            or 0
+        )
+    )
+    assert trig == 0
+    m_off = ((out_off.get("metrics") or {}).get("strategy")) or {}
+    m_on = ((out_on.get("metrics") or {}).get("strategy")) or {}
+    assert float(m_on.get("cumulative_return") or 0.0) == pytest.approx(
+        float(m_off.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("annualized_return") or 0.0) == pytest.approx(
+        float(m_off.get("annualized_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("max_drawdown") or 0.0) == pytest.approx(
+        float(m_off.get("max_drawdown") or 0.0), rel=0.0, abs=1e-12
+    )
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_vol_regime_zero_adjust_is_noop(runtime_engine, engine, api_client):
+    dates = [d.date() for d in pd.date_range("2021-01-01", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "VOL1": [
+                100.0 + i * 0.06 + ((i % 9) - 4) * 0.05 for i in range(len(dates))
+            ],
+            "VOL2": [
+                90.0 + i * 0.05 + ((i % 11) - 5) * 0.04 for i in range(len(dates))
+            ],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload_base = {
+        "codes": ["VOL1", "VOL2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 10,
+        "position_sizing": "risk_budget",
+        "risk_budget_pct": 0.01,
+        "risk_budget_atr_window": 20,
+        "risk_budget_overcap_policy": "scale",
+        "exec_price": "close",
+        "vol_ratio_fast_atr_window": 20,
+        "vol_ratio_slow_atr_window": 20,
+        "vol_ratio_expand_threshold": 100.0,
+        "vol_ratio_contract_threshold": 0.1,
+        "vol_ratio_normal_threshold": 50.0,
+        "vol_ratio_extreme_threshold": 200.0,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    if runtime_engine:
+        payload_base["engine"] = runtime_engine
+    out_off = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "vol_regime_risk_mgmt_enabled": False},
+    )
+    out_on = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**payload_base, "vol_regime_risk_mgmt_enabled": True},
+    )
+    adj_cnt = int(
+        (
+            (
+                ((out_on.get("trade_statistics") or {}).get("overall") or {}).get(
+                    "vol_risk_adjust_total_count"
+                )
+            )
+            or 0
+        )
+    )
+    assert adj_cnt == 0
+    m_off = ((out_off.get("metrics") or {}).get("strategy")) or {}
+    m_on = ((out_on.get("metrics") or {}).get("strategy")) or {}
+    assert float(m_on.get("cumulative_return") or 0.0) == pytest.approx(
+        float(m_off.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("annualized_return") or 0.0) == pytest.approx(
+        float(m_off.get("annualized_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(m_on.get("max_drawdown") or 0.0) == pytest.approx(
+        float(m_off.get("max_drawdown") or 0.0), rel=0.0, abs=1e-12
     )
 
 

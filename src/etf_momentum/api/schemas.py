@@ -939,7 +939,9 @@ class SimGbmAbStrategyParams(BaseModel):
         default=1,
         description="Non-zero: top-K by momentum if positive, bottom-K (inverse) if negative; effective=min(|K|, pool).",
     )
-    position_mode: str = Field(default="adaptive", description="adaptive|fixed")
+    position_mode: str = Field(
+        default="adaptive", description="adaptive|fixed|inverse_vol"
+    )
     entry_backfill: bool = Field(default=False)
     entry_match_n: int = Field(default=0, ge=0)
     exit_match_n: int = Field(default=0, ge=0)
@@ -1743,7 +1745,7 @@ class RotationBacktestRequest(BaseModel):
     )
     position_mode: str = Field(
         default="adaptive",
-        description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/|top_k|) | risk_budget(ATR risk budget).",
+        description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/|top_k|) | inverse_vol(inverse annualized volatility) | risk_budget(ATR risk budget).",
     )
     risk_budget_atr_window: int = Field(
         default=20, ge=2, description="ATR window for risk-budget sizing"
@@ -2062,6 +2064,18 @@ class RProfitScaleoutTier(BaseModel):
     )
 
 
+class BiasVTakeProfitTier(BaseModel):
+    threshold: float = Field(
+        gt=0.0,
+        description="Trigger threshold in BIAS-V units where this tier activates",
+    )
+    reduce_fraction: float = Field(
+        gt=0.0,
+        le=1.0,
+        description="Position fraction to reduce at this BIAS-V threshold",
+    )
+
+
 class TrendBacktestRequest(BaseModel):
     code: str = Field(
         min_length=1,
@@ -2075,6 +2089,11 @@ class TrendBacktestRequest(BaseModel):
         description="[deprecated] Trend research uses mixed basis like rotation: signal=qfq, nav=none with hfq fallback, benchmark=hfq.",
     )
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    initial_account_amount: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Optional initial trading account amount (CNY). null keeps normalized NAV mode.",
+    )
     cost_bps: float = Field(
         default=2.0,
         ge=0.0,
@@ -2301,10 +2320,9 @@ class TrendBacktestRequest(BaseModel):
     bias_v_atr_window: int = Field(
         default=20, ge=2, description="ATR window in BIAS-V=(close-MA)/ATR"
     )
-    bias_v_take_profit_threshold: float = Field(
-        default=5.0,
-        gt=0.0,
-        description="Trigger BIAS-V take-profit when BIAS-V >= threshold",
+    bias_v_take_profit_tiers: list[BiasVTakeProfitTier] | None = Field(
+        default=None,
+        description="Tiered BIAS-V take-profit config, e.g. [{threshold:5,reduce_fraction:0.5},{threshold:7,reduce_fraction:0.5}]",
     )
     monthly_risk_budget_enabled: bool = Field(
         default=False,
@@ -2401,6 +2419,11 @@ class TrendPortfolioBacktestRequest(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
+    initial_account_amount: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Optional initial trading account amount (CNY). null keeps normalized NAV mode.",
+    )
     cost_bps: float = Field(
         default=2.0,
         ge=0.0,
@@ -2593,11 +2616,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     bias_v_atr_window: int = Field(
         default=20, ge=2, description="ATR window in BIAS-V=(close-MA)/ATR"
     )
-    bias_v_take_profit_threshold: float = Field(
-        default=5.0,
-        gt=0.0,
-        description="Trigger BIAS-V take-profit when BIAS-V >= threshold",
-    )
+    bias_v_take_profit_tiers: list[BiasVTakeProfitTier] | None = Field(default=None)
     monthly_risk_budget_enabled: bool = Field(
         default=False,
         description="Enable account-level monthly max-loss risk budget gate before new entries",

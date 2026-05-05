@@ -23,7 +23,7 @@ class RotationAnalysisInputs:
     top_k: int = 1  # non-zero: >0 top-K, <0 bottom-K; effective=min(|k|, pool)
     top_k_mode: str = "fixed"  # fixed|floating
     floating_benchmark_code: str | None = None
-    position_mode: str = "adaptive"  # adaptive|fixed|risk_budget
+    position_mode: str = "adaptive"  # adaptive|fixed|risk_budget|inverse_vol
     risk_budget_atr_window: int = 20
     risk_budget_pct: float = 0.01
     entry_backfill: bool = False

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -127,6 +128,7 @@ from ..analysis.baseline import (
     _annualized_return,
     _annualized_vol,
     _compute_return_risk_contributions,
+    _information_ratio,
     _max_drawdown,
     _max_drawdown_duration_days,
     _rsi_wilder,
@@ -788,6 +790,349 @@ def _attach_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[st
             "scenarios": [],
             "series": {"dates": [], "by_scenario": {}},
             "meta": {"status": "error", "reason": str(exc)},
+        }
+    return out
+
+
+def _load_trend_exec_price_panel(
+    db: Session,
+    *,
+    codes: list[str],
+    start: dt.date,
+    end: dt.date,
+    exec_price: str,
+) -> pd.DataFrame:
+    if not codes:
+        return pd.DataFrame()
+    ep = str(exec_price or "open").strip().lower()
+    ohlc_none = load_ohlc_prices(db, codes=codes, start=start, end=end, adjust="none")
+    close_none = load_close_prices(db, codes=codes, start=start, end=end, adjust="none")
+    base_idx = pd.DatetimeIndex([])
+    if not close_none.empty:
+        base_idx = pd.DatetimeIndex(close_none.index)
+    o_df = ohlc_none.get("open", pd.DataFrame()).sort_index()
+    c_df = ohlc_none.get("close", pd.DataFrame()).sort_index()
+    if base_idx.empty and (not o_df.empty):
+        base_idx = pd.DatetimeIndex(o_df.index)
+    if base_idx.empty and (not c_df.empty):
+        base_idx = pd.DatetimeIndex(c_df.index)
+    if base_idx.empty:
+        return pd.DataFrame()
+    o = (
+        o_df.reindex(index=base_idx, columns=codes)
+        if not o_df.empty
+        else pd.DataFrame(index=base_idx, columns=codes, dtype=float)
+    )
+    c = (
+        c_df.reindex(index=base_idx, columns=codes)
+        if not c_df.empty
+        else pd.DataFrame(index=base_idx, columns=codes, dtype=float)
+    )
+    close_fallback = close_none.reindex(index=base_idx, columns=codes)
+    o = o.apply(pd.to_numeric, errors="coerce").combine_first(close_fallback)
+    c = c.apply(pd.to_numeric, errors="coerce").combine_first(close_fallback)
+    if ep == "close":
+        px = c
+    elif ep == "oc2":
+        px = (o + c) / 2.0
+    else:
+        px = o
+    return px.sort_index().ffill().astype(float)
+
+
+def _apply_trend_account_lot_sizing(
+    db: Session, out: dict[str, Any], *, initial_account_amount: float | None
+) -> dict[str, Any]:
+    init_amt = None if initial_account_amount is None else float(initial_account_amount)
+    if init_amt is None or (not np.isfinite(init_amt)) or init_amt <= 0.0:
+        return out
+    if not isinstance(out, dict):
+        return out
+    weights_block = (
+        (out.get("weights") or {}) if isinstance(out.get("weights"), dict) else {}
+    )
+    w_series = weights_block.get("series")
+    nav_dates_raw = (
+        ((out.get("nav") or {}).get("dates") or [])
+        if isinstance(out.get("nav"), dict)
+        else []
+    )
+    if (
+        not isinstance(w_series, dict)
+        or not isinstance(nav_dates_raw, list)
+        or not nav_dates_raw
+    ):
+        return out
+    idx = _parse_iso_date_index(list(nav_dates_raw))
+    if idx.empty:
+        return out
+    codes = [str(c) for c in w_series.keys()]
+    if not codes:
+        return out
+    w_target = pd.DataFrame(index=idx)
+    for c in codes:
+        s = pd.to_numeric(pd.Series(w_series.get(c, [])), errors="coerce")
+        if len(s) != len(idx):
+            s = s.reindex(range(len(idx)))
+        w_target[c] = s.to_numpy(dtype=float)
+    w_target = w_target.fillna(0.0).astype(float)
+    params = (
+        ((out.get("meta") or {}).get("params") or {})
+        if isinstance(out.get("meta"), dict)
+        else {}
+    )
+    ep = str(params.get("exec_price") or "open").strip().lower()
+    overcap_policy = str(params.get("risk_budget_overcap_policy") or "").strip().lower()
+    leverage_allowed = overcap_policy == "leverage_entry"
+    max_lev = float(params.get("risk_budget_max_leverage_multiple") or 1.0)
+    if (not leverage_allowed) or (not np.isfinite(max_lev)) or max_lev < 1.0:
+        max_lev = 1.0
+    px = _load_trend_exec_price_panel(
+        db,
+        codes=codes,
+        start=idx.min().date(),
+        end=idx.max().date(),
+        exec_price=ep,
+    ).reindex(index=idx, columns=codes)
+    if px.empty:
+        return out
+    # Align valuation path to engine execution-return semantics (including CA fallback)
+    # by reconstructing a synthetic exec-price path from asset_nav_exec.
+    asset_nav_exec = (
+        ((out.get("asset_nav_exec") or {}).get("series") or {})
+        if isinstance(out.get("asset_nav_exec"), dict)
+        else {}
+    )
+    if isinstance(asset_nav_exec, dict) and asset_nav_exec:
+        for c in codes:
+            nav_arr = asset_nav_exec.get(c)
+            if not isinstance(nav_arr, list):
+                continue
+            nav_s = pd.to_numeric(pd.Series(nav_arr), errors="coerce")
+            if len(nav_s) != len(idx):
+                nav_s = nav_s.reindex(range(len(idx)))
+            nav_s = pd.Series(nav_s.to_numpy(dtype=float), index=idx)
+            valid_nav = nav_s[np.isfinite(nav_s) & (nav_s > 0.0)]
+            if valid_nav.empty:
+                continue
+            t0 = valid_nav.index[0]
+            nav0 = float(valid_nav.iloc[0])
+            px0 = float(px.loc[t0, c]) if c in px.columns else float("nan")
+            if (not np.isfinite(px0)) or px0 <= 0.0:
+                px0 = 1.0
+            syn_px = pd.Series(np.nan, index=idx, dtype=float)
+            syn_px.loc[valid_nav.index] = (px0 * valid_nav / max(nav0, 1e-12)).astype(
+                float
+            )
+            if c in px.columns:
+                px[c] = syn_px.combine_first(px[c]).astype(float)
+            else:
+                px[c] = syn_px.astype(float)
+    px = px.sort_index().ffill().astype(float)
+    lot = 100.0
+    shares = pd.Series(0.0, index=codes, dtype=float)
+    cash = float(init_amt)
+    nav_vals: list[float] = []
+    cash_vals: list[float] = []
+    gross_lev_vals: list[float] = []
+    shares_hist: dict[str, list[int]] = {str(c): [] for c in codes}
+    w_actual = pd.DataFrame(index=idx, columns=codes, dtype=float)
+    eps = 1e-12
+    for dt_i in idx:
+        p = px.loc[dt_i].astype(float).replace([np.inf, -np.inf], np.nan)
+        valid = p > 0.0
+        pos_val = float((shares[valid] * p[valid]).sum()) if bool(valid.any()) else 0.0
+        equity = float(cash + pos_val)
+        if (not np.isfinite(equity)) or equity <= 0.0:
+            equity = eps
+        tgt_w = w_target.loc[dt_i].astype(float).fillna(0.0).clip(lower=0.0)
+        desired_notional = (tgt_w * equity).astype(float)
+        gross_desired = float(desired_notional.sum())
+        max_notional = float(max_lev * equity)
+        if gross_desired > max_notional and gross_desired > eps:
+            desired_notional = (
+                desired_notional * (max_notional / gross_desired)
+            ).astype(float)
+        target_shares = shares.copy()
+        for c in codes:
+            px_c = float(p.get(c, np.nan))
+            if (not np.isfinite(px_c)) or px_c <= 0.0:
+                continue
+            want_sh = float(desired_notional.get(c, 0.0) / px_c)
+            want_sh = math.floor(max(0.0, want_sh) / lot) * lot
+            target_shares.loc[c] = float(want_sh)
+        trade_shares = (target_shares - shares).astype(float)
+        buy_notional = (
+            float((trade_shares.clip(lower=0.0)[valid] * p[valid]).sum())
+            if bool(valid.any())
+            else 0.0
+        )
+        sell_notional = (
+            float(((-trade_shares.clip(upper=0.0))[valid] * p[valid]).sum())
+            if bool(valid.any())
+            else 0.0
+        )
+        cash_after = float(cash - buy_notional + sell_notional)
+        min_cash_allowed = float(equity - max_notional)
+        if cash_after < min_cash_allowed:
+            buy_codes = [
+                c
+                for c in codes
+                if float(trade_shares.get(c, 0.0)) > 0.0
+                and float(p.get(c, np.nan)) > 0.0
+            ]
+            buy_codes.sort(
+                key=lambda c: float(trade_shares.get(c, 0.0)) * float(p.get(c, 0.0)),
+                reverse=True,
+            )
+            while cash_after < min_cash_allowed and buy_codes:
+                progressed = False
+                for c in list(buy_codes):
+                    px_c = float(p.get(c, np.nan))
+                    if (not np.isfinite(px_c)) or px_c <= 0.0:
+                        buy_codes.remove(c)
+                        continue
+                    if float(trade_shares.get(c, 0.0)) < lot:
+                        buy_codes.remove(c)
+                        continue
+                    trade_shares.loc[c] = float(trade_shares.get(c, 0.0) - lot)
+                    target_shares.loc[c] = float(target_shares.get(c, 0.0) - lot)
+                    cash_after += float(lot * px_c)
+                    progressed = True
+                    if cash_after >= min_cash_allowed:
+                        break
+                if not progressed:
+                    break
+        shares = target_shares.astype(float)
+        cash = float(cash_after)
+        pos_val = float((shares[valid] * p[valid]).sum()) if bool(valid.any()) else 0.0
+        equity = float(cash + pos_val)
+        if (not np.isfinite(equity)) or equity <= 0.0:
+            equity = eps
+        nav_vals.append(float(equity / init_amt))
+        cash_vals.append(float(cash))
+        gross_lev_vals.append(float(pos_val / equity) if equity > eps else 0.0)
+        for c in codes:
+            shares_hist[str(c)].append(int(shares.get(c, 0.0)))
+        w_row = pd.Series(0.0, index=codes, dtype=float)
+        if equity > eps and bool(valid.any()):
+            w_row.loc[valid] = (shares[valid] * p[valid] / equity).astype(float)
+        w_actual.loc[dt_i] = w_row
+    nav_s = pd.Series(nav_vals, index=idx, dtype=float)
+    nav_s.iloc[0] = 1.0
+    nav_old = (
+        ((out.get("nav") or {}).get("series") or {})
+        if isinstance(out.get("nav"), dict)
+        else {}
+    )
+    bench = nav_old.get("BUY_HOLD")
+    if not isinstance(bench, list):
+        bench = nav_old.get("BUY_HOLD_EW")
+    bench_s = pd.to_numeric(
+        pd.Series(bench if isinstance(bench, list) else []), errors="coerce"
+    )
+    if len(bench_s) != len(idx):
+        bench_s = bench_s.reindex(range(len(idx)))
+    bench_s = pd.Series(bench_s.to_numpy(dtype=float), index=idx).ffill()
+    if bench_s.dropna().empty:
+        bench_s = pd.Series(1.0, index=idx, dtype=float)
+    strat_ret = nav_s.pct_change().fillna(0.0).astype(float)
+    bench_ret = bench_s.pct_change().fillna(0.0).astype(float)
+    ex_nav = (1.0 + (strat_ret - bench_ret)).cumprod().astype(float)
+    ex_nav.iloc[0] = 1.0
+    if isinstance(out.get("nav"), dict):
+        out["nav"]["dates"] = [d.strftime("%Y-%m-%d") for d in idx]
+        out["nav"]["series"] = {
+            **(out["nav"].get("series") or {}),
+            "STRAT": nav_s.tolist(),
+            "EXCESS": ex_nav.tolist(),
+        }
+    if isinstance(out.get("weights"), dict):
+        out["weights"]["dates"] = [d.strftime("%Y-%m-%d") for d in idx]
+        out["weights"]["series"] = {
+            c: w_actual[c].astype(float).tolist() for c in codes
+        }
+    if isinstance(out.get("signals"), dict) and isinstance(
+        out["signals"].get("position_effective"), list
+    ):
+        if len(codes) == 1:
+            out["signals"]["position_effective"] = (
+                w_actual[codes[0]].astype(float).tolist()
+            )
+        else:
+            out["signals"]["position_effective"] = (
+                w_actual.astype(float).sum(axis=1).astype(float).tolist()
+            )
+    if isinstance(out.get("metrics"), dict):
+        m = out["metrics"]
+        m_strat = dict((m.get("strategy") or {}))
+        m_ex = dict((m.get("excess") or {}))
+        m_strat["cumulative_return"] = float(nav_s.iloc[-1] - 1.0)
+        m_strat["annualized_return"] = float(
+            _annualized_return(nav_s, ann_factor=TRADING_DAYS_PER_YEAR)
+        )
+        m_strat["annualized_volatility"] = float(
+            _annualized_vol(strat_ret, ann_factor=TRADING_DAYS_PER_YEAR)
+        )
+        m_strat["max_drawdown"] = float(_max_drawdown(nav_s))
+        m_strat["max_drawdown_recovery_days"] = int(_max_drawdown_duration_days(nav_s))
+        m_strat["sharpe_ratio"] = float(
+            _sharpe(
+                strat_ret,
+                rf=float(params.get("risk_free_rate") or 0.025),
+                ann_factor=TRADING_DAYS_PER_YEAR,
+            )
+        )
+        m_strat["sortino_ratio"] = float(
+            _sortino(
+                strat_ret,
+                rf=float(params.get("risk_free_rate") or 0.025),
+                ann_factor=TRADING_DAYS_PER_YEAR,
+            )
+        )
+        ui = float(_ulcer_index(nav_s, in_percent=True))
+        m_strat["ulcer_index"] = ui
+        m_strat["ulcer_performance_index"] = (
+            float(
+                (
+                    m_strat["annualized_return"]
+                    - float(params.get("risk_free_rate") or 0.025)
+                )
+                / (ui / 100.0)
+            )
+            if ui > 0
+            else float("nan")
+        )
+        turn = (w_actual - w_actual.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
+        m_strat["avg_daily_turnover"] = float(turn.mean()) if len(turn) else 0.0
+        m_strat["avg_annual_turnover"] = float(
+            m_strat["avg_daily_turnover"] * TRADING_DAYS_PER_YEAR
+        )
+        m_strat["avg_annual_turnover_rate"] = float(m_strat["avg_annual_turnover"])
+        m_ex["cumulative_return"] = float(ex_nav.iloc[-1] - 1.0)
+        m_ex["annualized_return"] = float(
+            _annualized_return(ex_nav, ann_factor=TRADING_DAYS_PER_YEAR)
+        )
+        m_ex["information_ratio"] = float(
+            _information_ratio(strat_ret - bench_ret, ann_factor=TRADING_DAYS_PER_YEAR)
+        )
+        m["strategy"] = m_strat
+        m["excess"] = m_ex
+        out["metrics"] = m
+    meta = out.setdefault("meta", {})
+    if isinstance(meta, dict):
+        params_out = meta.setdefault("params", {})
+        if isinstance(params_out, dict):
+            params_out["initial_account_amount"] = float(init_amt)
+        out["meta"]["account_lot_sizing"] = {
+            "enabled": True,
+            "lot_size_shares": 100,
+            "initial_account_amount": float(init_amt),
+            "leverage_allowed": bool(max_lev > 1.0),
+            "max_leverage_multiple": float(max_lev),
+            "cash_series": cash_vals,
+            "gross_leverage_series": gross_lev_vals,
+            "shares_by_code": shares_hist,
         }
     return out
 
@@ -1588,8 +1933,10 @@ def trend_backtest(
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
-        bias_v_take_profit_threshold=float(
-            getattr(payload, "bias_v_take_profit_threshold", 5.0)
+        bias_v_take_profit_tiers=(
+            [x.model_dump() for x in getattr(payload, "bias_v_take_profit_tiers", [])]
+            if getattr(payload, "bias_v_take_profit_tiers", None)
+            else None
         ),
         monthly_risk_budget_enabled=bool(
             getattr(payload, "monthly_risk_budget_enabled", False)
@@ -1624,6 +1971,12 @@ def trend_backtest(
         fixed_max_holdings=payload.fixed_max_holdings,
         risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
         risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
+        risk_budget_overcap_policy=str(
+            getattr(payload, "risk_budget_overcap_policy", "scale")
+        ),
+        risk_budget_max_leverage_multiple=float(
+            getattr(payload, "risk_budget_max_leverage_multiple", 2.0)
+        ),
         vol_regime_risk_mgmt_enabled=bool(
             getattr(payload, "vol_regime_risk_mgmt_enabled", False)
         ),
@@ -1658,6 +2011,7 @@ def trend_backtest(
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
+        initial_account_amount=getattr(payload, "initial_account_amount", None),
         quick_mode=bool(getattr(payload, "quick_mode", False)),
     )
     settings = get_settings()
@@ -1786,8 +2140,10 @@ def trend_portfolio_backtest(
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
-        bias_v_take_profit_threshold=float(
-            getattr(payload, "bias_v_take_profit_threshold", 5.0)
+        bias_v_take_profit_tiers=(
+            [x.model_dump() for x in getattr(payload, "bias_v_take_profit_tiers", [])]
+            if getattr(payload, "bias_v_take_profit_tiers", None)
+            else None
         ),
         monthly_risk_budget_enabled=bool(
             getattr(payload, "monthly_risk_budget_enabled", False)
@@ -1824,6 +2180,7 @@ def trend_portfolio_backtest(
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
+        initial_account_amount=getattr(payload, "initial_account_amount", None),
         quick_mode=bool(getattr(payload, "quick_mode", False)),
     )
     settings = get_settings()
