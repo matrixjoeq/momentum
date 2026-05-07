@@ -82,9 +82,9 @@ def simulate_lot_account_weights(
         gross_desired = float(desired_notional.sum())
         max_notional = float(max_lev * equity)
         if gross_desired > max_notional and gross_desired > eps:
-            desired_notional = (desired_notional * (max_notional / gross_desired)).astype(
-                float
-            )
+            desired_notional = (
+                desired_notional * (max_notional / gross_desired)
+            ).astype(float)
         target_shares = shares.copy()
         for c in codes:
             px_c = float(p.get(c, np.nan))
@@ -95,7 +95,9 @@ def simulate_lot_account_weights(
             target_shares.loc[c] = float(want_shares)
         delta = (target_shares - shares).astype(float)
         buy_notional = (
-            float((delta.clip(lower=0.0)[valid] * p[valid]).sum()) if bool(valid.any()) else 0.0
+            float((delta.clip(lower=0.0)[valid] * p[valid]).sum())
+            if bool(valid.any())
+            else 0.0
         )
         sell_notional = (
             float(((-delta.clip(upper=0.0))[valid] * p[valid]).sum())
