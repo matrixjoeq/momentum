@@ -581,10 +581,6 @@ class BaselineAnalysisRequest(BaseModel):
     rebalance: str = Field(
         default="weekly", description="daily/weekly/monthly/quarterly/yearly/none"
     )
-    risk_free_rate: float = Field(
-        default=0.025,
-        description="Annualized risk-free rate for Sharpe/Sortino (decimal). Default 0.025 ~= 2.5% (CN 0-1y gov).",
-    )
     rolling_weeks: list[int] = Field(default_factory=lambda: [4, 12, 52])
     rolling_months: list[int] = Field(default_factory=lambda: [3, 6, 12])
     rolling_years: list[int] = Field(default_factory=lambda: [1, 3])
@@ -948,7 +944,6 @@ class SimGbmAbStrategyParams(BaseModel):
     lookback_days: int = Field(default=20, ge=1)
     skip_days: int = Field(default=0, ge=0)
     score_method: str = Field(default="raw_mom")
-    risk_free_rate: float = Field(default=0.025)
     cost_bps: float = Field(default=2.0, ge=0.0)
     trend_filter: bool = Field(default=False)
     trend_exit_filter: bool = Field(default=False)
@@ -1406,7 +1401,6 @@ class BaselineCalendarEffectRequest(BaseModel):
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
     adjust: str = Field(default="hfq", description="qfq/hfq/none (global)")
-    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     rebalance: str = Field(
         default="weekly",
         description="weekly/monthly/quarterly/yearly (calendar-effect study)",
@@ -1478,7 +1472,6 @@ class CalendarTimingStrategyRequest(BaseModel):
         default="prev",
         description="If decision day is non-trading: prev|next|skip",
     )
-    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     calendar: str = Field(
         default="XSHG", description="Trading calendar used by decision-day shift"
     )
@@ -1782,7 +1775,6 @@ class RotationBacktestRequest(BaseModel):
         default="raw_mom",
         description="Ranking score: raw_mom | sharpe_mom | sortino_mom",
     )
-    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     cost_bps: float = Field(default=2.0, ge=0.0)
     slippage_rate: float = Field(
         default=0.001,
@@ -2028,7 +2020,6 @@ class BaselineWeekly5EWDashboardRequest(BaseModel):
 
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
-    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     rebalance_shift: str = Field(
         default="prev", description="prev|next when anchor falls on non-trading day"
     )
@@ -2088,7 +2079,6 @@ class TrendBacktestRequest(BaseModel):
         default="hfq",
         description="[deprecated] Trend research uses mixed basis like rotation: signal=qfq, nav=none with hfq fallback, benchmark=hfq.",
     )
-    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     initial_account_amount: float | None = Field(
         default=None,
         gt=0.0,
@@ -2418,7 +2408,6 @@ class TrendPortfolioBacktestRequest(BaseModel):
     codes: list[str] = Field(min_length=1, description="Portfolio candidate codes")
     start: str = Field(description="YYYYMMDD")
     end: str = Field(description="YYYYMMDD")
-    risk_free_rate: float = Field(default=0.025, description="Annualized rf (decimal)")
     initial_account_amount: float | None = Field(
         default=None,
         gt=0.0,
@@ -2835,7 +2824,6 @@ class TrendOosBootstrapRequest(BaseModel):
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry",
     )
     cost_bps: float = Field(default=2.0, ge=0.0)
-    risk_free_rate: float = Field(default=0.025)
     exec_price: str = Field(default="open", description="open|close|oc2")
     engine: str | None = Field(
         default=None,

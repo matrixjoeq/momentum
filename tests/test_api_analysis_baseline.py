@@ -220,7 +220,7 @@ def test_api_baseline_analysis_happy_path(api_client):
     )
     assert data["metrics"]["benchmark_code"] == "510300"
     assert data["metrics"]["rebalance"] == "yearly"
-    assert data["metrics"]["risk_free_rate"] == 0.02
+    assert "risk_free_rate" not in data["metrics"]
     assert "ulcer_index" in data["metrics"]
     assert "ulcer_performance_index" in data["metrics"]
     assert "holding_weekly_win_rate" in data["metrics"]

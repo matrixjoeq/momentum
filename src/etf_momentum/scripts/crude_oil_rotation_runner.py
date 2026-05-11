@@ -144,12 +144,12 @@ def calculate_metrics(nav: pd.Series, rf_rate: float = 0.025) -> Dict[str, float
     drawdown = (nav - peak) / peak
     max_dd = drawdown.min()
 
-    excess_ret = ann_ret - rf_rate
-    sharpe = excess_ret / ann_vol if ann_vol > 0 else 0
+    _ = rf_rate  # keep signature backward-compatible; metrics ignore rf
+    sharpe = ann_ret / ann_vol if ann_vol > 0 else 0
 
     downside = daily_ret[daily_ret < 0]
     downside_std = downside.std() if len(downside) > 0 else 0
-    sortino = excess_ret / (downside_std * np.sqrt(252)) if downside_std > 0 else 0
+    sortino = ann_ret / (downside_std * np.sqrt(252)) if downside_std > 0 else 0
 
     calmar = ann_ret / abs(max_dd) if max_dd < 0 else 0
 

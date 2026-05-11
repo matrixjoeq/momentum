@@ -466,11 +466,10 @@ def _risk_adjusted_scores(
     m = (method or "raw_mom").strip().lower()
     if m not in {"sharpe_mom", "sortino_mom"}:
         raise ValueError(f"invalid score_method={method}")
+    _ = rf_annual
 
     lb = max(1, int(lookback_days))
     lag = max(0, int(skip_days))
-    rf_daily = float(rf_annual) / 252.0
-
     ret = close_qfq.pct_change().replace([np.inf, -np.inf], np.nan)
     # Align the window to end at (t - lag): shift returns forward by lag.
     ret = ret.shift(lag)
@@ -491,13 +490,14 @@ def _risk_adjusted_scores(
             out = out.mask(small & (sign == 0), other=0.0)
         return out
 
-    # sharpe/sortino use excess mean over rf
-    excess_mean = (mean - rf_daily).astype(float)
+    # Keep rf_annual parameter for backward compatibility; ranking now
+    # uses pure return-based Sharpe/Sortino style scores (no rf adjustment).
+    excess_mean = mean.astype(float)
     if m == "sharpe_mom":
         return safe_div(excess_mean, std.astype(float))
 
-    # sortino: downside deviation on (ret - rf_daily)
-    downside = (ret - rf_daily).clip(upper=0.0)
+    # sortino downside deviation on raw daily returns
+    downside = ret.clip(upper=0.0)
     dd = downside.rolling(window=lb, min_periods=max(3, lb // 2)).std(ddof=1)
     return safe_div(excess_mean, dd.astype(float))
 
@@ -4799,11 +4799,7 @@ def backtest_rotation(
         sortino = _sortino(port_ret_net, rf=float(inp.risk_free_rate))
         ui = _ulcer_index(port_nav_net, in_percent=True)
         ui_den = ui / 100.0
-        upi = (
-            float((ann_ret - float(inp.risk_free_rate)) / ui_den)
-            if ui_den > 0
-            else float("nan")
-        )
+        upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
 
         return {
             "date_range": {
@@ -5224,11 +5220,7 @@ def backtest_rotation(
     sortino = _sortino(port_ret_net, rf=float(inp.risk_free_rate))
     ui = _ulcer_index(port_nav_net, in_percent=True)
     ui_den = ui / 100.0
-    upi = (
-        float((ann_ret - float(inp.risk_free_rate)) / ui_den)
-        if ui_den > 0
-        else float("nan")
-    )
+    upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
 
     ann_excess = _annualized_return(excess_nav)
     ann_excess_vol = _annualized_vol(active_ret)

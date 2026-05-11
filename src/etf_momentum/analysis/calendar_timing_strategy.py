@@ -844,7 +844,7 @@ def compute_calendar_timing_strategy_backtest(
         )
         ui = _ulcer_index(nav, in_percent=True)
         ui_den = ui / 100.0
-        upi = float((ann_ret - rf) / ui_den) if ui_den > 0 else float("nan")
+        upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
         ir = (
             float(_information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR))
             if active is not None

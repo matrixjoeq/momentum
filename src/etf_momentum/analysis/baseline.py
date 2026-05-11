@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -661,7 +662,10 @@ def _sharpe(
 ) -> float:
     if daily_ret.empty:
         return float("nan")
-    ex = daily_ret - rf / ann_factor
+    _ = rf
+    # Keep rf parameter for backward-compatible API shape, but metrics
+    # are now defined purely on strategy returns (no risk-free adjustment).
+    ex = daily_ret.astype(float)
     std = ex.std(ddof=1)
     if (not np.isfinite(std)) or abs(float(std)) <= 1e-12:
         return float("nan")
@@ -673,7 +677,10 @@ def _sortino(
 ) -> float:
     if daily_ret.empty:
         return float("nan")
-    ex = daily_ret - rf / ann_factor
+    _ = rf
+    # Keep rf parameter for backward-compatible API shape, but metrics
+    # are now defined purely on strategy returns (no risk-free adjustment).
+    ex = daily_ret.astype(float)
     downside = ex.where(ex < 0, 0.0)
     dd_std = downside.std(ddof=1)
     if (not np.isfinite(dd_std)) or abs(float(dd_std)) <= 1e-12:
@@ -970,6 +977,104 @@ def _expanding_percentile_rank(s: pd.Series) -> pd.Series:
     return pd.Series(out, index=xs.index, dtype=float)
 
 
+def _daily_log_return_acf_stats(
+    code_ret: pd.Series,
+    *,
+    max_lag: int = 20,
+    alpha: float = 0.05,
+) -> dict[str, Any]:
+    """
+    Compute daily log-return ACF stats with per-lag significance and Ljung-Box test.
+    """
+    z_975 = 1.959963984540054
+    out: dict[str, Any] = {
+        "max_lag": int(max_lag),
+        "conf_level": float(1.0 - alpha),
+        "sample_size": 0,
+        "white_noise_bound": float("nan"),
+        "lags": [],
+        "acf": [],
+        "per_lag_significance": [],
+        "ljung_box": [],
+        "notes": "",
+    }
+    r = pd.to_numeric(code_ret, errors="coerce").astype(float)
+    lr = np.log1p(r).replace([np.inf, -np.inf], np.nan).dropna()
+    n = int(len(lr))
+    out["sample_size"] = n
+    if n < 10:
+        out["notes"] = f"insufficient_sample_for_acf: N={n} (<10)"
+        return out
+    k_max = int(min(max(int(max_lag), 1), n - 1))
+    if k_max <= 0:
+        out["notes"] = f"insufficient_sample_for_acf: N={n}"
+        return out
+
+    x = lr.to_numpy(dtype=float)
+    x = x - float(np.mean(x))
+    denom = float(np.dot(x, x))
+    if not np.isfinite(denom) or denom <= 0:
+        out["notes"] = "zero_or_invalid_variance"
+        return out
+
+    lags = list(range(1, k_max + 1))
+    acf_vals: list[float] = []
+    for k in lags:
+        num = float(np.dot(x[k:], x[:-k]))
+        v = num / denom
+        acf_vals.append(float(v))
+
+    crit = float(z_975 / np.sqrt(float(n)))
+    out["white_noise_bound"] = crit
+    out["lags"] = lags
+    out["acf"] = acf_vals
+    out["max_lag"] = k_max
+
+    per_lag: list[dict[str, Any]] = []
+    for k, v in zip(lags, acf_vals, strict=True):
+        sig = bool(abs(v) > crit)
+        per_lag.append(
+            {
+                "lag": int(k),
+                "acf": float(v),
+                "abs_acf": float(abs(v)),
+                "crit": float(crit),
+                "significant": sig,
+                "conclusion": ("显著（单阶）" if sig else "不显著（单阶）"),
+            }
+        )
+    out["per_lag_significance"] = per_lag
+
+    ljung_rows: list[dict[str, Any]] = []
+    q_acc = 0.0
+    for k, v in zip(lags, acf_vals, strict=True):
+        denom_k = float(n - k)
+        if denom_k <= 0:
+            q_stat = float("nan")
+            p_val = float("nan")
+            sig = False
+        else:
+            q_acc += (float(v) * float(v)) / denom_k
+            q_stat = float(n * (n + 2) * q_acc)
+            p_val = float(stats.chi2.sf(q_stat, df=k))
+            sig = bool(np.isfinite(p_val) and p_val < alpha)
+        ljung_rows.append(
+            {
+                "lag": int(k),
+                "q_stat": q_stat,
+                "p_value": p_val,
+                "significant": sig,
+                "conclusion": (
+                    "显著（拒绝至该阶联合白噪声）"
+                    if sig
+                    else "不显著（未拒绝至该阶联合白噪声）"
+                ),
+            }
+        )
+    out["ljung_box"] = ljung_rows
+    return out
+
+
 def _compute_periodic_returns_and_volatility(
     daily_ret: pd.DataFrame,
     *,
@@ -1064,6 +1169,9 @@ def _compute_periodic_returns_and_volatility(
             "current": float(code_ret.iloc[-1]),
             "current_date": pd.to_datetime(code_ret.index[-1]).date().isoformat(),
         }
+        code_result["daily_log_return_acf"] = _daily_log_return_acf_stats(
+            code_ret, max_lag=20, alpha=0.05
+        )
         # Log-return deviation: log(1+r) - MA20(log(1+r))
         lr = np.log1p(pd.to_numeric(code_ret, errors="coerce").astype(float))
         lr = lr.replace([np.inf, -np.inf], np.nan).dropna()
@@ -2839,15 +2947,10 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         ir = _information_ratio(nav_ret - bench_ret.fillna(0.0))
         ui = _ulcer_index(nav_s, in_percent=True)
         ui_den = ui / 100.0
-        upi = (
-            float((ann_ret - float(inp.risk_free_rate)) / ui_den)
-            if ui_den > 0
-            else float("nan")
-        )
+        upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
         return {
             "benchmark_code": bench_code,
             "rebalance": inp.rebalance,
-            "risk_free_rate": float(inp.risk_free_rate),
             "cumulative_return": cum_ret,
             "annualized_return": ann_ret,
             "annualized_volatility": ann_vol,

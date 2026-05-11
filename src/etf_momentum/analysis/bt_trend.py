@@ -3470,7 +3470,7 @@ def _metrics_from_ret(ret: pd.Series, rf: float) -> dict[str, float]:
         "ulcer_index": ulcer,
     }
     out["ulcer_performance_index"] = (
-        float((ann_ret - float(rf)) / (ulcer / 100.0)) if ulcer > 0.0 else float("nan")
+        float(ann_ret / (ulcer / 100.0)) if ulcer > 0.0 else float("nan")
     )
     return out
 

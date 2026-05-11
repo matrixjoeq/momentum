@@ -6872,9 +6872,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             )
         ),
         "ulcer_index": float(ui_strat),
-        "ulcer_performance_index": float(
-            (ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)
-        )
+        "ulcer_performance_index": float(ann_strat / (ui_strat / 100.0))
         if ui_strat > 0
         else float("nan"),
         "avg_daily_turnover": float(turnover_daily.mean())
@@ -6900,9 +6898,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             )
         ),
         "ulcer_index": float(ui_bh),
-        "ulcer_performance_index": float(
-            (ann_bh - float(inp.risk_free_rate)) / (ui_bh / 100.0)
-        )
+        "ulcer_performance_index": float(ann_bh / (ui_bh / 100.0))
         if ui_bh > 0
         else float("nan"),
     }
@@ -10049,9 +10045,7 @@ def compute_trend_portfolio_backtest(
             )
         ),
         "ulcer_index": float(ui_strat),
-        "ulcer_performance_index": float(
-            (ann_strat - float(inp.risk_free_rate)) / (ui_strat / 100.0)
-        )
+        "ulcer_performance_index": float(ann_strat / (ui_strat / 100.0))
         if ui_strat > 0
         else float("nan"),
         "avg_daily_turnover": float(turnover.mean()) if len(turnover) else 0.0,
@@ -10079,9 +10073,7 @@ def compute_trend_portfolio_backtest(
             )
         ),
         "ulcer_index": float(ui_bench),
-        "ulcer_performance_index": float(
-            (ann_bench - float(inp.risk_free_rate)) / (ui_bench / 100.0)
-        )
+        "ulcer_performance_index": float(ann_bench / (ui_bench / 100.0))
         if ui_bench > 0
         else float("nan"),
     }

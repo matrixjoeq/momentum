@@ -221,10 +221,6 @@
         <label>基准标的（用于信息比率）</label>
         <select id="benchmark"></select>
       </div>
-      <div>
-        <label>无风险收益率（年化，长期中国0-1年国债）</label>
-        <input id="rf" placeholder="如 2.5 或 0.025" value="2.5" />
-      </div>
       <button id="run">运行分析</button>
       <button id="exportPdf">导出PDF报告</button>
       <div id="status" class="muted" style="min-height: 1.4em"></div>
@@ -916,6 +912,19 @@
         style="width: 100%; height: 420px; margin-top: 12px"
       ></div>
       <table id="distQuantiles" style="margin-top: 12px"></table>
+      <div class="muted" style="margin-top: 10px">
+        日度对数收益率序列自相关（ACF, lag=1~20）与显著性检验
+      </div>
+      <div
+        id="distLogRetAcf"
+        style="width: 100%; height: 320px; margin-top: 8px"
+      ></div>
+      <table id="distLogRetAcfTable" style="margin-top: 8px"></table>
+      <div
+        id="distLogRetAcfExplain"
+        class="muted"
+        style="margin-top: 6px"
+      ></div>
       <div class="muted" style="margin-top: 10px">
         当前统计指标值 vs 未来 t+n 日收益率（散点）
       </div>
@@ -3817,9 +3826,6 @@
                 </select>
               </div>
               <div>
-                <label>rf(年化)</label><input id="simAbA_rf" value="0.025" />
-              </div>
-              <div>
                 <label>成本(bps)</label><input id="simAbA_cost" value="2" />
               </div>
             </div>
@@ -4262,9 +4268,6 @@
                   <option value="sharpe_mom">sharpe_mom</option>
                   <option value="sortino_mom">sortino_mom</option>
                 </select>
-              </div>
-              <div>
-                <label>rf(年化)</label><input id="simAbB_rf" value="0.025" />
               </div>
               <div>
                 <label>成本(bps)</label><input id="simAbB_cost" value="2" />
@@ -7815,7 +7818,6 @@
           "simAbA_lb",
           "simAbA_skip",
           "simAbA_score",
-          "simAbA_rf",
           "simAbA_cost",
           "simAbA_floorOn",
           "simAbA_floorOp",
@@ -7859,7 +7861,6 @@
           "simAbB_lb",
           "simAbB_skip",
           "simAbB_score",
-          "simAbB_rf",
           "simAbB_cost",
           "simAbB_floorOn",
           "simAbB_floorOp",
@@ -8495,14 +8496,6 @@
             <div style="margin-top:8px"><b>实现</b>：日度=每天重置；周/月/季/年=在对应周期边界重置；不平衡=等权买入持有（不再重置）。</div>
           `,
         },
-        risk_free_rate: {
-          title: "无风险收益率（risk_free_rate）",
-          sub: "用于夏普比率与索提诺比率（年化）。默认 2.5%（长期中国0-1年国债）。",
-          body: `
-            <div><b>含义</b>：在风险调整收益指标中，从组合收益中扣除无风险收益。</div>
-            <div style="margin-top:8px"><b>换算</b>：年化 rf 按日频近似换算为 rf/252。</div>
-          `,
-        },
         cumulative_return: {
           title: "累积收益率（cumulative_return）",
           sub: "区间内的总收益。",
@@ -8545,10 +8538,10 @@
         },
         sharpe_ratio: {
           title: "夏普比率（sharpe_ratio）",
-          sub: "单位总波动的超额收益（相对无风险）。",
+          sub: "单位总波动的策略收益（不再扣无风险收益率）。",
           body: `
-            <div><b>定义（年化）</b>：\\(Sharpe = \\frac{\\mathbb{E}[r - rf/${ANN_FACTOR}]}{\\sigma(r - rf/${ANN_FACTOR})} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
-            <div style="margin-top:8px"><b>说明</b>：r 为日收益率，rf 为年化无风险收益率。</div>
+            <div><b>定义（年化）</b>：\\(Sharpe = \\frac{\\mathbb{E}[r]}{\\sigma(r)} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：r 为策略日收益率。</div>
           `,
         },
         calmar_ratio: {
@@ -8561,10 +8554,10 @@
         },
         sortino_ratio: {
           title: "索提诺比率（sortino_ratio）",
-          sub: "只用下行波动衡量风险的超额收益。",
+          sub: "只用下行波动衡量风险的策略收益。",
           body: `
-            <div><b>定义（年化）</b>：\\(Sortino = \\frac{\\mathbb{E}[r - rf/${ANN_FACTOR}]}{\\sigma(\\min(r - rf/${ANN_FACTOR}, 0))} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
-            <div style="margin-top:8px"><b>说明</b>：只统计负的（下行）超额收益作为“下行风险”。</div>
+            <div><b>定义（年化）</b>：\\(Sortino = \\frac{\\mathbb{E}[r]}{\\sigma(\\min(r, 0))} \\cdot \\sqrt{${ANN_FACTOR}}\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：只统计负的（下行）日收益作为“下行风险”。</div>
           `,
         },
         information_ratio: {
@@ -8586,10 +8579,10 @@
         },
         ulcer_performance_index: {
           title: "溃疡绩效指标（ulcer_performance_index, UPI）",
-          sub: "类似“收益/痛苦”：用超额年化收益除以 Ulcer Index。",
+          sub: "类似“收益/痛苦”：用年化收益除以 Ulcer Index。",
           body: `
-            <div><b>定义</b>：\\(UPI = \\frac{R_{ann} - rf}{UI_{dec}}\\)，其中 \\(UI_{dec}=UI/100\\)。</div>
-            <div style="margin-top:8px"><b>说明</b>：rf 为年化无风险收益率；UI 越小、收益越高，UPI 越大。</div>
+            <div><b>定义</b>：\\(UPI = \\frac{R_{ann}}{UI_{dec}}\\)，其中 \\(UI_{dec}=UI/100\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：UI 越小、收益越高，UPI 越大。</div>
           `,
         },
         holding_weekly_win_rate: {
@@ -8947,13 +8940,13 @@
         },
         rot_sharpe: {
           title: "策略夏普",
-          sub: "基于日收益与无风险收益率的风险调整收益（年化）。",
-          body: `<div><b>计算</b>：Sharpe = mean(r-rf/252)/std(r-rf/252)×√252。</div>`,
+          sub: "基于日收益的风险调整收益（年化，不扣 rf）。",
+          body: `<div><b>计算</b>：Sharpe = mean(r)/std(r)×√252。</div>`,
         },
         rot_sortino: {
           title: "策略索提诺",
-          sub: "只用下行波动衡量风险的风险调整收益（年化）。",
-          body: `<div><b>计算</b>：Sortino = mean(r-rf/252)/std(min(r-rf/252,0))×√252。</div>`,
+          sub: "只用下行波动衡量风险的风险调整收益（年化，不扣 rf）。",
+          body: `<div><b>计算</b>：Sortino = mean(r)/std(min(r,0))×√252。</div>`,
         },
         rot_ui: {
           title: "策略溃疡指标(UI)",
@@ -8962,8 +8955,8 @@
         },
         rot_upi: {
           title: "策略溃疡绩效(UPI)",
-          sub: "收益/痛苦：用(年化收益-rf)除以 UI。",
-          body: `<div><b>计算</b>：UPI=(R_ann-rf)/(UI/100)。</div>`,
+          sub: "收益/痛苦：用年化收益除以 UI。",
+          body: `<div><b>计算</b>：UPI=R_ann/(UI/100)。</div>`,
         },
         rot_turnover: {
           title: "平均日换手",
@@ -9611,10 +9604,6 @@
             };
           };
           const _buildReq = (startYmd, endYmd, anchorWeekdayOrNull) => {
-            const rfRaw = ($("rf").value || "").trim();
-            let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-            if (Number.isFinite(risk_free_rate) && risk_free_rate > 1.0)
-              risk_free_rate = risk_free_rate / 100.0;
             let dd_threshold = Number(($("rotDDThr").value || "10").trim());
             if (Number.isFinite(dd_threshold) && dd_threshold > 1.0)
               dd_threshold = dd_threshold / 100.0;
@@ -9740,9 +9729,6 @@
               asset_groups: groupsParsed,
               asset_momentum_floor_rules: floorRules.length ? floorRules : null,
               score_method: $("rotScoreMethod").value,
-              risk_free_rate: Number.isFinite(risk_free_rate)
-                ? risk_free_rate
-                : 0.025,
               // filters & controls
               trend_filter: $("rotTrendOn").value === "true",
               trend_exit_filter:
@@ -11482,7 +11468,7 @@
         }
         return out;
       }
-      function _metricsFromReturns(rs, rfAnnual) {
+      function _metricsFromReturns(rs) {
         const xs = (Array.isArray(rs) ? rs : [])
           .map(Number)
           .filter(Number.isFinite);
@@ -11502,9 +11488,8 @@
         const annVol = Math.sqrt(Math.max(0, var0)) * Math.sqrt(252);
         const cumRet = nav[nav.length - 1] - 1.0;
         const annRet = Math.pow(1.0 + cumRet, 252 / n) - 1.0;
-        const rf = Number.isFinite(Number(rfAnnual)) ? Number(rfAnnual) : 0.025;
         const sharpe =
-          Number.isFinite(annVol) && annVol > 0 ? (annRet - rf) / annVol : NaN;
+          Number.isFinite(annVol) && annVol > 0 ? annRet / annVol : NaN;
         return {
           sample_days: n,
           cumulative_return: cumRet,
@@ -13716,7 +13701,7 @@
           const rs = Array.from(map.values())
             .map(Number)
             .filter(Number.isFinite);
-          const mm = _metricsFromReturns(rs, 0.0);
+          const mm = _metricsFromReturns(rs);
           return Number(mm && mm.annualized_volatility);
         });
         const inv = vols.map((v) =>
@@ -14802,15 +14787,11 @@
             0,
           ),
         );
-        const rfRaw = ($("rf").value || "").trim();
-        let rf = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(rf)) rf = 0.025;
-        if (rf > 1.0) rf = rf / 100.0;
-        const mMix = _metricsFromReturns(rsMix, rf);
+        const mMix = _metricsFromReturns(rsMix);
         if (!mMix) return setMsg("组合分析失败：收益序列无效。");
         const mById = {};
         for (const s of entries)
-          mById[s.id] = _metricsFromReturns(arrById[s.id], rf);
+          mById[s.id] = _metricsFromReturns(arrById[s.id]);
         const dts = validDates.slice(validDates.length - mMix.nav.length);
         const rollWin = Math.max(
           5,
@@ -15360,14 +15341,6 @@
             key: "rebalance",
             label: "再平衡周期",
             value: metrics.rebalance || "-",
-          },
-          {
-            key: "risk_free_rate",
-            label: "无风险收益率(年化)",
-            value:
-              metrics.risk_free_rate != null
-                ? fmtPct(metrics.risk_free_rate)
-                : "-",
           },
           {
             key: "cumulative_return",
@@ -16729,7 +16702,6 @@
             benchmark_code: code,
             adjust,
             rebalance: "yearly",
-            risk_free_rate: 0.025,
             fft_windows: [252, 126],
             fft_roll: false,
             fft_roll_step: 5,
@@ -16853,6 +16825,9 @@
         const rangeStateStats = $("distRangeStateStats");
         if (!codeSelect || !typeSelect || !periodSelect || !rollWinSelect)
           return;
+        const acfPlotEl = $("distLogRetAcf");
+        const acfTableEl = $("distLogRetAcfTable");
+        const acfExplainEl = $("distLogRetAcfExplain");
         const _distAtrDerivedTypes = new Set([
           "atr20_level",
           "mtr_atr20_multiple",
@@ -16946,6 +16921,9 @@
 
         if (codes.length === 0) {
           $("distHistogram").innerHTML = "<div class='muted'>无分布数据</div>";
+          if (acfPlotEl)
+            acfPlotEl.innerHTML = "<div class='muted'>无数据</div>";
+          if (acfTableEl) acfTableEl.innerHTML = "";
           if ($("distFutureScatter"))
             $("distFutureScatter").innerHTML =
               "<div class='muted'>无数据</div>";
@@ -20630,6 +20608,181 @@
             `<tr><td>当前值</td><td>${Number.isFinite(curR) ? `${fmtQv(curR)}（${esc(String(curD || ""))}）` : "-"}</td></tr>`;
         };
 
+        const _renderDailyLogReturnAcf = (code) => {
+          if (!acfPlotEl || !acfTableEl || !acfExplainEl) return;
+          const c = String(code || "").trim();
+          if (!c || !distByCode[c]) {
+            acfPlotEl.innerHTML = "<div class='muted'>请选择标的</div>";
+            acfTableEl.innerHTML = "";
+            acfExplainEl.innerHTML = "";
+            return;
+          }
+          const acfStats =
+            ((distByCode[c] || {}).daily_log_return_acf || null) &&
+            typeof (distByCode[c] || {}).daily_log_return_acf === "object"
+              ? (distByCode[c] || {}).daily_log_return_acf
+              : null;
+          if (!acfStats) {
+            acfPlotEl.innerHTML =
+              "<div class='muted'>无日度对数收益率ACF数据</div>";
+            acfTableEl.innerHTML = "";
+            acfExplainEl.innerHTML = "";
+            return;
+          }
+          const lags = Array.isArray(acfStats.lags)
+            ? acfStats.lags
+                .map((x) => Number(x))
+                .filter((x) => Number.isFinite(x))
+            : [];
+          const acfVals = Array.isArray(acfStats.acf)
+            ? acfStats.acf
+                .map((x) => Number(x))
+                .filter((x) => Number.isFinite(x))
+            : [];
+          const bound = Number(acfStats.white_noise_bound);
+          const sampleN = Number(acfStats.sample_size);
+          const note = String(acfStats.notes || "").trim();
+          if (
+            !lags.length ||
+            !acfVals.length ||
+            lags.length !== acfVals.length
+          ) {
+            const msg = note || "样本不足，无法计算 ACF(1~20)";
+            acfPlotEl.innerHTML = `<div class='muted'>${esc(msg)}</div>`;
+            acfTableEl.innerHTML = "";
+            acfExplainEl.innerHTML =
+              "<span>解读：样本不足时，单阶阈值与 Ljung-Box 结论参考意义有限，建议延长样本区间后再判断。</span>";
+            return;
+          }
+          if (typeof Plotly === "undefined") {
+            acfPlotEl.innerHTML =
+              "<div class='muted'>Plotly 未加载，无法绘图。</div>";
+            acfTableEl.innerHTML = "";
+            acfExplainEl.innerHTML = "";
+            return;
+          }
+          const xMin = Math.min(...lags) - 0.5;
+          const xMax = Math.max(...lags) + 0.5;
+          const traces = [
+            {
+              x: lags,
+              y: acfVals,
+              type: "bar",
+              marker: { color: "#4c78a8" },
+              name: "ACF",
+              hovertemplate: "lag=%{x}<br>acf=%{y:.4f}<extra></extra>",
+            },
+          ];
+          const shapes = [];
+          if (Number.isFinite(bound) && bound > 0) {
+            shapes.push(
+              {
+                type: "line",
+                xref: "x",
+                yref: "y",
+                x0: xMin,
+                x1: xMax,
+                y0: bound,
+                y1: bound,
+                line: {
+                  color: "rgba(214,39,40,0.85)",
+                  width: 1.5,
+                  dash: "dot",
+                },
+              },
+              {
+                type: "line",
+                xref: "x",
+                yref: "y",
+                x0: xMin,
+                x1: xMax,
+                y0: -bound,
+                y1: -bound,
+                line: {
+                  color: "rgba(214,39,40,0.85)",
+                  width: 1.5,
+                  dash: "dot",
+                },
+              },
+            );
+          }
+          Plotly.newPlot(
+            acfPlotEl.id,
+            traces,
+            {
+              margin: { t: 40, l: 56, r: 20, b: 45 },
+              title: {
+                text: `${codeLabel(c)} - 日度对数收益率 ACF（lag=1~${lags.length}）`,
+                font: { size: 14 },
+              },
+              xaxis: { title: "滞后阶数 (lag)", dtick: 1 },
+              yaxis: { title: "自相关系数", zeroline: true, zerolinewidth: 1 },
+              shapes,
+              annotations: [
+                {
+                  xref: "paper",
+                  yref: "paper",
+                  x: 0.01,
+                  y: 0.98,
+                  showarrow: false,
+                  text: `样本数 N=${Number.isFinite(sampleN) ? Math.round(sampleN) : "-"} · 95%白噪声阈值=${Number.isFinite(bound) ? bound.toFixed(4) : "-"}`,
+                  font: { size: 11, color: "#666" },
+                },
+              ],
+            },
+            { responsive: true, displayModeBar: false },
+          );
+
+          const perLag = Array.isArray(acfStats.per_lag_significance)
+            ? acfStats.per_lag_significance
+            : [];
+          const ljung = Array.isArray(acfStats.ljung_box)
+            ? acfStats.ljung_box
+            : [];
+          const ljungByLag = new Map(
+            ljung.map((row) => [Number(row && row.lag), row || {}]),
+          );
+          const rows = perLag.length
+            ? perLag.map((row) => {
+                const lag = Number(row && row.lag);
+                const lb = ljungByLag.get(lag) || {};
+                const acfV = Number(row && row.acf);
+                const absV = Number(row && row.abs_acf);
+                const crit = Number(row && row.crit);
+                const qStat = Number(lb && lb.q_stat);
+                const pVal = Number(lb && lb.p_value);
+                const oneSig = !!(row && row.significant);
+                const lbSig = !!(lb && lb.significant);
+                return `<tr>
+                  <td>${Number.isFinite(lag) ? Math.round(lag) : "-"}</td>
+                  <td>${Number.isFinite(acfV) ? acfV.toFixed(4) : "-"}</td>
+                  <td>${Number.isFinite(absV) ? absV.toFixed(4) : "-"}</td>
+                  <td>${Number.isFinite(crit) ? crit.toFixed(4) : "-"}</td>
+                  <td>${oneSig ? "显著" : "不显著"}</td>
+                  <td>${Number.isFinite(qStat) ? qStat.toFixed(4) : "-"}</td>
+                  <td>${Number.isFinite(pVal) ? pVal.toFixed(4) : "-"}</td>
+                  <td>${lbSig ? "显著" : "不显著"}</td>
+                </tr>`;
+              })
+            : [];
+          acfTableEl.innerHTML = rows.length
+            ? `<tr><th>lag</th><th>acf</th><th>|acf|</th><th>阈值</th><th>单阶结论</th><th>Ljung-Box Q</th><th>Ljung-Box p值</th><th>联合结论</th></tr>${rows.join("")}`
+            : "<tr><td class='muted'>暂无逐阶显著性数据</td></tr>";
+          const perLagSigCount = perLag.filter(
+            (row) => !!row.significant,
+          ).length;
+          const ljungSigCount = ljung.filter((row) => !!row.significant).length;
+          const oneLagText =
+            perLagSigCount > 0
+              ? `单阶检验中有 ${perLagSigCount}/${perLag.length} 个滞后阶显著，表示对应 lag 的线性相关性偏离白噪声阈值。`
+              : `单阶检验未发现显著滞后阶（0/${perLag.length}），当前样本下未见明显单点线性自相关。`;
+          const lbText =
+            ljungSigCount > 0
+              ? `Ljung-Box 联合检验在 ${ljungSigCount}/${ljung.length} 个累计滞后阶上显著，说明“截至该阶”的整体自相关结构并非纯白噪声。`
+              : `Ljung-Box 联合检验在各累计滞后阶均不显著，当前样本下整体上更接近白噪声。`;
+          acfExplainEl.innerHTML = `<span><b>解读说明：</b>${oneLagText}${lbText}当“单阶不显著但联合显著”时，常见于多个小幅相关叠加；当“单阶显著但联合不显著”时，可能是偶发波动。统计显著不等于可交易信号，建议结合样本稳定性、交易成本和样本外验证。</span>`;
+        };
+
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
@@ -20637,6 +20790,7 @@
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
 
           if (!code || !distByCode[code]) {
+            _renderDailyLogReturnAcf("");
             $("distHistogram").innerHTML =
               "<div class='muted'>请选择标的</div>";
             if ($("distFutureScatter"))
@@ -20700,6 +20854,7 @@
           } catch (e) {
             /* ignore */
           }
+          _renderDailyLogReturnAcf(code);
 
           const key = `${period}_${type}`;
           let data = distByCode[code][key];
@@ -21123,6 +21278,7 @@
                 adjust: adj,
               });
               if (!b || !b.period_distributions || !b.period_distributions[c]) {
+                _renderDailyLogReturnAcf("");
                 $("distHistogram").innerHTML =
                   "<div class='muted'>该区间无可用统计数据</div>";
                 $("distQuantiles").innerHTML = "";
@@ -21184,6 +21340,7 @@
               openByCode[c] = o;
               updateDisplay();
             } catch (e2) {
+              _renderDailyLogReturnAcf("");
               $("distHistogram").innerHTML =
                 `<div class='muted'>加载失败：${esc(String(e2 && e2.message ? e2.message : e2))}</div>`;
               if ($("distFutureScatter"))
@@ -24221,7 +24378,7 @@
         );
       }
 
-      function _calcMetricsFromNav(nav, rfAnnual) {
+      function _calcMetricsFromNav(nav) {
         const n = nav.length;
         if (n < 2) return {};
         const rets = nav.map((v, i) => (i === 0 ? 0 : v / nav[i - 1] - 1));
@@ -24235,8 +24392,7 @@
           const dd = nav[i] / peak - 1;
           if (dd < mdd) mdd = dd;
         }
-        const rf = Number.isFinite(rfAnnual) ? rfAnnual : 0;
-        const ex = rets.slice(1).map((x) => x - rf / 252);
+        const ex = rets.slice(1);
         const stdEx = _std(ex);
         const sharpe =
           Number.isFinite(stdEx) && stdEx > 0
@@ -24392,8 +24548,8 @@
           navAdj[t] = navAdj[t - 1] * (1.0 + rets[t] * exposure[t]);
         }
 
-        const baseMetrics = _calcMetricsFromNav(nav, rfAnnual);
-        const adjMetrics = _calcMetricsFromNav(navAdj, rfAnnual);
+        const baseMetrics = _calcMetricsFromNav(nav);
+        const adjMetrics = _calcMetricsFromNav(navAdj);
 
         const future = [];
         const sigValid = [];
@@ -28298,11 +28454,6 @@
           (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)
         )
           return setMsg("休眠天数必须>=1，例如 20");
-        const rfRaw = ($("rf").value || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(risk_free_rate))
-          return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
-        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const benchmark_mode =
           $("rotBenchMode") && $("rotBenchMode").value
             ? String($("rotBenchMode").value)
@@ -28452,7 +28603,6 @@
           top_k_mode,
           floating_benchmark_code:
             top_k_mode === "floating" ? floating_benchmark_code : null,
-          risk_free_rate,
           score_method,
           atr_stop_mode,
           atr_stop_atr_basis,
@@ -28685,11 +28835,6 @@
             : "ma_filter";
         const start = String(($("start") && $("start").value) || "").trim();
         const end = String(($("end") && $("end").value) || "").trim();
-        const rfRaw = String(($("rf") && $("rf").value) || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (Number.isFinite(risk_free_rate) && risk_free_rate > 1.0) {
-          risk_free_rate = risk_free_rate / 100.0;
-        }
         const position_sizing =
           $("trendSizing") && $("trendSizing").value
             ? String($("trendSizing").value)
@@ -28733,7 +28878,6 @@
         const common = {
           start,
           end,
-          risk_free_rate,
           initial_account_amount:
             initAccountAmountRaw === "" ? null : Number(initAccountAmountRaw),
           cost_bps: Number(($("trendCost").value || "2").trim()),
@@ -29093,11 +29237,6 @@
             : "ma_filter";
         const start = $("start").value.trim();
         const end = $("end").value.trim();
-        const rfRaw = ($("rf").value || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(risk_free_rate))
-          return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
-        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const cost_bps = Number(($("trendCost").value || "2").trim());
         if (!Number.isFinite(cost_bps) || cost_bps < 0)
           return setMsg("趋势成本(bps)需为>=0数字");
@@ -29126,7 +29265,6 @@
         const common = {
           start,
           end,
-          risk_free_rate,
           initial_account_amount,
           cost_bps,
           slippage_rate,
@@ -31243,11 +31381,6 @@
           ($("ewCalStart").value || "").trim() || $("start").value.trim();
         const end = ($("ewCalEnd").value || "").trim() || $("end").value.trim();
         const adjust = $("ewCalAdjust").value || ADJUST_USED;
-        const rfRaw = ($("rf").value || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(risk_free_rate))
-          return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
-        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const rebalance = $("rebalance").value || "weekly";
         const rebalance_shift =
           $("ewCalShift") && $("ewCalShift").value
@@ -31271,7 +31404,6 @@
             start,
             end,
             adjust,
-            risk_free_rate,
             rebalance,
             rebalance_shift,
             anchors,
@@ -31702,11 +31834,6 @@
           (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)
         )
           return setMsg("休眠天数必须>=1，例如 20");
-        const rfRaw = ($("rf").value || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(risk_free_rate))
-          return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
-        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         // phase-1 rules already validated by table parsers
         const parsed = parseCalendarAnchors("rot", rebalance);
         if (!parsed.ok) return setMsg(parsed.reason);
@@ -31854,7 +31981,6 @@
             skip_days,
             cost_bps,
             slippage_rate,
-            risk_free_rate,
             score_method,
             atr_stop_mode,
             atr_stop_atr_basis,
@@ -32446,10 +32572,6 @@
           cost_bps,
           slippage_rate,
           rebalance_shift,
-          risk_free_rate:
-            Number(($("rf").value || "0.025").trim()) > 1
-              ? Number(($("rf").value || "0.025").trim()) / 100.0
-              : Number(($("rf").value || "0.025").trim()),
         };
         const resp = await api("/analysis/calendar-timing", {
           method: "POST",
@@ -32571,12 +32693,6 @@
         const end = $("end").value.trim();
         const benchmark_code = $("benchmark").value || null;
         const rebalance = $("rebalance").value || "yearly";
-        const rfRaw = ($("rf").value || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(risk_free_rate))
-          return setMsg("无风险收益率必须是数字，例如 0.02");
-        // allow percent input like "2.5" to mean 2.5%
-        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const fftWindowsRaw = (
           $("fftWindows") && $("fftWindows").value
             ? $("fftWindows").value
@@ -32686,7 +32802,6 @@
             adjust: ADJUST_USED,
             rebalance,
             exec_price,
-            risk_free_rate,
             fft_windows,
             fft_roll,
             fft_roll_step,
@@ -32711,7 +32826,6 @@
           adjust: ADJUST_USED,
           rebalance,
           exec_price,
-          risk_free_rate,
           fft_windows,
           fft_roll,
           fft_roll_step,
@@ -32729,7 +32843,6 @@
           benchmark_code,
           rebalance,
           exec_price,
-          risk_free_rate,
           fft_windows,
           fft_roll,
           fft_roll_step,
@@ -35153,11 +35266,6 @@
         const end = $("end").value.trim();
         const benchmark_code = $("benchmark").value || null;
         const rebalance = $("rebalance").value || "weekly";
-        const rfRaw = ($("rf").value || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(risk_free_rate))
-          return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
-        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         const n_sims = Number(($("mcEwN").value || "10000").trim());
         const block_size = Number(($("mcEwBlock").value || "5").trim());
         const winRaw = ($("mcEwWindow").value || "").trim();
@@ -35182,7 +35290,6 @@
               benchmark_code,
               adjust: ADJUST_USED,
               rebalance,
-              risk_free_rate,
               n_sims,
               block_size,
               seed,
@@ -35558,11 +35665,6 @@
           (!Number.isFinite(dd_sleep_days) || dd_sleep_days < 1)
         )
           return setMsg("休眠天数必须>=1，例如 20");
-        const rfRaw = ($("rf").value || "").trim();
-        let risk_free_rate = rfRaw === "" ? 0.025 : Number(rfRaw);
-        if (!Number.isFinite(risk_free_rate))
-          return setMsg("无风险收益率必须是数字，例如 2.5 或 0.025");
-        if (risk_free_rate > 1.0) risk_free_rate = risk_free_rate / 100.0;
         // phase-1 rules already validated by table parsers
         const n_sims = Number(($("mcRotN").value || "2000").trim());
         const block_size = Number(($("mcRotBlock").value || "5").trim());
@@ -35688,7 +35790,6 @@
               rebalance_anchor,
               rebalance_shift,
               exec_price,
-              risk_free_rate,
               score_method,
               atr_stop_mode,
               atr_stop_atr_basis,
@@ -37130,7 +37231,6 @@
           lookback_days: Math.max(1, Math.trunc(_num(`${p}lb`, 20))),
           skip_days: Math.max(0, Math.trunc(_num(`${p}skip`, 0))),
           score_method: _str(`${p}score`) || "raw_mom",
-          risk_free_rate: _num(`${p}rf`, 0.025),
           cost_bps: _num(`${p}cost`, 2),
           trend_filter: _boolSel(`${p}trendOn`, false),
           trend_exit_filter: _boolSel(`${p}trendExit`, false),

@@ -210,7 +210,7 @@ def _metrics_from_nav(
     )
     ui = float(_ulcer_index(nav, in_percent=True))
     ui_den = ui / 100.0
-    upi = float((ann_ret - float(rf_annual)) / ui_den) if ui_den > 0 else float("nan")
+    upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
     return {
         "cumulative_return": cum,
         "annualized_return": ann_ret,

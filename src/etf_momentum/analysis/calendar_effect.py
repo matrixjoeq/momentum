@@ -436,11 +436,7 @@ def compute_baseline_calendar_effect(
             )
             ui = _ulcer_index(ew_nav, in_percent=True)
             ui_den = ui / 100.0
-            upi = (
-                float((ann_ret - float(inp.risk_free_rate)) / ui_den)
-                if ui_den > 0
-                else float("nan")
-            )
+            upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
 
             grid.append(
                 {

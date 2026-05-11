@@ -1079,27 +1079,21 @@ def _apply_trend_account_lot_sizing(
         m_strat["sharpe_ratio"] = float(
             _sharpe(
                 strat_ret,
-                rf=float(params.get("risk_free_rate") or 0.025),
+                rf=0.0,
                 ann_factor=TRADING_DAYS_PER_YEAR,
             )
         )
         m_strat["sortino_ratio"] = float(
             _sortino(
                 strat_ret,
-                rf=float(params.get("risk_free_rate") or 0.025),
+                rf=0.0,
                 ann_factor=TRADING_DAYS_PER_YEAR,
             )
         )
         ui = float(_ulcer_index(nav_s, in_percent=True))
         m_strat["ulcer_index"] = ui
         m_strat["ulcer_performance_index"] = (
-            float(
-                (
-                    m_strat["annualized_return"]
-                    - float(params.get("risk_free_rate") or 0.025)
-                )
-                / (ui / 100.0)
-            )
+            float(m_strat["annualized_return"] / (ui / 100.0))
             if ui > 0
             else float("nan")
         )
@@ -1528,7 +1522,6 @@ def baseline_analysis(
         "benchmark_code": payload.benchmark_code,
         "adjust": payload.adjust,
         "rebalance": payload.rebalance,
-        "risk_free_rate": payload.risk_free_rate,
         "rolling_weeks": payload.rolling_weeks,
         "rolling_months": payload.rolling_months,
         "rolling_years": payload.rolling_years,
@@ -1562,7 +1555,6 @@ def baseline_calendar_effect(
         start=_parse_yyyymmdd(payload.start),
         end=_parse_yyyymmdd(payload.end),
         adjust=payload.adjust,
-        risk_free_rate=payload.risk_free_rate,
         rebalance=payload.rebalance,
         rebalance_shift=payload.rebalance_shift,
         anchors=payload.anchors,
@@ -1596,7 +1588,6 @@ def calendar_timing_strategy(
         cost_bps=float(payload.cost_bps),
         slippage_rate=float(payload.slippage_rate),
         rebalance_shift=payload.rebalance_shift,
-        risk_free_rate=float(payload.risk_free_rate),
         cal=payload.calendar,
     )
     try:
@@ -1746,7 +1737,6 @@ def _rotation_inputs_from_payload(
         lookback_days=payload.lookback_days,
         skip_days=payload.skip_days,
         score_method=payload.score_method,
-        risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
         slippage_rate=payload.slippage_rate,
         atr_stop_mode=payload.atr_stop_mode,
@@ -1871,7 +1861,6 @@ def trend_backtest(
         code=payload.code,
         start=_parse_yyyymmdd(payload.start),
         end=_parse_yyyymmdd(payload.end),
-        risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
         slippage_rate=payload.slippage_rate,
         exec_price=payload.exec_price,
@@ -2043,7 +2032,6 @@ def trend_portfolio_backtest(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
         end=_parse_yyyymmdd(payload.end),
-        risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
         slippage_rate=payload.slippage_rate,
         exec_price=payload.exec_price,
@@ -2237,7 +2225,6 @@ def trend_portfolio_oos_bootstrap(
         param_grid=payload.param_grid,
         strategy=payload.strategy,
         config=cfg,
-        risk_free_rate=payload.risk_free_rate,
         cost_bps=payload.cost_bps,
         exec_price=payload.exec_price,
         engine=engine,
@@ -3910,12 +3897,13 @@ def rotation_weekly5_open_combo(
     r_rot = s_rot.pct_change().fillna(0.0).astype(float)
     r_ew = s_ew.pct_change().fillna(0.0).astype(float)
     excess_ret = (r_rot - r_ew).astype(float)
+    rf_annual = 0.0
     ann_ret = _annualized_return(s_rot, ann_factor=TRADING_DAYS_PER_YEAR)
     ann_vol = _annualized_vol(r_rot, ann_factor=TRADING_DAYS_PER_YEAR)
     mdd = _max_drawdown(s_rot)
     mdd_dur = _max_drawdown_duration_days(s_rot)
-    sharpe = _sharpe(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
-    sortino = _sortino(r_rot, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
+    sharpe = _sharpe(r_rot, rf=rf_annual, ann_factor=TRADING_DAYS_PER_YEAR)
+    sortino = _sortino(r_rot, rf=rf_annual, ann_factor=TRADING_DAYS_PER_YEAR)
     calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
     ui = _ulcer_index(s_rot, in_percent=True)
     ui_den = ui / 100.0
@@ -4692,7 +4680,7 @@ def baseline_weekly5_ew_dashboard(
     """
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
-    rf = float(payload.risk_free_rate)
+    rf = 0.0
     shift = (payload.rebalance_shift or "prev").strip().lower()
     if shift not in {"prev", "next", "skip"}:
         raise HTTPException(
@@ -4776,7 +4764,7 @@ def baseline_weekly5_ew_dashboard(
         sortino = _sortino(ew_ret, rf=rf, ann_factor=TRADING_DAYS_PER_YEAR)
         ui = _ulcer_index(ew_nav, in_percent=True)
         ui_den = ui / 100.0
-        upi = float((ann_ret - rf) / ui_den) if ui_den > 0 else float("nan")
+        upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
 
         metrics = {
             "cumulative_return": float(cum_ret),
@@ -5113,7 +5101,7 @@ def baseline_weekly5_ew_dashboard_combo(
     """
     start = _parse_yyyymmdd(payload.start)
     end = _parse_yyyymmdd(payload.end)
-    rf = float(payload.risk_free_rate)
+    rf = 0.0
     shift = (payload.rebalance_shift or "prev").strip().lower()
     if shift not in {"prev", "next", "skip"}:
         raise HTTPException(
@@ -5203,7 +5191,7 @@ def baseline_weekly5_ew_dashboard_combo(
     sortino = _sortino(ew_ret, rf=rf, ann_factor=TRADING_DAYS_PER_YEAR)
     ui = _ulcer_index(nav_mix, in_percent=True)
     ui_den = ui / 100.0
-    upi = float((ann_ret - rf) / ui_den) if ui_den > 0 else float("nan")
+    upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
     metrics = {
         "cumulative_return": float(cum_ret),
         "annualized_return": float(ann_ret),
@@ -5978,7 +5966,7 @@ def baseline_montecarlo(
     try:
         mc = bootstrap_metrics_from_daily_returns(
             daily_ret,
-            rf=float(payload.risk_free_rate),
+            rf=0.0,
             cfg=cfg,
             period_freq=period_freq,
         )
@@ -6068,7 +6056,7 @@ def rotation_montecarlo(
     try:
         mc_strategy = bootstrap_metrics_from_daily_returns(
             daily_ret,
-            rf=float(payload.risk_free_rate),
+            rf=0.0,
             cfg=cfg,
             period_freq=period_freq,
         )
