@@ -760,9 +760,7 @@
       <div id="distRangeHint" class="muted" style="margin-top: 8px"></div>
       <details class="panel" style="margin-top: 10px">
         <summary>
-          <h4 style="display: inline; margin: 0">
-            市场状态划分引擎（线性回归方向 × 波动）
-          </h4>
+          <h4 style="display: inline; margin: 0">市场状态识别</h4>
         </summary>
         <div class="muted" style="margin-top: 8px">
           规则：方向=滚动对数价格线性回归斜率（上升/下降/横向）；波动=滚动 ATR%
@@ -819,7 +817,7 @@
       </details>
       <details class="panel" style="margin-top: 10px">
         <summary>
-          <h4 style="display: inline; margin: 0">动力监控系统（Impulse）</h4>
+          <h4 style="display: inline; margin: 0">动力监控</h4>
         </summary>
         <div class="muted" style="margin-top: 8px">
           规则：使用 Elder Impulse System（EMA13 方向 + MACD Histogram 方向）。
@@ -847,9 +845,9 @@
         ></div>
         <table id="distImpulseFutureStats" style="margin-top: 8px"></table>
       </details>
-      <details class="panel" style="margin-top: 10px" open>
+      <details class="panel" style="margin-top: 10px">
         <summary>
-          <h4 style="display: inline; margin: 0">震荡状态识别（独立模块）</h4>
+          <h4 style="display: inline; margin: 0">震荡状态识别</h4>
         </summary>
         <div class="muted" style="margin-top: 8px">
           独立于策略引擎：基于价格序列识别 RANGE/TREND。第一阶段支持单指标 ADX
