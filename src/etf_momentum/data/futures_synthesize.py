@@ -47,6 +47,7 @@ NUM_COLS = ["open", "high", "low", "close", "volume", "hold", "settle", "amount"
 PRICE_COLS = ["open", "high", "low", "close", "settle"]
 ERROR_FIELDS = ["open", "high", "low", "close", "volume", "amount", "hold", "settle"]
 KEY_FIELDS = ["open", "high", "low", "close", "settle"]
+AUTO_CORRECT_FIELDS = ["open", "high", "low", "close", "settle"]
 
 USABLE_REL_MEAN_MAX = 0.01
 USABLE_REL_P95_MAX = 0.1
@@ -726,6 +727,146 @@ def _load_price_df(db: Session, *, code: str, adjust: str) -> pd.DataFrame:
     return df[["date", *NUM_COLS]].sort_values("date")
 
 
+def _load_price_df_with_meta(db: Session, *, code: str, adjust: str) -> pd.DataFrame:
+    from ..db.futures_repo import list_futures_prices
+
+    rows = list_futures_prices(db, code=code, adjust=adjust, limit=200000)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "date",
+                *NUM_COLS,
+                "dominant_contract_suffix",
+                "roll_from_symbol",
+                "roll_to_symbol",
+                "roll_from_open",
+                "roll_from_close",
+                "roll_to_open",
+                "roll_to_close",
+            ]
+        )
+    df = pd.DataFrame(
+        [
+            {
+                "date": r.trade_date,
+                "open": r.open,
+                "high": r.high,
+                "low": r.low,
+                "close": r.close,
+                "settle": r.settle,
+                "volume": r.volume,
+                "amount": r.amount,
+                "hold": r.hold,
+                "dominant_contract_suffix": r.dominant_contract_suffix,
+                "roll_from_symbol": r.roll_from_symbol,
+                "roll_to_symbol": r.roll_to_symbol,
+                "roll_from_open": r.roll_from_open,
+                "roll_from_close": r.roll_from_close,
+                "roll_to_open": r.roll_to_open,
+                "roll_to_close": r.roll_to_close,
+            }
+            for r in rows
+        ]
+    )
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "date",
+                *NUM_COLS,
+                "dominant_contract_suffix",
+                "roll_from_symbol",
+                "roll_to_symbol",
+                "roll_from_open",
+                "roll_from_close",
+                "roll_to_open",
+                "roll_to_close",
+            ]
+        )
+    df["date"] = pd.to_datetime(df["date"])
+    for c in NUM_COLS:
+        if c not in df.columns:
+            df[c] = np.nan
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def _collect_auto_corrections(
+    replay88_df: pd.DataFrame,
+    main_df: pd.DataFrame,
+    *,
+    rel_p95_max: float,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    if replay88_df.empty or main_df.empty:
+        return replay88_df.copy(), []
+    out = replay88_df.copy()
+    out_idx = out.set_index("date")
+    main_idx = main_df.copy().set_index("date")
+    corrected_rows: list[dict[str, Any]] = []
+    threshold = float(rel_p95_max)
+    for field in AUTO_CORRECT_FIELDS:
+        if field not in out_idx.columns or field not in main_idx.columns:
+            continue
+        lhs = pd.to_numeric(out_idx[field], errors="coerce")
+        rhs = pd.to_numeric(main_idx[field], errors="coerce")
+        denom = rhs.abs().replace(0.0, np.nan)
+        ape = (lhs - rhs).abs() / denom
+        mask = lhs.notna() & rhs.notna() & denom.notna() & (ape > threshold)
+        if not bool(mask.any()):
+            continue
+        bad_dates = list(mask[mask].index)
+        out_idx.loc[bad_dates, field] = rhs.loc[bad_dates]
+        for d in bad_dates:
+            corrected_rows.append(
+                {
+                    "date": str(pd.Timestamp(d).date()),
+                    "field": field,
+                    "old_value": float(lhs.loc[d]),
+                    "new_value": float(rhs.loc[d]),
+                    "ape": float(ape.loc[d]),
+                    "threshold": threshold,
+                }
+            )
+    return out_idx.reset_index(), corrected_rows
+
+
+def _resynthesize_adjusted_from_corrected_88(
+    db: Session,
+    *,
+    pool: FuturesPool,
+    corrected_88_df: pd.DataFrame,
+) -> dict[str, int]:
+    if corrected_88_df.empty:
+        return {"888": 0, "889": 0}
+    root = _symbol_root_from_main(pool.code)
+    contract_codes = _discover_contract_codes(db, pool=pool, root=root)
+    if not contract_codes:
+        raise RuntimeError(
+            "no deliverable contract data found for adjusted resynthesis"
+        )
+    contract_data = _load_contract_data(db, contract_codes)
+    if not contract_data:
+        raise RuntimeError("no contract data found for adjusted resynthesis")
+    panel = _build_quote_panel(contract_data)
+    roll_rows = corrected_88_df[
+        corrected_88_df["roll_from_symbol"].notna()
+        & corrected_88_df["roll_to_symbol"].notna()
+    ][["date", "roll_from_symbol", "roll_to_symbol"]].copy()
+    switch_df = roll_rows.rename(
+        columns={"roll_from_symbol": "from_symbol", "roll_to_symbol": "to_symbol"}
+    )
+    replay888_df, replay889_df = _build_adjusted_continuous(
+        corrected_88_df, switch_df, panel
+    )
+    pool_id = int(pool.id)
+    rows_888 = _df_to_price_rows(replay888_df, f"{root}888", "qfq", pool_id)
+    rows_889 = _df_to_price_rows(replay889_df, f"{root}889", "hfq", pool_id)
+    delete_futures_prices(db, code=f"{root}888", adjust="qfq")
+    delete_futures_prices(db, code=f"{root}889", adjust="hfq")
+    upsert_futures_prices(db, rows_888)
+    upsert_futures_prices(db, rows_889)
+    return {"888": len(rows_888), "889": len(rows_889)}
+
+
 def _build_joined_for_error(
     replay88_df: pd.DataFrame, main_df: pd.DataFrame
 ) -> pd.DataFrame:
@@ -857,6 +998,7 @@ def validate_synthesized_for_pool(
     rel_mean_max: float = USABLE_REL_MEAN_MAX,
     rel_p95_max: float = USABLE_REL_P95_MAX,
     min_fields: int = USABLE_MIN_FIELDS,
+    auto_correct: bool = True,
 ) -> dict[str, Any]:
     """
     Validate synthesized continuous futures for one pool.
@@ -869,6 +1011,7 @@ def validate_synthesized_for_pool(
     code_889 = f"{root}889"
 
     df_88 = _load_price_df(db, code=code_88, adjust="none")
+    df_88_with_meta = _load_price_df_with_meta(db, code=code_88, adjust="none")
     df_888 = _load_price_df(db, code=code_888, adjust="qfq")
     df_889 = _load_price_df(db, code=code_889, adjust="hfq")
 
@@ -949,6 +1092,44 @@ def validate_synthesized_for_pool(
     df_main = _load_price_df(db, code=code_main, adjust="none")
     joined = _build_joined_for_error(df_88, df_main)
     compare_ok = not joined.empty
+    auto_correction: dict[str, Any] = {
+        "enabled": bool(auto_correct),
+        "applied": False,
+        "corrected_points": 0,
+        "corrected_dates": 0,
+        "fields": [],
+        "rows_rebuilt": {"888": 0, "889": 0},
+        "sample": [],
+    }
+    if auto_correct and compare_ok and not df_88_with_meta.empty:
+        corrected_88_df, corrected_points = _collect_auto_corrections(
+            df_88_with_meta,
+            df_main,
+            rel_p95_max=float(rel_p95_max),
+        )
+        if corrected_points:
+            rows_88 = _df_to_price_rows(corrected_88_df, code_88, "none", int(pool.id))
+            upsert_futures_prices(db, rows_88)
+            rebuilt = _resynthesize_adjusted_from_corrected_88(
+                db, pool=pool, corrected_88_df=corrected_88_df
+            )
+            db.commit()
+            auto_correction = {
+                "enabled": True,
+                "applied": True,
+                "corrected_points": int(len(corrected_points)),
+                "corrected_dates": int(
+                    len({str(x["date"]) for x in corrected_points if x.get("date")})
+                ),
+                "fields": sorted(
+                    {str(x["field"]) for x in corrected_points if x.get("field")}
+                ),
+                "rows_rebuilt": rebuilt,
+                "sample": corrected_points[:20],
+            }
+            df_88 = _load_price_df(db, code=code_88, adjust="none")
+            joined = _build_joined_for_error(df_88, df_main)
+            compare_ok = not joined.empty
     err_df = _calc_error_stats(joined) if compare_ok else pd.DataFrame()
     usability = _evaluate_usability(
         err_df,
@@ -1004,6 +1185,7 @@ def validate_synthesized_for_pool(
                 "passed": error_pass,
                 "summary": compare_summary,
                 "usability": usability,
+                "auto_correction": auto_correction,
                 "error_fields": (
                     []
                     if err_df.empty

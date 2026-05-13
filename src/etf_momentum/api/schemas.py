@@ -247,6 +247,10 @@ class FuturesSynthesisValidationRequest(BaseModel):
         le=1.0,
         description="Maximum 95th percentile absolute percentage error (P95 APE) for usability pass",
     )
+    auto_correct: bool = Field(
+        default=True,
+        description="Auto-correct synthesized 88 field points exceeding P95_APE threshold using main0 values, then rebuild 888/889.",
+    )
 
 
 class FuturesPriceOut(BaseModel):

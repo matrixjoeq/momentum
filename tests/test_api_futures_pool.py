@@ -207,6 +207,14 @@ def test_futures_validate_all_api_contract(api_client: TestClient) -> None:
         assert set(item.keys()) == {"code", "status", "conclusion", "details"}
         assert item["status"] in {"passed", "failed", "skipped"}
         assert isinstance(item["details"], dict)
+        ac = (
+            ((item.get("details") or {}).get("main_compare_check") or {}).get(
+                "auto_correction"
+            )
+        ) or {}
+        if ac:
+            assert isinstance(bool(ac.get("enabled")), bool)
+            assert isinstance(bool(ac.get("applied")), bool)
         u = (
             ((item.get("details") or {}).get("main_compare_check") or {}).get(
                 "usability"
@@ -221,7 +229,7 @@ def test_futures_validate_all_api_contract(api_client: TestClient) -> None:
     # custom thresholds should be accepted and echoed in report details
     resp_custom = client.post(
         "/api/futures/validate-all",
-        json={"rel_mean_max": 0.02, "rel_p95_max": 0.2},
+        json={"rel_mean_max": 0.02, "rel_p95_max": 0.2, "auto_correct": False},
     )
     assert resp_custom.status_code == 200
     body_custom = resp_custom.json()

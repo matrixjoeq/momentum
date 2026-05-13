@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from etf_momentum.data.futures_synthesize import (
+    _collect_auto_corrections,
     _attach_switch_suffix_column,
     _build_adjusted_continuous,
     _build_hold_table,
@@ -305,3 +306,47 @@ def test_sanitize_settle_keeps_values_when_deviation_is_reasonable() -> None:
     out, fixed = _sanitize_settle_column(df, code="RB2405")
     assert fixed == 0
     assert out["settle"].tolist() == [101.8, 100.9]
+
+
+def test_collect_auto_corrections_replaces_points_exceeding_threshold() -> None:
+    dts = pd.to_datetime(["2024-01-02", "2024-01-03"])
+    replay88 = pd.DataFrame(
+        {
+            "date": dts,
+            "open": [100.0, 100.0],
+            "high": [110.0, 110.0],
+            "low": [95.0, 95.0],
+            "close": [100.0, 100.0],
+            "settle": [100.0, 100.0],
+            "volume": [1.0, 1.0],
+            "amount": [1.0, 1.0],
+            "hold": [1.0, 1.0],
+            "dominant_contract_suffix": [None, None],
+            "roll_from_symbol": [None, None],
+            "roll_to_symbol": [None, None],
+            "roll_from_open": [None, None],
+            "roll_from_close": [None, None],
+            "roll_to_open": [None, None],
+            "roll_to_close": [None, None],
+        }
+    )
+    main0 = pd.DataFrame(
+        {
+            "date": dts,
+            "open": [100.0, 80.0],  # day2 APE=25%
+            "high": [110.0, 108.0],
+            "low": [95.0, 95.0],
+            "close": [100.0, 100.0],
+            "settle": [100.0, 70.0],  # day2 APE=42.86%
+            "volume": [1.0, 1.0],
+            "amount": [1.0, 1.0],
+            "hold": [1.0, 1.0],
+        }
+    )
+    corrected, points = _collect_auto_corrections(replay88, main0, rel_p95_max=0.05)
+    corrected_idx = corrected.set_index("date")
+    d2 = pd.Timestamp("2024-01-03")
+    assert float(corrected_idx.loc[d2, "open"]) == 80.0
+    assert float(corrected_idx.loc[d2, "settle"]) == 70.0
+    assert len(points) == 2
+    assert sorted({str(p["field"]) for p in points}) == ["open", "settle"]

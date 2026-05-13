@@ -7343,6 +7343,7 @@ def validate_all_futures_synthesis(
                 item,
                 rel_mean_max=float(payload.rel_mean_max),
                 rel_p95_max=float(payload.rel_p95_max),
+                auto_correct=bool(payload.auto_correct),
             )
             status = str(rep.get("status", "")).strip().lower()
             out = FuturesSynthesisValidationItemOut(
