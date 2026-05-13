@@ -210,7 +210,7 @@
     </div>
 
     <div class="panel">
-      <h3>相关性矩阵（日收益，none价格）</h3>
+      <h3>相关性矩阵（日度对数收益，后复权合成连续 889）</h3>
       <div class="quick-row">
         <button data-corr="1m">近一月</button>
         <button data-corr="3m">近三月</button>
@@ -303,8 +303,9 @@
     <div class="panel" id="trendParamsPanel">
       <h3>趋势回测（TA-Lib + backtesting）</h3>
       <p class="muted" style="margin: 8px 0 12px">
-        价格口径：已完成合成连续时，基准用后复权连续（889），信号用前复权连续（888）
-        收盘价，成交与策略收益用无复权连续（88）；仅有主连数据时三段均退回主连无复权。
+        价格口径：趋势回测<strong>仅</strong>使用已合成的后复权连续（<code>{品种}889</code>，
+        DB adjust=hfq）。信号均线、成交与净值、基准买持均基于该序列；若缺少 889
+        数据则回测失败（需先在期货配置页执行「合成连续」）。
       </p>
       <div class="row" style="flex-wrap: wrap">
         <div>
@@ -691,6 +692,26 @@
         <div>
           <label>慢线周期</label>
           <input id="trendSlowMa" type="number" min="3" step="1" value="60" />
+        </div>
+        <div>
+          <label>多头入场过滤均线</label>
+          <input
+            id="trendLongEntryFilterMa"
+            type="number"
+            min="2"
+            step="1"
+            value="200"
+          />
+        </div>
+        <div>
+          <label>空头入场过滤均线</label>
+          <input
+            id="trendShortEntryFilterMa"
+            type="number"
+            min="2"
+            step="1"
+            value="200"
+          />
         </div>
         <div>
           <label
@@ -1095,6 +1116,12 @@
           maType: String($("trendMaType")?.value || "sma"),
           fastMa: String($("trendFastMa")?.value ?? "20"),
           slowMa: String($("trendSlowMa")?.value ?? "60"),
+          longEntryFilterMa: String(
+            $("trendLongEntryFilterMa")?.value ?? "200",
+          ),
+          shortEntryFilterMa: String(
+            $("trendShortEntryFilterMa")?.value ?? "200",
+          ),
           tradeDirection: String(
             $("trendTradeDirection")?.value || "long_only",
           ),
@@ -1197,6 +1224,8 @@
         setNum("trendRbMaxLev", p.rbMaxLev, "2");
         setNum("trendFastMa", p.fastMa, "20");
         setNum("trendSlowMa", p.slowMa, "60");
+        setNum("trendLongEntryFilterMa", p.longEntryFilterMa, "200");
+        setNum("trendShortEntryFilterMa", p.shortEntryFilterMa, "200");
         setSelectIfOptionExists("trendTradeDirection", p.tradeDirection);
         setNum("trendAccountCapitalWan", p.accountCapitalWan, "500");
         setNum("trendPositionUsePct", p.positionUsePct, "100");
@@ -2238,14 +2267,18 @@
       function refreshTrendSingleOptions() {
         const g = getActiveGroup();
         const codes = g && Array.isArray(g.codes) ? g.codes : [];
+        const codeVals = codes.map((x) => String(x));
         const sel = $("trendSingleCode");
         if (!sel) return;
-        sel.innerHTML = codes
+        const prev = String(sel.value || "");
+        sel.innerHTML = codeVals
           .map(
             (c) =>
               `<option value="${esc(String(c))}">${esc(String(c))}</option>`,
           )
           .join("");
+        if (prev && codeVals.includes(prev)) sel.value = prev;
+        else if (codeVals.length) sel.selectedIndex = 0;
       }
 
       function refreshSymbolOhlcOptions() {
@@ -2780,8 +2813,14 @@
           )
           .join(" | ");
         const m = out.meta || {};
+        const retLab =
+          m.returns === "daily_log" ? "日度对数收益" : m.returns || "-";
+        const pxLab =
+          m.close_price_basis === "hfq" && m.continuous_series
+            ? `${m.continuous_series}/hfq`
+            : "-";
         $("corrMeta").textContent =
-          `分组=${m.group_name || "-"} | 区间=${m.start || "-"}~${m.end || "-"} | 样本=${m.samples || 0} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 口径=${m.mode || "-"}`;
+          `分组=${m.group_name || "-"} | 区间=${m.start || "-"}~${m.end || "-"} | 样本=${m.samples || 0} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 口径=${m.mode || "-"} | 收益=${retLab} | 价格=${pxLab}`;
       }
 
       function renderCoverage(out) {
@@ -3131,6 +3170,8 @@
         const ts = String(m.trend_strategy || "ma_cross");
         const stratLabel = ts === "ma_cross" ? "均线交叉" : ts;
         const maLbl = String(m.ma_type || "sma").toUpperCase();
+        const longFilterMa = Number(m.long_entry_filter_ma || 0);
+        const shortFilterMa = Number(m.short_entry_filter_ma || 0);
         const acWan =
           m.account_capital_wan != null
             ? `${Number(m.account_capital_wan).toFixed(0)}万`
@@ -3151,7 +3192,7 @@
         const lotM =
           lotMeta && lotMeta.engine === "lot_account" ? "离散手数" : "-";
         $("trendMeta").textContent =
-          `分组=${m.group_name || "-"} | 策略=${stratLabel}(${maLbl} ${Number(m.fast_ma || 0)}/${Number(m.slow_ma || 0)}) | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 资金=${acWan}×使用${psp} | 预留=${rsv} | 回测保证金率=${bmr} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 引擎=${lotM} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+          `分组=${m.group_name || "-"} | 策略=${stratLabel}(${maLbl} ${Number(m.fast_ma || 0)}/${Number(m.slow_ma || 0)}) | 入场过滤MA(多/空)=${longFilterMa}/${shortFilterMa} | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 资金=${acWan}×使用${psp} | 预留=${rsv} | 回测保证金率=${bmr} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 引擎=${lotM} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
         const s = out.summary || {};
         $("trendSummaryWrap").innerHTML =
           `<table class="corr"><thead><tr><th>策略累计收益</th><th>基准累计收益</th><th>超额累计收益</th></tr></thead>` +
@@ -3302,6 +3343,16 @@
         if (slow <= fast) slow = fast + 1;
         $("trendFastMa").value = String(fast);
         $("trendSlowMa").value = String(slow);
+        let longEntryFilterMa = Number($("trendLongEntryFilterMa").value);
+        if (!Number.isFinite(longEntryFilterMa) || longEntryFilterMa < 2)
+          longEntryFilterMa = 200;
+        longEntryFilterMa = Math.floor(longEntryFilterMa);
+        $("trendLongEntryFilterMa").value = String(longEntryFilterMa);
+        let shortEntryFilterMa = Number($("trendShortEntryFilterMa").value);
+        if (!Number.isFinite(shortEntryFilterMa) || shortEntryFilterMa < 2)
+          shortEntryFilterMa = 200;
+        shortEntryFilterMa = Math.floor(shortEntryFilterMa);
+        $("trendShortEntryFilterMa").value = String(shortEntryFilterMa);
         let rbPct = Number($("trendRbPct").value);
         if (!Number.isFinite(rbPct) || rbPct <= 0) rbPct = 1;
         rbPct = Math.min(3, Math.max(0.1, rbPct));
@@ -3372,6 +3423,8 @@
           ma_type: String($("trendMaType").value || "sma"),
           fast_ma: fast,
           slow_ma: slow,
+          long_entry_filter_ma: longEntryFilterMa,
+          short_entry_filter_ma: shortEntryFilterMa,
           min_points: 120,
           position_size_pct: posUsePct / 100.0,
           account_capital_wan: accountWan,

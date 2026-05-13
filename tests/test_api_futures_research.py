@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import datetime as dt
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
+from etf_momentum.analysis import futures_research as fut_research
+from etf_momentum.db.futures_research_repo import FuturesGroupData
 from tests.helpers.rotation_case_data import post_json_ok
 
 
@@ -31,6 +36,9 @@ def test_futures_research_groups_state_and_correlation(api_client: TestClient) -
     )
     post_json_ok(client, "/api/futures/RB0/fetch", {})
     post_json_ok(client, "/api/futures/IF0/fetch", {})
+    synth = client.post("/api/futures/synthesize-all")
+    assert synth.status_code == 200
+    assert synth.json().get("succeeded", 0) >= 1
 
     # Save group as active
     g = post_json_ok(
@@ -64,6 +72,10 @@ def test_futures_research_groups_state_and_correlation(api_client: TestClient) -
     assert len(data["aliases"]) == 2
     assert len(data["matrix"]) == 2
     assert len(data["matrix"][0]) == 2
+    cm = data.get("meta") or {}
+    assert cm.get("returns") == "daily_log"
+    assert cm.get("close_price_basis") == "hfq"
+    assert cm.get("continuous_series") == "{root}889"
 
     cov = client.post(
         "/api/futures/research/coverage-summary", json={"range_key": "all"}
@@ -106,6 +118,55 @@ def test_futures_research_groups_state_and_correlation(api_client: TestClient) -
     d_1m = c_1m.json()
     assert d_1m["ok"] is True
     assert d_1m["meta"]["range_key"] == "1m"
+
+
+def test_futures_correlation_handles_non_positive_hfq_closes(monkeypatch) -> None:
+    idx = [dt.date(2024, 1, 2), dt.date(2024, 1, 3), dt.date(2024, 1, 4)]
+
+    def _fake_list_futures_prices(
+        _db,
+        *,
+        code,
+        adjust,
+        start_date,
+        end_date,
+        limit,
+    ):
+        assert adjust == "hfq"
+        if code == "RB889":
+            closes = [100.0, 0.0, 102.0]
+        elif code == "IF889":
+            closes = [200.0, -1.0, 201.0]
+        else:
+            closes = [100.0, 101.0, 102.0]
+        return [
+            SimpleNamespace(trade_date=d, close=v)
+            for d, v in zip(idx, closes, strict=False)
+        ]
+
+    monkeypatch.setattr(fut_research, "list_futures_prices", _fake_list_futures_prices)
+    monkeypatch.setattr(
+        fut_research,
+        "list_futures_pool",
+        lambda _db: [
+            SimpleNamespace(code="RB0", name="螺纹钢主连"),
+            SimpleNamespace(code="IF0", name="股指主连"),
+        ],
+    )
+
+    out = fut_research.compute_futures_group_correlation(
+        db=None,  # type: ignore[arg-type]
+        group=FuturesGroupData(name="G", codes=["RB0", "IF0"], is_active=True),
+        start="20240101",
+        end="20240131",
+        dynamic_universe=True,
+        min_obs=2,
+    )
+    assert out["ok"] is True
+    assert len(out["matrix"]) == 2
+    assert len(out["matrix"][0]) == 2
+    assert out["meta"]["returns"] == "daily_log"
+    assert out["meta"]["close_price_basis"] == "hfq"
 
 
 def test_futures_research_groups_import_export_overwrite(
@@ -192,6 +253,9 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     )
     post_json_ok(client, "/api/futures/RB0/fetch", {})
     post_json_ok(client, "/api/futures/IF0/fetch", {})
+    synth = client.post("/api/futures/synthesize-all")
+    assert synth.status_code == 200
+    assert synth.json().get("succeeded", 0) >= 1
     post_json_ok(
         client,
         "/api/futures/research/groups",
@@ -233,6 +297,8 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert out["meta"]["exec_price"] == "close"
     assert out["meta"]["trend_strategy"] == "ma_cross"
     assert out["meta"]["ma_type"] == "sma"
+    assert out["meta"]["long_entry_filter_ma"] == 200
+    assert out["meta"]["short_entry_filter_ma"] == 200
     assert out["meta"]["benchmark_price_basis"] == "close"
     assert out["meta"]["fee_side"] == "two_way"
     assert out["meta"]["slippage_type"] == "percent"
@@ -242,7 +308,8 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert isinstance(tsp, dict)
     assert "benchmark" in tsp and "signals" in tsp and "execution_and_returns" in tsp
     syms = out.get("symbols") or []
-    assert syms and syms[0].get("trend_resolution") == "main_contract_none"
+    assert syms and syms[0].get("trend_resolution") == "synthetic_hfq_continuous"
+    assert syms[0].get("trend_execution_adjust") == "hfq"
     assert out["meta"].get("backtest_mode") == "portfolio"
     assert out["meta"].get("position_sizing") == "equal"
     assert out["meta"].get("monthly_risk_budget_enabled") is False
@@ -294,6 +361,8 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
             "slippage_side": "two_way",
             "backtest_mode": "single",
             "single_code": "RB0",
+            "long_entry_filter_ma": 150,
+            "short_entry_filter_ma": 180,
         },
     )
     assert resp_single.status_code == 200
@@ -301,6 +370,8 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert one["ok"] is True
     assert one["meta"]["backtest_mode"] == "single"
     assert one["meta"]["single_code"] == "RB0"
+    assert one["meta"]["long_entry_filter_ma"] == 150
+    assert one["meta"]["short_entry_filter_ma"] == 180
     assert one["meta"]["position_sizing"] is None
     assert len(one.get("symbols") or []) == 1
     assert one["meta"].get("monthly_risk_budget_effective") is False
@@ -325,6 +396,59 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert out_open["ok"] is True
     assert out_open["meta"]["exec_price"] == "open"
     assert out_open["meta"]["benchmark_price_basis"] == "open"
+
+
+def test_futures_trend_backtest_requires_synthetic_hfq(api_client: TestClient) -> None:
+    """Without /api/futures/synthesize-all, 889 hfq rows are absent and backtest errors."""
+    client = api_client
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
+    post_json_ok(client, "/api/futures/RB0/fetch", {})
+    post_json_ok(
+        client,
+        "/api/futures/research/groups",
+        {"name": "仅主连组", "codes": ["RB0"], "set_active": True},
+    )
+    client.put(
+        "/api/futures/research/state",
+        json={
+            "start_date": "20240101",
+            "end_date": "20241231",
+            "dynamic_universe": True,
+            "quick_range_key": "all",
+        },
+    )
+    resp = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "missing_synthetic_hfq_continuous"
+    errs = (body.get("meta") or {}).get("errors") or []
+    assert errs and any(
+        "missing synthetic hfq continuous series" in str(e) for e in errs
+    )
 
 
 def test_futures_trend_backtest_rejects_invalid_position_sizing(
@@ -460,6 +584,8 @@ def test_futures_trend_backtest_risk_budget_accepts_both_direction(
         },
     )
     post_json_ok(client, "/api/futures/RB0/fetch", {})
+    synth = client.post("/api/futures/synthesize-all")
+    assert synth.status_code == 200
     post_json_ok(
         client,
         "/api/futures/research/groups",

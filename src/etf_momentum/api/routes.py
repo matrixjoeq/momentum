@@ -7982,6 +7982,10 @@ def futures_research_trend_backtest_api(
         fast_ma=int(payload.fast_ma),
         slow_ma=int(payload.slow_ma),
         ma_type=str(getattr(payload, "ma_type", "sma") or "sma"),
+        long_entry_filter_ma=int(getattr(payload, "long_entry_filter_ma", 200) or 200),
+        short_entry_filter_ma=int(
+            getattr(payload, "short_entry_filter_ma", 200) or 200
+        ),
         position_size_pct=float(payload.position_size_pct),
         min_points=int(payload.min_points),
         cost_bps=float(payload.cost_bps),

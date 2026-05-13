@@ -10,6 +10,7 @@ from collections.abc import Iterable
 # Allow running from repo root without editable install.
 sys.path.insert(0, "src")
 
+from etf_momentum.data.futures_synthesize import _symbol_root_from_main  # noqa: E402
 from etf_momentum.db.futures_repo import list_futures_prices  # noqa: E402
 from etf_momentum.db.session import make_engine, make_session_factory  # noqa: E402
 from etf_momentum.db.repo import list_prices  # noqa: E402
@@ -94,8 +95,11 @@ def _run_checks(
         for code in codes:
             if asset_domain == "etf":
                 adjusts = ["none", "qfq", "hfq"]
+                query_code = code
             else:
-                adjusts = ["none"]
+                # Futures trend research: synthetic {root}889 hfq only.
+                adjusts = ["hfq"]
+                query_code = f"{_symbol_root_from_main(code)}889"
 
             series: dict[str, dict] = {}
             alignment_dates: set[dt.date] = set()
@@ -103,7 +107,7 @@ def _run_checks(
                 if asset_domain == "etf":
                     rows = list_prices(
                         db,
-                        code=code,
+                        code=query_code,
                         adjust=adj,
                         start_date=start,
                         end_date=end,
@@ -112,7 +116,7 @@ def _run_checks(
                 else:
                     rows = list_futures_prices(
                         db,
-                        code=code,
+                        code=query_code,
                         adjust=adj,
                         start_date=start,
                         end_date=end,
@@ -137,7 +141,9 @@ def _run_checks(
                     warnings.append(
                         f"{asset_domain}:{code}:{adj} max_abs_return={max_abs_ret:.4f} > threshold={abs_return_threshold:.4f}"
                     )
-                if adj == "none":
+                if (asset_domain == "etf" and adj == "none") or (
+                    asset_domain == "futures" and adj == "hfq"
+                ):
                     alignment_dates = set(dates)
 
             if asset_domain == "etf":
@@ -146,10 +152,18 @@ def _run_checks(
                         errors.append(
                             f"etf:{code} missing required adjust={required_adj}"
                         )
+            elif int(series.get("hfq", {}).get("points", 0)) <= 0:
+                errors.append(
+                    f"futures:{code} missing required synthetic {query_code} adjust=hfq"
+                )
 
             by_code_alignment_dates[code] = alignment_dates
             union_dates.update(alignment_dates)
-            reports.append({"code": code, "series": series})
+            reports.append(
+                {"code": code, "query_code": query_code, "series": series}
+                if asset_domain == "futures"
+                else {"code": code, "series": series}
+            )
 
     union_n = len(union_dates)
     if union_n == 0:

@@ -47,6 +47,8 @@ def build_ma_panels(
     slow_ma: int,
     ma_type: str = "sma",
     trade_direction: str = "long_only",
+    long_entry_filter_ma: int = 200,
+    short_entry_filter_ma: int = 200,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (score_df fast-slow, sig_direction_df signed MA regime).
 
@@ -56,6 +58,11 @@ def build_ma_panels(
     - ``long_only``: +1 when fast > slow, else 0
     - ``short_only``: -1 when fast < slow, else 0
     - ``both``: sign(fast - slow) as +1 / -1 / 0
+
+    Entry filter is checked only on the MA trigger day:
+    - long trigger requires ``close > MA(long_entry_filter_ma)``
+    - short trigger requires ``close < MA(short_entry_filter_ma)``
+    - MA type is shared with ``ma_type`` (sma|ema|wma).
     """
     cols = sorted(exec_by_code.keys())
     score_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
@@ -63,6 +70,8 @@ def build_ma_panels(
     f, s = int(fast_ma), int(slow_ma)
     mt = str(ma_type or "sma").strip().lower()
     td = str(trade_direction or "long_only").strip().lower()
+    long_w = max(2, int(long_entry_filter_ma))
+    short_w = max(2, int(short_entry_filter_ma))
     for code in cols:
         df = exec_by_code[str(code)].reindex(common_idx)
         close = (
@@ -72,14 +81,42 @@ def build_ma_panels(
         )
         fast = _moving_average(close, window=f, ma_type=mt)
         slow = _moving_average(close, window=s, ma_type=mt)
+        long_filter = _moving_average(close, window=long_w, ma_type=mt)
+        short_filter = _moving_average(close, window=short_w, ma_type=mt)
         score_df[code] = (fast - slow).astype(float)
-        if td == "short_only":
-            sig_df[code] = -(fast < slow).astype(float)
-        elif td == "both":
-            diff = fast.astype(float) - slow.astype(float)
-            sig_df[code] = np.sign(diff).astype(float)
-        else:
-            sig_df[code] = (fast > slow).astype(float)
+        diff = (fast.astype(float) - slow.astype(float)).astype(float)
+        prev_diff = diff.shift(1)
+        trigger_long = (diff > 0.0) & ((prev_diff <= 0.0) | prev_diff.isna())
+        trigger_short = (diff < 0.0) & ((prev_diff >= 0.0) | prev_diff.isna())
+        pass_long = (close > long_filter).fillna(False)
+        pass_short = (close < short_filter).fillna(False)
+
+        state = 0.0
+        out: list[float] = []
+        for d in common_idx:
+            dv = float(diff.loc[d]) if pd.notna(diff.loc[d]) else np.nan
+            long_trig = bool(trigger_long.loc[d]) if pd.notna(diff.loc[d]) else False
+            short_trig = bool(trigger_short.loc[d]) if pd.notna(diff.loc[d]) else False
+            long_ok = bool(pass_long.loc[d])
+            short_ok = bool(pass_short.loc[d])
+
+            if td == "short_only":
+                if np.isfinite(dv) and dv > 0.0:
+                    state = 0.0
+                if short_trig:
+                    state = -1.0 if short_ok else 0.0
+            elif td == "both":
+                if long_trig:
+                    state = 1.0 if long_ok else 0.0
+                elif short_trig:
+                    state = -1.0 if short_ok else 0.0
+            else:
+                if np.isfinite(dv) and dv < 0.0:
+                    state = 0.0
+                if long_trig:
+                    state = 1.0 if long_ok else 0.0
+            out.append(float(state))
+        sig_df[code] = pd.Series(out, index=common_idx, dtype=float)
     return score_df, sig_df
 
 
@@ -117,7 +154,7 @@ def risk_budget_weights(
     """
     Stateful risk-budget loop (vol-regime adjustments disabled).
 
-    ``price_sig`` for entry/ATR uses execution bars (none) High/Low/Close, matching
+    ``price_sig`` for entry/ATR uses execution bars High/Low/Close (hfq 889), aligned
     traded contract volatility.
     """
     eps = 1e-12

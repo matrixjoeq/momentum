@@ -9,7 +9,7 @@ futures group trend-following backtests.
 
 - Asset domain: **futures only**.
 - Group source: `futures_research` active group.
-- Data basis: `FuturesPrice` with `adjust=none` only.
+- Data basis: `FuturesPrice` synthetic **hfq** continuous `{root}889` only (no main-contract fallback).
 - Engine path: `analysis/futures_trend.py` + `/api/futures/research/trend-backtest`.
 - Library priority:
   - indicators: **TA-Lib first**
@@ -18,7 +18,7 @@ futures group trend-following backtests.
 
 ### 1.2 Confirmed execution semantics
 
-- Signal and execution both use non-adjusted futures data (`none`).
+- Signal and execution both use the **same** backward-adjusted (hfq) synthetic continuous OHLCV.
 - Supported execution price:
   - `close` (default)
   - `open`
@@ -52,7 +52,7 @@ Run before each futures group trend backtest.
 - Date coverage and requested window consistency.
 - Missing ratio against group union timeline.
 - Extreme one-day absolute return sentinel.
-- `none` series availability for all selected futures symbols.
+- Synthetic **hfq** `{root}889` series availability for all selected futures symbols (no fallback).
 
 ### 2.2 Operational command
 
@@ -101,7 +101,8 @@ Must return explicit failures for:
 - empty group / no active group
 - invalid enum values (`exec_price`, cost/slippage sides/types)
 - invalid MA constraints (`slow_ma <= fast_ma`)
-- insufficient data points
+- insufficient data / overlap
+- missing synthetic hfq continuous (`{root}889`) for any required symbol
 - invalid date/range inputs
 
 ## 4) Validation Framework
@@ -163,7 +164,7 @@ Each release must include:
 
 ## 6) Known Limitations (Current Implementation)
 
-- Current futures benchmark is equal-weight buy-and-hold on `none` close returns
-  under selected dynamic/static mode.
-- Roll-aware continuous-contract semantics are not yet implemented and should be
-  treated as a dedicated follow-up enhancement.
+- Current futures benchmark is equal-weight buy-and-hold on **hfq (889)** returns
+  (same price basis as execution) under selected dynamic/static mode.
+- Discrete-lot roll costs and stitched continuous semantics are implemented in the
+  futures trend engine; further refinements remain possible as follow-ups.

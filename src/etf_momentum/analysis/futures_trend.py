@@ -1,29 +1,19 @@
 """
 Futures trend backtest (research) — price series policy
 ------------------------------------------------------
-When **synthesized continuous** rows exist for a symbol (codes ``{root}88`` /
-``{root}888`` / ``{root}889`` under the same ``Date`` calendar), we apply:
+Research trend backtests require **synthetic backward-adjusted continuous** prices
+(**hfq**, symbol ``{root}889``) for the same ``Date`` calendar. There is **no**
+main-contract or partial-series fallback:
 
-- **Main-contract roll (88 execution series):** group **strategy** P&L is driven by the
-  **discrete-lot account** simulator: MTM on stitched continuous prices plus
-  **round-turn** commission+slippage on ``dominant_contract_suffix`` changes (same
-  integer lots on exit and re-entry). Legacy per-bar return-matrix roll adjustments are
-  not applied once the lot engine is enabled.
+- **Signals** (TA-Lib SMA crossover on close), **trade execution**, **strategy return
+  compounding** (``backtesting.py`` / lot engine), and **benchmark buy-and-hold** all
+  use the **same** ``{root}889`` OHLCV (``SignalClose`` equals ``Close`` on that frame).
+- If ``{root}889`` rows are missing for the requested range, alignment raises
+  ``ValueError``; the group backtest records this per symbol in ``meta.skipped``.
 
-- **Benchmark (buy-and-hold comparison):** synthetic **backward-adjusted**
-  (**hfq**, e.g. ``{root}889``) OHLC; compare NAV uses the same open/close basis
-  as ``exec_price`` on this hfq series.
-- **Signals** (here: TA-Lib SMA crossover on “close”): synthetic **forward-adjusted**
-  (**qfq**, e.g. ``{root}888``) **close**, aligned on trading dates with execution data.
-- **Trade execution & strategy return compounding:** synthetic **no-adjust**
-  (**none**, e.g. ``{root}88``) OHLCV passed into ``backtesting.py``.
 - **Costs:** default **4 bps per fill** (``fee_side=one_way``, open and close each pay);
   default slippage **tick_multiple** with integer multiple **N** vs pool ``min_price_tick``
   (``tick_value_per_lot = contract_multiplier × min_price_tick`` for reporting).
-
-If ``{root}88`` is missing (no synthesis yet), we fall back to the group’s listed
-contract code (typically main ``*0``) **none** rows only; signals and benchmark then
-also use that same none series (see per-symbol ``trend_resolution`` in the API).
 """
 
 from __future__ import annotations
@@ -207,91 +197,41 @@ def _align_futures_trend_inputs(
     pool_code: str,
     start: str,
     end: str,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]] | None:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """
-    Build execution OHLCV (none) + benchmark OHLC (hfq when available) +
-    attach ``SignalClose`` (qfq when available) for the same calendar.
+    Build execution OHLCV, benchmark OHLC, and ``SignalClose`` from **only**
+    synthetic **hfq** continuous ``{root}889``.
 
-    Returns ``None`` when no usable none-style series exists in range.
+    Raises:
+        ValueError: If no rows exist for ``{root}889`` in the requested range.
     """
     root = _symbol_root_from_main(pool_code)
-    code_88 = f"{root}88"
-    code_888 = f"{root}888"
     code_889 = f"{root}889"
-
-    df88 = _load_futures_ohlcv(db, code=code_88, start=start, end=end, adjust="none")
-    df888 = _load_futures_ohlcv(db, code=code_888, start=start, end=end, adjust="qfq")
     df889 = _load_futures_ohlcv(db, code=code_889, start=start, end=end, adjust="hfq")
-
-    if df88.empty:
-        df_main = _load_futures_ohlcv(
-            db, code=pool_code, start=start, end=end, adjust="none"
+    if df889.empty:
+        raise ValueError(
+            f"missing synthetic hfq continuous series {code_889!r} for pool "
+            f"{pool_code!r} in [{start},{end}]"
         )
-        if df_main.empty:
-            return None
-        out = df_main.copy()
-        if "Settle" not in out.columns:
-            out["Settle"] = out["Close"].astype(float)
-        else:
-            sc = pd.to_numeric(out["Settle"], errors="coerce")
-            out["Settle"] = sc.fillna(out["Close"].astype(float)).astype(float)
-        out["SignalClose"] = out["Close"].astype(float)
-        detail: dict[str, Any] = {
-            "trend_resolution": "main_contract_none",
-            "execution_symbol": pool_code,
-            "signal_symbol": pool_code,
-            "benchmark_symbol": pool_code,
-            "signal_adjust": "none",
-            "benchmark_adjust": "none",
-        }
-        out.index = _coerce_trading_index(out.index)
-        ob = out.copy()
-        ob.index = _coerce_trading_index(ob.index)
-        return out, ob, detail
 
-    idx = df88.index
+    idx = df889.index.sort_values()
+    exec_df = df889.loc[idx].copy()
+    if "Settle" not in exec_df.columns:
+        exec_df["Settle"] = exec_df["Close"].astype(float)
+    else:
+        sc = pd.to_numeric(exec_df["Settle"], errors="coerce")
+        exec_df["Settle"] = sc.fillna(exec_df["Close"].astype(float)).astype(float)
+    exec_df["SignalClose"] = exec_df["Close"].astype(float)
+    bench_df = df889.loc[idx].copy()
     detail_a: dict[str, Any] = {
-        "execution_symbol": code_88,
-        "signal_adjust": "qfq",
+        "trend_resolution": "synthetic_hfq_continuous",
+        "execution_symbol": code_889,
+        "signal_symbol": code_889,
+        "benchmark_symbol": code_889,
+        "execution_adjust": "hfq",
+        "signal_adjust": "hfq",
         "benchmark_adjust": "hfq",
     }
-    if not df888.empty:
-        idx = idx.intersection(df888.index)
-    else:
-        detail_a["signal_adjust"] = "none_fallback"
-
-    if not df889.empty:
-        idx = idx.intersection(df889.index)
-    else:
-        detail_a["benchmark_adjust"] = "none_fallback"
-
-    idx = idx.sort_values()
-    if len(idx) == 0:
-        return None
-
-    exec_df = df88.loc[idx].copy()
-    if not df888.empty:
-        exec_df["SignalClose"] = df888.loc[idx, "Close"].astype(float).values
-        detail_a["signal_symbol"] = code_888
-    else:
-        exec_df["SignalClose"] = exec_df["Close"].astype(float)
-        detail_a["signal_symbol"] = code_88
-
-    if not df889.empty:
-        bench_df = df889.loc[idx].copy()
-        detail_a["benchmark_symbol"] = code_889
-    else:
-        bench_df = exec_df[["Open", "High", "Low", "Close", "Volume"]].copy()
-        detail_a["benchmark_symbol"] = code_88
-
-    if (
-        detail_a.get("signal_adjust") == "qfq"
-        and detail_a.get("benchmark_adjust") == "hfq"
-    ):
-        detail_a["trend_resolution"] = "synthetic_triple"
-    else:
-        detail_a["trend_resolution"] = "synthetic_partial"
-
     return exec_df, bench_df, detail_a
 
 
@@ -506,7 +446,7 @@ def _apply_main_contract_roll_adjustments(
     min_weight: float = 1e-12,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
-    On days where the stored 88 series marks a **main contract switch**, replace
+    On days where the execution frame marks a **main contract switch**, replace
     that symbol's strategy daily return with the **execution** close-to-close move
     on the stitched series (signed by **lagged weight**: long uses ``+r_cc``, short
     uses ``-r_cc``) and subtract **exit + re-entry** fill costs when the lagged
@@ -793,6 +733,8 @@ def compute_futures_group_trend_backtest(
     fast_ma: int = 20,
     slow_ma: int = 60,
     ma_type: str = "sma",
+    long_entry_filter_ma: int = 200,
+    short_entry_filter_ma: int = 200,
     position_size_pct: float = 1.0,
     min_points: int = 120,
     cost_bps: float = 4.0,
@@ -832,6 +774,8 @@ def compute_futures_group_trend_backtest(
     mt_eff = str(ma_type or "sma").strip().lower()
     if mt_eff not in {"sma", "ema", "wma"}:
         return {"ok": False, "error": "invalid_ma_type"}
+    if int(long_entry_filter_ma) < 2 or int(short_entry_filter_ma) < 2:
+        return {"ok": False, "error": "invalid_entry_filter_ma_windows"}
     if exec_price not in {"open", "close"}:
         return {"ok": False, "error": "invalid_exec_price"}
     if fee_side not in {"one_way", "two_way"}:
@@ -909,11 +853,13 @@ def compute_futures_group_trend_backtest(
     errors: list[str] = []
 
     for code in codes_run:
-        aligned = _align_futures_trend_inputs(db, pool_code=code, start=start, end=end)
-        if aligned is None:
-            errors.append(f"{code}:no_price_rows")
+        try:
+            df_exec, df_bench, trend_detail = _align_futures_trend_inputs(
+                db, pool_code=code, start=start, end=end
+            )
+        except ValueError as ex:
+            errors.append(f"{code}:{ex}")
             continue
-        df_exec, df_bench, trend_detail = aligned
         if len(df_exec.index) < int(min_points):
             errors.append(f"{code}:points<{int(min_points)}")
             continue
@@ -974,15 +920,22 @@ def compute_futures_group_trend_backtest(
                 "slippage_tick_multiple": cost.slippage_tick_multiple,
                 "trend_resolution": trend_detail.get("trend_resolution"),
                 "trend_execution_symbol": trend_detail.get("execution_symbol"),
+                "trend_execution_adjust": trend_detail.get("execution_adjust"),
                 "trend_signal_adjust": trend_detail.get("signal_adjust"),
                 "trend_benchmark_adjust": trend_detail.get("benchmark_adjust"),
             }
         )
 
     if not exec_by_code:
+        hfq_mark = "missing synthetic hfq continuous series"
+        err_kind = (
+            "missing_synthetic_hfq_continuous"
+            if errors and all(hfq_mark in str(e) for e in errors)
+            else "insufficient_data"
+        )
         return {
             "ok": False,
-            "error": "insufficient_data",
+            "error": err_kind,
             "meta": {
                 "group_name": group.name,
                 "start": start,
@@ -1024,6 +977,8 @@ def compute_futures_group_trend_backtest(
             slow_ma=int(slow_ma),
             ma_type=mt_eff,
             trade_direction=td_norm,
+            long_entry_filter_ma=int(long_entry_filter_ma),
+            short_entry_filter_ma=int(short_entry_filter_ma),
         )
         if atm_eff != "none":
             ex = exec_aligned.get(code)
@@ -1094,6 +1049,8 @@ def compute_futures_group_trend_backtest(
             slow_ma=int(slow_ma),
             ma_type=mt_eff,
             trade_direction=td_norm,
+            long_entry_filter_ma=int(long_entry_filter_ma),
+            short_entry_filter_ma=int(short_entry_filter_ma),
         )
         if atm_eff != "none":
             sig_adj = sig_df.copy()
@@ -1531,6 +1488,8 @@ def compute_futures_group_trend_backtest(
             "ma_type": str(mt_eff),
             "fast_ma": int(fast_ma),
             "slow_ma": int(slow_ma),
+            "long_entry_filter_ma": int(long_entry_filter_ma),
+            "short_entry_filter_ma": int(short_entry_filter_ma),
             "position_size_pct": float(position_size_pct),
             "cost_bps": float(cost_bps),
             "fee_side": fee_side,
@@ -1555,12 +1514,9 @@ def compute_futures_group_trend_backtest(
             "signal_lag_trading_days": 1,
             "benchmark_price_basis": ("open" if exec_price == "open" else "close"),
             "trend_series_policy": {
-                "benchmark": "synthetic_hfq_continuous (889) when present; "
-                "else none (fallback)",
-                "signals": "synthetic_qfq_continuous (888) close when present; "
-                "else none on execution series",
-                "execution_and_returns": "synthetic_none_continuous (88) when "
-                "present; else main contract none",
+                "benchmark": "synthetic_hfq_continuous ({root}889) only; no fallback",
+                "signals": "same hfq series as execution (889 close)",
+                "execution_and_returns": "synthetic_hfq_continuous ({root}889) OHLCV",
             },
             "backtest_mode": bm,
             "single_code": (

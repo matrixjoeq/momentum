@@ -51,6 +51,7 @@ KEY_FIELDS = ["open", "high", "low", "close", "settle"]
 USABLE_REL_MEAN_MAX = 0.01
 USABLE_REL_P95_MAX = 0.1
 USABLE_MIN_FIELDS = 4
+SETTLE_REL_DEV_MAX = 0.35
 
 
 def _symbol_root_from_main(code: str) -> str:
@@ -217,8 +218,53 @@ def _load_contract_data(
             continue
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
+        df, fixed_count = _sanitize_settle_column(df, code=contract_code)
+        if fixed_count > 0:
+            logger.warning(
+                "sanitize settle fallback applied for %s: %d rows",
+                contract_code,
+                fixed_count,
+            )
         data[contract_code] = df
     return data
+
+
+def _sanitize_settle_column(
+    df: pd.DataFrame, *, code: str = ""
+) -> tuple[pd.DataFrame, int]:
+    """
+    Clean settle dirty values and fallback to close price.
+
+    Rules:
+    - settle missing / non-finite / <=0 -> fallback close
+    - settle deviates too much from close (|settle-close|/close > threshold) -> fallback close
+    """
+    if df.empty:
+        return df.copy(), 0
+    out = df.copy()
+    if "close" not in out.columns:
+        return out, 0
+    close = pd.to_numeric(out["close"], errors="coerce").astype(float)
+    fallback = close.where(close > 0.0, np.nan)
+    if "settle" in out.columns:
+        settle = pd.to_numeric(out["settle"], errors="coerce").astype(float)
+    else:
+        settle = pd.Series(np.nan, index=out.index, dtype=float)
+
+    invalid = (~np.isfinite(settle)) | (settle <= 0.0)
+    rel_bad = pd.Series(False, index=out.index, dtype=bool)
+    positive_close = close > 0.0
+    rel_bad.loc[positive_close] = (
+        (settle.loc[positive_close] - close.loc[positive_close]).abs()
+        / close.loc[positive_close]
+    ) > float(SETTLE_REL_DEV_MAX)
+
+    fix_mask = (invalid | rel_bad) & fallback.notna()
+    settle_fixed = settle.copy()
+    settle_fixed.loc[fix_mask] = fallback.loc[fix_mask]
+    out["settle"] = settle_fixed.astype(float)
+    _ = code
+    return out, int(fix_mask.sum())
 
 
 def _discover_contract_codes(db: Session, *, pool: FuturesPool, root: str) -> list[str]:

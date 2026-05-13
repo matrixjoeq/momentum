@@ -451,6 +451,18 @@ class FuturesTrendBacktestRequest(BaseModel):
     )
     fast_ma: int = Field(default=20, ge=2, le=500)
     slow_ma: int = Field(default=60, ge=3, le=800)
+    long_entry_filter_ma: int = Field(
+        default=200,
+        ge=2,
+        le=2000,
+        description="Long entry filter: trigger-day close must be above this MA window",
+    )
+    short_entry_filter_ma: int = Field(
+        default=200,
+        ge=2,
+        le=2000,
+        description="Short entry filter: trigger-day close must be below this MA window",
+    )
     position_size_pct: float = Field(default=1.0, gt=0.0, le=1.0)
     min_points: int = Field(default=120, ge=2, le=100000)
     cost_bps: float = Field(

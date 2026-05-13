@@ -8,6 +8,7 @@ from etf_momentum.data.futures_synthesize import (
     _build_hold_table,
     _contract_yymm_suffix,
     _replay_dominant,
+    _sanitize_settle_column,
 )
 
 
@@ -267,3 +268,40 @@ def test_attach_switch_suffix_on_roll_date() -> None:
     )
     out = _attach_switch_suffix_column(replay_df, switch_df, root="RB")
     assert out["dominant_contract_suffix"].tolist() == [None, None, "2409"]
+
+
+def test_sanitize_settle_fallback_for_non_positive_and_outlier_values() -> None:
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2021-12-29", "2021-12-30", "2021-12-31"]),
+            "open": [6079.0, 5925.0, 5917.0],
+            "high": [6082.0, 5942.0, 5948.0],
+            "low": [5921.0, 5895.0, 5901.0],
+            "close": [5929.0, 5917.0, 5932.0],
+            "settle": [5974.0, 54.0, 0.0],
+        }
+    )
+    out, fixed = _sanitize_settle_column(df, code="A2405")
+    assert fixed == 2
+    # Keep reasonable settle
+    assert float(out.loc[0, "settle"]) == 5974.0
+    # Outlier fallback to close
+    assert float(out.loc[1, "settle"]) == 5917.0
+    # Non-positive fallback to close
+    assert float(out.loc[2, "settle"]) == 5932.0
+
+
+def test_sanitize_settle_keeps_values_when_deviation_is_reasonable() -> None:
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            "open": [100.0, 101.0],
+            "high": [102.0, 103.0],
+            "low": [99.0, 100.0],
+            "close": [101.0, 102.0],
+            "settle": [101.8, 100.9],
+        }
+    )
+    out, fixed = _sanitize_settle_column(df, code="RB2405")
+    assert fixed == 0
+    assert out["settle"].tolist() == [101.8, 100.9]

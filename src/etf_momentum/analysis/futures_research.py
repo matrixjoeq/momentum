@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from ..data.futures_synthesize import _symbol_root_from_main
 from ..db.futures_repo import list_futures_pool, list_futures_prices
 from ..db.futures_research_repo import FuturesGroupData
 
@@ -63,6 +64,7 @@ def _load_close_series(
     start: str,
     end: str,
 ) -> pd.DataFrame:
+    """Load pool ``*0`` main continuous closes (``adjust=none``) for coverage UI."""
     s_d = parse_yyyymmdd(start)
     e_d = parse_yyyymmdd(end)
     out: dict[str, pd.Series] = {}
@@ -74,6 +76,41 @@ def _load_close_series(
         vals = [float(r.close) if r.close is not None else float("nan") for r in rows]
         s = pd.Series(vals, index=idx, dtype=float).sort_index()
         out[str(code)] = s
+    if not out:
+        return pd.DataFrame()
+    return pd.DataFrame(out).sort_index()
+
+
+def _load_synth_hfq_close_by_pool_codes(
+    db: Session,
+    *,
+    codes: list[str],
+    start: str,
+    end: str,
+) -> pd.DataFrame:
+    """
+    For each pool code (e.g. ``RB0``), load **synthetic backward-adjusted** continuous
+    close from ``{root}889`` with ``adjust=hfq``. Columns keep **pool** codes for
+    matrix labels and API aliases.
+    """
+    s_d = parse_yyyymmdd(start)
+    e_d = parse_yyyymmdd(end)
+    out: dict[str, pd.Series] = {}
+    for pool_code in codes:
+        root = _symbol_root_from_main(str(pool_code))
+        synth = f"{root}889"
+        rows = list_futures_prices(
+            db,
+            code=synth,
+            adjust="hfq",
+            start_date=s_d,
+            end_date=e_d,
+            limit=200000,
+        )
+        idx = [r.trade_date for r in rows]
+        vals = [float(r.close) if r.close is not None else float("nan") for r in rows]
+        s = pd.Series(vals, index=idx, dtype=float).sort_index()
+        out[str(pool_code)] = s
     if not out:
         return pd.DataFrame()
     return pd.DataFrame(out).sort_index()
@@ -91,19 +128,26 @@ def compute_futures_group_correlation(
     codes = [str(c) for c in group.codes]
     if len(codes) == 0:
         return {"ok": False, "error": "empty_group", "meta": {"group_name": group.name}}
-    px = _load_close_series(db, codes=codes, start=start, end=end)
+    px = _load_synth_hfq_close_by_pool_codes(db, codes=codes, start=start, end=end)
     if px.empty:
         return {
             "ok": False,
             "error": "empty_prices",
-            "meta": {"group_name": group.name, "start": start, "end": end},
+            "meta": {
+                "group_name": group.name,
+                "start": start,
+                "end": end,
+                "hint": "synthetic_{root}889_hfq_required_for_correlation",
+            },
         }
     rets = pd.DataFrame(index=px.index, columns=px.columns, dtype=float)
     for c in px.columns:
         s = pd.to_numeric(px[c], errors="coerce").astype(float)
+        # Guard log-return input domain: hfq close <= 0 cannot be logged.
+        s = s.where(s > 0.0, np.nan)
         # Correlation research uses log returns for consistency across modules.
         rets[c] = np.log(s).diff()
-    rets = rets.replace([np.inf, -np.inf], pd.NA)
+    rets = rets.replace([np.inf, -np.inf], np.nan).astype(float)
     if dynamic_universe:
         corr_df = rets.corr(min_periods=max(2, int(min_obs)))
         ret_used = rets.dropna(how="all")
@@ -145,6 +189,9 @@ def compute_futures_group_correlation(
             "samples": int(len(ret_used.index)),
             "used_start": (used_dates[0] if used_dates else None),
             "used_end": (used_dates[-1] if used_dates else None),
+            "returns": "daily_log",
+            "close_price_basis": "hfq",
+            "continuous_series": "{root}889",
         },
         "aliases": aliases,
         "matrix": matrix,
