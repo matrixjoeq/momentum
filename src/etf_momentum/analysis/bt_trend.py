@@ -869,6 +869,40 @@ def _apply_er_entry_filter(
     }
 
 
+def _apply_macd_hist_threshold_gate(
+    raw_pos: pd.Series, *, hist: pd.Series, min_abs_hist: float
+) -> pd.Series:
+    """Delay MACD-family side switch until |hist| reaches threshold."""
+    thr = float(min_abs_hist)
+    if not np.isfinite(thr):
+        thr = 0.0
+    thr = max(0.0, thr)
+    idx = raw_pos.index
+    desired_s = (
+        pd.to_numeric(raw_pos, errors="coerce")
+        .astype(float)
+        .reindex(idx)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+    hist_s = pd.to_numeric(hist, errors="coerce").astype(float).reindex(idx)
+    out = np.zeros(len(idx), dtype=float)
+    confirmed = 0.0
+    pending: float | None = None
+    prev_desired = 0.0
+    for i, d in enumerate(idx):
+        desired = 1.0 if float(desired_s.loc[d]) > 0.0 else 0.0
+        if i == 0 or desired != prev_desired:
+            pending = desired
+        hv = float(hist_s.loc[d]) if np.isfinite(float(hist_s.loc[d])) else float("nan")
+        if pending is not None and np.isfinite(hv) and abs(hv) >= thr:
+            confirmed = float(pending)
+            pending = None
+        out[i] = confirmed
+        prev_desired = desired
+    return pd.Series(out, index=idx, dtype=float)
+
+
 def _apply_impulse_entry_filter(
     raw_pos: pd.Series,
     *,
@@ -3107,6 +3141,28 @@ def _validate_bt_single_inputs(inp: Any) -> None:
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema", "kama"}:
         raise ValueError("ma_type must be one of: sma|ema|kama")
+    if (
+        int(getattr(inp, "macd_fast", 12) or 12) < 2
+        or int(getattr(inp, "macd_slow", 26) or 26) < 2
+        or int(getattr(inp, "macd_signal", 9) or 9) < 2
+    ):
+        raise ValueError("macd_fast/macd_slow/macd_signal must be >= 2")
+    if int(getattr(inp, "macd_fast", 12) or 12) >= int(
+        getattr(inp, "macd_slow", 26) or 26
+    ):
+        raise ValueError("macd_fast must be < macd_slow")
+    if int(getattr(inp, "macd_v_atr_window", 26) or 26) < 2:
+        raise ValueError("macd_v_atr_window must be >= 2")
+    if (not np.isfinite(float(getattr(inp, "macd_v_scale", 100.0) or 100.0))) or float(
+        getattr(inp, "macd_v_scale", 100.0) or 100.0
+    ) <= 0:
+        raise ValueError("macd_v_scale must be finite and > 0")
+    macd_hist_min = float(getattr(inp, "macd_hist_min", 0.0) or 0.0)
+    macd_v_hist_min = float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0)
+    if (not np.isfinite(macd_hist_min)) or macd_hist_min < 0.0:
+        raise ValueError("macd_hist_min must be finite and >= 0")
+    if (not np.isfinite(macd_v_hist_min)) or macd_v_hist_min < 0.0:
+        raise ValueError("macd_v_hist_min must be finite and >= 0")
     kama_fast_window = int(getattr(inp, "kama_fast_window", 2) or 2)
     kama_slow_window = int(getattr(inp, "kama_slow_window", 30) or 30)
     if kama_fast_window >= kama_slow_window:
@@ -3216,7 +3272,9 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "macd_slow": int(getattr(inp, "macd_slow", 26) or 26),
         "macd_signal": int(getattr(inp, "macd_signal", 9) or 9),
         "macd_v_atr_window": int(getattr(inp, "macd_v_atr_window", 26) or 26),
-        "macd_v_scale": float(getattr(inp, "macd_v_scale", 1.0) or 1.0),
+        "macd_v_scale": float(getattr(inp, "macd_v_scale", 100.0) or 100.0),
+        "macd_hist_min": float(getattr(inp, "macd_hist_min", 0.0) or 0.0),
+        "macd_v_hist_min": float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
         "random_hold_days": int(getattr(inp, "random_hold_days", 20) or 20),
         "random_seed": (
             None
@@ -3595,7 +3653,11 @@ def _build_signal_position(
             slow=int(inp.macd_slow),
             signal=int(inp.macd_signal),
         )
-        raw_pos = (macd > sig).astype(float).fillna(0.0)
+        raw_pos = _apply_macd_hist_threshold_gate(
+            (macd > sig).astype(float).fillna(0.0),
+            hist=2.0 * (macd - sig),
+            min_abs_hist=float(getattr(inp, "macd_hist_min", 0.0) or 0.0),
+        )
         score = (macd - sig).replace([np.inf, -np.inf], np.nan).astype(float)
     elif strat == "macd_zero_filter":
         macd, _, _ = _macd_core(
@@ -3618,7 +3680,11 @@ def _build_signal_position(
         )
         macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
         macd_v_sig = _ema(macd_v, int(inp.macd_signal))
-        raw_pos = (macd_v > macd_v_sig).astype(float).fillna(0.0)
+        raw_pos = _apply_macd_hist_threshold_gate(
+            (macd_v > macd_v_sig).astype(float).fillna(0.0),
+            hist=2.0 * (macd_v - macd_v_sig),
+            min_abs_hist=float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
+        )
         score = (macd_v - macd_v_sig).replace([np.inf, -np.inf], np.nan).astype(float)
     elif strat == "random_entry":
         raw_pos = _pos_from_random_entry_hold(

@@ -136,6 +136,8 @@ class TrendInputs:
     macd_signal: int = 9
     macd_v_atr_window: int = 26
     macd_v_scale: float = 100.0
+    macd_hist_min: float = 0.0
+    macd_v_hist_min: float = 0.0
     random_hold_days: int = 20
     random_seed: int | None = 42
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
@@ -262,6 +264,8 @@ class TrendPortfolioInputs:
     macd_signal: int = 9
     macd_v_atr_window: int = 26
     macd_v_scale: float = 100.0
+    macd_hist_min: float = 0.0
+    macd_v_hist_min: float = 0.0
     random_hold_days: int = 20
     random_seed: int | None = 42
     group_enforce: bool = False
@@ -458,6 +462,47 @@ def _apply_er_entry_filter(
         "attempted_entry_count": int(attempted_entry_count),
         "allowed_entry_count": int(allowed_entry_count),
     }
+
+
+def _apply_macd_hist_threshold_gate(
+    raw_pos: pd.Series, *, hist: pd.Series, min_abs_hist: float
+) -> pd.Series:
+    """
+    Delay MACD-family cross execution until |hist| reaches threshold.
+
+    Rules:
+    - A direction change creates a pending target side (long/flat).
+    - Switch executes only when current |hist| >= threshold.
+    - If opposite cross happens before confirmation, pending direction flips.
+    """
+    thr = float(min_abs_hist)
+    if not np.isfinite(thr):
+        thr = 0.0
+    thr = max(0.0, thr)
+    idx = raw_pos.index
+    desired_s = (
+        pd.to_numeric(raw_pos, errors="coerce")
+        .astype(float)
+        .reindex(idx)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+    hist_s = pd.to_numeric(hist, errors="coerce").astype(float).reindex(idx)
+    out = np.zeros(len(idx), dtype=float)
+    confirmed = 0.0
+    pending: float | None = None
+    prev_desired = 0.0
+    for i, d in enumerate(idx):
+        desired = 1.0 if float(desired_s.loc[d]) > 0.0 else 0.0
+        if i == 0 or desired != prev_desired:
+            pending = desired
+        hv = float(hist_s.loc[d]) if np.isfinite(float(hist_s.loc[d])) else float("nan")
+        if pending is not None and np.isfinite(hv) and abs(hv) >= thr:
+            confirmed = float(pending)
+            pending = None
+        out[i] = confirmed
+        prev_desired = desired
+    return pd.Series(out, index=idx, dtype=float)
 
 
 def _compute_impulse_state(
@@ -5703,6 +5748,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError("macd_v_atr_window must be >= 2")
     if (not np.isfinite(float(inp.macd_v_scale))) or float(inp.macd_v_scale) <= 0:
         raise ValueError("macd_v_scale must be finite and > 0")
+    macd_hist_min = float(getattr(inp, "macd_hist_min", 0.0) or 0.0)
+    macd_v_hist_min = float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0)
+    if (not np.isfinite(macd_hist_min)) or macd_hist_min < 0.0:
+        raise ValueError("macd_hist_min must be finite and >= 0")
+    if (not np.isfinite(macd_v_hist_min)) or macd_v_hist_min < 0.0:
+        raise ValueError("macd_v_hist_min must be finite and >= 0")
     er_filter = bool(getattr(inp, "er_filter", False))
     er_window = int(getattr(inp, "er_window", 10) or 10)
     er_threshold = float(getattr(inp, "er_threshold", 0.30) or 0.30)
@@ -6140,7 +6191,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             slow=int(inp.macd_slow),
             signal=int(inp.macd_signal),
         )
-        raw_pos = (macd > sig).astype(float).fillna(0.0)
+        raw_pos = _apply_macd_hist_threshold_gate(
+            (macd > sig).astype(float).fillna(0.0),
+            hist=2.0 * (macd - sig),
+            min_abs_hist=float(getattr(inp, "macd_hist_min", 0.0) or 0.0),
+        )
     elif strat == "macd_zero_filter":
         macd, _, _ = _macd_core(
             px_sig,
@@ -6161,7 +6216,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         )
         macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
         macd_v_sig = _ema(macd_v, int(inp.macd_signal))
-        raw_pos = (macd_v > macd_v_sig).astype(float).fillna(0.0)
+        raw_pos = _apply_macd_hist_threshold_gate(
+            (macd_v > macd_v_sig).astype(float).fillna(0.0),
+            hist=2.0 * (macd_v - macd_v_sig),
+            min_abs_hist=float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
+        )
     elif strat == "random_entry":
         raw_pos = _pos_from_random_entry_hold(
             px_sig.index,
@@ -7417,6 +7476,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "macd_signal": int(inp.macd_signal),
                 "macd_v_atr_window": int(inp.macd_v_atr_window),
                 "macd_v_scale": float(inp.macd_v_scale),
+                "macd_hist_min": float(getattr(inp, "macd_hist_min", 0.0) or 0.0),
+                "macd_v_hist_min": float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
                 "random_hold_days": int(getattr(inp, "random_hold_days", 20)),
                 "random_seed": (
                     None
@@ -7993,6 +8054,20 @@ def compute_trend_portfolio_backtest(
         raise ValueError("tsmom_exit_threshold must be finite")
     if float(inp.tsmom_entry_threshold) < float(inp.tsmom_exit_threshold):
         raise ValueError("tsmom thresholds must satisfy: entry >= exit")
+    if int(inp.macd_fast) < 2 or int(inp.macd_slow) < 2 or int(inp.macd_signal) < 2:
+        raise ValueError("macd_fast/macd_slow/macd_signal must be >= 2")
+    if int(inp.macd_fast) >= int(inp.macd_slow):
+        raise ValueError("macd_fast must be < macd_slow")
+    if int(inp.macd_v_atr_window) < 2:
+        raise ValueError("macd_v_atr_window must be >= 2")
+    if (not np.isfinite(float(inp.macd_v_scale))) or float(inp.macd_v_scale) <= 0:
+        raise ValueError("macd_v_scale must be finite and > 0")
+    macd_hist_min = float(getattr(inp, "macd_hist_min", 0.0) or 0.0)
+    macd_v_hist_min = float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0)
+    if (not np.isfinite(macd_hist_min)) or macd_hist_min < 0.0:
+        raise ValueError("macd_hist_min must be finite and >= 0")
+    if (not np.isfinite(macd_v_hist_min)) or macd_v_hist_min < 0.0:
+        raise ValueError("macd_v_hist_min must be finite and >= 0")
     er_filter = bool(getattr(inp, "er_filter", False))
     er_window = int(getattr(inp, "er_window", 10) or 10)
     er_threshold = float(getattr(inp, "er_threshold", 0.30) or 0.30)
@@ -8645,7 +8720,11 @@ def compute_trend_portfolio_backtest(
                 slow=int(inp.macd_slow),
                 signal=int(inp.macd_signal),
             )
-            pos = (macd > sig).astype(float)
+            pos = _apply_macd_hist_threshold_gate(
+                (macd > sig).astype(float),
+                hist=2.0 * (macd - sig),
+                min_abs_hist=float(getattr(inp, "macd_hist_min", 0.0) or 0.0),
+            )
             score = (macd - sig).astype(float)
         elif strat == "macd_zero_filter":
             macd, _, _ = _macd_core(
@@ -8673,7 +8752,11 @@ def compute_trend_portfolio_backtest(
             )
             macd_v = (macd / atr.replace(0.0, np.nan)) * float(inp.macd_v_scale)
             macd_v_sig = _ema(macd_v, int(inp.macd_signal))
-            pos = (macd_v > macd_v_sig).astype(float)
+            pos = _apply_macd_hist_threshold_gate(
+                (macd_v > macd_v_sig).astype(float),
+                hist=2.0 * (macd_v - macd_v_sig),
+                min_abs_hist=float(getattr(inp, "macd_v_hist_min", 0.0) or 0.0),
+            )
             score = (macd_v - macd_v_sig).astype(float)
         elif strat == "random_entry":
             seed_base_raw = getattr(inp, "random_seed", 42)

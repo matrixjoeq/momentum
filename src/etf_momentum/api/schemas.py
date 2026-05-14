@@ -2372,6 +2372,16 @@ class TrendBacktestRequest(BaseModel):
     macd_v_scale: float = Field(
         default=100.0, gt=0.0, description="Scale factor for MACD-V"
     )
+    macd_hist_min: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="MACD histogram minimum absolute height filter for macd_cross (0 disables)",
+    )
+    macd_v_hist_min: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="MACD-V histogram minimum absolute height filter for macd_v (0 disables)",
+    )
     er_filter: bool = Field(
         default=False,
         description="Universal ER entry filter switch (when true, allow entry only if ER >= threshold)",
@@ -2646,6 +2656,8 @@ class TrendPortfolioBacktestRequest(BaseModel):
     macd_signal: int = Field(default=9, ge=2)
     macd_v_atr_window: int = Field(default=26, ge=2)
     macd_v_scale: float = Field(default=100.0, gt=0.0)
+    macd_hist_min: float = Field(default=0.0, ge=0.0)
+    macd_v_hist_min: float = Field(default=0.0, ge=0.0)
     er_filter: bool = Field(
         default=False, description="Universal ER entry filter switch"
     )

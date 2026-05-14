@@ -691,8 +691,8 @@
             <option value="vol_dev">成交量偏离(log)</option>
             <option value="macd_v_dif">MACD-V（DIF）</option>
             <option value="macd_v_dea">MACD-V（DEA）</option>
-            <option value="macd_v_absh">MACD-V（|H|=|2*(DIF-DEA)|）</option>
-            <option value="macd_abs">标准MACD（|MACD|, 12/26/9）</option>
+            <option value="macd_v_absh">MACD-V（|MACD|）</option>
+            <option value="macd_abs">标准MACD（|MACD|）</option>
           </select>
         </div>
         <div>
@@ -4940,6 +4940,14 @@
         <div>
           <label>MACD-V scale</label><input id="trendMacdVScale" value="100" />
         </div>
+        <div>
+          <label>MACD柱最小高度</label
+          ><input id="trendMacdHistMin" value="0.0" />
+        </div>
+        <div>
+          <label>MACD-V柱最小高度</label
+          ><input id="trendMacdVHistMin" value="0.0" />
+        </div>
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
         <div>
@@ -7755,6 +7763,8 @@
           "trendMacdSignal",
           "trendMacdVAtr",
           "trendMacdVScale",
+          "trendMacdHistMin",
+          "trendMacdVHistMin",
           "trendEventBucketProfile",
           "trendTraceN",
           "trendTraceView",
@@ -10894,6 +10904,8 @@
           "trendMacdSignal",
           "trendMacdVAtr",
           "trendMacdVScale",
+          "trendMacdHistMin",
+          "trendMacdVHistMin",
           "trendAtrStopMode",
           "trendAtrStopBasis",
           "trendAtrStopReentry",
@@ -10989,7 +11001,12 @@
             "trendBiasCold",
             "trendBiasPosMode",
           ],
-          macd_cross: ["trendMacdFast", "trendMacdSlow", "trendMacdSignal"],
+          macd_cross: [
+            "trendMacdFast",
+            "trendMacdSlow",
+            "trendMacdSignal",
+            "trendMacdHistMin",
+          ],
           macd_zero_filter: [
             "trendMacdFast",
             "trendMacdSlow",
@@ -11001,6 +11018,7 @@
             "trendMacdSignal",
             "trendMacdVAtr",
             "trendMacdVScale",
+            "trendMacdVHistMin",
           ],
         };
         const enabled = new Set([
@@ -11108,6 +11126,10 @@
           trendMacdSignal: "MACD信号线：信号EMA窗口。",
           trendMacdVAtr: "MACD-V ATR窗口：归一化波动窗口。",
           trendMacdVScale: "MACD-V scale：归一化缩放系数。",
+          trendMacdHistMin:
+            "MACD柱最小高度：仅当 |H|=|2*(DIF-DEA)| 达到阈值时才确认金叉/死叉信号；0=不过滤。",
+          trendMacdVHistMin:
+            "MACD-V柱最小高度：仅当 |H_v|=|2*(MACD-V-DEA_v)| 达到阈值时才确认信号；0=不过滤。",
           trendAtrStopMode:
             "通用ATR止损模式：关闭/静态/动态跟随/动态收紧。关闭时若开启R乘数止盈或浮盈降仓，本行「ATR周期」「止损倍数n」仍生效，用于定义R的计量基准。",
           trendAtrStopBasis:
@@ -28984,6 +29006,8 @@
           macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
           macd_v_atr_window: Number(($("trendMacdVAtr").value || "26").trim()),
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
+          macd_hist_min: Number(($("trendMacdHistMin").value || "0").trim()),
+          macd_v_hist_min: Number(($("trendMacdVHistMin").value || "0").trim()),
           random_hold_days: Number(
             ($("trendRandomHoldDays").value || "20").trim(),
           ),
@@ -29367,6 +29391,8 @@
           macd_signal: Number(($("trendMacdSignal").value || "9").trim()),
           macd_v_atr_window: Number(($("trendMacdVAtr").value || "26").trim()),
           macd_v_scale: Number(($("trendMacdVScale").value || "100").trim()),
+          macd_hist_min: Number(($("trendMacdHistMin").value || "0").trim()),
+          macd_v_hist_min: Number(($("trendMacdVHistMin").value || "0").trim()),
           random_hold_days: Number(
             ($("trendRandomHoldDays").value || "20").trim(),
           ),

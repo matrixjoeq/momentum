@@ -11,6 +11,7 @@ from etf_momentum.analysis.trend import (
     _trade_stats_from_returns,
     _semi_variance_run_stats_from_returns,
     _apply_impulse_entry_filter,
+    _apply_macd_hist_threshold_gate,
     _apply_atr_stop,
     _apply_intraday_stop_execution_single,
     _apply_intraday_stop_execution_portfolio,
@@ -2070,6 +2071,111 @@ def test_trend_macd_family_smoke(session_factory):
     assert out_zero["meta"]["strategy"] == "macd_zero_filter"
     assert out_v["meta"]["strategy"] == "macd_v"
     assert len(out_v["signals"]["position"]) == len(out_v["nav"]["dates"])
+
+
+def test_macd_hist_threshold_gate_delays_and_switches_pending_direction() -> None:
+    idx = pd.bdate_range("2024-01-01", periods=8)
+    raw_pos = pd.Series([0, 1, 1, 1, 0, 0, 1, 1], index=idx, dtype=float)
+    hist = pd.Series([0.0, 0.2, 0.3, 0.6, 0.1, -0.2, -0.3, -0.7], index=idx)
+    out = _apply_macd_hist_threshold_gate(raw_pos, hist=hist, min_abs_hist=0.5)
+    assert [float(x) for x in out.tolist()] == [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+    idx2 = pd.bdate_range("2024-02-01", periods=5)
+    raw_pos2 = pd.Series([0, 1, 1, 0, 0], index=idx2, dtype=float)
+    hist2 = pd.Series([0.0, 0.1, 0.2, -0.6, -0.7], index=idx2, dtype=float)
+    out2 = _apply_macd_hist_threshold_gate(raw_pos2, hist=hist2, min_abs_hist=0.5)
+    assert [float(x) for x in out2.tolist()] == [0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+def test_macd_hist_threshold_zero_matches_base_signal_when_hist_finite() -> None:
+    idx = pd.bdate_range("2024-03-01", periods=6)
+    raw_pos = pd.Series([0, 1, 1, 0, 1, 0], index=idx, dtype=float)
+    hist = pd.Series([0.2, 0.1, -0.3, -0.2, 0.4, -0.5], index=idx, dtype=float)
+    out = _apply_macd_hist_threshold_gate(raw_pos, hist=hist, min_abs_hist=0.0)
+    assert [float(x) for x in out.tolist()] == [float(x) for x in raw_pos.tolist()]
+
+
+def test_trend_macd_hist_min_reduces_switches(session_factory):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", "2024-06-30", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + i * 0.25 + (2.0 if (i % 10 < 5) else -2.0)
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out_cross_base = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="macd_cross",
+                macd_fast=2,
+                macd_slow=3,
+                macd_signal=2,
+                macd_hist_min=0.0,
+                cost_bps=0.0,
+            ),
+        )
+        out_cross_filtered = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="macd_cross",
+                macd_fast=2,
+                macd_slow=3,
+                macd_signal=2,
+                macd_hist_min=0.5,
+                cost_bps=0.0,
+            ),
+        )
+        out_v_base = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="macd_v",
+                macd_fast=2,
+                macd_slow=3,
+                macd_signal=2,
+                macd_v_atr_window=2,
+                macd_v_scale=100.0,
+                macd_v_hist_min=0.0,
+                cost_bps=0.0,
+            ),
+        )
+        out_v_filtered = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="macd_v",
+                macd_fast=2,
+                macd_slow=3,
+                macd_signal=2,
+                macd_v_atr_window=2,
+                macd_v_scale=100.0,
+                macd_v_hist_min=10.0,
+                cost_bps=0.0,
+            ),
+        )
+
+    def _switch_count(pos: list[float]) -> int:
+        return int(
+            sum(1 for i in range(1, len(pos)) if float(pos[i]) != float(pos[i - 1]))
+        )
+
+    cross_base_sw = _switch_count(list(out_cross_base["signals"]["position"]))
+    cross_filtered_sw = _switch_count(list(out_cross_filtered["signals"]["position"]))
+    v_base_sw = _switch_count(list(out_v_base["signals"]["position"]))
+    v_filtered_sw = _switch_count(list(out_v_filtered["signals"]["position"]))
+    assert cross_filtered_sw <= cross_base_sw
+    assert v_filtered_sw <= v_base_sw
 
 
 def test_trend_excludes_decision_day_return_for_all_strategies(session_factory):

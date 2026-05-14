@@ -1946,6 +1946,8 @@ def trend_backtest(
         macd_signal=payload.macd_signal,
         macd_v_atr_window=payload.macd_v_atr_window,
         macd_v_scale=payload.macd_v_scale,
+        macd_hist_min=payload.macd_hist_min,
+        macd_v_hist_min=payload.macd_v_hist_min,
         random_hold_days=int(getattr(payload, "random_hold_days", 20)),
         random_seed=(
             None
@@ -2152,6 +2154,8 @@ def trend_portfolio_backtest(
         macd_signal=payload.macd_signal,
         macd_v_atr_window=payload.macd_v_atr_window,
         macd_v_scale=payload.macd_v_scale,
+        macd_hist_min=payload.macd_hist_min,
+        macd_v_hist_min=payload.macd_v_hist_min,
         random_hold_days=int(getattr(payload, "random_hold_days", 20)),
         random_seed=(
             None

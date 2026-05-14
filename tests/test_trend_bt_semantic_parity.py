@@ -488,6 +488,61 @@ def test_bt_portfolio_semantic_parity_matrix(
             assert abs(float(lv) - float(bv)) <= float(tol)
 
 
+@pytest.mark.parametrize("strategy", ["macd_cross", "macd_v"])
+def test_bt_single_macd_hist_threshold_semantic_parity(engine, strategy: str):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendInputs(
+            code="A",
+            start=dates[0],
+            end=dates[-1],
+            strategy=strategy,
+            exec_price="close",
+            cost_bps=5.0,
+            slippage_rate=0.001,
+            macd_hist_min=0.5 if strategy == "macd_cross" else 0.0,
+            macd_v_hist_min=5.0 if strategy == "macd_v" else 0.0,
+        )
+        legacy = compute_trend_backtest(db, inp)
+        bt = compute_trend_backtest_bt(db, inp)
+
+    assert not sorted(_flat_keys(legacy) - _flat_keys(bt))
+    l_cum = _get(legacy, "metrics.strategy.cumulative_return")
+    b_cum = _get(bt, "metrics.strategy.cumulative_return")
+    assert isinstance(l_cum, (int, float)) and isinstance(b_cum, (int, float))
+    if math.isfinite(float(l_cum)) and math.isfinite(float(b_cum)):
+        assert abs(float(l_cum) - float(b_cum)) <= 1e-12
+
+
+@pytest.mark.parametrize("strategy", ["macd_cross", "macd_v"])
+def test_bt_portfolio_macd_hist_threshold_semantic_parity(engine, strategy: str):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendPortfolioInputs(
+            codes=["A", "B", "C"],
+            start=dates[0],
+            end=dates[-1],
+            strategy=strategy,
+            exec_price="close",
+            position_sizing="equal",
+            cost_bps=5.0,
+            slippage_rate=0.001,
+            macd_hist_min=0.5 if strategy == "macd_cross" else 0.0,
+            macd_v_hist_min=5.0 if strategy == "macd_v" else 0.0,
+        )
+        legacy = compute_trend_portfolio_backtest(db, inp)
+        bt = compute_trend_portfolio_backtest_bt(db, inp)
+
+    assert not sorted(_flat_keys(legacy) - _flat_keys(bt))
+    l_cum = _get(legacy, "metrics.strategy.cumulative_return")
+    b_cum = _get(bt, "metrics.strategy.cumulative_return")
+    assert isinstance(l_cum, (int, float)) and isinstance(b_cum, (int, float))
+    if math.isfinite(float(l_cum)) and math.isfinite(float(b_cum)):
+        assert abs(float(l_cum) - float(b_cum)) <= 3e-2
+
+
 def test_bt_portfolio_effective_weights_semantic_parity(engine):
     dates = _seed_case(engine)
     sf = make_session_factory(engine)
