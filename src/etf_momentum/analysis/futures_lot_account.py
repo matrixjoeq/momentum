@@ -122,6 +122,7 @@ def simulate_discrete_lot_portfolio(
         return pd.Series(dtype=float), {"error": "no_codes"}
 
     ps = str(position_sizing or "equal").strip().lower()
+    ep_mode = str(exec_price or "close").strip().lower()
     res = float(reserve_ratio)
     if not np.isfinite(res) or res < 0.0 or res >= 1.0:
         res = 0.0
@@ -273,8 +274,9 @@ def simulate_discrete_lot_portfolio(
             exec_m[c] = _exec_price_row(row, exec_price)
             suf_m[c] = _suffix_cell(row)
 
-        # MTM
-        if i > 0:
+        # MTM (close-exec uses full settle-to-settle on pre-trade lots;
+        # open-exec splits into overnight pre-trade and intraday post-trade).
+        if i > 0 and ep_mode != "open":
             for c in codes:
                 lc = int(lots[c])
                 if lc == 0:
@@ -287,6 +289,21 @@ def simulate_discrete_lot_portfolio(
                     and np.isfinite(float(mults[c]))
                 ):
                     equity += float(lc) * float(mults[c]) * (ps1 - ps0)
+        elif i > 0 and ep_mode == "open":
+            for c in codes:
+                lc = int(lots[c])
+                if lc == 0:
+                    continue
+                ps0 = prev_settle[c]
+                opx = exec_m[c]
+                if not np.isfinite(opx):
+                    opx = settle_m[c]
+                if (
+                    np.isfinite(ps0)
+                    and np.isfinite(opx)
+                    and np.isfinite(float(mults[c]))
+                ):
+                    equity += float(lc) * float(mults[c]) * (opx - ps0)
 
         # Roll round-turn fees (cash from unified pool); P&L already in stitched series via MTM
         if i > 0:
@@ -460,6 +477,23 @@ def simulate_discrete_lot_portfolio(
                     )
                 elif old != 0 and tgt == 0:
                     _close_trade(code=c, qty=abs(old), px=float(px), dt=pd.Timestamp(d))
+
+        # For open execution, intraday MTM must be on post-trade lots.
+        if i > 0 and ep_mode == "open":
+            for c in codes:
+                lc = int(lots[c])
+                if lc == 0:
+                    continue
+                opx = exec_m[c]
+                ps1 = settle_m[c]
+                if not np.isfinite(opx):
+                    opx = ps1
+                if (
+                    np.isfinite(opx)
+                    and np.isfinite(ps1)
+                    and np.isfinite(float(mults[c]))
+                ):
+                    equity += float(lc) * float(mults[c]) * (ps1 - opx)
 
         eq_list.append(equity)
         for c in codes:

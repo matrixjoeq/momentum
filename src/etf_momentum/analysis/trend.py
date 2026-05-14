@@ -3721,11 +3721,13 @@ def _apply_intraday_stop_execution_single(
             continue
         if d not in w_adj.index:
             continue
-        base_abs = (
-            abs(float(w0.loc[d]))
+        base_w = (
+            float(w0.loc[d])
             if (d in w0.index and np.isfinite(float(w0.loc[d])))
             else 0.0
         )
+        base_sign = float(np.sign(base_w))
+        base_abs = abs(float(base_w))
         if base_abs <= 1e-12:
             continue
         reduce_raw = e.get("reduce_fraction")
@@ -3771,10 +3773,10 @@ def _apply_intraday_stop_execution_single(
             prev_close_px=pc,
             fill_px=fill_px,
         )
-        override.loc[d] = float(override.loc[d] + sold_w * day_ret)
+        override.loc[d] = float(override.loc[d] + sold_w * base_sign * day_ret)
         sold_accum.loc[d] = float(min(base_abs, float(sold_accum.loc[d]) + sold_w))
         rem = float(max(0.0, base_abs - float(sold_accum.loc[d])))
-        w_adj.loc[d] = float(rem)
+        w_adj.loc[d] = float(base_sign * rem)
     return w_adj, override
 
 
@@ -3810,8 +3812,8 @@ def _apply_intraday_stop_execution_portfolio(
                 continue
             if d not in w_adj.index:
                 continue
-            base_abs = (
-                abs(float(w0.loc[d, c]))
+            base_w = (
+                float(w0.loc[d, c])
                 if (
                     d in w0.index
                     and c in w0.columns
@@ -3819,6 +3821,8 @@ def _apply_intraday_stop_execution_portfolio(
                 )
                 else 0.0
             )
+            base_sign = float(np.sign(base_w))
+            base_abs = abs(float(base_w))
             if base_abs <= 1e-12:
                 continue
             reduce_raw = e.get("reduce_fraction")
@@ -3876,12 +3880,12 @@ def _apply_intraday_stop_execution_portfolio(
                 prev_close_px=pc,
                 fill_px=fill_px,
             )
-            override.loc[d] = float(override.loc[d] + sold_w * day_ret)
+            override.loc[d] = float(override.loc[d] + sold_w * base_sign * day_ret)
             sold_accum.loc[d, c] = float(
                 min(base_abs, float(sold_accum.loc[d, c]) + sold_w)
             )
             rem = float(max(0.0, base_abs - float(sold_accum.loc[d, c])))
-            w_adj.loc[d, c] = float(rem)
+            w_adj.loc[d, c] = float(base_sign * rem)
     return w_adj, override
 
 

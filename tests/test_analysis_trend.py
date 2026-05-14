@@ -13,6 +13,7 @@ from etf_momentum.analysis.trend import (
     _apply_impulse_entry_filter,
     _apply_atr_stop,
     _apply_intraday_stop_execution_single,
+    _apply_intraday_stop_execution_portfolio,
     _apply_intraday_scaleout_execution_single,
     _apply_intraday_scaleout_execution_portfolio,
     _apply_r_multiple_take_profit,
@@ -739,6 +740,61 @@ def test_next_day_stop_override_uses_strategy_execution_price(
     )
     assert float(w_adj.iloc[2]) == 0.0
     assert float(override.iloc[2]) == pytest.approx(expected)
+
+
+def test_intraday_stop_override_short_side_uses_signed_return() -> None:
+    idx = pd.date_range("2024-01-01", periods=3, freq="B")
+    weights = pd.Series([0.0, -1.0, -1.0], index=idx, dtype=float)
+    open_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    close_sig = pd.Series([100.0, 90.0, 95.0], index=idx, dtype=float)
+    stats = {
+        "trigger_events": [
+            {
+                "date": idx[2].date().isoformat(),
+                "execution_mode": "intraday",
+                "fill_price": 95.0,
+            }
+        ]
+    }
+    w_adj, override = _apply_intraday_stop_execution_single(
+        weights=weights,
+        atr_stop_stats=stats,
+        exec_price="open",
+        stop_execution_mode="intraday",
+        open_sig=open_sig,
+        close_sig=close_sig,
+    )
+    assert float(w_adj.iloc[2]) == 0.0
+    assert float(override.iloc[2]) == pytest.approx(-(95.0 / 90.0 - 1.0))
+
+
+def test_intraday_stop_override_portfolio_short_partial_keeps_side() -> None:
+    idx = pd.date_range("2024-01-01", periods=3, freq="B")
+    weights = pd.DataFrame({"X": [0.0, -1.0, -1.0]}, index=idx, dtype=float)
+    open_sig_df = pd.DataFrame({"X": [100.0, 100.0, 100.0]}, index=idx, dtype=float)
+    close_sig_df = pd.DataFrame({"X": [100.0, 90.0, 95.0]}, index=idx, dtype=float)
+    atr_stop_by_asset = {
+        "X": {
+            "trigger_events": [
+                {
+                    "date": idx[2].date().isoformat(),
+                    "execution_mode": "intraday",
+                    "fill_price": 95.0,
+                    "reduce_fraction": 0.4,
+                }
+            ]
+        }
+    }
+    w_adj, override = _apply_intraday_stop_execution_portfolio(
+        weights=weights,
+        atr_stop_by_asset=atr_stop_by_asset,
+        exec_price="open",
+        stop_execution_mode="intraday",
+        open_sig_df=open_sig_df,
+        close_sig_df=close_sig_df,
+    )
+    assert float(w_adj.loc[idx[2], "X"]) == pytest.approx(-0.6)
+    assert float(override.loc[idx[2]]) == pytest.approx(-0.4 * (95.0 / 90.0 - 1.0))
 
 
 def test_atr_stop_requires_one_effective_holding_day_before_trigger() -> None:

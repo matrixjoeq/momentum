@@ -305,7 +305,9 @@ def risk_budget_weights(
 
         for c in cols:
             key_c = str(c)
-            if (float(w_row.loc[c]) > eps) and (key_c not in active_set):
+            # Inactive symbols must be flattened regardless of side; otherwise
+            # short positions can get stuck when signal drops to flat.
+            if (abs(float(w_row.loc[c])) > eps) and (key_c not in active_set):
                 w_row.loc[c] = 0.0
                 rb_state_by_code[key_c] = "FLAT"
                 rb_entry_price_by_code[key_c] = float("nan")

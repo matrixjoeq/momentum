@@ -142,3 +142,36 @@ def test_roll_fees_use_old_and_new_contract_execution_prices() -> None:
     expected = lots * 10.0 * (100.0 + 130.0) * 0.001
     assert meta.get("roll_events") == 1
     assert float(meta.get("roll_fees_cny", 0.0)) == pytest.approx(expected)
+
+
+def test_open_execution_marks_intraday_pnl_on_post_trade_lots() -> None:
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03"])
+    code = "X0"
+    df = pd.DataFrame(
+        {
+            "Open": [100.0, 110.0],
+            "High": [100.0, 130.0],
+            "Low": [100.0, 110.0],
+            "Close": [100.0, 130.0],
+            "Volume": [1.0, 1.0],
+            "Settle": [100.0, 130.0],
+        },
+        index=idx,
+    )
+    w_eff = pd.DataFrame({code: [0.0, 1.0]}, index=idx)
+    eq, _ = simulate_discrete_lot_portfolio(
+        common_idx=idx,
+        exec_by_code={code: df},
+        w_eff=w_eff,
+        cost_by_symbol={code: _noop_cost()},
+        mults={code: 10.0},
+        margin_rate_frac=0.1,
+        reserve_ratio=0.0,
+        initial_equity_cny=100_000.0,
+        exec_price="open",
+        position_sizing="equal",
+        codes_sorted=[code],
+    )
+    # Day2 entry at open should realize same-day intraday MTM on post-trade lots:
+    # lots=floor(100000 / (130*10*0.1))=769, pnl=769*10*(130-110)=153800.
+    assert float(eq.iloc[1]) == pytest.approx(253800.0)

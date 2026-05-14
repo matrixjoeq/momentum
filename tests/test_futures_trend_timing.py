@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import datetime as dt
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
 from etf_momentum.analysis.futures_trend import (
     _build_cost_profile,
+    _load_futures_ohlcv,
+    _lot_engine_stop_override_delta,
     _resolve_order_size,
     _run_symbol_backtest,
     _run_vectorized_fallback,
@@ -131,3 +136,99 @@ def test_symbol_backtest_finalizes_open_trade_for_stats() -> None:
     assert nav.iloc[-1] > 1.0
     if st.get("engine") == "backtesting":
         assert int(st.get("trades", 0)) >= 1
+
+
+def test_load_futures_ohlcv_drops_negative_price_rows(monkeypatch) -> None:
+    rows = [
+        SimpleNamespace(
+            trade_date=dt.date(2024, 1, 2),
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.5,
+            settle=100.2,
+            volume=1000.0,
+        ),
+        SimpleNamespace(
+            trade_date=dt.date(2024, 1, 3),
+            open=-10.0,
+            high=102.0,
+            low=98.0,
+            close=101.0,
+            settle=100.8,
+            volume=1200.0,
+        ),
+        SimpleNamespace(
+            trade_date=dt.date(2024, 1, 4),
+            open=0.0,
+            high=103.0,
+            low=101.0,
+            close=102.5,
+            settle=102.2,
+            volume=1100.0,
+        ),
+        SimpleNamespace(
+            trade_date=dt.date(2024, 1, 5),
+            open=102.0,
+            high=103.0,
+            low=101.0,
+            close=102.5,
+            settle=102.2,
+            volume=1100.0,
+        ),
+    ]
+
+    def _fake_list_futures_prices(
+        _db,
+        *,
+        code,
+        adjust,
+        start_date,
+        end_date,
+        limit,
+    ):
+        assert code == "RB889"
+        assert adjust == "hfq"
+        assert start_date <= end_date
+        assert limit > 0
+        return rows
+
+    monkeypatch.setattr(
+        "etf_momentum.analysis.futures_trend.list_futures_prices",
+        _fake_list_futures_prices,
+    )
+
+    out = _load_futures_ohlcv(
+        db=None,  # type: ignore[arg-type]
+        code="RB889",
+        start="20240101",
+        end="20240131",
+        adjust="hfq",
+    )
+    assert len(out) == 2
+    assert pd.Timestamp("2024-01-03") not in out.index
+    assert pd.Timestamp("2024-01-04") not in out.index
+    assert (out[["Open", "High", "Low", "Close"]] <= 0.0).sum().sum() == 0
+
+
+def test_lot_engine_stop_override_uses_delta_vs_exec_baseline_for_short_open() -> None:
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    w_before = pd.DataFrame({"X": [0.0, -1.0, -1.0]}, index=idx, dtype=float)
+    w_after = pd.DataFrame({"X": [0.0, -1.0, 0.0]}, index=idx, dtype=float)
+    # Replacement contribution for sold short leg: -(95/90-1)
+    replacement = pd.Series([0.0, 0.0, -(95.0 / 90.0 - 1.0)], index=idx, dtype=float)
+    open_df = pd.DataFrame({"X": [100.0, 100.0, 100.0]}, index=idx, dtype=float)
+    close_df = pd.DataFrame({"X": [100.0, 90.0, 95.0]}, index=idx, dtype=float)
+
+    delta = _lot_engine_stop_override_delta(
+        weights_before=w_before,
+        weights_after=w_after,
+        replacement_override=replacement,
+        exec_price="open",
+        open_sig_df=open_df,
+        close_sig_df=close_df,
+    )
+    # Lot engine baseline for sold short leg under open execution is -(100/90-1).
+    baseline = -(100.0 / 90.0 - 1.0)
+    expected = (-(95.0 / 90.0 - 1.0)) - baseline
+    assert float(delta.loc[idx[2]]) == pytest.approx(expected)

@@ -187,6 +187,10 @@ def _load_futures_ohlcv(
             ]
     df = df.sort_index()
     df = df.dropna(subset=["Open", "High", "Low", "Close"], how="any")
+    non_pos_mask = (df[["Open", "High", "Low", "Close"]] <= 0.0).any(axis=1)
+    if bool(non_pos_mask.any()):
+        # Any bar containing non-positive prices is considered invalid and removed.
+        df = df.loc[~non_pos_mask].copy()
     df.index = _coerce_trading_index(df.index)
     return df
 
@@ -435,6 +439,63 @@ def _safe_rate(num: int, den: int) -> float:
     if den <= 0:
         return 0.0
     return float(num) / float(den)
+
+
+def _lot_engine_stop_override_delta(
+    *,
+    weights_before: pd.DataFrame,
+    weights_after: pd.DataFrame,
+    replacement_override: pd.Series,
+    exec_price: str,
+    open_sig_df: pd.DataFrame,
+    close_sig_df: pd.DataFrame,
+) -> pd.Series:
+    """
+    Convert stop replacement return into a **delta** against lot-engine baseline.
+
+    ``_apply_intraday_stop_execution_portfolio`` computes replacement contribution
+    for the reduced leg (sold weight * stop fill return). In the futures lot
+    engine, that leg already contributes a baseline execution return (open-exec:
+    overnight to open; close-exec: close/settle-to-close). We therefore add only:
+
+        delta = replacement - baseline_for_reduced_leg
+    """
+    idx = pd.DatetimeIndex(weights_before.index)
+    cols = [str(c) for c in weights_before.columns]
+    wb = (
+        weights_before.reindex(index=idx, columns=cols)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    wa = (
+        weights_after.reindex(index=idx, columns=cols)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    sold_abs = (wb.abs() - wa.abs()).clip(lower=0.0)
+    sold_signed = np.sign(wb) * sold_abs
+
+    cl = (
+        close_sig_df.reindex(index=idx, columns=cols)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    op = (
+        open_sig_df.reindex(index=idx, columns=cols)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    prev_close = cl.shift(1)
+    ep = str(exec_price or "close").strip().lower()
+    px_exec = op if ep == "open" else cl
+    base_ret = (
+        px_exec.div(prev_close).replace([np.inf, -np.inf], np.nan).sub(1.0).fillna(0.0)
+    )
+    baseline = (sold_signed * base_ret).sum(axis=1).astype(float)
+    repl = replacement_override.reindex(idx).astype(float).fillna(0.0)
+    return (repl - baseline).astype(float)
 
 
 def _apply_main_contract_roll_adjustments(
@@ -1030,9 +1091,22 @@ def compute_futures_group_trend_backtest(
                 },
                 index=common_idx,
             )
-            w_eff, atr_override = _apply_intraday_stop_execution_portfolio(
+            w_before_stop = w_eff.copy()
+            w_eff, atr_replacement = _apply_intraday_stop_execution_portfolio(
                 weights=w_eff,
                 atr_stop_by_asset=atr_stop_by_asset,
+                exec_price=str(exec_price),
+                open_sig_df=open_df.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+                close_sig_df=close_df_exec.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+            )
+            atr_override = _lot_engine_stop_override_delta(
+                weights_before=w_before_stop,
+                weights_after=w_eff,
+                replacement_override=atr_replacement,
                 exec_price=str(exec_price),
                 open_sig_df=open_df.reindex(
                     index=w_eff.index, columns=w_eff.columns
@@ -1184,9 +1258,22 @@ def compute_futures_group_trend_backtest(
                 },
                 index=common_idx,
             )
-            w_eff, atr_override = _apply_intraday_stop_execution_portfolio(
+            w_before_stop = w_eff.copy()
+            w_eff, atr_replacement = _apply_intraday_stop_execution_portfolio(
                 weights=w_eff,
                 atr_stop_by_asset=atr_stop_by_asset,
+                exec_price=str(exec_price),
+                open_sig_df=open_df.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+                close_sig_df=close_df_exec.reindex(
+                    index=w_eff.index, columns=w_eff.columns
+                ).astype(float),
+            )
+            atr_override = _lot_engine_stop_override_delta(
+                weights_before=w_before_stop,
+                weights_after=w_eff,
+                replacement_override=atr_replacement,
                 exec_price=str(exec_price),
                 open_sig_df=open_df.reindex(
                     index=w_eff.index, columns=w_eff.columns

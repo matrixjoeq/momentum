@@ -691,6 +691,8 @@
             <option value="vol_dev">成交量偏离(log)</option>
             <option value="macd_v_dif">MACD-V（DIF）</option>
             <option value="macd_v_dea">MACD-V（DEA）</option>
+            <option value="macd_v_macd">MACD-V（|MACD|=|2*(DIF-DEA)|）</option>
+            <option value="macd_abs">标准MACD（|MACD|, 12/26/9）</option>
           </select>
         </div>
         <div>
@@ -16873,7 +16875,11 @@
                                         ? "MACD-V（DIF）"
                                         : t === "macd_v_dea"
                                           ? "MACD-V（DEA）"
-                                          : "成交量偏离(log)";
+                                          : t === "macd_v_macd"
+                                            ? "MACD-V（|MACD|=|2*(DIF-DEA)|）"
+                                            : t === "macd_abs"
+                                              ? "标准MACD（|MACD|, 12/26/9）"
+                                              : "成交量偏离(log)";
 
         // cache per-code distributions/baseline payloads
         window.__distDistributionsByCode =
@@ -18455,6 +18461,7 @@
           if (
             type === "macd_v_dif" ||
             type === "macd_v_dea" ||
+            type === "macd_v_macd" ||
             type === "bias_v"
           ) {
             const ema = (arr, span, minPeriods = span) => {
@@ -18582,7 +18589,46 @@
             });
             if (type === "macd_v_dif") return pack(dif);
             const dea = ema(dif, 20, 20);
-            return pack(dea);
+            if (type === "macd_v_dea") return pack(dea);
+            const absMacd = dif.map((v, i) => {
+              const d = Number(v);
+              const s = Number(dea[i]);
+              if (!Number.isFinite(d) || !Number.isFinite(s)) return NaN;
+              return Math.abs(2 * (d - s));
+            });
+            return pack(absMacd);
+          }
+          if (type === "macd_abs") {
+            const ema = (arr, span, minPeriods = span) => {
+              const out = new Array(arr.length).fill(NaN);
+              const alpha = 2 / (Number(span) + 1);
+              let y = NaN;
+              let valid = 0;
+              for (let i = 0; i < arr.length; i++) {
+                const v = Number(arr[i]);
+                if (!Number.isFinite(v)) continue;
+                valid += 1;
+                y = Number.isFinite(y) ? alpha * v + (1 - alpha) * y : v;
+                if (valid >= Number(minPeriods)) out[i] = y;
+              }
+              return out;
+            };
+            const ema12 = ema(periodClose, 12, 12);
+            const ema26 = ema(periodClose, 26, 26);
+            const dif = periodClose.map((_, i) => {
+              const a = Number(ema12[i]);
+              const b = Number(ema26[i]);
+              if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
+              return a - b;
+            });
+            const dea = ema(dif, 9, 9);
+            const absMacd = dif.map((v, i) => {
+              const d = Number(v);
+              const s = Number(dea[i]);
+              if (!Number.isFinite(d) || !Number.isFinite(s)) return NaN;
+              return Math.abs(2 * (d - s));
+            });
+            return pack(absMacd);
           }
           if (type === "return") return pack(periodRet);
           if (type === "efficiency_ratio") {
@@ -20784,7 +20830,7 @@
         // Render function
         const updateDisplay = () => {
           const code = codeSelect.value;
-          const type = typeSelect.value; // "return" | "volatility" | "bias" | "bias_v" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev" | "macd_v_dif" | "macd_v_dea"
+          const type = typeSelect.value; // "return" | "volatility" | "bias" | "bias_v" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev" | "macd_v_dif" | "macd_v_dea" | "macd_v_macd" | "macd_abs"
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
 
           if (!code || !distByCode[code]) {
