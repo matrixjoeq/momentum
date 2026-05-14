@@ -3215,7 +3215,7 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "macd_fast": int(getattr(inp, "macd_fast", 12) or 12),
         "macd_slow": int(getattr(inp, "macd_slow", 26) or 26),
         "macd_signal": int(getattr(inp, "macd_signal", 9) or 9),
-        "macd_v_atr_window": int(getattr(inp, "macd_v_atr_window", 14) or 14),
+        "macd_v_atr_window": int(getattr(inp, "macd_v_atr_window", 26) or 26),
         "macd_v_scale": float(getattr(inp, "macd_v_scale", 1.0) or 1.0),
         "random_hold_days": int(getattr(inp, "random_hold_days", 20) or 20),
         "random_seed": (
@@ -5331,7 +5331,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             int(getattr(inp, "donchian_entry", 20) or 20),
             int(getattr(inp, "mom_lookback", 252) or 252),
             int(getattr(inp, "macd_slow", 26) or 26),
-            int(getattr(inp, "macd_v_atr_window", 14) or 14),
+            int(getattr(inp, "macd_v_atr_window", 26) or 26),
             20,
         )
         + 60

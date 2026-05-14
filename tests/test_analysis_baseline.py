@@ -157,12 +157,24 @@ def test_compute_baseline_includes_macd_v_distributions(session_factory):
     pdist = out["period_distributions"][code]
     assert "daily_macd_v_dif" in pdist
     assert "daily_macd_v_dea" in pdist
+    assert "daily_macd_v_h" in pdist
+    assert "daily_macd_v_absh" in pdist
+    assert "daily_macd_abs" in pdist
     dif = pdist["daily_macd_v_dif"]
     dea = pdist["daily_macd_v_dea"]
+    h = pdist["daily_macd_v_h"]
+    absh = pdist["daily_macd_v_absh"]
+    macd_abs = pdist["daily_macd_abs"]
     assert dif["count"] > 0
     assert dea["count"] > 0
+    assert h["count"] > 0
+    assert absh["count"] > 0
+    assert macd_abs["count"] > 0
     assert dif["current_date"] == dates[-1].isoformat()
     assert dea["current_date"] == dates[-1].isoformat()
+    assert h["current_date"] == dates[-1].isoformat()
+    assert absh["current_date"] == dates[-1].isoformat()
+    assert macd_abs["current_date"] == dates[-1].isoformat()
 
     idx = pd.to_datetime(dates)
     close_s = pd.Series(closes, index=idx, dtype=float)
@@ -181,10 +193,21 @@ def test_compute_baseline_includes_macd_v_distributions(session_factory):
     ema12 = close_s.ewm(span=12, adjust=False, min_periods=12).mean()
     ema26 = close_s.ewm(span=26, adjust=False, min_periods=26).mean()
     dif_s = ((ema12 - ema26) / atr26.replace(0.0, pd.NA)).dropna()
-    dea_s = dif_s.ewm(span=20, adjust=False, min_periods=20).mean().dropna()
+    dea_s = dif_s.ewm(span=9, adjust=False, min_periods=9).mean().dropna()
     dif_s = dif_s.reindex(dea_s.index).dropna()
+    h_s = 2.0 * (dif_s - dea_s)
+    absh_s = h_s.abs()
+    std_dif_s = (ema12 - ema26).dropna()
+    std_dea_s = std_dif_s.ewm(span=9, adjust=False, min_periods=9).mean().dropna()
+    std_dif_s = std_dif_s.reindex(std_dea_s.index).dropna()
+    std_macd_abs_s = (2.0 * (std_dif_s - std_dea_s)).abs()
     assert dif["current"] == pytest.approx(float(dif_s.iloc[-1]), rel=1e-12)
     assert dea["current"] == pytest.approx(float(dea_s.iloc[-1]), rel=1e-12)
+    assert h["current"] == pytest.approx(float(h_s.iloc[-1]), rel=1e-12)
+    assert absh["current"] == pytest.approx(float(absh_s.iloc[-1]), rel=1e-12)
+    assert macd_abs["current"] == pytest.approx(
+        float(std_macd_abs_s.iloc[-1]), rel=1e-12
+    )
 
 
 def test_compute_baseline_includes_bias_v_distribution(session_factory):

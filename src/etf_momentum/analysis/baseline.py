@@ -1110,9 +1110,15 @@ def _compute_periodic_returns_and_volatility(
     - BIAS-V distributions (by frequency), where
         BIAS-V_t = (close_t - MA20(close)_t) / ATR(20)_t
       This standardizes MA20 deviation by ATR20 to support cross-asset comparability.
-    - MACD-V distributions (DIF/DEA, by frequency), where
+    - MACD-V distributions (DIF/DEA/H/|H|, by frequency), where
         DIF_t = (EMA(close, 12) - EMA(close, 26)) / ATR(26)
-        DEA_t = EMA(DIF, 20)
+        DEA_t = EMA(DIF, 9)
+        H_t = 2 * (DIF_t - DEA_t)
+        |H|_t = abs(H_t)
+    - Standard MACD absolute histogram distributions (by frequency), where
+        DIF_t = EMA(close, 12) - EMA(close, 26)
+        DEA_t = EMA(DIF, 9)
+        |MACD|_t = abs(2 * (DIF_t - DEA_t))
 
     Also supports (when `daily_volume` or `daily_amount` is provided):
     - "Activity" distributions (sum within period): use volume if available, otherwise fallback to amount.
@@ -1696,7 +1702,7 @@ def _compute_periodic_returns_and_volatility(
                     }
 
                 # MACD-V:
-                # DIF = (EMA(close,12)-EMA(close,26))/ATR(26), DEA = EMA(DIF,20)
+                # DIF = (EMA(close,12)-EMA(close,26))/ATR(26), DEA = EMA(DIF,9)
                 # ATR uses classic True Range with high/low/prev_close; if high/low is
                 # unavailable, fallback to close-based range.
                 hi_raw = (
@@ -1759,7 +1765,7 @@ def _compute_periodic_returns_and_volatility(
                     if dif.empty:
                         return
                     dea = (
-                        dif.ewm(span=20, adjust=False, min_periods=20)
+                        dif.ewm(span=9, adjust=False, min_periods=9)
                         .mean()
                         .replace([np.inf, -np.inf], np.nan)
                         .dropna()
@@ -1797,6 +1803,78 @@ def _compute_periodic_returns_and_volatility(
                         .isoformat(),
                     }
 
+                    h = (2.0 * (dif - dea)).replace([np.inf, -np.inf], np.nan).dropna()
+                    h_abs = h.abs()
+                    if h.empty or h_abs.empty:
+                        return
+                    h_vals = h.to_numpy(dtype=float)
+                    h_abs_vals = h_abs.to_numpy(dtype=float)
+                    code_result[f"{kind}_macd_v_h"] = {
+                        "hist": _histogram_from_samples(h_vals),
+                        "quantiles": _quantiles_from_samples(h_vals),
+                        "mean": float(np.mean(h_vals)),
+                        "std": float(np.std(h_vals, ddof=1))
+                        if len(h_vals) >= 2
+                        else float("nan"),
+                        "count": int(len(h_vals)),
+                        "current": float(h.iloc[-1]),
+                        "current_date": pd.to_datetime(h.index[-1]).date().isoformat(),
+                    }
+                    code_result[f"{kind}_macd_v_absh"] = {
+                        "hist": _histogram_from_samples(h_abs_vals),
+                        "quantiles": _quantiles_from_samples(h_abs_vals),
+                        "mean": float(np.mean(h_abs_vals)),
+                        "std": float(np.std(h_abs_vals, ddof=1))
+                        if len(h_abs_vals) >= 2
+                        else float("nan"),
+                        "count": int(len(h_abs_vals)),
+                        "current": float(h_abs.iloc[-1]),
+                        "current_date": pd.to_datetime(h_abs.index[-1])
+                        .date()
+                        .isoformat(),
+                    }
+
+                def _add_macd_abs(kind: str, close_s: pd.Series) -> None:
+                    c = (
+                        pd.to_numeric(close_s, errors="coerce")
+                        .astype(float)
+                        .replace([np.inf, -np.inf], np.nan)
+                        .dropna()
+                    )
+                    if c.empty:
+                        return
+                    ema12 = c.ewm(span=12, adjust=False, min_periods=12).mean()
+                    ema26 = c.ewm(span=26, adjust=False, min_periods=26).mean()
+                    dif = (ema12 - ema26).replace([np.inf, -np.inf], np.nan).dropna()
+                    if dif.empty:
+                        return
+                    dea = (
+                        dif.ewm(span=9, adjust=False, min_periods=9)
+                        .mean()
+                        .replace([np.inf, -np.inf], np.nan)
+                        .dropna()
+                    )
+                    dif = dif.reindex(dea.index).dropna()
+                    if dif.empty or dea.empty:
+                        return
+                    abs_macd = (2.0 * (dif - dea)).abs()
+                    if abs_macd.empty:
+                        return
+                    vals = abs_macd.to_numpy(dtype=float)
+                    code_result[f"{kind}_macd_abs"] = {
+                        "hist": _histogram_from_samples(vals),
+                        "quantiles": _quantiles_from_samples(vals),
+                        "mean": float(np.mean(vals)),
+                        "std": float(np.std(vals, ddof=1))
+                        if len(vals) >= 2
+                        else float("nan"),
+                        "count": int(len(vals)),
+                        "current": float(abs_macd.iloc[-1]),
+                        "current_date": pd.to_datetime(abs_macd.index[-1])
+                        .date()
+                        .isoformat(),
+                    }
+
                 hi_d = hi_raw
                 lo_d = lo_raw
                 hi_w = hi_raw.resample("W-FRI").max().dropna()
@@ -1813,6 +1891,11 @@ def _compute_periodic_returns_and_volatility(
                 _add_macd_v("monthly", px_m, hi_m, lo_m)
                 _add_macd_v("quarterly", px_q, hi_q, lo_q)
                 _add_macd_v("yearly", px_y, hi_y, lo_y)
+                _add_macd_abs("daily", px_d)
+                _add_macd_abs("weekly", px_w)
+                _add_macd_abs("monthly", px_m)
+                _add_macd_abs("quarterly", px_q)
+                _add_macd_abs("yearly", px_y)
                 _add_bias_v("daily", px_d, hi_d, lo_d)
                 _add_bias_v("weekly", px_w, hi_w, lo_w)
                 _add_bias_v("monthly", px_m, hi_m, lo_m)
