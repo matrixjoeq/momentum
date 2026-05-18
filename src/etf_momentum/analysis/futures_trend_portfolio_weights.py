@@ -45,33 +45,53 @@ def build_ma_panels(
     common_idx: pd.DatetimeIndex,
     fast_ma: int,
     slow_ma: int,
+    trend_strategy: str = "ma_cross",
     ma_type: str = "sma",
     trade_direction: str = "long_only",
+    entry_filter_enabled: bool = False,
     long_entry_filter_ma: int = 200,
     short_entry_filter_ma: int = 200,
+    kama_er_window: int = 10,
+    kama_fast_window: int = 2,
+    kama_slow_window: int = 30,
+    kama_std_window: int = 20,
+    kama_std_coef: float = 1.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (score_df fast-slow, sig_direction_df signed MA regime).
 
-    ``sig_df`` values: **+1** long regime, **-1** short regime, **0** flat (ties).
-    ``trade_direction`` maps regimes to allowed sides:
+    ``sig_df`` values: **+1** long regime, **-1** short regime, **0** flat.
+    ``trade_direction`` maps regimes to allowed sides for both strategies:
 
     - ``long_only``: +1 when fast > slow, else 0
     - ``short_only``: -1 when fast < slow, else 0
     - ``both``: sign(fast - slow) as +1 / -1 / 0
 
-    Entry filter is checked only on the MA trigger day:
+    Supported strategies:
+    - ``ma_cross``: trigger on fast/slow crossovers.
+    - ``ma_filter``: trigger on close crossing KAMA hysteresis bands
+      (upper=KAMA+coef*std(KAMA), lower=KAMA-coef*std(KAMA)).
+
+    Universal entry filter (independent from signal family) is optional and checked
+    only on the trigger day when enabled:
     - long trigger requires ``close > MA(long_entry_filter_ma)``
     - short trigger requires ``close < MA(short_entry_filter_ma)``
-    - MA type is shared with ``ma_type`` (sma|ema|wma).
+    - MA type is shared with ``ma_type`` (sma|ema|wma|kama).
     """
     cols = sorted(exec_by_code.keys())
     score_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
     sig_df = pd.DataFrame(index=common_idx, columns=cols, dtype=float)
+    strat = str(trend_strategy or "ma_cross").strip().lower()
     f, s = int(fast_ma), int(slow_ma)
     mt = str(ma_type or "sma").strip().lower()
     td = str(trade_direction or "long_only").strip().lower()
+    ef_on = bool(entry_filter_enabled)
     long_w = max(2, int(long_entry_filter_ma))
     short_w = max(2, int(short_entry_filter_ma))
+    k_er = max(2, int(kama_er_window))
+    k_fast = max(1, int(kama_fast_window))
+    k_slow = max(2, int(kama_slow_window))
+    k_std_w = max(2, int(kama_std_window))
+    k_std_c = max(0.0, float(kama_std_coef))
     for code in cols:
         df = exec_by_code[str(code)].reindex(common_idx)
         close = (
@@ -79,29 +99,94 @@ def build_ma_panels(
             if "SignalClose" in df.columns
             else df["Close"].astype(float)
         )
-        fast = _moving_average(close, window=f, ma_type=mt)
-        slow = _moving_average(close, window=s, ma_type=mt)
-        long_filter = _moving_average(close, window=long_w, ma_type=mt)
-        short_filter = _moving_average(close, window=short_w, ma_type=mt)
-        score_df[code] = (fast - slow).astype(float)
-        diff = (fast.astype(float) - slow.astype(float)).astype(float)
-        prev_diff = diff.shift(1)
-        trigger_long = (diff > 0.0) & ((prev_diff <= 0.0) | prev_diff.isna())
-        trigger_short = (diff < 0.0) & ((prev_diff >= 0.0) | prev_diff.isna())
-        pass_long = (close > long_filter).fillna(False)
-        pass_short = (close < short_filter).fillna(False)
+        long_filter = _moving_average(
+            close,
+            window=long_w,
+            ma_type=mt,
+            kama_er_window=k_er,
+            kama_fast_window=k_fast,
+            kama_slow_window=k_slow,
+        )
+        short_filter = _moving_average(
+            close,
+            window=short_w,
+            ma_type=mt,
+            kama_er_window=k_er,
+            kama_fast_window=k_fast,
+            kama_slow_window=k_slow,
+        )
+        trigger_long: pd.Series
+        trigger_short: pd.Series
+        if strat == "ma_filter":
+            kama = _moving_average(
+                close,
+                window=max(2, s),
+                ma_type="kama",
+                kama_er_window=k_er,
+                kama_fast_window=k_fast,
+                kama_slow_window=k_slow,
+            ).astype(float)
+            kstd = (
+                kama.rolling(window=k_std_w, min_periods=max(2, k_std_w // 2))
+                .std(ddof=0)
+                .fillna(0.0)
+                .astype(float)
+            )
+            upper = (kama + k_std_c * kstd).astype(float)
+            lower = (kama - k_std_c * kstd).astype(float)
+            prev_close = close.shift(1)
+            prev_upper = upper.shift(1)
+            prev_lower = lower.shift(1)
+            trigger_long = (close > upper) & (
+                (prev_close <= prev_upper) | prev_close.isna() | prev_upper.isna()
+            )
+            trigger_short = (close < lower) & (
+                (prev_close >= prev_lower) | prev_close.isna() | prev_lower.isna()
+            )
+            score_df[code] = (close / kama - 1.0).replace([np.inf, -np.inf], np.nan)
+        else:
+            fast = _moving_average(close, window=f, ma_type=mt)
+            slow = _moving_average(close, window=s, ma_type=mt)
+            score_df[code] = (fast - slow).astype(float)
+            diff = (fast.astype(float) - slow.astype(float)).astype(float)
+            prev_diff = diff.shift(1)
+            trigger_long = (diff > 0.0) & ((prev_diff <= 0.0) | prev_diff.isna())
+            trigger_short = (diff < 0.0) & ((prev_diff >= 0.0) | prev_diff.isna())
+        pass_long = (
+            (close > long_filter).fillna(False)
+            if ef_on
+            else pd.Series(True, index=common_idx, dtype=bool)
+        )
+        pass_short = (
+            (close < short_filter).fillna(False)
+            if ef_on
+            else pd.Series(True, index=common_idx, dtype=bool)
+        )
 
         state = 0.0
         out: list[float] = []
         for d in common_idx:
-            dv = float(diff.loc[d]) if pd.notna(diff.loc[d]) else np.nan
-            long_trig = bool(trigger_long.loc[d]) if pd.notna(diff.loc[d]) else False
-            short_trig = bool(trigger_short.loc[d]) if pd.notna(diff.loc[d]) else False
+            cv = float(close.loc[d]) if pd.notna(close.loc[d]) else np.nan
+            if not np.isfinite(cv):
+                # In dynamic-universe mode, missing bars must flatten the symbol to avoid
+                # carrying stale regime state across non-trading / pre-listing dates.
+                state = 0.0
+                out.append(float(state))
+                continue
+            dv = (
+                float(score_df.loc[d, code])
+                if pd.notna(score_df.loc[d, code])
+                else np.nan
+            )
+            long_trig = bool(trigger_long.loc[d]) if pd.notna(close.loc[d]) else False
+            short_trig = bool(trigger_short.loc[d]) if pd.notna(close.loc[d]) else False
             long_ok = bool(pass_long.loc[d])
             short_ok = bool(pass_short.loc[d])
 
             if td == "short_only":
-                if np.isfinite(dv) and dv > 0.0:
+                if strat == "ma_cross" and np.isfinite(dv) and dv > 0.0:
+                    state = 0.0
+                elif strat == "ma_filter" and long_trig:
                     state = 0.0
                 if short_trig:
                     state = -1.0 if short_ok else 0.0
@@ -111,7 +196,9 @@ def build_ma_panels(
                 elif short_trig:
                     state = -1.0 if short_ok else 0.0
             else:
-                if np.isfinite(dv) and dv < 0.0:
+                if strat == "ma_cross" and np.isfinite(dv) and dv < 0.0:
+                    state = 0.0
+                elif strat == "ma_filter" and short_trig:
                     state = 0.0
                 if long_trig:
                     state = 1.0 if long_ok else 0.0

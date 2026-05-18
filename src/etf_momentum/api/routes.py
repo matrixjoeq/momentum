@@ -7987,6 +7987,12 @@ def futures_research_trend_backtest_api(
         fast_ma=int(payload.fast_ma),
         slow_ma=int(payload.slow_ma),
         ma_type=str(getattr(payload, "ma_type", "sma") or "sma"),
+        kama_er_window=int(getattr(payload, "kama_er_window", 10) or 10),
+        kama_fast_window=int(getattr(payload, "kama_fast_window", 2) or 2),
+        kama_slow_window=int(getattr(payload, "kama_slow_window", 30) or 30),
+        kama_std_window=int(getattr(payload, "kama_std_window", 20) or 20),
+        kama_std_coef=float(getattr(payload, "kama_std_coef", 1.0) or 1.0),
+        entry_filter_enabled=bool(getattr(payload, "entry_filter_enabled", False)),
         long_entry_filter_ma=int(getattr(payload, "long_entry_filter_ma", 200) or 200),
         short_entry_filter_ma=int(
             getattr(payload, "short_entry_filter_ma", 200) or 200

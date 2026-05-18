@@ -659,39 +659,17 @@
           />
         </div>
       </div>
-      <div style="margin: 12px 0 6px; font-size: 13px; font-weight: 700">
-        策略信号
-      </div>
-      <div class="row">
+      <div
+        class="row"
+        id="trendUniversalEntryFilterRow"
+        style="flex-wrap: wrap; display: none; margin-top: 8px"
+      >
         <div>
-          <label
-            >趋势策略
-            <span
-              class="muted"
-              style="font-weight: normal"
-              title="与 ETF 趋势策略回测中「均线交叉」一致；快慢线与均线类型决定信号"
-              >?</span
-            ></label
-          >
-          <select id="trendStrategy">
-            <option value="ma_cross" selected>均线交叉</option>
+          <label>通用入场过滤</label>
+          <select id="trendEntryFilterEnabled" style="min-width: 140px">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
           </select>
-        </div>
-        <div>
-          <label>均线类型</label>
-          <select id="trendMaType" title="与 ETF ma_cross：SMA / EMA / WMA">
-            <option value="sma" selected>SMA</option>
-            <option value="ema">EMA</option>
-            <option value="wma">WMA</option>
-          </select>
-        </div>
-        <div>
-          <label>快线周期</label>
-          <input id="trendFastMa" type="number" min="2" step="1" value="20" />
-        </div>
-        <div>
-          <label>慢线周期</label>
-          <input id="trendSlowMa" type="number" min="3" step="1" value="60" />
         </div>
         <div>
           <label>多头入场过滤均线</label>
@@ -713,9 +691,97 @@
             value="200"
           />
         </div>
+      </div>
+      <div style="margin: 12px 0 6px; font-size: 13px; font-weight: 700">
+        策略信号
+      </div>
+      <div class="row">
         <div>
           <label
-            title="仅多头：快&gt;慢持多；仅空头：快&lt;慢持空；多空双向：快&gt;慢多、快&lt;慢空。均线交叉策略下与快慢线多空含义一致。"
+            >趋势策略
+            <span
+              class="muted"
+              style="font-weight: normal"
+              title="与 ETF 趋势策略回测中「均线交叉」一致；快慢线与均线类型决定信号"
+              >?</span
+            ></label
+          >
+          <select id="trendStrategy">
+            <option value="ma_filter">均线过滤</option>
+            <option value="ma_cross" selected>均线交叉</option>
+          </select>
+        </div>
+        <div>
+          <label>均线类型</label>
+          <select id="trendMaType" title="与 ETF ma_cross：SMA / EMA / WMA">
+            <option value="sma" selected>SMA</option>
+            <option value="ema">EMA</option>
+            <option value="wma">WMA</option>
+            <option value="kama">KAMA</option>
+          </select>
+        </div>
+        <div>
+          <label>快线周期</label>
+          <input id="trendFastMa" type="number" min="2" step="1" value="20" />
+        </div>
+        <div>
+          <label>慢线周期</label>
+          <input id="trendSlowMa" type="number" min="3" step="1" value="60" />
+        </div>
+        <div>
+          <label>KAMA ER窗口</label>
+          <input
+            id="trendKamaErWindow"
+            type="number"
+            min="2"
+            step="1"
+            value="10"
+          />
+        </div>
+        <div>
+          <label>KAMA 快线窗口</label>
+          <input
+            id="trendKamaFastWindow"
+            type="number"
+            min="1"
+            step="1"
+            value="2"
+          />
+        </div>
+        <div>
+          <label>KAMA 慢线窗口</label>
+          <input
+            id="trendKamaSlowWindow"
+            type="number"
+            min="2"
+            step="1"
+            value="30"
+          />
+        </div>
+        <div>
+          <label>KAMA 标准差窗口</label>
+          <input
+            id="trendKamaStdWindow"
+            type="number"
+            min="2"
+            step="1"
+            value="20"
+          />
+        </div>
+        <div>
+          <label>KAMA 标准差系数(0~3)</label>
+          <input
+            id="trendKamaStdCoef"
+            type="number"
+            min="0"
+            max="3"
+            step="0.1"
+            value="1.0"
+          />
+        </div>
+        <div>
+          <label
+            title="仅多头：触发多头后持多并在空头触发时平仓；仅空头：触发空头后持空并在多头触发时平仓；多空双向：多空触发互相反手。均线交叉与均线过滤均适用。"
             >交易方向</label
           >
           <select id="trendTradeDirection">
@@ -1111,11 +1177,19 @@
           atrStopWin: String($("trendAtrStopWin")?.value ?? "14"),
           atrStopN: String($("trendAtrStopN")?.value ?? "2.0"),
           atrStopM: String($("trendAtrStopM")?.value ?? "0.5"),
+          entryFilterEnabled: String(
+            $("trendEntryFilterEnabled")?.value || "false",
+          ),
           execPrice: String($("trendExecPrice")?.value || "close"),
           trendStrategy: String($("trendStrategy")?.value || "ma_cross"),
           maType: String($("trendMaType")?.value || "sma"),
           fastMa: String($("trendFastMa")?.value ?? "20"),
           slowMa: String($("trendSlowMa")?.value ?? "60"),
+          kamaErWindow: String($("trendKamaErWindow")?.value ?? "10"),
+          kamaFastWindow: String($("trendKamaFastWindow")?.value ?? "2"),
+          kamaSlowWindow: String($("trendKamaSlowWindow")?.value ?? "30"),
+          kamaStdWindow: String($("trendKamaStdWindow")?.value ?? "20"),
+          kamaStdCoef: String($("trendKamaStdCoef")?.value ?? "1.0"),
           longEntryFilterMa: String(
             $("trendLongEntryFilterMa")?.value ?? "200",
           ),
@@ -1213,6 +1287,11 @@
         setNum("trendAtrStopWin", p.atrStopWin, "14");
         setNum("trendAtrStopN", p.atrStopN, "2.0");
         setNum("trendAtrStopM", p.atrStopM, "0.5");
+        const efe = String(p.entryFilterEnabled || "");
+        if (efe === "true" || efe === "false") {
+          const el = $("trendEntryFilterEnabled");
+          if (el) el.value = efe;
+        }
         if (p.execPrice === "close" || p.execPrice === "open") {
           const el = $("trendExecPrice");
           if (el) el.value = p.execPrice;
@@ -1224,6 +1303,11 @@
         setNum("trendRbMaxLev", p.rbMaxLev, "2");
         setNum("trendFastMa", p.fastMa, "20");
         setNum("trendSlowMa", p.slowMa, "60");
+        setNum("trendKamaErWindow", p.kamaErWindow, "10");
+        setNum("trendKamaFastWindow", p.kamaFastWindow, "2");
+        setNum("trendKamaSlowWindow", p.kamaSlowWindow, "30");
+        setNum("trendKamaStdWindow", p.kamaStdWindow, "20");
+        setNum("trendKamaStdCoef", p.kamaStdCoef, "1.0");
         setNum("trendLongEntryFilterMa", p.longEntryFilterMa, "200");
         setNum("trendShortEntryFilterMa", p.shortEntryFilterMa, "200");
         setSelectIfOptionExists("trendTradeDirection", p.tradeDirection);
@@ -2245,6 +2329,7 @@
         refreshSymbolOhlcOptions();
         loadTrendParams();
         syncTrendSizingVisibility();
+        syncTrendStrategyVisibility();
       }
 
       async function loadState() {
@@ -2769,9 +2854,54 @@
         if (mrow) mrow.style.display = portfolio ? "" : "none";
         if (mex) mex.style.display = portfolio ? "" : "none";
         const uatr = $("trendUniversalAtrStopRow");
-        if (uatr) uatr.style.display = portfolio ? "" : "none";
+        if (uatr) uatr.style.display = "";
         const uex = $("trendUniversalAtrExplain");
-        if (uex) uex.style.display = portfolio ? "" : "none";
+        if (uex) uex.style.display = "";
+        const uef = $("trendUniversalEntryFilterRow");
+        if (uef) {
+          uef.style.display = "";
+          const enabled =
+            String($("trendEntryFilterEnabled")?.value || "false") === "true";
+          const controls = uef.querySelectorAll(
+            "#trendLongEntryFilterMa, #trendShortEntryFilterMa",
+          );
+          controls.forEach((el) => {
+            el.disabled = !enabled;
+          });
+        }
+      }
+
+      function syncTrendStrategyVisibility() {
+        const strategy = String(
+          $("trendStrategy")?.value || "ma_cross",
+        ).toLowerCase();
+        const isFilter = strategy === "ma_filter";
+        const maTypeEl = $("trendMaType");
+        if (maTypeEl) {
+          if (isFilter) {
+            maTypeEl.value = "kama";
+            maTypeEl.disabled = true;
+          } else {
+            if (String(maTypeEl.value || "") === "kama") maTypeEl.value = "sma";
+            maTypeEl.disabled = false;
+          }
+        }
+        const crossIds = ["trendFastMa", "trendSlowMa"];
+        crossIds.forEach((id) => {
+          const el = $(id);
+          if (el) el.disabled = isFilter;
+        });
+        const kamaIds = [
+          "trendKamaErWindow",
+          "trendKamaFastWindow",
+          "trendKamaSlowWindow",
+          "trendKamaStdWindow",
+          "trendKamaStdCoef",
+        ];
+        kamaIds.forEach((id) => {
+          const el = $(id);
+          if (el) el.disabled = !isFilter;
+        });
       }
 
       function corrColor(v) {
@@ -3168,8 +3298,13 @@
               ? "仅配置"
               : "关";
         const ts = String(m.trend_strategy || "ma_cross");
-        const stratLabel = ts === "ma_cross" ? "均线交叉" : ts;
+        const stratLabel = ts === "ma_filter" ? "均线过滤" : "均线交叉";
         const maLbl = String(m.ma_type || "sma").toUpperCase();
+        const stratDetail =
+          ts === "ma_filter"
+            ? `${stratLabel}(${maLbl} ER${Number(m.kama_er_window || 0)}/快${Number(m.kama_fast_window || 0)}/慢${Number(m.kama_slow_window || 0)} 标准差${Number(m.kama_std_window || 0)}×${Number(m.kama_std_coef || 0)})`
+            : `${stratLabel}(${maLbl} ${Number(m.fast_ma || 0)}/${Number(m.slow_ma || 0)})`;
+        const entryFilterOn = m.entry_filter_enabled === true;
         const longFilterMa = Number(m.long_entry_filter_ma || 0);
         const shortFilterMa = Number(m.short_entry_filter_ma || 0);
         const acWan =
@@ -3192,7 +3327,7 @@
         const lotM =
           lotMeta && lotMeta.engine === "lot_account" ? "离散手数" : "-";
         $("trendMeta").textContent =
-          `分组=${m.group_name || "-"} | 策略=${stratLabel}(${maLbl} ${Number(m.fast_ma || 0)}/${Number(m.slow_ma || 0)}) | 入场过滤MA(多/空)=${longFilterMa}/${shortFilterMa} | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 资金=${acWan}×使用${psp} | 预留=${rsv} | 回测保证金率=${bmr} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 引擎=${lotM} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+          `分组=${m.group_name || "-"} | 策略=${stratDetail} | 通用入场过滤=${entryFilterOn ? "开" : "关"}(多/空MA=${longFilterMa}/${shortFilterMa}) | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 资金=${acWan}×使用${psp} | 预留=${rsv} | 回测保证金率=${bmr} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 引擎=${lotM} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
         const s = out.summary || {};
         $("trendSummaryWrap").innerHTML =
           `<table class="corr"><thead><tr><th>策略累计收益</th><th>基准累计收益</th><th>超额累计收益</th></tr></thead>` +
@@ -3343,6 +3478,55 @@
         if (slow <= fast) slow = fast + 1;
         $("trendFastMa").value = String(fast);
         $("trendSlowMa").value = String(slow);
+        const strategy = String($("trendStrategy").value || "ma_cross")
+          .trim()
+          .toLowerCase();
+        let maType = String($("trendMaType").value || "sma")
+          .trim()
+          .toLowerCase();
+        if (!["ma_cross", "ma_filter"].includes(strategy)) {
+          return setMsg("趋势策略仅支持 均线交叉 / 均线过滤");
+        }
+        if (strategy === "ma_filter") {
+          maType = "kama";
+          $("trendMaType").value = "kama";
+        } else if (!["sma", "ema", "wma"].includes(maType)) {
+          return setMsg("均线交叉仅支持 SMA / EMA / WMA");
+        }
+        let kamaErWindow = Number($("trendKamaErWindow").value);
+        if (!Number.isFinite(kamaErWindow) || kamaErWindow < 2)
+          kamaErWindow = 10;
+        kamaErWindow = Math.floor(kamaErWindow);
+        $("trendKamaErWindow").value = String(kamaErWindow);
+        let kamaFastWindow = Number($("trendKamaFastWindow").value);
+        if (!Number.isFinite(kamaFastWindow) || kamaFastWindow < 1)
+          kamaFastWindow = 2;
+        kamaFastWindow = Math.floor(kamaFastWindow);
+        $("trendKamaFastWindow").value = String(kamaFastWindow);
+        let kamaSlowWindow = Number($("trendKamaSlowWindow").value);
+        if (!Number.isFinite(kamaSlowWindow) || kamaSlowWindow < 2)
+          kamaSlowWindow = 30;
+        kamaSlowWindow = Math.floor(kamaSlowWindow);
+        $("trendKamaSlowWindow").value = String(kamaSlowWindow);
+        if (kamaFastWindow >= kamaSlowWindow) {
+          return setMsg("KAMA参数要求：快线窗口需小于慢线窗口");
+        }
+        let kamaStdWindow = Number($("trendKamaStdWindow").value);
+        if (!Number.isFinite(kamaStdWindow) || kamaStdWindow < 2)
+          kamaStdWindow = 20;
+        kamaStdWindow = Math.floor(kamaStdWindow);
+        $("trendKamaStdWindow").value = String(kamaStdWindow);
+        let kamaStdCoef = Number($("trendKamaStdCoef").value);
+        if (
+          !Number.isFinite(kamaStdCoef) ||
+          kamaStdCoef < 0.0 ||
+          kamaStdCoef > 3.0
+        ) {
+          kamaStdCoef = 1.0;
+        }
+        $("trendKamaStdCoef").value = String(kamaStdCoef);
+        const entryFilterEnabled =
+          String($("trendEntryFilterEnabled").value || "false") === "true";
         let longEntryFilterMa = Number($("trendLongEntryFilterMa").value);
         if (!Number.isFinite(longEntryFilterMa) || longEntryFilterMa < 2)
           longEntryFilterMa = 200;
@@ -3416,13 +3600,19 @@
         const payload = {
           range_key: corrRangeKey,
           exec_price: String($("trendExecPrice").value || "close"),
-          trend_strategy: String($("trendStrategy").value || "ma_cross"),
+          trend_strategy: strategy,
           trade_direction: String(
             $("trendTradeDirection").value || "long_only",
           ),
-          ma_type: String($("trendMaType").value || "sma"),
+          ma_type: maType,
           fast_ma: fast,
           slow_ma: slow,
+          kama_er_window: kamaErWindow,
+          kama_fast_window: kamaFastWindow,
+          kama_slow_window: kamaSlowWindow,
+          kama_std_window: kamaStdWindow,
+          kama_std_coef: kamaStdCoef,
+          entry_filter_enabled: entryFilterEnabled,
           long_entry_filter_ma: longEntryFilterMa,
           short_entry_filter_ma: shortEntryFilterMa,
           min_points: 120,
@@ -3709,9 +3899,13 @@
             t &&
             (t.id === "trendBacktestMode" ||
               t.id === "trendPositionSizing" ||
-              t.id === "trendMonthlyRbEnable")
+              t.id === "trendMonthlyRbEnable" ||
+              t.id === "trendEntryFilterEnabled")
           ) {
             syncTrendSizingVisibility();
+          }
+          if (t && t.id === "trendStrategy") {
+            syncTrendStrategyVisibility();
           }
         });
       }

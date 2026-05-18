@@ -442,7 +442,7 @@ class FuturesTrendBacktestRequest(BaseModel):
     exec_price: str = Field(default="close", description="open|close")
     trend_strategy: str = Field(
         default="ma_cross",
-        description="Trend signal family; currently only ma_cross (fast vs slow MA)",
+        description="Trend signal family: ma_cross | ma_filter",
     )
     trade_direction: str = Field(
         default="long_only",
@@ -451,21 +451,51 @@ class FuturesTrendBacktestRequest(BaseModel):
     )
     ma_type: str = Field(
         default="sma",
-        description="For ma_cross: sma|ema|wma (aligned with ETF trend ma_cross)",
+        description="ma_cross: sma|ema|wma; ma_filter: kama only",
     )
     fast_ma: int = Field(default=20, ge=2, le=500)
     slow_ma: int = Field(default=60, ge=3, le=800)
+    kama_er_window: int = Field(
+        default=10,
+        ge=2,
+        description="KAMA ER lookback window (ma_filter only)",
+    )
+    kama_fast_window: int = Field(
+        default=2,
+        ge=1,
+        description="KAMA fast smoothing window (ma_filter only)",
+    )
+    kama_slow_window: int = Field(
+        default=30,
+        ge=2,
+        description="KAMA slow smoothing window (ma_filter only; must be > fast)",
+    )
+    kama_std_window: int = Field(
+        default=20,
+        ge=2,
+        description="KAMA std window (ma_filter only)",
+    )
+    kama_std_coef: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=3.0,
+        description="KAMA std coefficient in [0,3] (ma_filter only)",
+    )
+    entry_filter_enabled: bool = Field(
+        default=False,
+        description="Universal entry filter switch (independent from trend_strategy)",
+    )
     long_entry_filter_ma: int = Field(
         default=200,
         ge=2,
         le=2000,
-        description="Long entry filter: trigger-day close must be above this MA window",
+        description="Universal long-entry filter MA window: trigger-day close must be above this MA",
     )
     short_entry_filter_ma: int = Field(
         default=200,
         ge=2,
         le=2000,
-        description="Short entry filter: trigger-day close must be below this MA window",
+        description="Universal short-entry filter MA window: trigger-day close must be below this MA",
     )
     position_size_pct: float = Field(default=1.0, gt=0.0, le=1.0)
     min_points: int = Field(default=120, ge=2, le=100000)

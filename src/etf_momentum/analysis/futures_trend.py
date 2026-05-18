@@ -794,6 +794,12 @@ def compute_futures_group_trend_backtest(
     fast_ma: int = 20,
     slow_ma: int = 60,
     ma_type: str = "sma",
+    kama_er_window: int = 10,
+    kama_fast_window: int = 2,
+    kama_slow_window: int = 30,
+    kama_std_window: int = 20,
+    kama_std_coef: float = 1.0,
+    entry_filter_enabled: bool = False,
     long_entry_filter_ma: int = 200,
     short_entry_filter_ma: int = 200,
     position_size_pct: float = 1.0,
@@ -827,16 +833,34 @@ def compute_futures_group_trend_backtest(
     codes = [str(c).strip().upper() for c in group.codes if str(c).strip()]
     if len(codes) == 0:
         return {"ok": False, "error": "empty_group", "meta": {"group_name": group.name}}
-    if int(fast_ma) < 2 or int(slow_ma) <= int(fast_ma):
-        return {"ok": False, "error": "invalid_ma_windows"}
     ts_raw = str(trend_strategy or "ma_cross").strip().lower()
-    if ts_raw != "ma_cross":
+    if ts_raw not in {"ma_cross", "ma_filter"}:
         return {"ok": False, "error": "unsupported_trend_strategy"}
+    if ts_raw == "ma_cross" and (int(fast_ma) < 2 or int(slow_ma) <= int(fast_ma)):
+        return {"ok": False, "error": "invalid_ma_windows"}
     mt_eff = str(ma_type or "sma").strip().lower()
-    if mt_eff not in {"sma", "ema", "wma"}:
-        return {"ok": False, "error": "invalid_ma_type"}
+    if ts_raw == "ma_cross":
+        if mt_eff not in {"sma", "ema", "wma"}:
+            return {"ok": False, "error": "invalid_ma_type"}
+    else:
+        if mt_eff != "kama":
+            return {"ok": False, "error": "ma_filter_requires_kama"}
+        if int(kama_er_window) < 2:
+            return {"ok": False, "error": "invalid_kama_er_window"}
+        if int(kama_fast_window) < 1:
+            return {"ok": False, "error": "invalid_kama_fast_window"}
+        if int(kama_slow_window) < 2:
+            return {"ok": False, "error": "invalid_kama_slow_window"}
+        if int(kama_fast_window) >= int(kama_slow_window):
+            return {"ok": False, "error": "invalid_kama_fast_slow_relation"}
+        if int(kama_std_window) < 2:
+            return {"ok": False, "error": "invalid_kama_std_window"}
+        k_std_coef = float(kama_std_coef)
+        if (not np.isfinite(k_std_coef)) or k_std_coef < 0.0 or k_std_coef > 3.0:
+            return {"ok": False, "error": "invalid_kama_std_coef"}
     if int(long_entry_filter_ma) < 2 or int(short_entry_filter_ma) < 2:
         return {"ok": False, "error": "invalid_entry_filter_ma_windows"}
+    ef_on = bool(entry_filter_enabled)
     if exec_price not in {"open", "close"}:
         return {"ok": False, "error": "invalid_exec_price"}
     if fee_side not in {"one_way", "two_way"}:
@@ -1005,13 +1029,32 @@ def compute_futures_group_trend_backtest(
             },
         }
 
-    common_idx: pd.DatetimeIndex | None = None
+    idx_list: list[pd.DatetimeIndex] = []
     for code in codes_run:
         if code not in exec_by_code:
             continue
-        ix = _coerce_trading_index(exec_by_code[code].index)
-        common_idx = ix if common_idx is None else common_idx.intersection(ix)
-    if common_idx is None or len(common_idx) < int(min_points):
+        idx_list.append(_coerce_trading_index(exec_by_code[code].index))
+    if not idx_list:
+        return {
+            "ok": False,
+            "error": "insufficient_data",
+            "meta": {
+                "group_name": group.name,
+                "start": start,
+                "end": end,
+                "errors": errors,
+            },
+        }
+
+    common_idx = idx_list[0]
+    for ix in idx_list[1:]:
+        common_idx = (
+            common_idx.union(ix)
+            if bool(dynamic_universe)
+            else common_idx.intersection(ix)
+        )
+
+    if len(common_idx) < int(min_points):
         return {
             "ok": False,
             "error": "insufficient_overlap",
@@ -1036,8 +1079,15 @@ def compute_futures_group_trend_backtest(
             common_idx=common_idx,
             fast_ma=int(fast_ma),
             slow_ma=int(slow_ma),
+            trend_strategy=ts_raw,
             ma_type=mt_eff,
             trade_direction=td_norm,
+            kama_er_window=int(kama_er_window),
+            kama_fast_window=int(kama_fast_window),
+            kama_slow_window=int(kama_slow_window),
+            kama_std_window=int(kama_std_window),
+            kama_std_coef=float(kama_std_coef),
+            entry_filter_enabled=ef_on,
             long_entry_filter_ma=int(long_entry_filter_ma),
             short_entry_filter_ma=int(short_entry_filter_ma),
         )
@@ -1121,8 +1171,15 @@ def compute_futures_group_trend_backtest(
             common_idx=common_idx,
             fast_ma=int(fast_ma),
             slow_ma=int(slow_ma),
+            trend_strategy=ts_raw,
             ma_type=mt_eff,
             trade_direction=td_norm,
+            kama_er_window=int(kama_er_window),
+            kama_fast_window=int(kama_fast_window),
+            kama_slow_window=int(kama_slow_window),
+            kama_std_window=int(kama_std_window),
+            kama_std_coef=float(kama_std_coef),
+            entry_filter_enabled=ef_on,
             long_entry_filter_ma=int(long_entry_filter_ma),
             short_entry_filter_ma=int(short_entry_filter_ma),
         )
@@ -1535,9 +1592,11 @@ def compute_futures_group_trend_backtest(
 
     bench_close_df = pd.DataFrame(bench_price_by_symbol).sort_index()
     bench_close_df.index = _coerce_trading_index(bench_close_df.index)
-    bench_close_df = bench_close_df.reindex(common_idx).ffill().bfill()
+    bench_close_df = bench_close_df.reindex(common_idx)
+    if not bool(dynamic_universe):
+        bench_close_df = bench_close_df.ffill().bfill()
     bench_ret = _combine_group_returns(
-        bench_close_df.pct_change(),
+        bench_close_df.pct_change(fill_method=None),
         dynamic_universe=bool(dynamic_universe),
     )
     bench_nav = (1.0 + bench_ret.fillna(0.0)).cumprod()
@@ -1575,6 +1634,12 @@ def compute_futures_group_trend_backtest(
             "ma_type": str(mt_eff),
             "fast_ma": int(fast_ma),
             "slow_ma": int(slow_ma),
+            "kama_er_window": int(kama_er_window),
+            "kama_fast_window": int(kama_fast_window),
+            "kama_slow_window": int(kama_slow_window),
+            "kama_std_window": int(kama_std_window),
+            "kama_std_coef": float(kama_std_coef),
+            "entry_filter_enabled": bool(ef_on),
             "long_entry_filter_ma": int(long_entry_filter_ma),
             "short_entry_filter_ma": int(short_entry_filter_ma),
             "position_size_pct": float(position_size_pct),

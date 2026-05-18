@@ -297,6 +297,7 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert out["meta"]["exec_price"] == "close"
     assert out["meta"]["trend_strategy"] == "ma_cross"
     assert out["meta"]["ma_type"] == "sma"
+    assert out["meta"]["entry_filter_enabled"] is False
     assert out["meta"]["long_entry_filter_ma"] == 200
     assert out["meta"]["short_entry_filter_ma"] == 200
     assert out["meta"]["benchmark_price_basis"] == "close"
@@ -361,6 +362,7 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
             "slippage_side": "two_way",
             "backtest_mode": "single",
             "single_code": "RB0",
+            "entry_filter_enabled": True,
             "long_entry_filter_ma": 150,
             "short_entry_filter_ma": 180,
         },
@@ -370,6 +372,7 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert one["ok"] is True
     assert one["meta"]["backtest_mode"] == "single"
     assert one["meta"]["single_code"] == "RB0"
+    assert one["meta"]["entry_filter_enabled"] is True
     assert one["meta"]["long_entry_filter_ma"] == 150
     assert one["meta"]["short_entry_filter_ma"] == 180
     assert one["meta"]["position_sizing"] is None
@@ -396,6 +399,34 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert out_open["ok"] is True
     assert out_open["meta"]["exec_price"] == "open"
     assert out_open["meta"]["benchmark_price_basis"] == "open"
+
+    resp_filter = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "trend_strategy": "ma_filter",
+            "ma_type": "kama",
+            "trade_direction": "both",
+            "kama_er_window": 10,
+            "kama_fast_window": 2,
+            "kama_slow_window": 30,
+            "kama_std_window": 20,
+            "kama_std_coef": 1.0,
+            "min_points": 2,
+        },
+    )
+    assert resp_filter.status_code == 200
+    filter_out = resp_filter.json()
+    assert filter_out["ok"] is True
+    assert filter_out["meta"]["trend_strategy"] == "ma_filter"
+    assert filter_out["meta"]["ma_type"] == "kama"
+    assert filter_out["meta"]["trade_direction"] == "both"
+    assert filter_out["meta"]["kama_er_window"] == 10
+    assert filter_out["meta"]["kama_fast_window"] == 2
+    assert filter_out["meta"]["kama_slow_window"] == 30
+    assert filter_out["meta"]["kama_std_window"] == 20
+    assert abs(float(filter_out["meta"]["kama_std_coef"]) - 1.0) < 1e-12
 
 
 def test_futures_trend_backtest_requires_synthetic_hfq(api_client: TestClient) -> None:
@@ -567,6 +598,22 @@ def test_futures_trend_backtest_rejects_invalid_semantics(
     assert bad_ts.status_code == 200
     assert bad_ts.json()["ok"] is False
     assert bad_ts.json()["error"] == "unsupported_trend_strategy"
+
+    bad_filter_ma = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "trend_strategy": "ma_filter",
+            "ma_type": "sma",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+        },
+    )
+    assert bad_filter_ma.status_code == 200
+    assert bad_filter_ma.json()["ok"] is False
+    assert bad_filter_ma.json()["error"] == "ma_filter_requires_kama"
 
 
 def test_futures_trend_backtest_risk_budget_accepts_both_direction(
