@@ -3,6 +3,8 @@ from __future__ import annotations
 # pylint: disable=broad-exception-caught,cell-var-from-loop
 
 import datetime as dt
+import importlib
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +17,11 @@ from sqlalchemy.orm import Session
 from ..db.models import EtfPrice
 from .erc_weights import erc_weights_from_return_history
 from .execution_timing import forward_align_returns
+
+try:
+    _LPPLS_MODULE = importlib.import_module("lppls.lppls")
+except Exception:  # pragma: no cover - runtime availability check
+    _LPPLS_MODULE = None
 
 
 TRADING_DAYS_PER_YEAR = 252
@@ -76,6 +83,21 @@ class BaselineInputs:
     corr_min_obs: int = 20
     # 等权/风平组合成交价口径: open=执行日开盘价, close=执行日收盘价, oc2=OC均价
     exec_price: str = "close"
+    # LPPL crash prediction block (distribution panel)
+    lppl_enabled: bool = False
+    lppl_lookback_days: int = 504
+    lppl_min_points: int = 120
+    lppl_horizon_days: int = 120
+    lppl_multistart: int = 25
+    lppl_start_mode: str = "auto_lagrange"  # auto_lagrange|fixed_lookback
+    lppl_start_min_window: int = 120
+    lppl_start_max_window: int = 504
+    lppl_start_step: int = 5
+    lppl_bootstrap_on: bool = True
+    lppl_bootstrap_reps: int = 200
+    lppl_bootstrap_block_size: int = 10
+    lppl_bootstrap_seed: int | None = None
+    lppl_c_rel_min: float = 0.05
 
 
 def _inv_vol_weights(vol: pd.Series) -> pd.Series:
@@ -1075,6 +1097,545 @@ def _daily_log_return_acf_stats(
     return out
 
 
+def _ordinal_to_iso_date(value: float | int | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(v):
+        return None
+    try:
+        return dt.date.fromordinal(int(round(v))).isoformat()
+    except ValueError:
+        return None
+
+
+def _series_acf_ljung_stats(
+    values: np.ndarray, *, max_lag: int = 20, alpha: float = 0.05
+) -> dict[str, Any]:
+    x = np.asarray(values, dtype=float)
+    x = x[np.isfinite(x)]
+    n = int(x.size)
+    out: dict[str, Any] = {
+        "sample_size": n,
+        "max_lag": int(max_lag),
+        "conf_level": float(1.0 - alpha),
+        "white_noise_bound": float("nan"),
+        "lags": [],
+        "acf": [],
+        "per_lag_significance": [],
+        "ljung_box": [],
+        "residual_autocorr": False,
+        "notes": "",
+    }
+    if n < 10:
+        out["notes"] = f"insufficient_sample_for_residual_acf: N={n} (<10)"
+        return out
+    k_max = int(min(max(int(max_lag), 1), n - 1))
+    if k_max <= 0:
+        out["notes"] = f"insufficient_sample_for_residual_acf: N={n}"
+        return out
+    x = x - float(np.mean(x))
+    denom = float(np.dot(x, x))
+    if not np.isfinite(denom) or denom <= 0:
+        out["notes"] = "zero_or_invalid_variance"
+        return out
+    lags = list(range(1, k_max + 1))
+    acf_vals: list[float] = []
+    for k in lags:
+        num = float(np.dot(x[k:], x[:-k]))
+        acf_vals.append(float(num / denom))
+    crit = float(1.959963984540054 / np.sqrt(float(n)))
+    out["white_noise_bound"] = crit
+    out["lags"] = lags
+    out["acf"] = acf_vals
+    out["max_lag"] = k_max
+    per_lag: list[dict[str, Any]] = []
+    ljung_rows: list[dict[str, Any]] = []
+    q_acc = 0.0
+    has_ljung_sig = False
+    for k, v in zip(lags, acf_vals, strict=True):
+        per_sig = bool(abs(v) > crit)
+        per_lag.append(
+            {
+                "lag": int(k),
+                "acf": float(v),
+                "abs_acf": float(abs(v)),
+                "crit": float(crit),
+                "significant": per_sig,
+            }
+        )
+        denom_k = float(n - k)
+        if denom_k <= 0:
+            q_stat = float("nan")
+            p_val = float("nan")
+            lj_sig = False
+        else:
+            q_acc += (float(v) * float(v)) / denom_k
+            q_stat = float(n * (n + 2) * q_acc)
+            p_val = float(stats.chi2.sf(q_stat, df=k))
+            lj_sig = bool(np.isfinite(p_val) and p_val < alpha)
+            has_ljung_sig = has_ljung_sig or lj_sig
+        ljung_rows.append(
+            {
+                "lag": int(k),
+                "q_stat": q_stat,
+                "p_value": p_val,
+                "significant": lj_sig,
+            }
+        )
+    out["per_lag_significance"] = per_lag
+    out["ljung_box"] = ljung_rows
+    out["residual_autocorr"] = bool(has_ljung_sig)
+    return out
+
+
+def _lppl_fit_once(obs: np.ndarray, *, max_searches: int) -> dict[str, Any] | None:
+    if _LPPLS_MODULE is None:
+        return None
+    try:
+        model = _LPPLS_MODULE.LPPLS(observations=obs)
+        tc, m, w, a, b, c, c1, c2, oscillation_count, damping = model.fit(
+            int(max_searches)
+        )
+    except Exception:
+        return None
+    vals = [tc, m, w, a, b, c, c1, c2, oscillation_count, damping]
+    if not all(np.isfinite(float(v)) for v in vals):
+        return None
+    try:
+        fitted = np.asarray(model.lppls(obs[0, :], tc, m, w, a, b, c1, c2), dtype=float)
+    except Exception:
+        return None
+    if fitted.size != obs.shape[1]:
+        return None
+    residual = np.asarray(obs[1, :] - fitted, dtype=float)
+    residual = residual[np.isfinite(residual)]
+    if residual.size == 0:
+        return None
+    sse = float(np.sum(np.square(residual)))
+    rmse = float(np.sqrt(np.mean(np.square(residual))))
+    y = np.asarray(obs[1, :], dtype=float)
+    y = y[np.isfinite(y)]
+    if y.size == 0:
+        return None
+    y_mean = float(np.mean(y))
+    sst = float(np.sum(np.square(y - y_mean)))
+    r2 = float(1.0 - sse / sst) if np.isfinite(sst) and sst > 0 else float("nan")
+    phi = float(np.arctan2(float(c2), float(c1)))
+    return {
+        "tc": float(tc),
+        "m": float(m),
+        "omega": float(w),
+        "a": float(a),
+        "b": float(b),
+        "c": float(c),
+        "c1": float(c1),
+        "c2": float(c2),
+        "phi": phi,
+        "O": float(oscillation_count),
+        "D": float(damping),
+        "fitted": np.asarray(fitted, dtype=float),
+        "residual": np.asarray(obs[1, :] - fitted, dtype=float),
+        "rmse": rmse,
+        "r2": r2,
+    }
+
+
+def _lppl_reason_codes(
+    fit: dict[str, Any],
+    *,
+    t_last: float,
+    horizon_days: int,
+    c_rel_min: float,
+) -> list[str]:
+    reasons: list[str] = []
+    b = float(fit.get("b", float("nan")))
+    c = float(fit.get("c", float("nan")))
+    m = float(fit.get("m", float("nan")))
+    omega = float(fit.get("omega", float("nan")))
+    tc = float(fit.get("tc", float("nan")))
+    o_v = float(fit.get("O", float("nan")))
+    d_v = float(fit.get("D", float("nan")))
+    if not np.isfinite(b) or b >= 0.0:
+        reasons.append("B_non_negative")
+    if not np.isfinite(m) or not (0.0 < m < 1.0):
+        reasons.append("m_out_of_range")
+    if not np.isfinite(omega) or not (6.0 <= omega <= 13.0):
+        reasons.append("omega_out_of_range")
+    if not np.isfinite(tc) or tc <= float(t_last):
+        reasons.append("tc_not_in_future")
+    elif tc > float(t_last) + float(max(horizon_days, 1)):
+        reasons.append("tc_out_of_horizon")
+    if not np.isfinite(o_v) or o_v <= 2.5:
+        reasons.append("oscillation_strength_low")
+    if not np.isfinite(d_v) or d_v <= 0.5:
+        reasons.append("damping_low")
+    if not np.isfinite(c):
+        reasons.append("C_invalid")
+    elif abs(b) <= 1e-12 or abs(c) / max(abs(b), 1e-12) < float(max(c_rel_min, 0.0)):
+        reasons.append("C_relative_too_small")
+    return reasons
+
+
+def _moving_block_bootstrap_residual(
+    residual: np.ndarray, *, block_size: int, rng: np.random.Generator
+) -> np.ndarray:
+    r = np.asarray(residual, dtype=float)
+    n = int(r.size)
+    if n <= 0:
+        return np.array([], dtype=float)
+    bsz = int(max(1, min(int(block_size), n)))
+    starts = rng.integers(0, n - bsz + 1, size=int(np.ceil(float(n) / float(bsz))))
+    chunks = [r[int(s) : int(s) + bsz] for s in starts]
+    out = np.concatenate(chunks)[:n]
+    return np.asarray(out, dtype=float)
+
+
+def _lppl_bootstrap_tc_distribution(
+    *,
+    obs_t: np.ndarray,
+    fitted: np.ndarray,
+    residual: np.ndarray,
+    reps: int,
+    block_size: int,
+    max_searches: int,
+    horizon_days: int,
+    c_rel_min: float,
+    seed: int | None,
+) -> tuple[dict[str, Any], dict[str, Any], np.ndarray]:
+    reps_i = int(max(1, reps))
+    rng = np.random.default_rng(seed)
+    t_last = float(obs_t[-1]) if obs_t.size else float("nan")
+    tc_vals: list[float] = []
+    for _ in range(reps_i):
+        resampled = _moving_block_bootstrap_residual(
+            residual, block_size=block_size, rng=rng
+        )
+        if resampled.size != fitted.size:
+            continue
+        ln_boot = np.asarray(fitted + resampled, dtype=float)
+        obs_boot = np.array([obs_t, ln_boot], dtype=float)
+        fit_b = _lppl_fit_once(obs_boot, max_searches=max_searches)
+        if fit_b is None:
+            continue
+        reasons = _lppl_reason_codes(
+            fit_b,
+            t_last=t_last,
+            horizon_days=horizon_days,
+            c_rel_min=c_rel_min,
+        )
+        if reasons:
+            continue
+        tc_vals.append(float(fit_b["tc"]))
+    tc_arr = np.asarray(tc_vals, dtype=float)
+    valid_ratio = float(tc_arr.size / float(reps_i))
+    dist = {
+        "median": float("nan"),
+        "p10": float("nan"),
+        "p90": float("nan"),
+        "p05": float("nan"),
+        "p95": float("nan"),
+        "median_date": None,
+        "p10_date": None,
+        "p90_date": None,
+        "p05_date": None,
+        "p95_date": None,
+        "valid_bootstrap_ratio": valid_ratio,
+        "reps_used": reps_i,
+    }
+    horizon_prob = {
+        "within_30d": float("nan"),
+        "within_60d": float("nan"),
+        "within_90d": float("nan"),
+    }
+    if tc_arr.size > 0 and np.isfinite(t_last):
+        p05 = float(np.quantile(tc_arr, 0.05))
+        p10 = float(np.quantile(tc_arr, 0.10))
+        p50 = float(np.quantile(tc_arr, 0.50))
+        p90 = float(np.quantile(tc_arr, 0.90))
+        p95 = float(np.quantile(tc_arr, 0.95))
+        dist.update(
+            {
+                "median": p50,
+                "p10": p10,
+                "p90": p90,
+                "p05": p05,
+                "p95": p95,
+                "median_date": _ordinal_to_iso_date(p50),
+                "p10_date": _ordinal_to_iso_date(p10),
+                "p90_date": _ordinal_to_iso_date(p90),
+                "p05_date": _ordinal_to_iso_date(p05),
+                "p95_date": _ordinal_to_iso_date(p95),
+            }
+        )
+        horizon_prob = {
+            "within_30d": float(np.mean(tc_arr <= (t_last + 30.0))),
+            "within_60d": float(np.mean(tc_arr <= (t_last + 60.0))),
+            "within_90d": float(np.mean(tc_arr <= (t_last + 90.0))),
+        }
+    return dist, horizon_prob, tc_arr
+
+
+def _compute_daily_lppl(close_s: pd.Series, *, cfg: dict[str, Any]) -> dict[str, Any]:
+    if _LPPLS_MODULE is None:
+        return {
+            "status": "library_unavailable",
+            "reason_codes": ["lppls_not_installed"],
+            "warnings": [],
+        }
+    s_raw = pd.to_numeric(close_s, errors="coerce").astype(float)
+    n_raw = int(len(s_raw))
+    s_valid = s_raw.replace([np.inf, -np.inf], np.nan).dropna()
+    s_valid = s_valid[s_valid > 0.0]
+    n_valid = int(len(s_valid))
+    dropped = int(max(0, n_raw - n_valid))
+    lookback_days = int(max(30, cfg.get("lookback_days", 504)))
+    min_points = int(max(30, cfg.get("min_points", 120)))
+    if n_valid > lookback_days:
+        s_valid = s_valid.iloc[-lookback_days:]
+    if len(s_valid) < min_points:
+        return {
+            "status": "insufficient_data",
+            "reason_codes": ["insufficient_points_after_cleaning"],
+            "warnings": [],
+            "diagnostics": {
+                "n_obs_raw": n_raw,
+                "n_obs_valid": int(len(s_valid)),
+                "dropped_points": dropped,
+                "min_points": min_points,
+                "lookback_days": lookback_days,
+            },
+        }
+    idx = pd.to_datetime(s_valid.index)
+    t_ord = np.array([float(pd.Timestamp(d).toordinal()) for d in idx], dtype=float)
+    ln_p = np.log(s_valid.to_numpy(dtype=float))
+    start_mode = str(cfg.get("start_mode", "auto_lagrange") or "auto_lagrange").lower()
+    start_mode = "auto_lagrange" if start_mode == "auto_lagrange" else "fixed_lookback"
+    start_sel: dict[str, Any] = {
+        "mode": start_mode,
+        "tau_date": None,
+        "window_size": int(len(t_ord)),
+        "lagrange_sse_min": float("nan"),
+        "fallback_used": False,
+    }
+    warnings: list[str] = []
+    tau_candidates: list[float] = []
+    t_fit = t_ord
+    ln_fit = ln_p
+    max_searches = int(max(5, cfg.get("multistart", 25)))
+    seed = cfg.get("bootstrap_seed", None)
+    if seed is not None:
+        try:
+            random.seed(int(seed))
+        except (TypeError, ValueError):
+            random.seed(0)
+    if start_mode == "auto_lagrange":
+        min_win = int(max(min_points, cfg.get("start_min_window", min_points)))
+        max_win = int(max(min_win, cfg.get("start_max_window", lookback_days)))
+        step = int(max(1, cfg.get("start_step", 5)))
+        max_win = min(max_win, int(len(t_ord)))
+        min_win = min(min_win, max_win)
+        if max_win - min_win >= step:
+            try:
+                m_start = _LPPLS_MODULE.LPPLS(observations=np.array([t_ord, ln_p]))
+                lag_out = m_start.detect_bubble_start_time_via_lagrange(
+                    max_window_size=int(max_win),
+                    min_window_size=int(min_win),
+                    step_size=int(step),
+                    max_searches=int(max_searches),
+                )
+                tau_v = float((lag_out or {}).get("tau", np.nan))
+                if np.isfinite(tau_v):
+                    tau_candidates.append(tau_v)
+                    mask = t_ord >= tau_v
+                    if int(np.sum(mask)) >= min_points:
+                        t_fit = t_ord[mask]
+                        ln_fit = ln_p[mask]
+                        start_sel["tau_date"] = _ordinal_to_iso_date(tau_v)
+                        start_sel["window_size"] = int(np.sum(mask))
+                        lag_list = (lag_out or {}).get("lagrange_sse_list") or []
+                        if isinstance(lag_list, list) and len(lag_list) > 0:
+                            try:
+                                start_sel["lagrange_sse_min"] = float(
+                                    np.nanmin(lag_list)
+                                )
+                            except (TypeError, ValueError):
+                                start_sel["lagrange_sse_min"] = float("nan")
+                    else:
+                        start_sel["fallback_used"] = True
+                        warnings.append(
+                            "lagrange_tau_too_late_fallback_to_fixed_lookback"
+                        )
+                else:
+                    start_sel["fallback_used"] = True
+                    warnings.append(
+                        "lagrange_start_not_found_fallback_to_fixed_lookback"
+                    )
+            except Exception:
+                start_sel["fallback_used"] = True
+                warnings.append("lagrange_start_exception_fallback_to_fixed_lookback")
+        else:
+            start_sel["fallback_used"] = True
+            warnings.append("lagrange_window_invalid_fallback_to_fixed_lookback")
+    if start_sel.get("fallback_used"):
+        keep_n = int(max(min_points, min(lookback_days, len(t_ord))))
+        t_fit = t_ord[-keep_n:]
+        ln_fit = ln_p[-keep_n:]
+    obs = np.array([t_fit, ln_fit], dtype=float)
+    fit = _lppl_fit_once(obs, max_searches=max_searches)
+    if fit is None:
+        return {
+            "status": "fit_failed",
+            "reason_codes": ["lppls_fit_failed"],
+            "warnings": warnings,
+            "diagnostics": {
+                "n_obs_raw": n_raw,
+                "n_obs_valid": int(len(s_valid)),
+                "dropped_points": dropped,
+                "n_obs_fit": int(obs.shape[1]),
+                "max_searches": max_searches,
+            },
+        }
+    c_rel_min = float(max(0.0, cfg.get("c_rel_min", 0.05)))
+    horizon_days = int(max(1, cfg.get("horizon_days", 120)))
+    reason_codes = _lppl_reason_codes(
+        fit,
+        t_last=float(obs[0, -1]),
+        horizon_days=horizon_days,
+        c_rel_min=c_rel_min,
+    )
+    status = "ok" if len(reason_codes) == 0 else "fit_rejected"
+    residual_diag = _series_acf_ljung_stats(fit["residual"], max_lag=20, alpha=0.05)
+    if bool(residual_diag.get("residual_autocorr", False)):
+        warnings.append("residual_autocorr")
+    bootstrap_on = bool(cfg.get("bootstrap_on", True))
+    bootstrap_reps = int(max(1, cfg.get("bootstrap_reps", 200)))
+    bootstrap_block = int(max(1, cfg.get("bootstrap_block_size", 10)))
+    tc_dist = {
+        "median": float("nan"),
+        "p10": float("nan"),
+        "p90": float("nan"),
+        "p05": float("nan"),
+        "p95": float("nan"),
+        "median_date": None,
+        "p10_date": None,
+        "p90_date": None,
+        "p05_date": None,
+        "p95_date": None,
+        "valid_bootstrap_ratio": float("nan"),
+        "reps_used": int(bootstrap_reps),
+    }
+    tc_horizon_prob = {
+        "within_30d": float("nan"),
+        "within_60d": float("nan"),
+        "within_90d": float("nan"),
+    }
+    tc_boot = np.array([], dtype=float)
+    if bootstrap_on and obs.shape[1] >= min_points:
+        tc_dist, tc_horizon_prob, tc_boot = _lppl_bootstrap_tc_distribution(
+            obs_t=obs[0, :],
+            fitted=fit["fitted"],
+            residual=fit["residual"],
+            reps=bootstrap_reps,
+            block_size=bootstrap_block,
+            max_searches=max_searches,
+            horizon_days=horizon_days,
+            c_rel_min=c_rel_min,
+            seed=seed,
+        )
+        vr = float(tc_dist.get("valid_bootstrap_ratio", float("nan")))
+        if not np.isfinite(vr) or vr < 0.2:
+            warnings.append("bootstrap_unstable")
+    t_last = float(obs[0, -1])
+    days_to_tc = float(fit["tc"] - t_last)
+    score = 0.0
+    score += 0.5 if status == "ok" else 0.15
+    score += 0.2 if not bool(residual_diag.get("residual_autocorr", False)) else 0.0
+    vr_now = float(tc_dist.get("valid_bootstrap_ratio", float("nan")))
+    if np.isfinite(vr_now):
+        if vr_now >= 0.5:
+            score += 0.2
+        elif vr_now >= 0.2:
+            score += 0.1
+    if np.isfinite(days_to_tc):
+        if days_to_tc <= 30:
+            score += 0.1
+        elif days_to_tc <= 90:
+            score += 0.05
+    score = float(max(0.0, min(1.0, score)))
+    if score >= 0.75:
+        risk_label = "high"
+    elif score >= 0.45:
+        risk_label = "medium"
+    else:
+        risk_label = "low"
+    tc_std = float(np.std(tc_boot, ddof=1)) if tc_boot.size >= 2 else float("nan")
+    tc_iqr = (
+        float(np.quantile(tc_boot, 0.75) - np.quantile(tc_boot, 0.25))
+        if tc_boot.size >= 2
+        else float("nan")
+    )
+    qualified_ratio = float(tc_dist.get("valid_bootstrap_ratio", float("nan")))
+    if not np.isfinite(qualified_ratio):
+        qualified_ratio = 1.0 if status == "ok" else 0.0
+    start_sensitivity = {
+        "tau_candidates": [
+            _ordinal_to_iso_date(v) for v in tau_candidates if np.isfinite(v)
+        ],
+        "tc_dispersion": {"std_days": tc_std, "iqr_days": tc_iqr},
+        "qualified_ratio": float(qualified_ratio),
+    }
+    return {
+        "status": status,
+        "reason_codes": reason_codes,
+        "warnings": sorted(set(warnings)),
+        "ln_p_t": {"dates": idx.date.astype(str).tolist(), "values": ln_p.tolist()},
+        "fit_curve": {
+            "dates": [
+                _ordinal_to_iso_date(v) or ""
+                for v in np.asarray(obs[0, :], dtype=float).tolist()
+            ],
+            "values": np.asarray(fit["fitted"], dtype=float).tolist(),
+        },
+        "params": {
+            "A": float(fit["a"]),
+            "B": float(fit["b"]),
+            "C": float(fit["c"]),
+            "m": float(fit["m"]),
+            "omega": float(fit["omega"]),
+            "phi": float(fit["phi"]),
+            "tc_index": float(fit["tc"]),
+            "tc_date": _ordinal_to_iso_date(fit["tc"]),
+            "O": float(fit["O"]),
+            "D": float(fit["D"]),
+        },
+        "diagnostics": {
+            "rmse": float(fit["rmse"]),
+            "r2": float(fit["r2"]),
+            "n_obs_raw": n_raw,
+            "n_obs_valid": int(len(s_valid)),
+            "n_obs_fit": int(obs.shape[1]),
+            "dropped_points": dropped,
+            "lookback_days": lookback_days,
+            "multistart_used": max_searches,
+            "max_searches": max_searches,
+        },
+        "start_selection": start_sel,
+        "start_sensitivity": start_sensitivity,
+        "residual_diagnostics": residual_diag,
+        "tc_distribution": tc_dist,
+        "tc_horizon_prob": tc_horizon_prob,
+        "risk": {
+            "score": score,
+            "label": risk_label,
+            "days_to_tc": days_to_tc,
+        },
+    }
+
+
 def _compute_periodic_returns_and_volatility(
     daily_ret: pd.DataFrame,
     *,
@@ -1084,6 +1645,7 @@ def _compute_periodic_returns_and_volatility(
     daily_low: pd.DataFrame | None = None,
     daily_volume: pd.DataFrame | None = None,
     daily_amount: pd.DataFrame | None = None,
+    lppl_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Compute periodic returns and volatility for each code across different frequencies.
@@ -1153,6 +1715,8 @@ def _compute_periodic_returns_and_volatility(
         amt_df.index = pd.to_datetime(amt_df.index)
 
     result: dict[str, Any] = {}
+    lppl_cfg = dict(lppl_cfg or {})
+    lppl_enabled = bool(lppl_cfg.get("enabled", False))
 
     for code in codes:
         if code not in ret_df.columns:
@@ -1178,6 +1742,9 @@ def _compute_periodic_returns_and_volatility(
         code_result["daily_log_return_acf"] = _daily_log_return_acf_stats(
             code_ret, max_lag=20, alpha=0.05
         )
+        if lppl_enabled and close_df is not None and code in close_df.columns:
+            close_s = pd.to_numeric(close_df[code], errors="coerce").astype(float)
+            code_result["daily_lppl"] = _compute_daily_lppl(close_s, cfg=lppl_cfg)
         # Log-return deviation: log(1+r) - MA20(log(1+r))
         lr = np.log1p(pd.to_numeric(code_ret, errors="coerce").astype(float))
         lr = lr.replace([np.inf, -np.inf], np.nan).dropna()
@@ -3313,6 +3880,22 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         daily_low=(low_common.ffill() if low_common is not None else None),
         daily_volume=volume_common,
         daily_amount=amount_common,
+        lppl_cfg={
+            "enabled": bool(inp.lppl_enabled),
+            "lookback_days": int(inp.lppl_lookback_days),
+            "min_points": int(inp.lppl_min_points),
+            "horizon_days": int(inp.lppl_horizon_days),
+            "multistart": int(inp.lppl_multistart),
+            "start_mode": str(inp.lppl_start_mode),
+            "start_min_window": int(inp.lppl_start_min_window),
+            "start_max_window": int(inp.lppl_start_max_window),
+            "start_step": int(inp.lppl_start_step),
+            "bootstrap_on": bool(inp.lppl_bootstrap_on),
+            "bootstrap_reps": int(inp.lppl_bootstrap_reps),
+            "bootstrap_block_size": int(inp.lppl_bootstrap_block_size),
+            "bootstrap_seed": inp.lppl_bootstrap_seed,
+            "c_rel_min": float(inp.lppl_c_rel_min),
+        },
     )
 
     # "Mirror" composite deviation indicator time-series (per asset, by period).

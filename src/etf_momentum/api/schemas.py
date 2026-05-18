@@ -670,6 +670,82 @@ class BaselineAnalysisRequest(BaseModel):
         default="close",
         description="等权组合成交价口径: open=执行日开盘价, close=执行日收盘价, oc2=OC均价",
     )
+    lppl_enabled: bool = Field(
+        default=False,
+        description="Enable LPPL crash prediction block in period_distributions.daily_lppl",
+    )
+    lppl_lookback_days: int = Field(
+        default=504,
+        ge=60,
+        le=5000,
+        description="Maximum lookback window for LPPL fit (trading days)",
+    )
+    lppl_min_points: int = Field(
+        default=120,
+        ge=30,
+        le=2000,
+        description="Minimum valid points required for LPPL fitting",
+    )
+    lppl_horizon_days: int = Field(
+        default=120,
+        ge=5,
+        le=1260,
+        description="Accepted future horizon for tc (calendar days)",
+    )
+    lppl_multistart: int = Field(
+        default=25,
+        ge=5,
+        le=200,
+        description="Max random searches passed to lppls fit(max_searches)",
+    )
+    lppl_start_mode: str = Field(
+        default="auto_lagrange",
+        description="LPPL fit window start mode: auto_lagrange|fixed_lookback",
+    )
+    lppl_start_min_window: int = Field(
+        default=120,
+        ge=30,
+        le=5000,
+        description="Min window for lagrange start detection",
+    )
+    lppl_start_max_window: int = Field(
+        default=504,
+        ge=60,
+        le=5000,
+        description="Max window for lagrange start detection",
+    )
+    lppl_start_step: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description="Step size for lagrange start detection window scan",
+    )
+    lppl_bootstrap_on: bool = Field(
+        default=True,
+        description="Enable moving-block bootstrap for tc distribution",
+    )
+    lppl_bootstrap_reps: int = Field(
+        default=200,
+        ge=1,
+        le=2000,
+        description="Bootstrap repetitions for tc distribution",
+    )
+    lppl_bootstrap_block_size: int = Field(
+        default=10,
+        ge=1,
+        le=120,
+        description="Moving-block bootstrap block length (calendar days)",
+    )
+    lppl_bootstrap_seed: int | None = Field(
+        default=None,
+        description="Optional random seed for LPPL bootstrap reproducibility",
+    )
+    lppl_c_rel_min: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Minimum |C|/|B| threshold for oscillation significance",
+    )
 
 
 class LeadLagAnalysisRequest(BaseModel):

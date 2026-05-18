@@ -1515,31 +1515,52 @@ def admin_sync_job_status(
 def baseline_analysis(
     payload: BaselineAnalysisRequest, db: Session = Depends(get_session)
 ) -> dict:
-    inp_kwargs = {
-        "codes": payload.codes,
-        "start": _parse_yyyymmdd(payload.start),
-        "end": _parse_yyyymmdd(payload.end),
-        "benchmark_code": payload.benchmark_code,
-        "adjust": payload.adjust,
-        "rebalance": payload.rebalance,
-        "rolling_weeks": payload.rolling_weeks,
-        "rolling_months": payload.rolling_months,
-        "rolling_years": payload.rolling_years,
-        "fft_windows": payload.fft_windows,
-        "fft_roll": payload.fft_roll,
-        "fft_roll_step": payload.fft_roll_step,
-        "rp_window_days": getattr(payload, "rp_window_days", 60) or 60,
-        "holding_mode": str(getattr(payload, "holding_mode", "EW") or "EW"),
-        "custom_weights": (
+    inp = BaselineInputs(
+        codes=payload.codes,
+        start=_parse_yyyymmdd(payload.start),
+        end=_parse_yyyymmdd(payload.end),
+        benchmark_code=payload.benchmark_code,
+        adjust=payload.adjust,
+        rebalance=payload.rebalance,
+        rolling_weeks=payload.rolling_weeks,
+        rolling_months=payload.rolling_months,
+        rolling_years=payload.rolling_years,
+        fft_windows=payload.fft_windows,
+        fft_roll=payload.fft_roll,
+        fft_roll_step=payload.fft_roll_step,
+        rp_window_days=getattr(payload, "rp_window_days", 60) or 60,
+        holding_mode=str(getattr(payload, "holding_mode", "EW") or "EW"),
+        custom_weights=(
             dict(getattr(payload, "custom_weights", None))
             if getattr(payload, "custom_weights", None)
             else None
         ),
-        "dynamic_universe": bool(getattr(payload, "dynamic_universe", False)),
-        "corr_min_obs": int(getattr(payload, "corr_min_obs", 60) or 60),
-        "exec_price": str(getattr(payload, "exec_price", "close") or "close"),
-    }
-    inp = BaselineInputs(**inp_kwargs)
+        dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
+        corr_min_obs=int(getattr(payload, "corr_min_obs", 60) or 60),
+        exec_price=str(getattr(payload, "exec_price", "close") or "close"),
+        lppl_enabled=bool(getattr(payload, "lppl_enabled", False)),
+        lppl_lookback_days=int(getattr(payload, "lppl_lookback_days", 504) or 504),
+        lppl_min_points=int(getattr(payload, "lppl_min_points", 120) or 120),
+        lppl_horizon_days=int(getattr(payload, "lppl_horizon_days", 120) or 120),
+        lppl_multistart=int(getattr(payload, "lppl_multistart", 25) or 25),
+        lppl_start_mode=str(
+            getattr(payload, "lppl_start_mode", "auto_lagrange") or "auto_lagrange"
+        ),
+        lppl_start_min_window=int(
+            getattr(payload, "lppl_start_min_window", 120) or 120
+        ),
+        lppl_start_max_window=int(
+            getattr(payload, "lppl_start_max_window", 504) or 504
+        ),
+        lppl_start_step=int(getattr(payload, "lppl_start_step", 5) or 5),
+        lppl_bootstrap_on=bool(getattr(payload, "lppl_bootstrap_on", True)),
+        lppl_bootstrap_reps=int(getattr(payload, "lppl_bootstrap_reps", 200) or 200),
+        lppl_bootstrap_block_size=int(
+            getattr(payload, "lppl_bootstrap_block_size", 10) or 10
+        ),
+        lppl_bootstrap_seed=getattr(payload, "lppl_bootstrap_seed", None),
+        lppl_c_rel_min=float(getattr(payload, "lppl_c_rel_min", 0.05) or 0.05),
+    )
     try:
         return compute_baseline(db, inp)
     except ValueError as e:

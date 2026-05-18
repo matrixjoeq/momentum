@@ -693,6 +693,7 @@
             <option value="macd_v_dea">MACD-V（DEA）</option>
             <option value="macd_v_absh">MACD-V（|MACD|）</option>
             <option value="macd_abs">标准MACD（|MACD|）</option>
+            <option value="lppl">LPPL崩盘预测（日度）</option>
           </select>
         </div>
         <div>
@@ -757,6 +758,37 @@
             <input id="distFutureFitOn" type="checkbox" checked />
             <span>显示线性拟合线 + 95%置信区间带</span>
           </label>
+        </div>
+        <div>
+          <label>LPPL窗口（交易日）</label>
+          <input id="distLpplLookback" value="504" style="min-width: 140px" />
+        </div>
+        <div>
+          <label>LPPL最小样本</label>
+          <input id="distLpplMinPoints" value="120" style="min-width: 130px" />
+        </div>
+        <div>
+          <label>LPPL预测窗口（日）</label>
+          <input id="distLpplHorizon" value="120" style="min-width: 140px" />
+        </div>
+        <div>
+          <label>LPPL搜索次数</label>
+          <input id="distLpplMultistart" value="25" style="min-width: 130px" />
+        </div>
+        <div>
+          <label>LPPL起点模式</label>
+          <select id="distLpplStartMode" style="min-width: 180px">
+            <option value="auto_lagrange" selected>auto_lagrange</option>
+            <option value="fixed_lookback">fixed_lookback</option>
+          </select>
+        </div>
+        <div>
+          <label>LPPL Bootstrap重复</label>
+          <input id="distLpplBootReps" value="200" style="min-width: 130px" />
+        </div>
+        <div>
+          <label>LPPL Block长度（日）</label>
+          <input id="distLpplBootBlock" value="10" style="min-width: 140px" />
         </div>
       </div>
       <div id="distRangeHint" class="muted" style="margin-top: 8px"></div>
@@ -7621,6 +7653,13 @@
           "distRegimeVolWin",
           "distRegimeSlopeThr",
           "distRegimeVolQ",
+          "distLpplLookback",
+          "distLpplMinPoints",
+          "distLpplHorizon",
+          "distLpplMultistart",
+          "distLpplStartMode",
+          "distLpplBootReps",
+          "distLpplBootBlock",
         ],
         ewCal: ["ewCalStart", "ewCalEnd", "ewCalAdjust", "ewCalShift"],
         rotation: [
@@ -16712,8 +16751,31 @@
           .trim()
           .toLowerCase();
         if (!code || !start || !end) return null;
+        const _numInRange = (id, dflt, minV, maxV) => {
+          const el = $(id);
+          const raw = String(el && el.value != null ? el.value : dflt).trim();
+          const n = Math.floor(Number(raw));
+          if (!Number.isFinite(n)) return dflt;
+          return Math.max(minV, Math.min(maxV, n));
+        };
+        const lpplEnabled =
+          String(($("distTypeSelect") && $("distTypeSelect").value) || "")
+            .trim()
+            .toLowerCase() === "lppl";
+        const lpplLookback = _numInRange("distLpplLookback", 504, 60, 5000);
+        const lpplMinPoints = _numInRange("distLpplMinPoints", 120, 30, 2000);
+        const lpplHorizon = _numInRange("distLpplHorizon", 120, 5, 1260);
+        const lpplMultistart = _numInRange("distLpplMultistart", 25, 5, 200);
+        const lpplBootReps = _numInRange("distLpplBootReps", 200, 1, 2000);
+        const lpplBootBlock = _numInRange("distLpplBootBlock", 10, 1, 120);
+        const lpplStartMode = String(
+          ($("distLpplStartMode") && $("distLpplStartMode").value) ||
+            "auto_lagrange",
+        )
+          .trim()
+          .toLowerCase();
         const cache = window.__distCodeBaselineCache || {};
-        const key = `${adjust}|${code}|${start}|${end}`;
+        const key = `${adjust}|${code}|${start}|${end}|lppl:${lpplEnabled ? 1 : 0}|lb:${lpplLookback}|mp:${lpplMinPoints}|hz:${lpplHorizon}|ms:${lpplMultistart}|sm:${lpplStartMode}|br:${lpplBootReps}|bb:${lpplBootBlock}`;
         if (cache[key] && cache[key].period_distributions) return cache[key];
         const resp = await api("/analysis/baseline", {
           method: "POST",
@@ -16728,6 +16790,18 @@
             fft_roll: false,
             fft_roll_step: 5,
             rp_window_days: 60,
+            lppl_enabled: lpplEnabled,
+            lppl_lookback_days: lpplLookback,
+            lppl_min_points: lpplMinPoints,
+            lppl_horizon_days: lpplHorizon,
+            lppl_multistart: lpplMultistart,
+            lppl_start_mode:
+              lpplStartMode === "fixed_lookback"
+                ? "fixed_lookback"
+                : "auto_lagrange",
+            lppl_bootstrap_on: true,
+            lppl_bootstrap_reps: lpplBootReps,
+            lppl_bootstrap_block_size: lpplBootBlock,
           }),
         });
         const text = await resp.text();
@@ -16812,6 +16886,13 @@
         const futFitOn = $("distFutureFitOn");
         const futProbTable = $("distFutureProbTable");
         const futCausalTable = $("distFutureCausalTable");
+        const lpplLookbackInput = $("distLpplLookback");
+        const lpplMinPointsInput = $("distLpplMinPoints");
+        const lpplHorizonInput = $("distLpplHorizon");
+        const lpplMultistartInput = $("distLpplMultistart");
+        const lpplStartModeSel = $("distLpplStartMode");
+        const lpplBootRepsInput = $("distLpplBootReps");
+        const lpplBootBlockInput = $("distLpplBootBlock");
         const calDayInput = $("distCalDay");
         const calModeSelect = $("distCalMode");
         const calHoldNInput = $("distCalHoldN");
@@ -16902,7 +16983,9 @@
                                             ? "MACD-V（|H|=|2*(DIF-DEA)|）"
                                             : t === "macd_abs"
                                               ? "标准MACD（|MACD|, 12/26/9）"
-                                              : "成交量偏离(log)";
+                                              : t === "lppl"
+                                                ? "LPPL崩盘预测"
+                                                : "成交量偏离(log)";
 
         // cache per-code distributions/baseline payloads
         window.__distDistributionsByCode =
@@ -20905,6 +20988,151 @@
           }
           _renderDailyLogReturnAcf(code);
 
+          if (type === "lppl") {
+            if (periodSelect && periodSelect.value !== "daily") {
+              periodSelect.value = "daily";
+            }
+            const lppl =
+              distByCode[code] && typeof distByCode[code] === "object"
+                ? distByCode[code].daily_lppl
+                : null;
+            if (!lppl || typeof lppl !== "object") {
+              $("distHistogram").innerHTML =
+                "<div class='muted'>无LPPL数据，请切换到LPPL后重新加载该标的区间。</div>";
+              $("distQuantiles").innerHTML = "";
+              if ($("distFutureScatter"))
+                $("distFutureScatter").innerHTML =
+                  "<div class='muted'>LPPL模式不展示未来收益散点</div>";
+              if ($("distRollingAnnVol"))
+                $("distRollingAnnVol").innerHTML =
+                  "<div class='muted'>LPPL模式不展示滚动年化波动</div>";
+              if ($("distMirrorTs"))
+                $("distMirrorTs").innerHTML =
+                  "<div class='muted'>LPPL模式不展示镜像指标</div>";
+              if (futProbTable) futProbTable.innerHTML = "";
+              if (futCausalTable) futCausalTable.innerHTML = "";
+              return;
+            }
+            const ln = lppl.ln_p_t || {};
+            const fit = lppl.fit_curve || {};
+            const lnDates = Array.isArray(ln.dates) ? ln.dates : [];
+            const lnVals = Array.isArray(ln.values) ? ln.values : [];
+            const fitDates = Array.isArray(fit.dates) ? fit.dates : [];
+            const fitVals = Array.isArray(fit.values) ? fit.values : [];
+            if (lnDates.length > 0 && lnVals.length === lnDates.length) {
+              const traces = [
+                {
+                  x: lnDates,
+                  y: lnVals,
+                  type: "scatter",
+                  mode: "lines",
+                  name: "ln p(t)",
+                  line: { width: 1.6 },
+                },
+              ];
+              if (fitDates.length > 0 && fitVals.length === fitDates.length) {
+                traces.push({
+                  x: fitDates,
+                  y: fitVals,
+                  type: "scatter",
+                  mode: "lines",
+                  name: "LPPL拟合",
+                  line: { width: 1.4, dash: "dot" },
+                });
+              }
+              const tcDate = String(
+                (lppl.params && lppl.params.tc_date) || "",
+              ).trim();
+              const shapes = [];
+              if (tcDate) {
+                shapes.push({
+                  type: "line",
+                  xref: "x",
+                  yref: "paper",
+                  x0: tcDate,
+                  x1: tcDate,
+                  y0: 0,
+                  y1: 1,
+                  line: {
+                    color: "rgba(214,39,40,0.9)",
+                    width: 1.4,
+                    dash: "dash",
+                  },
+                });
+              }
+              Plotly.newPlot(
+                "distHistogram",
+                traces,
+                {
+                  margin: { t: 36, l: 56, r: 20, b: 45 },
+                  title: {
+                    text: `${codeLabel(code)} - LPPL（日度 ln p(t)）`,
+                    font: { size: 14 },
+                  },
+                  xaxis: { title: "日期" },
+                  yaxis: { title: "ln p(t)" },
+                  legend: { orientation: "h" },
+                  shapes,
+                },
+                { responsive: true, displayModeBar: false },
+              );
+            } else {
+              $("distHistogram").innerHTML =
+                "<div class='muted'>LPPL缺少可绘制的ln p(t)数据</div>";
+            }
+            const status = String(lppl.status || "").trim() || "-";
+            const reasons = Array.isArray(lppl.reason_codes)
+              ? lppl.reason_codes
+              : [];
+            const warnings = Array.isArray(lppl.warnings) ? lppl.warnings : [];
+            const p = lppl.params || {};
+            const d = lppl.diagnostics || {};
+            const risk = lppl.risk || {};
+            const tcDist = lppl.tc_distribution || {};
+            const tcProb = lppl.tc_horizon_prob || {};
+            const resDiag = lppl.residual_diagnostics || {};
+            const reasonTxt = reasons.length ? reasons.join(", ") : "-";
+            const warningTxt = warnings.length ? warnings.join(", ") : "-";
+            const ac = !!resDiag.residual_autocorr;
+            const residualTxt = ac
+              ? "残差存在显著自相关（Ljung-Box）"
+              : "残差未见显著联合自相关";
+            $("distQuantiles").innerHTML = `
+              <tr><th>项目</th><th>结果</th></tr>
+              <tr><td>状态</td><td>${esc(status)}</td></tr>
+              <tr><td>风险等级</td><td>${esc(String(risk.label || "-"))}（score=${Number.isFinite(Number(risk.score)) ? Number(risk.score).toFixed(3) : "-"}）</td></tr>
+              <tr><td>tc</td><td>${esc(String(p.tc_date || "-"))}（days_to_tc=${Number.isFinite(Number(risk.days_to_tc)) ? Number(risk.days_to_tc).toFixed(2) : "-"}）</td></tr>
+              <tr><td>参数</td><td>m=${Number.isFinite(Number(p.m)) ? Number(p.m).toFixed(4) : "-"}，omega=${Number.isFinite(Number(p.omega)) ? Number(p.omega).toFixed(4) : "-"}，B=${Number.isFinite(Number(p.B)) ? Number(p.B).toFixed(6) : "-"}，C=${Number.isFinite(Number(p.C)) ? Number(p.C).toFixed(6) : "-"}</td></tr>
+              <tr><td>拟合质量</td><td>rmse=${Number.isFinite(Number(d.rmse)) ? Number(d.rmse).toFixed(6) : "-"}，r2=${Number.isFinite(Number(d.r2)) ? Number(d.r2).toFixed(4) : "-"}</td></tr>
+              <tr><td>Bootstrap区间</td><td>P10-P90: ${esc(String(tcDist.p10_date || "-"))} ~ ${esc(String(tcDist.p90_date || "-"))}；P05-P95: ${esc(String(tcDist.p05_date || "-"))} ~ ${esc(String(tcDist.p95_date || "-"))}</td></tr>
+              <tr><td>期限触发概率</td><td>30日=${Number.isFinite(Number(tcProb.within_30d)) ? (Number(tcProb.within_30d) * 100).toFixed(1) + "%" : "-"}，60日=${Number.isFinite(Number(tcProb.within_60d)) ? (Number(tcProb.within_60d) * 100).toFixed(1) + "%" : "-"}，90日=${Number.isFinite(Number(tcProb.within_90d)) ? (Number(tcProb.within_90d) * 100).toFixed(1) + "%" : "-"}</td></tr>
+              <tr><td>残差诊断</td><td>${esc(residualTxt)}</td></tr>
+              <tr><td>拒绝原因</td><td>${esc(reasonTxt)}</td></tr>
+              <tr><td>告警</td><td>${esc(warningTxt)}</td></tr>
+              <tr><td>解读说明</td><td>LPPL用于刻画“加速上涨+对数周期振荡”结构，统计显著不等于可交易信号。请结合样本外验证、仓位管理与交易成本综合判断。</td></tr>
+            `;
+            if ($("distFutureScatter"))
+              $("distFutureScatter").innerHTML =
+                "<div class='muted'>LPPL模式不展示未来收益散点</div>";
+            if ($("distRollingAnnVol"))
+              $("distRollingAnnVol").innerHTML =
+                "<div class='muted'>LPPL模式不展示滚动年化波动</div>";
+            if ($("distMirrorTs"))
+              $("distMirrorTs").innerHTML =
+                "<div class='muted'>LPPL模式不展示镜像指标</div>";
+            if (futProbTable) futProbTable.innerHTML = "";
+            if (futCausalTable) futCausalTable.innerHTML = "";
+            if ($("distCalHeatmap"))
+              $("distCalHeatmap").innerHTML =
+                "<div class='muted'>LPPL模式不展示日历效应热力图</div>";
+            if ($("distCalHist"))
+              $("distCalHist").innerHTML =
+                "<div class='muted'>LPPL模式不展示日历效应分布</div>";
+            if (calTable) calTable.innerHTML = "";
+            if (calHint) calHint.textContent = "";
+            return;
+          }
+
           const key = `${period}_${type}`;
           let data = distByCode[code][key];
           if (!data && _distSyntheticTypes.has(type)) {
@@ -21508,7 +21736,16 @@
             _syncRangeFromQuick();
             await _fetchAndRenderCode(codeSelect.value);
           });
-          typeSelect.addEventListener("change", updateDisplay);
+          typeSelect.addEventListener("change", async () => {
+            const tv = String(typeSelect.value || "")
+              .trim()
+              .toLowerCase();
+            if (tv === "lppl") {
+              await _fetchAndRenderCode(codeSelect.value);
+            } else {
+              updateDisplay();
+            }
+          });
           periodSelect.addEventListener("change", updateDisplay);
           rollWinSelect.addEventListener("change", updateDisplay);
           if (futFitOn) futFitOn.addEventListener("change", updateDisplay);
@@ -21622,6 +21859,28 @@
                 /* ignore */
               });
             });
+          }
+          const _lpplRefetch = async () => {
+            const tv = String(typeSelect.value || "")
+              .trim()
+              .toLowerCase();
+            if (tv !== "lppl") {
+              updateDisplay();
+              return;
+            }
+            await _fetchAndRenderCode(codeSelect.value);
+          };
+          for (const el of [
+            lpplLookbackInput,
+            lpplMinPointsInput,
+            lpplHorizonInput,
+            lpplMultistartInput,
+            lpplStartModeSel,
+            lpplBootRepsInput,
+            lpplBootBlockInput,
+          ]) {
+            if (!el) continue;
+            el.addEventListener("change", _lpplRefetch);
           }
           const wkSel = $("distWkdaySelect");
           if (wkSel) {

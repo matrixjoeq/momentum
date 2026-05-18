@@ -23,6 +23,29 @@ export PIP_CONFIG_FILE="$(pwd)/pip.conf"
 
 > 说明：目前 `akshare` 固定使用 `1.16.72`，以避免其新版本在部分环境中引入的 `curl_cffi` 构建问题。
 
+### macOS 本地构建补充（LPPL / llvmlite）
+
+若在 macOS 上安装 `lppls` 遇到 `llvmlite` 构建错误（例如找不到 LLVM 或 LLVM 版本不匹配），先安装并指向 `llvm@20`：
+
+```bash
+brew install llvm@20
+LLVM_PREFIX="$(brew --prefix llvm@20)"
+export PATH="$LLVM_PREFIX/bin:$PATH"
+export LDFLAGS="-L$LLVM_PREFIX/lib"
+export CPPFLAGS="-I$LLVM_PREFIX/include"
+export CMAKE_PREFIX_PATH="$LLVM_PREFIX/lib/cmake"
+export LLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm"
+export PIP_CONFIG_FILE="$(pwd)/pip.conf"
+.venv/bin/python3 -m pip install llvmlite
+.venv/bin/python3 -m pip install lppls
+```
+
+可用下面命令快速验证：
+
+```bash
+.venv/bin/python3 -m pip show llvmlite lppls
+```
+
 ### Windows PowerShell 使用说明（仍以 python3 为前提）
 
 > 前提：系统已能在 PowerShell 中运行 `python3`（例如 `python3 --version`）。

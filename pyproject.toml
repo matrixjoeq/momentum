@@ -17,6 +17,7 @@ dependencies = [
   "akshare>=1.16.72",
   "pandas>=2.2.0",
   "scipy>=1.16.3",
+  "lppls",
   "TA-Lib>=0.4.30",
   "backtesting>=0.6.4",
   "httpx>=0.25.0",

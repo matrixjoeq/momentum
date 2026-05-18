@@ -247,6 +247,73 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert data["nav_rsi"]["windows"] == [14]
 
 
+def test_api_baseline_analysis_lppl_contract(api_client):
+    c = api_client
+    engine = c.app.state.engine
+    code = "LPPL1"
+    dates = [dt.date(2023, 1, 1) + dt.timedelta(days=i) for i in range(260)]
+    series = {
+        code: [100.0 + 0.2 * i + (1.3 if (i % 11) < 5 else -0.7) for i in range(260)]
+    }
+    seed_prices(engine, code_to_series=series, dates=dates)
+    data = post_json_ok(
+        c,
+        "/api/analysis/baseline",
+        {
+            "codes": [code],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "benchmark_code": code,
+            "adjust": "qfq",
+            "rebalance": "yearly",
+            "lppl_enabled": True,
+            "lppl_lookback_days": 220,
+            "lppl_min_points": 80,
+            "lppl_horizon_days": 120,
+            "lppl_multistart": 12,
+            "lppl_start_mode": "fixed_lookback",
+            "lppl_bootstrap_on": True,
+            "lppl_bootstrap_reps": 8,
+            "lppl_bootstrap_block_size": 4,
+        },
+    )
+    pdist = data["period_distributions"][code]
+    assert "daily_lppl" in pdist
+    lppl = pdist["daily_lppl"]
+    assert "status" in lppl
+    assert lppl["status"] in {
+        "ok",
+        "fit_rejected",
+        "fit_failed",
+        "library_unavailable",
+        "insufficient_data",
+    }
+    if lppl["status"] in {"ok", "fit_rejected"}:
+        assert "params" in lppl
+        assert "tc_distribution" in lppl
+        assert "tc_horizon_prob" in lppl
+
+
+def test_api_baseline_analysis_lppl_invalid_bootstrap_block(api_client):
+    c = api_client
+    payload = {
+        "codes": ["510300"],
+        "start": "20240102",
+        "end": "20240103",
+        "benchmark_code": "510300",
+        "adjust": "hfq",
+        "rebalance": "yearly",
+        "lppl_enabled": True,
+        "lppl_bootstrap_block_size": 0,
+    }
+    err = post_json(c, "/api/analysis/baseline", payload, expected_status=422)
+    assert isinstance(err, dict)
+    detail = err.get("detail") or []
+    assert isinstance(detail, list)
+    joined = str(detail)
+    assert "lppl_bootstrap_block_size" in joined
+
+
 def test_api_rotation_backtest_happy_path(api_client):
     c = api_client
     upsert_and_fetch_etfs(

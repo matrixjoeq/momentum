@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import etf_momentum.analysis.baseline as baseline_module
 from etf_momentum.analysis.baseline import BaselineInputs, compute_baseline
 from etf_momentum.db.models import EtfPrice
 
@@ -117,6 +118,49 @@ def test_compute_baseline_includes_price_bias_distribution(session_factory):
     ma20_last = sum(closes[-20:]) / 20.0
     expected = closes[-1] / ma20_last - 1.0
     assert bias["current"] == pytest.approx(expected, rel=1e-12)
+
+
+def test_compute_baseline_lppl_library_unavailable(
+    session_factory, monkeypatch: pytest.MonkeyPatch
+):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2023, 1, 1) + dt.timedelta(days=i) for i in range(220)]
+        closes = [100.0 + 0.25 * i + (1.0 if (i % 9) < 4 else -0.6) for i in range(220)]
+        for d, c in zip(dates, closes, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(c),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        monkeypatch.setattr(baseline_module, "_LPPLS_MODULE", None)
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+                lppl_enabled=True,
+                lppl_lookback_days=180,
+                lppl_min_points=60,
+            ),
+        )
+    pdist = out["period_distributions"][code]
+    assert "daily_lppl" in pdist
+    lppl = pdist["daily_lppl"]
+    assert lppl["status"] == "library_unavailable"
+    assert "lppls_not_installed" in (lppl.get("reason_codes") or [])
 
 
 def test_compute_baseline_includes_macd_v_distributions(session_factory):
