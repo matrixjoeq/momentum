@@ -231,6 +231,66 @@ def test_trend_portfolio_er_entry_filter_blocks_choppy_entries(session_factory):
     assert int(params.get("er_window") or 0) == 10
 
 
+def test_trend_portfolio_ma_entry_filter_blocks_when_fast_slow_not_ready(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px1 = 100.0 + ((-1.0) ** i) * 0.8 + i * 0.01
+            px2 = 90.0 + ((-1.0) ** (i + 1)) * 0.7 + i * 0.01
+            _add_price(db, code="M1", day=d, close=px1)
+            _add_price(db, code="M2", day=d, close=px2)
+        db.commit()
+
+        out_no_filter = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["M1", "M2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_entry_filter_enabled=False,
+                cost_bps=0.0,
+            ),
+        )
+        out_with_filter = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["M1", "M2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_entry_filter_enabled=True,
+                ma_entry_filter_type="sma",
+                ma_entry_filter_fast=100,
+                ma_entry_filter_slow=200,
+                cost_bps=0.0,
+            ),
+        )
+
+    w_no = pd.DataFrame((out_no_filter.get("weights") or {}).get("series") or {})
+    w_yes = pd.DataFrame((out_with_filter.get("weights") or {}).get("series") or {})
+    assert not w_no.empty
+    assert any(float(v) > 0.0 for v in w_no.to_numpy().ravel())
+    assert all(float(v) == 0.0 for v in w_yes.to_numpy().ravel())
+    params = (out_with_filter.get("meta") or {}).get("params") or {}
+    assert params.get("ma_entry_filter_enabled") is True
+    assert str(params.get("ma_entry_filter_type") or "") == "sma"
+    assert int(params.get("ma_entry_filter_fast") or 0) == 100
+    assert int(params.get("ma_entry_filter_slow") or 0) == 200
+    ts = out_with_filter.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    assert int(overall.get("ma_entry_filter_blocked_entry_count") or 0) > 0
+    assert int(overall.get("ma_entry_filter_attempted_entry_count") or 0) >= int(
+        overall.get("ma_entry_filter_blocked_entry_count") or 0
+    )
+    assert int(overall.get("ma_entry_filter_allowed_entry_count") or 0) >= 0
+
+
 def test_trend_portfolio_impulse_entry_filter_blocks_entries(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]

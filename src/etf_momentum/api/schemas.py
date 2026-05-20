@@ -2511,6 +2511,24 @@ class TrendBacktestRequest(BaseModel):
     impulse_allow_neutral: bool = Field(
         default=False, description="Allow new long entries in NEUTRAL impulse state"
     )
+    ma_entry_filter_enabled: bool = Field(
+        default=False,
+        description="Universal MA cross entry filter switch (allow entry only when fast MA is above slow MA)",
+    )
+    ma_entry_filter_type: Literal["sma", "ema"] = Field(
+        default="sma",
+        description="MA type used by universal MA cross entry filter: sma|ema",
+    )
+    ma_entry_filter_fast: int = Field(
+        default=100,
+        ge=2,
+        description="Fast MA window for universal MA cross entry filter (trading days)",
+    )
+    ma_entry_filter_slow: int = Field(
+        default=200,
+        ge=2,
+        description="Slow MA window for universal MA cross entry filter (trading days, must be > fast)",
+    )
     er_exit_filter: bool = Field(
         default=False,
         description="Universal ER exit filter switch (when true, exit if ER >= threshold)",
@@ -2534,6 +2552,12 @@ class TrendBacktestRequest(BaseModel):
         default=False,
         description="If true, skip heavy post analyses (return decomposition, entry-condition causal stats, trade_statistics raw traces, event study).",
     )
+
+    @model_validator(mode="after")
+    def _validate_ma_entry_filter_windows(self) -> "TrendBacktestRequest":
+        if int(self.ma_entry_filter_fast) >= int(self.ma_entry_filter_slow):
+            raise ValueError("ma_entry_filter_fast must be < ma_entry_filter_slow")
+        return self
 
 
 class TrendPortfolioBacktestRequest(BaseModel):
@@ -2782,6 +2806,24 @@ class TrendPortfolioBacktestRequest(BaseModel):
     impulse_allow_neutral: bool = Field(
         default=False, description="Allow new long entries in NEUTRAL impulse state"
     )
+    ma_entry_filter_enabled: bool = Field(
+        default=False,
+        description="Universal MA cross entry filter switch (allow entry only when fast MA is above slow MA)",
+    )
+    ma_entry_filter_type: Literal["sma", "ema"] = Field(
+        default="sma",
+        description="MA type used by universal MA cross entry filter: sma|ema",
+    )
+    ma_entry_filter_fast: int = Field(
+        default=100,
+        ge=2,
+        description="Fast MA window for universal MA cross entry filter (trading days)",
+    )
+    ma_entry_filter_slow: int = Field(
+        default=200,
+        ge=2,
+        description="Slow MA window for universal MA cross entry filter (trading days, must be > fast)",
+    )
     er_exit_filter: bool = Field(
         default=False, description="Universal ER exit filter switch"
     )
@@ -2811,6 +2853,12 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default=False,
         description="If true, skip heavy post analyses (return decomposition, entry-condition causal stats, trade_statistics raw traces, event study).",
     )
+
+    @model_validator(mode="after")
+    def _validate_ma_entry_filter_windows(self) -> "TrendPortfolioBacktestRequest":
+        if int(self.ma_entry_filter_fast) >= int(self.ma_entry_filter_slow):
+            raise ValueError("ma_entry_filter_fast must be < ma_entry_filter_slow")
+        return self
 
 
 class AssetGroupSuggestRequest(BaseModel):

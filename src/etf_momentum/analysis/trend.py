@@ -169,6 +169,10 @@ class TrendInputs:
     impulse_allow_bull: bool = True
     impulse_allow_bear: bool = False
     impulse_allow_neutral: bool = False
+    ma_entry_filter_enabled: bool = False
+    ma_entry_filter_type: str = "sma"
+    ma_entry_filter_fast: int = 100
+    ma_entry_filter_slow: int = 200
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
@@ -279,6 +283,10 @@ class TrendPortfolioInputs:
     impulse_allow_bull: bool = True
     impulse_allow_bear: bool = False
     impulse_allow_neutral: bool = False
+    ma_entry_filter_enabled: bool = False
+    ma_entry_filter_type: str = "sma"
+    ma_entry_filter_fast: int = 100
+    ma_entry_filter_slow: int = 200
     er_exit_filter: bool = False
     er_exit_window: int = 10
     er_exit_threshold: float = 0.88
@@ -443,6 +451,76 @@ def _apply_er_entry_filter(
                 attempted_entry_count += 1
                 er_ok = bool(np.isfinite(float(er.loc[d]))) and float(er.loc[d]) >= thr
                 if er_ok:
+                    in_pos = True
+                    allowed_entry_count += 1
+                    out[i] = desired
+                else:
+                    blocked_count += 1
+                    out[i] = 0.0
+            else:
+                out[i] = 0.0
+        else:
+            if desired <= 0.0:
+                in_pos = False
+                out[i] = 0.0
+            else:
+                out[i] = desired
+    return pd.Series(out, index=idx, dtype=float), {
+        "blocked_entry_count": int(blocked_count),
+        "attempted_entry_count": int(attempted_entry_count),
+        "allowed_entry_count": int(allowed_entry_count),
+    }
+
+
+def _apply_ma_cross_entry_filter(
+    raw_pos: pd.Series,
+    *,
+    price: pd.Series,
+    ma_type: str,
+    fast_window: int,
+    slow_window: int,
+) -> tuple[pd.Series, dict[str, int]]:
+    """Entry-only MA cross filter using fast_ma > slow_ma gate."""
+    t = str(ma_type or "sma").strip().lower()
+    if t not in {"sma", "ema"}:
+        raise ValueError("ma_entry_filter_type must be one of: sma|ema")
+    fast_w = int(fast_window)
+    slow_w = int(slow_window)
+    if fast_w < 2:
+        raise ValueError("ma_entry_filter_fast must be >= 2")
+    if slow_w < 2:
+        raise ValueError("ma_entry_filter_slow must be >= 2")
+    if fast_w >= slow_w:
+        raise ValueError("ma_entry_filter_fast must be < ma_entry_filter_slow")
+
+    idx = raw_pos.index
+    px = pd.to_numeric(price, errors="coerce").astype(float).reindex(idx)
+    fast_ma = _moving_average(px, window=fast_w, ma_type=t)
+    slow_ma = _moving_average(px, window=slow_w, ma_type=t)
+
+    out = np.zeros(len(raw_pos), dtype=float)
+    blocked_count = 0
+    attempted_entry_count = 0
+    allowed_entry_count = 0
+    in_pos = False
+    for i, d in enumerate(idx):
+        desired = float(raw_pos.iloc[i]) if np.isfinite(float(raw_pos.iloc[i])) else 0.0
+        desired = max(0.0, desired)
+        if not in_pos:
+            if desired > 0.0:
+                attempted_entry_count += 1
+                fv = (
+                    float(fast_ma.loc[d])
+                    if np.isfinite(float(fast_ma.loc[d]))
+                    else float("nan")
+                )
+                sv = (
+                    float(slow_ma.loc[d])
+                    if np.isfinite(float(slow_ma.loc[d]))
+                    else float("nan")
+                )
+                ma_ok = bool(np.isfinite(fv) and np.isfinite(sv) and fv > sv)
+                if ma_ok:
                     in_pos = True
                     allowed_entry_count += 1
                     out[i] = desired
@@ -5765,6 +5843,20 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     impulse_allow_bull = bool(getattr(inp, "impulse_allow_bull", True))
     impulse_allow_bear = bool(getattr(inp, "impulse_allow_bear", False))
     impulse_allow_neutral = bool(getattr(inp, "impulse_allow_neutral", False))
+    ma_entry_filter_enabled = bool(getattr(inp, "ma_entry_filter_enabled", False))
+    ma_entry_filter_type = (
+        str(getattr(inp, "ma_entry_filter_type", "sma") or "sma").strip().lower()
+    )
+    if ma_entry_filter_type not in {"sma", "ema"}:
+        raise ValueError("ma_entry_filter_type must be one of: sma|ema")
+    ma_entry_filter_fast = int(getattr(inp, "ma_entry_filter_fast", 100) or 100)
+    ma_entry_filter_slow = int(getattr(inp, "ma_entry_filter_slow", 200) or 200)
+    if ma_entry_filter_fast < 2:
+        raise ValueError("ma_entry_filter_fast must be >= 2")
+    if ma_entry_filter_slow < 2:
+        raise ValueError("ma_entry_filter_slow must be >= 2")
+    if ma_entry_filter_fast >= ma_entry_filter_slow:
+        raise ValueError("ma_entry_filter_fast must be < ma_entry_filter_slow")
     er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
     er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
@@ -5891,6 +5983,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         max(
             int(inp.sma_window),
             int(inp.slow_window),
+            int(ma_entry_filter_slow),
             int(inp.donchian_entry),
             int(inp.mom_lookback),
             20,
@@ -6235,6 +6328,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             exit_threshold=float(inp.tsmom_exit_threshold),
         ).astype(float)
 
+    ma_entry_filter_stats_overall = {
+        "blocked_entry_count": 0,
+        "attempted_entry_count": 0,
+        "allowed_entry_count": 0,
+    }
     impulse_filter_stats_overall = {
         "blocked_entry_count": 0,
         "attempted_entry_count": 0,
@@ -6260,6 +6358,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         macd_slow=26,
         macd_signal=9,
     )
+    if ma_entry_filter_enabled:
+        raw_pos, ma_entry_filter_stats_overall = _apply_ma_cross_entry_filter(
+            raw_pos.astype(float).fillna(0.0),
+            price=px_sig,
+            ma_type=ma_entry_filter_type,
+            fast_window=ma_entry_filter_fast,
+            slow_window=ma_entry_filter_slow,
+        )
     if impulse_entry_filter and (impulse_state is not None):
         raw_pos, impulse_filter_stats_overall = _apply_impulse_entry_filter(
             raw_pos.astype(float).fillna(0.0),
@@ -7127,6 +7233,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["by_code"][str(code)]["semi_variance"] = dict(
         single_semi_variance_stats
     )
+    ma_attempted_overall = int(
+        (ma_entry_filter_stats_overall or {}).get("attempted_entry_count", 0)
+    )
+    ma_blocked_overall = int(
+        (ma_entry_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
     impulse_attempted_overall = int(
         (impulse_filter_stats_overall or {}).get("attempted_entry_count", 0)
     )
@@ -7142,6 +7254,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     impulse_block_rate_overall = (
         float(impulse_blocked_overall / impulse_attempted_overall)
         if impulse_attempted_overall > 0
+        else 0.0
+    )
+    ma_block_rate_overall = (
+        float(ma_blocked_overall / ma_attempted_overall)
+        if ma_attempted_overall > 0
         else 0.0
     )
     monthly_block_rate_overall = (
@@ -7164,6 +7281,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
     trade_stats["overall"]["r_profit_scaleout_tier_trigger_counts"] = dict(
         (r_profit_scaleout_stats or {}).get("tier_trigger_counts", {}) or {}
+    )
+    trade_stats["overall"]["ma_entry_filter_blocked_entry_count"] = int(
+        (ma_entry_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    trade_stats["overall"]["ma_entry_filter_attempted_entry_count"] = (
+        ma_attempted_overall
+    )
+    trade_stats["overall"]["ma_entry_filter_allowed_entry_count"] = int(
+        (ma_entry_filter_stats_overall or {}).get("allowed_entry_count", 0)
+    )
+    trade_stats["overall"]["ma_entry_filter_blocked_entry_rate"] = float(
+        ma_block_rate_overall
     )
     trade_stats["overall"]["er_filter_blocked_entry_count"] = int(
         (er_filter_stats_overall or {}).get("blocked_entry_count", 0)
@@ -7257,6 +7386,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
     trade_stats["by_code"][str(code)]["r_profit_scaleout_tier_trigger_counts"] = dict(
         (r_profit_scaleout_stats or {}).get("tier_trigger_counts", {}) or {}
+    )
+    trade_stats["by_code"][str(code)]["ma_entry_filter_blocked_entry_count"] = int(
+        (ma_entry_filter_stats_overall or {}).get("blocked_entry_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["ma_entry_filter_attempted_entry_count"] = (
+        ma_attempted_overall
+    )
+    trade_stats["by_code"][str(code)]["ma_entry_filter_allowed_entry_count"] = int(
+        (ma_entry_filter_stats_overall or {}).get("allowed_entry_count", 0)
+    )
+    trade_stats["by_code"][str(code)]["ma_entry_filter_blocked_entry_rate"] = float(
+        ma_block_rate_overall
     )
     trade_stats["by_code"][str(code)]["er_filter_blocked_entry_count"] = int(
         (er_filter_stats_overall or {}).get("blocked_entry_count", 0)
@@ -7361,6 +7502,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     m_strat["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
     m_strat["r_profit_scaleout_tier_trigger_counts"] = dict(
         (r_profit_scaleout_stats or {}).get("tier_trigger_counts", {}) or {}
+    )
+    m_strat["ma_entry_filter_blocked_entry_count"] = int(
+        (ma_entry_filter_stats_overall or {}).get("blocked_entry_count", 0)
     )
     m_strat["impulse_filter_blocked_entry_count"] = int(
         (impulse_filter_stats_overall or {}).get("blocked_entry_count", 0)
@@ -7511,6 +7655,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "impulse_allow_bull": bool(impulse_allow_bull),
                 "impulse_allow_bear": bool(impulse_allow_bear),
                 "impulse_allow_neutral": bool(impulse_allow_neutral),
+                "ma_entry_filter_enabled": bool(ma_entry_filter_enabled),
+                "ma_entry_filter_type": str(ma_entry_filter_type),
+                "ma_entry_filter_fast": int(ma_entry_filter_fast),
+                "ma_entry_filter_slow": int(ma_entry_filter_slow),
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),
@@ -8079,6 +8227,20 @@ def compute_trend_portfolio_backtest(
     impulse_allow_bull = bool(getattr(inp, "impulse_allow_bull", True))
     impulse_allow_bear = bool(getattr(inp, "impulse_allow_bear", False))
     impulse_allow_neutral = bool(getattr(inp, "impulse_allow_neutral", False))
+    ma_entry_filter_enabled = bool(getattr(inp, "ma_entry_filter_enabled", False))
+    ma_entry_filter_type = (
+        str(getattr(inp, "ma_entry_filter_type", "sma") or "sma").strip().lower()
+    )
+    if ma_entry_filter_type not in {"sma", "ema"}:
+        raise ValueError("ma_entry_filter_type must be one of: sma|ema")
+    ma_entry_filter_fast = int(getattr(inp, "ma_entry_filter_fast", 100) or 100)
+    ma_entry_filter_slow = int(getattr(inp, "ma_entry_filter_slow", 200) or 200)
+    if ma_entry_filter_fast < 2:
+        raise ValueError("ma_entry_filter_fast must be >= 2")
+    if ma_entry_filter_slow < 2:
+        raise ValueError("ma_entry_filter_slow must be >= 2")
+    if ma_entry_filter_fast >= ma_entry_filter_slow:
+        raise ValueError("ma_entry_filter_fast must be < ma_entry_filter_slow")
     er_exit_filter = bool(getattr(inp, "er_exit_filter", False))
     er_exit_window = int(getattr(inp, "er_exit_window", 10) or 10)
     er_exit_threshold = float(getattr(inp, "er_exit_threshold", 0.88) or 0.88)
@@ -8189,6 +8351,7 @@ def compute_trend_portfolio_backtest(
             max(
                 int(inp.sma_window),
                 int(inp.slow_window),
+                int(ma_entry_filter_slow),
                 int(inp.donchian_entry),
                 int(inp.mom_lookback),
                 int(inp.macd_slow),
@@ -8611,6 +8774,7 @@ def compute_trend_portfolio_backtest(
     r_profit_scaleout_mult_df = pd.DataFrame(
         1.0, index=dates, columns=codes, dtype=float
     )
+    ma_entry_filter_by_asset: dict[str, dict[str, int]] = {}
     impulse_filter_by_asset: dict[str, dict[str, int]] = {}
     er_filter_by_asset: dict[str, dict[str, int]] = {}
     er_exit_filter_by_asset: dict[str, dict[str, Any]] = {}
@@ -8786,6 +8950,21 @@ def compute_trend_portfolio_backtest(
             macd_slow=26,
             macd_signal=9,
         )
+        if ma_entry_filter_enabled:
+            pos, one_ma_entry_stats = _apply_ma_cross_entry_filter(
+                pos.astype(float).fillna(0.0),
+                price=px,
+                ma_type=ma_entry_filter_type,
+                fast_window=ma_entry_filter_fast,
+                slow_window=ma_entry_filter_slow,
+            )
+            ma_entry_filter_by_asset[str(c)] = dict(one_ma_entry_stats or {})
+        else:
+            ma_entry_filter_by_asset[str(c)] = {
+                "blocked_entry_count": 0,
+                "attempted_entry_count": 0,
+                "allowed_entry_count": 0,
+            }
         if impulse_entry_filter and (impulse_state_one is not None):
             pos, one_impulse_stats = _apply_impulse_entry_filter(
                 pos.astype(float).fillna(0.0),
@@ -10405,6 +10584,24 @@ def compute_trend_portfolio_backtest(
     total_bias_v_tp_triggers = int(
         sum(int((v or {}).get("trigger_count", 0)) for v in bias_v_tp_by_asset.values())
     )
+    total_ma_entry_filter_blocked_entries = int(
+        sum(
+            int((v or {}).get("blocked_entry_count", 0))
+            for v in ma_entry_filter_by_asset.values()
+        )
+    )
+    total_ma_entry_filter_attempted_entries = int(
+        sum(
+            int((v or {}).get("attempted_entry_count", 0))
+            for v in ma_entry_filter_by_asset.values()
+        )
+    )
+    total_ma_entry_filter_allowed_entries = int(
+        sum(
+            int((v or {}).get("allowed_entry_count", 0))
+            for v in ma_entry_filter_by_asset.values()
+        )
+    )
     total_impulse_filter_blocked_entries = int(
         sum(
             int((v or {}).get("blocked_entry_count", 0))
@@ -10513,6 +10710,14 @@ def compute_trend_portfolio_backtest(
     total_monthly_risk_budget_blocked_entries = int(
         (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
     )
+    total_ma_entry_filter_blocked_rate = (
+        float(
+            total_ma_entry_filter_blocked_entries
+            / total_ma_entry_filter_attempted_entries
+        )
+        if total_ma_entry_filter_attempted_entries > 0
+        else 0.0
+    )
     total_impulse_filter_blocked_rate = (
         float(
             total_impulse_filter_blocked_entries
@@ -10600,6 +10805,18 @@ def compute_trend_portfolio_backtest(
     )
     trade_stats["overall"]["r_profit_scaleout_tier_trigger_counts"] = dict(
         total_r_profit_scaleout_tier_counts
+    )
+    trade_stats["overall"]["ma_entry_filter_blocked_entry_count"] = int(
+        total_ma_entry_filter_blocked_entries
+    )
+    trade_stats["overall"]["ma_entry_filter_attempted_entry_count"] = int(
+        total_ma_entry_filter_attempted_entries
+    )
+    trade_stats["overall"]["ma_entry_filter_allowed_entry_count"] = int(
+        total_ma_entry_filter_allowed_entries
+    )
+    trade_stats["overall"]["ma_entry_filter_blocked_entry_rate"] = float(
+        total_ma_entry_filter_blocked_rate
     )
     trade_stats["overall"]["impulse_filter_blocked_entry_count"] = int(
         total_impulse_filter_blocked_entries
@@ -10711,6 +10928,25 @@ def compute_trend_portfolio_backtest(
                 )
                 or {}
             )
+        )
+        one["ma_entry_filter_blocked_entry_count"] = int(
+            (ma_entry_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0)
+        )
+        one["ma_entry_filter_attempted_entry_count"] = int(
+            (ma_entry_filter_by_asset.get(code_key) or {}).get(
+                "attempted_entry_count", 0
+            )
+        )
+        one["ma_entry_filter_allowed_entry_count"] = int(
+            (ma_entry_filter_by_asset.get(code_key) or {}).get("allowed_entry_count", 0)
+        )
+        one["ma_entry_filter_blocked_entry_rate"] = (
+            float(
+                one["ma_entry_filter_blocked_entry_count"]
+                / one["ma_entry_filter_attempted_entry_count"]
+            )
+            if int(one["ma_entry_filter_attempted_entry_count"]) > 0
+            else 0.0
         )
         one["impulse_filter_blocked_entry_count"] = int(
             (impulse_filter_by_asset.get(code_key) or {}).get("blocked_entry_count", 0)
@@ -10866,6 +11102,9 @@ def compute_trend_portfolio_backtest(
     m_strat["r_profit_scaleout_trigger_count"] = int(total_r_profit_scaleout_triggers)
     m_strat["bias_v_take_profit_trigger_count"] = int(total_bias_v_tp_triggers)
     m_strat["atr_stop_trigger_count"] = int(total_triggers)
+    m_strat["ma_entry_filter_blocked_entry_count"] = int(
+        total_ma_entry_filter_blocked_entries
+    )
     m_strat["impulse_filter_blocked_entry_count"] = int(
         total_impulse_filter_blocked_entries
     )
@@ -11169,6 +11408,10 @@ def compute_trend_portfolio_backtest(
                 "impulse_allow_bull": bool(impulse_allow_bull),
                 "impulse_allow_bear": bool(impulse_allow_bear),
                 "impulse_allow_neutral": bool(impulse_allow_neutral),
+                "ma_entry_filter_enabled": bool(ma_entry_filter_enabled),
+                "ma_entry_filter_type": str(ma_entry_filter_type),
+                "ma_entry_filter_fast": int(ma_entry_filter_fast),
+                "ma_entry_filter_slow": int(ma_entry_filter_slow),
                 "er_exit_filter": bool(er_exit_filter),
                 "er_exit_window": int(er_exit_window),
                 "er_exit_threshold": float(er_exit_threshold),

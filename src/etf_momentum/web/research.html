@@ -5029,6 +5029,30 @@
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
         <div>
+          <label>通用MA入场过滤</label>
+          <select id="trendMaEntryFilterOn" style="min-width: 120px">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>过滤均线类型</label>
+          <select id="trendMaEntryFilterType" style="min-width: 120px">
+            <option value="sma" selected>SMA</option>
+            <option value="ema">EMA</option>
+          </select>
+        </div>
+        <div>
+          <label>过滤快线窗口</label
+          ><input id="trendMaEntryFilterFast" value="100" />
+        </div>
+        <div>
+          <label>过滤慢线窗口</label
+          ><input id="trendMaEntryFilterSlow" value="200" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
+        <div>
           <label>ER出场过滤</label>
           <select id="trendErExitFilterOn" style="min-width: 120px">
             <option value="false" selected>关闭</option>
@@ -7766,6 +7790,10 @@
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
+          "trendMaEntryFilterOn",
+          "trendMaEntryFilterType",
+          "trendMaEntryFilterFast",
+          "trendMaEntryFilterSlow",
           "trendErExitFilterOn",
           "trendErExitWindow",
           "trendErExitThreshold",
@@ -10733,11 +10761,14 @@
       function _syncTrendImpulseErFiltersUi() {
         const impulseOnEl = $("trendImpulseEntryFilterOn");
         const erEntryOnEl = $("trendErFilterOn");
+        const maEntryOnEl = $("trendMaEntryFilterOn");
         const erExitOnEl = $("trendErExitFilterOn");
         const impulseOn =
           impulseOnEl && String(impulseOnEl.value || "false") === "true";
         const erEntryOn =
           erEntryOnEl && String(erEntryOnEl.value || "false") === "true";
+        const maEntryOn =
+          maEntryOnEl && String(maEntryOnEl.value || "false") === "true";
         const erExitOn =
           erExitOnEl && String(erExitOnEl.value || "false") === "true";
         const setEnabled = (el, enable) => {
@@ -10750,6 +10781,9 @@
         setEnabled($("trendImpulseAllowNeutral"), impulseOn);
         setEnabled($("trendErWindow"), erEntryOn);
         setEnabled($("trendErThreshold"), erEntryOn);
+        setEnabled($("trendMaEntryFilterType"), maEntryOn);
+        setEnabled($("trendMaEntryFilterFast"), maEntryOn);
+        setEnabled($("trendMaEntryFilterSlow"), maEntryOn);
         setEnabled($("trendErExitWindow"), erExitOn);
         setEnabled($("trendErExitThreshold"), erExitOn);
       }
@@ -10930,6 +10964,10 @@
           "trendErFilterOn",
           "trendErWindow",
           "trendErThreshold",
+          "trendMaEntryFilterOn",
+          "trendMaEntryFilterType",
+          "trendMaEntryFilterFast",
+          "trendMaEntryFilterSlow",
           "trendErExitFilterOn",
           "trendErExitWindow",
           "trendErExitThreshold",
@@ -10985,6 +11023,10 @@
           "trendImpulseAllowBull",
           "trendImpulseAllowBear",
           "trendImpulseAllowNeutral",
+          "trendMaEntryFilterOn",
+          "trendMaEntryFilterType",
+          "trendMaEntryFilterFast",
+          "trendMaEntryFilterSlow",
           "trendErExitFilterOn",
           "trendErExitWindow",
           "trendErExitThreshold",
@@ -11151,6 +11193,14 @@
             "ER入场过滤：开启后仅当 ER>=阈值 才允许新开仓；平仓不受影响。",
           trendErWindow: "ER入场周期：效率比率回看窗口（交易日），默认10。",
           trendErThreshold: "ER入场阈值：取值[0,1]，ER越高表示趋势越单边。",
+          trendMaEntryFilterOn:
+            "通用MA入场过滤：开启后仅当过滤快线在过滤慢线之上才允许新开仓；平仓不受影响。与动力/ER入场过滤为AND串联。",
+          trendMaEntryFilterType:
+            "过滤均线类型：仅支持SMA/EMA，用于通用MA入场过滤条件计算。",
+          trendMaEntryFilterFast:
+            "过滤快线窗口：通用MA入场过滤快线窗口，默认100，需小于慢线窗口。",
+          trendMaEntryFilterSlow:
+            "过滤慢线窗口：通用MA入场过滤慢线窗口，默认200，需大于快线窗口。",
           trendErExitFilterOn: "ER出场过滤：开启后，当 ER>=阈值 时触发离场。",
           trendErExitWindow: "ER出场周期：效率比率回看窗口（交易日），默认10。",
           trendErExitThreshold: "ER出场阈值：取值[0,1]，默认0.88。",
@@ -29245,6 +29295,19 @@
             $("trendErFilterOn") && $("trendErFilterOn").value === "true",
           er_window: Number(($("trendErWindow").value || "10").trim()),
           er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),
+          ma_entry_filter_enabled:
+            $("trendMaEntryFilterOn") &&
+            $("trendMaEntryFilterOn").value === "true",
+          ma_entry_filter_type:
+            $("trendMaEntryFilterType") && $("trendMaEntryFilterType").value
+              ? String($("trendMaEntryFilterType").value)
+              : "sma",
+          ma_entry_filter_fast: Number(
+            ($("trendMaEntryFilterFast").value || "100").trim(),
+          ),
+          ma_entry_filter_slow: Number(
+            ($("trendMaEntryFilterSlow").value || "200").trim(),
+          ),
           er_exit_filter:
             $("trendErExitFilterOn") &&
             $("trendErExitFilterOn").value === "true",
@@ -29630,6 +29693,19 @@
             $("trendErFilterOn") && $("trendErFilterOn").value === "true",
           er_window: Number(($("trendErWindow").value || "10").trim()),
           er_threshold: Number(($("trendErThreshold").value || "0.30").trim()),
+          ma_entry_filter_enabled:
+            $("trendMaEntryFilterOn") &&
+            $("trendMaEntryFilterOn").value === "true",
+          ma_entry_filter_type:
+            $("trendMaEntryFilterType") && $("trendMaEntryFilterType").value
+              ? String($("trendMaEntryFilterType").value)
+              : "sma",
+          ma_entry_filter_fast: Number(
+            ($("trendMaEntryFilterFast").value || "100").trim(),
+          ),
+          ma_entry_filter_slow: Number(
+            ($("trendMaEntryFilterSlow").value || "200").trim(),
+          ),
           er_exit_filter:
             $("trendErExitFilterOn") &&
             $("trendErExitFilterOn").value === "true",
@@ -30200,6 +30276,31 @@
           common.er_threshold > 1
         ) {
           return setMsg("ER阈值需在[0,1]区间");
+        }
+        common.ma_entry_filter_type = String(
+          common.ma_entry_filter_type || "sma",
+        )
+          .trim()
+          .toLowerCase();
+        if (!["sma", "ema"].includes(common.ma_entry_filter_type)) {
+          return setMsg("通用MA入场过滤均线类型仅支持 SMA/EMA");
+        }
+        if (
+          !Number.isFinite(common.ma_entry_filter_fast) ||
+          common.ma_entry_filter_fast < 2
+        ) {
+          return setMsg("通用MA入场过滤快线窗口需为>=2数字");
+        }
+        common.ma_entry_filter_fast = Math.floor(common.ma_entry_filter_fast);
+        if (
+          !Number.isFinite(common.ma_entry_filter_slow) ||
+          common.ma_entry_filter_slow < 2
+        ) {
+          return setMsg("通用MA入场过滤慢线窗口需为>=2数字");
+        }
+        common.ma_entry_filter_slow = Math.floor(common.ma_entry_filter_slow);
+        if (common.ma_entry_filter_fast >= common.ma_entry_filter_slow) {
+          return setMsg("通用MA入场过滤参数要求：快线窗口需小于慢线窗口");
         }
         if (
           !Number.isFinite(common.er_exit_window) ||
@@ -35144,6 +35245,11 @@
         );
       if ($("trendErFilterOn"))
         $("trendErFilterOn").addEventListener(
+          "change",
+          _syncTrendImpulseErFiltersUi,
+        );
+      if ($("trendMaEntryFilterOn"))
+        $("trendMaEntryFilterOn").addEventListener(
           "change",
           _syncTrendImpulseErFiltersUi,
         );

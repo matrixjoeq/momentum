@@ -2020,6 +2020,14 @@ def trend_backtest(
         impulse_allow_bull=bool(getattr(payload, "impulse_allow_bull", True)),
         impulse_allow_bear=bool(getattr(payload, "impulse_allow_bear", False)),
         impulse_allow_neutral=bool(getattr(payload, "impulse_allow_neutral", False)),
+        ma_entry_filter_enabled=bool(
+            getattr(payload, "ma_entry_filter_enabled", False)
+        ),
+        ma_entry_filter_type=str(
+            getattr(payload, "ma_entry_filter_type", "sma") or "sma"
+        ),
+        ma_entry_filter_fast=int(getattr(payload, "ma_entry_filter_fast", 100)),
+        ma_entry_filter_slow=int(getattr(payload, "ma_entry_filter_slow", 200)),
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
@@ -2190,6 +2198,14 @@ def trend_portfolio_backtest(
         impulse_allow_bull=bool(getattr(payload, "impulse_allow_bull", True)),
         impulse_allow_bear=bool(getattr(payload, "impulse_allow_bear", False)),
         impulse_allow_neutral=bool(getattr(payload, "impulse_allow_neutral", False)),
+        ma_entry_filter_enabled=bool(
+            getattr(payload, "ma_entry_filter_enabled", False)
+        ),
+        ma_entry_filter_type=str(
+            getattr(payload, "ma_entry_filter_type", "sma") or "sma"
+        ),
+        ma_entry_filter_fast=int(getattr(payload, "ma_entry_filter_fast", 100)),
+        ma_entry_filter_slow=int(getattr(payload, "ma_entry_filter_slow", 200)),
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),

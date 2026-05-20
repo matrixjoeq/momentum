@@ -1475,6 +1475,63 @@ def test_trend_single_er_entry_filter_blocks_choppy_entries(session_factory):
     assert int(by_code.get("er_filter_blocked_entry_count") or 0) > 0
 
 
+def test_trend_single_ma_entry_filter_blocks_when_fast_slow_not_ready(session_factory):
+    sf = session_factory
+    code = "MAE1"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + ((-1.0) ** i) * 0.8 + i * 0.01
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out_no_filter = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_entry_filter_enabled=False,
+                cost_bps=0.0,
+            ),
+        )
+        out_with_filter = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_entry_filter_enabled=True,
+                ma_entry_filter_type="sma",
+                ma_entry_filter_fast=100,
+                ma_entry_filter_slow=200,
+                cost_bps=0.0,
+            ),
+        )
+
+    pos_no_filter = [float(x) for x in out_no_filter["signals"]["position"]]
+    pos_with_filter = [float(x) for x in out_with_filter["signals"]["position"]]
+    assert any(x > 0.0 for x in pos_no_filter)
+    assert all(x == 0.0 for x in pos_with_filter)
+    params = (out_with_filter.get("meta") or {}).get("params") or {}
+    assert params.get("ma_entry_filter_enabled") is True
+    assert str(params.get("ma_entry_filter_type") or "") == "sma"
+    assert int(params.get("ma_entry_filter_fast") or 0) == 100
+    assert int(params.get("ma_entry_filter_slow") or 0) == 200
+    ts = out_with_filter.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = (ts.get("by_code") or {}).get(code, {})
+    assert int(overall.get("ma_entry_filter_blocked_entry_count") or 0) > 0
+    assert int(overall.get("ma_entry_filter_attempted_entry_count") or 0) >= int(
+        overall.get("ma_entry_filter_blocked_entry_count") or 0
+    )
+    assert int(overall.get("ma_entry_filter_allowed_entry_count") or 0) >= 0
+    assert int(by_code.get("ma_entry_filter_blocked_entry_count") or 0) > 0
+
+
 def test_impulse_entry_filter_blocks_by_state_counts_are_split() -> None:
     idx = pd.date_range("2024-01-01", periods=6, freq="B")
     raw_pos = pd.Series([0.0, 1.0, 0.0, 1.0, 0.0, 1.0], index=idx, dtype=float)
