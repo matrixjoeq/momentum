@@ -1750,6 +1750,7 @@ def _rotation_inputs_from_payload(
             str(getattr(payload, "floating_benchmark_code", "")).strip() or None
         ),
         position_mode=payload.position_mode,
+        daily_rebalance=bool(getattr(payload, "daily_rebalance", False)),
         risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
         risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
         entry_backfill=payload.entry_backfill,

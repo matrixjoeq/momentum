@@ -1775,6 +1775,13 @@
               </select>
             </div>
             <div>
+              <label>持仓日度再平衡</label>
+              <select id="rotDailyRebalance" style="min-width: 140px">
+                <option value="false" selected>关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div>
               <label
                 >打分方式
                 <button
@@ -7674,6 +7681,7 @@
           "rotRiskBudgetAtrWin",
           "rotRiskBudgetPct",
           "rotEntryBackfill",
+          "rotDailyRebalance",
           "rotScoreMethod",
           "rotLookback",
           "rotSkip",
@@ -28406,6 +28414,8 @@
         }
         const entry_backfill =
           $("rotEntryBackfill") && $("rotEntryBackfill").value === "true";
+        const daily_rebalance =
+          $("rotDailyRebalance") && $("rotDailyRebalance").value === "true";
         const entry_match_n = Number(
           $("rotEntryMatchN") && $("rotEntryMatchN").value
             ? $("rotEntryMatchN").value
@@ -28902,6 +28912,7 @@
           risk_budget_atr_window: risk_budget_atr_window_req,
           risk_budget_pct,
           entry_backfill,
+          daily_rebalance,
           entry_match_n,
           exit_match_n,
           lookback_days,
@@ -30666,6 +30677,8 @@
             ),
             entry_backfill:
               $("rotEntryBackfill") && $("rotEntryBackfill").value === "true",
+            daily_rebalance:
+              $("rotDailyRebalance") && $("rotDailyRebalance").value === "true",
             entry_match_n: Number(
               $("rotEntryMatchN") && $("rotEntryMatchN").value
                 ? $("rotEntryMatchN").value
@@ -30818,6 +30831,8 @@
           ),
           entry_backfill:
             $("rotEntryBackfill") && $("rotEntryBackfill").value === "true",
+          daily_rebalance:
+            $("rotDailyRebalance") && $("rotDailyRebalance").value === "true",
           entry_match_n: Number(
             $("rotEntryMatchN") && $("rotEntryMatchN").value
               ? $("rotEntryMatchN").value
@@ -31598,6 +31613,7 @@
             topK: 1,
             positionMode: "adaptive",
             entryBackfill: "false",
+            dailyRebalance: "false",
             scoreMethod: "raw_mom",
             lookback: 20,
             skip: 0,
@@ -31651,6 +31667,8 @@
             $("rotPositionMode").value = String(spec.base.positionMode);
           if ($("rotEntryBackfill"))
             $("rotEntryBackfill").value = String(spec.base.entryBackfill);
+          if ($("rotDailyRebalance"))
+            $("rotDailyRebalance").value = String(spec.base.dailyRebalance);
           if ($("rotScoreMethod"))
             $("rotScoreMethod").value = String(spec.base.scoreMethod);
           if ($("rotLookback"))
@@ -31820,6 +31838,8 @@
         }
         const entry_backfill =
           $("rotEntryBackfill") && $("rotEntryBackfill").value === "true";
+        const daily_rebalance =
+          $("rotDailyRebalance") && $("rotDailyRebalance").value === "true";
         const entry_match_n = Number(
           $("rotEntryMatchN") && $("rotEntryMatchN").value
             ? $("rotEntryMatchN").value
@@ -32287,6 +32307,7 @@
             risk_budget_atr_window: Math.floor(risk_budget_atr_window),
             risk_budget_pct,
             entry_backfill,
+            daily_rebalance,
             entry_match_n,
             exit_match_n,
             lookback_days,
@@ -35662,6 +35683,8 @@
             : "adaptive";
         const entry_backfill =
           $("rotEntryBackfill") && $("rotEntryBackfill").value === "true";
+        const daily_rebalance =
+          $("rotDailyRebalance") && $("rotDailyRebalance").value === "true";
         const entry_match_n = Number(
           $("rotEntryMatchN") && $("rotEntryMatchN").value
             ? $("rotEntryMatchN").value
@@ -36097,6 +36120,7 @@
               slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
               position_mode,
               entry_backfill,
+              daily_rebalance,
               entry_match_n,
               exit_match_n,
               rebalance_anchor,

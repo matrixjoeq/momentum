@@ -437,6 +437,53 @@ def test_api_rotation_backtest_accepts_inverse_vol_position_mode(api_client) -> 
     assert "nav" in data and "ROTATION" in (data.get("nav") or {}).get("series", {})
 
 
+def test_api_rotation_backtest_daily_rebalance_switch(api_client) -> None:
+    c = api_client
+    engine = c.app.state.engine
+    codes = ["RDA", "RDB"]
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    px_a = 100.0
+    px_b = 100.0
+    series_a: list[float] = []
+    series_b: list[float] = []
+    for i, _ in enumerate(dates):
+        px_a *= 1.01 if (i % 2 == 0) else 0.99
+        px_b *= 0.99 if (i % 2 == 0) else 1.01
+        series_a.append(float(px_a))
+        series_b.append(float(px_b))
+    seed_prices(engine, code_to_series={"RDA": series_a, "RDB": series_b}, dates=dates)
+    upsert_and_fetch_etfs(
+        c,
+        codes=codes,
+        names={codes[0]: codes[0], codes[1]: codes[1]},
+        start_date=fmt_ymd(dates[0]),
+        end_date=fmt_ymd(dates[-1]),
+    )
+    base = {
+        "codes": codes,
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "rebalance": "weekly",
+        "rebalance_anchor": 1,
+        "top_k": 2,
+        "position_mode": "adaptive",
+        "lookback_days": 5,
+        "skip_days": 0,
+        "exec_price": "close",
+        "cost_bps": 100.0,
+        "slippage_rate": 0.0,
+    }
+    out_off = post_json_ok(c, "/api/analysis/rotation", {**base, "daily_rebalance": False})
+    out_on = post_json_ok(c, "/api/analysis/rotation", {**base, "daily_rebalance": True})
+    m_off = (out_off.get("metrics") or {}).get("strategy") or {}
+    m_on = (out_on.get("metrics") or {}).get("strategy") or {}
+    assert bool(out_off.get("daily_rebalance")) is False
+    assert bool(out_on.get("daily_rebalance")) is True
+    assert float(m_on.get("avg_daily_turnover") or 0.0) > float(
+        m_off.get("avg_daily_turnover") or 0.0
+    )
+
+
 def test_api_rotation_backtest_rejects_zero_top_k(api_client) -> None:
     c = api_client
     upsert_and_fetch_etfs(

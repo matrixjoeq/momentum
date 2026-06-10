@@ -1862,6 +1862,10 @@ class RotationBacktestRequest(BaseModel):
         default="adaptive",
         description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/|top_k|) | inverse_vol(inverse annualized volatility) | risk_budget(ATR risk budget).",
     )
+    daily_rebalance: bool = Field(
+        default=False,
+        description="Enable daily rebalance of held assets toward target weights (using daily close signal, next-day execution by exec_price).",
+    )
     risk_budget_atr_window: int = Field(
         default=20, ge=2, description="ATR window for risk-budget sizing"
     )
