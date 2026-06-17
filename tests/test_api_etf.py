@@ -63,3 +63,77 @@ def test_delete_etf_purge_removes_prices_and_batches(api_client: TestClient) -> 
     # data removed
     assert get_json_ok(client, "/api/etf/510300/prices?adjust=hfq") == []
     assert get_json_ok(client, "/api/batches?code=510300") == []
+
+
+def test_etf_research_groups_persistence_contract(api_client: TestClient) -> None:
+    client = api_client
+    post_json(
+        client,
+        "/api/etf",
+        {
+            "code": "510300",
+            "name": "沪深300ETF",
+            "start_date": "20240101",
+            "end_date": "20240131",
+        },
+    )
+    post_json(
+        client,
+        "/api/etf",
+        {
+            "code": "159915",
+            "name": "创业板ETF",
+            "start_date": "20240101",
+            "end_date": "20240131",
+        },
+    )
+
+    g_a = post_json(
+        client,
+        "/api/etf/research/groups",
+        {
+            "name": "A组",
+            "codes": ["510300", "NOT_EXISTS", "159915"],
+            "set_active": False,
+        },
+    )
+    assert g_a["name"] == "A组"
+    assert g_a["codes"] == ["510300", "159915"]
+    assert g_a["is_active"] is False
+
+    g_b = post_json(
+        client,
+        "/api/etf/research/groups",
+        {"name": "B组", "codes": ["159915"], "set_active": True},
+    )
+    assert g_b["name"] == "B组"
+    assert g_b["is_active"] is True
+
+    groups = get_json_ok(client, "/api/etf/research/groups")
+    names = {x["name"] for x in groups}
+    assert names == {"A组", "B组"}
+    active_hit = [x for x in groups if x["is_active"]]
+    assert len(active_hit) == 1 and active_hit[0]["name"] == "B组"
+
+    exported = get_json_ok(client, "/api/etf/research/groups-export")
+    assert exported["format"] == "etf_momentum_research_candidate_groups"
+    assert exported["active_group"] == "B组"
+    assert "A组" in exported["groups"]
+
+    imported = post_json(
+        client,
+        "/api/etf/research/groups-import",
+        {
+            "groups": {"默认分组": ["510300"]},
+            "active_group": "默认分组",
+            "replace_all": True,
+        },
+    )
+    assert imported["ok"] is True
+    assert imported["active_group"] == "默认分组"
+
+    groups_after = get_json_ok(client, "/api/etf/research/groups")
+    assert len(groups_after) == 1
+    assert groups_after[0]["name"] == "默认分组"
+    assert groups_after[0]["codes"] == ["510300"]
+    assert groups_after[0]["is_active"] is True

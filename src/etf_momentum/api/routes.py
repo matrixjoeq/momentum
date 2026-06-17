@@ -82,6 +82,9 @@ from .schemas import (
     SimGbmAbSignificanceRequest,
     EtfPoolOut,
     EtfPoolUpsert,
+    EtfResearchGroupOut,
+    EtfResearchGroupUpsert,
+    EtfResearchGroupsImportRequest,
     FetchAllRequest,
     FetchResult,
     FetchSelectedRequest,
@@ -282,6 +285,13 @@ from ..db.futures_research_repo import (
     set_active_futures_group,
     upsert_futures_group,
     upsert_futures_research_state,
+)
+from ..db.etf_research_repo import (
+    delete_etf_group,
+    get_active_etf_group,
+    list_etf_groups,
+    set_active_etf_group,
+    upsert_etf_group,
 )
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
@@ -6835,6 +6845,106 @@ def delete_prices_api(
     n = delete_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adjust)
     db.commit()
     return {"deleted": n}
+
+
+@router.get("/etf/research/groups", response_model=list[EtfResearchGroupOut])
+def list_etf_research_groups_api(
+    db: Session = Depends(get_session),
+) -> list[EtfResearchGroupOut]:
+    return [
+        EtfResearchGroupOut(name=g.name, codes=g.codes, is_active=g.is_active)
+        for g in list_etf_groups(db)
+    ]
+
+
+@router.post("/etf/research/groups", response_model=EtfResearchGroupOut)
+def upsert_etf_research_group_api(
+    payload: EtfResearchGroupUpsert,
+    db: Session = Depends(get_session),
+) -> EtfResearchGroupOut:
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="group name is required")
+    g, _skipped = upsert_etf_group(
+        db,
+        name=name,
+        codes=list(payload.codes or []),
+        set_active=bool(payload.set_active),
+    )
+    db.commit()
+    return EtfResearchGroupOut(name=g.name, codes=g.codes, is_active=g.is_active)
+
+
+@router.delete("/etf/research/groups/{name}")
+def delete_etf_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+    ok = delete_etf_group(db, name=name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="etf group not found")
+    db.commit()
+    return {"deleted": True}
+
+
+@router.post("/etf/research/groups/{name}/activate")
+def activate_etf_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+    ok = set_active_etf_group(db, name=name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="etf group not found")
+    db.commit()
+    return {"ok": True, "active_group": name}
+
+
+@router.get("/etf/research/groups-export")
+def export_etf_research_groups_api(db: Session = Depends(get_session)) -> dict:
+    groups = list_etf_groups(db)
+    active = get_active_etf_group(db)
+    return {
+        "format": "etf_momentum_research_candidate_groups",
+        "version": 1,
+        "active_group": (active.name if active else None),
+        "groups": {g.name: list(g.codes) for g in groups},
+    }
+
+
+@router.post("/etf/research/groups-import")
+def import_etf_research_groups_api(
+    payload: EtfResearchGroupsImportRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    groups_payload = payload.groups or {}
+    imported: list[str] = []
+    skipped_codes: dict[str, list[str]] = {}
+
+    incoming_names = {
+        str(k or "").strip() for k in groups_payload.keys() if str(k or "").strip()
+    }
+    if bool(payload.replace_all):
+        for g in list_etf_groups(db):
+            if g.name not in incoming_names:
+                _ = delete_etf_group(db, name=g.name)
+
+    for k, vv in groups_payload.items():
+        name = str(k or "").strip()
+        if not name:
+            continue
+        g, skipped = upsert_etf_group(
+            db, name=name, codes=list(vv or []), set_active=False
+        )
+        imported.append(g.name)
+        if skipped:
+            skipped_codes[g.name] = skipped
+
+    active = str(payload.active_group or "").strip()
+    if active:
+        _ = set_active_etf_group(db, name=active)
+
+    db.commit()
+    active_group_obj = get_active_etf_group(db)
+    return {
+        "ok": True,
+        "imported_groups": imported,
+        "active_group": (active_group_obj.name if active_group_obj else None),
+        "skipped_codes": skipped_codes,
+    }
 
 
 @router.get("/off-fund", response_model=list[OffFundPoolOut])

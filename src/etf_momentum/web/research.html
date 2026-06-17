@@ -6670,6 +6670,9 @@
       let candidateGroups = {};
       let activeGroupName = DEFAULT_GROUP_NAME;
       let _lastSelectionBeforeInvert = null;
+      let _candidateGroupsSyncTimer = null;
+      let _candidateGroupsSyncInFlight = false;
+      let _candidateGroupsSyncDirty = false;
 
       function _uniq(arr) {
         return Array.from(
@@ -6694,11 +6697,87 @@
         if (!n) return "";
         return n.slice(0, 40);
       }
+      function _snapshotCandidateGroupsForPersist() {
+        const groups = {};
+        for (const k of Object.keys(candidateGroups || {})) {
+          const name = _sanitizeGroupName(k);
+          if (!name) continue;
+          groups[name] = _validCodes(candidateGroups[k] || []);
+        }
+        const names = Object.keys(groups);
+        if (!names.length) groups[DEFAULT_GROUP_NAME] = [];
+        const active =
+          _sanitizeGroupName(activeGroupName || "") ||
+          Object.keys(groups)[0] ||
+          DEFAULT_GROUP_NAME;
+        return { groups, active_group: active };
+      }
+      async function _persistCandidateGroupsToServerNow() {
+        if (_candidateGroupsSyncInFlight) {
+          _candidateGroupsSyncDirty = true;
+          return;
+        }
+        _candidateGroupsSyncInFlight = true;
+        try {
+          const snap = _snapshotCandidateGroupsForPersist();
+          const resp = await api("/etf/research/groups-import", {
+            method: "POST",
+            body: JSON.stringify({
+              groups: snap.groups,
+              active_group: snap.active_group,
+              replace_all: true,
+            }),
+          });
+          if (!resp.ok) {
+            // Best effort: keep local persistence working even when backend sync fails.
+          }
+        } catch {
+          // Best effort: backend may be temporarily unavailable.
+        } finally {
+          _candidateGroupsSyncInFlight = false;
+          if (_candidateGroupsSyncDirty) {
+            _candidateGroupsSyncDirty = false;
+            void _persistCandidateGroupsToServerNow();
+          }
+        }
+      }
+      function _scheduleCandidateGroupsServerSync() {
+        if (_candidateGroupsSyncTimer != null) {
+          clearTimeout(_candidateGroupsSyncTimer);
+        }
+        _candidateGroupsSyncTimer = setTimeout(() => {
+          _candidateGroupsSyncTimer = null;
+          void _persistCandidateGroupsToServerNow();
+        }, 300);
+      }
+      async function _loadCandidateGroupsFromServer() {
+        try {
+          const resp = await api("/etf/research/groups", { method: "GET" });
+          if (!resp.ok) return null;
+          const data = await resp.json();
+          if (!Array.isArray(data) || !data.length) return null;
+          const groups = {};
+          let active = "";
+          for (const it of data) {
+            const name = _sanitizeGroupName(it && it.name);
+            if (!name) continue;
+            const codes =
+              it && Array.isArray(it.codes) ? _validCodes(it.codes) : [];
+            groups[name] = codes;
+            if (!active && it && it.is_active) active = name;
+          }
+          if (!Object.keys(groups).length) return null;
+          return { groups, active_group: active || null };
+        } catch {
+          return null;
+        }
+      }
       function _saveCandidateGroups() {
         _settingsSave(SETTINGS_KEYS.candidateGroups, {
           groups: candidateGroups,
           active_group: activeGroupName,
         });
+        _scheduleCandidateGroupsServerSync();
       }
       function _refreshUiAfterCandidateImport() {
         _ensureCandidateGroups();
@@ -11295,7 +11374,23 @@
 
         pool = data;
         selected.clear();
-        if (
+        let _migrateLocalGroupsToServer = false;
+        const serverGroups = await _loadCandidateGroupsFromServer();
+        if (serverGroups && typeof serverGroups === "object") {
+          const g =
+            serverGroups.groups && typeof serverGroups.groups === "object"
+              ? serverGroups.groups
+              : {};
+          candidateGroups = {};
+          for (const [k, vv] of Object.entries(g)) {
+            const name = _sanitizeGroupName(k);
+            if (!name) continue;
+            candidateGroups[name] = _validCodes(Array.isArray(vv) ? vv : []);
+          }
+          activeGroupName =
+            _sanitizeGroupName(serverGroups.active_group || "") ||
+            DEFAULT_GROUP_NAME;
+        } else if (
           _savedCandidateGroupsReady &&
           _savedCandidateGroups &&
           typeof _savedCandidateGroups === "object"
@@ -11314,6 +11409,7 @@
           activeGroupName =
             _sanitizeGroupName(_savedCandidateGroups.active_group || "") ||
             DEFAULT_GROUP_NAME;
+          _migrateLocalGroupsToServer = Object.keys(candidateGroups).length > 0;
         } else {
           candidateGroups = {};
           if (_savedSelectedCodesReady && Array.isArray(_savedSelectedCodes)) {
@@ -11329,6 +11425,9 @@
         _ensureCandidateGroups();
         _groupEditorLastSynced = activeGroupName;
         _setSelectedFromGroup(activeGroupName);
+        if (_migrateLocalGroupsToServer) {
+          void _persistCandidateGroupsToServerNow();
+        }
         renderCandidateGroupControls();
         renderCodeList();
         setMsg(`候选池已加载：${pool.length} 个标的`);

@@ -37,6 +37,31 @@ class EtfPoolOut(BaseModel):
     last_data_end_date: str | None = None  # YYYYMMDD
 
 
+class EtfResearchGroupUpsert(BaseModel):
+    name: str = Field(min_length=1, max_length=128, description="Group name")
+    codes: list[str] = Field(default_factory=list, description="ETF symbols in group")
+    set_active: bool = Field(
+        default=True, description="If true, set this group as current active group"
+    )
+
+
+class EtfResearchGroupOut(BaseModel):
+    name: str
+    codes: list[str]
+    is_active: bool
+
+
+class EtfResearchGroupsImportRequest(BaseModel):
+    groups: dict[str, list[str]] = Field(description="Mapping: group name -> symbol list")
+    active_group: str | None = Field(
+        default=None, description="Optional active group name"
+    )
+    replace_all: bool = Field(
+        default=False,
+        description="If true, remove DB groups not present in incoming payload first",
+    )
+
+
 class FetchResult(BaseModel):
     code: str
     inserted_or_updated: int
