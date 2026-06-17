@@ -2445,14 +2445,19 @@ def analysis_leadlag(
 
     fred_known = {"DGS2", "DGS5", "DGS10", "DGS30"}
     sina_known = {"DINIW"}
+    # Spot metals: Stooq's free CSV endpoint now gates downloads behind a JS
+    # proof-of-work / returns "Access denied", so route spot gold/silver through
+    # Sina's global-futures spot series (XAUUSD->XAU, XAGUSD->XAG).
+    sina_global_known = {"XAUUSD", "XAGUSD"}
     # Note: some Stooq symbols (notably certain futures like GC.F / DX.F) may require captcha on
     # historical download pages and can return empty content from the CSV endpoint.
-    stooq_known = {"XAUUSD", "GC.F"}
+    stooq_known = {"GC.F"}
 
     # Provider selection:
     # - cboe: VIX/VX/GVZ/OVX only (preferred when available)
     # - fred: FRED daily series (rates)
-    # - stooq: Stooq daily CSV (DXY / XAUUSD / GC)
+    # - sina_global: Sina global-futures spot metals (XAUUSD / XAGUSD)
+    # - stooq: Stooq daily CSV (GC, etc.)
     # - yahoo: fallback for arbitrary symbols
     # - auto: try in the above order based on symbol
     if idx_provider == "auto":
@@ -2462,6 +2467,8 @@ def analysis_leadlag(
             idx_provider_eff = "fred"
         elif idx_sym_u in sina_known:
             idx_provider_eff = "sina"
+        elif idx_sym_u in sina_global_known:
+            idx_provider_eff = "sina_global"
         elif idx_sym_u in stooq_known:
             idx_provider_eff = "stooq"
         else:
@@ -2557,6 +2564,33 @@ def analysis_leadlag(
             "symbol": idx_sym_u,
             "align": idx_align,
             "sina": smeta,
+        }
+    elif idx_provider_eff == "sina_global":
+        from ..data.sina_fetcher import (  # local import to keep optional dependency surface small
+            FetchRequest as SinaFetchRequest,
+            fetch_sina_global_futures_day_kline_daily_close,
+        )
+
+        df_sina, smeta = fetch_sina_global_futures_day_kline_daily_close(
+            SinaFetchRequest(
+                symbol=idx_sym_u, start_date=payload.start, end_date=payload.end
+            )
+        )
+        if df_sina is None or df_sina.empty:
+            err = str((smeta or {}).get("error") or "empty_sina_global_series")
+            return LeadLagAnalysisResponse(
+                ok=False, error=err, meta={"sina_global": smeta}
+            )
+        idx = pd.Series(
+            data=df_sina["close"].to_numpy(dtype=float),
+            index=df_sina["date"].to_list(),
+            dtype=float,
+        ).dropna()
+        idx_meta = {
+            "provider": "sina_global",
+            "symbol": idx_sym_u,
+            "align": idx_align,
+            "sina_global": smeta,
         }
     else:
         # Yahoo fallback (may be blocked by network policy).

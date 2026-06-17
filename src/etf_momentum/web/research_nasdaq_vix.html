@@ -141,9 +141,9 @@
           title="选择预设会自动填充资产来源与symbol/代码。"
         >
           <option value="db:513100" selected>513100（A股纳指ETF，DB）</option>
-          <option value="stooq:qqq.us">QQQ（海外ETF，Stooq: qqq.us）</option>
-          <option value="stooq:^ndx">
-            NDX（纳斯达克100指数，Stooq: ^ndx）
+          <option value="yahoo:QQQ">QQQ（海外ETF，Yahoo: QQQ）</option>
+          <option value="yahoo:^NDX">
+            NDX（纳斯达克100指数，Yahoo: ^NDX）
           </option>
           <option value="custom:">custom（自定义）</option>
         </select>
@@ -159,7 +159,7 @@
       </div>
       <div>
         <label>资产 symbol（外盘）</label>
-        <input id="assetSymbol" value="" placeholder="例如 qqq.us 或 ^ndx" />
+        <input id="assetSymbol" value="" placeholder="例如 QQQ 或 ^NDX（Yahoo）" />
       </div>
       <div>
         <label>ETF 复权</label>
@@ -175,6 +175,11 @@
           <option value="cboe:VXN" selected>VXN（Cboe 纳指恐慌指数）</option>
           <option value="cboe:VIX">VIX（Cboe 恐慌指数）</option>
           <option value="cboe:GVZ">GVZ（Cboe 黄金波动率）</option>
+          <option value="sina:DINIW">美元指数 DXY（Sina: DINIW）</option>
+          <option value="fred:DGS2">美债收益率 2Y（FRED: DGS2）</option>
+          <option value="fred:DGS5">美债收益率 5Y（FRED: DGS5）</option>
+          <option value="fred:DGS10">美债收益率 10Y（FRED: DGS10）</option>
+          <option value="fred:DGS30">美债收益率 30Y（FRED: DGS30）</option>
           <option value="custom:">custom（自定义）</option>
         </select>
       </div>
@@ -187,6 +192,8 @@
         <select id="idxProvider">
           <option value="auto">auto</option>
           <option value="cboe" selected>cboe</option>
+          <option value="fred">fred</option>
+          <option value="sina">sina</option>
           <option value="stooq">stooq</option>
           <option value="yahoo">yahoo</option>
         </select>
@@ -1749,11 +1756,13 @@
         const asset_provider = ($("assetProvider").value || "db").trim();
         const asset_symbol = ($("assetSymbol").value || "").trim();
         const preset = ($("assetPreset").value || "").trim();
-        const label = preset.includes("stooq:^ndx")
-          ? "NDX"
-          : preset.includes("stooq:qqq.us")
-            ? "QQQ"
-            : "513100";
+        const presetSym = (preset.split(":")[1] || "").trim().toLowerCase();
+        const label =
+          presetSym === "^ndx"
+            ? "NDX"
+            : presetSym === "qqq" || presetSym === "qqq.us"
+              ? "QQQ"
+              : "513100";
 
         setMsg("运行中...");
         const resp = await api("/analysis/leadlag", {
@@ -1821,8 +1830,8 @@
           $("assetSymbol").value = "";
           $("adjust").disabled = false;
           $("align").value = "cn_next_trading_day";
-        } else if (p === "stooq") {
-          $("assetProvider").value = "stooq";
+        } else if (p === "stooq" || p === "yahoo") {
+          $("assetProvider").value = p;
           $("assetSymbol").value = sym;
           $("adjust").disabled = true;
           $("align").value = "none";

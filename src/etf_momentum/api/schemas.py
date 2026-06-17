@@ -791,10 +791,10 @@ class LeadLagAnalysisRequest(BaseModel):
     )
     index_symbol: str = Field(
         min_length=1,
-        description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD (Stooq), GC.F (Stooq), GC=F (Yahoo).",
+        description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD/XAGUSD (Sina global spot), GC.F (Stooq), GC=F (Yahoo).",
     )
     index_provider: str = Field(
-        default="cboe", description="cboe|yahoo|fred|stooq|sina|auto"
+        default="cboe", description="cboe|yahoo|fred|stooq|sina|sina_global|auto"
     )
     index_align: str = Field(
         default="cn_next_trading_day", description="none|cn_next_trading_day"
