@@ -5016,6 +5016,22 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     monthly_attempted = int(month_stats.get("attempted_entry_count", 0))
     monthly_blocked = int(month_stats.get("blocked_entry_count", 0))
     risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
+    holding_bias_v_ge_5_counts = _trend_semantic_helpers._bias_v_hit_counts_per_holding(
+        weights=w_eff.reindex(nav.index).astype(float).fillna(0.0),
+        close=sig_close.reindex(nav.index).astype(float).ffill(),
+        high=sig_high.reindex(nav.index).astype(float).ffill(),
+        low=sig_low.reindex(nav.index).astype(float).ffill(),
+        ma_window=int(getattr(inp, "bias_v_ma_window", 20) or 20),
+        atr_window=int(getattr(inp, "bias_v_atr_window", 20) or 20),
+        threshold=5.0,
+    )
+    holding_bias_v_ge_5_count = int(sum(int(x) for x in holding_bias_v_ge_5_counts))
+    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
+        holding_bias_v_ge_5_counts
+    )
+    holding_bias_v_ge_5_max_per_holding = int(
+        (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
+    )
     single_semi_variance_stats = _semi_variance_run_stats_from_returns(
         strat_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
     )
@@ -5054,6 +5070,9 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
             (sem_dbg.get("r_profit_scaleout") or {}).get("trigger_count", 0)
         ),
         "bias_v_take_profit_trigger_count": int(bv_stats.get("trigger_count", 0)),
+        "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_count),
+        "holding_bias_v_ge_5_max_per_holding": int(holding_bias_v_ge_5_max_per_holding),
+        "holding_bias_v_ge_5_per_holding_distribution": dict(holding_bias_v_ge_5_dist),
         "r_take_profit_tier_trigger_counts": dict(
             rtp_stats.get("tier_trigger_counts") or {}
         ),
@@ -5221,6 +5240,13 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 ),
                 "r_profit_scaleout_trigger_count": int(
                     (sem_dbg.get("r_profit_scaleout") or {}).get("trigger_count", 0)
+                ),
+                "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_count),
+                "holding_bias_v_ge_5_max_per_holding": int(
+                    holding_bias_v_ge_5_max_per_holding
+                ),
+                "holding_bias_v_ge_5_per_holding_distribution": dict(
+                    holding_bias_v_ge_5_dist
                 ),
                 "ma_entry_filter_blocked_entry_count": int(
                     ma_stats.get("blocked_entry_count", 0)
@@ -7500,6 +7526,42 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         else 0.0
     )
     risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
+    holding_bias_v_ge_5_all_counts, holding_bias_v_ge_5_counts_by_code = (
+        _trend_semantic_helpers._bias_v_hit_counts_per_holding_by_code(
+            weights=w_eff.reindex(index=nav.index, columns=w_eff.columns)
+            .astype(float)
+            .fillna(0.0),
+            close=close_sig_df.reindex(index=nav.index, columns=w_eff.columns)
+            .astype(float)
+            .ffill(),
+            high=high_sig_df.reindex(index=nav.index, columns=w_eff.columns)
+            .astype(float)
+            .ffill(),
+            low=low_sig_df.reindex(index=nav.index, columns=w_eff.columns)
+            .astype(float)
+            .ffill(),
+            ma_window=int(getattr(inp, "bias_v_ma_window", 20) or 20),
+            atr_window=int(getattr(inp, "bias_v_atr_window", 20) or 20),
+            threshold=5.0,
+        )
+    )
+    holding_bias_v_ge_5_total = int(sum(int(x) for x in holding_bias_v_ge_5_all_counts))
+    holding_bias_v_ge_5_by_code = {
+        str(k): int(sum(int(x) for x in (v or [])))
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
+    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
+        holding_bias_v_ge_5_all_counts
+    )
+    holding_bias_v_ge_5_max_per_holding = int(
+        (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
+    )
+    holding_bias_v_ge_5_dist_by_code = {
+        str(k): _trend_semantic_helpers._distribution_stats_from_int_counts(
+            list(v or [])
+        )
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
     portfolio_semi_variance_overall = _semi_variance_run_stats_from_returns(
         port_ret.reindex(nav.index).astype(float).fillna(0.0).tolist()
     )
@@ -7544,6 +7606,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "r_take_profit_trigger_count": int(rtp_trigger_total),
         "r_profit_scaleout_trigger_count": int(rps_trigger_total),
         "bias_v_take_profit_trigger_count": int(bias_v_tp_trigger_total),
+        "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_total),
+        "holding_bias_v_ge_5_max_per_holding": int(holding_bias_v_ge_5_max_per_holding),
+        "holding_bias_v_ge_5_per_holding_distribution": dict(holding_bias_v_ge_5_dist),
         "bias_v_take_profit_tier_trigger_counts": dict(bias_v_tp_tier_counts),
         "r_take_profit_tier_trigger_counts": dict(rtp_tier_counts),
         "r_profit_scaleout_tier_trigger_counts": dict(rps_tier_counts),
@@ -7690,6 +7755,18 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             ),
             "bias_v_take_profit_trigger_count": int(
                 (sem.get("bias_v_take_profit") or {}).get("trigger_count", 0)
+            ),
+            "holding_bias_v_ge_5_count": int(
+                holding_bias_v_ge_5_by_code.get(str(c), 0)
+            ),
+            "holding_bias_v_ge_5_max_per_holding": int(
+                (
+                    holding_bias_v_ge_5_dist_by_code.get(str(c), {}) or {}
+                ).get("max", 0)
+                or 0
+            ),
+            "holding_bias_v_ge_5_per_holding_distribution": dict(
+                holding_bias_v_ge_5_dist_by_code.get(str(c), {})
             ),
             "bias_v_take_profit_tier_trigger_counts": dict(
                 (sem.get("bias_v_take_profit") or {}).get("tier_trigger_counts") or {}
@@ -8203,6 +8280,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "r_take_profit_trigger_count": int(rtp_trigger_total),
                 "r_profit_scaleout_trigger_count": int(rps_trigger_total),
                 "bias_v_take_profit_trigger_count": int(bias_v_tp_trigger_total),
+                "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_total),
+                "holding_bias_v_ge_5_max_per_holding": int(
+                    holding_bias_v_ge_5_max_per_holding
+                ),
                 "atr_stop_trigger_count": int(atr_trigger_total),
                 "ma_entry_filter_blocked_entry_count": int(ma_blocked),
                 "impulse_filter_blocked_entry_count": int(imp_blocked),

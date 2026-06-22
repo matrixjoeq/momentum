@@ -45,6 +45,7 @@ def test_frontend_backend_contract_smoke(api_client: TestClient) -> None:
     assert "/futures/research/coverage-summary" in fut_research
     assert "/futures/research/correlation-select" in fut_research
     assert "/futures/research/trend-backtest" in fut_research
+    assert "/futures/research/rotation-backtest" in fut_research
     assert "corrPickBasis" in fut_research
     assert "futures-research:corr-pick-basis" in fut_research
     assert "futures-research:corr-pick-n" in fut_research

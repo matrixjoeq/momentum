@@ -1143,12 +1143,18 @@ def test_trend_portfolio_exposes_r_take_profit_controls(session_factory):
     assert "atr_stop_trigger_count" in overall
     assert "r_take_profit_trigger_count" in overall
     assert "bias_v_take_profit_trigger_count" in overall
+    assert "holding_bias_v_ge_5_count" in overall
+    assert "holding_bias_v_ge_5_max_per_holding" in overall
+    assert "holding_bias_v_ge_5_per_holding_distribution" in overall
     assert isinstance((overall.get("r_take_profit_tier_trigger_counts") or {}), dict)
     for c in ["A1", "A2"]:
         one = by_code.get(c) or {}
         assert "atr_stop_trigger_count" in one
         assert "r_take_profit_trigger_count" in one
         assert "bias_v_take_profit_trigger_count" in one
+        assert "holding_bias_v_ge_5_count" in one
+        assert "holding_bias_v_ge_5_max_per_holding" in one
+        assert "holding_bias_v_ge_5_per_holding_distribution" in one
 
 
 def test_trend_portfolio_kama_std_band_reduces_trades(session_factory):

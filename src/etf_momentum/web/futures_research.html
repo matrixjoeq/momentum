@@ -901,6 +901,206 @@
       <div id="trendSeriesWrap"></div>
     </div>
 
+    <div class="panel" id="rotationParamsPanel">
+      <h3>轮动回测（固定 TopK）</h3>
+      <p class="muted" style="margin: 8px 0 12px">
+        价格口径：轮动回测使用合成后复权连续（<code>{品种}889</code>）。接口：
+        <code>/futures/research/rotation-backtest</code>。
+      </p>
+      <div class="row" style="flex-wrap: wrap; align-items: flex-end">
+        <div>
+          <label>调仓频率</label>
+          <select id="rotRebalance">
+            <option value="daily">日度</option>
+            <option value="weekly" selected>周度</option>
+            <option value="monthly">月度</option>
+          </select>
+        </div>
+        <div>
+          <label>动量回看（交易日）</label>
+          <input
+            id="rotLookbackDays"
+            type="number"
+            min="2"
+            step="1"
+            value="20"
+          />
+        </div>
+        <div>
+          <label>TopK（固定）</label>
+          <input id="rotTopK" type="number" min="1" step="1" value="1" />
+        </div>
+        <div>
+          <label>交易方向</label>
+          <select id="rotTradeDirection">
+            <option value="long_only" selected>做多</option>
+            <option value="short_only">做空</option>
+          </select>
+        </div>
+        <div>
+          <label>仓位比例模式</label>
+          <select id="rotPositionMode">
+            <option value="equal" selected>等权</option>
+            <option value="inverse_vol">波动率倒数加权</option>
+          </select>
+        </div>
+        <div>
+          <label>逆波动窗口</label>
+          <input
+            id="rotInverseVolWindow"
+            type="number"
+            min="2"
+            step="1"
+            value="20"
+          />
+        </div>
+      </div>
+      <div
+        class="row"
+        style="flex-wrap: wrap; align-items: flex-end; margin-top: 8px"
+      >
+        <div>
+          <label>执行价</label>
+          <select id="rotExecPrice">
+            <option value="open">开盘</option>
+            <option value="close" selected>收盘</option>
+          </select>
+        </div>
+        <div>
+          <label>回测保证金率（%）</label>
+          <input
+            id="rotBacktestMarginRatePct"
+            type="number"
+            min="0.1"
+            max="100"
+            step="0.1"
+            value="15"
+          />
+        </div>
+        <div>
+          <label>手续费（bps）</label>
+          <input
+            id="rotCostBps"
+            type="number"
+            min="0"
+            max="2000"
+            step="0.5"
+            value="5"
+          />
+        </div>
+        <div>
+          <label>手续费口径</label>
+          <select id="rotFeeSide">
+            <option value="one_way">单边</option>
+            <option value="two_way" selected>双边</option>
+          </select>
+        </div>
+        <div>
+          <label>滑点类型</label>
+          <select id="rotSlippageType">
+            <option value="percent" selected>比例（相对价格）</option>
+            <option value="price_spread">绝对价差</option>
+            <option value="tick_multiple">最小变动价位倍数</option>
+          </select>
+        </div>
+        <div>
+          <label>滑点数值</label>
+          <input
+            id="rotSlippageValue"
+            type="number"
+            min="0"
+            step="any"
+            value="0.0005"
+          />
+        </div>
+        <div>
+          <label>滑点口径</label>
+          <select id="rotSlippageSide">
+            <option value="one_way">单边</option>
+            <option value="two_way" selected>双边</option>
+          </select>
+        </div>
+        <button id="runRotationBacktest">刷新轮动回测</button>
+      </div>
+      <div id="rotationMeta" class="muted"></div>
+      <div id="futuresRotationChartsPanel" style="display: none; margin-top: 10px">
+        <div
+          class="panel two"
+          style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+        >
+          <div>
+            <h3 style="margin: 0">净值曲线（轮动 vs 基准）</h3>
+            <div
+              id="ftRotationChart"
+              style="width: 100%; height: 520px; margin-top: 8px"
+            ></div>
+            <h3 style="margin-top: 12px">回撤对比（轮动 vs 基准）</h3>
+            <div
+              id="ftRotationDDCompare"
+              style="width: 100%; height: 260px"
+            ></div>
+          </div>
+          <div>
+            <h3 style="margin: 0">超额净值（轮动 / 基准）</h3>
+            <div
+              id="ftRotationExcessChart"
+              style="width: 100%; height: 520px; margin-top: 8px"
+            ></div>
+            <h3 style="margin-top: 12px">40日收益差（轮动 - 基准）</h3>
+            <div
+              id="ftRotation40dExcessChart"
+              style="width: 100%; height: 260px"
+            ></div>
+          </div>
+        </div>
+        <div
+          class="panel two"
+          style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+        >
+          <div>
+            <h3>轮动策略滚动收益&amp;回撤（6个月/1年/2年/3年）</h3>
+            <div
+              id="ftRotationRollingCombo"
+              style="width: 100%; height: 520px"
+            ></div>
+          </div>
+          <div>
+            <h3>超额滚动收益&amp;回撤（6个月/1年/2年/3年）</h3>
+            <div
+              id="ftRotationExcessRollingCombo"
+              style="width: 100%; height: 520px"
+            ></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top: 10px">
+          <h3>日度收益率分布统计</h3>
+          <div class="row no-print" style="margin-top: 8px; align-items: end">
+            <div>
+              <label>分布口径</label>
+              <select id="ftRotationDailyRetMode">
+                <option value="simple" selected>普通收益率</option>
+                <option value="log">对数收益率</option>
+              </select>
+            </div>
+          </div>
+          <div
+            class="panel two"
+            style="grid-template-columns: 1fr 1fr; margin-top: 10px"
+          >
+            <div>
+              <div
+                id="ftRotationDailyRetHist"
+                style="width: 100%; height: 360px"
+              ></div>
+            </div>
+            <div>
+              <table id="ftRotationDailyRetQuantiles" class="corr"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="msg"></div>
 
     <script>
@@ -1072,10 +1272,12 @@
       let corrRangeKey = "all";
       let editorGroupName = "";
       let latestFuturesTrendOut = null;
+      let latestFuturesRotationOut = null;
       const corrRangeStorageKey = `futures-research:corr-range:${location.pathname}`;
       const corrPickBasisStorageKey = `futures-research:corr-pick-basis:${location.pathname}`;
       const corrPickNStorageKey = `futures-research:corr-pick-n:${location.pathname}`;
       const trendParamsStorageKey = `futures-research:trend-params:${location.pathname}`;
+      const rotationParamsStorageKey = `futures-research:rotation-params:${location.pathname}`;
       const corrRangeAllowed = new Set([
         "1m",
         "3m",
@@ -1351,6 +1553,71 @@
           if (!raw) return;
           const p = JSON.parse(raw);
           applyTrendParams(p);
+        } catch (_) {}
+      }
+
+      function readRotationParamsFromForm() {
+        return {
+          v: 1,
+          rebalance: String($("rotRebalance")?.value || "weekly"),
+          lookbackDays: String($("rotLookbackDays")?.value ?? "20"),
+          topK: String($("rotTopK")?.value ?? "1"),
+          tradeDirection: String($("rotTradeDirection")?.value || "long_only"),
+          positionMode: String($("rotPositionMode")?.value || "equal"),
+          inverseVolWindow: String($("rotInverseVolWindow")?.value ?? "20"),
+          execPrice: String($("rotExecPrice")?.value || "close"),
+          backtestMarginRatePct: String(
+            $("rotBacktestMarginRatePct")?.value ?? "15",
+          ),
+          costBps: String($("rotCostBps")?.value ?? "5"),
+          feeSide: String($("rotFeeSide")?.value || "two_way"),
+          slippageType: String($("rotSlippageType")?.value || "percent"),
+          slippageValue: String($("rotSlippageValue")?.value ?? "0.0005"),
+          slippageSide: String($("rotSlippageSide")?.value || "two_way"),
+        };
+      }
+
+      function saveRotationParams() {
+        try {
+          localStorage.setItem(
+            rotationParamsStorageKey,
+            JSON.stringify(readRotationParamsFromForm()),
+          );
+        } catch (_) {}
+      }
+
+      function applyRotationParams(p) {
+        if (!p || typeof p !== "object") return;
+        const setNum = (id, val, fallback) => {
+          const el = $(id);
+          if (!el) return;
+          const v =
+            val != null && String(val).trim() !== ""
+              ? String(val)
+              : String(fallback);
+          el.value = v;
+        };
+        setSelectIfOptionExists("rotRebalance", p.rebalance);
+        setSelectIfOptionExists("rotTradeDirection", p.tradeDirection);
+        setSelectIfOptionExists("rotPositionMode", p.positionMode);
+        setSelectIfOptionExists("rotExecPrice", p.execPrice);
+        setSelectIfOptionExists("rotFeeSide", p.feeSide);
+        setSelectIfOptionExists("rotSlippageType", p.slippageType);
+        setSelectIfOptionExists("rotSlippageSide", p.slippageSide);
+        setNum("rotLookbackDays", p.lookbackDays, "20");
+        setNum("rotTopK", p.topK, "1");
+        setNum("rotInverseVolWindow", p.inverseVolWindow, "20");
+        setNum("rotBacktestMarginRatePct", p.backtestMarginRatePct, "15");
+        setNum("rotCostBps", p.costBps, "5");
+        setNum("rotSlippageValue", p.slippageValue, "0.0005");
+      }
+
+      function loadRotationParams() {
+        try {
+          const raw = localStorage.getItem(rotationParamsStorageKey);
+          if (!raw) return;
+          const p = JSON.parse(raw);
+          applyRotationParams(p);
         } catch (_) {}
       }
 
@@ -1642,6 +1909,21 @@
         );
       }
 
+      function renderFuturesRotationDailyReturnDist() {
+        const d = window.__futuresRotationDist;
+        const modeSel = $("ftRotationDailyRetMode");
+        if (!d || !Array.isArray(d.stratNav) || d.stratNav.length < 2) return;
+        const payload = _dailyReturnsFromNav(d.stratNav, d.dates);
+        const mode = modeSel ? String(modeSel.value || "simple") : "simple";
+        _renderFuturesDailyReturnDist(
+          "ftRotationDailyRetHist",
+          "ftRotationDailyRetQuantiles",
+          payload,
+          "期货轮动策略",
+          mode,
+        );
+      }
+
       function clearFuturesTrendCharts() {
         const panel = $("futuresTrendChartsPanel");
         if (panel) panel.style.display = "none";
@@ -1665,6 +1947,29 @@
         if (q) q.innerHTML = "";
       }
 
+      function clearFuturesRotationCharts() {
+        const panel = $("futuresRotationChartsPanel");
+        if (panel) panel.style.display = "none";
+        window.__futuresRotationDist = null;
+        window.__lastFuturesRotationAligned = null;
+        if (!window.Plotly) return;
+        const ids = [
+          "ftRotationChart",
+          "ftRotationDDCompare",
+          "ftRotationExcessChart",
+          "ftRotation40dExcessChart",
+          "ftRotationRollingCombo",
+          "ftRotationExcessRollingCombo",
+          "ftRotationDailyRetHist",
+        ];
+        for (const id of ids) {
+          const gd = $(id);
+          if (gd) Plotly.purge(gd);
+        }
+        const q = $("ftRotationDailyRetQuantiles");
+        if (q) q.innerHTML = "";
+      }
+
       function runFuturesTrendCharts(aligned) {
         window.__lastFuturesTrendAligned = aligned;
         window.__futuresTrendDist = {
@@ -1675,7 +1980,14 @@
         if (panel) panel.style.display = "block";
         whenPlotlyReady(() => {
           try {
-            plotFuturesTrendAlignedCharts(aligned);
+            plotFuturesTrendAlignedCharts(aligned, {
+              navId: "ftTrendChart",
+              ddId: "ftTrendDDCompare",
+              excessId: "ftTrendExcessChart",
+              diff40Id: "ftTrend40dExcessChart",
+              rollingId: "ftTrendRollingCombo",
+              excessRollingId: "ftTrendExcessRollingCombo",
+            });
           } catch (e) {
             console.warn(e);
           }
@@ -1687,7 +1999,45 @@
         });
       }
 
-      function plotFuturesTrendAlignedCharts(payload) {
+      function runFuturesRotationCharts(aligned) {
+        window.__lastFuturesRotationAligned = aligned;
+        window.__futuresRotationDist = {
+          stratNav: aligned.stratNav,
+          dates: aligned.dates,
+        };
+        const panel = $("futuresRotationChartsPanel");
+        if (panel) panel.style.display = "block";
+        whenPlotlyReady(() => {
+          try {
+            plotFuturesTrendAlignedCharts(aligned, {
+              navId: "ftRotationChart",
+              ddId: "ftRotationDDCompare",
+              excessId: "ftRotationExcessChart",
+              diff40Id: "ftRotation40dExcessChart",
+              rollingId: "ftRotationRollingCombo",
+              excessRollingId: "ftRotationExcessRollingCombo",
+            });
+          } catch (e) {
+            console.warn(e);
+          }
+          try {
+            renderFuturesRotationDailyReturnDist();
+          } catch (e) {
+            console.warn(e);
+          }
+        });
+      }
+
+      function plotFuturesTrendAlignedCharts(payload, chartIds) {
+        const ids = {
+          navId: "ftTrendChart",
+          ddId: "ftTrendDDCompare",
+          excessId: "ftTrendExcessChart",
+          diff40Id: "ftTrend40dExcessChart",
+          rollingId: "ftTrendRollingCombo",
+          excessRollingId: "ftTrendExcessRollingCombo",
+          ...(chartIds || {}),
+        };
         const dates = Array.isArray(payload && payload.dates)
           ? payload.dates
           : [];
@@ -1862,7 +2212,7 @@
           });
         }
         Plotly.newPlot(
-          "ftTrendChart",
+          ids.navId,
           navTraces,
           {
             margin: { t: 20 },
@@ -1908,7 +2258,7 @@
           { responsive: true },
         );
         Plotly.newPlot(
-          "ftTrendDDCompare",
+          ids.ddId,
           [
             {
               x: dates,
@@ -2014,7 +2364,7 @@
           });
         }
         Plotly.newPlot(
-          "ftTrendExcessChart",
+          ids.excessId,
           exTraces,
           {
             margin: { t: 20 },
@@ -2069,7 +2419,7 @@
         });
         const diff40Ma242 = _rollingMean(diff40, 242);
         Plotly.newPlot(
-          "ftTrend40dExcessChart",
+          ids.diff40Id,
           [
             {
               x: dates,
@@ -2243,8 +2593,8 @@
             { responsive: true },
           );
         };
-        _plotRollingCombo("ftTrendRollingCombo", stratNav, "STRAT");
-        _plotRollingCombo("ftTrendExcessRollingCombo", excessNav, "EX");
+        _plotRollingCombo(ids.rollingId, stratNav, "STRAT");
+        _plotRollingCombo(ids.excessRollingId, excessNav, "EX");
       }
 
       function selectedCodesFromPool() {
@@ -2328,6 +2678,7 @@
         refreshTrendSingleOptions();
         refreshSymbolOhlcOptions();
         loadTrendParams();
+        loadRotationParams();
         syncTrendSizingVisibility();
         syncTrendStrategyVisibility();
       }
@@ -3383,6 +3734,32 @@
         renderFutTradeStats();
       }
 
+      function renderRotationBacktest(out) {
+        latestFuturesRotationOut = out || null;
+        if (!out || out.ok !== true) {
+          clearFuturesRotationCharts();
+          $("rotationMeta").textContent =
+            `轮动回测不可用：${(out && out.error) || "unknown"}`;
+          return;
+        }
+        const m = out.meta || {};
+        $("rotationMeta").textContent =
+          `分组=${m.group_name || "-"} | 调仓=${m.rebalance || "-"} | 动量回看=${Number(m.lookback_days || 0)} | TopK=${Number(m.top_k || 0)} | 方向=${m.trade_direction || "-"} | 权重模式=${m.position_mode || "-"} | 执行规则=${m.signal_execution_rule || "-"} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+        const strat = Array.isArray(out.series && out.series.strategy_nav)
+          ? out.series.strategy_nav
+          : [];
+        const bench = Array.isArray(out.series && out.series.benchmark_nav)
+          ? out.series.benchmark_nav
+          : [];
+        const aligned = alignFuturesTrendNavRows(strat, bench);
+        if (aligned.dates.length >= 2) {
+          runFuturesRotationCharts(aligned);
+        } else {
+          clearFuturesRotationCharts();
+          return;
+        }
+      }
+
       async function runCorrelation() {
         if (!hasActiveGroupWithCodes()) {
           renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
@@ -3665,6 +4042,82 @@
         renderTrendBacktest(out);
       }
 
+      async function runRotationBacktest() {
+        if (!hasActiveGroupWithCodes()) {
+          renderRotationBacktest({
+            ok: false,
+            error: "当前分组为空或分组内无标的",
+          });
+          return;
+        }
+        let lookback = Number($("rotLookbackDays").value);
+        if (!Number.isFinite(lookback) || lookback < 2) lookback = 20;
+        lookback = Math.floor(lookback);
+        $("rotLookbackDays").value = String(lookback);
+        let topK = Number($("rotTopK").value);
+        if (!Number.isFinite(topK) || topK < 1) topK = 1;
+        topK = Math.floor(topK);
+        $("rotTopK").value = String(topK);
+        let ivw = Number($("rotInverseVolWindow").value);
+        if (!Number.isFinite(ivw) || ivw < 2) ivw = 20;
+        ivw = Math.floor(ivw);
+        $("rotInverseVolWindow").value = String(ivw);
+        let marginRatePct = Number($("rotBacktestMarginRatePct").value);
+        if (!Number.isFinite(marginRatePct) || marginRatePct <= 0)
+          marginRatePct = 15;
+        marginRatePct = Math.min(100, Math.max(0.1, marginRatePct));
+        $("rotBacktestMarginRatePct").value = String(marginRatePct);
+        let costBps = Number($("rotCostBps").value);
+        if (!Number.isFinite(costBps) || costBps < 0) costBps = 5;
+        costBps = Math.min(2000, Math.max(0, costBps));
+        $("rotCostBps").value = String(costBps);
+        const slipType = String(
+          $("rotSlippageType").value || "percent",
+        ).toLowerCase();
+        let slipVal = Number($("rotSlippageValue").value);
+        if (slipType === "tick_multiple") {
+          slipVal = Math.round(slipVal);
+          if (!Number.isFinite(slipVal) || slipVal < 0) slipVal = 1;
+          $("rotSlippageValue").value = String(slipVal);
+        } else {
+          if (!Number.isFinite(slipVal) || slipVal < 0) slipVal = 0.0005;
+          $("rotSlippageValue").value = String(slipVal);
+        }
+        saveRotationParams();
+        const payload = {
+          range_key: corrRangeKey,
+          rebalance: String($("rotRebalance").value || "weekly"),
+          lookback_days: lookback,
+          top_k: topK,
+          trade_direction: String(
+            $("rotTradeDirection").value || "long_only",
+          ).toLowerCase(),
+          position_mode: String($("rotPositionMode").value || "equal").toLowerCase(),
+          inverse_vol_window: ivw,
+          exec_price: String($("rotExecPrice").value || "close").toLowerCase(),
+          min_points: 2,
+          cost_bps: costBps,
+          fee_side: String($("rotFeeSide").value || "two_way"),
+          slippage_type: slipType,
+          slippage_value: slipVal,
+          slippage_side: String($("rotSlippageSide").value || "two_way"),
+          backtest_margin_rate_pct: marginRatePct,
+        };
+        const resp = await api("/futures/research/rotation-backtest", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        const out = await resp.json();
+        if (!resp.ok) {
+          renderRotationBacktest({
+            ok: false,
+            error: (out && out.detail) || JSON.stringify(out),
+          });
+          return;
+        }
+        renderRotationBacktest(out);
+      }
+
       async function refreshResearchByActiveGroupChange() {
         if (!hasActiveGroupWithCodes()) {
           renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
@@ -3849,6 +4302,9 @@
       $("runTrendBacktest").addEventListener("click", async () => {
         await runTrendBacktest();
       });
+      $("runRotationBacktest").addEventListener("click", async () => {
+        await runRotationBacktest();
+      });
       const _futTradeStatsMode = $("futTradeStatsMode");
       if (_futTradeStatsMode) {
         _futTradeStatsMode.addEventListener("change", () =>
@@ -3909,6 +4365,11 @@
           }
         });
       }
+      const _rotationPanel = $("rotationParamsPanel");
+      if (_rotationPanel) {
+        _rotationPanel.addEventListener("input", saveRotationParams);
+        _rotationPanel.addEventListener("change", () => saveRotationParams());
+      }
 
       (function bindFuturesTrendDistMode() {
         const el = $("ftTrendDailyRetMode");
@@ -3916,6 +4377,16 @@
           el.addEventListener("change", () => {
             try {
               renderFuturesTrendDailyReturnDist();
+            } catch (_) {}
+          });
+      })();
+
+      (function bindFuturesRotationDistMode() {
+        const el = $("ftRotationDailyRetMode");
+        if (el)
+          el.addEventListener("change", () => {
+            try {
+              renderFuturesRotationDailyReturnDist();
             } catch (_) {}
           });
       })();
@@ -3932,6 +4403,10 @@
             renderCorr({ ok: false, error: "当前分组为空或分组内无标的" });
             renderCoverage({ ok: false, error: "当前分组为空或分组内无标的" });
             renderTrendBacktest({
+              ok: false,
+              error: "当前分组为空或分组内无标的",
+            });
+            renderRotationBacktest({
               ok: false,
               error: "当前分组为空或分组内无标的",
             });

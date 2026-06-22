@@ -2917,6 +2917,13 @@
               id="rotTradeOverallHist"
               style="width: 100%; height: 320px; margin-top: 8px"
             ></div>
+            <div class="muted" style="margin-top: 8px">
+              单次持仓 BIAS-V≥5 命中次数分布
+            </div>
+            <div
+              id="rotTradeOverallBiasV5Hist"
+              style="width: 100%; height: 180px; margin-top: 6px"
+            ></div>
           </div>
           <div>
             <div class="row" style="align-items: flex-end; gap: 8px">
@@ -2934,6 +2941,13 @@
             <div
               id="rotTradeByCodeHist"
               style="width: 100%; height: 320px; margin-top: 8px"
+            ></div>
+            <div class="muted" style="margin-top: 8px">
+              单次持仓 BIAS-V≥5 命中次数分布
+            </div>
+            <div
+              id="rotTradeByCodeBiasV5Hist"
+              style="width: 100%; height: 180px; margin-top: 6px"
             ></div>
           </div>
         </div>
@@ -5331,6 +5345,13 @@
               id="trendTradeOverallHist"
               style="width: 100%; height: 320px; margin-top: 8px"
             ></div>
+            <div class="muted" style="margin-top: 8px">
+              单次持仓 BIAS-V≥5 命中次数分布
+            </div>
+            <div
+              id="trendTradeOverallBiasV5Hist"
+              style="width: 100%; height: 180px; margin-top: 6px"
+            ></div>
           </div>
           <div>
             <div class="row" style="align-items: flex-end; gap: 8px">
@@ -5348,6 +5369,13 @@
             <div
               id="trendTradeByCodeHist"
               style="width: 100%; height: 320px; margin-top: 8px"
+            ></div>
+            <div class="muted" style="margin-top: 8px">
+              单次持仓 BIAS-V≥5 命中次数分布
+            </div>
+            <div
+              id="trendTradeByCodeBiasV5Hist"
+              style="width: 100%; height: 180px; margin-top: 6px"
             ></div>
           </div>
         </div>
@@ -6143,6 +6171,13 @@
               id="ctTradeOverallHist"
               style="width: 100%; height: 320px; margin-top: 8px"
             ></div>
+            <div class="muted" style="margin-top: 8px">
+              单次持仓 BIAS-V≥5 命中次数分布
+            </div>
+            <div
+              id="ctTradeOverallBiasV5Hist"
+              style="width: 100%; height: 180px; margin-top: 6px"
+            ></div>
           </div>
           <div>
             <div class="row" style="align-items: end">
@@ -6158,6 +6193,13 @@
             <div
               id="ctTradeByCodeHist"
               style="width: 100%; height: 320px; margin-top: 8px"
+            ></div>
+            <div class="muted" style="margin-top: 8px">
+              单次持仓 BIAS-V≥5 命中次数分布
+            </div>
+            <div
+              id="ctTradeByCodeBiasV5Hist"
+              style="width: 100%; height: 180px; margin-top: 6px"
             ></div>
           </div>
         </div>
@@ -11242,13 +11284,13 @@
           trendRTpTiers:
             "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
           trendRScaleEnable:
-            "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落。若ATR止损关闭，分层R仍由「ATR周期」与「止损倍数n」定义的基准计量。",
+            "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落；每档减仓比例都按触发当下剩余仓位计算。若ATR止损关闭，分层R仍由「ATR周期」与「止损倍数n」定义的基准计量。",
           trendRScaleExec:
             "降仓执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价成交。",
           trendRScaleTiers:
-            "分层参数：格式 r:ratio（如 2:0.4,3:0.3,4:0.2），表示达到对应R后直接减仓对应比例。",
+            "分层参数：格式 r:ratio（如 2:0.4,3:0.3,4:0.2），表示达到对应R后按当前剩余仓位减仓对应比例。",
           trendBiasVTpEnable:
-            "通用BIAS-V分档止盈：按配置阈值分层减仓（可逐档部分减仓，累计可清仓）。",
+            "通用BIAS-V分档止盈：按配置阈值分层减仓（可逐档部分减仓，累计可清仓）；每档减仓比例按触发当下剩余仓位计算。",
           trendBiasVTpReentry:
             "BIAS-V止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
           trendBiasVTpExec:
@@ -11257,7 +11299,7 @@
           trendBiasVTpAtrWin:
             "BIAS-V ATR窗口：BIAS-V分母中的 ATR 窗口，默认20。",
           trendBiasVTpTiers:
-            "分层参数：格式 v:ratio（如 5:0.5,7:0.3,9:0.2），表示 BIAS-V 达到对应阈值时按比例减仓。",
+            "分层参数：格式 v:ratio（如 5:0.5,7:0.3,9:0.2），表示 BIAS-V 达到对应阈值时按当前剩余仓位比例减仓。",
           trendVolRegimeRiskMgmtEnable:
             "波动率动态风控：仅在风险预算仓位模式生效；持仓后按 ATR(5)/ATR(50) 判断放大/缩小并动态调仓。",
           trendVolRatioFastAtrWindow:
@@ -22448,6 +22490,12 @@
         const minToExitOverall = _obj(minToExitPack.overall);
         const minToExitProfit = _obj(minToExitPack.profit_trades);
         const minToExitLoss = _obj(minToExitPack.loss_trades);
+        const biasVHoldDist = _obj(
+          s.holding_bias_v_ge_5_per_holding_distribution,
+        );
+        const biasVHoldRows = _hasDist(biasVHoldDist)
+          ? _distRows("单次持仓BIAS-V≥5命中次数", biasVHoldDist, _num)
+          : "";
         const tradeExtremeRows =
           _hasDist(maxPossibleOverall) ||
           _hasDist(maxPossibleProfit) ||
@@ -22647,7 +22695,10 @@
           `<tr><td>R止盈分段触发统计</td><td>${_tierText(s.r_take_profit_tier_trigger_counts, s.r_take_profit_trigger_count)}</td></tr>` +
           `<tr><td>浮盈降仓触发次数</td><td>${_n(s.r_profit_scaleout_trigger_count)}</td></tr>` +
           `<tr><td>浮盈降仓分段触发统计</td><td>${_tierText(s.r_profit_scaleout_tier_trigger_counts, s.r_profit_scaleout_trigger_count)}</td></tr>` +
-          `<tr><td>BIAS-V止盈触发次数</td><td>${_n(s.bias_v_take_profit_trigger_count)}</td></tr>`;
+          `<tr><td>BIAS-V止盈触发次数</td><td>${_n(s.bias_v_take_profit_trigger_count)}</td></tr>` +
+          `<tr><td>持仓期间BIAS-V≥5次数（累计）</td><td>${_n(s.holding_bias_v_ge_5_count)}</td></tr>` +
+          `<tr><td>单次持仓BIAS-V≥5命中次数（最大）</td><td>${_n(s.holding_bias_v_ge_5_max_per_holding)}</td></tr>` +
+          biasVHoldRows;
       }
 
       function _renderTradeHist(divId, returns, title) {
@@ -22676,6 +22727,40 @@
             title,
             xaxis: { title: "每笔交易收益率", tickformat: ".1%" },
             yaxis: { title: "频数" },
+          },
+          { responsive: true, displayModeBar: false },
+        );
+      }
+
+      function _renderBiasVHitHist(divId, counts, title) {
+        const div = $(divId);
+        if (!div) return;
+        const xs = Array.isArray(counts)
+          ? counts
+              .map((x) => Number(x))
+              .filter((x) => Number.isFinite(x) && x >= 0)
+          : [];
+        if (!xs.length) {
+          div.innerHTML = "<div class='muted'>暂无可用持仓样本</div>";
+          return;
+        }
+        const maxX = Math.max(0, ...xs);
+        Plotly.newPlot(
+          divId,
+          [
+            {
+              x: xs,
+              type: "histogram",
+              xbins: { start: -0.5, end: maxX + 0.5, size: 1 },
+              marker: { color: "#f28e2b" },
+              hovertemplate: "命中次数=%{x}<br>持仓段数=%{y}<extra></extra>",
+            },
+          ],
+          {
+            margin: { t: 30, b: 40 },
+            title,
+            xaxis: { title: "单次持仓 BIAS-V≥5 命中次数", dtick: 1 },
+            yaxis: { title: "持仓段数", rangemode: "tozero" },
           },
           { responsive: true, displayModeBar: false },
         );
@@ -24136,15 +24221,19 @@
             : null;
         const overallTable = `${p}TradeOverallTable`;
         const overallHist = `${p}TradeOverallHist`;
+        const overallBiasV5Hist = `${p}TradeOverallBiasV5Hist`;
         const byCodeSel = `${p}TradeByCodeSelect`;
         const byCodeTable = `${p}TradeByCodeTable`;
         const byCodeHist = `${p}TradeByCodeHist`;
+        const byCodeBiasV5Hist = `${p}TradeByCodeBiasV5Hist`;
         if (!stats) {
           _renderTradeStatsTable(overallTable, {});
           _renderTradeHist(overallHist, [], "无数据");
+          _renderBiasVHitHist(overallBiasV5Hist, [], "无数据");
           if ($(byCodeSel)) $(byCodeSel).innerHTML = "";
           _renderTradeStatsTable(byCodeTable, {});
           _renderTradeHist(byCodeHist, [], "无数据");
+          _renderBiasVHitHist(byCodeBiasV5Hist, [], "无数据");
           if (p === "trend") _renderTrendTradeByCodeNavMarks(null, "");
           _renderTradeStatsDebug(p, null);
           if (p === "trend") _renderTrendRiskTradeRecords(null);
@@ -24157,6 +24246,13 @@
           overallHist,
           (stats.overall || {}).returns || [],
           `${p === "rot" ? "轮动" : "趋势"}：整体每笔交易收益分布`,
+        );
+        _renderBiasVHitHist(
+          overallBiasV5Hist,
+          (((stats.overall || {}).holding_bias_v_ge_5_per_holding_distribution ||
+            {})
+            .values || []),
+          `${p === "rot" ? "轮动" : p === "ct" ? "日历择时" : "趋势"}：单次持仓 BIAS-V≥5 命中次数分布`,
         );
         const sel = $(byCodeSel);
         const by =
@@ -24181,6 +24277,12 @@
               s.returns || [],
               `${codeLabel(c)}：每笔交易收益分布`,
             );
+            _renderBiasVHitHist(
+              byCodeBiasV5Hist,
+              (((s || {}).holding_bias_v_ge_5_per_holding_distribution || {})
+                .values || []),
+              `${codeLabel(c)}：单次持仓 BIAS-V≥5 命中次数分布`,
+            );
             if (p === "trend") _renderTrendTradeByCodeNavMarks(data, c);
           };
           sel.onchange = update;
@@ -24188,6 +24290,7 @@
           else {
             _renderTradeStatsTable(byCodeTable, {});
             _renderTradeHist(byCodeHist, [], "无数据");
+            _renderBiasVHitHist(byCodeBiasV5Hist, [], "无数据");
             if (p === "trend") _renderTrendTradeByCodeNavMarks(data, "");
           }
         }

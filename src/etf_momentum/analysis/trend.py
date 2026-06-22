@@ -4272,6 +4272,203 @@ def _atr_from_hlc(
     )
 
 
+def _compute_bias_v_series(
+    *,
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    ma_window: int,
+    atr_window: int,
+) -> pd.Series:
+    cl = close.astype(float)
+    hi = high.astype(float).reindex(cl.index).fillna(cl)
+    lo = low.astype(float).reindex(cl.index).fillna(cl)
+    ma_w = max(2, int(ma_window))
+    atr_w = max(2, int(atr_window))
+    ma = cl.rolling(window=ma_w, min_periods=ma_w).mean().astype(float)
+    atr = _atr_from_hlc(hi, lo, cl, window=atr_w).astype(float)
+    return (
+        ((cl - ma) / atr.replace(0.0, np.nan))
+        .replace([np.inf, -np.inf], np.nan)
+        .astype(float)
+    )
+
+
+def _distribution_stats_from_int_counts(counts: list[int]) -> dict[str, Any]:
+    vals = [int(x) for x in counts]
+    if not vals:
+        return {
+            "count": 0,
+            "max": 0,
+            "min": 0,
+            "mean": 0.0,
+            "std": 0.0,
+            "quantiles": {
+                "p01": 0.0,
+                "p05": 0.0,
+                "p10": 0.0,
+                "p25": 0.0,
+                "p50": 0.0,
+                "p75": 0.0,
+                "p90": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+            },
+            "values": [],
+        }
+    arr = np.asarray(vals, dtype=float)
+    return {
+        "count": int(len(vals)),
+        "max": int(np.max(arr)),
+        "min": int(np.min(arr)),
+        "mean": float(np.mean(arr)),
+        "std": float(np.std(arr, ddof=0)),
+        "quantiles": {
+            "p01": float(np.quantile(arr, 0.01)),
+            "p05": float(np.quantile(arr, 0.05)),
+            "p10": float(np.quantile(arr, 0.10)),
+            "p25": float(np.quantile(arr, 0.25)),
+            "p50": float(np.quantile(arr, 0.50)),
+            "p75": float(np.quantile(arr, 0.75)),
+            "p90": float(np.quantile(arr, 0.90)),
+            "p95": float(np.quantile(arr, 0.95)),
+            "p99": float(np.quantile(arr, 0.99)),
+        },
+        "values": [int(x) for x in vals],
+    }
+
+
+def _bias_v_hit_counts_per_holding(
+    *,
+    weights: pd.Series,
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    ma_window: int,
+    atr_window: int,
+    threshold: float,
+) -> list[int]:
+    idx = close.index
+    w = weights.reindex(idx).fillna(0.0).astype(float)
+    bias_v = _compute_bias_v_series(
+        close=close.reindex(idx).astype(float),
+        high=high.reindex(idx).astype(float),
+        low=low.reindex(idx).astype(float),
+        ma_window=int(ma_window),
+        atr_window=int(atr_window),
+    )
+    th = float(threshold)
+    if not np.isfinite(th):
+        return []
+    hold = (w.abs() > 1e-12).astype(bool)
+    hit = (bias_v >= th).fillna(False).astype(bool)
+    out: list[int] = []
+    in_seg = False
+    seg_cnt = 0
+    for i in range(len(idx)):
+        if bool(hold.iloc[i]):
+            if not in_seg:
+                in_seg = True
+                seg_cnt = 0
+            if bool(hit.iloc[i]):
+                seg_cnt += 1
+        else:
+            if in_seg:
+                out.append(int(seg_cnt))
+                in_seg = False
+                seg_cnt = 0
+    if in_seg:
+        out.append(int(seg_cnt))
+    return out
+
+
+def _bias_v_hit_counts_per_holding_by_code(
+    *,
+    weights: pd.DataFrame,
+    close: pd.DataFrame,
+    high: pd.DataFrame,
+    low: pd.DataFrame,
+    ma_window: int,
+    atr_window: int,
+    threshold: float,
+) -> tuple[list[int], dict[str, list[int]]]:
+    by_code: dict[str, list[int]] = {}
+    all_counts: list[int] = []
+    idx = weights.index
+    for c in weights.columns:
+        key = str(c)
+        close_s = (
+            close[c].reindex(idx).astype(float)
+            if c in close.columns
+            else pd.Series(np.nan, index=idx, dtype=float)
+        )
+        high_s = (
+            high[c].reindex(idx).astype(float)
+            if c in high.columns
+            else close_s.copy()
+        )
+        low_s = (
+            low[c].reindex(idx).astype(float) if c in low.columns else close_s.copy()
+        )
+        cnts = _bias_v_hit_counts_per_holding(
+            weights=weights[c].reindex(idx).astype(float),
+            close=close_s,
+            high=high_s,
+            low=low_s,
+            ma_window=int(ma_window),
+            atr_window=int(atr_window),
+            threshold=float(threshold),
+        )
+        by_code[key] = [int(x) for x in cnts]
+        all_counts.extend(int(x) for x in cnts)
+    return all_counts, by_code
+
+
+def _count_bias_v_ge_threshold_while_holding(
+    *,
+    weights: pd.Series,
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    ma_window: int,
+    atr_window: int,
+    threshold: float,
+) -> int:
+    counts = _bias_v_hit_counts_per_holding(
+        weights=weights,
+        close=close,
+        high=high,
+        low=low,
+        ma_window=int(ma_window),
+        atr_window=int(atr_window),
+        threshold=float(threshold),
+    )
+    return int(sum(int(x) for x in counts))
+
+
+def _count_bias_v_ge_threshold_while_holding_by_code(
+    *,
+    weights: pd.DataFrame,
+    close: pd.DataFrame,
+    high: pd.DataFrame,
+    low: pd.DataFrame,
+    ma_window: int,
+    atr_window: int,
+    threshold: float,
+) -> tuple[int, dict[str, int]]:
+    all_counts, by_code_counts = _bias_v_hit_counts_per_holding_by_code(
+        weights=weights,
+        close=close,
+        high=high,
+        low=low,
+        ma_window=int(ma_window),
+        atr_window=int(atr_window),
+        threshold=float(threshold),
+    )
+    by_code = {str(k): int(sum(int(x) for x in v)) for k, v in by_code_counts.items()}
+    return int(sum(int(x) for x in all_counts)), by_code
+
+
 def _normalize_r_take_profit_tiers(
     tiers: list[dict[str, float]] | None,
 ) -> list[dict[str, float]]:
@@ -4390,6 +4587,7 @@ def _build_r_profit_scaleout_plan(
             "execution_mode": execution_v,
             "atr_window": int(atr_window),
             "atr_n": float(atr_n),
+            "reduce_fraction_basis": "remaining_position",
             "fallback_mode_used": False,
             "initial_r_mode": "disabled",
             "tiers": tiers_v,
@@ -4506,6 +4704,7 @@ def _build_r_profit_scaleout_plan(
             and initial_r_pct > eps
             and bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
         ):
+            remaining_for_tier = float(max(0.0, remaining_frac))
             for t_idx, t in enumerate(tiers_v):
                 if t_idx in triggered_tier_idx:
                     continue
@@ -4529,10 +4728,15 @@ def _build_r_profit_scaleout_plan(
                     )
                 if not triggered:
                     continue
-                reduce_eff = float(min(max(0.0, reduce_raw), max(0.0, remaining_frac)))
+                reduce_ratio = float(min(1.0, max(0.0, reduce_raw)))
+                reduce_eff = float(max(0.0, remaining_for_tier) * reduce_ratio)
+                reduce_eff = float(
+                    min(max(0.0, remaining_for_tier), max(0.0, reduce_eff))
+                )
                 triggered_tier_idx.add(int(t_idx))
                 if reduce_eff <= eps:
                     continue
+                remaining_for_tier = float(max(0.0, remaining_for_tier - reduce_eff))
                 exec_ds = (
                     _next_trading_day_iso(bp.index, i)
                     if execution_v == "next_day"
@@ -4560,7 +4764,7 @@ def _build_r_profit_scaleout_plan(
                         if gap_open
                         else "high_touch_r_scaleout"
                     )
-                    remaining_frac = float(max(0.0, remaining_frac - reduce_eff))
+                    remaining_frac = float(max(0.0, remaining_for_tier))
                 tier_label = f"{float(r_mult):g}R"
                 tier_trigger_counts[tier_label] = int(
                     tier_trigger_counts.get(tier_label, 0) + 1
@@ -4646,6 +4850,7 @@ def _build_r_profit_scaleout_plan(
         "execution_mode": execution_v,
         "atr_window": int(atr_window),
         "atr_n": float(atr_n),
+        "reduce_fraction_basis": "remaining_position",
         "fallback_mode_used": bool(not atr_stop_enabled),
         "initial_r_mode": (
             "atr_stop_based" if bool(atr_stop_enabled) else "virtual_atr_fallback"
@@ -5195,6 +5400,7 @@ def _apply_bias_v_take_profit(
             "execution_mode": execution_v,
             "ma_window": int(ma_window),
             "atr_window": int(atr_window),
+            "reduce_fraction_basis": "remaining_position",
             "tiers": tiers_v,
             "tier_trigger_counts": {},
             "trigger_reduce_fraction_sum": 0.0,
@@ -5371,7 +5577,7 @@ def _apply_bias_v_take_profit(
 
         tp_armed = bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
         tier_triggered_today: list[str] = []
-        scheduled_reduce_today = 0.0
+        remaining_for_tier = float(max(0.0, remaining_frac))
         for t_idx, t in enumerate(tiers_v):
             if t_idx in triggered_tier_idx:
                 continue
@@ -5412,11 +5618,15 @@ def _apply_bias_v_take_profit(
                 )
             if not triggered:
                 continue
-            available = float(max(0.0, remaining_frac - scheduled_reduce_today))
-            reduce_eff = float(min(max(0.0, reduce_raw), available))
+            reduce_ratio = float(min(1.0, max(0.0, reduce_raw)))
+            reduce_eff = float(max(0.0, remaining_for_tier) * reduce_ratio)
+            reduce_eff = float(
+                min(max(0.0, remaining_for_tier), max(0.0, reduce_eff))
+            )
             triggered_tier_idx.add(int(t_idx))
             if reduce_eff <= eps:
                 continue
+            remaining_for_tier = float(max(0.0, remaining_for_tier - reduce_eff))
             exec_ds = (
                 _next_trading_day_iso(bp.index, i) if execution_v == "next_day" else ds
             )
@@ -5427,7 +5637,6 @@ def _apply_bias_v_take_profit(
                 pending_reduce_by_idx[exec_idx] = float(
                     pending_reduce_by_idx.get(exec_idx, 0.0) + reduce_eff
                 )
-                scheduled_reduce_today += float(reduce_eff)
                 gap_open_triggered = False
                 fill_price = float("nan")
                 trigger_source = "close_above_bias_v_tp_tier_next_day_exec"
@@ -5442,7 +5651,7 @@ def _apply_bias_v_take_profit(
                     if gap_open_triggered and np.isfinite(o)
                     else float(line_eff)
                 )
-                remaining_frac = float(max(0.0, remaining_frac - reduce_eff))
+                remaining_frac = float(max(0.0, remaining_for_tier))
                 trigger_source = (
                     "gap_open_above_bias_v_tp_tier"
                     if gap_open_triggered
@@ -5570,6 +5779,7 @@ def _apply_bias_v_take_profit(
         "reentry_mode": reentry_v,
         "ma_window": int(ma_window),
         "atr_window": int(atr_window),
+        "reduce_fraction_basis": "remaining_position",
         "tiers": tiers_v,
         "tier_trigger_counts": dict(tier_trigger_counts),
         "trigger_reduce_fraction_sum": float(trigger_reduce_fraction_sum),
@@ -7266,6 +7476,22 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         if monthly_attempted_overall > 0
         else 0.0
     )
+    holding_bias_v_ge_5_counts = _bias_v_hit_counts_per_holding(
+        weights=w.reindex(nav.index).astype(float).fillna(0.0),
+        close=px_sig.reindex(nav.index).astype(float).ffill(),
+        high=high_qfq.reindex(nav.index).astype(float).ffill(),
+        low=low_qfq.reindex(nav.index).astype(float).ffill(),
+        ma_window=int(bias_v_tp_ma_window),
+        atr_window=int(bias_v_tp_atr_window),
+        threshold=5.0,
+    )
+    holding_bias_v_ge_5_count = int(sum(int(x) for x in holding_bias_v_ge_5_counts))
+    holding_bias_v_ge_5_dist = _distribution_stats_from_int_counts(
+        holding_bias_v_ge_5_counts
+    )
+    holding_bias_v_ge_5_max_per_holding = int(
+        (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
+    )
     trade_stats["overall"]["atr_stop_trigger_count"] = int(
         (atr_stop_stats or {}).get("trigger_count", 0)
     )
@@ -7277,6 +7503,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
     trade_stats["overall"]["bias_v_take_profit_trigger_count"] = int(
         (bias_v_take_profit_stats or {}).get("trigger_count", 0)
+    )
+    trade_stats["overall"]["holding_bias_v_ge_5_count"] = int(holding_bias_v_ge_5_count)
+    trade_stats["overall"]["holding_bias_v_ge_5_max_per_holding"] = int(
+        holding_bias_v_ge_5_max_per_holding
+    )
+    trade_stats["overall"]["holding_bias_v_ge_5_per_holding_distribution"] = dict(
+        holding_bias_v_ge_5_dist
     )
     trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = single_rtp_tier_counts
     trade_stats["overall"]["r_profit_scaleout_tier_trigger_counts"] = dict(
@@ -7381,6 +7614,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     trade_stats["by_code"][str(code)]["bias_v_take_profit_trigger_count"] = int(
         (bias_v_take_profit_stats or {}).get("trigger_count", 0)
     )
+    trade_stats["by_code"][str(code)]["holding_bias_v_ge_5_count"] = int(
+        holding_bias_v_ge_5_count
+    )
+    trade_stats["by_code"][str(code)]["holding_bias_v_ge_5_max_per_holding"] = int(
+        holding_bias_v_ge_5_max_per_holding
+    )
+    trade_stats["by_code"][str(code)][
+        "holding_bias_v_ge_5_per_holding_distribution"
+    ] = dict(holding_bias_v_ge_5_dist)
     trade_stats["by_code"][str(code)]["r_take_profit_tier_trigger_counts"] = (
         single_rtp_tier_counts
     )
@@ -7520,6 +7762,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
     m_strat["monthly_risk_budget_blocked_entry_count"] = int(
         (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
+    )
+    m_strat["holding_bias_v_ge_5_count"] = int(holding_bias_v_ge_5_count)
+    m_strat["holding_bias_v_ge_5_max_per_holding"] = int(
+        holding_bias_v_ge_5_max_per_holding
     )
     event_study = None
     if not quick_mode:
@@ -10792,6 +11038,34 @@ def compute_trend_portfolio_backtest(
             if str(d).strip()
         }
     )
+    holding_bias_v_ge_5_all_counts, holding_bias_v_ge_5_counts_by_code = (
+        _bias_v_hit_counts_per_holding_by_code(
+            weights=w.reindex(index=nav.index, columns=w.columns)
+            .astype(float)
+            .fillna(0.0),
+            close=close_qfq.reindex(index=nav.index, columns=w.columns).astype(float),
+            high=high_qfq_df.reindex(index=nav.index, columns=w.columns).astype(float),
+            low=low_qfq_df.reindex(index=nav.index, columns=w.columns).astype(float),
+            ma_window=int(bias_v_tp_ma_window),
+            atr_window=int(bias_v_tp_atr_window),
+            threshold=5.0,
+        )
+    )
+    holding_bias_v_ge_5_total = int(sum(int(x) for x in holding_bias_v_ge_5_all_counts))
+    holding_bias_v_ge_5_by_code = {
+        str(k): int(sum(int(x) for x in (v or [])))
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
+    holding_bias_v_ge_5_dist = _distribution_stats_from_int_counts(
+        holding_bias_v_ge_5_all_counts
+    )
+    holding_bias_v_ge_5_max_per_holding = int(
+        (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
+    )
+    holding_bias_v_ge_5_dist_by_code = {
+        str(k): _distribution_stats_from_int_counts(list(v or []))
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
     trade_stats["overall"]["atr_stop_trigger_count"] = int(total_triggers)
     trade_stats["overall"]["r_take_profit_trigger_count"] = int(total_rtp_triggers)
     trade_stats["overall"]["r_profit_scaleout_trigger_count"] = int(
@@ -10799,6 +11073,15 @@ def compute_trend_portfolio_backtest(
     )
     trade_stats["overall"]["bias_v_take_profit_trigger_count"] = int(
         total_bias_v_tp_triggers
+    )
+    trade_stats["overall"]["holding_bias_v_ge_5_count"] = int(
+        holding_bias_v_ge_5_total
+    )
+    trade_stats["overall"]["holding_bias_v_ge_5_max_per_holding"] = int(
+        holding_bias_v_ge_5_max_per_holding
+    )
+    trade_stats["overall"]["holding_bias_v_ge_5_per_holding_distribution"] = dict(
+        holding_bias_v_ge_5_dist
     )
     trade_stats["overall"]["r_take_profit_tier_trigger_counts"] = dict(
         total_rtp_tier_counts
@@ -10917,6 +11200,18 @@ def compute_trend_portfolio_backtest(
         )
         one["bias_v_take_profit_trigger_count"] = int(
             (bias_v_tp_by_asset.get(code_key) or {}).get("trigger_count", 0)
+        )
+        one["holding_bias_v_ge_5_count"] = int(
+            holding_bias_v_ge_5_by_code.get(code_key, 0)
+        )
+        one["holding_bias_v_ge_5_max_per_holding"] = int(
+            (
+                holding_bias_v_ge_5_dist_by_code.get(code_key, {}) or {}
+            ).get("max", 0)
+            or 0
+        )
+        one["holding_bias_v_ge_5_per_holding_distribution"] = dict(
+            holding_bias_v_ge_5_dist_by_code.get(code_key, {})
         )
         one["r_take_profit_tier_trigger_counts"] = dict(
             ((rtp_by_asset.get(code_key) or {}).get("tier_trigger_counts") or {})
@@ -11101,6 +11396,10 @@ def compute_trend_portfolio_backtest(
     m_strat["r_take_profit_trigger_count"] = int(total_rtp_triggers)
     m_strat["r_profit_scaleout_trigger_count"] = int(total_r_profit_scaleout_triggers)
     m_strat["bias_v_take_profit_trigger_count"] = int(total_bias_v_tp_triggers)
+    m_strat["holding_bias_v_ge_5_count"] = int(holding_bias_v_ge_5_total)
+    m_strat["holding_bias_v_ge_5_max_per_holding"] = int(
+        holding_bias_v_ge_5_max_per_holding
+    )
     m_strat["atr_stop_trigger_count"] = int(total_triggers)
     m_strat["ma_entry_filter_blocked_entry_count"] = int(
         total_ma_entry_filter_blocked_entries

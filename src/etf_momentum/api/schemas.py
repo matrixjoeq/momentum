@@ -542,6 +542,70 @@ class FuturesTrendBacktestRequest(BaseModel):
     )
 
 
+class FuturesRotationBacktestRequest(BaseModel):
+    group_name: str | None = Field(
+        default=None, description="If null, use active group"
+    )
+    range_key: str = Field(default="all", description="1m|3m|6m|1y|3y|5y|10y|all")
+    start_date: str | None = Field(
+        default=None, description="Optional explicit YYYYMMDD"
+    )
+    end_date: str | None = Field(default=None, description="Optional explicit YYYYMMDD")
+    dynamic_universe: bool | None = Field(
+        default=None, description="If null, use saved global setting"
+    )
+    rebalance: Literal["daily", "weekly", "monthly"] = Field(
+        default="weekly",
+        description="Rebalance frequency; weekly/monthly use period-end anchors",
+    )
+    lookback_days: int = Field(default=20, ge=2, le=2520)
+    top_k: int = Field(default=1, ge=1, le=500)
+    trade_direction: Literal["long_only", "short_only"] = Field(default="long_only")
+    position_mode: Literal["equal", "inverse_vol"] = Field(default="equal")
+    inverse_vol_window: int = Field(
+        default=20,
+        ge=2,
+        le=500,
+        description="Used when position_mode=inverse_vol",
+    )
+    exec_price: Literal["open", "close"] = Field(default="close")
+    position_size_pct: float = Field(default=1.0, gt=0.0, le=1.0)
+    min_points: int = Field(default=120, ge=2, le=100000)
+    cost_bps: float = Field(
+        default=4.0,
+        ge=0.0,
+        le=2000.0,
+        description="Commission bps; per-fill semantics controlled by fee_side",
+    )
+    fee_side: Literal["one_way", "two_way"] = Field(default="one_way")
+    slippage_type: Literal["percent", "price_spread", "tick_multiple"] = Field(
+        default="tick_multiple"
+    )
+    slippage_value: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="percent ratio, absolute spread, or integer tick multiple",
+    )
+    slippage_side: Literal["one_way", "two_way"] = Field(default="one_way")
+    account_capital_wan: float = Field(
+        default=500.0,
+        gt=0.0,
+        description="Initial account size in 万 RMB (×10000 => CNY)",
+    )
+    backtest_margin_rate_pct: float = Field(
+        default=15.0,
+        gt=0.0,
+        le=100.0,
+        description="Backtest-only margin rate % on settle×multiplier per lot",
+    )
+    reserve_margin_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        lt=1.0,
+        description="Min equity fraction kept unencumbered; max margin use = equity×(1−reserve)",
+    )
+
+
 class IngestionBatchOut(BaseModel):
     id: int
     code: str
@@ -2173,7 +2237,7 @@ class RProfitScaleoutTier(BaseModel):
     reduce_fraction: float = Field(
         gt=0.0,
         le=1.0,
-        description="Position fraction to reduce at this tier, e.g. 0.4 means sell 40%",
+        description="Position fraction to reduce at this tier relative to current remaining position, e.g. 0.4 means sell 40% of remaining",
     )
 
 
@@ -2185,7 +2249,7 @@ class BiasVTakeProfitTier(BaseModel):
     reduce_fraction: float = Field(
         gt=0.0,
         le=1.0,
-        description="Position fraction to reduce at this BIAS-V threshold",
+        description="Position fraction to reduce at this BIAS-V threshold relative to current remaining position",
     )
 
 
@@ -2413,7 +2477,7 @@ class TrendBacktestRequest(BaseModel):
     )
     r_profit_scaleout_tiers: list[RProfitScaleoutTier] | None = Field(
         default=None,
-        description="Tiered scale-out config, e.g. [{r_multiple:2,reduce_fraction:0.4},{r_multiple:3,reduce_fraction:0.3}]",
+        description="Tiered scale-out config; each tier reduces a fraction of current remaining position, e.g. [{r_multiple:2,reduce_fraction:0.4},{r_multiple:3,reduce_fraction:0.3}]",
     )
     bias_v_take_profit_enabled: bool = Field(
         default=False, description="Enable universal BIAS-V take-profit overlay"
@@ -2434,7 +2498,7 @@ class TrendBacktestRequest(BaseModel):
     )
     bias_v_take_profit_tiers: list[BiasVTakeProfitTier] | None = Field(
         default=None,
-        description="Tiered BIAS-V take-profit config, e.g. [{threshold:5,reduce_fraction:0.5},{threshold:7,reduce_fraction:0.5}]",
+        description="Tiered BIAS-V take-profit config; each tier reduces a fraction of current remaining position, e.g. [{threshold:5,reduce_fraction:0.5},{threshold:7,reduce_fraction:0.5}]",
     )
     monthly_risk_budget_enabled: bool = Field(
         default=False,

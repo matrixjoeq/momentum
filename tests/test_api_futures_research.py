@@ -4,6 +4,8 @@ import datetime as dt
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+import numpy as np
+import pandas as pd
 
 from etf_momentum.analysis import futures_research as fut_research
 from etf_momentum.db.futures_research_repo import FuturesGroupData
@@ -429,6 +431,158 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert abs(float(filter_out["meta"]["kama_std_coef"]) - 1.0) < 1e-12
 
 
+def test_futures_rotation_backtest_api_contract(
+    api_client: TestClient, monkeypatch
+) -> None:
+    client = api_client
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "IF0",
+            "name": "股指主连",
+            "contract_multiplier": 300.0,
+            "min_price_tick": 0.2,
+        },
+    )
+    idx = pd.date_range("2024-01-02", periods=120, freq="B")
+
+    def _fake_align(_db, *, pool_code, start, end):
+        _ = (start, end)
+        base = 3500.0 if str(pool_code).upper().startswith("RB") else 4200.0
+        drift = np.linspace(0.0, 120.0, len(idx))
+        wobble = np.sin(np.linspace(0, 8, len(idx))) * 8.0
+        close = base + drift + wobble
+        open_ = close * 0.999
+        high = np.maximum(open_, close) * 1.002
+        low = np.minimum(open_, close) * 0.998
+        df = pd.DataFrame(
+            {
+                "Open": open_,
+                "High": high,
+                "Low": low,
+                "Close": close,
+                "Settle": close,
+                "SignalClose": close,
+            },
+            index=idx,
+        )
+        return (
+            df,
+            df.copy(),
+            {
+                "trend_resolution": "synthetic_hfq_continuous",
+                "execution_symbol": f"{pool_code}889",
+                "execution_adjust": "hfq",
+            },
+        )
+
+    monkeypatch.setattr(
+        "etf_momentum.analysis.futures_rotation._align_futures_trend_inputs",
+        _fake_align,
+    )
+    post_json_ok(
+        client,
+        "/api/futures/research/groups",
+        {"name": "轮动组", "codes": ["RB0", "IF0"], "set_active": True},
+    )
+    st = client.put(
+        "/api/futures/research/state",
+        json={
+            "start_date": "20240101",
+            "end_date": "20241231",
+            "dynamic_universe": True,
+            "quick_range_key": "all",
+        },
+    )
+    assert st.status_code == 200
+
+    resp = client.post(
+        "/api/futures/research/rotation-backtest",
+        json={
+            "range_key": "all",
+            "rebalance": "weekly",
+            "lookback_days": 20,
+            "top_k": 1,
+            "trade_direction": "long_only",
+            "position_mode": "equal",
+            "exec_price": "close",
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+        },
+    )
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["ok"] is True
+    assert "series" in out
+    assert "strategy_nav" in out["series"]
+    assert "benchmark_nav" in out["series"]
+    assert "summary" in out
+    assert out["meta"]["rebalance"] == "weekly"
+    assert out["meta"]["trade_direction"] == "long_only"
+    assert out["meta"]["position_mode"] == "equal"
+    assert out["meta"]["exec_price"] == "close"
+    assert out["meta"]["benchmark_price_basis"] == "close"
+    assert out["meta"]["signal_execution_rule"] == "signal_t_execute_t_plus_1_close"
+    assert out["meta"]["range_key"] == "all"
+
+    resp_short = client.post(
+        "/api/futures/research/rotation-backtest",
+        json={
+            "range_key": "all",
+            "rebalance": "monthly",
+            "lookback_days": 10,
+            "top_k": 10,
+            "trade_direction": "short_only",
+            "position_mode": "inverse_vol",
+            "inverse_vol_window": 5,
+            "exec_price": "open",
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+        },
+    )
+    assert resp_short.status_code == 200
+    out_short = resp_short.json()
+    assert out_short["ok"] is True
+    assert out_short["meta"]["trade_direction"] == "short_only"
+    assert out_short["meta"]["position_mode"] == "inverse_vol"
+    assert out_short["meta"]["inverse_vol_window"] == 5
+    assert out_short["meta"]["exec_price"] == "open"
+    assert out_short["meta"]["benchmark_price_basis"] == "open"
+    assert out_short["meta"]["signal_execution_rule"] == "signal_t_execute_t_plus_1_open"
+    assert int(out_short["meta"]["effective_top_k_max"]) <= 2
+
+    bad_topk = client.post(
+        "/api/futures/research/rotation-backtest",
+        json={"range_key": "all", "top_k": 0},
+    )
+    assert bad_topk.status_code == 422
+
+    bad_exec = client.post(
+        "/api/futures/research/rotation-backtest",
+        json={"range_key": "all", "exec_price": "mid"},
+    )
+    assert bad_exec.status_code == 422
+
+
 def test_futures_trend_backtest_requires_synthetic_hfq(api_client: TestClient) -> None:
     """Without /api/futures/synthesize-all, 889 hfq rows are absent and backtest errors."""
     client = api_client
@@ -470,6 +624,66 @@ def test_futures_trend_backtest_requires_synthetic_hfq(api_client: TestClient) -
             "slippage_type": "percent",
             "slippage_value": 0.0005,
             "slippage_side": "two_way",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "missing_synthetic_hfq_continuous"
+    errs = (body.get("meta") or {}).get("errors") or []
+    assert errs and any(
+        "missing synthetic hfq continuous series" in str(e) for e in errs
+    )
+
+
+def test_futures_rotation_backtest_requires_synthetic_hfq(
+    api_client: TestClient,
+    monkeypatch,
+) -> None:
+    client = api_client
+    post_json_ok(
+        client,
+        "/api/futures",
+        {
+            "code": "RB0",
+            "name": "螺纹钢主连",
+            "contract_multiplier": 10.0,
+            "min_price_tick": 1.0,
+        },
+    )
+    def _fake_align_error(_db, *, pool_code, start, end):
+        _ = (pool_code, start, end)
+        raise ValueError("missing synthetic hfq continuous series 'RB889'")
+
+    monkeypatch.setattr(
+        "etf_momentum.analysis.futures_rotation._align_futures_trend_inputs",
+        _fake_align_error,
+    )
+    post_json_ok(
+        client,
+        "/api/futures/research/groups",
+        {"name": "仅主连组", "codes": ["RB0"], "set_active": True},
+    )
+    client.put(
+        "/api/futures/research/state",
+        json={
+            "start_date": "20240101",
+            "end_date": "20241231",
+            "dynamic_universe": True,
+            "quick_range_key": "all",
+        },
+    )
+    resp = client.post(
+        "/api/futures/research/rotation-backtest",
+        json={
+            "range_key": "all",
+            "rebalance": "weekly",
+            "lookback_days": 20,
+            "top_k": 1,
+            "trade_direction": "long_only",
+            "position_mode": "equal",
+            "exec_price": "close",
+            "min_points": 2,
         },
     )
     assert resp.status_code == 200
