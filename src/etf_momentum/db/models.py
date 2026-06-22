@@ -115,6 +115,47 @@ class EtfPrice(Base):
     )
 
 
+class EtfResearchGroup(Base):
+    """
+    ETF research groups persisted in DB.
+    """
+
+    __tablename__ = "etf_research_group"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(128), unique=True, index=True, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class EtfResearchGroupItem(Base):
+    """
+    Symbols bound to an ETF research group.
+    """
+
+    __tablename__ = "etf_research_group_item"
+    __table_args__ = (
+        UniqueConstraint("group_id", "code", name="uq_etf_research_group_item_group_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("etf_research_group.id"), index=True, nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class IngestionBatch(Base):
     __tablename__ = "ingestion_batch"
 

@@ -37,6 +37,31 @@ class EtfPoolOut(BaseModel):
     last_data_end_date: str | None = None  # YYYYMMDD
 
 
+class EtfResearchGroupUpsert(BaseModel):
+    name: str = Field(min_length=1, max_length=128, description="Group name")
+    codes: list[str] = Field(default_factory=list, description="ETF symbols in group")
+    set_active: bool = Field(
+        default=True, description="If true, set this group as current active group"
+    )
+
+
+class EtfResearchGroupOut(BaseModel):
+    name: str
+    codes: list[str]
+    is_active: bool
+
+
+class EtfResearchGroupsImportRequest(BaseModel):
+    groups: dict[str, list[str]] = Field(description="Mapping: group name -> symbol list")
+    active_group: str | None = Field(
+        default=None, description="Optional active group name"
+    )
+    replace_all: bool = Field(
+        default=False,
+        description="If true, remove DB groups not present in incoming payload first",
+    )
+
+
 class FetchResult(BaseModel):
     code: str
     inserted_or_updated: int
@@ -830,10 +855,10 @@ class LeadLagAnalysisRequest(BaseModel):
     )
     index_symbol: str = Field(
         min_length=1,
-        description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD (Stooq), GC.F (Stooq), GC=F (Yahoo).",
+        description="Index/series symbol. Examples: VIX/GVZ (Cboe), ^VIX/^GVZ (Yahoo), DGS2/DGS5/DGS10/DGS30 (FRED), DINIW (Sina), XAUUSD/XAGUSD (Sina global spot), GC.F (Stooq), GC=F (Yahoo).",
     )
     index_provider: str = Field(
-        default="cboe", description="cboe|yahoo|fred|stooq|sina|auto"
+        default="cboe", description="cboe|yahoo|fred|stooq|sina|sina_global|auto"
     )
     index_align: str = Field(
         default="cn_next_trading_day", description="none|cn_next_trading_day"
@@ -1925,6 +1950,10 @@ class RotationBacktestRequest(BaseModel):
     position_mode: str = Field(
         default="adaptive",
         description="Base position sizing among selected assets: adaptive(equal among selected) | fixed(each uses 1/|top_k|) | inverse_vol(inverse annualized volatility) | risk_budget(ATR risk budget).",
+    )
+    daily_rebalance: bool = Field(
+        default=False,
+        description="Enable daily rebalance of held assets toward target weights (using daily close signal, next-day execution by exec_price).",
     )
     risk_budget_atr_window: int = Field(
         default=20, ge=2, description="ATR window for risk-budget sizing"

@@ -71,6 +71,9 @@ class RotationInputs:
     top_k_mode: str = "fixed"  # fixed|floating
     floating_benchmark_code: str | None = None  # required when top_k_mode=floating
     position_mode: str = "adaptive"  # adaptive | fixed | risk_budget | inverse_vol (base sizing before other exposure controls)
+    daily_rebalance: bool = (
+        False  # if true, rebalance held assets toward target weights every trading day
+    )
     risk_budget_atr_window: int = 20  # n-day ATR window for risk-budget sizing
     risk_budget_pct: float = 0.01  # per-asset risk budget on total NAV (1% => 0.01)
     entry_backfill: bool = False  # if true, refill from lower-ranked candidates when top_k entries are filtered out
@@ -300,6 +303,7 @@ def _trade_returns_from_weight_series(
     cost_bps: float,
     slippage_rate: float,
     exec_price: pd.Series,
+    turnover_override: pd.Series | None,
     dates: pd.Index,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
@@ -321,6 +325,14 @@ def _trade_returns_from_weight_series(
         .replace([np.inf, -np.inf], np.nan)
         .ffill()
     )
+    to_override = (
+        pd.to_numeric(turnover_override, errors="coerce")
+        .astype(float)
+        .reindex(dates)
+        .fillna(0.0)
+        if turnover_override is not None
+        else None
+    )
     slip_spread = float(slippage_rate)
     returns: list[float] = []
     trades: list[dict[str, Any]] = []
@@ -332,7 +344,10 @@ def _trade_returns_from_weight_series(
         cur = float(ww.iloc[i])
         prev = float(ww.iloc[i - 1]) if i > 0 else 0.0
         r = float(rr.iloc[i]) if np.isfinite(float(rr.iloc[i])) else 0.0
-        turnover = abs(float(cur) - float(prev)) / 2.0
+        if to_override is not None:
+            turnover = float(to_override.iloc[i])
+        else:
+            turnover = abs(float(cur) - float(prev)) / 2.0
         px_i = (
             float(px.iloc[i])
             if np.isfinite(float(px.iloc[i])) and float(px.iloc[i]) > 0.0
@@ -399,6 +414,7 @@ def _trade_returns_from_weight_df(
     cost_bps: float,
     slippage_rate: float,
     exec_price: pd.DataFrame,
+    turnover_override: pd.DataFrame | None,
     dates: pd.Index,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
@@ -413,6 +429,9 @@ def _trade_returns_from_weight_df(
             exec_price=exec_price[c]
             if c in exec_price.columns
             else pd.Series(dtype=float),
+            turnover_override=turnover_override[c]
+            if (turnover_override is not None and c in turnover_override.columns)
+            else None,
             dates=dates,
             eps=float(eps),
         )
@@ -429,6 +448,63 @@ def _trade_returns_from_weight_df(
         "returns_by_code": by_code_returns,
         "trades_by_code": by_code_trades,
     }
+
+
+def _turnover_with_daily_rebalance(
+    target_w: pd.DataFrame,
+    ret_exec: pd.DataFrame,
+    *,
+    eps: float = 1e-12,
+) -> pd.DataFrame:
+    """
+    Estimate one-way turnover when daily rebalance is enabled.
+
+    We treat `target_w` as the post-rebalance target applied for the day's
+    execution-return horizon, and derive the pre-trade weights from previous
+    day's post-return drift.
+    """
+    idx = target_w.index
+    cols = target_w.columns
+    w_tgt = (
+        target_w.reindex(index=idx, columns=cols)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    ret = (
+        ret_exec.reindex(index=idx, columns=cols)
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    out = pd.DataFrame(0.0, index=idx, columns=cols, dtype=float)
+    prev_post = np.zeros(len(cols), dtype=float)
+    for i, d in enumerate(idx):
+        tgt = w_tgt.loc[d].to_numpy(dtype=float)
+        tgt = np.where(np.isfinite(tgt), tgt, 0.0)
+        pre = np.where(np.isfinite(prev_post), prev_post, 0.0)
+        # Rebalance every day while there is risk exposure (target or carried drift).
+        should_rebalance = bool(
+            np.sum(np.abs(tgt)) > float(eps) or np.sum(np.abs(pre)) > float(eps)
+        )
+        if should_rebalance:
+            turnover = np.abs(tgt - pre) / 2.0
+            exec_w = tgt
+        else:
+            turnover = np.zeros(len(cols), dtype=float)
+            exec_w = pre
+        out.loc[d, :] = turnover
+        r = ret.loc[d].to_numpy(dtype=float)
+        r = np.where(np.isfinite(r), r, 0.0)
+        gross = float(1.0 + np.dot(exec_w, r))
+        if (not np.isfinite(gross)) or gross <= float(eps):
+            prev_post = np.zeros(len(cols), dtype=float)
+            continue
+        gross_by_asset = exec_w * (1.0 + r)
+        prev_post = np.where(
+            np.isfinite(gross_by_asset), gross_by_asset / float(gross), 0.0
+        )
+    return out
 
 
 def _momentum_scores(
@@ -1690,6 +1766,7 @@ def backtest_rotation(
     ep = (inp.exec_price or "open").strip().lower()
     if ep not in {"close", "open", "oc2"}:
         raise ValueError("exec_price must be one of: close|open|oc2")
+    daily_rebalance = bool(getattr(inp, "daily_rebalance", False))
     group_policy = str(inp.group_pick_policy or "strongest_score").strip().lower()
     if group_policy not in {"strongest_score", "earliest_entry", "lowest_vol"}:
         raise ValueError(f"invalid group_pick_policy={inp.group_pick_policy}")
@@ -2627,40 +2704,87 @@ def backtest_rotation(
     rr_window_days = max(2, int(round(float(inp.rr_years) * 252.0)))
     nav_running = pd.Series(np.ones(len(dates), dtype=float), index=dates, dtype=float)
     processed_idx = 0
+    rr_prev_post_w = np.zeros(len(codes), dtype=float)
 
     def _advance_nav_to(idx: int) -> None:
-        nonlocal processed_idx
+        nonlocal processed_idx, rr_prev_post_w
         idx = int(idx)
         if idx <= processed_idx:
             return
         rng = np.arange(processed_idx + 1, idx + 1, dtype=int)
-        w_slice = w.iloc[rng].astype(float)
-        r_slice = ret_exec_all.iloc[rng].astype(float)
-        port_ret = (w_slice * r_slice).sum(axis=1).astype(float)
-        # Turnover must be computed by position, not by index alignment.
-        turnover_df = (w_slice - w.iloc[rng - 1].astype(float)).abs() / 2.0
-        turnover_np = turnover_df.sum(axis=1).to_numpy(dtype=float)
-        cost_np = turnover_np * (float(inp.cost_bps) / 10000.0)
-        slippage_np = (
-            slippage_return_from_turnover(
-                turnover_df.astype(float),
-                slippage_spread=float(inp.slippage_rate),
-                exec_price=px_exec_slip_all.iloc[rng].astype(float),
-            )
-            .sum(axis=1)
-            .to_numpy(dtype=float)
-        )
         nav = float(nav_running.iloc[processed_idx])
-        # Use raw arrays to avoid any index-alignment surprises.
-        xnet = (
-            port_ret.to_numpy(dtype=float)
-            - cost_np.astype(float)
-            - slippage_np.astype(float)
-        )
-        out = np.empty(len(xnet), dtype=float)
-        for j, x in enumerate(xnet):
-            nav *= 1.0 + float(x)
-            out[j] = nav
+        out = np.empty(len(rng), dtype=float)
+        if daily_rebalance:
+            eps = 1e-12
+            for j, t in enumerate(rng):
+                tgt = w.iloc[t].to_numpy(dtype=float)
+                tgt = np.where(np.isfinite(tgt), tgt, 0.0)
+                pre = np.where(np.isfinite(rr_prev_post_w), rr_prev_post_w, 0.0)
+                should_rebalance = bool(
+                    np.sum(np.abs(tgt)) > eps or np.sum(np.abs(pre)) > eps
+                )
+                if should_rebalance:
+                    turnover_by_asset = np.abs(tgt - pre) / 2.0
+                    exec_w = tgt
+                else:
+                    turnover_by_asset = np.zeros(len(codes), dtype=float)
+                    exec_w = pre
+                r_row = ret_exec_all.iloc[t].to_numpy(dtype=float)
+                r_row = np.where(np.isfinite(r_row), r_row, 0.0)
+                port_ret_val = float(np.dot(exec_w, r_row))
+                px_row = px_exec_slip_all.iloc[t].to_numpy(dtype=float)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    slip = float(
+                        np.nansum(
+                            np.where(
+                                px_row > 0.0,
+                                turnover_by_asset * (float(inp.slippage_rate) / px_row),
+                                0.0,
+                            )
+                        )
+                    )
+                turnover = float(np.sum(turnover_by_asset))
+                cost = float(turnover * (float(inp.cost_bps) / 10000.0))
+                nav *= 1.0 + float(port_ret_val) - float(cost) - float(slip)
+                out[j] = nav
+                gross = float(1.0 + float(port_ret_val))
+                if (not np.isfinite(gross)) or gross <= eps:
+                    rr_prev_post_w = np.zeros(len(codes), dtype=float)
+                else:
+                    gross_by_asset = exec_w * (1.0 + r_row)
+                    rr_prev_post_w = np.where(
+                        np.isfinite(gross_by_asset),
+                        gross_by_asset / float(gross),
+                        0.0,
+                    )
+        else:
+            w_slice = w.iloc[rng].astype(float)
+            r_slice = ret_exec_all.iloc[rng].astype(float)
+            port_ret = (w_slice * r_slice).sum(axis=1).astype(float)
+            # Turnover must be computed by position, not by index alignment.
+            prev_slice = w.iloc[rng - 1].astype(float).copy()
+            prev_slice.index = w_slice.index
+            turnover_df = (w_slice - prev_slice).abs() / 2.0
+            turnover_np = turnover_df.sum(axis=1).to_numpy(dtype=float)
+            cost_np = turnover_np * (float(inp.cost_bps) / 10000.0)
+            slippage_np = (
+                slippage_return_from_turnover(
+                    turnover_df.astype(float),
+                    slippage_spread=float(inp.slippage_rate),
+                    exec_price=px_exec_slip_all.iloc[rng].astype(float),
+                )
+                .sum(axis=1)
+                .to_numpy(dtype=float)
+            )
+            # Use raw arrays to avoid any index-alignment surprises.
+            xnet = (
+                port_ret.to_numpy(dtype=float)
+                - cost_np.astype(float)
+                - slippage_np.astype(float)
+            )
+            for j, x in enumerate(xnet):
+                nav *= 1.0 + float(x)
+                out[j] = nav
         nav_running.iloc[rng] = out
         processed_idx = idx
 
@@ -2680,6 +2804,7 @@ def backtest_rotation(
     dd_nav = 1.0
     dd_peak = 1.0
     dd_prev_w = np.zeros(len(codes), dtype=float)
+    dd_prev_post_w = np.zeros(len(codes), dtype=float)
     dd_processed_idx = 0
     dd_prev_drawdown = 0.0
 
@@ -2698,6 +2823,7 @@ def backtest_rotation(
             dd_nav, \
             dd_peak, \
             dd_prev_w, \
+            dd_prev_post_w, \
             dd_processed_idx, \
             dd_prev_drawdown
         seg_start_i = int(seg_start_i)
@@ -2750,8 +2876,21 @@ def backtest_rotation(
         for t in range(start, seg_end_i + 1):
             w_row = w.iloc[t].to_numpy(dtype=float)
             r_row = ret_exec_all.iloc[t].to_numpy(dtype=float)
-            port_ret = float(np.dot(w_row, r_row))
-            turnover_by_asset = np.abs(w_row - dd_prev_w) / 2.0
+            if daily_rebalance:
+                pre = np.where(np.isfinite(dd_prev_post_w), dd_prev_post_w, 0.0)
+                should_rebalance = bool(
+                    np.sum(np.abs(w_row)) > 1e-12 or np.sum(np.abs(pre)) > 1e-12
+                )
+                if should_rebalance:
+                    turnover_by_asset = np.abs(w_row - pre) / 2.0
+                    exec_w = w_row
+                else:
+                    turnover_by_asset = np.zeros(len(codes), dtype=float)
+                    exec_w = pre
+            else:
+                turnover_by_asset = np.abs(w_row - dd_prev_w) / 2.0
+                exec_w = w_row
+            port_ret = float(np.dot(exec_w, r_row))
             turnover = float(np.sum(turnover_by_asset))
             cost = float(turnover * (float(inp.cost_bps) / 10000.0))
             px_row = px_exec_slip_all.iloc[t].to_numpy(dtype=float)
@@ -2768,6 +2907,17 @@ def backtest_rotation(
             dd_nav *= 1.0 + float(port_ret) - float(cost) - float(slip)
             dd_peak = float(max(float(dd_peak), float(dd_nav)))
             dd_prev_w = w_row
+            if daily_rebalance:
+                gross = float(1.0 + float(port_ret))
+                if (not np.isfinite(gross)) or gross <= 1e-12:
+                    dd_prev_post_w = np.zeros(len(codes), dtype=float)
+                else:
+                    gross_by_asset = exec_w * (1.0 + r_row)
+                    dd_prev_post_w = np.where(
+                        np.isfinite(gross_by_asset),
+                        gross_by_asset / float(gross),
+                        0.0,
+                    )
             dd_processed_idx = int(t)
 
             # Trigger check on end-of-day NAV; apply from next trading day.
@@ -3971,6 +4121,8 @@ def backtest_rotation(
         # 3) Base sizing + volatility scaling (cash remainder).
         exposure = 1.0
         weight_map: dict[str, float] = {}
+        scales: dict[str, float] = {}
+        mirror_target_exposure: float | None = None
         if picks and (not dd_in_sleep):
             risk_picks = [p for p in picks if p in rank_codes]
             if not risk_picks:
@@ -4164,6 +4316,7 @@ def backtest_rotation(
                         if float(p) > float(thr):
                             target = float(exp)
                 mirror_meta["target_exposure"] = float(target)
+                mirror_target_exposure = float(target)
                 if np.isfinite(p) and float(exposure) > float(target) + 1e-12:
                     # Scale down all risk assets proportionally; keep defensive (if any) untouched.
                     risk_keys = [c for c in weight_map.keys() if c in rank_codes]
@@ -4180,46 +4333,6 @@ def backtest_rotation(
                 details["mirror_control"] = mirror_meta
             else:
                 details["mirror_control"] = mirror_meta
-
-            # Mirror composite-deviation exposure cap (cash remainder).
-            mirror_meta: dict[str, Any] = {
-                "enabled": bool(mirror_enabled),
-                "quantiles": [float(x) for x in mirror_qs],
-                "exposures": [float(x) for x in mirror_exps],
-            }
-            if mirror_enabled and weight_map and mirror_pct is not None:
-                try:
-                    p = float(mirror_pct.loc[d])
-                except Exception:  # pragma: no cover (defensive)
-                    p = float("nan")
-                mirror_meta["asof"] = d.date().isoformat()
-                mirror_meta["percentile"] = None if (not np.isfinite(p)) else float(p)
-                target = 1.0
-                if np.isfinite(p):
-                    for thr, exp in zip(mirror_qs, mirror_exps):
-                        if float(p) > float(thr):
-                            target = float(exp)
-                mirror_meta["target_exposure"] = float(target)
-                if np.isfinite(p) and float(exposure) > float(target) + 1e-12:
-                    # scale down all risk assets proportionally; keep defensive (if any) untouched
-                    risk_keys = [c for c in weight_map.keys() if c in rank_codes]
-                    if risk_keys:
-                        factor = (
-                            float(target) / float(exposure)
-                            if float(exposure) > 0
-                            else 0.0
-                        )
-                        for c in risk_keys:
-                            weight_map[c] = float(weight_map[c]) * float(factor)
-                        exposure = float(target)
-                        reasons.append(f"mirror_cap<{target:.3f}")
-                details["mirror_control"] = mirror_meta
-            else:
-                details["mirror_control"] = {
-                    "enabled": bool(mirror_enabled),
-                    "quantiles": [float(x) for x in mirror_qs],
-                    "exposures": [float(x) for x in mirror_exps],
-                }
 
             # Inertia: turnover threshold gate (applied after sizing determines final target weights).
             if inertia_enabled and float(inertia_min_turnover) > 0.0:
@@ -4246,9 +4359,135 @@ def backtest_rotation(
 
             # write weights for the whole holding segment (unless overridden by inertia turnover gate above)
             if weight_map:
-                for c, wt in weight_map.items():
-                    if wt and wt > 0:
-                        w.loc[dates[start_i] : dates[end_i], c] = float(wt)
+                if daily_rebalance and risk_picks:
+                    vol_df_daily = (
+                        ann_vol_by_window.get(int(inp.vol_window))
+                        if pos_mode == "inverse_vol"
+                        else None
+                    )
+                    for t in range(int(start_i), int(end_i) + 1):
+                        asof_t = dates[int(di)] if t == int(start_i) else dates[int(t) - 1]
+                        base_weight_map_t: dict[str, float] = {}
+                        if pos_mode == "risk_budget":
+                            for p in risk_picks:
+                                px = (
+                                    float(close_qfq.loc[asof_t, p])
+                                    if (
+                                        p in close_qfq.columns
+                                        and asof_t in close_qfq.index
+                                    )
+                                    else float("nan")
+                                )
+                                a = (
+                                    float(atr_budget.loc[asof_t, p])
+                                    if (
+                                        not atr_budget.empty
+                                        and p in atr_budget.columns
+                                        and asof_t in atr_budget.index
+                                    )
+                                    else float("nan")
+                                )
+                                if (
+                                    np.isfinite(px)
+                                    and px > 0.0
+                                    and np.isfinite(a)
+                                    and a > 0.0
+                                ):
+                                    w_raw = float(risk_budget_pct) * float(px) / float(a)
+                                else:
+                                    w_raw = 0.0
+                                base_weight_map_t[p] = max(0.0, float(w_raw))
+                            s_raw_t = float(sum(base_weight_map_t.values()))
+                            if s_raw_t > 1.0 + 1e-12:
+                                k_t = 1.0 / s_raw_t
+                                for p in list(base_weight_map_t.keys()):
+                                    base_weight_map_t[p] = (
+                                        float(base_weight_map_t[p]) * float(k_t)
+                                    )
+                        elif pos_mode == "inverse_vol":
+                            inv_raw_map_t: dict[str, float] = {}
+                            for p in risk_picks:
+                                v = (
+                                    float(vol_df_daily.loc[asof_t, p])
+                                    if (
+                                        vol_df_daily is not None
+                                        and p in vol_df_daily.columns
+                                        and asof_t in vol_df_daily.index
+                                        and np.isfinite(
+                                            float(vol_df_daily.loc[asof_t, p])
+                                        )
+                                    )
+                                    else float("nan")
+                                )
+                                inv_raw = (
+                                    (1.0 / float(v))
+                                    if (np.isfinite(v) and v > 0.0)
+                                    else 0.0
+                                )
+                                inv_raw_map_t[p] = float(max(0.0, inv_raw))
+                            inv_sum_t = float(sum(inv_raw_map_t.values()))
+                            if inv_sum_t > 0.0:
+                                for p in risk_picks:
+                                    base_weight_map_t[p] = float(
+                                        inv_raw_map_t.get(p, 0.0)
+                                    ) / float(inv_sum_t)
+                            else:
+                                per_t = 1.0 / float(len(risk_picks))
+                                for p in risk_picks:
+                                    base_weight_map_t[p] = float(per_t)
+                        else:
+                            if not risk_picks:
+                                per_t = 0.0
+                            elif pos_mode == "fixed":
+                                per_t = 1.0 / max(
+                                    1,
+                                    (
+                                        top_k_abs
+                                        if top_k_mode == "fixed"
+                                        else len(risk_picks)
+                                    ),
+                                )
+                            else:
+                                per_t = 1.0 / len(risk_picks)
+                            for p in risk_picks:
+                                base_weight_map_t[p] = float(per_t)
+                        weight_map_t: dict[str, float] = {}
+                        for p in risk_picks:
+                            weight_map_t[p] = float(
+                                scales.get(p, 1.0) * base_weight_map_t.get(p, 0.0)
+                            )
+                        exposure_t = float(sum(weight_map_t.values()))
+                        if rr_enabled and weight_map_t and float(rr_exposure) < 1.0:
+                            for c in list(weight_map_t.keys()):
+                                weight_map_t[c] = float(weight_map_t[c]) * float(
+                                    rr_exposure
+                                )
+                            exposure_t = float(exposure_t) * float(rr_exposure)
+                        if (
+                            mirror_target_exposure is not None
+                            and np.isfinite(float(mirror_target_exposure))
+                            and float(exposure_t)
+                            > float(mirror_target_exposure) + 1e-12
+                        ):
+                            risk_keys_t = [c for c in weight_map_t.keys() if c in rank_codes]
+                            if risk_keys_t and float(exposure_t) > 0.0:
+                                factor_t = float(mirror_target_exposure) / float(
+                                    exposure_t
+                                )
+                                for c in risk_keys_t:
+                                    weight_map_t[c] = float(weight_map_t[c]) * float(
+                                        factor_t
+                                    )
+                                exposure_t = float(mirror_target_exposure)
+                        row_np = np.zeros(len(codes), dtype=float)
+                        if exposure_t > 0.0:
+                            for j, c in enumerate(codes):
+                                row_np[j] = float(weight_map_t.get(c, 0.0))
+                        w.iloc[t, :] = row_np
+                else:
+                    for c, wt in weight_map.items():
+                        if wt and wt > 0:
+                            w.loc[dates[start_i] : dates[end_i], c] = float(wt)
         elif dd_in_sleep:
             # weights already copied from previous day; compute exposure for reporting
             exposure = float(w.iloc[start_i].sum()) if start_i < len(dates) else 0.0
@@ -4764,15 +5003,24 @@ def backtest_rotation(
         rules=inp.asset_vol_index_rules,
         vol_index_close=inp.vol_index_close,
     )
+    if daily_rebalance:
+        turnover_by_asset_effective = _turnover_with_daily_rebalance(
+            w.astype(float).fillna(0.0),
+            ret_exec.astype(float).fillna(0.0),
+            eps=1e-12,
+        )
+    else:
+        w_prev = w.shift(1).fillna(0.0)
+        turnover_by_asset_effective = (w - w_prev).abs() / 2.0
+    turnover_effective = turnover_by_asset_effective.sum(axis=1).astype(float)
     # Continuous holding streaks (by actual daily weights, not rebalance schedule).
     holding_streaks = _holding_streaks_from_weights(w, codes=codes, eps=1e-12)
     # Strategy-only fast path (used by rotation calendar-effect grid scan):
     # skip all benchmark NAV computation (EW/RP/IVOL and excess variants).
     if not bool(include_benchmarks):
         port_ret = (w * ret_exec).sum(axis=1).astype(float)
-        w_prev = w.shift(1).fillna(0.0)
-        turnover_by_asset = (w - w_prev).abs() / 2.0
-        turnover = turnover_by_asset.sum(axis=1).astype(float)
+        turnover_by_asset = turnover_by_asset_effective
+        turnover = turnover_effective
         cost = turnover * (float(inp.cost_bps) / 10000.0)
         slippage = (
             slippage_return_from_turnover(
@@ -4808,6 +5056,7 @@ def backtest_rotation(
             },
             "codes": codes,
             "exec_price": ep,
+            "daily_rebalance": bool(daily_rebalance),
             "nav": {
                 "dates": dates.date.astype(str).tolist(),
                 "series": {"ROTATION": port_nav_net.astype(float).tolist()},
@@ -4952,9 +5201,8 @@ def backtest_rotation(
     port_ret = (w * ret_exec).sum(axis=1).astype(float)
     port_nav = (1.0 + port_ret).cumprod()
     port_nav.iloc[0] = 1.0
-    w_prev = w.shift(1).fillna(0.0)
-    turnover_by_asset = (w - w_prev).abs() / 2.0
-    turnover = turnover_by_asset.sum(axis=1).astype(float)
+    turnover_by_asset = turnover_by_asset_effective
+    turnover = turnover_effective
     cost = turnover * (inp.cost_bps / 10000.0)
     slippage = (
         slippage_return_from_turnover(
@@ -5048,6 +5296,7 @@ def backtest_rotation(
         cost_bps=float(inp.cost_bps),
         slippage_rate=float(inp.slippage_rate),
         exec_price=px_exec_slip_all.reindex(index=dates, columns=codes).ffill(),
+        turnover_override=turnover_by_asset.reindex(index=dates, columns=codes),
         dates=dates,
     )
     sample_days = int(len(port_ret_net))
@@ -5721,6 +5970,7 @@ def backtest_rotation(
             floating_benchmark_code if top_k_mode == "floating" else None
         ),
         "position_mode": pos_mode,
+        "daily_rebalance": bool(daily_rebalance),
         "risk_budget_atr_window": int(risk_budget_atr_window),
         "risk_budget_pct": float(risk_budget_pct),
         "entry_backfill": bool(inp.entry_backfill),

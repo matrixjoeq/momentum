@@ -24,6 +24,7 @@ class RotationAnalysisInputs:
     top_k_mode: str = "fixed"  # fixed|floating
     floating_benchmark_code: str | None = None
     position_mode: str = "adaptive"  # adaptive|fixed|risk_budget|inverse_vol
+    daily_rebalance: bool = False  # rebalance held assets to target weights daily
     risk_budget_atr_window: int = 20
     risk_budget_pct: float = 0.01
     entry_backfill: bool = False
@@ -113,6 +114,7 @@ def compute_rotation_backtest(
             top_k_mode=inp.top_k_mode,
             floating_benchmark_code=inp.floating_benchmark_code,
             position_mode=inp.position_mode,
+            daily_rebalance=bool(inp.daily_rebalance),
             risk_budget_atr_window=inp.risk_budget_atr_window,
             risk_budget_pct=inp.risk_budget_pct,
             entry_backfill=inp.entry_backfill,

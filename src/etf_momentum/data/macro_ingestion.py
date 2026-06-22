@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 from ..data.fred_fetcher import FetchRequest as FredFetchRequest
 from ..data.fred_fetcher import fetch_fred_daily_close
 from ..data.sina_fetcher import FetchRequest as SinaFetchRequest
-from ..data.sina_fetcher import fetch_sina_forex_day_kline_daily_close
+from ..data.sina_fetcher import (
+    fetch_sina_forex_day_kline_daily_close,
+    fetch_sina_global_futures_day_kline_daily_close,
+)
 from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
 from ..data.stooq_fetcher import fetch_stooq_daily_close
 from ..data.yahoo_fetcher import FetchRequest as YahooFetchRequest
@@ -79,10 +82,13 @@ MACRO_SERIES: list[MacroSeriesSpec] = [
         category="fx",
         unit="index",
     ),
+    # Spot gold (London). Stooq's free CSV endpoint now gates downloads behind a
+    # JS proof-of-work / returns "Access denied"; use Sina's global-futures spot
+    # series (XAU) instead, which is reliable and unauthenticated.
     MacroSeriesSpec(
         series_id="XAUUSD",
-        provider="stooq",
-        provider_symbol="XAUUSD",
+        provider="sina_global",
+        provider_symbol="XAU",
         name="Gold Spot (XAUUSD)",
         category="gold_spot",
         unit="USD/oz",
@@ -97,10 +103,11 @@ MACRO_SERIES: list[MacroSeriesSpec] = [
         unit="USD/oz",
     ),
     # Silver spot (London) and key global futures (Yahoo).
+    # Spot silver (London). Same Stooq limitation as XAUUSD; use Sina XAG.
     MacroSeriesSpec(
         series_id="XAGUSD",
-        provider="stooq",
-        provider_symbol="XAGUSD",
+        provider="sina_global",
+        provider_symbol="XAG",
         name="Silver Spot (XAGUSD)",
         category="silver_spot",
         unit="USD/oz",
@@ -186,6 +193,10 @@ def fetch_macro_daily_close(
         )
     if prov == "sina":
         return fetch_sina_forex_day_kline_daily_close(
+            SinaFetchRequest(symbol=sym, start_date=start, end_date=end)
+        )
+    if prov == "sina_global":
+        return fetch_sina_global_futures_day_kline_daily_close(
             SinaFetchRequest(symbol=sym, start_date=start, end_date=end)
         )
     if prov == "stooq":

@@ -355,6 +355,325 @@ def test_rotation_inverse_vol_position_mode_overweights_lower_vol_asset(
             assert inv_b > inv_a
 
 
+def test_rotation_daily_rebalance_increases_turnover_and_cost_drag(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=90, freq="B")]
+    with sf() as db:
+        px_a = 100.0
+        px_b = 100.0
+        for i, d in enumerate(dates):
+            # Alternating relative moves create persistent drift between assets.
+            px_a *= 1.01 if (i % 2 == 0) else 0.99
+            px_b *= 0.99 if (i % 2 == 0) else 1.01
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(px_a),
+                open_price=float(px_a),
+                high=float(px_a),
+                low=float(px_a),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(px_b),
+                open_price=float(px_b),
+                high=float(px_b),
+                low=float(px_b),
+            )
+        db.commit()
+        base = dict(
+            codes=["AAA", "BBB"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="weekly",
+            rebalance_anchor=1,
+            top_k=2,
+            position_mode="adaptive",
+            lookback_days=5,
+            skip_days=0,
+            exec_price="close",
+            cost_bps=100.0,
+            slippage_rate=0.0,
+        )
+        out_base = backtest_rotation(db, RotationInputs(**base))
+        out_daily = backtest_rotation(
+            db, RotationInputs(**{**base, "daily_rebalance": True})
+        )
+    m_base = (out_base.get("metrics") or {}).get("strategy") or {}
+    m_daily = (out_daily.get("metrics") or {}).get("strategy") or {}
+    assert bool(out_base.get("daily_rebalance")) is False
+    assert bool(out_daily.get("daily_rebalance")) is True
+    assert float(m_daily.get("avg_daily_turnover") or 0.0) > float(
+        m_base.get("avg_daily_turnover") or 0.0
+    )
+    assert float(m_daily.get("cumulative_return") or 0.0) < float(
+        m_base.get("cumulative_return") or 0.0
+    )
+
+
+def test_rotation_daily_rebalance_respects_exec_price_mode(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            c1 = 100.0 + 0.7 * i
+            c2 = 110.0 - 0.4 * i
+            o1 = c1 * (0.99 if (i % 2 == 0) else 1.01)
+            o2 = c2 * (1.01 if (i % 2 == 0) else 0.99)
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(c1),
+                open_price=float(o1),
+                high=float(max(o1, c1)),
+                low=float(min(o1, c1)),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(c2),
+                open_price=float(o2),
+                high=float(max(o2, c2)),
+                low=float(min(o2, c2)),
+            )
+        db.commit()
+        base = dict(
+            codes=["AAA", "BBB"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="weekly",
+            rebalance_anchor=1,
+            top_k=2,
+            position_mode="adaptive",
+            daily_rebalance=True,
+            lookback_days=5,
+            skip_days=0,
+            cost_bps=20.0,
+            slippage_rate=0.001,
+        )
+        out_open = backtest_rotation(db, RotationInputs(**{**base, "exec_price": "open"}))
+        out_close = backtest_rotation(
+            db, RotationInputs(**{**base, "exec_price": "close"})
+        )
+    nav_open = float(((out_open.get("nav") or {}).get("series") or {}).get("ROTATION")[-1])
+    nav_close = float(
+        ((out_close.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
+    )
+    assert nav_open != pytest.approx(nav_close, rel=0.0, abs=1e-10)
+
+
+@pytest.mark.parametrize("position_mode", ["inverse_vol", "risk_budget"])
+def test_rotation_daily_rebalance_updates_dynamic_position_modes(
+    session_factory, position_mode: str
+):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=120, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            # Regime-shifting volatility profile to force dynamic sizing changes.
+            amp_a = 5.0 if i < 60 else 1.0
+            amp_b = 1.0 if i < 60 else 5.0
+            p1 = 100.0 + 0.45 * i + (amp_a if (i % 2 == 0) else -amp_a)
+            p2 = 105.0 + 0.20 * i + (amp_b if (i % 2 == 0) else -amp_b)
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(p1),
+                open_price=float(p1),
+                high=float(p1 * 1.02),
+                low=float(p1 * 0.98),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(p2),
+                open_price=float(p2),
+                high=float(p2 * 1.02),
+                low=float(p2 * 0.98),
+            )
+        db.commit()
+        base = dict(
+            codes=["AAA", "BBB"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="monthly",
+            rebalance_anchor=5,
+            top_k=2,
+            position_mode=position_mode,
+            lookback_days=10,
+            skip_days=0,
+            exec_price="close",
+            cost_bps=0.0,
+            slippage_rate=0.0,
+            risk_budget_atr_window=20,
+            risk_budget_pct=0.01,
+            vol_window=20,
+        )
+        out_base = backtest_rotation(db, RotationInputs(**base))
+        out_daily = backtest_rotation(
+            db, RotationInputs(**{**base, "daily_rebalance": True})
+        )
+    m_base = (out_base.get("metrics") or {}).get("strategy") or {}
+    m_daily = (out_daily.get("metrics") or {}).get("strategy") or {}
+    nav_base = float(((out_base.get("nav") or {}).get("series") or {}).get("ROTATION")[-1])
+    nav_daily = float(
+        ((out_daily.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
+    )
+    assert float(m_daily.get("avg_daily_turnover") or 0.0) > float(
+        m_base.get("avg_daily_turnover") or 0.0
+    )
+    assert nav_daily != pytest.approx(nav_base, rel=0.0, abs=1e-10)
+
+
+@pytest.mark.parametrize("position_mode", ["inverse_vol", "risk_budget"])
+def test_rotation_daily_rebalance_recalculates_within_single_segment(
+    session_factory, position_mode: str
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=75, freq="B")]
+    with sf() as db:
+        px_a = 100.0
+        px_b = 100.0
+        for i, d in enumerate(dates):
+            # One annual decision is anchored inside the sample window (day 40),
+            # while the next yearly decision is out of range. Early days keep both
+            # assets similar; later days force volatility divergence.
+            if i < 25:
+                r_a = 1.002 if (i % 2 == 0) else 0.998
+                r_b = 1.002 if (i % 2 == 0) else 0.998
+            else:
+                r_a = 1.020 if (i % 2 == 0) else 0.980
+                r_b = 1.004 if (i % 2 == 0) else 0.996
+            px_a *= float(r_a)
+            px_b *= float(r_b)
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(px_a),
+                open_price=float(px_a),
+                high=float(px_a * 1.01),
+                low=float(px_a * 0.99),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(px_b),
+                open_price=float(px_b),
+                high=float(px_b * 1.01),
+                low=float(px_b * 0.99),
+            )
+        db.commit()
+        base = dict(
+            codes=["AAA", "BBB"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="yearly",
+            rebalance_anchor=40,
+            top_k=2,
+            position_mode=position_mode,
+            lookback_days=5,
+            skip_days=0,
+            exec_price="close",
+            cost_bps=0.0,
+            slippage_rate=0.0,
+            vol_window=20,
+            risk_budget_atr_window=20,
+            risk_budget_pct=0.01,
+        )
+        out_base = backtest_rotation(db, RotationInputs(**base))
+        out_daily = backtest_rotation(
+            db, RotationInputs(**{**base, "daily_rebalance": True})
+        )
+    nav_base = float(((out_base.get("nav") or {}).get("series") or {}).get("ROTATION")[-1])
+    nav_daily = float(
+        ((out_daily.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
+    )
+    m_base = (out_base.get("metrics") or {}).get("strategy") or {}
+    m_daily = (out_daily.get("metrics") or {}).get("strategy") or {}
+    # With zero trading cost/slippage and a single rebalance decision in-range,
+    # fixed decision-date targets would produce identical NAV. A difference here
+    # confirms daily_rebalance recomputes dynamic position-mode targets each day.
+    assert nav_daily != pytest.approx(nav_base, rel=0.0, abs=1e-10)
+    assert float(m_daily.get("avg_daily_turnover") or 0.0) > float(
+        m_base.get("avg_daily_turnover") or 0.0
+    )
+
+
+def test_rotation_daily_rebalance_with_rr_and_dd_controls(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [d.date() for d in pd.date_range(start, periods=110, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + 0.30 * i + (2.0 if (i % 3 == 0) else -1.0)
+            p2 = 95.0 + 0.15 * i + (1.5 if (i % 3 == 0) else -0.8)
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(p1),
+                open_price=float(p1),
+                high=float(p1 * 1.01),
+                low=float(p1 * 0.99),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(p2),
+                open_price=float(p2),
+                high=float(p2 * 1.01),
+                low=float(p2 * 0.99),
+            )
+        db.commit()
+        base = dict(
+            codes=["AAA", "BBB"],
+            start=dates[0],
+            end=dates[-1],
+            rebalance="weekly",
+            rebalance_anchor=1,
+            top_k=2,
+            position_mode="adaptive",
+            lookback_days=5,
+            skip_days=0,
+            exec_price="close",
+            cost_bps=80.0,
+            slippage_rate=0.0,
+            rr_sizing=True,
+            rr_years=1.0,
+            rr_thresholds=[0.0, 0.05],
+            rr_weights=[1.0, 0.7, 0.4],
+            dd_control=True,
+            dd_threshold=0.08,
+            dd_reduce=0.5,
+            dd_sleep_days=10,
+        )
+        out_base = backtest_rotation(db, RotationInputs(**base))
+        out_daily = backtest_rotation(
+            db, RotationInputs(**{**base, "daily_rebalance": True})
+        )
+    m_base = (out_base.get("metrics") or {}).get("strategy") or {}
+    m_daily = (out_daily.get("metrics") or {}).get("strategy") or {}
+    assert float(m_daily.get("avg_daily_turnover") or 0.0) > float(
+        m_base.get("avg_daily_turnover") or 0.0
+    )
+    assert float(m_daily.get("cumulative_return") or 0.0) < float(
+        m_base.get("cumulative_return") or 0.0
+    )
+
+
 def test_rotation_negative_top_k_selects_lower_momentum_names(session_factory):
     """Inverse TopK: hold the lowest-momentum names (e.g. BBB vs AAA in a two-asset uptrend)."""
     sf = session_factory

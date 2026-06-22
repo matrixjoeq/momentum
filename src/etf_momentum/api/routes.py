@@ -82,6 +82,9 @@ from .schemas import (
     SimGbmAbSignificanceRequest,
     EtfPoolOut,
     EtfPoolUpsert,
+    EtfResearchGroupOut,
+    EtfResearchGroupUpsert,
+    EtfResearchGroupsImportRequest,
     FetchAllRequest,
     FetchResult,
     FetchSelectedRequest,
@@ -284,6 +287,13 @@ from ..db.futures_research_repo import (
     set_active_futures_group,
     upsert_futures_group,
     upsert_futures_research_state,
+)
+from ..db.etf_research_repo import (
+    delete_etf_group,
+    get_active_etf_group,
+    list_etf_groups,
+    set_active_etf_group,
+    upsert_etf_group,
 )
 from ..settings import get_settings
 from ..validation.policy_infer import infer_policy_name
@@ -1752,6 +1762,7 @@ def _rotation_inputs_from_payload(
             str(getattr(payload, "floating_benchmark_code", "")).strip() or None
         ),
         position_mode=payload.position_mode,
+        daily_rebalance=bool(getattr(payload, "daily_rebalance", False)),
         risk_budget_atr_window=int(getattr(payload, "risk_budget_atr_window", 20)),
         risk_budget_pct=float(getattr(payload, "risk_budget_pct", 0.01)),
         entry_backfill=payload.entry_backfill,
@@ -2452,14 +2463,19 @@ def analysis_leadlag(
 
     fred_known = {"DGS2", "DGS5", "DGS10", "DGS30"}
     sina_known = {"DINIW"}
+    # Spot metals: Stooq's free CSV endpoint now gates downloads behind a JS
+    # proof-of-work / returns "Access denied", so route spot gold/silver through
+    # Sina's global-futures spot series (XAUUSD->XAU, XAGUSD->XAG).
+    sina_global_known = {"XAUUSD", "XAGUSD"}
     # Note: some Stooq symbols (notably certain futures like GC.F / DX.F) may require captcha on
     # historical download pages and can return empty content from the CSV endpoint.
-    stooq_known = {"XAUUSD", "GC.F"}
+    stooq_known = {"GC.F"}
 
     # Provider selection:
     # - cboe: VIX/VX/GVZ/OVX only (preferred when available)
     # - fred: FRED daily series (rates)
-    # - stooq: Stooq daily CSV (DXY / XAUUSD / GC)
+    # - sina_global: Sina global-futures spot metals (XAUUSD / XAGUSD)
+    # - stooq: Stooq daily CSV (GC, etc.)
     # - yahoo: fallback for arbitrary symbols
     # - auto: try in the above order based on symbol
     if idx_provider == "auto":
@@ -2469,6 +2485,8 @@ def analysis_leadlag(
             idx_provider_eff = "fred"
         elif idx_sym_u in sina_known:
             idx_provider_eff = "sina"
+        elif idx_sym_u in sina_global_known:
+            idx_provider_eff = "sina_global"
         elif idx_sym_u in stooq_known:
             idx_provider_eff = "stooq"
         else:
@@ -2564,6 +2582,33 @@ def analysis_leadlag(
             "symbol": idx_sym_u,
             "align": idx_align,
             "sina": smeta,
+        }
+    elif idx_provider_eff == "sina_global":
+        from ..data.sina_fetcher import (  # local import to keep optional dependency surface small
+            FetchRequest as SinaFetchRequest,
+            fetch_sina_global_futures_day_kline_daily_close,
+        )
+
+        df_sina, smeta = fetch_sina_global_futures_day_kline_daily_close(
+            SinaFetchRequest(
+                symbol=idx_sym_u, start_date=payload.start, end_date=payload.end
+            )
+        )
+        if df_sina is None or df_sina.empty:
+            err = str((smeta or {}).get("error") or "empty_sina_global_series")
+            return LeadLagAnalysisResponse(
+                ok=False, error=err, meta={"sina_global": smeta}
+            )
+        idx = pd.Series(
+            data=df_sina["close"].to_numpy(dtype=float),
+            index=df_sina["date"].to_list(),
+            dtype=float,
+        ).dropna()
+        idx_meta = {
+            "provider": "sina_global",
+            "symbol": idx_sym_u,
+            "align": idx_align,
+            "sina_global": smeta,
         }
     else:
         # Yahoo fallback (may be blocked by network policy).
@@ -6852,6 +6897,106 @@ def delete_prices_api(
     n = delete_prices(db, code=code, start_date=start_d, end_date=end_d, adjust=adjust)
     db.commit()
     return {"deleted": n}
+
+
+@router.get("/etf/research/groups", response_model=list[EtfResearchGroupOut])
+def list_etf_research_groups_api(
+    db: Session = Depends(get_session),
+) -> list[EtfResearchGroupOut]:
+    return [
+        EtfResearchGroupOut(name=g.name, codes=g.codes, is_active=g.is_active)
+        for g in list_etf_groups(db)
+    ]
+
+
+@router.post("/etf/research/groups", response_model=EtfResearchGroupOut)
+def upsert_etf_research_group_api(
+    payload: EtfResearchGroupUpsert,
+    db: Session = Depends(get_session),
+) -> EtfResearchGroupOut:
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="group name is required")
+    g, _skipped = upsert_etf_group(
+        db,
+        name=name,
+        codes=list(payload.codes or []),
+        set_active=bool(payload.set_active),
+    )
+    db.commit()
+    return EtfResearchGroupOut(name=g.name, codes=g.codes, is_active=g.is_active)
+
+
+@router.delete("/etf/research/groups/{name}")
+def delete_etf_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+    ok = delete_etf_group(db, name=name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="etf group not found")
+    db.commit()
+    return {"deleted": True}
+
+
+@router.post("/etf/research/groups/{name}/activate")
+def activate_etf_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+    ok = set_active_etf_group(db, name=name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="etf group not found")
+    db.commit()
+    return {"ok": True, "active_group": name}
+
+
+@router.get("/etf/research/groups-export")
+def export_etf_research_groups_api(db: Session = Depends(get_session)) -> dict:
+    groups = list_etf_groups(db)
+    active = get_active_etf_group(db)
+    return {
+        "format": "etf_momentum_research_candidate_groups",
+        "version": 1,
+        "active_group": (active.name if active else None),
+        "groups": {g.name: list(g.codes) for g in groups},
+    }
+
+
+@router.post("/etf/research/groups-import")
+def import_etf_research_groups_api(
+    payload: EtfResearchGroupsImportRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    groups_payload = payload.groups or {}
+    imported: list[str] = []
+    skipped_codes: dict[str, list[str]] = {}
+
+    incoming_names = {
+        str(k or "").strip() for k in groups_payload.keys() if str(k or "").strip()
+    }
+    if bool(payload.replace_all):
+        for g in list_etf_groups(db):
+            if g.name not in incoming_names:
+                _ = delete_etf_group(db, name=g.name)
+
+    for k, vv in groups_payload.items():
+        name = str(k or "").strip()
+        if not name:
+            continue
+        g, skipped = upsert_etf_group(
+            db, name=name, codes=list(vv or []), set_active=False
+        )
+        imported.append(g.name)
+        if skipped:
+            skipped_codes[g.name] = skipped
+
+    active = str(payload.active_group or "").strip()
+    if active:
+        _ = set_active_etf_group(db, name=active)
+
+    db.commit()
+    active_group_obj = get_active_etf_group(db)
+    return {
+        "ok": True,
+        "imported_groups": imported,
+        "active_group": (active_group_obj.name if active_group_obj else None),
+        "skipped_codes": skipped_codes,
+    }
 
 
 @router.get("/off-fund", response_model=list[OffFundPoolOut])

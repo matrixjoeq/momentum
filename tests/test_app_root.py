@@ -17,6 +17,7 @@ def test_research_serves_html(api_client: TestClient) -> None:
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
     assert "基准分析" in resp.text
+    assert "/etf/research/groups" in resp.text
 
 
 def test_futures_pool_serves_html(api_client: TestClient) -> None:
