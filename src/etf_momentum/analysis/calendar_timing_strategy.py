@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pylint: disable=protected-access
+
 import calendar
 import datetime as dt
 from dataclasses import dataclass
@@ -16,6 +18,7 @@ from ..calendar.trading_calendar import (
 )
 from .baseline import (
     TRADING_DAYS_PER_YEAR,
+    _compute_return_risk_contributions,
     _annualized_return,
     _annualized_vol,
     _information_ratio,
@@ -29,6 +32,37 @@ from .baseline import (
     load_ohlc_prices,
 )
 from .execution_timing import corporate_action_mask, slippage_return_from_turnover
+from . import trend as _trend_semantic_helpers
+
+CASH_MANAGEMENT_PROXY_CODE = "511880"
+
+
+def _load_cash_management_qfq_close(
+    *,
+    db: Session,
+    start: dt.date,
+    end: dt.date,
+    dates: pd.Index,
+    cash_code: str = CASH_MANAGEMENT_PROXY_CODE,
+) -> tuple[pd.Series, bool]:
+    idx = pd.DatetimeIndex(dates)
+    ohlc_cash = load_ohlc_prices(
+        db, codes=[str(cash_code)], start=start, end=end, adjust="qfq"
+    )
+    close_cash = (
+        ohlc_cash.get("close", pd.DataFrame())
+        .sort_index()
+        .reindex(columns=[str(cash_code)])
+    )
+    if close_cash.empty or str(cash_code) not in close_cash.columns:
+        return pd.Series(np.nan, index=idx, dtype=float), False
+    cash_close = (
+        pd.to_numeric(close_cash[str(cash_code)], errors="coerce")
+        .astype(float)
+        .reindex(idx)
+        .ffill()
+    )
+    return cash_close.astype(float), bool(cash_close.notna().any())
 
 
 @dataclass(frozen=True)
@@ -200,9 +234,9 @@ def compute_calendar_timing_strategy_backtest(
     if (
         (not np.isfinite(risk_budget_pct))
         or risk_budget_pct < 0.001
-        or risk_budget_pct > 0.02
+        or risk_budget_pct > 0.03
     ):
-        raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
+        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     cost_rate = float(inp.cost_bps) / 10000.0
     slip_spread = float(inp.slippage_rate)
     if not np.isfinite(cost_rate) or cost_rate < 0.0:
@@ -273,6 +307,18 @@ def compute_calendar_timing_strategy_backtest(
     idx = pd.DatetimeIndex(close_none.index)
     dates = [d.date() for d in idx]
     date_to_i = {d: i for i, d in enumerate(dates)}
+    cash_close_qfq, cash_data_available = _load_cash_management_qfq_close(
+        db=db,
+        start=inp.start,
+        end=inp.end,
+        dates=idx,
+    )
+    cash_ret_series = (
+        (cash_close_qfq.shift(-1).div(cash_close_qfq) - 1.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+    ).reindex(idx)
 
     open_none = (
         ohlc_none.get("open", pd.DataFrame())
@@ -308,6 +354,22 @@ def compute_calendar_timing_strategy_backtest(
     )
     open_hfq = (
         ohlc_hfq.get("open", pd.DataFrame())
+        .sort_index()
+        .reindex(idx)
+        .reindex(columns=codes)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
+    high_hfq_exec = (
+        ohlc_hfq.get("high", pd.DataFrame())
+        .sort_index()
+        .reindex(idx)
+        .reindex(columns=codes)
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+    )
+    low_hfq_exec = (
+        ohlc_hfq.get("low", pd.DataFrame())
         .sort_index()
         .reindex(idx)
         .reindex(columns=codes)
@@ -462,6 +524,17 @@ def compute_calendar_timing_strategy_backtest(
         .replace([np.inf, -np.inf], np.nan)
         .ffill()
     )
+    close_for_bias = close_none_exec.where(
+        ~ca_mask.fillna(False), other=close_hfq_exec
+    ).astype(float)
+    high_for_bias = high_none_exec.where(
+        ~ca_mask.fillna(False),
+        other=high_hfq_exec.astype(float).combine_first(close_hfq_exec.astype(float)),
+    ).astype(float)
+    low_for_bias = low_none_exec.where(
+        ~ca_mask.fillna(False),
+        other=low_hfq_exec.astype(float).combine_first(close_hfq_exec.astype(float)),
+    ).astype(float)
     if mode == "single":
         bench_ret_series = hfq_close_buy_hold_returns(ch_bench.iloc[:, 0])
     else:
@@ -612,12 +685,14 @@ def compute_calendar_timing_strategy_backtest(
 
     def _simulate_with_gate(gate_exec: np.ndarray) -> dict[str, Any]:
         w_cur = np.zeros(n_codes, dtype=float)
+        weights_trace = np.zeros((len(idx), n_codes), dtype=float)
         strat_ret = np.zeros(len(idx), dtype=float)
         bench_ret = np.zeros(len(idx), dtype=float)
         turnover = np.zeros(len(idx), dtype=float)
         decomp_overnight = np.zeros(len(idx), dtype=float)
         decomp_intraday = np.zeros(len(idx), dtype=float)
         decomp_interaction = np.zeros(len(idx), dtype=float)
+        decomp_cash_management = np.zeros(len(idx), dtype=float)
         decomp_cost = np.zeros(len(idx), dtype=float)
         decomp_gross = np.zeros(len(idx), dtype=float)
         decomp_net = np.zeros(len(idx), dtype=float)
@@ -729,14 +804,17 @@ def compute_calendar_timing_strategy_backtest(
                 comp_interaction = float(np.dot(tgt, r_over_i * r_intra_i))
                 gross = float(comp_overnight + comp_intraday + comp_interaction)
             w_next = tgt
-            net = gross - cost_today
+            cash_weight_today = float(np.clip(1.0 - float(np.sum(tgt)), 0.0, 1.0))
+            cash_contrib_today = float(cash_weight_today * float(cash_ret_series.iloc[i]))
+            net = gross + cash_contrib_today - cost_today
             strat_ret[i] = net
             bench_ret[i] = bench_gross
             decomp_overnight[i] = float(comp_overnight)
             decomp_intraday[i] = float(comp_intraday)
             decomp_interaction[i] = float(comp_interaction)
+            decomp_cash_management[i] = float(cash_contrib_today)
             decomp_cost[i] = float(cost_today)
-            decomp_gross[i] = float(gross)
+            decomp_gross[i] = float(gross + cash_contrib_today)
             decomp_net[i] = float(net)
 
             if active_trade is not None:
@@ -757,6 +835,7 @@ def compute_calendar_timing_strategy_backtest(
                         active_trade["by_code_factor"][c] *= float(1.0 + cnet)
 
             w_cur = w_next
+            weights_trace[i, :] = w_next
             if (
                 active_trade is not None
                 and active_trade["exit_idx"] is not None
@@ -782,10 +861,14 @@ def compute_calendar_timing_strategy_backtest(
             "trade_returns": trade_returns,
             "trade_returns_by_code": trade_returns_by_code,
             "w_cur": w_cur.copy(),
+            "weights": pd.DataFrame(weights_trace, index=idx, columns=codes, dtype=float),
             "decomposition": {
                 "overnight": pd.Series(decomp_overnight, index=idx, dtype=float),
                 "intraday": pd.Series(decomp_intraday, index=idx, dtype=float),
                 "interaction": pd.Series(decomp_interaction, index=idx, dtype=float),
+                "cash_management": pd.Series(
+                    decomp_cash_management, index=idx, dtype=float
+                ),
                 "cost": pd.Series(decomp_cost, index=idx, dtype=float),
                 "gross": pd.Series(decomp_gross, index=idx, dtype=float),
                 "net": pd.Series(decomp_net, index=idx, dtype=float),
@@ -812,7 +895,50 @@ def compute_calendar_timing_strategy_backtest(
     trade_returns = list(sim_pack["trade_returns"])
     trade_returns_by_code = dict(sim_pack["trade_returns_by_code"])
     w_cur = np.asarray(sim_pack["w_cur"], dtype=float)
+    weights_used = pd.DataFrame(
+        sim_pack.get("weights", pd.DataFrame(index=idx, columns=codes, dtype=float))
+    ).reindex(index=idx, columns=codes)
     decomp_pack = dict(sim_pack.get("decomposition") or {})
+    decomp_cash_series = (
+        decomp_pack.get("cash_management")
+        if isinstance(decomp_pack.get("cash_management"), pd.Series)
+        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+    )
+    cash_contrib_total = float(decomp_cash_series.astype(float).sum())
+    cash_contrib_annualized = (
+        float(decomp_cash_series.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
+        if len(decomp_cash_series) > 1
+        else 0.0
+    )
+
+    holding_bias_v_ge_5_all_counts, holding_bias_v_ge_5_counts_by_code = (
+        _trend_semantic_helpers._bias_v_hit_counts_per_holding_by_code(
+            weights=weights_used.astype(float).fillna(0.0),
+            close=close_for_bias.reindex(index=idx, columns=codes).astype(float),
+            high=high_for_bias.reindex(index=idx, columns=codes).astype(float),
+            low=low_for_bias.reindex(index=idx, columns=codes).astype(float),
+            ma_window=20,
+            atr_window=20,
+            threshold=5.0,
+        )
+    )
+    holding_bias_v_ge_5_total = int(sum(int(x) for x in holding_bias_v_ge_5_all_counts))
+    holding_bias_v_ge_5_by_code = {
+        str(k): int(sum(int(x) for x in (v or [])))
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
+    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
+        list(holding_bias_v_ge_5_all_counts)
+    )
+    holding_bias_v_ge_5_max_per_holding = int(
+        (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
+    )
+    holding_bias_v_ge_5_dist_by_code = {
+        str(k): _trend_semantic_helpers._distribution_stats_from_int_counts(
+            list(v or [])
+        )
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
 
     strat_nav = pd.Series((1.0 + strat_ret).cumprod(), index=idx, dtype=float)
     asset_nav_exec = (
@@ -883,8 +1009,36 @@ def compute_calendar_timing_strategy_backtest(
     m_strat = _metrics(
         strat_nav, sret, rf=float(inp.risk_free_rate), active=(sret - bret)
     )
+    m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
+    m_strat["cash_management_data_available"] = bool(cash_data_available)
+    m_strat["cash_management_return_contribution"] = float(cash_contrib_total)
+    m_strat["cash_management_return_contribution_annualized"] = float(
+        cash_contrib_annualized
+    )
     m_bench = _metrics(bench_nav, bret, rf=float(inp.risk_free_rate), active=None)
     m_ex = _metrics(excess_nav, exret, rf=0.0, active=exret)
+    attr_asset_ret = (
+        ret_exec.reindex(index=idx, columns=codes).astype(float).fillna(0.0).copy()
+    )
+    attr_weights = (
+        weights_used.reindex(index=idx, columns=codes).astype(float).fillna(0.0).copy()
+    )
+    cash_weight_attr = (
+        (1.0 - attr_weights.sum(axis=1).astype(float))
+        .clip(lower=0.0, upper=1.0)
+        .astype(float)
+    )
+    attr_asset_ret[CASH_MANAGEMENT_PROXY_CODE] = (
+        cash_ret_series.reindex(idx).astype(float).fillna(0.0)
+    )
+    attr_weights[CASH_MANAGEMENT_PROXY_CODE] = cash_weight_attr.reindex(idx).astype(
+        float
+    )
+    attribution = _compute_return_risk_contributions(
+        asset_ret=attr_asset_ret,
+        weights=attr_weights,
+        total_return=float(strat_nav.iloc[-1] - 1.0) if len(strat_nav) else 0.0,
+    )
 
     weekly = _periodic_returns(strat_nav, "W-FRI")
     monthly = _periodic_returns(strat_nav, "ME")
@@ -1072,6 +1226,9 @@ def compute_calendar_timing_strategy_backtest(
             "adjust": str(inp.adjust),
             "strategy_price_basis": "none preferred + hfq fallback on corporate-action days",
             "benchmark_price_basis": "hfq close",
+            "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+            "cash_management_price_basis": "qfq close (forward one-day return)",
+            "cash_management_data_available": bool(cash_data_available),
         },
         "nav": {
             "dates": [str(d.date()) for d in idx],
@@ -1090,6 +1247,15 @@ def compute_calendar_timing_strategy_backtest(
             },
         },
         "metrics": {"strategy": m_strat, "benchmark": m_bench, "excess": m_ex},
+        "cash_management": {
+            "enabled": True,
+            "proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+            "price_adjust": "qfq",
+            "data_available": bool(cash_data_available),
+            "residual_weight_basis": "max(0, 1 - sum(target_weights))",
+            "return_contribution": float(cash_contrib_total),
+            "return_contribution_annualized": float(cash_contrib_annualized),
+        },
         "period_returns": {
             "weekly": weekly,
             "monthly": monthly,
@@ -1099,9 +1265,36 @@ def compute_calendar_timing_strategy_backtest(
         "current_holdings": current_holdings,
         "next_execution_plan": next_plan,
         "trade_statistics": {
-            "overall": _trade_stats(trade_returns),
-            "by_code": {c: _trade_stats(vs) for c, vs in trade_returns_by_code.items()},
+            "overall": {
+                **_trade_stats(trade_returns),
+                "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_total),
+                "holding_bias_v_ge_5_max_per_holding": int(
+                    holding_bias_v_ge_5_max_per_holding
+                ),
+                "holding_bias_v_ge_5_per_holding_distribution": dict(
+                    holding_bias_v_ge_5_dist
+                ),
+            },
+            "by_code": {
+                c: {
+                    **_trade_stats(vs),
+                    "holding_bias_v_ge_5_count": int(
+                        holding_bias_v_ge_5_by_code.get(str(c), 0)
+                    ),
+                    "holding_bias_v_ge_5_max_per_holding": int(
+                        (
+                            holding_bias_v_ge_5_dist_by_code.get(str(c), {}) or {}
+                        ).get("max", 0)
+                        or 0
+                    ),
+                    "holding_bias_v_ge_5_per_holding_distribution": dict(
+                        holding_bias_v_ge_5_dist_by_code.get(str(c), {})
+                    ),
+                }
+                for c, vs in trade_returns_by_code.items()
+            },
         },
+        "attribution": attribution,
         "return_decomposition": {
             "dates": [str(d.date()) for d in idx],
             "series": {
@@ -1126,6 +1319,14 @@ def compute_calendar_timing_strategy_backtest(
                     for x in (
                         decomp_pack.get("interaction")
                         if isinstance(decomp_pack.get("interaction"), pd.Series)
+                        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                    ).to_numpy(dtype=float)
+                ],
+                "cash_management": [
+                    float(x)
+                    for x in (
+                        decomp_pack.get("cash_management")
+                        if isinstance(decomp_pack.get("cash_management"), pd.Series)
                         else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
                     ).to_numpy(dtype=float)
                 ],
@@ -1184,6 +1385,18 @@ def compute_calendar_timing_strategy_backtest(
                         (
                             decomp_pack.get("interaction")
                             if isinstance(decomp_pack.get("interaction"), pd.Series)
+                            else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+                        ).iloc[1:]
+                    )
+                    * TRADING_DAYS_PER_YEAR
+                )
+                if len(idx) > 1
+                else 0.0,
+                "ann_cash_management": float(
+                    np.mean(
+                        (
+                            decomp_pack.get("cash_management")
+                            if isinstance(decomp_pack.get("cash_management"), pd.Series)
                             else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
                         ).iloc[1:]
                     )

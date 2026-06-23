@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# pylint: disable=broad-exception-caught
+# pylint: disable=broad-exception-caught,protected-access
 
 import datetime as dt
 from dataclasses import dataclass
@@ -42,6 +42,9 @@ from ..analysis.execution_timing import (
 )
 from ..analysis.market_regime import build_market_regime_report
 from ..analysis.r_multiple import enrich_trades_with_r_metrics
+from ..analysis import trend as _trend_semantic_helpers
+
+CASH_MANAGEMENT_PROXY_CODE = _trend_semantic_helpers.CASH_MANAGEMENT_PROXY_CODE
 
 
 # Shared helper for rebalance date shifting (to avoid redefining inside blocks)
@@ -1561,9 +1564,9 @@ def backtest_rotation(
     if (
         (not np.isfinite(risk_budget_pct))
         or risk_budget_pct < 0.001
-        or risk_budget_pct > 0.02
+        or risk_budget_pct > 0.03
     ):
-        raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
+        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     if inp.lookback_days <= 0:
         raise ValueError("lookback_days must be > 0")
     if int(inp.entry_match_n) < 0:
@@ -5013,12 +5016,28 @@ def backtest_rotation(
         w_prev = w.shift(1).fillna(0.0)
         turnover_by_asset_effective = (w - w_prev).abs() / 2.0
     turnover_effective = turnover_by_asset_effective.sum(axis=1).astype(float)
+    cash_close_qfq, cash_data_available = _trend_semantic_helpers._load_cash_management_qfq_close(
+        db=db,
+        start=dates[0].date(),
+        end=dates[-1].date(),
+        dates=dates,
+    )
+    cash_ret = _trend_semantic_helpers._cash_management_return_series_from_close(
+        cash_close_qfq, forward=True
+    ).reindex(dates)
+    cash_weight = _trend_semantic_helpers._cash_management_residual_weight(
+        w.sum(axis=1).astype(float)
+    ).reindex(dates)
+    decomp_cash_management = (
+        cash_weight.astype(float) * cash_ret.astype(float).fillna(0.0)
+    ).astype(float)
+    port_base_ret = (w * ret_exec).sum(axis=1).astype(float)
+    port_ret = (port_base_ret + decomp_cash_management).astype(float)
     # Continuous holding streaks (by actual daily weights, not rebalance schedule).
     holding_streaks = _holding_streaks_from_weights(w, codes=codes, eps=1e-12)
     # Strategy-only fast path (used by rotation calendar-effect grid scan):
     # skip all benchmark NAV computation (EW/RP/IVOL and excess variants).
     if not bool(include_benchmarks):
-        port_ret = (w * ret_exec).sum(axis=1).astype(float)
         turnover_by_asset = turnover_by_asset_effective
         turnover = turnover_effective
         cost = turnover * (float(inp.cost_bps) / 10000.0)
@@ -5088,6 +5107,8 @@ def backtest_rotation(
                     )
                     if len(turnover) > 1
                     else 0.0,
+                    "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+                    "cash_management_data_available": bool(cash_data_available),
                 }
             },
         }
@@ -5198,7 +5219,6 @@ def backtest_rotation(
         ivol_nav = pd.Series(np.nan, index=dates, dtype=float)
 
     # Timed strategy returns/costs.
-    port_ret = (w * ret_exec).sum(axis=1).astype(float)
     port_nav = (1.0 + port_ret).cumprod()
     port_nav.iloc[0] = 1.0
     turnover_by_asset = turnover_by_asset_effective
@@ -5220,7 +5240,8 @@ def backtest_rotation(
     # - close/oc2: split gross via close->next-open + next-open->next-close + interaction
     # - open: use the same split for open->open horizon, and on execution days
     #   (where we intentionally use same-day open->close), force overnight/interaction=0
-    #   and intraday=gross to preserve exact day-level accounting.
+    #   and intraday=base gross to preserve exact day-level accounting.
+    # - cash_management: residual cash position uses 511880 qfq close forward return.
     ret_overnight_none = (
         (o_none.shift(-1).div(c_none) - 1.0)
         .replace([np.inf, -np.inf], np.nan)
@@ -5279,7 +5300,9 @@ def backtest_rotation(
         comp_intraday = (0.5 * port_ret + 0.5 * comp_intraday_close).astype(float)
         comp_interaction = (0.5 * comp_interaction_close).astype(float)
     decomp_cost = (cost + slippage).astype(float)
-    decomp_gross = (comp_overnight + comp_intraday + comp_interaction).astype(float)
+    decomp_gross = (
+        comp_overnight + comp_intraday + comp_interaction + decomp_cash_management
+    ).astype(float)
     decomp_net = (decomp_gross - decomp_cost).astype(float)
     asset_nav_exec = (1.0 + ret_exec[codes].astype(float).fillna(0.0)).cumprod()
     current_holdings = _build_current_holdings_snapshot(
@@ -5368,6 +5391,51 @@ def backtest_rotation(
         "trades": trades_with_r,
         "trades_by_code": trades_by_code,
     }
+    holding_bias_v_ge_5_all_counts, holding_bias_v_ge_5_counts_by_code = (
+        _trend_semantic_helpers._bias_v_hit_counts_per_holding_by_code(
+            weights=w.reindex(index=dates, columns=codes).astype(float).fillna(0.0),
+            close=close_qfq_r.reindex(index=dates, columns=codes).astype(float),
+            high=high_qfq_r.reindex(index=dates, columns=codes).astype(float),
+            low=low_qfq_r.reindex(index=dates, columns=codes).astype(float),
+            ma_window=20,
+            atr_window=20,
+            threshold=5.0,
+        )
+    )
+    holding_bias_v_ge_5_total = int(sum(int(x) for x in holding_bias_v_ge_5_all_counts))
+    holding_bias_v_ge_5_by_code = {
+        str(k): int(sum(int(x) for x in (v or [])))
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
+    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
+        list(holding_bias_v_ge_5_all_counts)
+    )
+    holding_bias_v_ge_5_max_per_holding = int(
+        (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
+    )
+    holding_bias_v_ge_5_dist_by_code = {
+        str(k): _trend_semantic_helpers._distribution_stats_from_int_counts(
+            list(v or [])
+        )
+        for k, v in holding_bias_v_ge_5_counts_by_code.items()
+    }
+    trade_stats["overall"]["holding_bias_v_ge_5_count"] = int(holding_bias_v_ge_5_total)
+    trade_stats["overall"]["holding_bias_v_ge_5_max_per_holding"] = int(
+        holding_bias_v_ge_5_max_per_holding
+    )
+    trade_stats["overall"]["holding_bias_v_ge_5_per_holding_distribution"] = dict(
+        holding_bias_v_ge_5_dist
+    )
+    for c in codes:
+        key = str(c)
+        one = trade_stats["by_code"].setdefault(key, {})
+        one["holding_bias_v_ge_5_count"] = int(holding_bias_v_ge_5_by_code.get(key, 0))
+        one["holding_bias_v_ge_5_max_per_holding"] = int(
+            ((holding_bias_v_ge_5_dist_by_code.get(key) or {}).get("max", 0) or 0)
+        )
+        one["holding_bias_v_ge_5_per_holding_distribution"] = dict(
+            holding_bias_v_ge_5_dist_by_code.get(key, {})
+        )
     event_study = compute_event_study(
         dates=dates,
         daily_returns=port_ret_net.reindex(dates).astype(float),
@@ -5439,6 +5507,8 @@ def backtest_rotation(
                     "avg_annual_turnover_rate": float(avg_annual_turnover),
                     "avg_daily_trade_count": float(avg_daily_trade_count),
                     "avg_annual_trade_count": float(avg_annual_trade_count),
+                    "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+                    "cash_management_data_available": bool(cash_data_available),
                 }
             },
             "avg_exposure": expo_mean,
@@ -5453,11 +5523,26 @@ def backtest_rotation(
                 out_lite["weights_end"] = {}
         return out_lite
 
+    attr_asset_ret = ret_exec[codes].astype(float).copy()
+    attr_weights = w[codes].astype(float).copy()
+    cash_weight_attr = _trend_semantic_helpers._cash_management_residual_weight(
+        attr_weights.sum(axis=1).astype(float)
+    ).reindex(dates)
+    attr_asset_ret[CASH_MANAGEMENT_PROXY_CODE] = (
+        cash_ret.reindex(dates).astype(float).fillna(0.0)
+    )
+    attr_weights[CASH_MANAGEMENT_PROXY_CODE] = (
+        cash_weight_attr.astype(float).fillna(0.0)
+    )
     attribution = _compute_return_risk_contributions(
-        asset_ret=ret_exec[codes],
-        weights=w[codes],
+        asset_ret=attr_asset_ret,
+        weights=attr_weights,
         total_return=float(port_nav.iloc[-1] - 1.0),  # gross return (before costs)
     )
+    (
+        cash_contrib_total,
+        cash_contrib_annualized,
+    ) = _trend_semantic_helpers._extract_cash_management_return_contribution(attribution)
 
     # Metrics
     ann_ret = _annualized_return(port_nav_net)
@@ -5525,6 +5610,10 @@ def backtest_rotation(
             "avg_annual_turnover_rate": float(avg_annual_turnover),
             "avg_daily_trade_count": float(avg_daily_trade_count),
             "avg_annual_trade_count": float(avg_annual_trade_count),
+            "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+            "cash_management_data_available": bool(cash_data_available),
+            "cash_management_return_contribution": cash_contrib_total,
+            "cash_management_return_contribution_annualized": cash_contrib_annualized,
         },
         "equal_weight": {
             "cumulative_return": float(ew_nav.iloc[-1] - 1.0),
@@ -5962,6 +6051,7 @@ def backtest_rotation(
             "signal": "qfq",
             "strategy_nav": f"none execution({ep}) + hfq-implied corporate action factor (total return proxy)",
             "benchmark_nav": "hfq",
+            "cash_management": "qfq close (forward one-day return)",
         },
         "exec_price": ep,
         "benchmark_mode": bm_mode,
@@ -6035,6 +6125,7 @@ def backtest_rotation(
                 "overnight": comp_overnight.astype(float).tolist(),
                 "intraday": comp_intraday.astype(float).tolist(),
                 "interaction": comp_interaction.astype(float).tolist(),
+                "cash_management": decomp_cash_management.astype(float).tolist(),
                 "cost": decomp_cost.astype(float).tolist(),
                 "gross": decomp_gross.astype(float).tolist(),
                 "net": decomp_net.astype(float).tolist(),
@@ -6055,6 +6146,11 @@ def backtest_rotation(
                 )
                 if len(comp_interaction) > 1
                 else 0.0,
+                "ann_cash_management": float(
+                    decomp_cash_management.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_cash_management) > 1
+                else 0.0,
                 "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
                 if len(decomp_cost) > 1
                 else 0.0,
@@ -6065,6 +6161,18 @@ def backtest_rotation(
                 if len(decomp_net) > 1
                 else 0.0,
             },
+        },
+        "cash_management": {
+            "enabled": True,
+            "proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+            "price_adjust": "qfq",
+            "data_available": bool(cash_data_available),
+            "residual_weight_basis": "max(0, 1 - sum(strategy_return_weights))",
+            "min_cash_weight": float(cash_weight.min()) if len(cash_weight) else float("nan"),
+            "max_cash_weight": float(cash_weight.max()) if len(cash_weight) else float("nan"),
+            "mean_cash_weight": float(cash_weight.mean()) if len(cash_weight) else float("nan"),
+            "return_contribution": cash_contrib_total,
+            "return_contribution_annualized": cash_contrib_annualized,
         },
         "metrics": metrics,
         "win_payoff": stats,

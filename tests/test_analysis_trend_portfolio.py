@@ -773,6 +773,22 @@ def test_trend_portfolio_risk_budget_pct_upper_bound(session_factory):
             _add_price(db, code="A1", day=d, close=100 + i * 0.9)
             _add_price(db, code="A2", day=d, close=80 + i * 0.7)
         db.commit()
+        ok = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=8,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=20,
+                risk_budget_pct=0.03,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+        assert (ok.get("nav") or {}).get("series")
         try:
             compute_trend_portfolio_backtest(
                 db,
@@ -784,14 +800,14 @@ def test_trend_portfolio_risk_budget_pct_upper_bound(session_factory):
                     sma_window=8,
                     position_sizing="risk_budget",
                     risk_budget_atr_window=20,
-                    risk_budget_pct=0.03,
+                    risk_budget_pct=0.031,
                     cost_bps=0.0,
                     slippage_rate=0.0,
                 ),
             )
-            assert False, "expected ValueError for risk_budget_pct > 0.02"
+            assert False, "expected ValueError for risk_budget_pct > 0.03"
         except ValueError as exc:
-            assert "risk_budget_pct must be in [0.001, 0.02]" in str(exc)
+            assert "risk_budget_pct must be in [0.001, 0.03]" in str(exc)
 
 
 def test_trend_portfolio_risk_budget_overcap_skip_records_decision_and_episode(
@@ -1281,3 +1297,42 @@ def test_trend_portfolio_next_plan_exposes_strict_entry_exec_price_with_slippage
         assert code in entry_map
         expected = float(open_by_code[code][int(entry_idx)] + 0.1)
         assert float(entry_map[code]) == pytest.approx(expected)
+
+
+def test_trend_portfolio_cash_management_uses_511880_qfq(session_factory):
+    sf = session_factory
+    cash_code = "511880"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100.0 + i * 0.4)
+            _add_price(db, code="A2", day=d, close=80.0 + i * 0.35)
+            _add_price(db, code=cash_code, day=d, close=100.0 + i * 0.05)
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=5,
+                position_sizing="fixed_ratio",
+                fixed_pos_ratio=0.3,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    m = ((out.get("metrics") or {}).get("strategy")) or {}
+    assert str(m.get("cash_management_proxy_code") or "") == cash_code
+    assert bool(m.get("cash_management_data_available")) is True
+    assert float(m.get("cash_management_return_contribution") or 0.0) > 0.0
+    decomp_series = ((out.get("return_decomposition") or {}).get("series")) or {}
+    cash_decomp = [float(x) for x in (decomp_series.get("cash_management") or [])]
+    assert len(cash_decomp) == len((out.get("nav") or {}).get("dates") or [])
+    assert any(abs(x) > 0.0 for x in cash_decomp)
+    by_code = (
+        (((out.get("attribution") or {}).get("return") or {}).get("by_code")) or []
+    )
+    assert any(str((r or {}).get("code") or "") == cash_code for r in by_code)

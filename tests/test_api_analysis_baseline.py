@@ -437,6 +437,70 @@ def test_api_rotation_backtest_accepts_inverse_vol_position_mode(api_client) -> 
     assert "nav" in data and "ROTATION" in (data.get("nav") or {}).get("series", {})
 
 
+def test_api_rotation_backtest_accepts_risk_budget_pct_3_percent(api_client) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "position_mode": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.03,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    assert str(data.get("position_mode") or "") == "risk_budget"
+    assert "nav" in data and "ROTATION" in (data.get("nav") or {}).get("series", {})
+
+
+def test_api_rotation_backtest_rejects_risk_budget_pct_above_3_percent(
+    api_client,
+) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "position_mode": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.031,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "0.03" in str(err)
+
+
 def test_api_rotation_backtest_daily_rebalance_switch(api_client) -> None:
     c = api_client
     engine = c.app.state.engine
@@ -511,6 +575,72 @@ def test_api_rotation_backtest_rejects_zero_top_k(api_client) -> None:
         expected_status=422,
     )
     assert isinstance(err, dict)
+
+
+def test_api_calendar_timing_accepts_risk_budget_pct_3_percent(
+    engine, api_client
+) -> None:
+    c = api_client
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=60, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={"CTRB1": [100.0 + i * 0.3 for i, _ in enumerate(dates)]},
+        dates=dates,
+    )
+    out = post_json_ok(
+        c,
+        "/api/analysis/calendar-timing",
+        {
+            "mode": "single",
+            "code": "CTRB1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "decision_day": 1,
+            "hold_days": 1,
+            "position_mode": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.03,
+            "exec_price": "open",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "rebalance_shift": "prev",
+        },
+    )
+    meta = out.get("meta") or {}
+    assert str(meta.get("position_mode") or "") == "risk_budget"
+    assert float(meta.get("risk_budget_pct") or 0.0) == pytest.approx(0.03)
+
+
+def test_api_calendar_timing_rejects_risk_budget_pct_above_3_percent(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/calendar-timing",
+        {
+            "mode": "single",
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240110",
+            "decision_day": 1,
+            "hold_days": 1,
+            "position_mode": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.031,
+            "exec_price": "open",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "rebalance_shift": "prev",
+        },
+        expected_status=422,
+    )
+    assert "0.03" in str(err)
 
 
 def test_api_trend_single_accepts_risk_budget_params(api_client):
@@ -648,7 +778,7 @@ def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
     assert "threshold" not in rc
 
 
-def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
+def test_api_trend_single_rejects_risk_budget_pct_above_3_percent(api_client):
     c = api_client
     upsert_and_fetch_etfs(
         c,
@@ -668,13 +798,42 @@ def test_api_trend_single_rejects_risk_budget_pct_above_2_percent(api_client):
             "sma_window": 2,
             "position_sizing": "risk_budget",
             "risk_budget_atr_window": 2,
-            "risk_budget_pct": 0.03,
+            "risk_budget_pct": 0.031,
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
         },
         expected_status=422,
     )
-    assert "0.02" in str(err)
+    assert "0.03" in str(err)
+
+
+def test_api_trend_single_accepts_risk_budget_pct_3_percent(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_atr_window": 2,
+            "risk_budget_pct": 0.03,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert float(params.get("risk_budget_pct") or 0.0) == pytest.approx(0.03)
 
 
 def test_api_trend_single_quick_mode_skips_heavy_sections(engine, api_client):

@@ -1787,7 +1787,7 @@ class CalendarTimingStrategyRequest(BaseModel):
     risk_budget_pct: float = Field(
         default=0.01,
         ge=0.001,
-        le=0.02,
+        le=0.03,
         description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)",
     )
     dynamic_universe: bool = Field(
@@ -2085,7 +2085,7 @@ class RotationBacktestRequest(BaseModel):
     risk_budget_pct: float = Field(
         default=0.01,
         ge=0.001,
-        le=0.02,
+        le=0.03,
         description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)",
     )
     entry_backfill: bool = Field(
@@ -2473,7 +2473,7 @@ class TrendBacktestRequest(BaseModel):
     risk_budget_pct: float = Field(
         default=0.01,
         ge=0.001,
-        le=0.02,
+        le=0.03,
         description="NAV risk budget for 1 ATR move (0.01 = 1%)",
     )
     risk_budget_overcap_policy: str = Field(
@@ -2837,7 +2837,7 @@ class TrendPortfolioBacktestRequest(BaseModel):
     risk_budget_pct: float = Field(
         default=0.01,
         ge=0.001,
-        le=0.02,
+        le=0.03,
         description="Per-asset NAV risk budget for 1 ATR move (0.01 = 1%)",
     )
     risk_budget_overcap_policy: str = Field(

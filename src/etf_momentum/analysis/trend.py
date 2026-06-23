@@ -70,6 +70,72 @@ DEFAULT_BIAS_V_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
 ]
 STOP_EXECUTION_MODES: set[str] = {"intraday", "next_day"}
 VOL_REGIME_STATES: set[str] = {"NORMAL", "REDUCED", "INCREASED", "EXTREME"}
+CASH_MANAGEMENT_PROXY_CODE = "511880"
+
+
+def _load_cash_management_qfq_close(
+    *,
+    db: Session | None,
+    start: dt.date,
+    end: dt.date,
+    dates: pd.Index,
+    cash_code: str = CASH_MANAGEMENT_PROXY_CODE,
+) -> tuple[pd.Series, bool]:
+    idx = pd.DatetimeIndex(dates)
+    if db is None:
+        return pd.Series(np.nan, index=idx, dtype=float), False
+    close_qfq = load_close_prices(
+        db, codes=[str(cash_code)], start=start, end=end, adjust="qfq"
+    )
+    if close_qfq.empty or str(cash_code) not in close_qfq.columns:
+        return pd.Series(np.nan, index=idx, dtype=float), False
+    cash_close = (
+        pd.to_numeric(close_qfq[str(cash_code)], errors="coerce")
+        .astype(float)
+        .sort_index()
+        .reindex(idx)
+        .ffill()
+    )
+    return cash_close.astype(float), bool(cash_close.notna().any())
+
+
+def _cash_management_return_series_from_close(
+    close_qfq: pd.Series, *, forward: bool = False
+) -> pd.Series:
+    close_s = pd.to_numeric(close_qfq, errors="coerce").astype(float)
+    if forward:
+        ret = close_s.shift(-1).div(close_s) - 1.0
+    else:
+        ret = close_s.div(close_s.shift(1)) - 1.0
+    return ret.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+
+
+def _cash_management_residual_weight(exposure: pd.Series) -> pd.Series:
+    exp_s = pd.to_numeric(exposure, errors="coerce").astype(float).fillna(0.0)
+    return (1.0 - exp_s).clip(lower=0.0, upper=1.0).astype(float)
+
+
+def _extract_cash_management_return_contribution(
+    attribution: dict[str, Any] | None,
+    *,
+    cash_code: str = CASH_MANAGEMENT_PROXY_CODE,
+) -> tuple[float | None, float | None]:
+    rows = (((attribution or {}).get("return") or {}).get("by_code") or [])
+    for row in rows:
+        if str((row or {}).get("code") or "") != str(cash_code):
+            continue
+        total_v = (row or {}).get("return_contribution")
+        ann_v = (row or {}).get("return_contribution_annualized")
+        total = (
+            float(total_v)
+            if total_v is not None and np.isfinite(float(total_v))
+            else None
+        )
+        annualized = (
+            float(ann_v) if ann_v is not None and np.isfinite(float(ann_v)) else None
+        )
+        return total, annualized
+    return None, None
 
 
 @dataclass(frozen=True)
@@ -6107,9 +6173,9 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if (
         (not np.isfinite(risk_budget_pct))
         or risk_budget_pct < 0.001
-        or risk_budget_pct > 0.02
+        or risk_budget_pct > 0.03
     ):
-        raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
+        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     risk_budget_overcap_policy = (
         str(getattr(inp, "risk_budget_overcap_policy", "scale") or "scale")
         .strip()
@@ -7012,8 +7078,22 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         + r_take_profit_override_ret
         + r_profit_scaleout_override_ret
     ).astype(float)
+    cash_close_qfq, cash_data_available = _load_cash_management_qfq_close(
+        db=db,
+        start=inp.start,
+        end=inp.end,
+        dates=w.index,
+    )
+    cash_ret = _cash_management_return_series_from_close(
+        cash_close_qfq, forward=False
+    ).reindex(w.index)
+    cash_weight = _cash_management_residual_weight(w_ret.reindex(w.index).astype(float))
+    cash_management_ret = (
+        cash_weight * cash_ret.astype(float).fillna(0.0)
+    ).astype(float)
     strat_ret = (
         w_ret * ret_exec_day + risk_exit_override_ret - cost.astype(float) - slippage
+        + cash_management_ret
     ).astype(float)
     if not quick_mode:
         atr_stop_stats = {
@@ -7126,12 +7206,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             + decomp_r_take_profit_override
             + decomp_r_profit_scaleout_override
         ).astype(float)
+        decomp_cash_management = cash_management_ret.astype(float)
         decomp_cost = (cost + slippage).astype(float)
         decomp_gross = (
             decomp_overnight
             + decomp_intraday
             + decomp_interaction
             + decomp_risk_exit_override
+            + decomp_cash_management
         ).astype(float)
         decomp_net = (decomp_gross - decomp_cost).astype(float)
         return_decomposition = {
@@ -7151,6 +7233,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                     float
                 ).tolist(),
                 "risk_exit_override": decomp_risk_exit_override.astype(float).tolist(),
+                "cash_management": decomp_cash_management.astype(float).tolist(),
                 "cost": decomp_cost.astype(float).tolist(),
                 "gross": decomp_gross.astype(float).tolist(),
                 "net": decomp_net.astype(float).tolist(),
@@ -7198,6 +7281,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                     decomp_risk_exit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
                 )
                 if len(decomp_risk_exit_override) > 1
+                else 0.0,
+                "ann_cash_management": float(
+                    decomp_cash_management.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_cash_management) > 1
                 else 0.0,
                 "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
                 if len(decomp_cost) > 1
@@ -7290,13 +7378,35 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             _sharpe(active, rf=0.0, ann_factor=TRADING_DAYS_PER_YEAR)
         ),
     }
+    asset_ret_for_attribution = (
+        ret_exec_day.to_frame(code).astype(float).reindex(nav.index).fillna(0.0)
+    )
+    weight_for_attribution = (
+        w.to_frame(code).astype(float).reindex(nav.index).fillna(0.0)
+    )
+    cash_weight_attr = _cash_management_residual_weight(
+        weight_for_attribution[str(code)].astype(float)
+    )
+    asset_ret_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+        cash_ret.reindex(nav.index).astype(float).fillna(0.0)
+    )
+    weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+        cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
+    )
     attribution = _compute_return_risk_contributions(
-        asset_ret=ret_exec_day.to_frame(code)
-        .astype(float)
-        .reindex(nav.index)
-        .fillna(0.0),
-        weights=w.to_frame(code).astype(float).reindex(nav.index).fillna(0.0),
+        asset_ret=asset_ret_for_attribution,
+        weights=weight_for_attribution,
         total_return=float(nav.iloc[-1] - 1.0),
+    )
+    (
+        cash_contrib_total,
+        cash_contrib_annualized,
+    ) = _extract_cash_management_return_contribution(attribution)
+    m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
+    m_strat["cash_management_data_available"] = bool(cash_data_available)
+    m_strat["cash_management_return_contribution"] = cash_contrib_total
+    m_strat["cash_management_return_contribution_annualized"] = (
+        cash_contrib_annualized
     )
     trade_one = _trade_returns_from_weight_series(
         w,
@@ -7918,6 +8028,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
                 "risk_free_rate": float(inp.risk_free_rate),
+                "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+                "cash_management_price_adjust": "qfq",
             },
             "account_lot_sizing": account_lot_meta
             or {
@@ -8025,6 +8137,24 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 ),
             },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
+            "cash_management": {
+                "enabled": True,
+                "proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+                "price_adjust": "qfq",
+                "data_available": bool(cash_data_available),
+                "residual_weight_basis": "max(0, 1 - strategy_return_weight)",
+                "min_cash_weight": (
+                    float(cash_weight.min()) if len(cash_weight) else float("nan")
+                ),
+                "max_cash_weight": (
+                    float(cash_weight.max()) if len(cash_weight) else float("nan")
+                ),
+                "mean_cash_weight": (
+                    float(cash_weight.mean()) if len(cash_weight) else float("nan")
+                ),
+                "return_contribution": cash_contrib_total,
+                "return_contribution_annualized": cash_contrib_annualized,
+            },
         },
         "corporate_actions": (
             [
@@ -8253,9 +8383,9 @@ def compute_trend_portfolio_backtest(
     if (
         (not np.isfinite(risk_budget_pct))
         or risk_budget_pct < 0.001
-        or risk_budget_pct > 0.02
+        or risk_budget_pct > 0.03
     ):
-        raise ValueError("risk_budget_pct must be in [0.001, 0.02]")
+        raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
     risk_budget_overcap_policy = (
         str(getattr(inp, "risk_budget_overcap_policy", "scale") or "scale")
         .strip()
@@ -10339,8 +10469,24 @@ def compute_trend_portfolio_backtest(
         + decomp_r_profit_scaleout_override
     ).astype(float)
     port_base_ret = (w_ret * ret_exec_day).sum(axis=1).astype(float)
+    cash_close_qfq, cash_data_available = _load_cash_management_qfq_close(
+        db=db,
+        start=inp.start,
+        end=inp.end,
+        dates=w.index,
+    )
+    cash_ret = _cash_management_return_series_from_close(
+        cash_close_qfq, forward=False
+    ).reindex(w.index)
+    cash_weight = _cash_management_residual_weight(
+        w_ret.sum(axis=1).reindex(w.index).astype(float)
+    )
+    decomp_cash_management = (
+        cash_weight * cash_ret.astype(float).fillna(0.0)
+    ).astype(float)
     port_ret = (
         port_base_ret
+        + decomp_cash_management
         + decomp_risk_exit_override
         - cost.astype(float)
         - slippage.astype(float)
@@ -10448,6 +10594,7 @@ def compute_trend_portfolio_backtest(
             + comp_intraday
             + comp_interaction
             + decomp_risk_exit_override
+            + decomp_cash_management
         ).astype(float)
         port_ret = (decomp_gross - decomp_cost).astype(float)
         return_decomposition = {
@@ -10467,6 +10614,7 @@ def compute_trend_portfolio_backtest(
                     float
                 ).tolist(),
                 "risk_exit_override": decomp_risk_exit_override.astype(float).tolist(),
+                "cash_management": decomp_cash_management.astype(float).tolist(),
                 "cost": decomp_cost.astype(float).tolist(),
                 "gross": decomp_gross.astype(float).tolist(),
                 "net": port_ret.astype(float).tolist(),
@@ -10514,6 +10662,11 @@ def compute_trend_portfolio_backtest(
                     decomp_risk_exit_override.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
                 )
                 if len(decomp_risk_exit_override) > 1
+                else 0.0,
+                "ann_cash_management": float(
+                    decomp_cash_management.iloc[1:].mean() * TRADING_DAYS_PER_YEAR
+                )
+                if len(decomp_cash_management) > 1
                 else 0.0,
                 "ann_cost": float(decomp_cost.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
                 if len(decomp_cost) > 1
@@ -10598,12 +10751,35 @@ def compute_trend_portfolio_backtest(
             _information_ratio(active, ann_factor=TRADING_DAYS_PER_YEAR)
         ),
     }
+    asset_ret_for_attribution = (
+        ret_exec_day.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
+    )
+    weight_for_attribution = (
+        w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0)
+    )
+    cash_weight_attr = _cash_management_residual_weight(
+        weight_for_attribution.sum(axis=1).astype(float)
+    )
+    asset_ret_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+        cash_ret.reindex(nav.index).astype(float).fillna(0.0)
+    )
+    weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
+        cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
+    )
     attribution = _compute_return_risk_contributions(
-        asset_ret=ret_exec_day.reindex(index=nav.index, columns=codes)
-        .astype(float)
-        .fillna(0.0),
-        weights=w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
+        asset_ret=asset_ret_for_attribution,
+        weights=weight_for_attribution,
         total_return=float(nav.iloc[-1] - 1.0),
+    )
+    (
+        cash_contrib_total,
+        cash_contrib_annualized,
+    ) = _extract_cash_management_return_contribution(attribution)
+    m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
+    m_strat["cash_management_data_available"] = bool(cash_data_available)
+    m_strat["cash_management_return_contribution"] = cash_contrib_total
+    m_strat["cash_management_return_contribution_annualized"] = (
+        cash_contrib_annualized
     )
     trade_pack = _trade_returns_from_weight_df(
         w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
@@ -11758,6 +11934,8 @@ def compute_trend_portfolio_backtest(
                 "exec_price": str(ep),
                 "cost_bps": float(inp.cost_bps),
                 "slippage_rate": float(inp.slippage_rate),
+                "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+                "cash_management_price_adjust": "qfq",
             },
             "account_lot_sizing": account_lot_meta
             or {
@@ -12005,7 +12183,9 @@ def compute_trend_portfolio_backtest(
                 "position_sizing": str(ps),
                 "cash_as_residual": bool(
                     usage_enabled
-                ),  # <100% exposure is treated as cash at 0 return
+                ),  # <100% exposure is managed by cash proxy return.
+                "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+                "cash_management_data_available": bool(cash_data_available),
                 "min_exposure": (
                     None
                     if (not usage_enabled or (not np.isfinite(util_min)))
@@ -12031,6 +12211,24 @@ def compute_trend_portfolio_backtest(
                 },
                 "over_100pct_days": int(util_over100_days),
                 "under_100pct_days": int(util_under100_days),
+            },
+            "cash_management": {
+                "enabled": True,
+                "proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+                "price_adjust": "qfq",
+                "data_available": bool(cash_data_available),
+                "residual_weight_basis": "max(0, 1 - sum(strategy_return_weights))",
+                "min_cash_weight": (
+                    float(cash_weight.min()) if len(cash_weight) else float("nan")
+                ),
+                "max_cash_weight": (
+                    float(cash_weight.max()) if len(cash_weight) else float("nan")
+                ),
+                "mean_cash_weight": (
+                    float(cash_weight.mean()) if len(cash_weight) else float("nan")
+                ),
+                "return_contribution": cash_contrib_total,
+                "return_contribution_annualized": cash_contrib_annualized,
             },
             "group_filter": {
                 "enabled": bool(group_enforce),

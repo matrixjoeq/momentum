@@ -223,7 +223,14 @@ def test_rotation_trade_statistics_have_samples_user_case_like(session_factory):
     overall = ts.get("overall") or {}
     by_code = ts.get("by_code") or {}
     assert int(overall.get("total_trades") or 0) > 0
+    assert "holding_bias_v_ge_5_count" in overall
+    assert "holding_bias_v_ge_5_max_per_holding" in overall
+    assert "holding_bias_v_ge_5_per_holding_distribution" in overall
     assert any(int((v or {}).get("total_trades") or 0) > 0 for v in by_code.values())
+    for one in by_code.values():
+        assert "holding_bias_v_ge_5_count" in (one or {})
+        assert "holding_bias_v_ge_5_max_per_holding" in (one or {})
+        assert "holding_bias_v_ge_5_per_holding_distribution" in (one or {})
     rs = out.get("r_statistics") or {}
     assert int(((rs.get("overall") or {}).get("trade_count") or 0) > 0)
     assert "recent_100" in rs
@@ -288,6 +295,88 @@ def test_rotation_risk_budget_position_mode_scales_by_atr(session_factory):
         expo = w.sum(axis=1)
         assert float(expo.max()) <= 1.0000001
         assert float(expo.max()) > 0.0
+
+
+def test_rotation_cash_management_uses_511880_qfq(session_factory):
+    sf = session_factory
+    cash_code = "511880"
+    start = dt.date(2024, 1, 2)
+    dates = [d.date() for d in pd.date_range(start, periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + float(i) * 0.6
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(px),
+                open_price=float(px),
+                high=float(px * 1.10),
+                low=float(px * 0.90),
+            )
+            cash_px = 100.0 + float(i) * 0.04
+            add_price_all_adjustments(
+                db,
+                code=cash_code,
+                day=d,
+                close=float(cash_px),
+                open_price=float(cash_px),
+                high=float(cash_px),
+                low=float(cash_px),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["AAA"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                top_k=1,
+                position_mode="risk_budget",
+                risk_budget_atr_window=20,
+                risk_budget_pct=0.001,
+                lookback_days=10,
+                skip_days=0,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    m = ((out.get("metrics") or {}).get("strategy")) or {}
+    assert str(m.get("cash_management_proxy_code") or "") == cash_code
+    assert bool(m.get("cash_management_data_available")) is True
+    assert float(m.get("cash_management_return_contribution") or 0.0) > 0.0
+
+    decomp = out.get("return_decomposition") or {}
+    series = decomp.get("series") or {}
+    cash_series = [float(x) for x in (series.get("cash_management") or [])]
+    overnight = [float(x) for x in (series.get("overnight") or [])]
+    intraday = [float(x) for x in (series.get("intraday") or [])]
+    interaction = [float(x) for x in (series.get("interaction") or [])]
+    gross = [float(x) for x in (series.get("gross") or [])]
+    net = [float(x) for x in (series.get("net") or [])]
+    cost = [float(x) for x in (series.get("cost") or [])]
+    assert any(abs(x) > 0.0 for x in cash_series)
+    for i in range(len(gross)):
+        assert gross[i] == pytest.approx(
+            overnight[i] + intraday[i] + interaction[i] + cash_series[i], abs=1e-12
+        )
+        assert net[i] == pytest.approx(gross[i] - cost[i], abs=1e-12)
+
+    attr = out.get("attribution") or {}
+    ret_codes = {
+        str(x.get("code") or "") for x in (((attr.get("return") or {}).get("by_code")) or [])
+    }
+    risk_codes = {
+        str(x.get("code") or "") for x in (((attr.get("risk") or {}).get("by_code")) or [])
+    }
+    assert "AAA" in ret_codes
+    assert "AAA" in risk_codes
+    assert cash_code in ret_codes
+    assert cash_code in risk_codes
 
 
 def test_rotation_inverse_vol_position_mode_overweights_lower_vol_asset(

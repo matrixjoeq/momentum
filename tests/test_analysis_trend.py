@@ -1271,6 +1271,21 @@ def test_trend_single_risk_budget_pct_upper_bound(session_factory):
             px = 100.0 + i * 0.6
             _add_price(db, code=code, day=d, close=px)
         db.commit()
+        ok = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=5,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=2,
+                risk_budget_pct=0.03,
+                cost_bps=0.0,
+            ),
+        )
+        assert (ok.get("nav") or {}).get("series")
         try:
             compute_trend_backtest(
                 db,
@@ -1282,13 +1297,13 @@ def test_trend_single_risk_budget_pct_upper_bound(session_factory):
                     sma_window=5,
                     position_sizing="risk_budget",
                     risk_budget_atr_window=2,
-                    risk_budget_pct=0.03,
+                    risk_budget_pct=0.031,
                     cost_bps=0.0,
                 ),
             )
-            assert False, "expected ValueError for risk_budget_pct > 0.02"
+            assert False, "expected ValueError for risk_budget_pct > 0.03"
         except ValueError as exc:
-            assert "risk_budget_pct must be in [0.001, 0.02]" in str(exc)
+            assert "risk_budget_pct must be in [0.001, 0.03]" in str(exc)
 
 
 def test_trend_single_monthly_risk_budget_blocks_entries(session_factory):
@@ -2596,3 +2611,42 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
     assert "holding_bias_v_ge_5_count" in by_code
     assert "holding_bias_v_ge_5_max_per_holding" in by_code
     assert "holding_bias_v_ge_5_per_holding_distribution" in by_code
+
+
+def test_trend_backtest_cash_management_uses_511880_qfq(session_factory):
+    sf = session_factory
+    code = "AAA"
+    cash_code = "511880"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code=code, day=d, close=100.0 + i * 0.5)
+            _add_price(db, code=cash_code, day=d, close=100.0 + i * 0.05)
+        db.commit()
+        out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=5,
+                position_sizing="fixed_ratio",
+                fixed_pos_ratio=0.5,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    m = ((out.get("metrics") or {}).get("strategy")) or {}
+    assert str(m.get("cash_management_proxy_code") or "") == cash_code
+    assert bool(m.get("cash_management_data_available")) is True
+    assert float(m.get("cash_management_return_contribution") or 0.0) > 0.0
+    decomp_series = ((out.get("return_decomposition") or {}).get("series")) or {}
+    cash_decomp = [float(x) for x in (decomp_series.get("cash_management") or [])]
+    assert len(cash_decomp) == len((out.get("nav") or {}).get("dates") or [])
+    assert any(abs(x) > 0.0 for x in cash_decomp)
+    by_code = (
+        (((out.get("attribution") or {}).get("return") or {}).get("by_code")) or []
+    )
+    assert any(str((r or {}).get("code") or "") == cash_code for r in by_code)

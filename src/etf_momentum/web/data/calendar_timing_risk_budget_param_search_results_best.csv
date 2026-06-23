@@ -1,0 +1,2 @@
+risk_budget_pct_percent,risk_budget_pct,status,elapsed_ms,sharpe_ratio,annualized_return,cumulative_return,annualized_volatility,max_drawdown,max_drawdown_recovery_days,sortino_ratio,calmar_ratio,ulcer_index,ulcer_performance_index,win_rate,payoff_ratio,kelly_fraction,error
+0.1,0.001,ok,5242,1.5856855063196453,0.050999161713928265,0.3635526616134752,0.03166826444150831,-0.030701287570689573,301.0,2.5234260728969002,1.6611408103488472,0.7899729826282907,6.455810873968219,0.6712328767123288,1.4668402489891659,0.4471000009515005,

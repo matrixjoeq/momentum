@@ -334,7 +334,14 @@ def test_calendar_timing_trade_stats_by_code_no_extreme_explosions(session_facto
         )
 
     by_code = ((out.get("trade_statistics") or {}).get("by_code")) or {}
+    overall = ((out.get("trade_statistics") or {}).get("overall")) or {}
+    assert "holding_bias_v_ge_5_count" in overall
+    assert "holding_bias_v_ge_5_max_per_holding" in overall
+    assert "holding_bias_v_ge_5_per_holding_distribution" in overall
     for c, st in by_code.items():
+        assert "holding_bias_v_ge_5_count" in (st or {})
+        assert "holding_bias_v_ge_5_max_per_holding" in (st or {})
+        assert "holding_bias_v_ge_5_per_holding_distribution" in (st or {})
         all_stats = (st or {}).get("all_stats") or {}
         mn = all_stats.get("min")
         mx = all_stats.get("max")
@@ -597,3 +604,140 @@ def test_calendar_timing_return_decomposition_open_includes_overnight_component(
             overnight[i] + intraday[i] + interaction[i], abs=1e-12
         )
         assert net[i] == pytest.approx(gross[i] - cost[i], abs=1e-12)
+
+
+def test_calendar_timing_cash_management_uses_511880_qfq(session_factory):
+    sf = session_factory
+    cash_code = "511880"
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + 0.3 * float(i)
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=float(px),
+                        high=float(px),
+                        low=float(px),
+                        close=float(px),
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+            cash_px = 100.0 + 0.05 * float(i)
+            db.add(
+                EtfPrice(
+                    code=cash_code,
+                    trade_date=d,
+                    open=float(cash_px),
+                    high=float(cash_px),
+                    low=float(cash_px),
+                    close=float(cash_px),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=dates[-1],
+                decision_day=1,
+                hold_days=10,
+                position_mode="fixed_ratio",
+                fixed_pos_ratio=0.5,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                rebalance_shift="prev",
+            ),
+        )
+    m = ((out.get("metrics") or {}).get("strategy")) or {}
+    assert str(m.get("cash_management_proxy_code") or "") == cash_code
+    assert bool(m.get("cash_management_data_available")) is True
+    assert float(m.get("cash_management_return_contribution") or 0.0) > 0.0
+    decomp = out.get("return_decomposition") or {}
+    series = decomp.get("series") or {}
+    cash_series = [float(x) for x in (series.get("cash_management") or [])]
+    gross = [float(x) for x in (series.get("gross") or [])]
+    overnight = [float(x) for x in (series.get("overnight") or [])]
+    intraday = [float(x) for x in (series.get("intraday") or [])]
+    interaction = [float(x) for x in (series.get("interaction") or [])]
+    cost = [float(x) for x in (series.get("cost") or [])]
+    net = [float(x) for x in (series.get("net") or [])]
+    assert any(abs(x) > 0.0 for x in cash_series)
+    for i in range(len(gross)):
+        assert gross[i] == pytest.approx(
+            overnight[i] + intraday[i] + interaction[i] + cash_series[i], abs=1e-12
+        )
+        assert net[i] == pytest.approx(gross[i] - cost[i], abs=1e-12)
+
+
+def test_calendar_timing_outputs_attribution_tables_by_asset(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=70, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p = 100.0 + 0.2 * float(i)
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=float(p),
+                        high=float(p),
+                        low=float(p),
+                        close=float(p),
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+            cash_p = 100.0 + 0.03 * float(i)
+            db.add(
+                EtfPrice(
+                    code="511880",
+                    trade_date=d,
+                    open=float(cash_p),
+                    high=float(cash_p),
+                    low=float(cash_p),
+                    close=float(cash_p),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=dates[-1],
+                decision_day=1,
+                hold_days=8,
+                position_mode="fixed_ratio",
+                fixed_pos_ratio=0.6,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                rebalance_shift="prev",
+            ),
+        )
+
+    attr = out.get("attribution") or {}
+    ret_rows = ((attr.get("return") or {}).get("by_code")) or []
+    risk_rows = ((attr.get("risk") or {}).get("by_code")) or []
+    assert ret_rows and risk_rows
+    ret_codes = {str(x.get("code") or "") for x in ret_rows}
+    risk_codes = {str(x.get("code") or "") for x in risk_rows}
+    assert "A1" in ret_codes
+    assert "A1" in risk_codes
+    assert "511880" in ret_codes
+    assert "511880" in risk_codes

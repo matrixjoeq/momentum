@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>轮动风险预算参数搜索（按调仓日）</title>
+    <link rel="stylesheet" href="/static/terminal.css" />
+    <script
+      defer
+      src="https://cdn.plot.ly/plotly-cartesian-2.30.0.min.js"
+    ></script>
+    <style>
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 960px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+      }
+      .mono {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+      }
+      .charts-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .chart-box {
+        width: 100%;
+        height: 320px;
+      }
+      td,
+      th {
+        white-space: nowrap;
+      }
+      .robust-row {
+        background: color-mix(in srgb, var(--ok, #1e7f4f) 12%, transparent);
+      }
+    </style>
+  </head>
+  <body>
+    <h2>轮动风险预算参数搜索（按 Top K + 调仓日）</h2>
+    <div class="muted">
+      扫描 `top_k=1..3`、`rebalance_anchor=1..5` 与
+      `risk_budget_pct=[0.1%,3.0%]`，按每个 K 的每个调仓日展示 Sharpe +
+      年化收益曲线，并标注最佳参数与稳健区间。
+    </div>
+    <div class="muted" style="margin-top: 6px">
+      <a href="/research">返回研究主页</a>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 12px">
+      <div class="row">
+        <div style="min-width: 560px; flex: 1">
+          <label>结果 JSON URL</label>
+          <input
+            id="dataUrl"
+            value="/static/data/rotation_risk_budget_anchor_search_results.json"
+          />
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 8px">
+          <button id="loadUrlBtn">加载 URL</button>
+        </div>
+        <div style="min-width: 320px">
+          <label>或上传本地 JSON 文件</label>
+          <input id="fileInput" type="file" accept=".json,application/json" />
+        </div>
+      </div>
+    </div>
+
+    <div class="panel no-print">
+      <div class="row">
+        <div>
+          <label>稳健候选（Sharpe前N）</label>
+          <input id="robustTopK" value="3" />
+        </div>
+        <div>
+          <label>最大回撤阈值(%)</label>
+          <input id="robustMddLimitPct" value="20" />
+        </div>
+        <div>
+          <label>明细表展示TopN（按全局Sharpe）</label>
+          <input id="topN" value="80" />
+        </div>
+        <div style="display: flex; align-items: flex-end">
+          <button id="refreshBtn">刷新图表与表格</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3 style="margin-top: 0">运行信息</h3>
+        <div id="metaInfo" class="mono"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top: 0">全局最佳单一设置</h3>
+        <div id="bestInfo" class="mono"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">各 K-调仓日最佳参数与稳健区间</h3>
+      <div style="overflow: auto">
+        <table id="anchorSummaryTable"></table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">Sharpe/年化收益曲线（按 K 与调仓日）</h3>
+      <div id="chartsWrap" class="charts-grid"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">网格结果明细</h3>
+      <div style="overflow: auto">
+        <table id="resultTable"></table>
+      </div>
+    </div>
+
+    <div id="status" class="muted" style="margin-top: 8px"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      function status(msg) {
+        $("status").textContent = msg || "";
+      }
+
+      function fmtNum(v, digits = 6) {
+        const x = Number(v);
+        return Number.isFinite(x) ? x.toFixed(digits) : "-";
+      }
+
+      function fmtPct(v, digits = 2) {
+        const x = Number(v);
+        return Number.isFinite(x) ? `${(x * 100).toFixed(digits)}%` : "-";
+      }
+
+      function fmtPctInput(v, digits = 1) {
+        const x = Number(v);
+        return Number.isFinite(x) ? `${x.toFixed(digits)}%` : "-";
+      }
+
+      function parsePositive(v, fallback) {
+        const x = Number(v);
+        return Number.isFinite(x) && x > 0 ? x : fallback;
+      }
+
+      function metric(row, key) {
+        const v = Number(row?.metrics?.[key]);
+        return Number.isFinite(v) ? v : null;
+      }
+
+      function normalizeData(raw) {
+        const meta = raw && typeof raw === "object" ? raw.meta || {} : {};
+        const results =
+          raw && typeof raw === "object" && Array.isArray(raw.results)
+            ? raw.results
+            : [];
+        const best =
+          raw && typeof raw === "object" && raw.best_single_setting
+            ? raw.best_single_setting
+            : null;
+        return { meta, results, best };
+      }
+
+      function toSortedRows(rows) {
+        const out = rows
+          .filter(
+            (x) =>
+              Number.isFinite(Number(x?.rebalance_anchor)) &&
+              Number.isFinite(Number(x?.risk_budget_pct_percent)),
+          )
+          .map((x) => ({
+            ...x,
+            top_k: Number.isFinite(Number(x?.top_k)) ? Number(x.top_k) : 3,
+          }))
+          .slice();
+        out.sort(
+          (a, b) =>
+            Number(a.top_k) - Number(b.top_k) ||
+            Number(a.rebalance_anchor) - Number(b.rebalance_anchor) ||
+            Number(a.risk_budget_pct_percent) - Number(b.risk_budget_pct_percent),
+        );
+        return out;
+      }
+
+      function groupByTopKAnchor(rows) {
+        const byGroup = new Map();
+        const topKSet = new Set();
+        const anchorSet = new Set();
+        rows.forEach((r) => {
+          const tk = Number(r.top_k);
+          const a = Number(r.rebalance_anchor);
+          if (!Number.isFinite(tk) || !Number.isFinite(a)) return;
+          topKSet.add(tk);
+          anchorSet.add(a);
+          const key = `${tk}|${a}`;
+          if (!byGroup.has(key)) byGroup.set(key, []);
+          byGroup.get(key).push(r);
+        });
+        for (const arr of byGroup.values()) {
+          arr.sort(
+            (x, y) =>
+              Number(x.risk_budget_pct_percent) - Number(y.risk_budget_pct_percent),
+          );
+        }
+        return {
+          byGroup,
+          topKValues: Array.from(topKSet).sort((a, b) => a - b),
+          anchors: Array.from(anchorSet).sort((a, b) => a - b),
+        };
+      }
+
+      function pickBestFromRows(rows) {
+        let best = null;
+        let bestKey = null;
+        rows.forEach((r) => {
+          if (String(r?.status || "") !== "ok") return;
+          const sharpe = metric(r, "sharpe_ratio");
+          if (sharpe == null) return;
+          const ann = metric(r, "annualized_return");
+          const cum = metric(r, "cumulative_return");
+          const mdd = metric(r, "max_drawdown");
+          const k = [
+            sharpe,
+            ann == null ? -1e18 : ann,
+            cum == null ? -1e18 : cum,
+            mdd == null ? -1e18 : -Math.abs(mdd),
+          ];
+          if (!bestKey || k.join("|") > bestKey.join("|")) {
+            bestKey = k;
+            best = r;
+          }
+        });
+        return best;
+      }
+
+      function pickRobustCandidates(rows, topK, mddLimitPct) {
+        const okRows = rows.filter((r) => String(r?.status || "") === "ok");
+        const sortedBySharpe = okRows.slice().sort((a, b) => {
+          const av = metric(a, "sharpe_ratio");
+          const bv = metric(b, "sharpe_ratio");
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          return bv - av;
+        });
+        const topRows = sortedBySharpe.slice(0, Math.max(1, Number(topK)));
+        const mddLimit = Math.abs(Number(mddLimitPct)) / 100.0;
+        const robustRows = topRows.filter((r) => {
+          const mdd = metric(r, "max_drawdown");
+          return mdd != null && Math.abs(mdd) <= mddLimit;
+        });
+        if (robustRows.length === 0) {
+          return {
+            topRows,
+            robustRows,
+            interval: null,
+            robustKeySet: new Set(),
+          };
+        }
+        const xs = robustRows.map((r) => Number(r.risk_budget_pct_percent));
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const robustKeySet = new Set(xs.map((x) => x.toFixed(6)));
+        return {
+          topRows,
+          robustRows,
+          interval: { minX, maxX },
+          robustKeySet,
+        };
+      }
+
+      function getRobustConfig() {
+        return {
+          topK: Math.max(1, Math.floor(parsePositive($("robustTopK").value, 3))),
+          mddLimitPct: parsePositive($("robustMddLimitPct").value, 20),
+        };
+      }
+
+      function renderMeta(meta, rows) {
+        const lines = [];
+        lines.push(`生成时间: ${String(meta.generated_at || "-")}`);
+        lines.push(`后端地址: ${String(meta.api_base_url || "-")}`);
+        lines.push(`接口: ${String(meta.api_endpoint || "-")}`);
+        lines.push(
+          `样本总数: ${Number(meta.total_cases || rows.length || 0)} (成功 ${Number(meta.success_cases || 0)}, 失败 ${Number(meta.error_cases || 0)})`,
+        );
+        const ss = meta.search_space || {};
+        lines.push(
+          `调仓日: ${(ss.rebalance_anchors || []).join(", ")}；风险预算遍历: [${ss.risk_budget_pct_percent_start}, ${ss.risk_budget_pct_percent_end}]，步长 ${ss.risk_budget_pct_percent_step}`,
+        );
+        lines.push(`Top K: ${(ss.top_k_values || []).join(", ") || "-"}`);
+        const ctx = meta.search_context || {};
+        lines.push(`组合分组: ${String(ctx.group_name || "-")}`);
+        lines.push(`标的池: ${(ctx.selected_codes || []).join(", ")}`);
+        $("metaInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function renderBest(bestFromFile, bestFromRows) {
+        const best = bestFromRows || bestFromFile || null;
+        if (!best) {
+          $("bestInfo").innerHTML = "<div>无可用结果</div>";
+          return;
+        }
+        const lines = [];
+        lines.push(`Top K: ${Number(best.top_k)}`);
+        lines.push(`调仓日: 周${Number(best.rebalance_anchor)}`);
+        lines.push(
+          `risk_budget_pct(输入百分比): ${fmtPctInput(best.risk_budget_pct_percent, 1)}`,
+        );
+        lines.push(
+          `risk_budget_pct(后端小数): ${fmtNum(best.risk_budget_pct, 4)}`,
+        );
+        lines.push(`夏普: ${fmtNum(metric(best, "sharpe_ratio"), 6)}`);
+        lines.push(`年化收益: ${fmtPct(metric(best, "annualized_return"), 2)}`);
+        lines.push(`累计收益: ${fmtPct(metric(best, "cumulative_return"), 2)}`);
+        lines.push(`最大回撤: ${fmtPct(metric(best, "max_drawdown"), 2)}`);
+        $("bestInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function renderAnchorSummary(groupPack, robustCfg) {
+        const { byGroup, topKValues, anchors } = groupPack;
+        const head =
+          "<tr>" +
+          ["Top K", "调仓日", "最佳风险预算(%)", "最佳Sharpe", "稳健区间(%)", "稳健候选数"]
+            .map((x) => `<th>${x}</th>`)
+            .join("") +
+          "</tr>";
+        const rows = [];
+        topKValues.forEach((tk) => {
+          anchors.forEach((anchor) => {
+            const key = `${tk}|${anchor}`;
+            const oneRows = byGroup.get(key) || [];
+            if (!oneRows.length) return;
+            const best = pickBestFromRows(oneRows);
+            const robustPack = pickRobustCandidates(
+              oneRows,
+              robustCfg.topK,
+              robustCfg.mddLimitPct,
+            );
+            const interval = robustPack.interval
+              ? `${fmtPctInput(robustPack.interval.minX, 1)} ~ ${fmtPctInput(robustPack.interval.maxX, 1)}`
+              : "-";
+            rows.push(`<tr>
+              <td>${tk}</td>
+              <td>周${anchor}</td>
+              <td>${best ? fmtPctInput(best.risk_budget_pct_percent, 1) : "-"}</td>
+              <td>${best ? fmtNum(metric(best, "sharpe_ratio"), 6) : "-"}</td>
+              <td>${interval}</td>
+              <td>${robustPack.robustRows.length}</td>
+            </tr>`);
+          });
+        });
+        $("anchorSummaryTable").innerHTML =
+          head + (rows.join("") || `<tr><td colspan="6">暂无数据</td></tr>`);
+      }
+
+      function renderOneAnchorChart(topK, anchor, rows, robustCfg) {
+        const boxId = `chart-topk-${topK}-anchor-${anchor}`;
+        const best = pickBestFromRows(rows);
+        const robustPack = pickRobustCandidates(
+          rows,
+          robustCfg.topK,
+          robustCfg.mddLimitPct,
+        );
+
+        const x = rows.map((r) => Number(r.risk_budget_pct_percent));
+        const sharpe = rows.map((r) => metric(r, "sharpe_ratio"));
+        const ann = rows.map((r) => metric(r, "annualized_return"));
+        const traces = [
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            x,
+            y: sharpe,
+            name: `K=${topK} 周${anchor} Sharpe`,
+            yaxis: "y",
+            hovertemplate: "风险预算=%{x:.1f}%<br>Sharpe=%{y:.6f}<extra></extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            x,
+            y: ann,
+            name: `K=${topK} 周${anchor} 年化收益`,
+            yaxis: "y2",
+            hovertemplate:
+              "风险预算=%{x:.1f}%<br>年化收益=%{y:.2%}<extra></extra>",
+          },
+        ];
+        if (best) {
+          traces.push({
+            type: "scatter",
+            mode: "markers",
+            x: [Number(best.risk_budget_pct_percent)],
+            y: [metric(best, "sharpe_ratio")],
+            name: "最佳参数",
+            marker: { size: 11, symbol: "star", color: "#ff7f0e" },
+            hovertemplate:
+              "最佳参数<br>风险预算=%{x:.1f}%<br>Sharpe=%{y:.6f}<extra></extra>",
+          });
+        }
+        if (robustPack.robustRows.length > 0) {
+          traces.push({
+            type: "scatter",
+            mode: "markers",
+            x: robustPack.robustRows.map((r) => Number(r.risk_budget_pct_percent)),
+            y: robustPack.robustRows.map((r) => metric(r, "sharpe_ratio")),
+            name: "稳健候选",
+            marker: {
+              size: 9,
+              symbol: "diamond",
+              color: "#2ca02c",
+              line: { width: 1, color: "#145c2a" },
+            },
+            hovertemplate:
+              "稳健候选<br>风险预算=%{x:.1f}%<br>Sharpe=%{y:.6f}<extra></extra>",
+          });
+        }
+        const layout = {
+          title: `Top K=${topK}，调仓日 周${anchor}：风险预算 vs Sharpe/年化收益`,
+          margin: { t: 48, r: 74, b: 56, l: 68 },
+          xaxis: { title: "风险预算（%）" },
+          yaxis: { title: "Sharpe" },
+          yaxis2: {
+            title: "年化收益",
+            overlaying: "y",
+            side: "right",
+            tickformat: ".1%",
+          },
+          shapes: [],
+          annotations: [],
+          showlegend: true,
+          legend: { orientation: "h" },
+        };
+        if (robustPack.interval) {
+          let x0 = Number(robustPack.interval.minX);
+          let x1 = Number(robustPack.interval.maxX);
+          if (Math.abs(x1 - x0) < 1e-9) {
+            x0 -= 0.04;
+            x1 += 0.04;
+          }
+          layout.shapes.push({
+            type: "rect",
+            xref: "x",
+            yref: "paper",
+            x0,
+            x1,
+            y0: 0,
+            y1: 1,
+            fillcolor: "rgba(44, 160, 44, 0.14)",
+            line: { width: 0 },
+            layer: "below",
+          });
+          layout.annotations.push({
+            x: (Number(robustPack.interval.minX) + Number(robustPack.interval.maxX)) / 2,
+            y: 1.03,
+            xref: "x",
+            yref: "paper",
+            text: `稳健区间 ${fmtPctInput(robustPack.interval.minX, 1)} ~ ${fmtPctInput(robustPack.interval.maxX, 1)}`,
+            showarrow: false,
+            font: { color: "#1f7a3f", size: 12 },
+          });
+        }
+        Plotly.newPlot(boxId, traces, layout, { responsive: true });
+        return robustPack;
+      }
+
+      function renderCharts(groupPack, robustCfg) {
+        const { byGroup, topKValues, anchors } = groupPack;
+        const wrap = $("chartsWrap");
+        wrap.innerHTML = "";
+        const robustByGroup = new Map();
+        topKValues.forEach((topK) => {
+          const titlePanel = document.createElement("div");
+          titlePanel.className = "panel";
+          titlePanel.innerHTML = `<h4 style="margin:0">Top K = ${topK}</h4>`;
+          wrap.appendChild(titlePanel);
+          anchors.forEach((anchor) => {
+            const key = `${topK}|${anchor}`;
+            const oneRows = byGroup.get(key) || [];
+            if (!oneRows.length) return;
+            const panel = document.createElement("div");
+            panel.className = "panel";
+            const box = document.createElement("div");
+            box.id = `chart-topk-${topK}-anchor-${anchor}`;
+            box.className = "chart-box";
+            panel.appendChild(box);
+            wrap.appendChild(panel);
+            const robustPack = renderOneAnchorChart(
+              topK,
+              anchor,
+              oneRows,
+              robustCfg,
+            );
+            robustByGroup.set(key, robustPack);
+          });
+        });
+        return robustByGroup;
+      }
+
+      function renderResultTable(rows, robustByGroup) {
+        const topN = Math.max(1, Math.floor(parsePositive($("topN").value, 80)));
+        const sorted = rows.slice().sort((a, b) => {
+          const av = metric(a, "sharpe_ratio");
+          const bv = metric(b, "sharpe_ratio");
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          return bv - av;
+        });
+        const head =
+          "<tr>" +
+          [
+            "Top K",
+            "调仓日",
+            "风险预算(%)",
+            "风险预算(小数)",
+            "Sharpe",
+            "年化收益",
+            "累计收益",
+            "最大回撤",
+            "状态",
+            "错误",
+          ]
+            .map((x) => `<th>${x}</th>`)
+            .join("") +
+          "</tr>";
+        const body = sorted
+          .slice(0, topN)
+          .map((r) => {
+            const topK = Number(r.top_k);
+            const anchor = Number(r.rebalance_anchor);
+            const key = `${topK}|${anchor}`;
+            const robustPack = robustByGroup.get(key);
+            const robustHit =
+              robustPack &&
+              robustPack.robustKeySet &&
+              robustPack.robustKeySet.has(
+                Number(r.risk_budget_pct_percent).toFixed(6),
+              );
+            return `<tr class="${robustHit ? "robust-row" : ""}">
+              <td>${topK}</td>
+              <td>周${anchor}</td>
+              <td>${fmtPctInput(r.risk_budget_pct_percent, 1)}</td>
+              <td>${fmtNum(r.risk_budget_pct, 4)}</td>
+              <td>${fmtNum(metric(r, "sharpe_ratio"), 6)}</td>
+              <td>${fmtPct(metric(r, "annualized_return"), 2)}</td>
+              <td>${fmtPct(metric(r, "cumulative_return"), 2)}</td>
+              <td>${fmtPct(metric(r, "max_drawdown"), 2)}</td>
+              <td>${String(r.status || "-")}</td>
+              <td>${String(r.error || "").slice(0, 120)}</td>
+            </tr>`;
+          })
+          .join("");
+        $("resultTable").innerHTML =
+          head + (body || `<tr><td colspan="10">暂无数据</td></tr>`);
+      }
+
+      function refreshView() {
+        const state = window.__rotRbAnchorData;
+        if (!state) return;
+        const rows = toSortedRows(state.results);
+        const groupPack = groupByTopKAnchor(rows);
+        const robustCfg = getRobustConfig();
+        renderMeta(state.meta, rows);
+        renderBest(state.best, pickBestFromRows(rows));
+        renderAnchorSummary(groupPack, robustCfg);
+        const robustByGroup = renderCharts(groupPack, robustCfg);
+        renderResultTable(rows, robustByGroup);
+      }
+
+      async function loadFromUrl(url) {
+        status("正在加载数据...");
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`加载失败: HTTP ${resp.status}`);
+        const data = await resp.json();
+        const norm = normalizeData(data);
+        if (!Array.isArray(norm.results) || norm.results.length === 0) {
+          throw new Error("结果为空");
+        }
+        window.__rotRbAnchorData = norm;
+        refreshView();
+        status(`加载完成: ${url}`);
+      }
+
+      function bindEvents() {
+        $("loadUrlBtn").addEventListener("click", async () => {
+          try {
+            const url = String($("dataUrl").value || "").trim();
+            if (!url) throw new Error("请输入 JSON URL");
+            await loadFromUrl(url);
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        $("fileInput").addEventListener("change", async (ev) => {
+          try {
+            const files = ev?.target?.files;
+            if (!files || files.length === 0) return;
+            const txt = await files[0].text();
+            const data = JSON.parse(txt);
+            const norm = normalizeData(data);
+            if (!Array.isArray(norm.results) || norm.results.length === 0) {
+              throw new Error("结果为空");
+            }
+            window.__rotRbAnchorData = norm;
+            refreshView();
+            status(`已加载本地文件: ${files[0].name}`);
+          } catch (e) {
+            status(`读取本地文件失败: ${String(e)}`);
+          }
+        });
+        $("refreshBtn").addEventListener("click", () => {
+          try {
+            refreshView();
+            status("已刷新");
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        $("topN").addEventListener("change", refreshView);
+        $("robustTopK").addEventListener("change", refreshView);
+        $("robustMddLimitPct").addEventListener("change", refreshView);
+      }
+
+      function init() {
+        bindEvents();
+        loadFromUrl(String($("dataUrl").value || "")).catch((e) => {
+          status(`自动加载失败: ${String(e)}`);
+        });
+      }
+
+      window.addEventListener("DOMContentLoaded", init);
+    </script>
+  </body>
+</html>
