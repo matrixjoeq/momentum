@@ -10,6 +10,8 @@ from etf_momentum.analysis.trend import (
     _next_vol_regime_state,
     _trade_stats_from_returns,
     _semi_variance_run_stats_from_returns,
+    _distribution_stats_from_int_counts,
+    _bias_v_hit_counts_per_holding,
     _apply_impulse_entry_filter,
     _apply_macd_hist_threshold_gate,
     _apply_atr_stop,
@@ -17,6 +19,7 @@ from etf_momentum.analysis.trend import (
     _apply_intraday_stop_execution_portfolio,
     _apply_intraday_scaleout_execution_single,
     _apply_intraday_scaleout_execution_portfolio,
+    _build_r_profit_scaleout_plan,
     _apply_r_multiple_take_profit,
     _apply_bias_v_take_profit,
     _position_risk_from_stop_params,
@@ -144,6 +147,30 @@ def test_vol_regime_state_machine_allows_direct_cross_tier_jumps() -> None:
     )
 
 
+def test_bias_v_ge_threshold_counts_distribution_by_independent_holding() -> None:
+    idx = pd.date_range("2024-01-01", periods=10, freq="B")
+    weights = pd.Series([0, 1, 1, 0, 1, 1, 1, 0, 1, 0], index=idx, dtype=float)
+    close = pd.Series(
+        [100, 100, 101, 100, 100, 101, 102, 100, 99, 100], index=idx, dtype=float
+    )
+    high = close.copy()
+    low = close.copy()
+    per_holding_counts = _bias_v_hit_counts_per_holding(
+        weights=weights,
+        close=close,
+        high=high,
+        low=low,
+        ma_window=2,
+        atr_window=2,
+        threshold=0.5,
+    )
+    dist = _distribution_stats_from_int_counts(per_holding_counts)
+    assert per_holding_counts == [1, 2, 0]
+    assert int(dist.get("count", 0) or 0) == 3
+    assert int(dist.get("max", 0) or 0) == 2
+    assert int(sum(int(x) for x in per_holding_counts)) == 3
+
+
 def test_scaleout_single_incremental_mode_respects_prior_remaining_fraction() -> None:
     idx = pd.date_range("2024-01-01", periods=3, freq="B")
     weights = pd.Series([0.0, 0.60, 0.45], index=idx, dtype=float)
@@ -242,6 +269,43 @@ def test_scaleout_portfolio_incremental_mode_handles_dynamic_weight_path() -> No
     assert float(w_adj.loc[idx[2], "B"]) == pytest.approx(0.20, abs=1e-12)
     assert float(override.loc[idx[1]]) == pytest.approx(0.03, abs=1e-12)
     assert float(override.loc[idx[2]]) == pytest.approx(0.03, abs=1e-12)
+
+
+def test_r_profit_scaleout_tiers_reduce_against_remaining_position() -> None:
+    idx = pd.date_range("2024-01-01", periods=7, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([105.0, 105.0, 110.0, 121.0, 131.0, 141.0, 110.0], index=idx)
+    low = pd.Series([95.0] * len(idx), index=idx, dtype=float)
+
+    mult, stats = _build_r_profit_scaleout_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        execution_mode="intraday",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[
+            {"r_multiple": 2.0, "reduce_fraction": 0.4},
+            {"r_multiple": 3.0, "reduce_fraction": 0.3},
+            {"r_multiple": 4.0, "reduce_fraction": 0.2},
+        ],
+        atr_stop_enabled=False,
+    )
+
+    assert float(mult.loc[idx[3]]) == pytest.approx(0.6, abs=1e-12)
+    assert float(mult.loc[idx[4]]) == pytest.approx(0.42, abs=1e-12)
+    assert float(mult.loc[idx[5]]) == pytest.approx(0.336, abs=1e-12)
+    events = list((stats or {}).get("trigger_events") or [])
+    assert [float(e.get("reduce_fraction")) for e in events[:3]] == pytest.approx(
+        [0.4, 0.18, 0.084],
+        abs=1e-12,
+    )
+    assert str((stats or {}).get("reduce_fraction_basis") or "") == "remaining_position"
 
 
 def test_semi_variance_run_stats_split_continuous_profit_loss_segments() -> None:
@@ -645,6 +709,41 @@ def test_bias_v_take_profit_intraday_high_trigger_and_gap_fill() -> None:
     assert str(ev_gap[0].get("trigger_source")) == "gap_open_above_bias_v_tp_tier"
     assert bool(ev_gap[0].get("gap_open_triggered")) is True
     assert float(ev_gap[0].get("fill_price")) == pytest.approx(106.0)
+
+
+def test_bias_v_take_profit_tiers_reduce_against_remaining_position() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    low = pd.Series([99.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([100.0, 100.0, 103.0, 110.0, 100.0, 100.0], index=idx)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+
+    out, stats = _apply_bias_v_take_profit(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        ma_window=2,
+        atr_window=2,
+        tiers=[
+            {"threshold": 0.5, "reduce_fraction": 0.4},
+            {"threshold": 0.8, "reduce_fraction": 0.3},
+            {"threshold": 1.0, "reduce_fraction": 0.2},
+        ],
+    )
+
+    assert float(out.iloc[3]) == pytest.approx(0.336, abs=1e-12)
+    events = list((stats or {}).get("trigger_events") or [])
+    assert int((stats or {}).get("trigger_count") or 0) == 3
+    assert [float(e.get("reduce_fraction")) for e in events[:3]] == pytest.approx(
+        [0.4, 0.18, 0.084],
+        abs=1e-12,
+    )
+    assert str((stats or {}).get("reduce_fraction_basis") or "") == "remaining_position"
 
 
 def test_atr_stop_next_day_execution_triggers_on_close_and_schedules_next_day() -> None:
@@ -1473,6 +1572,63 @@ def test_trend_single_er_entry_filter_blocks_choppy_entries(session_factory):
     )
     assert int(overall.get("er_filter_allowed_entry_count") or 0) >= 0
     assert int(by_code.get("er_filter_blocked_entry_count") or 0) > 0
+
+
+def test_trend_single_ma_entry_filter_blocks_when_fast_slow_not_ready(session_factory):
+    sf = session_factory
+    code = "MAE1"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            px = 100.0 + ((-1.0) ** i) * 0.8 + i * 0.01
+            _add_price(db, code=code, day=d, close=px)
+        db.commit()
+        out_no_filter = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_entry_filter_enabled=False,
+                cost_bps=0.0,
+            ),
+        )
+        out_with_filter = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                ma_entry_filter_enabled=True,
+                ma_entry_filter_type="sma",
+                ma_entry_filter_fast=100,
+                ma_entry_filter_slow=200,
+                cost_bps=0.0,
+            ),
+        )
+
+    pos_no_filter = [float(x) for x in out_no_filter["signals"]["position"]]
+    pos_with_filter = [float(x) for x in out_with_filter["signals"]["position"]]
+    assert any(x > 0.0 for x in pos_no_filter)
+    assert all(x == 0.0 for x in pos_with_filter)
+    params = (out_with_filter.get("meta") or {}).get("params") or {}
+    assert params.get("ma_entry_filter_enabled") is True
+    assert str(params.get("ma_entry_filter_type") or "") == "sma"
+    assert int(params.get("ma_entry_filter_fast") or 0) == 100
+    assert int(params.get("ma_entry_filter_slow") or 0) == 200
+    ts = out_with_filter.get("trade_statistics") or {}
+    overall = ts.get("overall") or {}
+    by_code = (ts.get("by_code") or {}).get(code, {})
+    assert int(overall.get("ma_entry_filter_blocked_entry_count") or 0) > 0
+    assert int(overall.get("ma_entry_filter_attempted_entry_count") or 0) >= int(
+        overall.get("ma_entry_filter_blocked_entry_count") or 0
+    )
+    assert int(overall.get("ma_entry_filter_allowed_entry_count") or 0) >= 0
+    assert int(by_code.get("ma_entry_filter_blocked_entry_count") or 0) > 0
 
 
 def test_impulse_entry_filter_blocks_by_state_counts_are_split() -> None:
@@ -2430,7 +2586,13 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
     assert "atr_stop_trigger_count" in overall
     assert "r_take_profit_trigger_count" in overall
     assert "bias_v_take_profit_trigger_count" in overall
+    assert "holding_bias_v_ge_5_count" in overall
+    assert "holding_bias_v_ge_5_max_per_holding" in overall
+    assert "holding_bias_v_ge_5_per_holding_distribution" in overall
     assert isinstance((overall.get("r_take_profit_tier_trigger_counts") or {}), dict)
     assert "atr_stop_trigger_count" in by_code
     assert "r_take_profit_trigger_count" in by_code
     assert "bias_v_take_profit_trigger_count" in by_code
+    assert "holding_bias_v_ge_5_count" in by_code
+    assert "holding_bias_v_ge_5_max_per_holding" in by_code
+    assert "holding_bias_v_ge_5_per_holding_distribution" in by_code

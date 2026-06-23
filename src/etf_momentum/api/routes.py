@@ -122,6 +122,7 @@ from .schemas import (
     FuturesCoverageSummaryRequest,
     FuturesCorrelationSelectRequest,
     FuturesTrendBacktestRequest,
+    FuturesRotationBacktestRequest,
     IngestionBatchOut,
     SyncFixedPoolRequest,
     SyncFixedPoolResponse,
@@ -180,6 +181,7 @@ from ..analysis.futures_research import (
     select_symbols_by_correlation,
 )
 from ..analysis.futures_trend import compute_futures_group_trend_backtest
+from ..analysis.futures_rotation import compute_futures_group_rotation_backtest
 from ..analysis.off_fund_regression import (
     DEFAULT_CN_STOCK_FACTORS,
     RegressionFactorSpec,
@@ -2053,6 +2055,14 @@ def trend_backtest(
         impulse_allow_bull=bool(getattr(payload, "impulse_allow_bull", True)),
         impulse_allow_bear=bool(getattr(payload, "impulse_allow_bear", False)),
         impulse_allow_neutral=bool(getattr(payload, "impulse_allow_neutral", False)),
+        ma_entry_filter_enabled=bool(
+            getattr(payload, "ma_entry_filter_enabled", False)
+        ),
+        ma_entry_filter_type=str(
+            getattr(payload, "ma_entry_filter_type", "sma") or "sma"
+        ),
+        ma_entry_filter_fast=int(getattr(payload, "ma_entry_filter_fast", 100)),
+        ma_entry_filter_slow=int(getattr(payload, "ma_entry_filter_slow", 200)),
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
@@ -2223,6 +2233,14 @@ def trend_portfolio_backtest(
         impulse_allow_bull=bool(getattr(payload, "impulse_allow_bull", True)),
         impulse_allow_bear=bool(getattr(payload, "impulse_allow_bear", False)),
         impulse_allow_neutral=bool(getattr(payload, "impulse_allow_neutral", False)),
+        ma_entry_filter_enabled=bool(
+            getattr(payload, "ma_entry_filter_enabled", False)
+        ),
+        ma_entry_filter_type=str(
+            getattr(payload, "ma_entry_filter_type", "sma") or "sma"
+        ),
+        ma_entry_filter_fast=int(getattr(payload, "ma_entry_filter_fast", 100)),
+        ma_entry_filter_slow=int(getattr(payload, "ma_entry_filter_slow", 200)),
         er_exit_filter=bool(getattr(payload, "er_exit_filter", False)),
         er_exit_window=int(getattr(payload, "er_exit_window", 10)),
         er_exit_threshold=float(getattr(payload, "er_exit_threshold", 0.88)),
@@ -8574,6 +8592,74 @@ def futures_research_trend_backtest_api(
             getattr(payload, "backtest_margin_rate_pct", 15.0)
         ),
         reserve_margin_ratio=float(getattr(payload, "reserve_margin_ratio", 0.5)),
+    )
+    out["meta"] = {
+        **(out.get("meta") or {}),
+        "range_key": rr.key,
+    }
+    return out
+
+
+@router.post("/futures/research/rotation-backtest")
+def futures_research_rotation_backtest_api(
+    payload: FuturesRotationBacktestRequest,
+    db: Session = Depends(get_session),
+) -> dict:
+    st = get_futures_research_state(db)
+    group_name = str(payload.group_name or "").strip()
+    g = get_futures_group(db, name=group_name) if group_name else None
+    if g is None:
+        ag = get_active_futures_group(db)
+        if ag is None:
+            raise HTTPException(status_code=400, detail="no active futures group")
+        group = ag
+    else:
+        all_groups = {x.name: x for x in list_futures_groups(db)}
+        group = all_groups.get(str(g.name))
+        if group is None:
+            raise HTTPException(status_code=404, detail="futures group not found")
+
+    base_start, base_end = _default_futures_research_dates()
+    start_eff = str(payload.start_date or st.start_date or base_start)
+    end_eff = str(payload.end_date or st.end_date or base_end)
+    start_eff, end_eff = _clip_futures_research_window_to_data(
+        db, codes=list(group.codes), start_eff=start_eff, end_eff=end_eff
+    )
+    range_key = str(payload.range_key or "all").strip().lower()
+    if range_key not in RANGE_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail="range_key must be one of: 1m|3m|6m|1y|3y|5y|10y|all",
+        )
+    rr = resolve_quick_range(key=range_key, base_start=start_eff, base_end=end_eff)
+    dyn = (
+        bool(st.dynamic_universe)
+        if payload.dynamic_universe is None
+        else bool(payload.dynamic_universe)
+    )
+    out = compute_futures_group_rotation_backtest(
+        db,
+        group=group,
+        start=rr.start,
+        end=rr.end,
+        dynamic_universe=dyn,
+        rebalance=str(payload.rebalance),
+        lookback_days=int(payload.lookback_days),
+        top_k=int(payload.top_k),
+        trade_direction=str(payload.trade_direction),
+        position_mode=str(payload.position_mode),
+        inverse_vol_window=int(payload.inverse_vol_window),
+        exec_price=str(payload.exec_price),
+        position_size_pct=float(payload.position_size_pct),
+        min_points=int(payload.min_points),
+        cost_bps=float(payload.cost_bps),
+        fee_side=str(payload.fee_side),
+        slippage_type=str(payload.slippage_type),
+        slippage_value=float(payload.slippage_value),
+        slippage_side=str(payload.slippage_side),
+        account_capital_wan=float(payload.account_capital_wan),
+        backtest_margin_rate_pct=float(payload.backtest_margin_rate_pct),
+        reserve_margin_ratio=float(payload.reserve_margin_ratio),
     )
     out["meta"] = {
         **(out.get("meta") or {}),
