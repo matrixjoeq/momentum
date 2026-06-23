@@ -90,6 +90,15 @@ from .schemas import (
     FetchSelectedRequest,
     OffFundFetchResult,
     OffFundFetchSelectedRequest,
+    OffFundRegressionClassifyItem,
+    OffFundRegressionClassifyRequest,
+    OffFundRegressionClassifyResponse,
+    OffFundRegressionFactorConfigOut,
+    OffFundRegressionFactorConfigUpsert,
+    OffFundRegressionFactorAvailabilityItem,
+    OffFundRegressionFactorAvailabilityRequest,
+    OffFundRegressionFactorAvailabilityResponse,
+    OffFundRegressionFactorRequest,
     OffFundNavOut,
     OffFundPoolOut,
     OffFundPoolUpsert,
@@ -171,6 +180,13 @@ from ..analysis.futures_research import (
     select_symbols_by_correlation,
 )
 from ..analysis.futures_trend import compute_futures_group_trend_backtest
+from ..analysis.off_fund_regression import (
+    DEFAULT_CN_STOCK_FACTORS,
+    RegressionFactorSpec,
+    choose_factor_series,
+    classify_fund_by_regression,
+    inspect_factor_availability,
+)
 from ..analysis.montecarlo import MonteCarloConfig, bootstrap_metrics_from_daily_returns
 from ..analysis.rotation import RotationAnalysisInputs, compute_rotation_backtest
 from ..analysis.oos_bootstrap import OosBootstrapConfig, run_trend_oos_bootstrap
@@ -261,6 +277,12 @@ from ..db.off_fund_repo import (
     list_off_fund_pool,
     purge_off_fund_data,
     upsert_off_fund_pool,
+)
+from ..db.off_fund_regression_repo import (
+    delete_off_fund_factor_config,
+    list_off_fund_factor_configs,
+    set_active_off_fund_factor_config,
+    upsert_off_fund_factor_config,
 )
 from ..data.futures_synthesize import _symbol_root_from_main
 from ..db.futures_repo import (
@@ -6979,6 +7001,342 @@ def import_etf_research_groups_api(
         "active_group": (active_group_obj.name if active_group_obj else None),
         "skipped_codes": skipped_codes,
     }
+
+
+def _off_fund_factor_cfg_out(x) -> OffFundRegressionFactorConfigOut:
+    return OffFundRegressionFactorConfigOut(
+        name=str(x.name),
+        is_active=bool(x.is_active),
+        benchmark_profile=str(x.benchmark_profile or "cn_stock_core"),
+        benchmark_factors=list(x.benchmark_factors or []),
+    )
+
+
+@router.get(
+    "/off-fund/regression/factor-configs",
+    response_model=list[OffFundRegressionFactorConfigOut],
+)
+def list_off_fund_regression_factor_configs_api(
+    db: Session = Depends(get_session),
+) -> list[OffFundRegressionFactorConfigOut]:
+    rows = list_off_fund_factor_configs(db)
+    db.commit()
+    return [_off_fund_factor_cfg_out(x) for x in rows]
+
+
+@router.post(
+    "/off-fund/regression/factor-configs",
+    response_model=OffFundRegressionFactorConfigOut,
+)
+def upsert_off_fund_regression_factor_config_api(
+    payload: OffFundRegressionFactorConfigUpsert,
+    db: Session = Depends(get_session),
+) -> OffFundRegressionFactorConfigOut:
+    name = str(payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    factors = list(payload.benchmark_factors or [])
+    if factors and len(factors) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="benchmark_factors must provide at least 2 factors when custom",
+        )
+    obj = upsert_off_fund_factor_config(
+        db,
+        name=name,
+        benchmark_profile=str(payload.benchmark_profile or "cn_stock_core"),
+        benchmark_factors=[x.model_dump() for x in factors] if factors else None,
+        set_active=bool(payload.set_active),
+    )
+    db.commit()
+    return _off_fund_factor_cfg_out(obj)
+
+
+@router.delete("/off-fund/regression/factor-configs/{name}")
+def delete_off_fund_regression_factor_config_api(
+    name: str, db: Session = Depends(get_session)
+) -> dict:
+    ok = delete_off_fund_factor_config(db, name=str(name))
+    if not ok:
+        raise HTTPException(status_code=404, detail="factor config not found")
+    db.commit()
+    return {"deleted": True}
+
+
+@router.post("/off-fund/regression/factor-configs/{name}/activate")
+def activate_off_fund_regression_factor_config_api(
+    name: str, db: Session = Depends(get_session)
+) -> dict:
+    ok = set_active_off_fund_factor_config(db, name=str(name))
+    if not ok:
+        raise HTTPException(status_code=404, detail="factor config not found")
+    db.commit()
+    return {"ok": True, "active_config": str(name)}
+
+
+def _build_off_fund_regression_factors(
+    *,
+    benchmark_profile: str | None,
+    benchmark_factors: list[OffFundRegressionFactorRequest] | None,
+) -> tuple[list[RegressionFactorSpec], str | None]:
+    if benchmark_factors:
+        out: list[RegressionFactorSpec] = []
+        for x in benchmark_factors:
+            key = str(x.key or "").strip().upper()
+            aliases = tuple(
+                str(c or "").strip()
+                for c in (x.aliases or [])
+                if str(c or "").strip()
+            )
+            if not key or not aliases:
+                continue
+            out.append(
+                RegressionFactorSpec(
+                    key=key,
+                    label=str(x.label or key),
+                    aliases=aliases,
+                )
+            )
+        if len(out) < 2:
+            return [], "custom benchmark_factors must provide at least 2 valid factors"
+        return out, None
+    profile = str(benchmark_profile or "cn_stock_core").strip().lower()
+    if profile != "cn_stock_core":
+        return [], f"unsupported benchmark_profile: {profile}"
+    return list(DEFAULT_CN_STOCK_FACTORS), None
+
+
+@router.post(
+    "/analysis/off-fund/factor-availability",
+    response_model=OffFundRegressionFactorAvailabilityResponse,
+)
+def analysis_off_fund_factor_availability(
+    payload: OffFundRegressionFactorAvailabilityRequest,
+    db: Session = Depends(get_session),
+) -> OffFundRegressionFactorAvailabilityResponse:
+    try:
+        start_d = _parse_yyyymmdd(str(payload.start))
+        end_d = _parse_yyyymmdd(str(payload.end))
+    except Exception:
+        return OffFundRegressionFactorAvailabilityResponse(
+            ok=False, error="invalid_date_format"
+        )
+    if end_d < start_d:
+        return OffFundRegressionFactorAvailabilityResponse(
+            ok=False, error="end_before_start"
+        )
+    try:
+        _ = normalize_adjust(str(payload.benchmark_adjust or "hfq"))
+    except ValueError as e:
+        return OffFundRegressionFactorAvailabilityResponse(ok=False, error=str(e))
+    factor_specs, err = _build_off_fund_regression_factors(
+        benchmark_profile=str(payload.benchmark_profile or "cn_stock_core"),
+        benchmark_factors=payload.benchmark_factors,
+    )
+    if err:
+        return OffFundRegressionFactorAvailabilityResponse(ok=False, error=err)
+    aliases = sorted({a for x in factor_specs for a in x.aliases if a})
+    close_raw = (
+        load_close_prices(
+            db,
+            codes=aliases,
+            start=start_d,
+            end=end_d,
+            adjust=str(payload.benchmark_adjust or "hfq"),
+        )
+        if aliases
+        else pd.DataFrame(dtype=float)
+    )
+    if close_raw is None or close_raw.empty:
+        items = [
+            OffFundRegressionFactorAvailabilityItem(
+                key=x.key,
+                label=x.label,
+                aliases=list(x.aliases),
+                selected_code=None,
+                sample_days=0,
+                required_days=max(
+                    int(payload.min_samples), int(max(20, int(payload.rolling_window)) // 2)
+                ),
+                enough=False,
+                status="missing",
+                alias_samples={str(a): 0 for a in x.aliases},
+            )
+            for x in factor_specs
+        ]
+        return OffFundRegressionFactorAvailabilityResponse(
+            ok=True,
+            meta={
+                "start": start_d.isoformat(),
+                "end": end_d.isoformat(),
+                "benchmark_adjust": str(payload.benchmark_adjust or "hfq"),
+                "rolling_window": int(payload.rolling_window),
+                "min_samples": int(payload.min_samples),
+                "factor_count": len(items),
+                "enough_factor_count": 0,
+                "required_days": max(
+                    int(payload.min_samples), int(max(20, int(payload.rolling_window)) // 2)
+                ),
+            },
+            items=items,
+        )
+    items_raw, summary = inspect_factor_availability(
+        close_df=close_raw,
+        factor_specs=factor_specs,
+        min_samples=int(payload.min_samples),
+        rolling_window=int(payload.rolling_window),
+    )
+    items = [OffFundRegressionFactorAvailabilityItem(**x) for x in items_raw]
+    return OffFundRegressionFactorAvailabilityResponse(
+        ok=True,
+        meta={
+            "start": start_d.isoformat(),
+            "end": end_d.isoformat(),
+            "benchmark_adjust": str(payload.benchmark_adjust or "hfq"),
+            "rolling_window": int(payload.rolling_window),
+            "min_samples": int(payload.min_samples),
+            **summary,
+        },
+        items=items,
+    )
+
+
+@router.post(
+    "/analysis/off-fund/classify", response_model=OffFundRegressionClassifyResponse
+)
+def analysis_off_fund_classify(
+    payload: OffFundRegressionClassifyRequest,
+    db: Session = Depends(get_session),
+) -> OffFundRegressionClassifyResponse:
+    try:
+        start_d = _parse_yyyymmdd(str(payload.start))
+        end_d = _parse_yyyymmdd(str(payload.end))
+    except Exception:
+        return OffFundRegressionClassifyResponse(ok=False, error="invalid_date_format")
+    if end_d < start_d:
+        return OffFundRegressionClassifyResponse(ok=False, error="end_before_start")
+    try:
+        _ = normalize_adjust(str(payload.fund_adjust or "hfq"))
+        _ = normalize_adjust(str(payload.benchmark_adjust or "hfq"))
+    except ValueError as e:
+        return OffFundRegressionClassifyResponse(ok=False, error=str(e))
+
+    factor_specs, err = _build_off_fund_regression_factors(
+        benchmark_profile=str(payload.benchmark_profile or "cn_stock_core"),
+        benchmark_factors=payload.benchmark_factors,
+    )
+    if err:
+        return OffFundRegressionClassifyResponse(ok=False, error=err)
+    all_aliases = sorted({a for x in factor_specs for a in x.aliases if a})
+    factor_close_raw = load_close_prices(
+        db,
+        codes=all_aliases,
+        start=start_d,
+        end=end_d,
+        adjust=str(payload.benchmark_adjust or "hfq"),
+    )
+    if factor_close_raw is None or factor_close_raw.empty:
+        return OffFundRegressionClassifyResponse(
+            ok=False, error="empty_benchmark_series"
+        )
+    factor_close, factor_meta, factor_warnings = choose_factor_series(
+        close_df=factor_close_raw,
+        factor_specs=factor_specs,
+        min_samples=int(payload.min_samples),
+    )
+    if factor_close.shape[1] < 2:
+        return OffFundRegressionClassifyResponse(
+            ok=False,
+            error="insufficient_benchmark_factors",
+            factors=factor_meta,
+            meta={"warnings": factor_warnings},
+        )
+
+    pool = list_off_fund_pool(db)
+    name_by_code = {str(x.code): str(x.name) for x in pool}
+    req_codes: list[str] = []
+    seen: set[str] = set()
+    for c in payload.codes:
+        cc = str(c or "").strip()
+        if not cc or cc in seen:
+            continue
+        seen.add(cc)
+        req_codes.append(cc)
+    items: list[OffFundRegressionClassifyItem] = []
+    ok_count = 0
+    for code in req_codes:
+        rows = list_off_fund_navs(
+            db,
+            code=code,
+            start_date=start_d,
+            end_date=end_d,
+            adjust=str(payload.fund_adjust or "hfq"),
+            limit=800000,
+        )
+        nav = pd.Series(
+            [float(r.nav) if r.nav is not None else np.nan for r in rows],
+            index=[r.trade_date for r in rows],
+            dtype=float,
+        ).dropna()
+        out = classify_fund_by_regression(
+            fund_nav=nav,
+            factor_close_df=factor_close,
+            rolling_window=int(payload.rolling_window),
+            min_samples=int(payload.min_samples),
+            dominance_gap=float(payload.dominance_gap),
+            include_series=bool(payload.include_exposure_series),
+            max_series_points=int(payload.max_series_points),
+        )
+        warnings = list(out.get("warnings") or [])
+        if factor_warnings:
+            warnings.extend(factor_warnings)
+        item = OffFundRegressionClassifyItem(
+            code=code,
+            name=name_by_code.get(code),
+            status=str(out.get("status") or "failed"),
+            sample_days=int(out.get("sample_days") or 0),
+            effective_windows=(
+                int(out.get("effective_windows"))
+                if out.get("effective_windows") is not None
+                else None
+            ),
+            avg_r2=(float(out["avg_r2"]) if out.get("avg_r2") is not None else None),
+            latest_r2=(
+                float(out["latest_r2"]) if out.get("latest_r2") is not None else None
+            ),
+            label=str(out.get("label") or "未分类"),
+            confidence=str(out.get("confidence") or "LOW"),
+            primary_asset_class=str(out.get("primary_asset_class") or "unclassified"),
+            avg_exposures={
+                str(k): float(v) for k, v in dict(out.get("avg_exposures") or {}).items()
+            },
+            latest_exposures={
+                str(k): float(v)
+                for k, v in dict(out.get("latest_exposures") or {}).items()
+            },
+            warnings=warnings,
+            exposure_series=list(out.get("series") or []),
+        )
+        if item.status == "ok":
+            ok_count += 1
+        items.append(item)
+    meta = {
+        "start": start_d.isoformat(),
+        "end": end_d.isoformat(),
+        "fund_adjust": str(payload.fund_adjust or "hfq"),
+        "benchmark_adjust": str(payload.benchmark_adjust or "hfq"),
+        "rolling_window": int(payload.rolling_window),
+        "min_samples": int(payload.min_samples),
+        "requested_codes": req_codes,
+        "analyzed_codes": int(ok_count),
+        "factor_count": int(factor_close.shape[1]),
+    }
+    return OffFundRegressionClassifyResponse(
+        ok=True,
+        meta=meta,
+        factors=factor_meta,
+        items=items,
+    )
 
 
 @router.get("/off-fund", response_model=list[OffFundPoolOut])

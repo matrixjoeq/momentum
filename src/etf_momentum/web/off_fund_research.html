@@ -4,8 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>场外基金研究（持有策略）</title>
-    <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-    <script src="/static/market_regime.js"></script>
+    <script src="/static/market_regime.js" defer></script>
     <script>
       (function () {
         const key = `theme:${location.pathname}`;
@@ -60,7 +59,7 @@
   <body>
     <h2>场外基金研究（持有策略）</h2>
     <div class="muted">
-      支持候选池分组、组间仓位分配、组内协方差风险平价（等风险贡献）。
+      支持候选池分组、组间仓位分配、组内协方差风险平价（等风险贡献）和组内自定义权重。
     </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/off-fund-pool">场外基金候选池配置</a>
@@ -94,16 +93,46 @@
               风险平价(协方差ERC)
             </option>
             <option value="equal">等权</option>
+            <option value="custom">自定义（按组内百分比）</option>
           </select>
         </div>
         <div>
           <label>风险平价窗口(日)</label><input id="rpWindow" value="60" />
+        </div>
+        <div>
+          <label>再平衡周期</label>
+          <select id="rebalanceCycle">
+            <option value="daily" selected>每日</option>
+            <option value="weekly">每周</option>
+            <option value="monthly">每月</option>
+            <option value="quarterly">每季</option>
+            <option value="yearly">每年</option>
+            <option value="none">不再平衡</option>
+          </select>
+        </div>
+        <div>
+          <label>偏离再平衡</label>
+          <select id="driftRebalanceEnabled">
+            <option value="1" selected>开启</option>
+            <option value="0">关闭</option>
+          </select>
+        </div>
+        <div>
+          <label>偏离阈值-绝对(0~1)</label>
+          <input id="driftAbsThreshold" value="0.05" />
+        </div>
+        <div>
+          <label>偏离阈值-相对目标(0~1)</label>
+          <input id="driftRelThreshold" value="0.25" />
         </div>
         <button id="run">运行持有策略回测</button>
       </div>
       <div class="muted" style="margin-top: 6px">
         风险平价说明：按协方差矩阵迭代求解 ERC（Equal Risk
         Contribution），目标是组内各基金风险贡献相等。
+      </div>
+      <div class="muted" style="margin-top: 4px">
+        偏离再平衡说明：单资产触发阈值=min(绝对阈值, 目标权重×相对阈值)；偏离触发后重置周期再平衡计时。
       </div>
     </div>
 
@@ -154,6 +183,15 @@
           ></textarea>
         </div>
       </div>
+      <div>
+        <div class="muted" style="margin: 8px 0 4px 0">
+          组内自定义权重（code=weight，按组内归一化；仅在“组内权重法=自定义”时生效）
+        </div>
+        <textarea
+          id="innerCustomWeights"
+          placeholder="510300=0.6&#10;000905=0.4&#10;007358=0.5&#10;004614=0.5"
+        ></textarea>
+      </div>
     </div>
 
     <div id="msg" class="msg"></div>
@@ -161,6 +199,60 @@
     <div class="panel">
       <div id="navChart" style="width: 100%; height: 360px"></div>
       <table id="metricsTable"></table>
+    </div>
+    <div class="panel">
+      <h3 style="margin: 0 0 8px 0">基金分类回归（A股基准）</h3>
+      <div class="row">
+        <div>
+          <label>后端配置</label>
+          <select id="offClsCfgSelect" style="min-width: 220px"></select>
+        </div>
+        <div>
+          <label>配置名</label>
+          <input id="offClsCfgName" placeholder="例如：A股市值四因子" />
+        </div>
+        <button id="offClsCfgLoad">载入配置</button>
+        <button id="offClsCfgSave">保存并设为当前</button>
+        <button id="offClsCfgDelete">删除配置</button>
+      </div>
+      <div class="row">
+        <div>
+          <label>因子配置</label>
+          <select id="offClsFactorMode">
+            <option value="profile" selected>内置模板（cn_stock_core）</option>
+            <option value="custom">自定义因子列表</option>
+          </select>
+        </div>
+        <div>
+          <label>滚动窗口(日)</label><input id="offClsWindow" value="252" />
+        </div>
+        <div>
+          <label>最小样本(日)</label><input id="offClsMinSamples" value="120" />
+        </div>
+        <div>
+          <label>均衡判定阈值(top1-top2)</label>
+          <input id="offClsGap" value="0.08" />
+        </div>
+        <button id="offClsCheckFactors">检查因子历史覆盖</button>
+        <button id="runCls">运行基金分类回归</button>
+      </div>
+      <div style="margin-top: 8px">
+        <div class="muted">自定义因子（每行：KEY|标签=代码1,代码2...）</div>
+        <textarea
+          id="offClsFactors"
+          placeholder="CSI300|沪深300=000300,510300&#10;CSI500|中证500=000905,510500&#10;CSI1000|中证1000=000852,159845&#10;CSI2000|中证2000=932000,159533"
+        ></textarea>
+        <div class="row" style="margin-top: 6px">
+          <button id="offClsUseDefault">填充默认模板</button>
+        </div>
+      </div>
+      <div class="muted" style="margin-top: 6px">
+        口径：基金与基准均使用日度后复权（hfq）收益。当前内置 A 股市值基准：沪深300/中证500/中证1000/中证2000。
+      </div>
+      <table id="offClsFactorTable"></table>
+      <div class="muted" style="margin-top: 6px">本次回归实际生效因子</div>
+      <table id="offClsActiveFactors"></table>
+      <table id="offClsTable"></table>
     </div>
     <div class="panel">
       <h3 style="margin: 0 0 6px 0">市场状态划分（统一前端模块）</h3>
@@ -580,6 +672,21 @@
         const dd = String(d.getDate()).padStart(2, "0");
         return `${d.getFullYear()}${m}${dd}`;
       };
+      let plotlyLoadPromise = null;
+      function ensurePlotlyLoaded() {
+        if (window.Plotly) return Promise.resolve(window.Plotly);
+        if (plotlyLoadPromise) return plotlyLoadPromise;
+        plotlyLoadPromise = new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://cdn.plot.ly/plotly-2.30.0.min.js";
+          s.async = true;
+          s.onload = () => resolve(window.Plotly);
+          s.onerror = () =>
+            reject(new Error("Plotly 加载失败，请检查网络或稍后重试。"));
+          document.head.appendChild(s);
+        });
+        return plotlyLoadPromise;
+      }
 
       let pool = [];
       const selected = new Set();
@@ -590,8 +697,12 @@
       let activePersistentGroup = DEFAULT_PERSISTENT_GROUP;
       let subgroupMapByPersistent = {}; // groupName -> {code:subgroup}
       let subgroupWeightsByPersistent = {}; // groupName -> "S01=0.6\nS02=0.4"
+      let subgroupInnerWeightsByPersistent = {}; // groupName -> "code=weight"
       let activeSubgroupByPersistent = {}; // groupName -> active subgroup id in UI
       let lastCtx = null;
+      let offClsConfigs = [];
+      let persistTimer = null;
+      let lastPersistPayload = "";
       const pageSize = 12;
       const offPeriodState = {
         weekly: { page: 1, rows: [] },
@@ -633,19 +744,27 @@
         const s = String(x || "").trim();
         return s ? s.slice(0, 40) : "";
       }
-      function persistState() {
+      function persistStateNow() {
+        const payload = JSON.stringify({
+          groups: persistentGroups,
+          active: activePersistentGroup,
+          subgroup_maps: subgroupMapByPersistent,
+          subgroup_weights: subgroupWeightsByPersistent,
+          subgroup_inner_weights: subgroupInnerWeightsByPersistent,
+          active_subgroups: activeSubgroupByPersistent,
+        });
+        if (payload === lastPersistPayload) return;
         try {
-          localStorage.setItem(
-            SETTINGS_KEY,
-            JSON.stringify({
-              groups: persistentGroups,
-              active: activePersistentGroup,
-              subgroup_maps: subgroupMapByPersistent,
-              subgroup_weights: subgroupWeightsByPersistent,
-              active_subgroups: activeSubgroupByPersistent,
-            }),
-          );
+          localStorage.setItem(SETTINGS_KEY, payload);
+          lastPersistPayload = payload;
         } catch (_) {}
+      }
+      function schedulePersistState(delayMs = 180) {
+        if (persistTimer) clearTimeout(persistTimer);
+        persistTimer = setTimeout(() => {
+          persistTimer = null;
+          persistStateNow();
+        }, Math.max(0, Number(delayMs) || 0));
       }
       function hydrateStateFromStorage() {
         try {
@@ -675,12 +794,19 @@
             typeof obj.subgroup_weights === "object"
               ? obj.subgroup_weights
               : {};
+          subgroupInnerWeightsByPersistent =
+            obj &&
+            obj.subgroup_inner_weights &&
+            typeof obj.subgroup_inner_weights === "object"
+              ? obj.subgroup_inner_weights
+              : {};
           activeSubgroupByPersistent =
             obj &&
             obj.active_subgroups &&
             typeof obj.active_subgroups === "object"
               ? obj.active_subgroups
               : {};
+          lastPersistPayload = raw;
         } catch (_) {}
       }
       function ensurePersistentGroupExists(name) {
@@ -726,6 +852,11 @@
             subgroupWeightsByPersistent[activePersistentGroup]) ||
             "",
         );
+        $("innerCustomWeights").value = String(
+          (subgroupInnerWeightsByPersistent &&
+            subgroupInnerWeightsByPersistent[activePersistentGroup]) ||
+            "",
+        );
         const activeSub = String(
           (activeSubgroupByPersistent &&
             activeSubgroupByPersistent[activePersistentGroup]) ||
@@ -736,7 +867,7 @@
         renderPersistentGroupSelect();
         renderPool();
       }
-      function saveCurrentSubgroupState() {
+      function saveCurrentSubgroupState({ persist = "debounced" } = {}) {
         if (!activePersistentGroup) return;
         const mp = {};
         for (const c of persistentGroups[activePersistentGroup] || []) {
@@ -746,11 +877,15 @@
         subgroupWeightsByPersistent[activePersistentGroup] = String(
           $("groupWeights").value || "",
         ).trim();
+        subgroupInnerWeightsByPersistent[activePersistentGroup] = String(
+          $("innerCustomWeights").value || "",
+        ).trim();
         activeSubgroupByPersistent[activePersistentGroup] =
           String(
             ($("activeGroup") && $("activeGroup").value) || "S01",
           ).trim() || "S01";
-        persistState();
+        if (persist === "immediate") persistStateNow();
+        else schedulePersistState();
       }
 
       function normalizeWeights(mp, keys) {
@@ -1002,6 +1137,140 @@
           out.push({ period_end: dates[e], return: ret });
         }
         return out;
+      }
+      function parseDateYmd(dateStr) {
+        const s = String(dateStr || "");
+        const d = new Date(`${s}T00:00:00`);
+        return Number.isFinite(d.getTime()) ? d : null;
+      }
+      function ymdDateString(d) {
+        return d.toISOString().slice(0, 10);
+      }
+      function addMonthsClamped(d, months) {
+        const y = d.getFullYear();
+        const m = d.getMonth();
+        const day = d.getDate();
+        const total = m + Number(months || 0);
+        const y2 = y + Math.floor(total / 12);
+        const m2 = ((total % 12) + 12) % 12;
+        const lastDay = new Date(y2, m2 + 1, 0).getDate();
+        return new Date(y2, m2, Math.min(day, lastDay));
+      }
+      function nextPeriodicDueDate(lastRebalanceDate, cycle) {
+        const d = parseDateYmd(lastRebalanceDate);
+        if (!d) return null;
+        if (cycle === "weekly") {
+          const x = new Date(d);
+          x.setDate(x.getDate() + 7);
+          return ymdDateString(x);
+        }
+        if (cycle === "monthly") return ymdDateString(addMonthsClamped(d, 1));
+        if (cycle === "quarterly") return ymdDateString(addMonthsClamped(d, 3));
+        if (cycle === "yearly") return ymdDateString(addMonthsClamped(d, 12));
+        return null;
+      }
+      function simulatePeriodicRebalanceReturns({
+        picked,
+        datesRet,
+        retByCode,
+        targetWeights,
+        rebalanceCycle,
+        driftRebalanceEnabled,
+        driftAbsThreshold,
+        driftRelThreshold,
+      }) {
+        const codes = Array.isArray(picked) ? picked.slice() : [];
+        const n = Array.isArray(datesRet) ? datesRet.length : 0;
+        if (!codes.length || n <= 0) {
+          return {
+            returns: [],
+            avgWeights: {},
+            periodic_rebalance_count: 0,
+            drift_rebalance_count: 0,
+          };
+        }
+        const target = normalizeWeights(targetWeights || {}, codes);
+        const absThr = Math.max(
+          0,
+          Number.isFinite(Number(driftAbsThreshold))
+            ? Number(driftAbsThreshold)
+            : 0.05,
+        );
+        const relThr = Math.max(
+          0,
+          Number.isFinite(Number(driftRelThreshold))
+            ? Number(driftRelThreshold)
+            : 0.25,
+        );
+        const driftOn = Boolean(driftRebalanceEnabled);
+        const curr = {};
+        const weightSums = {};
+        for (const c of codes) {
+          curr[c] = Number(target[c] || 0);
+          weightSums[c] = 0;
+        }
+        let periodicCount = 0;
+        let driftCount = 0;
+        let nextDue =
+          rebalanceCycle === "daily" || rebalanceCycle === "none"
+            ? null
+            : nextPeriodicDueDate(datesRet[0], rebalanceCycle);
+        const rs = [];
+        for (let i = 0; i < n; i++) {
+          const d = String(datesRet[i] || "");
+          const periodicDue =
+            rebalanceCycle === "daily"
+              ? i > 0
+              : rebalanceCycle === "none"
+                ? false
+                : Boolean(nextDue && d >= nextDue);
+          let driftDue = false;
+          if (!periodicDue && driftOn) {
+            for (const c of codes) {
+              const tgt = Number(target[c] || 0);
+              const w = Number(curr[c] || 0);
+              const dev = Math.abs(w - tgt);
+              const thr = Math.min(absThr, tgt * relThr);
+              if (dev > thr + 1e-12) {
+                driftDue = true;
+                break;
+              }
+            }
+          }
+          if (periodicDue || driftDue) {
+            for (const c of codes) curr[c] = Number(target[c] || 0);
+            if (periodicDue) periodicCount += 1;
+            else driftCount += 1;
+            if (rebalanceCycle !== "daily" && rebalanceCycle !== "none") {
+              nextDue = nextPeriodicDueDate(d, rebalanceCycle);
+            }
+          }
+          for (const c of codes) weightSums[c] += Number(curr[c] || 0);
+          let rp = 0;
+          const post = {};
+          for (const c of codes) {
+            const r0 = Number(retByCode[c] && retByCode[c][i]);
+            const r = Number.isFinite(r0) ? r0 : 0;
+            const w = Number(curr[c] || 0);
+            rp += w * r;
+            post[c] = w * (1 + r);
+          }
+          rs.push(rp);
+          const totalPost = codes.reduce((a, c) => a + Number(post[c] || 0), 0);
+          if (totalPost > 0) {
+            for (const c of codes) curr[c] = Number(post[c] || 0) / totalPost;
+          } else {
+            for (const c of codes) curr[c] = Number(target[c] || 0);
+          }
+        }
+        const avgWeights = {};
+        for (const c of codes) avgWeights[c] = Number(weightSums[c] || 0) / n;
+        return {
+          returns: rs,
+          avgWeights,
+          periodic_rebalance_count: periodicCount,
+          drift_rebalance_count: driftCount,
+        };
       }
       function sortedPeriodRows(rows, sortKey, sortDir) {
         const arr = (rows || []).slice();
@@ -1483,7 +1752,7 @@
           persistentGroups[activePersistentGroup] = allCodes.slice();
         }
         applyPersistentGroupSelection(activePersistentGroup);
-        persistState();
+        persistStateNow();
       }
 
       async function fetchNav(code, adjust, start, end) {
@@ -1497,23 +1766,371 @@
         return JSON.parse(txt);
       }
 
-      async function runBacktest() {
+      function pickedCodesInActiveGroup() {
         const universe = new Set(
           validCodes(persistentGroups[activePersistentGroup] || []),
         );
-        const picked = pool
+        return pool
           .filter(
             (it) =>
               universe.has(String(it.code || "")) &&
               selected.has(String(it.code || "")),
           )
           .map((it) => String(it.code || ""));
+      }
+      function summarizeExposure(exposures, factorLabelByKey) {
+        const arr = Object.entries(exposures || {})
+          .filter(
+            ([k, v]) =>
+              String(k || "").toLowerCase() !== "cash" && Number.isFinite(Number(v)),
+          )
+          .sort((a, b) => Number(b[1]) - Number(a[1]))
+          .slice(0, 3);
+        if (!arr.length) return "-";
+        return arr
+          .map(
+            ([k, v]) =>
+              `${esc(factorLabelByKey[String(k)] || String(k))}:${fmtPct(Number(v))}`,
+          )
+          .join("，");
+      }
+      const OFF_CLS_DEFAULT_FACTORS_TEXT = [
+        "CSI300|沪深300=000300,510300",
+        "CSI500|中证500=000905,510500",
+        "CSI1000|中证1000=000852,159845",
+        "CSI2000|中证2000=932000,159533",
+      ].join("\n");
+      function factorsTextFromList(factors) {
+        const arr = Array.isArray(factors) ? factors : [];
+        const rows = [];
+        for (const x of arr) {
+          const key = String((x && x.key) || "").trim();
+          const label = String((x && x.label) || key).trim();
+          const aliases = Array.isArray(x && x.aliases)
+            ? x.aliases.map((a) => String(a || "").trim()).filter(Boolean)
+            : [];
+          if (!key || !aliases.length) continue;
+          rows.push(`${key}|${label}=${aliases.join(",")}`);
+        }
+        return rows.join("\n");
+      }
+      function renderClsConfigSelect() {
+        const sel = $("offClsCfgSelect");
+        if (!sel) return;
+        const rows = Array.isArray(offClsConfigs) ? offClsConfigs : [];
+        sel.innerHTML = rows.length
+          ? rows
+              .map(
+                (x) =>
+                  `<option value="${esc(x.name || "")}">${esc(x.is_active ? `* ${x.name}` : x.name)}</option>`,
+              )
+              .join("")
+          : `<option value="">(无配置)</option>`;
+      }
+      function getClsConfigByName(name) {
+        const nm = String(name || "").trim();
+        if (!nm) return null;
+        return (
+          (Array.isArray(offClsConfigs) ? offClsConfigs : []).find(
+            (x) => String((x && x.name) || "").trim() === nm,
+          ) || null
+        );
+      }
+      function applyClsConfigToUi(cfg) {
+        if (!cfg) return;
+        const factors = Array.isArray(cfg.benchmark_factors)
+          ? cfg.benchmark_factors
+          : [];
+        const mode = factors.length ? "custom" : "profile";
+        $("offClsFactorMode").value = mode;
+        $("offClsFactors").value =
+          factors.length > 0 ? factorsTextFromList(factors) : OFF_CLS_DEFAULT_FACTORS_TEXT;
+        $("offClsCfgName").value = String(cfg.name || "");
+        refreshClsFactorInputState();
+      }
+      async function loadClsConfigsFromBackend() {
+        const resp = await api("/off-fund/regression/factor-configs", {
+          method: "GET",
+        });
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        const rows = txt ? JSON.parse(txt) : [];
+        offClsConfigs = Array.isArray(rows) ? rows : [];
+        renderClsConfigSelect();
+        const active =
+          offClsConfigs.find((x) => x && x.is_active) || offClsConfigs[0] || null;
+        if (active) {
+          $("offClsCfgSelect").value = String(active.name || "");
+          applyClsConfigToUi(active);
+        }
+      }
+      async function saveClsConfigToBackend() {
+        const name =
+          String(($("offClsCfgName") && $("offClsCfgName").value) || "").trim() ||
+          String(($("offClsCfgSelect") && $("offClsCfgSelect").value) || "").trim();
+        if (!name) throw new Error("请先输入配置名");
+        const factorPayload = currentClsFactorPayload();
+        const resp = await api("/off-fund/regression/factor-configs", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            set_active: true,
+            benchmark_profile: factorPayload.benchmark_profile || "cn_stock_core",
+            benchmark_factors: factorPayload.benchmark_factors || null,
+          }),
+        });
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        const out = txt ? JSON.parse(txt) : {};
+        await loadClsConfigsFromBackend();
+        $("offClsCfgSelect").value = String((out && out.name) || name);
+        setMsg(`已保存因子配置：${name}`);
+      }
+      async function activateClsConfigFromSelect() {
+        const name = String(($("offClsCfgSelect") && $("offClsCfgSelect").value) || "").trim();
+        if (!name) throw new Error("请选择配置");
+        const cfg = getClsConfigByName(name);
+        if (!cfg) throw new Error("配置不存在");
+        const resp = await api(
+          `/off-fund/regression/factor-configs/${encodeURIComponent(name)}/activate`,
+          { method: "POST" },
+        );
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        await loadClsConfigsFromBackend();
+        $("offClsCfgSelect").value = name;
+        applyClsConfigToUi(cfg);
+        setMsg(`已载入并激活因子配置：${name}`);
+      }
+      async function deleteClsConfigFromSelect() {
+        const name = String(($("offClsCfgSelect") && $("offClsCfgSelect").value) || "").trim();
+        if (!name) throw new Error("请选择配置");
+        const resp = await api(
+          `/off-fund/regression/factor-configs/${encodeURIComponent(name)}`,
+          { method: "DELETE" },
+        );
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        await loadClsConfigsFromBackend();
+        setMsg(`已删除因子配置：${name}`);
+      }
+      function parseOffClsFactorsText(txt) {
+        const out = [];
+        const lines = String(txt || "").split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+          const raw = String(lines[i] || "").trim();
+          if (!raw) continue;
+          const idxEq = raw.indexOf("=");
+          if (idxEq <= 0)
+            throw new Error(`自定义因子第${i + 1}行格式错误：缺少 "="`);
+          const left = raw.slice(0, idxEq).trim();
+          const right = raw.slice(idxEq + 1).trim();
+          if (!left || !right)
+            throw new Error(`自定义因子第${i + 1}行格式错误：内容为空`);
+          const idxBar = left.indexOf("|");
+          const key = String((idxBar >= 0 ? left.slice(0, idxBar) : left) || "")
+            .trim()
+            .toUpperCase();
+          const label = String(
+            (idxBar >= 0 ? left.slice(idxBar + 1) : key) || key,
+          ).trim();
+          const aliases = right
+            .split(",")
+            .map((x) => String(x || "").trim())
+            .filter(Boolean);
+          if (!key || aliases.length === 0)
+            throw new Error(`自定义因子第${i + 1}行格式错误：KEY或代码为空`);
+          out.push({ key, label, aliases });
+        }
+        if (out.length < 2)
+          throw new Error("自定义因子至少需要2行有效配置（>=2个因子）");
+        return out;
+      }
+      function currentClsFactorPayload() {
+        const mode = String(($("offClsFactorMode") && $("offClsFactorMode").value) || "profile");
+        if (mode === "custom") {
+          const factors = parseOffClsFactorsText(
+            ($("offClsFactors") && $("offClsFactors").value) || "",
+          );
+          return { benchmark_factors: factors };
+        }
+        return { benchmark_profile: "cn_stock_core" };
+      }
+      function renderClsFactorAvailability(out) {
+        const rows = Array.isArray(out && out.items) ? out.items : [];
+        $("offClsFactorTable").innerHTML =
+          `<tr><th>因子KEY</th><th>标签</th><th>候选代码</th><th>生效代码</th><th>样本日</th><th>要求日数</th><th>是否充足</th><th>状态</th><th>各别名样本</th></tr>` +
+          (rows.length
+            ? rows
+                .map((x) => {
+                  const aliasSamples = Object.entries(x.alias_samples || {})
+                    .map(([k, v]) => `${k}:${v}`)
+                    .join("，");
+                  return `<tr><td>${esc(x.key || "-")}</td><td>${esc(x.label || "-")}</td><td>${esc((x.aliases || []).join(","))}</td><td>${esc(x.selected_code || "-")}</td><td>${Number(x.sample_days || 0)}</td><td>${Number(x.required_days || 0)}</td><td>${x.enough ? "是" : "否"}</td><td>${esc(x.status || "-")}</td><td>${esc(aliasSamples || "-")}</td></tr>`;
+                })
+                .join("")
+            : `<tr><td colspan="9" class="muted">暂无因子检查结果</td></tr>`);
+      }
+      function renderClsActiveFactors(factors) {
+        const rows = Array.isArray(factors) ? factors : [];
+        $("offClsActiveFactors").innerHTML =
+          `<tr><th>因子KEY</th><th>标签</th><th>生效代码</th><th>候选代码</th></tr>` +
+          (rows.length
+            ? rows
+                .map(
+                  (x) =>
+                    `<tr><td>${esc((x && x.key) || "-")}</td><td>${esc((x && x.label) || "-")}</td><td>${esc((x && x.selected_code) || "-")}</td><td>${esc(((x && x.aliases) || []).join(","))}</td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="4" class="muted">暂无生效因子信息</td></tr>`);
+      }
+      async function checkClsFactorAvailability({ quiet = false } = {}) {
+        const start = String(($("start").value || "").trim() || "20110210");
+        const end = String(($("end").value || "").trim() || todayYmd());
+        const rollingWindow = Math.max(
+          40,
+          Math.floor(Number(String($("offClsWindow").value || "252").trim())),
+        );
+        const minSamples = Math.max(
+          40,
+          Math.floor(Number(String($("offClsMinSamples").value || "120").trim())),
+        );
+        const factorPayload = currentClsFactorPayload();
+        const resp = await api("/analysis/off-fund/factor-availability", {
+          method: "POST",
+          body: JSON.stringify({
+            start,
+            end,
+            benchmark_adjust: "hfq",
+            rolling_window: rollingWindow,
+            min_samples: minSamples,
+            ...factorPayload,
+          }),
+        });
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        const out = txt ? JSON.parse(txt) : {};
+        if (!out || out.ok !== true)
+          throw new Error((out && out.error) || "因子检查失败");
+        renderClsFactorAvailability(out);
+        if (!quiet) {
+          const enough = Number((out.meta && out.meta.enough_factor_count) || 0);
+          const total = Number((out.meta && out.meta.factor_count) || 0);
+          const req = Number((out.meta && out.meta.required_days) || 0);
+          setMsg(`因子检查完成：充足 ${enough}/${total}，要求日数=${req}。`);
+        }
+        return out;
+      }
+      async function runClassification() {
+        const picked = pickedCodesInActiveGroup();
+        if (!picked.length) return setMsg("请先在候选池勾选至少1个基金。");
+        const start = String(($("start").value || "").trim() || "20110210");
+        const end = String(($("end").value || "").trim() || todayYmd());
+        const rollingWindow = Math.max(
+          40,
+          Math.floor(Number(String($("offClsWindow").value || "252").trim())),
+        );
+        const minSamples = Math.max(
+          40,
+          Math.floor(Number(String($("offClsMinSamples").value || "120").trim())),
+        );
+        const gap = Math.max(
+          0,
+          Math.min(1, Number(String($("offClsGap").value || "0.08").trim())),
+        );
+        const factorAvail = await checkClsFactorAvailability({ quiet: true });
+        const enoughFactors = Number(
+          (factorAvail &&
+            factorAvail.meta &&
+            factorAvail.meta.enough_factor_count) ||
+            0,
+        );
+        if (enoughFactors < 2)
+          return setMsg(
+            "可用因子不足（<2）。请先调整因子配置或补齐因子历史数据后再运行回归。",
+          );
+        const factorPayload = currentClsFactorPayload();
+        setMsg("运行基金分类回归中...");
+        const resp = await api("/analysis/off-fund/classify", {
+          method: "POST",
+          body: JSON.stringify({
+            codes: picked,
+            start,
+            end,
+            fund_adjust: "hfq",
+            benchmark_adjust: "hfq",
+            ...factorPayload,
+            rolling_window: rollingWindow,
+            min_samples: minSamples,
+            dominance_gap: gap,
+            include_exposure_series: false,
+          }),
+        });
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        const out = txt ? JSON.parse(txt) : {};
+        if (!out || out.ok !== true)
+          throw new Error((out && out.error) || "分类回归失败");
+        renderClsActiveFactors(out.factors || []);
+        const factorLabelByKey = {};
+        for (const f of Array.isArray(out.factors) ? out.factors : []) {
+          const key = String((f && f.key) || "").trim();
+          if (!key) continue;
+          factorLabelByKey[key] = String((f && f.label) || key);
+        }
+        const rows = Array.isArray(out.items) ? out.items : [];
+        $("offClsTable").innerHTML =
+          `<tr><th>代码</th><th>名称</th><th>分类标签</th><th>置信度</th><th>平均R²</th><th>最新R²</th><th>主导暴露(Top3)</th><th>状态/告警</th></tr>` +
+          (rows.length
+            ? rows
+                .map((x) => {
+                  const warn = Array.isArray(x.warnings)
+                    ? x.warnings.filter(Boolean).join(" | ")
+                    : "";
+                  const statusTxt =
+                    x.status === "ok"
+                      ? warn || "ok"
+                      : `${String(x.status || "-")}${warn ? ` | ${warn}` : ""}`;
+                  return `<tr><td>${esc(x.code || "-")}</td><td>${esc(x.name || "-")}</td><td>${esc(x.label || "-")}</td><td>${esc(x.confidence || "-")}</td><td>${fmtNum(x.avg_r2, 4)}</td><td>${fmtNum(x.latest_r2, 4)}</td><td>${summarizeExposure(x.avg_exposures || {}, factorLabelByKey)}</td><td>${esc(statusTxt)}</td></tr>`;
+                })
+                .join("")
+            : `<tr><td colspan="8" class="muted">暂无结果</td></tr>`);
+        const okN = rows.filter((x) => String(x.status || "") === "ok").length;
+        setMsg(
+          `分类回归完成：请求${picked.length}只，成功${okN}只，失败/未分类${picked.length - okN}只。`,
+        );
+      }
+
+      async function runBacktest() {
+        const picked = pickedCodesInActiveGroup();
         if (!picked.length) return setMsg("请先在候选池勾选至少1个基金。");
         const start = String(($("start").value || "").trim() || "20110210");
         const end = String(($("end").value || "").trim() || todayYmd());
         const adjust = String($("adjust").value || "hfq");
         const rf = Number(String($("rf").value || "0.025").trim());
         const innerMode = String($("innerMode").value || "risk_parity_cov");
+        const rebalanceCycle = String(
+          ($("rebalanceCycle") && $("rebalanceCycle").value) || "daily",
+        );
+        const driftRebalanceEnabled =
+          String(
+            ($("driftRebalanceEnabled") && $("driftRebalanceEnabled").value) ||
+              "1",
+          ) !== "0";
+        const driftAbsThreshold = Math.max(
+          0,
+          Number(
+            (($("driftAbsThreshold") && $("driftAbsThreshold").value) || "0.05")
+              .trim(),
+          ),
+        );
+        const driftRelThreshold = Math.max(
+          0,
+          Number(
+            (($("driftRelThreshold") && $("driftRelThreshold").value) || "0.25")
+              .trim(),
+          ),
+        );
         const rpWindow = Math.max(
           20,
           Math.floor(Number(String($("rpWindow").value || "60").trim())),
@@ -1527,9 +2144,11 @@
         renderPool();
 
         setMsg("加载净值中...");
+        const plotlyReady = ensurePlotlyLoaded();
         const navByCode = {};
         for (const c of picked)
           navByCode[c] = await fetchNav(c, adjust, start, end);
+        await plotlyReady;
 
         const dateSets = picked.map(
           (c) => new Set((navByCode[c] || []).map((x) => String(x.trade_date))),
@@ -1575,6 +2194,7 @@
           parseKvText($("groupWeights").value),
           groupIds,
         );
+        const innerCustomByCode = parseKvText($("innerCustomWeights").value);
 
         const finalW = {};
         const rcRows = [];
@@ -1589,7 +2209,13 @@
           const minLen = Math.min(...validRows.map((r) => r.length));
           const aligned = validRows.map((r) => r.slice(r.length - minLen));
           let wIn = [];
-          if (innerMode === "equal" || codes.length <= 1 || minLen < 20) {
+          if (innerMode === "custom") {
+            const wByCode = normalizeWeights(innerCustomByCode, codes);
+            wIn = codes.map((c) => Number(wByCode[c] || 0));
+            for (let i = 0; i < codes.length; i++) {
+              rcRows.push({ group: g, code: codes[i], rc: null, w_in: wIn[i] });
+            }
+          } else if (innerMode === "equal" || codes.length <= 1 || minLen < 20) {
             wIn = Array.from({ length: codes.length }, () => 1 / codes.length);
           } else {
             const cov = covMatrix(aligned);
@@ -1612,12 +2238,17 @@
         if (!(sumW > 0)) return setMsg("权重配置无效，请检查组间仓位。");
         for (const c of Object.keys(finalW)) finalW[c] = finalW[c] / sumW;
 
-        const rsPort = datesRet.map((_, i) =>
-          picked.reduce(
-            (a, c) => a + Number(finalW[c] || 0) * Number(retByCode[c][i] || 0),
-            0,
-          ),
-        );
+        const rebalanceRes = simulatePeriodicRebalanceReturns({
+          picked,
+          datesRet,
+          retByCode,
+          targetWeights: finalW,
+          rebalanceCycle,
+          driftRebalanceEnabled,
+          driftAbsThreshold,
+          driftRelThreshold,
+        });
+        const rsPort = rebalanceRes.returns;
         const m = metricsFromReturns(rsPort, Number.isFinite(rf) ? rf : 0.025);
         if (!m) return setMsg("回测失败：收益序列无效。");
         lastCtx = {
@@ -1688,7 +2319,7 @@
         const attr = buildAttribution(
           retByCode,
           codeGroup,
-          finalW,
+          rebalanceRes.avgWeights,
           rsPort,
           m.cumulative_return,
         );
@@ -1776,8 +2407,29 @@
           .sort()
           .map((g) => `${g}=${fmtPct(gw[g])}`)
           .join("，");
+        const innerModeLabel =
+          innerMode === "risk_parity_cov"
+            ? "协方差ERC"
+            : innerMode === "custom"
+              ? "组内自定义"
+              : "等权";
+        const rebalanceCycleLabel =
+          rebalanceCycle === "daily"
+            ? "每日"
+            : rebalanceCycle === "weekly"
+              ? "每周"
+              : rebalanceCycle === "monthly"
+                ? "每月"
+                : rebalanceCycle === "quarterly"
+                  ? "每季"
+                  : rebalanceCycle === "yearly"
+                    ? "每年"
+                    : "不再平衡";
+        const driftLabel = driftRebalanceEnabled
+          ? `开启[min(${fmtPct(driftAbsThreshold)}, 目标×${fmtPct(driftRelThreshold)})]`
+          : "关闭";
         setMsg(
-          `完成：标的数=${picked.length}，共同样本=${datesRet.length}，组间权重=${gwTxt}，组内方法=${innerMode === "risk_parity_cov" ? "协方差ERC" : "等权"}。`,
+          `完成：标的数=${picked.length}，共同样本=${datesRet.length}，组间权重=${gwTxt}，组内方法=${innerModeLabel}，周期再平衡=${rebalanceCycleLabel}（${rebalanceRes.periodic_rebalance_count}次），偏离再平衡=${driftLabel}（${rebalanceRes.drift_rebalance_count}次）。`,
         );
       }
 
@@ -1847,7 +2499,7 @@
         const base = validCodes(persistentGroups[activePersistentGroup] || []);
         for (const c of base)
           codeGroup[c] = String(mp[c] || codeGroup[c] || "S01");
-        saveCurrentSubgroupState();
+        saveCurrentSubgroupState({ persist: "immediate" });
         renderPool();
       });
       $("assetGroups").addEventListener("input", () => {
@@ -1861,6 +2513,12 @@
         saveCurrentSubgroupState(),
       );
       $("groupWeights").addEventListener("input", () =>
+        saveCurrentSubgroupState(),
+      );
+      $("innerCustomWeights").addEventListener("change", () =>
+        saveCurrentSubgroupState(),
+      );
+      $("innerCustomWeights").addEventListener("input", () =>
         saveCurrentSubgroupState(),
       );
       $("activeGroup").addEventListener("change", () =>
@@ -1914,17 +2572,17 @@
         const nm =
           sanitizeGroupName($("persistentGroupSelect").value || "") ||
           DEFAULT_PERSISTENT_GROUP;
-        saveCurrentSubgroupState();
+        saveCurrentSubgroupState({ persist: "immediate" });
         applyPersistentGroupSelection(nm);
-        persistState();
+        persistStateNow();
       });
       $("applyPersistentGroup").addEventListener("click", () => {
         const nm =
           sanitizeGroupName($("persistentGroupSelect").value || "") ||
           DEFAULT_PERSISTENT_GROUP;
-        saveCurrentSubgroupState();
+        saveCurrentSubgroupState({ persist: "immediate" });
         applyPersistentGroupSelection(nm);
-        persistState();
+        persistStateNow();
       });
       $("savePersistentGroup").addEventListener("click", () => {
         const nmInput = sanitizeGroupName($("persistentGroupName").value || "");
@@ -1943,7 +2601,7 @@
         if (!subgroupWeightsByPersistent[nm])
           subgroupWeightsByPersistent[nm] = "";
         applyPersistentGroupSelection(nm, { keepSelection: true });
-        persistState();
+        persistStateNow();
         setMsg(`大组已保存：${nm}（${persistentGroups[nm].length}个标的）`);
       });
       $("deletePersistentGroup").addEventListener("click", () => {
@@ -1952,6 +2610,7 @@
         delete persistentGroups[nm];
         delete subgroupMapByPersistent[nm];
         delete subgroupWeightsByPersistent[nm];
+        delete subgroupInnerWeightsByPersistent[nm];
         if (!Object.keys(persistentGroups).length)
           persistentGroups[DEFAULT_PERSISTENT_GROUP] = [];
         activePersistentGroup =
@@ -1959,23 +2618,65 @@
             a.localeCompare(b, "zh-Hans-CN"),
           )[0] || DEFAULT_PERSISTENT_GROUP;
         applyPersistentGroupSelection(activePersistentGroup);
-        persistState();
+        persistStateNow();
         setMsg(`已删除大组：${nm}`);
       });
+      if ($("offClsFactors") && !$("offClsFactors").value)
+        $("offClsFactors").value = OFF_CLS_DEFAULT_FACTORS_TEXT;
+      function refreshClsFactorInputState() {
+        const mode = String(
+          ($("offClsFactorMode") && $("offClsFactorMode").value) || "profile",
+        );
+        const readOnly = mode !== "custom";
+        if ($("offClsFactors")) $("offClsFactors").readOnly = readOnly;
+      }
+      refreshClsFactorInputState();
+      $("offClsCfgSelect").addEventListener("change", () => {
+        const name = String($("offClsCfgSelect").value || "").trim();
+        const cfg = getClsConfigByName(name);
+        $("offClsCfgName").value = name;
+        if (cfg) applyClsConfigToUi(cfg);
+      });
+      $("offClsCfgLoad").addEventListener("click", () =>
+        activateClsConfigFromSelect().catch((e) =>
+          setMsg(String((e && e.message) || e)),
+        ),
+      );
+      $("offClsCfgSave").addEventListener("click", () =>
+        saveClsConfigToBackend().catch((e) =>
+          setMsg(String((e && e.message) || e)),
+        ),
+      );
+      $("offClsCfgDelete").addEventListener("click", () =>
+        deleteClsConfigFromSelect().catch((e) =>
+          setMsg(String((e && e.message) || e)),
+        ),
+      );
+      $("offClsFactorMode").addEventListener("change", () => {
+        refreshClsFactorInputState();
+      });
+      $("offClsUseDefault").addEventListener("click", () => {
+        $("offClsFactors").value = OFF_CLS_DEFAULT_FACTORS_TEXT;
+      });
+      $("offClsCheckFactors").addEventListener("click", () =>
+        checkClsFactorAvailability().catch((e) =>
+          setMsg(String((e && e.message) || e)),
+        ),
+      );
       $("run").addEventListener("click", () =>
         runBacktest().catch((e) => setMsg(String((e && e.message) || e))),
+      );
+      $("runCls").addEventListener("click", () =>
+        runClassification().catch((e) => setMsg(String((e && e.message) || e))),
       );
       wireOffPeriodControls("weekly");
       wireOffPeriodControls("monthly");
       wireOffPeriodControls("quarterly");
       wireOffPeriodControls("yearly");
-      window.addEventListener("beforeunload", () => {
-        try {
-          saveCurrentSubgroupState();
-        } catch (_) {}
-      });
-
       hydrateStateFromStorage();
+      loadClsConfigsFromBackend().catch((e) =>
+        setMsg(`因子配置加载失败：${String((e && e.message) || e)}`),
+      );
       loadPool().catch((e) => setMsg(String((e && e.message) || e)));
     </script>
   </body>

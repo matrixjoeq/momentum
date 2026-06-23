@@ -150,6 +150,130 @@ class OffFundNavOut(BaseModel):
     adjust: str
 
 
+class OffFundRegressionFactorRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=64)
+    label: str | None = Field(default=None, max_length=128)
+    aliases: list[str] = Field(
+        min_length=1, description="Candidate benchmark codes in priority order"
+    )
+
+
+class OffFundRegressionFactorConfigUpsert(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    set_active: bool = Field(default=True)
+    benchmark_profile: str = Field(
+        default="cn_stock_core",
+        description='Built-in profile. current: "cn_stock_core"',
+    )
+    benchmark_factors: list[OffFundRegressionFactorRequest] | None = Field(
+        default=None,
+        description="Optional custom factors; when set, overrides benchmark_profile",
+    )
+
+
+class OffFundRegressionFactorConfigOut(BaseModel):
+    name: str
+    is_active: bool
+    benchmark_profile: str
+    benchmark_factors: list[OffFundRegressionFactorRequest] = Field(default_factory=list)
+
+
+class OffFundRegressionClassifyRequest(BaseModel):
+    codes: list[str] = Field(min_length=1, description="Off-fund codes to classify")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    fund_adjust: str = Field(default="hfq", description="Off-fund nav adjust basis")
+    benchmark_adjust: str = Field(
+        default="hfq", description="Benchmark close adjust basis"
+    )
+    benchmark_profile: str = Field(
+        default="cn_stock_core",
+        description='Built-in profile. current: "cn_stock_core"',
+    )
+    benchmark_factors: list[OffFundRegressionFactorRequest] | None = Field(
+        default=None,
+        description="Optional custom factors; when set, overrides benchmark_profile",
+    )
+    rolling_window: int = Field(default=252, ge=40, le=2000)
+    min_samples: int = Field(default=120, ge=40, le=2000)
+    dominance_gap: float = Field(
+        default=0.08,
+        ge=0.0,
+        le=1.0,
+        description="If top1-top2 exposure < gap, classify as balanced style",
+    )
+    include_exposure_series: bool = Field(default=False)
+    max_series_points: int = Field(default=260, ge=0, le=2000)
+
+
+class OffFundRegressionFactorAvailabilityRequest(BaseModel):
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    benchmark_adjust: str = Field(
+        default="hfq", description="Benchmark close adjust basis"
+    )
+    benchmark_profile: str = Field(
+        default="cn_stock_core",
+        description='Built-in profile. current: "cn_stock_core"',
+    )
+    benchmark_factors: list[OffFundRegressionFactorRequest] | None = Field(
+        default=None,
+        description="Optional custom factors; when set, overrides benchmark_profile",
+    )
+    rolling_window: int = Field(default=252, ge=40, le=2000)
+    min_samples: int = Field(default=120, ge=40, le=2000)
+
+
+class OffFundRegressionSeriesPoint(BaseModel):
+    trade_date: str
+    r2: float | None = None
+    exposures: dict[str, float] = Field(default_factory=dict)
+
+
+class OffFundRegressionClassifyItem(BaseModel):
+    code: str
+    name: str | None = None
+    status: str
+    sample_days: int
+    effective_windows: int | None = None
+    avg_r2: float | None = None
+    latest_r2: float | None = None
+    label: str
+    confidence: str
+    primary_asset_class: str
+    avg_exposures: dict[str, float] = Field(default_factory=dict)
+    latest_exposures: dict[str, float] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    exposure_series: list[OffFundRegressionSeriesPoint] = Field(default_factory=list)
+
+
+class OffFundRegressionClassifyResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+    factors: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[OffFundRegressionClassifyItem] = Field(default_factory=list)
+
+
+class OffFundRegressionFactorAvailabilityItem(BaseModel):
+    key: str
+    label: str
+    aliases: list[str] = Field(default_factory=list)
+    selected_code: str | None = None
+    sample_days: int
+    required_days: int
+    enough: bool
+    status: str
+    alias_samples: dict[str, int] = Field(default_factory=dict)
+
+
+class OffFundRegressionFactorAvailabilityResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+    items: list[OffFundRegressionFactorAvailabilityItem] = Field(default_factory=list)
+
+
 class FuturesPoolUpsert(BaseModel):
     code: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=128)

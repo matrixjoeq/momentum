@@ -240,6 +240,59 @@ def test_calendar_timing_next_plan_includes_current_month_decision(session_facto
     assert str(plan.get("planned_exit_date") or "") == "2026-04-15"
 
 
+def test_calendar_timing_next_plan_prefers_open_trade_exit_over_overlapping_entry(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2026-01-05", "2026-04-30", freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p = 100.0 + float(i) * 0.2
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=float(p),
+                        high=float(p),
+                        low=float(p),
+                        close=float(p),
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+        db.commit()
+
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=pd.to_datetime("2026-03-23").date(),
+                decision_day=1,
+                hold_days=20,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                rebalance_shift="prev",
+                dynamic_universe=False,
+            ),
+        )
+
+    next_plan = out.get("next_execution_plan") or {}
+    plan = next_plan.get("plan") or {}
+    assert bool(next_plan.get("has_execution_plan")) is True
+    # While current trade is still open, next executable event must be its exit.
+    assert str(plan.get("type") or "") == "exit"
+    assert str(plan.get("execution_date") or "") == "2026-03-30"
+    assert str(plan.get("execution_date") or "") > "2026-03-23"
+    assert plan.get("decision_date") is None
+    assert not (plan.get("buys") or [])
+    assert (plan.get("sells") or [])
+
+
 def test_calendar_timing_trade_stats_by_code_no_extreme_explosions(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2022-01-03", periods=300, freq="B")]

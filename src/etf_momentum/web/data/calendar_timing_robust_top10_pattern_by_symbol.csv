@@ -1,0 +1,5 @@
+symbol,top_count,decision_day_min,decision_day_max,decision_day_median,hold_days_min,hold_days_max,hold_days_median,decision_day_mode,hold_days_mode
+510300,112,-9,28,12.5,1,18,12.0,-6,12
+510500,112,-10,28,-1.5,2,20,13.0,-5,13
+512100,112,-10,28,-3.0,2,19,11.0,-8,10
+515180,112,-9,28,-4.0,6,19,11.5,-8,8

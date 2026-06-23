@@ -968,9 +968,11 @@ def compute_calendar_timing_strategy_backtest(
             if p is None or p + 1 >= len(all_trade_days):
                 continue
             fut_entries.append((dec, all_trade_days[p + 1]))
+        # Keep only real future entries; "next plan" must not point to a past
+        # execution date when asof is already inside an open trade.
+        fut_entries = [it for it in fut_entries if it[1] > asof]
         fut_entries.sort(key=lambda x: x[1])
 
-        next_entry = fut_entries[0] if fut_entries else None
         next_exit: dt.date | None = None
         if in_pos:
             # infer current open trade exit from schedule/trade days
@@ -983,6 +985,13 @@ def compute_calendar_timing_strategy_backtest(
                 ):
                     next_exit = xi if xi > asof else None
                     break
+
+        # Strategy schedule is non-overlapping, so while an in-flight trade
+        # exists, the next valid entry can only happen after that trade exits.
+        if next_exit is not None:
+            fut_entries = [it for it in fut_entries if it[1] > next_exit]
+
+        next_entry = fut_entries[0] if fut_entries else None
 
         candidate: tuple[str, dt.date, dt.date | None] | None = (
             None  # (type, exec_date, decision_date)

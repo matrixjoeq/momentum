@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>日历效应择时参数搜索结果</title>
+    <link rel="stylesheet" href="/static/terminal.css" />
+    <script
+      defer
+      src="https://cdn.plot.ly/plotly-cartesian-2.30.0.min.js"
+    ></script>
+    <style>
+      #heatmap {
+        width: 100%;
+        height: 620px;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 960px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+      }
+      td,
+      th {
+        white-space: nowrap;
+      }
+      .mono {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>日历效应择时参数搜索结果</h2>
+    <div class="muted">
+      本页用于展示 `calendar_timing_param_search.py` 导出的参数网格测试数据。
+    </div>
+    <div class="muted" style="margin-top: 6px">
+      <a href="/research">返回研究主页</a>
+    </div>
+
+    <div class="panel no-print" style="margin-top: 12px">
+      <div class="row">
+        <div style="min-width: 480px; flex: 1">
+          <label>结果 JSON URL</label>
+          <input
+            id="dataUrl"
+            value="/static/data/calendar_timing_param_search_results.json"
+          />
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 8px">
+          <button id="loadUrlBtn">加载 URL</button>
+        </div>
+        <div style="min-width: 320px">
+          <label>或上传本地 JSON 文件</label>
+          <input id="fileInput" type="file" accept=".json,application/json" />
+        </div>
+      </div>
+    </div>
+
+    <div class="panel no-print">
+      <div class="row">
+        <div>
+          <label>标的</label>
+          <select id="symbolSel"></select>
+        </div>
+        <div>
+          <label>指标</label>
+          <select id="metricSel"></select>
+        </div>
+        <div>
+          <label>排序方向</label>
+          <select id="sortSel">
+            <option value="auto" selected>自动</option>
+            <option value="max">从大到小</option>
+            <option value="min">从小到大</option>
+          </select>
+        </div>
+        <div>
+          <label>TopN</label>
+          <input id="topN" value="30" />
+        </div>
+        <div style="display: flex; align-items: flex-end">
+          <button id="refreshBtn">刷新图表与表格</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3 style="margin-top: 0">运行信息</h3>
+        <div id="metaInfo" class="mono"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top: 0">当前筛选最优参数</h3>
+        <div id="bestInfo" class="mono"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">参数热力图</h3>
+      <div id="heatmap"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0">Top 组合明细</h3>
+      <div style="overflow: auto">
+        <table id="topTable"></table>
+      </div>
+    </div>
+
+    <div id="status" class="muted" style="margin-top: 8px"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const METRICS = [
+        ["cumulative_return", "累计收益率"],
+        ["annualized_return", "年化收益率"],
+        ["annualized_volatility", "年化波动率"],
+        ["max_drawdown", "最大回撤"],
+        ["max_drawdown_recovery_days", "最大回撤修复时长"],
+        ["sharpe_ratio", "夏普比率"],
+        ["ulcer_index", "溃疡指标"],
+        ["ulcer_performance_index", "溃疡绩效"],
+        ["win_rate", "胜率"],
+        ["payoff_ratio", "赔率"],
+        ["kelly_fraction", "凯莉比"],
+      ];
+      const METRIC_LABEL = Object.fromEntries(METRICS.map((x) => [x[0], x[1]]));
+      const AUTO_SORT_MIN = new Set([
+        "annualized_volatility",
+        "max_drawdown_recovery_days",
+        "ulcer_index",
+      ]);
+
+      function fmtNum(v, digits = 6) {
+        const x = Number(v);
+        return Number.isFinite(x) ? x.toFixed(digits) : "-";
+      }
+
+      function fmtPct(v, digits = 2) {
+        const x = Number(v);
+        return Number.isFinite(x) ? `${(x * 100).toFixed(digits)}%` : "-";
+      }
+
+      function metricFmt(metric, value) {
+        if (
+          [
+            "cumulative_return",
+            "annualized_return",
+            "annualized_volatility",
+            "max_drawdown",
+            "win_rate",
+          ].includes(metric)
+        ) {
+          return fmtPct(value, 2);
+        }
+        if (metric === "max_drawdown_recovery_days") {
+          const x = Number(value);
+          return Number.isFinite(x) ? `${Math.round(x)} 天` : "-";
+        }
+        return fmtNum(value, 6);
+      }
+
+      function status(msg) {
+        $("status").textContent = msg || "";
+      }
+
+      function normalizeData(data) {
+        const meta = data && typeof data === "object" ? data.meta || {} : {};
+        const results =
+          data && typeof data === "object" && Array.isArray(data.results)
+            ? data.results
+            : [];
+        const bestBySymbol =
+          data && typeof data === "object" && data.best_by_symbol
+            ? data.best_by_symbol
+            : {};
+        return { meta, results, bestBySymbol };
+      }
+
+      function defaultSortMode(metric) {
+        return AUTO_SORT_MIN.has(metric) ? "min" : "max";
+      }
+
+      function effectiveSortMode(metric) {
+        const x = String($("sortSel").value || "auto");
+        return x === "auto" ? defaultSortMode(metric) : x;
+      }
+
+      function sortRows(rows, metric, mode) {
+        const direct = mode === "min" ? 1 : -1;
+        const arr = rows.slice();
+        arr.sort((a, b) => {
+          const av = Number(a?.metrics?.[metric]);
+          const bv = Number(b?.metrics?.[metric]);
+          const aok = Number.isFinite(av);
+          const bok = Number.isFinite(bv);
+          if (!aok && !bok) return 0;
+          if (!aok) return 1;
+          if (!bok) return -1;
+          if (av < bv) return -1 * direct;
+          if (av > bv) return 1 * direct;
+          const ash = Number(a?.metrics?.sharpe_ratio);
+          const bsh = Number(b?.metrics?.sharpe_ratio);
+          if (Number.isFinite(ash) && Number.isFinite(bsh)) {
+            if (ash > bsh) return -1;
+            if (ash < bsh) return 1;
+          }
+          return 0;
+        });
+        return arr;
+      }
+
+      function renderMeta(meta, results) {
+        const lines = [];
+        lines.push(`生成时间: ${String(meta.generated_at || "-")}`);
+        lines.push(`后端地址: ${String(meta.api_base_url || "-")}`);
+        lines.push(
+          `目标标的: ${(Array.isArray(meta.symbols) ? meta.symbols : []).join(", ")}`,
+        );
+        lines.push(
+          `样本总数: 成功 ${Number(meta.total_success_cases || 0)} / 失败 ${Number(meta.total_error_cases || 0)}`,
+        );
+        const fixed = meta.fixed_params || {};
+        lines.push(`固定参数: ${JSON.stringify(fixed, null, 0)}`);
+        const objective = meta.objective || {};
+        lines.push(
+          `默认最优口径: ${String(objective.metric || "-")} (${String(objective.mode || "-")})`,
+        );
+        if (results.length > 0) {
+          lines.push(
+            `已加载数据区间: ${results[0].start || "-"} ~ ${results[0].end || "-"}`,
+          );
+        }
+        $("metaInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function renderBestInfo(rows, metric, mode, bestBySymbol, symbol) {
+        const sorted = sortRows(rows, metric, mode);
+        const best = sorted.length > 0 ? sorted[0] : null;
+        const presetBest =
+          bestBySymbol && typeof bestBySymbol === "object"
+            ? bestBySymbol[symbol]
+            : null;
+        const lines = [];
+        if (!best) {
+          lines.push("无可用样本。");
+        } else {
+          lines.push(`标的: ${symbol}`);
+          lines.push(
+            `当前排序最优: decision_day=${best.decision_day}, hold_days=${best.hold_days}`,
+          );
+          lines.push(
+            `${METRIC_LABEL[metric] || metric}: ${metricFmt(metric, best.metrics?.[metric])}`,
+          );
+          lines.push(`夏普比率: ${metricFmt("sharpe_ratio", best.metrics?.sharpe_ratio)}`);
+          lines.push(
+            `累计收益率: ${metricFmt("cumulative_return", best.metrics?.cumulative_return)}`,
+          );
+          lines.push(
+            `最大回撤: ${metricFmt("max_drawdown", best.metrics?.max_drawdown)}`,
+          );
+        }
+        if (presetBest && typeof presetBest === "object") {
+          lines.push("----");
+          lines.push("脚本预设目标最优参数:");
+          lines.push(
+            `decision_day=${presetBest.decision_day}, hold_days=${presetBest.hold_days}`,
+          );
+          lines.push(
+            `sharpe_ratio=${metricFmt("sharpe_ratio", presetBest.metrics?.sharpe_ratio)}`,
+          );
+        }
+        $("bestInfo").innerHTML = lines.map((x) => `<div>${x}</div>`).join("");
+      }
+
+      function renderHeatmap(rows, metric, mode, symbol) {
+        const holdSet = new Set();
+        const decSet = new Set();
+        rows.forEach((r) => {
+          holdSet.add(Number(r.hold_days));
+          decSet.add(Number(r.decision_day));
+        });
+        const x = Array.from(holdSet).sort((a, b) => a - b);
+        const y = Array.from(decSet).sort((a, b) => a - b);
+        const zi = y.map(() => x.map(() => null));
+        const text = y.map(() => x.map(() => ""));
+        const yPos = new Map(y.map((v, i) => [v, i]));
+        const xPos = new Map(x.map((v, i) => [v, i]));
+        rows.forEach((r) => {
+          const yy = yPos.get(Number(r.decision_day));
+          const xx = xPos.get(Number(r.hold_days));
+          if (yy == null || xx == null) return;
+          const v = Number(r?.metrics?.[metric]);
+          if (!Number.isFinite(v)) return;
+          zi[yy][xx] = v;
+          text[yy][xx] = `decision_day=${r.decision_day}<br>hold_days=${r.hold_days}<br>${METRIC_LABEL[metric] || metric}: ${metricFmt(metric, v)}`;
+        });
+        const reverseScale = mode === "min";
+        Plotly.newPlot(
+          "heatmap",
+          [
+            {
+              type: "heatmap",
+              x,
+              y,
+              z: zi,
+              text,
+              hoverinfo: "text",
+              colorscale: "Viridis",
+              reversescale: reverseScale,
+              colorbar: {
+                title: METRIC_LABEL[metric] || metric,
+              },
+            },
+          ],
+          {
+            margin: { t: 40, r: 30, b: 60, l: 80 },
+            title: `${symbol} - ${(METRIC_LABEL[metric] || metric) + " 参数热力图"}`,
+            xaxis: { title: "持仓时长 (hold_days)" },
+            yaxis: { title: "调仓日 (decision_day)" },
+          },
+          { responsive: true },
+        );
+      }
+
+      function renderTopTable(rows, metric, mode) {
+        const n = Math.max(1, Math.floor(Number($("topN").value || "30")));
+        const sorted = sortRows(rows, metric, mode).slice(0, n);
+        const cols = [
+          "decision_day",
+          "hold_days",
+          "cumulative_return",
+          "annualized_return",
+          "annualized_volatility",
+          "max_drawdown",
+          "max_drawdown_recovery_days",
+          "sharpe_ratio",
+          "ulcer_index",
+          "ulcer_performance_index",
+          "win_rate",
+          "payoff_ratio",
+          "kelly_fraction",
+        ];
+        const head =
+          "<tr>" +
+          cols
+            .map((c) => `<th>${METRIC_LABEL[c] || c}</th>`)
+            .join("") +
+          "</tr>";
+        const body = sorted
+          .map((r) => {
+            const tds = cols.map((c) => {
+              if (c === "decision_day" || c === "hold_days") {
+                return `<td>${Number(r[c])}</td>`;
+              }
+              return `<td>${metricFmt(c, r?.metrics?.[c])}</td>`;
+            });
+            return `<tr>${tds.join("")}</tr>`;
+          })
+          .join("");
+        $("topTable").innerHTML =
+          head + (body || `<tr><td colspan="${cols.length}">暂无数据</td></tr>`);
+      }
+
+      function refreshView() {
+        const state = window.__ctGridData;
+        if (!state) return;
+        const symbol = String($("symbolSel").value || "");
+        const metric = String($("metricSel").value || "sharpe_ratio");
+        const mode = effectiveSortMode(metric);
+        const rows = state.results.filter((x) => String(x.symbol) === symbol);
+        renderMeta(state.meta, rows);
+        renderBestInfo(rows, metric, mode, state.bestBySymbol, symbol);
+        renderHeatmap(rows, metric, mode, symbol);
+        renderTopTable(rows, metric, mode);
+      }
+
+      async function loadFromUrl(url) {
+        status("正在加载数据...");
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) {
+          throw new Error(`加载失败: HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        applyData(data);
+        status(`加载完成: ${url}`);
+      }
+
+      function applyData(raw) {
+        const data = normalizeData(raw);
+        if (!Array.isArray(data.results) || data.results.length === 0) {
+          throw new Error("结果数据为空");
+        }
+        window.__ctGridData = data;
+
+        const symbolSel = $("symbolSel");
+        const symbols = Array.from(
+          new Set(data.results.map((x) => String(x.symbol || "")).filter(Boolean)),
+        ).sort();
+        symbolSel.innerHTML = symbols.map((x) => `<option>${x}</option>`).join("");
+
+        const metricSel = $("metricSel");
+        metricSel.innerHTML = METRICS.map(
+          ([k, v]) => `<option value="${k}">${v}</option>`,
+        ).join("");
+
+        const objective = String(data?.meta?.objective?.metric || "");
+        if (objective && METRIC_LABEL[objective]) {
+          metricSel.value = objective;
+        } else {
+          metricSel.value = "sharpe_ratio";
+        }
+        refreshView();
+      }
+
+      function bindEvents() {
+        $("loadUrlBtn").addEventListener("click", async () => {
+          try {
+            const url = String($("dataUrl").value || "").trim();
+            if (!url) throw new Error("请输入 JSON URL");
+            await loadFromUrl(url);
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        $("fileInput").addEventListener("change", async (ev) => {
+          try {
+            const files = ev?.target?.files;
+            if (!files || files.length === 0) return;
+            const txt = await files[0].text();
+            const data = JSON.parse(txt);
+            applyData(data);
+            status(`已加载本地文件: ${files[0].name}`);
+          } catch (e) {
+            status(`读取本地文件失败: ${String(e)}`);
+          }
+        });
+        $("refreshBtn").addEventListener("click", () => {
+          try {
+            refreshView();
+            status("已刷新");
+          } catch (e) {
+            status(String(e));
+          }
+        });
+        ["symbolSel", "metricSel", "sortSel", "topN"].forEach((id) => {
+          $(id).addEventListener("change", () => {
+            try {
+              refreshView();
+            } catch (e) {
+              status(String(e));
+            }
+          });
+        });
+      }
+
+      function init() {
+        bindEvents();
+        loadFromUrl(String($("dataUrl").value || "")).catch((e) => {
+          status(`自动加载失败: ${String(e)}`);
+        });
+      }
+
+      window.addEventListener("DOMContentLoaded", init);
+    </script>
+  </body>
+</html>

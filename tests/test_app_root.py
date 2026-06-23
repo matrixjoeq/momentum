@@ -45,3 +45,10 @@ def test_static_shared_terminal_css(api_client: TestClient) -> None:
     assert resp.status_code == 200
     assert ":root" in resp.text
     assert "Noto Sans SC" in resp.text
+
+
+def test_static_calendar_timing_param_search_page(api_client: TestClient) -> None:
+    resp = api_client.get("/static/calendar_timing_param_search.html")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "日历效应择时参数搜索结果" in resp.text

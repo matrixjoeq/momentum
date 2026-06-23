@@ -352,6 +352,33 @@ class OffFundEvent(Base):
     )
 
 
+class OffFundRegressionFactorConfig(Base):
+    """
+    Saved factor configuration profiles for off-fund regression classification.
+    """
+
+    __tablename__ = "off_fund_regression_factor_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(128), unique=True, index=True, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    benchmark_profile: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="cn_stock_core"
+    )
+    benchmark_factors_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class FuturesPool(Base):
     """
     Futures candidate pool.
