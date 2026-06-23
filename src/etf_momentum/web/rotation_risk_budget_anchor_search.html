@@ -47,8 +47,7 @@
     <h2>轮动风险预算参数搜索（按 Top K + 调仓日）</h2>
     <div class="muted">
       扫描 `top_k=1..3`、`rebalance_anchor=1..5` 与
-      `risk_budget_pct=[0.1%,3.0%]`，按每个 K 的每个调仓日展示 Sharpe +
-      年化收益曲线，并标注最佳参数与稳健区间。
+      `risk_budget_pct=[0.1%,3.0%]`，按每个 K 的每个调仓日展示不同风险预算比例在“年化波动率-年化收益率”二维空间中的位置，并拟合有效前沿曲线。
     </div>
     <div class="muted" style="margin-top: 6px">
       <a href="/research">返回研究主页</a>
@@ -112,7 +111,7 @@
     </div>
 
     <div class="panel">
-      <h3 style="margin-top: 0">Sharpe/年化收益曲线（按 K 与调仓日）</h3>
+      <h3 style="margin-top: 0">有效前沿</h3>
       <div id="chartsWrap" class="charts-grid"></div>
     </div>
 
@@ -363,6 +362,79 @@
           head + (rows.join("") || `<tr><td colspan="6">暂无数据</td></tr>`);
       }
 
+      function solveLinearSystem(a, b) {
+        const n = a.length;
+        const mat = a.map((row, i) => row.slice().concat([b[i]]));
+        for (let col = 0; col < n; col++) {
+          let pivot = col;
+          let pivotAbs = Math.abs(mat[col][col] || 0);
+          for (let r = col + 1; r < n; r++) {
+            const v = Math.abs(mat[r][col] || 0);
+            if (v > pivotAbs) {
+              pivot = r;
+              pivotAbs = v;
+            }
+          }
+          if (pivotAbs < 1e-12) return null;
+          if (pivot !== col) {
+            const tmp = mat[col];
+            mat[col] = mat[pivot];
+            mat[pivot] = tmp;
+          }
+          const base = mat[col][col];
+          for (let c = col; c <= n; c++) mat[col][c] /= base;
+          for (let r = 0; r < n; r++) {
+            if (r === col) continue;
+            const factor = mat[r][col];
+            if (Math.abs(factor) < 1e-12) continue;
+            for (let c = col; c <= n; c++) mat[r][c] -= factor * mat[col][c];
+          }
+        }
+        return mat.map((row) => row[n]);
+      }
+
+      function fitPolynomial(xs, ys, degree) {
+        const n = xs.length;
+        const d = Math.min(Math.max(1, degree), n - 1);
+        const m = d + 1;
+        const a = Array.from({ length: m }, () => Array(m).fill(0));
+        const b = Array(m).fill(0);
+        for (let row = 0; row < m; row++) {
+          for (let col = 0; col < m; col++) {
+            let s = 0;
+            for (let i = 0; i < n; i++) s += xs[i] ** (row + col);
+            a[row][col] = s;
+          }
+          let sb = 0;
+          for (let i = 0; i < n; i++) sb += ys[i] * xs[i] ** row;
+          b[row] = sb;
+        }
+        return solveLinearSystem(a, b);
+      }
+
+      function evalPolynomial(coeffs, x) {
+        if (!Array.isArray(coeffs)) return null;
+        let y = 0;
+        for (let i = 0; i < coeffs.length; i++) y += coeffs[i] * x ** i;
+        return y;
+      }
+
+      function computeFrontierPoints(points) {
+        const sorted = points.slice().sort((a, b) => {
+          if (Math.abs(a.risk - b.risk) < 1e-12) return b.ret - a.ret;
+          return a.risk - b.risk;
+        });
+        const frontier = [];
+        let bestRet = -Infinity;
+        sorted.forEach((p) => {
+          if (p.ret > bestRet + 1e-12) {
+            frontier.push(p);
+            bestRet = p.ret;
+          }
+        });
+        return frontier;
+      }
+
       function renderOneAnchorChart(topK, anchor, rows, robustCfg) {
         const boxId = `chart-topk-${topK}-anchor-${anchor}`;
         const best = pickBestFromRows(rows);
@@ -372,102 +444,186 @@
           robustCfg.mddLimitPct,
         );
 
-        const x = rows.map((r) => Number(r.risk_budget_pct_percent));
-        const sharpe = rows.map((r) => metric(r, "sharpe_ratio"));
-        const ann = rows.map((r) => metric(r, "annualized_return"));
+        const points = rows
+          .filter((r) => String(r?.status || "") === "ok")
+          .map((r) => {
+            const risk = metric(r, "annualized_volatility");
+            const ret = metric(r, "annualized_return");
+            const budget = Number(r.risk_budget_pct_percent);
+            const sharpe = metric(r, "sharpe_ratio");
+            const mdd = metric(r, "max_drawdown");
+            if (
+              risk == null ||
+              ret == null ||
+              !Number.isFinite(risk) ||
+              !Number.isFinite(ret) ||
+              !Number.isFinite(budget)
+            ) {
+              return null;
+            }
+            return { risk, ret, budget, sharpe, mdd };
+          })
+          .filter(Boolean);
+
+        if (points.length === 0) {
+          Plotly.newPlot(
+            boxId,
+            [],
+            {
+              title: `Top K=${topK}，调仓日 周${anchor}：有效前沿`,
+              margin: { t: 48, r: 20, b: 56, l: 68 },
+              xaxis: { title: "年化波动率（风险）", tickformat: ".2%" },
+              yaxis: { title: "年化收益率", tickformat: ".2%" },
+              annotations: [
+                {
+                  text: "无可绘制数据",
+                  x: 0.5,
+                  y: 0.5,
+                  xref: "paper",
+                  yref: "paper",
+                  showarrow: false,
+                },
+              ],
+            },
+            { responsive: true },
+          );
+          return robustPack;
+        }
+
+        const frontier = computeFrontierPoints(points);
+        const frontierXs = frontier.map((p) => p.risk);
+        const frontierYs = frontier.map((p) => p.ret);
+        const coeffs =
+          frontier.length >= 2 ? fitPolynomial(frontierXs, frontierYs, 2) : null;
+        const fitX = [];
+        const fitY = [];
+        if (coeffs && frontier.length >= 2) {
+          const minX = Math.min(...frontierXs);
+          const maxX = Math.max(...frontierXs);
+          const n = 120;
+          for (let i = 0; i < n; i++) {
+            const x = minX + ((maxX - minX) * i) / (n - 1);
+            const y = evalPolynomial(coeffs, x);
+            if (Number.isFinite(y)) {
+              fitX.push(x);
+              fitY.push(y);
+            }
+          }
+        }
+
         const traces = [
           {
             type: "scatter",
-            mode: "lines+markers",
-            x,
-            y: sharpe,
-            name: `K=${topK} 周${anchor} Sharpe`,
-            yaxis: "y",
-            hovertemplate: "风险预算=%{x:.1f}%<br>Sharpe=%{y:.6f}<extra></extra>",
+            mode: "markers",
+            x: points.map((p) => p.risk),
+            y: points.map((p) => p.ret),
+            name: "参数点",
+            marker: {
+              size: 9,
+              color: points.map((p) => p.budget),
+              colorscale: "Viridis",
+              showscale: false,
+              line: { width: 0.5, color: "#1b2a3a" },
+            },
+            customdata: points.map((p) => [p.budget, p.sharpe, p.mdd]),
+            hovertemplate:
+              "风险预算=%{customdata[0]:.1f}%<br>年化波动率=%{x:.2%}<br>年化收益率=%{y:.2%}<br>Sharpe=%{customdata[1]:.4f}<br>最大回撤=%{customdata[2]:.2%}<extra></extra>",
           },
           {
             type: "scatter",
             mode: "lines+markers",
-            x,
-            y: ann,
-            name: `K=${topK} 周${anchor} 年化收益`,
-            yaxis: "y2",
+            x: frontierXs,
+            y: frontierYs,
+            name: "有效前沿（离散）",
+            marker: { size: 7, color: "#ff7f0e" },
+            line: { width: 2, color: "#ff7f0e" },
             hovertemplate:
-              "风险预算=%{x:.1f}%<br>年化收益=%{y:.2%}<extra></extra>",
+              "有效前沿点<br>年化波动率=%{x:.2%}<br>年化收益率=%{y:.2%}<extra></extra>",
           },
         ];
-        if (best) {
+        if (fitX.length > 0) {
           traces.push({
             type: "scatter",
-            mode: "markers",
-            x: [Number(best.risk_budget_pct_percent)],
-            y: [metric(best, "sharpe_ratio")],
-            name: "最佳参数",
-            marker: { size: 11, symbol: "star", color: "#ff7f0e" },
+            mode: "lines",
+            x: fitX,
+            y: fitY,
+            name: "有效前沿拟合曲线",
+            line: { width: 3, color: "#d62728", dash: "dash" },
             hovertemplate:
-              "最佳参数<br>风险预算=%{x:.1f}%<br>Sharpe=%{y:.6f}<extra></extra>",
+              "拟合前沿<br>年化波动率=%{x:.2%}<br>拟合年化收益率=%{y:.2%}<extra></extra>",
           });
+        }
+        if (best) {
+          const bestRisk = metric(best, "annualized_volatility");
+          const bestRet = metric(best, "annualized_return");
+          if (bestRisk != null && bestRet != null) {
+            traces.push({
+              type: "scatter",
+              mode: "markers",
+              x: [bestRisk],
+              y: [bestRet],
+              name: "最佳参数",
+              marker: { size: 11, symbol: "star", color: "#9467bd" },
+              hovertemplate:
+                "最佳参数<br>年化波动率=%{x:.2%}<br>年化收益率=%{y:.2%}<extra></extra>",
+            });
+          }
         }
         if (robustPack.robustRows.length > 0) {
-          traces.push({
-            type: "scatter",
-            mode: "markers",
-            x: robustPack.robustRows.map((r) => Number(r.risk_budget_pct_percent)),
-            y: robustPack.robustRows.map((r) => metric(r, "sharpe_ratio")),
-            name: "稳健候选",
-            marker: {
-              size: 9,
-              symbol: "diamond",
-              color: "#2ca02c",
-              line: { width: 1, color: "#145c2a" },
-            },
-            hovertemplate:
-              "稳健候选<br>风险预算=%{x:.1f}%<br>Sharpe=%{y:.6f}<extra></extra>",
-          });
+          const robustPts = robustPack.robustRows
+            .map((r) => ({
+              risk: metric(r, "annualized_volatility"),
+              ret: metric(r, "annualized_return"),
+              budget: Number(r.risk_budget_pct_percent),
+            }))
+            .filter(
+              (p) =>
+                p.risk != null &&
+                p.ret != null &&
+                Number.isFinite(p.risk) &&
+                Number.isFinite(p.ret),
+            );
+          if (robustPts.length > 0) {
+            traces.push({
+              type: "scatter",
+              mode: "markers",
+              x: robustPts.map((p) => p.risk),
+              y: robustPts.map((p) => p.ret),
+              name: "稳健候选",
+              marker: {
+                size: 9,
+                symbol: "diamond",
+                color: "#2ca02c",
+                line: { width: 1, color: "#145c2a" },
+              },
+              customdata: robustPts.map((p) => [p.budget]),
+              hovertemplate:
+                "稳健候选<br>风险预算=%{customdata[0]:.1f}%<br>年化波动率=%{x:.2%}<br>年化收益率=%{y:.2%}<extra></extra>",
+            });
+          }
         }
+
         const layout = {
-          title: `Top K=${topK}，调仓日 周${anchor}：风险预算 vs Sharpe/年化收益`,
-          margin: { t: 48, r: 74, b: 56, l: 68 },
-          xaxis: { title: "风险预算（%）" },
-          yaxis: { title: "Sharpe" },
-          yaxis2: {
-            title: "年化收益",
-            overlaying: "y",
-            side: "right",
-            tickformat: ".1%",
-          },
-          shapes: [],
+          title: `Top K=${topK}，调仓日 周${anchor}：有效前沿`,
+          margin: { t: 48, r: 20, b: 56, l: 68 },
+          xaxis: { title: "年化波动率（风险）", tickformat: ".2%" },
+          yaxis: { title: "年化收益率", tickformat: ".2%" },
           annotations: [],
           showlegend: true,
           legend: { orientation: "h" },
         };
-        if (robustPack.interval) {
-          let x0 = Number(robustPack.interval.minX);
-          let x1 = Number(robustPack.interval.maxX);
-          if (Math.abs(x1 - x0) < 1e-9) {
-            x0 -= 0.04;
-            x1 += 0.04;
-          }
-          layout.shapes.push({
-            type: "rect",
-            xref: "x",
-            yref: "paper",
-            x0,
-            x1,
-            y0: 0,
-            y1: 1,
-            fillcolor: "rgba(44, 160, 44, 0.14)",
-            line: { width: 0 },
-            layer: "below",
-          });
+        if (fitX.length > 0) {
+          const degree = Math.max(1, (coeffs || []).length - 1);
           layout.annotations.push({
-            x: (Number(robustPack.interval.minX) + Number(robustPack.interval.maxX)) / 2,
-            y: 1.03,
-            xref: "x",
+            x: 0.01,
+            y: 0.99,
+            xref: "paper",
             yref: "paper",
-            text: `稳健区间 ${fmtPctInput(robustPack.interval.minX, 1)} ~ ${fmtPctInput(robustPack.interval.maxX, 1)}`,
+            xanchor: "left",
+            yanchor: "top",
             showarrow: false,
-            font: { color: "#1f7a3f", size: 12 },
+            text: `前沿拟合: ${degree}次多项式`,
+            font: { size: 11, color: "#d62728" },
           });
         }
         Plotly.newPlot(boxId, traces, layout, { responsive: true });
