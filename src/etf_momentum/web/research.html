@@ -56,6 +56,7 @@
         #baselineDDCompare,
         #baselineRatioChart,
         #baseline40dDiffChart,
+        #baselineDcaChart,
         #baselineRollingCombo,
         #baselineExcessRollingCombo,
         #calTimingNavChart,
@@ -200,6 +201,38 @@
           <option value="IVOL">波动率倒数加权</option>
           <option value="CUSTOM">自定义</option>
         </select>
+      </div>
+      <div>
+        <label>投入方式</label>
+        <select id="baselineInvestMode">
+          <option value="lump_sum" selected>一次性买入（默认）</option>
+          <option value="dca">定投</option>
+        </select>
+      </div>
+      <div id="baselineDcaWrap" style="display: none">
+        <label>定投参数（底仓 / 频率 / 每期金额）</label>
+        <div class="row" style="gap: 8px; align-items: center">
+          <input
+            id="baselineDcaBaseAmount"
+            value="100000"
+            placeholder="底仓金额（首日）"
+            style="max-width: 160px"
+          />
+          <select id="baselineDcaFrequency" style="max-width: 120px">
+            <option value="daily">日投</option>
+            <option value="weekly">周投</option>
+            <option value="monthly" selected>月投</option>
+            <option value="quarterly">季投</option>
+            <option value="yearly">年投</option>
+            <option value="none">仅底仓</option>
+          </select>
+          <input
+            id="baselineDcaPeriodicAmount"
+            value="10000"
+            placeholder="每期定投金额"
+            style="max-width: 160px"
+          />
+        </div>
       </div>
       <div>
         <label>ERC / 波动率倒数 估计窗口（交易日）</label>
@@ -386,6 +419,15 @@
             style="width: 100%; height: 520px"
           ></div>
         </div>
+      </div>
+      <div class="panel" style="margin-top: 10px">
+        <h3 id="baselineTitleDca" style="margin: 0">
+          定投资金曲线（等权(EW)）
+        </h3>
+        <div
+          id="baselineDcaChart"
+          style="width: 100%; height: 360px; margin-top: 8px"
+        ></div>
       </div>
     </div>
 
@@ -7708,6 +7750,10 @@
             "rebalance",
             "baselineExecPrice",
             "baselineMode",
+            "baselineInvestMode",
+            "baselineDcaBaseAmount",
+            "baselineDcaFrequency",
+            "baselineDcaPeriodicAmount",
             "baselineRpWin",
             "baselineCustomWeights",
             "benchmark",
@@ -7761,6 +7807,10 @@
             "rebalance",
             "baselineExecPrice",
             "baselineMode",
+            "baselineInvestMode",
+            "baselineDcaBaseAmount",
+            "baselineDcaFrequency",
+            "baselineDcaPeriodicAmount",
             "baselineRpWin",
             "baselineCustomWeights",
             "benchmark",
@@ -7838,6 +7888,10 @@
           "rebalance",
           "baselineExecPrice",
           "baselineMode",
+          "baselineInvestMode",
+          "baselineDcaBaseAmount",
+          "baselineDcaFrequency",
+          "baselineDcaPeriodicAmount",
           "baselineRpWin",
           "baselineCustomWeights",
           "benchmark",
@@ -8790,6 +8844,56 @@
             <div><b>定义</b>：\\(R_{cum} = \\frac{NAV_T}{NAV_0} - 1\\)。</div>
             <div style="margin-top:8px"><b>说明</b>：这里 NAV 为等权组合净值（起点=1）。</div>
           `,
+        },
+        dca_enabled: {
+          title: "定投模式（dca_enabled）",
+          sub: "是否启用“首日底仓 + 固定频率固定金额”定投收益计算。",
+          body: `
+            <div><b>未启用</b>：沿用一次性买入并持有的指标口径。</div>
+            <div style="margin-top:8px"><b>启用</b>：在保留策略净值口径的同时，追加定投收益统计（累计/资金加权/时间加权）。</div>
+          `,
+        },
+        dca_frequency: {
+          title: "定投频率（dca_frequency）",
+          sub: "定投追加投入的频率。",
+          body: `
+            <div><b>支持</b>：daily / weekly / monthly / quarterly / yearly / none。</div>
+            <div style="margin-top:8px"><b>none</b>：只投入首日底仓，不做后续追加。</div>
+          `,
+        },
+        dca_cumulative_return: {
+          title: "定投累计收益率（dca_cumulative_return）",
+          sub: "按资金口径看，期末市值相对累计投入金额的收益率。",
+          body: `
+            <div><b>定义</b>：\\(R = \\frac{V_{end}}{\\sum CF_{in}} - 1\\)。</div>
+            <div style="margin-top:8px"><b>说明</b>：反映“投入多少钱，最终变成多少钱”的整体结果。</div>
+          `,
+        },
+        dca_money_weighted_return: {
+          title: "定投资金加权收益率（dca_money_weighted_return）",
+          sub: "考虑每笔资金投入时点的收益率（Money-Weighted Return）。",
+          body: `
+            <div><b>定义</b>：按现金流（每次投入为负、期末市值为正）求 IRR/XIRR，再换算为区间收益率。</div>
+            <div style="margin-top:8px"><b>特征</b>：对资金投入时点敏感，越早投入的资金权重越高。</div>
+          `,
+        },
+        dca_time_weighted_return: {
+          title: "定投时间加权收益率（dca_time_weighted_return）",
+          sub: "剔除现金流影响后的策略时间加权收益。",
+          body: `
+            <div><b>定义</b>：把每个子区间收益连乘，得到资金流中性（manager skill）口径的收益率。</div>
+            <div style="margin-top:8px"><b>特征</b>：更适合比较策略本身表现，不受投入节奏影响。</div>
+          `,
+        },
+        dca_total_invested: {
+          title: "定投累计投入金额（dca_total_invested）",
+          sub: "首日底仓与所有定投追加金额之和。",
+          body: `<div><b>定义</b>：\\(\\sum CF_{in}\\)。</div>`,
+        },
+        dca_final_value: {
+          title: "定投期末市值（dca_final_value）",
+          sub: "按策略收益路径滚动后的最终账户价值。",
+          body: `<div><b>定义</b>：最终账户净值对应的货币市值。</div>`,
         },
         annualized_return: {
           title: "年化收益率（annualized_return）",
@@ -15908,6 +16012,44 @@
             value: fmtPct(metrics.cumulative_return),
           },
           {
+            key: "dca_enabled",
+            label: "定投模式",
+            value: metrics.dca_enabled ? "启用" : "未启用",
+          },
+          {
+            key: "dca_frequency",
+            label: "定投频率",
+            value:
+              metrics.dca_enabled && metrics.dca_frequency
+                ? String(metrics.dca_frequency)
+                : "-",
+          },
+          {
+            key: "dca_cumulative_return",
+            label: "定投累计收益率",
+            value: fmtPct(metrics.dca_cumulative_return),
+          },
+          {
+            key: "dca_money_weighted_return",
+            label: "定投资金加权收益率",
+            value: fmtPct(metrics.dca_money_weighted_return),
+          },
+          {
+            key: "dca_time_weighted_return",
+            label: "定投时间加权收益率",
+            value: fmtPct(metrics.dca_time_weighted_return),
+          },
+          {
+            key: "dca_total_invested",
+            label: "定投累计投入金额",
+            value: fmtNum(metrics.dca_total_invested, 2),
+          },
+          {
+            key: "dca_final_value",
+            label: "定投期末市值",
+            value: fmtNum(metrics.dca_final_value, 2),
+          },
+          {
             key: "annualized_return",
             label: "年化收益率",
             value: fmtPct(metrics.annualized_return),
@@ -16845,6 +16987,74 @@
           { responsive: true },
         );
         _plotRollingCombo("baselineRollingCombo", stratNav, mode);
+        const _plotDcaCurve = () => {
+          const dcaBy = data && data.dca_by_portfolio ? data.dca_by_portfolio : {};
+          const dcaPack = dcaBy[mode] || data.dca || null;
+          const dcaEnabled = !!(dcaPack && dcaPack.enabled);
+          if (!dcaEnabled) {
+            _msg("baselineDcaChart", "未启用定投模式，切换为“定投”后可查看资金曲线。");
+            return;
+          }
+          const ds = (dcaPack && dcaPack.series) || {};
+          const dDates = Array.isArray(ds.dates) ? ds.dates : dates;
+          const invested = Array.isArray(ds.invested) ? ds.invested : [];
+          const account = Array.isArray(ds.account_value) ? ds.account_value : [];
+          if (
+            dDates.length === 0 ||
+            invested.length !== dDates.length ||
+            account.length !== dDates.length
+          ) {
+            _msg("baselineDcaChart", "定投曲线数据不可用。");
+            return;
+          }
+          const pnl = account.map((v, i) => {
+            const a = Number(v);
+            const b = Number(invested[i]);
+            if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+            return a - b;
+          });
+          Plotly.newPlot(
+            "baselineDcaChart",
+            [
+              {
+                x: dDates,
+                y: invested,
+                mode: "lines",
+                name: "累计投入",
+                line: { color: "rgba(31,119,180,0.9)", width: 1.8 },
+                hovertemplate: "%{x}<br>累计投入=%{y:,.2f}<extra></extra>",
+              },
+              {
+                x: dDates,
+                y: account,
+                mode: "lines",
+                name: "账户市值",
+                line: { color: "rgba(214,39,40,0.9)", width: 2.0 },
+                hovertemplate: "%{x}<br>账户市值=%{y:,.2f}<extra></extra>",
+              },
+              {
+                x: dDates,
+                y: pnl,
+                mode: "lines",
+                name: "投入收益差",
+                line: { color: "rgba(107,114,128,0.95)", width: 1.8, dash: "dot" },
+                hovertemplate: "%{x}<br>投入收益差=%{y:,.2f}<extra></extra>",
+              },
+            ],
+            {
+              margin: { t: 10, b: 40 },
+              legend: { orientation: "h" },
+              yaxis: {
+                tickformat: ",.0f",
+                zeroline: true,
+                zerolinecolor: "#bbb",
+                gridcolor: "#eee",
+              },
+            },
+            { responsive: true },
+          );
+        };
+        _plotDcaCurve();
         if (!hasBench) {
           _msg(
             "baselineRatioChart",
@@ -17056,6 +17266,8 @@
         if ($("baselineTitleExRolling"))
           $("baselineTitleExRolling").textContent =
             `${label}超额滚动收益&回撤（6个月/1年/2年/3年）`;
+        if ($("baselineTitleDca"))
+          $("baselineTitleDca").textContent = `定投资金曲线（${label}）`;
       }
 
       function plotRolling(id, title, rollingMap, yTickFormat) {
@@ -34135,6 +34347,58 @@
             : "close";
         if (!["open", "close", "oc2"].includes(exec_price))
           return setMsg("成交价口径仅支持 open/close/oc2");
+        const baseline_invest_mode =
+          $("baselineInvestMode") && $("baselineInvestMode").value
+            ? String($("baselineInvestMode").value).trim().toLowerCase()
+            : "lump_sum";
+        const dca_enabled = baseline_invest_mode === "dca";
+        let dca_base_amount = Number(
+          (
+            ($("baselineDcaBaseAmount") && $("baselineDcaBaseAmount").value) ||
+            "100000"
+          ).trim(),
+        );
+        let dca_periodic_amount = Number(
+          (
+            ($("baselineDcaPeriodicAmount") &&
+              $("baselineDcaPeriodicAmount").value) ||
+            "10000"
+          ).trim(),
+        );
+        let dca_frequency =
+          $("baselineDcaFrequency") && $("baselineDcaFrequency").value
+            ? String($("baselineDcaFrequency").value).trim().toLowerCase()
+            : "monthly";
+        if (!dca_enabled) {
+          dca_base_amount = 100000.0;
+          dca_periodic_amount = 10000.0;
+          dca_frequency = "monthly";
+        }
+        if (dca_enabled) {
+          if (!(Number.isFinite(dca_base_amount) && dca_base_amount > 0))
+            return setMsg("定投底仓金额必须是大于0的数字。");
+          if (
+            !(
+              Number.isFinite(dca_periodic_amount) &&
+              dca_periodic_amount >= 0
+            )
+          )
+            return setMsg("定投每期金额必须是大于等于0的数字。");
+          if (
+            ![
+              "none",
+              "daily",
+              "weekly",
+              "monthly",
+              "quarterly",
+              "yearly",
+            ].includes(dca_frequency)
+          ) {
+            return setMsg(
+              "定投频率仅支持 none/daily/weekly/monthly/quarterly/yearly",
+            );
+          }
+        }
         $("status").textContent = "计算中...";
         setMsg("");
         const resp = await api("/analysis/baseline", {
@@ -34155,6 +34419,10 @@
             custom_weights,
             dynamic_universe,
             corr_min_obs,
+            dca_enabled,
+            dca_base_amount,
+            dca_periodic_amount,
+            dca_frequency,
           }),
         });
         const text = await resp.text();
@@ -34179,6 +34447,10 @@
           custom_weights,
           dynamic_universe,
           corr_min_obs,
+          dca_enabled,
+          dca_base_amount,
+          dca_periodic_amount,
+          dca_frequency,
         };
         // Save last baseline payload for distribution re-fetch (with different adjust).
         window.__distBaselinePayload = {
@@ -34193,6 +34465,10 @@
           fft_roll_step,
           dynamic_universe,
           corr_min_obs,
+          dca_enabled,
+          dca_base_amount,
+          dca_periodic_amount,
+          dca_frequency,
         };
         window.__distBaselineCache = window.__distBaselineCache || {};
         window.__distBaselineCache[ADJUST_USED] = data;
@@ -34241,6 +34517,10 @@
         const benchName = benchmark_code
           ? codeLabel(benchmark_code)
           : "未设置基准";
+        const dcaReportLine =
+          picked && picked.metrics && picked.metrics.dca_enabled
+            ? `定投：累计收益 ${fmtPct((picked.metrics || {}).dca_cumulative_return)}，资金加权收益 ${fmtPct((picked.metrics || {}).dca_money_weighted_return)}，时间加权收益 ${fmtPct((picked.metrics || {}).dca_time_weighted_return)}。`
+            : "投入方式：一次性买入（未启用定投模式）。";
         setReport(
           "基线分析报告式解读",
           [
@@ -34249,6 +34529,7 @@
               picked.metrics || {},
             ),
             `基准：${benchName}。信息比率 ${fmtNum((picked.metrics || {}).information_ratio)}，溃疡绩效(UPI) ${fmtNum((picked.metrics || {}).ulcer_performance_index)}。`,
+            dcaReportLine,
           ],
           "说明：建议结合滚动收益/滚动回撤与相关性变化共同判断稳健性。",
         );
@@ -34261,6 +34542,7 @@
               picked.metrics || {},
             ),
             `基准：${benchName}。信息比率 ${fmtNum((picked.metrics || {}).information_ratio)}，溃疡绩效(UPI) ${fmtNum((picked.metrics || {}).ulcer_performance_index)}。`,
+            dcaReportLine,
           ],
           "说明：建议结合滚动收益/滚动回撤与相关性变化共同判断稳健性。",
         );
@@ -34273,11 +34555,26 @@
             ? String($("baselineMode").value)
             : "EW"
         ).toUpperCase();
+        const investMode = (
+          $("baselineInvestMode") && $("baselineInvestMode").value
+            ? String($("baselineInvestMode").value)
+            : "lump_sum"
+        ).toLowerCase();
+        const dcaOn = investMode === "dca";
         if ($("baselineRpWin"))
           $("baselineRpWin").disabled = mode !== "RP" && mode !== "IVOL";
         if ($("baselineCustomWeightsWrap"))
           $("baselineCustomWeightsWrap").style.display =
             mode === "CUSTOM" ? "" : "none";
+        if ($("baselineDcaWrap"))
+          $("baselineDcaWrap").style.display = dcaOn ? "" : "none";
+        for (const id of [
+          "baselineDcaBaseAmount",
+          "baselineDcaFrequency",
+          "baselineDcaPeriodicAmount",
+        ]) {
+          if ($(id)) $(id).disabled = !dcaOn;
+        }
       }
       if ($("baselineMode"))
         $("baselineMode").addEventListener("change", () => {
@@ -34294,6 +34591,10 @@
           renderMetrics(metrics);
           renderBaselineDailyReturnDist(lastBaseline, mode);
           renderContributionTables("ew", attribution);
+        });
+      if ($("baselineInvestMode"))
+        $("baselineInvestMode").addEventListener("change", () => {
+          updateBaselineHoldingUi();
         });
       if ($("baselineDailyRetSeries"))
         $("baselineDailyRetSeries").addEventListener("change", () => {

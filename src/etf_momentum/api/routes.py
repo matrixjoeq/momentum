@@ -1572,6 +1572,12 @@ def baseline_analysis(
         dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),
         corr_min_obs=int(getattr(payload, "corr_min_obs", 60) or 60),
         exec_price=str(getattr(payload, "exec_price", "close") or "close"),
+        dca_enabled=bool(getattr(payload, "dca_enabled", False)),
+        dca_base_amount=float(getattr(payload, "dca_base_amount", 100000.0) or 0.0),
+        dca_periodic_amount=float(
+            getattr(payload, "dca_periodic_amount", 10000.0) or 0.0
+        ),
+        dca_frequency=str(getattr(payload, "dca_frequency", "monthly") or "monthly"),
         lppl_enabled=bool(getattr(payload, "lppl_enabled", False)),
         lppl_lookback_days=int(getattr(payload, "lppl_lookback_days", 504) or 504),
         lppl_min_points=int(getattr(payload, "lppl_min_points", 120) or 120),

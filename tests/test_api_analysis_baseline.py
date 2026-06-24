@@ -247,6 +247,65 @@ def test_api_baseline_analysis_happy_path(api_client):
     assert data["nav_rsi"]["windows"] == [14]
 
 
+def test_api_baseline_analysis_accepts_dca_payload(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240112",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/baseline",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240112",
+            "benchmark_code": "510300",
+            "adjust": "hfq",
+            "rebalance": "weekly",
+            "exec_price": "close",
+            "holding_mode": "EW",
+            "dca_enabled": True,
+            "dca_base_amount": 100000.0,
+            "dca_periodic_amount": 20000.0,
+            "dca_frequency": "weekly",
+        },
+    )
+    data_off = post_json_ok(
+        c,
+        "/api/analysis/baseline",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240112",
+            "benchmark_code": "510300",
+            "adjust": "hfq",
+            "rebalance": "weekly",
+            "exec_price": "close",
+            "holding_mode": "EW",
+            "dca_enabled": False,
+        },
+    )
+    m = data.get("metrics") or {}
+    m_off = data_off.get("metrics") or {}
+    assert bool(m.get("dca_enabled")) is True
+    assert str(m.get("dca_frequency") or "") == "weekly"
+    assert m.get("dca_total_invested") is not None
+    assert m.get("dca_final_value") is not None
+    assert m.get("dca_cumulative_return") is not None
+    assert m.get("dca_money_weighted_return") is not None
+    assert m.get("dca_time_weighted_return") is not None
+    assert "dca" in data
+    assert "dca_by_portfolio" in data
+    assert "EW" in (data.get("dca_by_portfolio") or {})
+    assert float(m.get("avg_annual_turnover") or 0.0) > float(
+        m_off.get("avg_annual_turnover") or 0.0
+    )
+
+
 def test_api_baseline_analysis_lppl_contract(api_client):
     c = api_client
     engine = c.app.state.engine

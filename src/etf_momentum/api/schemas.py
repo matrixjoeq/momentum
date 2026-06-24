@@ -883,6 +883,26 @@ class BaselineAnalysisRequest(BaseModel):
         default="close",
         description="等权组合成交价口径: open=执行日开盘价, close=执行日收盘价, oc2=OC均价",
     )
+    dca_enabled: bool = Field(
+        default=False,
+        description="Enable fixed-amount DCA mode for holding strategy returns.",
+    )
+    dca_base_amount: float = Field(
+        default=100000.0,
+        gt=0.0,
+        description="Base position amount invested on the first trading day when DCA is enabled.",
+    )
+    dca_periodic_amount: float = Field(
+        default=10000.0,
+        ge=0.0,
+        description="Periodic DCA amount invested on each scheduled contribution date.",
+    )
+    dca_frequency: Literal[
+        "none", "daily", "weekly", "monthly", "quarterly", "yearly"
+    ] = Field(
+        default="monthly",
+        description="Periodic DCA frequency. 'none' means only the first-day base amount.",
+    )
     lppl_enabled: bool = Field(
         default=False,
         description="Enable LPPL crash prediction block in period_distributions.daily_lppl",
