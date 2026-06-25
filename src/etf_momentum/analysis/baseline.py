@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.optimize import brentq
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -83,6 +84,11 @@ class BaselineInputs:
     corr_min_obs: int = 20
     # 等权/风平组合成交价口径: open=执行日开盘价, close=执行日收盘价, oc2=OC均价
     exec_price: str = "close"
+    # 定投参数：enabled=False 时沿用一次性买入（当前默认行为）
+    dca_enabled: bool = False
+    dca_base_amount: float = 100000.0
+    dca_periodic_amount: float = 10000.0
+    dca_frequency: str = "monthly"  # daily/weekly/monthly/quarterly/yearly/none
     # LPPL crash prediction block (distribution panel)
     lppl_enabled: bool = False
     lppl_lookback_days: int = 504
@@ -719,6 +725,213 @@ def _information_ratio(
     if (not np.isfinite(std)) or abs(float(std)) <= 1e-12:
         return float("nan")
     return float(active_daily.mean() / std * np.sqrt(ann_factor))
+
+
+def _build_dca_contribution_series(
+    index: pd.DatetimeIndex,
+    *,
+    base_amount: float,
+    periodic_amount: float,
+    frequency: str,
+) -> pd.Series:
+    idx = pd.DatetimeIndex(index)
+    out = pd.Series(0.0, index=idx, dtype=float)
+    if len(idx) == 0:
+        return out
+    out.iloc[0] = float(base_amount)
+    per_amt = float(periodic_amount)
+    if per_amt <= 0.0:
+        return out
+    freq = str(frequency or "monthly").strip().lower()
+    if freq == "none":
+        return out
+    if freq == "daily":
+        if len(out) > 1:
+            out.iloc[1:] = out.iloc[1:] + per_amt
+        return out
+    labels = _rebalance_labels(idx, freq, weekly_anchor="FRI")
+    prev = labels[0]
+    for i in range(1, len(idx)):
+        cur = labels[i]
+        if cur != prev:
+            out.iloc[i] = out.iloc[i] + per_amt
+        prev = cur
+    return out
+
+
+def _xirr_annualized_from_cashflows(
+    dates: list[pd.Timestamp], cashflows: list[float]
+) -> float:
+    if len(dates) != len(cashflows) or len(dates) < 2:
+        return float("nan")
+    vals = np.asarray(cashflows, dtype=float)
+    if not (np.any(vals > 0.0) and np.any(vals < 0.0)):
+        return float("nan")
+    base_date = min(dates)
+    years = np.asarray(
+        [max(0.0, (pd.Timestamp(d) - base_date).days / 365.2425) for d in dates],
+        dtype=float,
+    )
+
+    def _npv(rate: float) -> float:
+        if (not np.isfinite(rate)) or rate <= -0.999999:
+            return float("nan")
+        try:
+            den = np.power(1.0 + float(rate), years)
+            if np.any(~np.isfinite(den)) or np.any(den == 0.0):
+                return float("nan")
+            out = float(np.sum(vals / den))
+            return out if np.isfinite(out) else float("nan")
+        except Exception:
+            return float("nan")
+
+    lo = -0.9999
+    hi = 0.10
+    f_lo = _npv(lo)
+    f_hi = _npv(hi)
+    # Expand upper bound until we bracket a root.
+    for _ in range(40):
+        if np.isfinite(f_lo) and np.isfinite(f_hi) and (f_lo * f_hi <= 0.0):
+            break
+        hi = hi * 2.0 + 0.10
+        f_hi = _npv(hi)
+    else:
+        return float("nan")
+    try:
+        return float(brentq(_npv, lo, hi, xtol=1e-12, maxiter=200))
+    except Exception:
+        return float("nan")
+
+
+def _compute_dca_from_nav(
+    nav_s: pd.Series,
+    *,
+    enabled: bool,
+    base_amount: float,
+    periodic_amount: float,
+    frequency: str,
+) -> dict[str, Any]:
+    idx = pd.DatetimeIndex(nav_s.index)
+    if len(idx) == 0:
+        return {
+            "enabled": bool(enabled),
+            "config": {
+                "base_amount": float(base_amount),
+                "periodic_amount": float(periodic_amount),
+                "frequency": str(frequency),
+            },
+            "series": {
+                "dates": [],
+                "contribution": [],
+                "invested": [],
+                "account_value": [],
+            },
+            "metrics": {
+                "dca_total_invested": None,
+                "dca_final_value": None,
+                "dca_cumulative_return": None,
+                "dca_money_weighted_return": None,
+                "dca_money_weighted_annualized_return": None,
+                "dca_time_weighted_return": None,
+            },
+        }
+    if not bool(enabled):
+        return {
+            "enabled": False,
+            "config": {
+                "base_amount": float(base_amount),
+                "periodic_amount": float(periodic_amount),
+                "frequency": str(frequency),
+            },
+            "series": {
+                "dates": idx.strftime("%Y-%m-%d").tolist(),
+                "contribution": [0.0 for _ in range(len(idx))],
+                "invested": [0.0 for _ in range(len(idx))],
+                "account_value": [0.0 for _ in range(len(idx))],
+            },
+            "metrics": {
+                "dca_total_invested": None,
+                "dca_final_value": None,
+                "dca_cumulative_return": None,
+                "dca_money_weighted_return": None,
+                "dca_money_weighted_annualized_return": None,
+                "dca_time_weighted_return": None,
+            },
+        }
+    contrib = _build_dca_contribution_series(
+        idx,
+        base_amount=float(base_amount),
+        periodic_amount=float(periodic_amount),
+        frequency=str(frequency),
+    )
+    ret = (
+        pd.to_numeric(nav_s, errors="coerce")
+        .astype(float)
+        .pct_change()
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype(float)
+    )
+    account_vals: list[float] = []
+    invested_vals: list[float] = []
+    account = 0.0
+    invested = 0.0
+    for i in range(len(idx)):
+        c = float(contrib.iloc[i])
+        r = float(ret.iloc[i]) if np.isfinite(float(ret.iloc[i])) else 0.0
+        invested += c
+        account = (account + c) * (1.0 + r)
+        invested_vals.append(float(invested))
+        account_vals.append(float(account))
+    total_invested = float(invested_vals[-1]) if invested_vals else 0.0
+    final_value = float(account_vals[-1]) if account_vals else 0.0
+    cum_ret = (
+        float(final_value / total_invested - 1.0)
+        if total_invested > 0.0
+        else float("nan")
+    )
+    twr = float(np.prod(1.0 + ret.to_numpy(dtype=float)) - 1.0)
+    cf_dates: list[pd.Timestamp] = []
+    cf_vals: list[float] = []
+    for i, d in enumerate(idx):
+        c = float(contrib.iloc[i])
+        if c > 0.0:
+            cf_dates.append(pd.Timestamp(d))
+            cf_vals.append(-c)
+    if account_vals:
+        cf_dates.append(pd.Timestamp(idx[-1]))
+        cf_vals.append(float(account_vals[-1]))
+    mwr_ann = _xirr_annualized_from_cashflows(cf_dates, cf_vals)
+    span_years = max(0.0, (idx[-1] - idx[0]).days / 365.2425)
+    if np.isfinite(mwr_ann):
+        if span_years > 0.0:
+            mwr = float((1.0 + mwr_ann) ** span_years - 1.0)
+        else:
+            mwr = float(cum_ret) if np.isfinite(cum_ret) else float("nan")
+    else:
+        mwr = float("nan")
+    return {
+        "enabled": True,
+        "config": {
+            "base_amount": float(base_amount),
+            "periodic_amount": float(periodic_amount),
+            "frequency": str(frequency),
+        },
+        "series": {
+            "dates": idx.strftime("%Y-%m-%d").tolist(),
+            "contribution": contrib.astype(float).tolist(),
+            "invested": [float(x) for x in invested_vals],
+            "account_value": [float(x) for x in account_vals],
+        },
+        "metrics": {
+            "dca_total_invested": float(total_invested),
+            "dca_final_value": float(final_value),
+            "dca_cumulative_return": float(cum_ret),
+            "dca_money_weighted_return": float(mwr),
+            "dca_money_weighted_annualized_return": float(mwr_ann),
+            "dca_time_weighted_return": float(twr),
+        },
+    }
 
 
 def _rolling_max_drawdown(nav: pd.Series, window: int) -> pd.Series:
@@ -3435,6 +3648,30 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     mode = str(getattr(inp, "holding_mode", "EW") or "EW").strip().upper()
     if mode not in {"EW", "RP", "IVOL", "CUSTOM"}:
         raise ValueError("holding_mode must be one of: EW|RP|IVOL|CUSTOM")
+    dca_enabled = bool(getattr(inp, "dca_enabled", False))
+    dca_base_amount = float(getattr(inp, "dca_base_amount", 100000.0) or 0.0)
+    dca_periodic_amount = float(
+        getattr(inp, "dca_periodic_amount", 10000.0) or 0.0
+    )
+    dca_frequency = str(getattr(inp, "dca_frequency", "monthly") or "monthly")
+    dca_frequency = dca_frequency.strip().lower()
+    if dca_frequency not in {
+        "none",
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+    }:
+        raise ValueError(
+            "dca_frequency must be one of: none|daily|weekly|monthly|quarterly|yearly"
+        )
+    if dca_enabled and (not np.isfinite(dca_base_amount) or dca_base_amount <= 0.0):
+        raise ValueError("dca_base_amount must be > 0 when dca_enabled=true")
+    if dca_enabled and (
+        (not np.isfinite(dca_periodic_amount)) or dca_periodic_amount < 0.0
+    ):
+        raise ValueError("dca_periodic_amount must be >= 0 when dca_enabled=true")
     cw_raw = dict(getattr(inp, "custom_weights", None) or {})
     cw = pd.Series(0.0, index=codes_eff, dtype=float)
     for k, v in cw_raw.items():
@@ -3510,27 +3747,100 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         )
 
     nav_by_mode = {"EW": ew_nav, "RP": rp_nav, "IVOL": ivol_nav, "CUSTOM": custom_nav}
-    selected_nav = nav_by_mode.get(mode, ew_nav)
+    dca_by_portfolio = {
+        key: _compute_dca_from_nav(
+            nav_s,
+            enabled=dca_enabled,
+            base_amount=dca_base_amount,
+            periodic_amount=dca_periodic_amount,
+            frequency=dca_frequency,
+        )
+        for key, nav_s in nav_by_mode.items()
+    }
+    dca = dca_by_portfolio.get(mode, dca_by_portfolio.get("EW", {}))
+    idx_common = pd.DatetimeIndex(ret_common.index)
+
+    def _dca_series_to_pd(dca_pack: dict[str, Any], key: str) -> pd.Series:
+        vals = ((dca_pack.get("series") or {}).get(key) or []) if dca_pack else []
+        if len(vals) != len(idx_common):
+            return pd.Series(np.nan, index=idx_common, dtype=float)
+        s = pd.to_numeric(pd.Series(vals, index=idx_common), errors="coerce").astype(float)
+        return s.replace([np.inf, -np.inf], np.nan)
+
+    dca_account_nav_by_portfolio = {
+        key: _dca_series_to_pd(dca_pack, "account_value")
+        for key, dca_pack in dca_by_portfolio.items()
+    }
+    dca_contribution_by_portfolio = {
+        key: _dca_series_to_pd(dca_pack, "contribution").fillna(0.0)
+        for key, dca_pack in dca_by_portfolio.items()
+    }
+    perf_nav_by_portfolio: dict[str, pd.Series] = {}
+    for key, strat_nav in nav_by_mode.items():
+        if not dca_enabled:
+            perf_nav_by_portfolio[key] = strat_nav.astype(float)
+            continue
+        dca_nav = dca_account_nav_by_portfolio.get(key)
+        if (
+            dca_nav is None
+            or dca_nav.empty
+            or dca_nav.isna().any()
+            or (dca_nav <= 0.0).any()
+        ):
+            perf_nav_by_portfolio[key] = strat_nav.astype(float)
+            continue
+        perf_nav_by_portfolio[key] = dca_nav.astype(float)
+    perf_ret_by_portfolio = {
+        key: (
+            nav_s.pct_change()
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(float)
+        )
+        for key, nav_s in perf_nav_by_portfolio.items()
+    }
+    bench_perf_ret = bench_ret.fillna(0.0).astype(float)
+    if dca_enabled:
+        bench_dca = _compute_dca_from_nav(
+            bench_nav,
+            enabled=True,
+            base_amount=dca_base_amount,
+            periodic_amount=dca_periodic_amount,
+            frequency=dca_frequency,
+        )
+        bench_dca_nav = _dca_series_to_pd(bench_dca, "account_value")
+        if (
+            (not bench_dca_nav.empty)
+            and (not bench_dca_nav.isna().any())
+            and (not (bench_dca_nav <= 0.0).any())
+        ):
+            bench_perf_ret = (
+                bench_dca_nav.pct_change()
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .astype(float)
+            )
+    selected_nav = perf_nav_by_portfolio.get(mode, perf_nav_by_portfolio.get("EW", ew_nav))
     weekly = period_returns(selected_nav, "W-FRI")
     monthly = period_returns(selected_nav, "ME")
     quarterly = period_returns(selected_nav, "QE")
     yearly = period_returns(selected_nav, "YE")
-    weekly_ew = period_returns(ew_nav, "W-FRI")
-    monthly_ew = period_returns(ew_nav, "ME")
-    quarterly_ew = period_returns(ew_nav, "QE")
-    yearly_ew = period_returns(ew_nav, "YE")
-    weekly_rp = period_returns(rp_nav, "W-FRI")
-    monthly_rp = period_returns(rp_nav, "ME")
-    quarterly_rp = period_returns(rp_nav, "QE")
-    yearly_rp = period_returns(rp_nav, "YE")
-    weekly_ivol = period_returns(ivol_nav, "W-FRI")
-    monthly_ivol = period_returns(ivol_nav, "ME")
-    quarterly_ivol = period_returns(ivol_nav, "QE")
-    yearly_ivol = period_returns(ivol_nav, "YE")
-    weekly_custom = period_returns(custom_nav, "W-FRI")
-    monthly_custom = period_returns(custom_nav, "ME")
-    quarterly_custom = period_returns(custom_nav, "QE")
-    yearly_custom = period_returns(custom_nav, "YE")
+    weekly_ew = period_returns(perf_nav_by_portfolio["EW"], "W-FRI")
+    monthly_ew = period_returns(perf_nav_by_portfolio["EW"], "ME")
+    quarterly_ew = period_returns(perf_nav_by_portfolio["EW"], "QE")
+    yearly_ew = period_returns(perf_nav_by_portfolio["EW"], "YE")
+    weekly_rp = period_returns(perf_nav_by_portfolio["RP"], "W-FRI")
+    monthly_rp = period_returns(perf_nav_by_portfolio["RP"], "ME")
+    quarterly_rp = period_returns(perf_nav_by_portfolio["RP"], "QE")
+    yearly_rp = period_returns(perf_nav_by_portfolio["RP"], "YE")
+    weekly_ivol = period_returns(perf_nav_by_portfolio["IVOL"], "W-FRI")
+    monthly_ivol = period_returns(perf_nav_by_portfolio["IVOL"], "ME")
+    quarterly_ivol = period_returns(perf_nav_by_portfolio["IVOL"], "QE")
+    yearly_ivol = period_returns(perf_nav_by_portfolio["IVOL"], "YE")
+    weekly_custom = period_returns(perf_nav_by_portfolio["CUSTOM"], "W-FRI")
+    monthly_custom = period_returns(perf_nav_by_portfolio["CUSTOM"], "ME")
+    quarterly_custom = period_returns(perf_nav_by_portfolio["CUSTOM"], "QE")
+    yearly_custom = period_returns(perf_nav_by_portfolio["CUSTOM"], "YE")
 
     def _win_payoff_kelly(df: pd.DataFrame) -> dict[str, float]:
         r = (
@@ -3581,6 +3891,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         nav_s: pd.Series,
         nav_ret: pd.Series,
         *,
+        bench_ret_s: pd.Series,
         wp_w: dict[str, float],
         wp_m: dict[str, float],
         wp_q: dict[str, float],
@@ -3594,7 +3905,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         sharpe = _sharpe(nav_ret, rf=float(inp.risk_free_rate))
         calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
         sortino = _sortino(nav_ret, rf=float(inp.risk_free_rate))
-        ir = _information_ratio(nav_ret - bench_ret.fillna(0.0))
+        ir = _information_ratio(nav_ret - bench_ret_s.reindex(nav_ret.index).fillna(0.0))
         ui = _ulcer_index(nav_s, in_percent=True)
         ui_den = ui / 100.0
         upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
@@ -3627,7 +3938,12 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             "holding_yearly_kelly_fraction": wp_y["kelly_fraction"],
         }
 
-    def _trade_freq_from_weights(weight_df: pd.DataFrame) -> dict[str, float]:
+    def _trade_freq_from_weights(
+        weight_df: pd.DataFrame,
+        *,
+        account_nav: pd.Series | None = None,
+        contribution: pd.Series | None = None,
+    ) -> dict[str, float]:
         if weight_df is None or weight_df.empty:
             return {
                 "avg_daily_turnover": 0.0,
@@ -3641,9 +3957,35 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             .astype(float)
             .fillna(0.0)
         )
-        daily_turnover = (
+        daily_rebalance_turnover = (
             (w_aligned - w_aligned.shift(1).fillna(0.0)).abs().sum(axis=1) / 2.0
         ).astype(float)
+        if account_nav is None:
+            daily_turnover = daily_rebalance_turnover
+        else:
+            nav_s = pd.to_numeric(
+                account_nav.reindex(ret_common.index), errors="coerce"
+            ).astype(float)
+            nav_prev = nav_s.shift(1)
+            if len(nav_prev) > 0:
+                nav_prev.iloc[0] = 0.0
+            contrib_s = (
+                pd.to_numeric(
+                    contribution.reindex(ret_common.index), errors="coerce"
+                ).astype(float)
+                if contribution is not None
+                else pd.Series(0.0, index=ret_common.index, dtype=float)
+            )
+            contrib_s = contrib_s.fillna(0.0).clip(lower=0.0)
+            gross_cap = (nav_prev + contrib_s).replace([np.inf, -np.inf], np.nan)
+            dca_buy_turnover = pd.Series(0.0, index=ret_common.index, dtype=float)
+            valid = gross_cap > 0.0
+            dca_buy_turnover.loc[valid] = (
+                contrib_s.loc[valid] / gross_cap.loc[valid]
+            ).astype(float)
+            daily_turnover = (daily_rebalance_turnover + dca_buy_turnover).astype(
+                float
+            )
         avg_daily_turnover = (
             float(daily_turnover.mean()) if len(daily_turnover) else 0.0
         )
@@ -3665,41 +4007,114 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         }
 
     metrics_ew = _metrics_from_nav(
-        ew_nav,
-        ew_ret,
+        perf_nav_by_portfolio["EW"],
+        perf_ret_by_portfolio["EW"],
         wp_w=weekly_wp,
         wp_m=monthly_wp,
         wp_q=quarterly_wp,
         wp_y=yearly_wp,
+        bench_ret_s=bench_perf_ret,
     )
     metrics_rp = _metrics_from_nav(
-        rp_nav,
-        rp_ret,
+        perf_nav_by_portfolio["RP"],
+        perf_ret_by_portfolio["RP"],
         wp_w=weekly_wp_rp,
         wp_m=monthly_wp_rp,
         wp_q=quarterly_wp_rp,
         wp_y=yearly_wp_rp,
+        bench_ret_s=bench_perf_ret,
     )
     metrics_ivol = _metrics_from_nav(
-        ivol_nav,
-        ivol_ret,
+        perf_nav_by_portfolio["IVOL"],
+        perf_ret_by_portfolio["IVOL"],
         wp_w=weekly_wp_ivol,
         wp_m=monthly_wp_ivol,
         wp_q=quarterly_wp_ivol,
         wp_y=yearly_wp_ivol,
+        bench_ret_s=bench_perf_ret,
     )
     metrics_custom = _metrics_from_nav(
-        custom_nav,
-        custom_ret,
+        perf_nav_by_portfolio["CUSTOM"],
+        perf_ret_by_portfolio["CUSTOM"],
         wp_w=weekly_wp_custom,
         wp_m=monthly_wp_custom,
         wp_q=quarterly_wp_custom,
         wp_y=yearly_wp_custom,
+        bench_ret_s=bench_perf_ret,
     )
-    metrics_ew.update(_trade_freq_from_weights(ew_w))
-    metrics_rp.update(_trade_freq_from_weights(rp_w))
-    metrics_ivol.update(_trade_freq_from_weights(ivol_w))
-    metrics_custom.update(_trade_freq_from_weights(custom_w))
+    metrics_ew.update(
+        _trade_freq_from_weights(
+            ew_w,
+            account_nav=(perf_nav_by_portfolio["EW"] if dca_enabled else None),
+            contribution=(
+                dca_contribution_by_portfolio.get("EW") if dca_enabled else None
+            ),
+        )
+    )
+    metrics_rp.update(
+        _trade_freq_from_weights(
+            rp_w,
+            account_nav=(perf_nav_by_portfolio["RP"] if dca_enabled else None),
+            contribution=(
+                dca_contribution_by_portfolio.get("RP") if dca_enabled else None
+            ),
+        )
+    )
+    metrics_ivol.update(
+        _trade_freq_from_weights(
+            ivol_w,
+            account_nav=(perf_nav_by_portfolio["IVOL"] if dca_enabled else None),
+            contribution=(
+                dca_contribution_by_portfolio.get("IVOL")
+                if dca_enabled
+                else None
+            ),
+        )
+    )
+    metrics_custom.update(
+        _trade_freq_from_weights(
+            custom_w,
+            account_nav=(perf_nav_by_portfolio["CUSTOM"] if dca_enabled else None),
+            contribution=(
+                dca_contribution_by_portfolio.get("CUSTOM")
+                if dca_enabled
+                else None
+            ),
+        )
+    )
+    for p_name, one_metrics in [
+        ("EW", metrics_ew),
+        ("RP", metrics_rp),
+        ("IVOL", metrics_ivol),
+        ("CUSTOM", metrics_custom),
+    ]:
+        dca_metrics = dict(
+            (dca_by_portfolio.get(p_name) or {}).get("metrics") or {}
+        )
+        one_metrics.update(
+            {
+                "dca_enabled": bool(dca_enabled),
+                "dca_frequency": (dca_frequency if dca_enabled else None),
+                "dca_base_amount": (
+                    float(dca_base_amount) if dca_enabled else None
+                ),
+                "dca_periodic_amount": (
+                    float(dca_periodic_amount) if dca_enabled else None
+                ),
+                "dca_total_invested": dca_metrics.get("dca_total_invested"),
+                "dca_final_value": dca_metrics.get("dca_final_value"),
+                "dca_cumulative_return": dca_metrics.get("dca_cumulative_return"),
+                "dca_money_weighted_return": dca_metrics.get(
+                    "dca_money_weighted_return"
+                ),
+                "dca_money_weighted_annualized_return": dca_metrics.get(
+                    "dca_money_weighted_annualized_return"
+                ),
+                "dca_time_weighted_return": dca_metrics.get(
+                    "dca_time_weighted_return"
+                ),
+            }
+        )
     metrics_by_portfolio = {
         "EW": metrics_ew,
         "RP": metrics_rp,
@@ -3765,10 +4180,10 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         }
 
     rolling_by_portfolio = {
-        "EW": _rolling_pack(ew_nav),
-        "RP": _rolling_pack(rp_nav),
-        "IVOL": _rolling_pack(ivol_nav),
-        "CUSTOM": _rolling_pack(custom_nav),
+        "EW": _rolling_pack(perf_nav_by_portfolio["EW"]),
+        "RP": _rolling_pack(perf_nav_by_portfolio["RP"]),
+        "IVOL": _rolling_pack(perf_nav_by_portfolio["IVOL"]),
+        "CUSTOM": _rolling_pack(perf_nav_by_portfolio["CUSTOM"]),
     }
 
     # package series for UI (plotly expects arrays)
@@ -3813,34 +4228,40 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         },
     }
     rolling_out = rolling_by_portfolio.get(mode, rolling_by_portfolio["EW"])
+    strategy_total_return_by_portfolio = {
+        "EW": float(ew_nav.iloc[-1] / ew_nav.iloc[0] - 1.0),
+        "RP": float(rp_nav.iloc[-1] / rp_nav.iloc[0] - 1.0),
+        "IVOL": float(ivol_nav.iloc[-1] / ivol_nav.iloc[0] - 1.0),
+        "CUSTOM": float(custom_nav.iloc[-1] / custom_nav.iloc[0] - 1.0),
+    }
 
     attribution_ew = _compute_return_risk_contributions(
         asset_ret=ret_common[codes_eff],
         weights=ew_w[codes_eff]
         if not ew_w.empty
         else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(metrics_ew["cumulative_return"]),
+        total_return=float(strategy_total_return_by_portfolio["EW"]),
     )
     attribution_rp = _compute_return_risk_contributions(
         asset_ret=ret_common[codes_eff],
         weights=rp_w[codes_eff]
         if not rp_w.empty
         else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(metrics_rp["cumulative_return"]),
+        total_return=float(strategy_total_return_by_portfolio["RP"]),
     )
     attribution_ivol = _compute_return_risk_contributions(
         asset_ret=ret_common[codes_eff],
         weights=ivol_w[codes_eff]
         if not ivol_w.empty
         else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(metrics_ivol["cumulative_return"]),
+        total_return=float(strategy_total_return_by_portfolio["IVOL"]),
     )
     attribution_custom = _compute_return_risk_contributions(
         asset_ret=ret_common[codes_eff],
         weights=custom_w[codes_eff]
         if not custom_w.empty
         else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(metrics_custom["cumulative_return"]),
+        total_return=float(strategy_total_return_by_portfolio["CUSTOM"]),
     )
     attribution_by_portfolio = {
         "EW": attribution_ew,
@@ -4072,6 +4493,8 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         },
         "metrics": metrics,
         "metrics_by_portfolio": metrics_by_portfolio,
+        "dca": dca,
+        "dca_by_portfolio": dca_by_portfolio,
         "correlation": corr_out,
         "rolling": rolling_out,
         "rolling_by_portfolio": rolling_by_portfolio,

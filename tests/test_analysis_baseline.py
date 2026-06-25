@@ -78,6 +78,84 @@ def test_compute_baseline_basic_metrics(session_factory):
     assert len(out["correlation"]["matrix"][0]) == 2
 
 
+def test_compute_baseline_supports_dca_metrics(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(8)]
+        closes = [100.0 * (1.01**i) for i in range(len(dates))]
+        for d, c in zip(dates, closes, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    close=float(c),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rebalance="weekly",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+                dca_enabled=True,
+                dca_base_amount=100.0,
+                dca_periodic_amount=20.0,
+                dca_frequency="daily",
+            ),
+        )
+
+    m = out["metrics"]
+    assert bool(m.get("dca_enabled")) is True
+    expected_invested = 100.0 + 20.0 * (len(dates) - 1)
+    assert float(m["dca_total_invested"]) == pytest.approx(
+        expected_invested, rel=1e-12
+    )
+    assert float(m["dca_final_value"]) > expected_invested
+    assert float(m["dca_cumulative_return"]) == pytest.approx(
+        float(m["dca_final_value"]) / float(m["dca_total_invested"]) - 1.0,
+        rel=1e-12,
+    )
+    dca_series = (out.get("dca") or {}).get("series") or {}
+    acct = [float(x) for x in (dca_series.get("account_value") or [])]
+    assert len(acct) == len(dates)
+    expected_curve_cum = float(acct[-1] / acct[0] - 1.0)
+    assert float(m["cumulative_return"]) == pytest.approx(expected_curve_cum, rel=1e-12)
+    expected_ann = float((acct[-1] / acct[0]) ** (252.0 / (len(acct) - 1)) - 1.0)
+    assert float(m["annualized_return"]) == pytest.approx(expected_ann, rel=1e-12)
+    peak = -float("inf")
+    mdd = 0.0
+    for v in acct:
+        peak = max(peak, float(v))
+        mdd = min(mdd, float(v) / peak - 1.0)
+    assert float(m["max_drawdown"]) == pytest.approx(float(mdd), rel=1e-12)
+    strat_cum = float(out["nav"]["series"]["EW"][-1] - 1.0)
+    assert float(m["dca_time_weighted_return"]) == pytest.approx(
+        strat_cum, rel=1e-12
+    )
+    assert float(m["cumulative_return"]) != pytest.approx(strat_cum, rel=1e-9, abs=1e-9)
+    assert np.isfinite(float(m["dca_money_weighted_return"]))
+    dca = out.get("dca") or {}
+    assert bool(dca.get("enabled")) is True
+    assert len((dca.get("series") or {}).get("dates") or []) == len(
+        out["nav"]["dates"]
+    )
+    dca_by = out.get("dca_by_portfolio") or {}
+    assert float(
+        (dca_by.get("EW") or {}).get("metrics", {}).get("dca_total_invested")
+    ) == pytest.approx(expected_invested, rel=1e-12)
+
+
 def test_compute_baseline_includes_price_bias_distribution(session_factory):
     sf = session_factory
     with sf() as db:
