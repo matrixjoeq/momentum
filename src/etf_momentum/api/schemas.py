@@ -52,7 +52,9 @@ class EtfResearchGroupOut(BaseModel):
 
 
 class EtfResearchGroupsImportRequest(BaseModel):
-    groups: dict[str, list[str]] = Field(description="Mapping: group name -> symbol list")
+    groups: dict[str, list[str]] = Field(
+        description="Mapping: group name -> symbol list"
+    )
     active_group: str | None = Field(
         default=None, description="Optional active group name"
     )
@@ -175,7 +177,9 @@ class OffFundRegressionFactorConfigOut(BaseModel):
     name: str
     is_active: bool
     benchmark_profile: str
-    benchmark_factors: list[OffFundRegressionFactorRequest] = Field(default_factory=list)
+    benchmark_factors: list[OffFundRegressionFactorRequest] = Field(
+        default_factory=list
+    )
 
 
 class OffFundRegressionClassifyRequest(BaseModel):
@@ -3252,3 +3256,289 @@ class TrendOosBootstrapRequest(BaseModel):
         default=None,
         description="Optional param grid per strategy; if omitted, a default grid is used.",
     )
+
+
+class LiveAccountCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    base_ccy: str = Field(default="CNY", min_length=1, max_length=16)
+    initial_cash: float = Field(default=0.0, ge=0.0)
+    notes: str | None = None
+
+
+class LiveAccountUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    notes: str | None = None
+
+
+class LiveAccountOut(BaseModel):
+    id: int
+    name: str
+    base_ccy: str
+    initial_cash: float
+    notes: str | None = None
+    created_at: str
+
+
+class LiveShareholderAccountCreateRequest(BaseModel):
+    shareholder_account: str = Field(min_length=1, max_length=64)
+    notes: str | None = None
+
+
+class LiveShareholderAccountOut(BaseModel):
+    id: int
+    account_id: int
+    shareholder_account: str
+    notes: str | None = None
+    created_at: str
+
+
+class LiveStrategyCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    notes: str | None = None
+
+
+class LiveStrategyUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    notes: str | None = None
+
+
+class LiveStrategyOut(BaseModel):
+    id: int
+    account_id: int
+    name: str
+    notes: str | None = None
+    created_at: str
+
+
+class LiveAccountCashflowCreateRequest(BaseModel):
+    flow_date: str = Field(description="YYYYMMDD")
+    amount: float = Field(description="Positive deposit, negative withdraw")
+    flow_type: str = Field(
+        default="deposit",
+        description="deposit|withdraw|transfer_to_strategy|transfer_from_strategy|dividend|manual",
+    )
+    transfer_id: str | None = Field(default=None, max_length=64)
+    notes: str | None = None
+
+
+class LiveStrategyCashflowCreateRequest(BaseModel):
+    flow_date: str = Field(description="YYYYMMDD")
+    amount: float = Field(description="Positive inflow, negative outflow")
+    flow_type: str = Field(
+        default="transfer_in", description="transfer_in|transfer_out|dividend|manual"
+    )
+    transfer_id: str | None = Field(default=None, max_length=64)
+    notes: str | None = None
+
+
+class LiveStrategyTransferRequest(BaseModel):
+    strategy_id: int = Field(ge=1)
+    flow_date: str = Field(description="YYYYMMDD")
+    amount: float = Field(gt=0.0)
+    direction: str = Field(
+        default="to_strategy", description="to_strategy|from_strategy"
+    )
+    transfer_id: str | None = Field(default=None, max_length=64)
+    notes: str | None = None
+
+
+class LiveCashflowOut(BaseModel):
+    id: int
+    account_id: int | None = None
+    strategy_id: int | None = None
+    flow_date: str
+    amount: float
+    flow_type: str
+    transfer_id: str | None = None
+    notes: str | None = None
+    created_at: str
+
+
+class LiveTradeCreateRequest(BaseModel):
+    account_id: int = Field(ge=1)
+    strategy_id: int = Field(ge=1)
+    shareholder_account_id: int = Field(ge=1)
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(default="", max_length=128)
+    trade_date: str = Field(description="YYYYMMDD")
+    trade_time: str = Field(default="09:30:00", description="HH:MM[:SS]")
+    side: str = Field(description="BUY|SELL")
+    price: float = Field(gt=0.0)
+    quantity: float = Field(gt=0.0)
+    fee: float = Field(default=0.0, ge=0.0)
+    amount: float | None = Field(default=None, ge=0.0)
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    broker_trade_no: str | None = Field(default=None, max_length=128)
+    notes: str | None = None
+
+
+class LiveTradeUpdateRequest(BaseModel):
+    account_id: int = Field(ge=1)
+    strategy_id: int = Field(ge=1)
+    shareholder_account_id: int = Field(ge=1)
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(default="", max_length=128)
+    trade_date: str = Field(description="YYYYMMDD")
+    trade_time: str = Field(default="09:30:00", description="HH:MM[:SS]")
+    side: str = Field(description="BUY|SELL")
+    price: float = Field(gt=0.0)
+    quantity: float = Field(gt=0.0)
+    fee: float = Field(default=0.0, ge=0.0)
+    amount: float | None = Field(default=None, ge=0.0)
+    broker_trade_no: str | None = Field(default=None, max_length=128)
+    notes: str | None = None
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class LiveTradeBatchCreateRequest(BaseModel):
+    trades: list[LiveTradeCreateRequest] = Field(min_length=1)
+
+
+class LiveTradeDeleteRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class LiveTradeOut(BaseModel):
+    id: int
+    account_id: int
+    strategy_id: int
+    shareholder_account_id: int
+    code: str
+    name: str
+    trade_date: str
+    trade_time: str
+    side: str
+    price: float
+    quantity: float
+    fee: float
+    amount: float
+    idempotency_key: str | None = None
+    broker_trade_no: str | None = None
+    notes: str | None = None
+    created_at: str
+
+
+class LiveCorporateActionCreateRequest(BaseModel):
+    account_id: int | None = Field(default=None, ge=1)
+    strategy_id: int | None = Field(default=None, ge=1)
+    event_type: str = Field(
+        description="cash_dividend|split|share_conversion|code_change"
+    )
+    code: str = Field(min_length=1, max_length=32)
+    new_code: str | None = Field(default=None, max_length=32)
+    event_date: str = Field(description="YYYYMMDD")
+    effective_date: str = Field(description="YYYYMMDD")
+    ratio_factor: float | None = Field(default=None, gt=0.0)
+    cash_per_share: float | None = Field(default=None, ge=0.0)
+    notes: str | None = None
+
+
+class LiveCorporateActionOut(BaseModel):
+    id: int
+    account_id: int | None = None
+    strategy_id: int | None = None
+    event_type: str
+    code: str
+    new_code: str | None = None
+    event_date: str
+    effective_date: str
+    ratio_factor: float | None = None
+    cash_per_share: float | None = None
+    notes: str | None = None
+    created_at: str
+
+
+class LiveReplayRequest(BaseModel):
+    account_id: int | None = Field(default=None, ge=1)
+    strategy_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _check_scope(self) -> "LiveReplayRequest":
+        if self.account_id is None and self.strategy_id is None:
+            raise ValueError("account_id or strategy_id is required")
+        return self
+
+
+class LiveHoldingOut(BaseModel):
+    snapshot_date: str
+    scope_type: str
+    scope_id: int
+    account_id: int
+    strategy_id: int | None = None
+    code: str
+    name: str
+    quantity: float
+    cost_price: float | None = None
+    market_price: float | None = None
+    cost_value: float
+    market_value: float | None = None
+    pnl_amount: float | None = None
+    pnl_rate: float | None = None
+    price_missing: bool
+    stale_days: int | None = None
+
+
+class LiveClosedRoundOut(BaseModel):
+    id: int
+    scope_type: str
+    scope_id: int
+    account_id: int
+    strategy_id: int | None = None
+    round_no: int
+    code: str
+    name: str
+    open_date: str
+    close_date: str
+    buy_count: int
+    sell_count: int
+    buy_qty: float
+    sell_qty: float
+    avg_buy_price: float | None = None
+    avg_sell_price: float | None = None
+    realized_pnl: float
+    return_rate: float | None = None
+    total_fee: float
+
+
+class LiveNavPointOut(BaseModel):
+    nav_date: str
+    equity: float
+    cash: float
+    market_value: float
+    external_flow: float
+    trading_fee: float
+    nav_twr: float
+    nav_dietz: float
+    daily_return_twr: float | None = None
+    daily_return_dietz: float | None = None
+    selection_return: float | None = None
+    timing_return: float | None = None
+    position_return: float | None = None
+    cost_drag_return: float | None = None
+    cash_drag_return: float | None = None
+
+
+class LivePerformanceOut(BaseModel):
+    scope_type: str
+    scope_id: int
+    return_basis: str
+    nav: list[LiveNavPointOut]
+    dietz_basis_metrics: dict[str, Any]
+    twr_basis_metrics: dict[str, Any]
+
+
+class LiveAttributionOut(BaseModel):
+    scope_type: str
+    scope_id: int
+    daily: list[dict[str, Any]]
+    period: dict[str, Any]
+
+
+class LiveFeeStatsOut(BaseModel):
+    scope_type: str
+    scope_id: int
+    total_fee: float
+    buy_fee: float
+    sell_fee: float
+    avg_fee_per_trade: float
+    by_day: list[dict[str, Any]]

@@ -13,6 +13,7 @@ from .api.routes import router as api_router
 from .api.deps import init_app_state
 from .scheduler import start_auto_sync, stop_auto_sync
 from .settings import get_settings
+from .utils.loky_cleanup import cleanup_loky_executor
 
 
 def create_app() -> FastAPI:
@@ -26,6 +27,8 @@ def create_app() -> FastAPI:
         init_app_state(fastapi_app)
         start_auto_sync(fastapi_app)
         yield
+        # Best-effort cleanup for any joblib/loky pools created during requests.
+        cleanup_loky_executor(logging.getLogger(__name__))
         await stop_auto_sync(fastapi_app)
 
     fastapi_app = FastAPI(
@@ -106,6 +109,14 @@ def create_app() -> FastAPI:
     def research_nasdaq_vix():
         _ = get_settings()
         path = Path(__file__).resolve().parent / "web" / "research_nasdaq_vix.html"
+        if not path.exists():
+            return RedirectResponse(url="/docs")
+        return FileResponse(path)
+
+    @fastapi_app.get("/trading-records")
+    def trading_records():
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "trading_records.html"
         if not path.exists():
             return RedirectResponse(url="/docs")
         return FileResponse(path)

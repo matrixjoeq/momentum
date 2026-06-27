@@ -331,10 +331,13 @@ from ..db.models import (
 )
 from ..calendar.trading_calendar import is_trading_day
 from ..services.market_sync import sync_fixed_pool_prices
+from .live_trading import router as live_trading_router
+from ..utils.loky_cleanup import cleanup_loky_executor
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+router.include_router(live_trading_router, prefix="/live", tags=["live-trading"])
 
 _ALL_ADJUSTS = ("qfq", "hfq", "none")
 
@@ -6362,197 +6365,216 @@ def sim_gbm_phase2(payload: SimGbmPhase2Request) -> dict:
 
 @router.post("/analysis/sim/gbm/phase3")
 def sim_gbm_phase3(payload: SimGbmPhase3Request) -> dict:
-    return montecarlo_strategy_pair(
-        start=str(payload.start),
-        end=(str(payload.end) if payload.end else None),
-        n_sims=int(payload.n_sims),
-        n_assets=int(payload.n_assets),
-        vol_low=float(payload.vol_low),
-        vol_high=float(payload.vol_high),
-        corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
-        corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
-        mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
-        mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
-        seed=(None if payload.seed is None else int(payload.seed)),
-        target_a=(None if payload.target_a is None else str(payload.target_a)),
-        target_b=(None if payload.target_b is None else str(payload.target_b)),
-        strategy_a=(
-            dict(payload.strategy_a or {}) if payload.strategy_a is not None else None
-        ),
-        strategy_b=(
-            dict(payload.strategy_b or {}) if payload.strategy_b is not None else None
-        ),
-        holding_strategy_a=(
-            payload.holding_strategy_a.model_dump()
-            if payload.holding_strategy_a is not None
-            else payload.holding_strategy.model_dump()
-        ),
-        holding_strategy_b=(
-            payload.holding_strategy_b.model_dump()
-            if payload.holding_strategy_b is not None
-            else payload.holding_strategy.model_dump()
-        ),
-        n_jobs=int(payload.n_jobs),
-    )
+    try:
+        return montecarlo_strategy_pair(
+            start=str(payload.start),
+            end=(str(payload.end) if payload.end else None),
+            n_sims=int(payload.n_sims),
+            n_assets=int(payload.n_assets),
+            vol_low=float(payload.vol_low),
+            vol_high=float(payload.vol_high),
+            corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+            corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+            mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+            mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
+            seed=(None if payload.seed is None else int(payload.seed)),
+            target_a=(None if payload.target_a is None else str(payload.target_a)),
+            target_b=(None if payload.target_b is None else str(payload.target_b)),
+            strategy_a=(
+                dict(payload.strategy_a or {})
+                if payload.strategy_a is not None
+                else None
+            ),
+            strategy_b=(
+                dict(payload.strategy_b or {})
+                if payload.strategy_b is not None
+                else None
+            ),
+            holding_strategy_a=(
+                payload.holding_strategy_a.model_dump()
+                if payload.holding_strategy_a is not None
+                else payload.holding_strategy.model_dump()
+            ),
+            holding_strategy_b=(
+                payload.holding_strategy_b.model_dump()
+                if payload.holding_strategy_b is not None
+                else payload.holding_strategy.model_dump()
+            ),
+            n_jobs=int(payload.n_jobs),
+        )
+    finally:
+        cleanup_loky_executor(logger)
 
 
 @router.post("/analysis/sim/gbm/phase4")
 def sim_gbm_phase4(payload: SimGbmPhase4Request) -> dict:
-    # Run phase2 once (single sim) + apply position sizing; and also run MC distribution with ruin proxy stats.
-    cfg = _SimCfg(
-        n_assets=int(payload.n_assets),
-        vol_low=float(payload.vol_low),
-        vol_high=float(payload.vol_high),
-        corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
-        corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
-        mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
-        mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
-        seed=(None if payload.seed is None else int(payload.seed)),
-    )
-    base = simulate_gbm_prices(
-        start=str(payload.start),
-        end=(str(payload.end) if payload.end else None),
-        cfg=cfg,
-    )
-    if not bool(base.get("ok")):
-        return base
-    dates = (base.get("series") or {}).get("dates") or []
-    close_map = (base.get("series") or {}).get("close") or {}
-    codes = (base.get("assets") or {}).get("codes") or []
-    idx = pd.to_datetime(dates)
-    close = pd.DataFrame({c: close_map.get(c) for c in codes}, index=idx, dtype=float)
-    strat_a = dict(payload.strategy_a or {})
-    if not strat_a:
-        strat_a = {"lookback_days": int(payload.lookback_days), "top_k": 1}
-    hold = (
-        payload.holding_strategy.model_dump()
-        if payload.holding_strategy is not None
-        else {}
-    )
-    hold_reb = str(hold.get("rebalance", "weekly") or "weekly")
-    hold_cost = float(hold.get("cost_bps", 2.0) or 0.0)
-    hold_rp_win = int(hold.get("rp_vol_window", 20) or 20)
-    rot = _run_rotation_variant_with_series_on_sim(close, strat_a)
-    ew = backtest_holding_rebalance(
-        close,
-        allocation="equal_weight",
-        rebalance=hold_reb,
-        cost_bps=hold_cost,
-    )
-    rp = backtest_holding_rebalance(
-        close,
-        allocation="risk_parity",
-        rebalance=hold_reb,
-        cost_bps=hold_cost,
-        ann_vols=(base.get("assets") or {}).get("ann_vols") or {},
-        rp_vol_window=hold_rp_win,
-    )
-    if not bool(rot.get("ok")) or not bool(ew.get("ok")):
-        return {
-            "ok": False,
-            "error": "backtest_failed",
-            "rotation": rot,
-            "equal_weight": ew,
-        }
-    nav_rot = pd.Series(
-        (rot.get("series") or {}).get("nav") or [], index=idx, dtype=float
-    )
-    nav_ew = pd.Series(
-        (ew.get("series") or {}).get("nav") or [], index=idx, dtype=float
-    )
-    nav_rp = pd.Series(
-        (rp.get("series") or {}).get("nav") or [], index=idx, dtype=float
-    )
-    sized_rot = apply_position_sizing(
-        nav_rot,
-        initial_cash=float(payload.initial_cash),
-        position_pct=float(payload.position_pct),
-    )
-    sized_ew = apply_position_sizing(
-        nav_ew,
-        initial_cash=float(payload.initial_cash),
-        position_pct=float(payload.position_pct),
-    )
-    sized_rp = apply_position_sizing(
-        nav_rp,
-        initial_cash=float(payload.initial_cash),
-        position_pct=float(payload.position_pct),
-    )
-
-    # Quick MC: compute distribution of min equity ratio under sizing (approx, using cagr only is insufficient; do full paths in blocks).
-    mc = montecarlo_rotation_vs_ew(
-        start=str(payload.start),
-        end=(str(payload.end) if payload.end else None),
-        n_sims=int(payload.n_sims),
-        chunk_size=int(payload.chunk_size),
-        n_assets=int(payload.n_assets),
-        vol_low=float(payload.vol_low),
-        vol_high=float(payload.vol_high),
-        corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
-        corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
-        mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
-        mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
-        seed=(None if payload.seed is None else int(payload.seed)),
-        lookback_days=int(payload.lookback_days),
-        strategy_a=(
-            dict(payload.strategy_a or {}) if payload.strategy_a is not None else None
-        ),
-        holding_strategy=(
+    try:
+        # Run phase2 once (single sim) + apply position sizing; and also run MC distribution with ruin proxy stats.
+        cfg = _SimCfg(
+            n_assets=int(payload.n_assets),
+            vol_low=float(payload.vol_low),
+            vol_high=float(payload.vol_high),
+            corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+            corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+            mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+            mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
+            seed=(None if payload.seed is None else int(payload.seed)),
+        )
+        base = simulate_gbm_prices(
+            start=str(payload.start),
+            end=(str(payload.end) if payload.end else None),
+            cfg=cfg,
+        )
+        if not bool(base.get("ok")):
+            return base
+        dates = (base.get("series") or {}).get("dates") or []
+        close_map = (base.get("series") or {}).get("close") or {}
+        codes = (base.get("assets") or {}).get("codes") or []
+        idx = pd.to_datetime(dates)
+        close = pd.DataFrame(
+            {c: close_map.get(c) for c in codes}, index=idx, dtype=float
+        )
+        strat_a = dict(payload.strategy_a or {})
+        if not strat_a:
+            strat_a = {"lookback_days": int(payload.lookback_days), "top_k": 1}
+        hold = (
             payload.holding_strategy.model_dump()
             if payload.holding_strategy is not None
-            else None
-        ),
-        n_jobs=int(payload.n_jobs),
-    )
-    # Ruin (theoretical) for GBM with pos<=1 is 0; we still report a conservative check on min_equity_ratio using the single-path sized runs.
-    ruin = bool((sized_rot.get("stats") or {}).get("ruin")) or bool(
-        (sized_ew.get("stats") or {}).get("ruin")
-    )
-    return {
-        "ok": True,
-        "meta": dict(base.get("meta") or {}),
-        "sizing": {
-            "initial_cash": float(payload.initial_cash),
-            "position_pct": float(payload.position_pct),
-            "ruin": bool(ruin),
-        },
-        "one": {
-            "rotation": sized_rot,
-            "equal_weight": sized_ew,
-            "risk_parity": sized_rp,
-        },
-        "mc": mc,
-    }
+            else {}
+        )
+        hold_reb = str(hold.get("rebalance", "weekly") or "weekly")
+        hold_cost = float(hold.get("cost_bps", 2.0) or 0.0)
+        hold_rp_win = int(hold.get("rp_vol_window", 20) or 20)
+        rot = _run_rotation_variant_with_series_on_sim(close, strat_a)
+        ew = backtest_holding_rebalance(
+            close,
+            allocation="equal_weight",
+            rebalance=hold_reb,
+            cost_bps=hold_cost,
+        )
+        rp = backtest_holding_rebalance(
+            close,
+            allocation="risk_parity",
+            rebalance=hold_reb,
+            cost_bps=hold_cost,
+            ann_vols=(base.get("assets") or {}).get("ann_vols") or {},
+            rp_vol_window=hold_rp_win,
+        )
+        if not bool(rot.get("ok")) or not bool(ew.get("ok")):
+            return {
+                "ok": False,
+                "error": "backtest_failed",
+                "rotation": rot,
+                "equal_weight": ew,
+            }
+        nav_rot = pd.Series(
+            (rot.get("series") or {}).get("nav") or [], index=idx, dtype=float
+        )
+        nav_ew = pd.Series(
+            (ew.get("series") or {}).get("nav") or [], index=idx, dtype=float
+        )
+        nav_rp = pd.Series(
+            (rp.get("series") or {}).get("nav") or [], index=idx, dtype=float
+        )
+        sized_rot = apply_position_sizing(
+            nav_rot,
+            initial_cash=float(payload.initial_cash),
+            position_pct=float(payload.position_pct),
+        )
+        sized_ew = apply_position_sizing(
+            nav_ew,
+            initial_cash=float(payload.initial_cash),
+            position_pct=float(payload.position_pct),
+        )
+        sized_rp = apply_position_sizing(
+            nav_rp,
+            initial_cash=float(payload.initial_cash),
+            position_pct=float(payload.position_pct),
+        )
+
+        # Quick MC: compute distribution of min equity ratio under sizing (approx, using cagr only is insufficient; do full paths in blocks).
+        mc = montecarlo_rotation_vs_ew(
+            start=str(payload.start),
+            end=(str(payload.end) if payload.end else None),
+            n_sims=int(payload.n_sims),
+            chunk_size=int(payload.chunk_size),
+            n_assets=int(payload.n_assets),
+            vol_low=float(payload.vol_low),
+            vol_high=float(payload.vol_high),
+            corr_low=(None if payload.corr_low is None else float(payload.corr_low)),
+            corr_high=(None if payload.corr_high is None else float(payload.corr_high)),
+            mu_low=(None if payload.mu_low is None else float(payload.mu_low)),
+            mu_high=(None if payload.mu_high is None else float(payload.mu_high)),
+            seed=(None if payload.seed is None else int(payload.seed)),
+            lookback_days=int(payload.lookback_days),
+            strategy_a=(
+                dict(payload.strategy_a or {})
+                if payload.strategy_a is not None
+                else None
+            ),
+            holding_strategy=(
+                payload.holding_strategy.model_dump()
+                if payload.holding_strategy is not None
+                else None
+            ),
+            n_jobs=int(payload.n_jobs),
+        )
+        # Ruin (theoretical) for GBM with pos<=1 is 0; we still report a conservative check on min_equity_ratio using the single-path sized runs.
+        ruin = bool((sized_rot.get("stats") or {}).get("ruin")) or bool(
+            (sized_ew.get("stats") or {}).get("ruin")
+        )
+        return {
+            "ok": True,
+            "meta": dict(base.get("meta") or {}),
+            "sizing": {
+                "initial_cash": float(payload.initial_cash),
+                "position_pct": float(payload.position_pct),
+                "ruin": bool(ruin),
+            },
+            "one": {
+                "rotation": sized_rot,
+                "equal_weight": sized_ew,
+                "risk_parity": sized_rp,
+            },
+            "mc": mc,
+        }
+    finally:
+        cleanup_loky_executor(logger)
 
 
 @router.post("/analysis/sim/gbm/ab-significance")
 def sim_gbm_ab_significance(payload: SimGbmAbSignificanceRequest) -> dict:
-    req: dict[str, object] = {
-        "start": str(payload.start),
-        "end": (str(payload.end) if payload.end else None),
-        "n_worlds": int(payload.n_worlds),
-        "n_assets": int(payload.n_assets),
-        "vol_low": float(payload.vol_low),
-        "vol_high": float(payload.vol_high),
-        "corr_low": (None if payload.corr_low is None else float(payload.corr_low)),
-        "corr_high": (None if payload.corr_high is None else float(payload.corr_high)),
-        "mu_low": (None if payload.mu_low is None else float(payload.mu_low)),
-        "mu_high": (None if payload.mu_high is None else float(payload.mu_high)),
-        "seed": (None if payload.seed is None else int(payload.seed)),
-        "strategy_a": payload.strategy_a.model_dump(),
-        "strategy_b": payload.strategy_b.model_dump(),
-        "n_perm": int(payload.n_perm),
-        "n_boot": int(payload.n_boot),
-        "n_jobs": int(payload.n_jobs),
-        "stability_repeats": int(payload.stability_repeats),
-        "stability_worlds": int(payload.stability_worlds),
-        "target_a": (None if payload.target_a is None else str(payload.target_a)),
-        "target_b": (None if payload.target_b is None else str(payload.target_b)),
-        "comparison_mode": str(payload.comparison_mode),
-        "holding_strategy_a": payload.holding_strategy_a.model_dump(),
-        "holding_strategy_b": payload.holding_strategy_b.model_dump(),
-    }
-    return gbm_ab_significance(**req)
+    try:
+        req: dict[str, object] = {
+            "start": str(payload.start),
+            "end": (str(payload.end) if payload.end else None),
+            "n_worlds": int(payload.n_worlds),
+            "n_assets": int(payload.n_assets),
+            "vol_low": float(payload.vol_low),
+            "vol_high": float(payload.vol_high),
+            "corr_low": (None if payload.corr_low is None else float(payload.corr_low)),
+            "corr_high": (
+                None if payload.corr_high is None else float(payload.corr_high)
+            ),
+            "mu_low": (None if payload.mu_low is None else float(payload.mu_low)),
+            "mu_high": (None if payload.mu_high is None else float(payload.mu_high)),
+            "seed": (None if payload.seed is None else int(payload.seed)),
+            "strategy_a": payload.strategy_a.model_dump(),
+            "strategy_b": payload.strategy_b.model_dump(),
+            "n_perm": int(payload.n_perm),
+            "n_boot": int(payload.n_boot),
+            "n_jobs": int(payload.n_jobs),
+            "stability_repeats": int(payload.stability_repeats),
+            "stability_worlds": int(payload.stability_worlds),
+            "target_a": (None if payload.target_a is None else str(payload.target_a)),
+            "target_b": (None if payload.target_b is None else str(payload.target_b)),
+            "comparison_mode": str(payload.comparison_mode),
+            "holding_strategy_a": payload.holding_strategy_a.model_dump(),
+            "holding_strategy_b": payload.holding_strategy_b.model_dump(),
+        }
+        return gbm_ab_significance(**req)
+    finally:
+        cleanup_loky_executor(logger)
 
 
 @router.get("/validation-policies", response_model=list[ValidationPolicyOut])
@@ -6956,7 +6978,9 @@ def upsert_etf_research_group_api(
 
 
 @router.delete("/etf/research/groups/{name}")
-def delete_etf_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+def delete_etf_research_group_api(
+    name: str, db: Session = Depends(get_session)
+) -> dict:
     ok = delete_etf_group(db, name=name)
     if not ok:
         raise HTTPException(status_code=404, detail="etf group not found")
@@ -6965,7 +6989,9 @@ def delete_etf_research_group_api(name: str, db: Session = Depends(get_session))
 
 
 @router.post("/etf/research/groups/{name}/activate")
-def activate_etf_research_group_api(name: str, db: Session = Depends(get_session)) -> dict:
+def activate_etf_research_group_api(
+    name: str, db: Session = Depends(get_session)
+) -> dict:
     ok = set_active_etf_group(db, name=name)
     if not ok:
         raise HTTPException(status_code=404, detail="etf group not found")
@@ -7108,9 +7134,7 @@ def _build_off_fund_regression_factors(
         for x in benchmark_factors:
             key = str(x.key or "").strip().upper()
             aliases = tuple(
-                str(c or "").strip()
-                for c in (x.aliases or [])
-                if str(c or "").strip()
+                str(c or "").strip() for c in (x.aliases or []) if str(c or "").strip()
             )
             if not key or not aliases:
                 continue
@@ -7180,7 +7204,8 @@ def analysis_off_fund_factor_availability(
                 selected_code=None,
                 sample_days=0,
                 required_days=max(
-                    int(payload.min_samples), int(max(20, int(payload.rolling_window)) // 2)
+                    int(payload.min_samples),
+                    int(max(20, int(payload.rolling_window)) // 2),
                 ),
                 enough=False,
                 status="missing",
@@ -7199,7 +7224,8 @@ def analysis_off_fund_factor_availability(
                 "factor_count": len(items),
                 "enough_factor_count": 0,
                 "required_days": max(
-                    int(payload.min_samples), int(max(20, int(payload.rolling_window)) // 2)
+                    int(payload.min_samples),
+                    int(max(20, int(payload.rolling_window)) // 2),
                 ),
             },
             items=items,
@@ -7332,7 +7358,8 @@ def analysis_off_fund_classify(
             confidence=str(out.get("confidence") or "LOW"),
             primary_asset_class=str(out.get("primary_asset_class") or "unclassified"),
             avg_exposures={
-                str(k): float(v) for k, v in dict(out.get("avg_exposures") or {}).items()
+                str(k): float(v)
+                for k, v in dict(out.get("avg_exposures") or {}).items()
             },
             latest_exposures={
                 str(k): float(v)

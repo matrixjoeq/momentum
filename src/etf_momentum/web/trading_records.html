@@ -1,0 +1,2436 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>实盘交易记录</title>
+    <script>
+      (function () {
+        // This page must run under HTTP origin for /api and /static paths.
+        if (location.protocol === "file:") {
+          location.replace("http://127.0.0.1:8000/trading-records");
+          return;
+        }
+        const key = `theme:${location.pathname}`;
+        let theme = "dark";
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved === "light" || saved === "dark") theme = saved;
+        } catch (_) {}
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/terminal.css" />
+    <link rel="stylesheet" href="/static/vendor/flatpickr.min.css" />
+    <style>
+      .three {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .kpi {
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--control-bg);
+      }
+      .kpi .k {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .kpi .v {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .mono {
+        font-family: var(--font-mono);
+      }
+      .danger {
+        color: #ef4444;
+      }
+      .good {
+        color: #10b981;
+      }
+      .plot {
+        min-height: 320px;
+      }
+      textarea.csv {
+        min-height: 110px;
+      }
+      th.sortable-th {
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+      }
+      th.sortable-th[data-sort="asc"]::after {
+        content: " ▲";
+        color: var(--muted);
+        font-size: 11px;
+      }
+      th.sortable-th[data-sort="desc"]::after {
+        content: " ▼";
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.45);
+      }
+      .modal-backdrop.is-open {
+        display: flex;
+      }
+      .modal-card {
+        width: min(520px, calc(100vw - 32px));
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--panel-bg);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        padding: 14px;
+      }
+      .modal-card h3 {
+        margin: 0 0 8px 0;
+      }
+      .modal-card textarea {
+        width: 100%;
+        min-height: 96px;
+      }
+      body.modal-open {
+        overflow: hidden;
+      }
+    </style>
+    <script
+      id="plotlyScript"
+      async
+      src="/static/vendor/plotly-cartesian-2.30.0.min.js"
+    ></script>
+    <script defer src="/static/vendor/flatpickr.min.js"></script>
+  </head>
+  <body>
+    <h2>实盘交易记录</h2>
+    <div class="muted">
+      支持账户/策略双维度、FIFO 平仓归并、Dietz/TWR
+      双口径绩效、归因分解、企业行为处理。
+    </div>
+    <div class="muted" style="margin-top: 6px">
+      <a href="/">ETF 候选池</a>
+      <span style="margin: 0 6px">|</span>
+      <a href="/research">ETF 研究</a>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <div>
+          <label>账户</label>
+          <select id="accountSelect"></select>
+        </div>
+        <div>
+          <label>策略</label>
+          <select id="strategySelect"></select>
+        </div>
+        <div>
+          <label>股东账号</label>
+          <select id="holderSelect"></select>
+        </div>
+        <button id="refreshAllBtn">刷新全部</button>
+        <button id="replayBtn">重放计算</button>
+      </div>
+      <div id="msg" class="muted" style="margin-top: 8px"></div>
+    </div>
+
+    <div class="two">
+      <div class="panel">
+        <h3>账户与策略管理</h3>
+        <div class="row">
+          <div>
+            <label>新账户名</label>
+            <input id="newAccountName" />
+          </div>
+          <div>
+            <label>初始资金</label>
+            <input
+              id="newAccountInitialCash"
+              type="number"
+              step="0.01"
+              value="0"
+            />
+          </div>
+          <button id="addAccountBtn">新增账户</button>
+        </div>
+        <div class="row" style="margin-top: 8px">
+          <div>
+            <label>新策略名</label>
+            <input id="newStrategyName" />
+          </div>
+          <button id="addStrategyBtn">新增策略</button>
+        </div>
+        <div class="row" style="margin-top: 8px">
+          <div>
+            <label>新股东账号</label>
+            <input id="newHolderText" />
+          </div>
+          <button id="addHolderBtn">新增股东账号</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>资金流水 / 调拨</h3>
+        <div class="row">
+          <div>
+            <label>账户流水日期</label>
+            <input id="accountFlowDate" type="date" />
+          </div>
+          <div>
+            <label>账户流水金额</label>
+            <input id="accountFlowAmount" type="number" step="0.01" />
+          </div>
+          <div>
+            <label>类型</label>
+            <select id="accountFlowType">
+              <option value="deposit">deposit</option>
+              <option value="withdraw">withdraw</option>
+              <option value="dividend">dividend</option>
+              <option value="manual">manual</option>
+            </select>
+          </div>
+          <button id="addAccountFlowBtn">新增账户流水</button>
+        </div>
+        <div class="row" style="margin-top: 8px">
+          <div>
+            <label>调拨日期</label>
+            <input id="transferDate" type="date" />
+          </div>
+          <div>
+            <label>调拨金额</label>
+            <input id="transferAmount" type="number" step="0.01" />
+          </div>
+          <div>
+            <label>方向</label>
+            <select id="transferDirection">
+              <option value="to_strategy">to_strategy</option>
+              <option value="from_strategy">from_strategy</option>
+            </select>
+          </div>
+          <button id="transferBtn">账户-策略调拨</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>交易录入</h3>
+      <div class="row">
+        <div>
+          <label>代码</label>
+          <input
+            id="tradeCode"
+            list="etfCodeDatalist"
+            autocomplete="off"
+            placeholder="159915 / 159915.SZ"
+          />
+        </div>
+        <div>
+          <label>名称</label>
+          <input id="tradeName" />
+        </div>
+        <div>
+          <label>策略</label>
+          <select id="tradeStrategySelect"></select>
+        </div>
+        <div>
+          <label>股东账号</label>
+          <select id="tradeHolderSelect"></select>
+        </div>
+        <div>
+          <label>日期</label>
+          <input id="tradeDate" type="date" />
+        </div>
+        <div>
+          <label>时间</label>
+          <input
+            id="tradeTime"
+            type="time"
+            step="1"
+            min="09:00:00"
+            max="14:59:59"
+            value="14:56:00"
+          />
+        </div>
+        <div>
+          <label>快捷时间</label>
+          <select id="tradeTimeQuick">
+            <option value="close" selected>收盘</option>
+            <option value="open">开盘</option>
+          </select>
+        </div>
+        <div>
+          <label>方向</label>
+          <select id="tradeSide">
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+        </div>
+        <div>
+          <label>价格</label>
+          <input id="tradePrice" type="number" step="0.001" />
+        </div>
+        <div>
+          <label>数量</label>
+          <input id="tradeQty" type="number" min="100" step="100" />
+        </div>
+        <div>
+          <label>费用</label>
+          <input id="tradeFee" type="number" step="0.01" value="0.20" />
+        </div>
+        <div>
+          <label>成交号(可选)</label>
+          <input id="tradeBrokerNo" />
+        </div>
+        <button id="addTradeBtn" type="button">新增成交</button>
+        <button id="cancelTradeEditBtn" type="button" style="display: none">
+          取消修改
+        </button>
+      </div>
+      <div
+        id="tradeEditHint"
+        class="muted"
+        style="margin-top: 8px; display: none"
+      ></div>
+
+      <details style="margin-top: 12px">
+        <summary style="cursor: pointer">批量导入 CSV</summary>
+        <div class="row" style="margin-top: 10px">
+          <div style="min-width: 380px; flex: 1">
+            <label
+              >header:
+              code,name,trade_date,trade_time,side,price,quantity,fee(可选),broker_trade_no</label
+            >
+            <textarea id="batchCsv" class="csv mono"></textarea>
+          </div>
+        </div>
+        <div class="row">
+          <button id="importCsvBtn">批量导入</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <h3>企业行为</h3>
+      <div class="row">
+        <div>
+          <label>类型</label>
+          <select id="caType">
+            <option value="cash_dividend">cash_dividend</option>
+            <option value="split">split</option>
+            <option value="share_conversion">share_conversion</option>
+            <option value="code_change">code_change</option>
+          </select>
+        </div>
+        <div>
+          <label>代码</label>
+          <input id="caCode" list="etfCodeDatalist" autocomplete="off" />
+        </div>
+        <div>
+          <label>新代码</label>
+          <input id="caNewCode" list="etfCodeDatalist" autocomplete="off" />
+        </div>
+        <div>
+          <label>事件日</label>
+          <input id="caEventDate" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>生效日</label>
+          <input id="caEffDate" placeholder="YYYYMMDD" />
+        </div>
+        <div>
+          <label>比例因子</label>
+          <input id="caFactor" type="number" step="0.0001" />
+        </div>
+        <div>
+          <label>每股分红</label>
+          <input id="caCashPerShare" type="number" step="0.0001" />
+        </div>
+        <button id="addCaBtn">新增企业行为</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>类型</th>
+            <th>代码</th>
+            <th>新代码</th>
+            <th>事件日</th>
+            <th>生效日</th>
+            <th>比例</th>
+            <th>分红</th>
+          </tr>
+        </thead>
+        <tbody id="caTbody"></tbody>
+      </table>
+    </div>
+
+    <datalist id="etfCodeDatalist"></datalist>
+
+    <div class="panel">
+      <h3>当前持仓（按所选维度）</h3>
+      <table id="holdingsTable">
+        <thead>
+          <tr>
+            <th class="sortable-th" data-sort-key="code">代码</th>
+            <th class="sortable-th" data-sort-key="name">名称</th>
+            <th class="sortable-th" data-sort-key="strategy_text">策略</th>
+            <th class="sortable-th" data-sort-key="holder_text">股东账号</th>
+            <th class="sortable-th" data-sort-key="quantity">数量</th>
+            <th class="sortable-th" data-sort-key="cost_price">成本价</th>
+            <th class="sortable-th" data-sort-key="market_price">现价</th>
+            <th class="sortable-th" data-sort-key="cost_value">成本</th>
+            <th class="sortable-th" data-sort-key="market_value">市值</th>
+            <th class="sortable-th" data-sort-key="position_ratio">仓位比例</th>
+            <th class="sortable-th" data-sort-key="pnl_amount">盈亏</th>
+            <th class="sortable-th" data-sort-key="pnl_rate">收益率</th>
+            <th class="sortable-th" data-sort-key="status_text">状态</th>
+          </tr>
+        </thead>
+        <tbody id="holdTbody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>资金总览（按所选维度）</h3>
+      <div class="three">
+        <div class="kpi">
+          <div class="k">总权益</div>
+          <div id="kpiOverviewEquity" class="v mono">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">权益市值</div>
+          <div id="kpiOverviewMarketValue" class="v mono">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">可用金额</div>
+          <div id="kpiOverviewCash" class="v mono">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">持仓浮动盈亏</div>
+          <div id="kpiOverviewFloatingPnl" class="v mono">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">累积盈亏金额</div>
+          <div id="kpiOverviewCumPnl" class="v mono">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">权益总仓位</div>
+          <div id="kpiOverviewPositionRatio" class="v mono">-</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>平仓统计与交易费用</h3>
+      <div class="row" style="margin-top: 6px">
+        <div>
+          <label>标的筛选</label>
+          <select id="roundCodeFilter"></select>
+        </div>
+      </div>
+      <div class="three">
+        <div class="kpi">
+          <div class="k">总交易次数</div>
+          <div id="kpiTotalTrades" class="v">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">胜率</div>
+          <div id="kpiWinRate" class="v">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">盈亏比</div>
+          <div id="kpiPayoff" class="v">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">总费用</div>
+          <div id="kpiTotalFee" class="v">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">买入费用</div>
+          <div id="kpiBuyFee" class="v">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">卖出费用</div>
+          <div id="kpiSellFee" class="v">-</div>
+        </div>
+      </div>
+      <table id="closedRoundsTable" style="margin-top: 10px">
+        <thead>
+          <tr>
+            <th class="sortable-th" data-sort-key="code">代码</th>
+            <th class="sortable-th" data-sort-key="open_date">开仓</th>
+            <th class="sortable-th" data-sort-key="close_date">平仓</th>
+            <th class="sortable-th" data-sort-key="buy_count">买次</th>
+            <th class="sortable-th" data-sort-key="sell_count">卖次</th>
+            <th class="sortable-th" data-sort-key="avg_buy_price">平均买价</th>
+            <th class="sortable-th" data-sort-key="avg_sell_price">平均卖价</th>
+            <th class="sortable-th" data-sort-key="realized_pnl">盈亏</th>
+            <th class="sortable-th" data-sort-key="return_rate">收益率</th>
+            <th class="sortable-th" data-sort-key="total_fee">费用</th>
+          </tr>
+        </thead>
+        <tbody id="roundTbody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>净值曲线与绩效（Dietz/TWR）</h3>
+      <div id="navPlot" class="plot"></div>
+      <div class="two">
+        <div>
+          <h3>Dietz 指标</h3>
+          <table>
+            <tbody id="dietzMetricsBody"></tbody>
+          </table>
+        </div>
+        <div>
+          <h3>TWR 指标</h3>
+          <table>
+            <tbody id="twrMetricsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>收益归因分解</h3>
+      <div id="attrPlot" class="plot"></div>
+      <table>
+        <thead>
+          <tr>
+            <th>归因项</th>
+            <th>区间值</th>
+          </tr>
+        </thead>
+        <tbody id="attrPeriodBody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>最近成交</h3>
+      <table id="recentTradesTable">
+        <thead>
+          <tr>
+            <th class="sortable-th" data-sort-key="id">ID</th>
+            <th class="sortable-th" data-sort-key="trade_date">日期</th>
+            <th class="sortable-th" data-sort-key="trade_time">时间</th>
+            <th class="sortable-th" data-sort-key="code">代码</th>
+            <th class="sortable-th" data-sort-key="strategy_text">策略</th>
+            <th class="sortable-th" data-sort-key="holder_text">股东账号</th>
+            <th class="sortable-th" data-sort-key="side">方向</th>
+            <th class="sortable-th" data-sort-key="price">价格</th>
+            <th class="sortable-th" data-sort-key="quantity">数量</th>
+            <th class="sortable-th" data-sort-key="fee">费用</th>
+            <th class="sortable-th" data-sort-key="amount">金额</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="tradeTbody"></tbody>
+      </table>
+    </div>
+
+    <div id="reasonModal" class="modal-backdrop" aria-hidden="true">
+      <div class="modal-card" role="dialog" aria-modal="true">
+        <h3 id="reasonModalTitle">填写理由</h3>
+        <div
+          id="reasonModalHint"
+          class="muted"
+          style="margin-bottom: 8px"
+        ></div>
+        <textarea
+          id="reasonModalInput"
+          placeholder="请输入本次修改/删除的原因（必填）"
+        ></textarea>
+        <div
+          id="reasonModalError"
+          class="danger"
+          style="min-height: 20px"
+        ></div>
+        <div class="row" style="justify-content: flex-end">
+          <button id="reasonModalCancelBtn" type="button">取消</button>
+          <button id="reasonModalConfirmBtn" type="button">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const PRICE_DECIMALS = 3;
+      const fmtNum = (x, d = 4) =>
+        x == null || !Number.isFinite(Number(x)) ? "-" : Number(x).toFixed(d);
+      const fmtPrice = (x) => fmtNum(x, PRICE_DECIMALS);
+      const fmtInt = (x) =>
+        x == null || !Number.isFinite(Number(x))
+          ? "-"
+          : String(Math.round(Number(x)));
+      const fmtPct = (x) =>
+        x == null || !Number.isFinite(Number(x))
+          ? "-"
+          : `${(Number(x) * 100).toFixed(2)}%`;
+      const msg = (t, isErr = false) => {
+        $("msg").textContent = t || "";
+        $("msg").className = isErr ? "danger" : "muted";
+      };
+      let reasonModalResolver = null;
+      const closeReasonModal = (value) => {
+        const modal = $("reasonModal");
+        if (modal) {
+          modal.classList.remove("is-open");
+          modal.setAttribute("aria-hidden", "true");
+        }
+        document.body.classList.remove("modal-open");
+        if (reasonModalResolver) {
+          const fn = reasonModalResolver;
+          reasonModalResolver = null;
+          fn(value);
+        }
+      };
+      const askReasonInput = ({
+        title = "填写理由",
+        hint = "",
+        confirmText = "确认",
+      } = {}) =>
+        new Promise((resolve) => {
+          if (reasonModalResolver) {
+            closeReasonModal(null);
+          }
+          reasonModalResolver = resolve;
+          $("reasonModalTitle").textContent = title;
+          $("reasonModalHint").textContent = hint;
+          $("reasonModalConfirmBtn").textContent = confirmText;
+          $("reasonModalInput").value = "";
+          $("reasonModalError").textContent = "";
+          $("reasonModal").classList.add("is-open");
+          $("reasonModal").setAttribute("aria-hidden", "false");
+          document.body.classList.add("modal-open");
+          setTimeout(() => {
+            $("reasonModalInput").focus();
+          }, 0);
+        });
+      const API_BASE = `${location.origin}/api/live`;
+      const TRADE_FEE_RATE = 0.0001;
+      const TRADE_FEE_MIN = 0.2;
+      let strategiesLoadSeq = 0;
+      let holdersLoadSeq = 0;
+      let etfCodeCatalog = [];
+      let etfCodeLookup = new Map();
+      let tradeFeeAuto = true;
+      let accountFlowDatePicker = null;
+      let transferDatePicker = null;
+      let tradeDatePicker = null;
+      let tradeTimePicker = null;
+      let editingTradeId = null;
+      let tradesRowsCache = [];
+      let holdingsRowsCache = [];
+      let navRowsCache = [];
+      let roundsRowsCache = [];
+      let roundsCodeFilterValue = "";
+      let roundsFeeBreakdownCache = new Map();
+      const tradesSortState = { key: "id", dir: "desc" };
+      const holdingsSortState = { key: "market_value", dir: "desc" };
+      const roundsSortState = { key: "", dir: "asc" };
+      const TRADE_NUMERIC_SORT_KEYS = new Set([
+        "id",
+        "price",
+        "quantity",
+        "fee",
+        "amount",
+      ]);
+      const HOLD_NUMERIC_SORT_KEYS = new Set([
+        "quantity",
+        "cost_price",
+        "market_price",
+        "cost_value",
+        "market_value",
+        "position_ratio",
+        "pnl_amount",
+        "pnl_rate",
+      ]);
+      const ROUND_NUMERIC_SORT_KEYS = new Set([
+        "buy_count",
+        "sell_count",
+        "avg_buy_price",
+        "avg_sell_price",
+        "realized_pnl",
+        "return_rate",
+        "total_fee",
+      ]);
+      const api = async (path, opts = {}) => {
+        let res;
+        try {
+          res = await fetch(`${API_BASE}${path}`, {
+            headers: { "Content-Type": "application/json" },
+            ...opts,
+          });
+        } catch (e) {
+          throw new Error(
+            `接口请求失败：${e.message}。请通过 http://127.0.0.1:8000/trading-records 访问页面。`,
+          );
+        }
+        if (!res.ok) {
+          let err = `${res.status} ${res.statusText}`;
+          try {
+            const j = await res.json();
+            if (j && j.detail) err = String(j.detail);
+          } catch (_) {}
+          throw new Error(err);
+        }
+        return res.json();
+      };
+
+      function toYmdToday() {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${y}${m}${dd}`;
+      }
+
+      function toIsoDateToday() {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${dd}`;
+      }
+
+      function calcDefaultTradeFee(price, quantity) {
+        const px = Number(price);
+        const qty = Number(quantity);
+        if (
+          !Number.isFinite(px) ||
+          !Number.isFinite(qty) ||
+          px <= 0 ||
+          qty <= 0
+        ) {
+          return Number(TRADE_FEE_MIN.toFixed(2));
+        }
+        return Number(
+          Math.max(px * qty * TRADE_FEE_RATE, TRADE_FEE_MIN).toFixed(2),
+        );
+      }
+
+      function applyTradeFeeDefault(force = false) {
+        const feeInput = $("tradeFee");
+        const curRaw = String(feeInput?.value || "").trim();
+        if (!feeInput) return;
+        if (!force && !tradeFeeAuto && curRaw) return;
+        const next = calcDefaultTradeFee(
+          $("tradePrice").value,
+          $("tradeQty").value,
+        );
+        feeInput.value = Number(next).toFixed(2);
+      }
+
+      function isTradeTimeAllowed(timeText) {
+        const m = String(timeText || "")
+          .trim()
+          .match(/^(\d{2}):(\d{2}):(\d{2})$/);
+        if (!m) return false;
+        const hh = Number(m[1]);
+        const mm = Number(m[2]);
+        const ss = Number(m[3]);
+        if (
+          !Number.isInteger(hh) ||
+          !Number.isInteger(mm) ||
+          !Number.isInteger(ss)
+        ) {
+          return false;
+        }
+        return (
+          hh >= 9 && hh <= 14 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59
+        );
+      }
+
+      function isTradeQtyAllowed(qtyText) {
+        const q = Number(qtyText);
+        if (!Number.isFinite(q) || q <= 0) return false;
+        const lotRatio = q / 100;
+        return Math.abs(lotRatio - Math.round(lotRatio)) <= 1e-9;
+      }
+
+      function normalizeTradePriceInput({ required = false } = {}) {
+        const priceInput = $("tradePrice");
+        const raw = String(priceInput?.value || "").trim();
+        if (!raw) {
+          if (required) throw new Error("请输入成交价格");
+          return null;
+        }
+        const px = Number(raw);
+        if (!Number.isFinite(px) || px <= 0) {
+          throw new Error("成交价格必须是大于 0 的数字");
+        }
+        const normalized = Number(px.toFixed(PRICE_DECIMALS));
+        if (priceInput) {
+          priceInput.value = normalized.toFixed(PRICE_DECIMALS);
+        }
+        return normalized;
+      }
+
+      function clampTradePriceInputDecimals() {
+        const priceInput = $("tradePrice");
+        const raw = String(priceInput?.value || "");
+        if (!raw) return;
+        const m = raw.match(/^(-?\d*)(?:\.(\d*))?$/);
+        if (!m) return;
+        const intPart = String(m[1] || "");
+        const fracPart = String(m[2] || "");
+        if (fracPart.length <= PRICE_DECIMALS) return;
+        priceInput.value = `${intPart}.${fracPart.slice(0, PRICE_DECIMALS)}`;
+      }
+
+      function setTradeDateValue(isoDate) {
+        const v = String(isoDate || "").trim();
+        if (tradeDatePicker) {
+          tradeDatePicker.setDate(v, true, "Y-m-d");
+        } else {
+          $("tradeDate").value = v;
+        }
+      }
+
+      function setAccountFlowDateValue(isoDate) {
+        const v = String(isoDate || "").trim();
+        if (accountFlowDatePicker) {
+          accountFlowDatePicker.setDate(v, true, "Y-m-d");
+        } else {
+          $("accountFlowDate").value = v;
+        }
+      }
+
+      function setTransferDateValue(isoDate) {
+        const v = String(isoDate || "").trim();
+        if (transferDatePicker) {
+          transferDatePicker.setDate(v, true, "Y-m-d");
+        } else {
+          $("transferDate").value = v;
+        }
+      }
+
+      function localDateFromTime(timeText) {
+        const m = String(timeText || "")
+          .trim()
+          .match(/^(\d{2}):(\d{2}):(\d{2})$/);
+        if (!m) return null;
+        const hh = Number(m[1]);
+        const mm = Number(m[2]);
+        const ss = Number(m[3]);
+        if (
+          !Number.isInteger(hh) ||
+          !Number.isInteger(mm) ||
+          !Number.isInteger(ss)
+        ) {
+          return null;
+        }
+        const d = new Date();
+        d.setFullYear(2000, 0, 1);
+        d.setHours(hh, mm, ss, 0);
+        return d;
+      }
+
+      function setTradeTimeValue(timeText) {
+        const v = String(timeText || "").trim();
+        if (!isTradeTimeAllowed(v)) return;
+        if (tradeTimePicker) {
+          const d = localDateFromTime(v);
+          if (d) tradeTimePicker.setDate(d, true, "H:i:S");
+        } else {
+          $("tradeTime").value = v;
+        }
+      }
+
+      function resetTradeEntryForm() {
+        $("tradeCode").value = "";
+        $("tradeName").value = "";
+        const sid = selectedTradeStrategyId();
+        const hid = selectedTradeHolderId();
+        if ($("tradeStrategySelect") && sid) {
+          $("tradeStrategySelect").value = String(sid);
+        }
+        if ($("tradeHolderSelect") && hid) {
+          $("tradeHolderSelect").value = String(hid);
+        }
+        setTradeDateValue(toIsoDateToday());
+        $("tradeTimeQuick").value = "close";
+        setTradeTimeValue("14:56:00");
+        $("tradeSide").value = "BUY";
+        $("tradePrice").value = "";
+        $("tradeQty").value = "100";
+        tradeFeeAuto = true;
+        applyTradeFeeDefault(true);
+        $("tradeBrokerNo").value = "";
+      }
+
+      function initTradeDateTimePickers() {
+        const dateInput = $("tradeDate");
+        const accountFlowInput = $("accountFlowDate");
+        const transferInput = $("transferDate");
+        const timeInput = $("tradeTime");
+        if (!dateInput || !timeInput) return;
+        const setupDatePicker = (el) => {
+          if (!el) return null;
+          if (!window.flatpickr) return null;
+          return window.flatpickr(el, {
+            dateFormat: "Y-m-d",
+            allowInput: false,
+            defaultDate: toIsoDateToday(),
+            clickOpens: true,
+          });
+        };
+        if (window.flatpickr) {
+          tradeDatePicker = setupDatePicker(dateInput);
+          accountFlowDatePicker = setupDatePicker(accountFlowInput);
+          transferDatePicker = setupDatePicker(transferInput);
+          tradeTimePicker = window.flatpickr(timeInput, {
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: "H:i:S",
+            time_24hr: true,
+            enableSeconds: true,
+            hourIncrement: 1,
+            minuteIncrement: 1,
+            minTime: "09:00:00",
+            maxTime: "14:59:59",
+            allowInput: false,
+            defaultDate: localDateFromTime("14:56:00"),
+            clickOpens: true,
+          });
+          return;
+        }
+        // Native fallback for environments without flatpickr.
+        const tryOpenNative = (el) => {
+          if (typeof el?.showPicker === "function") {
+            try {
+              el.showPicker();
+            } catch (_) {}
+          }
+        };
+        dateInput.addEventListener("click", () => tryOpenNative(dateInput));
+        if (accountFlowInput) {
+          accountFlowInput.addEventListener("click", () =>
+            tryOpenNative(accountFlowInput),
+          );
+        }
+        if (transferInput) {
+          transferInput.addEventListener("click", () =>
+            tryOpenNative(transferInput),
+          );
+        }
+        timeInput.addEventListener("click", () => tryOpenNative(timeInput));
+      }
+
+      function normalizeEtfCode(raw) {
+        const s = String(raw || "")
+          .trim()
+          .toUpperCase();
+        if (!s) return "";
+        const m = s.match(/^([0-9]{6})(?:\.[A-Z]+)?$/);
+        if (m) return m[1];
+        return s;
+      }
+
+      function renderEtfCodeCandidates(keyword = "") {
+        const dl = $("etfCodeDatalist");
+        if (!dl) return;
+        const q = String(keyword || "")
+          .trim()
+          .toUpperCase();
+        const maxN = 80;
+        const list = q
+          ? etfCodeCatalog
+              .filter((x) => x.code.includes(q) || x.nameUpper.includes(q))
+              .slice(0, maxN)
+          : etfCodeCatalog.slice(0, maxN);
+        dl.innerHTML = "";
+        for (const x of list) {
+          const o = document.createElement("option");
+          o.value = x.code;
+          o.label = x.name || "";
+          o.textContent = x.name || "";
+          dl.appendChild(o);
+        }
+      }
+
+      function fillTradeNameFromCodeIfMatched() {
+        const tradeCode = $("tradeCode");
+        const tradeName = $("tradeName");
+        const key = normalizeEtfCode(tradeCode?.value);
+        if (!key) return;
+        const hit = etfCodeLookup.get(key);
+        if (hit && hit.name) tradeName.value = hit.name;
+      }
+
+      async function loadEtfCodeCatalog() {
+        const fetchEtf = async (adjust) => {
+          const url = `${location.origin}/api/etf${adjust ? `?adjust=${encodeURIComponent(adjust)}` : ""}`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+          const data = await res.json();
+          return Array.isArray(data) ? data : [];
+        };
+        let list = [];
+        try {
+          list = await fetchEtf("hfq");
+        } catch (_) {
+          list = await fetchEtf("");
+        }
+        etfCodeCatalog = list
+          .map((x) => ({
+            code: String(x?.code || "")
+              .trim()
+              .toUpperCase(),
+            name: String(x?.name || "").trim(),
+          }))
+          .filter((x) => x.code);
+        etfCodeCatalog.sort((a, b) => a.code.localeCompare(b.code));
+        etfCodeLookup = new Map(
+          etfCodeCatalog.map((x) => [normalizeEtfCode(x.code), x]),
+        );
+        renderEtfCodeCandidates("");
+      }
+
+      function bindPlotlyLateRender() {
+        const script = $("plotlyScript");
+        if (!script || window.Plotly) return;
+        script.addEventListener("load", async () => {
+          try {
+            const s = currentScope();
+            if (!s.scope_id) return;
+            await Promise.all([loadPerformance(), loadAttribution()]);
+            msg("图表已加载。");
+          } catch (e) {
+            msg(`图表加载后刷新失败：${e.message}`, true);
+          }
+        });
+      }
+
+      async function loadAccounts(preferredAccountId = null) {
+        const list = await api("/accounts");
+        const sel = $("accountSelect");
+        const old = sel.value;
+        sel.innerHTML = "";
+        for (const x of list) {
+          const o = document.createElement("option");
+          o.value = String(x.id);
+          o.textContent = `${x.name} (#${x.id})`;
+          sel.appendChild(o);
+        }
+        const values = new Set(list.map((x) => String(x.id)));
+        let targetValue = "";
+        if (
+          preferredAccountId != null &&
+          values.has(String(preferredAccountId))
+        ) {
+          targetValue = String(preferredAccountId);
+        } else if (old && values.has(String(old))) {
+          targetValue = String(old);
+        } else if (list[0]) {
+          targetValue = String(list[0].id);
+        }
+        if (list.length > 0) {
+          let idx = list.findIndex((x) => String(x.id) === targetValue);
+          if (idx < 0) idx = 0;
+          sel.selectedIndex = idx;
+          sel.value = String(list[idx].id);
+        } else {
+          sel.selectedIndex = -1;
+          sel.value = "";
+        }
+        return list;
+      }
+
+      async function loadStrategies(preferredStrategyId = null) {
+        const aid = Number($("accountSelect").value || 0);
+        const sel = $("strategySelect");
+        const tradeSel = $("tradeStrategySelect");
+        const old = sel.value;
+        const oldTrade = tradeSel ? tradeSel.value : "";
+        sel.innerHTML = "";
+        if (tradeSel) tradeSel.innerHTML = "";
+        if (!aid) {
+          sel.selectedIndex = -1;
+          sel.value = "";
+          if (tradeSel) {
+            tradeSel.selectedIndex = -1;
+            tradeSel.value = "";
+          }
+          return [];
+        }
+        const reqSeq = ++strategiesLoadSeq;
+        const list = await api(`/accounts/${aid}/strategies`);
+        // Prevent stale async responses from overriding a newer selector refresh.
+        if (reqSeq !== strategiesLoadSeq) return list;
+        const allOpt = document.createElement("option");
+        allOpt.value = "";
+        allOpt.textContent = "全部策略（账户维度）";
+        sel.appendChild(allOpt);
+        for (const x of list) {
+          const o = document.createElement("option");
+          o.value = String(x.id);
+          o.textContent = `${x.name} (#${x.id})`;
+          sel.appendChild(o);
+          if (tradeSel) {
+            const o2 = document.createElement("option");
+            o2.value = String(x.id);
+            o2.textContent = `${x.name} (#${x.id})`;
+            tradeSel.appendChild(o2);
+          }
+        }
+        const values = new Set(["", ...list.map((x) => String(x.id))]);
+        let targetValue = "";
+        if (
+          preferredStrategyId != null &&
+          values.has(String(preferredStrategyId))
+        ) {
+          targetValue = String(preferredStrategyId);
+        } else if (old && values.has(String(old))) {
+          targetValue = String(old);
+        } else if (values.has("")) {
+          targetValue = "";
+        } else if (list[0]) {
+          targetValue = String(list[0].id);
+        }
+        if (sel.options.length > 0) {
+          let idx = Array.from(sel.options).findIndex(
+            (o) => o.value === targetValue,
+          );
+          if (idx < 0) idx = 0;
+          sel.selectedIndex = idx;
+          sel.value = sel.options[idx].value;
+        } else {
+          sel.selectedIndex = -1;
+          sel.value = "";
+        }
+        if (tradeSel) {
+          const strategyValues = new Set(list.map((x) => String(x.id)));
+          let targetTradeValue = "";
+          if (
+            preferredStrategyId != null &&
+            strategyValues.has(String(preferredStrategyId))
+          ) {
+            targetTradeValue = String(preferredStrategyId);
+          } else if (oldTrade && strategyValues.has(String(oldTrade))) {
+            targetTradeValue = String(oldTrade);
+          } else if (targetValue && strategyValues.has(String(targetValue))) {
+            targetTradeValue = String(targetValue);
+          } else if (list[0]) {
+            targetTradeValue = String(list[0].id);
+          }
+          if (tradeSel.options.length > 0) {
+            let idx2 = Array.from(tradeSel.options).findIndex(
+              (o) => o.value === targetTradeValue,
+            );
+            if (idx2 < 0) idx2 = 0;
+            tradeSel.selectedIndex = idx2;
+            tradeSel.value = tradeSel.options[idx2].value;
+          } else {
+            tradeSel.selectedIndex = -1;
+            tradeSel.value = "";
+          }
+        }
+        return list;
+      }
+
+      async function loadHolders(preferredHolderId = null) {
+        const aid = Number($("accountSelect").value || 0);
+        const sel = $("holderSelect");
+        const tradeSel = $("tradeHolderSelect");
+        const old = sel.value;
+        const oldTrade = tradeSel ? tradeSel.value : "";
+        sel.innerHTML = "";
+        if (tradeSel) tradeSel.innerHTML = "";
+        if (!aid) {
+          sel.selectedIndex = -1;
+          sel.value = "";
+          if (tradeSel) {
+            tradeSel.selectedIndex = -1;
+            tradeSel.value = "";
+          }
+          return [];
+        }
+        const reqSeq = ++holdersLoadSeq;
+        const list = await api(`/accounts/${aid}/shareholders`);
+        // Prevent stale async responses from overriding a newer selector refresh.
+        if (reqSeq !== holdersLoadSeq) return list;
+        for (const x of list) {
+          const o = document.createElement("option");
+          o.value = String(x.id);
+          o.textContent = `${x.shareholder_account} (#${x.id})`;
+          sel.appendChild(o);
+          if (tradeSel) {
+            const o2 = document.createElement("option");
+            o2.value = String(x.id);
+            o2.textContent = `${x.shareholder_account} (#${x.id})`;
+            tradeSel.appendChild(o2);
+          }
+        }
+        const values = new Set(list.map((x) => String(x.id)));
+        let targetValue = "";
+        if (
+          preferredHolderId != null &&
+          values.has(String(preferredHolderId))
+        ) {
+          targetValue = String(preferredHolderId);
+        } else if (old && values.has(String(old))) {
+          targetValue = String(old);
+        } else if (list[0]) {
+          targetValue = String(list[0].id);
+        }
+        if (list.length > 0) {
+          let idx = list.findIndex((x) => String(x.id) === targetValue);
+          if (idx < 0) idx = 0;
+          sel.selectedIndex = idx;
+          sel.value = String(list[idx].id);
+        } else {
+          sel.selectedIndex = -1;
+          sel.value = "";
+        }
+        let targetTradeValue = "";
+        if (
+          preferredHolderId != null &&
+          values.has(String(preferredHolderId))
+        ) {
+          targetTradeValue = String(preferredHolderId);
+        } else if (oldTrade && values.has(String(oldTrade))) {
+          targetTradeValue = String(oldTrade);
+        } else if (targetValue && values.has(String(targetValue))) {
+          targetTradeValue = String(targetValue);
+        } else if (list[0]) {
+          targetTradeValue = String(list[0].id);
+        }
+        if (tradeSel) {
+          if (list.length > 0) {
+            let idx2 = list.findIndex((x) => String(x.id) === targetTradeValue);
+            if (idx2 < 0) idx2 = 0;
+            tradeSel.selectedIndex = idx2;
+            tradeSel.value = String(list[idx2].id);
+          } else {
+            tradeSel.selectedIndex = -1;
+            tradeSel.value = "";
+          }
+        }
+        return list;
+      }
+
+      function selectedTradeHolderId() {
+        return Number(
+          $("tradeHolderSelect").value || $("holderSelect").value || 0,
+        );
+      }
+
+      function selectedTradeStrategyId() {
+        return Number(
+          $("tradeStrategySelect").value || $("strategySelect").value || 0,
+        );
+      }
+
+      function findTradeRowById(tradeId) {
+        const id = Number(tradeId);
+        if (!Number.isFinite(id) || id <= 0) return null;
+        return tradesRowsCache.find((x) => Number(x.id) === id) || null;
+      }
+
+      function resetTradeEditMode() {
+        editingTradeId = null;
+        $("addTradeBtn").textContent = "新增成交";
+        $("cancelTradeEditBtn").style.display = "none";
+        $("tradeEditHint").style.display = "none";
+        $("tradeEditHint").textContent = "";
+      }
+
+      function enterTradeEditMode(row) {
+        if (!row) return;
+        editingTradeId = Number(row.id);
+        if ($("tradeStrategySelect")) {
+          $("tradeStrategySelect").value = String(row.strategy_id || "");
+        }
+        if ($("tradeHolderSelect")) {
+          $("tradeHolderSelect").value = String(
+            row.shareholder_account_id || "",
+          );
+        }
+        $("tradeCode").value = row.code || "";
+        $("tradeName").value = row.name || "";
+        setTradeDateValue(row.trade_date || toIsoDateToday());
+        setTradeTimeValue(row.trade_time || "14:56:00");
+        $("tradeSide").value = row.side || "BUY";
+        $("tradePrice").value =
+          row.price == null || !Number.isFinite(Number(row.price))
+            ? ""
+            : Number(row.price).toFixed(PRICE_DECIMALS);
+        $("tradeQty").value = row.quantity ?? "";
+        $("tradeFee").value =
+          row.fee == null || !Number.isFinite(Number(row.fee))
+            ? ""
+            : Number(row.fee).toFixed(2);
+        $("tradeBrokerNo").value = row.broker_trade_no || "";
+        tradeFeeAuto = false;
+        $("addTradeBtn").textContent = "保存成交修改";
+        $("cancelTradeEditBtn").style.display = "";
+        $("tradeEditHint").style.display = "";
+        $("tradeEditHint").textContent =
+          `正在修改成交 #${row.id}（保存时需填写修改理由）`;
+      }
+
+      function buildTradePayloadFromForm(aid, sid, hid, qty) {
+        return {
+          account_id: aid,
+          strategy_id: sid,
+          shareholder_account_id: hid,
+          code: $("tradeCode").value.trim(),
+          name: $("tradeName").value.trim(),
+          trade_date: $("tradeDate").value.trim(),
+          trade_time: (() => {
+            const t = String($("tradeTime").value || "").trim();
+            if (!isTradeTimeAllowed(t)) {
+              throw new Error(
+                "交易时间需在 09:00:00 - 14:59:59（时分秒步长 1）",
+              );
+            }
+            return t;
+          })(),
+          side: $("tradeSide").value,
+          price: normalizeTradePriceInput({ required: true }),
+          quantity: qty,
+          fee: Number($("tradeFee").value || 0),
+          broker_trade_no: $("tradeBrokerNo").value.trim() || null,
+        };
+      }
+
+      function currentScope() {
+        const sid = Number($("strategySelect").value || 0);
+        if (sid) return { scope_type: "strategy", scope_id: sid };
+        const aid = Number($("accountSelect").value || 0);
+        return { scope_type: "account", scope_id: aid };
+      }
+
+      function selectedScopeName(selectId) {
+        const sel = $(selectId);
+        if (!sel || sel.selectedIndex < 0) return "";
+        const opt = sel.options[sel.selectedIndex];
+        const raw = String(opt?.textContent || "").trim();
+        return raw.replace(/\s*\(#\d+\)\s*$/, "").trim();
+      }
+
+      function currentScopeNavTitle() {
+        const s = currentScope();
+        const name =
+          s.scope_type === "strategy"
+            ? selectedScopeName("strategySelect")
+            : selectedScopeName("accountSelect");
+        if (name) return `${name} 净值曲线`;
+        const prefix = s.scope_type === "strategy" ? "策略" : "账户";
+        return `${prefix}#${s.scope_id} 净值曲线`;
+      }
+
+      function optionLabelById(selectId, rawId) {
+        const sel = $(selectId);
+        if (!sel) return "";
+        const target = String(rawId ?? "").trim();
+        if (!target) return "";
+        const opt = Array.from(sel.options || []).find(
+          (o) => String(o.value) === target,
+        );
+        if (!opt) return "";
+        const raw = String(opt.textContent || "").trim();
+        return raw.replace(/\s*\(#\d+\)\s*$/, "").trim();
+      }
+
+      function strategyLabelById(strategyId) {
+        const txt = optionLabelById("strategySelect", strategyId);
+        return txt || (strategyId ? `#${strategyId}` : "-");
+      }
+
+      function holderLabelById(holderId) {
+        const txt = optionLabelById("holderSelect", holderId);
+        return txt || (holderId ? `#${holderId}` : "-");
+      }
+
+      async function latestTradeMetaByCode(aid, sid) {
+        if (!aid && !sid) return new Map();
+        const q = sid
+          ? `?strategy_id=${sid}&page=1&page_size=500`
+          : `?account_id=${aid}&page=1&page_size=500`;
+        const out = await api(`/trades${q}`);
+        const map = new Map();
+        for (const x of out.items || []) {
+          const code = String(x.code || "").trim();
+          if (!code || map.has(code)) continue;
+          map.set(code, {
+            strategy_id: x.strategy_id,
+            shareholder_account_id: x.shareholder_account_id,
+          });
+        }
+        return map;
+      }
+
+      function nextSortState(state, key) {
+        if (state.key === key) {
+          state.dir = state.dir === "asc" ? "desc" : "asc";
+          return;
+        }
+        state.key = key;
+        state.dir = "asc";
+      }
+
+      function sortRows(rows, state, numericKeys) {
+        if (!state.key) return [...rows];
+        const dir = state.dir === "asc" ? 1 : -1;
+        const key = state.key;
+        return [...rows].sort((a, b) => {
+          const av = a?.[key];
+          const bv = b?.[key];
+          const an = av == null || av === "";
+          const bn = bv == null || bv === "";
+          if (an && bn) return 0;
+          if (an) return 1;
+          if (bn) return -1;
+          if (numericKeys.has(key)) {
+            const na = Number(av);
+            const nb = Number(bv);
+            const af = Number.isFinite(na);
+            const bf = Number.isFinite(nb);
+            if (!af && !bf) return 0;
+            if (!af) return 1;
+            if (!bf) return -1;
+            if (na < nb) return -1 * dir;
+            if (na > nb) return 1 * dir;
+            return 0;
+          }
+          const sa = String(av);
+          const sb = String(bv);
+          return sa.localeCompare(sb, "zh-CN", { sensitivity: "base" }) * dir;
+        });
+      }
+
+      function updateSortHeaders(tableId, state) {
+        const headers = document.querySelectorAll(`#${tableId} th.sortable-th`);
+        for (const th of headers) {
+          const k = String(th.dataset.sortKey || "");
+          if (k && k === state.key) {
+            th.dataset.sort = state.dir;
+          } else {
+            delete th.dataset.sort;
+          }
+        }
+      }
+
+      function renderTradesRows(rows) {
+        const sorted = sortRows(rows, tradesSortState, TRADE_NUMERIC_SORT_KEYS);
+        $("tradeTbody").innerHTML = sorted
+          .map(
+            (x) => `
+          <tr>
+            <td>${x.id}</td>
+            <td>${x.trade_date || ""}</td>
+            <td>${x.trade_time || ""}</td>
+            <td>${x.code || ""}</td>
+            <td>${x.strategy_text || "-"}</td>
+            <td>${x.holder_text || "-"}</td>
+            <td>${x.side || ""}</td>
+            <td>${fmtPrice(x.price)}</td>
+            <td>${fmtInt(x.quantity)}</td>
+            <td>${fmtNum(x.fee, 2)}</td>
+            <td>${fmtNum(x.amount)}</td>
+            <td>
+              <button data-trade-action="edit" data-trade-id="${x.id}">修改</button>
+              <button data-trade-action="delete" data-trade-id="${x.id}">删除</button>
+            </td>
+          </tr>
+        `,
+          )
+          .join("");
+        updateSortHeaders("recentTradesTable", tradesSortState);
+      }
+
+      function renderHoldingsRows(rows) {
+        const latestNavPoint = navRowsCache.length
+          ? navRowsCache[navRowsCache.length - 1]
+          : null;
+        const scopeEquity =
+          Number.isFinite(Number(latestNavPoint?.equity)) &&
+          Math.abs(Number(latestNavPoint?.equity)) > 1e-12
+            ? Number(latestNavPoint.equity)
+            : null;
+        const rowsWithPosition = (rows || []).map((x) => ({
+          ...x,
+          position_ratio:
+            scopeEquity != null && Number.isFinite(Number(x.market_value))
+              ? Number(x.market_value) / scopeEquity
+              : null,
+        }));
+        const sorted = sortRows(
+          rowsWithPosition,
+          holdingsSortState,
+          HOLD_NUMERIC_SORT_KEYS,
+        );
+        $("holdTbody").innerHTML = sorted
+          .map(
+            (x) => `
+            <tr class="${x.row_class || ""}">
+              <td>${x.code || ""}</td>
+              <td>${x.name || ""}</td>
+              <td>${x.strategy_text || "-"}</td>
+              <td>${x.holder_text || "-"}</td>
+              <td>${fmtInt(x.quantity)}</td>
+              <td>${fmtPrice(x.cost_price)}</td>
+              <td>${fmtPrice(x.market_price)}</td>
+              <td>${fmtNum(x.cost_value, 2)}</td>
+              <td>${fmtNum(x.market_value, 2)}</td>
+              <td>${fmtPct(x.position_ratio)}</td>
+              <td>${fmtNum(x.pnl_amount)}</td>
+              <td>${fmtPct(x.pnl_rate)}</td>
+              <td>${x.status_text || ""}</td>
+            </tr>
+          `,
+          )
+          .join("");
+        updateSortHeaders("holdingsTable", holdingsSortState);
+      }
+
+      function renderRoundsRows(rows) {
+        const sorted = sortRows(rows, roundsSortState, ROUND_NUMERIC_SORT_KEYS);
+        $("roundTbody").innerHTML = sorted
+          .map(
+            (x) => `
+          <tr>
+            <td>${x.code || ""}</td>
+            <td>${x.open_date || ""}</td>
+            <td>${x.close_date || ""}</td>
+            <td>${x.buy_count ?? "-"}</td>
+            <td>${x.sell_count ?? "-"}</td>
+            <td>${fmtPrice(x.avg_buy_price)}</td>
+            <td>${fmtPrice(x.avg_sell_price)}</td>
+            <td class="${Number(x.realized_pnl || 0) >= 0 ? "good" : "danger"}">${fmtNum(x.realized_pnl)}</td>
+            <td>${fmtPct(x.return_rate)}</td>
+            <td>${fmtNum(x.total_fee, 2)}</td>
+          </tr>
+        `,
+          )
+          .join("");
+        updateSortHeaders("closedRoundsTable", roundsSortState);
+      }
+
+      function populateRoundCodeFilterOptions(rows) {
+        const sel = $("roundCodeFilter");
+        if (!sel) return;
+        const old = roundsCodeFilterValue || sel.value || "";
+        const codes = Array.from(
+          new Set(
+            (rows || [])
+              .map((x) => String(x.code || "").trim())
+              .filter(Boolean),
+          ),
+        ).sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" }));
+        sel.innerHTML = "";
+        const allOpt = document.createElement("option");
+        allOpt.value = "";
+        allOpt.textContent = "全部标的";
+        sel.appendChild(allOpt);
+        for (const code of codes) {
+          const o = document.createElement("option");
+          o.value = code;
+          o.textContent = code;
+          sel.appendChild(o);
+        }
+        if (old && codes.includes(old)) {
+          sel.value = old;
+        } else {
+          sel.value = "";
+        }
+        roundsCodeFilterValue = sel.value;
+      }
+
+      function getFilteredRoundsRows() {
+        const code = String(roundsCodeFilterValue || "").trim();
+        if (!code) return roundsRowsCache;
+        return roundsRowsCache.filter(
+          (x) => String(x.code || "").trim() === code,
+        );
+      }
+
+      function calcRoundStats(rows) {
+        const pnl = (rows || [])
+          .map((x) => Number(x.realized_pnl))
+          .filter((x) => Number.isFinite(x));
+        const wins = pnl.filter((x) => x > 0);
+        const losses = pnl.filter((x) => x < 0);
+        const winCount = wins.length;
+        const lossCount = losses.length;
+        const denom = winCount + lossCount;
+        const winRate = denom > 0 ? winCount / denom : null;
+        const avgWin =
+          winCount > 0 ? wins.reduce((a, b) => a + b, 0) / winCount : null;
+        const avgLoss =
+          lossCount > 0 ? losses.reduce((a, b) => a + b, 0) / lossCount : null;
+        const payoff =
+          avgWin != null && avgLoss != null && avgLoss < 0
+            ? avgWin / Math.abs(avgLoss)
+            : null;
+        return { totalTrades: rows.length, winRate, payoff };
+      }
+
+      function setRoundKpis(stats, fee) {
+        $("kpiTotalTrades").textContent = stats?.totalTrades ?? "-";
+        $("kpiWinRate").textContent = fmtPct(stats?.winRate);
+        $("kpiPayoff").textContent = fmtNum(stats?.payoff);
+        $("kpiTotalFee").textContent = fmtNum(fee?.total_fee, 2);
+        $("kpiBuyFee").textContent = fmtNum(fee?.buy_fee, 2);
+        $("kpiSellFee").textContent = fmtNum(fee?.sell_fee, 2);
+      }
+
+      async function fetchFeeStatsForSelectedCode(scope, code) {
+        const key = `${scope.scope_type}:${scope.scope_id}:${code || "__ALL__"}`;
+        if (roundsFeeBreakdownCache.has(key))
+          return roundsFeeBreakdownCache.get(key);
+        if (!code) {
+          const fee = await api(
+            `/stats/fees?scope_type=${scope.scope_type}&scope_id=${scope.scope_id}`,
+          );
+          roundsFeeBreakdownCache.set(key, fee);
+          return fee;
+        }
+        let buyFee = 0.0;
+        let sellFee = 0.0;
+        const pageSize = 500;
+        let page = 1;
+        let total = 0;
+        let seen = 0;
+        while (true) {
+          const q =
+            scope.scope_type === "strategy"
+              ? `/trades?strategy_id=${scope.scope_id}&code=${encodeURIComponent(code)}&page=${page}&page_size=${pageSize}`
+              : `/trades?account_id=${scope.scope_id}&code=${encodeURIComponent(code)}&page=${page}&page_size=${pageSize}`;
+          const out = await api(q);
+          total = Number(out.total || 0);
+          const items = out.items || [];
+          for (const t of items) {
+            const fee = Number(t.fee || 0);
+            if (String(t.side || "").toUpperCase() === "BUY") buyFee += fee;
+            if (String(t.side || "").toUpperCase() === "SELL") sellFee += fee;
+          }
+          seen += items.length;
+          if (!items.length || seen >= total) break;
+          page += 1;
+        }
+        const feeOut = {
+          total_fee: buyFee + sellFee,
+          buy_fee: buyFee,
+          sell_fee: sellFee,
+        };
+        roundsFeeBreakdownCache.set(key, feeOut);
+        return feeOut;
+      }
+
+      async function refreshRoundsViewAndKpis(scope) {
+        const rows = getFilteredRoundsRows();
+        renderRoundsRows(rows);
+        const stats = calcRoundStats(rows);
+        const fee = await fetchFeeStatsForSelectedCode(
+          scope,
+          String(roundsCodeFilterValue || "").trim(),
+        );
+        setRoundKpis(stats, fee);
+      }
+
+      function bindSortableTables() {
+        for (const th of document.querySelectorAll(
+          "#recentTradesTable th.sortable-th",
+        )) {
+          th.addEventListener("click", () => {
+            const key = String(th.dataset.sortKey || "");
+            if (!key) return;
+            nextSortState(tradesSortState, key);
+            renderTradesRows(tradesRowsCache);
+          });
+        }
+        for (const th of document.querySelectorAll(
+          "#holdingsTable th.sortable-th",
+        )) {
+          th.addEventListener("click", () => {
+            const key = String(th.dataset.sortKey || "");
+            if (!key) return;
+            nextSortState(holdingsSortState, key);
+            renderHoldingsRows(holdingsRowsCache);
+          });
+        }
+        for (const th of document.querySelectorAll(
+          "#closedRoundsTable th.sortable-th",
+        )) {
+          th.addEventListener("click", () => {
+            const key = String(th.dataset.sortKey || "");
+            if (!key) return;
+            nextSortState(roundsSortState, key);
+            renderRoundsRows(getFilteredRoundsRows());
+          });
+        }
+      }
+
+      function renderCapitalOverview(latestNavPoint = null, navRows = []) {
+        const floatingPnl = (holdingsRowsCache || [])
+          .map((x) => Number(x.pnl_amount))
+          .filter((x) => Number.isFinite(x))
+          .reduce((acc, v) => acc + v, 0.0);
+        const netExternalFlow = (navRows || [])
+          .map((x) => Number(x.external_flow))
+          .filter((x) => Number.isFinite(x))
+          .reduce((acc, v) => acc + v, 0.0);
+        const cumPnl = Number.isFinite(Number(latestNavPoint?.equity))
+          ? Number(latestNavPoint.equity) - netExternalFlow
+          : null;
+        const positionRatio =
+          Number.isFinite(Number(latestNavPoint?.equity)) &&
+          Number.isFinite(Number(latestNavPoint?.market_value)) &&
+          Math.abs(Number(latestNavPoint.equity)) > 1e-12
+            ? Number(latestNavPoint.market_value) /
+              Number(latestNavPoint.equity)
+            : null;
+        $("kpiOverviewEquity").textContent = fmtNum(latestNavPoint?.equity, 2);
+        $("kpiOverviewMarketValue").textContent = fmtNum(
+          latestNavPoint?.market_value,
+          2,
+        );
+        $("kpiOverviewCash").textContent = fmtNum(latestNavPoint?.cash, 2);
+        $("kpiOverviewFloatingPnl").textContent = fmtNum(floatingPnl, 2);
+        $("kpiOverviewCumPnl").textContent = fmtNum(cumPnl, 2);
+        $("kpiOverviewPositionRatio").textContent = fmtPct(positionRatio);
+      }
+
+      async function loadTrades() {
+        const aid = Number($("accountSelect").value || 0);
+        const sid = Number($("strategySelect").value || 0);
+        if (!aid && !sid) {
+          tradesRowsCache = [];
+          renderTradesRows(tradesRowsCache);
+          return;
+        }
+        const q = sid
+          ? `?strategy_id=${sid}&page=1&page_size=200`
+          : `?account_id=${aid}&page=1&page_size=200`;
+        const out = await api(`/trades${q}`);
+        tradesRowsCache = (out.items || []).map((x) => ({
+          ...x,
+          strategy_text: strategyLabelById(x.strategy_id),
+          holder_text: holderLabelById(x.shareholder_account_id),
+        }));
+        if (editingTradeId && !findTradeRowById(editingTradeId)) {
+          resetTradeEditMode();
+        }
+        renderTradesRows(tradesRowsCache);
+      }
+
+      async function loadHoldings() {
+        const s = currentScope();
+        if (!s.scope_id) return;
+        const aid = Number($("accountSelect").value || 0);
+        const sid = Number($("strategySelect").value || 0);
+        const tradeMetaByCode = await latestTradeMetaByCode(aid, sid);
+        const out = await api(
+          `/holdings?scope_type=${s.scope_type}&scope_id=${s.scope_id}`,
+        );
+        holdingsRowsCache = (out || []).map((x) => {
+          const cls = x.price_missing ? "danger" : "";
+          const status = x.price_missing
+            ? `缺价${x.stale_days != null ? ` (stale ${x.stale_days}d)` : ""}`
+            : "正常";
+          const meta = tradeMetaByCode.get(String(x.code || "").trim());
+          const strategyText = meta
+            ? strategyLabelById(meta.strategy_id)
+            : s.scope_type === "strategy"
+              ? selectedScopeName("strategySelect") || "-"
+              : "账户汇总";
+          const holderText = meta
+            ? holderLabelById(meta.shareholder_account_id)
+            : s.scope_type === "strategy"
+              ? "策略内汇总"
+              : "账户内汇总";
+          return {
+            ...x,
+            strategy_text: strategyText,
+            holder_text: holderText,
+            status_text: status,
+            row_class: cls,
+          };
+        });
+        renderHoldingsRows(holdingsRowsCache);
+        const latestNavPoint = navRowsCache.length
+          ? navRowsCache[navRowsCache.length - 1]
+          : null;
+        renderCapitalOverview(latestNavPoint, navRowsCache);
+      }
+
+      async function loadRoundsAndStats() {
+        const s = currentScope();
+        if (!s.scope_id) return;
+        const rounds = await api(
+          `/closed-rounds?scope_type=${s.scope_type}&scope_id=${s.scope_id}&page=1&page_size=200`,
+        );
+        roundsRowsCache = rounds.items || [];
+        roundsFeeBreakdownCache = new Map();
+        populateRoundCodeFilterOptions(roundsRowsCache);
+        await refreshRoundsViewAndKpis(s);
+      }
+
+      function renderMetricsTable(bodyId, obj) {
+        const rows = Object.entries(obj || {})
+          .map(
+            ([k, v]) =>
+              `<tr><td>${k}</td><td>${(typeof v === "number" && k.includes("return")) || k.includes("ratio") || k.includes("drawdown") || k.includes("volatility") ? fmtPct(v) : fmtNum(v)}</td></tr>`,
+          )
+          .join("");
+        $(bodyId).innerHTML = rows;
+      }
+
+      async function loadPerformance() {
+        const s = currentScope();
+        if (!s.scope_id) return;
+        const out = await api(
+          `/performance?scope_type=${s.scope_type}&scope_id=${s.scope_id}&return_basis=both`,
+        );
+        const nav = out.nav || [];
+        navRowsCache = nav;
+        renderCapitalOverview(nav.length ? nav[nav.length - 1] : null, nav);
+        renderHoldingsRows(holdingsRowsCache);
+        const x = nav.map((r) => r.nav_date);
+        const dietz = nav.map((r) => r.nav_dietz);
+        const twr = nav.map((r) => r.nav_twr);
+        if (window.Plotly) {
+          Plotly.newPlot(
+            "navPlot",
+            [
+              { x, y: dietz, mode: "lines", name: "NAV Dietz" },
+              { x, y: twr, mode: "lines", name: "NAV TWR" },
+            ],
+            {
+              title: currentScopeNavTitle(),
+              yaxis: { type: "log" },
+              margin: { t: 40, l: 50, r: 20, b: 40 },
+            },
+            { responsive: true },
+          );
+        }
+        renderMetricsTable("dietzMetricsBody", out.dietz_basis_metrics || {});
+        renderMetricsTable("twrMetricsBody", out.twr_basis_metrics || {});
+      }
+
+      async function loadAttribution() {
+        const s = currentScope();
+        if (!s.scope_id) return;
+        const out = await api(
+          `/attribution?scope_type=${s.scope_type}&scope_id=${s.scope_id}`,
+        );
+        const daily = out.daily || [];
+        const x = daily.map((r) => r.date);
+        const traces = [
+          { key: "selection_return", name: "选标的" },
+          { key: "timing_return", name: "择时" },
+          { key: "position_return", name: "仓位" },
+          { key: "cost_drag_return", name: "成本拖累" },
+          { key: "cash_drag_return", name: "现金拖累" },
+        ].map((k) => ({
+          x,
+          y: daily.map((r) => r[k.key] || 0),
+          mode: "lines",
+          name: k.name,
+        }));
+        if (window.Plotly) {
+          Plotly.newPlot(
+            "attrPlot",
+            traces,
+            {
+              title: "日度收益归因",
+              margin: { t: 40, l: 50, r: 20, b: 40 },
+            },
+            { responsive: true },
+          );
+        }
+        const p = out.period || {};
+        $("attrPeriodBody").innerHTML = [
+          ["selection_return", p.selection_return],
+          ["timing_return", p.timing_return],
+          ["position_return", p.position_return],
+          ["cost_drag_return", p.cost_drag_return],
+          ["cash_drag_return", p.cash_drag_return],
+          ["rebuild_total", p.rebuild_total],
+          ["total_return_twr_sum", p.total_return_twr_sum],
+        ]
+          .map(([k, v]) => `<tr><td>${k}</td><td>${fmtPct(v)}</td></tr>`)
+          .join("");
+      }
+
+      async function loadCorporateActions() {
+        const aid = Number($("accountSelect").value || 0);
+        const sid = Number($("strategySelect").value || 0);
+        if (!aid && !sid) {
+          $("caTbody").innerHTML = "";
+          return;
+        }
+        const q = sid ? `?strategy_id=${sid}` : `?account_id=${aid}`;
+        const list = await api(`/corporate-actions${q}`);
+        $("caTbody").innerHTML = (list || [])
+          .map(
+            (x) => `
+          <tr>
+            <td>${x.id}</td>
+            <td>${x.event_type || ""}</td>
+            <td>${x.code || ""}</td>
+            <td>${x.new_code || ""}</td>
+            <td>${x.event_date || ""}</td>
+            <td>${x.effective_date || ""}</td>
+            <td>${fmtNum(x.ratio_factor)}</td>
+            <td>${fmtNum(x.cash_per_share)}</td>
+          </tr>
+        `,
+          )
+          .join("");
+      }
+
+      async function refreshAll(opts = {}) {
+        const preferredStrategyId = opts.preferredStrategyId ?? null;
+        const preferredHolderId = opts.preferredHolderId ?? null;
+        await loadStrategies(preferredStrategyId);
+        await loadHolders(preferredHolderId);
+        const aid = Number($("accountSelect").value || 0);
+        const sid = Number($("strategySelect").value || 0);
+        if (!aid && !sid) {
+          tradesRowsCache = [];
+          holdingsRowsCache = [];
+          navRowsCache = [];
+          roundsRowsCache = [];
+          roundsCodeFilterValue = "";
+          roundsFeeBreakdownCache = new Map();
+          renderTradesRows(tradesRowsCache);
+          renderHoldingsRows(holdingsRowsCache);
+          renderRoundsRows(roundsRowsCache);
+          populateRoundCodeFilterOptions([]);
+          setRoundKpis({ totalTrades: "-", winRate: null, payoff: null }, null);
+          $("caTbody").innerHTML = "";
+          $("attrPeriodBody").innerHTML = "";
+          renderCapitalOverview(null);
+          if (window.Plotly) {
+            Plotly.purge("navPlot");
+            Plotly.purge("attrPlot");
+          }
+          msg("暂无账户，请先创建账户、策略和股东账号。");
+          return;
+        }
+        await Promise.all([
+          loadTrades(),
+          loadHoldings(),
+          loadRoundsAndStats(),
+          loadPerformance(),
+          loadAttribution(),
+          loadCorporateActions(),
+        ]);
+      }
+
+      function parseCsvTrades(text, aid, sid, hid) {
+        const lines = String(text || "")
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const [header, ...rows] = lines;
+        const cols = header.split(",").map((x) => x.trim());
+        const idx = (name) => cols.indexOf(name);
+        const required = [
+          "code",
+          "name",
+          "trade_date",
+          "trade_time",
+          "side",
+          "price",
+          "quantity",
+        ];
+        for (const k of required)
+          if (idx(k) < 0) throw new Error(`CSV 缺列: ${k}`);
+        return rows.map((r) => {
+          const parts = r.split(",").map((x) => x.trim());
+          const price = Number(parts[idx("price")]);
+          const quantity = Number(parts[idx("quantity")]);
+          if (!isTradeQtyAllowed(quantity)) {
+            throw new Error(
+              `CSV 数量必须是 100 的倍数，当前值=${parts[idx("quantity")]}`,
+            );
+          }
+          const feeRaw = idx("fee") >= 0 ? Number(parts[idx("fee")]) : NaN;
+          const fee =
+            Number.isFinite(feeRaw) && feeRaw > 0
+              ? Number(feeRaw.toFixed(2))
+              : calcDefaultTradeFee(price, quantity);
+          return {
+            account_id: aid,
+            strategy_id: sid,
+            shareholder_account_id: hid,
+            code: parts[idx("code")],
+            name: parts[idx("name")],
+            trade_date: parts[idx("trade_date")],
+            trade_time: parts[idx("trade_time")] || "09:30:00",
+            side: parts[idx("side")],
+            price,
+            quantity,
+            fee,
+            broker_trade_no:
+              idx("broker_trade_no") >= 0
+                ? parts[idx("broker_trade_no")]
+                : null,
+          };
+        });
+      }
+
+      async function init() {
+        bindPlotlyLateRender();
+        bindSortableTables();
+        const today = toYmdToday();
+        initTradeDateTimePickers();
+        const todayIso = toIsoDateToday();
+        setAccountFlowDateValue(todayIso);
+        setTransferDateValue(todayIso);
+        setTradeDateValue(toIsoDateToday());
+        $("caEventDate").value = today;
+        $("caEffDate").value = today;
+        $("tradeTimeQuick").value = "close";
+        setTradeTimeValue("14:56:00");
+        resetTradeEditMode();
+        tradeFeeAuto = true;
+        applyTradeFeeDefault(true);
+
+        $("tradeTimeQuick").addEventListener("change", () => {
+          const mode = $("tradeTimeQuick").value;
+          if (mode === "open") {
+            setTradeTimeValue("09:30:00");
+          } else if (mode === "close") {
+            setTradeTimeValue("14:56:00");
+          }
+        });
+
+        $("tradeCode").addEventListener("input", () => {
+          renderEtfCodeCandidates($("tradeCode").value);
+          fillTradeNameFromCodeIfMatched();
+        });
+        $("tradeCode").addEventListener(
+          "change",
+          fillTradeNameFromCodeIfMatched,
+        );
+        $("caCode").addEventListener("input", () =>
+          renderEtfCodeCandidates($("caCode").value),
+        );
+        $("caNewCode").addEventListener("input", () =>
+          renderEtfCodeCandidates($("caNewCode").value),
+        );
+        $("tradePrice").addEventListener("input", () => {
+          clampTradePriceInputDecimals();
+          applyTradeFeeDefault(false);
+        });
+        $("tradePrice").addEventListener("blur", () => {
+          const raw = String($("tradePrice").value || "").trim();
+          if (!raw) return;
+          try {
+            normalizeTradePriceInput();
+            applyTradeFeeDefault(false);
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("tradeQty").addEventListener("input", () =>
+          applyTradeFeeDefault(false),
+        );
+        $("tradeFee").addEventListener("input", () => {
+          const v = Number($("tradeFee").value);
+          tradeFeeAuto = !(Number.isFinite(v) && v > 0);
+          if (tradeFeeAuto) applyTradeFeeDefault(true);
+        });
+        $("tradeQty").addEventListener("change", () => {
+          const qtyVal = $("tradeQty").value;
+          if (!isTradeQtyAllowed(qtyVal)) {
+            msg("成交数量必须是 100 的倍数。", true);
+          }
+        });
+        $("tradeTime").addEventListener("change", () => {
+          const t = String($("tradeTime").value || "").trim();
+          if (!isTradeTimeAllowed(t)) {
+            msg("交易时间需在 09:00:00 - 14:59:59（时分秒步长 1）。", true);
+            setTradeTimeValue("14:56:00");
+          }
+        });
+
+        $("accountSelect").addEventListener("change", async () => {
+          try {
+            await refreshAll();
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("strategySelect").addEventListener("change", async () => {
+          try {
+            if ($("tradeStrategySelect")) {
+              $("tradeStrategySelect").value = $("strategySelect").value;
+            }
+            await refreshAll();
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("tradeStrategySelect").addEventListener("change", async () => {
+          try {
+            if ($("strategySelect")) {
+              $("strategySelect").value = $("tradeStrategySelect").value;
+            }
+            await refreshAll();
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("roundCodeFilter").addEventListener("change", async () => {
+          roundsCodeFilterValue = String($("roundCodeFilter").value || "");
+          try {
+            const s = currentScope();
+            if (!s.scope_id) return;
+            await refreshRoundsViewAndKpis(s);
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("holderSelect").addEventListener("change", () => {
+          if ($("tradeHolderSelect"))
+            $("tradeHolderSelect").value = $("holderSelect").value;
+        });
+        $("tradeHolderSelect").addEventListener("change", () => {
+          if ($("holderSelect"))
+            $("holderSelect").value = $("tradeHolderSelect").value;
+        });
+        $("reasonModalCancelBtn").addEventListener("click", (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          closeReasonModal(null);
+        });
+        $("reasonModalConfirmBtn").addEventListener("click", (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          const reason = String($("reasonModalInput").value || "").trim();
+          if (!reason) {
+            $("reasonModalError").textContent = "理由不能为空";
+            $("reasonModalInput").focus();
+            return;
+          }
+          $("reasonModalError").textContent = "";
+          closeReasonModal(reason);
+        });
+        $("reasonModal").addEventListener("click", (evt) => {
+          if (evt.target === $("reasonModal")) closeReasonModal(null);
+        });
+        $("reasonModalInput").addEventListener("keydown", (evt) => {
+          if (evt.key === "Escape") {
+            evt.preventDefault();
+            closeReasonModal(null);
+            return;
+          }
+          if ((evt.ctrlKey || evt.metaKey) && evt.key === "Enter") {
+            evt.preventDefault();
+            $("reasonModalConfirmBtn").click();
+          }
+        });
+        $("tradeTbody").addEventListener("click", async (evt) => {
+          const btn = evt.target.closest("button[data-trade-action]");
+          if (!btn) return;
+          const tradeId = Number(btn.dataset.tradeId || 0);
+          const row = findTradeRowById(tradeId);
+          if (!row) {
+            msg("未找到对应成交记录，请先刷新", true);
+            return;
+          }
+          const action = String(btn.dataset.tradeAction || "");
+          if (action === "edit") {
+            enterTradeEditMode(row);
+            msg(`已载入成交 #${row.id}，修改后点击“保存成交修改”`, false);
+            return;
+          }
+          if (action !== "delete") return;
+          const reason = await askReasonInput({
+            title: `删除成交 #${row.id}`,
+            hint: "请填写删除理由（必填）",
+            confirmText: "确认删除",
+          });
+          if (reason == null) return;
+          try {
+            await api(`/trades/${row.id}`, {
+              method: "DELETE",
+              body: JSON.stringify({ reason }),
+            });
+            if (editingTradeId && Number(editingTradeId) === Number(row.id)) {
+              resetTradeEditMode();
+            }
+            await refreshAll();
+            msg(`成交 #${row.id} 已删除`);
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
+        $("cancelTradeEditBtn").addEventListener("click", () => {
+          resetTradeEntryForm();
+          resetTradeEditMode();
+          msg("已取消成交修改");
+        });
+
+        $("addAccountBtn").onclick = async () => {
+          try {
+            const name = $("newAccountName").value.trim();
+            if (!name) throw new Error("账户名不能为空");
+            const created = await api("/accounts", {
+              method: "POST",
+              body: JSON.stringify({
+                name,
+                initial_cash: Number($("newAccountInitialCash").value || 0),
+              }),
+            });
+            await loadAccounts(created.id);
+            $("newAccountName").value = "";
+            try {
+              await refreshAll();
+              msg("账户已新增");
+            } catch (e) {
+              msg(`账户已新增，但部分统计刷新失败：${e.message}`, true);
+            }
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("addStrategyBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            const name = $("newStrategyName").value.trim();
+            if (!aid) throw new Error("请先选择账户");
+            if (!name) throw new Error("策略名不能为空");
+            const created = await api(`/accounts/${aid}/strategies`, {
+              method: "POST",
+              body: JSON.stringify({ name }),
+            });
+            $("newStrategyName").value = "";
+            await refreshAll({ preferredStrategyId: created.id });
+            msg("策略已新增");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("addHolderBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            const val = $("newHolderText").value.trim();
+            if (!aid) throw new Error("请先选择账户");
+            if (!val) throw new Error("股东账号不能为空");
+            const created = await api(`/accounts/${aid}/shareholders`, {
+              method: "POST",
+              body: JSON.stringify({ shareholder_account: val }),
+            });
+            $("newHolderText").value = "";
+            await refreshAll({ preferredHolderId: created.id });
+            msg("股东账号已新增");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("addAccountFlowBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            if (!aid) throw new Error("请先选择账户");
+            await api(`/accounts/${aid}/cashflows`, {
+              method: "POST",
+              body: JSON.stringify({
+                flow_date: $("accountFlowDate").value.trim(),
+                amount: Number($("accountFlowAmount").value || 0),
+                flow_type: $("accountFlowType").value,
+              }),
+            });
+            await refreshAll();
+            msg("账户流水已新增");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("transferBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            const sid = Number($("strategySelect").value || 0);
+            if (!aid || !sid) throw new Error("请先选择账户与策略");
+            await api(`/accounts/${aid}/strategy-transfer`, {
+              method: "POST",
+              body: JSON.stringify({
+                strategy_id: sid,
+                flow_date: $("transferDate").value.trim(),
+                amount: Number($("transferAmount").value || 0),
+                direction: $("transferDirection").value,
+              }),
+            });
+            await refreshAll();
+            msg("账户-策略调拨已记录");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("addTradeBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            const sid = selectedTradeStrategyId();
+            const hid = selectedTradeHolderId();
+            const qty = Number($("tradeQty").value);
+            const isEditing = Boolean(editingTradeId);
+            if (!aid || !sid || !hid)
+              throw new Error("请先选择账户/策略/股东账号");
+            if (!isTradeQtyAllowed(qty))
+              throw new Error("成交数量必须是 100 的倍数");
+            const payload = buildTradePayloadFromForm(aid, sid, hid, qty);
+            if (isEditing) {
+              const reason = await askReasonInput({
+                title: `修改成交 #${editingTradeId}`,
+                hint: "请填写修改理由（必填）",
+                confirmText: "确认修改",
+              });
+              if (reason == null) return;
+              await api(`/trades/${editingTradeId}`, {
+                method: "PUT",
+                body: JSON.stringify({
+                  ...payload,
+                  reason,
+                }),
+              });
+              resetTradeEditMode();
+            } else {
+              await api("/trades", {
+                method: "POST",
+                body: JSON.stringify(payload),
+              });
+            }
+            await refreshAll();
+            msg(isEditing ? "成交已修改" : "成交已新增");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("importCsvBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            const sid = selectedTradeStrategyId();
+            const hid = selectedTradeHolderId();
+            if (!aid || !sid || !hid)
+              throw new Error("请先选择账户/策略/股东账号");
+            const trades = parseCsvTrades($("batchCsv").value, aid, sid, hid);
+            if (!trades.length) throw new Error("CSV 为空");
+            await api("/trades/batch", {
+              method: "POST",
+              body: JSON.stringify({ trades }),
+            });
+            await refreshAll();
+            msg(`已批量导入 ${trades.length} 条成交`);
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("addCaBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            const sid = Number($("strategySelect").value || 0);
+            if (!aid) throw new Error("请先选择账户");
+            await api("/corporate-actions", {
+              method: "POST",
+              body: JSON.stringify({
+                account_id: aid,
+                strategy_id: sid || null,
+                event_type: $("caType").value,
+                code: $("caCode").value.trim(),
+                new_code: $("caNewCode").value.trim() || null,
+                event_date: $("caEventDate").value.trim(),
+                effective_date: $("caEffDate").value.trim(),
+                ratio_factor: $("caFactor").value
+                  ? Number($("caFactor").value)
+                  : null,
+                cash_per_share: $("caCashPerShare").value
+                  ? Number($("caCashPerShare").value)
+                  : null,
+              }),
+            });
+            await refreshAll();
+            msg("企业行为已新增并应用");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("replayBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            const sid = Number($("strategySelect").value || 0);
+            if (!aid) throw new Error("请先选择账户");
+            await api("/replay", {
+              method: "POST",
+              body: JSON.stringify({
+                account_id: aid,
+                strategy_id: sid || null,
+              }),
+            });
+            await refreshAll();
+            msg("重放完成");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("refreshAllBtn").onclick = async () => {
+          try {
+            await refreshAll();
+            msg("已刷新");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        try {
+          await loadEtfCodeCatalog();
+          await loadAccounts();
+          await refreshAll();
+          msg("就绪");
+        } catch (e) {
+          msg(e.message, true);
+        }
+      }
+
+      (function initThemeToggle() {
+        const key = `theme:${location.pathname}`;
+        const html = document.documentElement;
+        const nextTheme = () =>
+          html.getAttribute("data-theme") === "light" ? "dark" : "light";
+        const apply = (theme) => {
+          html.setAttribute("data-theme", theme);
+          try {
+            localStorage.setItem(key, theme);
+          } catch (_) {}
+          const btn = document.getElementById("themeToggle");
+          if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+        };
+        document.addEventListener("DOMContentLoaded", () => {
+          const btn = document.createElement("button");
+          btn.id = "themeToggle";
+          btn.className = "theme-toggle";
+          btn.type = "button";
+          btn.addEventListener("click", () => apply(nextTheme()));
+          document.body.appendChild(btn);
+          apply(html.getAttribute("data-theme") || "dark");
+          init();
+        });
+      })();
+    </script>
+  </body>
+</html>

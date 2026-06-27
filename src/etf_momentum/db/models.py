@@ -145,7 +145,9 @@ class EtfResearchGroupItem(Base):
 
     __tablename__ = "etf_research_group_item"
     __table_args__ = (
-        UniqueConstraint("group_id", "code", name="uq_etf_research_group_item_group_code"),
+        UniqueConstraint(
+            "group_id", "code", name="uq_etf_research_group_item_group_code"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -855,4 +857,356 @@ class MacroIngestionBatch(Base):
     )
     finished_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class LiveAccount(Base):
+    __tablename__ = "live_account"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(128), unique=True, index=True, nullable=False
+    )
+    base_ccy: Mapped[str] = mapped_column(String(16), nullable=False, default="CNY")
+    initial_cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class LiveShareholderAccount(Base):
+    __tablename__ = "live_shareholder_account"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "shareholder_account",
+            name="uq_live_shareholder_account_account_holder",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=False
+    )
+    shareholder_account: Mapped[str] = mapped_column(String(64), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveStrategy(Base):
+    __tablename__ = "live_strategy"
+    __table_args__ = (
+        UniqueConstraint("account_id", "name", name="uq_live_strategy_account_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class LiveAccountCashflow(Base):
+    __tablename__ = "live_account_cashflow"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=False
+    )
+    flow_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    flow_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="deposit"
+    )  # deposit|withdraw|transfer_to_strategy|transfer_from_strategy|dividend|manual
+    transfer_id: Mapped[str | None] = mapped_column(
+        String(64), index=True, nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveStrategyCashflow(Base):
+    __tablename__ = "live_strategy_cashflow"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_strategy.id"), index=True, nullable=False
+    )
+    flow_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    flow_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="transfer_in"
+    )  # transfer_in|transfer_out|manual|dividend
+    transfer_id: Mapped[str | None] = mapped_column(
+        String(64), index=True, nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveTrade(Base):
+    __tablename__ = "live_trade"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_live_trade_idempotency_key"),
+        UniqueConstraint("broker_trade_no", name="uq_live_trade_broker_trade_no"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=False
+    )
+    strategy_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_strategy.id"), index=True, nullable=False
+    )
+    shareholder_account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_shareholder_account.id"), index=True, nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    trade_time: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="09:30:00"
+    )
+    side: Mapped[str] = mapped_column(String(8), nullable=False)  # BUY|SELL
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    broker_trade_no: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveTradeAuditLog(Base):
+    __tablename__ = "live_trade_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    account_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    strategy_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)  # update|delete
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveCorporateActionEvent(Base):
+    __tablename__ = "live_corporate_action_event"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=True
+    )
+    strategy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("live_strategy.id"), index=True, nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(24), nullable=False
+    )  # cash_dividend|split|share_conversion|code_change
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    new_code: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
+    event_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    effective_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    ratio_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cash_per_share: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveSymbolAlias(Base):
+    __tablename__ = "live_symbol_alias"
+    __table_args__ = (
+        UniqueConstraint(
+            "old_code", "effective_date", name="uq_live_symbol_alias_old_code_effective"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    old_code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    new_code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    effective_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveClosedRound(Base):
+    __tablename__ = "live_closed_round"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_type",
+            "scope_id",
+            "code",
+            "round_no",
+            name="uq_live_closed_round_scope_code_round_no",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope_type: Mapped[str] = mapped_column(
+        String(16), index=True, nullable=False
+    )  # account|strategy
+    scope_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=False
+    )
+    strategy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("live_strategy.id"), index=True, nullable=True
+    )
+    round_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    open_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    close_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    buy_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sell_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    buy_qty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    sell_qty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    avg_buy_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_sell_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    return_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveClosedRoundLeg(Base):
+    __tablename__ = "live_closed_round_leg"
+    __table_args__ = (
+        UniqueConstraint(
+            "round_id", "sort_order", name="uq_live_closed_round_leg_round_sort"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    round_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_closed_round.id"), index=True, nullable=False
+    )
+    trade_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_trade.id"), index=True, nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    trade_time: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="09:30:00"
+    )
+
+
+class LiveHoldingSnapshot(Base):
+    __tablename__ = "live_holding_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_date",
+            "scope_type",
+            "scope_id",
+            "code",
+            name="uq_live_holding_snapshot_scope_code_day",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    snapshot_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(
+        String(16), index=True, nullable=False
+    )  # account|strategy
+    scope_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=False
+    )
+    strategy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("live_strategy.id"), index=True, nullable=True
+    )
+    code: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cost_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    market_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_missing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    stale_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveNavDaily(Base):
+    __tablename__ = "live_nav_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "nav_date", "scope_type", "scope_id", name="uq_live_nav_daily_scope_day"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nav_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(
+        String(16), index=True, nullable=False
+    )  # account|strategy
+    scope_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_account.id"), index=True, nullable=False
+    )
+    strategy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("live_strategy.id"), index=True, nullable=True
+    )
+    equity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    market_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    external_flow: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    trading_fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    daily_return_twr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    daily_return_dietz: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nav_twr: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    nav_dietz: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    selection_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    timing_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    position_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_drag_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cash_drag_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
