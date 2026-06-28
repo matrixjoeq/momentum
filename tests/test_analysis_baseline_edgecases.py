@@ -224,3 +224,175 @@ def test_compute_baseline_single_asset_portfolios_track_asset_nav(session_factor
     assert float(rp[-1]) == pytest.approx(expected_last, rel=1e-9)
     m = out.get("metrics") or {}
     assert float(m.get("cumulative_return") or 0.0) > 0.0
+
+
+def test_compute_baseline_attribution_respects_exec_price_mode(session_factory):
+    sf = session_factory
+    with sf() as db:
+        code_a = "A"
+        code_b = "B"
+        dates = [d.date() for d in pd.date_range("2024-01-01", periods=10, freq="B")]
+        close_a = [100.0 + 0.2 * i for i in range(len(dates))]
+        close_b = [100.0 + 0.2 * i for i in range(len(dates))]
+        exec_days = {dates[0], dates[5]}
+        for d, ca, cb in zip(dates, close_a, close_b, strict=True):
+            oa = float(ca / 1.08) if d in exec_days else float(ca)
+            ob = float(cb / 0.95) if d in exec_days else float(cb)
+            db.add(
+                EtfPrice(
+                    code=code_a,
+                    trade_date=d,
+                    open=oa,
+                    close=float(ca),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+            db.add(
+                EtfPrice(
+                    code=code_b,
+                    trade_date=d,
+                    open=ob,
+                    close=float(cb),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+
+        out_open = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code_a, code_b],
+                start=dates[0],
+                end=dates[-1],
+                adjust="qfq",
+                rebalance="weekly",
+                exec_price="open",
+                holding_mode="EW",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+            ),
+        )
+        out_close = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code_a, code_b],
+                start=dates[0],
+                end=dates[-1],
+                adjust="qfq",
+                rebalance="weekly",
+                exec_price="close",
+                holding_mode="EW",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+            ),
+        )
+
+    m_open = (out_open.get("metrics_by_portfolio") or {}).get("EW") or {}
+    m_close = (out_close.get("metrics_by_portfolio") or {}).get("EW") or {}
+    assert float(m_open.get("cumulative_return") or 0.0) != pytest.approx(
+        float(m_close.get("cumulative_return") or 0.0), rel=0.0, abs=1e-9
+    )
+
+    a_open = (
+        ((out_open.get("attribution_by_portfolio") or {}).get("EW") or {})
+        .get("return", {})
+        .get("by_code", [])
+    )
+    a_close = (
+        ((out_close.get("attribution_by_portfolio") or {}).get("EW") or {})
+        .get("return", {})
+        .get("by_code", [])
+    )
+    share_open = {str(x["code"]): x.get("return_share") for x in a_open}
+    share_close = {str(x["code"]): x.get("return_share") for x in a_close}
+    assert share_open.get(code_a) is not None
+    assert share_close.get(code_a) is not None
+    assert abs(float(share_open[code_a]) - float(share_close[code_a])) > 0.05
+
+
+def test_compute_baseline_attribution_dca_mode_uses_money_weighted_curve(
+    session_factory,
+):
+    sf = session_factory
+    with sf() as db:
+        code = "AAA"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(10)]
+        closes = [100.0 * (1.01**i) for i in range(len(dates))]
+        for d, c in zip(dates, closes, strict=True):
+            db.add(
+                EtfPrice(
+                    code=code,
+                    trade_date=d,
+                    open=float(c),
+                    close=float(c),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+
+        out_dca = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rebalance="weekly",
+                holding_mode="EW",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+                dca_enabled=True,
+                dca_base_amount=100.0,
+                dca_periodic_amount=20.0,
+                dca_frequency="daily",
+            ),
+        )
+        out_lump = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code],
+                start=dates[0],
+                end=dates[-1],
+                benchmark_code=code,
+                adjust="qfq",
+                rebalance="weekly",
+                holding_mode="EW",
+                rolling_weeks=[],
+                rolling_months=[],
+                rolling_years=[],
+                dca_enabled=False,
+            ),
+        )
+
+    dca_metrics = (out_dca.get("metrics_by_portfolio") or {}).get("EW") or {}
+    dca_attr = ((out_dca.get("attribution_by_portfolio") or {}).get("EW") or {}).get(
+        "return", {}
+    ) or {}
+    dca_rows = dca_attr.get("by_code") or []
+    dca_sum = sum(float(x.get("return_contribution") or 0.0) for x in dca_rows)
+    assert str(dca_attr.get("method") or "") == "money_weighted_capital_curve"
+    assert float(dca_attr.get("total_return") or 0.0) == pytest.approx(
+        float(dca_metrics.get("dca_cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(dca_sum) == pytest.approx(
+        float(dca_metrics.get("dca_cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(dca_metrics.get("dca_cumulative_return") or 0.0) != pytest.approx(
+        float(dca_metrics.get("cumulative_return") or 0.0), rel=0.0, abs=1e-9
+    )
+
+    lump_metrics = (out_lump.get("metrics_by_portfolio") or {}).get("EW") or {}
+    lump_attr = ((out_lump.get("attribution_by_portfolio") or {}).get("EW") or {}).get(
+        "return", {}
+    ) or {}
+    assert str(lump_attr.get("method") or "") == "log_scaled"
+    assert float(lump_attr.get("total_return") or 0.0) == pytest.approx(
+        float(lump_metrics.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )

@@ -3352,6 +3352,188 @@ def _compute_return_risk_contributions(
     }
 
 
+def _compute_return_risk_contributions_money_weighted(
+    *,
+    asset_ret: pd.DataFrame,
+    weights: pd.DataFrame,
+    contribution: pd.Series,
+    account_nav: pd.Series,
+) -> dict[str, Any]:
+    """
+    Money-weighted attribution on capital curve (for DCA mode).
+
+    Daily asset PnL is computed from the actually invested capital on each day:
+      gross_cap_t = nav_{t-1} + contribution_t
+      pnl_{i,t} = gross_cap_t * w_{i,t} * r_{i,t}
+
+    Return contribution is then:
+      contribution_i = sum_t pnl_{i,t} / total_invested
+    """
+    r = asset_ret.astype(float).fillna(0.0)
+    w = weights.reindex(index=r.index, columns=r.columns).astype(float).fillna(0.0)
+    c = (
+        pd.to_numeric(contribution.reindex(r.index), errors="coerce")
+        .astype(float)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+    nav = (
+        pd.to_numeric(account_nav.reindex(r.index), errors="coerce")
+        .astype(float)
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    nav_prev = nav.shift(1)
+    if len(nav_prev) > 0:
+        nav_prev.iloc[0] = 0.0
+    gross_cap = (nav_prev.fillna(0.0) + c).astype(float).clip(lower=0.0)
+
+    asset_pnl = (w * r).mul(gross_cap, axis=0).astype(float)
+    by_code_pnl = asset_pnl.sum(axis=0).astype(float)
+    model_total_pnl = float(np.nansum(by_code_pnl.to_numpy(dtype=float)))
+    total_invested = float(np.nansum(c.to_numpy(dtype=float)))
+    nav_last = (
+        float(nav.iloc[-1])
+        if len(nav) > 0 and np.isfinite(float(nav.iloc[-1]))
+        else float("nan")
+    )
+    curve_total_pnl = (
+        float(nav_last - total_invested)
+        if np.isfinite(nav_last) and np.isfinite(total_invested)
+        else float("nan")
+    )
+    total_return = (
+        float(curve_total_pnl / total_invested)
+        if float(total_invested) > 0.0 and np.isfinite(curve_total_pnl)
+        else float("nan")
+    )
+
+    n_obs = int(len(r.index))
+    min_obs_for_ann = 252
+    ann_applicable = bool(n_obs >= min_obs_for_ann)
+
+    contrib = pd.Series(np.nan, index=r.columns, dtype=float)
+    share = pd.Series(np.nan, index=r.columns, dtype=float)
+    if np.isfinite(model_total_pnl) and abs(float(model_total_pnl)) > 1e-18:
+        share = (by_code_pnl / float(model_total_pnl)).astype(float)
+    elif len(r.columns) == 1:
+        share = pd.Series(1.0, index=r.columns, dtype=float)
+    else:
+        exposure = w.mean(axis=0).astype(float).clip(lower=0.0)
+        expo_sum = float(np.nansum(exposure.to_numpy(dtype=float)))
+        if expo_sum > 1e-18:
+            share = (exposure / expo_sum).astype(float)
+    if np.isfinite(total_return):
+        contrib = (share * float(total_return)).astype(float)
+
+    ann_total_return = float("nan")
+    ann_contrib = pd.Series(index=r.columns, dtype=float)
+    if (
+        ann_applicable
+        and np.isfinite(total_return)
+        and (1.0 + float(total_return)) > 0.0
+    ):
+        ann_total_return = float(
+            np.power(1.0 + float(total_return), 252.0 / float(max(1, n_obs))) - 1.0
+        )
+        ann_contrib = (share * ann_total_return).astype(float)
+
+    return_rows = []
+    for code in r.columns:
+        return_rows.append(
+            {
+                "code": str(code),
+                "return_contribution": (
+                    None if pd.isna(contrib.get(code)) else float(contrib.get(code))
+                ),
+                "return_contribution_annualized": (
+                    None
+                    if (not ann_applicable) or pd.isna(ann_contrib.get(code))
+                    else float(ann_contrib.get(code))
+                ),
+                "return_share": (
+                    None if pd.isna(share.get(code)) else float(share.get(code))
+                ),
+            }
+        )
+
+    # Risk decomposition on daily money-weighted component return series:
+    #   comp_ret_{i,t} = pnl_{i,t} / total_invested
+    risk_rows = [{"code": str(code), "risk_share": None} for code in r.columns]
+    port_var = float("nan")
+    port_vol_ann = float("nan")
+    if total_invested > 0.0:
+        comp_ret = (asset_pnl / float(total_invested)).astype(float)
+        cov = comp_ret.cov()
+        cov_mat = cov.to_numpy(dtype=float)
+        ones = np.ones(cov_mat.shape[0], dtype=float)
+        if cov_mat.size > 0:
+            port_var = float(ones.T @ cov_mat @ ones)
+            if np.isfinite(port_var) and abs(float(port_var)) > 1e-24:
+                cov_with_port = cov_mat @ ones
+                risk_share = cov_with_port / port_var
+                rc_vol_ann = np.full_like(risk_share, np.nan, dtype=float)
+                if ann_applicable and port_var > 0.0:
+                    port_vol_ann = float(np.sqrt(port_var) * np.sqrt(252.0))
+                    rc_vol_ann = cov_with_port / np.sqrt(port_var) * np.sqrt(252.0)
+                risk_rows = []
+                for i, code in enumerate(cov.index):
+                    risk_rows.append(
+                        {
+                            "code": str(code),
+                            "risk_share": float(risk_share[i]),
+                            "risk_contribution_annualized": (
+                                None
+                                if (not ann_applicable)
+                                or (not np.isfinite(float(rc_vol_ann[i])))
+                                else float(rc_vol_ann[i])
+                            ),
+                        }
+                    )
+
+    return {
+        "return": {
+            "method": "money_weighted_capital_curve",
+            "total_return": (
+                None if (not np.isfinite(total_return)) else float(total_return)
+            ),
+            "annualized_total_return": (
+                None
+                if (not ann_applicable) or (not np.isfinite(ann_total_return))
+                else float(ann_total_return)
+            ),
+            "total_invested": (
+                None if (not np.isfinite(total_invested)) else float(total_invested)
+            ),
+            "total_pnl": (
+                None if (not np.isfinite(curve_total_pnl)) else float(curve_total_pnl)
+            ),
+            "annualization": {
+                "applicable": bool(ann_applicable),
+                "n_obs": int(n_obs),
+                "min_obs": int(min_obs_for_ann),
+            },
+            "by_code": return_rows,
+        },
+        "risk": {
+            "method": "money_weighted_variance_share",
+            "portfolio_variance": (
+                None if (not np.isfinite(port_var)) else float(port_var)
+            ),
+            "annualized_portfolio_volatility": (
+                None
+                if (not ann_applicable) or (not np.isfinite(port_vol_ann))
+                else float(port_vol_ann)
+            ),
+            "annualization": {
+                "applicable": bool(ann_applicable),
+                "n_obs": int(n_obs),
+                "min_obs": int(min_obs_for_ann),
+            },
+            "by_code": risk_rows,
+        },
+    }
+
+
 def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     codes = list(dict.fromkeys(inp.codes))
     if not codes:
@@ -3650,9 +3832,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         raise ValueError("holding_mode must be one of: EW|RP|IVOL|CUSTOM")
     dca_enabled = bool(getattr(inp, "dca_enabled", False))
     dca_base_amount = float(getattr(inp, "dca_base_amount", 100000.0) or 0.0)
-    dca_periodic_amount = float(
-        getattr(inp, "dca_periodic_amount", 10000.0) or 0.0
-    )
+    dca_periodic_amount = float(getattr(inp, "dca_periodic_amount", 10000.0) or 0.0)
     dca_frequency = str(getattr(inp, "dca_frequency", "monthly") or "monthly")
     dca_frequency = dca_frequency.strip().lower()
     if dca_frequency not in {
@@ -3764,7 +3944,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         vals = ((dca_pack.get("series") or {}).get(key) or []) if dca_pack else []
         if len(vals) != len(idx_common):
             return pd.Series(np.nan, index=idx_common, dtype=float)
-        s = pd.to_numeric(pd.Series(vals, index=idx_common), errors="coerce").astype(float)
+        s = pd.to_numeric(pd.Series(vals, index=idx_common), errors="coerce").astype(
+            float
+        )
         return s.replace([np.inf, -np.inf], np.nan)
 
     dca_account_nav_by_portfolio = {
@@ -3820,7 +4002,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
                 .fillna(0.0)
                 .astype(float)
             )
-    selected_nav = perf_nav_by_portfolio.get(mode, perf_nav_by_portfolio.get("EW", ew_nav))
+    selected_nav = perf_nav_by_portfolio.get(
+        mode, perf_nav_by_portfolio.get("EW", ew_nav)
+    )
     weekly = period_returns(selected_nav, "W-FRI")
     monthly = period_returns(selected_nav, "ME")
     quarterly = period_returns(selected_nav, "QE")
@@ -3905,7 +4089,9 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         sharpe = _sharpe(nav_ret, rf=float(inp.risk_free_rate))
         calmar = float(ann_ret / abs(mdd)) if mdd < 0 else float("nan")
         sortino = _sortino(nav_ret, rf=float(inp.risk_free_rate))
-        ir = _information_ratio(nav_ret - bench_ret_s.reindex(nav_ret.index).fillna(0.0))
+        ir = _information_ratio(
+            nav_ret - bench_ret_s.reindex(nav_ret.index).fillna(0.0)
+        )
         ui = _ulcer_index(nav_s, in_percent=True)
         ui_den = ui / 100.0
         upi = float(ann_ret / ui_den) if ui_den > 0 else float("nan")
@@ -3983,9 +4169,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             dca_buy_turnover.loc[valid] = (
                 contrib_s.loc[valid] / gross_cap.loc[valid]
             ).astype(float)
-            daily_turnover = (daily_rebalance_turnover + dca_buy_turnover).astype(
-                float
-            )
+            daily_turnover = (daily_rebalance_turnover + dca_buy_turnover).astype(float)
         avg_daily_turnover = (
             float(daily_turnover.mean()) if len(daily_turnover) else 0.0
         )
@@ -4065,9 +4249,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             ivol_w,
             account_nav=(perf_nav_by_portfolio["IVOL"] if dca_enabled else None),
             contribution=(
-                dca_contribution_by_portfolio.get("IVOL")
-                if dca_enabled
-                else None
+                dca_contribution_by_portfolio.get("IVOL") if dca_enabled else None
             ),
         )
     )
@@ -4076,9 +4258,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
             custom_w,
             account_nav=(perf_nav_by_portfolio["CUSTOM"] if dca_enabled else None),
             contribution=(
-                dca_contribution_by_portfolio.get("CUSTOM")
-                if dca_enabled
-                else None
+                dca_contribution_by_portfolio.get("CUSTOM") if dca_enabled else None
             ),
         )
     )
@@ -4088,16 +4268,12 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         ("IVOL", metrics_ivol),
         ("CUSTOM", metrics_custom),
     ]:
-        dca_metrics = dict(
-            (dca_by_portfolio.get(p_name) or {}).get("metrics") or {}
-        )
+        dca_metrics = dict((dca_by_portfolio.get(p_name) or {}).get("metrics") or {})
         one_metrics.update(
             {
                 "dca_enabled": bool(dca_enabled),
                 "dca_frequency": (dca_frequency if dca_enabled else None),
-                "dca_base_amount": (
-                    float(dca_base_amount) if dca_enabled else None
-                ),
+                "dca_base_amount": (float(dca_base_amount) if dca_enabled else None),
                 "dca_periodic_amount": (
                     float(dca_periodic_amount) if dca_enabled else None
                 ),
@@ -4110,9 +4286,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
                 "dca_money_weighted_annualized_return": dca_metrics.get(
                     "dca_money_weighted_annualized_return"
                 ),
-                "dca_time_weighted_return": dca_metrics.get(
-                    "dca_time_weighted_return"
-                ),
+                "dca_time_weighted_return": dca_metrics.get("dca_time_weighted_return"),
             }
         )
     metrics_by_portfolio = {
@@ -4235,34 +4409,81 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "CUSTOM": float(custom_nav.iloc[-1] / custom_nav.iloc[0] - 1.0),
     }
 
-    attribution_ew = _compute_return_risk_contributions(
-        asset_ret=ret_common[codes_eff],
-        weights=ew_w[codes_eff]
-        if not ew_w.empty
-        else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(strategy_total_return_by_portfolio["EW"]),
+    attr_asset_ret = (
+        ret_common[codes_eff]
+        if reb_mode == "none"
+        else ret_fwd.reindex(index=ret_common.index, columns=codes_eff).fillna(0.0)
     )
-    attribution_rp = _compute_return_risk_contributions(
-        asset_ret=ret_common[codes_eff],
-        weights=rp_w[codes_eff]
-        if not rp_w.empty
-        else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(strategy_total_return_by_portfolio["RP"]),
-    )
-    attribution_ivol = _compute_return_risk_contributions(
-        asset_ret=ret_common[codes_eff],
-        weights=ivol_w[codes_eff]
-        if not ivol_w.empty
-        else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(strategy_total_return_by_portfolio["IVOL"]),
-    )
-    attribution_custom = _compute_return_risk_contributions(
-        asset_ret=ret_common[codes_eff],
-        weights=custom_w[codes_eff]
-        if not custom_w.empty
-        else pd.DataFrame(index=ret_common.index, columns=codes_eff),
-        total_return=float(strategy_total_return_by_portfolio["CUSTOM"]),
-    )
+    if dca_enabled:
+        attribution_ew = _compute_return_risk_contributions_money_weighted(
+            asset_ret=attr_asset_ret,
+            weights=ew_w[codes_eff]
+            if not ew_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            contribution=dca_contribution_by_portfolio.get(
+                "EW", pd.Series(0.0, index=ret_common.index, dtype=float)
+            ),
+            account_nav=perf_nav_by_portfolio["EW"],
+        )
+        attribution_rp = _compute_return_risk_contributions_money_weighted(
+            asset_ret=attr_asset_ret,
+            weights=rp_w[codes_eff]
+            if not rp_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            contribution=dca_contribution_by_portfolio.get(
+                "RP", pd.Series(0.0, index=ret_common.index, dtype=float)
+            ),
+            account_nav=perf_nav_by_portfolio["RP"],
+        )
+        attribution_ivol = _compute_return_risk_contributions_money_weighted(
+            asset_ret=attr_asset_ret,
+            weights=ivol_w[codes_eff]
+            if not ivol_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            contribution=dca_contribution_by_portfolio.get(
+                "IVOL", pd.Series(0.0, index=ret_common.index, dtype=float)
+            ),
+            account_nav=perf_nav_by_portfolio["IVOL"],
+        )
+        attribution_custom = _compute_return_risk_contributions_money_weighted(
+            asset_ret=attr_asset_ret,
+            weights=custom_w[codes_eff]
+            if not custom_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            contribution=dca_contribution_by_portfolio.get(
+                "CUSTOM", pd.Series(0.0, index=ret_common.index, dtype=float)
+            ),
+            account_nav=perf_nav_by_portfolio["CUSTOM"],
+        )
+    else:
+        attribution_ew = _compute_return_risk_contributions(
+            asset_ret=attr_asset_ret,
+            weights=ew_w[codes_eff]
+            if not ew_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            total_return=float(strategy_total_return_by_portfolio["EW"]),
+        )
+        attribution_rp = _compute_return_risk_contributions(
+            asset_ret=attr_asset_ret,
+            weights=rp_w[codes_eff]
+            if not rp_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            total_return=float(strategy_total_return_by_portfolio["RP"]),
+        )
+        attribution_ivol = _compute_return_risk_contributions(
+            asset_ret=attr_asset_ret,
+            weights=ivol_w[codes_eff]
+            if not ivol_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            total_return=float(strategy_total_return_by_portfolio["IVOL"]),
+        )
+        attribution_custom = _compute_return_risk_contributions(
+            asset_ret=attr_asset_ret,
+            weights=custom_w[codes_eff]
+            if not custom_w.empty
+            else pd.DataFrame(index=ret_common.index, columns=codes_eff),
+            total_return=float(strategy_total_return_by_portfolio["CUSTOM"]),
+        )
     attribution_by_portfolio = {
         "EW": attribution_ew,
         "RP": attribution_rp,
