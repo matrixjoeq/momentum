@@ -1774,6 +1774,10 @@
         $("cancelTradeEditBtn").style.display = "none";
         $("tradeEditHint").style.display = "none";
         $("tradeEditHint").textContent = "";
+        // Exit edit mode into "new trade" mode: restore automatic fee behavior
+        // so stale fee values from edited rows do not leak into subsequent orders.
+        tradeFeeAuto = true;
+        applyTradeFeeDefault(true);
       }
 
       function enterTradeEditMode(row) {
