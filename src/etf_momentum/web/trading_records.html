@@ -566,6 +566,11 @@
         </thead>
         <tbody id="roundTbody"></tbody>
       </table>
+      <div class="row" style="margin-top: 8px">
+        <button id="roundsPrevBtn" type="button">上一页</button>
+        <button id="roundsNextBtn" type="button">下一页</button>
+        <span id="roundsPageInfo" class="muted">第 0/0 页，共 0 条</span>
+      </div>
     </div>
 
     <div class="panel">
@@ -623,6 +628,11 @@
         </thead>
         <tbody id="tradeTbody"></tbody>
       </table>
+      <div class="row" style="margin-top: 8px">
+        <button id="tradesPrevBtn" type="button">上一页</button>
+        <button id="tradesNextBtn" type="button">下一页</button>
+        <span id="tradesPageInfo" class="muted">第 0/0 页，共 0 条</span>
+      </div>
     </div>
 
     <div id="reasonModal" class="modal-backdrop" aria-hidden="true">
@@ -765,17 +775,21 @@
       let navRowsCache = [];
       let roundsRowsCache = [];
       let overviewCashflowRowsCache = [];
+      let tradesPage = 1;
       let holdingsPage = 1;
       let overviewCashflowPage = 1;
+      let roundsPage = 1;
       let roundsCodeFilterValue = "";
       let roundsFeeBreakdownCache = new Map();
       const ROUND_FILTER_ALL = "";
       const ROUND_FILTER_EX_REPO = "__ALL_EX_REPO__";
+      const TRADES_PAGE_SIZE = 20;
       const HOLDINGS_PAGE_SIZE = 20;
       const OVERVIEW_CASHFLOW_PAGE_SIZE = 20;
+      const ROUNDS_PAGE_SIZE = 20;
       const tradesSortState = { key: "trade_date", dir: "desc" };
       const holdingsSortState = { key: "market_value", dir: "desc" };
-      const roundsSortState = { key: "", dir: "asc" };
+      const roundsSortState = { key: "close_date", dir: "desc" };
       const TRADE_NUMERIC_SORT_KEYS = new Set([
         "id",
         "price",
@@ -2141,7 +2155,21 @@
 
       function renderTradesRows(rows) {
         const sorted = sortRows(rows, tradesSortState, TRADE_NUMERIC_SORT_KEYS);
-        $("tradeTbody").innerHTML = sorted
+        if (!sorted.length) {
+          $("tradeTbody").innerHTML =
+            '<tr><td colspan="13" class="muted">暂无成交记录</td></tr>';
+          renderTradesPager(0);
+          updateSortHeaders("recentTradesTable", tradesSortState);
+          return;
+        }
+        const totalPages = Math.max(
+          1,
+          Math.ceil(sorted.length / TRADES_PAGE_SIZE),
+        );
+        tradesPage = Math.min(Math.max(tradesPage, 1), totalPages);
+        const start = (tradesPage - 1) * TRADES_PAGE_SIZE;
+        const pageRows = sorted.slice(start, start + TRADES_PAGE_SIZE);
+        $("tradeTbody").innerHTML = pageRows
           .map(
             (x) => `
           <tr>
@@ -2165,7 +2193,30 @@
         `,
           )
           .join("");
+        renderTradesPager(sorted.length);
         updateSortHeaders("recentTradesTable", tradesSortState);
+      }
+
+      function renderTradesPager(totalRows = 0) {
+        const prevBtn = $("tradesPrevBtn");
+        const nextBtn = $("tradesNextBtn");
+        const info = $("tradesPageInfo");
+        const total = Math.max(0, Number(totalRows) || 0);
+        const totalPages = total
+          ? Math.max(1, Math.ceil(total / TRADES_PAGE_SIZE))
+          : 0;
+        if (totalPages > 0) {
+          tradesPage = Math.min(Math.max(tradesPage, 1), totalPages);
+        } else {
+          tradesPage = 1;
+        }
+        if (info) {
+          info.textContent = total
+            ? `第 ${tradesPage}/${totalPages} 页，共 ${total} 条`
+            : "第 0/0 页，共 0 条";
+        }
+        if (prevBtn) prevBtn.disabled = !total || tradesPage <= 1;
+        if (nextBtn) nextBtn.disabled = !total || tradesPage >= totalPages;
       }
 
       function renderHoldingsRows(rows) {
@@ -2252,7 +2303,21 @@
 
       function renderRoundsRows(rows) {
         const sorted = sortRows(rows, roundsSortState, ROUND_NUMERIC_SORT_KEYS);
-        $("roundTbody").innerHTML = sorted
+        if (!sorted.length) {
+          $("roundTbody").innerHTML =
+            '<tr><td colspan="11" class="muted">暂无平仓记录</td></tr>';
+          renderRoundsPager(0);
+          updateSortHeaders("closedRoundsTable", roundsSortState);
+          return;
+        }
+        const totalPages = Math.max(
+          1,
+          Math.ceil(sorted.length / ROUNDS_PAGE_SIZE),
+        );
+        roundsPage = Math.min(Math.max(roundsPage, 1), totalPages);
+        const start = (roundsPage - 1) * ROUNDS_PAGE_SIZE;
+        const pageRows = sorted.slice(start, start + ROUNDS_PAGE_SIZE);
+        $("roundTbody").innerHTML = pageRows
           .map(
             (x) => `
           <tr>
@@ -2271,7 +2336,30 @@
         `,
           )
           .join("");
+        renderRoundsPager(sorted.length);
         updateSortHeaders("closedRoundsTable", roundsSortState);
+      }
+
+      function renderRoundsPager(totalRows = 0) {
+        const prevBtn = $("roundsPrevBtn");
+        const nextBtn = $("roundsNextBtn");
+        const info = $("roundsPageInfo");
+        const total = Math.max(0, Number(totalRows) || 0);
+        const totalPages = total
+          ? Math.max(1, Math.ceil(total / ROUNDS_PAGE_SIZE))
+          : 0;
+        if (totalPages > 0) {
+          roundsPage = Math.min(Math.max(roundsPage, 1), totalPages);
+        } else {
+          roundsPage = 1;
+        }
+        if (info) {
+          info.textContent = total
+            ? `第 ${roundsPage}/${totalPages} 页，共 ${total} 条`
+            : "第 0/0 页，共 0 条";
+        }
+        if (prevBtn) prevBtn.disabled = !total || roundsPage <= 1;
+        if (nextBtn) nextBtn.disabled = !total || roundsPage >= totalPages;
       }
 
       function populateRoundCodeFilterOptions(rows) {
@@ -2435,6 +2523,7 @@
             const key = String(th.dataset.sortKey || "");
             if (!key) return;
             nextSortState(tradesSortState, key);
+            tradesPage = 1;
             renderTradesRows(tradesRowsCache);
           });
         }
@@ -2456,6 +2545,7 @@
             const key = String(th.dataset.sortKey || "");
             if (!key) return;
             nextSortState(roundsSortState, key);
+            roundsPage = 1;
             renderRoundsRows(getFilteredRoundsRows());
           });
         }
@@ -2682,18 +2772,31 @@
         const sid = Number($("strategySelect").value || 0);
         if (!aid && !sid) {
           tradesRowsCache = [];
+          tradesPage = 1;
           renderTradesRows(tradesRowsCache);
           return;
         }
-        const q = sid
-          ? `?strategy_id=${sid}&page=1&page_size=200`
-          : `?account_id=${aid}&page=1&page_size=200`;
-        const out = await api(`/trades${q}`);
-        tradesRowsCache = (out.items || []).map((x) => ({
+        const pageSize = 500;
+        let page = 1;
+        let total = 0;
+        const allItems = [];
+        while (true) {
+          const q = sid
+            ? `?strategy_id=${sid}&page=${page}&page_size=${pageSize}`
+            : `?account_id=${aid}&page=${page}&page_size=${pageSize}`;
+          const out = await api(`/trades${q}`);
+          const items = out.items || [];
+          if (page === 1) total = Number(out.total || 0);
+          allItems.push(...items);
+          if (!items.length || allItems.length >= total) break;
+          page += 1;
+        }
+        tradesRowsCache = allItems.map((x) => ({
           ...x,
           strategy_text: strategyLabelById(x.strategy_id),
           holder_text: holderLabelById(x.shareholder_account_id),
         }));
+        tradesPage = 1;
         renderTradesRows(tradesRowsCache);
       }
 
@@ -2741,10 +2844,22 @@
       async function loadRoundsAndStats() {
         const s = currentScope();
         if (!s.scope_id) return;
-        const rounds = await api(
-          `/closed-rounds?scope_type=${s.scope_type}&scope_id=${s.scope_id}&page=1&page_size=200`,
-        );
-        roundsRowsCache = rounds.items || [];
+        const pageSize = 500;
+        let page = 1;
+        let total = 0;
+        const allRows = [];
+        while (true) {
+          const out = await api(
+            `/closed-rounds?scope_type=${s.scope_type}&scope_id=${s.scope_id}&page=${page}&page_size=${pageSize}`,
+          );
+          const items = out.items || [];
+          if (page === 1) total = Number(out.total || 0);
+          allRows.push(...items);
+          if (!items.length || allRows.length >= total) break;
+          page += 1;
+        }
+        roundsRowsCache = allRows;
+        roundsPage = 1;
         roundsFeeBreakdownCache = new Map();
         populateRoundCodeFilterOptions(roundsRowsCache);
         await refreshRoundsViewAndKpis(s);
@@ -2959,10 +3074,12 @@
         const sid = Number($("strategySelect").value || 0);
         if (!aid && !sid) {
           tradesRowsCache = [];
+          tradesPage = 1;
           holdingsRowsCache = [];
           holdingsPage = 1;
           navRowsCache = [];
           roundsRowsCache = [];
+          roundsPage = 1;
           overviewCashflowRowsCache = [];
           overviewCashflowPage = 1;
           roundsCodeFilterValue = "";
@@ -3248,6 +3365,7 @@
         });
         $("roundCodeFilter").addEventListener("change", async () => {
           roundsCodeFilterValue = String($("roundCodeFilter").value || "");
+          roundsPage = 1;
           try {
             const s = currentScope();
             if (!s.scope_id) return;
@@ -3269,6 +3387,20 @@
           overviewCashflowPage -= 1;
           renderOverviewCashflowPage();
         });
+        $("tradesPrevBtn").addEventListener("click", () => {
+          if (tradesPage <= 1) return;
+          tradesPage -= 1;
+          renderTradesRows(tradesRowsCache);
+        });
+        $("tradesNextBtn").addEventListener("click", () => {
+          const totalPages = Math.max(
+            1,
+            Math.ceil((tradesRowsCache || []).length / TRADES_PAGE_SIZE),
+          );
+          if (tradesPage >= totalPages) return;
+          tradesPage += 1;
+          renderTradesRows(tradesRowsCache);
+        });
         $("holdingsPrevBtn").addEventListener("click", () => {
           if (holdingsPage <= 1) return;
           holdingsPage -= 1;
@@ -3282,6 +3414,20 @@
           if (holdingsPage >= totalPages) return;
           holdingsPage += 1;
           renderHoldingsRows(holdingsRowsCache);
+        });
+        $("roundsPrevBtn").addEventListener("click", () => {
+          if (roundsPage <= 1) return;
+          roundsPage -= 1;
+          renderRoundsRows(getFilteredRoundsRows());
+        });
+        $("roundsNextBtn").addEventListener("click", () => {
+          const totalPages = Math.max(
+            1,
+            Math.ceil(getFilteredRoundsRows().length / ROUNDS_PAGE_SIZE),
+          );
+          if (roundsPage >= totalPages) return;
+          roundsPage += 1;
+          renderRoundsRows(getFilteredRoundsRows());
         });
         $("overviewCashflowNextBtn").addEventListener("click", () => {
           const totalPages = Math.max(
