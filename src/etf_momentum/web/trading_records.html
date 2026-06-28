@@ -757,7 +757,7 @@
       let roundsFeeBreakdownCache = new Map();
       const HOLDINGS_PAGE_SIZE = 20;
       const OVERVIEW_CASHFLOW_PAGE_SIZE = 20;
-      const tradesSortState = { key: "id", dir: "desc" };
+      const tradesSortState = { key: "trade_date", dir: "desc" };
       const holdingsSortState = { key: "market_value", dir: "desc" };
       const roundsSortState = { key: "", dir: "asc" };
       const TRADE_NUMERIC_SORT_KEYS = new Set([
@@ -2062,6 +2062,25 @@
         const dir = state.dir === "asc" ? 1 : -1;
         const key = state.key;
         return [...rows].sort((a, b) => {
+          if (key === "trade_date") {
+            const da = String(a?.trade_date || "").replaceAll("-", "");
+            const db = String(b?.trade_date || "").replaceAll("-", "");
+            if (da && db && da !== db) {
+              return da < db ? -1 * dir : 1 * dir;
+            }
+            const ta = String(a?.trade_time || "");
+            const tb = String(b?.trade_time || "");
+            if (ta && tb && ta !== tb) {
+              return (
+                ta.localeCompare(tb, "zh-CN", { sensitivity: "base" }) * dir
+              );
+            }
+            const ia = Number(a?.id);
+            const ib = Number(b?.id);
+            if (Number.isFinite(ia) && Number.isFinite(ib) && ia !== ib) {
+              return ia < ib ? -1 * dir : 1 * dir;
+            }
+          }
           const av = a?.[key];
           const bv = b?.[key];
           const an = av == null || av === "";
