@@ -3,6 +3,7 @@ import pytest
 
 from etf_momentum.analysis.calendar_timing_strategy import (
     CalendarTimingStrategyInputs,
+    TRADING_COST_PROXY_CODE,
     compute_calendar_timing_strategy_backtest,
 )
 from etf_momentum.db.models import EtfPrice
@@ -290,7 +291,7 @@ def test_calendar_timing_next_plan_prefers_open_trade_exit_over_overlapping_entr
     assert str(plan.get("execution_date") or "") > "2026-03-23"
     assert plan.get("decision_date") is None
     assert not (plan.get("buys") or [])
-    assert (plan.get("sells") or [])
+    assert plan.get("sells") or []
 
 
 def test_calendar_timing_trade_stats_by_code_no_extreme_explosions(session_factory):
@@ -741,3 +742,159 @@ def test_calendar_timing_outputs_attribution_tables_by_asset(session_factory):
     assert "A1" in risk_codes
     assert "511880" in ret_codes
     assert "511880" in risk_codes
+
+
+def test_calendar_timing_single_attribution_net_consistency_with_cost_proxy(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            base = 100.0 + 0.25 * float(i)
+            o = float(base * (1.002 if (i % 2 == 0) else 0.998))
+            c = float(base * (1.001 if (i % 3 == 0) else 0.999))
+            for adj in ("none", "hfq", "qfq"):
+                db.add(
+                    EtfPrice(
+                        code="A1",
+                        trade_date=d,
+                        open=o,
+                        high=max(o, c),
+                        low=min(o, c),
+                        close=c,
+                        source="eastmoney",
+                        adjust=adj,
+                    )
+                )
+            cash_p = 100.0 + 0.02 * float(i)
+            db.add(
+                EtfPrice(
+                    code="511880",
+                    trade_date=d,
+                    open=float(cash_p),
+                    high=float(cash_p),
+                    low=float(cash_p),
+                    close=float(cash_p),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="single",
+                code="A1",
+                codes=None,
+                start=dates[0],
+                end=dates[-1],
+                decision_day=1,
+                hold_days=8,
+                position_mode="fixed_ratio",
+                fixed_pos_ratio=0.8,
+                exec_price="open",
+                cost_bps=18.0,
+                slippage_rate=0.0018,
+                rebalance_shift="prev",
+            ),
+        )
+
+    m = ((out.get("metrics") or {}).get("strategy")) or {}
+    attr = out.get("attribution") or {}
+    ret = (attr.get("return") or {}) or {}
+    rows = ret.get("by_code") or []
+    by_code = {str((r or {}).get("code") or ""): (r or {}) for r in rows}
+    total = float(ret.get("total_return") or 0.0)
+    cum = float(m.get("cumulative_return") or 0.0)
+    row_sum = float(
+        sum(float((r or {}).get("return_contribution") or 0.0) for r in rows)
+    )
+    assert total == pytest.approx(cum, abs=1e-10)
+    assert row_sum == pytest.approx(cum, abs=1e-10)
+    assert TRADING_COST_PROXY_CODE in by_code
+    tc = float(by_code[TRADING_COST_PROXY_CODE].get("return_contribution") or 0.0)
+    assert tc <= 1e-12
+    assert float(m.get("trading_cost_return_contribution") or 0.0) == pytest.approx(
+        tc, abs=1e-10
+    )
+
+
+def test_calendar_timing_portfolio_attribution_net_consistency_with_cost_proxy(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            for code, base0, drift, alt in (
+                ("A1", 90.0, 0.22, 0.0015),
+                ("A2", 120.0, 0.16, -0.0012),
+            ):
+                base = float(base0 + drift * float(i))
+                o = float(base * (1.001 if (i % 2 == 0) else 1.0 - alt))
+                c = float(base * (1.0 + alt if (i % 3 == 0) else 0.999))
+                for adj in ("none", "hfq", "qfq"):
+                    db.add(
+                        EtfPrice(
+                            code=code,
+                            trade_date=d,
+                            open=o,
+                            high=max(o, c),
+                            low=min(o, c),
+                            close=c,
+                            source="eastmoney",
+                            adjust=adj,
+                        )
+                    )
+            cash_p = 100.0 + 0.02 * float(i)
+            db.add(
+                EtfPrice(
+                    code="511880",
+                    trade_date=d,
+                    open=float(cash_p),
+                    high=float(cash_p),
+                    low=float(cash_p),
+                    close=float(cash_p),
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="portfolio",
+                code=None,
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                decision_day=1,
+                hold_days=8,
+                position_mode="equal",
+                fixed_pos_ratio=1.0,
+                exec_price="open",
+                cost_bps=22.0,
+                slippage_rate=0.002,
+                rebalance_shift="prev",
+            ),
+        )
+
+    m = ((out.get("metrics") or {}).get("strategy")) or {}
+    attr = out.get("attribution") or {}
+    ret = (attr.get("return") or {}) or {}
+    rows = ret.get("by_code") or []
+    by_code = {str((r or {}).get("code") or ""): (r or {}) for r in rows}
+    total = float(ret.get("total_return") or 0.0)
+    cum = float(m.get("cumulative_return") or 0.0)
+    row_sum = float(
+        sum(float((r or {}).get("return_contribution") or 0.0) for r in rows)
+    )
+    assert total == pytest.approx(cum, abs=1e-10)
+    assert row_sum == pytest.approx(cum, abs=1e-10)
+    assert TRADING_COST_PROXY_CODE in by_code
+    tc = float(by_code[TRADING_COST_PROXY_CODE].get("return_contribution") or 0.0)
+    assert tc <= 1e-12
+    assert float(m.get("trading_cost_return_contribution") or 0.0) == pytest.approx(
+        tc, abs=1e-10
+    )

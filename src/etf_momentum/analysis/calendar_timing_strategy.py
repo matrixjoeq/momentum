@@ -35,6 +35,7 @@ from .execution_timing import corporate_action_mask, slippage_return_from_turnov
 from . import trend as _trend_semantic_helpers
 
 CASH_MANAGEMENT_PROXY_CODE = "511880"
+TRADING_COST_PROXY_CODE = "__TRADING_COST__"
 
 
 def _load_cash_management_qfq_close(
@@ -805,7 +806,9 @@ def compute_calendar_timing_strategy_backtest(
                 gross = float(comp_overnight + comp_intraday + comp_interaction)
             w_next = tgt
             cash_weight_today = float(np.clip(1.0 - float(np.sum(tgt)), 0.0, 1.0))
-            cash_contrib_today = float(cash_weight_today * float(cash_ret_series.iloc[i]))
+            cash_contrib_today = float(
+                cash_weight_today * float(cash_ret_series.iloc[i])
+            )
             net = gross + cash_contrib_today - cost_today
             strat_ret[i] = net
             bench_ret[i] = bench_gross
@@ -861,7 +864,9 @@ def compute_calendar_timing_strategy_backtest(
             "trade_returns": trade_returns,
             "trade_returns_by_code": trade_returns_by_code,
             "w_cur": w_cur.copy(),
-            "weights": pd.DataFrame(weights_trace, index=idx, columns=codes, dtype=float),
+            "weights": pd.DataFrame(
+                weights_trace, index=idx, columns=codes, dtype=float
+            ),
             "decomposition": {
                 "overnight": pd.Series(decomp_overnight, index=idx, dtype=float),
                 "intraday": pd.Series(decomp_intraday, index=idx, dtype=float),
@@ -904,6 +909,11 @@ def compute_calendar_timing_strategy_backtest(
         if isinstance(decomp_pack.get("cash_management"), pd.Series)
         else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
     )
+    decomp_cost_series = (
+        decomp_pack.get("cost")
+        if isinstance(decomp_pack.get("cost"), pd.Series)
+        else pd.Series(np.zeros(len(idx), dtype=float), index=idx)
+    )
     cash_contrib_total = float(decomp_cash_series.astype(float).sum())
     cash_contrib_annualized = (
         float(decomp_cash_series.iloc[1:].mean() * TRADING_DAYS_PER_YEAR)
@@ -927,8 +937,10 @@ def compute_calendar_timing_strategy_backtest(
         str(k): int(sum(int(x) for x in (v or [])))
         for k, v in holding_bias_v_ge_5_counts_by_code.items()
     }
-    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
-        list(holding_bias_v_ge_5_all_counts)
+    holding_bias_v_ge_5_dist = (
+        _trend_semantic_helpers._distribution_stats_from_int_counts(
+            list(holding_bias_v_ge_5_all_counts)
+        )
     )
     holding_bias_v_ge_5_max_per_holding = int(
         (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
@@ -1034,10 +1046,47 @@ def compute_calendar_timing_strategy_backtest(
     attr_weights[CASH_MANAGEMENT_PROXY_CODE] = cash_weight_attr.reindex(idx).astype(
         float
     )
+    # Keep attribution in net-return space by explicitly modeling trading cost.
+    attr_asset_ret[TRADING_COST_PROXY_CODE] = (
+        -decomp_cost_series.reindex(idx).astype(float).fillna(0.0)
+    )
+    attr_weights[TRADING_COST_PROXY_CODE] = 1.0
     attribution = _compute_return_risk_contributions(
         asset_ret=attr_asset_ret,
         weights=attr_weights,
         total_return=float(strat_nav.iloc[-1] - 1.0) if len(strat_nav) else 0.0,
+    )
+    (
+        cash_contrib_total_attr,
+        cash_contrib_annualized_attr,
+    ) = _trend_semantic_helpers._extract_return_contribution_by_code(
+        attribution, code=CASH_MANAGEMENT_PROXY_CODE
+    )
+    (
+        trading_cost_contrib_total,
+        trading_cost_contrib_annualized,
+    ) = _trend_semantic_helpers._extract_return_contribution_by_code(
+        attribution, code=TRADING_COST_PROXY_CODE
+    )
+    m_strat["cash_management_return_contribution"] = (
+        float(cash_contrib_total_attr)
+        if cash_contrib_total_attr is not None
+        else float(cash_contrib_total)
+    )
+    m_strat["cash_management_return_contribution_annualized"] = (
+        float(cash_contrib_annualized_attr)
+        if cash_contrib_annualized_attr is not None
+        else float(cash_contrib_annualized)
+    )
+    m_strat["trading_cost_return_contribution"] = (
+        float(trading_cost_contrib_total)
+        if trading_cost_contrib_total is not None
+        else None
+    )
+    m_strat["trading_cost_return_contribution_annualized"] = (
+        float(trading_cost_contrib_annualized)
+        if trading_cost_contrib_annualized is not None
+        else None
     )
 
     weekly = _periodic_returns(strat_nav, "W-FRI")
@@ -1227,6 +1276,7 @@ def compute_calendar_timing_strategy_backtest(
             "strategy_price_basis": "none preferred + hfq fallback on corporate-action days",
             "benchmark_price_basis": "hfq close",
             "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
+            "trading_cost_proxy_code": str(TRADING_COST_PROXY_CODE),
             "cash_management_price_basis": "qfq close (forward one-day return)",
             "cash_management_data_available": bool(cash_data_available),
         },
@@ -1282,9 +1332,9 @@ def compute_calendar_timing_strategy_backtest(
                         holding_bias_v_ge_5_by_code.get(str(c), 0)
                     ),
                     "holding_bias_v_ge_5_max_per_holding": int(
-                        (
-                            holding_bias_v_ge_5_dist_by_code.get(str(c), {}) or {}
-                        ).get("max", 0)
+                        (holding_bias_v_ge_5_dist_by_code.get(str(c), {}) or {}).get(
+                            "max", 0
+                        )
                         or 0
                     ),
                     "holding_bias_v_ge_5_per_holding_distribution": dict(
