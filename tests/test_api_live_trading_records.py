@@ -176,7 +176,7 @@ def test_live_trading_records_contract(api_client, session_factory):
         },
         expected_status=400,
     )
-    assert "between 09:00:00 and 14:59:59" in r_bad_time.json().get("detail", "")
+    assert "between 09:00:00 and 15:00:00" in r_bad_time.json().get("detail", "")
 
     # fifo trades (2 buys + 2 sells -> 1 closed round)
     post_json(

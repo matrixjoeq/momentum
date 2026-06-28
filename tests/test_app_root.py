@@ -50,7 +50,7 @@ def test_trading_records_serves_html(api_client: TestClient) -> None:
     assert 'id="tradeTime"' in resp.text
     assert 'type="time"' in resp.text
     assert 'min="09:00:00"' in resp.text
-    assert 'max="14:59:59"' in resp.text
+    assert 'max="15:00:00"' in resp.text
     assert 'step="1"' in resp.text
     assert 'id="tradeStrategySelect"' in resp.text
     assert 'id="tradeQty"' in resp.text and 'min="100"' in resp.text

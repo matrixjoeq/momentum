@@ -281,7 +281,7 @@
             type="time"
             step="1"
             min="09:00:00"
-            max="14:59:59"
+            max="15:00:00"
             value="14:56:00"
           />
         </div>
@@ -893,9 +893,10 @@
         ) {
           return false;
         }
-        return (
-          hh >= 9 && hh <= 14 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59
-        );
+        const nowSec = hh * 3600 + mm * 60 + ss;
+        const openSec = 9 * 3600;
+        const closeSec = 15 * 3600;
+        return nowSec >= openSec && nowSec <= closeSec;
       }
 
       function currentRepoAction() {
@@ -930,7 +931,7 @@
       function tradeTimeErrorMessageForCurrentContext() {
         const fmtMsg = "交易时间格式需为 HH:MM:SS（时分秒步长 1）。";
         if (currentTradeStrategyType() !== "bond_repo") {
-          return `交易时间需在 09:00:00 - 14:59:59，且${fmtMsg}`;
+          return `交易时间需在 09:00:00 - 15:00:00，且${fmtMsg}`;
         }
         if (currentRepoAction() === "BUYBACK") {
           return fmtMsg;
@@ -951,10 +952,10 @@
         if (!input || !quick) return;
         if (!isRepo) {
           input.min = "09:00:00";
-          input.max = "14:59:59";
+          input.max = "15:00:00";
           if (tradeTimePicker) {
             tradeTimePicker.set("minTime", "09:00:00");
-            tradeTimePicker.set("maxTime", "14:59:59");
+            tradeTimePicker.set("maxTime", "15:00:00");
           }
           quick.disabled = false;
           return;
@@ -1287,7 +1288,7 @@
             hourIncrement: 1,
             minuteIncrement: 1,
             minTime: "09:00:00",
-            maxTime: "14:59:59",
+            maxTime: "15:00:00",
             allowInput: false,
             defaultDate: localDateFromTime("14:56:00"),
             clickOpens: true,

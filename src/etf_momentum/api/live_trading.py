@@ -249,7 +249,7 @@ def _strategy_profile_for(db: Session, strategy_id: int) -> tuple[str, str]:
 
 def _is_trade_time_allowed(x: str) -> bool:
     t = dt.datetime.strptime(x, "%H:%M:%S").time()
-    return dt.time(9, 0, 0) <= t <= dt.time(14, 59, 59)
+    return dt.time(9, 0, 0) <= t <= dt.time(15, 0, 0)
 
 
 def _is_repo_lend_time_allowed(x: str) -> bool:
@@ -2437,7 +2437,7 @@ def _apply_trade_values(
         if not _is_trade_time_allowed(trade_time):
             raise HTTPException(
                 status_code=400,
-                detail="trade_time must be between 09:00:00 and 14:59:59",
+                detail="trade_time must be between 09:00:00 and 15:00:00",
             )
         if (
             payload.repo_action is not None
