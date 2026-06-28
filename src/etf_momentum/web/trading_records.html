@@ -532,6 +532,10 @@
           <div id="kpiPayoff" class="v">-</div>
         </div>
         <div class="kpi">
+          <div class="k">凯莉比</div>
+          <div id="kpiKelly" class="v">-</div>
+        </div>
+        <div class="kpi">
           <div class="k">总费用</div>
           <div id="kpiTotalFee" class="v">-</div>
         </div>
@@ -765,6 +769,8 @@
       let overviewCashflowPage = 1;
       let roundsCodeFilterValue = "";
       let roundsFeeBreakdownCache = new Map();
+      const ROUND_FILTER_ALL = "";
+      const ROUND_FILTER_EX_REPO = "__ALL_EX_REPO__";
       const HOLDINGS_PAGE_SIZE = 20;
       const OVERVIEW_CASHFLOW_PAGE_SIZE = 20;
       const tradesSortState = { key: "trade_date", dir: "desc" };
@@ -2286,9 +2292,13 @@
         );
         sel.innerHTML = "";
         const allOpt = document.createElement("option");
-        allOpt.value = "";
+        allOpt.value = ROUND_FILTER_ALL;
         allOpt.textContent = "全部标的";
         sel.appendChild(allOpt);
+        const allExRepoOpt = document.createElement("option");
+        allExRepoOpt.value = ROUND_FILTER_EX_REPO;
+        allExRepoOpt.textContent = "全部标的（除回购）";
+        sel.appendChild(allExRepoOpt);
         for (const code of codes) {
           const o = document.createElement("option");
           o.value = code;
@@ -2296,17 +2306,30 @@
           o.textContent = name ? `${code} - ${name}` : code;
           sel.appendChild(o);
         }
-        if (old && codes.includes(old)) {
+        if (
+          old &&
+          (old === ROUND_FILTER_ALL ||
+            old === ROUND_FILTER_EX_REPO ||
+            codes.includes(old))
+        ) {
           sel.value = old;
         } else {
-          sel.value = "";
+          sel.value = ROUND_FILTER_EX_REPO;
         }
         roundsCodeFilterValue = sel.value;
       }
 
       function getFilteredRoundsRows() {
         const code = String(roundsCodeFilterValue || "").trim();
-        if (!code) return roundsRowsCache;
+        if (!code || code === ROUND_FILTER_ALL) return roundsRowsCache;
+        if (code === ROUND_FILTER_EX_REPO) {
+          const repoCodes = new Set(
+            REPO_SYMBOLS.map((x) => String(x.code || "").trim()),
+          );
+          return roundsRowsCache.filter(
+            (x) => !repoCodes.has(String(x.code || "").trim()),
+          );
+        }
         return roundsRowsCache.filter(
           (x) => String(x.code || "").trim() === code,
         );
@@ -2330,13 +2353,18 @@
           avgWin != null && avgLoss != null && avgLoss < 0
             ? avgWin / Math.abs(avgLoss)
             : null;
-        return { totalTrades: rows.length, winRate, payoff };
+        const kelly =
+          winRate != null && payoff != null && payoff > 0
+            ? winRate - (1.0 - winRate) / payoff
+            : null;
+        return { totalTrades: rows.length, winRate, payoff, kelly };
       }
 
       function setRoundKpis(stats, fee) {
         $("kpiTotalTrades").textContent = stats?.totalTrades ?? "-";
         $("kpiWinRate").textContent = fmtPct(stats?.winRate);
         $("kpiPayoff").textContent = fmtNum(stats?.payoff);
+        $("kpiKelly").textContent = fmtPct(stats?.kelly);
         $("kpiTotalFee").textContent = fmtNum(fee?.total_fee, 2);
         $("kpiBuyFee").textContent = fmtNum(fee?.buy_fee, 2);
         $("kpiSellFee").textContent = fmtNum(fee?.sell_fee, 2);
@@ -2354,13 +2382,47 @@
         return fee;
       }
 
+      async function fetchFeeStatsForRoundFilter(scope, filterCode, rows) {
+        const code = String(filterCode || "").trim();
+        if (!code || code === ROUND_FILTER_ALL) {
+          return await fetchFeeStatsForSelectedCode(scope, "");
+        }
+        if (code !== ROUND_FILTER_EX_REPO) {
+          return await fetchFeeStatsForSelectedCode(scope, code);
+        }
+        const codes = Array.from(
+          new Set(
+            (rows || [])
+              .map((x) => String(x.code || "").trim())
+              .filter(Boolean),
+          ),
+        );
+        if (!codes.length) {
+          return { total_fee: 0, buy_fee: 0, sell_fee: 0 };
+        }
+        const parts = await Promise.all(
+          codes.map(async (oneCode) =>
+            fetchFeeStatsForSelectedCode(scope, oneCode),
+          ),
+        );
+        return parts.reduce(
+          (acc, one) => ({
+            total_fee: Number(acc.total_fee || 0) + Number(one?.total_fee || 0),
+            buy_fee: Number(acc.buy_fee || 0) + Number(one?.buy_fee || 0),
+            sell_fee: Number(acc.sell_fee || 0) + Number(one?.sell_fee || 0),
+          }),
+          { total_fee: 0, buy_fee: 0, sell_fee: 0 },
+        );
+      }
+
       async function refreshRoundsViewAndKpis(scope) {
         const rows = getFilteredRoundsRows();
         renderRoundsRows(rows);
         const stats = calcRoundStats(rows);
-        const fee = await fetchFeeStatsForSelectedCode(
+        const fee = await fetchFeeStatsForRoundFilter(
           scope,
           String(roundsCodeFilterValue || "").trim(),
+          rows,
         );
         setRoundKpis(stats, fee);
       }
