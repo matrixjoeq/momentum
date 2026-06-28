@@ -4,7 +4,11 @@ import pandas as pd
 import pytest
 
 from etf_momentum.db.models import EtfPrice
-from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
+from etf_momentum.strategy.rotation import (
+    TRADING_COST_PROXY_CODE,
+    RotationInputs,
+    backtest_rotation,
+)
 from tests.helpers.price_seed import add_price_all_adjustments
 
 
@@ -368,10 +372,12 @@ def test_rotation_cash_management_uses_511880_qfq(session_factory):
 
     attr = out.get("attribution") or {}
     ret_codes = {
-        str(x.get("code") or "") for x in (((attr.get("return") or {}).get("by_code")) or [])
+        str(x.get("code") or "")
+        for x in (((attr.get("return") or {}).get("by_code")) or [])
     }
     risk_codes = {
-        str(x.get("code") or "") for x in (((attr.get("risk") or {}).get("by_code")) or [])
+        str(x.get("code") or "")
+        for x in (((attr.get("risk") or {}).get("by_code")) or [])
     }
     assert "AAA" in ret_codes
     assert "AAA" in risk_codes
@@ -547,11 +553,15 @@ def test_rotation_daily_rebalance_respects_exec_price_mode(session_factory):
             cost_bps=20.0,
             slippage_rate=0.001,
         )
-        out_open = backtest_rotation(db, RotationInputs(**{**base, "exec_price": "open"}))
+        out_open = backtest_rotation(
+            db, RotationInputs(**{**base, "exec_price": "open"})
+        )
         out_close = backtest_rotation(
             db, RotationInputs(**{**base, "exec_price": "close"})
         )
-    nav_open = float(((out_open.get("nav") or {}).get("series") or {}).get("ROTATION")[-1])
+    nav_open = float(
+        ((out_open.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
+    )
     nav_close = float(
         ((out_close.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
     )
@@ -614,7 +624,9 @@ def test_rotation_daily_rebalance_updates_dynamic_position_modes(
         )
     m_base = (out_base.get("metrics") or {}).get("strategy") or {}
     m_daily = (out_daily.get("metrics") or {}).get("strategy") or {}
-    nav_base = float(((out_base.get("nav") or {}).get("series") or {}).get("ROTATION")[-1])
+    nav_base = float(
+        ((out_base.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
+    )
     nav_daily = float(
         ((out_daily.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
     )
@@ -685,7 +697,9 @@ def test_rotation_daily_rebalance_recalculates_within_single_segment(
         out_daily = backtest_rotation(
             db, RotationInputs(**{**base, "daily_rebalance": True})
         )
-    nav_base = float(((out_base.get("nav") or {}).get("series") or {}).get("ROTATION")[-1])
+    nav_base = float(
+        ((out_base.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
+    )
     nav_daily = float(
         ((out_daily.get("nav") or {}).get("series") or {}).get("ROTATION")[-1]
     )
@@ -697,6 +711,74 @@ def test_rotation_daily_rebalance_recalculates_within_single_segment(
     assert nav_daily != pytest.approx(nav_base, rel=0.0, abs=1e-10)
     assert float(m_daily.get("avg_daily_turnover") or 0.0) > float(
         m_base.get("avg_daily_turnover") or 0.0
+    )
+
+
+def test_rotation_attribution_net_consistency_with_cost_proxy(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    with sf() as db:
+        px_a = 100.0
+        px_b = 100.0
+        for i, d in enumerate(dates):
+            # Alternate leader to force frequent turnover and non-trivial cost drag.
+            ra = 1.010 if (i % 2 == 0) else 0.992
+            rb = 0.992 if (i % 2 == 0) else 1.010
+            px_a *= float(ra)
+            px_b *= float(rb)
+            add_price_all_adjustments(
+                db,
+                code="AAA",
+                day=d,
+                close=float(px_a),
+                open_price=float(px_a),
+                high=float(px_a * 1.01),
+                low=float(px_a * 0.99),
+            )
+            add_price_all_adjustments(
+                db,
+                code="BBB",
+                day=d,
+                close=float(px_b),
+                open_price=float(px_b),
+                high=float(px_b * 1.01),
+                low=float(px_b * 0.99),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=["AAA", "BBB"],
+                start=dates[0],
+                end=dates[-1],
+                rebalance="daily",
+                top_k=1,
+                lookback_days=1,
+                skip_days=0,
+                exec_price="close",
+                cost_bps=20.0,
+                slippage_rate=0.001,
+            ),
+        )
+
+    m = ((out.get("metrics") or {}).get("strategy")) or {}
+    attr_ret = ((out.get("attribution") or {}).get("return")) or {}
+    rows = list(attr_ret.get("by_code") or [])
+    by_code = {str(r.get("code") or ""): r for r in rows}
+    total_contrib = sum(float((r.get("return_contribution") or 0.0)) for r in rows)
+
+    assert float(attr_ret.get("total_return") or 0.0) == pytest.approx(
+        float(m.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert float(total_contrib) == pytest.approx(
+        float(m.get("cumulative_return") or 0.0), rel=0.0, abs=1e-12
+    )
+    assert TRADING_COST_PROXY_CODE in by_code
+    assert (
+        float(
+            (by_code[TRADING_COST_PROXY_CODE] or {}).get("return_contribution") or 0.0
+        )
+        < 0.0
     )
 
 

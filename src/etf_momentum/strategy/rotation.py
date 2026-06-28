@@ -45,6 +45,7 @@ from ..analysis.r_multiple import enrich_trades_with_r_metrics
 from ..analysis import trend as _trend_semantic_helpers
 
 CASH_MANAGEMENT_PROXY_CODE = _trend_semantic_helpers.CASH_MANAGEMENT_PROXY_CODE
+TRADING_COST_PROXY_CODE = "__TRADING_COST__"
 
 
 # Shared helper for rebalance date shifting (to avoid redefining inside blocks)
@@ -4369,7 +4370,9 @@ def backtest_rotation(
                         else None
                     )
                     for t in range(int(start_i), int(end_i) + 1):
-                        asof_t = dates[int(di)] if t == int(start_i) else dates[int(t) - 1]
+                        asof_t = (
+                            dates[int(di)] if t == int(start_i) else dates[int(t) - 1]
+                        )
                         base_weight_map_t: dict[str, float] = {}
                         if pos_mode == "risk_budget":
                             for p in risk_picks:
@@ -4396,7 +4399,9 @@ def backtest_rotation(
                                     and np.isfinite(a)
                                     and a > 0.0
                                 ):
-                                    w_raw = float(risk_budget_pct) * float(px) / float(a)
+                                    w_raw = (
+                                        float(risk_budget_pct) * float(px) / float(a)
+                                    )
                                 else:
                                     w_raw = 0.0
                                 base_weight_map_t[p] = max(0.0, float(w_raw))
@@ -4404,9 +4409,9 @@ def backtest_rotation(
                             if s_raw_t > 1.0 + 1e-12:
                                 k_t = 1.0 / s_raw_t
                                 for p in list(base_weight_map_t.keys()):
-                                    base_weight_map_t[p] = (
-                                        float(base_weight_map_t[p]) * float(k_t)
-                                    )
+                                    base_weight_map_t[p] = float(
+                                        base_weight_map_t[p]
+                                    ) * float(k_t)
                         elif pos_mode == "inverse_vol":
                             inv_raw_map_t: dict[str, float] = {}
                             for p in risk_picks:
@@ -4472,7 +4477,9 @@ def backtest_rotation(
                             and float(exposure_t)
                             > float(mirror_target_exposure) + 1e-12
                         ):
-                            risk_keys_t = [c for c in weight_map_t.keys() if c in rank_codes]
+                            risk_keys_t = [
+                                c for c in weight_map_t.keys() if c in rank_codes
+                            ]
                             if risk_keys_t and float(exposure_t) > 0.0:
                                 factor_t = float(mirror_target_exposure) / float(
                                     exposure_t
@@ -5016,11 +5023,13 @@ def backtest_rotation(
         w_prev = w.shift(1).fillna(0.0)
         turnover_by_asset_effective = (w - w_prev).abs() / 2.0
     turnover_effective = turnover_by_asset_effective.sum(axis=1).astype(float)
-    cash_close_qfq, cash_data_available = _trend_semantic_helpers._load_cash_management_qfq_close(
-        db=db,
-        start=dates[0].date(),
-        end=dates[-1].date(),
-        dates=dates,
+    cash_close_qfq, cash_data_available = (
+        _trend_semantic_helpers._load_cash_management_qfq_close(
+            db=db,
+            start=dates[0].date(),
+            end=dates[-1].date(),
+            dates=dates,
+        )
     )
     cash_ret = _trend_semantic_helpers._cash_management_return_series_from_close(
         cash_close_qfq, forward=True
@@ -5407,8 +5416,10 @@ def backtest_rotation(
         str(k): int(sum(int(x) for x in (v or [])))
         for k, v in holding_bias_v_ge_5_counts_by_code.items()
     }
-    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
-        list(holding_bias_v_ge_5_all_counts)
+    holding_bias_v_ge_5_dist = (
+        _trend_semantic_helpers._distribution_stats_from_int_counts(
+            list(holding_bias_v_ge_5_all_counts)
+        )
     )
     holding_bias_v_ge_5_max_per_holding = int(
         (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
@@ -5531,18 +5542,26 @@ def backtest_rotation(
     attr_asset_ret[CASH_MANAGEMENT_PROXY_CODE] = (
         cash_ret.reindex(dates).astype(float).fillna(0.0)
     )
-    attr_weights[CASH_MANAGEMENT_PROXY_CODE] = (
-        cash_weight_attr.astype(float).fillna(0.0)
+    attr_weights[CASH_MANAGEMENT_PROXY_CODE] = cash_weight_attr.astype(float).fillna(
+        0.0
     )
+    # Keep attribution in net-return space by explicitly adding a trading-cost proxy.
+    # Cost/slippage are portfolio-level drags; represent them as a standalone component.
+    attr_asset_ret[TRADING_COST_PROXY_CODE] = (
+        -(cost + slippage).reindex(dates).astype(float).fillna(0.0)
+    )
+    attr_weights[TRADING_COST_PROXY_CODE] = 1.0
     attribution = _compute_return_risk_contributions(
         asset_ret=attr_asset_ret,
         weights=attr_weights,
-        total_return=float(port_nav.iloc[-1] - 1.0),  # gross return (before costs)
+        total_return=float(port_nav_net.iloc[-1] - 1.0),  # net return (after costs)
     )
     (
         cash_contrib_total,
         cash_contrib_annualized,
-    ) = _trend_semantic_helpers._extract_cash_management_return_contribution(attribution)
+    ) = _trend_semantic_helpers._extract_cash_management_return_contribution(
+        attribution
+    )
 
     # Metrics
     ann_ret = _annualized_return(port_nav_net)
@@ -6168,9 +6187,15 @@ def backtest_rotation(
             "price_adjust": "qfq",
             "data_available": bool(cash_data_available),
             "residual_weight_basis": "max(0, 1 - sum(strategy_return_weights))",
-            "min_cash_weight": float(cash_weight.min()) if len(cash_weight) else float("nan"),
-            "max_cash_weight": float(cash_weight.max()) if len(cash_weight) else float("nan"),
-            "mean_cash_weight": float(cash_weight.mean()) if len(cash_weight) else float("nan"),
+            "min_cash_weight": float(cash_weight.min())
+            if len(cash_weight)
+            else float("nan"),
+            "max_cash_weight": float(cash_weight.max())
+            if len(cash_weight)
+            else float("nan"),
+            "mean_cash_weight": float(cash_weight.mean())
+            if len(cash_weight)
+            else float("nan"),
             "return_contribution": cash_contrib_total,
             "return_contribution_annualized": cash_contrib_annualized,
         },
