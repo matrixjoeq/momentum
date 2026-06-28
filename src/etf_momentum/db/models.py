@@ -925,6 +925,33 @@ class LiveStrategy(Base):
     )
 
 
+class LiveStrategyProfile(Base):
+    __tablename__ = "live_strategy_profile"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", name="uq_live_strategy_profile_strategy"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_strategy.id"), index=True, nullable=False
+    )
+    strategy_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="etf_spot"
+    )  # etf_spot|bond_repo
+    capital_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="segregated"
+    )  # segregated|shared_account_cash
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class LiveAccountCashflow(Base):
     __tablename__ = "live_account_cashflow"
 
@@ -1004,6 +1031,35 @@ class LiveTrade(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LiveRepoTradeDetail(Base):
+    __tablename__ = "live_repo_trade_detail"
+    __table_args__ = (
+        UniqueConstraint("trade_id", name="uq_live_repo_trade_detail_trade"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_trade.id"), index=True, nullable=False
+    )
+    repo_action: Mapped[str] = mapped_column(String(8), nullable=False)  # OPEN|CLOSE
+    principal_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    annual_rate_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    interest_days: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    day_count_basis: Mapped[int] = mapped_column(Integer, nullable=False, default=365)
+    open_trade_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("live_trade.id"), index=True, nullable=True
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -1207,6 +1263,8 @@ class LiveNavDaily(Base):
     position_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     cost_drag_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     cash_drag_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    repo_carry_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    repo_fee_drag_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

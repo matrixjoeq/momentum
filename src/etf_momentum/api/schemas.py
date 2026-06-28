@@ -3294,11 +3294,19 @@ class LiveShareholderAccountOut(BaseModel):
 
 class LiveStrategyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
+    strategy_type: str = Field(default="etf_spot", description="etf_spot|bond_repo")
+    capital_mode: str | None = Field(
+        default=None, description="segregated|shared_account_cash"
+    )
     notes: str | None = None
 
 
 class LiveStrategyUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
+    strategy_type: str | None = Field(default=None, description="etf_spot|bond_repo")
+    capital_mode: str | None = Field(
+        default=None, description="segregated|shared_account_cash"
+    )
     notes: str | None = None
 
 
@@ -3306,6 +3314,8 @@ class LiveStrategyOut(BaseModel):
     id: int
     account_id: int
     name: str
+    strategy_type: str = "etf_spot"
+    capital_mode: str = "segregated"
     notes: str | None = None
     created_at: str
 
@@ -3367,6 +3377,12 @@ class LiveTradeCreateRequest(BaseModel):
     quantity: float = Field(gt=0.0)
     fee: float = Field(default=0.0, ge=0.0)
     amount: float | None = Field(default=None, ge=0.0)
+    repo_action: str | None = Field(default=None, description="OPEN|CLOSE")
+    repo_principal_amount: float | None = Field(default=None, gt=0.0)
+    repo_annual_rate_pct: float | None = Field(default=None, gt=0.0)
+    repo_interest_days: int | None = Field(default=None, ge=1)
+    repo_day_count_basis: int | None = Field(default=None, ge=1)
+    repo_open_trade_id: int | None = Field(default=None, ge=1)
     idempotency_key: str | None = Field(default=None, max_length=128)
     broker_trade_no: str | None = Field(default=None, max_length=128)
     notes: str | None = None
@@ -3385,6 +3401,12 @@ class LiveTradeUpdateRequest(BaseModel):
     quantity: float = Field(gt=0.0)
     fee: float = Field(default=0.0, ge=0.0)
     amount: float | None = Field(default=None, ge=0.0)
+    repo_action: str | None = Field(default=None, description="OPEN|CLOSE")
+    repo_principal_amount: float | None = Field(default=None, gt=0.0)
+    repo_annual_rate_pct: float | None = Field(default=None, gt=0.0)
+    repo_interest_days: int | None = Field(default=None, ge=1)
+    repo_day_count_basis: int | None = Field(default=None, ge=1)
+    repo_open_trade_id: int | None = Field(default=None, ge=1)
     broker_trade_no: str | None = Field(default=None, max_length=128)
     notes: str | None = None
     reason: str = Field(min_length=1, max_length=500)
@@ -3412,6 +3434,12 @@ class LiveTradeOut(BaseModel):
     quantity: float
     fee: float
     amount: float
+    repo_action: str | None = None
+    repo_principal_amount: float | None = None
+    repo_annual_rate_pct: float | None = None
+    repo_interest_days: int | None = None
+    repo_day_count_basis: int | None = None
+    repo_open_trade_id: int | None = None
     idempotency_key: str | None = None
     broker_trade_no: str | None = None
     notes: str | None = None
@@ -3516,6 +3544,8 @@ class LiveNavPointOut(BaseModel):
     position_return: float | None = None
     cost_drag_return: float | None = None
     cash_drag_return: float | None = None
+    repo_carry_return: float | None = None
+    repo_fee_drag_return: float | None = None
 
 
 class LivePerformanceOut(BaseModel):

@@ -51,6 +51,15 @@
       .good {
         color: #10b981;
       }
+      .pnl-profit {
+        color: #ef4444;
+      }
+      .pnl-loss {
+        color: #10b981;
+      }
+      .pnl-flat {
+        color: #ffffff;
+      }
       .plot {
         min-height: 320px;
       }
@@ -166,7 +175,24 @@
             <label>新策略名</label>
             <input id="newStrategyName" />
           </div>
+          <div>
+            <label>策略类型</label>
+            <select id="newStrategyType">
+              <option value="etf_spot" selected>etf_spot</option>
+              <option value="bond_repo">bond_repo</option>
+            </select>
+          </div>
           <button id="addStrategyBtn">新增策略</button>
+        </div>
+        <div class="row" style="margin-top: 8px">
+          <div>
+            <label>当前策略类型</label>
+            <select id="editStrategyType">
+              <option value="etf_spot">etf_spot</option>
+              <option value="bond_repo">bond_repo</option>
+            </select>
+          </div>
+          <button id="updateStrategyTypeBtn">保存当前策略类型</button>
         </div>
         <div class="row" style="margin-top: 8px">
           <div>
@@ -274,11 +300,11 @@
           </select>
         </div>
         <div>
-          <label>价格</label>
+          <label id="tradePriceLabel">价格</label>
           <input id="tradePrice" type="number" step="0.001" />
         </div>
         <div>
-          <label>数量</label>
+          <label id="tradeQtyLabel">数量</label>
           <input id="tradeQty" type="number" min="100" step="100" />
         </div>
         <div>
@@ -288,6 +314,28 @@
         <div>
           <label>成交号(可选)</label>
           <input id="tradeBrokerNo" />
+        </div>
+        <div class="repo-only" style="display: none">
+          <label>逆回购品种</label>
+          <select id="tradeRepoSymbol">
+            <option value="204001|GC001" selected>204001 - GC001</option>
+            <option value="131810|R-001">131810 - R-001</option>
+          </select>
+        </div>
+        <div class="repo-only" style="display: none">
+          <label>回购动作</label>
+          <select id="tradeRepoAction">
+            <option value="LEND" selected>融券</option>
+            <option value="BUYBACK">融券购回</option>
+          </select>
+        </div>
+        <div class="repo-only" style="display: none">
+          <label id="tradeRepoPrincipalLabel">交易金额(元，1000整数倍)</label>
+          <input id="tradeRepoPrincipal" type="number" min="1000" step="1000" />
+        </div>
+        <div class="repo-only" style="display: none">
+          <label>计息天数</label>
+          <input id="tradeRepoInterestDays" type="number" min="1" step="1" />
         </div>
         <button id="addTradeBtn" type="button">新增成交</button>
         <button id="cancelTradeEditBtn" type="button" style="display: none">
@@ -299,6 +347,7 @@
         class="muted"
         style="margin-top: 8px; display: none"
       ></div>
+      <div id="tradeRepoHint" class="muted" style="margin-top: 6px"></div>
 
       <details style="margin-top: 12px">
         <summary style="cursor: pointer">批量导入 CSV</summary>
@@ -376,6 +425,9 @@
 
     <div class="panel">
       <h3>当前持仓（按所选维度）</h3>
+      <div class="muted" style="margin: 6px 0 8px 0">
+        口径：盈亏已含交易费用（成本价不含费用）。
+      </div>
       <table id="holdingsTable">
         <thead>
           <tr>
@@ -426,10 +478,34 @@
           <div id="kpiOverviewPositionRatio" class="v mono">-</div>
         </div>
       </div>
+      <div class="muted" style="margin: 10px 0 6px 0">资金进出记录（完整）</div>
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>类型</th>
+            <th>策略名称</th>
+            <th>金额</th>
+            <th>关联ID</th>
+            <th>备注</th>
+          </tr>
+        </thead>
+        <tbody id="overviewCashflowTbody"></tbody>
+      </table>
+      <div class="row" style="margin-top: 8px">
+        <button id="overviewCashflowPrevBtn" type="button">上一页</button>
+        <button id="overviewCashflowNextBtn" type="button">下一页</button>
+        <span id="overviewCashflowPageInfo" class="muted"
+          >第 0/0 页，共 0 条</span
+        >
+      </div>
     </div>
 
     <div class="panel">
       <h3>平仓统计与交易费用</h3>
+      <div class="muted" style="margin: 6px 0 8px 0">
+        口径：盈亏已含交易费用（成本价不含费用）。
+      </div>
       <div class="row" style="margin-top: 6px">
         <div>
           <label>标的筛选</label>
@@ -466,6 +542,7 @@
         <thead>
           <tr>
             <th class="sortable-th" data-sort-key="code">代码</th>
+            <th class="sortable-th" data-sort-key="name">名称</th>
             <th class="sortable-th" data-sort-key="open_date">开仓</th>
             <th class="sortable-th" data-sort-key="close_date">平仓</th>
             <th class="sortable-th" data-sort-key="buy_count">买次</th>
@@ -482,7 +559,7 @@
     </div>
 
     <div class="panel">
-      <h3>净值曲线与绩效（Dietz/TWR）</h3>
+      <h3>净值曲线（交易日00:00）与绩效（Dietz/TWR）</h3>
       <div id="navPlot" class="plot"></div>
       <div class="two">
         <div>
@@ -523,6 +600,7 @@
             <th class="sortable-th" data-sort-key="trade_date">日期</th>
             <th class="sortable-th" data-sort-key="trade_time">时间</th>
             <th class="sortable-th" data-sort-key="code">代码</th>
+            <th class="sortable-th" data-sort-key="name">名称</th>
             <th class="sortable-th" data-sort-key="strategy_text">策略</th>
             <th class="sortable-th" data-sort-key="holder_text">股东账号</th>
             <th class="sortable-th" data-sort-key="side">方向</th>
@@ -564,17 +642,35 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const PRICE_DECIMALS = 3;
+      const roundHalfUp = (x, d = 2) => {
+        const n = Number(x);
+        if (!Number.isFinite(n)) return null;
+        const factor = 10 ** d;
+        if (n >= 0) {
+          return Math.round((n + Number.EPSILON) * factor) / factor;
+        }
+        return -Math.round((-n + Number.EPSILON) * factor) / factor;
+      };
       const fmtNum = (x, d = 4) =>
-        x == null || !Number.isFinite(Number(x)) ? "-" : Number(x).toFixed(d);
+        x == null || roundHalfUp(x, d) == null
+          ? "-"
+          : roundHalfUp(x, d).toFixed(d);
       const fmtPrice = (x) => fmtNum(x, PRICE_DECIMALS);
       const fmtInt = (x) =>
         x == null || !Number.isFinite(Number(x))
           ? "-"
           : String(Math.round(Number(x)));
       const fmtPct = (x) =>
-        x == null || !Number.isFinite(Number(x))
+        x == null || roundHalfUp(Number(x) * 100, 2) == null
           ? "-"
-          : `${(Number(x) * 100).toFixed(2)}%`;
+          : `${roundHalfUp(Number(x) * 100, 2).toFixed(2)}%`;
+      const pnlClass = (x) => {
+        const n = Number(x);
+        if (!Number.isFinite(n)) return "";
+        if (n > 1e-12) return "pnl-profit";
+        if (n < -1e-12) return "pnl-loss";
+        return "pnl-flat";
+      };
       const msg = (t, isErr = false) => {
         $("msg").textContent = t || "";
         $("msg").className = isErr ? "danger" : "muted";
@@ -618,6 +714,22 @@
       const API_BASE = `${location.origin}/api/live`;
       const TRADE_FEE_RATE = 0.0001;
       const TRADE_FEE_MIN = 0.2;
+      const REPO_FEE_RATE = 0.00001;
+      const REPO_LOT_AMOUNT = 1000;
+      const REPO_SYMBOLS = [
+        { code: "204001", name: "GC001" },
+        { code: "131810", name: "R-001" },
+      ];
+      const FLOW_TYPE_LABEL = {
+        deposit: "入金",
+        withdraw: "出金",
+        dividend: "分红",
+        manual: "手工调整",
+        transfer_to_strategy: "转入策略",
+        transfer_from_strategy: "策略回拨",
+        transfer_in: "调拨转入",
+        transfer_out: "调拨转出",
+      };
       let strategiesLoadSeq = 0;
       let holdersLoadSeq = 0;
       let etfCodeCatalog = [];
@@ -628,12 +740,16 @@
       let tradeDatePicker = null;
       let tradeTimePicker = null;
       let editingTradeId = null;
+      let strategyMetaById = new Map();
       let tradesRowsCache = [];
       let holdingsRowsCache = [];
       let navRowsCache = [];
       let roundsRowsCache = [];
+      let overviewCashflowRowsCache = [];
+      let overviewCashflowPage = 1;
       let roundsCodeFilterValue = "";
       let roundsFeeBreakdownCache = new Map();
+      const OVERVIEW_CASHFLOW_PAGE_SIZE = 20;
       const tradesSortState = { key: "id", dir: "desc" };
       const holdingsSortState = { key: "market_value", dir: "desc" };
       const roundsSortState = { key: "", dir: "asc" };
@@ -668,6 +784,7 @@
         try {
           res = await fetch(`${API_BASE}${path}`, {
             headers: { "Content-Type": "application/json" },
+            cache: "no-store",
             ...opts,
           });
         } catch (e) {
@@ -711,11 +828,18 @@
           px <= 0 ||
           qty <= 0
         ) {
-          return Number(TRADE_FEE_MIN.toFixed(2));
+          return roundHalfUp(TRADE_FEE_MIN, 2);
         }
-        return Number(
-          Math.max(px * qty * TRADE_FEE_RATE, TRADE_FEE_MIN).toFixed(2),
+        return roundHalfUp(
+          Math.max(px * qty * TRADE_FEE_RATE, TRADE_FEE_MIN),
+          2,
         );
+      }
+
+      function calcDefaultRepoFee(amount) {
+        const amt = Number(amount);
+        if (!Number.isFinite(amt) || amt <= 0) return 0;
+        return roundHalfUp(amt * REPO_FEE_RATE, 2);
       }
 
       function applyTradeFeeDefault(force = false) {
@@ -723,11 +847,18 @@
         const curRaw = String(feeInput?.value || "").trim();
         if (!feeInput) return;
         if (!force && !tradeFeeAuto && curRaw) return;
-        const next = calcDefaultTradeFee(
-          $("tradePrice").value,
-          $("tradeQty").value,
-        );
-        feeInput.value = Number(next).toFixed(2);
+        const next =
+          currentTradeStrategyType() === "bond_repo"
+            ? (() => {
+                const principal = Number($("tradeRepoPrincipal").value);
+                const action = String(
+                  $("tradeRepoAction").value || "",
+                ).toUpperCase();
+                if (action === "BUYBACK") return 0;
+                return calcDefaultRepoFee(principal);
+              })()
+            : calcDefaultTradeFee($("tradePrice").value, $("tradeQty").value);
+        feeInput.value = roundHalfUp(next, 2).toFixed(2);
       }
 
       function isTradeTimeAllowed(timeText) {
@@ -750,11 +881,247 @@
         );
       }
 
+      function currentRepoAction() {
+        return String($("tradeRepoAction")?.value || "LEND").toUpperCase();
+      }
+
+      function isTradeTimeAllowedForCurrentContext(timeText) {
+        const m = String(timeText || "")
+          .trim()
+          .match(/^(\d{2}):(\d{2}):(\d{2})$/);
+        if (!m) return false;
+        const hh = Number(m[1]);
+        const mm = Number(m[2]);
+        const ss = Number(m[3]);
+        if (
+          !Number.isInteger(hh) ||
+          !Number.isInteger(mm) ||
+          !Number.isInteger(ss)
+        ) {
+          return false;
+        }
+        const nowSec = hh * 3600 + mm * 60 + ss;
+        if (currentTradeStrategyType() !== "bond_repo") {
+          return isTradeTimeAllowed(timeText);
+        }
+        if (currentRepoAction() === "BUYBACK") return true;
+        const openSec = 9 * 3600 + 30 * 60;
+        const closeSec = 15 * 3600 + 30 * 60;
+        return nowSec >= openSec && nowSec <= closeSec;
+      }
+
+      function tradeTimeErrorMessageForCurrentContext() {
+        const fmtMsg = "交易时间格式需为 HH:MM:SS（时分秒步长 1）。";
+        if (currentTradeStrategyType() !== "bond_repo") {
+          return `交易时间需在 09:00:00 - 14:59:59，且${fmtMsg}`;
+        }
+        if (currentRepoAction() === "BUYBACK") {
+          return fmtMsg;
+        }
+        return `逆回购融券时间需在 09:30:00 - 15:30:00，且${fmtMsg}`;
+      }
+
+      function defaultTradeTimeForCurrentContext() {
+        if (currentTradeStrategyType() !== "bond_repo") return "14:56:00";
+        return currentRepoAction() === "BUYBACK" ? "00:00:00" : "14:57:00";
+      }
+
+      function applyTradeTimeUiByContext() {
+        const isRepo = currentTradeStrategyType() === "bond_repo";
+        const action = currentRepoAction();
+        const input = $("tradeTime");
+        const quick = $("tradeTimeQuick");
+        if (!input || !quick) return;
+        if (!isRepo) {
+          input.min = "09:00:00";
+          input.max = "14:59:59";
+          if (tradeTimePicker) {
+            tradeTimePicker.set("minTime", "09:00:00");
+            tradeTimePicker.set("maxTime", "14:59:59");
+          }
+          quick.disabled = false;
+          return;
+        }
+        if (action === "BUYBACK") {
+          input.min = "00:00:00";
+          input.max = "23:59:59";
+          if (tradeTimePicker) {
+            tradeTimePicker.set("minTime", "00:00:00");
+            tradeTimePicker.set("maxTime", "23:59:59");
+          }
+          quick.disabled = true;
+        } else {
+          input.min = "09:30:00";
+          input.max = "15:30:00";
+          if (tradeTimePicker) {
+            tradeTimePicker.set("minTime", "09:30:00");
+            tradeTimePicker.set("maxTime", "15:30:00");
+          }
+          quick.disabled = false;
+        }
+      }
+
       function isTradeQtyAllowed(qtyText) {
         const q = Number(qtyText);
         if (!Number.isFinite(q) || q <= 0) return false;
         const lotRatio = q / 100;
         return Math.abs(lotRatio - Math.round(lotRatio)) <= 1e-9;
+      }
+
+      function isRepoLotQtyAllowed(qtyText) {
+        const q = Number(qtyText);
+        if (!Number.isFinite(q) || q <= 0) return false;
+        return Math.abs(q - Math.round(q)) <= 1e-9;
+      }
+
+      function isRepoPrincipalAllowed(amountText) {
+        const amt = Number(amountText);
+        if (!Number.isFinite(amt) || amt <= 0) return false;
+        const ratio = amt / REPO_LOT_AMOUNT;
+        return Math.abs(ratio - Math.round(ratio)) <= 1e-9;
+      }
+
+      function syncRepoPrincipalFromQty() {
+        if (currentTradeStrategyType() !== "bond_repo") return;
+        if (currentRepoAction() === "BUYBACK") return;
+        const raw = String($("tradeQty").value || "").trim();
+        if (!raw) return;
+        if (!isRepoLotQtyAllowed(raw)) return;
+        const qty = Math.round(Number(raw));
+        $("tradeQty").value = String(qty);
+        $("tradeRepoPrincipal").value = String(qty * REPO_LOT_AMOUNT);
+      }
+
+      function syncRepoQtyFromPrincipal() {
+        if (currentTradeStrategyType() !== "bond_repo") return;
+        const raw = String($("tradeRepoPrincipal").value || "").trim();
+        if (!raw) return;
+        if (currentRepoAction() === "BUYBACK") {
+          const amount = Number(raw);
+          if (!Number.isFinite(amount) || amount <= 0) {
+            $("tradeQty").value = "";
+            return;
+          }
+          const qty = Math.floor(amount / REPO_LOT_AMOUNT);
+          $("tradeQty").value = qty > 0 ? String(qty) : "";
+          return;
+        }
+        if (!isRepoPrincipalAllowed(raw)) return;
+        const principal = Number(raw);
+        const qty = Math.round(principal / REPO_LOT_AMOUNT);
+        $("tradeRepoPrincipal").value = String(Math.round(principal));
+        $("tradeQty").value = String(qty);
+      }
+
+      function parsePositiveNumber(raw) {
+        const v = Number(raw);
+        if (!Number.isFinite(v) || v <= 0) return null;
+        return v;
+      }
+
+      function parsePositiveInteger(raw) {
+        const v = Number(raw);
+        if (!Number.isFinite(v) || v <= 0) return null;
+        const rounded = Math.round(v);
+        if (Math.abs(v - rounded) > 1e-9) return null;
+        return rounded;
+      }
+
+      function repoBuybackFactor(ratePct, interestDays) {
+        return 1 + (ratePct / 100 / 365) * interestDays;
+      }
+
+      function syncRepoBuybackDerivedFields(sourceField = "") {
+        if (currentTradeStrategyType() !== "bond_repo") return;
+        if (currentRepoAction() !== "BUYBACK") return;
+        const qtyRaw = String($("tradeQty").value || "").trim();
+        const amountRaw = String($("tradeRepoPrincipal").value || "").trim();
+        const rateRaw = String($("tradePrice").value || "").trim();
+        const daysRaw = String($("tradeRepoInterestDays").value || "").trim();
+
+        let qty = parsePositiveInteger(qtyRaw);
+        let amount = parsePositiveNumber(amountRaw);
+        let rate = parsePositiveNumber(rateRaw);
+        let days = parsePositiveInteger(daysRaw);
+
+        const knownCount =
+          (qty != null ? 1 : 0) +
+          (amount != null ? 1 : 0) +
+          (rate != null ? 1 : 0) +
+          (days != null ? 1 : 0);
+
+        if (knownCount < 3) return;
+
+        if (qty == null && amount != null) {
+          const base =
+            rate != null && days != null
+              ? REPO_LOT_AMOUNT * repoBuybackFactor(rate, days)
+              : REPO_LOT_AMOUNT;
+          const inferredQty = Math.floor(amount / base);
+          qty = inferredQty > 0 ? inferredQty : null;
+          $("tradeQty").value = qty != null ? String(qty) : "";
+        } else if (
+          amount == null &&
+          qty != null &&
+          rate != null &&
+          days != null
+        ) {
+          amount = qty * REPO_LOT_AMOUNT * repoBuybackFactor(rate, days);
+          $("tradeRepoPrincipal").value = roundHalfUp(amount, 2).toFixed(2);
+        } else if (
+          rate == null &&
+          amount != null &&
+          qty != null &&
+          days != null
+        ) {
+          const denominator = qty * REPO_LOT_AMOUNT;
+          if (denominator > 0 && days > 0) {
+            const inferredRate =
+              ((amount / denominator - 1) * 365 * 100) / days;
+            if (Number.isFinite(inferredRate) && inferredRate > 0) {
+              rate = inferredRate;
+              $("tradePrice").value = roundHalfUp(
+                inferredRate,
+                PRICE_DECIMALS,
+              ).toFixed(PRICE_DECIMALS);
+            }
+          }
+        } else if (
+          days == null &&
+          amount != null &&
+          qty != null &&
+          rate != null
+        ) {
+          const denominator = qty * REPO_LOT_AMOUNT;
+          if (denominator > 0 && rate > 0) {
+            const inferredDays =
+              ((amount / denominator - 1) * 365 * 100) / rate;
+            if (Number.isFinite(inferredDays) && inferredDays > 0) {
+              days = Math.max(1, Math.round(inferredDays));
+              $("tradeRepoInterestDays").value = String(days);
+            }
+          }
+        } else if (
+          qty != null &&
+          amount != null &&
+          rate != null &&
+          days != null
+        ) {
+          if (sourceField === "tradeRepoPrincipal") {
+            const inferredQty = Math.floor(
+              amount / (REPO_LOT_AMOUNT * repoBuybackFactor(rate, days)),
+            );
+            $("tradeQty").value = inferredQty > 0 ? String(inferredQty) : "";
+          } else if (
+            sourceField === "" ||
+            sourceField === "tradeQty" ||
+            sourceField === "tradePrice" ||
+            sourceField === "tradeRepoInterestDays"
+          ) {
+            const amt = qty * REPO_LOT_AMOUNT * repoBuybackFactor(rate, days);
+            $("tradeRepoPrincipal").value = roundHalfUp(amt, 2).toFixed(2);
+          }
+        }
       }
 
       function normalizeTradePriceInput({ required = false } = {}) {
@@ -768,7 +1135,7 @@
         if (!Number.isFinite(px) || px <= 0) {
           throw new Error("成交价格必须是大于 0 的数字");
         }
-        const normalized = Number(px.toFixed(PRICE_DECIMALS));
+        const normalized = roundHalfUp(px, PRICE_DECIMALS);
         if (priceInput) {
           priceInput.value = normalized.toFixed(PRICE_DECIMALS);
         }
@@ -837,7 +1204,7 @@
 
       function setTradeTimeValue(timeText) {
         const v = String(timeText || "").trim();
-        if (!isTradeTimeAllowed(v)) return;
+        if (!localDateFromTime(v)) return;
         if (tradeTimePicker) {
           const d = localDateFromTime(v);
           if (d) tradeTimePicker.setDate(d, true, "H:i:S");
@@ -859,13 +1226,19 @@
         }
         setTradeDateValue(toIsoDateToday());
         $("tradeTimeQuick").value = "close";
-        setTradeTimeValue("14:56:00");
         $("tradeSide").value = "BUY";
         $("tradePrice").value = "";
-        $("tradeQty").value = "100";
+        $("tradeQty").value =
+          currentTradeStrategyType() === "bond_repo" ? "1" : "100";
         tradeFeeAuto = true;
-        applyTradeFeeDefault(true);
         $("tradeBrokerNo").value = "";
+        $("tradeRepoSymbol").value = "204001|GC001";
+        $("tradeRepoAction").value = "LEND";
+        $("tradeRepoPrincipal").value = "";
+        $("tradeRepoInterestDays").value = "";
+        syncTradeFormByStrategyType(true);
+        setTradeTimeValue(defaultTradeTimeForCurrentContext());
+        applyTradeFeeDefault(true);
       }
 
       function initTradeDateTimePickers() {
@@ -1055,31 +1428,44 @@
         sel.innerHTML = "";
         if (tradeSel) tradeSel.innerHTML = "";
         if (!aid) {
+          strategyMetaById = new Map();
           sel.selectedIndex = -1;
           sel.value = "";
           if (tradeSel) {
             tradeSel.selectedIndex = -1;
             tradeSel.value = "";
           }
+          refreshStrategyTypeEditor();
+          syncTradeFormByStrategyType();
           return [];
         }
         const reqSeq = ++strategiesLoadSeq;
         const list = await api(`/accounts/${aid}/strategies`);
         // Prevent stale async responses from overriding a newer selector refresh.
         if (reqSeq !== strategiesLoadSeq) return list;
+        strategyMetaById = new Map(
+          (list || []).map((x) => [
+            Number(x.id),
+            String(x.strategy_type || "etf_spot"),
+          ]),
+        );
         const allOpt = document.createElement("option");
         allOpt.value = "";
         allOpt.textContent = "全部策略（账户维度）";
         sel.appendChild(allOpt);
         for (const x of list) {
+          const typeTag =
+            String(x.strategy_type || "etf_spot") === "bond_repo"
+              ? " [bond_repo]"
+              : "";
           const o = document.createElement("option");
           o.value = String(x.id);
-          o.textContent = `${x.name} (#${x.id})`;
+          o.textContent = `${x.name}${typeTag} (#${x.id})`;
           sel.appendChild(o);
           if (tradeSel) {
             const o2 = document.createElement("option");
             o2.value = String(x.id);
-            o2.textContent = `${x.name} (#${x.id})`;
+            o2.textContent = `${x.name}${typeTag} (#${x.id})`;
             tradeSel.appendChild(o2);
           }
         }
@@ -1135,6 +1521,8 @@
             tradeSel.value = "";
           }
         }
+        refreshStrategyTypeEditor();
+        syncTradeFormByStrategyType();
         return list;
       }
 
@@ -1231,6 +1619,131 @@
         );
       }
 
+      function strategyTypeById(strategyId) {
+        const sid = Number(strategyId || 0);
+        if (!sid) return "etf_spot";
+        return String(strategyMetaById.get(sid) || "etf_spot");
+      }
+
+      function currentTradeStrategyType() {
+        return strategyTypeById(selectedTradeStrategyId());
+      }
+
+      function selectedRepoSymbol() {
+        const raw = String($("tradeRepoSymbol")?.value || "").trim();
+        const m = raw.match(/^([0-9]{6})\|(.+)$/);
+        if (m) return { code: m[1], name: m[2] };
+        return REPO_SYMBOLS[0];
+      }
+
+      function syncTradeRepoSymbolInputs() {
+        if (currentTradeStrategyType() !== "bond_repo") return;
+        const one = selectedRepoSymbol();
+        if (!one) return;
+        $("tradeCode").value = one.code;
+        $("tradeName").value = one.name;
+      }
+
+      function refreshStrategyTypeEditor() {
+        const sid = Number(
+          $("strategySelect").value || $("tradeStrategySelect").value || 0,
+        );
+        const editor = $("editStrategyType");
+        const btn = $("updateStrategyTypeBtn");
+        if (!editor || !btn) return;
+        if (!sid) {
+          editor.value = "etf_spot";
+          editor.disabled = true;
+          btn.disabled = true;
+          return;
+        }
+        editor.disabled = false;
+        btn.disabled = false;
+        editor.value = strategyTypeById(sid);
+      }
+
+      function syncTradeFormByStrategyType(forceDefaultTime = false) {
+        const isRepo = currentTradeStrategyType() === "bond_repo";
+        const repoAction = currentRepoAction();
+        for (const el of document.querySelectorAll(".repo-only")) {
+          el.style.display = isRepo ? "" : "none";
+        }
+        $("tradePriceLabel").textContent = isRepo ? "年化利率(%)" : "价格";
+        $("tradeQtyLabel").textContent = isRepo ? "数量(手)" : "数量(股)";
+        if ($("tradeRepoPrincipalLabel")) {
+          $("tradeRepoPrincipalLabel").textContent =
+            isRepo && repoAction === "BUYBACK"
+              ? "购回金额(元，可含利息)"
+              : "交易金额(元，1000整数倍)";
+        }
+        $("tradeCode").readOnly = isRepo;
+        $("tradeName").readOnly = isRepo;
+        if (isRepo) {
+          $("tradeCode").removeAttribute("list");
+          $("tradeQty").setAttribute("min", "1");
+          $("tradeQty").setAttribute("step", "1");
+          if (repoAction === "BUYBACK") {
+            $("tradeRepoPrincipal").setAttribute("min", "0.01");
+            $("tradeRepoPrincipal").setAttribute("step", "0.01");
+          } else {
+            $("tradeRepoPrincipal").setAttribute("min", "1000");
+            $("tradeRepoPrincipal").setAttribute("step", "1000");
+          }
+        } else {
+          $("tradeCode").setAttribute("list", "etfCodeDatalist");
+          $("tradeQty").setAttribute("min", "100");
+          $("tradeQty").setAttribute("step", "100");
+          $("tradeRepoPrincipal").setAttribute("min", "1000");
+          $("tradeRepoPrincipal").setAttribute("step", "1000");
+        }
+        $("tradePrice").disabled = false;
+        $("tradePrice").title = "";
+        $("tradeFee").disabled = isRepo;
+        if ($("tradeRepoHint")) {
+          $("tradeRepoHint").textContent = isRepo
+            ? repoAction === "BUYBACK"
+              ? "当前策略类型为 bond_repo：仅支持 204001/GC001 与 131810/R-001；数量单位为手(1手=1000元)；价格表示年化利率；购回金额=数量*1000*(1+利率/100/365*计息天数)，四项填三项可自动推算剩余一项。"
+              : "当前策略类型为 bond_repo：仅支持 204001/GC001 与 131810/R-001；数量单位为手(1手=1000元)；价格表示年化利率；融券交易金额需满足金额=数量*1000；融券费率十万分之一。"
+            : "当前策略类型为 etf_spot：逆回购字段已隐藏。可在“账户与策略管理”中把当前策略类型改为 bond_repo。";
+        }
+        if (!isRepo) {
+          applyTradeTimeUiByContext();
+          if (
+            forceDefaultTime ||
+            !isTradeTimeAllowedForCurrentContext($("tradeTime").value)
+          ) {
+            setTradeTimeValue(defaultTradeTimeForCurrentContext());
+          }
+          return;
+        }
+        syncTradeRepoSymbolInputs();
+        if (!String($("tradeQty").value || "").trim()) {
+          $("tradeQty").value = "1";
+        }
+        if ($("tradeRepoAction").value === "LEND") {
+          syncRepoPrincipalFromQty();
+          $("tradeSide").value = "BUY";
+        } else {
+          if (!String($("tradeRepoPrincipal").value || "").trim()) {
+            const qtyRaw = String($("tradeQty").value || "").trim();
+            if (isRepoLotQtyAllowed(qtyRaw)) {
+              $("tradeRepoPrincipal").value = String(
+                Math.round(Number(qtyRaw)) * REPO_LOT_AMOUNT,
+              );
+            }
+          }
+          syncRepoBuybackDerivedFields();
+          $("tradeSide").value = "SELL";
+        }
+        applyTradeTimeUiByContext();
+        if (
+          forceDefaultTime ||
+          !isTradeTimeAllowedForCurrentContext($("tradeTime").value)
+        ) {
+          setTradeTimeValue(defaultTradeTimeForCurrentContext());
+        }
+      }
+
       function findTradeRowById(tradeId) {
         const id = Number(tradeId);
         if (!Number.isFinite(id) || id <= 0) return null;
@@ -1264,13 +1777,27 @@
         $("tradePrice").value =
           row.price == null || !Number.isFinite(Number(row.price))
             ? ""
-            : Number(row.price).toFixed(PRICE_DECIMALS);
+            : roundHalfUp(row.price, PRICE_DECIMALS).toFixed(PRICE_DECIMALS);
         $("tradeQty").value = row.quantity ?? "";
         $("tradeFee").value =
           row.fee == null || !Number.isFinite(Number(row.fee))
             ? ""
-            : Number(row.fee).toFixed(2);
+            : roundHalfUp(row.fee, 2).toFixed(2);
         $("tradeBrokerNo").value = row.broker_trade_no || "";
+        const repoOpt = REPO_SYMBOLS.find(
+          (x) => x.code === String(row.code || ""),
+        );
+        if (repoOpt) {
+          $("tradeRepoSymbol").value = `${repoOpt.code}|${repoOpt.name}`;
+        }
+        $("tradeRepoAction").value =
+          row.repo_action === "BUYBACK" ? "BUYBACK" : "LEND";
+        $("tradeRepoPrincipal").value =
+          row.repo_action === "BUYBACK"
+            ? (row.amount ?? "")
+            : (row.repo_principal_amount ?? "");
+        $("tradeRepoInterestDays").value = row.repo_interest_days ?? "";
+        syncTradeFormByStrategyType();
         tradeFeeAuto = false;
         $("addTradeBtn").textContent = "保存成交修改";
         $("cancelTradeEditBtn").style.display = "";
@@ -1280,26 +1807,169 @@
       }
 
       function buildTradePayloadFromForm(aid, sid, hid, qty) {
+        const strategyType = strategyTypeById(sid);
+        const isRepo = strategyType === "bond_repo";
+        const repoAction = String(
+          $("tradeRepoAction").value || "LEND",
+        ).toUpperCase();
+        const isRepoBuyback = isRepo && repoAction === "BUYBACK";
+        const repoSymbol = selectedRepoSymbol();
+        const repoQtyRaw = String($("tradeQty").value || "").trim();
+        const repoAmountRaw = String(
+          $("tradeRepoPrincipal").value || "",
+        ).trim();
+        const repoRateRaw = String($("tradePrice").value || "").trim();
+        const repoInterestDaysRaw = String(
+          $("tradeRepoInterestDays").value || "",
+        ).trim();
+        let repoQtyParsed = parsePositiveInteger(repoQtyRaw);
+        let repoAmountParsed = parsePositiveNumber(repoAmountRaw);
+        let repoRateParsed = parsePositiveNumber(repoRateRaw);
+        let repoDaysParsed = parsePositiveInteger(repoInterestDaysRaw);
+        const repoQtyValid = repoQtyParsed != null;
+        const repoPrincipalValidForLend =
+          repoAmountParsed != null && isRepoPrincipalAllowed(repoAmountRaw);
+        if (isRepo) {
+          if (!isRepoBuyback && !repoQtyValid && !repoPrincipalValidForLend) {
+            throw new Error(
+              "逆回购需填写有效数量(正整数手)；融券金额需为1000的正整数倍。",
+            );
+          }
+          if (!isRepoBuyback && repoAmountRaw && !repoPrincipalValidForLend) {
+            throw new Error("融券交易金额必须是1000的正整数倍。");
+          }
+        }
+        if (isRepoBuyback) {
+          const knownCount =
+            (repoQtyParsed != null ? 1 : 0) +
+            (repoAmountParsed != null ? 1 : 0) +
+            (repoRateParsed != null ? 1 : 0) +
+            (repoDaysParsed != null ? 1 : 0);
+          if (knownCount < 3) {
+            throw new Error(
+              "融券购回请至少填写利率/计息天数/数量/购回金额中的任意三项。",
+            );
+          }
+          if (
+            repoQtyParsed == null &&
+            repoAmountParsed != null &&
+            repoRateParsed != null &&
+            repoDaysParsed != null
+          ) {
+            const denom =
+              REPO_LOT_AMOUNT *
+              repoBuybackFactor(repoRateParsed, repoDaysParsed);
+            repoQtyParsed = Math.floor(repoAmountParsed / denom);
+          }
+          if (
+            repoAmountParsed == null &&
+            repoQtyParsed != null &&
+            repoRateParsed != null &&
+            repoDaysParsed != null
+          ) {
+            repoAmountParsed =
+              repoQtyParsed *
+              REPO_LOT_AMOUNT *
+              repoBuybackFactor(repoRateParsed, repoDaysParsed);
+          }
+          if (
+            repoRateParsed == null &&
+            repoAmountParsed != null &&
+            repoQtyParsed != null &&
+            repoDaysParsed != null
+          ) {
+            const denom = repoQtyParsed * REPO_LOT_AMOUNT;
+            repoRateParsed =
+              ((repoAmountParsed / denom - 1) * 365 * 100) / repoDaysParsed;
+          }
+          if (
+            repoDaysParsed == null &&
+            repoAmountParsed != null &&
+            repoQtyParsed != null &&
+            repoRateParsed != null
+          ) {
+            const denom = repoQtyParsed * REPO_LOT_AMOUNT;
+            repoDaysParsed = Math.max(
+              1,
+              Math.round(
+                ((repoAmountParsed / denom - 1) * 365 * 100) / repoRateParsed,
+              ),
+            );
+          }
+          if (
+            repoQtyParsed == null ||
+            repoQtyParsed < 1 ||
+            repoAmountParsed == null ||
+            repoAmountParsed <= 0 ||
+            repoRateParsed == null ||
+            repoRateParsed <= 0 ||
+            repoDaysParsed == null ||
+            repoDaysParsed < 1
+          ) {
+            throw new Error("融券购回参数无法联动求解，请检查输入。");
+          }
+          $("tradeQty").value = String(repoQtyParsed);
+          $("tradeRepoPrincipal").value = roundHalfUp(
+            repoAmountParsed,
+            2,
+          ).toFixed(2);
+          $("tradePrice").value = roundHalfUp(
+            repoRateParsed,
+            PRICE_DECIMALS,
+          ).toFixed(PRICE_DECIMALS);
+          $("tradeRepoInterestDays").value = String(repoDaysParsed);
+        }
+        const repoQtyFinal = isRepo
+          ? isRepoBuyback
+            ? Math.floor(Number(repoQtyParsed))
+            : repoQtyValid
+              ? Math.round(Number(repoQtyParsed))
+              : Math.round(Number(repoAmountParsed) / REPO_LOT_AMOUNT)
+          : null;
+        if (isRepoBuyback && repoQtyFinal < 1) {
+          throw new Error("融券购回金额需不小于1000元。");
+        }
+        const repoPrincipal = isRepo ? repoQtyFinal * REPO_LOT_AMOUNT : null;
+        const repoAmount = isRepo
+          ? isRepoBuyback
+            ? roundHalfUp(repoAmountParsed, 2)
+            : repoPrincipal
+          : undefined;
+        const repoInterestDaysRawFinal = String(
+          $("tradeRepoInterestDays").value || "",
+        ).trim();
+        const repoInterestDays = repoInterestDaysRawFinal
+          ? Number(repoInterestDaysRawFinal)
+          : null;
         return {
           account_id: aid,
           strategy_id: sid,
           shareholder_account_id: hid,
-          code: $("tradeCode").value.trim(),
-          name: $("tradeName").value.trim(),
+          code: isRepo ? repoSymbol.code : $("tradeCode").value.trim(),
+          name: isRepo ? repoSymbol.name : $("tradeName").value.trim(),
           trade_date: $("tradeDate").value.trim(),
           trade_time: (() => {
             const t = String($("tradeTime").value || "").trim();
-            if (!isTradeTimeAllowed(t)) {
-              throw new Error(
-                "交易时间需在 09:00:00 - 14:59:59（时分秒步长 1）",
-              );
+            if (!isTradeTimeAllowedForCurrentContext(t)) {
+              throw new Error(tradeTimeErrorMessageForCurrentContext());
             }
             return t;
           })(),
-          side: $("tradeSide").value,
+          side: isRepo
+            ? repoAction === "BUYBACK"
+              ? "SELL"
+              : "BUY"
+            : $("tradeSide").value,
           price: normalizeTradePriceInput({ required: true }),
-          quantity: qty,
+          quantity: isRepo ? repoQtyFinal : qty,
           fee: Number($("tradeFee").value || 0),
+          amount: isRepo ? repoAmount : undefined,
+          repo_action: isRepo ? repoAction : null,
+          repo_principal_amount: isRepo ? repoPrincipal : null,
+          repo_annual_rate_pct: null,
+          repo_interest_days: isRepo ? repoInterestDays : null,
+          repo_day_count_basis: null,
+          repo_open_trade_id: null,
           broker_trade_no: $("tradeBrokerNo").value.trim() || null,
         };
       }
@@ -1432,13 +2102,14 @@
             <td>${x.trade_date || ""}</td>
             <td>${x.trade_time || ""}</td>
             <td>${x.code || ""}</td>
+            <td>${x.name || ""}</td>
             <td>${x.strategy_text || "-"}</td>
             <td>${x.holder_text || "-"}</td>
             <td>${x.side || ""}</td>
             <td>${fmtPrice(x.price)}</td>
             <td>${fmtInt(x.quantity)}</td>
             <td>${fmtNum(x.fee, 2)}</td>
-            <td>${fmtNum(x.amount)}</td>
+            <td>${fmtNum(x.amount, 2)}</td>
             <td>
               <button data-trade-action="edit" data-trade-id="${x.id}">修改</button>
               <button data-trade-action="delete" data-trade-id="${x.id}">删除</button>
@@ -1485,8 +2156,8 @@
               <td>${fmtNum(x.cost_value, 2)}</td>
               <td>${fmtNum(x.market_value, 2)}</td>
               <td>${fmtPct(x.position_ratio)}</td>
-              <td>${fmtNum(x.pnl_amount)}</td>
-              <td>${fmtPct(x.pnl_rate)}</td>
+              <td class="${pnlClass(x.pnl_amount)}">${fmtNum(x.pnl_amount, 2)}</td>
+              <td class="${pnlClass(x.pnl_rate)}">${fmtPct(x.pnl_rate)}</td>
               <td>${x.status_text || ""}</td>
             </tr>
           `,
@@ -1502,14 +2173,15 @@
             (x) => `
           <tr>
             <td>${x.code || ""}</td>
+            <td>${x.name || ""}</td>
             <td>${x.open_date || ""}</td>
             <td>${x.close_date || ""}</td>
             <td>${x.buy_count ?? "-"}</td>
             <td>${x.sell_count ?? "-"}</td>
             <td>${fmtPrice(x.avg_buy_price)}</td>
             <td>${fmtPrice(x.avg_sell_price)}</td>
-            <td class="${Number(x.realized_pnl || 0) >= 0 ? "good" : "danger"}">${fmtNum(x.realized_pnl)}</td>
-            <td>${fmtPct(x.return_rate)}</td>
+            <td class="${pnlClass(x.realized_pnl)}">${fmtNum(x.realized_pnl)}</td>
+            <td class="${pnlClass(x.return_rate)}">${fmtPct(x.return_rate)}</td>
             <td>${fmtNum(x.total_fee, 2)}</td>
           </tr>
         `,
@@ -1522,13 +2194,18 @@
         const sel = $("roundCodeFilter");
         if (!sel) return;
         const old = roundsCodeFilterValue || sel.value || "";
-        const codes = Array.from(
-          new Set(
-            (rows || [])
-              .map((x) => String(x.code || "").trim())
-              .filter(Boolean),
-          ),
-        ).sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" }));
+        const codeNameMap = new Map();
+        for (const x of rows || []) {
+          const code = String(x.code || "").trim();
+          if (!code) continue;
+          const name = String(x.name || "").trim();
+          if (!codeNameMap.has(code) || (name && !codeNameMap.get(code))) {
+            codeNameMap.set(code, name);
+          }
+        }
+        const codes = Array.from(codeNameMap.keys()).sort((a, b) =>
+          a.localeCompare(b, "zh-CN", { sensitivity: "base" }),
+        );
         sel.innerHTML = "";
         const allOpt = document.createElement("option");
         allOpt.value = "";
@@ -1537,7 +2214,8 @@
         for (const code of codes) {
           const o = document.createElement("option");
           o.value = code;
-          o.textContent = code;
+          const name = String(codeNameMap.get(code) || "").trim();
+          o.textContent = name ? `${code} - ${name}` : code;
           sel.appendChild(o);
         }
         if (old && codes.includes(old)) {
@@ -1590,43 +2268,12 @@
         const key = `${scope.scope_type}:${scope.scope_id}:${code || "__ALL__"}`;
         if (roundsFeeBreakdownCache.has(key))
           return roundsFeeBreakdownCache.get(key);
-        if (!code) {
-          const fee = await api(
-            `/stats/fees?scope_type=${scope.scope_type}&scope_id=${scope.scope_id}`,
-          );
-          roundsFeeBreakdownCache.set(key, fee);
-          return fee;
-        }
-        let buyFee = 0.0;
-        let sellFee = 0.0;
-        const pageSize = 500;
-        let page = 1;
-        let total = 0;
-        let seen = 0;
-        while (true) {
-          const q =
-            scope.scope_type === "strategy"
-              ? `/trades?strategy_id=${scope.scope_id}&code=${encodeURIComponent(code)}&page=${page}&page_size=${pageSize}`
-              : `/trades?account_id=${scope.scope_id}&code=${encodeURIComponent(code)}&page=${page}&page_size=${pageSize}`;
-          const out = await api(q);
-          total = Number(out.total || 0);
-          const items = out.items || [];
-          for (const t of items) {
-            const fee = Number(t.fee || 0);
-            if (String(t.side || "").toUpperCase() === "BUY") buyFee += fee;
-            if (String(t.side || "").toUpperCase() === "SELL") sellFee += fee;
-          }
-          seen += items.length;
-          if (!items.length || seen >= total) break;
-          page += 1;
-        }
-        const feeOut = {
-          total_fee: buyFee + sellFee,
-          buy_fee: buyFee,
-          sell_fee: sellFee,
-        };
-        roundsFeeBreakdownCache.set(key, feeOut);
-        return feeOut;
+        const q = code
+          ? `/stats/fees/closed-rounds?scope_type=${scope.scope_type}&scope_id=${scope.scope_id}&code=${encodeURIComponent(code)}`
+          : `/stats/fees/closed-rounds?scope_type=${scope.scope_type}&scope_id=${scope.scope_id}`;
+        const fee = await api(q);
+        roundsFeeBreakdownCache.set(key, fee);
+        return fee;
       }
 
       async function refreshRoundsViewAndKpis(scope) {
@@ -1678,29 +2325,215 @@
           .map((x) => Number(x.pnl_amount))
           .filter((x) => Number.isFinite(x))
           .reduce((acc, v) => acc + v, 0.0);
+        const holdingsMarketValue = (holdingsRowsCache || [])
+          .map((x) => Number(x.market_value))
+          .filter((x) => Number.isFinite(x))
+          .reduce((acc, v) => acc + v, 0.0);
+        const hasHoldingsMarketValue = (holdingsRowsCache || []).some((x) =>
+          Number.isFinite(Number(x?.market_value)),
+        );
+        const marketValueForOverview = hasHoldingsMarketValue
+          ? holdingsMarketValue
+          : Number(latestNavPoint?.market_value);
+        const cashForOverview = Number(latestNavPoint?.cash);
+        const equityForOverview =
+          Number.isFinite(Number(marketValueForOverview)) &&
+          Number.isFinite(cashForOverview)
+            ? Number(marketValueForOverview) + cashForOverview
+            : Number(latestNavPoint?.equity);
         const netExternalFlow = (navRows || [])
           .map((x) => Number(x.external_flow))
           .filter((x) => Number.isFinite(x))
           .reduce((acc, v) => acc + v, 0.0);
-        const cumPnl = Number.isFinite(Number(latestNavPoint?.equity))
-          ? Number(latestNavPoint.equity) - netExternalFlow
+        const cumPnl = Number.isFinite(Number(equityForOverview))
+          ? Number(equityForOverview) - netExternalFlow
           : null;
         const positionRatio =
-          Number.isFinite(Number(latestNavPoint?.equity)) &&
-          Number.isFinite(Number(latestNavPoint?.market_value)) &&
-          Math.abs(Number(latestNavPoint.equity)) > 1e-12
-            ? Number(latestNavPoint.market_value) /
-              Number(latestNavPoint.equity)
+          Number.isFinite(Number(equityForOverview)) &&
+          Number.isFinite(Number(marketValueForOverview)) &&
+          Math.abs(Number(equityForOverview)) > 1e-12
+            ? Number(marketValueForOverview) / Number(equityForOverview)
             : null;
-        $("kpiOverviewEquity").textContent = fmtNum(latestNavPoint?.equity, 2);
+        $("kpiOverviewEquity").textContent = fmtNum(equityForOverview, 2);
         $("kpiOverviewMarketValue").textContent = fmtNum(
-          latestNavPoint?.market_value,
+          marketValueForOverview,
           2,
         );
-        $("kpiOverviewCash").textContent = fmtNum(latestNavPoint?.cash, 2);
+        $("kpiOverviewCash").textContent = fmtNum(cashForOverview, 2);
         $("kpiOverviewFloatingPnl").textContent = fmtNum(floatingPnl, 2);
+        $("kpiOverviewFloatingPnl").className =
+          `v mono ${pnlClass(floatingPnl)}`;
         $("kpiOverviewCumPnl").textContent = fmtNum(cumPnl, 2);
+        $("kpiOverviewCumPnl").className = `v mono ${pnlClass(cumPnl)}`;
         $("kpiOverviewPositionRatio").textContent = fmtPct(positionRatio);
+      }
+
+      function flowTypeText(flowTypeRaw) {
+        const key = String(flowTypeRaw || "")
+          .trim()
+          .toLowerCase();
+        return FLOW_TYPE_LABEL[key] || key || "-";
+      }
+
+      function isTransferFlowType(flowTypeRaw) {
+        const key = String(flowTypeRaw || "")
+          .trim()
+          .toLowerCase();
+        return (
+          key === "transfer_to_strategy" ||
+          key === "transfer_from_strategy" ||
+          key === "transfer_in" ||
+          key === "transfer_out"
+        );
+      }
+
+      function renderOverviewCashflowRows(rows = []) {
+        const body = $("overviewCashflowTbody");
+        if (!body) return;
+        const list = Array.isArray(rows) ? rows : [];
+        if (!list.length) {
+          body.innerHTML = `<tr><td colspan="6" class="muted">暂无资金进出记录</td></tr>`;
+          return;
+        }
+        body.innerHTML = list
+          .map((x) => {
+            const amt = Number(x?.amount);
+            const signed = Number.isFinite(amt)
+              ? `${amt > 0 ? "+" : ""}${fmtNum(amt, 2)}`
+              : "-";
+            return `<tr>
+              <td>${x?.flow_date || "-"}</td>
+              <td>${flowTypeText(x?.flow_type)}</td>
+              <td>${x?.strategy_name_text || "-"}</td>
+              <td class="mono">${signed}</td>
+              <td class="mono">${x?.transfer_id || "-"}</td>
+              <td>${x?.notes || "-"}</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      function renderOverviewCashflowPager(totalRows = 0) {
+        const prevBtn = $("overviewCashflowPrevBtn");
+        const nextBtn = $("overviewCashflowNextBtn");
+        const info = $("overviewCashflowPageInfo");
+        const total = Math.max(0, Number(totalRows) || 0);
+        const totalPages = total
+          ? Math.max(1, Math.ceil(total / OVERVIEW_CASHFLOW_PAGE_SIZE))
+          : 0;
+        if (totalPages > 0) {
+          overviewCashflowPage = Math.min(
+            Math.max(overviewCashflowPage, 1),
+            totalPages,
+          );
+        } else {
+          overviewCashflowPage = 1;
+        }
+        if (info) {
+          info.textContent = total
+            ? `第 ${overviewCashflowPage}/${totalPages} 页，共 ${total} 条`
+            : "第 0/0 页，共 0 条";
+        }
+        if (prevBtn) prevBtn.disabled = !total || overviewCashflowPage <= 1;
+        if (nextBtn)
+          nextBtn.disabled = !total || overviewCashflowPage >= totalPages;
+      }
+
+      function renderOverviewCashflowPage() {
+        const allRows = Array.isArray(overviewCashflowRowsCache)
+          ? overviewCashflowRowsCache
+          : [];
+        if (!allRows.length) {
+          renderOverviewCashflowRows([]);
+          renderOverviewCashflowPager(0);
+          return;
+        }
+        const totalPages = Math.max(
+          1,
+          Math.ceil(allRows.length / OVERVIEW_CASHFLOW_PAGE_SIZE),
+        );
+        overviewCashflowPage = Math.min(
+          Math.max(overviewCashflowPage, 1),
+          totalPages,
+        );
+        const start = (overviewCashflowPage - 1) * OVERVIEW_CASHFLOW_PAGE_SIZE;
+        const rows = allRows.slice(start, start + OVERVIEW_CASHFLOW_PAGE_SIZE);
+        renderOverviewCashflowRows(rows);
+        renderOverviewCashflowPager(allRows.length);
+      }
+
+      async function loadOverviewCashflowRecords() {
+        const sid = Number($("strategySelect").value || 0);
+        const aid = Number($("accountSelect").value || 0);
+        if (!aid && !sid) {
+          overviewCashflowRowsCache = [];
+          overviewCashflowPage = 1;
+          renderOverviewCashflowPage();
+          return;
+        }
+        const rows = sid
+          ? await api(`/strategies/${sid}/cashflows`)
+          : await api(`/accounts/${aid}/cashflows`);
+        let transferStrategyNameById = new Map();
+        if (!sid) {
+          const transferIds = new Set(
+            (rows || [])
+              .filter(
+                (x) =>
+                  isTransferFlowType(x?.flow_type) &&
+                  String(x?.transfer_id || "").trim(),
+              )
+              .map((x) => String(x.transfer_id).trim()),
+          );
+          if (transferIds.size) {
+            const strategyIds = Array.from($("strategySelect").options || [])
+              .map((opt) => Number(opt.value || 0))
+              .filter((id) => Number.isFinite(id) && id > 0);
+            if (strategyIds.length) {
+              const strategyFlows = await Promise.all(
+                strategyIds.map(async (oneSid) => {
+                  try {
+                    const flows = await api(`/strategies/${oneSid}/cashflows`);
+                    return { sid: oneSid, flows: flows || [] };
+                  } catch (_) {
+                    return { sid: oneSid, flows: [] };
+                  }
+                }),
+              );
+              transferStrategyNameById = new Map();
+              for (const one of strategyFlows) {
+                const strategyName = strategyLabelById(one.sid);
+                for (const f of one.flows) {
+                  const tid = String(f?.transfer_id || "").trim();
+                  if (!tid || !transferIds.has(tid)) continue;
+                  transferStrategyNameById.set(
+                    tid,
+                    strategyName || `#${one.sid}`,
+                  );
+                }
+              }
+            }
+          }
+        }
+        const enriched = (rows || []).map((x) => {
+          const transferId = String(x?.transfer_id || "").trim();
+          const strategyNameText = sid
+            ? isTransferFlowType(x?.flow_type)
+              ? strategyLabelById(sid)
+              : "-"
+            : transferId && isTransferFlowType(x?.flow_type)
+              ? transferStrategyNameById.get(transferId) || "-"
+              : "-";
+          return { ...x, strategy_name_text: strategyNameText };
+        });
+        overviewCashflowRowsCache = enriched.slice().sort((a, b) => {
+          const da = String(a?.flow_date || "");
+          const db = String(b?.flow_date || "");
+          if (da !== db) return db.localeCompare(da);
+          return Number(b?.id || 0) - Number(a?.id || 0);
+        });
+        overviewCashflowPage = 1;
+        renderOverviewCashflowPage();
       }
 
       async function loadTrades() {
@@ -1720,9 +2553,6 @@
           strategy_text: strategyLabelById(x.strategy_id),
           holder_text: holderLabelById(x.shareholder_account_id),
         }));
-        if (editingTradeId && !findTradeRowById(editingTradeId)) {
-          resetTradeEditMode();
-        }
         renderTradesRows(tradesRowsCache);
       }
 
@@ -1780,10 +2610,28 @@
 
       function renderMetricsTable(bodyId, obj) {
         const rows = Object.entries(obj || {})
-          .map(
-            ([k, v]) =>
-              `<tr><td>${k}</td><td>${(typeof v === "number" && k.includes("return")) || k.includes("ratio") || k.includes("drawdown") || k.includes("volatility") ? fmtPct(v) : fmtNum(v)}</td></tr>`,
-          )
+          .map(([k, v]) => {
+            const key = String(k || "");
+            const isRatioMetric =
+              key === "sharpe_ratio" ||
+              key === "calmar_ratio" ||
+              key === "sortino_ratio";
+            const isRecoveryDays = key === "max_drawdown_recovery_days";
+            const isPctMetric =
+              (typeof v === "number" && key.includes("return")) ||
+              (key.includes("drawdown") && !isRecoveryDays) ||
+              key.includes("volatility");
+            const isUlcerMetric =
+              key === "ulcer_index" || key === "ulcer_performance_index";
+            const shown = isRecoveryDays
+              ? fmtInt(v)
+              : isPctMetric
+                ? fmtPct(v)
+                : isRatioMetric || isUlcerMetric
+                  ? fmtNum(v, 2)
+                  : fmtNum(v);
+            return `<tr><td>${key}</td><td>${shown}</td></tr>`;
+          })
           .join("");
         $(bodyId).innerHTML = rows;
       }
@@ -1794,22 +2642,49 @@
         const out = await api(
           `/performance?scope_type=${s.scope_type}&scope_id=${s.scope_id}&return_basis=both`,
         );
-        const nav = out.nav || [];
+        const normalizeNavDayKey = (v) => {
+          const s = String(v || "").trim();
+          if (!s) return "";
+          // Keep only trading day label, strip any time suffix.
+          const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+          return m ? m[1] : s;
+        };
+        const navRaw = out.nav || [];
+        // Defensive dedupe: guarantee one point per trading day for charting.
+        const byDay = new Map();
+        for (const r of navRaw) {
+          const k = normalizeNavDayKey(r?.nav_date);
+          if (!k) continue;
+          byDay.set(k, { ...r, nav_date: k });
+        }
+        const nav = Array.from(byDay.values()).sort((a, b) =>
+          String(a?.nav_date || "").localeCompare(String(b?.nav_date || "")),
+        );
         navRowsCache = nav;
         renderCapitalOverview(nav.length ? nav[nav.length - 1] : null, nav);
         renderHoldingsRows(holdingsRowsCache);
         const x = nav.map((r) => r.nav_date);
-        const dietz = nav.map((r) => r.nav_dietz);
-        const twr = nav.map((r) => r.nav_twr);
+        // Prefer backend integrated TWR NAV (includes holdings + realized trades + costs).
+        // Fallback to equity-normalized series only if nav_twr is unavailable.
+        const navTwrSeries = nav.map((r) => {
+          const v = Number(r?.nav_twr);
+          return Number.isFinite(v) && v > 0 ? v : null;
+        });
+        const hasTwr = navTwrSeries.some((v) => v != null);
+        const eodEquity = nav.map((r) => Number(r?.equity));
+        const baseEq =
+          eodEquity.find((v) => Number.isFinite(v) && v > 0) || null;
+        const navEqFallback = eodEquity.map((v) =>
+          baseEq && Number.isFinite(v) ? v / baseEq : null,
+        );
+        const navSeries = hasTwr ? navTwrSeries : navEqFallback;
         if (window.Plotly) {
           Plotly.newPlot(
             "navPlot",
-            [
-              { x, y: dietz, mode: "lines", name: "NAV Dietz" },
-              { x, y: twr, mode: "lines", name: "NAV TWR" },
-            ],
+            [{ x, y: navSeries, mode: "lines+markers", name: "综合净值(TWR)" }],
             {
               title: currentScopeNavTitle(),
+              xaxis: { type: "category" },
               yaxis: { type: "log" },
               margin: { t: 40, l: 50, r: 20, b: 40 },
             },
@@ -1828,13 +2703,16 @@
         );
         const daily = out.daily || [];
         const x = daily.map((r) => r.date);
-        const traces = [
+        const components = [
           { key: "selection_return", name: "选标的" },
           { key: "timing_return", name: "择时" },
           { key: "position_return", name: "仓位" },
           { key: "cost_drag_return", name: "成本拖累" },
           { key: "cash_drag_return", name: "现金拖累" },
-        ].map((k) => ({
+          { key: "repo_carry_return", name: "Repo 利息贡献" },
+          { key: "repo_fee_drag_return", name: "Repo 费用拖累" },
+        ];
+        const traces = components.map((k) => ({
           x,
           y: daily.map((r) => r[k.key] || 0),
           mode: "lines",
@@ -1852,16 +2730,19 @@
           );
         }
         const p = out.period || {};
-        $("attrPeriodBody").innerHTML = [
-          ["selection_return", p.selection_return],
-          ["timing_return", p.timing_return],
-          ["position_return", p.position_return],
-          ["cost_drag_return", p.cost_drag_return],
-          ["cash_drag_return", p.cash_drag_return],
-          ["rebuild_total", p.rebuild_total],
-          ["total_return_twr_sum", p.total_return_twr_sum],
-        ]
-          .map(([k, v]) => `<tr><td>${k}</td><td>${fmtPct(v)}</td></tr>`)
+        const periodRows = [
+          ["选标的", p.selection_return],
+          ["择时", p.timing_return],
+          ["仓位", p.position_return],
+          ["成本拖累", p.cost_drag_return],
+          ["现金拖累", p.cash_drag_return],
+          ["Repo 利息贡献", p.repo_carry_return],
+          ["Repo 费用拖累", p.repo_fee_drag_return],
+          ["重建总收益", p.rebuild_total],
+          ["TWR 总收益求和", p.total_return_twr_sum],
+        ];
+        $("attrPeriodBody").innerHTML = periodRows
+          .map(([k, v]) => `<tr><td>${k}</td><td>${fmtPct(v || 0)}</td></tr>`)
           .join("");
       }
 
@@ -1904,11 +2785,14 @@
           holdingsRowsCache = [];
           navRowsCache = [];
           roundsRowsCache = [];
+          overviewCashflowRowsCache = [];
+          overviewCashflowPage = 1;
           roundsCodeFilterValue = "";
           roundsFeeBreakdownCache = new Map();
           renderTradesRows(tradesRowsCache);
           renderHoldingsRows(holdingsRowsCache);
           renderRoundsRows(roundsRowsCache);
+          renderOverviewCashflowPage();
           populateRoundCodeFilterOptions([]);
           setRoundKpis({ totalTrades: "-", winRate: null, payoff: null }, null);
           $("caTbody").innerHTML = "";
@@ -1926,8 +2810,22 @@
           loadHoldings(),
           loadRoundsAndStats(),
           loadPerformance(),
+          loadOverviewCashflowRecords(),
           loadAttribution(),
           loadCorporateActions(),
+        ]);
+      }
+
+      async function refreshTradeRelatedViews() {
+        const s = currentScope();
+        if (!s.scope_id) return;
+        // Keep capital overview consistent with latest NAV before holdings refresh.
+        await loadPerformance();
+        await Promise.all([
+          loadTrades(),
+          loadHoldings(),
+          loadRoundsAndStats(),
+          loadOverviewCashflowRecords(),
         ]);
       }
 
@@ -1963,7 +2861,7 @@
           const feeRaw = idx("fee") >= 0 ? Number(parts[idx("fee")]) : NaN;
           const fee =
             Number.isFinite(feeRaw) && feeRaw > 0
-              ? Number(feeRaw.toFixed(2))
+              ? roundHalfUp(feeRaw, 2)
               : calcDefaultTradeFee(price, quantity);
           return {
             account_id: aid,
@@ -2003,22 +2901,34 @@
         applyTradeFeeDefault(true);
 
         $("tradeTimeQuick").addEventListener("change", () => {
+          if (
+            currentTradeStrategyType() === "bond_repo" &&
+            currentRepoAction() === "BUYBACK"
+          ) {
+            setTradeTimeValue("00:00:00");
+            return;
+          }
           const mode = $("tradeTimeQuick").value;
           if (mode === "open") {
             setTradeTimeValue("09:30:00");
           } else if (mode === "close") {
-            setTradeTimeValue("14:56:00");
+            setTradeTimeValue(
+              currentTradeStrategyType() === "bond_repo"
+                ? "14:57:00"
+                : "14:56:00",
+            );
           }
         });
 
         $("tradeCode").addEventListener("input", () => {
+          if (currentTradeStrategyType() === "bond_repo") return;
           renderEtfCodeCandidates($("tradeCode").value);
           fillTradeNameFromCodeIfMatched();
         });
-        $("tradeCode").addEventListener(
-          "change",
-          fillTradeNameFromCodeIfMatched,
-        );
+        $("tradeCode").addEventListener("change", () => {
+          if (currentTradeStrategyType() === "bond_repo") return;
+          fillTradeNameFromCodeIfMatched();
+        });
         $("caCode").addEventListener("input", () =>
           renderEtfCodeCandidates($("caCode").value),
         );
@@ -2027,6 +2937,39 @@
         );
         $("tradePrice").addEventListener("input", () => {
           clampTradePriceInputDecimals();
+          if (
+            currentTradeStrategyType() === "bond_repo" &&
+            currentRepoAction() === "BUYBACK"
+          ) {
+            syncRepoBuybackDerivedFields("tradePrice");
+          }
+          applyTradeFeeDefault(false);
+        });
+        $("tradeRepoSymbol").addEventListener("change", () => {
+          syncTradeRepoSymbolInputs();
+        });
+        $("tradeRepoAction").addEventListener("change", () => {
+          syncTradeFormByStrategyType(true);
+          applyTradeFeeDefault(false);
+        });
+        $("tradeRepoPrincipal").addEventListener("input", () => {
+          if (
+            currentTradeStrategyType() === "bond_repo" &&
+            currentRepoAction() === "BUYBACK"
+          ) {
+            syncRepoBuybackDerivedFields("tradeRepoPrincipal");
+          } else {
+            syncRepoQtyFromPrincipal();
+          }
+          applyTradeFeeDefault(false);
+        });
+        $("tradeRepoInterestDays").addEventListener("input", () => {
+          if (
+            currentTradeStrategyType() === "bond_repo" &&
+            currentRepoAction() === "BUYBACK"
+          ) {
+            syncRepoBuybackDerivedFields("tradeRepoInterestDays");
+          }
           applyTradeFeeDefault(false);
         });
         $("tradePrice").addEventListener("blur", () => {
@@ -2034,20 +2977,45 @@
           if (!raw) return;
           try {
             normalizeTradePriceInput();
+            if (
+              currentTradeStrategyType() === "bond_repo" &&
+              currentRepoAction() === "BUYBACK"
+            ) {
+              syncRepoBuybackDerivedFields("tradePrice");
+            }
             applyTradeFeeDefault(false);
           } catch (e) {
             msg(e.message, true);
           }
         });
-        $("tradeQty").addEventListener("input", () =>
-          applyTradeFeeDefault(false),
-        );
+        $("tradeQty").addEventListener("input", () => {
+          if (currentTradeStrategyType() === "bond_repo") {
+            if (currentRepoAction() === "BUYBACK") {
+              syncRepoBuybackDerivedFields("tradeQty");
+            } else {
+              syncRepoPrincipalFromQty();
+            }
+          }
+          applyTradeFeeDefault(false);
+        });
         $("tradeFee").addEventListener("input", () => {
           const v = Number($("tradeFee").value);
           tradeFeeAuto = !(Number.isFinite(v) && v > 0);
           if (tradeFeeAuto) applyTradeFeeDefault(true);
         });
         $("tradeQty").addEventListener("change", () => {
+          if (currentTradeStrategyType() === "bond_repo") {
+            if (!isRepoLotQtyAllowed($("tradeQty").value)) {
+              msg("逆回购数量必须是正整数（单位：手）。", true);
+              return;
+            }
+            if (currentRepoAction() === "BUYBACK") {
+              syncRepoBuybackDerivedFields("tradeQty");
+            } else {
+              syncRepoPrincipalFromQty();
+            }
+            return;
+          }
           const qtyVal = $("tradeQty").value;
           if (!isTradeQtyAllowed(qtyVal)) {
             msg("成交数量必须是 100 的倍数。", true);
@@ -2055,9 +3023,10 @@
         });
         $("tradeTime").addEventListener("change", () => {
           const t = String($("tradeTime").value || "").trim();
-          if (!isTradeTimeAllowed(t)) {
-            msg("交易时间需在 09:00:00 - 14:59:59（时分秒步长 1）。", true);
-            setTradeTimeValue("14:56:00");
+          if (!isTradeTimeAllowedForCurrentContext(t)) {
+            const err = tradeTimeErrorMessageForCurrentContext();
+            if (err) msg(err, true);
+            setTradeTimeValue(defaultTradeTimeForCurrentContext());
           }
         });
 
@@ -2073,6 +3042,8 @@
             if ($("tradeStrategySelect")) {
               $("tradeStrategySelect").value = $("strategySelect").value;
             }
+            refreshStrategyTypeEditor();
+            syncTradeFormByStrategyType(true);
             await refreshAll();
           } catch (e) {
             msg(e.message, true);
@@ -2080,9 +3051,18 @@
         });
         $("tradeStrategySelect").addEventListener("change", async () => {
           try {
+            if (editingTradeId) {
+              // In edit mode, changing trade strategy should update payload only,
+              // and must not refresh scope list (which would clear edit state).
+              syncTradeFormByStrategyType(true);
+              applyTradeFeeDefault(true);
+              return;
+            }
             if ($("strategySelect")) {
               $("strategySelect").value = $("tradeStrategySelect").value;
             }
+            refreshStrategyTypeEditor();
+            syncTradeFormByStrategyType(true);
             await refreshAll();
           } catch (e) {
             msg(e.message, true);
@@ -2105,6 +3085,23 @@
         $("tradeHolderSelect").addEventListener("change", () => {
           if ($("holderSelect"))
             $("holderSelect").value = $("tradeHolderSelect").value;
+        });
+        $("overviewCashflowPrevBtn").addEventListener("click", () => {
+          if (overviewCashflowPage <= 1) return;
+          overviewCashflowPage -= 1;
+          renderOverviewCashflowPage();
+        });
+        $("overviewCashflowNextBtn").addEventListener("click", () => {
+          const totalPages = Math.max(
+            1,
+            Math.ceil(
+              (overviewCashflowRowsCache || []).length /
+                OVERVIEW_CASHFLOW_PAGE_SIZE,
+            ),
+          );
+          if (overviewCashflowPage >= totalPages) return;
+          overviewCashflowPage += 1;
+          renderOverviewCashflowPage();
         });
         $("reasonModalCancelBtn").addEventListener("click", (evt) => {
           evt.preventDefault();
@@ -2167,7 +3164,7 @@
             if (editingTradeId && Number(editingTradeId) === Number(row.id)) {
               resetTradeEditMode();
             }
-            await refreshAll();
+            await refreshTradeRelatedViews();
             msg(`成交 #${row.id} 已删除`);
           } catch (e) {
             msg(e.message, true);
@@ -2207,15 +3204,39 @@
           try {
             const aid = Number($("accountSelect").value || 0);
             const name = $("newStrategyName").value.trim();
+            const strategyType = String(
+              $("newStrategyType").value || "etf_spot",
+            ).trim();
             if (!aid) throw new Error("请先选择账户");
             if (!name) throw new Error("策略名不能为空");
             const created = await api(`/accounts/${aid}/strategies`, {
               method: "POST",
-              body: JSON.stringify({ name }),
+              body: JSON.stringify({ name, strategy_type: strategyType }),
             });
             $("newStrategyName").value = "";
+            $("newStrategyType").value = "etf_spot";
             await refreshAll({ preferredStrategyId: created.id });
             msg("策略已新增");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("updateStrategyTypeBtn").onclick = async () => {
+          try {
+            const sid = Number(
+              $("strategySelect").value || $("tradeStrategySelect").value || 0,
+            );
+            const stype = String(
+              $("editStrategyType").value || "etf_spot",
+            ).trim();
+            if (!sid) throw new Error("请先选择要修改的策略");
+            await api(`/strategies/${sid}`, {
+              method: "PATCH",
+              body: JSON.stringify({ strategy_type: stype }),
+            });
+            await refreshAll({ preferredStrategyId: sid });
+            msg("策略类型已更新");
           } catch (e) {
             msg(e.message, true);
           }
@@ -2285,11 +3306,78 @@
             const sid = selectedTradeStrategyId();
             const hid = selectedTradeHolderId();
             const qty = Number($("tradeQty").value);
+            const isRepo = strategyTypeById(sid) === "bond_repo";
+            const repoQtyRaw = String($("tradeQty").value || "").trim();
+            const repoAmountRaw = String(
+              $("tradeRepoPrincipal").value || "",
+            ).trim();
+            const repoQty = repoQtyRaw ? Number(repoQtyRaw) : null;
+            const repoAmount = repoAmountRaw ? Number(repoAmountRaw) : null;
+            const repoAction = String(
+              $("tradeRepoAction").value || "LEND",
+            ).toUpperCase();
+            const repoInterestDaysRaw = String(
+              $("tradeRepoInterestDays").value || "",
+            ).trim();
+            const repoInterestDays = repoInterestDaysRaw
+              ? Number(repoInterestDaysRaw)
+              : null;
             const isEditing = Boolean(editingTradeId);
             if (!aid || !sid || !hid)
               throw new Error("请先选择账户/策略/股东账号");
-            if (!isTradeQtyAllowed(qty))
+            if (!isRepo && !isTradeQtyAllowed(qty))
               throw new Error("成交数量必须是 100 的倍数");
+            if (isRepo) {
+              const qtyOk = repoQty != null && isRepoLotQtyAllowed(repoQtyRaw);
+              const principalOk =
+                repoAmount != null && isRepoPrincipalAllowed(repoAmountRaw);
+              if (repoAction === "LEND") {
+                if (!qtyOk && !principalOk) {
+                  throw new Error(
+                    "融券需填写有效数量(正整数手)或交易金额(1000 的正整数倍)",
+                  );
+                }
+                if (qtyOk && principalOk) {
+                  const expected =
+                    Math.round(Number(repoQty)) * REPO_LOT_AMOUNT;
+                  if (Math.abs(Number(repoAmount) - expected) > 1e-9) {
+                    throw new Error(
+                      "融券数量与交易金额不一致，应满足：金额=数量*1000",
+                    );
+                  }
+                }
+              } else {
+                syncRepoBuybackDerivedFields();
+                const qtyAfter = String($("tradeQty").value || "").trim();
+                if (!isRepoLotQtyAllowed(qtyAfter)) {
+                  throw new Error(
+                    "融券购回请至少填写利率/计息天数/数量/购回金额中的任意三项。",
+                  );
+                }
+              }
+              if (repoAction === "LEND") {
+                if (
+                  !Number.isFinite(repoInterestDays) ||
+                  Number(repoInterestDays) <= 0 ||
+                  Math.abs(
+                    Number(repoInterestDays) -
+                      Math.round(Number(repoInterestDays)),
+                  ) > 1e-9
+                ) {
+                  throw new Error("融券时计息天数必填，且必须是正整数");
+                }
+              } else if (
+                repoInterestDays != null &&
+                (!Number.isFinite(repoInterestDays) ||
+                  Number(repoInterestDays) <= 0 ||
+                  Math.abs(
+                    Number(repoInterestDays) -
+                      Math.round(Number(repoInterestDays)),
+                  ) > 1e-9)
+              ) {
+                throw new Error("计息天数填写时必须是正整数");
+              }
+            }
             const payload = buildTradePayloadFromForm(aid, sid, hid, qty);
             if (isEditing) {
               const reason = await askReasonInput({
@@ -2312,7 +3400,7 @@
                 body: JSON.stringify(payload),
               });
             }
-            await refreshAll();
+            await refreshTradeRelatedViews();
             msg(isEditing ? "成交已修改" : "成交已新增");
           } catch (e) {
             msg(e.message, true);
@@ -2326,13 +3414,18 @@
             const hid = selectedTradeHolderId();
             if (!aid || !sid || !hid)
               throw new Error("请先选择账户/策略/股东账号");
+            if (strategyTypeById(sid) === "bond_repo") {
+              throw new Error(
+                "bond_repo 策略暂不支持 CSV 批量导入，请逐笔录入",
+              );
+            }
             const trades = parseCsvTrades($("batchCsv").value, aid, sid, hid);
             if (!trades.length) throw new Error("CSV 为空");
             await api("/trades/batch", {
               method: "POST",
               body: JSON.stringify({ trades }),
             });
-            await refreshAll();
+            await refreshTradeRelatedViews();
             msg(`已批量导入 ${trades.length} 条成交`);
           } catch (e) {
             msg(e.message, true);

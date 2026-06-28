@@ -187,6 +187,34 @@ def ensure_runtime_schema(engine: Engine) -> None:
     """
     if engine.dialect.name == "sqlite":
         ensure_sqlite_schema(engine)
+
+    if inspect(engine).has_table("live_strategy_profile"):
+        live_strategy_profile_cols = {
+            "capital_mode": "capital_mode VARCHAR(32)",
+        }
+        for col, ddl in live_strategy_profile_cols.items():
+            if _has_column(engine, "live_strategy_profile", col):
+                continue
+            _add_column(engine, "live_strategy_profile", ddl)
+        if _has_column(engine, "live_strategy_profile", "capital_mode"):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE live_strategy_profile SET capital_mode = 'segregated' "
+                        "WHERE capital_mode IS NULL OR TRIM(capital_mode) = ''"
+                    )
+                )
+
+    if inspect(engine).has_table("live_nav_daily"):
+        live_nav_daily_cols = {
+            "repo_carry_return": "repo_carry_return FLOAT",
+            "repo_fee_drag_return": "repo_fee_drag_return FLOAT",
+        }
+        for col, ddl in live_nav_daily_cols.items():
+            if _has_column(engine, "live_nav_daily", col):
+                continue
+            _add_column(engine, "live_nav_daily", ddl)
+
     if not inspect(engine).has_table("futures_pool"):
         return
     futures_pool_cols = {

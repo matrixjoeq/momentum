@@ -66,14 +66,22 @@ from ..db.models import (
     LiveShareholderAccount,
     LiveStrategy,
     LiveStrategyCashflow,
+    LiveStrategyProfile,
     LiveSymbolAlias,
     LiveTrade,
     LiveTradeAuditLog,
+    LiveRepoTradeDetail,
 )
 
 router = APIRouter()
 TRADE_FEE_RATE = 1e-4
 TRADE_FEE_MIN = 0.2
+REPO_TRADE_FEE_RATE = 1e-5
+REPO_LOT_AMOUNT = 1000.0
+REPO_SYMBOL_NAME_MAP: dict[str, str] = {
+    "204001": "GC001",
+    "131810": "R-001",
+}
 
 
 @dataclass
@@ -154,9 +162,99 @@ def _norm_time(x: str) -> str:
     return s
 
 
+def _norm_strategy_type(raw: str | None) -> str:
+    s = str(raw or "").strip().lower()
+    if s in {"", "etf", "etf_spot"}:
+        return "etf_spot"
+    if s in {"bond_repo", "repo", "reverse_repo"}:
+        return "bond_repo"
+    raise HTTPException(
+        status_code=400, detail="strategy_type must be etf_spot|bond_repo"
+    )
+
+
+def _default_capital_mode(strategy_type: str) -> str:
+    return "shared_account_cash" if strategy_type == "bond_repo" else "segregated"
+
+
+def _norm_capital_mode(raw: str | None, *, strategy_type: str) -> str:
+    if raw is None or str(raw).strip() == "":
+        return _default_capital_mode(strategy_type)
+    s = str(raw).strip().lower()
+    if s not in {"segregated", "shared_account_cash"}:
+        raise HTTPException(
+            status_code=400,
+            detail="capital_mode must be segregated|shared_account_cash",
+        )
+    return s
+
+
+def _strategy_type_map(db: Session, strategy_ids: list[int]) -> dict[int, str]:
+    if not strategy_ids:
+        return {}
+    out: dict[int, str] = {int(sid): "etf_spot" for sid in strategy_ids}
+    rows = (
+        db.query(LiveStrategyProfile)
+        .filter(LiveStrategyProfile.strategy_id.in_(strategy_ids))
+        .all()
+    )
+    for x in rows:
+        out[int(x.strategy_id)] = _norm_strategy_type(x.strategy_type)
+    return out
+
+
+def _strategy_profile_map(
+    db: Session, strategy_ids: list[int]
+) -> dict[int, tuple[str, str]]:
+    if not strategy_ids:
+        return {}
+    out: dict[int, tuple[str, str]] = {
+        int(sid): ("etf_spot", "segregated") for sid in strategy_ids
+    }
+    rows = (
+        db.query(LiveStrategyProfile)
+        .filter(LiveStrategyProfile.strategy_id.in_(strategy_ids))
+        .all()
+    )
+    for x in rows:
+        stype = _norm_strategy_type(x.strategy_type)
+        cmode = _norm_capital_mode(x.capital_mode, strategy_type=stype)
+        out[int(x.strategy_id)] = (stype, cmode)
+    return out
+
+
+def _strategy_type_for(db: Session, strategy_id: int) -> str:
+    row = (
+        db.query(LiveStrategyProfile)
+        .filter(LiveStrategyProfile.strategy_id == int(strategy_id))
+        .one_or_none()
+    )
+    if row is None:
+        return "etf_spot"
+    return _norm_strategy_type(row.strategy_type)
+
+
+def _strategy_profile_for(db: Session, strategy_id: int) -> tuple[str, str]:
+    row = (
+        db.query(LiveStrategyProfile)
+        .filter(LiveStrategyProfile.strategy_id == int(strategy_id))
+        .one_or_none()
+    )
+    if row is None:
+        return ("etf_spot", "segregated")
+    stype = _norm_strategy_type(row.strategy_type)
+    cmode = _norm_capital_mode(row.capital_mode, strategy_type=stype)
+    return (stype, cmode)
+
+
 def _is_trade_time_allowed(x: str) -> bool:
     t = dt.datetime.strptime(x, "%H:%M:%S").time()
     return dt.time(9, 0, 0) <= t <= dt.time(14, 59, 59)
+
+
+def _is_repo_lend_time_allowed(x: str) -> bool:
+    t = dt.datetime.strptime(x, "%H:%M:%S").time()
+    return dt.time(9, 30, 0) <= t <= dt.time(15, 30, 0)
 
 
 def _round_fee_2(x: float) -> float:
@@ -166,6 +264,21 @@ def _round_fee_2(x: float) -> float:
 def _default_trade_fee(price: float, quantity: float) -> float:
     amount = float(price) * float(quantity)
     return _round_fee_2(max(amount * TRADE_FEE_RATE, TRADE_FEE_MIN))
+
+
+def _default_repo_trade_fee(amount: float) -> float:
+    return _round_fee_2(float(amount) * REPO_TRADE_FEE_RATE)
+
+
+def _norm_repo_symbol(code_raw: str) -> tuple[str, str]:
+    code = _norm_code(code_raw)
+    name = REPO_SYMBOL_NAME_MAP.get(code)
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="bond_repo code must be one of: 204001(GC001), 131810(R-001)",
+        )
+    return code, name
 
 
 def _scope_from_ids(
@@ -314,6 +427,247 @@ def _scope_rows(
     return trades, a_cfs, s_cfs, events
 
 
+def _trade_order_key(
+    trade_date: dt.date, trade_time: str, trade_id: int
+) -> tuple[dt.date, str, int]:
+    return trade_date, _norm_time(trade_time), int(trade_id)
+
+
+def _trade_cash_delta(
+    *,
+    side: str,
+    amount: float,
+    fee: float,
+    strategy_type: str,
+    repo_detail: LiveRepoTradeDetail | dict[str, Any] | None,
+) -> float:
+    side_norm = _norm_side(side)
+    amt = float(amount)
+    fee_v = float(fee or 0.0)
+    if strategy_type == "bond_repo":
+        if repo_detail is None:
+            raise HTTPException(status_code=400, detail="missing repo detail")
+        if isinstance(repo_detail, LiveRepoTradeDetail):
+            action = _norm_repo_action(repo_detail.repo_action, side=side_norm)
+            principal = float(repo_detail.principal_amount or amt)
+        else:
+            action = _norm_repo_action(
+                str(repo_detail.get("repo_action") or ""), side=side_norm
+            )
+            principal = float(repo_detail.get("principal_amount") or amt)
+        if action == "LEND":
+            return -(principal + fee_v)
+        return amt - fee_v
+    if side_norm == "BUY":
+        return -(amt + fee_v)
+    return amt - fee_v
+
+
+def _account_cash_before_order(
+    db: Session,
+    *,
+    account_id: int,
+    order_date: dt.date,
+    order_time: str,
+    order_id: int,
+    exclude_trade_id: int | None = None,
+) -> float:
+    account = (
+        db.query(LiveAccount).filter(LiveAccount.id == int(account_id)).one_or_none()
+    )
+    cash = float(account.initial_cash) if account is not None else 0.0
+    flows = (
+        db.query(LiveAccountCashflow)
+        .filter(LiveAccountCashflow.account_id == int(account_id))
+        .order_by(LiveAccountCashflow.flow_date.asc(), LiveAccountCashflow.id.asc())
+        .all()
+    )
+    for f in flows:
+        if f.flow_date > order_date:
+            break
+        flow_type = str(f.flow_type or "").strip().lower()
+        if flow_type.startswith("transfer_"):
+            continue
+        if str(f.notes or "").strip().lower() == "initial_cash":
+            # Avoid double-counting the synthetic initial cashflow row:
+            # baseline cash already starts from account.initial_cash.
+            continue
+        cash += float(f.amount)
+
+    trades = (
+        db.query(LiveTrade)
+        .filter(
+            LiveTrade.account_id == int(account_id),
+            LiveTrade.trade_date <= order_date,
+        )
+        .order_by(
+            LiveTrade.trade_date.asc(), LiveTrade.trade_time.asc(), LiveTrade.id.asc()
+        )
+        .all()
+    )
+    if not trades:
+        return float(cash)
+    strategy_type_by_id = _strategy_type_map(
+        db, sorted({int(t.strategy_id) for t in trades})
+    )
+    repo_detail_by_trade_id = _repo_detail_map(db, [int(t.id) for t in trades])
+    target_key = _trade_order_key(order_date, order_time, int(order_id))
+    for t in trades:
+        tid = int(t.id)
+        if exclude_trade_id is not None and tid == int(exclude_trade_id):
+            continue
+        if _trade_order_key(t.trade_date, str(t.trade_time), tid) >= target_key:
+            break
+        delta = _trade_cash_delta(
+            side=str(t.side),
+            amount=float(t.amount or (float(t.quantity) * float(t.price))),
+            fee=float(t.fee or 0.0),
+            strategy_type=strategy_type_by_id.get(int(t.strategy_id), "etf_spot"),
+            repo_detail=repo_detail_by_trade_id.get(tid),
+        )
+        cash += delta
+    return float(cash)
+
+
+def _strategy_cash_before_order(
+    db: Session,
+    *,
+    strategy_id: int,
+    order_date: dt.date,
+    order_time: str,
+    order_id: int,
+    exclude_trade_id: int | None = None,
+) -> float:
+    cash = 0.0
+    flows = (
+        db.query(LiveStrategyCashflow)
+        .filter(LiveStrategyCashflow.strategy_id == int(strategy_id))
+        .order_by(LiveStrategyCashflow.flow_date.asc(), LiveStrategyCashflow.id.asc())
+        .all()
+    )
+    for f in flows:
+        if f.flow_date > order_date:
+            break
+        cash += float(f.amount)
+
+    trades = (
+        db.query(LiveTrade)
+        .filter(
+            LiveTrade.strategy_id == int(strategy_id),
+            LiveTrade.trade_date <= order_date,
+        )
+        .order_by(
+            LiveTrade.trade_date.asc(), LiveTrade.trade_time.asc(), LiveTrade.id.asc()
+        )
+        .all()
+    )
+    if not trades:
+        return float(cash)
+    strategy_type_by_id = _strategy_type_map(
+        db, sorted({int(t.strategy_id) for t in trades})
+    )
+    repo_detail_by_trade_id = _repo_detail_map(db, [int(t.id) for t in trades])
+    target_key = _trade_order_key(order_date, order_time, int(order_id))
+    for t in trades:
+        tid = int(t.id)
+        if exclude_trade_id is not None and tid == int(exclude_trade_id):
+            continue
+        if _trade_order_key(t.trade_date, str(t.trade_time), tid) >= target_key:
+            break
+        delta = _trade_cash_delta(
+            side=str(t.side),
+            amount=float(t.amount or (float(t.quantity) * float(t.price))),
+            fee=float(t.fee or 0.0),
+            strategy_type=strategy_type_by_id.get(int(t.strategy_id), "etf_spot"),
+            repo_detail=repo_detail_by_trade_id.get(tid),
+        )
+        cash += delta
+    return float(cash)
+
+
+def _validate_trade_funding_constraints(
+    db: Session,
+    *,
+    account_id: int,
+    strategy_id: int,
+    strategy_type: str,
+    trade_date: dt.date,
+    trade_time: str,
+    side: str,
+    amount: float,
+    fee: float,
+    repo_detail: dict[str, Any] | None,
+    exclude_trade_id: int | None = None,
+    order_trade_id: int | None = None,
+) -> None:
+    # Financing/leverage is not enabled yet: account and segregated-strategy cash
+    # must stay non-negative at order time.
+    order_id = int(order_trade_id) if order_trade_id is not None else 10**18
+    order_time_norm = _norm_time(trade_time)
+    delta = _trade_cash_delta(
+        side=side,
+        amount=amount,
+        fee=fee,
+        strategy_type=strategy_type,
+        repo_detail=repo_detail,
+    )
+    account = (
+        db.query(LiveAccount).filter(LiveAccount.id == int(account_id)).one_or_none()
+    )
+    account_has_external_budget = bool(
+        account is not None and float(account.initial_cash or 0.0) > 1e-12
+    ) or (
+        db.query(LiveAccountCashflow)
+        .filter(LiveAccountCashflow.account_id == int(account_id))
+        .filter(~LiveAccountCashflow.flow_type.like("transfer_%"))
+        .count()
+        > 0
+    )
+    if account_has_external_budget:
+        account_cash_before = _account_cash_before_order(
+            db,
+            account_id=int(account_id),
+            order_date=trade_date,
+            order_time=order_time_norm,
+            order_id=order_id,
+            exclude_trade_id=exclude_trade_id,
+        )
+        account_cash_after = account_cash_before + delta
+        if account_cash_after < -1e-6:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "insufficient account cash at order time; "
+                    "without financing account total position cannot exceed 100%"
+                ),
+            )
+    _, capital_mode = _strategy_profile_for(db, int(strategy_id))
+    strategy_has_allocated_budget = (
+        db.query(LiveStrategyCashflow)
+        .filter(LiveStrategyCashflow.strategy_id == int(strategy_id))
+        .count()
+        > 0
+    )
+    if capital_mode == "segregated" and strategy_has_allocated_budget:
+        strategy_cash_before = _strategy_cash_before_order(
+            db,
+            strategy_id=int(strategy_id),
+            order_date=trade_date,
+            order_time=order_time_norm,
+            order_id=order_id,
+            exclude_trade_id=exclude_trade_id,
+        )
+        strategy_cash_after = strategy_cash_before + delta
+        if strategy_cash_after < -1e-6:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "insufficient strategy cash at order time; "
+                    "without financing strategy position cannot exceed 100%"
+                ),
+            )
+
+
 def _apply_symbol_alias(code: str, alias_map: dict[str, str]) -> str:
     cur = code
     # avoid loops from broken data
@@ -346,7 +700,9 @@ def _calc_metrics(nav: pd.Series, ret: pd.Series) -> dict[str, Any]:
             "ulcer_index": None,
             "ulcer_performance_index": None,
         }
-    cum_ret = float(nav.iloc[-1] / nav.iloc[0] - 1.0) if len(nav) > 0 else 0.0
+    # Cumulative return should include every daily return in the window,
+    # including the first replay day return.
+    cum_ret = float((1.0 + ret.fillna(0.0)).prod() - 1.0) if len(ret) > 0 else 0.0
     ann_ret = float(_annualized_return(nav))
     ann_vol = float(_annualized_vol(ret))
     mdd = float(_max_drawdown(nav))
@@ -440,6 +796,10 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
     end = max(end, shift_to_trading_day(dt.date.today(), shift="prev"))
 
     codes = sorted({_norm_code(t.code) for t in trades})
+    strategy_type_by_id = _strategy_type_map(
+        db, sorted({int(t.strategy_id) for t in trades})
+    )
+    repo_detail_by_trade_id = _repo_detail_map(db, [int(t.id) for t in trades])
     price_map = _latest_price_map(
         db, codes=codes, start=start - dt.timedelta(days=3650), end=end
     )
@@ -465,12 +825,77 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
     # Position/FIFO lot matching must be isolated by shareholder account.
     # key: (code, shareholder_account_id)
     lots: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    repo_lots: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
     rounds_open: dict[tuple[str, int], _RoundState] = {}
     round_no_by_code: dict[str, int] = defaultdict(int)
     closed_round_rows: list[dict[str, Any]] = []
     closed_round_legs: list[dict[str, Any]] = []
 
     cash = 0.0
+    initial_equity_base = 0.0
+    if scope.scope_type == "strategy" and trades:
+        # Reconstruct a stable strategy capital base:
+        # - no strategy cashflow: infer from buy-side gross notional (for segregated books)
+        # - with strategy cashflow: top up only the minimum cash deficit so pre-flow trades
+        #   won't collapse equity to (near) zero and break NAV/return math.
+        inferred_initial_cash = 0.0
+        for t in trades:
+            side = _norm_side(t.side)
+            strategy_type = strategy_type_by_id.get(int(t.strategy_id), "etf_spot")
+            amount = float(t.amount or (float(t.quantity) * float(t.price)))
+            fee = float(t.fee or 0.0)
+            if strategy_type == "bond_repo":
+                detail = repo_detail_by_trade_id.get(int(t.id))
+                if detail is None:
+                    continue
+                action = _norm_repo_action(detail.repo_action, side=side)
+                if action == "LEND":
+                    principal = float(detail.principal_amount or amount)
+                    inferred_initial_cash += principal + fee
+            elif side == "BUY":
+                inferred_initial_cash += amount + fee
+
+        cash_probe = 0.0
+        min_cash_probe = 0.0
+        probe_days = sorted(
+            set([t.trade_date for t in trades] + [f.flow_date for f in strategy_flows])
+        )
+        for pday in probe_days:
+            for f in strategy_flow_by_day.get(pday, []):
+                cash_probe += float(f.amount)
+            day_trades_probe = sorted(
+                trade_by_day.get(pday, []),
+                key=lambda x: (str(x.trade_time or ""), int(x.id)),
+            )
+            for t in day_trades_probe:
+                side = _norm_side(t.side)
+                strategy_type = strategy_type_by_id.get(int(t.strategy_id), "etf_spot")
+                qty = float(t.quantity)
+                amount = float(t.amount or (qty * float(t.price)))
+                fee = float(t.fee or 0.0)
+                if strategy_type == "bond_repo":
+                    detail = repo_detail_by_trade_id.get(int(t.id))
+                    if detail is None:
+                        continue
+                    action = _norm_repo_action(detail.repo_action, side=side)
+                    principal = float(detail.principal_amount or amount)
+                    if action == "LEND":
+                        cash_probe -= principal + fee
+                    else:
+                        cash_probe += amount - fee
+                else:
+                    if side == "BUY":
+                        cash_probe -= amount + fee
+                    else:
+                        cash_probe += amount - fee
+                min_cash_probe = min(min_cash_probe, cash_probe)
+
+        deficit_topup = max(0.0, -min_cash_probe)
+        if strategy_flows:
+            cash = float(deficit_topup)
+        else:
+            cash = float(max(inferred_initial_cash, deficit_topup))
+        initial_equity_base = float(cash)
     nav_twr = 1.0
     nav_dietz = 1.0
     prev_equity: float | None = None
@@ -487,6 +912,9 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
     def _round_keys_for_code(target_code: str) -> list[tuple[str, int]]:
         return [k for k in rounds_open.keys() if k[0] == target_code]
 
+    def _repo_keys_for_code(target_code: str) -> list[tuple[str, int]]:
+        return [k for k in repo_lots.keys() if k[0] == target_code]
+
     def _qty_for_code(target_code: str) -> float:
         return float(
             sum(
@@ -502,9 +930,17 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
             out.extend(lots.get(k, []))
         return out
 
+    def _repo_lots_for_code(target_code: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for k in _repo_keys_for_code(target_code):
+            out.extend(repo_lots.get(k, []))
+        return out
+
     days = trading_days(start, end)
     for day in days:
         fees_day = 0.0
+        repo_fee_day = 0.0
+        repo_carry_day = 0.0
         external_flow = 0.0
 
         for ev in events_by_day.get(day, []):
@@ -530,6 +966,9 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                     for old_key in list(_keys_for_code(code)):
                         new_key = (new_code, old_key[1])
                         lots[new_key].extend(lots.pop(old_key))
+                    for old_key in list(_repo_keys_for_code(code)):
+                        new_key = (new_code, old_key[1])
+                        repo_lots[new_key].extend(repo_lots.pop(old_key))
                     for old_key in list(_round_keys_for_code(code)):
                         st_old = rounds_open.pop(old_key)
                         new_key = (new_code, old_key[1])
@@ -582,6 +1021,7 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
             holder_id = int(t.shareholder_account_id)
             key = (code, holder_id)
             side = _norm_side(t.side)
+            strategy_type = strategy_type_by_id.get(int(t.strategy_id), "etf_spot")
             qty = float(t.quantity)
             px = float(t.price)
             fee = float(t.fee or 0.0)
@@ -590,16 +1030,228 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                 raise HTTPException(
                     status_code=400, detail=f"invalid quantity in trade {t.id}"
                 )
+            if strategy_type == "bond_repo":
+                detail = repo_detail_by_trade_id.get(int(t.id))
+                if detail is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"missing repo detail for trade {t.id}",
+                    )
+                action = _norm_repo_action(detail.repo_action, side=side)
+                principal = float(detail.principal_amount or amount)
+                annual_rate_pct = float(detail.annual_rate_pct)
+                interest_days = int(detail.interest_days)
+                day_count_basis = int(detail.day_count_basis or 365)
+                open_trade_id = (
+                    int(detail.open_trade_id)
+                    if detail.open_trade_id is not None
+                    else None
+                )
+                if principal <= 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"invalid repo principal for trade {t.id}",
+                    )
+                if action == "LEND":
+                    cash -= principal + fee
+                    repo_lots[key].append(
+                        {
+                            "principal": principal,
+                            "fee_open_remain": fee,
+                            "annual_rate_pct": annual_rate_pct,
+                            "interest_days": interest_days,
+                            "day_count_basis": day_count_basis,
+                            "open_trade_id": int(t.id),
+                            "open_date": t.trade_date,
+                            "name": t.name,
+                            "shareholder_account_id": holder_id,
+                        }
+                    )
+                    fees_day += fee
+                    repo_fee_day += fee
+                    if key not in rounds_open:
+                        round_no_by_code[code] += 1
+                        rounds_open[key] = _RoundState(
+                            round_no=round_no_by_code[code],
+                            open_date=t.trade_date,
+                            code=code,
+                            name=t.name,
+                        )
+                    st = rounds_open[key]
+                    st.buy_count += 1
+                    st.buy_qty += principal
+                    st.buy_amount += principal
+                    st.total_fee += fee
+                    st.ensure_legs().append(
+                        {
+                            "trade_id": int(t.id),
+                            "side": "BUY",
+                            "quantity": principal,
+                            "price": annual_rate_pct,
+                            "fee": fee,
+                            "trade_date": t.trade_date,
+                            "trade_time": _norm_time(t.trade_time),
+                        }
+                    )
+                else:
+                    available = float(
+                        sum(float(x["principal"]) for x in repo_lots.get(key, []))
+                    )
+                    if available + 1e-9 < principal:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                "repo close principal exceeds position for "
+                                f"code={code}, shareholder_account_id={holder_id}, trade_id={t.id}"
+                            ),
+                        )
+                    remain = principal
+                    interest_total = 0.0
+                    buy_fee_out = 0.0
+                    fifo = repo_lots.get(key, [])
+                    close_income_total = amount - principal
+                    close_income_scale = (
+                        close_income_total / principal if principal > 1e-12 else 0.0
+                    )
+
+                    def _next_lot() -> dict[str, Any] | None:
+                        for lot in fifo:
+                            if float(lot["principal"]) <= 1e-12:
+                                continue
+                            if open_trade_id is not None and int(
+                                lot["open_trade_id"]
+                            ) != int(open_trade_id):
+                                continue
+                            return lot
+                        return None
+
+                    while remain > 1e-12:
+                        top = _next_lot()
+                        if top is None:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    "repo close cannot match open lot for "
+                                    f"code={code}, shareholder_account_id={holder_id}, trade_id={t.id}"
+                                ),
+                            )
+                        top_principal = float(top["principal"])
+                        take = min(remain, top_principal)
+                        lot_rate = float(top["annual_rate_pct"])
+                        lot_days = int(top["interest_days"])
+                        lot_basis = int(top["day_count_basis"])
+                        if abs(close_income_total) > 1e-12:
+                            interest_take = take * close_income_scale
+                        else:
+                            effective_days = (
+                                lot_days
+                                if lot_days > 0
+                                else max((day - top["open_date"]).days + 1, 1)
+                            )
+                            interest_take = (
+                                take * lot_rate / 100.0 * effective_days / lot_basis
+                            )
+                        elapsed_prev = (
+                            max(
+                                0, min((prev_day - top["open_date"]).days + 1, lot_days)
+                            )
+                            if lot_days > 0
+                            else max((prev_day - top["open_date"]).days + 1, 0)
+                            if prev_day is not None
+                            else 0
+                        )
+                        accrued_prev_take = (
+                            take * lot_rate / 100.0 * float(elapsed_prev) / lot_basis
+                        )
+                        top_fee = float(top.get("fee_open_remain", 0.0) or 0.0)
+                        fee_take = (
+                            top_fee * (take / top_principal)
+                            if top_principal > 1e-12 and top_fee > 0
+                            else 0.0
+                        )
+                        interest_total += interest_take
+                        repo_carry_day += interest_take - accrued_prev_take
+                        buy_fee_out += fee_take
+                        top["fee_open_remain"] = max(0.0, top_fee - fee_take)
+                        top["principal"] = top_principal - take
+                        remain -= take
+                        if float(top["principal"]) <= 1e-12:
+                            fifo.remove(top)
+                    realized = interest_total - buy_fee_out - fee
+                    cash += amount - fee
+                    fees_day += fee
+                    repo_fee_day += fee
+                    if key not in rounds_open:
+                        round_no_by_code[code] += 1
+                        rounds_open[key] = _RoundState(
+                            round_no=round_no_by_code[code],
+                            open_date=t.trade_date,
+                            code=code,
+                            name=t.name,
+                        )
+                    st = rounds_open[key]
+                    st.sell_count += 1
+                    st.sell_qty += principal
+                    st.sell_amount += principal
+                    st.realized_pnl += realized
+                    st.total_fee += fee
+                    st.ensure_legs().append(
+                        {
+                            "trade_id": int(t.id),
+                            "side": "SELL",
+                            "quantity": principal,
+                            "price": annual_rate_pct,
+                            "fee": fee,
+                            "trade_date": t.trade_date,
+                            "trade_time": _norm_time(t.trade_time),
+                        }
+                    )
+                    if (
+                        float(
+                            sum(float(x["principal"]) for x in repo_lots.get(key, []))
+                        )
+                        <= 1e-12
+                    ):
+                        buy_amt = float(st.buy_amount)
+                        round_row = {
+                            "scope_type": scope.scope_type,
+                            "scope_id": scope.scope_id,
+                            "account_id": scope.account_id,
+                            "strategy_id": scope.strategy_id,
+                            "round_no": int(st.round_no),
+                            "code": code,
+                            "name": st.name or "",
+                            "open_date": st.open_date,
+                            "close_date": day,
+                            "buy_count": int(st.buy_count),
+                            "sell_count": int(st.sell_count),
+                            "buy_qty": float(st.buy_qty),
+                            "sell_qty": float(st.sell_qty),
+                            "avg_buy_price": None,
+                            "avg_sell_price": None,
+                            "realized_pnl": float(st.realized_pnl),
+                            "return_rate": (
+                                float(st.realized_pnl / buy_amt)
+                                if buy_amt > 1e-12
+                                else None
+                            ),
+                            "total_fee": float(st.total_fee),
+                            "legs": st.legs or [],
+                        }
+                        closed_round_rows.append(round_row)
+                        rounds_open.pop(key, None)
+                continue
             if side == "BUY":
                 gross = amount + fee
                 cash -= gross
-                # Holding cost and trade PnL are based on execution price only.
-                # Fees are tracked separately in cash / fee stats / cost drag.
+                # Keep holding cost_price on pure execution price (no fee allocation),
+                # while tracking remaining buy-side fee per lot for PnL attribution.
                 unit_cost = amount / qty
                 lots[key].append(
                     {
                         "qty": qty,
                         "unit_cost": unit_cost,
+                        "fee_remain": fee,
                         "trade_id": int(t.id),
                         "trade_date": t.trade_date,
                         "trade_time": t.trade_time,
@@ -644,18 +1296,28 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                     )
                 remain = qty
                 cost_out = 0.0
+                buy_fee_out = 0.0
                 fifo = lots.get(key, [])
                 while remain > 1e-12 and fifo:
                     top = fifo[0]
-                    take = min(remain, float(top["qty"]))
+                    top_qty = float(top["qty"])
+                    take = min(remain, top_qty)
                     cost_out += take * float(top["unit_cost"])
-                    top["qty"] = float(top["qty"]) - take
+                    top_fee = float(top.get("fee_remain", 0.0) or 0.0)
+                    fee_take = (
+                        top_fee * (take / top_qty)
+                        if top_qty > 1e-12 and top_fee > 0
+                        else 0.0
+                    )
+                    buy_fee_out += fee_take
+                    top["fee_remain"] = max(0.0, top_fee - fee_take)
+                    top["qty"] = top_qty - take
                     remain -= take
                     if float(top["qty"]) <= 1e-12:
                         fifo.pop(0)
                 proceeds = amount - fee
-                # Realized trade PnL excludes transaction fees by requirement.
-                realized = amount - cost_out
+                # Realized trade PnL includes both allocated buy fees and sell fees.
+                realized = amount - cost_out - buy_fee_out - fee
                 cash += proceeds
                 fees_day += fee
                 if key not in rounds_open:
@@ -721,32 +1383,110 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                     closed_round_rows.append(round_row)
                     rounds_open.pop(key, None)
 
+        for code, holder_id in list(repo_lots.keys()):
+            for lot in repo_lots.get((code, holder_id), []):
+                principal = float(lot["principal"])
+                if principal <= 1e-12:
+                    continue
+                lot_days = int(lot["interest_days"])
+                lot_basis = int(lot["day_count_basis"])
+                lot_rate = float(lot["annual_rate_pct"])
+                if lot_days > 0:
+                    elapsed_today = lot_days
+                else:
+                    elapsed_today = max((day - lot["open_date"]).days + 1, 0)
+                if prev_day is None:
+                    elapsed_prev = 0
+                else:
+                    if lot_days > 0:
+                        elapsed_prev = lot_days if prev_day >= lot["open_date"] else 0
+                    else:
+                        elapsed_prev = max((prev_day - lot["open_date"]).days + 1, 0)
+                if elapsed_today <= elapsed_prev:
+                    continue
+                repo_carry_day += (
+                    principal
+                    * lot_rate
+                    / 100.0
+                    * float(elapsed_today - elapsed_prev)
+                    / float(lot_basis)
+                )
+
         account_id = scope.account_id
         strategy_id = scope.strategy_id
         market_value = 0.0
         today_holdings: list[LiveHoldingSnapshot] = []
-        active_codes = sorted(
-            {
-                code
-                for code, holder_id in lots.keys()
-                if sum(float(x["qty"]) for x in lots.get((code, holder_id), [])) > 1e-12
-            }
-        )
+        stock_active_codes = {
+            code
+            for code, holder_id in lots.keys()
+            if sum(float(x["qty"]) for x in lots.get((code, holder_id), [])) > 1e-12
+        }
+        repo_active_codes = {
+            code
+            for code, holder_id in repo_lots.keys()
+            if sum(float(x["principal"]) for x in repo_lots.get((code, holder_id), []))
+            > 1e-12
+        }
+        active_codes = sorted(stock_active_codes | repo_active_codes)
         for code in active_codes:
-            code_lots = _lots_for_code(code)
-            qty_total = float(sum(float(x["qty"]) for x in code_lots))
-            cost_value = float(
-                sum(float(x["qty"]) * float(x["unit_cost"]) for x in code_lots)
-            )
-            cost_price = float(cost_value / qty_total) if qty_total > 1e-12 else None
-            mpx, mpx_day = _price_on_or_before(price_map, code, day)
-            stale_days = (day - mpx_day).days if mpx_day is not None else None
-            price_missing = mpx is None
-            mv = float(qty_total * mpx) if mpx is not None else None
-            pnl = (mv - cost_value) if mv is not None else None
-            pnl_rate = (
-                (pnl / cost_value) if (pnl is not None and cost_value > 1e-12) else None
-            )
+            stock_code_lots = _lots_for_code(code)
+            repo_code_lots = _repo_lots_for_code(code)
+            if repo_code_lots and not stock_code_lots:
+                qty_total = float(sum(float(x["principal"]) for x in repo_code_lots))
+                cost_value = qty_total
+                cost_price = None
+                mpx = None
+                stale_days = None
+                price_missing = False
+                fee_open = float(
+                    sum(
+                        float(x.get("fee_open_remain", 0.0) or 0.0)
+                        for x in repo_code_lots
+                    )
+                )
+                accrued_interest = 0.0
+                for lot in repo_code_lots:
+                    principal = float(lot["principal"])
+                    lot_days = int(lot["interest_days"])
+                    elapsed = (
+                        lot_days
+                        if lot_days > 0
+                        else max((day - lot["open_date"]).days + 1, 0)
+                    )
+                    accrued_interest += (
+                        principal
+                        * float(lot["annual_rate_pct"])
+                        / 100.0
+                        * float(elapsed)
+                        / float(lot["day_count_basis"])
+                    )
+                mv = float(cost_value + accrued_interest)
+                pnl = float(accrued_interest - fee_open)
+                pnl_rate = (pnl / cost_value) if cost_value > 1e-12 else None
+                hold_name = str(repo_code_lots[-1].get("name", "") or "")
+            else:
+                code_lots = stock_code_lots
+                qty_total = float(sum(float(x["qty"]) for x in code_lots))
+                cost_value = float(
+                    sum(float(x["qty"]) * float(x["unit_cost"]) for x in code_lots)
+                )
+                fee_open = float(
+                    sum(float(x.get("fee_remain", 0.0) or 0.0) for x in code_lots)
+                )
+                cost_price = (
+                    float(cost_value / qty_total) if qty_total > 1e-12 else None
+                )
+                mpx, mpx_day = _price_on_or_before(price_map, code, day)
+                stale_days = (day - mpx_day).days if mpx_day is not None else None
+                price_missing = mpx is None
+                mv = float(qty_total * mpx) if mpx is not None else None
+                pnl = (mv - cost_value - fee_open) if mv is not None else None
+                pnl_rate = (
+                    (pnl / cost_value)
+                    if (pnl is not None and cost_value > 1e-12)
+                    else None
+                )
+                hold_name = str(code_lots[-1].get("name", "") if code_lots else "")
             if mv is not None:
                 market_value += mv
             today_holdings.append(
@@ -757,7 +1497,7 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                     account_id=account_id,
                     strategy_id=strategy_id,
                     code=code,
-                    name=(code_lots[-1].get("name", "") if code_lots else ""),
+                    name=hold_name,
                     quantity=qty_total,
                     cost_price=cost_price,
                     market_price=mpx,
@@ -780,6 +1520,8 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
         position = 0.0
         cost_drag = 0.0
         cash_drag = 0.0
+        repo_carry = 0.0
+        repo_fee_drag = 0.0
         if prev_equity is not None and prev_equity > 1e-12:
             daily_twr = float((equity - prev_equity - external_flow) / prev_equity)
             denom = float(prev_equity + 0.5 * external_flow)
@@ -829,15 +1571,44 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                 else:
                     selection = 0.0
                     position = 0.0
-                cost_drag = float(-fees_day / prev_equity)
+                repo_carry = float(repo_carry_day / prev_equity)
+                repo_fee_drag = float(-repo_fee_day / prev_equity)
+                cost_drag = float(-(fees_day - repo_fee_day) / prev_equity)
                 cash_drag = float(-cash_weight * u_ret)
                 timing = float(
-                    (daily_twr or 0.0) - (selection + position + cost_drag + cash_drag)
+                    (daily_twr or 0.0)
+                    - (
+                        selection
+                        + position
+                        + cost_drag
+                        + cash_drag
+                        + repo_carry
+                        + repo_fee_drag
+                    )
                 )
         elif prev_equity is None:
-            # first day keeps nav at 1.0
-            daily_twr = 0.0
-            daily_dietz = 0.0
+            # First-day return should be measured against reconstructed starting capital
+            # when strategy replay has an inferred/top-up base.
+            if initial_equity_base > 1e-12:
+                daily_twr = float(
+                    (equity - initial_equity_base - external_flow) / initial_equity_base
+                )
+                denom = float(initial_equity_base + 0.5 * external_flow)
+                if abs(denom) <= 1e-12:
+                    daily_dietz = daily_twr
+                else:
+                    daily_dietz = float(
+                        (equity - initial_equity_base - external_flow) / denom
+                    )
+                nav_twr *= 1.0 + daily_twr
+                nav_dietz *= 1.0 + daily_dietz
+                # No previous-day decomposition context on day 1; assign to timing
+                # so attribution period rebuild remains consistent with TWR sum.
+                timing = float(daily_twr)
+            else:
+                # No usable baseline (e.g., pure account scope without prior capital).
+                daily_twr = 0.0
+                daily_dietz = 0.0
 
         db.add(
             LiveNavDaily(
@@ -860,6 +1631,8 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                 position_return=float(position),
                 cost_drag_return=float(cost_drag),
                 cash_drag_return=float(cash_drag),
+                repo_carry_return=float(repo_carry),
+                repo_fee_drag_return=float(repo_fee_drag),
             )
         )
         prev_equity = float(equity)
@@ -936,11 +1709,19 @@ def _serialize_account(x: LiveAccount) -> LiveAccountOut:
     )
 
 
-def _serialize_strategy(x: LiveStrategy) -> LiveStrategyOut:
+def _serialize_strategy(
+    x: LiveStrategy,
+    *,
+    strategy_type: str = "etf_spot",
+    capital_mode: str = "segregated",
+) -> LiveStrategyOut:
+    norm_type = _norm_strategy_type(strategy_type)
     return LiveStrategyOut(
         id=int(x.id),
         account_id=int(x.account_id),
         name=str(x.name),
+        strategy_type=norm_type,
+        capital_mode=_norm_capital_mode(capital_mode, strategy_type=norm_type),
         notes=x.notes,
         created_at=_dt_s(x.created_at),
     )
@@ -956,7 +1737,22 @@ def _serialize_shareholder(x: LiveShareholderAccount) -> LiveShareholderAccountO
     )
 
 
-def _serialize_trade(x: LiveTrade) -> LiveTradeOut:
+def _repo_detail_map(
+    db: Session, trade_ids: list[int]
+) -> dict[int, LiveRepoTradeDetail]:
+    if not trade_ids:
+        return {}
+    rows = (
+        db.query(LiveRepoTradeDetail)
+        .filter(LiveRepoTradeDetail.trade_id.in_(trade_ids))
+        .all()
+    )
+    return {int(x.trade_id): x for x in rows}
+
+
+def _serialize_trade(
+    x: LiveTrade, *, repo_detail: LiveRepoTradeDetail | None = None
+) -> LiveTradeOut:
     return LiveTradeOut(
         id=int(x.id),
         account_id=int(x.account_id),
@@ -971,6 +1767,30 @@ def _serialize_trade(x: LiveTrade) -> LiveTradeOut:
         quantity=float(x.quantity),
         fee=float(x.fee),
         amount=float(x.amount),
+        repo_action=repo_detail.repo_action if repo_detail else None,
+        repo_principal_amount=(
+            float(repo_detail.principal_amount) if repo_detail is not None else None
+        ),
+        repo_annual_rate_pct=(
+            float(repo_detail.annual_rate_pct) if repo_detail is not None else None
+        ),
+        repo_interest_days=(
+            (
+                int(repo_detail.interest_days)
+                if int(repo_detail.interest_days) > 0
+                else None
+            )
+            if repo_detail is not None
+            else None
+        ),
+        repo_day_count_basis=(
+            int(repo_detail.day_count_basis) if repo_detail is not None else None
+        ),
+        repo_open_trade_id=(
+            int(repo_detail.open_trade_id)
+            if (repo_detail is not None and repo_detail.open_trade_id is not None)
+            else None
+        ),
         idempotency_key=x.idempotency_key,
         broker_trade_no=x.broker_trade_no,
         notes=x.notes,
@@ -1104,6 +1924,8 @@ def live_create_strategy(
     account = db.query(LiveAccount).filter(LiveAccount.id == account_id).one_or_none()
     if account is None:
         raise HTTPException(status_code=404, detail="account not found")
+    strategy_type = _norm_strategy_type(payload.strategy_type)
+    capital_mode = _norm_capital_mode(payload.capital_mode, strategy_type=strategy_type)
     row = LiveStrategy(
         account_id=account_id, name=payload.name.strip(), notes=payload.notes
     )
@@ -1114,7 +1936,17 @@ def live_create_strategy(
         raise HTTPException(
             status_code=400, detail="strategy name already exists in account"
         ) from exc
-    return _serialize_strategy(row)
+    db.add(
+        LiveStrategyProfile(
+            strategy_id=int(row.id),
+            strategy_type=strategy_type,
+            capital_mode=capital_mode,
+        )
+    )
+    db.flush()
+    return _serialize_strategy(
+        row, strategy_type=strategy_type, capital_mode=capital_mode
+    )
 
 
 @router.get("/accounts/{account_id}/strategies", response_model=list[LiveStrategyOut])
@@ -1125,7 +1957,12 @@ def live_list_strategies(account_id: int, db: Session = Depends(get_session)):
         .order_by(LiveStrategy.id.asc())
         .all()
     )
-    return [_serialize_strategy(x) for x in rows]
+    profile_map = _strategy_profile_map(db, [int(x.id) for x in rows])
+    out: list[LiveStrategyOut] = []
+    for x in rows:
+        stype, cmode = profile_map.get(int(x.id), ("etf_spot", "segregated"))
+        out.append(_serialize_strategy(x, strategy_type=stype, capital_mode=cmode))
+    return out
 
 
 @router.patch("/strategies/{strategy_id}", response_model=LiveStrategyOut)
@@ -1141,13 +1978,43 @@ def live_update_strategy(
         row.name = payload.name.strip()
     if payload.notes is not None:
         row.notes = payload.notes
+    profile = (
+        db.query(LiveStrategyProfile)
+        .filter(LiveStrategyProfile.strategy_id == int(row.id))
+        .one_or_none()
+    )
+    stype = (
+        _norm_strategy_type(payload.strategy_type) if payload.strategy_type else None
+    )
+    if stype is not None or payload.capital_mode is not None:
+        if profile is None:
+            base_type = stype or "etf_spot"
+            base_mode = _norm_capital_mode(
+                payload.capital_mode, strategy_type=base_type
+            )
+            profile = LiveStrategyProfile(
+                strategy_id=int(row.id),
+                strategy_type=base_type,
+                capital_mode=base_mode,
+            )
+            db.add(profile)
+        if stype is not None:
+            profile.strategy_type = stype
+        profile.strategy_type = _norm_strategy_type(profile.strategy_type)
+        profile.capital_mode = _norm_capital_mode(
+            payload.capital_mode
+            if payload.capital_mode is not None
+            else profile.capital_mode,
+            strategy_type=profile.strategy_type,
+        )
     try:
         db.flush()
     except IntegrityError as exc:
         raise HTTPException(
             status_code=400, detail="strategy name already exists in account"
         ) from exc
-    return _serialize_strategy(row)
+    out_type, out_mode = _strategy_profile_for(db, int(row.id))
+    return _serialize_strategy(row, strategy_type=out_type, capital_mode=out_mode)
 
 
 @router.delete("/strategies/{strategy_id}")
@@ -1155,6 +2022,11 @@ def live_delete_strategy(strategy_id: int, db: Session = Depends(get_session)):
     row = db.query(LiveStrategy).filter(LiveStrategy.id == strategy_id).one_or_none()
     if row is None:
         return {"ok": True}
+    (
+        db.query(LiveStrategyProfile)
+        .filter(LiveStrategyProfile.strategy_id == int(strategy_id))
+        .delete(synchronize_session=False)
+    )
     db.delete(row)
     return {"ok": True}
 
@@ -1415,40 +2287,215 @@ def _require_change_reason(raw_reason: str) -> str:
     return reason
 
 
+def _norm_repo_action(raw: str | None, *, side: str) -> str:
+    if raw is None or str(raw).strip() == "":
+        return "LEND" if side == "BUY" else "BUYBACK"
+    s = str(raw).strip()
+    su = s.upper()
+    if su in {"OPEN", "LEND"} or s in {"融券"}:
+        return "LEND"
+    if su in {"CLOSE", "BUYBACK"} or s in {"融券购回"}:
+        return "BUYBACK"
+    raise HTTPException(
+        status_code=400,
+        detail="repo_action must be LEND|BUYBACK (or 融券|融券购回)",
+    )
+
+
+def _build_repo_detail_payload(
+    payload: LiveTradeCreateRequest | LiveTradeUpdateRequest, *, side: str
+) -> dict[str, Any]:
+    action = _norm_repo_action(payload.repo_action, side=side)
+    if action == "LEND" and side != "BUY":
+        raise HTTPException(status_code=400, detail="repo LEND must use BUY side")
+    if action == "BUYBACK" and side != "SELL":
+        raise HTTPException(status_code=400, detail="repo BUYBACK must use SELL side")
+    qty_lots = float(payload.quantity)
+    if qty_lots <= 0:
+        raise HTTPException(status_code=400, detail="repo quantity must be > 0")
+    qty_int = int(round(qty_lots))
+    if not math.isclose(qty_lots, float(qty_int), rel_tol=0.0, abs_tol=1e-9):
+        raise HTTPException(
+            status_code=400, detail="repo quantity must be a positive integer"
+        )
+    principal_from_qty = float(qty_int) * REPO_LOT_AMOUNT
+    principal = (
+        float(payload.repo_principal_amount)
+        if payload.repo_principal_amount is not None
+        else principal_from_qty
+    )
+    if principal <= 0:
+        raise HTTPException(status_code=400, detail="repo principal_amount must be > 0")
+    principal_lot_ratio = principal / REPO_LOT_AMOUNT
+    if not math.isclose(
+        principal_lot_ratio, round(principal_lot_ratio), rel_tol=0.0, abs_tol=1e-9
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="repo principal_amount must be a positive multiple of 1000",
+        )
+    if not math.isclose(principal, principal_from_qty, rel_tol=0.0, abs_tol=1e-9):
+        raise HTTPException(
+            status_code=400,
+            detail="repo principal_amount must equal quantity * 1000",
+        )
+    annual_rate_pct = float(payload.price or 0.0)
+    if annual_rate_pct <= 0:
+        raise HTTPException(
+            status_code=400, detail="repo price(annual rate) must be > 0"
+        )
+    raw_interest_days = payload.repo_interest_days
+    if action == "LEND":
+        if raw_interest_days is None:
+            raise HTTPException(
+                status_code=400, detail="repo interest_days is required for LEND"
+            )
+        interest_days = int(raw_interest_days)
+        if interest_days <= 0:
+            raise HTTPException(
+                status_code=400, detail="repo interest_days must be >= 1"
+            )
+    else:
+        if raw_interest_days is None:
+            interest_days = 0
+        else:
+            interest_days = int(raw_interest_days)
+            if interest_days <= 0:
+                raise HTTPException(
+                    status_code=400, detail="repo interest_days must be >= 1"
+                )
+    day_count_basis = 365
+    open_trade_id = (
+        int(payload.repo_open_trade_id)
+        if payload.repo_open_trade_id is not None
+        else None
+    )
+    return {
+        "repo_action": action,
+        "principal_amount": principal,
+        "lot_quantity": float(qty_int),
+        "annual_rate_pct": annual_rate_pct,
+        "interest_days": interest_days,
+        "day_count_basis": day_count_basis,
+        "open_trade_id": open_trade_id,
+    }
+
+
+def _upsert_repo_trade_detail(
+    db: Session, *, trade_id: int, detail_payload: dict[str, Any] | None
+) -> LiveRepoTradeDetail | None:
+    row = (
+        db.query(LiveRepoTradeDetail)
+        .filter(LiveRepoTradeDetail.trade_id == int(trade_id))
+        .one_or_none()
+    )
+    if detail_payload is None:
+        if row is not None:
+            db.delete(row)
+        return None
+    if row is None:
+        row = LiveRepoTradeDetail(trade_id=int(trade_id))
+        db.add(row)
+    row.repo_action = str(detail_payload["repo_action"])
+    row.principal_amount = float(detail_payload["principal_amount"])
+    row.annual_rate_pct = float(detail_payload["annual_rate_pct"])
+    row.interest_days = int(detail_payload["interest_days"])
+    row.day_count_basis = int(detail_payload["day_count_basis"])
+    row.open_trade_id = detail_payload["open_trade_id"]
+    return row
+
+
 def _apply_trade_values(
     row: LiveTrade,
     payload: LiveTradeCreateRequest | LiveTradeUpdateRequest,
     *,
+    db: Session,
     account_id: int,
     strategy_id: int,
-) -> None:
+) -> tuple[str, dict[str, Any] | None]:
+    strategy_type = _strategy_type_for(db, int(strategy_id))
     side = _norm_side(payload.side)
     code = _norm_code(payload.code)
     trade_date = _to_date(payload.trade_date)
     trade_time = _norm_time(payload.trade_time)
-    if not _is_trade_time_allowed(trade_time):
-        raise HTTPException(
-            status_code=400,
-            detail="trade_time must be between 09:00:00 and 14:59:59",
-        )
     qty = float(payload.quantity)
     if qty <= 0:
         raise HTTPException(status_code=400, detail="quantity must be > 0")
-    lot_ratio = qty / 100.0
-    if not math.isclose(lot_ratio, round(lot_ratio), rel_tol=0.0, abs_tol=1e-9):
-        raise HTTPException(
-            status_code=400, detail="quantity must be a multiple of 100"
+    repo_detail: dict[str, Any] | None = None
+    if strategy_type == "bond_repo":
+        repo_detail = _build_repo_detail_payload(payload, side=side)
+        if repo_detail["repo_action"] == "LEND" and not _is_repo_lend_time_allowed(
+            trade_time
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="repo LEND trade_time must be between 09:30:00 and 15:30:00",
+            )
+        code, repo_name = _norm_repo_symbol(payload.code)
+        qty = float(repo_detail["lot_quantity"])
+        px = float(repo_detail["annual_rate_pct"])
+        amount = float(
+            payload.amount
+            if payload.amount is not None
+            else repo_detail["principal_amount"]
         )
-    px = float(payload.price)
-    raw_fee = float(payload.fee or 0.0)
-    fee = _round_fee_2(raw_fee if raw_fee > 0.0 else _default_trade_fee(px, qty))
-    amount = float(payload.amount if payload.amount is not None else (qty * px))
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="repo amount must be > 0")
+        if (
+            repo_detail["repo_action"] == "LEND"
+            and payload.amount is not None
+            and not math.isclose(
+                amount,
+                float(repo_detail["principal_amount"]),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="repo LEND amount must equal quantity * 1000",
+            )
+    else:
+        if not _is_trade_time_allowed(trade_time):
+            raise HTTPException(
+                status_code=400,
+                detail="trade_time must be between 09:00:00 and 14:59:59",
+            )
+        if (
+            payload.repo_action is not None
+            or payload.repo_principal_amount is not None
+            or payload.repo_annual_rate_pct is not None
+            or payload.repo_interest_days is not None
+            or payload.repo_day_count_basis is not None
+            or payload.repo_open_trade_id is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="repo fields are only allowed for bond_repo strategy",
+            )
+        lot_ratio = qty / 100.0
+        if not math.isclose(lot_ratio, round(lot_ratio), rel_tol=0.0, abs_tol=1e-9):
+            raise HTTPException(
+                status_code=400, detail="quantity must be a multiple of 100"
+            )
+        px = float(payload.price)
+        amount = float(payload.amount if payload.amount is not None else (qty * px))
+    if strategy_type == "bond_repo":
+        fee = (
+            0.0
+            if repo_detail and repo_detail["repo_action"] == "BUYBACK"
+            else _default_repo_trade_fee(amount)
+        )
+    else:
+        raw_fee = float(payload.fee or 0.0)
+        fee_default = _default_trade_fee(px, qty)
+        fee = _round_fee_2(raw_fee if raw_fee > 0.0 else fee_default)
 
     row.account_id = account_id
     row.strategy_id = strategy_id
     row.shareholder_account_id = int(payload.shareholder_account_id)
     row.code = code
-    row.name = str(payload.name or "")
+    row.name = repo_name if strategy_type == "bond_repo" else str(payload.name or "")
     row.trade_date = trade_date
     row.trade_time = trade_time
     row.side = side
@@ -1458,6 +2505,7 @@ def _apply_trade_values(
     row.amount = amount
     row.broker_trade_no = payload.broker_trade_no
     row.notes = payload.notes
+    return strategy_type, repo_detail
 
 
 def _replay_touched_scopes(
@@ -1529,7 +2577,25 @@ def _insert_trade(payload: LiveTradeCreateRequest, db: Session) -> LiveTrade:
         broker_trade_no=None,
         notes=None,
     )
-    _apply_trade_values(row, payload, account_id=account_id, strategy_id=strategy_id)
+    _, repo_detail = _apply_trade_values(
+        row,
+        payload,
+        db=db,
+        account_id=account_id,
+        strategy_id=strategy_id,
+    )
+    _validate_trade_funding_constraints(
+        db,
+        account_id=int(row.account_id),
+        strategy_id=int(row.strategy_id),
+        strategy_type=_strategy_type_for(db, int(row.strategy_id)),
+        trade_date=row.trade_date,
+        trade_time=str(row.trade_time),
+        side=str(row.side),
+        amount=float(row.amount),
+        fee=float(row.fee or 0.0),
+        repo_detail=repo_detail,
+    )
     db.add(row)
     try:
         db.flush()
@@ -1537,6 +2603,8 @@ def _insert_trade(payload: LiveTradeCreateRequest, db: Session) -> LiveTrade:
         raise HTTPException(
             status_code=400, detail="duplicate idempotency_key or broker_trade_no"
         ) from exc
+    _upsert_repo_trade_detail(db, trade_id=int(row.id), detail_payload=repo_detail)
+    db.flush()
     return row
 
 
@@ -1548,7 +2616,12 @@ def live_add_trade(payload: LiveTradeCreateRequest, db: Session = Depends(get_se
         strategy_ids={int(row.strategy_id)},
         account_ids={int(row.account_id)},
     )
-    return _serialize_trade(row)
+    repo_detail = (
+        db.query(LiveRepoTradeDetail)
+        .filter(LiveRepoTradeDetail.trade_id == int(row.id))
+        .one_or_none()
+    )
+    return _serialize_trade(row, repo_detail=repo_detail)
 
 
 @router.put("/trades/{trade_id}", response_model=LiveTradeOut)
@@ -1561,15 +2634,44 @@ def live_update_trade(
     reason = _require_change_reason(payload.reason)
     old_account_id = int(row.account_id)
     old_strategy_id = int(row.strategy_id)
-    old_snapshot = _serialize_trade(row).model_dump()
+    old_repo_detail = (
+        db.query(LiveRepoTradeDetail)
+        .filter(LiveRepoTradeDetail.trade_id == int(row.id))
+        .one_or_none()
+    )
+    old_snapshot = _serialize_trade(row, repo_detail=old_repo_detail).model_dump()
     account_id, strategy_id = _validate_trade_payload(payload, db)
-    _apply_trade_values(row, payload, account_id=account_id, strategy_id=strategy_id)
+    _, repo_detail_payload = _apply_trade_values(
+        row,
+        payload,
+        db=db,
+        account_id=account_id,
+        strategy_id=strategy_id,
+    )
+    _validate_trade_funding_constraints(
+        db,
+        account_id=int(row.account_id),
+        strategy_id=int(row.strategy_id),
+        strategy_type=_strategy_type_for(db, int(row.strategy_id)),
+        trade_date=row.trade_date,
+        trade_time=str(row.trade_time),
+        side=str(row.side),
+        amount=float(row.amount),
+        fee=float(row.fee or 0.0),
+        repo_detail=repo_detail_payload,
+        exclude_trade_id=int(row.id),
+        order_trade_id=int(row.id),
+    )
     try:
         db.flush()
     except IntegrityError as exc:
         raise HTTPException(
             status_code=400, detail="duplicate broker_trade_no"
         ) from exc
+    repo_detail = _upsert_repo_trade_detail(
+        db, trade_id=int(row.id), detail_payload=repo_detail_payload
+    )
+    db.flush()
     _log_trade_audit(
         db,
         trade_id=int(row.id),
@@ -1579,7 +2681,7 @@ def live_update_trade(
         reason=reason,
         snapshot={
             "before": old_snapshot,
-            "after": _serialize_trade(row).model_dump(),
+            "after": _serialize_trade(row, repo_detail=repo_detail).model_dump(),
         },
     )
     _replay_touched_scopes(
@@ -1587,7 +2689,7 @@ def live_update_trade(
         strategy_ids={old_strategy_id, int(row.strategy_id)},
         account_ids={old_account_id, int(row.account_id)},
     )
-    return _serialize_trade(row)
+    return _serialize_trade(row, repo_detail=repo_detail)
 
 
 @router.post("/trades/batch")
@@ -1641,11 +2743,15 @@ def live_list_trades(
         .limit(page_size)
         .all()
     )
+    repo_map = _repo_detail_map(db, [int(x.id) for x in rows])
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "items": [_serialize_trade(x).model_dump() for x in rows],
+        "items": [
+            _serialize_trade(x, repo_detail=repo_map.get(int(x.id))).model_dump()
+            for x in rows
+        ],
     }
 
 
@@ -1659,7 +2765,17 @@ def live_delete_trade(
         return {"ok": True}
     account_id = int(row.account_id)
     strategy_id = int(row.strategy_id)
-    snapshot = _serialize_trade(row).model_dump()
+    repo_detail = (
+        db.query(LiveRepoTradeDetail)
+        .filter(LiveRepoTradeDetail.trade_id == int(row.id))
+        .one_or_none()
+    )
+    snapshot = _serialize_trade(row, repo_detail=repo_detail).model_dump()
+    (
+        db.query(LiveRepoTradeDetail)
+        .filter(LiveRepoTradeDetail.trade_id == int(trade_id))
+        .delete(synchronize_session=False)
+    )
     db.delete(row)
     db.flush()
     _log_trade_audit(
@@ -1767,18 +2883,38 @@ def live_replay(payload: LiveReplayRequest, db: Session = Depends(get_session)):
     scope = _scope_from_ids(
         db, account_id=payload.account_id, strategy_id=payload.strategy_id
     )
-    out = _replay_scope(db, scope)
-    if scope.scope_type == "strategy":
-        _replay_scope(
+    account_id = int(scope.account_id)
+    strategy_ids = [
+        int(x.id)
+        for x in db.query(LiveStrategy.id)
+        .filter(LiveStrategy.account_id == account_id)
+        .all()
+    ]
+    strategy_out_by_id: dict[int, dict[str, Any]] = {}
+    for sid in sorted(strategy_ids):
+        strategy_out_by_id[sid] = _replay_scope(
             db,
             _Scope(
-                scope_type="account",
-                scope_id=scope.account_id,
-                account_id=scope.account_id,
-                strategy_id=None,
+                scope_type="strategy",
+                scope_id=sid,
+                account_id=account_id,
+                strategy_id=sid,
             ),
         )
-    return {"ok": True, **out}
+    account_out = _replay_scope(
+        db,
+        _Scope(
+            scope_type="account",
+            scope_id=account_id,
+            account_id=account_id,
+            strategy_id=None,
+        ),
+    )
+    if scope.scope_type == "strategy":
+        target_out = strategy_out_by_id.get(int(scope.strategy_id or 0), account_out)
+    else:
+        target_out = account_out
+    return {"ok": True, "strategies_replayed": len(strategy_ids), **target_out}
 
 
 @router.get("/holdings", response_model=list[LiveHoldingOut])
@@ -1792,18 +2928,21 @@ def live_holdings(
         raise HTTPException(
             status_code=400, detail="scope_type must be account|strategy"
         )
-    max_day = (
-        db.query(LiveHoldingSnapshot.snapshot_date)
+    # Holdings must be aligned to the latest replayed NAV day for the scope.
+    # Otherwise callers can observe stale positions from an older day
+    # when the latest day has no positions (e.g. fully closed book).
+    max_nav_day = (
+        db.query(LiveNavDaily.nav_date)
         .filter(
-            LiveHoldingSnapshot.scope_type == st,
-            LiveHoldingSnapshot.scope_id == scope_id,
+            LiveNavDaily.scope_type == st,
+            LiveNavDaily.scope_id == scope_id,
         )
-        .order_by(LiveHoldingSnapshot.snapshot_date.desc())
+        .order_by(LiveNavDaily.nav_date.desc())
         .first()
     )
-    if max_day is None:
+    if max_nav_day is None:
         return []
-    day = max_day[0]
+    day = max_nav_day[0]
     rows = (
         db.query(LiveHoldingSnapshot)
         .filter(
@@ -1986,6 +3125,64 @@ def live_fee_stats(
     )
 
 
+@router.get("/stats/fees/closed-rounds", response_model=LiveFeeStatsOut)
+def live_closed_round_fee_stats(
+    scope_type: str = Query(description="account|strategy"),
+    scope_id: int = Query(ge=1),
+    code: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    db: Session = Depends(get_session),
+):
+    st = str(scope_type or "").strip().lower()
+    if st not in {"account", "strategy"}:
+        raise HTTPException(
+            status_code=400, detail="scope_type must be account|strategy"
+        )
+    q = db.query(LiveClosedRoundLeg, LiveClosedRound).join(
+        LiveClosedRound, LiveClosedRound.id == LiveClosedRoundLeg.round_id
+    )
+    q = q.filter(LiveClosedRound.scope_type == st, LiveClosedRound.scope_id == scope_id)
+    if code:
+        q = q.filter(LiveClosedRound.code == _norm_code(code))
+    if start:
+        q = q.filter(LiveClosedRoundLeg.trade_date >= _to_date(start))
+    if end:
+        q = q.filter(LiveClosedRoundLeg.trade_date <= _to_date(end))
+    rows = q.order_by(
+        LiveClosedRoundLeg.trade_date.asc(), LiveClosedRoundLeg.id.asc()
+    ).all()
+    total_fee = float(sum(float(leg.fee or 0.0) for leg, _ in rows))
+    buy_fee = float(
+        sum(
+            float(leg.fee or 0.0)
+            for leg, _ in rows
+            if _norm_side(getattr(leg, "side", "")) == "BUY"
+        )
+    )
+    sell_fee = float(
+        sum(
+            float(leg.fee or 0.0)
+            for leg, _ in rows
+            if _norm_side(getattr(leg, "side", "")) == "SELL"
+        )
+    )
+    avg_fee = float(total_fee / len(rows)) if rows else 0.0
+    by_day_map: dict[str, float] = defaultdict(float)
+    for leg, _ in rows:
+        by_day_map[leg.trade_date.isoformat()] += float(leg.fee or 0.0)
+    by_day = [{"date": k, "fee": float(v)} for k, v in sorted(by_day_map.items())]
+    return LiveFeeStatsOut(
+        scope_type=st,
+        scope_id=scope_id,
+        total_fee=total_fee,
+        buy_fee=buy_fee,
+        sell_fee=sell_fee,
+        avg_fee_per_trade=avg_fee,
+        by_day=by_day,
+    )
+
+
 @router.get("/performance", response_model=LivePerformanceOut)
 def live_performance(
     scope_type: str = Query(description="account|strategy"),
@@ -2070,6 +3267,14 @@ def live_performance(
             "cash_drag_return": (
                 float(x.cash_drag_return) if x.cash_drag_return is not None else None
             ),
+            "repo_carry_return": (
+                float(x.repo_carry_return) if x.repo_carry_return is not None else None
+            ),
+            "repo_fee_drag_return": (
+                float(x.repo_fee_drag_return)
+                if x.repo_fee_drag_return is not None
+                else None
+            ),
         }
         for x in rows
     ]
@@ -2111,6 +3316,8 @@ def live_attribution(
         "position_return": 0.0,
         "cost_drag_return": 0.0,
         "cash_drag_return": 0.0,
+        "repo_carry_return": 0.0,
+        "repo_fee_drag_return": 0.0,
     }
     for x in rows:
         item = {
@@ -2120,6 +3327,8 @@ def live_attribution(
             "position_return": float(x.position_return or 0.0),
             "cost_drag_return": float(x.cost_drag_return or 0.0),
             "cash_drag_return": float(x.cash_drag_return or 0.0),
+            "repo_carry_return": float(x.repo_carry_return or 0.0),
+            "repo_fee_drag_return": float(x.repo_fee_drag_return or 0.0),
             "daily_return_twr": float(x.daily_return_twr or 0.0),
         }
         daily.append(item)
@@ -2133,6 +3342,8 @@ def live_attribution(
         + sums["position_return"]
         + sums["cost_drag_return"]
         + sums["cash_drag_return"]
+        + sums["repo_carry_return"]
+        + sums["repo_fee_drag_return"]
     )
     return LiveAttributionOut(
         scope_type=st, scope_id=scope_id, daily=daily, period=sums
