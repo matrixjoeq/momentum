@@ -580,6 +580,7 @@
     <div class="panel">
       <h3>净值曲线（交易日00:00）与绩效（Dietz/TWR）</h3>
       <div id="navPlot" class="plot"></div>
+      <div id="navDrawdownPlot" class="plot" style="min-height: 220px"></div>
       <div class="two">
         <div>
           <h3>Dietz 指标</h3>
@@ -2939,6 +2940,15 @@
           baseEq && Number.isFinite(v) ? v / baseEq : null,
         );
         const navSeries = hasTwr ? navTwrSeries : navEqFallback;
+        const drawdownSeries = (() => {
+          let peak = null;
+          return navSeries.map((v) => {
+            const n = Number(v);
+            if (!Number.isFinite(n) || n <= 0) return null;
+            peak = peak == null ? n : Math.max(peak, n);
+            return peak > 0 ? n / peak - 1 : null;
+          });
+        })();
         if (window.Plotly) {
           Plotly.newPlot(
             "navPlot",
@@ -2947,6 +2957,27 @@
               title: currentScopeNavTitle(),
               xaxis: { type: "category" },
               yaxis: { type: "log" },
+              margin: { t: 40, l: 50, r: 20, b: 40 },
+            },
+            { responsive: true },
+          );
+          Plotly.newPlot(
+            "navDrawdownPlot",
+            [
+              {
+                x,
+                y: drawdownSeries,
+                mode: "lines",
+                name: "回撤",
+                line: { color: "#ef4444" },
+                fill: "tozeroy",
+                fillcolor: "rgba(239,68,68,0.18)",
+              },
+            ],
+            {
+              title: "回撤曲线（对应上方净值时间轴）",
+              xaxis: { type: "category" },
+              yaxis: { tickformat: ".2%", zeroline: true },
               margin: { t: 40, l: 50, r: 20, b: 40 },
             },
             { responsive: true },
@@ -3099,6 +3130,7 @@
           renderCapitalOverview(null);
           if (window.Plotly) {
             Plotly.purge("navPlot");
+            Plotly.purge("navDrawdownPlot");
             Plotly.purge("attrPlot");
           }
           msg("暂无账户，请先创建账户、策略和股东账号。");

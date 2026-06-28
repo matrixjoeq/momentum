@@ -61,6 +61,7 @@ def test_trading_records_serves_html(api_client: TestClient) -> None:
     assert "股东账号</th>" in resp.text
     assert 'id="holdingsTable"' in resp.text
     assert 'id="recentTradesTable"' in resp.text
+    assert 'id="navDrawdownPlot"' in resp.text
     assert 'id="closedRoundsTable"' in resp.text
     assert 'id="cancelTradeEditBtn"' in resp.text
     assert 'id="reasonModal"' in resp.text
