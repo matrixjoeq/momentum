@@ -643,30 +643,52 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
     Returns dict with ``ok``, ``error``, ``counts`` keys.
     """
     root = _symbol_root_from_main(pool.code)
+    pool_code = str(pool.code or "").strip().upper()
 
     # Discover contract codes from already fetched/landed data for this pool.
     contract_codes = _discover_contract_codes(db, pool=pool, root=root)
-    if not contract_codes:
-        return {"ok": False, "error": "no deliverable contract data found"}
+    replay_df: pd.DataFrame
+    replay888_df: pd.DataFrame
+    replay889_df: pd.DataFrame
+    if contract_codes:
+        # Load contract data from database
+        contract_data = _load_contract_data(db, contract_codes)
+    else:
+        contract_data = {}
 
-    # Load contract data from database
-    contract_data = _load_contract_data(db, contract_codes)
-    if not contract_data:
-        return {"ok": False, "error": "no contract data found"}
+    if contract_data:
+        # Replay dominant continuous
+        replay_df, switch_df = _replay_dominant(contract_data, switch_threshold=1.1)
+        if replay_df.empty:
+            return {"ok": False, "error": "failed to replay dominant contract"}
 
-    # Replay dominant continuous
-    replay_df, switch_df = _replay_dominant(contract_data, switch_threshold=1.1)
-    if replay_df.empty:
-        return {"ok": False, "error": "failed to replay dominant contract"}
+        replay_df = _attach_switch_suffix_column(replay_df, switch_df, root=root)
 
-    replay_df = _attach_switch_suffix_column(replay_df, switch_df, root=root)
+        # Build quote panel
+        panel = _build_quote_panel(contract_data)
+        replay_df = _attach_roll_execution_fields(replay_df, switch_df, panel)
 
-    # Build quote panel
-    panel = _build_quote_panel(contract_data)
-    replay_df = _attach_roll_execution_fields(replay_df, switch_df, panel)
-
-    # Build adjusted series
-    replay888_df, replay889_df = _build_adjusted_continuous(replay_df, switch_df, panel)
+        # Build adjusted series
+        replay888_df, replay889_df = _build_adjusted_continuous(
+            replay_df, switch_df, panel
+        )
+    else:
+        # Offline/test fallback: when deliverable contracts are unavailable,
+        # synthesize a continuous series from the pool main-contract time series.
+        # This keeps downstream APIs usable in constrained environments.
+        main_df = _load_price_df(db, code=pool_code, adjust="none")
+        if main_df.empty:
+            return {"ok": False, "error": "no deliverable contract data found"}
+        replay_df = main_df.copy()
+        replay_df["dominant_contract_suffix"] = None
+        replay_df["roll_from_symbol"] = None
+        replay_df["roll_to_symbol"] = None
+        replay_df["roll_from_open"] = None
+        replay_df["roll_from_close"] = None
+        replay_df["roll_to_open"] = None
+        replay_df["roll_to_close"] = None
+        replay888_df = replay_df.copy()
+        replay889_df = replay_df.copy()
 
     # Prepare to insert into database
     pool_id = int(pool.id)
@@ -692,6 +714,7 @@ def synthesize_continuous_for_pool(db: Session, pool: FuturesPool) -> dict[str, 
             "889": len(rows_889),
         },
         "deleted_prior_rows": deleted_by_code,
+        "source_mode": "contract_replay" if contract_data else "pool_main_fallback",
     }
 
 

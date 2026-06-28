@@ -307,7 +307,7 @@ def _trade_returns_from_weight_series(
     cost_bps: float,
     slippage_rate: float,
     exec_price: pd.Series,
-    turnover_override: pd.Series | None,
+    turnover_override: pd.Series | None = None,
     dates: pd.Index,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
