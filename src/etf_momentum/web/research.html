@@ -13815,7 +13815,9 @@
                 ? st.payload
                 : {};
             const rawIds = Array.isArray(p.strategy_ids)
-              ? p.strategy_ids.map((x) => String(x || "").trim()).filter(Boolean)
+              ? p.strategy_ids
+                  .map((x) => String(x || "").trim())
+                  .filter(Boolean)
               : [];
             const childEntries = [];
             for (const cid of rawIds) {
@@ -13893,6 +13895,7 @@
         const riskAnnByCode = {};
         const riskShareProxyByCode = {};
         let totalReturnFromContrib = 0.0;
+        let hasReturnContrib = false;
         let totalReturnFallback = 0.0;
         let hasReturnFallback = false;
         let totalAnnReturn = 0.0;
@@ -13917,6 +13920,7 @@
             if (Number.isFinite(v)) {
               retByCode[c] = Number(retByCode[c] || 0) + w * v;
               totalReturnFromContrib += w * v;
+              hasReturnContrib = true;
             }
             const va = Number(r && r.return_contribution_annualized);
             if (Number.isFinite(va)) {
@@ -13980,7 +13984,8 @@
           if (hasAnnRisk && totalAnnRisk > 1e-12) {
             share = Number(riskAnnByCode[c] || 0) / totalAnnRisk;
           } else if (riskProxyTotal > 1e-12) {
-            share = Math.max(0, Number(riskShareProxyByCode[c] || 0)) /
+            share =
+              Math.max(0, Number(riskShareProxyByCode[c] || 0)) /
               riskProxyTotal;
           }
           return {
@@ -13994,7 +13999,7 @@
         return {
           return: {
             method: "weighted_leaf_sum",
-            total_return: Number.isFinite(totalReturnFromContrib)
+            total_return: hasReturnContrib
               ? totalReturnFromContrib
               : hasReturnFallback
                 ? totalReturnFallback
@@ -14385,7 +14390,7 @@
         const m = _normalizeMixWeightModeToken(mode);
         if (m === "custom") {
           const raw = arr.map((x) =>
-            Number((_readCustomMixWeightMap() || {})[x.id] || 0),
+            Number((_readCustomMixWeightMap() || {})[x.id] || 1),
           );
           return _normalizeWeights(raw);
         }
@@ -16988,17 +16993,23 @@
         );
         _plotRollingCombo("baselineRollingCombo", stratNav, mode);
         const _plotDcaCurve = () => {
-          const dcaBy = data && data.dca_by_portfolio ? data.dca_by_portfolio : {};
+          const dcaBy =
+            data && data.dca_by_portfolio ? data.dca_by_portfolio : {};
           const dcaPack = dcaBy[mode] || data.dca || null;
           const dcaEnabled = !!(dcaPack && dcaPack.enabled);
           if (!dcaEnabled) {
-            _msg("baselineDcaChart", "未启用定投模式，切换为“定投”后可查看资金曲线。");
+            _msg(
+              "baselineDcaChart",
+              "未启用定投模式，切换为“定投”后可查看资金曲线。",
+            );
             return;
           }
           const ds = (dcaPack && dcaPack.series) || {};
           const dDates = Array.isArray(ds.dates) ? ds.dates : dates;
           const invested = Array.isArray(ds.invested) ? ds.invested : [];
-          const account = Array.isArray(ds.account_value) ? ds.account_value : [];
+          const account = Array.isArray(ds.account_value)
+            ? ds.account_value
+            : [];
           if (
             dDates.length === 0 ||
             invested.length !== dDates.length ||
@@ -17037,7 +17048,11 @@
                 y: pnl,
                 mode: "lines",
                 name: "投入收益差",
-                line: { color: "rgba(107,114,128,0.95)", width: 1.8, dash: "dot" },
+                line: {
+                  color: "rgba(107,114,128,0.95)",
+                  width: 1.8,
+                  dash: "dot",
+                },
                 hovertemplate: "%{x}<br>投入收益差=%{y:,.2f}<extra></extra>",
               },
             ],
@@ -19551,7 +19566,7 @@
           const idx = Array.from({ length: n }, (_, i) => i);
           idx.sort((a, b) => arr[a] - arr[b]);
           const r = new Array(n).fill(NaN);
-          for (let i = 0; i < n; ) {
+          for (let i = 0; i < n;) {
             let j = i + 1;
             while (j < n && arr[idx[j]] === arr[idx[i]]) j += 1;
             const rk = (i + j - 1) / 2 + 1;
@@ -24677,14 +24692,12 @@
           const rp = Number((r && r.replace_entry) || 0);
           const lv = Number((r && r.leverage_entry) || 0);
           const lm = Number((r && r.leverage_multiple_max) || 0);
-          if (
-            !(
-              Number.isFinite(sc) ||
-              Number.isFinite(sk) ||
-              Number.isFinite(rp) ||
-              Number.isFinite(lv)
-            )
-          )
+          if (!(
+            Number.isFinite(sc) ||
+            Number.isFinite(sk) ||
+            Number.isFinite(rp) ||
+            Number.isFinite(lv)
+          ))
             continue;
           xs.push(d);
           yScale.push(Number.isFinite(sc) ? sc : 0);
@@ -24878,9 +24891,10 @@
         );
         _renderBiasVHitHist(
           overallBiasV5Hist,
-          (((stats.overall || {}).holding_bias_v_ge_5_per_holding_distribution ||
-            {})
-            .values || []),
+          (
+            (stats.overall || {})
+              .holding_bias_v_ge_5_per_holding_distribution || {}
+          ).values || [],
           `${p === "rot" ? "轮动" : p === "ct" ? "日历择时" : "趋势"}：单次持仓 BIAS-V≥5 命中次数分布`,
         );
         const sel = $(byCodeSel);
@@ -24908,8 +24922,8 @@
             );
             _renderBiasVHitHist(
               byCodeBiasV5Hist,
-              (((s || {}).holding_bias_v_ge_5_per_holding_distribution || {})
-                .values || []),
+              ((s || {}).holding_bias_v_ge_5_per_holding_distribution || {})
+                .values || [],
               `${codeLabel(c)}：单次持仓 BIAS-V≥5 命中次数分布`,
             );
             if (p === "trend") _renderTrendTradeByCodeNavMarks(data, c);
@@ -29151,7 +29165,8 @@
             : "1"
           ).trim(),
         );
-        if (Number.isFinite(rbPctRaw) && rbPctRaw >= 0.1) rbPctRaw = rbPctRaw / 100.0;
+        if (Number.isFinite(rbPctRaw) && rbPctRaw >= 0.1)
+          rbPctRaw = rbPctRaw / 100.0;
         const risk_budget_pct =
           Number.isFinite(rbPctRaw) && rbPctRaw > 0
             ? Math.min(0.03, Math.max(0.001, rbPctRaw))
@@ -29253,7 +29268,9 @@
               ? Math.floor(rbAtrRaw)
               : null,
           risk_budget_pct,
-          lookback_days: Number(($("rotLookback") && $("rotLookback").value) || 252),
+          lookback_days: Number(
+            ($("rotLookback") && $("rotLookback").value) || 252,
+          ),
           skip_days: Number(($("rotSkip") && $("rotSkip").value) || 0),
           cost_bps: Number(($("rotCost") && $("rotCost").value) || 2),
           slippage_rate: Number(
@@ -29276,25 +29293,30 @@
             !(
               (entryFloorRules && entryFloorRules.__error) ||
               (exitFloorRules && exitFloorRules.__error)
-            ) && (entryFloorRules || exitFloorRules)
+            ) &&
+            (entryFloorRules || exitFloorRules)
               ? [...(entryFloorRules || []), ...(exitFloorRules || [])]
               : null,
           asset_trend_rules:
             !(
               (trendEntryRules && trendEntryRules.__error) ||
               (trendExitRules && trendExitRules.__error)
-            ) && (trendEntryRules || trendExitRules)
+            ) &&
+            (trendEntryRules || trendExitRules)
               ? [...(trendEntryRules || []), ...(trendExitRules || [])]
               : null,
           asset_bias_rules:
             !(
               (biasEntryRules && biasEntryRules.__error) ||
               (biasExitRules && biasExitRules.__error)
-            ) && (biasEntryRules || biasExitRules)
+            ) &&
+            (biasEntryRules || biasExitRules)
               ? [...(biasEntryRules || []), ...(biasExitRules || [])]
               : null,
           asset_rsi_rules:
-            asset_rsi_rules && !asset_rsi_rules.__error ? asset_rsi_rules : null,
+            asset_rsi_rules && !asset_rsi_rules.__error
+              ? asset_rsi_rules
+              : null,
           asset_vol_monitor_rules:
             asset_vol_monitor_rules && !asset_vol_monitor_rules.__error
               ? asset_vol_monitor_rules
@@ -33858,7 +33880,8 @@
         const end = String(($("end") && $("end").value) || "").trim();
         const decision_day = Number(
           String(
-            ($("calTimingDecisionDay") && $("calTimingDecisionDay").value) || "",
+            ($("calTimingDecisionDay") && $("calTimingDecisionDay").value) ||
+              "",
           ).trim(),
         );
         const hold_days = Number(
@@ -33871,18 +33894,22 @@
             ? String($("calTimingPositionMode").value)
             : "equal";
         const fixed_pos_ratio = Number(
-          String(($("calTimingFixedRatio") && $("calTimingFixedRatio").value) || "1.0").trim(),
+          String(
+            ($("calTimingFixedRatio") && $("calTimingFixedRatio").value) ||
+              "1.0",
+          ).trim(),
         );
         const risk_budget_atr_window = Number(
           String(
             ($("calTimingRiskBudgetAtrWin") &&
-            $("calTimingRiskBudgetAtrWin").value) ||
+              $("calTimingRiskBudgetAtrWin").value) ||
               "20",
           ).trim(),
         );
         let risk_budget_pct = Number(
           String(
-            ($("calTimingRiskBudgetPct") && $("calTimingRiskBudgetPct").value) ||
+            ($("calTimingRiskBudgetPct") &&
+              $("calTimingRiskBudgetPct").value) ||
               "1",
           ).trim(),
         );
@@ -33897,7 +33924,9 @@
             ? String($("calTimingExecPrice").value)
             : "open";
         const cost_bps = Number(
-          String(($("calTimingCost") && $("calTimingCost").value) || "2").trim(),
+          String(
+            ($("calTimingCost") && $("calTimingCost").value) || "2",
+          ).trim(),
         );
         const slippage_rate = Number(
           String(
@@ -33944,8 +33973,8 @@
               : null,
           risk_budget:
             position_mode === "risk_budget" &&
-            ((!Number.isFinite(risk_budget_atr_window) ||
-              risk_budget_atr_window < 2) ||
+            (!Number.isFinite(risk_budget_atr_window) ||
+              risk_budget_atr_window < 2 ||
               !Number.isFinite(risk_budget_pct))
               ? "风险预算参数非法（ATR周期>=2，风险预算在0.1%~3%）"
               : null,
@@ -33983,7 +34012,8 @@
         };
         return {
           group_name: String(
-            ($("calTimingGroupPreset") && $("calTimingGroupPreset").value) || "",
+            ($("calTimingGroupPreset") && $("calTimingGroupPreset").value) ||
+              "",
           ).trim(),
           backtest_range: { start, end },
           dynamic_universe,
@@ -34377,12 +34407,9 @@
         if (dca_enabled) {
           if (!(Number.isFinite(dca_base_amount) && dca_base_amount > 0))
             return setMsg("定投底仓金额必须是大于0的数字。");
-          if (
-            !(
-              Number.isFinite(dca_periodic_amount) &&
-              dca_periodic_amount >= 0
-            )
-          )
+          if (!(
+            Number.isFinite(dca_periodic_amount) && dca_periodic_amount >= 0
+          ))
             return setMsg("定投每期金额必须是大于等于0的数字。");
           if (
             ![
@@ -35635,8 +35662,7 @@
         const toggleId = s === "rotation" ? "rotVolIdxOn" : "rotVolIdxOn";
         const tableId =
           s === "rotation" ? "rotVolIdxRulesTable" : "rotVolIdxRulesTable";
-        const label =
-          s === "rotation" ? "波动率指数择时" : "波动率指数择时";
+        const label = s === "rotation" ? "波动率指数择时" : "波动率指数择时";
         const on = $(toggleId) && $(toggleId).value === "true";
         if (!on) return null;
         const tbl = $(tableId);
@@ -35695,8 +35721,10 @@
             };
           let qs = parseCsvNums(qsRaw);
           let exps = parseCsvNums(expsRaw);
-          if (qs.length === 0) return { __error: `${label}：${code} 阈值解析失败` };
-          if (exps.length === 0) return { __error: `${label}：${code} 仓位解析失败` };
+          if (qs.length === 0)
+            return { __error: `${label}：${code} 阈值解析失败` };
+          if (exps.length === 0)
+            return { __error: `${label}：${code} 仓位解析失败` };
           if (qs.some((x) => !Number.isFinite(x)))
             return { __error: `${label}：${code} 阈值必须是数字` };
           if (exps.some((x) => !Number.isFinite(x)))
@@ -38755,13 +38783,11 @@
         );
         for (const src of srcEls) {
           if (!src || !src.id) continue;
-          if (
-            !(
-              src instanceof HTMLInputElement ||
-              src instanceof HTMLSelectElement ||
-              src instanceof HTMLTextAreaElement
-            )
-          )
+          if (!(
+            src instanceof HTMLInputElement ||
+            src instanceof HTMLSelectElement ||
+            src instanceof HTMLTextAreaElement
+          ))
             continue;
           const suffix = src.id.slice(`${fromPrefix}_`.length);
           if (!suffix) continue;
