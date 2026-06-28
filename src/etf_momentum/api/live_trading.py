@@ -600,8 +600,11 @@ def _validate_trade_funding_constraints(
     exclude_trade_id: int | None = None,
     order_trade_id: int | None = None,
 ) -> None:
-    # Financing/leverage is not enabled yet: account and segregated-strategy cash
-    # must stay non-negative at order time.
+    _ = strategy_id
+    # Financing/leverage is not enabled yet: account-level cash must stay
+    # non-negative at order time (account total position <= 100%).
+    # Strategy-level transferred budget is treated as a soft allocation target:
+    # strategies within the same account can share the account cash pool.
     order_id = int(order_trade_id) if order_trade_id is not None else 10**18
     order_time_norm = _norm_time(trade_time)
     delta = _trade_cash_delta(
@@ -639,31 +642,6 @@ def _validate_trade_funding_constraints(
                 detail=(
                     "insufficient account cash at order time; "
                     "without financing account total position cannot exceed 100%"
-                ),
-            )
-    _, capital_mode = _strategy_profile_for(db, int(strategy_id))
-    strategy_has_allocated_budget = (
-        db.query(LiveStrategyCashflow)
-        .filter(LiveStrategyCashflow.strategy_id == int(strategy_id))
-        .count()
-        > 0
-    )
-    if capital_mode == "segregated" and strategy_has_allocated_budget:
-        strategy_cash_before = _strategy_cash_before_order(
-            db,
-            strategy_id=int(strategy_id),
-            order_date=trade_date,
-            order_time=order_time_norm,
-            order_id=order_id,
-            exclude_trade_id=exclude_trade_id,
-        )
-        strategy_cash_after = strategy_cash_before + delta
-        if strategy_cash_after < -1e-6:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "insufficient strategy cash at order time; "
-                    "without financing strategy position cannot exceed 100%"
                 ),
             )
 

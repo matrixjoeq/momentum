@@ -448,6 +448,11 @@
         </thead>
         <tbody id="holdTbody"></tbody>
       </table>
+      <div class="row" style="margin-top: 8px">
+        <button id="holdingsPrevBtn" type="button">上一页</button>
+        <button id="holdingsNextBtn" type="button">下一页</button>
+        <span id="holdingsPageInfo" class="muted">第 0/0 页，共 0 条</span>
+      </div>
     </div>
 
     <div class="panel">
@@ -746,9 +751,11 @@
       let navRowsCache = [];
       let roundsRowsCache = [];
       let overviewCashflowRowsCache = [];
+      let holdingsPage = 1;
       let overviewCashflowPage = 1;
       let roundsCodeFilterValue = "";
       let roundsFeeBreakdownCache = new Map();
+      const HOLDINGS_PAGE_SIZE = 20;
       const OVERVIEW_CASHFLOW_PAGE_SIZE = 20;
       const tradesSortState = { key: "id", dir: "desc" };
       const holdingsSortState = { key: "market_value", dir: "desc" };
@@ -2142,7 +2149,21 @@
           holdingsSortState,
           HOLD_NUMERIC_SORT_KEYS,
         );
-        $("holdTbody").innerHTML = sorted
+        if (!sorted.length) {
+          $("holdTbody").innerHTML =
+            '<tr><td colspan="13" class="muted">暂无持仓数据</td></tr>';
+          renderHoldingsPager(0);
+          updateSortHeaders("holdingsTable", holdingsSortState);
+          return;
+        }
+        const totalPages = Math.max(
+          1,
+          Math.ceil(sorted.length / HOLDINGS_PAGE_SIZE),
+        );
+        holdingsPage = Math.min(Math.max(holdingsPage, 1), totalPages);
+        const start = (holdingsPage - 1) * HOLDINGS_PAGE_SIZE;
+        const pageRows = sorted.slice(start, start + HOLDINGS_PAGE_SIZE);
+        $("holdTbody").innerHTML = pageRows
           .map(
             (x) => `
             <tr class="${x.row_class || ""}">
@@ -2163,7 +2184,30 @@
           `,
           )
           .join("");
+        renderHoldingsPager(sorted.length);
         updateSortHeaders("holdingsTable", holdingsSortState);
+      }
+
+      function renderHoldingsPager(totalRows = 0) {
+        const prevBtn = $("holdingsPrevBtn");
+        const nextBtn = $("holdingsNextBtn");
+        const info = $("holdingsPageInfo");
+        const total = Math.max(0, Number(totalRows) || 0);
+        const totalPages = total
+          ? Math.max(1, Math.ceil(total / HOLDINGS_PAGE_SIZE))
+          : 0;
+        if (totalPages > 0) {
+          holdingsPage = Math.min(Math.max(holdingsPage, 1), totalPages);
+        } else {
+          holdingsPage = 1;
+        }
+        if (info) {
+          info.textContent = total
+            ? `第 ${holdingsPage}/${totalPages} 页，共 ${total} 条`
+            : "第 0/0 页，共 0 条";
+        }
+        if (prevBtn) prevBtn.disabled = !total || holdingsPage <= 1;
+        if (nextBtn) nextBtn.disabled = !total || holdingsPage >= totalPages;
       }
 
       function renderRoundsRows(rows) {
@@ -2305,6 +2349,7 @@
             const key = String(th.dataset.sortKey || "");
             if (!key) return;
             nextSortState(holdingsSortState, key);
+            holdingsPage = 1;
             renderHoldingsRows(holdingsRowsCache);
           });
         }
@@ -2589,6 +2634,7 @@
             row_class: cls,
           };
         });
+        holdingsPage = 1;
         renderHoldingsRows(holdingsRowsCache);
         const latestNavPoint = navRowsCache.length
           ? navRowsCache[navRowsCache.length - 1]
@@ -2818,6 +2864,7 @@
         if (!aid && !sid) {
           tradesRowsCache = [];
           holdingsRowsCache = [];
+          holdingsPage = 1;
           navRowsCache = [];
           roundsRowsCache = [];
           overviewCashflowRowsCache = [];
@@ -3125,6 +3172,20 @@
           if (overviewCashflowPage <= 1) return;
           overviewCashflowPage -= 1;
           renderOverviewCashflowPage();
+        });
+        $("holdingsPrevBtn").addEventListener("click", () => {
+          if (holdingsPage <= 1) return;
+          holdingsPage -= 1;
+          renderHoldingsRows(holdingsRowsCache);
+        });
+        $("holdingsNextBtn").addEventListener("click", () => {
+          const totalPages = Math.max(
+            1,
+            Math.ceil((holdingsRowsCache || []).length / HOLDINGS_PAGE_SIZE),
+          );
+          if (holdingsPage >= totalPages) return;
+          holdingsPage += 1;
+          renderHoldingsRows(holdingsRowsCache);
         });
         $("overviewCashflowNextBtn").addEventListener("click", () => {
           const totalPages = Math.max(

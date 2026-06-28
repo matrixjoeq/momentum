@@ -1095,7 +1095,7 @@ def test_live_holdings_align_to_latest_nav_day(api_client, session_factory):
     _assert_scope_financial_audit(c, scope_type="strategy", scope_id=sid)
 
 
-def test_live_trade_rejects_when_strategy_allocation_insufficient(
+def test_live_trade_allows_when_strategy_allocation_insufficient_but_account_ok(
     api_client, session_factory
 ):
     _seed_live_prices(session_factory)
@@ -1125,7 +1125,7 @@ def test_live_trade_rejects_when_strategy_allocation_insufficient(
         },
     )
 
-    r = post_response(
+    t = post_json(
         c,
         "/api/live/trades",
         {
@@ -1138,16 +1138,15 @@ def test_live_trade_rejects_when_strategy_allocation_insufficient(
             "trade_time": "10:00:00",
             "side": "BUY",
             "price": 4.10,
-            "quantity": 300,  # amount=1230 > transferred 1000
+            "quantity": 300,  # amount=1230 > transferred 1000, but account cash is enough
             "fee": 0.2,
             "idempotency_key": "cash-check-strategy-insufficient",
         },
-        expected_status=400,
     )
-    assert "insufficient strategy cash" in str(r.json().get("detail", ""))
+    assert int(t["strategy_id"]) == sid
 
 
-def test_live_trade_rejects_update_when_switching_to_insufficient_strategy(
+def test_live_trade_allows_update_when_switching_to_insufficient_strategy(
     api_client, session_factory
 ):
     _seed_live_prices(session_factory)
@@ -1226,12 +1225,11 @@ def test_live_trade_rejects_update_when_switching_to_insufficient_strategy(
             "reason": "改策略测试资金校验",
         },
     )
-    assert r.status_code == 400
-    assert "insufficient strategy cash" in str(r.json().get("detail", ""))
+    assert r.status_code == 200
 
     trades = get_json(c, f"/api/live/trades?account_id={aid}&page=1&page_size=20")
     only = next(x for x in trades["items"] if int(x["id"]) == tid)
-    assert int(only["strategy_id"]) == sid_a
+    assert int(only["strategy_id"]) == sid_b
 
 
 def test_live_trade_rejects_when_account_cash_insufficient_without_financing(
