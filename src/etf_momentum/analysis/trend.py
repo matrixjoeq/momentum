@@ -71,6 +71,8 @@ DEFAULT_BIAS_V_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
 STOP_EXECUTION_MODES: set[str] = {"intraday", "next_day"}
 VOL_REGIME_STATES: set[str] = {"NORMAL", "REDUCED", "INCREASED", "EXTREME"}
 CASH_MANAGEMENT_PROXY_CODE = "511880"
+RISK_EXIT_PROXY_CODE = "__RISK_EXIT_OVERRIDE__"
+TRADING_COST_PROXY_CODE = "__TRADING_COST__"
 
 
 def _load_cash_management_qfq_close(
@@ -115,14 +117,14 @@ def _cash_management_residual_weight(exposure: pd.Series) -> pd.Series:
     return (1.0 - exp_s).clip(lower=0.0, upper=1.0).astype(float)
 
 
-def _extract_cash_management_return_contribution(
+def _extract_return_contribution_by_code(
     attribution: dict[str, Any] | None,
     *,
-    cash_code: str = CASH_MANAGEMENT_PROXY_CODE,
+    code: str,
 ) -> tuple[float | None, float | None]:
-    rows = (((attribution or {}).get("return") or {}).get("by_code") or [])
+    rows = ((attribution or {}).get("return") or {}).get("by_code") or []
     for row in rows:
-        if str((row or {}).get("code") or "") != str(cash_code):
+        if str((row or {}).get("code") or "") != str(code):
             continue
         total_v = (row or {}).get("return_contribution")
         ann_v = (row or {}).get("return_contribution_annualized")
@@ -136,6 +138,14 @@ def _extract_cash_management_return_contribution(
         )
         return total, annualized
     return None, None
+
+
+def _extract_cash_management_return_contribution(
+    attribution: dict[str, Any] | None,
+    *,
+    cash_code: str = CASH_MANAGEMENT_PROXY_CODE,
+) -> tuple[float | None, float | None]:
+    return _extract_return_contribution_by_code(attribution, code=cash_code)
 
 
 @dataclass(frozen=True)
@@ -4469,9 +4479,7 @@ def _bias_v_hit_counts_per_holding_by_code(
             else pd.Series(np.nan, index=idx, dtype=float)
         )
         high_s = (
-            high[c].reindex(idx).astype(float)
-            if c in high.columns
-            else close_s.copy()
+            high[c].reindex(idx).astype(float) if c in high.columns else close_s.copy()
         )
         low_s = (
             low[c].reindex(idx).astype(float) if c in low.columns else close_s.copy()
@@ -5686,9 +5694,7 @@ def _apply_bias_v_take_profit(
                 continue
             reduce_ratio = float(min(1.0, max(0.0, reduce_raw)))
             reduce_eff = float(max(0.0, remaining_for_tier) * reduce_ratio)
-            reduce_eff = float(
-                min(max(0.0, remaining_for_tier), max(0.0, reduce_eff))
-            )
+            reduce_eff = float(min(max(0.0, remaining_for_tier), max(0.0, reduce_eff)))
             triggered_tier_idx.add(int(t_idx))
             if reduce_eff <= eps:
                 continue
@@ -7088,11 +7094,14 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         cash_close_qfq, forward=False
     ).reindex(w.index)
     cash_weight = _cash_management_residual_weight(w_ret.reindex(w.index).astype(float))
-    cash_management_ret = (
-        cash_weight * cash_ret.astype(float).fillna(0.0)
-    ).astype(float)
+    cash_management_ret = (cash_weight * cash_ret.astype(float).fillna(0.0)).astype(
+        float
+    )
     strat_ret = (
-        w_ret * ret_exec_day + risk_exit_override_ret - cost.astype(float) - slippage
+        w_ret * ret_exec_day
+        + risk_exit_override_ret
+        - cost.astype(float)
+        - slippage
         + cash_management_ret
     ).astype(float)
     if not quick_mode:
@@ -7393,6 +7402,19 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
         cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
     )
+    # Keep attribution in net-return space by explicitly modeling risk overrides
+    # and trading costs as standalone components.
+    asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
+        risk_exit_override_ret.reindex(nav.index).astype(float).fillna(0.0)
+    )
+    weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
+    asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
+        -(cost.astype(float) + slippage.astype(float))
+        .reindex(nav.index)
+        .astype(float)
+        .fillna(0.0)
+    )
+    weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
     attribution = _compute_return_risk_contributions(
         asset_ret=asset_ret_for_attribution,
         weights=weight_for_attribution,
@@ -7402,11 +7424,23 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         cash_contrib_total,
         cash_contrib_annualized,
     ) = _extract_cash_management_return_contribution(attribution)
+    (
+        risk_exit_contrib_total,
+        risk_exit_contrib_annualized,
+    ) = _extract_return_contribution_by_code(attribution, code=RISK_EXIT_PROXY_CODE)
+    (
+        trading_cost_contrib_total,
+        trading_cost_contrib_annualized,
+    ) = _extract_return_contribution_by_code(attribution, code=TRADING_COST_PROXY_CODE)
     m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
     m_strat["cash_management_data_available"] = bool(cash_data_available)
     m_strat["cash_management_return_contribution"] = cash_contrib_total
-    m_strat["cash_management_return_contribution_annualized"] = (
-        cash_contrib_annualized
+    m_strat["cash_management_return_contribution_annualized"] = cash_contrib_annualized
+    m_strat["risk_exit_return_contribution"] = risk_exit_contrib_total
+    m_strat["risk_exit_return_contribution_annualized"] = risk_exit_contrib_annualized
+    m_strat["trading_cost_return_contribution"] = trading_cost_contrib_total
+    m_strat["trading_cost_return_contribution_annualized"] = (
+        trading_cost_contrib_annualized
     )
     trade_one = _trade_returns_from_weight_series(
         w,
@@ -10481,9 +10515,9 @@ def compute_trend_portfolio_backtest(
     cash_weight = _cash_management_residual_weight(
         w_ret.sum(axis=1).reindex(w.index).astype(float)
     )
-    decomp_cash_management = (
-        cash_weight * cash_ret.astype(float).fillna(0.0)
-    ).astype(float)
+    decomp_cash_management = (cash_weight * cash_ret.astype(float).fillna(0.0)).astype(
+        float
+    )
     port_ret = (
         port_base_ret
         + decomp_cash_management
@@ -10766,6 +10800,19 @@ def compute_trend_portfolio_backtest(
     weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
         cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
     )
+    # Keep attribution in net-return space by explicitly modeling risk overrides
+    # and trading costs as standalone components.
+    asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
+        decomp_risk_exit_override.reindex(nav.index).astype(float).fillna(0.0)
+    )
+    weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
+    asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
+        -(cost.astype(float) + slippage.astype(float))
+        .reindex(nav.index)
+        .astype(float)
+        .fillna(0.0)
+    )
+    weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
     attribution = _compute_return_risk_contributions(
         asset_ret=asset_ret_for_attribution,
         weights=weight_for_attribution,
@@ -10775,11 +10822,23 @@ def compute_trend_portfolio_backtest(
         cash_contrib_total,
         cash_contrib_annualized,
     ) = _extract_cash_management_return_contribution(attribution)
+    (
+        risk_exit_contrib_total,
+        risk_exit_contrib_annualized,
+    ) = _extract_return_contribution_by_code(attribution, code=RISK_EXIT_PROXY_CODE)
+    (
+        trading_cost_contrib_total,
+        trading_cost_contrib_annualized,
+    ) = _extract_return_contribution_by_code(attribution, code=TRADING_COST_PROXY_CODE)
     m_strat["cash_management_proxy_code"] = str(CASH_MANAGEMENT_PROXY_CODE)
     m_strat["cash_management_data_available"] = bool(cash_data_available)
     m_strat["cash_management_return_contribution"] = cash_contrib_total
-    m_strat["cash_management_return_contribution_annualized"] = (
-        cash_contrib_annualized
+    m_strat["cash_management_return_contribution_annualized"] = cash_contrib_annualized
+    m_strat["risk_exit_return_contribution"] = risk_exit_contrib_total
+    m_strat["risk_exit_return_contribution_annualized"] = risk_exit_contrib_annualized
+    m_strat["trading_cost_return_contribution"] = trading_cost_contrib_total
+    m_strat["trading_cost_return_contribution_annualized"] = (
+        trading_cost_contrib_annualized
     )
     trade_pack = _trade_returns_from_weight_df(
         w.reindex(index=nav.index, columns=codes).astype(float).fillna(0.0),
@@ -11250,9 +11309,7 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["bias_v_take_profit_trigger_count"] = int(
         total_bias_v_tp_triggers
     )
-    trade_stats["overall"]["holding_bias_v_ge_5_count"] = int(
-        holding_bias_v_ge_5_total
-    )
+    trade_stats["overall"]["holding_bias_v_ge_5_count"] = int(holding_bias_v_ge_5_total)
     trade_stats["overall"]["holding_bias_v_ge_5_max_per_holding"] = int(
         holding_bias_v_ge_5_max_per_holding
     )
@@ -11381,9 +11438,7 @@ def compute_trend_portfolio_backtest(
             holding_bias_v_ge_5_by_code.get(code_key, 0)
         )
         one["holding_bias_v_ge_5_max_per_holding"] = int(
-            (
-                holding_bias_v_ge_5_dist_by_code.get(code_key, {}) or {}
-            ).get("max", 0)
+            (holding_bias_v_ge_5_dist_by_code.get(code_key, {}) or {}).get("max", 0)
             or 0
         )
         one["holding_bias_v_ge_5_per_holding_distribution"] = dict(

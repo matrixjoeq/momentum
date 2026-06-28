@@ -111,6 +111,8 @@ DEFAULT_R_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
 STOP_EXECUTION_MODES: set[str] = {"intraday", "next_day"}
 VOL_REGIME_STATES: set[str] = {"NORMAL", "REDUCED", "INCREASED", "EXTREME"}
 CASH_MANAGEMENT_PROXY_CODE = _trend_semantic_helpers.CASH_MANAGEMENT_PROXY_CODE
+RISK_EXIT_PROXY_CODE = _trend_semantic_helpers.RISK_EXIT_PROXY_CODE
+TRADING_COST_PROXY_CODE = _trend_semantic_helpers.TRADING_COST_PROXY_CODE
 
 
 def _talib_enabled() -> bool:
@@ -4768,11 +4770,13 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 strat_ret.reindex(nav.index).astype(float)
                 - bench_ret.reindex(nav.index).astype(float).fillna(0.0)
             ).astype(float)
-    cash_close_qfq, cash_data_available = _trend_semantic_helpers._load_cash_management_qfq_close(
-        db=db,
-        start=getattr(inp, "start"),
-        end=getattr(inp, "end"),
-        dates=nav.index,
+    cash_close_qfq, cash_data_available = (
+        _trend_semantic_helpers._load_cash_management_qfq_close(
+            db=db,
+            start=getattr(inp, "start"),
+            end=getattr(inp, "end"),
+            dates=nav.index,
+        )
     )
     cash_ret = _trend_semantic_helpers._cash_management_return_series_from_close(
         cash_close_qfq, forward=False
@@ -4780,9 +4784,9 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     cash_weight = _trend_semantic_helpers._cash_management_residual_weight(
         w_ret.reindex(nav.index).astype(float)
     )
-    cash_management_ret = (
-        cash_weight * cash_ret.astype(float).fillna(0.0)
-    ).astype(float)
+    cash_management_ret = (cash_weight * cash_ret.astype(float).fillna(0.0)).astype(
+        float
+    )
     strat_ret = (
         strat_ret.reindex(nav.index).astype(float).fillna(0.0) + cash_management_ret
     ).astype(float)
@@ -4923,6 +4927,22 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
         cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
     )
+    # Keep attribution in net-return space by explicitly modeling risk overrides
+    # and trading costs as standalone components.
+    asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
+        (atr_over + bv_over + rtp_over + rps_over)
+        .reindex(nav.index)
+        .astype(float)
+        .fillna(0.0)
+    )
+    weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
+    asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
+        -(cost_s.astype(float) + slip_s.astype(float))
+        .reindex(nav.index)
+        .astype(float)
+        .fillna(0.0)
+    )
+    weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
     attribution = _compute_return_risk_contributions(
         asset_ret=asset_ret_for_attribution,
         weights=weight_for_attribution,
@@ -4933,6 +4953,18 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         cash_contrib_annualized,
     ) = _trend_semantic_helpers._extract_cash_management_return_contribution(
         attribution
+    )
+    (
+        risk_exit_contrib_total,
+        risk_exit_contrib_annualized,
+    ) = _trend_semantic_helpers._extract_return_contribution_by_code(
+        attribution, code=RISK_EXIT_PROXY_CODE
+    )
+    (
+        trading_cost_contrib_total,
+        trading_cost_contrib_annualized,
+    ) = _trend_semantic_helpers._extract_return_contribution_by_code(
+        attribution, code=TRADING_COST_PROXY_CODE
     )
     latest_entry_exec_px = _latest_entry_exec_price_with_slippage(
         effective_weight=w_eff.reindex(nav.index).astype(float),
@@ -5085,8 +5117,10 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         threshold=5.0,
     )
     holding_bias_v_ge_5_count = int(sum(int(x) for x in holding_bias_v_ge_5_counts))
-    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
-        holding_bias_v_ge_5_counts
+    holding_bias_v_ge_5_dist = (
+        _trend_semantic_helpers._distribution_stats_from_int_counts(
+            holding_bias_v_ge_5_counts
+        )
     )
     holding_bias_v_ge_5_max_per_holding = int(
         (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
@@ -5330,6 +5364,14 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "cash_management_return_contribution": cash_contrib_total,
                 "cash_management_return_contribution_annualized": (
                     cash_contrib_annualized
+                ),
+                "risk_exit_return_contribution": risk_exit_contrib_total,
+                "risk_exit_return_contribution_annualized": (
+                    risk_exit_contrib_annualized
+                ),
+                "trading_cost_return_contribution": trading_cost_contrib_total,
+                "trading_cost_return_contribution_annualized": (
+                    trading_cost_contrib_annualized
                 ),
             },
             "benchmark": _metrics_from_ret(bench_ret, float(inp.risk_free_rate)),
@@ -6993,11 +7035,13 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         .astype(float)
     )
     base_ret = (w_ret * ret_exec_df).sum(axis=1).astype(float)
-    cash_close_qfq, cash_data_available = _trend_semantic_helpers._load_cash_management_qfq_close(
-        db=db,
-        start=getattr(inp, "start"),
-        end=getattr(inp, "end"),
-        dates=w_eff.index,
+    cash_close_qfq, cash_data_available = (
+        _trend_semantic_helpers._load_cash_management_qfq_close(
+            db=db,
+            start=getattr(inp, "start"),
+            end=getattr(inp, "end"),
+            dates=w_eff.index,
+        )
     )
     cash_ret = _trend_semantic_helpers._cash_management_return_series_from_close(
         cash_close_qfq, forward=False
@@ -7005,9 +7049,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     cash_weight = _trend_semantic_helpers._cash_management_residual_weight(
         w_ret.sum(axis=1).reindex(w_eff.index).astype(float)
     )
-    decomp_cash_management = (
-        cash_weight * cash_ret.astype(float).fillna(0.0)
-    ).astype(float)
+    decomp_cash_management = (cash_weight * cash_ret.astype(float).fillna(0.0)).astype(
+        float
+    )
     decomp_risk = (
         atr_stop_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
         + bias_v_take_profit_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
@@ -7016,8 +7060,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     ).astype(float)
     decomp_cost = (cost + slippage).astype(float)
     port_ret = (
-        base_ret + decomp_risk + decomp_cash_management - decomp_cost
-    ).fillna(0.0).astype(float)
+        (base_ret + decomp_risk + decomp_cash_management - decomp_cost)
+        .fillna(0.0)
+        .astype(float)
+    )
     return_decomposition = None
     if not bool(getattr(inp, "quick_mode", False)):
         if ep_port == "open":
@@ -7231,6 +7277,16 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     weight_for_attribution[CASH_MANAGEMENT_PROXY_CODE] = (
         cash_weight_attr.reindex(nav.index).astype(float).fillna(0.0)
     )
+    # Keep attribution in net-return space by explicitly modeling risk overrides
+    # and trading costs as standalone components.
+    asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
+        decomp_risk.reindex(nav.index).astype(float).fillna(0.0)
+    )
+    weight_for_attribution[RISK_EXIT_PROXY_CODE] = 1.0
+    asset_ret_for_attribution[TRADING_COST_PROXY_CODE] = (
+        -decomp_cost.reindex(nav.index).astype(float).fillna(0.0)
+    )
+    weight_for_attribution[TRADING_COST_PROXY_CODE] = 1.0
     attribution = _compute_return_risk_contributions(
         asset_ret=asset_ret_for_attribution,
         weights=weight_for_attribution,
@@ -7241,6 +7297,18 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         cash_contrib_annualized,
     ) = _trend_semantic_helpers._extract_cash_management_return_contribution(
         attribution
+    )
+    (
+        risk_exit_contrib_total,
+        risk_exit_contrib_annualized,
+    ) = _trend_semantic_helpers._extract_return_contribution_by_code(
+        attribution, code=RISK_EXIT_PROXY_CODE
+    )
+    (
+        trading_cost_contrib_total,
+        trading_cost_contrib_annualized,
+    ) = _trend_semantic_helpers._extract_return_contribution_by_code(
+        attribution, code=TRADING_COST_PROXY_CODE
     )
     holdings: list[dict[str, Any]] = []
     prev_picks: tuple[str, ...] | None = None
@@ -7679,8 +7747,10 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         str(k): int(sum(int(x) for x in (v or [])))
         for k, v in holding_bias_v_ge_5_counts_by_code.items()
     }
-    holding_bias_v_ge_5_dist = _trend_semantic_helpers._distribution_stats_from_int_counts(
-        holding_bias_v_ge_5_all_counts
+    holding_bias_v_ge_5_dist = (
+        _trend_semantic_helpers._distribution_stats_from_int_counts(
+            holding_bias_v_ge_5_all_counts
+        )
     )
     holding_bias_v_ge_5_max_per_holding = int(
         (holding_bias_v_ge_5_dist or {}).get("max", 0) or 0
@@ -7889,9 +7959,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 holding_bias_v_ge_5_by_code.get(str(c), 0)
             ),
             "holding_bias_v_ge_5_max_per_holding": int(
-                (
-                    holding_bias_v_ge_5_dist_by_code.get(str(c), {}) or {}
-                ).get("max", 0)
+                (holding_bias_v_ge_5_dist_by_code.get(str(c), {}) or {}).get("max", 0)
                 or 0
             ),
             "holding_bias_v_ge_5_per_holding_distribution": dict(
@@ -8439,6 +8507,14 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "cash_management_return_contribution": cash_contrib_total,
                 "cash_management_return_contribution_annualized": (
                     cash_contrib_annualized
+                ),
+                "risk_exit_return_contribution": risk_exit_contrib_total,
+                "risk_exit_return_contribution_annualized": (
+                    risk_exit_contrib_annualized
+                ),
+                "trading_cost_return_contribution": trading_cost_contrib_total,
+                "trading_cost_return_contribution_annualized": (
+                    trading_cost_contrib_annualized
                 ),
             },
             "benchmark": _metrics_from_ret(bh_ret, float(inp.risk_free_rate)),
