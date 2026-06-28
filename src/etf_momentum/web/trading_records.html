@@ -2701,8 +2701,6 @@
         const out = await api(
           `/attribution?scope_type=${s.scope_type}&scope_id=${s.scope_id}`,
         );
-        const daily = out.daily || [];
-        const x = daily.map((r) => r.date);
         const components = [
           { key: "selection_return", name: "选标的" },
           { key: "timing_return", name: "择时" },
@@ -2712,6 +2710,42 @@
           { key: "repo_carry_return", name: "Repo 利息贡献" },
           { key: "repo_fee_drag_return", name: "Repo 费用拖累" },
         ];
+        const normalizeAttrDayKey = (v) => {
+          const s = String(v || "").trim();
+          if (!s) return "";
+          const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+          return m ? m[1] : s;
+        };
+        const rawDaily = Array.isArray(out.daily) ? out.daily : [];
+        // Align with NAV chart semantics: one aggregated point per trading day.
+        const dailyByDay = new Map();
+        for (const row of rawDaily) {
+          const k = normalizeAttrDayKey(row?.date);
+          if (!k) continue;
+          const prev = dailyByDay.get(k) || {
+            date: k,
+            selection_return: 0,
+            timing_return: 0,
+            position_return: 0,
+            cost_drag_return: 0,
+            cash_drag_return: 0,
+            repo_carry_return: 0,
+            repo_fee_drag_return: 0,
+            daily_return_twr: 0,
+          };
+          const cur = { ...prev };
+          for (const c of components) {
+            cur[c.key] = Number(prev[c.key] || 0) + Number(row?.[c.key] || 0);
+          }
+          cur.daily_return_twr =
+            Number(prev.daily_return_twr || 0) +
+            Number(row?.daily_return_twr || 0);
+          dailyByDay.set(k, cur);
+        }
+        const daily = Array.from(dailyByDay.values()).sort((a, b) =>
+          String(a?.date || "").localeCompare(String(b?.date || "")),
+        );
+        const x = daily.map((r) => r.date);
         const traces = components.map((k) => ({
           x,
           y: daily.map((r) => r[k.key] || 0),
@@ -2724,6 +2758,7 @@
             traces,
             {
               title: "日度收益归因",
+              xaxis: { type: "category" },
               margin: { t: 40, l: 50, r: 20, b: 40 },
             },
             { responsive: true },
