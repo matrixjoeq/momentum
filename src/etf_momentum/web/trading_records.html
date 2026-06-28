@@ -348,6 +348,7 @@
         style="margin-top: 8px; display: none"
       ></div>
       <div id="tradeRepoHint" class="muted" style="margin-top: 6px"></div>
+      <div id="tradeMsg" class="muted" style="margin-top: 6px"></div>
 
       <details style="margin-top: 12px">
         <summary style="cursor: pointer">批量导入 CSV</summary>
@@ -679,6 +680,15 @@
       const msg = (t, isErr = false) => {
         $("msg").textContent = t || "";
         $("msg").className = isErr ? "danger" : "muted";
+      };
+      const tradeMsg = (t, isErr = false) => {
+        const el = $("tradeMsg");
+        if (!el) {
+          msg(t, isErr);
+          return;
+        }
+        el.textContent = t || "";
+        el.className = isErr ? "danger" : "muted";
       };
       let reasonModalResolver = null;
       const closeReasonModal = (value) => {
@@ -3086,7 +3096,7 @@
             }
             applyTradeFeeDefault(false);
           } catch (e) {
-            msg(e.message, true);
+            tradeMsg(e.message, true);
           }
         });
         $("tradeQty").addEventListener("input", () => {
@@ -3107,7 +3117,7 @@
         $("tradeQty").addEventListener("change", () => {
           if (currentTradeStrategyType() === "bond_repo") {
             if (!isRepoLotQtyAllowed($("tradeQty").value)) {
-              msg("逆回购数量必须是正整数（单位：手）。", true);
+              tradeMsg("逆回购数量必须是正整数（单位：手）。", true);
               return;
             }
             if (currentRepoAction() === "BUYBACK") {
@@ -3119,14 +3129,14 @@
           }
           const qtyVal = $("tradeQty").value;
           if (!isTradeQtyAllowed(qtyVal)) {
-            msg("成交数量必须是 100 的倍数。", true);
+            tradeMsg("成交数量必须是 100 的倍数。", true);
           }
         });
         $("tradeTime").addEventListener("change", () => {
           const t = String($("tradeTime").value || "").trim();
           if (!isTradeTimeAllowedForCurrentContext(t)) {
             const err = tradeTimeErrorMessageForCurrentContext();
-            if (err) msg(err, true);
+            if (err) tradeMsg(err, true);
             setTradeTimeValue(defaultTradeTimeForCurrentContext());
           }
         });
@@ -3417,6 +3427,7 @@
 
         $("addTradeBtn").onclick = async () => {
           try {
+            tradeMsg("");
             const aid = Number($("accountSelect").value || 0);
             const sid = selectedTradeStrategyId();
             const hid = selectedTradeHolderId();
@@ -3516,14 +3527,16 @@
               });
             }
             await refreshTradeRelatedViews();
+            tradeMsg("");
             msg(isEditing ? "成交已修改" : "成交已新增");
           } catch (e) {
-            msg(e.message, true);
+            tradeMsg(e.message, true);
           }
         };
 
         $("importCsvBtn").onclick = async () => {
           try {
+            tradeMsg("");
             const aid = Number($("accountSelect").value || 0);
             const sid = selectedTradeStrategyId();
             const hid = selectedTradeHolderId();
@@ -3541,9 +3554,10 @@
               body: JSON.stringify({ trades }),
             });
             await refreshTradeRelatedViews();
+            tradeMsg("");
             msg(`已批量导入 ${trades.length} 条成交`);
           } catch (e) {
-            msg(e.message, true);
+            tradeMsg(e.message, true);
           }
         };
 
