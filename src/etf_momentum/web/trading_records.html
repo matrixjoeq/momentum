@@ -2964,7 +2964,7 @@
         );
         const components = [
           { key: "selection_return", name: "选标的" },
-          { key: "timing_return", name: "择时" },
+          { key: "timing_return", name: "残差项" },
           { key: "position_return", name: "仓位" },
           { key: "cost_drag_return", name: "成本拖累" },
           { key: "cash_drag_return", name: "现金拖累" },
@@ -3028,7 +3028,7 @@
         const p = out.period || {};
         const periodRows = [
           ["选标的", p.selection_return],
-          ["择时", p.timing_return],
+          ["残差项", p.timing_return],
           ["仓位", p.position_return],
           ["成本拖累", p.cost_drag_return],
           ["现金拖累", p.cash_drag_return],
