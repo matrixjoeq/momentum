@@ -145,49 +145,110 @@ def _price_rows_from_close_df(
     return [dedup[d] for d in sorted(dedup)]
 
 
+_HK_YAHOO_ALIAS: dict[str, str] = {
+    "HSI": "^HSI",
+    "HSCEI": "^HSCE",
+    "HSTECH": "^HSTECH",
+    "HSHCI": "^HSHCI",
+    "HSCCI": "^HSCCI",
+}
+
+
+def _to_yahoo_symbol(code: str, *, code_format: str) -> str:
+    c = str(code or "").strip()
+    if not c:
+        return c
+    u = c.upper()
+    if str(code_format) == "hk_index":
+        if u in _HK_YAHOO_ALIAS:
+            return _HK_YAHOO_ALIAS[u]
+        if c.startswith("^"):
+            return c
+        return f"^{u}"
+    if str(code_format) == "cn_6":
+        if c.isdigit() and len(c) == 6:
+            suffix = ".SS" if c.startswith(("5", "6", "9")) else ".SZ"
+            return f"{c}{suffix}"
+    return c
+
+
+def _tencent_symbol_candidates(code: str) -> list[str]:
+    c = str(code or "").strip()
+    if not c:
+        return []
+    cand = [c]
+    if c.isdigit() and len(c) == 6:
+        cand.extend([f"sh{c}", f"sz{c}"])
+    if c.lower().startswith(("sh", "sz")) and len(c) == 8:
+        raw6 = c[2:]
+        if raw6.isdigit():
+            cand.extend([raw6, f"sh{raw6}", f"sz{raw6}"])
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in cand:
+        k = str(x).strip().lower()
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(str(x).strip())
+    return out
+
+
 def _fetch_via_tencent(
     *,
     ak: Any,
     code: str,
+    code_format: str,
     start: str,
     end: str,
 ) -> tuple[list[GlobalBenchmarkPriceRow], str | None]:
-    try:
-        rows = fetch_etf_daily_tencent(
-            ak,
-            TencentFetchRequest(
-                code=code, start_date=start, end_date=end, adjust="none"
-            ),
-        )
-    except Exception as e:
-        return [], str(e)
-    out = [
-        GlobalBenchmarkPriceRow(
-            code=code,
-            trade_date=r.trade_date,
-            open=r.open,
-            high=r.high,
-            low=r.low,
-            close=r.close,
-            volume=r.volume,
-            amount=r.amount,
-            source="tencent",
-            adjust="none",
-        )
-        for r in rows
-    ]
-    return out, None
+    if str(code_format) != "cn_6":
+        return [], f"unsupported code_format for tencent: {code_format}"
+    errs: list[str] = []
+    for sym in _tencent_symbol_candidates(code):
+        try:
+            rows = fetch_etf_daily_tencent(
+                ak,
+                TencentFetchRequest(
+                    code=sym, start_date=start, end_date=end, adjust="none"
+                ),
+            )
+        except Exception as e:
+            errs.append(f"{sym}:{e}")
+            continue
+        if not rows:
+            errs.append(f"{sym}:empty")
+            continue
+        out = [
+            GlobalBenchmarkPriceRow(
+                code=code,
+                trade_date=r.trade_date,
+                open=r.open,
+                high=r.high,
+                low=r.low,
+                close=r.close,
+                volume=r.volume,
+                amount=r.amount,
+                source="tencent",
+                adjust="none",
+            )
+            for r in rows
+        ]
+        return out, None
+    return [], "; ".join(errs) if errs else "empty"
 
 
 def _fetch_via_yahoo(
     *,
     code: str,
+    code_format: str,
     start: str,
     end: str,
 ) -> tuple[list[GlobalBenchmarkPriceRow], str | None]:
+    symbol = _to_yahoo_symbol(code, code_format=code_format)
     try:
         df, meta = fetch_yahoo_daily_close_with_alias(
-            YahooFetchRequest(symbol=code, start_date=start, end_date=end),
+            YahooFetchRequest(symbol=symbol, start_date=start, end_date=end),
             aliases=None,
         )
     except Exception as e:
@@ -201,12 +262,14 @@ def _fetch_via_yahoo(
 def _fetch_via_stooq(
     *,
     code: str,
+    code_format: str,
     start: str,
     end: str,
 ) -> tuple[list[GlobalBenchmarkPriceRow], str | None]:
+    symbol = _to_yahoo_symbol(code, code_format=code_format)
     try:
         df, meta = fetch_stooq_daily_close(
-            StooqFetchRequest(symbol=code, start_date=start, end_date=end)
+            StooqFetchRequest(symbol=symbol, start_date=start, end_date=end)
         )
     except Exception as e:
         return [], str(e)
@@ -295,11 +358,17 @@ def ingest_one_global_benchmark(
         rows: list[GlobalBenchmarkPriceRow] = []
         err: str | None = None
         if provider == "tencent":
-            rows, err = _fetch_via_tencent(ak=ak, code=code, start=start, end=end)
+            rows, err = _fetch_via_tencent(
+                ak=ak, code=code, code_format=code_format, start=start, end=end
+            )
         elif provider == "yahoo":
-            rows, err = _fetch_via_yahoo(code=code, start=start, end=end)
+            rows, err = _fetch_via_yahoo(
+                code=code, code_format=code_format, start=start, end=end
+            )
         elif provider == "stooq":
-            rows, err = _fetch_via_stooq(code=code, start=start, end=end)
+            rows, err = _fetch_via_stooq(
+                code=code, code_format=code_format, start=start, end=end
+            )
         elif provider == "sina_global":
             rows, err = _fetch_via_sina_global(code=code, start=start, end=end)
         elif provider == "sina":
