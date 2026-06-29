@@ -149,6 +149,22 @@ class GlobalBenchmarkPriceOut(BaseModel):
     adjust: str
 
 
+class GlobalBenchmarkFetchResult(BaseModel):
+    code: str
+    inserted_or_updated: int
+    status: str
+    message: str | None = None
+    code_format: str | None = None
+    final_provider: str | None = None
+    provider_attempts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GlobalBenchmarkFetchSelectedRequest(BaseModel):
+    codes: list[str] = Field(
+        min_length=1, description="Global benchmark codes to fetch"
+    )
+
+
 class OffFundPoolUpsert(BaseModel):
     code: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=128)

@@ -4,6 +4,8 @@ import datetime as dt
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .models import GlobalBenchmarkPool, GlobalBenchmarkPrice
@@ -96,6 +98,86 @@ def purge_global_benchmark_data(db: Session, *, code: str) -> dict[str, int]:
         delete(GlobalBenchmarkPrice).where(GlobalBenchmarkPrice.code == code)
     )
     return {"prices": int(getattr(r_prices, "rowcount", 0) or 0)}
+
+
+def mark_global_benchmark_fetch_status(
+    db: Session,
+    *,
+    code: str,
+    status: str,
+    message: str | None = None,
+    when: dt.datetime | None = None,
+) -> None:
+    obj = get_global_benchmark_pool_by_code(db, code)
+    if obj is None:
+        return
+    msg = None if message is None else str(message)
+    if msg is not None and len(msg) > 512:
+        msg = msg[:498] + "...(truncated)"
+    obj.last_fetch_at = when or dt.datetime.now(dt.timezone.utc)
+    obj.last_fetch_status = status
+    obj.last_fetch_message = msg
+    db.flush()
+
+
+def upsert_global_benchmark_prices(
+    db: Session, rows: list[GlobalBenchmarkPriceRow]
+) -> int:
+    if not rows:
+        return 0
+    values = [
+        {
+            "code": r.code,
+            "trade_date": r.trade_date,
+            "open": r.open,
+            "high": r.high,
+            "low": r.low,
+            "close": r.close,
+            "volume": r.volume,
+            "amount": r.amount,
+            "source": r.source,
+            "adjust": normalize_adjust(r.adjust),
+        }
+        for r in rows
+    ]
+    dialect = (db.get_bind().dialect.name if db.get_bind() is not None else "").lower()
+    if dialect == "mysql":
+        stmt = mysql_insert(GlobalBenchmarkPrice).values(values)
+        stmt = stmt.on_duplicate_key_update(
+            {
+                "open": stmt.inserted.open,
+                "high": stmt.inserted.high,
+                "low": stmt.inserted.low,
+                "close": stmt.inserted.close,
+                "volume": stmt.inserted.volume,
+                "amount": stmt.inserted.amount,
+                "source": stmt.inserted.source,
+                "adjust": stmt.inserted.adjust,
+                "ingested_at": dt.datetime.now(dt.timezone.utc),
+            }
+        )
+    else:
+        stmt = sqlite_insert(GlobalBenchmarkPrice).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[
+                GlobalBenchmarkPrice.code,
+                GlobalBenchmarkPrice.trade_date,
+                GlobalBenchmarkPrice.adjust,
+            ],
+            set_={
+                "open": stmt.excluded.open,
+                "high": stmt.excluded.high,
+                "low": stmt.excluded.low,
+                "close": stmt.excluded.close,
+                "volume": stmt.excluded.volume,
+                "amount": stmt.excluded.amount,
+                "source": stmt.excluded.source,
+                "adjust": stmt.excluded.adjust,
+                "ingested_at": dt.datetime.now(dt.timezone.utc),
+            },
+        )
+    res = db.execute(stmt)
+    return int(getattr(res, "rowcount", 0) or 0)
 
 
 def list_global_benchmark_prices(

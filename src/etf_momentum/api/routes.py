@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import time
+from dataclasses import asdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -83,6 +84,8 @@ from .schemas import (
     GlobalBenchmarkPoolOut,
     GlobalBenchmarkPoolUpsert,
     GlobalBenchmarkPriceOut,
+    GlobalBenchmarkFetchResult,
+    GlobalBenchmarkFetchSelectedRequest,
     EtfPoolOut,
     EtfPoolUpsert,
     EtfResearchGroupOut,
@@ -245,6 +248,7 @@ from ..data.futures_contract_ingestion import (
 )
 from ..data.futures_ingestion import ingest_one_futures
 from ..data.off_fund_ingestion import ingest_one_off_fund
+from ..data.global_benchmark_ingestion import ingest_one_global_benchmark
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
 from ..data.stooq_fetcher import fetch_stooq_daily_close
@@ -285,6 +289,7 @@ from ..db.off_fund_repo import (
 )
 from ..db.global_benchmark_repo import (
     delete_global_benchmark_pool,
+    get_global_benchmark_pool_by_code,
     get_global_benchmark_date_range,
     list_global_benchmark_pool,
     list_global_benchmark_prices,
@@ -7144,6 +7149,123 @@ def delete_global_benchmark_api(code: str, db: Session = Depends(get_session)) -
     purged = purge_global_benchmark_data(db, code=code)
     db.commit()
     return {"deleted": True, "purged": purged}
+
+
+@router.post(
+    "/global-benchmark/{code}/fetch",
+    response_model=GlobalBenchmarkFetchResult,
+)
+def fetch_one_global_benchmark(
+    code: str,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> GlobalBenchmarkFetchResult:
+    item = get_global_benchmark_pool_by_code(db, code)
+    if item is None:
+        raise HTTPException(status_code=404, detail="global benchmark not found")
+    res = ingest_one_global_benchmark(
+        db,
+        ak=ak,
+        code=code,
+        start_date=item.start_date or get_settings().default_start_date,
+        end_date=item.end_date or get_settings().default_end_date,
+    )
+    if res.status != "success":
+        raise HTTPException(
+            status_code=500,
+            detail=res.message or "global benchmark ingestion failed",
+        )
+    return GlobalBenchmarkFetchResult(
+        code=res.code,
+        inserted_or_updated=res.inserted_or_updated,
+        status=res.status,
+        message=res.message,
+        code_format=res.code_format,
+        final_provider=res.final_provider,
+        provider_attempts=[asdict(x) for x in res.attempts],
+    )
+
+
+@router.post(
+    "/global-benchmark/fetch-all",
+    response_model=list[GlobalBenchmarkFetchResult],
+)
+def fetch_all_global_benchmarks(
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> list[GlobalBenchmarkFetchResult]:
+    out: list[GlobalBenchmarkFetchResult] = []
+    for item in list_global_benchmark_pool(db):
+        res = ingest_one_global_benchmark(
+            db,
+            ak=ak,
+            code=item.code,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            GlobalBenchmarkFetchResult(
+                code=res.code,
+                inserted_or_updated=(
+                    int(res.inserted_or_updated) if res.status == "success" else 0
+                ),
+                status=res.status,
+                message=res.message,
+                code_format=res.code_format,
+                final_provider=res.final_provider,
+                provider_attempts=[asdict(x) for x in res.attempts],
+            )
+        )
+    return out
+
+
+@router.post(
+    "/global-benchmark/fetch-selected",
+    response_model=list[GlobalBenchmarkFetchResult],
+)
+def fetch_selected_global_benchmarks(
+    payload: GlobalBenchmarkFetchSelectedRequest,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> list[GlobalBenchmarkFetchResult]:
+    pool_by_code = {x.code: x for x in list_global_benchmark_pool(db)}
+    out: list[GlobalBenchmarkFetchResult] = []
+    for code in payload.codes:
+        item = pool_by_code.get(code)
+        if item is None:
+            out.append(
+                GlobalBenchmarkFetchResult(
+                    code=code,
+                    inserted_or_updated=0,
+                    status="failed",
+                    message="global benchmark not found",
+                    code_format=None,
+                    final_provider=None,
+                    provider_attempts=[],
+                )
+            )
+            continue
+        res = ingest_one_global_benchmark(
+            db,
+            ak=ak,
+            code=code,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            GlobalBenchmarkFetchResult(
+                code=res.code,
+                inserted_or_updated=(
+                    int(res.inserted_or_updated) if res.status == "success" else 0
+                ),
+                status=res.status,
+                message=res.message,
+                code_format=res.code_format,
+                final_provider=res.final_provider,
+                provider_attempts=[asdict(x) for x in res.attempts],
+            )
+        )
+    return out
 
 
 @router.get(

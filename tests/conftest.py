@@ -37,9 +37,25 @@ def api_client(engine):
         db.commit()
 
     class FakeAk:
+        def stock_zh_a_hist_tx(self, **kwargs):
+            import pandas as pd
+
+            _ = kwargs
+            return pd.DataFrame(
+                {
+                    "date": ["2024-01-02", "2024-01-03"],
+                    "open": [1.0, 1.02],
+                    "high": [1.05, 1.06],
+                    "low": [0.98, 1.00],
+                    "close": [1.02, 1.03],
+                    "amount": [10.0, 20.0],
+                }
+            )
+
         def fund_etf_hist_em(self, **kwargs):
             import pandas as pd
 
+            _ = kwargs
             return pd.DataFrame(
                 {
                     "日期": ["2024-01-02", "2024-01-03"],

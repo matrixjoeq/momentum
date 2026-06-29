@@ -99,3 +99,42 @@ def test_global_benchmark_rejects_non_none_adjust(api_client: TestClient) -> Non
     assert bad_list.status_code == 400
     bad_prices = client.get("/api/global-benchmark/000300/prices?adjust=qfq")
     assert bad_prices.status_code == 400
+
+
+def test_global_benchmark_fetch_one_and_batch_contract(api_client: TestClient) -> None:
+    client = api_client
+    _ = client.post(
+        "/api/global-benchmark",
+        json={
+            "code": "000300",
+            "name": "沪深300",
+            "code_format": "cn_6",
+            "provider_hint": "tencent",
+            "start_date": "20240101",
+            "end_date": "20240131",
+        },
+    )
+    one = client.post("/api/global-benchmark/000300/fetch", json={})
+    assert one.status_code == 200
+    out = one.json()
+    assert out["status"] == "success"
+    assert out["final_provider"] == "tencent"
+    assert len(out["provider_attempts"]) == 1
+    prices = client.get("/api/global-benchmark/000300/prices?adjust=none").json()
+    assert len(prices) >= 1
+
+    all_resp = client.post("/api/global-benchmark/fetch-all", json={})
+    assert all_resp.status_code == 200
+    rows = all_resp.json()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "success"
+
+    sel = client.post(
+        "/api/global-benchmark/fetch-selected",
+        json={"codes": ["NOPE", "000300"]},
+    )
+    assert sel.status_code == 200
+    out_sel = sel.json()
+    by_code = {x["code"]: x for x in out_sel}
+    assert by_code["NOPE"]["status"] == "failed"
+    assert by_code["000300"]["status"] == "success"
