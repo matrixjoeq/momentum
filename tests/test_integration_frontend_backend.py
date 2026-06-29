@@ -45,6 +45,8 @@ def test_frontend_backend_contract_smoke(api_client: TestClient) -> None:
     assert "/global-benchmark" in gb_html
     assert "/global-benchmark/fetch-all" in gb_html
     assert "/global-benchmark/fetch-selected" in gb_html
+    assert "/global-benchmark/default-universe/install" in gb_html
+    assert "/global-benchmark/default-universe/acceptance" in gb_html
 
     resp = client.get("/research/futures")
     assert resp.status_code == 200

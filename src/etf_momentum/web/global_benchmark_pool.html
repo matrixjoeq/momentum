@@ -40,6 +40,9 @@
       ETF/场外基金/期货候选池。阶段1仅实现候选池配置与无复权价格读取接口骨架。
     </div>
     <div class="muted" style="margin-top: 6px">
+      阶段3：支持一键写入默认全球基准清单，并提供默认清单抓取验收（none口径）。
+    </div>
+    <div class="muted" style="margin-top: 6px">
       <a href="/">ETF 候选池</a>
       <span style="margin: 0 6px">|</span>
       <a href="/off-fund-pool">场外基金候选池</a>
@@ -75,6 +78,8 @@
         <input id="end" placeholder="YYYYMMDD (可空)" />
       </div>
       <button id="save">保存/更新</button>
+      <button id="installDefaults">写入默认清单</button>
+      <button id="acceptDefaults">默认清单验收</button>
       <button id="fetchAll">抓取全部</button>
       <button id="selectAll">全选</button>
       <button id="selectNone">取消全选</button>
@@ -141,6 +146,15 @@
         if ($("deleteSelected")) $("deleteSelected").disabled = !hasSel;
       }
 
+      function summarizeAcceptanceReport(rep) {
+        if (!rep || typeof rep !== "object") return "";
+        const total = Number(rep.total || 0);
+        const succeeded = Number(rep.succeeded || 0);
+        const failed = Number(rep.failed || 0);
+        const skipped = Number(rep.skipped || 0);
+        return `default-universe acceptance: total=${total}, succeeded=${succeeded}, failed=${failed}, skipped=${skipped}`;
+      }
+
       function statusClass(s) {
         if (!s) return "status-null";
         if (s === "success") return "status-success";
@@ -156,7 +170,7 @@
         const tbody = $("tbody");
         tbody.innerHTML = "";
         if (!Array.isArray(data) || data.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="7" class="muted">候选池为空：请先保存指数代码/名称。</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="8" class="muted">候选池为空：请先保存指数代码/名称。</td></tr>`;
           return;
         }
         for (const it of data) {
@@ -212,6 +226,45 @@
         $("providerHint").value = "";
         $("start").value = "";
         $("end").value = "";
+        await refresh();
+      });
+
+      $("installDefaults").addEventListener("click", async () => {
+        setMsg("正在写入默认全球指数清单...");
+        const resp = await api("/global-benchmark/default-universe/install", {
+          method: "POST",
+          body: JSON.stringify({ overwrite_existing: false }),
+        });
+        const txt = await resp.text();
+        if (!resp.ok) return setMsg(txt);
+        try {
+          const out = JSON.parse(txt);
+          setMsg(
+            `default-universe install: total=${out.total}, inserted=${out.inserted}, updated=${out.updated}, skipped=${out.skipped}`,
+          );
+        } catch (_) {
+          setMsg(txt);
+        }
+        await refresh();
+      });
+
+      $("acceptDefaults").addEventListener("click", async () => {
+        setMsg("正在执行默认清单抓取验收...");
+        const resp = await api(
+          "/global-benchmark/default-universe/acceptance",
+          {
+            method: "POST",
+            body: JSON.stringify({ fetch: true, continue_on_error: true }),
+          },
+        );
+        const txt = await resp.text();
+        if (!resp.ok) return setMsg(txt);
+        try {
+          const out = JSON.parse(txt);
+          setMsg(summarizeAcceptanceReport(out));
+        } catch (_) {
+          setMsg(txt);
+        }
         await refresh();
       });
 

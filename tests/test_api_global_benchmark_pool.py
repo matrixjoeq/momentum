@@ -4,6 +4,9 @@ import datetime as dt
 
 from fastapi.testclient import TestClient
 
+from etf_momentum.data.global_benchmark_defaults import (
+    DEFAULT_GLOBAL_BENCHMARK_UNIVERSE,
+)
 from etf_momentum.db.models import GlobalBenchmarkPrice
 from etf_momentum.db.session import make_session_factory
 
@@ -138,3 +141,52 @@ def test_global_benchmark_fetch_one_and_batch_contract(api_client: TestClient) -
     by_code = {x["code"]: x for x in out_sel}
     assert by_code["NOPE"]["status"] == "failed"
     assert by_code["000300"]["status"] == "success"
+
+
+def test_global_benchmark_default_universe_install_and_acceptance(
+    api_client: TestClient,
+) -> None:
+    client = api_client
+    r = client.post(
+        "/api/global-benchmark/default-universe/install",
+        json={"overwrite_existing": False},
+    )
+    assert r.status_code == 200
+    out = r.json()
+    assert out["ok"] is True
+    assert out["total"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
+    assert out["inserted"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
+    assert out["updated"] == 0
+    assert out["skipped"] == 0
+
+    r2 = client.post(
+        "/api/global-benchmark/default-universe/install",
+        json={"overwrite_existing": False},
+    )
+    assert r2.status_code == 200
+    out2 = r2.json()
+    assert out2["skipped"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
+
+    # no-network acceptance contract path
+    chk = client.post(
+        "/api/global-benchmark/default-universe/acceptance",
+        json={"fetch": False, "continue_on_error": True},
+    )
+    assert chk.status_code == 200
+    rep = chk.json()
+    assert rep["total"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
+    assert rep["failed"] == 0
+    assert rep["skipped"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
+
+    # smoke fetch with fake-ak covered code only
+    chk2 = client.post(
+        "/api/global-benchmark/default-universe/acceptance",
+        json={"codes": ["000300"], "fetch": True, "continue_on_error": False},
+    )
+    assert chk2.status_code == 200
+    rep2 = chk2.json()
+    assert rep2["total"] == 1
+    assert rep2["succeeded"] == 1
+    assert rep2["failed"] == 0
+    assert rep2["items"][0]["code"] == "000300"
+    assert rep2["items"][0]["status"] == "success"

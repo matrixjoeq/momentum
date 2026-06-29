@@ -165,6 +165,51 @@ class GlobalBenchmarkFetchSelectedRequest(BaseModel):
     )
 
 
+class GlobalBenchmarkDefaultInstallRequest(BaseModel):
+    overwrite_existing: bool = False
+
+
+class GlobalBenchmarkDefaultInstallItem(BaseModel):
+    code: str
+    name: str
+    action: str
+
+
+class GlobalBenchmarkDefaultInstallResponse(BaseModel):
+    ok: bool
+    total: int
+    inserted: int
+    updated: int
+    skipped: int
+    items: list[GlobalBenchmarkDefaultInstallItem] = Field(default_factory=list)
+
+
+class GlobalBenchmarkDefaultAcceptanceRequest(BaseModel):
+    codes: list[str] | None = Field(default=None, description="Subset of default codes")
+    fetch: bool = True
+    continue_on_error: bool = True
+
+
+class GlobalBenchmarkDefaultAcceptanceItem(BaseModel):
+    code: str
+    name: str
+    status: str
+    message: str | None = None
+    final_provider: str | None = None
+    sample_days: int = 0
+    data_start_date: str | None = None
+    data_end_date: str | None = None
+
+
+class GlobalBenchmarkDefaultAcceptanceResponse(BaseModel):
+    ok: bool
+    total: int
+    succeeded: int
+    failed: int
+    skipped: int
+    items: list[GlobalBenchmarkDefaultAcceptanceItem] = Field(default_factory=list)
+
+
 class OffFundPoolUpsert(BaseModel):
     code: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=128)

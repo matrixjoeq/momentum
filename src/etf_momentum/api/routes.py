@@ -86,6 +86,12 @@ from .schemas import (
     GlobalBenchmarkPriceOut,
     GlobalBenchmarkFetchResult,
     GlobalBenchmarkFetchSelectedRequest,
+    GlobalBenchmarkDefaultInstallRequest,
+    GlobalBenchmarkDefaultInstallItem,
+    GlobalBenchmarkDefaultInstallResponse,
+    GlobalBenchmarkDefaultAcceptanceRequest,
+    GlobalBenchmarkDefaultAcceptanceItem,
+    GlobalBenchmarkDefaultAcceptanceResponse,
     EtfPoolOut,
     EtfPoolUpsert,
     EtfResearchGroupOut,
@@ -248,6 +254,10 @@ from ..data.futures_contract_ingestion import (
 )
 from ..data.futures_ingestion import ingest_one_futures
 from ..data.off_fund_ingestion import ingest_one_off_fund
+from ..data.global_benchmark_defaults import (
+    DEFAULT_GLOBAL_BENCHMARK_UNIVERSE,
+    DefaultGlobalBenchmarkSpec,
+)
 from ..data.global_benchmark_ingestion import ingest_one_global_benchmark
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
@@ -288,6 +298,7 @@ from ..db.off_fund_repo import (
     upsert_off_fund_pool,
 )
 from ..db.global_benchmark_repo import (
+    count_global_benchmark_prices,
     delete_global_benchmark_pool,
     get_global_benchmark_pool_by_code,
     get_global_benchmark_date_range,
@@ -7068,6 +7079,188 @@ def import_etf_research_groups_api(
         "active_group": (active_group_obj.name if active_group_obj else None),
         "skipped_codes": skipped_codes,
     }
+
+
+def _default_global_benchmark_specs_by_code() -> dict[str, DefaultGlobalBenchmarkSpec]:
+    return {x.code: x for x in DEFAULT_GLOBAL_BENCHMARK_UNIVERSE}
+
+
+def _upsert_default_global_benchmark_spec(
+    db: Session,
+    *,
+    spec: DefaultGlobalBenchmarkSpec,
+    overwrite_existing: bool,
+) -> str:
+    existing = get_global_benchmark_pool_by_code(db, spec.code)
+    if existing is not None and not overwrite_existing:
+        return "skipped"
+    _ = upsert_global_benchmark_pool(
+        db,
+        code=spec.code,
+        name=spec.name,
+        code_format=spec.code_format,
+        provider_hint=spec.provider_hint,
+        start_date=spec.start_date,
+        end_date=spec.end_date,
+    )
+    if existing is None:
+        return "inserted"
+    return "updated"
+
+
+@router.post(
+    "/global-benchmark/default-universe/install",
+    response_model=GlobalBenchmarkDefaultInstallResponse,
+)
+def install_default_global_benchmark_universe(
+    payload: GlobalBenchmarkDefaultInstallRequest = Body(
+        default_factory=GlobalBenchmarkDefaultInstallRequest
+    ),
+    db: Session = Depends(get_session),
+) -> GlobalBenchmarkDefaultInstallResponse:
+    items: list[GlobalBenchmarkDefaultInstallItem] = []
+    n_inserted = 0
+    n_updated = 0
+    n_skipped = 0
+    for spec in DEFAULT_GLOBAL_BENCHMARK_UNIVERSE:
+        action = _upsert_default_global_benchmark_spec(
+            db,
+            spec=spec,
+            overwrite_existing=bool(payload.overwrite_existing),
+        )
+        items.append(
+            GlobalBenchmarkDefaultInstallItem(
+                code=spec.code,
+                name=spec.name,
+                action=action,
+            )
+        )
+        if action == "inserted":
+            n_inserted += 1
+        elif action == "updated":
+            n_updated += 1
+        else:
+            n_skipped += 1
+    db.commit()
+    return GlobalBenchmarkDefaultInstallResponse(
+        ok=True,
+        total=len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE),
+        inserted=n_inserted,
+        updated=n_updated,
+        skipped=n_skipped,
+        items=items,
+    )
+
+
+@router.post(
+    "/global-benchmark/default-universe/acceptance",
+    response_model=GlobalBenchmarkDefaultAcceptanceResponse,
+)
+def run_default_global_benchmark_acceptance(
+    payload: GlobalBenchmarkDefaultAcceptanceRequest = Body(
+        default_factory=GlobalBenchmarkDefaultAcceptanceRequest
+    ),
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> GlobalBenchmarkDefaultAcceptanceResponse:
+    spec_by_code = _default_global_benchmark_specs_by_code()
+    requested = (
+        list(payload.codes)
+        if payload.codes
+        else [x.code for x in DEFAULT_GLOBAL_BENCHMARK_UNIVERSE]
+    )
+    requested = [str(x).strip() for x in requested if str(x).strip()]
+    unknown = [c for c in requested if c not in spec_by_code]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown default-universe codes: {', '.join(unknown)}",
+        )
+    # ensure requested defaults are present in pool
+    for code in requested:
+        spec = spec_by_code[code]
+        _ = _upsert_default_global_benchmark_spec(
+            db,
+            spec=spec,
+            overwrite_existing=False,
+        )
+    db.commit()
+
+    items: list[GlobalBenchmarkDefaultAcceptanceItem] = []
+    n_succ = 0
+    n_fail = 0
+    n_skip = 0
+    for code in requested:
+        spec = spec_by_code[code]
+        item = get_global_benchmark_pool_by_code(db, code)
+        if item is None:
+            n_fail += 1
+            row = GlobalBenchmarkDefaultAcceptanceItem(
+                code=code,
+                name=spec.name,
+                status="failed",
+                message="missing from pool after install",
+                final_provider=None,
+                sample_days=0,
+                data_start_date=None,
+                data_end_date=None,
+            )
+            items.append(row)
+            if not payload.continue_on_error:
+                break
+            continue
+        if not bool(payload.fetch):
+            n_skip += 1
+            n_prices = count_global_benchmark_prices(db, code=code, adjust="none")
+            d0, d1 = get_global_benchmark_date_range(db, code=code, adjust="none")
+            items.append(
+                GlobalBenchmarkDefaultAcceptanceItem(
+                    code=code,
+                    name=item.name,
+                    status="skipped",
+                    message="fetch disabled",
+                    final_provider=None,
+                    sample_days=n_prices,
+                    data_start_date=d0,
+                    data_end_date=d1,
+                )
+            )
+            continue
+        res = ingest_one_global_benchmark(
+            db,
+            ak=ak,
+            code=code,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        n_prices = count_global_benchmark_prices(db, code=code, adjust="none")
+        d0, d1 = get_global_benchmark_date_range(db, code=code, adjust="none")
+        items.append(
+            GlobalBenchmarkDefaultAcceptanceItem(
+                code=code,
+                name=item.name,
+                status=res.status,
+                message=res.message,
+                final_provider=res.final_provider,
+                sample_days=n_prices,
+                data_start_date=d0,
+                data_end_date=d1,
+            )
+        )
+        if res.status == "success":
+            n_succ += 1
+        else:
+            n_fail += 1
+            if not payload.continue_on_error:
+                break
+    return GlobalBenchmarkDefaultAcceptanceResponse(
+        ok=(n_fail == 0),
+        total=len(items),
+        succeeded=n_succ,
+        failed=n_fail,
+        skipped=n_skip,
+        items=items,
+    )
 
 
 @router.get("/global-benchmark", response_model=list[GlobalBenchmarkPoolOut])

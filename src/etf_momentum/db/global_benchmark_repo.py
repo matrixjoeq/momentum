@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func as sa_func, select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -208,8 +208,8 @@ def get_global_benchmark_date_range(
     adj = normalize_adjust(adjust)
     start_d, end_d = db.execute(
         select(
-            func.min(GlobalBenchmarkPrice.trade_date),
-            func.max(GlobalBenchmarkPrice.trade_date),
+            sa_func.min(GlobalBenchmarkPrice.trade_date),
+            sa_func.max(GlobalBenchmarkPrice.trade_date),
         ).where(
             GlobalBenchmarkPrice.code == code,
             GlobalBenchmarkPrice.adjust == adj,
@@ -218,6 +218,22 @@ def get_global_benchmark_date_range(
     if start_d is None or end_d is None:
         return (None, None)
     return (start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d"))
+
+
+def count_global_benchmark_prices(
+    db: Session,
+    *,
+    code: str,
+    adjust: str = "none",
+) -> int:
+    adj = normalize_adjust(adjust)
+    n = db.execute(
+        select(sa_func.count(GlobalBenchmarkPrice.id)).where(
+            GlobalBenchmarkPrice.code == code,
+            GlobalBenchmarkPrice.adjust == adj,
+        )
+    ).scalar_one()
+    return int(n or 0)
 
 
 def update_global_benchmark_pool_data_range(
