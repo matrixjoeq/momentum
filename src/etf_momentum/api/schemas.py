@@ -3589,6 +3589,8 @@ class LiveHoldingOut(BaseModel):
     scope_id: int
     account_id: int
     strategy_id: int | None = None
+    shareholder_account_id: int | None = None
+    shareholder_account: str | None = None
     code: str
     name: str
     quantity: float

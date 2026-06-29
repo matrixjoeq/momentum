@@ -513,6 +513,16 @@ def test_live_trading_shareholder_isolated_fifo(api_client, session_factory):
         },
     )
 
+    # Holdings are grouped by (code, shareholder_account_id), not merged by code only.
+    hs_split = get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid}")
+    hs_159915 = [x for x in hs_split if str(x.get("code")) == "159915"]
+    assert len(hs_159915) == 2
+    qty_by_holder = {
+        int(x["shareholder_account_id"]): float(x["quantity"]) for x in hs_159915
+    }
+    assert abs(qty_by_holder[h1] - 100.0) < 1e-9
+    assert abs(qty_by_holder[h2] - 200.0) < 1e-9
+
     # Holder-level matching: H1 cannot sell beyond H1's own position,
     # even when other holders in the same strategy still hold quantity.
     r_cross_holder_oversell = post_response(
@@ -810,12 +820,16 @@ def test_live_trade_pnl_includes_fees_without_cost_price_allocation(
 
     holdings = get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid}")
     row = next(x for x in holdings if x["code"] == "159915")
-    # Cost basis keeps execution price (fees are not allocated into cost_price).
-    assert abs(float(row["cost_price"]) - 4.00) < 1e-9
-    assert abs(float(row["cost_value"]) - 400.0) < 1e-9
-    # Holding endpoint returns latest snapshot (seed latest close=4.70):
+    # With cumulative-fee-inclusive basis:
+    # cost_value = market_value - cumulative_pnl = 470 - 60 = 410
+    # cost_price = cost_value / qty = 4.10
+    assert abs(float(row["cost_price"]) - 4.10) < 1e-9
+    assert abs(float(row["cost_value"]) - 410.0) < 1e-9
+    # Holdings cumulative PnL includes symbol-level fees:
     # 4.70*100 - 4.00*100 - 10 = 60.
     assert abs(float(row["pnl_amount"]) - 60.0) < 1e-9
+    # cumulative_return = cumulative_pnl / (market_value - cumulative_pnl)
+    assert abs(float(row["pnl_rate"]) - (60.0 / 410.0)) < 1e-9
 
     post_json(
         c,
@@ -976,6 +990,7 @@ def test_live_bond_repo_round_contract(api_client, session_factory):
 
     holdings = get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid}")
     h0 = next(x for x in holdings if str(x.get("code")) == "204001")
+    # Holdings cumulative PnL includes symbol-level fees.
     # 90000 * 1.46% * 3 / 365 = 10.8; minus fee 0.9 => 9.9
     assert abs(float(h0["pnl_amount"]) - 9.9) < 1e-6
 

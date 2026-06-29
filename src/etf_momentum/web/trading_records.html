@@ -442,8 +442,8 @@
             <th class="sortable-th" data-sort-key="cost_value">成本</th>
             <th class="sortable-th" data-sort-key="market_value">市值</th>
             <th class="sortable-th" data-sort-key="position_ratio">仓位比例</th>
-            <th class="sortable-th" data-sort-key="pnl_amount">盈亏</th>
-            <th class="sortable-th" data-sort-key="pnl_rate">收益率</th>
+            <th class="sortable-th" data-sort-key="pnl_amount">累计盈亏</th>
+            <th class="sortable-th" data-sort-key="pnl_rate">累计收益率</th>
             <th class="sortable-th" data-sort-key="status_text">状态</th>
           </tr>
         </thead>
@@ -2557,7 +2557,12 @@
 
       function renderCapitalOverview(latestNavPoint = null, navRows = []) {
         const floatingPnl = (holdingsRowsCache || [])
-          .map((x) => Number(x.pnl_amount))
+          .map((x) => {
+            const mv = Number(x?.market_value);
+            const cv = Number(x?.cost_value);
+            if (!Number.isFinite(mv) || !Number.isFinite(cv)) return NaN;
+            return mv - cv;
+          })
           .filter((x) => Number.isFinite(x))
           .reduce((acc, v) => acc + v, 0.0);
         const holdingsMarketValue = (holdingsRowsCache || [])
@@ -2807,9 +2812,6 @@
       async function loadHoldings() {
         const s = currentScope();
         if (!s.scope_id) return;
-        const aid = Number($("accountSelect").value || 0);
-        const sid = Number($("strategySelect").value || 0);
-        const tradeMetaByCode = await latestTradeMetaByCode(aid, sid);
         const out = await api(
           `/holdings?scope_type=${s.scope_type}&scope_id=${s.scope_id}`,
         );
@@ -2818,17 +2820,14 @@
           const status = x.price_missing
             ? `缺价${x.stale_days != null ? ` (stale ${x.stale_days}d)` : ""}`
             : "正常";
-          const meta = tradeMetaByCode.get(String(x.code || "").trim());
-          const strategyText = meta
-            ? strategyLabelById(meta.strategy_id)
-            : s.scope_type === "strategy"
+          const strategyText =
+            s.scope_type === "strategy"
               ? selectedScopeName("strategySelect") || "-"
               : "账户汇总";
-          const holderText = meta
-            ? holderLabelById(meta.shareholder_account_id)
-            : s.scope_type === "strategy"
-              ? "策略内汇总"
-              : "账户内汇总";
+          const holderText =
+            x.shareholder_account ||
+            holderLabelById(x.shareholder_account_id) ||
+            "-";
           return {
             ...x,
             strategy_text: strategyText,

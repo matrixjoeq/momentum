@@ -943,13 +943,20 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                     alias_map[code] = new_code
                     for old_key in list(_keys_for_code(code)):
                         new_key = (new_code, old_key[1])
+                        if new_key == old_key:
+                            continue
                         lots[new_key].extend(lots.pop(old_key))
                     for old_key in list(_repo_keys_for_code(code)):
                         new_key = (new_code, old_key[1])
+                        if new_key == old_key:
+                            continue
                         repo_lots[new_key].extend(repo_lots.pop(old_key))
                     for old_key in list(_round_keys_for_code(code)):
                         st_old = rounds_open.pop(old_key)
                         new_key = (new_code, old_key[1])
+                        if new_key == old_key:
+                            rounds_open[old_key] = st_old
+                            continue
                         st_old.code = new_code
                         if new_key not in rounds_open:
                             rounds_open[new_key] = st_old
@@ -2921,37 +2928,322 @@ def live_holdings(
     if max_nav_day is None:
         return []
     day = max_nav_day[0]
-    rows = (
-        db.query(LiveHoldingSnapshot)
-        .filter(
-            LiveHoldingSnapshot.scope_type == st,
-            LiveHoldingSnapshot.scope_id == scope_id,
-            LiveHoldingSnapshot.snapshot_date == day,
+    if st == "strategy":
+        strategy = (
+            db.query(LiveStrategy).filter(LiveStrategy.id == scope_id).one_or_none()
         )
-        .order_by(LiveHoldingSnapshot.code.asc())
-        .all()
+        if strategy is None:
+            return []
+        scope = _Scope(
+            scope_type="strategy",
+            scope_id=int(scope_id),
+            account_id=int(strategy.account_id),
+            strategy_id=int(scope_id),
+        )
+    else:
+        account = db.query(LiveAccount).filter(LiveAccount.id == scope_id).one_or_none()
+        if account is None:
+            return []
+        scope = _Scope(
+            scope_type="account",
+            scope_id=int(scope_id),
+            account_id=int(scope_id),
+            strategy_id=None,
+        )
+
+    trades_all, _, _, events_all = _scope_rows(db, scope)
+    trades = [t for t in trades_all if t.trade_date <= day]
+    events = [ev for ev in events_all if ev.effective_date <= day]
+    if not trades and not events:
+        return []
+
+    strategy_type_by_id = _strategy_type_map(
+        db, sorted({int(t.strategy_id) for t in trades})
     )
-    return [
-        LiveHoldingOut(
-            snapshot_date=x.snapshot_date.isoformat(),
-            scope_type=x.scope_type,
-            scope_id=int(x.scope_id),
-            account_id=int(x.account_id),
-            strategy_id=x.strategy_id,
-            code=x.code,
-            name=x.name,
-            quantity=float(x.quantity),
-            cost_price=x.cost_price,
-            market_price=x.market_price,
-            cost_value=float(x.cost_value),
-            market_value=x.market_value,
-            pnl_amount=x.pnl_amount,
-            pnl_rate=x.pnl_rate,
-            price_missing=bool(x.price_missing),
-            stale_days=x.stale_days,
+    repo_detail_by_trade_id = _repo_detail_map(db, [int(t.id) for t in trades])
+
+    start = min(
+        [t.trade_date for t in trades] + [ev.effective_date for ev in events] or [day]
+    )
+    price_map = _latest_price_map(
+        db,
+        codes=sorted({_norm_code(t.code) for t in trades}),
+        start=start - dt.timedelta(days=3650),
+        end=day,
+    )
+
+    trade_by_day: dict[dt.date, list[LiveTrade]] = defaultdict(list)
+    for t in trades:
+        trade_by_day[t.trade_date].append(t)
+    events_by_day: dict[dt.date, list[LiveCorporateActionEvent]] = defaultdict(list)
+    for ev in events:
+        events_by_day[ev.effective_date].append(ev)
+
+    alias_map: dict[str, str] = {}
+    for alias in db.query(LiveSymbolAlias).all():
+        alias_map[_norm_code(alias.old_code)] = _norm_code(alias.new_code)
+
+    lots: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    repo_lots: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    open_rounds: dict[tuple[str, int], dict[str, Any]] = {}
+
+    def _ensure_round(key: tuple[str, int], code: str, name: str) -> dict[str, Any]:
+        if key not in open_rounds:
+            open_rounds[key] = {
+                "code": code,
+                "name": name or "",
+                "buy_amount": 0.0,
+                "sell_amount": 0.0,
+                "total_fee": 0.0,
+            }
+        st_round = open_rounds[key]
+        if not st_round.get("name") and name:
+            st_round["name"] = name
+        return st_round
+
+    def _is_key_closed(key: tuple[str, int]) -> bool:
+        stock_qty = float(sum(float(x["qty"]) for x in lots.get(key, [])))
+        repo_qty = float(sum(float(x["principal"]) for x in repo_lots.get(key, [])))
+        return stock_qty <= 1e-12 and repo_qty <= 1e-12
+
+    for d in trading_days(start, day):
+        for ev in events_by_day.get(d, []):
+            code = _apply_symbol_alias(_norm_code(ev.code), alias_map)
+            event_type = str(ev.event_type or "").strip().lower()
+            if event_type in {"split", "share_conversion"}:
+                fac = float(ev.ratio_factor or 0.0)
+                if fac > 0.0:
+                    for key in [k for k in lots.keys() if k[0] == code]:
+                        for lot in lots.get(key, []):
+                            q = float(lot["qty"])
+                            lot["qty"] = q * fac
+                            lot["unit_cost"] = float(lot["unit_cost"]) / fac
+            elif event_type == "code_change":
+                new_code = _norm_code(ev.new_code or "")
+                if new_code:
+                    alias_map[code] = new_code
+                    for old_key in [k for k in list(lots.keys()) if k[0] == code]:
+                        new_key = (new_code, old_key[1])
+                        if new_key == old_key:
+                            continue
+                        lots[new_key].extend(lots.pop(old_key))
+                    for old_key in [k for k in list(repo_lots.keys()) if k[0] == code]:
+                        new_key = (new_code, old_key[1])
+                        if new_key == old_key:
+                            continue
+                        repo_lots[new_key].extend(repo_lots.pop(old_key))
+                    for old_key in [
+                        k for k in list(open_rounds.keys()) if k[0] == code
+                    ]:
+                        st_old = open_rounds.pop(old_key)
+                        new_key = (new_code, old_key[1])
+                        if new_key == old_key:
+                            open_rounds[old_key] = st_old
+                            continue
+                        st_new = _ensure_round(
+                            new_key, new_code, st_old.get("name", "")
+                        )
+                        st_new["buy_amount"] = float(st_new["buy_amount"]) + float(
+                            st_old.get("buy_amount", 0.0)
+                        )
+                        st_new["sell_amount"] = float(st_new["sell_amount"]) + float(
+                            st_old.get("sell_amount", 0.0)
+                        )
+                        st_new["total_fee"] = float(st_new["total_fee"]) + float(
+                            st_old.get("total_fee", 0.0)
+                        )
+
+        day_trades = sorted(
+            trade_by_day.get(d, []),
+            key=lambda x: (str(x.trade_time or ""), int(x.id)),
         )
-        for x in rows
-    ]
+        for t in day_trades:
+            code = _apply_symbol_alias(_norm_code(t.code), alias_map)
+            holder_id = int(t.shareholder_account_id)
+            key = (code, holder_id)
+            side = _norm_side(t.side)
+            qty = float(t.quantity)
+            px = float(t.price)
+            fee = float(t.fee or 0.0)
+            amount = float(t.amount or (qty * px))
+            strategy_type = strategy_type_by_id.get(int(t.strategy_id), "etf_spot")
+
+            if strategy_type == "bond_repo":
+                detail = repo_detail_by_trade_id.get(int(t.id))
+                if detail is None:
+                    continue
+                action = _norm_repo_action(detail.repo_action, side=side)
+                principal = float(detail.principal_amount or amount)
+                st_round = _ensure_round(key, code, t.name or "")
+                st_round["total_fee"] = float(st_round["total_fee"]) + fee
+                if action == "LEND":
+                    repo_lots[key].append(
+                        {
+                            "principal": principal,
+                            "fee_open_remain": fee,
+                            "annual_rate_pct": float(detail.annual_rate_pct or px),
+                            "open_date": t.trade_date,
+                            "interest_days": int(detail.interest_days or 0),
+                            "day_count_basis": int(detail.day_count_basis or 365),
+                            "name": t.name,
+                        }
+                    )
+                    st_round["buy_amount"] = float(st_round["buy_amount"]) + principal
+                else:
+                    remain = principal
+                    fifo = repo_lots.get(key, [])
+                    while remain > 1e-12 and fifo:
+                        top = fifo[0]
+                        top_principal = float(top["principal"])
+                        take = min(remain, top_principal)
+                        top_fee = float(top.get("fee_open_remain", 0.0) or 0.0)
+                        fee_take = (
+                            top_fee * (take / top_principal)
+                            if top_principal > 1e-12 and top_fee > 0
+                            else 0.0
+                        )
+                        top["fee_open_remain"] = max(0.0, top_fee - fee_take)
+                        top["principal"] = top_principal - take
+                        remain -= take
+                        if float(top["principal"]) <= 1e-12:
+                            fifo.pop(0)
+                    st_round["sell_amount"] = float(st_round["sell_amount"]) + amount
+                    if _is_key_closed(key):
+                        open_rounds.pop(key, None)
+                continue
+
+            st_round = _ensure_round(key, code, t.name or "")
+            st_round["total_fee"] = float(st_round["total_fee"]) + fee
+            if side == "BUY":
+                lots[key].append(
+                    {
+                        "qty": qty,
+                        "unit_cost": amount / qty if qty > 1e-12 else 0.0,
+                        "fee_remain": fee,
+                        "name": t.name,
+                    }
+                )
+                st_round["buy_amount"] = float(st_round["buy_amount"]) + amount
+            else:
+                remain = qty
+                fifo = lots.get(key, [])
+                while remain > 1e-12 and fifo:
+                    top = fifo[0]
+                    top_qty = float(top["qty"])
+                    take = min(remain, top_qty)
+                    top_fee = float(top.get("fee_remain", 0.0) or 0.0)
+                    fee_take = (
+                        top_fee * (take / top_qty)
+                        if top_qty > 1e-12 and top_fee > 0
+                        else 0.0
+                    )
+                    top["fee_remain"] = max(0.0, top_fee - fee_take)
+                    top["qty"] = top_qty - take
+                    remain -= take
+                    if float(top["qty"]) <= 1e-12:
+                        fifo.pop(0)
+                st_round["sell_amount"] = float(st_round["sell_amount"]) + amount
+                if _is_key_closed(key):
+                    open_rounds.pop(key, None)
+
+    holder_text_by_id = {
+        int(x.id): str(x.shareholder_account or "")
+        for x in db.query(LiveShareholderAccount)
+        .filter(LiveShareholderAccount.account_id == scope.account_id)
+        .all()
+    }
+
+    active_keys = sorted(
+        {
+            key
+            for key in set(lots.keys()) | set(repo_lots.keys())
+            if (
+                sum(float(x["qty"]) for x in lots.get(key, [])) > 1e-12
+                or sum(float(x["principal"]) for x in repo_lots.get(key, [])) > 1e-12
+            )
+        },
+        key=lambda k: (k[0], int(k[1])),
+    )
+    out_rows: list[LiveHoldingOut] = []
+    for code, holder_id in active_keys:
+        key = (code, holder_id)
+        stock_lots = lots.get(key, [])
+        repo_open_lots = repo_lots.get(key, [])
+        st_round = open_rounds.get(key)
+        buy_amount = float(st_round.get("buy_amount", 0.0)) if st_round else 0.0
+        sell_amount = float(st_round.get("sell_amount", 0.0)) if st_round else 0.0
+        total_fee = float(st_round.get("total_fee", 0.0)) if st_round else 0.0
+
+        market_price: float | None = None
+        stale_days: int | None = None
+        price_missing = False
+        name = ""
+
+        if stock_lots:
+            qty_total = float(sum(float(x["qty"]) for x in stock_lots))
+            mpx, mpx_day = _price_on_or_before(price_map, code, day)
+            market_price = mpx
+            stale_days = (day - mpx_day).days if mpx_day is not None else None
+            price_missing = mpx is None
+            market_value = float(qty_total * mpx) if mpx is not None else None
+            name = str(stock_lots[-1].get("name", "") or "")
+        else:
+            qty_total = float(sum(float(x["principal"]) for x in repo_open_lots))
+            accrued_interest = 0.0
+            for lot in repo_open_lots:
+                principal = float(lot["principal"])
+                lot_days = int(lot["interest_days"])
+                elapsed = (
+                    lot_days
+                    if lot_days > 0
+                    else max((day - lot["open_date"]).days + 1, 0)
+                )
+                accrued_interest += (
+                    principal
+                    * float(lot["annual_rate_pct"])
+                    / 100.0
+                    * float(elapsed)
+                    / float(lot["day_count_basis"])
+                )
+            market_value = float(qty_total + accrued_interest)
+            name = str(repo_open_lots[-1].get("name", "") or "")
+
+        if market_value is not None:
+            cumulative_pnl = float(market_value + sell_amount - buy_amount - total_fee)
+            cost_value = float(market_value - cumulative_pnl)
+        else:
+            cumulative_pnl = None
+            cost_value = float(buy_amount + total_fee - sell_amount)
+        cost_price = float(cost_value / qty_total) if qty_total > 1e-12 else None
+        pnl_rate = (
+            float(cumulative_pnl / cost_value)
+            if cumulative_pnl is not None and abs(cost_value) > 1e-12
+            else None
+        )
+
+        out_rows.append(
+            LiveHoldingOut(
+                snapshot_date=day.isoformat(),
+                scope_type=st,
+                scope_id=int(scope_id),
+                account_id=int(scope.account_id),
+                strategy_id=scope.strategy_id,
+                shareholder_account_id=int(holder_id),
+                shareholder_account=holder_text_by_id.get(int(holder_id)) or None,
+                code=code,
+                name=name,
+                quantity=qty_total,
+                cost_price=cost_price,
+                market_price=market_price,
+                cost_value=float(cost_value),
+                market_value=market_value,
+                pnl_amount=cumulative_pnl,
+                pnl_rate=pnl_rate,
+                price_missing=bool(price_missing),
+                stale_days=stale_days,
+            )
+        )
+    return out_rows
 
 
 @router.get("/closed-rounds")
