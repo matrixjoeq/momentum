@@ -193,6 +193,26 @@ Note: the project uses setuptools with a pyproject.toml and dev extras for tests
 - Add small, focused tests for any new feature or bug fix.
 - When adding or changing an API route, add or extend an HTTP-level contract test so every method/path remains covered (see **API contract test rule** above).
 
+5. Skills and Workflows (技能与工作流)
+
+- **Purpose:** Skills are the _executable entry points_ for the strong constraints defined elsewhere in this file. They do not replace the authoritative rules. On any conflict, `SOUL.md` and `AGENTS.md` win over a skill. Always wrap work in the mandatory **using-superpowers** pipeline: 规划 → 拆解 → 执行 → 审查 → 复盘.
+
+- **Project-local skills (repo-committed, under `.cursor/skills/`):** these operationalize the rules above into "when to trigger + steps + checklist + delivery evidence". Read and follow the matching skill _before_ coding when its trigger applies.
+  - `.cursor/skills/momentum-strategy-research/SKILL.md` → maps to: Strategy research parity rule, Strategy baseline charting/reporting rule, Strategy layout rule, Strategy benchmark NAV rule, Strict execution-timing NAV rule, Price-adjustment rule, Engine consistency rule, Strategy group-selection rule, Strategy parameter persistence rule, Multi-strategy coverage rule. Trigger: editing `research.html` strategy sections or `analysis/` strategy engines.
+  - `.cursor/skills/momentum-live-trading/SKILL.md` → maps to: Financial-engineering DoD gate, Tolerance policy, Scope additivity rule, Time-slice consistency rule, Funding constraint rule, Delivery evidence rule. Trigger: any change to cash/holdings/NAV/PnL/attribution/fees/replay/scope (`api/live_trading.py`, `db/models.py` Live* tables, `trading_records.html`).
+  - `.cursor/skills/momentum-data-ops/SKILL.md` → maps to: Price-adjustment rule for NAV computation, Futures trend research price basis, Futures correlation matrix. Trigger: data ingestion/validation, `none`/`hfq` handling, `{root}889` synthesis, EOD sync (`data/`, `validation/`, `scheduler/market_sync.py`, `scripts/update_macro.py`).
+  - `.cursor/skills/momentum-api-contract/SKILL.md` → maps to: API contract test rule. Trigger: adding/changing any `/api/...` route or request/response schema.
+  - `.cursor/skills/momentum-futures-research/SKILL.md` → maps to: Futures trend portfolio sizing, Futures monthly risk budget gate, Futures trend research price basis, Futures correlation matrix, Futures indicators/backtest library rule, TA-Lib/backtesting API verification rule. Trigger: futures trend/rotation/lot-account, TA-Lib/backtesting code, 889/sizing/risk-budget work.
+
+- **End-to-end workflows (orchestration of installed + project-local skills):**
+  - **A. 策略研究 (Strategy research):** `brainstorming` → `momentum-strategy-research` → `python`/`code` → `momentum-api-contract` (add contract tests) → `code-review` (optional `review-bugbot`) → `self-improving`. Use when adding/modifying a research strategy.
+  - **B. 实盘记录与对账 (Live records & reconciliation):** `momentum-live-trading` (DoD gate) → `momentum-data-ops` (price/adjustment alignment) → replay → six DoD checks + delivery evidence note. Use for any finance-critical live-trading change.
+  - **C. 每日数据运维 / EOD (Daily data ops):** `macro-monitor` + `momentum-data-ops` → validation → next-trading-day buy/sell plan (feeds the strategy page "next-day plan"). Use for scheduled/EOD data refresh and planning.
+  - **D. 研究报告产出 (Research report):** `data-analysis` → `canvas` / `word-docx` / `powerpoint-pptx` / `pdf` → `humanizer`. Use to turn analysis into shareable deliverables.
+  - **E. 技能治理 (Skill governance):** `find-skills` / `search-skill` → `skill-vetter` → user confirmation → `skill-creator` / `skill-from-*` to create or install. Must follow the **Installing Skills** workflow in § Security and secrets (vet → report → confirm → install only after approval). Do not install external skills without explicit user approval.
+
+- **Maintenance:** When a new strategy/engine/route/data source is added, update the matching project-local skill checklist in the same change, and add a new skill (or workflow) here if a new recurring task class emerges.
+
 Appendix: repository references
 
 - Tests live under `/tests`.
