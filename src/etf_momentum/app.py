@@ -67,6 +67,14 @@ def create_app() -> FastAPI:
             return RedirectResponse(url="/docs")
         return FileResponse(path)
 
+    @fastapi_app.get("/global-benchmark-pool")
+    def global_benchmark_pool():
+        _ = get_settings()
+        path = Path(__file__).resolve().parent / "web" / "global_benchmark_pool.html"
+        if not path.exists():
+            return RedirectResponse(url="/docs")
+        return FileResponse(path)
+
     @fastapi_app.get("/futures-pool")
     def futures_pool():
         _ = get_settings()

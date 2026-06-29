@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>全球基准指数候选池</title>
+    <script>
+      (function () {
+        const key = `theme:${location.pathname}`;
+        let theme = "dark";
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved === "light" || saved === "dark") theme = saved;
+        } catch (_) {}
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/terminal.css" />
+    <style>
+      input,
+      select {
+        min-width: 150px;
+      }
+      table {
+        margin-top: 16px;
+      }
+      th,
+      td {
+        padding: 10px;
+      }
+      .msg {
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>全球基准指数候选池配置</h2>
+    <div class="muted">
+      独立于
+      ETF/场外基金/期货候选池。阶段1仅实现候选池配置与无复权价格读取接口骨架。
+    </div>
+    <div class="muted" style="margin-top: 6px">
+      <a href="/">ETF 候选池</a>
+      <span style="margin: 0 6px">|</span>
+      <a href="/off-fund-pool">场外基金候选池</a>
+      <span style="margin: 0 6px">|</span>
+      <a href="/futures-pool">期货标的池</a>
+      <span style="margin: 0 6px">|</span>
+      <a href="/research">ETF 研究</a>
+    </div>
+
+    <div style="margin-top: 16px" class="row">
+      <div>
+        <label>指数代码</label>
+        <input id="code" placeholder="如 000300 / ^GSPC / HSI" />
+      </div>
+      <div>
+        <label>指数名称</label>
+        <input id="name" placeholder="如 标普500" />
+      </div>
+      <div>
+        <label>代码格式</label>
+        <input id="codeFormat" placeholder="auto / cn_6 / hk / yahoo / msci" />
+      </div>
+      <div>
+        <label>数据源提示</label>
+        <input id="providerHint" placeholder="auto / tencent / yahoo / sina" />
+      </div>
+      <div>
+        <label>开始日期</label>
+        <input id="start" placeholder="YYYYMMDD (可空)" />
+      </div>
+      <div>
+        <label>结束日期</label>
+        <input id="end" placeholder="YYYYMMDD (可空)" />
+      </div>
+      <button id="save">保存/更新</button>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>代码</th>
+          <th>名称</th>
+          <th>格式/源</th>
+          <th>配置区间</th>
+          <th>已抓取区间(none)</th>
+          <th>抓取状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <script>
+      (function initThemeToggle() {
+        const key = `theme:${location.pathname}`;
+        const html = document.documentElement;
+        const nextTheme = () =>
+          html.getAttribute("data-theme") === "light" ? "dark" : "light";
+        const apply = (theme) => {
+          html.setAttribute("data-theme", theme);
+          try {
+            localStorage.setItem(key, theme);
+          } catch (_) {}
+          const btn = document.getElementById("themeToggle");
+          if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+        };
+        document.addEventListener("DOMContentLoaded", () => {
+          const btn = document.createElement("button");
+          btn.id = "themeToggle";
+          btn.className = "theme-toggle";
+          btn.type = "button";
+          btn.addEventListener("click", () => apply(nextTheme()));
+          document.body.appendChild(btn);
+          apply(html.getAttribute("data-theme") || "dark");
+        });
+      })();
+
+      const api = (path, opts) =>
+        fetch(`/api${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
+      const $ = (id) => document.getElementById(id);
+      const setMsg = (t) => ($("msg").textContent = t || "");
+
+      function statusClass(s) {
+        if (!s) return "status-null";
+        if (s === "success") return "status-success";
+        if (s === "failed") return "status-failed";
+        return "";
+      }
+
+      async function refresh() {
+        const resp = await api("/global-benchmark?adjust=none", {
+          method: "GET",
+        });
+        const data = await resp.json();
+        const tbody = $("tbody");
+        tbody.innerHTML = "";
+        if (!Array.isArray(data) || data.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" class="muted">候选池为空：请先保存指数代码/名称。</td></tr>`;
+          return;
+        }
+        for (const it of data) {
+          const tr = document.createElement("tr");
+          const cfgRange = `${it.start_date || "-"} ~ ${it.end_date || "-"}`;
+          const dataRange =
+            it.last_data_start_date && it.last_data_end_date
+              ? `${it.last_data_start_date} ~ ${it.last_data_end_date}`
+              : "没有";
+          const st = it.last_fetch_status || "";
+          const msg = it.last_fetch_message || "";
+          tr.innerHTML = `
+            <td>${it.code}</td>
+            <td>${it.name}</td>
+            <td><div>${it.code_format || "-"}</div><div class="muted">${it.provider_hint || "-"}</div></td>
+            <td>${cfgRange}</td>
+            <td>${dataRange}</td>
+            <td class="${statusClass(st)}">${st || "-"} <span class="muted">${msg ? "· " + msg : ""}</span></td>
+            <td>
+              <div class="actions">
+                <button data-act="edit" data-code="${it.code}">编辑</button>
+                <button data-act="del" data-code="${it.code}">删除</button>
+              </div>
+            </td>
+          `;
+          tr.dataset.item = JSON.stringify(it);
+          tbody.appendChild(tr);
+        }
+      }
+
+      $("save").addEventListener("click", async () => {
+        const payload = {
+          code: $("code").value.trim(),
+          name: $("name").value.trim(),
+          code_format: $("codeFormat").value.trim() || null,
+          provider_hint: $("providerHint").value.trim() || null,
+          start_date: $("start").value.trim() || null,
+          end_date: $("end").value.trim() || null,
+        };
+        const resp = await api("/global-benchmark", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        const txt = await resp.text();
+        if (!resp.ok) return setMsg(txt);
+        $("code").value = "";
+        $("name").value = "";
+        $("codeFormat").value = "";
+        $("providerHint").value = "";
+        $("start").value = "";
+        $("end").value = "";
+        await refresh();
+      });
+
+      $("tbody").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        const act = btn.getAttribute("data-act");
+        const code = btn.getAttribute("data-code");
+        const tr = btn.closest("tr");
+        const it = tr && tr.dataset.item ? JSON.parse(tr.dataset.item) : null;
+        if (act === "edit" && it) {
+          $("code").value = it.code;
+          $("name").value = it.name;
+          $("codeFormat").value = it.code_format || "";
+          $("providerHint").value = it.provider_hint || "";
+          $("start").value = it.start_date || "";
+          $("end").value = it.end_date || "";
+          setMsg("已载入到表单，修改后点“保存/更新”。");
+          return;
+        }
+        if (act === "del") {
+          if (
+            !confirm(
+              `将彻底删除 ${code}：\n\n- 候选池记录\n- 全部已抓取价格（none）\n\n此操作不可恢复，确认继续？`,
+            )
+          )
+            return;
+          const resp = await api(
+            `/global-benchmark/${encodeURIComponent(code)}`,
+            {
+              method: "DELETE",
+            },
+          );
+          const txt = await resp.text();
+          if (!resp.ok) return setMsg(txt);
+          await refresh();
+          setMsg(txt || "删除成功。");
+        }
+      });
+
+      refresh().catch((e) => setMsg(String(e)));
+    </script>
+  </body>
+</html>

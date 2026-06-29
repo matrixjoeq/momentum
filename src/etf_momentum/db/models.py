@@ -381,6 +381,79 @@ class OffFundRegressionFactorConfig(Base):
     )
 
 
+class GlobalBenchmarkPool(Base):
+    """
+    Global benchmark index candidate pool.
+    Independent from ETF/off-fund/futures pools.
+    """
+
+    __tablename__ = "global_benchmark_pool"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    code_format: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_hint: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
+    end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
+
+    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_fetch_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_fetch_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    last_data_start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    last_data_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class GlobalBenchmarkPrice(Base):
+    """
+    Global benchmark index daily prices.
+    Price basis is fixed to raw/unadjusted (`none`).
+    """
+
+    __tablename__ = "global_benchmark_prices"
+    __table_args__ = (
+        UniqueConstraint(
+            "code",
+            "trade_date",
+            "adjust",
+            name="uq_global_benchmark_prices_code_trade_date_adjust",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+
+    open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="none")
+
+    ingested_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class FuturesPool(Base):
     """
     Futures candidate pool.

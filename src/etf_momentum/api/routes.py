@@ -80,6 +80,9 @@ from .schemas import (
     SimGbmPhase3Request,
     SimGbmPhase4Request,
     SimGbmAbSignificanceRequest,
+    GlobalBenchmarkPoolOut,
+    GlobalBenchmarkPoolUpsert,
+    GlobalBenchmarkPriceOut,
     EtfPoolOut,
     EtfPoolUpsert,
     EtfResearchGroupOut,
@@ -279,6 +282,15 @@ from ..db.off_fund_repo import (
     list_off_fund_pool,
     purge_off_fund_data,
     upsert_off_fund_pool,
+)
+from ..db.global_benchmark_repo import (
+    delete_global_benchmark_pool,
+    get_global_benchmark_date_range,
+    list_global_benchmark_pool,
+    list_global_benchmark_prices,
+    normalize_adjust as normalize_global_benchmark_adjust,
+    purge_global_benchmark_data,
+    upsert_global_benchmark_pool,
 )
 from ..db.off_fund_regression_repo import (
     delete_off_fund_factor_config,
@@ -7051,6 +7063,129 @@ def import_etf_research_groups_api(
         "active_group": (active_group_obj.name if active_group_obj else None),
         "skipped_codes": skipped_codes,
     }
+
+
+@router.get("/global-benchmark", response_model=list[GlobalBenchmarkPoolOut])
+def get_global_benchmarks(
+    adjust: str = "none",
+    db: Session = Depends(get_session),
+) -> list[GlobalBenchmarkPoolOut]:
+    try:
+        _ = normalize_global_benchmark_adjust(adjust)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    items = list_global_benchmark_pool(db)
+    out: list[GlobalBenchmarkPoolOut] = []
+    for i in items:
+        rng = get_global_benchmark_date_range(db, code=i.code, adjust=adjust)
+        out.append(
+            GlobalBenchmarkPoolOut(
+                code=i.code,
+                name=i.name,
+                code_format=i.code_format,
+                provider_hint=i.provider_hint,
+                start_date=i.start_date,
+                end_date=i.end_date,
+                last_fetch_status=i.last_fetch_status,
+                last_fetch_message=i.last_fetch_message,
+                last_data_start_date=rng[0],
+                last_data_end_date=rng[1],
+            )
+        )
+    return out
+
+
+@router.post("/global-benchmark", response_model=GlobalBenchmarkPoolOut)
+def upsert_global_benchmark(
+    payload: GlobalBenchmarkPoolUpsert,
+    db: Session = Depends(get_session),
+) -> GlobalBenchmarkPoolOut:
+    if payload.start_date and len(payload.start_date) != 8:
+        raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
+    if payload.end_date and len(payload.end_date) != 8:
+        raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
+    if (
+        payload.start_date
+        and payload.end_date
+        and str(payload.start_date) > str(payload.end_date)
+    ):
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+    code_format = str(payload.code_format or "").strip().lower() or None
+    provider_hint = str(payload.provider_hint or "").strip().lower() or None
+    obj = upsert_global_benchmark_pool(
+        db,
+        code=str(payload.code).strip(),
+        name=str(payload.name).strip(),
+        code_format=code_format,
+        provider_hint=provider_hint,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    db.commit()
+    return GlobalBenchmarkPoolOut(
+        code=obj.code,
+        name=obj.name,
+        code_format=obj.code_format,
+        provider_hint=obj.provider_hint,
+        start_date=obj.start_date,
+        end_date=obj.end_date,
+        last_fetch_status=obj.last_fetch_status,
+        last_fetch_message=obj.last_fetch_message,
+        last_data_start_date=obj.last_data_start_date,
+        last_data_end_date=obj.last_data_end_date,
+    )
+
+
+@router.delete("/global-benchmark/{code}")
+def delete_global_benchmark_api(code: str, db: Session = Depends(get_session)) -> dict:
+    ok = delete_global_benchmark_pool(db, code)
+    if not ok:
+        raise HTTPException(status_code=404, detail="global benchmark not found")
+    purged = purge_global_benchmark_data(db, code=code)
+    db.commit()
+    return {"deleted": True, "purged": purged}
+
+
+@router.get(
+    "/global-benchmark/{code}/prices",
+    response_model=list[GlobalBenchmarkPriceOut],
+)
+def get_global_benchmark_prices_api(
+    code: str,
+    start: str | None = None,
+    end: str | None = None,
+    adjust: str = "none",
+    limit: int = 5000,
+    db: Session = Depends(get_session),
+) -> list[GlobalBenchmarkPriceOut]:
+    start_d = _parse_yyyymmdd(start) if start else None
+    end_d = _parse_yyyymmdd(end) if end else None
+    try:
+        rows = list_global_benchmark_prices(
+            db,
+            code=code,
+            adjust=adjust,
+            start_date=start_d,
+            end_date=end_d,
+            limit=limit,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return [
+        GlobalBenchmarkPriceOut(
+            code=r.code,
+            trade_date=r.trade_date.isoformat(),
+            open=r.open,
+            high=r.high,
+            low=r.low,
+            close=r.close,
+            volume=r.volume,
+            amount=r.amount,
+            source=r.source,
+            adjust=r.adjust,
+        )
+        for r in rows
+    ]
 
 
 def _off_fund_factor_cfg_out(x) -> OffFundRegressionFactorConfigOut:

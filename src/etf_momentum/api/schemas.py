@@ -114,6 +114,41 @@ class PriceOut(BaseModel):
     adjust: str
 
 
+class GlobalBenchmarkPoolUpsert(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    code_format: str | None = Field(default=None, max_length=32)
+    provider_hint: str | None = Field(default=None, max_length=32)
+    start_date: str | None = Field(default=None, description="YYYYMMDD")
+    end_date: str | None = Field(default=None, description="YYYYMMDD")
+
+
+class GlobalBenchmarkPoolOut(BaseModel):
+    code: str
+    name: str
+    code_format: str | None = None
+    provider_hint: str | None = None
+    start_date: str | None
+    end_date: str | None
+    last_fetch_status: str | None = None
+    last_fetch_message: str | None = None
+    last_data_start_date: str | None = None
+    last_data_end_date: str | None = None
+
+
+class GlobalBenchmarkPriceOut(BaseModel):
+    code: str
+    trade_date: str
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    volume: float | None
+    amount: float | None
+    source: str
+    adjust: str
+
+
 class OffFundPoolUpsert(BaseModel):
     code: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=128)

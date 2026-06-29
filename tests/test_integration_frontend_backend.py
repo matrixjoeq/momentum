@@ -20,6 +20,7 @@ def test_frontend_backend_contract_smoke(api_client: TestClient) -> None:
     assert "/fetch-selected" in html
     assert "/fetch-all" in html
     assert "fetchMode" in html
+    assert "/global-benchmark-pool" in html
     assert "/futures-pool" in html
     assert "/research/futures" in html
 
@@ -36,6 +37,12 @@ def test_frontend_backend_contract_smoke(api_client: TestClient) -> None:
     fut_html = resp.text
     assert "/futures/fetch-selected" in fut_html
     assert "/futures/fetch-all" in fut_html
+
+    resp = client.get("/global-benchmark-pool")
+    assert resp.status_code == 200
+    gb_html = resp.text
+    assert "/global-benchmark?adjust=none" in gb_html
+    assert "/global-benchmark" in gb_html
 
     resp = client.get("/research/futures")
     assert resp.status_code == 200
