@@ -7,6 +7,7 @@ import pytest
 from etf_momentum.analysis.trend import (
     TrendInputs,
     _risk_budget_dynamic_weights,
+    _risk_budget_periodic_weights,
     _next_vol_regime_state,
     _trade_stats_from_returns,
     _semi_variance_run_stats_from_returns,
@@ -109,6 +110,54 @@ def test_risk_budget_dynamic_weights_supports_extreme_tier_transition() -> None:
     # EXTREME -> REDUCED transition should rebalance once.
     assert float(w.iloc[1]) > float(w.iloc[0])
     assert int(stats.get("vol_risk_adjust_total_count") or 0) == 1
+
+
+def test_risk_budget_periodic_weights_rebalances_on_threshold_and_resets_baseline() -> (
+    None
+):
+    idx = pd.date_range("2024-01-01", periods=4, freq="B")
+    active = pd.Series([1, 1, 1, 1], index=idx, dtype=float)
+    close = pd.Series([100, 100, 100, 100], index=idx, dtype=float)
+    # target weights: 0.50 -> 0.51 -> 0.55 -> 0.56
+    atr_b = pd.Series([2.00, 1.9607843137, 1.8181818182, 1.7857142857], index=idx)
+    w, stats = _risk_budget_periodic_weights(
+        active,
+        close=close,
+        atr_for_budget=atr_b,
+        risk_budget_pct=0.01,
+        rebalance_threshold_pct=0.05,
+    )
+    assert float(w.iloc[0]) == pytest.approx(0.5, rel=0.0, abs=1e-12)
+    assert float(w.iloc[1]) == pytest.approx(0.5, rel=0.0, abs=1e-12)
+    assert float(w.iloc[2]) == pytest.approx(0.55, rel=0.0, abs=1e-9)
+    assert float(w.iloc[3]) == pytest.approx(0.55, rel=0.0, abs=1e-9)
+    assert int(stats.get("periodic_rebalance_evaluated_count") or 0) == 3
+    assert int(stats.get("periodic_rebalance_trigger_count") or 0) == 1
+    assert int(stats.get("periodic_rebalance_skip_count") or 0) == 2
+
+
+def test_trend_single_rejects_mutual_vol_regime_and_periodic_risk_mgmt(
+    session_factory,
+) -> None:
+    sf = session_factory
+    with sf() as db:
+        with pytest.raises(ValueError) as exc:
+            compute_trend_backtest(
+                db,
+                TrendInputs(
+                    code="MUTUAL_SINGLE",
+                    start=dt.date(2024, 1, 2),
+                    end=dt.date(2024, 1, 10),
+                    strategy="ma_filter",
+                    sma_window=2,
+                    position_sizing="risk_budget",
+                    vol_regime_risk_mgmt_enabled=True,
+                    vol_periodic_risk_mgmt_enabled=True,
+                    cost_bps=0.0,
+                    slippage_rate=0.0,
+                ),
+            )
+    assert "cannot both be enabled" in str(exc.value)
 
 
 def test_vol_regime_state_machine_allows_direct_cross_tier_jumps() -> None:
@@ -2647,6 +2696,6 @@ def test_trend_backtest_cash_management_uses_511880_qfq(session_factory):
     assert len(cash_decomp) == len((out.get("nav") or {}).get("dates") or [])
     assert any(abs(x) > 0.0 for x in cash_decomp)
     by_code = (
-        (((out.get("attribution") or {}).get("return") or {}).get("by_code")) or []
-    )
+        ((out.get("attribution") or {}).get("return") or {}).get("by_code")
+    ) or []
     assert any(str((r or {}).get("code") or "") == cash_code for r in by_code)

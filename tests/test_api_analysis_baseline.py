@@ -2041,6 +2041,250 @@ def test_api_trend_single_rejects_invalid_vol_regime_extreme_threshold(api_clien
     )
 
 
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_single_periodic_risk_mgmt_stats_contract(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    series = {"RBVP1": [100.0 + i * 0.5 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "code": "RBVP1",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "position_sizing": "risk_budget",
+        "risk_budget_atr_window": 20,
+        "risk_budget_pct": 0.01,
+        "vol_periodic_risk_mgmt_enabled": True,
+        "vol_periodic_rebalance_threshold_pct": 0.05,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend", payload)
+    params = (out.get("meta") or {}).get("params") or {}
+    assert params.get("vol_periodic_risk_mgmt_enabled") is True
+    assert float(
+        params.get("vol_periodic_rebalance_threshold_pct") or 0.0
+    ) == pytest.approx(0.05)
+    rc = (out.get("risk_controls") or {}).get("vol_periodic_risk_mgmt") or {}
+    assert rc.get("enabled") is True
+    assert float(rc.get("rebalance_threshold_pct") or 0.0) == pytest.approx(0.05)
+    overall = (out.get("trade_statistics") or {}).get("overall") or {}
+    assert "vol_periodic_rebalance_trigger_count" in overall
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_single_periodic_risk_mgmt_lot_stats_contract(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    series = {"RBVP1L": [100.0 + i * 0.5 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "code": "RBVP1L",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "position_sizing": "risk_budget",
+        "risk_budget_atr_window": 20,
+        "risk_budget_pct": 0.01,
+        "vol_periodic_risk_mgmt_enabled": True,
+        "vol_periodic_rebalance_threshold_pct": 0.05,
+        "initial_account_amount": 1_000_000.0,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend", payload)
+    rc = (out.get("risk_controls") or {}).get("vol_periodic_risk_mgmt") or {}
+    lot_meta = (out.get("meta") or {}).get("account_lot_sizing") or {}
+    lot_stats = (lot_meta.get("periodic_rebalance_stats") or {}).get("overall") or {}
+    assert bool(lot_meta.get("enabled")) is True
+    assert bool(lot_meta.get("periodic_rebalance_enabled")) is True
+    assert int(rc.get("evaluated_count") or 0) == int(
+        lot_stats.get("periodic_rebalance_evaluated_count") or 0
+    )
+    assert int(rc.get("trigger_count") or 0) == int(
+        lot_stats.get("periodic_rebalance_trigger_count") or 0
+    )
+    assert int(rc.get("skip_count") or 0) == int(
+        lot_stats.get("periodic_rebalance_skip_count") or 0
+    )
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_single_periodic_risk_mgmt_enabled_false_when_not_risk_budget(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    series = {"RBVP1E": [100.0 + i * 0.3 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "code": "RBVP1E",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "position_sizing": "equal",
+        "vol_periodic_risk_mgmt_enabled": True,
+        "vol_periodic_rebalance_threshold_pct": 0.05,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend", payload)
+    rc = (out.get("risk_controls") or {}).get("vol_periodic_risk_mgmt") or {}
+    assert rc.get("enabled") is False
+
+
+def test_api_trend_single_periodic_risk_mgmt_legacy_bt_consistent(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    series = {"RBVP1C": [100.0 + i * 0.5 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "code": "RBVP1C",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "position_sizing": "risk_budget",
+        "risk_budget_atr_window": 20,
+        "risk_budget_pct": 0.01,
+        "vol_periodic_risk_mgmt_enabled": True,
+        "vol_periodic_rebalance_threshold_pct": 0.05,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    out_legacy = post_json_ok(c, "/api/analysis/trend", dict(payload))
+    out_bt = post_json_ok(c, "/api/analysis/trend", {**payload, "engine": "bt"})
+    legacy_rc = (out_legacy.get("risk_controls") or {}).get(
+        "vol_periodic_risk_mgmt"
+    ) or {}
+    bt_rc = (out_bt.get("risk_controls") or {}).get("vol_periodic_risk_mgmt") or {}
+    assert int(legacy_rc.get("trigger_count") or 0) == int(
+        bt_rc.get("trigger_count") or 0
+    )
+    legacy_overall = (out_legacy.get("trade_statistics") or {}).get("overall") or {}
+    bt_overall = (out_bt.get("trade_statistics") or {}).get("overall") or {}
+    assert int(legacy_overall.get("vol_periodic_rebalance_trigger_count") or 0) == int(
+        bt_overall.get("vol_periodic_rebalance_trigger_count") or 0
+    )
+
+
+def test_api_trend_single_rejects_mutual_vol_regime_and_periodic_risk_mgmt(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "vol_regime_risk_mgmt_enabled": True,
+            "vol_periodic_risk_mgmt_enabled": True,
+        },
+        expected_status=422,
+    )
+    assert "cannot both be enabled" in str(err)
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_portfolio_periodic_risk_mgmt_stats_contract(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]
+    series = {"RBVP2": [100.0 + i * 0.4 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "codes": ["RBVP2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "position_sizing": "risk_budget",
+        "risk_budget_atr_window": 20,
+        "risk_budget_pct": 0.01,
+        "vol_periodic_risk_mgmt_enabled": True,
+        "vol_periodic_rebalance_threshold_pct": 0.05,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend/portfolio", payload)
+    params = (out.get("meta") or {}).get("params") or {}
+    assert params.get("vol_periodic_risk_mgmt_enabled") is True
+    rc = (out.get("risk_controls") or {}).get("vol_periodic_risk_mgmt") or {}
+    assert rc.get("enabled") is True
+    assert "trigger_count" in rc
+    by_code = ((out.get("trade_statistics") or {}).get("by_code") or {}).get(
+        "RBVP2", {}
+    )
+    assert "vol_periodic_rebalance_trigger_count" in by_code
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_portfolio_periodic_risk_mgmt_enabled_false_when_not_risk_budget(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    series = {"RBVP2E": [100.0 + i * 0.4 for i, _ in enumerate(dates)]}
+    seed_prices(engine, code_to_series=series, dates=dates)
+    c = api_client
+    payload = {
+        "codes": ["RBVP2E"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "position_sizing": "equal",
+        "vol_periodic_risk_mgmt_enabled": True,
+        "vol_periodic_rebalance_threshold_pct": 0.05,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(c, "/api/analysis/trend/portfolio", payload)
+    rc = (out.get("risk_controls") or {}).get("vol_periodic_risk_mgmt") or {}
+    assert rc.get("enabled") is False
+
+
+def test_api_trend_portfolio_rejects_periodic_threshold_above_one(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["510300"],
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "position_sizing": "risk_budget",
+            "vol_periodic_risk_mgmt_enabled": True,
+            "vol_periodic_rebalance_threshold_pct": 1.01,
+        },
+        expected_status=422,
+    )
+    assert "vol_periodic_rebalance_threshold_pct" in str(err)
+
+
 def test_api_trend_portfolio_risk_budget_freezes_weight_after_entry(engine, api_client):
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
     series = {"RBP1": [100.0 + i * 0.6 for i, _ in enumerate(dates)]}

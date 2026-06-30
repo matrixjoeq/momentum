@@ -4797,6 +4797,17 @@
           </select>
         </div>
         <div>
+          <label>波动率定期风控</label>
+          <select id="trendVolPeriodicRiskMgmtEnable" style="min-width: 140px">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>最小仓位变化阈值%(按份数)</label>
+          <input id="trendVolPeriodicRebalanceThresholdPct" value="5" />
+        </div>
+        <div>
           <label>波动比率快ATR周期</label>
           <input id="trendVolRatioFastAtrWindow" value="5" />
         </div>
@@ -8021,6 +8032,8 @@
           "trendRiskBudgetOvercapPolicy",
           "trendRiskBudgetMaxLeverage",
           "trendVolRegimeRiskMgmtEnable",
+          "trendVolPeriodicRiskMgmtEnable",
+          "trendVolPeriodicRebalanceThresholdPct",
           "trendVolRatioFastAtrWindow",
           "trendVolRatioSlowAtrWindow",
           "trendVolRatioExpandThreshold",
@@ -11108,6 +11121,20 @@
         setEnabled($("trendErExitWindow"), erExitOn);
         setEnabled($("trendErExitThreshold"), erExitOn);
       }
+      function _enforceTrendVolRiskMutualExclusion(changedId = null) {
+        const volMgmtOnEl = $("trendVolRegimeRiskMgmtEnable");
+        const periodicOnEl = $("trendVolPeriodicRiskMgmtEnable");
+        if (!volMgmtOnEl || !periodicOnEl) return;
+        const volOn = String(volMgmtOnEl.value || "false") === "true";
+        const periodicOn = String(periodicOnEl.value || "false") === "true";
+        if (!(volOn && periodicOn)) return;
+        if (changedId === "trendVolPeriodicRiskMgmtEnable") {
+          volMgmtOnEl.value = "false";
+          return;
+        }
+        periodicOnEl.value = "false";
+      }
+
       function updateTrendSizingUi() {
         const mode =
           $("trendMode") && $("trendMode").value
@@ -11128,16 +11155,25 @@
         const rbOvercapEl = $("trendRiskBudgetOvercapPolicy");
         const rbMaxLevEl = $("trendRiskBudgetMaxLeverage");
         const volMgmtOnEl = $("trendVolRegimeRiskMgmtEnable");
+        const periodicVolMgmtOnEl = $("trendVolPeriodicRiskMgmtEnable");
+        const periodicVolThresholdEl = $(
+          "trendVolPeriodicRebalanceThresholdPct",
+        );
         const volFastEl = $("trendVolRatioFastAtrWindow");
         const volSlowEl = $("trendVolRatioSlowAtrWindow");
         const volExpandEl = $("trendVolRatioExpandThreshold");
         const volContractEl = $("trendVolRatioContractThreshold");
         const volNormalEl = $("trendVolRatioNormalThreshold");
         const volExtremeEl = $("trendVolRatioExtremeThreshold");
+        _enforceTrendVolRiskMutualExclusion();
         const volMgmtOn =
           isRiskBudget &&
           volMgmtOnEl &&
           String(volMgmtOnEl.value || "false") === "true";
+        const periodicVolMgmtOn =
+          isRiskBudget &&
+          periodicVolMgmtOnEl &&
+          String(periodicVolMgmtOnEl.value || "false") === "true";
         if (singleCodeEl) {
           const enableSingleCode = mode === "single";
           singleCodeEl.disabled = !enableSingleCode;
@@ -11182,6 +11218,16 @@
         if (volMgmtOnEl) {
           volMgmtOnEl.disabled = !isRiskBudget;
           volMgmtOnEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        if (periodicVolMgmtOnEl) {
+          periodicVolMgmtOnEl.disabled = !isRiskBudget;
+          periodicVolMgmtOnEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        if (periodicVolThresholdEl) {
+          periodicVolThresholdEl.disabled = !periodicVolMgmtOn;
+          periodicVolThresholdEl.style.opacity = periodicVolMgmtOn
+            ? "1"
+            : "0.55";
         }
         for (const el of [
           volFastEl,
@@ -11325,6 +11371,8 @@
           "trendBiasVTpAtrWin",
           "trendBiasVTpTiers",
           "trendVolRegimeRiskMgmtEnable",
+          "trendVolPeriodicRiskMgmtEnable",
+          "trendVolPeriodicRebalanceThresholdPct",
           "trendVolRatioFastAtrWindow",
           "trendVolRatioSlowAtrWindow",
           "trendVolRatioExpandThreshold",
@@ -11372,6 +11420,8 @@
           "trendBiasVTpAtrWin",
           "trendBiasVTpTiers",
           "trendVolRegimeRiskMgmtEnable",
+          "trendVolPeriodicRiskMgmtEnable",
+          "trendVolPeriodicRebalanceThresholdPct",
           "trendVolRatioFastAtrWindow",
           "trendVolRatioSlowAtrWindow",
           "trendVolRatioExpandThreshold",
@@ -11581,6 +11631,10 @@
             "分层参数：格式 v:ratio（如 5:0.5,7:0.3,9:0.2），表示 BIAS-V 达到对应阈值时按当前剩余仓位比例减仓。",
           trendVolRegimeRiskMgmtEnable:
             "波动率动态风控：仅在风险预算仓位模式生效；持仓后按 ATR(5)/ATR(50) 判断放大/缩小并动态调仓。",
+          trendVolPeriodicRiskMgmtEnable:
+            "波动率定期风控：仅在风险预算仓位模式生效；与波动率动态风控互斥，按ATR风险预算目标仓位与当前仓位份数变化阈值决定是否调仓。",
+          trendVolPeriodicRebalanceThresholdPct:
+            "最小仓位变化阈值：按份数口径比较 |新仓位-现仓位|/现仓位，达到阈值才触发调仓；支持输入百分数（如5表示5%）。",
           trendVolRatioFastAtrWindow:
             "波动比率快ATR周期：默认5，用于 ATR(5)/ATR(50) 分子。",
           trendVolRatioSlowAtrWindow:
@@ -30542,6 +30596,18 @@
             $("trendVolRegimeRiskMgmtEnable").value
               ? String($("trendVolRegimeRiskMgmtEnable").value) === "true"
               : false,
+          vol_periodic_risk_mgmt_enabled:
+            $("trendVolPeriodicRiskMgmtEnable") &&
+            $("trendVolPeriodicRiskMgmtEnable").value
+              ? String($("trendVolPeriodicRiskMgmtEnable").value) === "true"
+              : false,
+          vol_periodic_rebalance_threshold_pct: Number(
+            ($("trendVolPeriodicRebalanceThresholdPct") &&
+            $("trendVolPeriodicRebalanceThresholdPct").value
+              ? $("trendVolPeriodicRebalanceThresholdPct").value
+              : "5"
+            ).trim(),
+          ),
           vol_ratio_fast_atr_window: Number(
             ($("trendVolRatioFastAtrWindow") &&
             $("trendVolRatioFastAtrWindow").value
@@ -30928,6 +30994,18 @@
             $("trendVolRegimeRiskMgmtEnable").value
               ? String($("trendVolRegimeRiskMgmtEnable").value) === "true"
               : false,
+          vol_periodic_risk_mgmt_enabled:
+            $("trendVolPeriodicRiskMgmtEnable") &&
+            $("trendVolPeriodicRiskMgmtEnable").value
+              ? String($("trendVolPeriodicRiskMgmtEnable").value) === "true"
+              : false,
+          vol_periodic_rebalance_threshold_pct: Number(
+            ($("trendVolPeriodicRebalanceThresholdPct") &&
+            $("trendVolPeriodicRebalanceThresholdPct").value
+              ? $("trendVolPeriodicRebalanceThresholdPct").value
+              : "5"
+            ).trim(),
+          ),
           vol_ratio_fast_atr_window: Number(
             ($("trendVolRatioFastAtrWindow") &&
             $("trendVolRatioFastAtrWindow").value
@@ -31277,6 +31355,25 @@
           common.vol_ratio_extreme_threshold <= 0
         ) {
           return setMsg("极大波动阈值需为>0数字");
+        }
+        if (!Number.isFinite(common.vol_periodic_rebalance_threshold_pct)) {
+          return setMsg("定期风控最小仓位变化阈值需为数字");
+        }
+        common.vol_periodic_rebalance_threshold_pct =
+          common.vol_periodic_rebalance_threshold_pct > 1.0
+            ? common.vol_periodic_rebalance_threshold_pct / 100.0
+            : common.vol_periodic_rebalance_threshold_pct;
+        if (
+          common.vol_periodic_rebalance_threshold_pct < 0.0 ||
+          common.vol_periodic_rebalance_threshold_pct > 1.0
+        ) {
+          return setMsg("定期风控最小仓位变化阈值需在0%~100%之间");
+        }
+        if (
+          common.vol_regime_risk_mgmt_enabled &&
+          common.vol_periodic_risk_mgmt_enabled
+        ) {
+          return setMsg("波动率动态风控 与 波动率定期风控 不能同时开启");
         }
         if (
           !(
@@ -36664,10 +36761,15 @@
           updateTrendSizingUi,
         );
       if ($("trendVolRegimeRiskMgmtEnable"))
-        $("trendVolRegimeRiskMgmtEnable").addEventListener(
-          "change",
-          updateTrendSizingUi,
-        );
+        $("trendVolRegimeRiskMgmtEnable").addEventListener("change", () => {
+          _enforceTrendVolRiskMutualExclusion("trendVolRegimeRiskMgmtEnable");
+          updateTrendSizingUi();
+        });
+      if ($("trendVolPeriodicRiskMgmtEnable"))
+        $("trendVolPeriodicRiskMgmtEnable").addEventListener("change", () => {
+          _enforceTrendVolRiskMutualExclusion("trendVolPeriodicRiskMgmtEnable");
+          updateTrendSizingUi();
+        });
       if ($("trendMonthlyRiskBudgetEnable"))
         $("trendMonthlyRiskBudgetEnable").addEventListener(
           "change",

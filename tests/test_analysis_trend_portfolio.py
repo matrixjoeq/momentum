@@ -722,6 +722,95 @@ def test_trend_portfolio_risk_budget_position_sizing(session_factory):
         assert float(expo.max()) > 0.0
 
 
+def test_trend_portfolio_rejects_mutual_vol_regime_and_periodic_risk_mgmt(
+    session_factory,
+) -> None:
+    sf = session_factory
+    with sf() as db:
+        with pytest.raises(ValueError) as exc:
+            compute_trend_portfolio_backtest(
+                db,
+                TrendPortfolioInputs(
+                    codes=["MUTUAL_PORT"],
+                    start=dt.date(2024, 1, 2),
+                    end=dt.date(2024, 1, 10),
+                    strategy="ma_filter",
+                    sma_window=2,
+                    position_sizing="risk_budget",
+                    vol_regime_risk_mgmt_enabled=True,
+                    vol_periodic_risk_mgmt_enabled=True,
+                    cost_bps=0.0,
+                    slippage_rate=0.0,
+                ),
+            )
+    assert "cannot both be enabled" in str(exc.value)
+
+
+def test_trend_portfolio_periodic_risk_mgmt_triggers_per_asset_independently(
+    session_factory,
+) -> None:
+    sf = session_factory
+    with sf() as db:
+        start = dt.date(2024, 1, 2)
+        dates = [d.date() for d in pd.date_range(start, periods=8, freq="B")]
+        close_a = [100.0 + i for i in range(len(dates))]
+        close_b = [80.0 + i for i in range(len(dates))]
+        widths_a = [20.0, 20.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
+        widths_b = [20.0] * len(dates)
+        for d, ca, cb, wa, wb in zip(
+            dates, close_a, close_b, widths_a, widths_b, strict=True
+        ):
+            _add_price_hl(
+                db,
+                code="PERA",
+                day=d,
+                close=ca,
+                high=ca + wa / 2.0,
+                low=ca - wa / 2.0,
+            )
+            _add_price_hl(
+                db,
+                code="PERB",
+                day=d,
+                close=cb,
+                high=cb + wb / 2.0,
+                low=cb - wb / 2.0,
+            )
+        db.commit()
+
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["PERA", "PERB"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=2,
+                risk_budget_pct=0.01,
+                vol_periodic_risk_mgmt_enabled=True,
+                vol_periodic_rebalance_threshold_pct=0.05,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    rc = (out.get("risk_controls") or {}).get("vol_periodic_risk_mgmt") or {}
+    by_asset = rc.get("by_asset") or {}
+    a_stats = by_asset.get("PERA") or {}
+    b_stats = by_asset.get("PERB") or {}
+    assert rc.get("enabled") is True
+    a_trigger = int(a_stats.get("periodic_rebalance_trigger_count") or 0)
+    b_trigger = int(b_stats.get("periodic_rebalance_trigger_count") or 0)
+    assert a_trigger >= 1
+    assert a_trigger > b_trigger
+    overall = (out.get("trade_statistics") or {}).get("overall") or {}
+    by_code = (out.get("trade_statistics") or {}).get("by_code") or {}
+    assert int(overall.get("vol_periodic_rebalance_trigger_count") or 0) >= 1
+    assert "vol_periodic_rebalance_trigger_count" in (by_code.get("PERA") or {})
+
+
 def test_trend_portfolio_quick_mode_contains_mfe_r_distribution(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
@@ -1333,6 +1422,6 @@ def test_trend_portfolio_cash_management_uses_511880_qfq(session_factory):
     assert len(cash_decomp) == len((out.get("nav") or {}).get("dates") or [])
     assert any(abs(x) > 0.0 for x in cash_decomp)
     by_code = (
-        (((out.get("attribution") or {}).get("return") or {}).get("by_code")) or []
-    )
+        ((out.get("attribution") or {}).get("return") or {}).get("by_code")
+    ) or []
     assert any(str((r or {}).get("code") or "") == cash_code for r in by_code)

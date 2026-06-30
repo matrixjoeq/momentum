@@ -37,6 +37,8 @@ def simulate_lot_account_weights(
     initial_account_amount: float,
     max_leverage_multiple: float,
     lot_size_shares: int = 100,
+    periodic_rebalance_enabled: bool = False,
+    periodic_rebalance_threshold_pct: float = 0.05,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     w_tgt = target_weights.copy().astype(float).fillna(0.0).clip(lower=0.0)
     px = (
@@ -63,11 +65,24 @@ def simulate_lot_account_weights(
         else 1.0
     )
     lot = float(max(1, int(lot_size_shares)))
+    periodic_enabled = bool(periodic_rebalance_enabled)
+    threshold = float(periodic_rebalance_threshold_pct)
+    if (not np.isfinite(threshold)) or threshold < 0.0:
+        threshold = 0.05
+    threshold = float(min(1.0, threshold))
     codes = list(w_tgt.columns)
     shares = pd.Series(0.0, index=codes, dtype=float)
     cash = float(init_amt)
     w_real = pd.DataFrame(index=w_tgt.index, columns=codes, dtype=float)
     shares_hist: dict[str, list[int]] = {str(c): [] for c in codes}
+    periodic_by_code: dict[str, dict[str, int]] = {
+        str(c): {
+            "periodic_rebalance_evaluated_count": 0,
+            "periodic_rebalance_trigger_count": 0,
+            "periodic_rebalance_skip_count": 0,
+        }
+        for c in codes
+    }
     cash_series: list[float] = []
     gross_lev_series: list[float] = []
     eps = 1e-12
@@ -86,6 +101,7 @@ def simulate_lot_account_weights(
                 desired_notional * (max_notional / gross_desired)
             ).astype(float)
         target_shares = shares.copy()
+        target_valid: dict[str, bool] = {str(c): False for c in codes}
         for c in codes:
             px_c = float(p.get(c, np.nan))
             if (not np.isfinite(px_c)) or px_c <= 0.0:
@@ -93,6 +109,24 @@ def simulate_lot_account_weights(
             want_shares = float(desired_notional.get(c, 0.0) / px_c)
             want_shares = math.floor(max(0.0, want_shares) / lot) * lot
             target_shares.loc[c] = float(want_shares)
+            target_valid[str(c)] = True
+        if periodic_enabled:
+            for c in codes:
+                key = str(c)
+                if not bool(target_valid.get(key, False)):
+                    continue
+                cur_shares = float(shares.get(c, 0.0))
+                if cur_shares <= eps:
+                    continue
+                tgt_shares = float(target_shares.get(c, 0.0))
+                periodic_by_code[key]["periodic_rebalance_evaluated_count"] += 1
+                rel_change = abs(tgt_shares - cur_shares) / abs(cur_shares)
+                should_rebalance = bool(rel_change + eps >= threshold)
+                if should_rebalance:
+                    periodic_by_code[key]["periodic_rebalance_trigger_count"] += 1
+                else:
+                    periodic_by_code[key]["periodic_rebalance_skip_count"] += 1
+                    target_shares.loc[c] = float(cur_shares)
         delta = (target_shares - shares).astype(float)
         buy_notional = (
             float((delta.clip(lower=0.0)[valid] * p[valid]).sum())
@@ -148,6 +182,26 @@ def simulate_lot_account_weights(
             shares_hist[str(c)].append(int(shares.get(c, 0.0)))
         cash_series.append(float(cash))
         gross_lev_series.append(float(pos_val / equity) if equity > eps else 0.0)
+    periodic_overall = {
+        "periodic_rebalance_evaluated_count": int(
+            sum(
+                int((v or {}).get("periodic_rebalance_evaluated_count", 0))
+                for v in periodic_by_code.values()
+            )
+        ),
+        "periodic_rebalance_trigger_count": int(
+            sum(
+                int((v or {}).get("periodic_rebalance_trigger_count", 0))
+                for v in periodic_by_code.values()
+            )
+        ),
+        "periodic_rebalance_skip_count": int(
+            sum(
+                int((v or {}).get("periodic_rebalance_skip_count", 0))
+                for v in periodic_by_code.values()
+            )
+        ),
+    }
     return w_real.astype(float).fillna(0.0), {
         "enabled": True,
         "initial_account_amount": float(init_amt),
@@ -156,6 +210,12 @@ def simulate_lot_account_weights(
         "cash_series": cash_series,
         "gross_leverage_series": gross_lev_series,
         "shares_by_code": shares_hist,
+        "periodic_rebalance_enabled": bool(periodic_enabled),
+        "periodic_rebalance_threshold_pct": float(threshold),
+        "periodic_rebalance_stats": {
+            "overall": periodic_overall,
+            "by_code": periodic_by_code,
+        },
     }
 
 

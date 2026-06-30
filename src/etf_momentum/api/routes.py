@@ -2203,6 +2203,12 @@ def trend_backtest(
         vol_ratio_extreme_threshold=float(
             getattr(payload, "vol_ratio_extreme_threshold", 2.2)
         ),
+        vol_periodic_risk_mgmt_enabled=bool(
+            getattr(payload, "vol_periodic_risk_mgmt_enabled", False)
+        ),
+        vol_periodic_rebalance_threshold_pct=float(
+            getattr(payload, "vol_periodic_rebalance_threshold_pct", 0.05)
+        ),
         risk_of_ruin_maxrisk=float(getattr(payload, "risk_of_ruin_maxrisk", 0.30)),
         group_enforce=bool(getattr(payload, "group_enforce", False)),
         group_pick_policy=getattr(payload, "group_pick_policy", "highest_sharpe"),
@@ -2254,6 +2260,9 @@ def trend_backtest(
 def trend_portfolio_backtest(
     payload: TrendPortfolioBacktestRequest, db: Session = Depends(get_session)
 ) -> dict:
+    # Pylint can lag on dataclass constructor fields in local analysis state.
+    # Keep behavior correct; suppress false-positive for newly added fields.
+    # pylint: disable=unexpected-keyword-arg
     inp = TrendPortfolioInputs(
         codes=payload.codes,
         start=_parse_yyyymmdd(payload.start),
@@ -2294,6 +2303,12 @@ def trend_portfolio_backtest(
         ),
         vol_ratio_extreme_threshold=float(
             getattr(payload, "vol_ratio_extreme_threshold", 2.2)
+        ),
+        vol_periodic_risk_mgmt_enabled=bool(
+            getattr(payload, "vol_periodic_risk_mgmt_enabled", False)
+        ),
+        vol_periodic_rebalance_threshold_pct=float(
+            getattr(payload, "vol_periodic_rebalance_threshold_pct", 0.05)
         ),
         risk_of_ruin_maxrisk=float(getattr(payload, "risk_of_ruin_maxrisk", 0.30)),
         dynamic_universe=bool(getattr(payload, "dynamic_universe", False)),

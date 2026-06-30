@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -2640,6 +2642,16 @@ class TrendBacktestRequest(BaseModel):
         gt=0.0,
         description="If ATR ratio > threshold, enter extreme volatility tier above expanded state",
     )
+    vol_periodic_risk_mgmt_enabled: bool = Field(
+        default=False,
+        description="Enable periodic ATR-based risk-budget rebalance by share-size threshold; mutually exclusive with vol_regime_risk_mgmt_enabled",
+    )
+    vol_periodic_rebalance_threshold_pct: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Minimum relative share-size change threshold for periodic volatility rebalance (0.05 = 5%)",
+    )
     risk_of_ruin_maxrisk: float = Field(
         default=0.30,
         gt=0.0,
@@ -2894,6 +2906,14 @@ class TrendBacktestRequest(BaseModel):
     def _validate_ma_entry_filter_windows(self) -> "TrendBacktestRequest":
         if int(self.ma_entry_filter_fast) >= int(self.ma_entry_filter_slow):
             raise ValueError("ma_entry_filter_fast must be < ma_entry_filter_slow")
+        if bool(self.vol_regime_risk_mgmt_enabled) and bool(
+            self.vol_periodic_risk_mgmt_enabled
+        ):
+            raise ValueError(
+                "vol_regime_risk_mgmt_enabled and vol_periodic_risk_mgmt_enabled cannot both be enabled"
+            )
+        if not math.isfinite(float(self.vol_periodic_rebalance_threshold_pct)):
+            raise ValueError("vol_periodic_rebalance_threshold_pct must be finite")
         return self
 
 
@@ -3003,6 +3023,16 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default=2.2,
         gt=0.0,
         description="If ATR ratio > threshold, enter extreme volatility tier above expanded state",
+    )
+    vol_periodic_risk_mgmt_enabled: bool = Field(
+        default=False,
+        description="Enable periodic ATR-based risk-budget rebalance by share-size threshold; mutually exclusive with vol_regime_risk_mgmt_enabled",
+    )
+    vol_periodic_rebalance_threshold_pct: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Minimum relative share-size change threshold for periodic volatility rebalance (0.05 = 5%)",
     )
     risk_of_ruin_maxrisk: float = Field(
         default=0.30,
@@ -3195,6 +3225,14 @@ class TrendPortfolioBacktestRequest(BaseModel):
     def _validate_ma_entry_filter_windows(self) -> "TrendPortfolioBacktestRequest":
         if int(self.ma_entry_filter_fast) >= int(self.ma_entry_filter_slow):
             raise ValueError("ma_entry_filter_fast must be < ma_entry_filter_slow")
+        if bool(self.vol_regime_risk_mgmt_enabled) and bool(
+            self.vol_periodic_risk_mgmt_enabled
+        ):
+            raise ValueError(
+                "vol_regime_risk_mgmt_enabled and vol_periodic_risk_mgmt_enabled cannot both be enabled"
+            )
+        if not math.isfinite(float(self.vol_periodic_rebalance_threshold_pct)):
+            raise ValueError("vol_periodic_rebalance_threshold_pct must be finite")
         return self
 
 

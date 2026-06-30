@@ -233,6 +233,8 @@ class TrendInputs:
     vol_ratio_contract_threshold: float = 0.65
     vol_ratio_normal_threshold: float = 1.05
     vol_ratio_extreme_threshold: float = 2.20
+    vol_periodic_risk_mgmt_enabled: bool = False
+    vol_periodic_rebalance_threshold_pct: float = 0.05
     risk_of_ruin_maxrisk: float = 0.30
     group_enforce: bool = False
     group_pick_policy: str = "highest_sharpe"
@@ -293,6 +295,8 @@ class TrendPortfolioInputs:
     vol_ratio_contract_threshold: float = 0.65
     vol_ratio_normal_threshold: float = 1.05
     vol_ratio_extreme_threshold: float = 2.20
+    vol_periodic_risk_mgmt_enabled: bool = False
+    vol_periodic_rebalance_threshold_pct: float = 0.05
     risk_of_ruin_maxrisk: float = 0.30
     dynamic_universe: bool = False
     initial_account_amount: float | None = None
@@ -1004,6 +1008,85 @@ def _risk_budget_dynamic_weights(
                     stats["vol_risk_adjust_recover_from_expand_count"] += 1
                 if state == "NORMAL" and old_state == "INCREASED":
                     stats["vol_risk_adjust_recover_from_contract_count"] += 1
+        out.loc[d] = float(min(1.0, max(0.0, held_weight)))
+    return out.astype(float), {k: int(v) for k, v in stats.items()}
+
+
+def _risk_budget_periodic_weights(
+    active_signal: pd.Series,
+    *,
+    close: pd.Series,
+    atr_for_budget: pd.Series,
+    risk_budget_pct: float,
+    rebalance_threshold_pct: float,
+) -> tuple[pd.Series, dict[str, int]]:
+    """
+    Risk-budget weights with periodic ATR-based rebalance threshold.
+
+    When in position, compare the target share proxy (risk_budget_pct / ATR)
+    against the current held share proxy (held_weight / close). Rebalance only
+    when relative change reaches threshold.
+    """
+    idx = active_signal.index
+    sig = active_signal.reindex(idx).astype(float).fillna(0.0).clip(lower=0.0)
+    px = close.reindex(idx).astype(float)
+    atr_b = atr_for_budget.reindex(idx).astype(float)
+    base_target = (
+        (float(risk_budget_pct) * px / atr_b.replace(0.0, np.nan))
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(lower=0.0, upper=1.0)
+        .astype(float)
+    )
+    threshold = float(rebalance_threshold_pct)
+    if (not np.isfinite(threshold)) or threshold < 0.0:
+        threshold = 0.05
+    threshold = float(min(1.0, threshold))
+
+    out = pd.Series(0.0, index=idx, dtype=float)
+    held_weight = 0.0
+    stats = {
+        "periodic_rebalance_evaluated_count": 0,
+        "periodic_rebalance_trigger_count": 0,
+        "periodic_rebalance_skip_count": 0,
+    }
+    eps = 1e-12
+    for d in idx:
+        desired = float(sig.loc[d]) if np.isfinite(float(sig.loc[d])) else 0.0
+        if desired <= eps:
+            held_weight = 0.0
+            out.loc[d] = 0.0
+            continue
+        if held_weight <= eps:
+            held_weight = (
+                float(base_target.loc[d])
+                if np.isfinite(float(base_target.loc[d]))
+                else 0.0
+            )
+            out.loc[d] = float(min(1.0, max(0.0, held_weight)))
+            continue
+        tgt = (
+            float(base_target.loc[d])
+            if np.isfinite(float(base_target.loc[d]))
+            else float("nan")
+        )
+        px_d = float(px.loc[d]) if np.isfinite(float(px.loc[d])) else float("nan")
+        if (not np.isfinite(tgt)) or (not np.isfinite(px_d)) or px_d <= 0.0:
+            out.loc[d] = float(min(1.0, max(0.0, held_weight)))
+            continue
+        cur_share_proxy = float(held_weight / px_d) if held_weight > eps else 0.0
+        tgt_share_proxy = float(tgt / px_d) if tgt > eps else 0.0
+        stats["periodic_rebalance_evaluated_count"] += 1
+        if cur_share_proxy <= eps:
+            should_rebalance = tgt_share_proxy > eps
+        else:
+            rel_change = abs(tgt_share_proxy - cur_share_proxy) / abs(cur_share_proxy)
+            should_rebalance = rel_change + eps >= threshold
+        if should_rebalance:
+            held_weight = float(tgt)
+            stats["periodic_rebalance_trigger_count"] += 1
+        else:
+            stats["periodic_rebalance_skip_count"] += 1
         out.loc[d] = float(min(1.0, max(0.0, held_weight)))
     return out.astype(float), {k: int(v) for k, v in stats.items()}
 
@@ -6208,6 +6291,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     vol_regime_risk_mgmt_enabled = bool(
         getattr(inp, "vol_regime_risk_mgmt_enabled", False)
     )
+    vol_periodic_risk_mgmt_enabled = bool(
+        getattr(inp, "vol_periodic_risk_mgmt_enabled", False)
+    )
+    vol_periodic_rebalance_threshold_pct = float(
+        getattr(inp, "vol_periodic_rebalance_threshold_pct", 0.05) or 0.05
+    )
+    initial_account_amount = getattr(inp, "initial_account_amount", None)
+    has_initial_account_amount = bool(
+        initial_account_amount is not None
+        and np.isfinite(float(initial_account_amount))
+        and float(initial_account_amount) > 0.0
+    )
     vol_ratio_fast_atr_window = int(getattr(inp, "vol_ratio_fast_atr_window", 5) or 5)
     vol_ratio_slow_atr_window = int(getattr(inp, "vol_ratio_slow_atr_window", 50) or 50)
     vol_ratio_expand_threshold = float(
@@ -6249,6 +6344,16 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if vol_ratio_extreme_threshold <= vol_ratio_expand_threshold:
         raise ValueError(
             "vol_ratio_extreme_threshold must be > vol_ratio_expand_threshold"
+        )
+    if (
+        not np.isfinite(vol_periodic_rebalance_threshold_pct)
+        or vol_periodic_rebalance_threshold_pct < 0.0
+        or vol_periodic_rebalance_threshold_pct > 1.0
+    ):
+        raise ValueError("vol_periodic_rebalance_threshold_pct must be in [0, 1]")
+    if vol_regime_risk_mgmt_enabled and vol_periodic_risk_mgmt_enabled:
+        raise ValueError(
+            "vol_regime_risk_mgmt_enabled and vol_periodic_risk_mgmt_enabled cannot both be enabled"
         )
     risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
     if (
@@ -6737,12 +6842,21 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         "vol_risk_adjust_recover_from_expand_count": 0,
         "vol_risk_adjust_recover_from_contract_count": 0,
     }
+    vol_periodic_rebalance_stats_overall: dict[str, int] = {
+        "periodic_rebalance_evaluated_count": 0,
+        "periodic_rebalance_trigger_count": 0,
+        "periodic_rebalance_skip_count": 0,
+    }
 
     # Single-asset sizing overlay (same knobs as portfolio mode).
     sizing_scale = pd.Series(1.0, index=raw_pos.index, dtype=float)
     if ps == "fixed_ratio":
         sizing_scale = pd.Series(float(fixed_ratio), index=raw_pos.index, dtype=float)
     elif ps == "risk_budget":
+        periodic_enabled = bool(vol_periodic_risk_mgmt_enabled)
+        periodic_uses_lot_threshold = bool(
+            periodic_enabled and has_initial_account_amount
+        )
         atr_rb = (
             _atr_from_hlc(
                 high_qfq.astype(float).fillna(px_sig),
@@ -6773,19 +6887,34 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             .reindex(raw_pos.index)
             .astype(float)
         )
-        sizing_scale, vol_risk_adjust_stats_overall = _risk_budget_dynamic_weights(
-            raw_pos.astype(float).fillna(0.0),
-            close=px_sig.astype(float),
-            atr_for_budget=atr_rb,
-            atr_fast=atr_fast,
-            atr_slow=atr_slow,
-            risk_budget_pct=float(risk_budget_pct),
-            dynamic_enabled=bool(vol_regime_risk_mgmt_enabled),
-            expand_threshold=float(vol_ratio_expand_threshold),
-            contract_threshold=float(vol_ratio_contract_threshold),
-            normal_threshold=float(vol_ratio_normal_threshold),
-            extreme_threshold=float(vol_ratio_extreme_threshold),
-        )
+        if periodic_enabled:
+            sizing_scale, vol_periodic_rebalance_stats_overall = (
+                _risk_budget_periodic_weights(
+                    raw_pos.astype(float).fillna(0.0),
+                    close=px_sig.astype(float),
+                    atr_for_budget=atr_rb,
+                    risk_budget_pct=float(risk_budget_pct),
+                    rebalance_threshold_pct=float(
+                        0.0
+                        if periodic_uses_lot_threshold
+                        else vol_periodic_rebalance_threshold_pct
+                    ),
+                )
+            )
+        else:
+            sizing_scale, vol_risk_adjust_stats_overall = _risk_budget_dynamic_weights(
+                raw_pos.astype(float).fillna(0.0),
+                close=px_sig.astype(float),
+                atr_for_budget=atr_rb,
+                atr_fast=atr_fast,
+                atr_slow=atr_slow,
+                risk_budget_pct=float(risk_budget_pct),
+                dynamic_enabled=bool(vol_regime_risk_mgmt_enabled),
+                expand_threshold=float(vol_ratio_expand_threshold),
+                contract_threshold=float(vol_ratio_contract_threshold),
+                normal_threshold=float(vol_ratio_normal_threshold),
+                extreme_threshold=float(vol_ratio_extreme_threshold),
+            )
     elif ps == "vol_target":
         asset_vol = (
             ret_exec.rolling(
@@ -7034,8 +7163,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     else:
         ret_bh = (0.5 * (ret_bh_open + ret_bh_close)).astype(float)
     account_lot_meta: dict[str, Any] | None = None
-    init_amt = getattr(inp, "initial_account_amount", None)
-    if init_amt is not None and np.isfinite(float(init_amt)) and float(init_amt) > 0.0:
+    init_amt = initial_account_amount
+    if has_initial_account_amount:
         max_lev = resolve_max_leverage(
             position_sizing=str(ps),
             risk_budget_overcap_policy=str(risk_budget_overcap_policy),
@@ -7050,6 +7179,12 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             initial_account_amount=float(init_amt),
             max_leverage_multiple=float(max_lev),
             lot_size_shares=100,
+            periodic_rebalance_enabled=bool(
+                ps == "risk_budget" and vol_periodic_risk_mgmt_enabled
+            ),
+            periodic_rebalance_threshold_pct=float(
+                vol_periodic_rebalance_threshold_pct
+            ),
         )
         if not w_real.empty and code in w_real.columns:
             w_old = w_target.astype(float)
@@ -7071,6 +7206,21 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             r_profit_scaleout_override_ret = (
                 r_profit_scaleout_override_ret * risk_scale
             ).astype(float)
+        periodic_stats = (
+            (account_lot_meta or {}).get("periodic_rebalance_stats") or {}
+        ).get("overall") or {}
+        if bool(ps == "risk_budget" and vol_periodic_risk_mgmt_enabled):
+            vol_periodic_rebalance_stats_overall = {
+                "periodic_rebalance_evaluated_count": int(
+                    periodic_stats.get("periodic_rebalance_evaluated_count", 0) or 0
+                ),
+                "periodic_rebalance_trigger_count": int(
+                    periodic_stats.get("periodic_rebalance_trigger_count", 0) or 0
+                ),
+                "periodic_rebalance_skip_count": int(
+                    periodic_stats.get("periodic_rebalance_skip_count", 0) or 0
+                ),
+            }
     cost = _turnover_cost_from_weights(w, cost_bps=float(inp.cost_bps))
     turnover = (w - w.shift(1).fillna(0.0)).abs() / 2.0
     slippage = slippage_return_from_turnover(
@@ -7737,6 +7887,21 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             "vol_risk_entry_state_increase_on_contract_count", 0
         )
     )
+    trade_stats["overall"]["vol_periodic_rebalance_evaluated_count"] = int(
+        (vol_periodic_rebalance_stats_overall or {}).get(
+            "periodic_rebalance_evaluated_count", 0
+        )
+    )
+    trade_stats["overall"]["vol_periodic_rebalance_trigger_count"] = int(
+        (vol_periodic_rebalance_stats_overall or {}).get(
+            "periodic_rebalance_trigger_count", 0
+        )
+    )
+    trade_stats["overall"]["vol_periodic_rebalance_skip_count"] = int(
+        (vol_periodic_rebalance_stats_overall or {}).get(
+            "periodic_rebalance_skip_count", 0
+        )
+    )
     trade_stats["overall"]["monthly_risk_budget_attempted_entry_count"] = (
         monthly_attempted_overall
     )
@@ -7861,6 +8026,21 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             "vol_risk_entry_state_increase_on_contract_count", 0
         )
     )
+    trade_stats["by_code"][str(code)]["vol_periodic_rebalance_evaluated_count"] = int(
+        (vol_periodic_rebalance_stats_overall or {}).get(
+            "periodic_rebalance_evaluated_count", 0
+        )
+    )
+    trade_stats["by_code"][str(code)]["vol_periodic_rebalance_trigger_count"] = int(
+        (vol_periodic_rebalance_stats_overall or {}).get(
+            "periodic_rebalance_trigger_count", 0
+        )
+    )
+    trade_stats["by_code"][str(code)]["vol_periodic_rebalance_skip_count"] = int(
+        (vol_periodic_rebalance_stats_overall or {}).get(
+            "periodic_rebalance_skip_count", 0
+        )
+    )
     trade_stats["by_code"][str(code)]["monthly_risk_budget_attempted_entry_count"] = (
         monthly_attempted_overall
     )
@@ -7906,6 +8086,11 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
     m_strat["monthly_risk_budget_blocked_entry_count"] = int(
         (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
+    )
+    m_strat["vol_periodic_rebalance_trigger_count"] = int(
+        (vol_periodic_rebalance_stats_overall or {}).get(
+            "periodic_rebalance_trigger_count", 0
+        )
     )
     m_strat["holding_bias_v_ge_5_count"] = int(holding_bias_v_ge_5_count)
     m_strat["holding_bias_v_ge_5_max_per_holding"] = int(
@@ -8031,6 +8216,10 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                     risk_budget_max_leverage_multiple
                 ),
                 "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
+                "vol_periodic_risk_mgmt_enabled": bool(vol_periodic_risk_mgmt_enabled),
+                "vol_periodic_rebalance_threshold_pct": float(
+                    vol_periodic_rebalance_threshold_pct
+                ),
                 "vol_ratio_fast_atr_window": int(vol_ratio_fast_atr_window),
                 "vol_ratio_slow_atr_window": int(vol_ratio_slow_atr_window),
                 "vol_ratio_expand_threshold": float(vol_ratio_expand_threshold),
@@ -8167,6 +8356,26 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "entry_state_increase_on_contract_count": int(
                     (vol_risk_adjust_stats_overall or {}).get(
                         "vol_risk_entry_state_increase_on_contract_count", 0
+                    )
+                ),
+            },
+            "vol_periodic_risk_mgmt": {
+                "enabled": bool(ps == "risk_budget" and vol_periodic_risk_mgmt_enabled),
+                "atr_window": int(risk_budget_atr_window),
+                "rebalance_threshold_pct": float(vol_periodic_rebalance_threshold_pct),
+                "evaluated_count": int(
+                    (vol_periodic_rebalance_stats_overall or {}).get(
+                        "periodic_rebalance_evaluated_count", 0
+                    )
+                ),
+                "trigger_count": int(
+                    (vol_periodic_rebalance_stats_overall or {}).get(
+                        "periodic_rebalance_trigger_count", 0
+                    )
+                ),
+                "skip_count": int(
+                    (vol_periodic_rebalance_stats_overall or {}).get(
+                        "periodic_rebalance_skip_count", 0
                     )
                 ),
             },
@@ -8446,6 +8655,18 @@ def compute_trend_portfolio_backtest(
     vol_regime_risk_mgmt_enabled = bool(
         getattr(inp, "vol_regime_risk_mgmt_enabled", False)
     )
+    vol_periodic_risk_mgmt_enabled = bool(
+        getattr(inp, "vol_periodic_risk_mgmt_enabled", False)
+    )
+    vol_periodic_rebalance_threshold_pct = float(
+        getattr(inp, "vol_periodic_rebalance_threshold_pct", 0.05) or 0.05
+    )
+    initial_account_amount = getattr(inp, "initial_account_amount", None)
+    has_initial_account_amount = bool(
+        initial_account_amount is not None
+        and np.isfinite(float(initial_account_amount))
+        and float(initial_account_amount) > 0.0
+    )
     vol_ratio_fast_atr_window = int(getattr(inp, "vol_ratio_fast_atr_window", 5) or 5)
     vol_ratio_slow_atr_window = int(getattr(inp, "vol_ratio_slow_atr_window", 50) or 50)
     vol_ratio_expand_threshold = float(
@@ -8487,6 +8708,16 @@ def compute_trend_portfolio_backtest(
     if vol_ratio_extreme_threshold <= vol_ratio_expand_threshold:
         raise ValueError(
             "vol_ratio_extreme_threshold must be > vol_ratio_expand_threshold"
+        )
+    if (
+        not np.isfinite(vol_periodic_rebalance_threshold_pct)
+        or vol_periodic_rebalance_threshold_pct < 0.0
+        or vol_periodic_rebalance_threshold_pct > 1.0
+    ):
+        raise ValueError("vol_periodic_rebalance_threshold_pct must be in [0, 1]")
+    if vol_regime_risk_mgmt_enabled and vol_periodic_risk_mgmt_enabled:
+        raise ValueError(
+            "vol_regime_risk_mgmt_enabled and vol_periodic_risk_mgmt_enabled cannot both be enabled"
         )
     risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
     if (
@@ -9634,6 +9865,16 @@ def compute_trend_portfolio_backtest(
         }
         for c in codes
     }
+    vol_periodic_rebalance_by_asset: dict[str, dict[str, int]] = {
+        str(c): {
+            "periodic_rebalance_evaluated_count": 0,
+            "periodic_rebalance_trigger_count": 0,
+            "periodic_rebalance_skip_count": 0,
+        }
+        for c in codes
+    }
+    periodic_enabled = bool(ps == "risk_budget" and vol_periodic_risk_mgmt_enabled)
+    periodic_uses_lot_threshold = bool(periodic_enabled and has_initial_account_amount)
     for d in dates:
         day_seq += 1
         d_key = d.date().isoformat()
@@ -9989,6 +10230,46 @@ def compute_trend_portfolio_backtest(
                                     _apply_overcap_scale_once(
                                         float(risk_budget_max_leverage_multiple)
                                     )
+                    continue
+                if bool(periodic_enabled):
+                    if not np.isfinite(base_target):
+                        continue
+                    if bool(periodic_uses_lot_threshold):
+                        w_row.loc[c] = float(base_target)
+                        continue
+                    px_now = float(px) if np.isfinite(float(px)) else float("nan")
+                    if (not np.isfinite(px_now)) or px_now <= 0.0:
+                        continue
+                    cur_weight = (
+                        float(w_row.loc[c]) if np.isfinite(float(w_row.loc[c])) else 0.0
+                    )
+                    cur_share_proxy = cur_weight / px_now if cur_weight > 1e-12 else 0.0
+                    tgt_share_proxy = (
+                        float(base_target) / px_now
+                        if float(base_target) > 1e-12
+                        else 0.0
+                    )
+                    vol_periodic_rebalance_by_asset[key][
+                        "periodic_rebalance_evaluated_count"
+                    ] += 1
+                    if cur_share_proxy <= 1e-12:
+                        should_rebalance = tgt_share_proxy > 1e-12
+                    else:
+                        rel_change = abs(tgt_share_proxy - cur_share_proxy) / abs(
+                            cur_share_proxy
+                        )
+                        should_rebalance = rel_change + 1e-12 >= float(
+                            vol_periodic_rebalance_threshold_pct
+                        )
+                    if should_rebalance:
+                        w_row.loc[c] = float(base_target)
+                        vol_periodic_rebalance_by_asset[key][
+                            "periodic_rebalance_trigger_count"
+                        ] += 1
+                    else:
+                        vol_periodic_rebalance_by_asset[key][
+                            "periodic_rebalance_skip_count"
+                        ] += 1
                     continue
                 if not bool(vol_regime_risk_mgmt_enabled):
                     continue
@@ -10383,8 +10664,8 @@ def compute_trend_portfolio_backtest(
         ret_exec_day = ret_exec_open_day.astype(float)
 
     account_lot_meta: dict[str, Any] | None = None
-    init_amt = getattr(inp, "initial_account_amount", None)
-    if init_amt is not None and np.isfinite(float(init_amt)) and float(init_amt) > 0.0:
+    init_amt = initial_account_amount
+    if has_initial_account_amount:
         w_eff_old = w.copy().astype(float)
         w_ret_old = w_ret.copy().astype(float)
         max_lev = resolve_max_leverage(
@@ -10398,6 +10679,12 @@ def compute_trend_portfolio_backtest(
             initial_account_amount=float(init_amt),
             max_leverage_multiple=float(max_lev),
             lot_size_shares=100,
+            periodic_rebalance_enabled=bool(
+                ps == "risk_budget" and vol_periodic_risk_mgmt_enabled
+            ),
+            periodic_rebalance_threshold_pct=float(
+                vol_periodic_rebalance_threshold_pct
+            ),
         )
         if not w_real.empty:
             w = w_real.astype(float).fillna(0.0)
@@ -10416,6 +10703,24 @@ def compute_trend_portfolio_backtest(
             r_profit_scaleout_override_ret = (
                 r_profit_scaleout_override_ret * risk_scale
             ).astype(float)
+        if bool(ps == "risk_budget" and vol_periodic_risk_mgmt_enabled):
+            periodic_by_code = (
+                (account_lot_meta or {}).get("periodic_rebalance_stats") or {}
+            ).get("by_code") or {}
+            for c in codes:
+                key = str(c)
+                one = periodic_by_code.get(key) or {}
+                vol_periodic_rebalance_by_asset[key] = {
+                    "periodic_rebalance_evaluated_count": int(
+                        one.get("periodic_rebalance_evaluated_count", 0) or 0
+                    ),
+                    "periodic_rebalance_trigger_count": int(
+                        one.get("periodic_rebalance_trigger_count", 0) or 0
+                    ),
+                    "periodic_rebalance_skip_count": int(
+                        one.get("periodic_rebalance_skip_count", 0) or 0
+                    ),
+                }
 
     bench_ret = bench_ret.reindex(dates).fillna(0.0).astype(float)
     bench_nav = (1.0 + bench_ret).cumprod()
@@ -11185,6 +11490,24 @@ def compute_trend_portfolio_backtest(
             for v in vol_risk_adjust_by_asset.values()
         )
     )
+    total_vol_periodic_rebalance_evaluated = int(
+        sum(
+            int((v or {}).get("periodic_rebalance_evaluated_count", 0))
+            for v in vol_periodic_rebalance_by_asset.values()
+        )
+    )
+    total_vol_periodic_rebalance_trigger = int(
+        sum(
+            int((v or {}).get("periodic_rebalance_trigger_count", 0))
+            for v in vol_periodic_rebalance_by_asset.values()
+        )
+    )
+    total_vol_periodic_rebalance_skip = int(
+        sum(
+            int((v or {}).get("periodic_rebalance_skip_count", 0))
+            for v in vol_periodic_rebalance_by_asset.values()
+        )
+    )
     total_monthly_risk_budget_attempted_entries = int(
         (monthly_risk_budget_gate_stats or {}).get("attempted_entry_count", 0)
     )
@@ -11386,6 +11709,15 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["vol_risk_entry_state_increase_on_contract_count"] = int(
         total_vol_risk_entry_increase_contract
     )
+    trade_stats["overall"]["vol_periodic_rebalance_evaluated_count"] = int(
+        total_vol_periodic_rebalance_evaluated
+    )
+    trade_stats["overall"]["vol_periodic_rebalance_trigger_count"] = int(
+        total_vol_periodic_rebalance_trigger
+    )
+    trade_stats["overall"]["vol_periodic_rebalance_skip_count"] = int(
+        total_vol_periodic_rebalance_skip
+    )
     trade_stats["overall"]["vol_risk_overcap_scale_count"] = int(
         risk_budget_overcap_scale_count
     )
@@ -11555,6 +11887,21 @@ def compute_trend_portfolio_backtest(
                 "vol_risk_entry_state_increase_on_contract_count", 0
             )
         )
+        one["vol_periodic_rebalance_evaluated_count"] = int(
+            (vol_periodic_rebalance_by_asset.get(code_key) or {}).get(
+                "periodic_rebalance_evaluated_count", 0
+            )
+        )
+        one["vol_periodic_rebalance_trigger_count"] = int(
+            (vol_periodic_rebalance_by_asset.get(code_key) or {}).get(
+                "periodic_rebalance_trigger_count", 0
+            )
+        )
+        one["vol_periodic_rebalance_skip_count"] = int(
+            (vol_periodic_rebalance_by_asset.get(code_key) or {}).get(
+                "periodic_rebalance_skip_count", 0
+            )
+        )
         one["vol_risk_overcap_scale_count"] = int(
             risk_budget_overcap_scale_by_code.get(code_key, 0)
         )
@@ -11662,6 +12009,9 @@ def compute_trend_portfolio_backtest(
     )
     m_strat["vol_risk_overcap_leverage_max_multiple"] = float(
         risk_budget_overcap_leverage_max_multiple
+    )
+    m_strat["vol_periodic_rebalance_trigger_count"] = int(
+        total_vol_periodic_rebalance_trigger
     )
     m_strat["monthly_risk_budget_blocked_entry_count"] = int(
         (monthly_risk_budget_gate_stats or {}).get("blocked_entry_count", 0)
@@ -11919,6 +12269,10 @@ def compute_trend_portfolio_backtest(
                     risk_budget_max_leverage_multiple
                 ),
                 "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
+                "vol_periodic_risk_mgmt_enabled": bool(vol_periodic_risk_mgmt_enabled),
+                "vol_periodic_rebalance_threshold_pct": float(
+                    vol_periodic_rebalance_threshold_pct
+                ),
                 "vol_ratio_fast_atr_window": int(vol_ratio_fast_atr_window),
                 "vol_ratio_slow_atr_window": int(vol_ratio_slow_atr_window),
                 "vol_ratio_expand_threshold": float(vol_ratio_expand_threshold),
@@ -12204,6 +12558,15 @@ def compute_trend_portfolio_backtest(
                 ),
                 "overcap_daily_counts": risk_budget_overcap_daily,
                 "by_asset": vol_risk_adjust_by_asset,
+            },
+            "vol_periodic_risk_mgmt": {
+                "enabled": bool(ps == "risk_budget" and vol_periodic_risk_mgmt_enabled),
+                "atr_window": int(risk_budget_atr_window),
+                "rebalance_threshold_pct": float(vol_periodic_rebalance_threshold_pct),
+                "evaluated_count": int(total_vol_periodic_rebalance_evaluated),
+                "trigger_count": int(total_vol_periodic_rebalance_trigger),
+                "skip_count": int(total_vol_periodic_rebalance_skip),
+                "by_asset": vol_periodic_rebalance_by_asset,
             },
             "monthly_risk_budget": monthly_risk_budget_gate_stats,
             "position_extension": {
