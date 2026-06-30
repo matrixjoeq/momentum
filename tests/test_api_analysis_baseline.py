@@ -5,6 +5,7 @@ import pytest
 
 from etf_momentum.db.models import EtfPrice
 from etf_momentum.db.session import make_session_factory
+from etf_momentum.api.routes import _build_trend_capacity_estimate
 from etf_momentum.analysis.trend import _apply_intraday_stop_execution_single
 from tests.helpers.rotation_case_data import (
     build_rotation_case_series,
@@ -437,6 +438,66 @@ def test_api_rotation_backtest_happy_path(api_client):
     assert "excess_vs_risk_parity" in (data_rp.get("metrics") or {})
 
 
+def test_api_rotation_capacity_estimate_has_three_scenarios(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    # Construct alternating momentum leadership to create non-zero turnover windows.
+    s1 = [100.0 + ((i % 20) - 10) * 0.8 + i * 0.03 for i in range(len(dates))]
+    s2 = [100.0 - ((i % 20) - 10) * 0.8 + i * 0.03 for i in range(len(dates))]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={"RCAP1": s1, "RCAP2": s2},
+        dates=dates,
+        with_amount=False,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["RCAP1", "RCAP2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "rebalance": "weekly",
+            "rebalance_anchor": 5,
+            "top_k": 1,
+            "lookback_days": 5,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    cap = (out or {}).get("capacity_estimate") or {}
+    meta = cap.get("meta") or {}
+    scenarios = cap.get("scenarios") or []
+    assert str(cap.get("method") or "") == "asset_participation_bottleneck_daily"
+    assert str(meta.get("status") or "") == "ok"
+    assert len(scenarios) == 3
+    by_name = {str((x or {}).get("name") or ""): x for x in scenarios}
+    assert set(by_name.keys()) == {"conservative", "balanced", "aggressive"}
+    assert float(
+        (by_name["balanced"] or {}).get("participation_rate") or 0.0
+    ) == pytest.approx(0.10, rel=0.0, abs=1e-12)
+    src = (meta.get("source_stats") or {}).get("sources") or {}
+    assert int(src.get("volume_avg_price") or 0) > 0
+
+
+def test_api_rotation_weekly5_open_contains_capacity_estimate(api_client, engine):
+    dates, src = build_rotation_case_series()
+    mapped = map_case_series_to_miniprogram_codes(src)
+    seed_prices(engine, code_to_series=mapped, dates=dates)
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/rotation/weekly5-open",
+        {"start": "20240102", "end": "20240731", "anchor_weekday": 5},
+    )
+    one = ((out or {}).get("by_anchor") or {}).get("5") or {}
+    cap = one.get("capacity_estimate") or {}
+    assert str(cap.get("method") or "") == "asset_participation_bottleneck_daily"
+    assert "meta" in cap
+    assert "scenarios" in cap
+
+
 def test_api_rotation_backtest_accepts_negative_top_k(api_client) -> None:
     c = api_client
     upsert_and_fetch_etfs(
@@ -596,8 +657,12 @@ def test_api_rotation_backtest_daily_rebalance_switch(api_client) -> None:
         "cost_bps": 100.0,
         "slippage_rate": 0.0,
     }
-    out_off = post_json_ok(c, "/api/analysis/rotation", {**base, "daily_rebalance": False})
-    out_on = post_json_ok(c, "/api/analysis/rotation", {**base, "daily_rebalance": True})
+    out_off = post_json_ok(
+        c, "/api/analysis/rotation", {**base, "daily_rebalance": False}
+    )
+    out_on = post_json_ok(
+        c, "/api/analysis/rotation", {**base, "daily_rebalance": True}
+    )
     m_off = (out_off.get("metrics") or {}).get("strategy") or {}
     m_on = (out_on.get("metrics") or {}).get("strategy") or {}
     assert bool(out_off.get("daily_rebalance")) is False
@@ -1050,6 +1115,150 @@ def test_api_trend_portfolio_capacity_estimate_has_three_scenarios(engine, api_c
     assert float((by_name["aggressive"] or {}).get("aum_cap_p25") or 0.0) >= float(
         (by_name["conservative"] or {}).get("aum_cap_p25") or 0.0
     )
+
+
+def test_capacity_estimate_counts_full_cash_to_risk_one_way_turnover(engine):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=3, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={"CAPF1": [100.0, 101.0, 102.0]},
+        dates=dates,
+        with_amount=True,
+    )
+    out = {
+        "nav": {"dates": [d.strftime("%Y-%m-%d") for d in dates]},
+        "weights": {"series": {"CAPF1": [0.0, 1.0, 1.0]}},
+    }
+    sf = make_session_factory(engine)
+    with sf() as db:
+        cap = _build_trend_capacity_estimate(db, out)
+    by_name = {
+        str((x or {}).get("name") or ""): x for x in (cap.get("scenarios") or [])
+    }
+    assert int((by_name.get("balanced") or {}).get("sample_days") or 0) == 1
+    series_bal = (
+        ((cap.get("series") or {}).get("by_scenario") or {}).get("balanced")
+    ) or {}
+    turnover = list(series_bal.get("daily_turnover_one_way") or [])
+    liq = list(series_bal.get("daily_liquidity_notional") or [])
+    aum = list(series_bal.get("daily_aum_cap") or [])
+    assert float(turnover[1]) == pytest.approx(1.0, rel=0.0, abs=1e-12)
+    assert float(aum[1]) == pytest.approx(float(liq[1]) * 0.10, rel=0.0, abs=1e-8)
+
+
+def test_capacity_estimate_excludes_untraded_liquidity_from_daily_capacity(engine):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=3, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "CAPL1": [10.0, 10.5, 10.5],
+            "CAPL2": [1000.0, 1005.0, 1005.0],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    out = {
+        "nav": {"dates": [d.strftime("%Y-%m-%d") for d in dates]},
+        "weights": {"series": {"CAPL1": [0.2, 0.4, 0.4], "CAPL2": [0.3, 0.3, 0.3]}},
+    }
+    sf = make_session_factory(engine)
+    with sf() as db:
+        cap = _build_trend_capacity_estimate(db, out)
+    series_bal = (
+        ((cap.get("series") or {}).get("by_scenario") or {}).get("balanced")
+    ) or {}
+    liq_traded = list(series_bal.get("daily_liquidity_notional") or [])
+    liq_all = list(series_bal.get("daily_liquidity_notional_all") or [])
+    turnover = list(series_bal.get("daily_turnover_one_way") or [])
+    aum = list(series_bal.get("daily_aum_cap") or [])
+    # Day-2 only CAPL1 trades; CAPL2's high liquidity should not inflate capacity.
+    assert float(liq_all[1]) > float(liq_traded[1]) * 50.0
+    expected = float(liq_traded[1]) * 0.10 / float(turnover[1])
+    assert float(aum[1]) == pytest.approx(expected, rel=0.0, abs=1e-8)
+
+
+def test_capacity_estimate_drops_days_with_missing_liquidity_on_traded_assets(engine):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=2, freq="B")]
+    sf = make_session_factory(engine)
+    with sf() as db:
+        # Day-1 has liquidity; day-2 intentionally missing amount and volume.
+        db.add(
+            EtfPrice(
+                code="CAPM1",
+                trade_date=dates[0],
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.0,
+                volume=1_000_000.0,
+                amount=100_000_000.0,
+                source="eastmoney",
+                adjust="none",
+            )
+        )
+        db.add(
+            EtfPrice(
+                code="CAPM1",
+                trade_date=dates[1],
+                open=101.0,
+                high=102.0,
+                low=100.0,
+                close=101.0,
+                volume=0.0,
+                amount=None,
+                source="eastmoney",
+                adjust="none",
+            )
+        )
+        db.commit()
+    out = {
+        "nav": {"dates": [d.strftime("%Y-%m-%d") for d in dates]},
+        "weights": {"series": {"CAPM1": [0.0, 1.0]}},
+    }
+    with sf() as db:
+        cap = _build_trend_capacity_estimate(db, out)
+    meta = cap.get("meta") or {}
+    by_name = {
+        str((x or {}).get("name") or ""): x for x in (cap.get("scenarios") or [])
+    }
+    assert int(meta.get("invalid_traded_liquidity_days") or 0) == 1
+    assert int((by_name.get("balanced") or {}).get("sample_days") or 0) == 0
+
+
+def test_capacity_estimate_tencent_volume_fallback_uses_lot_multiplier(engine):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=3, freq="B")]
+    sf = make_session_factory(engine)
+    with sf() as db:
+        for d in dates:
+            db.add(
+                EtfPrice(
+                    code="TCAP1",
+                    trade_date=d,
+                    open=10.0,
+                    high=10.0,
+                    low=10.0,
+                    close=10.0,
+                    volume=1000.0,  # tencent volume is in lots(手)
+                    amount=None,
+                    source="tencent",
+                    adjust="none",
+                )
+            )
+        db.commit()
+    out = {
+        "nav": {"dates": [d.strftime("%Y-%m-%d") for d in dates]},
+        "weights": {"series": {"TCAP1": [0.0, 1.0, 1.0]}},
+    }
+    with sf() as db:
+        cap = _build_trend_capacity_estimate(db, out)
+    series_bal = (
+        ((cap.get("series") or {}).get("by_scenario") or {}).get("balanced")
+    ) or {}
+    liq = list(series_bal.get("daily_liquidity_notional") or [])
+    aum = list(series_bal.get("daily_aum_cap") or [])
+    # volume*price fallback should convert lot volume into shares by *100.
+    assert float(liq[1]) == pytest.approx(1_000_000.0, rel=0.0, abs=1e-8)
+    assert float(aum[1]) == pytest.approx(100_000.0, rel=0.0, abs=1e-8)
 
 
 @pytest.mark.parametrize("runtime_engine", [None, "bt"])

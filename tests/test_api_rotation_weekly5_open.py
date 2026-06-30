@@ -66,6 +66,12 @@ def test_api_rotation_weekly5_open_combo_ignores_payload_risk_free_rate(
     nav_high = high_rf["by_anchor"]["mix"]["nav"]["series"]["ROTATION"]
     assert nav_low == nav_high
 
+    cap = ((low_rf.get("by_anchor") or {}).get("mix") or {}).get(
+        "capacity_estimate"
+    ) or {}
+    assert str(cap.get("method") or "") == "asset_participation_bottleneck_daily"
+    assert str(((cap.get("meta") or {}).get("status") or "")) in {"ok", "unavailable"}
+
     m_low = low_rf["by_anchor"]["mix"]["metrics"]["strategy"]
     m_high = high_rf["by_anchor"]["mix"]["metrics"]["strategy"]
     assert math.isfinite(float(m_low["sharpe_ratio"]))

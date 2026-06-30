@@ -6113,6 +6113,14 @@ def backtest_rotation(
                 )
             ),
         },
+        "weights": {
+            "dates": dates.date.astype(str).tolist(),
+            "series": {
+                str(c): w[str(c)].astype(float).tolist()
+                for c in codes
+                if str(c) in w.columns
+            },
+        },
         "asset_nav_exec": {
             "dates": dates.date.astype(str).tolist(),
             "series": {
