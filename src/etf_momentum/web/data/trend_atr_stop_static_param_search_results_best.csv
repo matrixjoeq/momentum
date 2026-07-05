@@ -1,0 +1,2 @@
+atr_stop_mode,atr_stop_n,status,elapsed_ms,sharpe_ratio,annualized_return,cumulative_return,annualized_volatility,max_drawdown,max_drawdown_recovery_days,sortino_ratio,calmar_ratio,ulcer_index,ulcer_performance_index,error
+static,2.0,ok,40819,1.563782765304196,0.15758524655931772,6.784933893344703,0.09653996287150002,-0.09638620011236243,307.0,2.765179418909577,,2.717888079711067,5.7980771075779645,

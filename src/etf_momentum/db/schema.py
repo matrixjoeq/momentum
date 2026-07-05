@@ -215,6 +215,15 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 continue
             _add_column(engine, "live_nav_daily", ddl)
 
+    if inspect(engine).has_table("live_closed_round"):
+        live_closed_round_cols = {
+            "holding_duration_days": "holding_duration_days INTEGER",
+        }
+        for col, ddl in live_closed_round_cols.items():
+            if _has_column(engine, "live_closed_round", col):
+                continue
+            _add_column(engine, "live_closed_round", ddl)
+
     if not inspect(engine).has_table("futures_pool"):
         return
     futures_pool_cols = {

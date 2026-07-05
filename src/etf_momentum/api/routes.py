@@ -82,6 +82,7 @@ from .schemas import (
     SimGbmPhase4Request,
     SimGbmAbSignificanceRequest,
     GlobalBenchmarkPoolOut,
+    GlobalBenchmarkSeriesOut,
     GlobalBenchmarkPoolUpsert,
     GlobalBenchmarkPriceOut,
     GlobalBenchmarkFetchResult,
@@ -91,6 +92,7 @@ from .schemas import (
     GlobalBenchmarkDefaultInstallResponse,
     GlobalBenchmarkDefaultAcceptanceRequest,
     GlobalBenchmarkDefaultAcceptanceItem,
+    GlobalBenchmarkDefaultAcceptanceSeriesItem,
     GlobalBenchmarkDefaultAcceptanceResponse,
     EtfPoolOut,
     EtfPoolUpsert,
@@ -258,7 +260,9 @@ from ..data.global_benchmark_defaults import (
     DEFAULT_GLOBAL_BENCHMARK_UNIVERSE,
     DefaultGlobalBenchmarkSpec,
 )
-from ..data.global_benchmark_ingestion import ingest_one_global_benchmark
+from ..data.global_benchmark_ingestion import (
+    ingest_one_global_benchmark_series,
+)
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
 from ..data.stooq_fetcher import fetch_stooq_daily_close
@@ -301,10 +305,13 @@ from ..db.global_benchmark_repo import (
     count_global_benchmark_prices,
     delete_global_benchmark_pool,
     get_global_benchmark_pool_by_code,
+    get_global_benchmark_pool_series,
     get_global_benchmark_date_range,
     list_global_benchmark_pool,
     list_global_benchmark_prices,
+    list_global_benchmark_trade_dates,
     normalize_adjust as normalize_global_benchmark_adjust,
+    normalize_series_kind as normalize_global_benchmark_series_kind,
     purge_global_benchmark_data,
     upsert_global_benchmark_pool,
 )
@@ -2104,6 +2111,28 @@ def trend_backtest(
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
+        ma_trailing_stop_enabled=bool(
+            getattr(payload, "ma_trailing_stop_enabled", False)
+        ),
+        ma_trailing_stop_ma_type=str(
+            getattr(payload, "ma_trailing_stop_ma_type", "sma") or "sma"
+        ),
+        ma_trailing_stop_execution_mode=str(
+            getattr(payload, "ma_trailing_stop_execution_mode", "intraday")
+            or "intraday"
+        ),
+        ma_trailing_stop_effective_delay_days=int(
+            getattr(payload, "ma_trailing_stop_effective_delay_days", 3) or 3
+        ),
+        ma_trailing_stop_reduce_window=int(
+            getattr(payload, "ma_trailing_stop_reduce_window", 10)
+        ),
+        ma_trailing_stop_exit_window=int(
+            getattr(payload, "ma_trailing_stop_exit_window", 20)
+        ),
+        ma_trailing_stop_reduce_fraction=float(
+            getattr(payload, "ma_trailing_stop_reduce_fraction", 0.33)
+        ),
         r_take_profit_enabled=bool(getattr(payload, "r_take_profit_enabled", False)),
         r_take_profit_reentry_mode=str(
             getattr(payload, "r_take_profit_reentry_mode", "reenter")
@@ -2122,6 +2151,9 @@ def trend_backtest(
         r_profit_scaleout_execution_mode=str(
             getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
         ),
+        r_profit_scaleout_breakeven_stop_enabled=bool(
+            getattr(payload, "r_profit_scaleout_breakeven_stop_enabled", True)
+        ),
         r_profit_scaleout_tiers=(
             [x.model_dump() for x in getattr(payload, "r_profit_scaleout_tiers", [])]
             if getattr(payload, "r_profit_scaleout_tiers", None)
@@ -2135,6 +2167,9 @@ def trend_backtest(
         ),
         bias_v_take_profit_execution_mode=str(
             getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
+        ),
+        bias_v_take_profit_breakeven_stop_enabled=bool(
+            getattr(payload, "bias_v_take_profit_breakeven_stop_enabled", True)
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
@@ -2335,6 +2370,28 @@ def trend_portfolio_backtest(
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
+        ma_trailing_stop_enabled=bool(
+            getattr(payload, "ma_trailing_stop_enabled", False)
+        ),
+        ma_trailing_stop_ma_type=str(
+            getattr(payload, "ma_trailing_stop_ma_type", "sma") or "sma"
+        ),
+        ma_trailing_stop_execution_mode=str(
+            getattr(payload, "ma_trailing_stop_execution_mode", "intraday")
+            or "intraday"
+        ),
+        ma_trailing_stop_effective_delay_days=int(
+            getattr(payload, "ma_trailing_stop_effective_delay_days", 3) or 3
+        ),
+        ma_trailing_stop_reduce_window=int(
+            getattr(payload, "ma_trailing_stop_reduce_window", 10)
+        ),
+        ma_trailing_stop_exit_window=int(
+            getattr(payload, "ma_trailing_stop_exit_window", 20)
+        ),
+        ma_trailing_stop_reduce_fraction=float(
+            getattr(payload, "ma_trailing_stop_reduce_fraction", 0.33)
+        ),
         r_take_profit_enabled=bool(getattr(payload, "r_take_profit_enabled", False)),
         r_take_profit_reentry_mode=str(
             getattr(payload, "r_take_profit_reentry_mode", "reenter")
@@ -2353,6 +2410,9 @@ def trend_portfolio_backtest(
         r_profit_scaleout_execution_mode=str(
             getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
         ),
+        r_profit_scaleout_breakeven_stop_enabled=bool(
+            getattr(payload, "r_profit_scaleout_breakeven_stop_enabled", True)
+        ),
         r_profit_scaleout_tiers=(
             [x.model_dump() for x in getattr(payload, "r_profit_scaleout_tiers", [])]
             if getattr(payload, "r_profit_scaleout_tiers", None)
@@ -2366,6 +2426,9 @@ def trend_portfolio_backtest(
         ),
         bias_v_take_profit_execution_mode=str(
             getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
+        ),
+        bias_v_take_profit_breakeven_stop_enabled=bool(
+            getattr(payload, "bias_v_take_profit_breakeven_stop_enabled", True)
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
@@ -2522,6 +2585,7 @@ def screen_rotation_candidates_api(
         factor_weights=payload.factor_weights,
         category_quotas=payload.category_quotas,
         signif_horizon_days=payload.signif_horizon_days,
+        skip_days=payload.skip_days,
     )
     try:
         return screen_rotation_candidates(db, inp)
@@ -7252,22 +7316,49 @@ def _upsert_default_global_benchmark_spec(
     *,
     spec: DefaultGlobalBenchmarkSpec,
     overwrite_existing: bool,
-) -> str:
-    existing = get_global_benchmark_pool_by_code(db, spec.code)
-    if existing is not None and not overwrite_existing:
-        return "skipped"
-    _ = upsert_global_benchmark_pool(
-        db,
-        code=spec.code,
-        name=spec.name,
-        code_format=spec.code_format,
-        provider_hint=spec.provider_hint,
-        start_date=spec.start_date,
-        end_date=spec.end_date,
-    )
-    if existing is None:
-        return "inserted"
-    return "updated"
+) -> list[GlobalBenchmarkDefaultInstallItem]:
+    actions: list[GlobalBenchmarkDefaultInstallItem] = []
+    for s in (spec.price, spec.total_return):
+        kind = normalize_global_benchmark_series_kind(s.series_kind)
+        existing = get_global_benchmark_pool_by_code(db, spec.code, series_kind=kind)
+        if existing is not None and not overwrite_existing:
+            actions.append(
+                GlobalBenchmarkDefaultInstallItem(
+                    code=spec.code,
+                    name=spec.name,
+                    series_kind=kind,
+                    action="skipped",
+                )
+            )
+            continue
+        primary = s.candidates[0] if s.candidates else None
+        fallback = (
+            [{"provider": x.provider, "symbol": x.symbol} for x in s.candidates[1:]]
+            if len(s.candidates) > 1
+            else None
+        )
+        _ = upsert_global_benchmark_pool(
+            db,
+            code=spec.code,
+            series_kind=kind,
+            name=spec.name,
+            code_format=s.code_format,
+            provider_hint=(primary.provider if primary else "auto"),
+            provider_symbol=(primary.symbol if primary else None),
+            source_locked=False,
+            fallback_sources=fallback,
+            start_date=s.start_date,
+            end_date=s.end_date,
+        )
+        actions.append(
+            GlobalBenchmarkDefaultInstallItem(
+                code=spec.code,
+                name=spec.name,
+                series_kind=kind,
+                action=("inserted" if existing is None else "updated"),
+            )
+        )
+    return actions
 
 
 @router.post(
@@ -7285,28 +7376,23 @@ def install_default_global_benchmark_universe(
     n_updated = 0
     n_skipped = 0
     for spec in DEFAULT_GLOBAL_BENCHMARK_UNIVERSE:
-        action = _upsert_default_global_benchmark_spec(
+        actions = _upsert_default_global_benchmark_spec(
             db,
             spec=spec,
             overwrite_existing=bool(payload.overwrite_existing),
         )
-        items.append(
-            GlobalBenchmarkDefaultInstallItem(
-                code=spec.code,
-                name=spec.name,
-                action=action,
-            )
-        )
-        if action == "inserted":
-            n_inserted += 1
-        elif action == "updated":
-            n_updated += 1
-        else:
-            n_skipped += 1
+        items.extend(actions)
+        for x in actions:
+            if x.action == "inserted":
+                n_inserted += 1
+            elif x.action == "updated":
+                n_updated += 1
+            else:
+                n_skipped += 1
     db.commit()
     return GlobalBenchmarkDefaultInstallResponse(
         ok=True,
-        total=len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE),
+        total=len(items),
         inserted=n_inserted,
         updated=n_updated,
         skipped=n_skipped,
@@ -7354,62 +7440,120 @@ def run_default_global_benchmark_acceptance(
     n_skip = 0
     for code in requested:
         spec = spec_by_code[code]
-        item = get_global_benchmark_pool_by_code(db, code)
-        if item is None:
-            n_fail += 1
-            row = GlobalBenchmarkDefaultAcceptanceItem(
+        pool_series = get_global_benchmark_pool_series(db, code)
+        series_items: list[GlobalBenchmarkDefaultAcceptanceSeriesItem] = []
+        for kind in ("price", "total_return"):
+            item = pool_series.get(kind)
+            if item is None:
+                series_items.append(
+                    GlobalBenchmarkDefaultAcceptanceSeriesItem(
+                        series_kind=kind,
+                        status="failed",
+                        message="missing series config",
+                        final_provider=None,
+                        final_symbol=None,
+                        sample_days=0,
+                        data_start_date=None,
+                        data_end_date=None,
+                    )
+                )
+                continue
+            if not bool(payload.fetch):
+                n_prices = count_global_benchmark_prices(
+                    db, code=code, series_kind=kind, adjust="none"
+                )
+                d0, d1 = get_global_benchmark_date_range(
+                    db, code=code, series_kind=kind, adjust="none"
+                )
+                series_items.append(
+                    GlobalBenchmarkDefaultAcceptanceSeriesItem(
+                        series_kind=kind,
+                        status="skipped",
+                        message="fetch disabled",
+                        final_provider=None,
+                        final_symbol=None,
+                        sample_days=n_prices,
+                        data_start_date=d0,
+                        data_end_date=d1,
+                    )
+                )
+                continue
+            res = ingest_one_global_benchmark_series(
+                db,
+                ak=ak,
                 code=code,
-                name=spec.name,
-                status="failed",
-                message="missing from pool after install",
-                final_provider=None,
-                sample_days=0,
-                data_start_date=None,
-                data_end_date=None,
+                series_kind=kind,
+                start_date=item.start_date or get_settings().default_start_date,
+                end_date=item.end_date or get_settings().default_end_date,
             )
-            items.append(row)
-            if not payload.continue_on_error:
-                break
-            continue
-        if not bool(payload.fetch):
-            n_skip += 1
-            n_prices = count_global_benchmark_prices(db, code=code, adjust="none")
-            d0, d1 = get_global_benchmark_date_range(db, code=code, adjust="none")
-            items.append(
-                GlobalBenchmarkDefaultAcceptanceItem(
-                    code=code,
-                    name=item.name,
-                    status="skipped",
-                    message="fetch disabled",
-                    final_provider=None,
+            n_prices = count_global_benchmark_prices(
+                db, code=code, series_kind=kind, adjust="none"
+            )
+            d0, d1 = get_global_benchmark_date_range(
+                db, code=code, series_kind=kind, adjust="none"
+            )
+            series_items.append(
+                GlobalBenchmarkDefaultAcceptanceSeriesItem(
+                    series_kind=kind,
+                    status=res.status,
+                    message=res.message,
+                    final_provider=res.final_provider,
+                    final_symbol=res.final_symbol,
                     sample_days=n_prices,
                     data_start_date=d0,
                     data_end_date=d1,
                 )
             )
+
+        if not bool(payload.fetch):
+            n_skip += 1
+            items.append(
+                GlobalBenchmarkDefaultAcceptanceItem(
+                    code=code,
+                    name=spec.name,
+                    status="skipped",
+                    failure_reason=None,
+                    series=series_items,
+                )
+            )
             continue
-        res = ingest_one_global_benchmark(
-            db,
-            ak=ak,
-            code=code,
-            start_date=item.start_date or get_settings().default_start_date,
-            end_date=item.end_date or get_settings().default_end_date,
-        )
-        n_prices = count_global_benchmark_prices(db, code=code, adjust="none")
-        d0, d1 = get_global_benchmark_date_range(db, code=code, adjust="none")
+
+        by_kind = {x.series_kind: x for x in series_items}
+        reason: str | None = None
+        if by_kind.get("price") is None or by_kind["price"].status == "failed":
+            reason = "price_missing"
+        elif (
+            by_kind.get("total_return") is None
+            or by_kind["total_return"].status == "failed"
+        ):
+            reason = "total_return_missing"
+        elif any(x.status != "success" for x in series_items):
+            total_days = sum(int(x.sample_days or 0) for x in series_items)
+            reason = "provider_error" if total_days <= 0 else "coverage_insufficient"
+        else:
+            price_dates = set(
+                list_global_benchmark_trade_dates(
+                    db, code=code, series_kind="price", adjust="none"
+                )
+            )
+            tr_dates = set(
+                list_global_benchmark_trade_dates(
+                    db, code=code, series_kind="total_return", adjust="none"
+                )
+            )
+            if price_dates != tr_dates:
+                reason = "coverage_insufficient"
+        status = "success" if reason is None else "failed"
         items.append(
             GlobalBenchmarkDefaultAcceptanceItem(
                 code=code,
-                name=item.name,
-                status=res.status,
-                message=res.message,
-                final_provider=res.final_provider,
-                sample_days=n_prices,
-                data_start_date=d0,
-                data_end_date=d1,
+                name=spec.name,
+                status=status,
+                failure_reason=reason,
+                series=series_items,
             )
         )
-        if res.status == "success":
+        if status == "success":
             n_succ += 1
         else:
             n_fail += 1
@@ -7425,6 +7569,36 @@ def run_default_global_benchmark_acceptance(
     )
 
 
+def _global_benchmark_pool_out(
+    db: Session, *, code: str, rows
+) -> GlobalBenchmarkPoolOut:
+    first = rows[0]
+    series_rows: list[GlobalBenchmarkSeriesOut] = []
+    for i in rows:
+        d0, d1 = get_global_benchmark_date_range(
+            db,
+            code=i.code,
+            series_kind=i.series_kind,
+            adjust="none",
+        )
+        series_rows.append(
+            GlobalBenchmarkSeriesOut(
+                series_kind=i.series_kind,
+                code_format=i.code_format,
+                provider_hint=i.provider_hint,
+                provider_symbol=i.provider_symbol,
+                source_locked=bool(i.source_locked),
+                start_date=i.start_date,
+                end_date=i.end_date,
+                last_fetch_status=i.last_fetch_status,
+                last_fetch_message=i.last_fetch_message,
+                last_data_start_date=d0,
+                last_data_end_date=d1,
+            )
+        )
+    return GlobalBenchmarkPoolOut(code=code, name=first.name, series=series_rows)
+
+
 @router.get("/global-benchmark", response_model=list[GlobalBenchmarkPoolOut])
 def get_global_benchmarks(
     adjust: str = "none",
@@ -7435,23 +7609,12 @@ def get_global_benchmarks(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     items = list_global_benchmark_pool(db)
+    by_code: dict[str, list] = {}
+    for x in items:
+        by_code.setdefault(x.code, []).append(x)
     out: list[GlobalBenchmarkPoolOut] = []
-    for i in items:
-        rng = get_global_benchmark_date_range(db, code=i.code, adjust=adjust)
-        out.append(
-            GlobalBenchmarkPoolOut(
-                code=i.code,
-                name=i.name,
-                code_format=i.code_format,
-                provider_hint=i.provider_hint,
-                start_date=i.start_date,
-                end_date=i.end_date,
-                last_fetch_status=i.last_fetch_status,
-                last_fetch_message=i.last_fetch_message,
-                last_data_start_date=rng[0],
-                last_data_end_date=rng[1],
-            )
-        )
+    for code in sorted(by_code):
+        out.append(_global_benchmark_pool_out(db, code=code, rows=by_code[code]))
     return out
 
 
@@ -7472,28 +7635,25 @@ def upsert_global_benchmark(
         raise HTTPException(status_code=400, detail="start_date must be <= end_date")
     code_format = str(payload.code_format or "").strip().lower() or None
     provider_hint = str(payload.provider_hint or "").strip().lower() or None
+    series_kind = normalize_global_benchmark_series_kind(payload.series_kind)
     obj = upsert_global_benchmark_pool(
         db,
         code=str(payload.code).strip(),
+        series_kind=series_kind,
         name=str(payload.name).strip(),
         code_format=code_format,
         provider_hint=provider_hint,
+        provider_symbol=(
+            str(payload.provider_symbol).strip() if payload.provider_symbol else None
+        ),
+        source_locked=payload.source_locked,
+        fallback_sources=payload.fallback_sources,
         start_date=payload.start_date,
         end_date=payload.end_date,
     )
     db.commit()
-    return GlobalBenchmarkPoolOut(
-        code=obj.code,
-        name=obj.name,
-        code_format=obj.code_format,
-        provider_hint=obj.provider_hint,
-        start_date=obj.start_date,
-        end_date=obj.end_date,
-        last_fetch_status=obj.last_fetch_status,
-        last_fetch_message=obj.last_fetch_message,
-        last_data_start_date=obj.last_data_start_date,
-        last_data_end_date=obj.last_data_end_date,
-    )
+    rows = list_global_benchmark_pool(db, code=obj.code)
+    return _global_benchmark_pool_out(db, code=obj.code, rows=rows)
 
 
 @router.delete("/global-benchmark/{code}")
@@ -7508,35 +7668,78 @@ def delete_global_benchmark_api(code: str, db: Session = Depends(get_session)) -
 
 @router.post(
     "/global-benchmark/{code}/fetch",
-    response_model=GlobalBenchmarkFetchResult,
+    response_model=list[GlobalBenchmarkFetchResult],
 )
 def fetch_one_global_benchmark(
     code: str,
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
-) -> GlobalBenchmarkFetchResult:
-    item = get_global_benchmark_pool_by_code(db, code)
-    if item is None:
+) -> list[GlobalBenchmarkFetchResult]:
+    rows = list_global_benchmark_pool(db, code=code)
+    if not rows:
         raise HTTPException(status_code=404, detail="global benchmark not found")
-    res = ingest_one_global_benchmark(
+    out: list[GlobalBenchmarkFetchResult] = []
+    for item in rows:
+        res = ingest_one_global_benchmark_series(
+            db,
+            ak=ak,
+            code=code,
+            series_kind=item.series_kind,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            GlobalBenchmarkFetchResult(
+                code=res.code,
+                series_kind=res.series_kind,
+                inserted_or_updated=(
+                    int(res.inserted_or_updated) if res.status == "success" else 0
+                ),
+                status=res.status,
+                message=res.message,
+                code_format=res.code_format,
+                final_provider=res.final_provider,
+                final_symbol=res.final_symbol,
+                provider_attempts=[asdict(x) for x in res.attempts],
+            )
+        )
+    return out
+
+
+@router.post(
+    "/global-benchmark/{code}/fetch/{series_kind}",
+    response_model=GlobalBenchmarkFetchResult,
+)
+def fetch_one_global_benchmark_series_api(
+    code: str,
+    series_kind: str,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> GlobalBenchmarkFetchResult:
+    item = get_global_benchmark_pool_by_code(
+        db, code, series_kind=normalize_global_benchmark_series_kind(series_kind)
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="global benchmark series not found")
+    res = ingest_one_global_benchmark_series(
         db,
         ak=ak,
         code=code,
+        series_kind=item.series_kind,
         start_date=item.start_date or get_settings().default_start_date,
         end_date=item.end_date or get_settings().default_end_date,
     )
-    if res.status != "success":
-        raise HTTPException(
-            status_code=500,
-            detail=res.message or "global benchmark ingestion failed",
-        )
     return GlobalBenchmarkFetchResult(
         code=res.code,
-        inserted_or_updated=res.inserted_or_updated,
+        series_kind=res.series_kind,
+        inserted_or_updated=(
+            int(res.inserted_or_updated) if res.status == "success" else 0
+        ),
         status=res.status,
         message=res.message,
         code_format=res.code_format,
         final_provider=res.final_provider,
+        final_symbol=res.final_symbol,
         provider_attempts=[asdict(x) for x in res.attempts],
     )
 
@@ -7551,16 +7754,18 @@ def fetch_all_global_benchmarks(
 ) -> list[GlobalBenchmarkFetchResult]:
     out: list[GlobalBenchmarkFetchResult] = []
     for item in list_global_benchmark_pool(db):
-        res = ingest_one_global_benchmark(
+        res = ingest_one_global_benchmark_series(
             db,
             ak=ak,
             code=item.code,
+            series_kind=item.series_kind,
             start_date=item.start_date or get_settings().default_start_date,
             end_date=item.end_date or get_settings().default_end_date,
         )
         out.append(
             GlobalBenchmarkFetchResult(
                 code=res.code,
+                series_kind=res.series_kind,
                 inserted_or_updated=(
                     int(res.inserted_or_updated) if res.status == "success" else 0
                 ),
@@ -7568,6 +7773,7 @@ def fetch_all_global_benchmarks(
                 message=res.message,
                 code_format=res.code_format,
                 final_provider=res.final_provider,
+                final_symbol=res.final_symbol,
                 provider_attempts=[asdict(x) for x in res.attempts],
             )
         )
@@ -7583,43 +7789,51 @@ def fetch_selected_global_benchmarks(
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[GlobalBenchmarkFetchResult]:
-    pool_by_code = {x.code: x for x in list_global_benchmark_pool(db)}
+    pool_by_code: dict[str, list] = {}
+    for x in list_global_benchmark_pool(db):
+        pool_by_code.setdefault(x.code, []).append(x)
     out: list[GlobalBenchmarkFetchResult] = []
     for code in payload.codes:
-        item = pool_by_code.get(code)
-        if item is None:
+        items = pool_by_code.get(code)
+        if not items:
             out.append(
                 GlobalBenchmarkFetchResult(
                     code=code,
+                    series_kind="price",
                     inserted_or_updated=0,
                     status="failed",
                     message="global benchmark not found",
                     code_format=None,
                     final_provider=None,
+                    final_symbol=None,
                     provider_attempts=[],
                 )
             )
             continue
-        res = ingest_one_global_benchmark(
-            db,
-            ak=ak,
-            code=code,
-            start_date=item.start_date or get_settings().default_start_date,
-            end_date=item.end_date or get_settings().default_end_date,
-        )
-        out.append(
-            GlobalBenchmarkFetchResult(
-                code=res.code,
-                inserted_or_updated=(
-                    int(res.inserted_or_updated) if res.status == "success" else 0
-                ),
-                status=res.status,
-                message=res.message,
-                code_format=res.code_format,
-                final_provider=res.final_provider,
-                provider_attempts=[asdict(x) for x in res.attempts],
+        for item in items:
+            res = ingest_one_global_benchmark_series(
+                db,
+                ak=ak,
+                code=code,
+                series_kind=item.series_kind,
+                start_date=item.start_date or get_settings().default_start_date,
+                end_date=item.end_date or get_settings().default_end_date,
             )
-        )
+            out.append(
+                GlobalBenchmarkFetchResult(
+                    code=res.code,
+                    series_kind=res.series_kind,
+                    inserted_or_updated=(
+                        int(res.inserted_or_updated) if res.status == "success" else 0
+                    ),
+                    status=res.status,
+                    message=res.message,
+                    code_format=res.code_format,
+                    final_provider=res.final_provider,
+                    final_symbol=res.final_symbol,
+                    provider_attempts=[asdict(x) for x in res.attempts],
+                )
+            )
     return out
 
 
@@ -7629,6 +7843,7 @@ def fetch_selected_global_benchmarks(
 )
 def get_global_benchmark_prices_api(
     code: str,
+    series_kind: str = "price",
     start: str | None = None,
     end: str | None = None,
     adjust: str = "none",
@@ -7641,6 +7856,7 @@ def get_global_benchmark_prices_api(
         rows = list_global_benchmark_prices(
             db,
             code=code,
+            series_kind=normalize_global_benchmark_series_kind(series_kind),
             adjust=adjust,
             start_date=start_d,
             end_date=end_d,
@@ -7651,6 +7867,7 @@ def get_global_benchmark_prices_api(
     return [
         GlobalBenchmarkPriceOut(
             code=r.code,
+            series_kind=r.series_kind,
             trade_date=r.trade_date.isoformat(),
             open=r.open,
             high=r.high,

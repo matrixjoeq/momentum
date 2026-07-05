@@ -429,6 +429,10 @@
       <div class="muted" style="margin: 6px 0 8px 0">
         口径：盈亏已含交易费用（成本价不含费用）。
       </div>
+      <div class="muted" style="margin: 0 0 8px 0">
+        持仓时长口径：按交易日计算（开仓日记为 0
+        日）；账户汇总下同代码同股东账号按剩余持仓数量加权平均。
+      </div>
       <table id="holdingsTable">
         <thead>
           <tr>
@@ -444,6 +448,9 @@
             <th class="sortable-th" data-sort-key="position_ratio">仓位比例</th>
             <th class="sortable-th" data-sort-key="pnl_amount">累计盈亏</th>
             <th class="sortable-th" data-sort-key="pnl_rate">累计收益率</th>
+            <th class="sortable-th" data-sort-key="holding_duration_days">
+              持仓时长(日)
+            </th>
             <th class="sortable-th" data-sort-key="status_text">状态</th>
           </tr>
         </thead>
@@ -512,6 +519,10 @@
       <div class="muted" style="margin: 6px 0 8px 0">
         口径：盈亏已含交易费用（成本价不含费用）。
       </div>
+      <div class="muted" style="margin: 0 0 8px 0">
+        平仓时长口径：按交易日计算（开仓日记为 0
+        日，平仓日计入）；最小/最大/平均基于当前筛选结果，平均按每笔平仓等权。
+      </div>
       <div class="row" style="margin-top: 6px">
         <div>
           <label>标的筛选</label>
@@ -540,6 +551,20 @@
       </div>
       <div class="three" style="margin-top: 8px">
         <div class="kpi">
+          <div class="k">最小持仓时长</div>
+          <div id="kpiMinHoldingDays" class="v">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">最大持仓时长</div>
+          <div id="kpiMaxHoldingDays" class="v">-</div>
+        </div>
+        <div class="kpi">
+          <div class="k">平均持仓时长</div>
+          <div id="kpiAvgHoldingDays" class="v">-</div>
+        </div>
+      </div>
+      <div class="three" style="margin-top: 8px">
+        <div class="kpi">
           <div class="k">总费用</div>
           <div id="kpiTotalFee" class="v">-</div>
         </div>
@@ -559,6 +584,9 @@
             <th class="sortable-th" data-sort-key="name">名称</th>
             <th class="sortable-th" data-sort-key="open_date">开仓</th>
             <th class="sortable-th" data-sort-key="close_date">平仓</th>
+            <th class="sortable-th" data-sort-key="holding_duration_days">
+              持仓时长(日)
+            </th>
             <th class="sortable-th" data-sort-key="buy_count">买次</th>
             <th class="sortable-th" data-sort-key="sell_count">卖次</th>
             <th class="sortable-th" data-sort-key="avg_buy_price">平均买价</th>
@@ -810,8 +838,10 @@
         "position_ratio",
         "pnl_amount",
         "pnl_rate",
+        "holding_duration_days",
       ]);
       const ROUND_NUMERIC_SORT_KEYS = new Set([
+        "holding_duration_days",
         "buy_count",
         "sell_count",
         "avg_buy_price",
@@ -965,7 +995,7 @@
 
       function defaultTradeTimeForCurrentContext() {
         if (currentTradeStrategyType() !== "bond_repo") return "14:56:00";
-        return currentRepoAction() === "BUYBACK" ? "00:00:00" : "14:57:00";
+        return currentRepoAction() === "BUYBACK" ? "00:00:00" : "15:00:00";
       }
 
       function applyTradeTimeUiByContext() {
@@ -2246,7 +2276,7 @@
         );
         if (!sorted.length) {
           $("holdTbody").innerHTML =
-            '<tr><td colspan="13" class="muted">暂无持仓数据</td></tr>';
+            '<tr><td colspan="14" class="muted">暂无持仓数据</td></tr>';
           renderHoldingsPager(0);
           updateSortHeaders("holdingsTable", holdingsSortState);
           return;
@@ -2274,6 +2304,7 @@
               <td>${fmtPct(x.position_ratio)}</td>
               <td class="${pnlClass(x.pnl_amount)}">${fmtNum(x.pnl_amount, 2)}</td>
               <td class="${pnlClass(x.pnl_rate)}">${fmtPct(x.pnl_rate)}</td>
+              <td>${fmtInt(x.holding_duration_days)}</td>
               <td>${x.status_text || ""}</td>
             </tr>
           `,
@@ -2309,7 +2340,7 @@
         const sorted = sortRows(rows, roundsSortState, ROUND_NUMERIC_SORT_KEYS);
         if (!sorted.length) {
           $("roundTbody").innerHTML =
-            '<tr><td colspan="11" class="muted">暂无平仓记录</td></tr>';
+            '<tr><td colspan="12" class="muted">暂无平仓记录</td></tr>';
           renderRoundsPager(0);
           updateSortHeaders("closedRoundsTable", roundsSortState);
           return;
@@ -2329,6 +2360,7 @@
             <td>${x.name || ""}</td>
             <td>${x.open_date || ""}</td>
             <td>${x.close_date || ""}</td>
+            <td>${fmtInt(x.holding_duration_days)}</td>
             <td>${x.buy_count ?? "-"}</td>
             <td>${x.sell_count ?? "-"}</td>
             <td>${fmtPrice(x.avg_buy_price)}</td>
@@ -2431,6 +2463,9 @@
         const pnl = (rows || [])
           .map((x) => Number(x.realized_pnl))
           .filter((x) => Number.isFinite(x));
+        const durationDays = (rows || [])
+          .map((x) => Number(x.holding_duration_days))
+          .filter((x) => Number.isFinite(x));
         const wins = pnl.filter((x) => x > 0);
         const losses = pnl.filter((x) => x < 0);
         const winCount = wins.length;
@@ -2449,7 +2484,24 @@
           winRate != null && payoff != null && payoff > 0
             ? winRate - (1.0 - winRate) / payoff
             : null;
-        return { totalTrades: rows.length, winRate, payoff, kelly };
+        const minHoldingDurationDays = durationDays.length
+          ? Math.min(...durationDays)
+          : null;
+        const maxHoldingDurationDays = durationDays.length
+          ? Math.max(...durationDays)
+          : null;
+        const avgHoldingDurationDays = durationDays.length
+          ? durationDays.reduce((a, b) => a + b, 0) / durationDays.length
+          : null;
+        return {
+          totalTrades: rows.length,
+          winRate,
+          payoff,
+          kelly,
+          minHoldingDurationDays,
+          maxHoldingDurationDays,
+          avgHoldingDurationDays,
+        };
       }
 
       function setRoundKpis(stats, fee) {
@@ -2457,6 +2509,17 @@
         $("kpiWinRate").textContent = fmtPct(stats?.winRate);
         $("kpiPayoff").textContent = fmtNum(stats?.payoff);
         $("kpiKelly").textContent = fmtPct(stats?.kelly);
+        $("kpiMinHoldingDays").textContent = fmtInt(
+          stats?.minHoldingDurationDays,
+        );
+        $("kpiMaxHoldingDays").textContent = fmtInt(
+          stats?.maxHoldingDurationDays,
+        );
+        $("kpiAvgHoldingDays").textContent = fmtInt(
+          Number.isFinite(Number(stats?.avgHoldingDurationDays))
+            ? Math.round(Number(stats.avgHoldingDurationDays))
+            : null,
+        );
         $("kpiTotalFee").textContent = fmtNum(fee?.total_fee, 2);
         $("kpiBuyFee").textContent = fmtNum(fee?.buy_fee, 2);
         $("kpiSellFee").textContent = fmtNum(fee?.sell_fee, 2);

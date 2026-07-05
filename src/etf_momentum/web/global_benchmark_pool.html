@@ -62,6 +62,13 @@
         <input id="name" placeholder="如 标普500" />
       </div>
       <div>
+        <label>序列类型</label>
+        <select id="seriesKind">
+          <option value="price">price（价格指数）</option>
+          <option value="total_return">total_return（全收益指数）</option>
+        </select>
+      </div>
+      <div>
         <label>代码格式</label>
         <input id="codeFormat" placeholder="auto / cn_6 / hk / yahoo / msci" />
       </div>
@@ -96,9 +103,8 @@
           <th>选择</th>
           <th>代码</th>
           <th>名称</th>
-          <th>格式/源</th>
-          <th>配置区间</th>
-          <th>已抓取区间(none)</th>
+          <th>序列配置</th>
+          <th>序列状态</th>
           <th>抓取状态</th>
           <th>操作</th>
         </tr>
@@ -162,6 +168,22 @@
         return "";
       }
 
+      function byKind(it, kind) {
+        const rows = Array.isArray(it.series) ? it.series : [];
+        return rows.find((x) => String(x.series_kind || "") === kind) || null;
+      }
+
+      function renderSeriesStatusLine(row) {
+        if (!row) return `<div class="muted">-</div>`;
+        const st = row.last_fetch_status || "";
+        const msg = row.last_fetch_message || "";
+        const range =
+          row.last_data_start_date && row.last_data_end_date
+            ? `${row.last_data_start_date} ~ ${row.last_data_end_date}`
+            : "没有";
+        return `<div><span class="${statusClass(st)}">${st || "-"}</span> <span class="muted">${msg ? "· " + msg : ""}</span></div><div class="muted">data: ${range}</div>`;
+      }
+
       async function refresh() {
         const resp = await api("/global-benchmark?adjust=none", {
           method: "GET",
@@ -175,26 +197,30 @@
         }
         for (const it of data) {
           const tr = document.createElement("tr");
-          const cfgRange = `${it.start_date || "-"} ~ ${it.end_date || "-"}`;
-          const dataRange =
-            it.last_data_start_date && it.last_data_end_date
-              ? `${it.last_data_start_date} ~ ${it.last_data_end_date}`
-              : "没有";
-          const st = it.last_fetch_status || "";
-          const msg = it.last_fetch_message || "";
+          const p = byKind(it, "price");
+          const trr = byKind(it, "total_return");
           const checked = selected.has(it.code) ? "checked" : "";
           tr.innerHTML = `
             <td><input type="checkbox" data-act="sel" data-code="${it.code}" ${checked} /></td>
             <td>${it.code}</td>
             <td>${it.name}</td>
-            <td><div>${it.code_format || "-"}</div><div class="muted">${it.provider_hint || "-"}</div></td>
-            <td>${cfgRange}</td>
-            <td>${dataRange}</td>
-            <td class="${statusClass(st)}">${st || "-"} <span class="muted">${msg ? "· " + msg : ""}</span></td>
+            <td>
+              <div><strong>price</strong>: ${p ? `${p.code_format || "-"} / ${p.provider_hint || "-"} / ${p.provider_symbol || "-"}` : "-"}</div>
+              <div class="muted"><strong>total_return</strong>: ${trr ? `${trr.code_format || "-"} / ${trr.provider_hint || "-"} / ${trr.provider_symbol || "-"}` : "-"}</div>
+            </td>
+            <td>
+              <div><strong>price</strong>: ${renderSeriesStatusLine(p)}</div>
+              <div style="margin-top:6px;"><strong>total_return</strong>: ${renderSeriesStatusLine(trr)}</div>
+            </td>
+            <td class="${statusClass((p && p.last_fetch_status) || (trr && trr.last_fetch_status) || "")}">
+              <div class="muted">基准级抓取会同时尝试两个序列</div>
+            </td>
             <td>
               <div class="actions">
                 <button data-act="edit" data-code="${it.code}">编辑</button>
-                <button data-act="fetch" data-code="${it.code}">抓取</button>
+                <button data-act="fetch" data-code="${it.code}">抓取(双序列)</button>
+                <button data-act="fetchSeries" data-code="${it.code}" data-kind="price">抓取price</button>
+                <button data-act="fetchSeries" data-code="${it.code}" data-kind="total_return">抓取total_return</button>
                 <button data-act="del" data-code="${it.code}">删除</button>
               </div>
             </td>
@@ -209,8 +235,12 @@
         const payload = {
           code: $("code").value.trim(),
           name: $("name").value.trim(),
+          series_kind: $("seriesKind").value.trim() || "price",
           code_format: $("codeFormat").value.trim() || null,
           provider_hint: $("providerHint").value.trim() || null,
+          provider_symbol: null,
+          source_locked: false,
+          fallback_sources: null,
           start_date: $("start").value.trim() || null,
           end_date: $("end").value.trim() || null,
         };
@@ -222,6 +252,7 @@
         if (!resp.ok) return setMsg(txt);
         $("code").value = "";
         $("name").value = "";
+        $("seriesKind").value = "price";
         $("codeFormat").value = "";
         $("providerHint").value = "";
         $("start").value = "";
@@ -376,19 +407,39 @@
         const tr = btn.closest("tr");
         const it = tr && tr.dataset.item ? JSON.parse(tr.dataset.item) : null;
         if (act === "edit" && it) {
+          const p = byKind(it, "price");
+          const row = p || byKind(it, "total_return") || null;
           $("code").value = it.code;
           $("name").value = it.name;
-          $("codeFormat").value = it.code_format || "";
-          $("providerHint").value = it.provider_hint || "";
-          $("start").value = it.start_date || "";
-          $("end").value = it.end_date || "";
-          setMsg("已载入到表单，修改后点“保存/更新”。");
+          $("seriesKind").value =
+            row && row.series_kind ? row.series_kind : "price";
+          $("codeFormat").value = row ? row.code_format || "" : "";
+          $("providerHint").value = row ? row.provider_hint || "" : "";
+          $("start").value = row ? row.start_date || "" : "";
+          $("end").value = row ? row.end_date || "" : "";
+          setMsg("已载入默认（price优先）到表单，修改后点“保存/更新”。");
           return;
         }
         if (act === "fetch") {
           setMsg(`global-benchmark fetch ${code}...`);
           const resp = await api(
             `/global-benchmark/${encodeURIComponent(code)}/fetch`,
+            {
+              method: "POST",
+              body: "{}",
+            },
+          );
+          const txt = await resp.text();
+          if (!resp.ok) return setMsg(txt);
+          setMsg(txt);
+          await refresh();
+          return;
+        }
+        if (act === "fetchSeries") {
+          const kind = btn.getAttribute("data-kind");
+          setMsg(`global-benchmark fetch ${code}/${kind}...`);
+          const resp = await api(
+            `/global-benchmark/${encodeURIComponent(code)}/fetch/${encodeURIComponent(kind)}`,
             {
               method: "POST",
               body: "{}",

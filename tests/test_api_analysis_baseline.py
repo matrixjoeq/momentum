@@ -1462,6 +1462,99 @@ def test_api_trend_bias_v_tier_zero_trigger_is_noop(runtime_engine, engine, api_
     )
 
 
+def test_api_trend_breakeven_addon_defaults_to_enabled(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2022-01-03", periods=180, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "BEA1": [100.0 + i * 0.05 + ((i % 9) - 4) * 0.03 for i in range(len(dates))]
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    out = post_json_ok(
+        api_client,
+        "/api/analysis/trend",
+        {
+            "code": "BEA1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 15,
+            "position_sizing": "equal",
+            "exec_price": "close",
+            "r_profit_scaleout_enabled": False,
+            "bias_v_take_profit_enabled": False,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "quick_mode": True,
+        },
+    )
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert bool(params.get("r_profit_scaleout_breakeven_stop_enabled")) is True
+    assert bool(params.get("bias_v_take_profit_breakeven_stop_enabled")) is True
+    addons = ((out.get("risk_controls") or {}).get("addons")) or {}
+    rps_addon = addons.get("r_profit_scaleout_breakeven_stop") or {}
+    bv_addon = addons.get("bias_v_take_profit_breakeven_stop") or {}
+    assert bool(rps_addon.get("enabled")) is True
+    assert bool(bv_addon.get("enabled")) is True
+
+
+@pytest.mark.parametrize("runtime_engine", [None, "bt"])
+def test_api_trend_portfolio_breakeven_addon_switch_is_respected(
+    runtime_engine, engine, api_client
+):
+    dates = [d.date() for d in pd.date_range("2022-01-03", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "BEP1": [
+                100.0 + i * 0.07 + ((i % 9) - 4) * 0.05 for i in range(len(dates))
+            ],
+            "BEP2": [
+                95.0 + i * 0.05 + ((i % 11) - 5) * 0.04 for i in range(len(dates))
+            ],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    payload = {
+        "codes": ["BEP1", "BEP2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 15,
+        "position_sizing": "equal",
+        "exec_price": "close",
+        "atr_stop_mode": "none",
+        "r_profit_scaleout_enabled": True,
+        "r_profit_scaleout_execution_mode": "intraday",
+        "r_profit_scaleout_breakeven_stop_enabled": False,
+        "r_profit_scaleout_tiers": [{"r_multiple": 50.0, "reduce_fraction": 0.5}],
+        "bias_v_take_profit_enabled": True,
+        "bias_v_take_profit_reentry_mode": "reenter",
+        "bias_v_take_profit_execution_mode": "intraday",
+        "bias_v_take_profit_breakeven_stop_enabled": False,
+        "bias_v_ma_window": 20,
+        "bias_v_atr_window": 20,
+        "bias_v_take_profit_tiers": [{"threshold": 50.0, "reduce_fraction": 0.5}],
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    if runtime_engine:
+        payload["engine"] = runtime_engine
+    out = post_json_ok(api_client, "/api/analysis/trend/portfolio", payload)
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert bool(params.get("r_profit_scaleout_breakeven_stop_enabled")) is False
+    assert bool(params.get("bias_v_take_profit_breakeven_stop_enabled")) is False
+    addons = ((out.get("risk_controls") or {}).get("addons")) or {}
+    rps_addon = addons.get("r_profit_scaleout_breakeven_stop") or {}
+    bv_addon = addons.get("bias_v_take_profit_breakeven_stop") or {}
+    assert bool(rps_addon.get("enabled")) is False
+    assert bool(bv_addon.get("enabled")) is False
+
+
 @pytest.mark.parametrize("runtime_engine", [None, "bt"])
 def test_api_trend_bias_v_deprecated_threshold_is_ignored(
     runtime_engine, engine, api_client
@@ -3017,15 +3110,22 @@ def test_api_trend_single_ma_cross_rejects_kama_type(api_client):
     )
 
 
-def test_api_trend_single_rejects_conflicting_r_take_profit_modes(api_client):
+def test_api_trend_single_allows_r_take_profit_and_scaleout_together(api_client):
     c = api_client
-    err = post_json(
+    upsert_and_fetch_etfs(
+        c,
+        codes=["510300"],
+        names={"510300": "沪深300ETF"},
+        start_date="20240102",
+        end_date="20240110",
+    )
+    out = post_json_ok(
         c,
         "/api/analysis/trend",
         {
             "code": "510300",
             "start": "20240102",
-            "end": "20240103",
+            "end": "20240110",
             "strategy": "ma_filter",
             "sma_window": 5,
             "r_take_profit_enabled": True,
@@ -3033,21 +3133,28 @@ def test_api_trend_single_rejects_conflicting_r_take_profit_modes(api_client):
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
         },
-        expected_status=400,
     )
-    assert isinstance(err, dict)
-    assert "cannot both be true" in str((err or {}).get("detail") or "")
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert bool(params.get("r_take_profit_enabled")) is True
+    assert bool(params.get("r_profit_scaleout_enabled")) is True
 
 
-def test_api_trend_portfolio_rejects_conflicting_r_take_profit_modes(api_client):
+def test_api_trend_portfolio_allows_r_take_profit_and_scaleout_together(api_client):
     c = api_client
-    err = post_json(
+    upsert_and_fetch_etfs(
+        c,
+        codes=["510300", "159915"],
+        names={"510300": "沪深300ETF", "159915": "创业板ETF"},
+        start_date="20240102",
+        end_date="20240110",
+    )
+    out = post_json_ok(
         c,
         "/api/analysis/trend/portfolio",
         {
             "codes": ["510300", "159915"],
             "start": "20240102",
-            "end": "20240103",
+            "end": "20240110",
             "strategy": "ma_filter",
             "sma_window": 5,
             "position_sizing": "equal",
@@ -3056,10 +3163,10 @@ def test_api_trend_portfolio_rejects_conflicting_r_take_profit_modes(api_client)
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
         },
-        expected_status=400,
     )
-    assert isinstance(err, dict)
-    assert "cannot both be true" in str((err or {}).get("detail") or "")
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert bool(params.get("r_take_profit_enabled")) is True
+    assert bool(params.get("r_profit_scaleout_enabled")) is True
 
 
 def test_api_trend_single_bt_engine_contract(api_client):
@@ -4053,3 +4160,139 @@ def test_api_rotation_next_plan_entry_param_matrix_mini_program(
     else:
         assert data["pick_code"] is not None
         assert float(data["pick_exposure"]) > 0.0
+
+
+def test_api_trend_ma_trailing_stop_contract_and_validation(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2023-01-03", periods=180, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "MATS1": [
+                110.0 - i * 0.08 + ((i % 9) - 4) * 0.03 for i in range(len(dates))
+            ]
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    payload = {
+        "code": "MATS1",
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 20,
+        "exec_price": "close",
+        "position_sizing": "equal",
+        "ma_trailing_stop_enabled": True,
+        "ma_trailing_stop_ma_type": "ema",
+        "ma_trailing_stop_execution_mode": "next_day",
+        "ma_trailing_stop_effective_delay_days": 3,
+        "ma_trailing_stop_reduce_window": 10,
+        "ma_trailing_stop_exit_window": 20,
+        "ma_trailing_stop_reduce_fraction": 0.33,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "quick_mode": True,
+    }
+    out = post_json_ok(c, "/api/analysis/trend", payload)
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert bool(params.get("ma_trailing_stop_enabled")) is True
+    assert str(params.get("ma_trailing_stop_ma_type") or "") == "ema"
+    assert str(params.get("ma_trailing_stop_execution_mode") or "") == "next_day"
+    assert int(params.get("ma_trailing_stop_effective_delay_days") or 0) == 3
+    rc = ((out.get("risk_controls") or {}).get("ma_trailing_stop")) or {}
+    assert bool(rc.get("enabled")) is True
+    assert str(rc.get("reduce_fraction_basis") or "") == "initial_position"
+    assert int(rc.get("effective_delay_days") or 0) == 3
+
+    bad = dict(payload)
+    bad["ma_trailing_stop_ma_type"] = "bad_ma"
+    resp = c.post("/api/analysis/trend", json=bad)
+    assert resp.status_code == 400
+    bad_delay = dict(payload)
+    bad_delay["ma_trailing_stop_effective_delay_days"] = 0
+    resp_delay = c.post("/api/analysis/trend", json=bad_delay)
+    assert resp_delay.status_code == 422
+
+
+def test_api_trend_allows_r_take_profit_and_scaleout_together(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2022-01-03", periods=220, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "OR1": [100.0 + i * 0.06 + ((i % 9) - 4) * 0.04 for i in range(len(dates))],
+            "OR2": [95.0 + i * 0.05 + ((i % 11) - 5) * 0.03 for i in range(len(dates))],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["OR1", "OR2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 15,
+            "position_sizing": "equal",
+            "exec_price": "close",
+            "atr_stop_mode": "none",
+            "r_take_profit_enabled": True,
+            "r_take_profit_execution_mode": "intraday",
+            "r_take_profit_tiers": [{"r_multiple": 50.0, "retrace_ratio": 0.2}],
+            "r_profit_scaleout_enabled": True,
+            "r_profit_scaleout_execution_mode": "intraday",
+            "r_profit_scaleout_tiers": [{"r_multiple": 50.0, "reduce_fraction": 0.3}],
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "quick_mode": True,
+        },
+    )
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert bool(params.get("r_take_profit_enabled")) is True
+    assert bool(params.get("r_profit_scaleout_enabled")) is True
+
+
+def test_api_trend_portfolio_ma_trailing_stop_delay_param(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2023-01-03", periods=180, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "MDP1": [
+                100.0 + i * 0.03 + ((i % 7) - 3) * 0.04 for i in range(len(dates))
+            ],
+            "MDP2": [98.0 + i * 0.04 + ((i % 9) - 4) * 0.05 for i in range(len(dates))],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": ["MDP1", "MDP2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "sma_window": 20,
+            "position_sizing": "equal",
+            "exec_price": "close",
+            "ma_trailing_stop_enabled": True,
+            "ma_trailing_stop_ma_type": "sma",
+            "ma_trailing_stop_execution_mode": "intraday",
+            "ma_trailing_stop_effective_delay_days": 3,
+            "ma_trailing_stop_reduce_window": 10,
+            "ma_trailing_stop_exit_window": 20,
+            "ma_trailing_stop_reduce_fraction": 0.33,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "quick_mode": True,
+        },
+    )
+    params = ((out.get("meta") or {}).get("params")) or {}
+    assert int(params.get("ma_trailing_stop_effective_delay_days") or 0) == 3
+    rc = ((out.get("risk_controls") or {}).get("ma_trailing_stop")) or {}
+    assert int(rc.get("effective_delay_days") or 0) == 3

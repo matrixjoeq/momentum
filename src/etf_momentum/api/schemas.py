@@ -119,17 +119,22 @@ class PriceOut(BaseModel):
 class GlobalBenchmarkPoolUpsert(BaseModel):
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=128)
+    series_kind: str | None = Field(default=None, max_length=32)
     code_format: str | None = Field(default=None, max_length=32)
     provider_hint: str | None = Field(default=None, max_length=32)
+    provider_symbol: str | None = Field(default=None, max_length=64)
+    source_locked: bool | None = None
+    fallback_sources: list[dict[str, str]] | None = None
     start_date: str | None = Field(default=None, description="YYYYMMDD")
     end_date: str | None = Field(default=None, description="YYYYMMDD")
 
 
-class GlobalBenchmarkPoolOut(BaseModel):
-    code: str
-    name: str
+class GlobalBenchmarkSeriesOut(BaseModel):
+    series_kind: str
     code_format: str | None = None
     provider_hint: str | None = None
+    provider_symbol: str | None = None
+    source_locked: bool = False
     start_date: str | None
     end_date: str | None
     last_fetch_status: str | None = None
@@ -138,8 +143,15 @@ class GlobalBenchmarkPoolOut(BaseModel):
     last_data_end_date: str | None = None
 
 
+class GlobalBenchmarkPoolOut(BaseModel):
+    code: str
+    name: str
+    series: list[GlobalBenchmarkSeriesOut] = Field(default_factory=list)
+
+
 class GlobalBenchmarkPriceOut(BaseModel):
     code: str
+    series_kind: str
     trade_date: str
     open: float | None
     high: float | None
@@ -153,11 +165,13 @@ class GlobalBenchmarkPriceOut(BaseModel):
 
 class GlobalBenchmarkFetchResult(BaseModel):
     code: str
+    series_kind: str
     inserted_or_updated: int
     status: str
     message: str | None = None
     code_format: str | None = None
     final_provider: str | None = None
+    final_symbol: str | None = None
     provider_attempts: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -174,6 +188,7 @@ class GlobalBenchmarkDefaultInstallRequest(BaseModel):
 class GlobalBenchmarkDefaultInstallItem(BaseModel):
     code: str
     name: str
+    series_kind: str
     action: str
 
 
@@ -192,15 +207,25 @@ class GlobalBenchmarkDefaultAcceptanceRequest(BaseModel):
     continue_on_error: bool = True
 
 
+class GlobalBenchmarkDefaultAcceptanceSeriesItem(BaseModel):
+    series_kind: str
+    status: str
+    message: str | None = None
+    final_provider: str | None = None
+    final_symbol: str | None = None
+    sample_days: int = 0
+    data_start_date: str | None = None
+    data_end_date: str | None = None
+
+
 class GlobalBenchmarkDefaultAcceptanceItem(BaseModel):
     code: str
     name: str
     status: str
-    message: str | None = None
-    final_provider: str | None = None
-    sample_days: int = 0
-    data_start_date: str | None = None
-    data_end_date: str | None = None
+    failure_reason: str | None = None
+    series: list[GlobalBenchmarkDefaultAcceptanceSeriesItem] = Field(
+        default_factory=list
+    )
 
 
 class GlobalBenchmarkDefaultAcceptanceResponse(BaseModel):
@@ -2512,7 +2537,7 @@ class RProfitScaleoutTier(BaseModel):
     reduce_fraction: float = Field(
         gt=0.0,
         le=1.0,
-        description="Position fraction to reduce at this tier relative to current remaining position, e.g. 0.4 means sell 40% of remaining",
+        description="Position fraction to reduce at this tier relative to initial position at entry",
     )
 
 
@@ -2524,7 +2549,7 @@ class BiasVTakeProfitTier(BaseModel):
     reduce_fraction: float = Field(
         gt=0.0,
         le=1.0,
-        description="Position fraction to reduce at this BIAS-V threshold relative to current remaining position",
+        description="Position fraction to reduce at this BIAS-V threshold relative to initial position at entry",
     )
 
 
@@ -2736,6 +2761,39 @@ class TrendBacktestRequest(BaseModel):
         gt=0.0,
         description="ATR tightening step m (used by tightening mode)",
     )
+    ma_trailing_stop_enabled: bool = Field(
+        default=False,
+        description="Enable universal MA/EMA trailing-stop overlay",
+    )
+    ma_trailing_stop_ma_type: str = Field(
+        default="sma",
+        description="MA trailing-stop type: sma|ema",
+    )
+    ma_trailing_stop_execution_mode: str = Field(
+        default="intraday",
+        description="MA trailing-stop execution mode: intraday|next_day",
+    )
+    ma_trailing_stop_effective_delay_days: int = Field(
+        default=3,
+        ge=1,
+        description="MA trailing-stop activation delay in trading days after entry (3 means active from T+3)",
+    )
+    ma_trailing_stop_reduce_window: int = Field(
+        default=10,
+        ge=2,
+        description="Reduce-line MA window used by MA trailing stop",
+    )
+    ma_trailing_stop_exit_window: int = Field(
+        default=20,
+        ge=2,
+        description="Exit-line MA window used by MA trailing stop",
+    )
+    ma_trailing_stop_reduce_fraction: float = Field(
+        default=0.33,
+        gt=0.0,
+        le=1.0,
+        description="Reduce fraction when reduce line triggers, relative to initial position at entry",
+    )
     r_take_profit_enabled: bool = Field(
         default=False,
         description="Enable universal R-multiple drawdown take-profit overlay",
@@ -2760,6 +2818,10 @@ class TrendBacktestRequest(BaseModel):
         default="intraday",
         description="Floating-profit scale-out execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
     )
+    r_profit_scaleout_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed floating-profit scale-out",
+    )
     r_profit_scaleout_tiers: list[RProfitScaleoutTier] | None = Field(
         default=None,
         description="Tiered scale-out config; each tier reduces a fraction of current remaining position, e.g. [{r_multiple:2,reduce_fraction:0.4},{r_multiple:3,reduce_fraction:0.3}]",
@@ -2774,6 +2836,10 @@ class TrendBacktestRequest(BaseModel):
     bias_v_take_profit_execution_mode: str = Field(
         default="intraday",
         description="BIAS-V take-profit execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    bias_v_take_profit_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed BIAS-V take-profit tier",
     )
     bias_v_ma_window: int = Field(
         default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"
@@ -3091,6 +3157,26 @@ class TrendPortfolioBacktestRequest(BaseModel):
     atr_stop_window: int = Field(default=14, ge=2)
     atr_stop_n: float = Field(default=2.0, gt=0.0)
     atr_stop_m: float = Field(default=0.5, gt=0.0)
+    ma_trailing_stop_enabled: bool = Field(
+        default=False,
+        description="Enable universal MA/EMA trailing-stop overlay",
+    )
+    ma_trailing_stop_ma_type: str = Field(
+        default="sma",
+        description="MA trailing-stop type: sma|ema",
+    )
+    ma_trailing_stop_execution_mode: str = Field(
+        default="intraday",
+        description="intraday|next_day",
+    )
+    ma_trailing_stop_effective_delay_days: int = Field(
+        default=3,
+        ge=1,
+        description="MA trailing-stop activation delay in trading days after entry (3 means active from T+3)",
+    )
+    ma_trailing_stop_reduce_window: int = Field(default=10, ge=2)
+    ma_trailing_stop_exit_window: int = Field(default=20, ge=2)
+    ma_trailing_stop_reduce_fraction: float = Field(default=0.33, gt=0.0, le=1.0)
     r_take_profit_enabled: bool = Field(
         default=False,
         description="Enable universal R-multiple drawdown take-profit overlay",
@@ -3111,6 +3197,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default="intraday",
         description="intraday|next_day (intraday takes effect from next trading day after entry)",
     )
+    r_profit_scaleout_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed floating-profit scale-out",
+    )
     r_profit_scaleout_tiers: list[RProfitScaleoutTier] | None = Field(default=None)
     bias_v_take_profit_enabled: bool = Field(
         default=False, description="Enable universal BIAS-V take-profit overlay"
@@ -3121,6 +3211,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
     bias_v_take_profit_execution_mode: str = Field(
         default="intraday",
         description="intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    bias_v_take_profit_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed BIAS-V take-profit tier",
     )
     bias_v_ma_window: int = Field(
         default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"
@@ -3289,6 +3383,12 @@ class RotationCandidateScreenRequest(BaseModel):
         ge=5,
         le=252,
         description="Forward horizon for momentum significance test",
+    )
+    skip_days: int = Field(
+        default=0,
+        ge=0,
+        le=252,
+        description="Skip recent N trading days when constructing momentum signal",
     )
     factor_weights: dict[str, float] | None = Field(
         default=None,
@@ -3638,6 +3738,7 @@ class LiveHoldingOut(BaseModel):
     market_value: float | None = None
     pnl_amount: float | None = None
     pnl_rate: float | None = None
+    holding_duration_days: int | None = None
     price_missing: bool
     stale_days: int | None = None
 
@@ -3653,6 +3754,7 @@ class LiveClosedRoundOut(BaseModel):
     name: str
     open_date: str
     close_date: str
+    holding_duration_days: int | None = None
     buy_count: int
     sell_count: int
     buy_qty: float

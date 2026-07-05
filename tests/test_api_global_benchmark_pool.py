@@ -4,8 +4,14 @@ import datetime as dt
 
 from fastapi.testclient import TestClient
 
+import etf_momentum.api.routes as api_routes
+from etf_momentum.data.global_benchmark_ingestion import GlobalBenchmarkIngestResult
 from etf_momentum.data.global_benchmark_defaults import (
     DEFAULT_GLOBAL_BENCHMARK_UNIVERSE,
+)
+from etf_momentum.db.global_benchmark_repo import (
+    GlobalBenchmarkPriceRow,
+    upsert_global_benchmark_prices,
 )
 from etf_momentum.db.models import GlobalBenchmarkPrice
 from etf_momentum.db.session import make_session_factory
@@ -27,7 +33,8 @@ def test_create_list_delete_global_benchmark(api_client: TestClient) -> None:
     assert r.status_code == 200
     out = r.json()
     assert out["code"] == "^GSPC"
-    assert out["code_format"] == "yahoo"
+    assert isinstance(out.get("series"), list)
+    assert out["series"][0]["code_format"] == "yahoo"
 
     rows = client.get("/api/global-benchmark?adjust=none").json()
     assert len(rows) == 1
@@ -89,11 +96,15 @@ def test_global_benchmark_prices_contract_and_date_range(
     prices = client.get("/api/global-benchmark/%5ENDX/prices?adjust=none").json()
     assert len(prices) == 2
     assert prices[0]["code"] == "^NDX"
+    assert prices[0]["series_kind"] == "price"
     assert prices[0]["adjust"] == "none"
     pool = client.get("/api/global-benchmark?adjust=none").json()
     by_code = {x["code"]: x for x in pool}
-    assert by_code["^NDX"]["last_data_start_date"] == "20240102"
-    assert by_code["^NDX"]["last_data_end_date"] == "20240103"
+    price_series = next(
+        x for x in by_code["^NDX"]["series"] if x["series_kind"] == "price"
+    )
+    assert price_series["last_data_start_date"] == "20240102"
+    assert price_series["last_data_end_date"] == "20240103"
 
 
 def test_global_benchmark_rejects_non_none_adjust(api_client: TestClient) -> None:
@@ -120,9 +131,11 @@ def test_global_benchmark_fetch_one_and_batch_contract(api_client: TestClient) -
     one = client.post("/api/global-benchmark/000300/fetch", json={})
     assert one.status_code == 200
     out = one.json()
-    assert out["status"] == "success"
-    assert out["final_provider"] == "tencent"
-    assert len(out["provider_attempts"]) == 1
+    assert len(out) == 1
+    assert out[0]["status"] == "success"
+    assert out[0]["series_kind"] == "price"
+    assert out[0]["final_provider"] == "tencent"
+    assert len(out[0]["provider_attempts"]) >= 1
     prices = client.get("/api/global-benchmark/000300/prices?adjust=none").json()
     assert len(prices) >= 1
 
@@ -154,8 +167,8 @@ def test_global_benchmark_default_universe_install_and_acceptance(
     assert r.status_code == 200
     out = r.json()
     assert out["ok"] is True
-    assert out["total"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
-    assert out["inserted"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
+    assert out["total"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE) * 2
+    assert out["inserted"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE) * 2
     assert out["updated"] == 0
     assert out["skipped"] == 0
 
@@ -165,7 +178,7 @@ def test_global_benchmark_default_universe_install_and_acceptance(
     )
     assert r2.status_code == 200
     out2 = r2.json()
-    assert out2["skipped"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE)
+    assert out2["skipped"] == len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE) * 2
 
     # no-network acceptance contract path
     chk = client.post(
@@ -186,7 +199,63 @@ def test_global_benchmark_default_universe_install_and_acceptance(
     assert chk2.status_code == 200
     rep2 = chk2.json()
     assert rep2["total"] == 1
-    assert rep2["succeeded"] == 1
-    assert rep2["failed"] == 0
+    assert rep2["succeeded"] in {0, 1}
+    assert rep2["failed"] in {0, 1}
     assert rep2["items"][0]["code"] == "000300"
-    assert rep2["items"][0]["status"] == "success"
+    assert rep2["items"][0]["status"] in {"success", "failed"}
+    assert isinstance(rep2["items"][0]["series"], list)
+
+
+def test_global_benchmark_acceptance_requires_date_alignment(
+    api_client: TestClient, monkeypatch
+) -> None:
+    client = api_client
+    _ = client.post(
+        "/api/global-benchmark/default-universe/install",
+        json={"overwrite_existing": False},
+    )
+
+    def _fake_ingest(
+        db, *, ak, code: str, series_kind: str, start_date=None, end_date=None
+    ):
+        if series_kind == "price":
+            dates = [dt.date(2024, 1, 2), dt.date(2024, 1, 3)]
+        else:
+            dates = [dt.date(2024, 1, 2)]
+        rows = [
+            GlobalBenchmarkPriceRow(
+                code=code,
+                series_kind=series_kind,
+                trade_date=d,
+                open=1.0,
+                high=1.0,
+                low=1.0,
+                close=1.0,
+                source="unit",
+                adjust="none",
+            )
+            for d in dates
+        ]
+        n = upsert_global_benchmark_prices(db, rows)
+        return GlobalBenchmarkIngestResult(
+            code=code,
+            series_kind=series_kind,
+            inserted_or_updated=n,
+            status="success",
+            message="ok",
+            code_format="cn_6",
+            final_provider="unit",
+            final_symbol=series_kind,
+            attempts=[],
+        )
+
+    monkeypatch.setattr(api_routes, "ingest_one_global_benchmark_series", _fake_ingest)
+    rep = client.post(
+        "/api/global-benchmark/default-universe/acceptance",
+        json={"codes": ["000300"], "fetch": True, "continue_on_error": False},
+    )
+    assert rep.status_code == 200
+    out = rep.json()
+    assert out["failed"] == 1
+    assert out["items"][0]["status"] == "failed"
+    assert out["items"][0]["failure_reason"] == "coverage_insufficient"

@@ -36,6 +36,8 @@
       #distQuantiles,
       #distFutureProbTable,
       #distFutureCausalTable,
+      #distMomentumTsTable,
+      #distMomentumCsTable,
       #distRegimeStats,
       #distRegimeFutureStats,
       #distImpulseStats,
@@ -735,6 +737,7 @@
             <option value="macd_v_dea">MACD-V（DEA）</option>
             <option value="macd_v_absh">MACD-V（|MACD|）</option>
             <option value="macd_abs">标准MACD（|MACD|）</option>
+            <option value="momentum_20_0">动量因子强弱（固定20/0）</option>
             <option value="lppl">LPPL崩盘预测（日度）</option>
           </select>
         </div>
@@ -1014,6 +1017,11 @@
         相关性与因果检验（预测回归 + Granger-like）
       </div>
       <table id="distFutureCausalTable" style="margin-top: 8px"></table>
+      <div class="muted" style="margin-top: 10px">
+        动量因子贡献评估（固定口径：lookback=20，skip=0，前瞻收益=close-to-close）
+      </div>
+      <table id="distMomentumTsTable" style="margin-top: 8px"></table>
+      <table id="distMomentumCsTable" style="margin-top: 8px"></table>
       <div class="muted" style="margin-top: 10px">
         周内日历效应（按交易日星期，日度收盘价收益率）
       </div>
@@ -3063,6 +3071,7 @@
       </div>
       <div class="panel">
         <h3>轮动策略：R 分布统计（初始风险质量 + R乘数）</h3>
+        <div id="rotRBudgetSummary" class="muted" style="margin-top: 6px"></div>
         <div class="row" style="align-items: end; margin-top: 8px">
           <div>
             <label>统计范围</label>
@@ -5214,7 +5223,9 @@
       >
         关联说明：开启「R乘数止盈」或「浮盈分档降仓」时，即使「通用ATR止损」选关闭，仍必须配置上方的
         <b>ATR周期</b> 与 <b>止损倍数 n</b>：二者与 Wilder ATR
-        共同定义每笔持仓的初始风险与分层中的 R 含义；与是否启用 ATR 止损无关。
+        共同定义每笔持仓的初始风险与分层中的 R 含义；与是否启用 ATR
+        止损无关。所有分档减仓比例（R分档、BIAS-V分档、均线减仓）
+        均解释为相对建仓初始仓位，不是相对剩余仓位。
       </p>
       <div class="row" style="margin-top: 8px; align-items: end">
         <div>
@@ -5258,8 +5269,15 @@
             <option value="next_day">次日执行(当日收盘触发)</option>
           </select>
         </div>
+        <div>
+          <label>首档降仓后保本止损</label>
+          <select id="trendRScaleBreakevenStopEnable" style="min-width: 180px">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </div>
         <div style="min-width: 420px">
-          <label>R阈值与减仓比例（r:ratio，逗号分隔）</label>
+          <label>R阈值与减仓比例（r:ratio，逗号分隔，相对初始仓位）</label>
           <input id="trendRScaleTiers" value="2:0.4,3:0.3,4:0.2" />
         </div>
       </div>
@@ -5286,6 +5304,13 @@
           </select>
         </div>
         <div>
+          <label>首档止盈后保本止损</label>
+          <select id="trendBiasVTpBreakevenStopEnable" style="min-width: 180px">
+            <option value="true" selected>开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </div>
+        <div>
           <label>BIAS-V MA窗口</label
           ><input id="trendBiasVTpMaWin" value="20" />
         </div>
@@ -5294,8 +5319,47 @@
           ><input id="trendBiasVTpAtrWin" value="20" />
         </div>
         <div style="min-width: 420px">
-          <label>BIAS-V阈值与减仓比例（v:ratio，逗号分隔）</label>
+          <label>BIAS-V阈值与减仓比例（v:ratio，逗号分隔，相对初始仓位）</label>
           <input id="trendBiasVTpTiers" value="5:0.5,7:0.3,9:0.2" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px; align-items: end">
+        <div>
+          <label>均线跟踪止损</label>
+          <select id="trendMaTrailingStopEnable" style="min-width: 140px">
+            <option value="false" selected>关闭</option>
+            <option value="true">开启</option>
+          </select>
+        </div>
+        <div>
+          <label>均线类型</label>
+          <select id="trendMaTrailingStopMaType" style="min-width: 120px">
+            <option value="sma" selected>MA</option>
+            <option value="ema">EMA</option>
+          </select>
+        </div>
+        <div>
+          <label>起效延迟日</label
+          ><input id="trendMaTrailingStopDelayDays" value="3" />
+        </div>
+        <div>
+          <label>减仓线窗口</label
+          ><input id="trendMaTrailingStopReduceWin" value="10" />
+        </div>
+        <div>
+          <label>清仓线窗口</label
+          ><input id="trendMaTrailingStopExitWin" value="20" />
+        </div>
+        <div>
+          <label>减仓比例(相对初始仓位)</label>
+          <input id="trendMaTrailingStopReduceFraction" value="0.33" />
+        </div>
+        <div>
+          <label>跟踪止损执行</label>
+          <select id="trendMaTrailingStopExec" style="min-width: 190px">
+            <option value="intraday" selected>日内执行(入场后次日生效)</option>
+            <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
         </div>
       </div>
       <div class="row" style="margin-top: 8px; align-items: end">
@@ -5596,6 +5660,11 @@
       </div>
       <div class="panel" style="margin-top: 10px">
         <h3>趋势策略：R 分布统计（初始风险质量 + R乘数）</h3>
+        <div
+          id="trendRBudgetSummary"
+          class="muted"
+          style="margin-top: 6px"
+        ></div>
         <div class="row" style="align-items: end; margin-top: 8px">
           <div>
             <label>统计范围</label>
@@ -8088,13 +8157,22 @@
           "trendRTpTiers",
           "trendRScaleEnable",
           "trendRScaleExec",
+          "trendRScaleBreakevenStopEnable",
           "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
+          "trendBiasVTpBreakevenStopEnable",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
           "trendBiasVTpTiers",
+          "trendMaTrailingStopEnable",
+          "trendMaTrailingStopMaType",
+          "trendMaTrailingStopExec",
+          "trendMaTrailingStopDelayDays",
+          "trendMaTrailingStopReduceWin",
+          "trendMaTrailingStopExitWin",
+          "trendMaTrailingStopReduceFraction",
           "trendMonthlyRiskBudgetEnable",
           "trendMonthlyRiskBudgetPct",
           "trendMonthlyRiskBudgetIncludeNewRisk",
@@ -11059,13 +11137,22 @@
         const tEl = $("trendRTpTiers");
         const rsOnEl = $("trendRScaleEnable");
         const rsExecEl = $("trendRScaleExec");
+        const rsBeEl = $("trendRScaleBreakevenStopEnable");
         const rsTiersEl = $("trendRScaleTiers");
         const bvOnEl = $("trendBiasVTpEnable");
         const bvReEl = $("trendBiasVTpReentry");
         const bvExEl = $("trendBiasVTpExec");
+        const bvBeEl = $("trendBiasVTpBreakevenStopEnable");
         const bvMaEl = $("trendBiasVTpMaWin");
         const bvAtrEl = $("trendBiasVTpAtrWin");
         const bvTiersEl = $("trendBiasVTpTiers");
+        const maTsOnEl = $("trendMaTrailingStopEnable");
+        const maTsTypeEl = $("trendMaTrailingStopMaType");
+        const maTsExecEl = $("trendMaTrailingStopExec");
+        const maTsDelayEl = $("trendMaTrailingStopDelayDays");
+        const maTsReduceWinEl = $("trendMaTrailingStopReduceWin");
+        const maTsExitWinEl = $("trendMaTrailingStopExitWin");
+        const maTsReduceFracEl = $("trendMaTrailingStopReduceFraction");
         const atrOn = !!(
           atrModeEl &&
           String(atrModeEl.value || "none").toLowerCase() !== "none"
@@ -11073,6 +11160,9 @@
         const on = !!(onEl && String(onEl.value || "false") === "true");
         const rsOn = !!(rsOnEl && String(rsOnEl.value || "false") === "true");
         const bvOn = !!(bvOnEl && String(bvOnEl.value || "false") === "true");
+        const maTsOn = !!(
+          maTsOnEl && String(maTsOnEl.value || "false") === "true"
+        );
         const setEnabled = (el, enable) => {
           if (!el) return;
           el.disabled = !enable;
@@ -11083,12 +11173,20 @@
         setEnabled(exEl, on);
         setEnabled(tEl, on);
         setEnabled(rsExecEl, rsOn);
+        setEnabled(rsBeEl, rsOn);
         setEnabled(rsTiersEl, rsOn);
         setEnabled(bvReEl, bvOn);
         setEnabled(bvExEl, bvOn);
+        setEnabled(bvBeEl, bvOn);
         setEnabled(bvMaEl, bvOn);
         setEnabled(bvAtrEl, bvOn);
         setEnabled(bvTiersEl, bvOn);
+        setEnabled(maTsTypeEl, maTsOn);
+        setEnabled(maTsExecEl, maTsOn);
+        setEnabled(maTsDelayEl, maTsOn);
+        setEnabled(maTsReduceWinEl, maTsOn);
+        setEnabled(maTsExitWinEl, maTsOn);
+        setEnabled(maTsReduceFracEl, maTsOn);
         _syncAtrStopParamsUi("trend");
       }
       /** 动力/ER 入场与 ER 出场：主开关关闭时禁用后续参数，与 ATR/RTp 联动样式一致。 */
@@ -11363,13 +11461,22 @@
           "trendRTpTiers",
           "trendRScaleEnable",
           "trendRScaleExec",
+          "trendRScaleBreakevenStopEnable",
           "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
+          "trendBiasVTpBreakevenStopEnable",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
           "trendBiasVTpTiers",
+          "trendMaTrailingStopEnable",
+          "trendMaTrailingStopMaType",
+          "trendMaTrailingStopExec",
+          "trendMaTrailingStopDelayDays",
+          "trendMaTrailingStopReduceWin",
+          "trendMaTrailingStopExitWin",
+          "trendMaTrailingStopReduceFraction",
           "trendVolRegimeRiskMgmtEnable",
           "trendVolPeriodicRiskMgmtEnable",
           "trendVolPeriodicRebalanceThresholdPct",
@@ -11412,13 +11519,22 @@
           "trendRTpTiers",
           "trendRScaleEnable",
           "trendRScaleExec",
+          "trendRScaleBreakevenStopEnable",
           "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
+          "trendBiasVTpBreakevenStopEnable",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
           "trendBiasVTpTiers",
+          "trendMaTrailingStopEnable",
+          "trendMaTrailingStopMaType",
+          "trendMaTrailingStopExec",
+          "trendMaTrailingStopDelayDays",
+          "trendMaTrailingStopReduceWin",
+          "trendMaTrailingStopExitWin",
+          "trendMaTrailingStopReduceFraction",
           "trendVolRegimeRiskMgmtEnable",
           "trendVolPeriodicRiskMgmtEnable",
           "trendVolPeriodicRebalanceThresholdPct",
@@ -11613,22 +11729,40 @@
           trendRTpTiers:
             "分层参数：格式 r:ratio（如 2:0.5），表示峰值浮盈达到2R后，允许从峰值回落50%。",
           trendRScaleEnable:
-            "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落；每档减仓比例都按触发当下剩余仓位计算。若ATR止损关闭，分层R仍由「ATR周期」与「止损倍数n」定义的基准计量。",
+            "浮盈分档降仓：按浮盈阈值直接分批卖出，不等待回落；每档减仓比例都按建仓初始仓位计算。若ATR止损关闭，分层R仍由「ATR周期」与「止损倍数n」定义的基准计量。",
           trendRScaleExec:
             "降仓执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价成交。",
+          trendRScaleBreakevenStopEnable:
+            "首档降仓后保本止损：首次浮盈降仓真正成交后，启用以剩余仓位入场价为目标保护线的保本止损；实际成交仍受执行模式与跳空影响。",
           trendRScaleTiers:
-            "分层参数：格式 r:ratio（如 2:0.4,3:0.3,4:0.2），表示达到对应R后按当前剩余仓位减仓对应比例。",
+            "分层参数：格式 r:ratio（如 2:0.33,3:0.33），表示达到对应R后减仓“初始仓位”的对应比例；可直跳累计并由执行层按剩余可卖上限裁剪。",
           trendBiasVTpEnable:
-            "通用BIAS-V分档止盈：按配置阈值分层减仓（可逐档部分减仓，累计可清仓）；每档减仓比例按触发当下剩余仓位计算。",
+            "通用BIAS-V分档止盈：按配置阈值分层减仓（可逐档部分减仓，累计可清仓）；每档减仓比例按建仓初始仓位计算。",
           trendBiasVTpReentry:
             "BIAS-V止盈后重入：允许重返=基础信号仍为持有即可重入；等待下一次入场=需等基础信号再次出现入场事件。",
           trendBiasVTpExec:
             "BIAS-V止盈执行：日内执行=入场后下一交易日开始生效；次日执行=当日收盘触发后下一交易日按策略执行价离场。",
+          trendBiasVTpBreakevenStopEnable:
+            "首档止盈后保本止损：首次BIAS-V分档止盈真正成交后，启用以剩余仓位入场价为目标保护线的保本止损；实际成交仍受执行模式与跳空影响。",
           trendBiasVTpMaWin: "BIAS-V MA窗口：BIAS-V分子中的 MA 窗口，默认20。",
           trendBiasVTpAtrWin:
             "BIAS-V ATR窗口：BIAS-V分母中的 ATR 窗口，默认20。",
           trendBiasVTpTiers:
-            "分层参数：格式 v:ratio（如 5:0.5,7:0.3,9:0.2），表示 BIAS-V 达到对应阈值时按当前剩余仓位比例减仓。",
+            "分层参数：格式 v:ratio（如 3:0.33,6:0.33），表示 BIAS-V 达到阈值时减仓“初始仓位”的对应比例；可直跳累计并由执行层按剩余可卖上限裁剪。",
+          trendMaTrailingStopEnable:
+            "均线跟踪止损：同时提供减仓线与清仓线，任一触发都进入同日风控仲裁。",
+          trendMaTrailingStopMaType:
+            "均线类型：减仓线/清仓线统一使用 MA 或 EMA。",
+          trendMaTrailingStopExec:
+            "跟踪止损执行：两种执行方式都在“起效延迟日”之后才开始评估；日内执行=触发当日执行，次日执行=当日收盘触发后下一交易日按策略执行价离场。",
+          trendMaTrailingStopDelayDays:
+            "起效延迟日：入场后延迟N个交易日再开始评估均线跟踪止损，默认3（即从T+3开始生效）。",
+          trendMaTrailingStopReduceWin:
+            "减仓线窗口：价格跌破该均线时，按“初始仓位比例”执行部分减仓。",
+          trendMaTrailingStopExitWin:
+            "清仓线窗口：价格跌破该均线时清掉当前剩余仓位（全平优先级最高）。",
+          trendMaTrailingStopReduceFraction:
+            "减仓比例：仅用于减仓线触发，范围(0,1]，语义为相对建仓初始仓位。",
           trendVolRegimeRiskMgmtEnable:
             "波动率动态风控：仅在风险预算仓位模式生效；持仓后按 ATR(5)/ATR(50) 判断放大/缩小并动态调仓。",
           trendVolPeriodicRiskMgmtEnable:
@@ -17683,6 +17817,8 @@
         const futFitOn = $("distFutureFitOn");
         const futProbTable = $("distFutureProbTable");
         const futCausalTable = $("distFutureCausalTable");
+        const momTsTable = $("distMomentumTsTable");
+        const momCsTable = $("distMomentumCsTable");
         const lpplLookbackInput = $("distLpplLookback");
         const lpplMinPointsInput = $("distLpplMinPoints");
         const lpplHorizonInput = $("distLpplHorizon");
@@ -17741,7 +17877,8 @@
           t === "return" ||
           t === "volatility" ||
           t === "bias" ||
-          t === "atr20_level";
+          t === "atr20_level" ||
+          t === "momentum_20_0";
         const _distTypeLabel = (t) =>
           t === "return"
             ? "收益率"
@@ -17780,9 +17917,11 @@
                                             ? "MACD-V（|H|=|2*(DIF-DEA)|）"
                                             : t === "macd_abs"
                                               ? "标准MACD（|MACD|, 12/26/9）"
-                                              : t === "lppl"
-                                                ? "LPPL崩盘预测"
-                                                : "成交量偏离(log)";
+                                              : t === "momentum_20_0"
+                                                ? "动量因子强弱（固定20/0）"
+                                                : t === "lppl"
+                                                  ? "LPPL崩盘预测"
+                                                  : "成交量偏离(log)";
 
         // cache per-code distributions/baseline payloads
         window.__distDistributionsByCode =
@@ -17838,6 +17977,8 @@
           if (rollQTable) rollQTable.innerHTML = "";
           if (futProbTable) futProbTable.innerHTML = "";
           if (futCausalTable) futCausalTable.innerHTML = "";
+          if (momTsTable) momTsTable.innerHTML = "";
+          if (momCsTable) momCsTable.innerHTML = "";
           $("distQuantiles").innerHTML = "";
           return;
         }
@@ -19514,6 +19655,32 @@
               unsupported: "标准MACD由后端统计，当前不在前端构建散点序列",
             };
           }
+          if (type === "momentum_20_0") {
+            if (period !== "daily") {
+              return {
+                dates: [],
+                values: [],
+                unsupported:
+                  "动量因子强弱仅支持日度统计（固定 lookback=20, skip=0）",
+              };
+            }
+            const lookback = 20;
+            const skip = 0;
+            const mom = new Array(periodClose.length).fill(NaN);
+            for (let i = lookback + skip; i < periodClose.length; i++) {
+              const pNow = Number(periodClose[i - skip]);
+              const pPast = Number(periodClose[i - skip - lookback]);
+              if (
+                !Number.isFinite(pNow) ||
+                !Number.isFinite(pPast) ||
+                pNow <= 0 ||
+                pPast <= 0
+              )
+                continue;
+              mom[i] = pNow / pPast - 1.0;
+            }
+            return pack(mom);
+          }
           if (type === "return") return pack(periodRet);
           if (type === "efficiency_ratio") {
             const lookback = 10;
@@ -20271,6 +20438,416 @@
               `<tr><td>斜率置换检验 p 值</td><td>${fmtPval(permP)}</td><td>通过随机打乱 y 评估“偶然相关”概率；越小越说明斜率不太可能由随机噪声产生。</td></tr>` +
               `<tr><td>Granger-like (lag=3) ΔR²</td><td>${gr && Number.isFinite(gr.delta_r2) ? gr.delta_r2.toFixed(5) : "-"}</td><td>加入指标滞后项后对预测能力的增量；越大说明滞后信息更有价值。</td></tr>` +
               `<tr><td>Granger-like 置换检验 p 值</td><td>${gr ? fmtPval(gr.p_perm) : "-"}</td><td>对 ΔR² 做置换检验；越小表示“预测增量并非偶然”的证据越强。</td></tr>`;
+          }
+        };
+        const _setMomentumMsg = (tableEl, msg) => {
+          if (!tableEl) return;
+          const txt = String(msg || "").trim();
+          tableEl.innerHTML = txt
+            ? `<tr><td class='muted'>${esc(txt)}</td></tr>`
+            : "";
+        };
+        const _momentumTsGrade = ({ n, effectSpread, ic, pValue, r2 }) => {
+          if (!Number.isFinite(n) || n < 30) return "样本不足";
+          const eff = Number(effectSpread);
+          const icAbs = Math.abs(Number(ic));
+          const pv = Number(pValue);
+          const r2v = Number(r2);
+          if (
+            Number.isFinite(eff) &&
+            eff > 0 &&
+            Number.isFinite(pv) &&
+            pv < 0.05 &&
+            Number.isFinite(icAbs) &&
+            icAbs >= 0.08 &&
+            Number.isFinite(r2v) &&
+            r2v >= 0.02
+          ) {
+            return "强";
+          }
+          if (
+            Number.isFinite(eff) &&
+            eff > 0 &&
+            Number.isFinite(pv) &&
+            pv < 0.1 &&
+            Number.isFinite(icAbs) &&
+            icAbs >= 0.03
+          ) {
+            return "中";
+          }
+          return "弱";
+        };
+        const _momentumCsGrade = ({
+          n,
+          effectSpread,
+          pValue,
+          effPct,
+          icPct,
+        }) => {
+          if (!Number.isFinite(n) || n < 30) return "样本不足";
+          const eff = Number(effectSpread);
+          const pv = Number(pValue);
+          const ep = Number(effPct);
+          const ip = Number(icPct);
+          if (
+            Number.isFinite(eff) &&
+            eff > 0 &&
+            Number.isFinite(pv) &&
+            pv < 0.05 &&
+            Number.isFinite(ep) &&
+            ep >= 0.8 &&
+            Number.isFinite(ip) &&
+            ip >= 0.8
+          ) {
+            return "强";
+          }
+          if (
+            Number.isFinite(eff) &&
+            eff > 0 &&
+            Number.isFinite(ep) &&
+            ep >= 0.6 &&
+            Number.isFinite(ip) &&
+            ip >= 0.6
+          ) {
+            return "中";
+          }
+          return "弱";
+        };
+        const _buildFuturePairsCloseToClose = ({
+          code,
+          type,
+          period,
+          baseline,
+          openSeries,
+          horizonDays,
+        }) => {
+          const dates =
+            baseline && baseline.nav && baseline.nav.dates
+              ? baseline.nav.dates
+              : [];
+          const nav =
+            baseline &&
+            baseline.nav &&
+            baseline.nav.series &&
+            baseline.nav.series[code]
+              ? baseline.nav.series[code]
+              : [];
+          if (
+            !Array.isArray(dates) ||
+            !Array.isArray(nav) ||
+            dates.length !== nav.length ||
+            dates.length < Number(horizonDays) + 20
+          ) {
+            return {
+              unsupported:
+                "样本不足，无法计算 close-to-close 前瞻收益配对样本。",
+            };
+          }
+          const metricSeries = _buildMetricSeriesForDist({
+            dates,
+            nav,
+            type,
+            period,
+            openSeries,
+          });
+          if (metricSeries.unsupported) {
+            return { unsupported: metricSeries.unsupported };
+          }
+          const idxByDate = new Map();
+          for (let i = 0; i < dates.length; i++) {
+            idxByDate.set(String(dates[i] || ""), i);
+          }
+          const xs = [];
+          const ys = [];
+          for (let k = 0; k < metricSeries.dates.length; k++) {
+            const d = String(metricSeries.dates[k] || "");
+            const i = idxByDate.get(d);
+            const x = Number(metricSeries.values[k]);
+            if (i == null || !Number.isFinite(x)) continue;
+            const j = Number(i) + Number(horizonDays);
+            if (j >= dates.length) continue;
+            const p0 = Number(nav[i]);
+            const p1 = Number(nav[j]);
+            if (
+              !Number.isFinite(p0) ||
+              !Number.isFinite(p1) ||
+              p0 <= 0 ||
+              p1 <= 0
+            )
+              continue;
+            xs.push(x);
+            ys.push(p1 / p0 - 1.0);
+          }
+          return { xs, ys };
+        };
+        const _fetchMomentumCrossSection = async ({
+          codes,
+          start,
+          end,
+          adjust,
+          horizonDays,
+        }) => {
+          window.__distMomentumCsCache = window.__distMomentumCsCache || {};
+          const cache = window.__distMomentumCsCache;
+          const uniqCodes = Array.from(
+            new Set(
+              (codes || []).map((c) => String(c || "").trim()).filter(Boolean),
+            ),
+          );
+          const key = [
+            uniqCodes.join(","),
+            String(start || ""),
+            String(end || ""),
+            String(adjust || "qfq"),
+            String(horizonDays || ""),
+          ].join("|");
+          if (cache[key]) return cache[key];
+          const hs = Math.max(
+            5,
+            Math.min(252, Math.floor(Number(horizonDays) || 5)),
+          );
+          const topN = Math.max(2, Math.min(uniqCodes.length, 200));
+          const minN = Math.max(1, Math.min(topN, 4));
+          const res = await api("/analysis/rotation/candidate-screen", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              codes: uniqCodes.slice(0, 200),
+              start: String(start || ""),
+              end: String(end || ""),
+              adjust: String(adjust || "qfq"),
+              lookback_days: 20,
+              skip_days: 0,
+              top_n: topN,
+              min_n: minN,
+              max_pair_corr: 0.99,
+              signif_horizon_days: hs,
+            }),
+          });
+          cache[key] = res;
+          return res;
+        };
+        const _renderMomentumContribution = async ({
+          code,
+          type,
+          period,
+          baseline,
+          openSeries,
+          poolCodes,
+          start,
+          end,
+          adjust,
+        }) => {
+          if (type !== "momentum_20_0") {
+            _setMomentumMsg(momTsTable, "");
+            _setMomentumMsg(momCsTable, "");
+            return;
+          }
+          if (period !== "daily") {
+            _setMomentumMsg(
+              momTsTable,
+              "动量因子强弱仅支持日度统计；请切换周期为“日度”。",
+            );
+            _setMomentumMsg(
+              momCsTable,
+              "截面动量评估仅在日度口径下可用；已跳过接口请求。",
+            );
+            return;
+          }
+          const nRaw = Number(
+            futNInput && futNInput.value ? futNInput.value : 5,
+          );
+          const nDays = Number.isFinite(nRaw)
+            ? Math.max(1, Math.floor(nRaw))
+            : 5;
+          const tsPairs = _buildFuturePairsCloseToClose({
+            code,
+            type,
+            period,
+            baseline,
+            openSeries,
+            horizonDays: nDays,
+          });
+          if (tsPairs.unsupported) {
+            _setMomentumMsg(
+              momTsTable,
+              String(tsPairs.unsupported || "样本不足"),
+            );
+          } else if (!Array.isArray(tsPairs.xs) || tsPairs.xs.length < 30) {
+            _setMomentumMsg(
+              momTsTable,
+              "有效样本不足（<30），无法给出稳定的时序动量结论。",
+            );
+          } else {
+            const xs = tsPairs.xs;
+            const ys = tsPairs.ys;
+            const pos = ys.filter((_, i) => Number(xs[i]) > 0);
+            const nonPos = ys.filter((_, i) => !(Number(xs[i]) > 0));
+            const mean = (arr) =>
+              arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : NaN;
+            const variance = (arr) => {
+              if (arr.length < 2) return NaN;
+              const m = mean(arr);
+              return (
+                arr.reduce((s, v) => s + (v - m) * (v - m), 0) /
+                Math.max(1, arr.length - 1)
+              );
+            };
+            const mPos = mean(pos);
+            const mNon = mean(nonPos);
+            const effectSpread =
+              Number.isFinite(mPos) && Number.isFinite(mNon)
+                ? mPos - mNon
+                : NaN;
+            const vPos = variance(pos);
+            const vNon = variance(nonPos);
+            const tSpread =
+              Number.isFinite(effectSpread) &&
+              Number.isFinite(vPos) &&
+              Number.isFinite(vNon) &&
+              pos.length > 1 &&
+              nonPos.length > 1
+                ? effectSpread /
+                  Math.sqrt(
+                    Math.max(1e-18, vPos / pos.length + vNon / nonPos.length),
+                  )
+                : NaN;
+            const pSpread =
+              Number.isFinite(tSpread) && typeof Math.erfc === "function"
+                ? Math.erfc(Math.abs(tSpread) / Math.sqrt(2))
+                : NaN;
+            const icPearson = _pearson(xs, ys);
+            const icSpearman = _pearson(_rankAvg(xs), _rankAvg(ys));
+            const reg = _ols(
+              ys,
+              xs.map((v) => [1, v]),
+            );
+            const slope = reg ? reg.beta[1] : NaN;
+            const slopeT = reg ? reg.t[1] : NaN;
+            const slopeP = reg ? reg.p[1] : NaN;
+            const r2 = reg ? reg.r2 : NaN;
+            const permP = _permPForSlope(ys, xs, 200);
+            const grade = _momentumTsGrade({
+              n: xs.length,
+              effectSpread,
+              ic: icPearson,
+              pValue: slopeP,
+              r2,
+            });
+            momTsTable.innerHTML =
+              "<tr><th>时序动量指标</th><th>结果</th><th>说明</th></tr>" +
+              `<tr><td>样本数</td><td>${xs.length}</td><td>固定口径：lookback=20, skip=0, horizon=${nDays}（close-to-close）。</td></tr>` +
+              `<tr><td>effect spread</td><td>${fmtPct(effectSpread)}</td><td>mom&gt;0 与 mom≤0 两组未来收益均值差（越高越好）。</td></tr>` +
+              `<tr><td>effect spread t / p</td><td>${Number.isFinite(tSpread) ? tSpread.toFixed(3) : "-"} / ${Number.isFinite(pSpread) ? pSpread.toFixed(4) : "-"}</td><td>两组均值差显著性（正态近似）。</td></tr>` +
+              `<tr><td>IC (Pearson / Spearman)</td><td>${Number.isFinite(icPearson) ? icPearson.toFixed(4) : "-"} / ${Number.isFinite(icSpearman) ? icSpearman.toFixed(4) : "-"}</td><td>衡量信号与未来收益的一致性。</td></tr>` +
+              `<tr><td>回归 β / t / p / R²</td><td>${Number.isFinite(slope) ? slope.toFixed(6) : "-"} / ${Number.isFinite(slopeT) ? slopeT.toFixed(3) : "-"} / ${Number.isFinite(slopeP) ? slopeP.toFixed(4) : "-"} / ${Number.isFinite(r2) ? r2.toFixed(4) : "-"}</td><td>预测回归统计量（统计相关，不代表因果）。</td></tr>` +
+              `<tr><td>斜率置换检验 p</td><td>${Number.isFinite(permP) ? permP.toFixed(4) : "-"}</td><td>检验线性关系是否可能由随机噪声导致。</td></tr>` +
+              `<tr><td>结论分级</td><td>${grade}</td><td>规则：样本不足(&lt;30)/强/中/弱。</td></tr>`;
+          }
+
+          const csCodes = Array.from(
+            new Set(
+              (poolCodes || [])
+                .map((c) => String(c || "").trim())
+                .filter(Boolean),
+            ),
+          );
+          if (csCodes.length < 2) {
+            _setMomentumMsg(
+              momCsTable,
+              "候选池代码少于2个，已跳过截面动量接口请求。",
+            );
+            return;
+          }
+          if (!String(start || "").trim() || !String(end || "").trim()) {
+            _setMomentumMsg(momCsTable, "区间为空，无法进行截面动量评估。");
+            return;
+          }
+          window.__distMomentumRenderToken =
+            (window.__distMomentumRenderToken || 0) + 1;
+          const renderToken = window.__distMomentumRenderToken;
+          _setMomentumMsg(momCsTable, "正在计算截面动量有效性...");
+          try {
+            const csResp = await _fetchMomentumCrossSection({
+              codes: csCodes,
+              start,
+              end,
+              adjust,
+              horizonDays: nDays,
+            });
+            if (renderToken !== window.__distMomentumRenderToken) return;
+            const rows =
+              csResp &&
+              csResp.significance_report &&
+              Array.isArray(csResp.significance_report.rows)
+                ? csResp.significance_report.rows
+                : [];
+            const self = rows.find(
+              (r) => String((r && r.code) || "") === String(code || ""),
+            );
+            if (!self) {
+              _setMomentumMsg(
+                momCsTable,
+                "截面结果中未找到当前标的，可能是样本不足或代码不在候选池。",
+              );
+              return;
+            }
+            const validRows = rows.filter((r) => {
+              const n = Number(r && r.n);
+              const eff = Number(r && r.effect_spread);
+              const ic = Number(r && r.ic);
+              return (
+                Number.isFinite(n) &&
+                n >= 30 &&
+                Number.isFinite(eff) &&
+                Number.isFinite(ic)
+              );
+            });
+            const selfN = Number(self.n);
+            const selfEff = Number(self.effect_spread);
+            const selfIc = Number(self.ic);
+            const selfP = Number(self.p_value);
+            if (
+              validRows.length < 5 ||
+              !Number.isFinite(selfEff) ||
+              !Number.isFinite(selfIc)
+            ) {
+              _setMomentumMsg(
+                momCsTable,
+                "截面有效样本不足，无法计算稳定分位（需至少5个有效资产）。",
+              );
+              return;
+            }
+            const effArr = validRows.map((r) => Number(r.effect_spread));
+            const icArr = validRows.map((r) => Number(r.ic));
+            const pctRank = (arr, v) =>
+              arr.length
+                ? arr.filter((x) => Number.isFinite(x) && x <= v).length /
+                  arr.length
+                : NaN;
+            const effPct = pctRank(effArr, selfEff);
+            const icPct = pctRank(icArr, selfIc);
+            const grade = _momentumCsGrade({
+              n: selfN,
+              effectSpread: selfEff,
+              pValue: selfP,
+              effPct,
+              icPct,
+            });
+            momCsTable.innerHTML =
+              "<tr><th>截面动量指标</th><th>结果</th><th>说明</th></tr>" +
+              `<tr><td>候选池规模</td><td>${csCodes.length}（有效=${validRows.length}）</td><td>候选池来自研究页当前选中标的集合。</td></tr>` +
+              `<tr><td>当前标的</td><td>${esc(codeLabel(code))}</td><td>固定口径：lookback=20, skip=0, horizon=${Math.max(5, Math.min(252, nDays))}。</td></tr>` +
+              `<tr><td>effect spread / IC / p</td><td>${fmtPct(selfEff)} / ${selfIc.toFixed(4)} / ${Number.isFinite(selfP) ? selfP.toFixed(4) : "-"}</td><td>来自 /analysis/rotation/candidate-screen 显著性结果。</td></tr>` +
+              `<tr><td>effect 分位 / IC 分位</td><td>${fmtPct(effPct)} / ${fmtPct(icPct)}</td><td>按候选池有效资产横截面分位衡量相对强弱。</td></tr>` +
+              `<tr><td>显著性标记</td><td>${self && self.significant_5pct ? "是" : "否"}</td><td>后端判定：p&lt;0.05 且 effect_spread&gt;0。</td></tr>` +
+              `<tr><td>结论分级</td><td>${grade}</td><td>规则：样本不足(&lt;30)/强/中/弱。</td></tr>`;
+          } catch (eCs) {
+            if (renderToken !== window.__distMomentumRenderToken) return;
+            _setMomentumMsg(
+              momCsTable,
+              `截面动量接口调用失败：${String(eCs && eCs.message ? eCs.message : eCs)}`,
+            );
           }
         };
 
@@ -21727,6 +22304,8 @@
                 "<div class='muted'>请选择标的</div>";
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
+            if (momTsTable) momTsTable.innerHTML = "";
+            if (momCsTable) momCsTable.innerHTML = "";
             if ($("distCalHeatmap"))
               $("distCalHeatmap").innerHTML =
                 "<div class='muted'>请选择标的</div>";
@@ -21808,6 +22387,8 @@
                   "<div class='muted'>LPPL模式不展示镜像指标</div>";
               if (futProbTable) futProbTable.innerHTML = "";
               if (futCausalTable) futCausalTable.innerHTML = "";
+              if (momTsTable) momTsTable.innerHTML = "";
+              if (momCsTable) momCsTable.innerHTML = "";
               return;
             }
             const ln = lppl.ln_p_t || {};
@@ -21919,6 +22500,8 @@
                 "<div class='muted'>LPPL模式不展示镜像指标</div>";
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
+            if (momTsTable) momTsTable.innerHTML = "";
+            if (momCsTable) momCsTable.innerHTML = "";
             if ($("distCalHeatmap"))
               $("distCalHeatmap").innerHTML =
                 "<div class='muted'>LPPL模式不展示日历效应热力图</div>";
@@ -22267,6 +22850,28 @@
             if (futProbTable) futProbTable.innerHTML = "";
             if (futCausalTable) futCausalTable.innerHTML = "";
           }
+          _renderMomentumContribution({
+            code,
+            type,
+            period,
+            baseline: baseByCode[code],
+            openSeries: openByCode[code],
+            poolCodes: codes,
+            start: String((rangeStart && rangeStart.value) || "").trim(),
+            end: String((rangeEnd && rangeEnd.value) || "").trim(),
+            adjust: String((adjustSelect && adjustSelect.value) || "qfq")
+              .trim()
+              .toLowerCase(),
+          }).catch((eMom) => {
+            _setMomentumMsg(
+              momTsTable,
+              `动量时序评估失败：${String(eMom && eMom.message ? eMom.message : eMom)}`,
+            );
+            _setMomentumMsg(
+              momCsTable,
+              `动量截面评估失败：${String(eMom && eMom.message ? eMom.message : eMom)}`,
+            );
+          });
           try {
             _renderMonthdayEffect({ code, openSeries: openByCode[code] });
           } catch (eCal) {
@@ -22366,6 +22971,8 @@
                     "<div class='muted'>无散点数据</div>";
                 if (futProbTable) futProbTable.innerHTML = "";
                 if (futCausalTable) futCausalTable.innerHTML = "";
+                if (momTsTable) momTsTable.innerHTML = "";
+                if (momCsTable) momCsTable.innerHTML = "";
                 if ($("distCalHeatmap"))
                   $("distCalHeatmap").innerHTML =
                     "<div class='muted'>无日历效应数据</div>";
@@ -22422,6 +23029,8 @@
                   "<div class='muted'>散点加载失败</div>";
               if (futProbTable) futProbTable.innerHTML = "";
               if (futCausalTable) futCausalTable.innerHTML = "";
+              if (momTsTable) momTsTable.innerHTML = "";
+              if (momCsTable) momCsTable.innerHTML = "";
               if ($("distCalHeatmap"))
                 $("distCalHeatmap").innerHTML =
                   "<div class='muted'>日历效应加载失败</div>";
@@ -23401,6 +24010,7 @@
           `<tr><td>浮盈降仓触发次数</td><td>${_n(s.r_profit_scaleout_trigger_count)}</td></tr>` +
           `<tr><td>浮盈降仓分段触发统计</td><td>${_tierText(s.r_profit_scaleout_tier_trigger_counts, s.r_profit_scaleout_trigger_count)}</td></tr>` +
           `<tr><td>BIAS-V止盈触发次数</td><td>${_n(s.bias_v_take_profit_trigger_count)}</td></tr>` +
+          `<tr><td>均线跟踪止损触发次数</td><td>${_n(s.ma_trailing_stop_trigger_count)}</td></tr>` +
           `<tr><td>持仓期间BIAS-V≥5次数（累计）</td><td>${_n(s.holding_bias_v_ge_5_count)}</td></tr>` +
           `<tr><td>单次持仓BIAS-V≥5命中次数（最大）</td><td>${_n(s.holding_bias_v_ge_5_max_per_holding)}</td></tr>` +
           biasVHoldRows;
@@ -23762,7 +24372,7 @@
             : "";
         t.innerHTML =
           `<tr><th>指标</th><th>值</th></tr>` +
-          `<tr><td>样本数</td><td>${n(s.sample_size)}</td></tr>` +
+          `<tr><td>样本数（单笔交易）</td><td>${n(s.sample_size)}</td></tr>` +
           `<tr><td>均值 / 标准差</td><td>${f(s.mean)} / ${f(s.std)}</td></tr>` +
           `<tr><td>最小 / 最大</td><td>${f(s.min)} / ${f(s.max)}</td></tr>` +
           `<tr><td>P05 / P25 / P50 / P75 / P95</td><td>${f(s.p05)} / ${f(s.p25)} / ${f(s.p50)} / ${f(s.p75)} / ${f(s.p95)}</td></tr>` +
@@ -24087,6 +24697,98 @@
         };
       }
 
+      function _meanOrNaN(values) {
+        const xs = Array.isArray(values)
+          ? values.map((x) => Number(x)).filter(Number.isFinite)
+          : [];
+        if (!xs.length) return NaN;
+        return xs.reduce((acc, x) => acc + x, 0) / xs.length;
+      }
+
+      function _buildRTradeRiskSummary(trades) {
+        const rows = Array.isArray(trades) ? trades : [];
+        const initVals = rows
+          .map((tr) => Number(tr && tr.initial_r_pct_nav))
+          .filter(Number.isFinite);
+        const rVals = rows
+          .map((tr) => Number(tr && tr.r_multiple))
+          .filter(Number.isFinite);
+        const pairVals = rows
+          .map((tr) => {
+            const x = Number(tr && tr.initial_r_pct_nav);
+            const r = Number(tr && tr.r_multiple);
+            if (!Number.isFinite(x) || !Number.isFinite(r)) return NaN;
+            return x * r;
+          })
+          .filter(Number.isFinite);
+        const initSorted = initVals.slice().sort((a, b) => a - b);
+        const meanInit = _meanOrNaN(initVals);
+        const meanR = _meanOrNaN(rVals);
+        return {
+          trade_count: rows.length,
+          valid_initial_r_count: initVals.length,
+          valid_r_count: rVals.length,
+          valid_pair_count: pairVals.length,
+          mean_initial_r_pct_nav: meanInit,
+          p50_initial_r_pct_nav: initSorted.length
+            ? _percentile(initSorted, 50)
+            : NaN,
+          mean_r_multiple: meanR,
+          mean_account_return_from_r_product: _meanOrNaN(pairVals),
+          product_of_means:
+            Number.isFinite(meanInit) && Number.isFinite(meanR)
+              ? meanInit * meanR
+              : NaN,
+        };
+      }
+
+      function _renderRTradeRiskSummary(
+        summaryId,
+        scopeSuffix,
+        overallSummary,
+        codeName,
+        codeSummary,
+      ) {
+        const box = $(summaryId);
+        if (!box) return;
+        const s =
+          overallSummary && typeof overallSummary === "object"
+            ? overallSummary
+            : {};
+        const one =
+          codeSummary && typeof codeSummary === "object" ? codeSummary : {};
+        const asPct = (x) =>
+          Number.isFinite(Number(x)) ? fmtPct(Number(x)) : "-";
+        const asNum = (x) =>
+          Number.isFinite(Number(x)) ? fmtNum(Number(x)) : "-";
+        const scopeTxt = String(scopeSuffix || "");
+        const showCode =
+          String(codeName || "").trim().length > 0 &&
+          Number(one.valid_initial_r_count) > 0;
+        if (Number(s.valid_initial_r_count) <= 0) {
+          box.textContent = `口径：样本单位=单笔交易。initial_r_pct_nav=单笔交易初始风险金额/入场日策略账户NAV，R=r_multiple=单笔盈亏金额/单笔初始风险金额。当前${scopeTxt}暂无可用样本。`;
+          return;
+        }
+        const overallLine =
+          `整体${scopeTxt}：` +
+          `x(单笔相对账户初始风险预算)均值=${asPct(s.mean_initial_r_pct_nav)}，` +
+          `P50=${asPct(s.p50_initial_r_pct_nav)}；` +
+          `R均值=${asNum(s.mean_r_multiple)}；` +
+          `E[x*R]=${asPct(s.mean_account_return_from_r_product)}；` +
+          `E[x]*E[R]=${asPct(s.product_of_means)}（仅对照）`;
+        const codeLine = showCode
+          ? `按标的${esc(String(codeName || ""))}${scopeTxt}：` +
+            `x均值=${asPct(one.mean_initial_r_pct_nav)}，` +
+            `P50=${asPct(one.p50_initial_r_pct_nav)}；` +
+            `R均值=${asNum(one.mean_r_multiple)}；` +
+            `E[x*R]=${asPct(one.mean_account_return_from_r_product)}；` +
+            `E[x]*E[R]=${asPct(one.product_of_means)}（仅对照）`
+          : "";
+        const noteLine =
+          "说明：若止损设置在1R，单笔亏损上限约为x（占账户总额）。通常用x的分位数（如P50/P75）做实盘风险预算更稳健。";
+        box.innerHTML = `<div>口径：样本单位=单笔交易。initial_r_pct_nav=单笔交易初始风险金额/入场日策略账户NAV，R=r_multiple=单笔盈亏金额/单笔初始风险金额；单笔账户收益贡献=x*R，且通常 E[x*R] ≠ E[x]*E[R]。</div><div style="margin-top:4px;">${overallLine}</div>${codeLine ? `<div style="margin-top:4px;">${codeLine}</div>` : ""}<div style="margin-top:4px;">${noteLine}</div>`;
+      }
+
       function renderRStatistics(prefix, data) {
         const p = String(prefix || "").trim();
         const hideCompositeScore = p === "trend";
@@ -24146,6 +24848,7 @@
         const mfePullbackByCodeHist = `${p}MfeRPullbackByCodeHist`;
         const rtpSuggestionSummary = `${p}RTpSuggestionSummary`;
         const rtpSuggestionTable = `${p}RTpSuggestionTable`;
+        const rBudgetSummary = `${p}RBudgetSummary`;
 
         if (!$(initOverallTable) || !$(multOverallTable) || !codeSel) return;
         if (scopeSel && !scopeSel.value) scopeSel.value = "all";
@@ -24289,6 +24992,7 @@
             `${strategyLabel}：R乘数分布（r_multiple）${scopeSuffix}`,
             "num",
           );
+          const overallRiskSummary = _buildRTradeRiskSummary(activeTrades);
 
           const codeSet = new Set(Object.keys(activeStatsByCode || {}));
           for (const tr of activeTrades) {
@@ -24354,6 +25058,14 @@
           );
           const tCode = activeTrades.filter(
             (x) => String((x && x.code) || "") === c,
+          );
+          const oneRiskSummary = _buildRTradeRiskSummary(tCode);
+          _renderRTradeRiskSummary(
+            rBudgetSummary,
+            scopeSuffix,
+            overallRiskSummary,
+            c ? codeLabel(c) : "",
+            oneRiskSummary,
           );
           const initVals = tCode
             .map((x) => Number(x && x.initial_r_pct_nav))
@@ -30501,6 +31213,11 @@
             $("trendRScaleExec") && $("trendRScaleExec").value
               ? String($("trendRScaleExec").value)
               : "intraday",
+          r_profit_scaleout_breakeven_stop_enabled:
+            $("trendRScaleBreakevenStopEnable") &&
+            $("trendRScaleBreakevenStopEnable").value
+              ? String($("trendRScaleBreakevenStopEnable").value) === "true"
+              : true,
           r_profit_scaleout_tiers:
             parsedRScaleTiers && !parsedRScaleTiers.__error
               ? parsedRScaleTiers.tiers || []
@@ -30517,6 +31234,11 @@
             $("trendBiasVTpExec") && $("trendBiasVTpExec").value
               ? String($("trendBiasVTpExec").value)
               : "intraday",
+          bias_v_take_profit_breakeven_stop_enabled:
+            $("trendBiasVTpBreakevenStopEnable") &&
+            $("trendBiasVTpBreakevenStopEnable").value
+              ? String($("trendBiasVTpBreakevenStopEnable").value) === "true"
+              : true,
           bias_v_ma_window: Number(
             ($("trendBiasVTpMaWin") && $("trendBiasVTpMaWin").value
               ? $("trendBiasVTpMaWin").value
@@ -30533,6 +31255,48 @@
             parsedBiasVTiers && !parsedBiasVTiers.__error
               ? parsedBiasVTiers.tiers || []
               : [],
+          ma_trailing_stop_enabled:
+            $("trendMaTrailingStopEnable") &&
+            $("trendMaTrailingStopEnable").value
+              ? String($("trendMaTrailingStopEnable").value) === "true"
+              : false,
+          ma_trailing_stop_ma_type:
+            $("trendMaTrailingStopMaType") &&
+            $("trendMaTrailingStopMaType").value
+              ? String($("trendMaTrailingStopMaType").value)
+              : "sma",
+          ma_trailing_stop_execution_mode:
+            $("trendMaTrailingStopExec") && $("trendMaTrailingStopExec").value
+              ? String($("trendMaTrailingStopExec").value)
+              : "intraday",
+          ma_trailing_stop_effective_delay_days: Number(
+            ($("trendMaTrailingStopDelayDays") &&
+            $("trendMaTrailingStopDelayDays").value
+              ? $("trendMaTrailingStopDelayDays").value
+              : "3"
+            ).trim(),
+          ),
+          ma_trailing_stop_reduce_window: Number(
+            ($("trendMaTrailingStopReduceWin") &&
+            $("trendMaTrailingStopReduceWin").value
+              ? $("trendMaTrailingStopReduceWin").value
+              : "10"
+            ).trim(),
+          ),
+          ma_trailing_stop_exit_window: Number(
+            ($("trendMaTrailingStopExitWin") &&
+            $("trendMaTrailingStopExitWin").value
+              ? $("trendMaTrailingStopExitWin").value
+              : "20"
+            ).trim(),
+          ),
+          ma_trailing_stop_reduce_fraction: Number(
+            ($("trendMaTrailingStopReduceFraction") &&
+            $("trendMaTrailingStopReduceFraction").value
+              ? $("trendMaTrailingStopReduceFraction").value
+              : "0.33"
+            ).trim(),
+          ),
           monthly_risk_budget_enabled:
             $("trendMonthlyRiskBudgetEnable") &&
             $("trendMonthlyRiskBudgetEnable").value
@@ -30905,6 +31669,11 @@
             $("trendRScaleExec") && $("trendRScaleExec").value
               ? String($("trendRScaleExec").value)
               : "intraday",
+          r_profit_scaleout_breakeven_stop_enabled:
+            $("trendRScaleBreakevenStopEnable") &&
+            $("trendRScaleBreakevenStopEnable").value
+              ? String($("trendRScaleBreakevenStopEnable").value) === "true"
+              : true,
           r_profit_scaleout_tiers: [],
           bias_v_take_profit_enabled:
             $("trendBiasVTpEnable") && $("trendBiasVTpEnable").value
@@ -30918,6 +31687,11 @@
             $("trendBiasVTpExec") && $("trendBiasVTpExec").value
               ? String($("trendBiasVTpExec").value)
               : "intraday",
+          bias_v_take_profit_breakeven_stop_enabled:
+            $("trendBiasVTpBreakevenStopEnable") &&
+            $("trendBiasVTpBreakevenStopEnable").value
+              ? String($("trendBiasVTpBreakevenStopEnable").value) === "true"
+              : true,
           bias_v_ma_window: Number(
             ($("trendBiasVTpMaWin") && $("trendBiasVTpMaWin").value
               ? $("trendBiasVTpMaWin").value
@@ -30931,6 +31705,48 @@
             ).trim(),
           ),
           bias_v_take_profit_tiers: [],
+          ma_trailing_stop_enabled:
+            $("trendMaTrailingStopEnable") &&
+            $("trendMaTrailingStopEnable").value
+              ? String($("trendMaTrailingStopEnable").value) === "true"
+              : false,
+          ma_trailing_stop_ma_type:
+            $("trendMaTrailingStopMaType") &&
+            $("trendMaTrailingStopMaType").value
+              ? String($("trendMaTrailingStopMaType").value)
+              : "sma",
+          ma_trailing_stop_execution_mode:
+            $("trendMaTrailingStopExec") && $("trendMaTrailingStopExec").value
+              ? String($("trendMaTrailingStopExec").value)
+              : "intraday",
+          ma_trailing_stop_effective_delay_days: Number(
+            ($("trendMaTrailingStopDelayDays") &&
+            $("trendMaTrailingStopDelayDays").value
+              ? $("trendMaTrailingStopDelayDays").value
+              : "3"
+            ).trim(),
+          ),
+          ma_trailing_stop_reduce_window: Number(
+            ($("trendMaTrailingStopReduceWin") &&
+            $("trendMaTrailingStopReduceWin").value
+              ? $("trendMaTrailingStopReduceWin").value
+              : "10"
+            ).trim(),
+          ),
+          ma_trailing_stop_exit_window: Number(
+            ($("trendMaTrailingStopExitWin") &&
+            $("trendMaTrailingStopExitWin").value
+              ? $("trendMaTrailingStopExitWin").value
+              : "20"
+            ).trim(),
+          ),
+          ma_trailing_stop_reduce_fraction: Number(
+            ($("trendMaTrailingStopReduceFraction") &&
+            $("trendMaTrailingStopReduceFraction").value
+              ? $("trendMaTrailingStopReduceFraction").value
+              : "0.33"
+            ).trim(),
+          ),
           monthly_risk_budget_enabled:
             $("trendMonthlyRiskBudgetEnable") &&
             $("trendMonthlyRiskBudgetEnable").value
@@ -31187,9 +32003,6 @@
         } else {
           common.r_profit_scaleout_tiers = [];
         }
-        if (common.r_take_profit_enabled && common.r_profit_scaleout_enabled) {
-          return setMsg("R回落止盈 与 浮盈分档降仓 不能同时开启");
-        }
         if (
           !["reenter", "wait_next_entry"].includes(
             String(common.bias_v_take_profit_reentry_mode),
@@ -31236,6 +32049,50 @@
           }
         } else {
           common.bias_v_take_profit_tiers = [];
+        }
+        if (!["sma", "ema"].includes(String(common.ma_trailing_stop_ma_type))) {
+          return setMsg("均线跟踪止损均线类型非法，请选择 MA/EMA");
+        }
+        if (
+          !["intraday", "next_day"].includes(
+            String(common.ma_trailing_stop_execution_mode),
+          )
+        ) {
+          return setMsg("均线跟踪止损执行模式非法，请选择 日内执行/次日执行");
+        }
+        if (
+          !Number.isFinite(common.ma_trailing_stop_effective_delay_days) ||
+          common.ma_trailing_stop_effective_delay_days < 1
+        ) {
+          return setMsg("均线跟踪止损起效延迟日需为>=1数字");
+        }
+        common.ma_trailing_stop_effective_delay_days = Math.floor(
+          common.ma_trailing_stop_effective_delay_days,
+        );
+        if (
+          !Number.isFinite(common.ma_trailing_stop_reduce_window) ||
+          common.ma_trailing_stop_reduce_window < 2
+        ) {
+          return setMsg("均线跟踪止损减仓线窗口需为>=2数字");
+        }
+        common.ma_trailing_stop_reduce_window = Math.floor(
+          common.ma_trailing_stop_reduce_window,
+        );
+        if (
+          !Number.isFinite(common.ma_trailing_stop_exit_window) ||
+          common.ma_trailing_stop_exit_window < 2
+        ) {
+          return setMsg("均线跟踪止损清仓线窗口需为>=2数字");
+        }
+        common.ma_trailing_stop_exit_window = Math.floor(
+          common.ma_trailing_stop_exit_window,
+        );
+        if (
+          !Number.isFinite(common.ma_trailing_stop_reduce_fraction) ||
+          common.ma_trailing_stop_reduce_fraction <= 0 ||
+          common.ma_trailing_stop_reduce_fraction > 1
+        ) {
+          return setMsg("均线跟踪止损减仓比例需在(0,1]之间");
         }
         if (!Number.isFinite(common.monthly_risk_budget_pct)) {
           return setMsg("月度风险预算需为数字");
@@ -36794,6 +37651,11 @@
         $("trendRScaleEnable").addEventListener("change", _syncRTpParamsUi);
       if ($("trendBiasVTpEnable"))
         $("trendBiasVTpEnable").addEventListener("change", _syncRTpParamsUi);
+      if ($("trendMaTrailingStopEnable"))
+        $("trendMaTrailingStopEnable").addEventListener(
+          "change",
+          _syncRTpParamsUi,
+        );
       if ($("trendImpulseEntryFilterOn"))
         $("trendImpulseEntryFilterOn").addEventListener(
           "change",

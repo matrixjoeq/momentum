@@ -125,6 +125,12 @@ def _date_s(d: dt.date | None) -> str | None:
     return d.isoformat() if d is not None else None
 
 
+def _trading_holding_days(open_date: dt.date, asof_date: dt.date) -> int:
+    if asof_date < open_date:
+        return 0
+    return max(len(trading_days(open_date, asof_date)) - 1, 0)
+
+
 def _dt_s(x: dt.datetime | None) -> str:
     if x is None:
         return ""
@@ -259,6 +265,10 @@ def _is_repo_lend_time_allowed(x: str) -> bool:
 
 def _round_fee_2(x: float) -> float:
     return float(Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _round_half_up_int(x: float) -> int:
+    return int(Decimal(str(x)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _default_trade_fee(price: float, quantity: float) -> float:
@@ -1208,6 +1218,9 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                             "name": st.name or "",
                             "open_date": st.open_date,
                             "close_date": day,
+                            "holding_duration_days": _trading_holding_days(
+                                st.open_date, day
+                            ),
                             "buy_count": int(st.buy_count),
                             "sell_count": int(st.sell_count),
                             "buy_qty": float(st.buy_qty),
@@ -1342,6 +1355,9 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                         "name": st.name or "",
                         "open_date": st.open_date,
                         "close_date": day,
+                        "holding_duration_days": _trading_holding_days(
+                            st.open_date, day
+                        ),
                         "buy_count": int(st.buy_count),
                         "sell_count": int(st.sell_count),
                         "buy_qty": float(st.buy_qty),
@@ -1635,6 +1651,7 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
             name=row["name"],
             open_date=row["open_date"],
             close_date=row["close_date"],
+            holding_duration_days=row.get("holding_duration_days"),
             buy_count=row["buy_count"],
             sell_count=row["sell_count"],
             buy_qty=row["buy_qty"],
@@ -3120,6 +3137,7 @@ def live_holdings(
                         "qty": qty,
                         "unit_cost": amount / qty if qty > 1e-12 else 0.0,
                         "fee_remain": fee,
+                        "trade_date": t.trade_date,
                         "name": t.name,
                     }
                 )
@@ -3181,6 +3199,21 @@ def live_holdings(
 
         if stock_lots:
             qty_total = float(sum(float(x["qty"]) for x in stock_lots))
+            weighted_duration = sum(
+                float(lot["qty"])
+                * float(
+                    _trading_holding_days(
+                        lot.get("trade_date", day),
+                        day,
+                    )
+                )
+                for lot in stock_lots
+            )
+            holding_duration_days = (
+                _round_half_up_int(weighted_duration / qty_total)
+                if qty_total > 1e-12
+                else None
+            )
             mpx, mpx_day = _price_on_or_before(price_map, code, day)
             market_price = mpx
             stale_days = (day - mpx_day).days if mpx_day is not None else None
@@ -3189,6 +3222,21 @@ def live_holdings(
             name = str(stock_lots[-1].get("name", "") or "")
         else:
             qty_total = float(sum(float(x["principal"]) for x in repo_open_lots))
+            weighted_duration = sum(
+                float(lot["principal"])
+                * float(
+                    _trading_holding_days(
+                        lot.get("open_date", day),
+                        day,
+                    )
+                )
+                for lot in repo_open_lots
+            )
+            holding_duration_days = (
+                _round_half_up_int(weighted_duration / qty_total)
+                if qty_total > 1e-12
+                else None
+            )
             accrued_interest = 0.0
             for lot in repo_open_lots:
                 principal = float(lot["principal"])
@@ -3239,6 +3287,7 @@ def live_holdings(
                 market_value=market_value,
                 pnl_amount=cumulative_pnl,
                 pnl_rate=pnl_rate,
+                holding_duration_days=holding_duration_days,
                 price_missing=bool(price_missing),
                 stale_days=stale_days,
             )
@@ -3272,30 +3321,37 @@ def live_closed_rounds(
         .limit(page_size)
         .all()
     )
-    items = [
-        LiveClosedRoundOut(
-            id=int(x.id),
-            scope_type=x.scope_type,
-            scope_id=int(x.scope_id),
-            account_id=int(x.account_id),
-            strategy_id=x.strategy_id,
-            round_no=int(x.round_no),
-            code=x.code,
-            name=x.name,
-            open_date=x.open_date.isoformat(),
-            close_date=x.close_date.isoformat(),
-            buy_count=int(x.buy_count),
-            sell_count=int(x.sell_count),
-            buy_qty=float(x.buy_qty),
-            sell_qty=float(x.sell_qty),
-            avg_buy_price=x.avg_buy_price,
-            avg_sell_price=x.avg_sell_price,
-            realized_pnl=float(x.realized_pnl),
-            return_rate=x.return_rate,
-            total_fee=float(x.total_fee),
-        ).model_dump()
-        for x in rows
-    ]
+    items: list[dict[str, Any]] = []
+    for x in rows:
+        duration_days = (
+            int(x.holding_duration_days)
+            if x.holding_duration_days is not None
+            else _trading_holding_days(x.open_date, x.close_date)
+        )
+        items.append(
+            LiveClosedRoundOut(
+                id=int(x.id),
+                scope_type=x.scope_type,
+                scope_id=int(x.scope_id),
+                account_id=int(x.account_id),
+                strategy_id=x.strategy_id,
+                round_no=int(x.round_no),
+                code=x.code,
+                name=x.name,
+                open_date=x.open_date.isoformat(),
+                close_date=x.close_date.isoformat(),
+                holding_duration_days=duration_days,
+                buy_count=int(x.buy_count),
+                sell_count=int(x.sell_count),
+                buy_qty=float(x.buy_qty),
+                sell_qty=float(x.sell_qty),
+                avg_buy_price=x.avg_buy_price,
+                avg_sell_price=x.avg_sell_price,
+                realized_pnl=float(x.realized_pnl),
+                return_rate=x.return_rate,
+                total_fee=float(x.total_fee),
+            ).model_dump()
+        )
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
@@ -3330,6 +3386,21 @@ def live_closed_round_stats(
         if loss_count > 0 and avg_loss < 0
         else float("nan")
     )
+    holding_duration = (
+        np.asarray(
+            [
+                float(
+                    x.holding_duration_days
+                    if x.holding_duration_days is not None
+                    else _trading_holding_days(x.open_date, x.close_date)
+                )
+                for x in rows
+            ],
+            dtype=float,
+        )
+        if rows
+        else np.asarray([], dtype=float)
+    )
     return {
         "scope_type": st,
         "scope_id": scope_id,
@@ -3346,6 +3417,17 @@ def live_closed_round_stats(
             float(np.min(losses)) if loss_count > 0 else float("nan")
         ),
         "payoff_ratio": _safe_json_float(payoff),
+        "min_holding_duration_days": (
+            int(np.min(holding_duration)) if holding_duration.size else None
+        ),
+        "max_holding_duration_days": (
+            int(np.max(holding_duration)) if holding_duration.size else None
+        ),
+        "avg_holding_duration_days": (
+            _round_half_up_int(float(np.mean(holding_duration)))
+            if holding_duration.size
+            else None
+        ),
     }
 
 

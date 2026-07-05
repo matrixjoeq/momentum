@@ -66,6 +66,10 @@ def test_trading_records_serves_html(api_client: TestClient) -> None:
     assert "开盘" in resp.text and "收盘" in resp.text
     assert "策略</th>" in resp.text
     assert "股东账号</th>" in resp.text
+    assert "持仓时长(日)" in resp.text
+    assert 'id="kpiMinHoldingDays"' in resp.text
+    assert 'id="kpiMaxHoldingDays"' in resp.text
+    assert 'id="kpiAvgHoldingDays"' in resp.text
     assert 'id="holdingsTable"' in resp.text
     assert 'id="recentTradesTable"' in resp.text
     assert 'id="closedRoundsTable"' in resp.text
@@ -78,6 +82,7 @@ def test_trading_records_serves_html(api_client: TestClient) -> None:
     assert 'class="sortable-th"' in resp.text
     assert 'data-sort-key="trade_date"' in resp.text
     assert 'data-sort-key="market_value"' in resp.text
+    assert 'data-sort-key="holding_duration_days"' in resp.text
     assert 'data-sort-key="open_date"' in resp.text
     assert 'data-sort-key="realized_pnl"' in resp.text
     assert "/static/vendor/flatpickr.min.css" in resp.text
@@ -118,3 +123,21 @@ def test_static_calendar_timing_param_search_page(api_client: TestClient) -> Non
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
     assert "日历效应择时参数搜索结果" in resp.text
+
+
+def test_static_trend_atr_stop_static_param_search_page(
+    api_client: TestClient,
+) -> None:
+    resp = api_client.get("/static/trend_atr_stop_static_param_search.html")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "趋势 ATR 静态止损参数搜索" in resp.text
+
+
+def test_static_trend_r_profit_scaleout_param_search_page(
+    api_client: TestClient,
+) -> None:
+    resp = api_client.get("/static/trend_r_profit_scaleout_param_search.html")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "趋势浮赢分档降仓参数搜索" in resp.text

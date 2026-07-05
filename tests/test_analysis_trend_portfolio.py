@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import etf_momentum.analysis.trend as trend_mod
 from etf_momentum.analysis.trend import (
     TrendPortfolioInputs,
     compute_trend_portfolio_backtest,
@@ -743,7 +744,10 @@ def test_trend_portfolio_rejects_mutual_vol_regime_and_periodic_risk_mgmt(
                     slippage_rate=0.0,
                 ),
             )
-    assert "cannot both be enabled" in str(exc.value)
+    msg = str(exc.value)
+    assert "mutually exclusive risk controls" in msg
+    assert "vol_regime_risk_mgmt_enabled" in msg
+    assert "vol_periodic_risk_mgmt_enabled" in msg
 
 
 def test_trend_portfolio_periodic_risk_mgmt_triggers_per_asset_independently(
@@ -1260,6 +1264,168 @@ def test_trend_portfolio_exposes_r_take_profit_controls(session_factory):
         assert "holding_bias_v_ge_5_count" in one
         assert "holding_bias_v_ge_5_max_per_holding" in one
         assert "holding_bias_v_ge_5_per_holding_distribution" in one
+
+
+def test_trend_portfolio_open_exec_exposes_ma_trailing_stop_decomp_series(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + 0.25 * i + 2.5 * np.sin(i / 4.0)
+            p2 = 90.0 + 0.20 * i + 2.0 * np.sin(i / 5.0 + 0.6)
+            _add_price(db, code="A1", day=d, close=float(p1))
+            _add_price(db, code="A2", day=d, close=float(p2))
+        db.commit()
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                exec_price="open",
+                position_sizing="equal",
+                ma_trailing_stop_enabled=True,
+                ma_trailing_stop_ma_type="sma",
+                ma_trailing_stop_execution_mode="intraday",
+                ma_trailing_stop_effective_delay_days=1,
+                ma_trailing_stop_reduce_window=3,
+                ma_trailing_stop_exit_window=5,
+                ma_trailing_stop_reduce_fraction=0.5,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    decomp = ((out.get("return_decomposition") or {}).get("series")) or {}
+    ma_series = [float(x) for x in (decomp.get("ma_trailing_stop_override") or [])]
+    nav_dates = list(((out.get("nav") or {}).get("dates") or []))
+    assert len(ma_series) == len(nav_dates)
+    assert ((out.get("risk_controls") or {}).get("ma_trailing_stop") or {}).get(
+        "execution_mode"
+    ) == "intraday"
+
+
+def test_trend_portfolio_ma_trailing_stop_override_scales_once_with_lot_remap(
+    session_factory, monkeypatch
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            p1 = 100.0 + 0.25 * i + 2.5 * np.sin(i / 4.0)
+            p2 = 90.0 + 0.20 * i + 2.0 * np.sin(i / 5.0 + 0.6)
+            _add_price(db, code="A1", day=d, close=float(p1))
+            _add_price(db, code="A2", day=d, close=float(p2))
+        db.commit()
+
+        def _fake_apply_intraday_or_arbitration_portfolio(
+            *,
+            weights,
+            event_sets_by_asset,
+            exec_price,
+            open_sig_df,
+            close_sig_df,
+        ):
+            del event_sets_by_asset, exec_price, open_sig_df, close_sig_df
+            zeros = pd.Series(0.0, index=weights.index, dtype=float)
+            ma_over = pd.Series(0.01, index=weights.index, dtype=float)
+            return weights.astype(float).copy(), {
+                "atr_stop": zeros.copy(),
+                "bias_v_take_profit": zeros.copy(),
+                "r_take_profit": zeros.copy(),
+                "r_profit_scaleout": zeros.copy(),
+                "ma_trailing_stop": ma_over,
+            }
+
+        monkeypatch.setattr(
+            trend_mod,
+            "_apply_intraday_or_arbitration_portfolio",
+            _fake_apply_intraday_or_arbitration_portfolio,
+        )
+
+        base_out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                exec_price="open",
+                position_sizing="equal",
+                ma_trailing_stop_enabled=True,
+                ma_trailing_stop_ma_type="sma",
+                ma_trailing_stop_execution_mode="intraday",
+                ma_trailing_stop_effective_delay_days=1,
+                ma_trailing_stop_reduce_window=3,
+                ma_trailing_stop_exit_window=5,
+                ma_trailing_stop_reduce_fraction=0.5,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+        base_series = (
+            ((base_out.get("return_decomposition") or {}).get("series") or {}).get(
+                "ma_trailing_stop_override"
+            )
+        ) or []
+        assert base_series
+        assert any(abs(float(x)) > 1e-12 for x in base_series)
+
+        def _fake_simulate_lot_account_weights(*, target_weights, **kwargs):
+            del kwargs
+            return target_weights.copy().astype(float), {}
+
+        def _fake_remap_return_weights(*, w_eff_before, w_eff_after, w_ret_before):
+            del w_eff_before, w_eff_after
+            risk_scale = pd.Series(0.5, index=w_ret_before.index, dtype=float)
+            return w_ret_before.copy().astype(float), risk_scale
+
+        monkeypatch.setattr(
+            trend_mod,
+            "simulate_lot_account_weights",
+            _fake_simulate_lot_account_weights,
+        )
+        monkeypatch.setattr(
+            trend_mod, "remap_return_weights", _fake_remap_return_weights
+        )
+
+        scaled_out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                exec_price="open",
+                initial_account_amount=1_000_000.0,
+                position_sizing="fixed_ratio",
+                fixed_pos_ratio=0.8,
+                ma_trailing_stop_enabled=True,
+                ma_trailing_stop_ma_type="sma",
+                ma_trailing_stop_execution_mode="intraday",
+                ma_trailing_stop_effective_delay_days=1,
+                ma_trailing_stop_reduce_window=3,
+                ma_trailing_stop_exit_window=5,
+                ma_trailing_stop_reduce_fraction=0.5,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    scaled_series = (
+        ((scaled_out.get("return_decomposition") or {}).get("series") or {}).get(
+            "ma_trailing_stop_override"
+        )
+    ) or []
+    assert len(scaled_series) == len(base_series)
+    for base_v, scaled_v in zip(base_series, scaled_series):
+        assert float(scaled_v) == pytest.approx(float(base_v) * 0.5, abs=1e-12)
 
 
 def test_trend_portfolio_kama_std_band_reduces_trades(session_factory):

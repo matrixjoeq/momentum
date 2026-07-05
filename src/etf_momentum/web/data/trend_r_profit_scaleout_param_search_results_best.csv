@@ -1,0 +1,2 @@
+r_multiple,reduce_fraction,status,elapsed_ms,sharpe_ratio,annualized_return,cumulative_return,annualized_volatility,max_drawdown,max_drawdown_recovery_days,sortino_ratio,calmar_ratio,ulcer_index,ulcer_performance_index,error
+5.0,0.9,ok,46483,1.6244140016461905,0.15923869501709875,6.942333073365634,0.09364597467230037,-0.08833464465623053,307.0,2.918033262274064,,2.447983061272375,6.5048936627172615,

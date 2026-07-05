@@ -18,38 +18,53 @@ def test_global_benchmark_pool_upsert_and_list(session_factory) -> None:
         upsert_global_benchmark_pool(
             db,
             code="^GSPC",
+            series_kind="price",
             name="标普500",
             code_format="yahoo",
             provider_hint="auto",
+            provider_symbol="^GSPC",
+            source_locked=False,
+            fallback_sources=None,
             start_date="20000101",
             end_date="20250101",
         )
         upsert_global_benchmark_pool(
             db,
             code="000300",
+            series_kind="price",
             name="沪深300",
             code_format="cn_6",
             provider_hint="tencent",
+            provider_symbol="000300",
+            source_locked=False,
+            fallback_sources=None,
             start_date="20050101",
             end_date="20250101",
         )
         db.commit()
         rows = list_global_benchmark_pool(db)
-        assert [x.code for x in rows] == ["000300", "^GSPC"]
+        assert [(x.code, x.series_kind) for x in rows] == [
+            ("000300", "price"),
+            ("^GSPC", "price"),
+        ]
 
         upsert_global_benchmark_pool(
             db,
             code="^GSPC",
+            series_kind="price",
             name="标普500指数",
             code_format="yahoo",
             provider_hint="yahoo",
+            provider_symbol="^GSPC",
+            source_locked=True,
+            fallback_sources=[{"provider": "stooq", "symbol": "^GSPC"}],
             start_date="20000101",
             end_date="20250601",
         )
         db.commit()
-        rows2 = {x.code: x for x in list_global_benchmark_pool(db)}
-        assert rows2["^GSPC"].name == "标普500指数"
-        assert rows2["^GSPC"].provider_hint == "yahoo"
+        rows2 = {(x.code, x.series_kind): x for x in list_global_benchmark_pool(db)}
+        assert rows2[("^GSPC", "price")].name == "标普500指数"
+        assert rows2[("^GSPC", "price")].provider_hint == "yahoo"
 
 
 def test_global_benchmark_date_range_uses_none_only(session_factory) -> None:

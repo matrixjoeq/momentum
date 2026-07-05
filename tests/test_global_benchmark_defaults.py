@@ -16,5 +16,7 @@ def test_default_global_benchmark_universe_fields_are_present() -> None:
     for x in DEFAULT_GLOBAL_BENCHMARK_UNIVERSE:
         assert str(x.code).strip()
         assert str(x.name).strip()
-        assert str(x.code_format).strip()
-        assert str(x.provider_hint).strip()
+        assert x.price.series_kind == "price"
+        assert x.total_return.series_kind == "total_return"
+        assert str(x.price.code_format).strip()
+        assert str(x.total_return.code_format).strip()

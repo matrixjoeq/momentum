@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import ROUND_HALF_UP, Decimal
 
 from etf_momentum.db.models import EtfPrice, LiveHoldingSnapshot, LiveNavDaily
+from etf_momentum.calendar.trading_calendar import trading_days
 from tests.helpers.rotation_case_data import get_json, post_json, post_response
 
 
@@ -1108,6 +1110,203 @@ def test_live_holdings_align_to_latest_nav_day(api_client, session_factory):
     # Latest nav day has no open position, so holdings must not return stale rows.
     assert holdings == []
     _assert_scope_financial_audit(c, scope_type="strategy", scope_id=sid)
+
+
+def test_live_holdings_duration_days_weighted_for_account_scope(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "实盘持仓时长", "initial_cash": 100000}
+    )
+    aid = int(acc["id"])
+    s1 = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略时长A"})
+    s2 = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略时长B"})
+    sid1 = int(s1["id"])
+    sid2 = int(s2["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "DUR001"},
+    )
+    hid = int(holder["id"])
+
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid1,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "10:00:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "duration-s1-buy",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid2,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240624",
+            "trade_time": "10:05:00",
+            "side": "BUY",
+            "price": 4.20,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "duration-s2-buy",
+        },
+    )
+
+    hs_s1 = get_json(c, f"/api/live/holdings?scope_type=strategy&scope_id={sid1}")
+    row_s1 = next(x for x in hs_s1 if str(x.get("code")) == "159915")
+    asof = dt.date.fromisoformat(str(row_s1["snapshot_date"]))
+    d1 = max(len(trading_days(dt.date(2024, 6, 21), asof)) - 1, 0)
+    assert int(row_s1["holding_duration_days"]) == d1
+
+    hs_acc = get_json(c, f"/api/live/holdings?scope_type=account&scope_id={aid}")
+    row_acc = next(x for x in hs_acc if str(x.get("code")) == "159915")
+    d2 = max(len(trading_days(dt.date(2024, 6, 24), asof)) - 1, 0)
+    expected_weighted = int(
+        Decimal(str((100.0 * d1 + 100.0 * d2) / 200.0)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    assert abs(float(row_acc["quantity"]) - 200.0) < 1e-9
+    assert int(row_acc["holding_duration_days"]) == expected_weighted
+
+
+def test_live_closed_rounds_duration_and_stats(api_client, session_factory):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "实盘平仓时长", "initial_cash": 100000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略平仓时长"})
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "CLOSE001"},
+    )
+    hid = int(holder["id"])
+
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "10:00:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "close-duration-round1-buy",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240626",
+            "trade_time": "10:01:00",
+            "side": "SELL",
+            "price": 4.50,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "close-duration-round1-sell",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240627",
+            "trade_time": "10:02:00",
+            "side": "BUY",
+            "price": 4.60,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "close-duration-round2-buy",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240628",
+            "trade_time": "10:03:00",
+            "side": "SELL",
+            "price": 4.70,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "close-duration-round2-sell",
+        },
+    )
+
+    rounds = get_json(
+        c,
+        f"/api/live/closed-rounds?scope_type=strategy&scope_id={sid}&page=1&page_size=50",
+    )
+    assert int(rounds["total"]) == 2
+    duration_days = sorted(
+        int(x["holding_duration_days"])
+        for x in rounds["items"]
+        if x.get("holding_duration_days") is not None
+    )
+    expected_d1 = max(
+        len(trading_days(dt.date(2024, 6, 21), dt.date(2024, 6, 26))) - 1, 0
+    )
+    expected_d2 = max(
+        len(trading_days(dt.date(2024, 6, 27), dt.date(2024, 6, 28))) - 1, 0
+    )
+    assert duration_days == sorted([expected_d1, expected_d2])
+
+    stats = get_json(
+        c, f"/api/live/stats/closed-rounds?scope_type=strategy&scope_id={sid}"
+    )
+    assert int(stats["min_holding_duration_days"]) == min(expected_d1, expected_d2)
+    assert int(stats["max_holding_duration_days"]) == max(expected_d1, expected_d2)
+    expected_avg = (float(expected_d1) + float(expected_d2)) / 2.0
+    expected_avg_days = int(
+        Decimal(str(expected_avg)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    assert isinstance(stats["avg_holding_duration_days"], int)
+    assert int(stats["avg_holding_duration_days"]) == expected_avg_days
 
 
 def test_live_trade_allows_when_strategy_allocation_insufficient_but_account_ok(
