@@ -45,6 +45,9 @@ def test_frontend_backend_contract_smoke(api_client: TestClient) -> None:
     assert "distMomentumTsTable" in research_html
     assert "distMomentumCsTable" in research_html
     assert "lookback=20，skip=0" in research_html
+    assert "distFutureN&lt;5 时自动按 5 计算" in research_html
+    assert "Math.max(5, Math.min(252, Math.floor(nRaw)))" in research_html
+    assert '"momentum_20_0"' in research_html
 
     resp = client.get("/api/validation-policies")
     assert resp.status_code == 200

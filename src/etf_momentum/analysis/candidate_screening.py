@@ -180,13 +180,14 @@ def screen_rotation_candidates(
         if v < 0:
             raise ValueError(f"category quota must be >=0: {k}")
 
-    close = load_close_prices(
+    close_raw = load_close_prices(
         db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq")
     )
-    if close.empty:
+    if close_raw.empty:
         raise ValueError("no price data in selected range")
-    close = close.sort_index().ffill().replace([np.inf, -np.inf], np.nan)
-    close = close[codes]
+    close_raw = close_raw.sort_index().replace([np.inf, -np.inf], np.nan)
+    close_raw = close_raw[codes]
+    close = close_raw.ffill()
     # Research correlation uses log returns across modules.
     # Guard non-positive close values to avoid invalid log warnings.
     close_pos = close.where(close > 0.0)
@@ -267,7 +268,8 @@ def screen_rotation_candidates(
 
     # Advanced momentum significance: does momentum state predict near-future return?
     # Unified basis: close-to-close simple forward return.
-    px_sig = close.sort_index().ffill().replace([np.inf, -np.inf], np.nan)
+    # Significance pairing must not use forward-filled prices.
+    px_sig = close_raw.sort_index().replace([np.inf, -np.inf], np.nan)
     mom_num = px_sig.shift(skip_days)
     mom_den = px_sig.shift(skip_days + lb)
     mom_sig = (mom_num / mom_den - 1.0).astype(float)

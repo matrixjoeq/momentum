@@ -127,3 +127,40 @@ def test_rotation_candidate_screen_contract_filters_nonpositive_close_samples(
     rows = {str(r["code"]): r for r in body["significance_report"]["rows"]}
     assert int(rows["X"]["n"]) < int(rows["Z"]["n"])
     assert int(rows["X"]["n"]) >= 30
+
+
+def test_rotation_candidate_screen_contract_significance_does_not_ffill_missing(
+    api_client: TestClient, session_factory
+) -> None:
+    dates = [d.date() for d in pd.date_range("2022-01-03", "2024-12-31", freq="B")]
+    with session_factory() as db:
+        db.add(EtfPool(code="SP", name="稀疏样本", start_date=None, end_date=None))
+        db.add(EtfPool(code="FU", name="完整样本", start_date=None, end_date=None))
+        n = len(dates)
+        full_close = [100.0 + 0.12 * i for i in range(n)]
+        sparse_dates = dates[::2]
+        sparse_close = [100.0 + 0.12 * i for i in range(len(sparse_dates))]
+        _seed_price_series(db, code="FU", dates=dates, closes=full_close)
+        _seed_price_series(db, code="SP", dates=sparse_dates, closes=sparse_close)
+        db.commit()
+
+    payload = {
+        "codes": ["SP", "FU"],
+        "start": dates[0].strftime("%Y%m%d"),
+        "end": dates[-1].strftime("%Y%m%d"),
+        "adjust": "qfq",
+        "lookback_days": 20,
+        "skip_days": 0,
+        "top_n": 2,
+        "min_n": 1,
+        "max_pair_corr": 0.95,
+        "signif_horizon_days": 5,
+    }
+    resp = api_client.post("/api/analysis/rotation/candidate-screen", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    rows = {str(r["code"]): r for r in body["significance_report"]["rows"]}
+    n_sparse = int(rows["SP"]["n"])
+    n_full = int(rows["FU"]["n"])
+    assert n_full >= 30
+    assert n_sparse < n_full

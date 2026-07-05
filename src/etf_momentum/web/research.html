@@ -792,7 +792,12 @@
           </select>
         </div>
         <div>
-          <label>未来收益预测窗口 n（日）</label>
+          <label
+            >未来收益预测窗口 n（日）
+            <span class="muted"
+              >（distFutureN&lt;5 时自动按 5 计算）</span
+            ></label
+          >
           <input id="distFutureN" value="5" style="min-width: 140px" />
         </div>
         <div>
@@ -17872,6 +17877,7 @@
         const _distSyntheticTypes = new Set([
           "efficiency_ratio",
           ..._distAtrDerivedTypes,
+          "momentum_20_0",
         ]);
         const _distTypeIsPct = (t) =>
           t === "return" ||
@@ -17980,6 +17986,8 @@
           if (momTsTable) momTsTable.innerHTML = "";
           if (momCsTable) momCsTable.innerHTML = "";
           $("distQuantiles").innerHTML = "";
+          window.__distMomentumRenderToken =
+            (window.__distMomentumRenderToken || 0) + 1;
           return;
         }
 
@@ -18782,8 +18790,11 @@
             regimeStats.innerHTML = head + body;
           }
           const nAhead = Math.max(
-            1,
-            Math.round(Number((futNInput && futNInput.value) || 5)),
+            5,
+            Math.min(
+              252,
+              Math.round(Number((futNInput && futNInput.value) || 5)),
+            ),
           );
           const futByState = window.MarketRegimeUI.summarizeForwardByState(
             rows,
@@ -18912,8 +18923,11 @@
             impulseStats.innerHTML = head + body;
           }
           const nAhead = Math.max(
-            1,
-            Math.round(Number((futNInput && futNInput.value) || 5)),
+            5,
+            Math.min(
+              252,
+              Math.round(Number((futNInput && futNInput.value) || 5)),
+            ),
           );
           const futByState =
             window.MarketRegimeUI.summarizeForwardByImpulseState(rows, nAhead);
@@ -20063,7 +20077,7 @@
             futNInput && futNInput.value ? futNInput.value : 5,
           );
           const nDays = Number.isFinite(nRaw)
-            ? Math.max(1, Math.floor(nRaw))
+            ? Math.max(5, Math.min(252, Math.floor(nRaw)))
             : 5;
           if (futNInput && String(futNInput.value || "").trim() === "")
             futNInput.value = "5";
@@ -20638,6 +20652,10 @@
           end,
           adjust,
         }) => {
+          // Always advance token to invalidate any prior in-flight request.
+          window.__distMomentumRenderToken =
+            (window.__distMomentumRenderToken || 0) + 1;
+          const renderToken = window.__distMomentumRenderToken;
           if (type !== "momentum_20_0") {
             _setMomentumMsg(momTsTable, "");
             _setMomentumMsg(momCsTable, "");
@@ -20658,7 +20676,7 @@
             futNInput && futNInput.value ? futNInput.value : 5,
           );
           const nDays = Number.isFinite(nRaw)
-            ? Math.max(1, Math.floor(nRaw))
+            ? Math.max(5, Math.min(252, Math.floor(nRaw)))
             : 5;
           const tsPairs = _buildFuturePairsCloseToClose({
             code,
@@ -20763,9 +20781,6 @@
             _setMomentumMsg(momCsTable, "区间为空，无法进行截面动量评估。");
             return;
           }
-          window.__distMomentumRenderToken =
-            (window.__distMomentumRenderToken || 0) + 1;
-          const renderToken = window.__distMomentumRenderToken;
           _setMomentumMsg(momCsTable, "正在计算截面动量有效性...");
           try {
             const csResp = await _fetchMomentumCrossSection({
@@ -20837,7 +20852,7 @@
             momCsTable.innerHTML =
               "<tr><th>截面动量指标</th><th>结果</th><th>说明</th></tr>" +
               `<tr><td>候选池规模</td><td>${csCodes.length}（有效=${validRows.length}）</td><td>候选池来自研究页当前选中标的集合。</td></tr>` +
-              `<tr><td>当前标的</td><td>${esc(codeLabel(code))}</td><td>固定口径：lookback=20, skip=0, horizon=${Math.max(5, Math.min(252, nDays))}。</td></tr>` +
+              `<tr><td>当前标的</td><td>${esc(codeLabel(code))}</td><td>固定口径：lookback=20, skip=0, horizon=${nDays}。</td></tr>` +
               `<tr><td>effect spread / IC / p</td><td>${fmtPct(selfEff)} / ${selfIc.toFixed(4)} / ${Number.isFinite(selfP) ? selfP.toFixed(4) : "-"}</td><td>来自 /analysis/rotation/candidate-screen 显著性结果。</td></tr>` +
               `<tr><td>effect 分位 / IC 分位</td><td>${fmtPct(effPct)} / ${fmtPct(icPct)}</td><td>按候选池有效资产横截面分位衡量相对强弱。</td></tr>` +
               `<tr><td>显著性标记</td><td>${self && self.significant_5pct ? "是" : "否"}</td><td>后端判定：p&lt;0.05 且 effect_spread&gt;0。</td></tr>` +
@@ -22353,6 +22368,8 @@
             _renderDistRangeStateMonitor().catch(() => {
               /* ignore */
             });
+            window.__distMomentumRenderToken =
+              (window.__distMomentumRenderToken || 0) + 1;
             return;
           }
 
@@ -22389,6 +22406,8 @@
               if (futCausalTable) futCausalTable.innerHTML = "";
               if (momTsTable) momTsTable.innerHTML = "";
               if (momCsTable) momCsTable.innerHTML = "";
+              window.__distMomentumRenderToken =
+                (window.__distMomentumRenderToken || 0) + 1;
               return;
             }
             const ln = lppl.ln_p_t || {};
@@ -22510,6 +22529,8 @@
                 "<div class='muted'>LPPL模式不展示日历效应分布</div>";
             if (calTable) calTable.innerHTML = "";
             if (calHint) calHint.textContent = "";
+            window.__distMomentumRenderToken =
+              (window.__distMomentumRenderToken || 0) + 1;
             return;
           }
 
@@ -22585,6 +22606,28 @@
             _renderDistRangeStateMonitor().catch(() => {
               /* ignore */
             });
+            _renderMomentumContribution({
+              code,
+              type,
+              period,
+              baseline: baseByCode[code],
+              openSeries: openByCode[code],
+              poolCodes: codes,
+              start: String((rangeStart && rangeStart.value) || "").trim(),
+              end: String((rangeEnd && rangeEnd.value) || "").trim(),
+              adjust: String((adjustSelect && adjustSelect.value) || "qfq")
+                .trim()
+                .toLowerCase(),
+            }).catch((eMom) => {
+              _setMomentumMsg(
+                momTsTable,
+                `动量时序评估失败：${String(eMom && eMom.message ? eMom.message : eMom)}`,
+              );
+              _setMomentumMsg(
+                momCsTable,
+                `动量截面评估失败：${String(eMom && eMom.message ? eMom.message : eMom)}`,
+              );
+            });
             return;
           }
 
@@ -22641,6 +22684,28 @@
             }
             _renderDistRangeStateMonitor().catch(() => {
               /* ignore */
+            });
+            _renderMomentumContribution({
+              code,
+              type,
+              period,
+              baseline: baseByCode[code],
+              openSeries: openByCode[code],
+              poolCodes: codes,
+              start: String((rangeStart && rangeStart.value) || "").trim(),
+              end: String((rangeEnd && rangeEnd.value) || "").trim(),
+              adjust: String((adjustSelect && adjustSelect.value) || "qfq")
+                .trim()
+                .toLowerCase(),
+            }).catch((eMom) => {
+              _setMomentumMsg(
+                momTsTable,
+                `动量时序评估失败：${String(eMom && eMom.message ? eMom.message : eMom)}`,
+              );
+              _setMomentumMsg(
+                momCsTable,
+                `动量截面评估失败：${String(eMom && eMom.message ? eMom.message : eMom)}`,
+              );
             });
             return;
           }
@@ -22973,6 +23038,8 @@
                 if (futCausalTable) futCausalTable.innerHTML = "";
                 if (momTsTable) momTsTable.innerHTML = "";
                 if (momCsTable) momCsTable.innerHTML = "";
+                window.__distMomentumRenderToken =
+                  (window.__distMomentumRenderToken || 0) + 1;
                 if ($("distCalHeatmap"))
                   $("distCalHeatmap").innerHTML =
                     "<div class='muted'>无日历效应数据</div>";
@@ -23031,6 +23098,8 @@
               if (futCausalTable) futCausalTable.innerHTML = "";
               if (momTsTable) momTsTable.innerHTML = "";
               if (momCsTable) momCsTable.innerHTML = "";
+              window.__distMomentumRenderToken =
+                (window.__distMomentumRenderToken || 0) + 1;
               if ($("distCalHeatmap"))
                 $("distCalHeatmap").innerHTML =
                   "<div class='muted'>日历效应加载失败</div>";
