@@ -265,6 +265,38 @@ def test_bt_single_semantic_parity_keys_and_metrics(engine):
             assert abs(float(lv) - float(bv)) <= 1e-12
 
 
+def test_bt_meta_params_execution_time_defaults_match_legacy(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendInputs(
+            code="A",
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            exec_price="close",
+            atr_stop_execution_mode="next_day",
+            r_take_profit_execution_mode="next_day",
+            r_profit_scaleout_execution_mode="next_day",
+            bias_v_take_profit_execution_mode="next_day",
+            ma_trailing_stop_execution_mode="next_day",
+        )
+        legacy = compute_trend_backtest(db, inp)
+        bt = compute_trend_backtest_bt(db, inp)
+
+    l_params = ((legacy or {}).get("meta") or {}).get("params") or {}
+    b_params = ((bt or {}).get("meta") or {}).get("params") or {}
+    for key in [
+        "atr_stop_execution_time",
+        "r_take_profit_execution_time",
+        "r_profit_scaleout_execution_time",
+        "bias_v_take_profit_execution_time",
+        "ma_trailing_stop_execution_time",
+    ]:
+        assert str(l_params.get(key) or "") == "close"
+        assert str(b_params.get(key) or "") == str(l_params.get(key) or "")
+
+
 def test_bt_portfolio_semantic_parity_keys_and_core_metrics(engine):
     dates = _seed_case(engine)
     sf = make_session_factory(engine)
@@ -324,30 +356,22 @@ def test_bt_portfolio_semantic_parity_keys_and_core_metrics(engine):
     [
         ("ma_filter", "close", "equal"),
         ("ma_filter", "open", "risk_budget"),
-        ("ma_filter", "oc2", "equal"),
         ("ma_cross", "close", "equal"),
         ("ma_cross", "open", "risk_budget"),
-        ("donchian", "oc2", "equal"),
         ("donchian", "close", "equal"),
         ("donchian", "open", "risk_budget"),
         ("tsmom", "close", "equal"),
         ("tsmom", "open", "risk_budget"),
-        ("tsmom", "oc2", "equal"),
         ("linreg_slope", "close", "equal"),
         ("linreg_slope", "open", "risk_budget"),
-        ("linreg_slope", "oc2", "equal"),
         ("bias", "close", "equal"),
         ("bias", "open", "risk_budget"),
-        ("bias", "oc2", "equal"),
         ("macd_cross", "close", "equal"),
         ("macd_cross", "open", "risk_budget"),
-        ("macd_cross", "oc2", "equal"),
         ("macd_zero_filter", "close", "equal"),
         ("macd_zero_filter", "open", "risk_budget"),
-        ("macd_zero_filter", "oc2", "equal"),
         ("macd_v", "close", "equal"),
         ("macd_v", "open", "risk_budget"),
-        ("macd_v", "oc2", "equal"),
     ],
 )
 def test_bt_single_semantic_parity_matrix(
@@ -411,31 +435,22 @@ def test_bt_single_semantic_parity_matrix(
     [
         ("ma_filter", "close", "equal"),
         ("ma_filter", "open", "risk_budget"),
-        ("ma_filter", "oc2", "equal"),
         ("ma_cross", "close", "equal"),
         ("ma_cross", "open", "risk_budget"),
-        ("ma_cross", "oc2", "equal"),
         ("donchian", "close", "equal"),
         ("donchian", "open", "risk_budget"),
-        ("donchian", "oc2", "equal"),
         ("tsmom", "close", "equal"),
         ("tsmom", "open", "risk_budget"),
-        ("tsmom", "oc2", "equal"),
         ("linreg_slope", "close", "equal"),
         ("linreg_slope", "open", "risk_budget"),
-        ("linreg_slope", "oc2", "equal"),
         ("bias", "close", "equal"),
         ("bias", "open", "risk_budget"),
-        ("bias", "oc2", "equal"),
         ("macd_cross", "close", "equal"),
         ("macd_cross", "open", "risk_budget"),
-        ("macd_cross", "oc2", "equal"),
         ("macd_zero_filter", "close", "equal"),
         ("macd_zero_filter", "open", "risk_budget"),
-        ("macd_zero_filter", "oc2", "equal"),
         ("macd_v", "close", "equal"),
         ("macd_v", "open", "risk_budget"),
-        ("macd_v", "oc2", "equal"),
     ],
 )
 def test_bt_portfolio_semantic_parity_matrix(
@@ -604,10 +619,6 @@ def test_bt_portfolio_effective_weights_semantic_parity(engine):
         ("open", "risk_budget"),
         ("open", "fixed_ratio"),
         ("open", "vol_target"),
-        ("oc2", "equal"),
-        ("oc2", "risk_budget"),
-        ("oc2", "fixed_ratio"),
-        ("oc2", "vol_target"),
     ],
 )
 def test_bt_single_sizing_modes_sentinel_parity(
@@ -667,10 +678,6 @@ def test_bt_single_sizing_modes_sentinel_parity(
         ("open", "risk_budget"),
         ("open", "fixed_ratio"),
         ("open", "vol_target"),
-        ("oc2", "equal"),
-        ("oc2", "risk_budget"),
-        ("oc2", "fixed_ratio"),
-        ("oc2", "vol_target"),
     ],
 )
 def test_bt_portfolio_sizing_modes_sentinel_parity(
@@ -730,10 +737,6 @@ def test_bt_portfolio_sizing_modes_sentinel_parity(
         ("open", "risk_budget"),
         ("open", "fixed_ratio"),
         ("open", "vol_target"),
-        ("oc2", "equal"),
-        ("oc2", "risk_budget"),
-        ("oc2", "fixed_ratio"),
-        ("oc2", "vol_target"),
     ],
 )
 def test_bt_portfolio_quick_mode_sentinel_parity(
@@ -775,6 +778,40 @@ def test_bt_portfolio_quick_mode_sentinel_parity(
     assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
     if math.isfinite(float(lv)) and math.isfinite(float(bv)):
         assert abs(float(lv) - float(bv)) <= 1e-12
+
+
+def test_trend_single_rejects_oc2_exec_price_in_legacy_and_bt(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendInputs(
+            code="A",
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            exec_price="oc2",
+        )
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_backtest(db, inp)
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_backtest_bt(db, inp)
+
+
+def test_trend_portfolio_rejects_oc2_exec_price_in_legacy_and_bt(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendPortfolioInputs(
+            codes=["A", "B", "C"],
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            exec_price="oc2",
+        )
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_portfolio_backtest(db, inp)
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_portfolio_backtest_bt(db, inp)
 
 
 @pytest.mark.parametrize("quick_mode", [False, True])

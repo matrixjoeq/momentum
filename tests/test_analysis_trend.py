@@ -1049,6 +1049,156 @@ def test_ma_trailing_stop_effective_delay_days_delays_activation() -> None:
     assert str(ev[0].get("trigger_date") or "") == idx[5].date().isoformat()
 
 
+def test_overlay_execution_time_resolution_and_validation() -> None:
+    assert (
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="intraday",
+            execution_time=None,
+            exec_price="open",
+            mode_field="m",
+            time_field="t",
+        )
+        == "full_day"
+    )
+    assert (
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="next_day",
+            execution_time=None,
+            exec_price="close",
+            mode_field="m",
+            time_field="t",
+        )
+        == "close"
+    )
+    assert (
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="next_day",
+            execution_time="open",
+            exec_price="close",
+            mode_field="m",
+            time_field="t",
+        )
+        == "open"
+    )
+    with pytest.raises(ValueError):
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="next_day",
+            execution_time="full_day",
+            exec_price="open",
+            mode_field="m",
+            time_field="t",
+        )
+
+
+def test_overlay_execution_time_is_propagated_to_events() -> None:
+    idx = pd.date_range("2024-01-01", periods=8, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx)
+    close = pd.Series(
+        [100.0, 102.0, 104.0, 106.0, 105.0, 104.0, 103.0, 102.0], index=idx
+    )
+    high = (close + 1.0).astype(float)
+    low = (close - 1.0).astype(float)
+    open_ = close.copy().astype(float)
+
+    _, atr_stats = _apply_atr_stop(
+        pd.Series([1.0, 1.0, 1.0, 1.0], index=idx[:4], dtype=float),
+        open_=pd.Series([100.0, 96.0, 97.5, 97.0], index=idx[:4], dtype=float),
+        close=pd.Series([100.0, 100.0, 100.0, 100.0], index=idx[:4], dtype=float),
+        high=pd.Series([106.0, 106.0, 106.0, 106.0], index=idx[:4], dtype=float),
+        low=pd.Series([94.0, 96.0, 97.0, 96.0], index=idx[:4], dtype=float),
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="open",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+    )
+    atr_events = list((atr_stats or {}).get("trigger_events") or [])
+    assert atr_events and str(atr_events[0].get("execution_time") or "") == "open"
+
+    _, rtp_stats = _apply_r_multiple_take_profit(
+        pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx[:5], dtype=float),
+        open_=pd.Series(
+            [100.0, 100.0, 109.0, 109.0, 109.0], index=idx[:5], dtype=float
+        ),
+        close=pd.Series(
+            [100.0, 100.0, 108.0, 108.0, 108.0], index=idx[:5], dtype=float
+        ),
+        high=pd.Series([100.0, 103.0, 110.0, 112.0, 112.0], index=idx[:5], dtype=float),
+        low=pd.Series([100.0, 97.0, 107.0, 104.0, 104.0], index=idx[:5], dtype=float),
+        enabled=True,
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="close",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.5, "retrace_ratio": 0.3}],
+        atr_stop_enabled=True,
+    )
+    rtp_events = list((rtp_stats or {}).get("trigger_events") or [])
+    assert rtp_events and str(rtp_events[0].get("execution_time") or "") == "close"
+
+    _, rps_stats = _build_r_profit_scaleout_plan(
+        pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx[:5], dtype=float),
+        open_=pd.Series([100.0] * 5, index=idx[:5], dtype=float),
+        close=pd.Series([100.0] * 5, index=idx[:5], dtype=float),
+        high=pd.Series([100.0, 100.0, 110.0, 121.0, 121.0], index=idx[:5], dtype=float),
+        low=pd.Series([95.0] * 5, index=idx[:5], dtype=float),
+        enabled=True,
+        execution_mode="intraday",
+        execution_time="full_day",
+        breakeven_stop_enabled=False,
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 2.0, "reduce_fraction": 0.5}],
+        atr_stop_enabled=False,
+    )
+    rps_events = list((rps_stats or {}).get("trigger_events") or [])
+    assert rps_events and str(rps_events[0].get("execution_time") or "") == "full_day"
+
+    _, bias_stats = _apply_bias_v_take_profit(
+        pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx[:5], dtype=float),
+        open_=pd.Series(
+            [100.0, 100.0, 100.0, 102.0, 102.0], index=idx[:5], dtype=float
+        ),
+        close=pd.Series(
+            [100.0, 100.0, 100.0, 100.0, 100.0], index=idx[:5], dtype=float
+        ),
+        high=pd.Series([100.0, 100.0, 100.0, 108.0, 108.0], index=idx[:5], dtype=float),
+        low=pd.Series([99.0, 99.0, 99.0, 99.0, 99.0], index=idx[:5], dtype=float),
+        enabled=True,
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="full_day",
+        ma_window=2,
+        atr_window=2,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 1.0}],
+        breakeven_stop_enabled=False,
+    )
+    bias_events = list((bias_stats or {}).get("trigger_events") or [])
+    assert bias_events and str(bias_events[0].get("execution_time") or "") == "full_day"
+
+    _, ma_stats = _build_ma_trailing_stop_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        ma_type="sma",
+        execution_mode="intraday",
+        execution_time="close",
+        effective_delay_days=1,
+        reduce_window=3,
+        exit_window=6,
+        reduce_fraction=0.33,
+    )
+    ma_events = list((ma_stats or {}).get("trigger_events") or [])
+    assert ma_events and str(ma_events[0].get("execution_time") or "") == "close"
+
+
 def test_intraday_or_arbitration_prioritizes_full_exit_then_max_partial() -> None:
     idx = pd.date_range("2024-01-01", periods=3, freq="B")
     weights = pd.Series([0.0, 1.0, 1.0], index=idx, dtype=float)

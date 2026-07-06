@@ -2108,6 +2108,7 @@ def trend_backtest(
         atr_stop_execution_mode=str(
             getattr(payload, "atr_stop_execution_mode", "intraday")
         ),
+        atr_stop_execution_time=getattr(payload, "atr_stop_execution_time", None),
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
@@ -2120,6 +2121,9 @@ def trend_backtest(
         ma_trailing_stop_execution_mode=str(
             getattr(payload, "ma_trailing_stop_execution_mode", "intraday")
             or "intraday"
+        ),
+        ma_trailing_stop_execution_time=getattr(
+            payload, "ma_trailing_stop_execution_time", None
         ),
         ma_trailing_stop_effective_delay_days=int(
             getattr(payload, "ma_trailing_stop_effective_delay_days", 3) or 3
@@ -2140,6 +2144,9 @@ def trend_backtest(
         r_take_profit_execution_mode=str(
             getattr(payload, "r_take_profit_execution_mode", "intraday")
         ),
+        r_take_profit_execution_time=getattr(
+            payload, "r_take_profit_execution_time", None
+        ),
         r_take_profit_tiers=(
             [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
             if getattr(payload, "r_take_profit_tiers", None)
@@ -2150,6 +2157,9 @@ def trend_backtest(
         ),
         r_profit_scaleout_execution_mode=str(
             getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
+        ),
+        r_profit_scaleout_execution_time=getattr(
+            payload, "r_profit_scaleout_execution_time", None
         ),
         r_profit_scaleout_breakeven_stop_enabled=bool(
             getattr(payload, "r_profit_scaleout_breakeven_stop_enabled", True)
@@ -2167,6 +2177,9 @@ def trend_backtest(
         ),
         bias_v_take_profit_execution_mode=str(
             getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
+        ),
+        bias_v_take_profit_execution_time=getattr(
+            payload, "bias_v_take_profit_execution_time", None
         ),
         bias_v_take_profit_breakeven_stop_enabled=bool(
             getattr(payload, "bias_v_take_profit_breakeven_stop_enabled", True)
@@ -2367,6 +2380,7 @@ def trend_portfolio_backtest(
         atr_stop_execution_mode=str(
             getattr(payload, "atr_stop_execution_mode", "intraday")
         ),
+        atr_stop_execution_time=getattr(payload, "atr_stop_execution_time", None),
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
@@ -2379,6 +2393,9 @@ def trend_portfolio_backtest(
         ma_trailing_stop_execution_mode=str(
             getattr(payload, "ma_trailing_stop_execution_mode", "intraday")
             or "intraday"
+        ),
+        ma_trailing_stop_execution_time=getattr(
+            payload, "ma_trailing_stop_execution_time", None
         ),
         ma_trailing_stop_effective_delay_days=int(
             getattr(payload, "ma_trailing_stop_effective_delay_days", 3) or 3
@@ -2399,6 +2416,9 @@ def trend_portfolio_backtest(
         r_take_profit_execution_mode=str(
             getattr(payload, "r_take_profit_execution_mode", "intraday")
         ),
+        r_take_profit_execution_time=getattr(
+            payload, "r_take_profit_execution_time", None
+        ),
         r_take_profit_tiers=(
             [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
             if getattr(payload, "r_take_profit_tiers", None)
@@ -2409,6 +2429,9 @@ def trend_portfolio_backtest(
         ),
         r_profit_scaleout_execution_mode=str(
             getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
+        ),
+        r_profit_scaleout_execution_time=getattr(
+            payload, "r_profit_scaleout_execution_time", None
         ),
         r_profit_scaleout_breakeven_stop_enabled=bool(
             getattr(payload, "r_profit_scaleout_breakeven_stop_enabled", True)
@@ -2426,6 +2449,9 @@ def trend_portfolio_backtest(
         ),
         bias_v_take_profit_execution_mode=str(
             getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
+        ),
+        bias_v_take_profit_execution_time=getattr(
+            payload, "bias_v_take_profit_execution_time", None
         ),
         bias_v_take_profit_breakeven_stop_enabled=bool(
             getattr(payload, "bias_v_take_profit_breakeven_stop_enabled", True)

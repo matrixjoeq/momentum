@@ -85,7 +85,6 @@ def _seed_one_exec_timing(
     [
         ("open", 1.148989898989899),
         ("close", 7.0 / 13.0),
-        ("oc2", 0.8405812937062936),
     ],
 )
 def test_trend_portfolio_exec_price_follows_execution_day_timing_rule(

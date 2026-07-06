@@ -5208,6 +5208,15 @@
           </select>
         </div>
         <div>
+          <label>ATR止损执行时点</label>
+          <select id="trendAtrStopExecTime" style="min-width: 160px">
+            <option value="" selected>兼容默认(自动)</option>
+            <option value="open">开盘</option>
+            <option value="close">收盘</option>
+            <option value="full_day">全日</option>
+          </select>
+        </div>
+        <div>
           <label>ATR周期</label><input id="trendAtrStopWin" value="14" />
         </div>
         <div>
@@ -5254,6 +5263,15 @@
             <option value="next_day">次日执行(当日收盘触发)</option>
           </select>
         </div>
+        <div>
+          <label>R止盈执行时点</label>
+          <select id="trendRTpExecTime" style="min-width: 160px">
+            <option value="" selected>兼容默认(自动)</option>
+            <option value="open">开盘</option>
+            <option value="close">收盘</option>
+            <option value="full_day">全日</option>
+          </select>
+        </div>
         <div style="min-width: 420px">
           <label>R阈值与允许回落（r:ratio，逗号分隔）</label>
           <input id="trendRTpTiers" value="2:0.5,3:0.3,4:0.2,5:0.1,6:0.05" />
@@ -5272,6 +5290,15 @@
           <select id="trendRScaleExec" style="min-width: 190px">
             <option value="intraday" selected>日内执行(入场后次日生效)</option>
             <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
+        </div>
+        <div>
+          <label>降仓执行时点</label>
+          <select id="trendRScaleExecTime" style="min-width: 160px">
+            <option value="" selected>兼容默认(自动)</option>
+            <option value="open">开盘</option>
+            <option value="close">收盘</option>
+            <option value="full_day">全日</option>
           </select>
         </div>
         <div>
@@ -5306,6 +5333,15 @@
           <select id="trendBiasVTpExec" style="min-width: 190px">
             <option value="intraday" selected>日内执行(入场后次日生效)</option>
             <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
+        </div>
+        <div>
+          <label>BIAS-V执行时点</label>
+          <select id="trendBiasVTpExecTime" style="min-width: 160px">
+            <option value="" selected>兼容默认(自动)</option>
+            <option value="open">开盘</option>
+            <option value="close">收盘</option>
+            <option value="full_day">全日</option>
           </select>
         </div>
         <div>
@@ -5364,6 +5400,15 @@
           <select id="trendMaTrailingStopExec" style="min-width: 190px">
             <option value="intraday" selected>日内执行(入场后次日生效)</option>
             <option value="next_day">次日执行(当日收盘触发)</option>
+          </select>
+        </div>
+        <div>
+          <label>跟踪止损执行时点</label>
+          <select id="trendMaTrailingStopExecTime" style="min-width: 160px">
+            <option value="" selected>兼容默认(自动)</option>
+            <option value="open">开盘</option>
+            <option value="close">收盘</option>
+            <option value="full_day">全日</option>
           </select>
         </div>
       </div>
@@ -8153,20 +8198,24 @@
           "trendAtrStopBasis",
           "trendAtrStopReentry",
           "trendAtrStopExec",
+          "trendAtrStopExecTime",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpExec",
+          "trendRTpExecTime",
           "trendRTpTiers",
           "trendRScaleEnable",
           "trendRScaleExec",
+          "trendRScaleExecTime",
           "trendRScaleBreakevenStopEnable",
           "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
+          "trendBiasVTpExecTime",
           "trendBiasVTpBreakevenStopEnable",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
@@ -8174,6 +8223,7 @@
           "trendMaTrailingStopEnable",
           "trendMaTrailingStopMaType",
           "trendMaTrailingStopExec",
+          "trendMaTrailingStopExecTime",
           "trendMaTrailingStopDelayDays",
           "trendMaTrailingStopReduceWin",
           "trendMaTrailingStopExitWin",
@@ -11133,20 +11183,43 @@
         tiers.sort((a, b) => Number(a.threshold) - Number(b.threshold));
         return { tiers };
       }
+      function _normalizeTrendOverlayExecutionTime(modeId, timeId) {
+        const modeEl = $(modeId);
+        const timeEl = $(timeId);
+        if (!modeEl || !timeEl) return;
+        const mode = String(modeEl.value || "intraday")
+          .trim()
+          .toLowerCase();
+        const fullDayOpt = timeEl.querySelector('option[value="full_day"]');
+        if (fullDayOpt) fullDayOpt.disabled = mode === "next_day";
+        if (mode === "next_day" && String(timeEl.value || "") === "full_day") {
+          timeEl.value = "";
+        }
+      }
+      function _trendOverlayExecutionTimeValue(id) {
+        const el = $(id);
+        if (!el) return null;
+        const v = String(el.value || "").trim();
+        return v ? v : null;
+      }
       function _syncRTpParamsUi() {
         const atrModeEl = $("trendAtrStopMode");
         const atrExecEl = $("trendAtrStopExec");
+        const atrExecTimeEl = $("trendAtrStopExecTime");
         const onEl = $("trendRTpEnable");
         const reEl = $("trendRTpReentry");
         const exEl = $("trendRTpExec");
+        const exTimeEl = $("trendRTpExecTime");
         const tEl = $("trendRTpTiers");
         const rsOnEl = $("trendRScaleEnable");
         const rsExecEl = $("trendRScaleExec");
+        const rsExecTimeEl = $("trendRScaleExecTime");
         const rsBeEl = $("trendRScaleBreakevenStopEnable");
         const rsTiersEl = $("trendRScaleTiers");
         const bvOnEl = $("trendBiasVTpEnable");
         const bvReEl = $("trendBiasVTpReentry");
         const bvExEl = $("trendBiasVTpExec");
+        const bvExTimeEl = $("trendBiasVTpExecTime");
         const bvBeEl = $("trendBiasVTpBreakevenStopEnable");
         const bvMaEl = $("trendBiasVTpMaWin");
         const bvAtrEl = $("trendBiasVTpAtrWin");
@@ -11154,6 +11227,7 @@
         const maTsOnEl = $("trendMaTrailingStopEnable");
         const maTsTypeEl = $("trendMaTrailingStopMaType");
         const maTsExecEl = $("trendMaTrailingStopExec");
+        const maTsExecTimeEl = $("trendMaTrailingStopExecTime");
         const maTsDelayEl = $("trendMaTrailingStopDelayDays");
         const maTsReduceWinEl = $("trendMaTrailingStopReduceWin");
         const maTsExitWinEl = $("trendMaTrailingStopExitWin");
@@ -11173,21 +11247,43 @@
           el.disabled = !enable;
           el.style.opacity = enable ? "1" : "0.55";
         };
+        _normalizeTrendOverlayExecutionTime(
+          "trendAtrStopExec",
+          "trendAtrStopExecTime",
+        );
+        _normalizeTrendOverlayExecutionTime("trendRTpExec", "trendRTpExecTime");
+        _normalizeTrendOverlayExecutionTime(
+          "trendRScaleExec",
+          "trendRScaleExecTime",
+        );
+        _normalizeTrendOverlayExecutionTime(
+          "trendBiasVTpExec",
+          "trendBiasVTpExecTime",
+        );
+        _normalizeTrendOverlayExecutionTime(
+          "trendMaTrailingStopExec",
+          "trendMaTrailingStopExecTime",
+        );
         setEnabled(atrExecEl, atrOn);
+        setEnabled(atrExecTimeEl, atrOn);
         setEnabled(reEl, on);
         setEnabled(exEl, on);
+        setEnabled(exTimeEl, on);
         setEnabled(tEl, on);
         setEnabled(rsExecEl, rsOn);
+        setEnabled(rsExecTimeEl, rsOn);
         setEnabled(rsBeEl, rsOn);
         setEnabled(rsTiersEl, rsOn);
         setEnabled(bvReEl, bvOn);
         setEnabled(bvExEl, bvOn);
+        setEnabled(bvExTimeEl, bvOn);
         setEnabled(bvBeEl, bvOn);
         setEnabled(bvMaEl, bvOn);
         setEnabled(bvAtrEl, bvOn);
         setEnabled(bvTiersEl, bvOn);
         setEnabled(maTsTypeEl, maTsOn);
         setEnabled(maTsExecEl, maTsOn);
+        setEnabled(maTsExecTimeEl, maTsOn);
         setEnabled(maTsDelayEl, maTsOn);
         setEnabled(maTsReduceWinEl, maTsOn);
         setEnabled(maTsExitWinEl, maTsOn);
@@ -11457,20 +11553,24 @@
           "trendAtrStopBasis",
           "trendAtrStopReentry",
           "trendAtrStopExec",
+          "trendAtrStopExecTime",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpExec",
+          "trendRTpExecTime",
           "trendRTpTiers",
           "trendRScaleEnable",
           "trendRScaleExec",
+          "trendRScaleExecTime",
           "trendRScaleBreakevenStopEnable",
           "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
+          "trendBiasVTpExecTime",
           "trendBiasVTpBreakevenStopEnable",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
@@ -11478,6 +11578,7 @@
           "trendMaTrailingStopEnable",
           "trendMaTrailingStopMaType",
           "trendMaTrailingStopExec",
+          "trendMaTrailingStopExecTime",
           "trendMaTrailingStopDelayDays",
           "trendMaTrailingStopReduceWin",
           "trendMaTrailingStopExitWin",
@@ -11515,20 +11616,24 @@
           "trendAtrStopBasis",
           "trendAtrStopReentry",
           "trendAtrStopExec",
+          "trendAtrStopExecTime",
           "trendAtrStopWin",
           "trendAtrStopN",
           "trendAtrStopM",
           "trendRTpEnable",
           "trendRTpReentry",
           "trendRTpExec",
+          "trendRTpExecTime",
           "trendRTpTiers",
           "trendRScaleEnable",
           "trendRScaleExec",
+          "trendRScaleExecTime",
           "trendRScaleBreakevenStopEnable",
           "trendRScaleTiers",
           "trendBiasVTpEnable",
           "trendBiasVTpReentry",
           "trendBiasVTpExec",
+          "trendBiasVTpExecTime",
           "trendBiasVTpBreakevenStopEnable",
           "trendBiasVTpMaWin",
           "trendBiasVTpAtrWin",
@@ -11536,6 +11641,7 @@
           "trendMaTrailingStopEnable",
           "trendMaTrailingStopMaType",
           "trendMaTrailingStopExec",
+          "trendMaTrailingStopExecTime",
           "trendMaTrailingStopDelayDays",
           "trendMaTrailingStopReduceWin",
           "trendMaTrailingStopExitWin",
@@ -31255,6 +31361,9 @@
             $("trendAtrStopExec") && $("trendAtrStopExec").value
               ? String($("trendAtrStopExec").value)
               : "intraday",
+          atr_stop_execution_time: _trendOverlayExecutionTimeValue(
+            "trendAtrStopExecTime",
+          ),
           atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
           atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
           atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
@@ -31270,6 +31379,8 @@
             $("trendRTpExec") && $("trendRTpExec").value
               ? String($("trendRTpExec").value)
               : "intraday",
+          r_take_profit_execution_time:
+            _trendOverlayExecutionTimeValue("trendRTpExecTime"),
           r_take_profit_tiers:
             parsedRTiers && !parsedRTiers.__error
               ? parsedRTiers.tiers || []
@@ -31282,6 +31393,9 @@
             $("trendRScaleExec") && $("trendRScaleExec").value
               ? String($("trendRScaleExec").value)
               : "intraday",
+          r_profit_scaleout_execution_time: _trendOverlayExecutionTimeValue(
+            "trendRScaleExecTime",
+          ),
           r_profit_scaleout_breakeven_stop_enabled:
             $("trendRScaleBreakevenStopEnable") &&
             $("trendRScaleBreakevenStopEnable").value
@@ -31303,6 +31417,9 @@
             $("trendBiasVTpExec") && $("trendBiasVTpExec").value
               ? String($("trendBiasVTpExec").value)
               : "intraday",
+          bias_v_take_profit_execution_time: _trendOverlayExecutionTimeValue(
+            "trendBiasVTpExecTime",
+          ),
           bias_v_take_profit_breakeven_stop_enabled:
             $("trendBiasVTpBreakevenStopEnable") &&
             $("trendBiasVTpBreakevenStopEnable").value
@@ -31338,6 +31455,9 @@
             $("trendMaTrailingStopExec") && $("trendMaTrailingStopExec").value
               ? String($("trendMaTrailingStopExec").value)
               : "intraday",
+          ma_trailing_stop_execution_time: _trendOverlayExecutionTimeValue(
+            "trendMaTrailingStopExecTime",
+          ),
           ma_trailing_stop_effective_delay_days: Number(
             ($("trendMaTrailingStopDelayDays") &&
             $("trendMaTrailingStopDelayDays").value
@@ -31714,6 +31834,9 @@
             $("trendAtrStopExec") && $("trendAtrStopExec").value
               ? String($("trendAtrStopExec").value)
               : "intraday",
+          atr_stop_execution_time: _trendOverlayExecutionTimeValue(
+            "trendAtrStopExecTime",
+          ),
           atr_stop_window: Number(($("trendAtrStopWin").value || "14").trim()),
           atr_stop_n: Number(($("trendAtrStopN").value || "2.0").trim()),
           atr_stop_m: Number(($("trendAtrStopM").value || "0.5").trim()),
@@ -31729,6 +31852,8 @@
             $("trendRTpExec") && $("trendRTpExec").value
               ? String($("trendRTpExec").value)
               : "intraday",
+          r_take_profit_execution_time:
+            _trendOverlayExecutionTimeValue("trendRTpExecTime"),
           r_take_profit_tiers: [],
           r_profit_scaleout_enabled:
             $("trendRScaleEnable") && $("trendRScaleEnable").value
@@ -31738,6 +31863,9 @@
             $("trendRScaleExec") && $("trendRScaleExec").value
               ? String($("trendRScaleExec").value)
               : "intraday",
+          r_profit_scaleout_execution_time: _trendOverlayExecutionTimeValue(
+            "trendRScaleExecTime",
+          ),
           r_profit_scaleout_breakeven_stop_enabled:
             $("trendRScaleBreakevenStopEnable") &&
             $("trendRScaleBreakevenStopEnable").value
@@ -31756,6 +31884,9 @@
             $("trendBiasVTpExec") && $("trendBiasVTpExec").value
               ? String($("trendBiasVTpExec").value)
               : "intraday",
+          bias_v_take_profit_execution_time: _trendOverlayExecutionTimeValue(
+            "trendBiasVTpExecTime",
+          ),
           bias_v_take_profit_breakeven_stop_enabled:
             $("trendBiasVTpBreakevenStopEnable") &&
             $("trendBiasVTpBreakevenStopEnable").value
@@ -31788,6 +31919,9 @@
             $("trendMaTrailingStopExec") && $("trendMaTrailingStopExec").value
               ? String($("trendMaTrailingStopExec").value)
               : "intraday",
+          ma_trailing_stop_execution_time: _trendOverlayExecutionTimeValue(
+            "trendMaTrailingStopExecTime",
+          ),
           ma_trailing_stop_effective_delay_days: Number(
             ($("trendMaTrailingStopDelayDays") &&
             $("trendMaTrailingStopDelayDays").value
@@ -31975,6 +32109,20 @@
             return setMsg("随机种子需为数字，或留空使用系统随机");
           common.random_seed = Math.floor(seedNum);
         }
+        const validateOverlayExecutionTime = (mode, time, label) => {
+          const modeV = String(mode || "intraday")
+            .trim()
+            .toLowerCase();
+          const timeRaw = time == null ? "" : String(time).trim().toLowerCase();
+          if (timeRaw === "") return null;
+          if (!["open", "close", "full_day"].includes(timeRaw)) {
+            return `${label}执行时点非法，请选择 开盘/收盘/全日`;
+          }
+          if (modeV === "next_day" && timeRaw === "full_day") {
+            return `${label}为次日执行时，不支持全日执行`;
+          }
+          return null;
+        };
         if (
           !["none", "static", "trailing", "tightening"].includes(
             String(common.atr_stop_mode),
@@ -31998,6 +32146,14 @@
           )
         ) {
           return setMsg("ATR止损执行模式非法，请选择 日内执行/次日执行");
+        }
+        {
+          const err = validateOverlayExecutionTime(
+            common.atr_stop_execution_mode,
+            common.atr_stop_execution_time,
+            "ATR止损",
+          );
+          if (err) return setMsg(err);
         }
         if (
           !Number.isFinite(common.atr_stop_window) ||
@@ -32031,6 +32187,14 @@
         ) {
           return setMsg("R止盈执行模式非法，请选择 日内执行/次日执行");
         }
+        {
+          const err = validateOverlayExecutionTime(
+            common.r_take_profit_execution_mode,
+            common.r_take_profit_execution_time,
+            "R止盈",
+          );
+          if (err) return setMsg(err);
+        }
         if (common.r_take_profit_enabled) {
           const parsed = _parseRTpTiers(
             $("trendRTpTiers") && $("trendRTpTiers").value
@@ -32054,6 +32218,14 @@
           )
         ) {
           return setMsg("浮盈降仓执行模式非法，请选择 日内执行/次日执行");
+        }
+        {
+          const err = validateOverlayExecutionTime(
+            common.r_profit_scaleout_execution_mode,
+            common.r_profit_scaleout_execution_time,
+            "浮盈降仓",
+          );
+          if (err) return setMsg(err);
         }
         if (common.r_profit_scaleout_enabled) {
           const parsed = _parseRScaleTiers(
@@ -32087,6 +32259,14 @@
           )
         ) {
           return setMsg("BIAS-V止盈执行模式非法，请选择 日内执行/次日执行");
+        }
+        {
+          const err = validateOverlayExecutionTime(
+            common.bias_v_take_profit_execution_mode,
+            common.bias_v_take_profit_execution_time,
+            "BIAS-V止盈",
+          );
+          if (err) return setMsg(err);
         }
         if (
           !Number.isFinite(common.bias_v_ma_window) ||
@@ -32128,6 +32308,14 @@
           )
         ) {
           return setMsg("均线跟踪止损执行模式非法，请选择 日内执行/次日执行");
+        }
+        {
+          const err = validateOverlayExecutionTime(
+            common.ma_trailing_stop_execution_mode,
+            common.ma_trailing_stop_execution_time,
+            "均线跟踪止损",
+          );
+          if (err) return setMsg(err);
         }
         if (
           !Number.isFinite(common.ma_trailing_stop_effective_delay_days) ||

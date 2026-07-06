@@ -822,9 +822,15 @@ def test_api_trend_single_accepts_stop_execution_modes(api_client):
             "atr_stop_window": 2,
             "atr_stop_n": 1.0,
             "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "open",
             "r_take_profit_enabled": True,
             "r_take_profit_tiers": [{"r_multiple": 1.5, "retrace_ratio": 0.5}],
             "r_take_profit_execution_mode": "next_day",
+            "r_take_profit_execution_time": "close",
+            "r_profit_scaleout_enabled": True,
+            "r_profit_scaleout_tiers": [{"r_multiple": 1.5, "reduce_fraction": 0.4}],
+            "r_profit_scaleout_execution_mode": "intraday",
+            "r_profit_scaleout_execution_time": "full_day",
             "bias_v_take_profit_enabled": True,
             "bias_v_ma_window": 2,
             "bias_v_atr_window": 2,
@@ -833,14 +839,29 @@ def test_api_trend_single_accepts_stop_execution_modes(api_client):
                 {"threshold": 0.8, "reduce_fraction": 0.4},
             ],
             "bias_v_take_profit_execution_mode": "next_day",
+            "bias_v_take_profit_execution_time": "open",
+            "ma_trailing_stop_enabled": True,
+            "ma_trailing_stop_execution_mode": "intraday",
+            "ma_trailing_stop_execution_time": "full_day",
+            "ma_trailing_stop_reduce_window": 2,
+            "ma_trailing_stop_exit_window": 2,
+            "ma_trailing_stop_effective_delay_days": 1,
+            "ma_trailing_stop_reduce_fraction": 0.5,
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
         },
     )
     params = ((data or {}).get("meta") or {}).get("params") or {}
     assert str(params.get("atr_stop_execution_mode") or "") == "next_day"
+    assert str(params.get("atr_stop_execution_time") or "") == "open"
     assert str(params.get("r_take_profit_execution_mode") or "") == "next_day"
+    assert str(params.get("r_take_profit_execution_time") or "") == "close"
+    assert str(params.get("r_profit_scaleout_execution_mode") or "") == "intraday"
+    assert str(params.get("r_profit_scaleout_execution_time") or "") == "full_day"
     assert str(params.get("bias_v_take_profit_execution_mode") or "") == "next_day"
+    assert str(params.get("bias_v_take_profit_execution_time") or "") == "open"
+    assert str(params.get("ma_trailing_stop_execution_mode") or "") == "intraday"
+    assert str(params.get("ma_trailing_stop_execution_time") or "") == "full_day"
     assert "bias_v_take_profit_threshold" not in params
     tiers = list(params.get("bias_v_take_profit_tiers") or [])
     assert tiers == [
@@ -873,9 +894,15 @@ def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
             "atr_stop_window": 2,
             "atr_stop_n": 1.0,
             "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "open",
             "r_take_profit_enabled": True,
             "r_take_profit_tiers": [{"r_multiple": 1.5, "retrace_ratio": 0.5}],
             "r_take_profit_execution_mode": "next_day",
+            "r_take_profit_execution_time": "close",
+            "r_profit_scaleout_enabled": True,
+            "r_profit_scaleout_tiers": [{"r_multiple": 1.5, "reduce_fraction": 0.4}],
+            "r_profit_scaleout_execution_mode": "intraday",
+            "r_profit_scaleout_execution_time": "full_day",
             "bias_v_take_profit_enabled": True,
             "bias_v_ma_window": 2,
             "bias_v_atr_window": 2,
@@ -884,14 +911,29 @@ def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
                 {"threshold": 0.8, "reduce_fraction": 0.4},
             ],
             "bias_v_take_profit_execution_mode": "next_day",
+            "bias_v_take_profit_execution_time": "open",
+            "ma_trailing_stop_enabled": True,
+            "ma_trailing_stop_execution_mode": "intraday",
+            "ma_trailing_stop_execution_time": "full_day",
+            "ma_trailing_stop_reduce_window": 2,
+            "ma_trailing_stop_exit_window": 2,
+            "ma_trailing_stop_effective_delay_days": 1,
+            "ma_trailing_stop_reduce_fraction": 0.5,
             "cost_bps": 0.0,
             "slippage_rate": 0.0,
         },
     )
     params = ((data or {}).get("meta") or {}).get("params") or {}
     assert str(params.get("atr_stop_execution_mode") or "") == "next_day"
+    assert str(params.get("atr_stop_execution_time") or "") == "open"
     assert str(params.get("r_take_profit_execution_mode") or "") == "next_day"
+    assert str(params.get("r_take_profit_execution_time") or "") == "close"
+    assert str(params.get("r_profit_scaleout_execution_mode") or "") == "intraday"
+    assert str(params.get("r_profit_scaleout_execution_time") or "") == "full_day"
     assert str(params.get("bias_v_take_profit_execution_mode") or "") == "next_day"
+    assert str(params.get("bias_v_take_profit_execution_time") or "") == "open"
+    assert str(params.get("ma_trailing_stop_execution_mode") or "") == "intraday"
+    assert str(params.get("ma_trailing_stop_execution_time") or "") == "full_day"
     assert "bias_v_take_profit_threshold" not in params
     tiers = list(params.get("bias_v_take_profit_tiers") or [])
     assert tiers == [
@@ -900,6 +942,122 @@ def test_api_trend_portfolio_accepts_stop_execution_modes(api_client):
     ]
     rc = ((data or {}).get("risk_controls") or {}).get("bias_v_take_profit") or {}
     assert "threshold" not in rc
+
+
+def test_api_trend_single_rejects_oc2_exec_price(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "exec_price": "oc2",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "open" in str(err) and "close" in str(err)
+
+
+def test_api_trend_single_rejects_next_day_full_day_execution_time(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "510300",
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "atr_stop_mode": "static",
+            "atr_stop_window": 2,
+            "atr_stop_n": 1.0,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "full_day",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "full_day" in str(err) and "next_day" in str(err)
+
+
+def test_api_trend_portfolio_rejects_oc2_exec_price(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": _BASELINE_CODES,
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "exec_price": "oc2",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "open" in str(err) and "close" in str(err)
+
+
+def test_api_trend_portfolio_rejects_next_day_full_day_execution_time(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/trend/portfolio",
+        {
+            "codes": _BASELINE_CODES,
+            "start": "20240102",
+            "end": "20240103",
+            "strategy": "ma_filter",
+            "sma_window": 2,
+            "atr_stop_mode": "static",
+            "atr_stop_window": 2,
+            "atr_stop_n": 1.0,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "full_day",
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+        expected_status=422,
+    )
+    assert "full_day" in str(err) and "next_day" in str(err)
 
 
 def test_api_trend_single_rejects_risk_budget_pct_above_3_percent(api_client):

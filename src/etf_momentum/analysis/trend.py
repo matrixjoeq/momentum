@@ -69,6 +69,8 @@ DEFAULT_BIAS_V_TAKE_PROFIT_TIERS: list[dict[str, float]] = [
     {"threshold": 5.0, "reduce_fraction": 1.0},
 ]
 STOP_EXECUTION_MODES: set[str] = {"intraday", "next_day"}
+STOP_EXECUTION_TIMES: set[str] = {"open", "close", "full_day"}
+STOP_NEXT_DAY_EXECUTION_TIMES: set[str] = {"open", "close"}
 VOL_REGIME_STATES: set[str] = {"NORMAL", "REDUCED", "INCREASED", "EXTREME"}
 CASH_MANAGEMENT_PROXY_CODE = "511880"
 RISK_EXIT_PROXY_CODE = "__RISK_EXIT_OVERRIDE__"
@@ -83,6 +85,38 @@ RISK_OVERLAY_KEYS: tuple[str, ...] = (
 RISK_MUTEX_GROUPS: tuple[tuple[str, ...], ...] = (
     ("vol_regime_risk_mgmt_enabled", "vol_periodic_risk_mgmt_enabled"),
 )
+
+
+def _resolve_stop_execution_time(
+    *,
+    execution_mode: str,
+    execution_time: str | None,
+    exec_price: str,
+    mode_field: str,
+    time_field: str,
+) -> str:
+    mode_v = str(execution_mode or "intraday").strip().lower()
+    if mode_v not in STOP_EXECUTION_MODES:
+        raise ValueError(f"{mode_field} must be one of: intraday|next_day")
+    raw_time = (
+        None if execution_time is None else str(execution_time).strip().lower() or None
+    )
+    if raw_time is not None and raw_time not in STOP_EXECUTION_TIMES:
+        raise ValueError(f"{time_field} must be one of: open|close|full_day")
+    if mode_v == "next_day":
+        if raw_time == "full_day":
+            raise ValueError(
+                f"{time_field} must be open|close when {mode_field}=next_day"
+            )
+        if raw_time in STOP_NEXT_DAY_EXECUTION_TIMES:
+            return str(raw_time)
+        ep = str(exec_price or "close").strip().lower()
+        if ep not in STOP_NEXT_DAY_EXECUTION_TIMES:
+            raise ValueError("exec_price must be one of: open|close")
+        return str(ep)
+    if raw_time is None:
+        return "full_day"
+    return str(raw_time)
 
 
 def _build_risk_control_compatibility_meta(
@@ -210,7 +244,7 @@ class TrendInputs:
     slippage_rate: float = (
         0.001  # one-way adverse slippage spread (absolute price diff)
     )
-    exec_price: str = "open"  # open|close (oc2 deprecated; averaged open/close)
+    exec_price: str = "open"  # open|close
     # strategy selection
     strategy: str = "ma_filter"  # ma_filter | ma_cross | donchian | tsmom | linreg_slope | bias | macd_cross | macd_zero_filter | macd_v | random_entry
     # parameters
@@ -232,12 +266,14 @@ class TrendInputs:
     atr_stop_atr_basis: str = "latest"  # entry | latest (for trailing/tightening)
     atr_stop_reentry_mode: str = "reenter"  # reenter | wait_next_entry
     atr_stop_execution_mode: str = "intraday"  # intraday | next_day (default intraday, armed from next day after entry)
+    atr_stop_execution_time: str | None = None  # open | close | full_day
     atr_stop_window: int = 14  # ATR lookback window
     atr_stop_n: float = 2.0  # stop distance multiplier by ATR
     atr_stop_m: float = 0.5  # tightening step in ATR multiples
     ma_trailing_stop_enabled: bool = False
     ma_trailing_stop_ma_type: str = "sma"  # sma | ema
     ma_trailing_stop_execution_mode: str = "intraday"  # intraday | next_day
+    ma_trailing_stop_execution_time: str | None = None  # open | close | full_day
     ma_trailing_stop_effective_delay_days: int = 3
     ma_trailing_stop_reduce_window: int = 10
     ma_trailing_stop_exit_window: int = 20
@@ -245,14 +281,17 @@ class TrendInputs:
     r_take_profit_enabled: bool = False
     r_take_profit_reentry_mode: str = "reenter"  # reenter | wait_next_entry
     r_take_profit_execution_mode: str = "intraday"  # intraday | next_day
+    r_take_profit_execution_time: str | None = None  # open | close | full_day
     r_take_profit_tiers: list[dict[str, float]] | None = None
     r_profit_scaleout_enabled: bool = False
     r_profit_scaleout_execution_mode: str = "intraday"  # intraday | next_day
+    r_profit_scaleout_execution_time: str | None = None  # open | close | full_day
     r_profit_scaleout_breakeven_stop_enabled: bool = True
     r_profit_scaleout_tiers: list[dict[str, float]] | None = None
     bias_v_take_profit_enabled: bool = False
     bias_v_take_profit_reentry_mode: str = "reenter"  # reenter | wait_next_entry
     bias_v_take_profit_execution_mode: str = "intraday"  # intraday | next_day
+    bias_v_take_profit_execution_time: str | None = None  # open | close | full_day
     bias_v_take_profit_breakeven_stop_enabled: bool = True
     bias_v_ma_window: int = 20
     bias_v_atr_window: int = 20
@@ -329,7 +368,7 @@ class TrendPortfolioInputs:
     slippage_rate: float = (
         0.001  # one-way adverse slippage spread (absolute price diff)
     )
-    exec_price: str = "open"  # open|close (oc2 deprecated; averaged open/close)
+    exec_price: str = "open"  # open|close
     strategy: str = "ma_filter"
     position_sizing: str = "equal"  # equal | vol_target | fixed_ratio | risk_budget
     vol_window: int = 20
@@ -380,12 +419,14 @@ class TrendPortfolioInputs:
     atr_stop_atr_basis: str = "latest"
     atr_stop_reentry_mode: str = "reenter"
     atr_stop_execution_mode: str = "intraday"
+    atr_stop_execution_time: str | None = None  # open | close | full_day
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
     ma_trailing_stop_enabled: bool = False
     ma_trailing_stop_ma_type: str = "sma"  # sma | ema
     ma_trailing_stop_execution_mode: str = "intraday"  # intraday | next_day
+    ma_trailing_stop_execution_time: str | None = None  # open | close | full_day
     ma_trailing_stop_effective_delay_days: int = 3
     ma_trailing_stop_reduce_window: int = 10
     ma_trailing_stop_exit_window: int = 20
@@ -393,14 +434,17 @@ class TrendPortfolioInputs:
     r_take_profit_enabled: bool = False
     r_take_profit_reentry_mode: str = "reenter"
     r_take_profit_execution_mode: str = "intraday"
+    r_take_profit_execution_time: str | None = None  # open | close | full_day
     r_take_profit_tiers: list[dict[str, float]] | None = None
     r_profit_scaleout_enabled: bool = False
     r_profit_scaleout_execution_mode: str = "intraday"
+    r_profit_scaleout_execution_time: str | None = None  # open | close | full_day
     r_profit_scaleout_breakeven_stop_enabled: bool = True
     r_profit_scaleout_tiers: list[dict[str, float]] | None = None
     bias_v_take_profit_enabled: bool = False
     bias_v_take_profit_reentry_mode: str = "reenter"
     bias_v_take_profit_execution_mode: str = "intraday"
+    bias_v_take_profit_execution_time: str | None = None  # open | close | full_day
     bias_v_take_profit_breakeven_stop_enabled: bool = True
     bias_v_ma_window: int = 20
     bias_v_atr_window: int = 20
@@ -3103,6 +3147,7 @@ def _apply_atr_stop(
     atr_basis: str,
     reentry_mode: str,
     execution_mode: str = "intraday",
+    execution_time: str = "full_day",
     atr_window: int,
     n_mult: float,
     m_step: float,
@@ -3135,6 +3180,12 @@ def _apply_atr_stop(
     execution_v = str(execution_mode or "intraday").strip().lower()
     if execution_v not in STOP_EXECUTION_MODES:
         execution_v = "intraday"
+    execution_time_v = str(execution_time or "full_day").strip().lower()
+    if execution_v == "next_day":
+        if execution_time_v not in STOP_NEXT_DAY_EXECUTION_TIMES:
+            execution_time_v = "close"
+    elif execution_time_v not in STOP_EXECUTION_TIMES:
+        execution_time_v = "full_day"
 
     def _event_row(
         *,
@@ -3276,10 +3327,15 @@ def _apply_atr_stop(
             "trigger_rule": "long_low_le_stop_short_high_ge_stop",
             "fill_rule": (
                 "intraday: long_gap_down_open_or_low_touch_stop; short_gap_up_open_or_high_touch_stop"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday: open_trigger_then_execute_at_open"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday: close_trigger_then_execute_at_close"
                 if execution_v == "intraday"
-                else "next_day: close_trigger_then_execute_next_day_by_exec_price"
+                else f"next_day: close_trigger_then_execute_next_day_at_{execution_time_v}"
             ),
             "execution_mode": execution_v,
+            "execution_time": execution_time_v,
             "same_day_stop": bool(same_day_stop),
             "trace_last_rows": trace_rows[-80:],
             "trade_records": [],
@@ -3520,6 +3576,20 @@ def _apply_atr_stop(
                     and np.isfinite(stop_px)
                     and (c <= stop_px)
                 )
+            elif execution_time_v == "open":
+                stop_triggered = bool(
+                    stop_armed
+                    and np.isfinite(o)
+                    and np.isfinite(stop_px)
+                    and (o <= stop_px)
+                )
+            elif execution_time_v == "close":
+                stop_triggered = bool(
+                    stop_armed
+                    and np.isfinite(c)
+                    and np.isfinite(stop_px)
+                    and (c <= stop_px)
+                )
             else:
                 stop_triggered = bool(
                     stop_armed
@@ -3546,6 +3616,14 @@ def _apply_atr_stop(
                     gap_open_triggered = False
                     fill_price = float("nan")
                     trigger_source = "close_below_stop_next_day_exec"
+                elif execution_time_v == "open":
+                    gap_open_triggered = bool(np.isfinite(o) and (o <= stop_px))
+                    fill_price = float(o) if np.isfinite(o) else float("nan")
+                    trigger_source = "open_below_stop"
+                elif execution_time_v == "close":
+                    gap_open_triggered = False
+                    fill_price = float(c) if np.isfinite(c) else float("nan")
+                    trigger_source = "close_below_stop"
                 else:
                     gap_open_triggered = bool(np.isfinite(o) and (o <= stop_px))
                     fill_price = (
@@ -3565,6 +3643,7 @@ def _apply_atr_stop(
                             "trigger_date": ds,
                             "execution_date": exec_ds,
                             "execution_mode": execution_v,
+                            "execution_time": execution_time_v,
                             "position_side": "long",
                             "stop_price": (
                                 float(stop_px) if np.isfinite(stop_px) else None
@@ -3768,6 +3847,20 @@ def _apply_atr_stop(
                 and np.isfinite(stop_px)
                 and (c >= stop_px)
             )
+        elif execution_time_v == "open":
+            stop_triggered = bool(
+                stop_armed
+                and np.isfinite(o)
+                and np.isfinite(stop_px)
+                and (o >= stop_px)
+            )
+        elif execution_time_v == "close":
+            stop_triggered = bool(
+                stop_armed
+                and np.isfinite(c)
+                and np.isfinite(stop_px)
+                and (c >= stop_px)
+            )
         else:
             stop_triggered = bool(
                 stop_armed
@@ -3790,6 +3883,14 @@ def _apply_atr_stop(
                 gap_open_triggered = False
                 fill_price = float("nan")
                 trigger_source = "close_above_stop_next_day_exec"
+            elif execution_time_v == "open":
+                gap_open_triggered = bool(np.isfinite(o) and (o >= stop_px))
+                fill_price = float(o) if np.isfinite(o) else float("nan")
+                trigger_source = "open_above_stop"
+            elif execution_time_v == "close":
+                gap_open_triggered = False
+                fill_price = float(c) if np.isfinite(c) else float("nan")
+                trigger_source = "close_above_stop"
             else:
                 gap_open_triggered = bool(np.isfinite(o) and (o >= stop_px))
                 fill_price = (
@@ -3807,6 +3908,7 @@ def _apply_atr_stop(
                         "trigger_date": ds,
                         "execution_date": exec_ds,
                         "execution_mode": execution_v,
+                        "execution_time": execution_time_v,
                         "position_side": "short",
                         "stop_price": (
                             float(stop_px) if np.isfinite(stop_px) else None
@@ -3984,16 +4086,25 @@ def _apply_atr_stop(
         ),
         "wait_next_entry_lock_active": bool(wait_lock_long or wait_lock_short),
         "trigger_rule": (
-            "intraday: long_low_le_stop_short_high_ge_stop"
+            "intraday/full_day: long_low_le_stop_short_high_ge_stop"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: long_open_le_stop_short_open_ge_stop"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: long_close_le_stop_short_close_ge_stop"
             if execution_v == "intraday"
-            else "next_day: long_close_le_stop_short_close_ge_stop"
+            else "next_day/close-trigger: long_close_le_stop_short_close_ge_stop"
         ),
         "fill_rule": (
             "intraday: long_gap_down_open_or_low_touch_stop; short_gap_up_open_or_high_touch_stop"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: execute_at_open"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: execute_at_close"
             if execution_v == "intraday"
-            else "next_day: execute_on_next_trading_day_by_exec_price"
+            else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
         ),
         "execution_mode": execution_v,
+        "execution_time": execution_time_v,
         "same_day_stop": bool(same_day_stop),
         "trace_last_rows": trace_last_rows[-80:],
         "trade_records": trade_records,
@@ -4005,26 +4116,18 @@ def _stop_fill_return(
     *,
     exec_price: str,
     execution_mode: str,
+    execution_time: str | None,
     open_px: float,
     close_px: float,
     prev_close_px: float,
     fill_px: float,
 ) -> float:
     mode = str(execution_mode or "intraday").strip().lower()
-    ep = str(exec_price or "close").strip().lower()
     if mode == "next_day":
+        ep = str(execution_time or exec_price or "close").strip().lower()
         exec_fill = float("nan")
         if ep == "open":
             exec_fill = float(open_px)
-        elif ep == "close":
-            exec_fill = float(close_px) if np.isfinite(close_px) else float(open_px)
-        elif ep == "oc2":
-            if np.isfinite(open_px) and np.isfinite(close_px):
-                exec_fill = float(0.5 * (open_px + close_px))
-            elif np.isfinite(open_px):
-                exec_fill = float(open_px)
-            elif np.isfinite(close_px):
-                exec_fill = float(close_px)
         else:
             exec_fill = float(close_px) if np.isfinite(close_px) else float(open_px)
         if (not np.isfinite(exec_fill)) or exec_fill <= 0.0:
@@ -4120,6 +4223,7 @@ def _apply_intraday_stop_execution_single(
         day_ret = _stop_fill_return(
             exec_price=exec_price,
             execution_mode=ev_mode,
+            execution_time=str(e.get("execution_time") or "").strip().lower() or None,
             open_px=o,
             close_px=cl,
             prev_close_px=pc,
@@ -4227,6 +4331,8 @@ def _apply_intraday_stop_execution_portfolio(
             day_ret = _stop_fill_return(
                 exec_price=exec_price,
                 execution_mode=ev_mode,
+                execution_time=str(e.get("execution_time") or "").strip().lower()
+                or None,
                 open_px=o,
                 close_px=cl,
                 prev_close_px=pc,
@@ -4337,6 +4443,7 @@ def _apply_intraday_scaleout_execution_single(
         day_ret = _stop_fill_return(
             exec_price=exec_price,
             execution_mode=ev_mode,
+            execution_time=str(e.get("execution_time") or "").strip().lower() or None,
             open_px=o,
             close_px=cl,
             prev_close_px=pc,
@@ -4462,6 +4569,8 @@ def _apply_intraday_scaleout_execution_portfolio(
             day_ret = _stop_fill_return(
                 exec_price=exec_price,
                 execution_mode=ev_mode,
+                execution_time=str(e.get("execution_time") or "").strip().lower()
+                or None,
                 open_px=o,
                 close_px=cl,
                 prev_close_px=pc,
@@ -4667,6 +4776,9 @@ def _apply_intraday_or_arbitration_single(
         day_ret = _stop_fill_return(
             exec_price=exec_price,
             execution_mode=str(chosen.get("execution_mode") or "intraday"),
+            execution_time=(
+                str(e_chosen.get("execution_time") or "").strip().lower() or None
+            ),
             open_px=o,
             close_px=cl,
             prev_close_px=pc,
@@ -5084,6 +5196,7 @@ def _build_r_profit_scaleout_plan(
     low: pd.Series,
     enabled: bool,
     execution_mode: str = "intraday",
+    execution_time: str = "full_day",
     breakeven_stop_enabled: bool = True,
     atr_window: int,
     atr_n: float,
@@ -5094,6 +5207,12 @@ def _build_r_profit_scaleout_plan(
     execution_v = str(execution_mode or "intraday").strip().lower()
     if execution_v not in STOP_EXECUTION_MODES:
         execution_v = "intraday"
+    execution_time_v = str(execution_time or "full_day").strip().lower()
+    if execution_v == "next_day":
+        if execution_time_v not in STOP_NEXT_DAY_EXECUTION_TIMES:
+            execution_time_v = "close"
+    elif execution_time_v not in STOP_EXECUTION_TIMES:
+        execution_time_v = "full_day"
     bp = base_pos.fillna(0.0).astype(float).clip(lower=0.0)
     cl = close.astype(float).reindex(bp.index)
     op = (
@@ -5110,6 +5229,7 @@ def _build_r_profit_scaleout_plan(
         return mult, {
             "enabled": False,
             "execution_mode": execution_v,
+            "execution_time": execution_time_v,
             "atr_window": int(atr_window),
             "atr_n": float(atr_n),
             "reduce_fraction_basis": "initial_position",
@@ -5121,19 +5241,29 @@ def _build_r_profit_scaleout_plan(
             "trigger_events": [],
             "tier_trigger_counts": {},
             "trigger_rule": (
-                "intraday: high_ge_r_threshold"
+                "intraday/full_day: high_ge_r_threshold"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: open_ge_r_threshold"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: close_ge_r_threshold"
                 if execution_v == "intraday"
-                else "next_day: close_ge_r_threshold"
+                else "next_day/close-trigger: close_ge_r_threshold"
             ),
             "fill_rule": (
-                "intraday: fill=max(trigger_price,open_price)"
+                "intraday/full_day: fill=max(trigger_price,open_price)"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: execute_at_open"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: execute_at_close"
                 if execution_v == "intraday"
-                else "next_day: execute_on_next_trading_day_by_exec_price"
+                else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
             ),
             "trace_last_rows": [],
             "trade_records": [],
             "breakeven_stop": {
                 "enabled": bool(addon_enabled),
+                "execution_mode": execution_v,
+                "execution_time": execution_time_v,
                 "armed": False,
                 "arm_count": 0,
                 "arm_dates": [],
@@ -5141,14 +5271,22 @@ def _build_r_profit_scaleout_plan(
                 "trigger_dates": [],
                 "trigger_events": [],
                 "trigger_rule": (
-                    "intraday: low_le_entry_price"
+                    "intraday/full_day: low_le_entry_price"
+                    if execution_v == "intraday" and execution_time_v == "full_day"
+                    else "intraday/open: open_le_entry_price"
+                    if execution_v == "intraday" and execution_time_v == "open"
+                    else "intraday/close: close_le_entry_price"
                     if execution_v == "intraday"
-                    else "next_day: close_le_entry_price"
+                    else "next_day/close-trigger: close_le_entry_price"
                 ),
                 "fill_rule": (
-                    "intraday: fill=min(trigger_price,open_price)"
+                    "intraday/full_day: fill=min(trigger_price,open_price)"
+                    if execution_v == "intraday" and execution_time_v == "full_day"
+                    else "intraday/open: execute_at_open"
+                    if execution_v == "intraday" and execution_time_v == "open"
+                    else "intraday/close: execute_at_close"
                     if execution_v == "intraday"
-                    else "next_day: execute_on_next_trading_day_by_exec_price"
+                    else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
                 ),
                 "price_rule": "entry_price_after_first_executed_scaleout",
                 "target_protection_line_only": True,
@@ -5289,6 +5427,14 @@ def _build_r_profit_scaleout_plan(
                     triggered = bool(
                         np.isfinite(c) and np.isfinite(trigger_px) and c >= trigger_px
                     )
+                elif execution_time_v == "open":
+                    triggered = bool(
+                        np.isfinite(o) and np.isfinite(trigger_px) and o >= trigger_px
+                    )
+                elif execution_time_v == "close":
+                    triggered = bool(
+                        np.isfinite(c) and np.isfinite(trigger_px) and c >= trigger_px
+                    )
                 else:
                     triggered = bool(
                         np.isfinite(h) and np.isfinite(trigger_px) and h >= trigger_px
@@ -5318,6 +5464,16 @@ def _build_r_profit_scaleout_plan(
                     pending_reduce_by_idx[exec_idx] = float(
                         pending_reduce_by_idx.get(exec_idx, 0.0) + reduce_eff
                     )
+                elif execution_time_v == "open":
+                    gap_open = False
+                    fill_px = float(o) if np.isfinite(o) else float("nan")
+                    trigger_source = "open_above_r_scaleout"
+                    remaining_frac = float(max(0.0, remaining_for_tier))
+                elif execution_time_v == "close":
+                    gap_open = False
+                    fill_px = float(c) if np.isfinite(c) else float("nan")
+                    trigger_source = "close_above_r_scaleout"
+                    remaining_frac = float(max(0.0, remaining_for_tier))
                 else:
                     gap_open = bool(
                         np.isfinite(o) and np.isfinite(trigger_px) and o >= trigger_px
@@ -5351,6 +5507,7 @@ def _build_r_profit_scaleout_plan(
                             "trigger_date": ds,
                             "execution_date": exec_ds,
                             "execution_mode": execution_v,
+                            "execution_time": execution_time_v,
                             "trigger_price": float(trigger_px),
                             "open_price": (float(o) if np.isfinite(o) else None),
                             "close_price": (float(c) if np.isfinite(c) else None),
@@ -5398,6 +5555,10 @@ def _build_r_profit_scaleout_plan(
             stop_px = float(entry_px)
             if execution_v == "next_day":
                 triggered = bool(np.isfinite(c) and c <= stop_px)
+            elif execution_time_v == "open":
+                triggered = bool(np.isfinite(o) and o <= stop_px)
+            elif execution_time_v == "close":
+                triggered = bool(np.isfinite(c) and c <= stop_px)
             else:
                 triggered = bool(
                     np.isfinite(lo.iloc[i]) and float(lo.iloc[i]) <= stop_px
@@ -5421,6 +5582,18 @@ def _build_r_profit_scaleout_plan(
                             "close_below_r_scaleout_breakeven_next_day_exec"
                         )
                         breakeven_exit_pending = True
+                    elif execution_time_v == "open":
+                        gap_open = False
+                        fill_px = float(o) if np.isfinite(o) else float("nan")
+                        trigger_source = "open_below_r_scaleout_breakeven"
+                        remaining_frac = 0.0
+                        breakeven_exit_pending = False
+                    elif execution_time_v == "close":
+                        gap_open = False
+                        fill_px = float(c) if np.isfinite(c) else float("nan")
+                        trigger_source = "close_below_r_scaleout_breakeven"
+                        remaining_frac = 0.0
+                        breakeven_exit_pending = False
                     else:
                         gap_open = bool(np.isfinite(o) and o <= stop_px)
                         fill_px = (
@@ -5442,6 +5615,7 @@ def _build_r_profit_scaleout_plan(
                             "trigger_date": ds,
                             "execution_date": exec_ds,
                             "execution_mode": execution_v,
+                            "execution_time": execution_time_v,
                             "trigger_kind": "exit",
                             "trigger_price": float(stop_px),
                             "open_price": (float(o) if np.isfinite(o) else None),
@@ -5539,6 +5713,7 @@ def _build_r_profit_scaleout_plan(
     stats = {
         "enabled": True,
         "execution_mode": execution_v,
+        "execution_time": execution_time_v,
         "atr_window": int(atr_window),
         "atr_n": float(atr_n),
         "reduce_fraction_basis": "initial_position",
@@ -5554,19 +5729,29 @@ def _build_r_profit_scaleout_plan(
         "trigger_reduce_fraction_sum": float(trigger_reduce_fraction_sum),
         "invalid_initial_r_entries": int(invalid_r_entries),
         "trigger_rule": (
-            "intraday: high_ge_r_threshold"
+            "intraday/full_day: high_ge_r_threshold"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: open_ge_r_threshold"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: close_ge_r_threshold"
             if execution_v == "intraday"
-            else "next_day: close_ge_r_threshold"
+            else "next_day/close-trigger: close_ge_r_threshold"
         ),
         "fill_rule": (
-            "intraday: fill=max(trigger_price,open_price)"
+            "intraday/full_day: fill=max(trigger_price,open_price)"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: execute_at_open"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: execute_at_close"
             if execution_v == "intraday"
-            else "next_day: execute_on_next_trading_day_by_exec_price"
+            else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
         ),
         "trace_last_rows": trace_last_rows[-80:],
         "trade_records": trade_records[:300],
         "breakeven_stop": {
             "enabled": bool(addon_enabled),
+            "execution_mode": execution_v,
+            "execution_time": execution_time_v,
             "armed": bool(breakeven_armed),
             "arm_count": int(len(breakeven_arm_dates)),
             "arm_dates": breakeven_arm_dates[:200],
@@ -5574,14 +5759,22 @@ def _build_r_profit_scaleout_plan(
             "trigger_dates": breakeven_trigger_dates[:200],
             "trigger_events": breakeven_trigger_events[:200],
             "trigger_rule": (
-                "intraday: low_le_entry_price"
+                "intraday/full_day: low_le_entry_price"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: open_le_entry_price"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: close_le_entry_price"
                 if execution_v == "intraday"
-                else "next_day: close_le_entry_price"
+                else "next_day/close-trigger: close_le_entry_price"
             ),
             "fill_rule": (
-                "intraday: fill=min(trigger_price,open_price)"
+                "intraday/full_day: fill=min(trigger_price,open_price)"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: execute_at_open"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: execute_at_close"
                 if execution_v == "intraday"
-                else "next_day: execute_on_next_trading_day_by_exec_price"
+                else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
             ),
             "price_rule": "entry_price_after_first_executed_scaleout",
             "target_protection_line_only": True,
@@ -5601,6 +5794,7 @@ def _build_ma_trailing_stop_plan(
     enabled: bool,
     ma_type: str = "sma",
     execution_mode: str = "intraday",
+    execution_time: str = "full_day",
     effective_delay_days: int = 3,
     reduce_window: int = 10,
     exit_window: int = 20,
@@ -5609,6 +5803,12 @@ def _build_ma_trailing_stop_plan(
     execution_v = str(execution_mode or "intraday").strip().lower()
     if execution_v not in STOP_EXECUTION_MODES:
         execution_v = "intraday"
+    execution_time_v = str(execution_time or "full_day").strip().lower()
+    if execution_v == "next_day":
+        if execution_time_v not in STOP_NEXT_DAY_EXECUTION_TIMES:
+            execution_time_v = "close"
+    elif execution_time_v not in STOP_EXECUTION_TIMES:
+        execution_time_v = "full_day"
     ma_type_v = str(ma_type or "sma").strip().lower()
     if ma_type_v not in {"sma", "ema"}:
         ma_type_v = "sma"
@@ -5634,6 +5834,7 @@ def _build_ma_trailing_stop_plan(
             "enabled": False,
             "ma_type": ma_type_v,
             "execution_mode": execution_v,
+            "execution_time": execution_time_v,
             "reduce_window": int(reduce_w),
             "exit_window": int(exit_w),
             "effective_delay_days": int(delay_days),
@@ -5721,11 +5922,19 @@ def _build_ma_trailing_stop_plan(
             if np.isfinite(exit_line):
                 if execution_v == "next_day":
                     exit_hit = bool(np.isfinite(c) and c <= exit_line)
+                elif execution_time_v == "open":
+                    exit_hit = bool(np.isfinite(o) and o <= exit_line)
+                elif execution_time_v == "close":
+                    exit_hit = bool(np.isfinite(c) and c <= exit_line)
                 else:
                     exit_hit = bool(np.isfinite(low_px) and low_px <= exit_line)
             reduce_hit = False
             if (not reduce_triggered) and np.isfinite(reduce_line):
                 if execution_v == "next_day":
+                    reduce_hit = bool(np.isfinite(c) and c <= reduce_line)
+                elif execution_time_v == "open":
+                    reduce_hit = bool(np.isfinite(o) and o <= reduce_line)
+                elif execution_time_v == "close":
                     reduce_hit = bool(np.isfinite(c) and c <= reduce_line)
                 else:
                     reduce_hit = bool(np.isfinite(low_px) and low_px <= reduce_line)
@@ -5761,26 +5970,43 @@ def _build_ma_trailing_stop_plan(
                             else "close_below_ma_trailing_reduce_line_next_day_exec"
                         )
                     else:
-                        gap_open_triggered = bool(
-                            np.isfinite(o)
-                            and np.isfinite(trigger_line)
-                            and o <= trigger_line
-                        )
-                        fill_price = (
-                            float(o)
-                            if gap_open_triggered and np.isfinite(o)
-                            else float(trigger_line)
-                        )
+                        if execution_time_v == "open":
+                            gap_open_triggered = False
+                            fill_price = float(o) if np.isfinite(o) else float("nan")
+                            trigger_source = (
+                                "open_below_ma_trailing_exit_line"
+                                if trigger_kind == "exit"
+                                else "open_below_ma_trailing_reduce_line"
+                            )
+                        elif execution_time_v == "close":
+                            gap_open_triggered = False
+                            fill_price = float(c) if np.isfinite(c) else float("nan")
+                            trigger_source = (
+                                "close_below_ma_trailing_exit_line"
+                                if trigger_kind == "exit"
+                                else "close_below_ma_trailing_reduce_line"
+                            )
+                        else:
+                            gap_open_triggered = bool(
+                                np.isfinite(o)
+                                and np.isfinite(trigger_line)
+                                and o <= trigger_line
+                            )
+                            fill_price = (
+                                float(o)
+                                if gap_open_triggered and np.isfinite(o)
+                                else float(trigger_line)
+                            )
+                            trigger_source = (
+                                "gap_open_below_ma_trailing_exit_line"
+                                if trigger_kind == "exit" and gap_open_triggered
+                                else "low_touch_ma_trailing_exit_line"
+                                if trigger_kind == "exit"
+                                else "gap_open_below_ma_trailing_reduce_line"
+                                if gap_open_triggered
+                                else "low_touch_ma_trailing_reduce_line"
+                            )
                         remaining_frac = float(max(0.0, remaining_frac - reduce_eff))
-                        trigger_source = (
-                            "gap_open_below_ma_trailing_exit_line"
-                            if trigger_kind == "exit" and gap_open_triggered
-                            else "low_touch_ma_trailing_exit_line"
-                            if trigger_kind == "exit"
-                            else "gap_open_below_ma_trailing_reduce_line"
-                            if gap_open_triggered
-                            else "low_touch_ma_trailing_reduce_line"
-                        )
                     trigger_reduce_fraction_sum += float(reduce_eff)
                     trigger_dates.append(ds)
                     if trigger_kind == "reduce":
@@ -5791,6 +6017,7 @@ def _build_ma_trailing_stop_plan(
                             "trigger_date": ds,
                             "execution_date": exec_ds,
                             "execution_mode": execution_v,
+                            "execution_time": execution_time_v,
                             "trigger_kind": str(trigger_kind),
                             "trigger_price": (
                                 float(trigger_line)
@@ -5823,6 +6050,7 @@ def _build_ma_trailing_stop_plan(
                             "trigger_date": ds,
                             "scheduled_execution_date": exec_ds,
                             "execution_mode": execution_v,
+                            "execution_time": execution_time_v,
                             "trigger_kind": str(trigger_kind),
                             "trigger_price": (
                                 float(trigger_line)
@@ -5867,6 +6095,25 @@ def _build_ma_trailing_stop_plan(
         "enabled": True,
         "ma_type": str(ma_type_v),
         "execution_mode": execution_v,
+        "execution_time": execution_time_v,
+        "trigger_rule": (
+            "intraday/full_day: low_le_ma_trailing_line"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: open_le_ma_trailing_line"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: close_le_ma_trailing_line"
+            if execution_v == "intraday"
+            else "next_day/close-trigger: close_le_ma_trailing_line"
+        ),
+        "fill_rule": (
+            "intraday/full_day: gap_open_below_line_or_low_touch_line"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: execute_at_open"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: execute_at_close"
+            if execution_v == "intraday"
+            else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
+        ),
         "reduce_window": int(reduce_w),
         "exit_window": int(exit_w),
         "effective_delay_days": int(delay_days),
@@ -5892,6 +6139,7 @@ def _apply_r_multiple_take_profit(
     enabled: bool,
     reentry_mode: str,
     execution_mode: str = "intraday",
+    execution_time: str = "full_day",
     atr_window: int,
     atr_n: float,
     tiers: list[dict[str, float]] | None,
@@ -5904,12 +6152,19 @@ def _apply_r_multiple_take_profit(
     execution_v = str(execution_mode or "intraday").strip().lower()
     if execution_v not in STOP_EXECUTION_MODES:
         execution_v = "intraday"
+    execution_time_v = str(execution_time or "full_day").strip().lower()
+    if execution_v == "next_day":
+        if execution_time_v not in STOP_NEXT_DAY_EXECUTION_TIMES:
+            execution_time_v = "close"
+    elif execution_time_v not in STOP_EXECUTION_TIMES:
+        execution_time_v = "full_day"
     if not bool(enabled):
         out_none = base_pos.fillna(0.0).astype(float)
         return out_none, {
             "enabled": False,
             "reentry_mode": reentry_v,
             "execution_mode": execution_v,
+            "execution_time": execution_time_v,
             "atr_window": int(atr_window),
             "atr_n": float(atr_n),
             "fallback_mode_used": False,
@@ -5930,14 +6185,22 @@ def _apply_r_multiple_take_profit(
             "tiers": tiers_v,
             "tier_trigger_counts": {},
             "trigger_rule": (
-                "intraday: low_vs_peak_retrace"
+                "intraday/full_day: low_vs_peak_retrace"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: open_vs_peak_retrace"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: close_vs_peak_retrace"
                 if execution_v == "intraday"
-                else "next_day: close_vs_peak_retrace"
+                else "next_day/close-trigger: close_vs_peak_retrace"
             ),
             "fill_rule": (
-                "intraday: fill=min(trigger_price,open_price)"
+                "intraday/full_day: fill=min(trigger_price,open_price)"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: execute_at_open"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: execute_at_close"
                 if execution_v == "intraday"
-                else "next_day: execute_on_next_trading_day_by_exec_price"
+                else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
             ),
             "trace_last_rows": [],
         }
@@ -6089,6 +6352,11 @@ def _apply_r_multiple_take_profit(
             if (np.isfinite(l) and np.isfinite(entry_px) and entry_px > eps)
             else float("nan")
         )
+        cur_open_profit_pct = (
+            (o / entry_px - 1.0)
+            if (np.isfinite(o) and np.isfinite(entry_px) and entry_px > eps)
+            else float("nan")
+        )
         cur_close_profit_pct = (
             (c / entry_px - 1.0)
             if (np.isfinite(c) and np.isfinite(entry_px) and entry_px > eps)
@@ -6130,21 +6398,31 @@ def _apply_r_multiple_take_profit(
             )
             else float("nan")
         )
+        dd_from_peak_open = (
+            (float(peak_profit_pct) - float(cur_open_profit_pct))
+            / float(peak_profit_pct)
+            if (
+                np.isfinite(peak_profit_pct)
+                and peak_profit_pct > eps
+                and np.isfinite(cur_open_profit_pct)
+            )
+            else float("nan")
+        )
         tp_armed = bool(entry_i >= 0 and (i - int(entry_i)) >= 2)
         if execution_v == "next_day":
-            tp_triggered = bool(
-                tp_armed
-                and active_tier is not None
-                and np.isfinite(dd_from_peak_close)
-                and dd_from_peak_close >= float(active_tier["retrace_ratio"])
-            )
+            dd_eval = dd_from_peak_close
+        elif execution_time_v == "open":
+            dd_eval = dd_from_peak_open
+        elif execution_time_v == "close":
+            dd_eval = dd_from_peak_close
         else:
-            tp_triggered = bool(
-                tp_armed
-                and active_tier is not None
-                and np.isfinite(dd_from_peak)
-                and dd_from_peak >= float(active_tier["retrace_ratio"])
-            )
+            dd_eval = dd_from_peak
+        tp_triggered = bool(
+            tp_armed
+            and active_tier is not None
+            and np.isfinite(dd_eval)
+            and dd_eval >= float(active_tier["retrace_ratio"])
+        )
         if tp_triggered:
             in_pos = False
             trigger_profit_pct = float(peak_profit_pct) * (
@@ -6166,19 +6444,28 @@ def _apply_r_multiple_take_profit(
                 fill_price = float("nan")
                 trigger_source = "close_retrace_next_day_exec"
             else:
-                gap_open_triggered = bool(
-                    np.isfinite(o) and np.isfinite(trigger_px) and (o <= trigger_px)
-                )
-                fill_price = (
-                    float(o)
-                    if gap_open_triggered and np.isfinite(o)
-                    else float(trigger_px)
-                )
-                trigger_source = (
-                    "gap_open_below_tp"
-                    if gap_open_triggered
-                    else "low_touch_tp_retrace"
-                )
+                if execution_time_v == "open":
+                    gap_open_triggered = False
+                    fill_price = float(o) if np.isfinite(o) else float("nan")
+                    trigger_source = "open_retrace_trigger"
+                elif execution_time_v == "close":
+                    gap_open_triggered = False
+                    fill_price = float(c) if np.isfinite(c) else float("nan")
+                    trigger_source = "close_retrace_trigger"
+                else:
+                    gap_open_triggered = bool(
+                        np.isfinite(o) and np.isfinite(trigger_px) and (o <= trigger_px)
+                    )
+                    fill_price = (
+                        float(o)
+                        if gap_open_triggered and np.isfinite(o)
+                        else float(trigger_px)
+                    )
+                    trigger_source = (
+                        "gap_open_below_tp"
+                        if gap_open_triggered
+                        else "low_touch_tp_retrace"
+                    )
             if reentry_v == "wait_next_entry":
                 wait_next_entry_lock = True
             trigger_dates.append(ds)
@@ -6189,6 +6476,7 @@ def _apply_r_multiple_take_profit(
                         "trigger_date": ds,
                         "execution_date": exec_ds,
                         "execution_mode": execution_v,
+                        "execution_time": execution_time_v,
                         "trigger_price": (
                             float(trigger_px) if np.isfinite(trigger_px) else None
                         ),
@@ -6241,17 +6529,7 @@ def _apply_r_multiple_take_profit(
                     if active_tier
                     else None,
                     "drawdown_from_peak": (
-                        float(
-                            dd_from_peak_close
-                            if execution_v == "next_day"
-                            else dd_from_peak
-                        )
-                        if np.isfinite(
-                            dd_from_peak_close
-                            if execution_v == "next_day"
-                            else dd_from_peak
-                        )
-                        else None
+                        float(dd_eval) if np.isfinite(dd_eval) else None
                     ),
                     "tp_triggered": True,
                     "open": (float(o) if np.isfinite(o) else None),
@@ -6305,17 +6583,7 @@ def _apply_r_multiple_take_profit(
                 if active_tier
                 else None,
                 "drawdown_from_peak": (
-                    float(
-                        dd_from_peak_close
-                        if execution_v == "next_day"
-                        else dd_from_peak
-                    )
-                    if np.isfinite(
-                        dd_from_peak_close
-                        if execution_v == "next_day"
-                        else dd_from_peak
-                    )
-                    else None
+                    float(dd_eval) if np.isfinite(dd_eval) else None
                 ),
                 "tp_triggered": False,
                 "open": (float(o) if np.isfinite(o) else None),
@@ -6357,18 +6625,27 @@ def _apply_r_multiple_take_profit(
         ),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
         "execution_mode": execution_v,
+        "execution_time": execution_time_v,
         "tiers": tiers_v,
         "tier_trigger_counts": dict(tier_trigger_counts),
         "invalid_initial_r_entries": int(invalid_r_entries),
         "trigger_rule": (
-            "intraday: low_vs_peak_retrace"
+            "intraday/full_day: low_vs_peak_retrace"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: open_vs_peak_retrace"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: close_vs_peak_retrace"
             if execution_v == "intraday"
-            else "next_day: close_vs_peak_retrace"
+            else "next_day/close-trigger: close_vs_peak_retrace"
         ),
         "fill_rule": (
-            "intraday: fill=min(trigger_price,open_price)"
+            "intraday/full_day: fill=min(trigger_price,open_price)"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: execute_at_open"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: execute_at_close"
             if execution_v == "intraday"
-            else "next_day: execute_on_next_trading_day_by_exec_price"
+            else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
         ),
         "trace_last_rows": trace_last_rows[-80:],
     }
@@ -6385,6 +6662,7 @@ def _apply_bias_v_take_profit(
     enabled: bool,
     reentry_mode: str,
     execution_mode: str = "intraday",
+    execution_time: str = "full_day",
     breakeven_stop_enabled: bool = True,
     ma_window: int,
     atr_window: int,
@@ -6397,6 +6675,12 @@ def _apply_bias_v_take_profit(
     execution_v = str(execution_mode or "intraday").strip().lower()
     if execution_v not in STOP_EXECUTION_MODES:
         execution_v = "intraday"
+    execution_time_v = str(execution_time or "full_day").strip().lower()
+    if execution_v == "next_day":
+        if execution_time_v not in STOP_NEXT_DAY_EXECUTION_TIMES:
+            execution_time_v = "close"
+    elif execution_time_v not in STOP_EXECUTION_TIMES:
+        execution_time_v = "full_day"
     if not bool(enabled):
         addon_enabled = bool(breakeven_stop_enabled)
         out_none = base_pos.fillna(0.0).astype(float)
@@ -6404,6 +6688,7 @@ def _apply_bias_v_take_profit(
             "enabled": False,
             "reentry_mode": reentry_v,
             "execution_mode": execution_v,
+            "execution_time": execution_time_v,
             "ma_window": int(ma_window),
             "atr_window": int(atr_window),
             "reduce_fraction_basis": "initial_position",
@@ -6424,14 +6709,22 @@ def _apply_bias_v_take_profit(
             "trigger_exit_share": 0.0,
             "wait_next_entry_lock_active": False,
             "trigger_rule": (
-                "intraday: high_ge_threshold"
+                "intraday/full_day: high_ge_threshold"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: open_ge_threshold"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: close_ge_threshold"
                 if execution_v == "intraday"
-                else "next_day: close_ge_threshold"
+                else "next_day/close-trigger: close_ge_threshold"
             ),
             "fill_rule": (
-                "intraday: fill=max(trigger_price,open_price)"
+                "intraday/full_day: fill=max(trigger_price,open_price)"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: execute_at_open"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: execute_at_close"
                 if execution_v == "intraday"
-                else "next_day: execute_on_next_trading_day_by_exec_price"
+                else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
             ),
             "trace_last_rows": [],
             "trade_records": [],
@@ -6444,14 +6737,22 @@ def _apply_bias_v_take_profit(
                 "trigger_dates": [],
                 "trigger_events": [],
                 "trigger_rule": (
-                    "intraday: low_le_entry_price"
+                    "intraday/full_day: low_le_entry_price"
+                    if execution_v == "intraday" and execution_time_v == "full_day"
+                    else "intraday/open: open_le_entry_price"
+                    if execution_v == "intraday" and execution_time_v == "open"
+                    else "intraday/close: close_le_entry_price"
                     if execution_v == "intraday"
-                    else "next_day: close_le_entry_price"
+                    else "next_day/close-trigger: close_le_entry_price"
                 ),
                 "fill_rule": (
-                    "intraday: fill=min(trigger_price,open_price)"
+                    "intraday/full_day: fill=min(trigger_price,open_price)"
+                    if execution_v == "intraday" and execution_time_v == "full_day"
+                    else "intraday/open: execute_at_open"
+                    if execution_v == "intraday" and execution_time_v == "open"
+                    else "intraday/close: execute_at_close"
                     if execution_v == "intraday"
-                    else "next_day: execute_on_next_trading_day_by_exec_price"
+                    else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
                 ),
                 "price_rule": "entry_price_after_first_executed_bias_v_tier",
                 "target_protection_line_only": True,
@@ -6666,6 +6967,18 @@ def _apply_bias_v_take_profit(
                     and np.isfinite(line_eff)
                     and (float(c) >= float(line_eff))
                 )
+            elif execution_time_v == "open":
+                triggered = bool(
+                    np.isfinite(o)
+                    and np.isfinite(line_eff)
+                    and (float(o) >= float(line_eff))
+                )
+            elif execution_time_v == "close":
+                triggered = bool(
+                    np.isfinite(c)
+                    and np.isfinite(line_eff)
+                    and (float(c) >= float(line_eff))
+                )
             else:
                 triggered = bool(
                     np.isfinite(h)
@@ -6696,22 +7009,31 @@ def _apply_bias_v_take_profit(
                 fill_price = float("nan")
                 trigger_source = "close_above_bias_v_tp_tier_next_day_exec"
             else:
-                gap_open_triggered = bool(
-                    np.isfinite(o)
-                    and np.isfinite(line_eff)
-                    and (float(o) >= float(line_eff))
-                )
-                fill_price = (
-                    float(o)
-                    if gap_open_triggered and np.isfinite(o)
-                    else float(line_eff)
-                )
+                if execution_time_v == "open":
+                    gap_open_triggered = False
+                    fill_price = float(o) if np.isfinite(o) else float("nan")
+                    trigger_source = "open_above_bias_v_tp_tier"
+                elif execution_time_v == "close":
+                    gap_open_triggered = False
+                    fill_price = float(c) if np.isfinite(c) else float("nan")
+                    trigger_source = "close_above_bias_v_tp_tier"
+                else:
+                    gap_open_triggered = bool(
+                        np.isfinite(o)
+                        and np.isfinite(line_eff)
+                        and (float(o) >= float(line_eff))
+                    )
+                    fill_price = (
+                        float(o)
+                        if gap_open_triggered and np.isfinite(o)
+                        else float(line_eff)
+                    )
+                    trigger_source = (
+                        "gap_open_above_bias_v_tp_tier"
+                        if gap_open_triggered
+                        else "high_touch_bias_v_tp_tier"
+                    )
                 remaining_frac = float(max(0.0, remaining_for_tier))
-                trigger_source = (
-                    "gap_open_above_bias_v_tp_tier"
-                    if gap_open_triggered
-                    else "high_touch_bias_v_tp_tier"
-                )
             if addon_enabled and (not breakeven_armed):
                 if execution_v == "next_day":
                     pending_arm_by_idx.add(exec_idx)
@@ -6732,6 +7054,7 @@ def _apply_bias_v_take_profit(
                     "trigger_date": ds,
                     "execution_date": exec_ds,
                     "execution_mode": execution_v,
+                    "execution_time": execution_time_v,
                     "trigger_price": (
                         float(line_eff) if np.isfinite(line_eff) else None
                     ),
@@ -6774,6 +7097,7 @@ def _apply_bias_v_take_profit(
                     ),
                     "trigger_date": ds,
                     "execution_mode": execution_v,
+                    "execution_time": execution_time_v,
                     "scheduled_execution_date": exec_ds,
                     "tier_label": str(tier_label),
                     "threshold": float(th),
@@ -6796,6 +7120,10 @@ def _apply_bias_v_take_profit(
             stop_px = float(breakeven_entry_price)
             if execution_v == "next_day":
                 be_triggered = bool(np.isfinite(c) and c <= stop_px)
+            elif execution_time_v == "open":
+                be_triggered = bool(np.isfinite(o) and o <= stop_px)
+            elif execution_time_v == "close":
+                be_triggered = bool(np.isfinite(c) and c <= stop_px)
             else:
                 be_triggered = bool(np.isfinite(l) and l <= stop_px)
             if be_triggered:
@@ -6816,17 +7144,26 @@ def _apply_bias_v_take_profit(
                         trigger_source = "close_below_bias_v_breakeven_next_day_exec"
                         breakeven_exit_pending = True
                     else:
-                        gap_open_triggered = bool(np.isfinite(o) and o <= stop_px)
-                        fill_price = (
-                            float(o)
-                            if gap_open_triggered and np.isfinite(o)
-                            else float(stop_px)
-                        )
-                        trigger_source = (
-                            "gap_open_below_bias_v_breakeven"
-                            if gap_open_triggered
-                            else "low_touch_bias_v_breakeven"
-                        )
+                        if execution_time_v == "open":
+                            gap_open_triggered = False
+                            fill_price = float(o) if np.isfinite(o) else float("nan")
+                            trigger_source = "open_below_bias_v_breakeven"
+                        elif execution_time_v == "close":
+                            gap_open_triggered = False
+                            fill_price = float(c) if np.isfinite(c) else float("nan")
+                            trigger_source = "close_below_bias_v_breakeven"
+                        else:
+                            gap_open_triggered = bool(np.isfinite(o) and o <= stop_px)
+                            fill_price = (
+                                float(o)
+                                if gap_open_triggered and np.isfinite(o)
+                                else float(stop_px)
+                            )
+                            trigger_source = (
+                                "gap_open_below_bias_v_breakeven"
+                                if gap_open_triggered
+                                else "low_touch_bias_v_breakeven"
+                            )
                         remaining_frac = 0.0
                         breakeven_exit_pending = False
                     breakeven_armed = False
@@ -6838,6 +7175,7 @@ def _apply_bias_v_take_profit(
                             "trigger_date": ds,
                             "execution_date": exec_ds,
                             "execution_mode": execution_v,
+                            "execution_time": execution_time_v,
                             "trigger_kind": "exit",
                             "trigger_price": float(stop_px),
                             "open_price": (float(o) if np.isfinite(o) else None),
@@ -6868,6 +7206,7 @@ def _apply_bias_v_take_profit(
                             ),
                             "trigger_date": ds,
                             "execution_mode": execution_v,
+                            "execution_time": execution_time_v,
                             "scheduled_execution_date": exec_ds,
                             "tier_label": "breakeven_stop",
                             "threshold": None,
@@ -6989,15 +7328,24 @@ def _apply_bias_v_take_profit(
         ),
         "wait_next_entry_lock_active": bool(wait_next_entry_lock),
         "execution_mode": execution_v,
+        "execution_time": execution_time_v,
         "trigger_rule": (
-            "intraday: high_ge_tier_threshold"
+            "intraday/full_day: high_ge_tier_threshold"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: open_ge_tier_threshold"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: close_ge_tier_threshold"
             if execution_v == "intraday"
-            else "next_day: close_ge_tier_threshold"
+            else "next_day/close-trigger: close_ge_tier_threshold"
         ),
         "fill_rule": (
-            "intraday: fill=max(trigger_price,open_price)"
+            "intraday/full_day: fill=max(trigger_price,open_price)"
+            if execution_v == "intraday" and execution_time_v == "full_day"
+            else "intraday/open: execute_at_open"
+            if execution_v == "intraday" and execution_time_v == "open"
+            else "intraday/close: execute_at_close"
             if execution_v == "intraday"
-            else "next_day: execute_on_next_trading_day_by_exec_price"
+            else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
         ),
         "trace_last_rows": trace_last_rows[-80:],
         "trade_records": trade_records,
@@ -7010,14 +7358,22 @@ def _apply_bias_v_take_profit(
             "trigger_dates": breakeven_trigger_dates[:200],
             "trigger_events": breakeven_trigger_events[:200],
             "trigger_rule": (
-                "intraday: low_le_entry_price"
+                "intraday/full_day: low_le_entry_price"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: open_le_entry_price"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: close_le_entry_price"
                 if execution_v == "intraday"
-                else "next_day: close_le_entry_price"
+                else "next_day/close-trigger: close_le_entry_price"
             ),
             "fill_rule": (
-                "intraday: fill=min(trigger_price,open_price)"
+                "intraday/full_day: fill=min(trigger_price,open_price)"
+                if execution_v == "intraday" and execution_time_v == "full_day"
+                else "intraday/open: execute_at_open"
+                if execution_v == "intraday" and execution_time_v == "open"
+                else "intraday/close: execute_at_close"
                 if execution_v == "intraday"
-                else "next_day: execute_on_next_trading_day_by_exec_price"
+                else f"next_day: execute_on_next_trading_day_at_{execution_time_v}"
             ),
             "price_rule": "entry_price_after_first_executed_bias_v_tier",
             "target_protection_line_only": True,
@@ -7036,8 +7392,8 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     if (not np.isfinite(float(inp.slippage_rate))) or float(inp.slippage_rate) < 0:
         raise ValueError("slippage_rate must be finite and >= 0")
     ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
-    if ep not in {"open", "close", "oc2"}:
-        raise ValueError("exec_price must be one of: open|close|oc2")
+    if ep not in {"open", "close"}:
+        raise ValueError("exec_price must be one of: open|close")
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
     quick_mode = bool(getattr(inp, "quick_mode", False))
@@ -7135,6 +7491,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
     if atr_execution_mode not in STOP_EXECUTION_MODES:
         raise ValueError("atr_stop_execution_mode must be one of: intraday|next_day")
+    atr_execution_time = _resolve_stop_execution_time(
+        execution_mode=atr_execution_mode,
+        execution_time=getattr(inp, "atr_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="atr_stop_execution_mode",
+        time_field="atr_stop_execution_time",
+    )
     if int(inp.atr_stop_window) < 2:
         raise ValueError("atr_stop_window must be >= 2")
     if (not np.isfinite(float(inp.atr_stop_n))) or float(inp.atr_stop_n) <= 0:
@@ -7160,6 +7523,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError(
             "ma_trailing_stop_execution_mode must be one of: intraday|next_day"
         )
+    ma_trailing_stop_execution_time = _resolve_stop_execution_time(
+        execution_mode=ma_trailing_stop_execution_mode,
+        execution_time=getattr(inp, "ma_trailing_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="ma_trailing_stop_execution_mode",
+        time_field="ma_trailing_stop_execution_time",
+    )
     ma_trailing_stop_reduce_window = int(
         getattr(inp, "ma_trailing_stop_reduce_window", 10) or 10
     )
@@ -7203,6 +7573,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError(
             "r_take_profit_execution_mode must be one of: intraday|next_day"
         )
+    rtp_execution_time = _resolve_stop_execution_time(
+        execution_mode=rtp_execution_mode,
+        execution_time=getattr(inp, "r_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="r_take_profit_execution_mode",
+        time_field="r_take_profit_execution_time",
+    )
     rtp_tiers = _normalize_r_take_profit_tiers(
         getattr(inp, "r_take_profit_tiers", None)
     )
@@ -7216,6 +7593,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError(
             "r_profit_scaleout_execution_mode must be one of: intraday|next_day"
         )
+    rps_execution_time = _resolve_stop_execution_time(
+        execution_mode=rps_execution_mode,
+        execution_time=getattr(inp, "r_profit_scaleout_execution_time", None),
+        exec_price=ep,
+        mode_field="r_profit_scaleout_execution_mode",
+        time_field="r_profit_scaleout_execution_time",
+    )
     rps_tiers = _normalize_r_profit_scaleout_tiers(
         getattr(inp, "r_profit_scaleout_tiers", None)
     )
@@ -7241,6 +7625,13 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         raise ValueError(
             "bias_v_take_profit_execution_mode must be one of: intraday|next_day"
         )
+    bias_v_tp_execution_time = _resolve_stop_execution_time(
+        execution_mode=bias_v_tp_execution_mode,
+        execution_time=getattr(inp, "bias_v_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="bias_v_take_profit_execution_mode",
+        time_field="bias_v_take_profit_execution_time",
+    )
     bias_v_tp_ma_window = int(getattr(inp, "bias_v_ma_window", 20) or 20)
     if bias_v_tp_ma_window < 2:
         raise ValueError("bias_v_ma_window must be >= 2")
@@ -7554,7 +7945,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
     )
 
     # Returns:
-    # - strategy execution: choose open/close/oc2 by exec_price, then apply none->hfq fallback on CA days
+    # - strategy execution: choose open/close by exec_price, then apply none->hfq fallback on CA days
     # - benchmark: hfq close
     ohlc_none = load_ohlc_prices(
         db, codes=[code], start=inp.start, end=inp.end, adjust="none"
@@ -7895,6 +8286,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         atr_basis=atr_basis,
         reentry_mode=atr_reentry_mode,
         execution_mode=atr_execution_mode,
+        execution_time=atr_execution_time,
         atr_window=int(inp.atr_stop_window),
         n_mult=float(inp.atr_stop_n),
         m_step=float(inp.atr_stop_m),
@@ -7912,6 +8304,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         enabled=bias_v_tp_enabled,
         reentry_mode=bias_v_tp_reentry_mode,
         execution_mode=bias_v_tp_execution_mode,
+        execution_time=bias_v_tp_execution_time,
         breakeven_stop_enabled=bias_v_tp_breakeven_stop_enabled,
         ma_window=int(bias_v_tp_ma_window),
         atr_window=int(bias_v_tp_atr_window),
@@ -7926,6 +8319,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         enabled=rtp_enabled,
         reentry_mode=rtp_reentry_mode,
         execution_mode=rtp_execution_mode,
+        execution_time=rtp_execution_time,
         atr_window=int(inp.atr_stop_window),
         atr_n=float(inp.atr_stop_n),
         tiers=rtp_tiers,
@@ -7939,6 +8333,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         low=low_qfq.astype(float).fillna(px_sig),
         enabled=bool(rps_enabled),
         execution_mode=str(rps_execution_mode),
+        execution_time=str(rps_execution_time),
         breakeven_stop_enabled=bool(rps_breakeven_stop_enabled),
         atr_window=int(inp.atr_stop_window),
         atr_n=float(inp.atr_stop_n),
@@ -7954,6 +8349,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         enabled=bool(ma_trailing_stop_enabled),
         ma_type=str(ma_trailing_stop_ma_type),
         execution_mode=str(ma_trailing_stop_execution_mode),
+        execution_time=str(ma_trailing_stop_execution_time),
         effective_delay_days=int(ma_trailing_stop_effective_delay_days),
         reduce_window=int(ma_trailing_stop_reduce_window),
         exit_window=int(ma_trailing_stop_exit_window),
@@ -8142,7 +8538,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             ma_over.astype(float),
         )
 
-    open_leg_mode = "open" if ep == "oc2" else str(ep)
+    open_leg_mode = str(ep)
     (
         w_post,
         atr_over_post,
@@ -8216,50 +8612,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
             scale_multiplier_mode="incremental_from_prev",
         )
         ret_exec_day = ret_exec_close_day.astype(float)
-    elif ep == "oc2":
-        w_close_base = w.shift(1).fillna(0.0).astype(float)
-        (
-            w_close,
-            atr_over_close,
-            bias_over_close,
-            rtp_over_close,
-            rps_over_close,
-            ma_over_close,
-        ) = _apply_all_intraday_overlays(
-            w_close_base,
-            mode="close",
-            scale_multiplier_mode="incremental_from_prev",
-        )
-        w_ret = (0.5 * (w + w_close)).astype(float)
-        ret_exec_day = (0.5 * (ret_exec_open_day + ret_exec_close_day)).astype(float)
-        atr_stop_override_ret = (
-            0.5 * (atr_stop_override_ret + atr_over_close.reindex(w.index).fillna(0.0))
-        ).astype(float)
-        bias_v_take_profit_override_ret = (
-            0.5
-            * (
-                bias_v_take_profit_override_ret
-                + bias_over_close.reindex(w.index).fillna(0.0)
-            )
-        ).astype(float)
-        r_take_profit_override_ret = (
-            0.5
-            * (r_take_profit_override_ret + rtp_over_close.reindex(w.index).fillna(0.0))
-        ).astype(float)
-        r_profit_scaleout_override_ret = (
-            0.5
-            * (
-                r_profit_scaleout_override_ret
-                + rps_over_close.reindex(w.index).fillna(0.0)
-            )
-        ).astype(float)
-        ma_trailing_stop_override_ret = (
-            0.5
-            * (
-                ma_trailing_stop_override_ret
-                + ma_over_close.reindex(w.index).fillna(0.0)
-            )
-        ).astype(float)
     else:
         ret_exec_day = ret_exec_open_day.astype(float)
     # Buy-and-hold benchmark: always invested; align daily returns with exec_price (tests + rotation parity).
@@ -9308,7 +9660,6 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "benchmark_nav": {
                     "close": "HFQ close-to-close daily returns (BUY_HOLD line; excess vs strategy uses this series)",
                     "open": "same-day open→close (none; hfq on corporate-action days); BUY_HOLD aligned to open execution",
-                    "oc2": "arithmetic average of open execution and close execution daily return series",
                 }.get(ep, "unknown exec_price"),
             },
             "params": {
@@ -9330,15 +9681,18 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
                 "atr_stop_execution_mode": str(atr_execution_mode),
+                "atr_stop_execution_time": str(atr_execution_time),
                 "atr_stop_window": int(inp.atr_stop_window),
                 "atr_stop_n": float(inp.atr_stop_n),
                 "atr_stop_m": float(inp.atr_stop_m),
                 "r_take_profit_enabled": bool(rtp_enabled),
                 "r_take_profit_reentry_mode": str(rtp_reentry_mode),
                 "r_take_profit_execution_mode": str(rtp_execution_mode),
+                "r_take_profit_execution_time": str(rtp_execution_time),
                 "r_take_profit_tiers": rtp_tiers,
                 "r_profit_scaleout_enabled": bool(rps_enabled),
                 "r_profit_scaleout_execution_mode": str(rps_execution_mode),
+                "r_profit_scaleout_execution_time": str(rps_execution_time),
                 "r_profit_scaleout_breakeven_stop_enabled": bool(
                     rps_breakeven_stop_enabled
                 ),
@@ -9346,6 +9700,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "bias_v_take_profit_enabled": bool(bias_v_tp_enabled),
                 "bias_v_take_profit_reentry_mode": str(bias_v_tp_reentry_mode),
                 "bias_v_take_profit_execution_mode": str(bias_v_tp_execution_mode),
+                "bias_v_take_profit_execution_time": str(bias_v_tp_execution_time),
                 "bias_v_take_profit_breakeven_stop_enabled": bool(
                     bias_v_tp_breakeven_stop_enabled
                 ),
@@ -9355,6 +9710,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "ma_trailing_stop_enabled": bool(ma_trailing_stop_enabled),
                 "ma_trailing_stop_ma_type": str(ma_trailing_stop_ma_type),
                 "ma_trailing_stop_execution_mode": str(ma_trailing_stop_execution_mode),
+                "ma_trailing_stop_execution_time": str(ma_trailing_stop_execution_time),
                 "ma_trailing_stop_effective_delay_days": int(
                     ma_trailing_stop_effective_delay_days
                 ),
@@ -9627,10 +9983,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
                 "atr_stop_execution_mode": str(atr_execution_mode),
+                "atr_stop_execution_time": str(atr_execution_time),
                 "r_take_profit_execution_mode": str(rtp_execution_mode),
+                "r_take_profit_execution_time": str(rtp_execution_time),
                 "r_profit_scaleout_execution_mode": str(rps_execution_mode),
+                "r_profit_scaleout_execution_time": str(rps_execution_time),
                 "bias_v_take_profit_execution_mode": str(bias_v_tp_execution_mode),
+                "bias_v_take_profit_execution_time": str(bias_v_tp_execution_time),
                 "ma_trailing_stop_execution_mode": str(ma_trailing_stop_execution_mode),
+                "ma_trailing_stop_execution_time": str(ma_trailing_stop_execution_time),
                 "ma_trailing_stop_effective_delay_days": int(
                     ma_trailing_stop_effective_delay_days
                 ),
@@ -9805,8 +10166,8 @@ def compute_trend_portfolio_backtest(
     if (not np.isfinite(float(inp.slippage_rate))) or float(inp.slippage_rate) < 0:
         raise ValueError("slippage_rate must be finite and >= 0")
     ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
-    if ep not in {"open", "close", "oc2"}:
-        raise ValueError("exec_price must be one of: open|close|oc2")
+    if ep not in {"open", "close"}:
+        raise ValueError("exec_price must be one of: open|close")
     if not np.isfinite(float(inp.risk_free_rate)):
         raise ValueError("risk_free_rate must be finite")
     quick_mode = bool(getattr(inp, "quick_mode", False))
@@ -10580,14 +10941,7 @@ def compute_trend_portfolio_backtest(
             )
             ret_intraday = pd.DataFrame(0.0, index=dates, columns=codes, dtype=float)
         else:
-            ret_overnight = (
-                0.5
-                * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
-            ).astype(float)
-            ret_intraday = (
-                0.5
-                * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
-            ).astype(float)
+            raise ValueError("exec_price must be one of: open|close")
     else:
         if ep == "open":
             ret_overnight = (
@@ -10612,20 +10966,7 @@ def compute_trend_portfolio_backtest(
                 .fillna(0.0)
             )
         else:
-            ret_overnight = (
-                0.5
-                * ret_overnight_close.astype(float)
-                .reindex(index=dates, columns=codes)
-                .fillna(0.0)
-            ).astype(float)
-            ret_intraday = (
-                0.5
-                * ret_exec.astype(float).reindex(index=dates, columns=codes).fillna(0.0)
-                + 0.5
-                * ret_intraday_close.astype(float)
-                .reindex(index=dates, columns=codes)
-                .fillna(0.0)
-            ).astype(float)
+            raise ValueError("exec_price must be one of: open|close")
 
     atr_execution_mode = (
         str(getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday")
@@ -10634,6 +10975,13 @@ def compute_trend_portfolio_backtest(
     )
     if atr_execution_mode not in STOP_EXECUTION_MODES:
         raise ValueError("atr_stop_execution_mode must be one of: intraday|next_day")
+    atr_execution_time = _resolve_stop_execution_time(
+        execution_mode=atr_execution_mode,
+        execution_time=getattr(inp, "atr_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="atr_stop_execution_mode",
+        time_field="atr_stop_execution_time",
+    )
     rtp_execution_mode = (
         str(getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday")
         .strip()
@@ -10643,6 +10991,13 @@ def compute_trend_portfolio_backtest(
         raise ValueError(
             "r_take_profit_execution_mode must be one of: intraday|next_day"
         )
+    rtp_execution_time = _resolve_stop_execution_time(
+        execution_mode=rtp_execution_mode,
+        execution_time=getattr(inp, "r_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="r_take_profit_execution_mode",
+        time_field="r_take_profit_execution_time",
+    )
     rps_execution_mode = (
         str(getattr(inp, "r_profit_scaleout_execution_mode", "intraday") or "intraday")
         .strip()
@@ -10652,6 +11007,13 @@ def compute_trend_portfolio_backtest(
         raise ValueError(
             "r_profit_scaleout_execution_mode must be one of: intraday|next_day"
         )
+    rps_execution_time = _resolve_stop_execution_time(
+        execution_mode=rps_execution_mode,
+        execution_time=getattr(inp, "r_profit_scaleout_execution_time", None),
+        exec_price=ep,
+        mode_field="r_profit_scaleout_execution_mode",
+        time_field="r_profit_scaleout_execution_time",
+    )
     bias_v_tp_execution_mode = (
         str(getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday")
         .strip()
@@ -10661,6 +11023,20 @@ def compute_trend_portfolio_backtest(
         raise ValueError(
             "bias_v_take_profit_execution_mode must be one of: intraday|next_day"
         )
+    bias_v_tp_execution_time = _resolve_stop_execution_time(
+        execution_mode=bias_v_tp_execution_mode,
+        execution_time=getattr(inp, "bias_v_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="bias_v_take_profit_execution_mode",
+        time_field="bias_v_take_profit_execution_time",
+    )
+    ma_trailing_stop_execution_time = _resolve_stop_execution_time(
+        execution_mode=ma_trailing_stop_execution_mode,
+        execution_time=getattr(inp, "ma_trailing_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="ma_trailing_stop_execution_mode",
+        time_field="ma_trailing_stop_execution_time",
+    )
 
     sig_pos = pd.DataFrame(index=dates, columns=codes, dtype=float)
     sig_score = pd.DataFrame(index=dates, columns=codes, dtype=float)
@@ -10922,6 +11298,7 @@ def compute_trend_portfolio_backtest(
             atr_basis=atr_basis,
             reentry_mode=atr_reentry_mode,
             execution_mode=atr_execution_mode,
+            execution_time=atr_execution_time,
             atr_window=int(inp.atr_stop_window),
             n_mult=float(inp.atr_stop_n),
             m_step=float(inp.atr_stop_m),
@@ -10943,6 +11320,7 @@ def compute_trend_portfolio_backtest(
             enabled=bias_v_tp_enabled,
             reentry_mode=bias_v_tp_reentry_mode,
             execution_mode=bias_v_tp_execution_mode,
+            execution_time=bias_v_tp_execution_time,
             breakeven_stop_enabled=bias_v_tp_breakeven_stop_enabled,
             ma_window=int(bias_v_tp_ma_window),
             atr_window=int(bias_v_tp_atr_window),
@@ -10961,6 +11339,7 @@ def compute_trend_portfolio_backtest(
             enabled=rtp_enabled,
             reentry_mode=rtp_reentry_mode,
             execution_mode=rtp_execution_mode,
+            execution_time=rtp_execution_time,
             atr_window=int(inp.atr_stop_window),
             atr_n=float(inp.atr_stop_n),
             tiers=rtp_tiers,
@@ -10978,6 +11357,7 @@ def compute_trend_portfolio_backtest(
             low=low_px.astype(float).fillna(px),
             enabled=bool(rps_enabled),
             execution_mode=str(rps_execution_mode),
+            execution_time=str(rps_execution_time),
             breakeven_stop_enabled=bool(rps_breakeven_stop_enabled),
             atr_window=int(inp.atr_stop_window),
             atr_n=float(inp.atr_stop_n),
@@ -10997,6 +11377,7 @@ def compute_trend_portfolio_backtest(
             enabled=bool(ma_trailing_stop_enabled),
             ma_type=str(ma_trailing_stop_ma_type),
             execution_mode=str(ma_trailing_stop_execution_mode),
+            execution_time=str(ma_trailing_stop_execution_time),
             effective_delay_days=int(ma_trailing_stop_effective_delay_days),
             reduce_window=int(ma_trailing_stop_reduce_window),
             exit_window=int(ma_trailing_stop_exit_window),
@@ -11790,7 +12171,7 @@ def compute_trend_portfolio_backtest(
             ma_over.astype(float),
         )
 
-    open_leg_mode = "open" if ep == "oc2" else str(ep)
+    open_leg_mode = str(ep)
     (
         w_post,
         atr_over_post,
@@ -11908,50 +12289,6 @@ def compute_trend_portfolio_backtest(
             scale_multiplier_mode="incremental_from_prev",
         )
         ret_exec_day = ret_exec_close_day.astype(float)
-    elif ep == "oc2":
-        w_close_base = w.shift(1).fillna(0.0).astype(float)
-        (
-            w_close,
-            atr_over_close,
-            bias_over_close,
-            rtp_over_close,
-            rps_over_close,
-            ma_over_close,
-        ) = _apply_all_intraday_overlays_df(
-            w_close_base,
-            mode="close",
-            scale_multiplier_mode="incremental_from_prev",
-        )
-        w_ret = (0.5 * (w + w_close)).astype(float)
-        ret_exec_day = (0.5 * (ret_exec_open_day + ret_exec_close_day)).astype(float)
-        atr_stop_override_ret = (
-            0.5 * (atr_stop_override_ret + atr_over_close.reindex(w.index).fillna(0.0))
-        ).astype(float)
-        bias_v_take_profit_override_ret = (
-            0.5
-            * (
-                bias_v_take_profit_override_ret
-                + bias_over_close.reindex(w.index).fillna(0.0)
-            )
-        ).astype(float)
-        r_take_profit_override_ret = (
-            0.5
-            * (r_take_profit_override_ret + rtp_over_close.reindex(w.index).fillna(0.0))
-        ).astype(float)
-        r_profit_scaleout_override_ret = (
-            0.5
-            * (
-                r_profit_scaleout_override_ret
-                + rps_over_close.reindex(w.index).fillna(0.0)
-            )
-        ).astype(float)
-        ma_trailing_stop_override_ret = (
-            0.5
-            * (
-                ma_trailing_stop_override_ret
-                + ma_over_close.reindex(w.index).fillna(0.0)
-            )
-        ).astype(float)
     else:
         ret_exec_day = ret_exec_open_day.astype(float)
 
@@ -13693,15 +14030,18 @@ def compute_trend_portfolio_backtest(
                 "atr_stop_atr_basis": str(atr_basis),
                 "atr_stop_reentry_mode": str(atr_reentry_mode),
                 "atr_stop_execution_mode": str(atr_execution_mode),
+                "atr_stop_execution_time": str(atr_execution_time),
                 "atr_stop_window": int(inp.atr_stop_window),
                 "atr_stop_n": float(inp.atr_stop_n),
                 "atr_stop_m": float(inp.atr_stop_m),
                 "r_take_profit_enabled": bool(rtp_enabled),
                 "r_take_profit_reentry_mode": str(rtp_reentry_mode),
                 "r_take_profit_execution_mode": str(rtp_execution_mode),
+                "r_take_profit_execution_time": str(rtp_execution_time),
                 "r_take_profit_tiers": rtp_tiers,
                 "r_profit_scaleout_enabled": bool(rps_enabled),
                 "r_profit_scaleout_execution_mode": str(rps_execution_mode),
+                "r_profit_scaleout_execution_time": str(rps_execution_time),
                 "r_profit_scaleout_breakeven_stop_enabled": bool(
                     rps_breakeven_stop_enabled
                 ),
@@ -13709,6 +14049,7 @@ def compute_trend_portfolio_backtest(
                 "bias_v_take_profit_enabled": bool(bias_v_tp_enabled),
                 "bias_v_take_profit_reentry_mode": str(bias_v_tp_reentry_mode),
                 "bias_v_take_profit_execution_mode": str(bias_v_tp_execution_mode),
+                "bias_v_take_profit_execution_time": str(bias_v_tp_execution_time),
                 "bias_v_take_profit_breakeven_stop_enabled": bool(
                     bias_v_tp_breakeven_stop_enabled
                 ),
@@ -13718,6 +14059,7 @@ def compute_trend_portfolio_backtest(
                 "ma_trailing_stop_enabled": bool(ma_trailing_stop_enabled),
                 "ma_trailing_stop_ma_type": str(ma_trailing_stop_ma_type),
                 "ma_trailing_stop_execution_mode": str(ma_trailing_stop_execution_mode),
+                "ma_trailing_stop_execution_time": str(ma_trailing_stop_execution_time),
                 "ma_trailing_stop_effective_delay_days": int(
                     ma_trailing_stop_effective_delay_days
                 ),
