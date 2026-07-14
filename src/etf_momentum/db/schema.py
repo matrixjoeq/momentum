@@ -188,6 +188,15 @@ def ensure_runtime_schema(engine: Engine) -> None:
     if engine.dialect.name == "sqlite":
         ensure_sqlite_schema(engine)
 
+    if inspect(engine).has_table("off_fund_research_state"):
+        off_fund_research_cols = {
+            "pair_chart_prefs_json": "pair_chart_prefs_json TEXT",
+        }
+        for col, ddl in off_fund_research_cols.items():
+            if _has_column(engine, "off_fund_research_state", col):
+                continue
+            _add_column(engine, "off_fund_research_state", ddl)
+
     if inspect(engine).has_table("live_strategy_profile"):
         live_strategy_profile_cols = {
             "capital_mode": "capital_mode VARCHAR(32)",

@@ -15,10 +15,7 @@
         document.documentElement.setAttribute("data-theme", theme);
       })();
     </script>
-    <script
-      defer
-      src="https://cdn.plot.ly/plotly-cartesian-2.30.0.min.js"
-    ></script>
+    <script src="/static/vendor/plotly-cartesian-2.30.0.min.js"></script>
     <script defer src="/static/market_regime.js"></script>
     <link rel="stylesheet" href="/static/terminal.css" />
     <style>
@@ -1964,6 +1961,41 @@
                 </button></label
               >
               <input id="rotSlippage" value="0.001" />
+            </div>
+            <div>
+              <label>容量统计窗口</label>
+              <select id="rotCapacityWindowYears" style="min-width: 140px">
+                <option value="1" selected>近一年</option>
+                <option value="3">近三年</option>
+                <option value="5">近五年</option>
+              </select>
+            </div>
+            <div>
+              <label>止损方案</label>
+              <select id="rotStopScheme" style="min-width: 160px">
+                <option value="none" selected>关闭</option>
+                <option value="atr">通用ATR止损</option>
+                <option value="equity_budget">总权益风险预算止损</option>
+              </select>
+            </div>
+            <div>
+              <label>止损执行模式</label>
+              <select id="rotStopExecMode" style="min-width: 140px">
+                <option value="intraday" selected>日内执行</option>
+                <option value="next_day">次日执行</option>
+              </select>
+            </div>
+            <div>
+              <label>止损执行时点</label>
+              <select id="rotStopExecTime" style="min-width: 140px">
+                <option value="full_day" selected>全日</option>
+                <option value="open">开盘</option>
+                <option value="close">收盘</option>
+              </select>
+            </div>
+            <div>
+              <label>总权益风险预算(%)</label>
+              <input id="rotEquityStopRiskPct" value="2.0" />
             </div>
             <div>
               <label>通用ATR止损模式</label>
@@ -4909,6 +4941,14 @@
           <select id="trendExecPrice" style="min-width: 100px">
             <option value="open" selected>开盘</option>
             <option value="close">收盘</option>
+          </select>
+        </div>
+        <div>
+          <label>容量统计窗口</label>
+          <select id="trendCapacityWindowYears" style="min-width: 120px">
+            <option value="1" selected>近一年</option>
+            <option value="3">近三年</option>
+            <option value="5">近五年</option>
           </select>
         </div>
         <div>
@@ -8098,8 +8138,13 @@
           "rotSkip",
           "rotCost",
           "rotSlippage",
+          "rotCapacityWindowYears",
           "rotEntryMatchN",
           "rotExitMatchN",
+          "rotStopScheme",
+          "rotStopExecMode",
+          "rotStopExecTime",
+          "rotEquityStopRiskPct",
           "rotAtrStopMode",
           "rotAtrStopBasis",
           "rotAtrStopWin",
@@ -8137,6 +8182,7 @@
           "trendStrategy",
           "trendEngine",
           "trendExecPrice",
+          "trendCapacityWindowYears",
           "trendCost",
           "trendSlippage",
           "trendRiskOfRuinMaxrisk",
@@ -10267,6 +10313,18 @@
               skip_days: Number(($("rotSkip").value || "0").trim()),
               cost_bps: Number(($("rotCost").value || "2").trim()),
               slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
+              capacity_window_years: (() => {
+                const y = Math.trunc(
+                  Number(
+                    ($("rotCapacityWindowYears") &&
+                    $("rotCapacityWindowYears").value
+                      ? $("rotCapacityWindowYears").value
+                      : "1"
+                    ).trim(),
+                  ),
+                );
+                return [1, 3, 5].includes(y) ? y : 1;
+              })(),
               group_enforce: groupEnforce,
               group_pick_policy: groupPolicy,
               asset_groups: groupsParsed,
@@ -11078,6 +11136,71 @@
         const nEl = $(`${prefix}AtrStopN`);
         const mEl = $(`${prefix}AtrStopM`);
         if (!modeEl) return;
+        const setEnabled = (el, on) => {
+          if (!el) return;
+          el.disabled = !on;
+          el.style.opacity = on ? "1" : "0.55";
+        };
+        if (prefix === "rot") {
+          const stopSchemeEl = $("rotStopScheme");
+          const execModeEl = $("rotStopExecMode");
+          const execTimeEl = $("rotStopExecTime");
+          const eqRiskEl = $("rotEquityStopRiskPct");
+          const stopScheme = stopSchemeEl
+            ? String(stopSchemeEl.value || "none")
+                .trim()
+                .toLowerCase()
+            : "none";
+          const isAtr = stopScheme === "atr";
+          const isEq = stopScheme === "equity_budget";
+          const mode = String(modeEl.value || "none")
+            .trim()
+            .toLowerCase();
+          const isStatic = isAtr && mode === "static";
+          const isDynamic =
+            isAtr && (mode === "trailing" || mode === "tightening");
+          const canEditWinN = isStatic || isDynamic;
+          const canEditStopAux = isStatic || isDynamic;
+          const canEditAll = isDynamic;
+          let execMode = execModeEl
+            ? String(execModeEl.value || "intraday")
+                .trim()
+                .toLowerCase()
+            : "intraday";
+          if (!["intraday", "next_day"].includes(execMode))
+            execMode = "intraday";
+          if (execModeEl) execModeEl.value = execMode;
+          if (execTimeEl) {
+            let execTime = String(execTimeEl.value || "full_day")
+              .trim()
+              .toLowerCase();
+            if (!["open", "close", "full_day"].includes(execTime))
+              execTime = "full_day";
+            if (isEq) execTime = "close";
+            if (execMode === "next_day" && execTime === "full_day")
+              execTime = "close";
+            execTimeEl.value = execTime;
+            for (const opt of Array.from(execTimeEl.options || [])) {
+              const vv = String(opt.value || "")
+                .trim()
+                .toLowerCase();
+              const dis =
+                (isEq && vv !== "close") ||
+                (execMode === "next_day" && vv === "full_day");
+              opt.disabled = !!dis;
+            }
+          }
+          setEnabled(modeEl, isAtr);
+          setEnabled(winEl, canEditWinN);
+          setEnabled(nEl, canEditWinN);
+          setEnabled(reentryEl, canEditStopAux);
+          setEnabled(basisEl, canEditAll);
+          setEnabled(mEl, canEditAll);
+          setEnabled(execModeEl, isAtr || isEq);
+          setEnabled(execTimeEl, isAtr || isEq);
+          setEnabled(eqRiskEl, isEq);
+          return;
+        }
         const mode = String(modeEl.value || "none")
           .trim()
           .toLowerCase();
@@ -11094,11 +11217,6 @@
         const canEditWinN = isStatic || isDynamic || rMultNeedsAtrWinN;
         const canEditStopAux = isStatic || isDynamic;
         const canEditAll = isDynamic;
-        const setEnabled = (el, on) => {
-          if (!el) return;
-          el.disabled = !on;
-          el.style.opacity = on ? "1" : "0.55";
-        };
         setEnabled(winEl, canEditWinN);
         setEnabled(nEl, canEditWinN);
         setEnabled(reentryEl, canEditStopAux);
@@ -27119,6 +27237,21 @@
       }
 
       function plotRotation(result) {
+        if (typeof Plotly === "undefined" || !window.Plotly) {
+          const msg = "Plotly 未加载，无法绘图（请稍后重试或检查网络/CDN）。";
+          for (const id of [
+            "rotChart",
+            "rotDDCompare",
+            "rotExcessChart",
+            "rot40dDiffChart",
+            "rotRollingCombo",
+            "rotExcessRollingCombo",
+          ]) {
+            const el = $(id);
+            if (el) el.innerHTML = `<div class="muted">${msg}</div>`;
+          }
+          return;
+        }
         const dates = result.nav.dates;
         const s = result.nav.series;
         const rsiWins = [14];
@@ -28280,7 +28413,7 @@
             const cov = Number((s && s.coverage_ratio) || 0);
             const _fmtCap = (v) => {
               const n = Number(v);
-              return Number.isFinite(n) ? fmtNum(n, 2) : "-";
+              return Number.isFinite(n) ? fmtNum(n / 10000.0, 2) : "-";
             };
             return `<tr>
               <td>${esc(nameText)}</td>
@@ -28295,9 +28428,15 @@
         const src = ((meta || {}).source_stats || {}).sources || {} || {};
         const amountN = Number(src.amount || 0);
         const volPxN = Number(src.volume_avg_price || 0);
-        const sourceHint = `流动性数据来源：amount=${fmtNum(amountN, 0)}，volume×日均价=${fmtNum(volPxN, 0)}`;
+        const capYears = Number((meta || {}).capacity_window_years || 1);
+        const capStart = String(
+          (meta || {}).capacity_window_start || "",
+        ).trim();
+        const capEnd = String((meta || {}).capacity_window_end || "").trim();
+        const sourceHint = `统计窗口：近${capYears}年（${capStart || "-"} ~ ${capEnd || "-"}）；流动性数据来源：amount=${fmtNum(amountN, 0)}，volume×日均价=${fmtNum(volPxN, 0)}`;
         const explain = [
           "术语定义：AUM 指策略管理资金规模（人民币口径）；本面板的“AUM上限”按“已交易资产参与率约束”反推可承载资金。",
+          "展示单位：AUM上限分位数以“万元”显示（1万元=10,000元）。",
           "术语定义：参与率 指单资产当日成交额占该资产当日可交易额的比例（如10%表示策略单资产成交额约占该资产当日市场成交额的10%）。",
           "术语定义：覆盖率=有有效容量样本的交易日占比；覆盖率越高，分位数统计越稳定。",
           "场景说明：保守=5%参与率，中性=10%参与率，激进=20%参与率（参与率越高，理论容量越大，但交易冲击风险也更高）。",
@@ -28312,9 +28451,9 @@
             <tr>
               <th>场景</th>
               <th>参与率</th>
-              <th>AUM上限P10</th>
-              <th>AUM上限P25</th>
-              <th>AUM上限P50</th>
+              <th>AUM上限P10(万元)</th>
+              <th>AUM上限P25(万元)</th>
+              <th>AUM上限P50(万元)</th>
               <th>覆盖率</th>
             </tr>
             ${rows}
@@ -28350,7 +28489,7 @@
             const cov = Number((s && s.coverage_ratio) || 0);
             const _fmtCap = (v) => {
               const n = Number(v);
-              return Number.isFinite(n) ? fmtNum(n, 2) : "-";
+              return Number.isFinite(n) ? fmtNum(n / 10000.0, 2) : "-";
             };
             return `<tr>
               <td>${esc(nameText)}</td>
@@ -28365,9 +28504,15 @@
         const src = ((meta || {}).source_stats || {}).sources || {} || {};
         const amountN = Number(src.amount || 0);
         const volPxN = Number(src.volume_avg_price || 0);
-        const sourceHint = `流动性数据来源：amount=${fmtNum(amountN, 0)}，volume×日均价=${fmtNum(volPxN, 0)}`;
+        const capYears = Number((meta || {}).capacity_window_years || 1);
+        const capStart = String(
+          (meta || {}).capacity_window_start || "",
+        ).trim();
+        const capEnd = String((meta || {}).capacity_window_end || "").trim();
+        const sourceHint = `统计窗口：近${capYears}年（${capStart || "-"} ~ ${capEnd || "-"}）；流动性数据来源：amount=${fmtNum(amountN, 0)}，volume×日均价=${fmtNum(volPxN, 0)}`;
         const explain = [
           "术语定义：AUM 指策略管理资金规模（人民币口径）；本面板的“AUM上限”按“已交易资产参与率约束”反推可承载资金。",
+          "展示单位：AUM上限分位数以“万元”显示（1万元=10,000元）。",
           "术语定义：参与率 指单资产当日成交额占该资产当日可交易额的比例（如10%表示策略单资产成交额约占该资产当日市场成交额的10%）。",
           "术语定义：覆盖率=有有效容量样本的交易日占比；覆盖率越高，分位数统计越稳定。",
           "场景说明：保守=5%参与率，中性=10%参与率，激进=20%参与率（参与率越高，理论容量越大，但交易冲击风险也更高）。",
@@ -28382,9 +28527,9 @@
             <tr>
               <th>场景</th>
               <th>参与率</th>
-              <th>AUM上限P10</th>
-              <th>AUM上限P25</th>
-              <th>AUM上限P50</th>
+              <th>AUM上限P10(万元)</th>
+              <th>AUM上限P25(万元)</th>
+              <th>AUM上限P50(万元)</th>
               <th>覆盖率</th>
             </tr>
             ${rows}
@@ -30168,6 +30313,12 @@
           $("rotFloatingBenchmark") && $("rotFloatingBenchmark").value
             ? String($("rotFloatingBenchmark").value).trim()
             : "";
+        const capacity_window_years = Number(
+          ($("rotCapacityWindowYears") && $("rotCapacityWindowYears").value
+            ? $("rotCapacityWindowYears").value
+            : "1"
+          ).trim(),
+        );
         const position_mode =
           $("rotPositionMode") && $("rotPositionMode").value
             ? String($("rotPositionMode").value)
@@ -30295,6 +30446,11 @@
           slippage_rate: Number(
             ($("rotSlippage") && $("rotSlippage").value) || 0.001,
           ),
+          capacity_window_years: [1, 3, 5].includes(
+            Math.trunc(Number(capacity_window_years)),
+          )
+            ? Math.trunc(Number(capacity_window_years))
+            : 1,
           benchmark_mode:
             $("rotBenchMode") && $("rotBenchMode").value
               ? String($("rotBenchMode").value)
@@ -30490,6 +30646,17 @@
         );
         if (!Number.isFinite(slippage_rate) || slippage_rate < 0)
           return setMsg("轮动滑点需为>=0数字（例如 0.001）");
+        const capacity_window_years = Number(
+          ($("rotCapacityWindowYears") && $("rotCapacityWindowYears").value
+            ? $("rotCapacityWindowYears").value
+            : "1"
+          ).trim(),
+        );
+        if (
+          !Number.isFinite(capacity_window_years) ||
+          ![1, 3, 5].includes(Math.trunc(capacity_window_years))
+        )
+          return setMsg("容量统计窗口仅支持近一年/近三年/近五年");
         const entryFloorRules = _buildFloorRules(
           "rotFloorOn",
           "rotFloorRulesTable",
@@ -30509,6 +30676,32 @@
           ...(exitFloorRules || []),
         ];
         const score_method = $("rotScoreMethod").value;
+        const stop_scheme =
+          $("rotStopScheme") && $("rotStopScheme").value
+            ? String($("rotStopScheme").value)
+            : "none";
+        const atr_stop_execution_mode =
+          $("rotStopExecMode") && $("rotStopExecMode").value
+            ? String($("rotStopExecMode").value)
+            : "intraday";
+        const atr_stop_execution_time =
+          $("rotStopExecTime") && $("rotStopExecTime").value
+            ? String($("rotStopExecTime").value)
+            : "full_day";
+        let equity_stop_risk_pct = Number(
+          (
+            ($("rotEquityStopRiskPct") && $("rotEquityStopRiskPct").value) ||
+            "2.0"
+          ).trim(),
+        );
+        if (!Number.isFinite(equity_stop_risk_pct))
+          return setMsg("总权益风险预算需为数字");
+        equity_stop_risk_pct =
+          equity_stop_risk_pct > 0.1
+            ? equity_stop_risk_pct / 100.0
+            : equity_stop_risk_pct;
+        if (equity_stop_risk_pct < 0.001 || equity_stop_risk_pct > 0.05)
+          return setMsg("总权益风险预算需在0.1%~5%之间");
         const atr_stop_mode =
           $("rotAtrStopMode") && $("rotAtrStopMode").value
             ? String($("rotAtrStopMode").value)
@@ -30526,15 +30719,37 @@
           !["none", "static", "trailing", "tightening"].includes(atr_stop_mode)
         )
           return setMsg("通用ATR止损模式非法");
+        if (!["none", "atr", "equity_budget"].includes(stop_scheme))
+          return setMsg("止损方案非法");
         if (!["entry", "latest"].includes(atr_stop_atr_basis))
           return setMsg("通用ATR基准非法（仅支持入场/最新）");
+        if (!["intraday", "next_day"].includes(atr_stop_execution_mode))
+          return setMsg("止损执行模式仅支持 intraday/next_day");
+        if (!["open", "close", "full_day"].includes(atr_stop_execution_time))
+          return setMsg("止损执行时点仅支持 open/close/full_day");
+        if (
+          atr_stop_execution_mode === "next_day" &&
+          atr_stop_execution_time === "full_day"
+        )
+          return setMsg("次日止损执行时点仅支持 open/close");
+        if (
+          stop_scheme === "equity_budget" &&
+          atr_stop_execution_time !== "close"
+        )
+          return setMsg("总权益风险预算止损仅支持收盘执行");
+        if (stop_scheme === "atr" && atr_stop_mode === "none")
+          return setMsg("选择ATR止损方案时，ATR止损模式不能为关闭");
         if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2)
           return setMsg("通用ATR止损周期需为>=2数字");
         if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0)
           return setMsg("通用ATR止损倍数 n 需为>0数字");
         if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0)
           return setMsg("通用ATR收紧步长 m 需为>0数字");
-        if (atr_stop_mode === "tightening" && !(atr_stop_n > atr_stop_m))
+        if (
+          stop_scheme === "atr" &&
+          atr_stop_mode === "tightening" &&
+          !(atr_stop_n > atr_stop_m)
+        )
           return setMsg("通用ATR动态收紧要求 n > m");
         const trend_filter = $("rotTrendOn").value === "true";
         const trend_exit_filter =
@@ -30965,12 +31180,17 @@
           skip_days,
           cost_bps,
           slippage_rate,
+          capacity_window_years: Math.trunc(capacity_window_years),
           top_k_mode,
           floating_benchmark_code:
             top_k_mode === "floating" ? floating_benchmark_code : null,
           score_method,
+          stop_scheme,
+          equity_stop_risk_pct,
           atr_stop_mode,
           atr_stop_atr_basis,
+          atr_stop_execution_mode,
+          atr_stop_execution_time,
           atr_stop_window,
           atr_stop_n,
           atr_stop_m,
@@ -31051,12 +31271,21 @@
         $("status").textContent = "";
         window.__lastRotationResultByBench[benchmark_mode] = data;
         window.__lastRotationResult = data;
-        _renderRotationCurrentHoldings(
-          Array.isArray(data.current_holdings) ? data.current_holdings : [],
-        );
-        _renderRotationNextPlanTables(
-          window.__lastRotationNextExecutionPlan || null,
-        );
+        try {
+          _renderRotationCurrentHoldings(
+            Array.isArray(data.current_holdings) ? data.current_holdings : [],
+          );
+        } catch (e) {
+          console.error("render rotation current holdings failed:", e);
+        }
+        try {
+          _renderRotationNextPlanTables(
+            window.__lastRotationNextExecutionPlan || null,
+          );
+        } catch (e) {
+          // Keep charts available even when next-plan table shape mismatches.
+          console.error("render rotation next-plan tables failed:", e);
+        }
         plotRotation(data);
         renderRotationMetrics(data.metrics || {}, data || {});
         renderRotationCapacityPanel(data || {});
@@ -31248,6 +31477,18 @@
             initAccountAmountRaw === "" ? null : Number(initAccountAmountRaw),
           cost_bps: Number(($("trendCost").value || "2").trim()),
           slippage_rate: Number(($("trendSlippage").value || "0.001").trim()),
+          capacity_window_years: (() => {
+            const y = Math.trunc(
+              Number(
+                ($("trendCapacityWindowYears") &&
+                $("trendCapacityWindowYears").value
+                  ? $("trendCapacityWindowYears").value
+                  : "1"
+                ).trim(),
+              ),
+            );
+            return [1, 3, 5].includes(y) ? y : 1;
+          })(),
           quick_mode:
             !($("trendQuickMode") && $("trendQuickMode").value) ||
             String($("trendQuickMode").value) !== "detailed",
@@ -31704,6 +31945,17 @@
         );
         if (!Number.isFinite(slippage_rate) || slippage_rate < 0)
           return setMsg("趋势滑点需为>=0数字（例如 0.001）");
+        const capacity_window_years = Number(
+          ($("trendCapacityWindowYears") && $("trendCapacityWindowYears").value
+            ? $("trendCapacityWindowYears").value
+            : "1"
+          ).trim(),
+        );
+        if (
+          !Number.isFinite(capacity_window_years) ||
+          ![1, 3, 5].includes(Math.trunc(capacity_window_years))
+        )
+          return setMsg("趋势容量统计窗口仅支持近一年/近三年/近五年");
         const initAccountAmountRaw =
           $("trendInitialAccountAmount") && $("trendInitialAccountAmount").value
             ? String($("trendInitialAccountAmount").value).trim()
@@ -31735,6 +31987,7 @@
               ? String($("trendEngine").value).trim().toLowerCase()
               : "legacy",
           exec_price,
+          capacity_window_years: Math.trunc(capacity_window_years),
           strategy,
           sma_window: Number(($("trendSmaWin").value || "200").trim()),
           fast_window: Number(($("trendFastWin").value || "50").trim()),
@@ -32982,6 +33235,94 @@
           $("end") && $("end").value ? String($("end").value).trim() : "";
         const asof = asofRaw || endRaw;
         if (!asof) return setMsg("请填写计划查询基准日（或先设置结束日期）");
+        const capacity_window_years = Number(
+          ($("rotCapacityWindowYears") && $("rotCapacityWindowYears").value
+            ? $("rotCapacityWindowYears").value
+            : "1"
+          ).trim(),
+        );
+        if (
+          !Number.isFinite(capacity_window_years) ||
+          ![1, 3, 5].includes(Math.trunc(capacity_window_years))
+        )
+          return setMsg("容量统计窗口仅支持近一年/近三年/近五年");
+        const stop_scheme =
+          $("rotStopScheme") && $("rotStopScheme").value
+            ? String($("rotStopScheme").value)
+            : "none";
+        const atr_stop_execution_mode =
+          $("rotStopExecMode") && $("rotStopExecMode").value
+            ? String($("rotStopExecMode").value)
+            : "intraday";
+        const atr_stop_execution_time =
+          $("rotStopExecTime") && $("rotStopExecTime").value
+            ? String($("rotStopExecTime").value)
+            : "full_day";
+        let equity_stop_risk_pct = Number(
+          (
+            ($("rotEquityStopRiskPct") && $("rotEquityStopRiskPct").value) ||
+            "2.0"
+          ).trim(),
+        );
+        if (!Number.isFinite(equity_stop_risk_pct))
+          return setMsg("总权益风险预算需为数字");
+        equity_stop_risk_pct =
+          equity_stop_risk_pct > 0.1
+            ? equity_stop_risk_pct / 100.0
+            : equity_stop_risk_pct;
+        if (equity_stop_risk_pct < 0.001 || equity_stop_risk_pct > 0.05)
+          return setMsg("总权益风险预算需在0.1%~5%之间");
+        const atr_stop_mode =
+          $("rotAtrStopMode") && $("rotAtrStopMode").value
+            ? String($("rotAtrStopMode").value)
+            : "none";
+        const atr_stop_mode_effective =
+          stop_scheme === "atr" ? atr_stop_mode : "none";
+        const atr_stop_atr_basis =
+          $("rotAtrStopBasis") && $("rotAtrStopBasis").value
+            ? String($("rotAtrStopBasis").value)
+            : "latest";
+        const atr_stop_window = Number(
+          ($("rotAtrStopWin").value || "14").trim(),
+        );
+        const atr_stop_n = Number(($("rotAtrStopN").value || "2.0").trim());
+        const atr_stop_m = Number(($("rotAtrStopM").value || "0.5").trim());
+        if (
+          !["none", "static", "trailing", "tightening"].includes(atr_stop_mode)
+        )
+          return setMsg("通用ATR止损模式非法");
+        if (!["none", "atr", "equity_budget"].includes(stop_scheme))
+          return setMsg("止损方案非法");
+        if (!["entry", "latest"].includes(atr_stop_atr_basis))
+          return setMsg("通用ATR基准非法（仅支持入场/最新）");
+        if (!["intraday", "next_day"].includes(atr_stop_execution_mode))
+          return setMsg("止损执行模式仅支持 intraday/next_day");
+        if (!["open", "close", "full_day"].includes(atr_stop_execution_time))
+          return setMsg("止损执行时点仅支持 open/close/full_day");
+        if (
+          atr_stop_execution_mode === "next_day" &&
+          atr_stop_execution_time === "full_day"
+        )
+          return setMsg("次日止损执行时点仅支持 open/close");
+        if (
+          stop_scheme === "equity_budget" &&
+          atr_stop_execution_time !== "close"
+        )
+          return setMsg("总权益风险预算止损仅支持收盘执行");
+        if (stop_scheme === "atr" && atr_stop_mode === "none")
+          return setMsg("选择ATR止损方案时，ATR止损模式不能为关闭");
+        if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2)
+          return setMsg("通用ATR止损周期需为>=2数字");
+        if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0)
+          return setMsg("通用ATR止损倍数 n 需为>0数字");
+        if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0)
+          return setMsg("通用ATR收紧步长 m 需为>0数字");
+        if (
+          stop_scheme === "atr" &&
+          atr_stop_mode === "tightening" &&
+          !(atr_stop_n > atr_stop_m)
+        )
+          return setMsg("通用ATR动态收紧要求 n > m");
 
         let payload = null;
         if (
@@ -33061,6 +33402,16 @@
             skip_days: Number(($("rotSkip").value || "0").trim()),
             cost_bps: Number(($("rotCost").value || "2").trim()),
             slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
+            stop_scheme,
+            equity_stop_risk_pct,
+            atr_stop_mode: atr_stop_mode_effective,
+            atr_stop_atr_basis,
+            atr_stop_execution_mode,
+            atr_stop_execution_time,
+            atr_stop_window: Math.floor(atr_stop_window),
+            atr_stop_n,
+            atr_stop_m,
+            capacity_window_years: Math.trunc(capacity_window_years),
             asset_momentum_floor_rules: floorRules.length ? floorRules : null,
             score_method:
               $("rotScoreMethod") && $("rotScoreMethod").value
@@ -33215,6 +33566,16 @@
           skip_days: Number(($("rotSkip").value || "0").trim()),
           cost_bps: Number(($("rotCost").value || "2").trim()),
           slippage_rate: Number(($("rotSlippage").value || "0.001").trim()),
+          stop_scheme,
+          equity_stop_risk_pct,
+          atr_stop_mode: atr_stop_mode_effective,
+          atr_stop_atr_basis,
+          atr_stop_execution_mode,
+          atr_stop_execution_time,
+          atr_stop_window: Math.floor(atr_stop_window),
+          atr_stop_n,
+          atr_stop_m,
+          capacity_window_years: Math.trunc(capacity_window_years),
           score_method:
             $("rotScoreMethod") && $("rotScoreMethod").value
               ? String($("rotScoreMethod").value)
@@ -33918,6 +34279,10 @@
               cost: 2,
               entryMatchN: 0,
               exitMatchN: 0,
+              stopScheme: "none",
+              stopExecMode: "intraday",
+              stopExecTime: "full_day",
+              equityStopRiskPct: 2.0,
               atrStopMode: "none",
               groupEnforce: "false",
               groupPolicy: "strongest_score",
@@ -33953,6 +34318,10 @@
               cost: 2,
               entryMatchN: 0,
               exitMatchN: 0,
+              stopScheme: "atr",
+              stopExecMode: "intraday",
+              stopExecTime: "full_day",
+              equityStopRiskPct: 2.0,
               atrStopMode: "trailing",
               groupEnforce: "true",
               groupPolicy: "strongest_score",
@@ -33988,6 +34357,10 @@
             cost: 2,
             entryMatchN: 0,
             exitMatchN: 0,
+            stopScheme: "none",
+            stopExecMode: "intraday",
+            stopExecTime: "full_day",
+            equityStopRiskPct: 2.0,
             atrStopMode: "none",
             groupEnforce: "false",
             groupPolicy: "strongest_score",
@@ -34047,6 +34420,22 @@
             $("rotEntryMatchN").value = String(spec.base.entryMatchN);
           if ($("rotExitMatchN"))
             $("rotExitMatchN").value = String(spec.base.exitMatchN);
+          if ($("rotStopScheme"))
+            $("rotStopScheme").value = String(spec.base.stopScheme || "none");
+          if ($("rotStopExecMode"))
+            $("rotStopExecMode").value = String(
+              spec.base.stopExecMode || "intraday",
+            );
+          if ($("rotStopExecTime"))
+            $("rotStopExecTime").value = String(
+              spec.base.stopExecTime || "full_day",
+            );
+          if ($("rotEquityStopRiskPct"))
+            $("rotEquityStopRiskPct").value = String(
+              spec.base.equityStopRiskPct != null
+                ? spec.base.equityStopRiskPct
+                : 2.0,
+            );
           if ($("rotAtrStopMode"))
             $("rotAtrStopMode").value = String(spec.base.atrStopMode);
           if ($("rotGroupEnforce"))
@@ -34245,6 +34634,32 @@
           ...(exitFloorRules || []),
         ];
         const score_method = $("rotScoreMethod").value;
+        const stop_scheme =
+          $("rotStopScheme") && $("rotStopScheme").value
+            ? String($("rotStopScheme").value)
+            : "none";
+        const atr_stop_execution_mode =
+          $("rotStopExecMode") && $("rotStopExecMode").value
+            ? String($("rotStopExecMode").value)
+            : "intraday";
+        const atr_stop_execution_time =
+          $("rotStopExecTime") && $("rotStopExecTime").value
+            ? String($("rotStopExecTime").value)
+            : "full_day";
+        let equity_stop_risk_pct = Number(
+          (
+            ($("rotEquityStopRiskPct") && $("rotEquityStopRiskPct").value) ||
+            "2.0"
+          ).trim(),
+        );
+        if (!Number.isFinite(equity_stop_risk_pct))
+          return setMsg("总权益风险预算需为数字");
+        equity_stop_risk_pct =
+          equity_stop_risk_pct > 0.1
+            ? equity_stop_risk_pct / 100.0
+            : equity_stop_risk_pct;
+        if (equity_stop_risk_pct < 0.001 || equity_stop_risk_pct > 0.05)
+          return setMsg("总权益风险预算需在0.1%~5%之间");
         const atr_stop_mode =
           $("rotAtrStopMode") && $("rotAtrStopMode").value
             ? String($("rotAtrStopMode").value)
@@ -34262,15 +34677,37 @@
           !["none", "static", "trailing", "tightening"].includes(atr_stop_mode)
         )
           return setMsg("通用ATR止损模式非法");
+        if (!["none", "atr", "equity_budget"].includes(stop_scheme))
+          return setMsg("止损方案非法");
         if (!["entry", "latest"].includes(atr_stop_atr_basis))
           return setMsg("通用ATR基准非法（仅支持入场/最新）");
+        if (!["intraday", "next_day"].includes(atr_stop_execution_mode))
+          return setMsg("止损执行模式仅支持 intraday/next_day");
+        if (!["open", "close", "full_day"].includes(atr_stop_execution_time))
+          return setMsg("止损执行时点仅支持 open/close/full_day");
+        if (
+          atr_stop_execution_mode === "next_day" &&
+          atr_stop_execution_time === "full_day"
+        )
+          return setMsg("次日止损执行时点仅支持 open/close");
+        if (
+          stop_scheme === "equity_budget" &&
+          atr_stop_execution_time !== "close"
+        )
+          return setMsg("总权益风险预算止损仅支持收盘执行");
+        if (stop_scheme === "atr" && atr_stop_mode === "none")
+          return setMsg("选择ATR止损方案时，ATR止损模式不能为关闭");
         if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2)
           return setMsg("通用ATR止损周期需为>=2数字");
         if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0)
           return setMsg("通用ATR止损倍数 n 需为>0数字");
         if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0)
           return setMsg("通用ATR收紧步长 m 需为>0数字");
-        if (atr_stop_mode === "tightening" && !(atr_stop_n > atr_stop_m))
+        if (
+          stop_scheme === "atr" &&
+          atr_stop_mode === "tightening" &&
+          !(atr_stop_n > atr_stop_m)
+        )
           return setMsg("通用ATR动态收紧要求 n > m");
         const trend_filter = $("rotTrendOn").value === "true";
         const trend_exit_filter =
@@ -34683,8 +35120,12 @@
             cost_bps,
             slippage_rate,
             score_method,
+            stop_scheme,
+            equity_stop_risk_pct,
             atr_stop_mode,
             atr_stop_atr_basis,
+            atr_stop_execution_mode,
+            atr_stop_execution_time,
             atr_stop_window,
             atr_stop_n,
             atr_stop_m,
@@ -35011,73 +35452,78 @@
           shareEl.innerHTML = `<tr><td class="muted">暂无可用拆解数据</td></tr>`;
           return;
         }
-        const xs = dates.slice(0, n);
-        const _cumsum = (arr) => {
-          const out = [];
-          let s0 = 0.0;
-          for (let i = 0; i < n; i++) {
-            const v = Number(arr[i]);
-            s0 += Number.isFinite(v) ? v : 0.0;
-            out.push(s0);
-          }
-          return out;
-        };
-        Plotly.newPlot(
-          chartId,
-          [
+        if (typeof Plotly === "undefined" || !window.Plotly) {
+          chartEl.innerHTML =
+            "<div class='muted'>Plotly 未加载，收益拆解图暂不可用。</div>";
+        } else {
+          const xs = dates.slice(0, n);
+          const _cumsum = (arr) => {
+            const out = [];
+            let s0 = 0.0;
+            for (let i = 0; i < n; i++) {
+              const v = Number(arr[i]);
+              s0 += Number.isFinite(v) ? v : 0.0;
+              out.push(s0);
+            }
+            return out;
+          };
+          Plotly.newPlot(
+            chartId,
+            [
+              {
+                x: xs,
+                y: _cumsum(overnight),
+                type: "scatter",
+                mode: "lines",
+                name: "隔夜累计贡献(算术)",
+                line: { color: "rgba(31,119,180,0.90)" },
+              },
+              {
+                x: xs,
+                y: _cumsum(intraday),
+                type: "scatter",
+                mode: "lines",
+                name: "日内累计贡献(算术)",
+                line: { color: "rgba(44,160,44,0.90)" },
+              },
+              {
+                x: xs,
+                y: _cumsum(interaction),
+                type: "scatter",
+                mode: "lines",
+                name: "交互项累计贡献(算术)",
+                line: { color: "rgba(148,103,189,0.90)" },
+              },
+              {
+                x: xs,
+                y: _cumsum(cost.map((v) => -Number(v || 0))),
+                type: "scatter",
+                mode: "lines",
+                name: "成本累计拖累(算术)",
+                line: { color: "rgba(214,39,40,0.90)" },
+              },
+              {
+                x: xs,
+                y: _cumsum(net),
+                type: "scatter",
+                mode: "lines",
+                name: "净收益累计(算术)",
+                line: { color: "rgba(255,127,14,0.95)", width: 2 },
+              },
+            ],
             {
-              x: xs,
-              y: _cumsum(overnight),
-              type: "scatter",
-              mode: "lines",
-              name: "隔夜累计贡献(算术)",
-              line: { color: "rgba(31,119,180,0.90)" },
+              margin: { t: 10, b: 30 },
+              legend: { orientation: "h" },
+              yaxis: {
+                tickformat: ".1%",
+                zeroline: true,
+                zerolinecolor: "#bbb",
+                gridcolor: "#eee",
+              },
             },
-            {
-              x: xs,
-              y: _cumsum(intraday),
-              type: "scatter",
-              mode: "lines",
-              name: "日内累计贡献(算术)",
-              line: { color: "rgba(44,160,44,0.90)" },
-            },
-            {
-              x: xs,
-              y: _cumsum(interaction),
-              type: "scatter",
-              mode: "lines",
-              name: "交互项累计贡献(算术)",
-              line: { color: "rgba(148,103,189,0.90)" },
-            },
-            {
-              x: xs,
-              y: _cumsum(cost.map((v) => -Number(v || 0))),
-              type: "scatter",
-              mode: "lines",
-              name: "成本累计拖累(算术)",
-              line: { color: "rgba(214,39,40,0.90)" },
-            },
-            {
-              x: xs,
-              y: _cumsum(net),
-              type: "scatter",
-              mode: "lines",
-              name: "净收益累计(算术)",
-              line: { color: "rgba(255,127,14,0.95)", width: 2 },
-            },
-          ],
-          {
-            margin: { t: 10, b: 30 },
-            legend: { orientation: "h" },
-            yaxis: {
-              tickformat: ".1%",
-              zeroline: true,
-              zerolinecolor: "#bbb",
-              gridcolor: "#eee",
-            },
-          },
-          { responsive: true },
-        );
+            { responsive: true },
+          );
+        }
         const sm =
           dd.summary && typeof dd.summary === "object" ? dd.summary : {};
         const rows = [
@@ -36003,10 +36449,19 @@
           if ($("rotExitTrendOn") && $("rotExitTrendOn").value === "true")
             m += 1;
           if ($("rotExitBiasOn") && $("rotExitBiasOn").value === "true") m += 1;
+          const stopScheme = $("rotStopScheme")
+            ? String($("rotStopScheme").value || "none")
+                .trim()
+                .toLowerCase()
+            : "none";
           const atrStopOn =
             $("rotAtrStopMode") &&
             String($("rotAtrStopMode").value || "none") !== "none";
-          if (atrStopOn) m += 1;
+          if (
+            (stopScheme === "atr" && atrStopOn) ||
+            stopScheme === "equity_budget"
+          )
+            m += 1;
           if ($("rotRROn") && $("rotRROn").value === "true") m += 1;
           if ($("rotDDOn") && $("rotDDOn").value === "true") m += 1;
           if ($("rotMirrorOn") && $("rotMirrorOn").value === "true") m += 1;
@@ -36083,6 +36538,7 @@
           "rotExitFloorOn",
           "rotExitTrendOn",
           "rotExitBiasOn",
+          "rotStopScheme",
           "rotAtrStopMode",
           "rotRROn",
           "rotDDOn",
@@ -37933,6 +38389,14 @@
           "change",
           _syncTrendImpulseErFiltersUi,
         );
+      if ($("rotStopScheme"))
+        $("rotStopScheme").addEventListener("change", () =>
+          _syncAtrStopParamsUi("rot"),
+        );
+      if ($("rotStopExecMode"))
+        $("rotStopExecMode").addEventListener("change", () =>
+          _syncAtrStopParamsUi("rot"),
+        );
       if ($("rotAtrStopMode"))
         $("rotAtrStopMode").addEventListener("change", () =>
           _syncAtrStopParamsUi("rot"),
@@ -38500,6 +38964,32 @@
           ...(exitFloorRules || []),
         ];
         const score_method = $("rotScoreMethod").value;
+        const stop_scheme =
+          $("rotStopScheme") && $("rotStopScheme").value
+            ? String($("rotStopScheme").value)
+            : "none";
+        const atr_stop_execution_mode =
+          $("rotStopExecMode") && $("rotStopExecMode").value
+            ? String($("rotStopExecMode").value)
+            : "intraday";
+        const atr_stop_execution_time =
+          $("rotStopExecTime") && $("rotStopExecTime").value
+            ? String($("rotStopExecTime").value)
+            : "full_day";
+        let equity_stop_risk_pct = Number(
+          (
+            ($("rotEquityStopRiskPct") && $("rotEquityStopRiskPct").value) ||
+            "2.0"
+          ).trim(),
+        );
+        if (!Number.isFinite(equity_stop_risk_pct))
+          return setMsg("总权益风险预算需为数字");
+        equity_stop_risk_pct =
+          equity_stop_risk_pct > 0.1
+            ? equity_stop_risk_pct / 100.0
+            : equity_stop_risk_pct;
+        if (equity_stop_risk_pct < 0.001 || equity_stop_risk_pct > 0.05)
+          return setMsg("总权益风险预算需在0.1%~5%之间");
         const atr_stop_mode =
           $("rotAtrStopMode") && $("rotAtrStopMode").value
             ? String($("rotAtrStopMode").value)
@@ -38517,15 +39007,37 @@
           !["none", "static", "trailing", "tightening"].includes(atr_stop_mode)
         )
           return setMsg("通用ATR止损模式非法");
+        if (!["none", "atr", "equity_budget"].includes(stop_scheme))
+          return setMsg("止损方案非法");
         if (!["entry", "latest"].includes(atr_stop_atr_basis))
           return setMsg("通用ATR基准非法（仅支持入场/最新）");
+        if (!["intraday", "next_day"].includes(atr_stop_execution_mode))
+          return setMsg("止损执行模式仅支持 intraday/next_day");
+        if (!["open", "close", "full_day"].includes(atr_stop_execution_time))
+          return setMsg("止损执行时点仅支持 open/close/full_day");
+        if (
+          atr_stop_execution_mode === "next_day" &&
+          atr_stop_execution_time === "full_day"
+        )
+          return setMsg("次日止损执行时点仅支持 open/close");
+        if (
+          stop_scheme === "equity_budget" &&
+          atr_stop_execution_time !== "close"
+        )
+          return setMsg("总权益风险预算止损仅支持收盘执行");
+        if (stop_scheme === "atr" && atr_stop_mode === "none")
+          return setMsg("选择ATR止损方案时，ATR止损模式不能为关闭");
         if (!Number.isFinite(atr_stop_window) || atr_stop_window < 2)
           return setMsg("通用ATR止损周期需为>=2数字");
         if (!Number.isFinite(atr_stop_n) || atr_stop_n <= 0)
           return setMsg("通用ATR止损倍数 n 需为>0数字");
         if (!Number.isFinite(atr_stop_m) || atr_stop_m <= 0)
           return setMsg("通用ATR收紧步长 m 需为>0数字");
-        if (atr_stop_mode === "tightening" && !(atr_stop_n > atr_stop_m))
+        if (
+          stop_scheme === "atr" &&
+          atr_stop_mode === "tightening" &&
+          !(atr_stop_n > atr_stop_m)
+        )
           return setMsg("通用ATR动态收紧要求 n > m");
         const trend_filter = $("rotTrendOn").value === "true";
         const trend_exit_filter =
@@ -38897,8 +39409,12 @@
               rebalance_shift,
               exec_price,
               score_method,
+              stop_scheme,
+              equity_stop_risk_pct,
               atr_stop_mode,
               atr_stop_atr_basis,
+              atr_stop_execution_mode,
+              atr_stop_execution_time,
               atr_stop_window,
               atr_stop_n,
               atr_stop_m,

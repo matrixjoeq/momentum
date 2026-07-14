@@ -29,12 +29,62 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
     RegressionFactorSpec(
         key="CSI1000",
         label="中证1000",
-        aliases=("000852", "159845"),
+        aliases=("000852", "512100"),
     ),
     RegressionFactorSpec(
         key="CSI2000",
         label="中证2000",
-        aliases=("932000", "159533"),
+        aliases=("932000", "563300"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_CONSUMER",
+        label="中证全指可选消费",
+        aliases=("000989", "159936"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_MEDICINE",
+        label="中证全指医药",
+        aliases=("000991", "159938"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_INFORMATION",
+        label="中证全指信息",
+        aliases=("000993", "159939"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_FINANCE",
+        label="中证全指金融",
+        aliases=("000992", "159940"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_ENERGY",
+        label="中证全指能源",
+        aliases=("000986", "159945"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_MATERIAL",
+        label="中证全指材料",
+        aliases=("000987", "159944"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_300_GROWTH_INNOVATION",
+        label="300成长创新",
+        aliases=("931589", "159523"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_300_VALUE_STABILITY",
+        label="300价值稳健",
+        aliases=("931586", "159510"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_1000_GROWTH_INNOVATION",
+        label="1000成长创新",
+        aliases=("931591", "562520"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_1000_VALUE_STABILITY",
+        label="1000价值稳健",
+        aliases=("931588", "562530"),
     ),
 )
 
@@ -43,8 +93,28 @@ def nav_to_returns(nav: pd.Series) -> pd.Series:
     s = pd.to_numeric(nav, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
     if s.empty:
         return pd.Series(dtype=float)
+    idx = pd.to_datetime(s.index, errors="coerce")
+    valid = ~pd.isna(idx)
+    if not bool(np.all(valid)):
+        s = s.iloc[np.asarray(valid, dtype=bool)]
+        idx = idx[valid]
+    if s.empty:
+        return pd.Series(dtype=float)
+    dti = pd.DatetimeIndex(idx)
+    if dti.tz is not None:
+        dti = dti.tz_localize(None)
+    s.index = pd.DatetimeIndex(dti.date)
+    if not s.index.is_unique:
+        # Keep the latest observation if multiple rows map to the same trading day.
+        s = s.groupby(level=0).last()
     s = s.sort_index()
-    return s.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    return s.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def _required_days(min_samples: int, rolling_window: int | None = None) -> int:
+    if rolling_window is None:
+        return max(3, int(min_samples))
+    return max(int(min_samples), int(max(20, int(rolling_window)) // 2))
 
 
 def choose_factor_series(
@@ -52,7 +122,11 @@ def choose_factor_series(
     close_df: pd.DataFrame,
     factor_specs: list[RegressionFactorSpec],
     min_samples: int,
+    rolling_window: int | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], list[str]]:
+    required_days = _required_days(
+        min_samples=min_samples, rolling_window=rolling_window
+    )
     out_cols: dict[str, pd.Series] = {}
     used: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -67,13 +141,16 @@ def choose_factor_series(
                 .replace([np.inf, -np.inf], np.nan)
                 .dropna()
             )
-            if int(s.shape[0]) < max(3, min_samples // 2):
+            if int(s.shape[0]) < required_days:
                 continue
             chosen_code = code
             chosen = s
             break
         if chosen is None:
-            warnings.append(f"factor {spec.key} missing data in aliases={list(spec.aliases)}")
+            warnings.append(
+                f"factor {spec.key} missing enough data "
+                f"(required_days={required_days}, aliases={list(spec.aliases)})"
+            )
             continue
         out_cols[spec.key] = chosen
         used.append(
@@ -86,8 +163,48 @@ def choose_factor_series(
         )
     if not out_cols:
         return pd.DataFrame(dtype=float), used, warnings
-    out = pd.DataFrame(out_cols).sort_index()
-    return out, used, warnings
+    out_df = pd.DataFrame(out_cols).sort_index()
+    if out_df.shape[1] < 2:
+        return out_df, used, warnings
+    fac_ret = out_df.apply(nav_to_returns)
+    active_keys = [str(c) for c in fac_ret.columns]
+
+    def _common_days(keys: list[str]) -> int:
+        if not keys:
+            return 0
+        idx = fac_ret[keys[0]].index
+        for key in keys[1:]:
+            idx = idx.intersection(fac_ret[key].index)
+        return int(idx.shape[0])
+
+    current_common = _common_days(active_keys)
+    dropped: list[str] = []
+    while len(active_keys) >= 3 and current_common < required_days:
+        best_drop: str | None = None
+        best_common = current_common
+        for key in active_keys:
+            remain = [x for x in active_keys if x != key]
+            if len(remain) < 2:
+                continue
+            days = _common_days(remain)
+            if days > best_common:
+                best_common = days
+                best_drop = key
+        if best_drop is None:
+            break
+        active_keys = [x for x in active_keys if x != best_drop]
+        dropped.append(best_drop)
+        current_common = best_common
+    if dropped:
+        warnings.append(
+            "dropped factors to improve common sample window: "
+            f"{dropped}, common_days={current_common}, required_days={required_days}"
+        )
+    active_set = set(active_keys)
+    kept_cols = [c for c in out_df.columns if str(c) in active_set]
+    out_df = out_df.loc[:, kept_cols]
+    used = [x for x in used if str(x.get("key") or "") in active_set]
+    return out_df, used, warnings
 
 
 def inspect_factor_availability(
@@ -98,7 +215,9 @@ def inspect_factor_availability(
     rolling_window: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     use_threshold = max(3, int(min_samples // 2))
-    required_days = max(int(min_samples), int(max(20, rolling_window) // 2))
+    required_days = _required_days(
+        min_samples=min_samples, rolling_window=rolling_window
+    )
     items: list[dict[str, Any]] = []
     for spec in factor_specs:
         alias_samples: dict[str, int] = {}
@@ -117,7 +236,9 @@ def inspect_factor_availability(
                 selected_code = code
                 selected_samples = n
         enough = selected_code is not None and int(selected_samples) >= required_days
-        status = "ok" if enough else ("insufficient_data" if selected_code else "missing")
+        status = (
+            "ok" if enough else ("insufficient_data" if selected_code else "missing")
+        )
         items.append(
             {
                 "key": spec.key,
@@ -198,13 +319,41 @@ def classify_fund_by_regression(
     include_series: bool,
     max_series_points: int,
 ) -> dict[str, Any]:
-    ret_fund = nav_to_returns(fund_nav)
+    fund_nav_clean = (
+        pd.to_numeric(fund_nav, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
+    ret_fund = nav_to_returns(fund_nav_clean)
     fac_ret = factor_close_df.apply(nav_to_returns)
     common = ret_fund.index
     for c in fac_ret.columns:
         common = common.intersection(fac_ret[c].index)
     common = common.sort_values()
     factor_keys = [str(c) for c in fac_ret.columns]
+    required_days = max(int(min_samples), int(max(20, int(rolling_window)) // 2))
+    factor_price_days = {
+        str(c): int(
+            pd.to_numeric(factor_close_df[c], errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+            .notna()
+            .sum()
+        )
+        for c in factor_close_df.columns
+    }
+    factor_ret_days = {str(c): int(fac_ret[c].shape[0]) for c in fac_ret.columns}
+    common_start = str(common[0]) if common.shape[0] > 0 else None
+    common_end = str(common[-1]) if common.shape[0] > 0 else None
+    debug_summary = (
+        "debug:"
+        f" fund_nav_days={int(fund_nav_clean.shape[0])},"
+        f" fund_ret_days={int(ret_fund.shape[0])},"
+        f" factor_price_days={factor_price_days},"
+        f" factor_ret_days={factor_ret_days},"
+        f" common_days={int(common.shape[0])},"
+        f" required_days={int(required_days)},"
+        f" common_range=({common_start},{common_end})"
+    )
     if len(factor_keys) < 2:
         return {
             "status": "insufficient_factors",
@@ -216,10 +365,10 @@ def classify_fund_by_regression(
             "primary_asset_class": "unclassified",
             "avg_exposures": {},
             "latest_exposures": {},
-            "warnings": ["valid factor count < 2"],
+            "warnings": ["valid factor count < 2", debug_summary],
             "series": [],
         }
-    if common.shape[0] < max(int(min_samples), int(rolling_window // 2)):
+    if common.shape[0] < required_days:
         return {
             "status": "insufficient_samples",
             "sample_days": int(common.shape[0]),
@@ -231,11 +380,14 @@ def classify_fund_by_regression(
             "avg_exposures": {},
             "latest_exposures": {},
             "warnings": [
-                f"sample days={int(common.shape[0])} < min required={int(min_samples)}"
+                f"sample days={int(common.shape[0])} < required days={int(required_days)}",
+                debug_summary,
             ],
             "series": [],
         }
-    y_all = pd.to_numeric(ret_fund.reindex(common), errors="coerce").to_numpy(dtype=float)
+    y_all = pd.to_numeric(ret_fund.reindex(common), errors="coerce").to_numpy(
+        dtype=float
+    )
     x_all = (
         fac_ret.reindex(common)
         .apply(pd.to_numeric, errors="coerce")
@@ -245,9 +397,9 @@ def classify_fund_by_regression(
     min_obs = max(int(min_samples), x_all.shape[1] + 6)
     rows: list[dict[str, Any]] = []
     for i in range(win - 1, int(common.shape[0])):
-        l = i - win + 1
-        y = y_all[l : i + 1]
-        x = x_all[l : i + 1, :]
+        left_idx = i - win + 1
+        y = y_all[left_idx : i + 1]
+        x = x_all[left_idx : i + 1, :]
         valid = np.isfinite(y)
         valid &= np.all(np.isfinite(x), axis=1)
         if int(valid.sum()) < min_obs:
@@ -277,7 +429,7 @@ def classify_fund_by_regression(
             "primary_asset_class": "unclassified",
             "avg_exposures": {},
             "latest_exposures": {},
-            "warnings": ["no valid rolling regression window"],
+            "warnings": ["no valid rolling regression window", debug_summary],
             "series": [],
         }
     df = pd.DataFrame(rows)
@@ -299,7 +451,8 @@ def classify_fund_by_regression(
             df_out = df
         for _, r in df_out.iterrows():
             exp = {
-                k: float(r[k]) if np.isfinite(float(r[k])) else 0.0 for k in exposure_cols
+                k: float(r[k]) if np.isfinite(float(r[k])) else 0.0
+                for k in exposure_cols
             }
             out_series.append(
                 {

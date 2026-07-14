@@ -381,6 +381,46 @@ class OffFundRegressionFactorConfig(Base):
     )
 
 
+class OffFundResearchState(Base):
+    """
+    Shared global state for off-fund research parameter panel.
+    Single row (id=1): date range, pricing basis, sizing/rebalance controls.
+    """
+
+    __tablename__ = "off_fund_research_state"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False, default=1
+    )
+    start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="hfq")
+    risk_free_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.025)
+    inner_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="risk_parity_cov"
+    )
+    rp_window: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    rebalance_cycle: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="daily"
+    )
+    drift_rebalance_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    drift_abs_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.05
+    )
+    drift_rel_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.25
+    )
+    pair_chart_prefs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class GlobalBenchmarkPool(Base):
     """
     Global benchmark index candidate pool.

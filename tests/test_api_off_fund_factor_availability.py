@@ -50,7 +50,9 @@ def _seed_benchmark_prices(client: TestClient) -> tuple[str, str]:
     return d0.strftime("%Y%m%d"), (d0 + dt.timedelta(days=219)).strftime("%Y%m%d")
 
 
-def test_factor_availability_returns_per_factor_coverage(api_client: TestClient) -> None:
+def test_factor_availability_returns_per_factor_coverage(
+    api_client: TestClient,
+) -> None:
     start, end = _seed_benchmark_prices(api_client)
     resp = api_client.post(
         "/api/analysis/off-fund/factor-availability",
@@ -96,6 +98,6 @@ def test_factor_availability_profile_handles_empty_benchmark_data(
     assert resp.status_code == 200
     out = resp.json()
     assert out["ok"] is True
-    assert int(out["meta"]["factor_count"]) == 4
+    assert int(out["meta"]["factor_count"]) == int(len(out["items"]))
     assert int(out["meta"]["enough_factor_count"]) == 0
     assert all(str(x["status"]) == "missing" for x in out["items"])

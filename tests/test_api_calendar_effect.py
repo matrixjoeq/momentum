@@ -1,3 +1,5 @@
+import pytest
+
 from tests.helpers.rotation_case_data import (
     build_rotation_case_series,
     first_grid_metric,
@@ -6,6 +8,7 @@ from tests.helpers.rotation_case_data import (
     make_entry_filters_payload,
     make_rotation_base_payload,
     make_trend_rule,
+    post_json,
     post_json_ok,
     seed_prices,
 )
@@ -98,6 +101,171 @@ def test_api_rotation_calendar_effect(api_client):
         "information_ratio",
     ]:
         assert k in m
+
+
+def test_api_rotation_calendar_effect_accepts_equity_budget_stop_params(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240215",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation/calendar-effect",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240215",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 5,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "close",
+            "anchors": [1, 5],
+            "exec_prices": ["close"],
+        },
+    )
+    assert data["meta"]["type"] == "rotation_calendar_effect"
+    assert len(data["grid"]) == 2
+
+
+def test_api_rotation_calendar_effect_rejects_equity_budget_non_close_execution(
+    api_client,
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240215",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/calendar-effect",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240215",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 5,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "open",
+            "anchors": [1, 5],
+            "exec_prices": ["close"],
+        },
+        expected_status=422,
+    )
+    assert "equity_budget" in str(err)
+
+
+def test_api_rotation_calendar_effect_rejects_atr_scheme_with_none_mode(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240215",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/calendar-effect",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240215",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 5,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "stop_scheme": "atr",
+            "atr_stop_mode": "none",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+            "anchors": [1, 5],
+            "exec_prices": ["close"],
+        },
+        expected_status=422,
+    )
+    assert "stop_scheme=atr requires atr_stop_mode" in str(err)
+
+
+@pytest.mark.parametrize(
+    "patch,err_msg",
+    [
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "static",
+                "atr_stop_atr_basis": "oops",
+            },
+            "atr_stop_atr_basis must be one of: entry|latest",
+        ),
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "static",
+                "atr_stop_reentry_mode": "hold",
+            },
+            "atr_stop_reentry_mode must be one of: reenter|wait_next_entry",
+        ),
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "tightening",
+                "atr_stop_n": 0.5,
+                "atr_stop_m": 1.0,
+            },
+            "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening",
+        ),
+    ],
+)
+def test_api_rotation_calendar_effect_rejects_invalid_atr_aux_fields(
+    api_client, patch: dict[str, object], err_msg: str
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240215",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/calendar-effect",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240215",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 5,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+            "anchors": [1, 5],
+            "exec_prices": ["close"],
+            **patch,
+        },
+        expected_status=422,
+    )
+    assert err_msg in str(err)
 
 
 def test_api_rotation_calendar_effect_entry_param_combo_diff(api_client, engine):

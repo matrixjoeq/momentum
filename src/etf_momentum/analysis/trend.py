@@ -10549,6 +10549,7 @@ def compute_trend_portfolio_backtest(
     if int(getattr(inp, "random_hold_days", 20)) < 1:
         raise ValueError("random_hold_days must be >= 1")
 
+    untradable_codes_skipped: list[str] = []
     if data_override is not None:
         dates = data_override["dates"]
         close_qfq_raw = data_override["close_qfq"].reindex(columns=codes).reindex(dates)
@@ -10633,6 +10634,13 @@ def compute_trend_portfolio_backtest(
         close_hfq = load_close_prices(
             db, codes=codes, start=ext_start, end=inp.end, adjust="hfq"
         ).sort_index()
+        # Keep candidate-pool columns stable even when some symbols have no
+        # rows in the selected window (e.g. not listed yet). Those symbols are
+        # skipped downstream by NaN masks instead of raising KeyError.
+        close_none_raw = close_none_raw.reindex(columns=codes)
+        close_none = close_none.reindex(columns=codes)
+        close_qfq = close_qfq.reindex(columns=codes)
+        close_hfq = close_hfq.reindex(columns=codes)
         high_none = close_none.reindex(columns=codes).astype(float)
         low_none = close_none.reindex(columns=codes).astype(float)
         high_hfq = close_hfq.reindex(columns=codes).astype(float)
@@ -10640,16 +10648,12 @@ def compute_trend_portfolio_backtest(
         if close_none.empty:
             raise ValueError("no execution price data for given range (none)")
         if not bool(getattr(inp, "dynamic_universe", False)):
-            miss = [
-                c
-                for c in codes
-                if c not in close_none.columns or close_none[c].dropna().empty
+            available_for_alignment = [
+                c for c in codes if not close_none[c].dropna().empty
             ]
-            if miss:
-                raise ValueError(f"missing execution data (none) for: {miss}")
             first_valid = [
                 close_none[c].first_valid_index()
-                for c in codes
+                for c in available_for_alignment
                 if close_none[c].first_valid_index() is not None
             ]
             if not first_valid:
@@ -13946,15 +13950,26 @@ def compute_trend_portfolio_backtest(
             in_span = (nav_c.index >= first_dt) & (nav_c.index <= last_dt)
             nav_c = nav_c.where(in_span)
         else:
-            nav_c = nav_c.where(False)
+            nav_c = pd.Series(np.nan, index=nav_c.index, dtype=float)
         asset_nav_exec_series[str(c)] = [
             (None if not np.isfinite(float(v)) else float(v)) for v in nav_c.to_numpy()
         ]
+    untradable_codes_skipped = list(
+        dict.fromkeys(
+            [
+                str(c)
+                for c in codes
+                if (c not in asset_data_available.columns)
+                or (not bool(asset_data_available[c].astype(bool).any()))
+            ]
+        )
+    )
 
     return {
         "meta": {
             "type": "trend_portfolio_backtest",
             "codes": codes,
+            "untradable_codes_skipped": untradable_codes_skipped,
             "start": inp.start.strftime("%Y%m%d"),
             "end": inp.end.strftime("%Y%m%d"),
             "strategy": strat,

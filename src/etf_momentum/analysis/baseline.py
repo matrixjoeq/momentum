@@ -3549,8 +3549,6 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
     dynamic_universe = bool(getattr(inp, "dynamic_universe", False))
     corr_min_obs = max(3, int(getattr(inp, "corr_min_obs", 20) or 20))
     missing = [c for c in codes if c not in close.columns or close[c].dropna().empty]
-    if missing and (not dynamic_universe):
-        raise ValueError(f"missing data for adjust={inp.adjust}: {missing}")
     codes_eff = [c for c in codes if c in close.columns and close[c].dropna().size > 0]
     if not codes_eff:
         raise ValueError("no valid code with price data in selected range")
@@ -4704,6 +4702,7 @@ def compute_baseline(db: Session, inp: BaselineInputs) -> dict[str, Any]:
         "holding_mode": mode,
         "exec_price": ep,
         "codes": codes,
+        "untradable_codes_skipped": [str(c) for c in missing],
         "nav": {"dates": dates, "series": series},
         "nav_rsi": nav_rsi,
         "period_returns": {

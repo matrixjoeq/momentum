@@ -183,6 +183,42 @@ def test_trend_portfolio_invests_when_candidates_are_active(session_factory):
     assert any((h.get("picks") or []) for h in out["holdings"])
 
 
+@pytest.mark.parametrize("dynamic_universe", [False, True])
+def test_trend_portfolio_skips_untradable_candidates_regardless_dynamic_universe(
+    session_factory, dynamic_universe: bool
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=80, freq="B")]
+    missing_code = "159985"
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 1.0)
+            _add_price(db, code="A2", day=d, close=90 + i * 0.8)
+        db.commit()
+
+        out = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2", missing_code],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                dynamic_universe=bool(dynamic_universe),
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    skipped = list(((out.get("meta") or {}).get("untradable_codes_skipped")) or [])
+    assert missing_code in skipped
+    w_series = ((out.get("weights") or {}).get("series") or {}).get(missing_code) or []
+    assert w_series
+    assert all(float(x) == 0.0 for x in w_series)
+    for h in out.get("holdings") or []:
+        assert missing_code not in list((h or {}).get("picks") or [])
+
+
 def test_trend_portfolio_er_entry_filter_blocks_choppy_entries(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]

@@ -275,6 +275,49 @@ class OffFundNavOut(BaseModel):
     adjust: str
 
 
+class OffFundResearchStateUpdate(BaseModel):
+    start_date: str | None = Field(default=None, description="YYYYMMDD")
+    end_date: str | None = Field(default=None, description="YYYYMMDD")
+    adjust: Literal["hfq", "qfq", "none"] = Field(default="hfq")
+    rf: float = Field(default=0.025, ge=-1.0, le=1.0)
+    inner_mode: Literal["risk_parity_cov", "equal", "custom"] = Field(
+        default="risk_parity_cov"
+    )
+    rp_window: int = Field(default=60, ge=20, le=2000)
+    rebalance_cycle: Literal[
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+        "none",
+    ] = Field(default="daily")
+    drift_rebalance_enabled: bool = Field(default=True)
+    drift_abs_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
+    drift_rel_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    pair_chart_prefs_json: str | None = Field(default=None)
+
+
+class OffFundResearchStateMeta(BaseModel):
+    contract_version: str = "pair_contract_v1"
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OffFundResearchStateOut(BaseModel):
+    start_date: str | None = "20110210"
+    end_date: str | None = None
+    adjust: str = "hfq"
+    rf: float = 0.025
+    inner_mode: str = "risk_parity_cov"
+    rp_window: int = 60
+    rebalance_cycle: str = "daily"
+    drift_rebalance_enabled: bool = True
+    drift_abs_threshold: float = 0.05
+    drift_rel_threshold: float = 0.25
+    pair_chart_prefs_json: str | None = None
+    meta: OffFundResearchStateMeta = Field(default_factory=OffFundResearchStateMeta)
+
+
 class OffFundRegressionFactorRequest(BaseModel):
     key: str = Field(min_length=1, max_length=64)
     label: str | None = Field(default=None, max_length=128)
@@ -302,6 +345,13 @@ class OffFundRegressionFactorConfigOut(BaseModel):
     benchmark_profile: str
     benchmark_factors: list[OffFundRegressionFactorRequest] = Field(
         default_factory=list
+    )
+    effective_benchmark_factors: list[OffFundRegressionFactorRequest] = Field(
+        default_factory=list,
+        description=(
+            "Resolved factor list used by backend: custom factors if provided; "
+            "otherwise factors expanded from benchmark_profile."
+        ),
     )
 
 
@@ -2267,6 +2317,20 @@ class RotationBacktestRequest(BaseModel):
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
     )
+    capacity_window_years: Literal[1, 3, 5] = Field(
+        default=1,
+        description="Capacity statistics window in years: 1|3|5 (default 1 year).",
+    )
+    stop_scheme: str = Field(
+        default="none",
+        description="Stop-loss scheme: none|atr|equity_budget. Backward-compatible: when stop_scheme is omitted and atr_stop_mode!=none, stop_scheme falls back to atr.",
+    )
+    equity_stop_risk_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.05,
+        description="Per-trade initial risk budget as % of total equity for equity_budget stop scheme (0.02 = 2%).",
+    )
     atr_stop_mode: str = Field(
         default="none",
         description="Universal ATR stop mode: none|static|trailing|tightening",
@@ -2415,6 +2479,69 @@ class RotationBacktestRequest(BaseModel):
             raise ValueError(
                 "benchmark_mode must be one of: EW_REBAL|RP_REBAL|IVOL_REBAL|ALL"
             )
+        stop_scheme = (
+            str(getattr(self, "stop_scheme", "none") or "none").strip().lower()
+        )
+        if stop_scheme not in {"none", "atr", "equity_budget"}:
+            raise ValueError("stop_scheme must be one of: none|atr|equity_budget")
+        atr_mode = str(getattr(self, "atr_stop_mode", "none") or "none").strip().lower()
+        if atr_mode not in {"none", "static", "trailing", "tightening"}:
+            raise ValueError(
+                "atr_stop_mode must be one of: none|static|trailing|tightening"
+            )
+        atr_basis = str(getattr(self, "atr_stop_atr_basis", "latest") or "latest")
+        atr_basis = atr_basis.strip().lower()
+        if atr_basis not in {"entry", "latest"}:
+            raise ValueError("atr_stop_atr_basis must be one of: entry|latest")
+        atr_reentry = (
+            str(getattr(self, "atr_stop_reentry_mode", "reenter") or "reenter")
+            .strip()
+            .lower()
+        )
+        if atr_reentry not in {"reenter", "wait_next_entry"}:
+            raise ValueError(
+                "atr_stop_reentry_mode must be one of: reenter|wait_next_entry"
+            )
+        fields_set = set(getattr(self, "__pydantic_fields_set__", set()) or set())
+        stop_scheme_explicit = "stop_scheme" in fields_set
+        if (not stop_scheme_explicit) and stop_scheme == "none" and atr_mode != "none":
+            # Backward compatibility: historical clients only send atr_stop_mode.
+            self.stop_scheme = "atr"
+            stop_scheme = "atr"
+        if stop_scheme == "atr" and atr_mode == "none":
+            raise ValueError(
+                "stop_scheme=atr requires atr_stop_mode to be one of: static|trailing|tightening"
+            )
+        if (
+            stop_scheme == "atr"
+            and atr_mode == "tightening"
+            and float(getattr(self, "atr_stop_n", 0.0))
+            <= float(getattr(self, "atr_stop_m", 0.0))
+        ):
+            raise ValueError(
+                "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening"
+            )
+        _validate_overlay_execution_mode_time(
+            execution_mode=str(
+                getattr(self, "atr_stop_execution_mode", "intraday") or "intraday"
+            ),
+            execution_time=getattr(self, "atr_stop_execution_time", None),
+            mode_field="atr_stop_execution_mode",
+            time_field="atr_stop_execution_time",
+        )
+        raw_exec_time = getattr(self, "atr_stop_execution_time", None)
+        exec_time_v = (
+            None
+            if raw_exec_time is None
+            else str(raw_exec_time).strip().lower() or None
+        )
+        if stop_scheme == "equity_budget":
+            if exec_time_v is None:
+                self.atr_stop_execution_time = "close"
+            elif exec_time_v != "close":
+                raise ValueError(
+                    "equity_budget stop only supports close execution (intraday-close or next_day-close)"
+                )
         return self
 
 
@@ -2602,6 +2729,10 @@ class TrendBacktestRequest(BaseModel):
         default=0.001,
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
+    )
+    capacity_window_years: Literal[1, 3, 5] = Field(
+        default=1,
+        description="Capacity statistics window in years: 1|3|5 (default 1 year).",
     )
     exec_price: Literal["open", "close"] = Field(
         default="open",
@@ -3080,6 +3211,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default=0.001,
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
+    )
+    capacity_window_years: Literal[1, 3, 5] = Field(
+        default=1,
+        description="Capacity statistics window in years: 1|3|5 (default 1 year).",
     )
     exec_price: Literal["open", "close"] = Field(
         default="open",

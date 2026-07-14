@@ -188,6 +188,45 @@ def test_compute_baseline_dynamic_universe_uses_union_start(session_factory):
     assert vals and max(vals) >= 2 and 1 in vals
 
 
+@pytest.mark.parametrize("dynamic_universe", [False, True])
+def test_compute_baseline_skips_untradable_candidates_regardless_dynamic_universe(
+    session_factory, dynamic_universe: bool
+):
+    sf = session_factory
+    with sf() as db:
+        code_a = "AAA"
+        missing_code = "159985"
+        dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(80)]
+        for i, d in enumerate(dates):
+            db.add(
+                EtfPrice(
+                    code=code_a,
+                    trade_date=d,
+                    close=100.0 + i,
+                    source="eastmoney",
+                    adjust="qfq",
+                )
+            )
+        db.commit()
+
+        out = compute_baseline(
+            db,
+            BaselineInputs(
+                codes=[code_a, missing_code],
+                start=dates[0],
+                end=dates[-1],
+                adjust="qfq",
+                dynamic_universe=bool(dynamic_universe),
+            ),
+        )
+
+    skipped = list(out.get("untradable_codes_skipped") or [])
+    assert missing_code in skipped
+    ew_nav = list(((out.get("nav") or {}).get("series") or {}).get("EW") or [])
+    assert ew_nav
+    assert float(ew_nav[-1]) > 1.0
+
+
 def test_compute_baseline_single_asset_portfolios_track_asset_nav(session_factory):
     sf = session_factory
     with sf() as db:

@@ -1,0 +1,2 @@
+top_k,rebalance_anchor,status,elapsed_ms,sharpe_ratio,annualized_return,cumulative_return,annualized_volatility,max_drawdown,max_drawdown_recovery_days,sortino_ratio,calmar_ratio,ulcer_index,ulcer_performance_index,win_rate,payoff_ratio,kelly_fraction,error
+5,12,ok,42470,0.89584882208127,0.12387592275406623,4.3527057609290845,0.1415766262964195,-0.19416668858747776,714,1.3810680284056585,0.6379875129726823,4.993853951102712,2.4805675930252766,0.6619718309859155,2.656768481760539,0.5347390023315775,

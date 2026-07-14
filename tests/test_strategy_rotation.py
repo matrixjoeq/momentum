@@ -100,6 +100,52 @@ def test_backtest_rotation_basic_outputs(session_factory):
         assert "sells" in out["period_details"][0]
 
 
+@pytest.mark.parametrize("dynamic_universe", [False, True])
+def test_backtest_rotation_skips_untradable_candidates_regardless_dynamic_universe(
+    session_factory, dynamic_universe: bool
+):
+    sf = session_factory
+    with sf() as db:
+        codes = ["AAA", "BBB", "159985"]
+        start = dt.date(2024, 1, 1)
+        dates = [start + dt.timedelta(days=i) for i in range(60)]
+        for i, d in enumerate(dates):
+            for code, px in [("AAA", 100.0 + i), ("BBB", 90.0 + i * 0.8)]:
+                add_price_all_adjustments(
+                    db,
+                    code=code,
+                    day=d,
+                    close=float(px),
+                    open_price=float(px),
+                    high=float(px),
+                    low=float(px),
+                )
+        db.commit()
+
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=start,
+                end=dates[-1],
+                rebalance="weekly",
+                top_k=1,
+                lookback_days=10,
+                dynamic_universe=bool(dynamic_universe),
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    skipped = list(out.get("untradable_codes_skipped") or [])
+    assert "159985" in skipped
+    w_series = ((out.get("weights") or {}).get("series") or {}).get("159985") or []
+    assert w_series
+    assert all(float(x) == 0.0 for x in w_series)
+    for one in out.get("period_details") or []:
+        assert "159985" not in list((one or {}).get("picks") or [])
+
+
 def test_rotation_close_exec_uses_forward_corp_action_fallback(session_factory):
     sf = session_factory
     with sf() as db:
@@ -973,6 +1019,40 @@ def test_rotation_topk_larger_than_pool_still_runs(session_factory):
     assert nav and float(nav[-1]) > 0.0
 
 
+def test_rotation_atr_scheme_requires_non_none_mode(session_factory):
+    sf = session_factory
+    start = dt.date(2024, 1, 1)
+    dates = [start]
+    with sf() as db:
+        add_price_all_adjustments(
+            db,
+            code="AAA",
+            day=dates[0],
+            close=100.0,
+            open_price=100.0,
+            high=100.0,
+            low=100.0,
+        )
+        db.commit()
+        with pytest.raises(ValueError, match="stop_scheme=atr requires atr_stop_mode"):
+            backtest_rotation(
+                db,
+                RotationInputs(
+                    codes=["AAA"],
+                    start=dates[0],
+                    end=dates[0],
+                    rebalance="daily",
+                    top_k=1,
+                    lookback_days=1,
+                    skip_days=0,
+                    cost_bps=0.0,
+                    slippage_rate=0.0,
+                    stop_scheme="atr",
+                    atr_stop_mode="none",
+                ),
+            )
+
+
 def test_rotation_floating_topk_selects_positive_excess_assets(session_factory):
     sf = session_factory
     start = dt.date(2024, 1, 1)
@@ -1142,3 +1222,208 @@ def test_rotation_event_study_counts_membership_switches(session_factory):
         )
     ev = out.get("event_study", {})
     assert int(ev.get("entry_count", 0)) >= 4
+
+
+def test_rotation_atr_stop_exits_only_triggered_asset(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["STOPA", "STOPB"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+        for i, d in enumerate(dates):
+            pa = 100.0 + i * 0.8
+            if i >= 36:
+                pa = 68.0 + (i - 36) * 0.05
+            pb = 100.0 + i * 0.25
+            add_price_all_adjustments(
+                db,
+                code="STOPA",
+                day=d,
+                close=float(pa),
+                open_price=float(pa),
+                high=float(pa),
+                low=float(pa),
+            )
+            add_price_all_adjustments(
+                db,
+                code="STOPB",
+                day=d,
+                close=float(pb),
+                open_price=float(pb),
+                high=float(pb),
+                low=float(pb),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="atr",
+                atr_stop_mode="static",
+                atr_stop_execution_mode="intraday",
+                atr_stop_execution_time="close",
+                atr_stop_window=5,
+                atr_stop_n=1.0,
+                atr_stop_m=0.5,
+            ),
+        )
+    wa = [
+        float(x)
+        for x in ((out.get("weights") or {}).get("series") or {}).get("STOPA", [])
+    ]
+    wb = [
+        float(x)
+        for x in ((out.get("weights") or {}).get("series") or {}).get("STOPB", [])
+    ]
+    assert wa and wb and len(wa) == len(wb)
+    assert any((a <= 1e-12) and (b > 1e-12) for a, b in zip(wa, wb))
+    atr_events = []
+    for p in out.get("holdings") or []:
+        atr_meta = (p or {}).get("atr_stop") or {}
+        atr_events.extend(list(atr_meta.get("events") or []))
+    assert any(str((e or {}).get("code") or "") == "STOPA" for e in atr_events)
+
+
+def test_rotation_equity_budget_stop_exits_only_triggered_asset(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["EQA", "EQB"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+        for i, d in enumerate(dates):
+            pa = 100.0 + i * 0.7
+            if i >= 34:
+                pa = 70.0 + (i - 34) * 0.08
+            pb = 100.0 + i * 0.22
+            add_price_all_adjustments(
+                db,
+                code="EQA",
+                day=d,
+                close=float(pa),
+                open_price=float(pa),
+                high=float(pa),
+                low=float(pa),
+            )
+            add_price_all_adjustments(
+                db,
+                code="EQB",
+                day=d,
+                close=float(pb),
+                open_price=float(pb),
+                high=float(pb),
+                low=float(pb),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="equity_budget",
+                equity_stop_risk_pct=0.02,
+                atr_stop_execution_mode="intraday",
+                atr_stop_execution_time="close",
+                atr_stop_mode="none",
+            ),
+        )
+    wa = [
+        float(x)
+        for x in ((out.get("weights") or {}).get("series") or {}).get("EQA", [])
+    ]
+    wb = [
+        float(x)
+        for x in ((out.get("weights") or {}).get("series") or {}).get("EQB", [])
+    ]
+    assert wa and wb and len(wa) == len(wb)
+    assert any((a <= 1e-12) and (b > 1e-12) for a, b in zip(wa, wb))
+    eq_events = []
+    for p in out.get("holdings") or []:
+        atr_meta = (p or {}).get("atr_stop") or {}
+        eq_events.extend(list(atr_meta.get("events") or []))
+    assert any(str((e or {}).get("code") or "") == "EQA" for e in eq_events)
+
+
+def test_rotation_equity_budget_next_day_close_exec_delays_exit(session_factory):
+    sf = session_factory
+    with sf() as db:
+        codes = ["EQN_A", "EQN_B"]
+        dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+        for i, d in enumerate(dates):
+            pa = 100.0 + i * 0.7
+            if i >= 34:
+                pa = 69.0 + (i - 34) * 0.08
+            pb = 100.0 + i * 0.20
+            add_price_all_adjustments(
+                db,
+                code="EQN_A",
+                day=d,
+                close=float(pa),
+                open_price=float(pa),
+                high=float(pa),
+                low=float(pa),
+            )
+            add_price_all_adjustments(
+                db,
+                code="EQN_B",
+                day=d,
+                close=float(pb),
+                open_price=float(pb),
+                high=float(pb),
+                low=float(pb),
+            )
+        db.commit()
+        out = backtest_rotation(
+            db,
+            RotationInputs(
+                codes=codes,
+                start=dates[0],
+                end=dates[-1],
+                rebalance="weekly",
+                rebalance_anchor=1,
+                rebalance_shift="prev",
+                exec_price="close",
+                top_k=2,
+                lookback_days=5,
+                skip_days=0,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                stop_scheme="equity_budget",
+                equity_stop_risk_pct=0.02,
+                atr_stop_execution_mode="next_day",
+                atr_stop_execution_time="close",
+                atr_stop_mode="none",
+            ),
+        )
+    events = []
+    for p in out.get("holdings") or []:
+        atr_meta = (p or {}).get("atr_stop") or {}
+        events.extend([e for e in (atr_meta.get("events") or []) if e])
+    target = next(
+        (e for e in events if str(e.get("code") or "") == "EQN_A"),
+        None,
+    )
+    assert target is not None
+    trigger_date = str(target.get("trigger_date") or "")
+    execution_date = str(target.get("execution_date") or "")
+    assert execution_date and execution_date > trigger_date
+    assert str(target.get("execution_mode") or "") == "next_day"
+    assert str(target.get("execution_time") or "") == "close"

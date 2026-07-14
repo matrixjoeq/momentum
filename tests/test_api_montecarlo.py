@@ -1,3 +1,5 @@
+import pytest
+
 from tests.helpers.rotation_case_data import (
     build_rotation_case_series,
     make_bias_rule,
@@ -6,6 +8,7 @@ from tests.helpers.rotation_case_data import (
     make_rotation_base_payload,
     make_trend_rule,
     mc_metric_mean,
+    post_json,
     post_json_ok,
     seed_prices,
 )
@@ -81,6 +84,184 @@ def test_api_rotation_montecarlo_smoke(api_client):
     assert data["meta"]["type"] == "rotation"
     assert "mc" in data and "strategy" in data["mc"] and "excess" in data["mc"]
     assert "annualized_return" in data["mc"]["strategy"]["metrics"]
+
+
+def test_api_rotation_montecarlo_accepts_equity_budget_stop_params(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240101",
+        end_date="20241231",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation/montecarlo",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240101",
+            "end": "20241231",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 20,
+            "skip_days": 0,
+            "risk_off": False,
+            "risk_free_rate": 0.02,
+            "cost_bps": 0.0,
+            "n_sims": 100,
+            "block_size": 5,
+            "seed": 11,
+            "sample_window_days": 2,
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "close",
+        },
+    )
+    assert data["meta"]["type"] == "rotation"
+
+
+def test_api_rotation_montecarlo_rejects_equity_budget_non_close_execution(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240101",
+        end_date="20241231",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/montecarlo",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240101",
+            "end": "20241231",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 20,
+            "skip_days": 0,
+            "risk_off": False,
+            "risk_free_rate": 0.02,
+            "cost_bps": 0.0,
+            "n_sims": 100,
+            "block_size": 5,
+            "seed": 11,
+            "sample_window_days": 2,
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "open",
+        },
+        expected_status=422,
+    )
+    assert "equity_budget" in str(err)
+
+
+def test_api_rotation_montecarlo_rejects_atr_scheme_with_none_mode(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240101",
+        end_date="20241231",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/montecarlo",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240101",
+            "end": "20241231",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 20,
+            "skip_days": 0,
+            "risk_off": False,
+            "risk_free_rate": 0.02,
+            "cost_bps": 0.0,
+            "n_sims": 100,
+            "block_size": 5,
+            "seed": 11,
+            "sample_window_days": 2,
+            "stop_scheme": "atr",
+            "atr_stop_mode": "none",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "stop_scheme=atr requires atr_stop_mode" in str(err)
+
+
+@pytest.mark.parametrize(
+    "patch,err_msg",
+    [
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "static",
+                "atr_stop_atr_basis": "oops",
+            },
+            "atr_stop_atr_basis must be one of: entry|latest",
+        ),
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "static",
+                "atr_stop_reentry_mode": "hold",
+            },
+            "atr_stop_reentry_mode must be one of: reenter|wait_next_entry",
+        ),
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "tightening",
+                "atr_stop_n": 0.5,
+                "atr_stop_m": 1.0,
+            },
+            "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening",
+        ),
+    ],
+)
+def test_api_rotation_montecarlo_rejects_invalid_atr_aux_fields(
+    api_client, patch: dict[str, object], err_msg: str
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240101",
+        end_date="20241231",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/montecarlo",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240101",
+            "end": "20241231",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 20,
+            "skip_days": 0,
+            "risk_off": False,
+            "risk_free_rate": 0.02,
+            "cost_bps": 0.0,
+            "n_sims": 100,
+            "block_size": 5,
+            "seed": 11,
+            "sample_window_days": 2,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+            **patch,
+        },
+        expected_status=422,
+    )
+    assert err_msg in str(err)
 
 
 def test_api_rotation_montecarlo_entry_param_combo_diff(api_client, engine):

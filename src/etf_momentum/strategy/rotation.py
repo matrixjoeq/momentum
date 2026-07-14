@@ -134,6 +134,13 @@ class RotationInputs:
     chop_er_threshold: float = 0.25  # ER < threshold => choppy => exclude
     chop_adx_window: int = 20
     chop_adx_threshold: float = 20.0  # ADX < threshold => choppy => exclude
+    # --- Stop-loss scheme ---
+    # none | atr | equity_budget
+    stop_scheme: str = "none"
+    # Whether stop_scheme was explicitly provided by caller (used for compatibility fallback).
+    stop_scheme_explicit: bool = False
+    # For stop_scheme=equity_budget: per-trade initial risk budget as % of total equity.
+    equity_stop_risk_pct: float = 0.02
     # --- Universal ATR stop-loss (qfq price basis; aligned with trend research) ---
     # none | static | trailing | tightening
     atr_stop_mode: str = "none"
@@ -141,6 +148,8 @@ class RotationInputs:
     atr_stop_reentry_mode: str = (
         "reenter"  # reenter | wait_next_entry (reserved for parity with trend)
     )
+    atr_stop_execution_mode: str = "intraday"  # intraday | next_day
+    atr_stop_execution_time: str | None = None  # open|close|full_day
     atr_stop_window: int = 14
     atr_stop_n: float = 2.0
     atr_stop_m: float = 0.5
@@ -1633,11 +1642,29 @@ def backtest_rotation(
             raise ValueError("chop_adx_threshold must be finite")
         if float(inp.chop_adx_threshold) <= 0:
             raise ValueError("chop_adx_threshold must be > 0")
+    stop_scheme = str(getattr(inp, "stop_scheme", "none") or "none").strip().lower()
+    if stop_scheme not in {"none", "atr", "equity_budget"}:
+        raise ValueError("stop_scheme must be one of: none|atr|equity_budget")
     atr_stop_mode = (inp.atr_stop_mode or "none").strip().lower()
     if atr_stop_mode not in {"none", "static", "trailing", "tightening"}:
         raise ValueError(
             "atr_stop_mode must be one of: none|static|trailing|tightening"
         )
+    stop_scheme_explicit = bool(getattr(inp, "stop_scheme_explicit", False))
+    if (not stop_scheme_explicit) and stop_scheme == "none" and atr_stop_mode != "none":
+        # Backward compatibility for legacy payloads without stop_scheme.
+        stop_scheme = "atr"
+    if stop_scheme == "atr" and atr_stop_mode == "none":
+        raise ValueError(
+            "stop_scheme=atr requires atr_stop_mode to be one of: static|trailing|tightening"
+        )
+    equity_stop_risk_pct = float(getattr(inp, "equity_stop_risk_pct", 0.02) or 0.02)
+    if (
+        not np.isfinite(equity_stop_risk_pct)
+        or float(equity_stop_risk_pct) < 0.001
+        or float(equity_stop_risk_pct) > 0.05
+    ):
+        raise ValueError("equity_stop_risk_pct must be within [0.001,0.05]")
     atr_stop_atr_basis = (inp.atr_stop_atr_basis or "latest").strip().lower()
     if atr_stop_atr_basis not in {"entry", "latest"}:
         raise ValueError("atr_stop_atr_basis must be one of: entry|latest")
@@ -1657,6 +1684,25 @@ def backtest_rotation(
     if atr_stop_mode == "tightening" and float(inp.atr_stop_n) <= float(inp.atr_stop_m):
         raise ValueError(
             "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening"
+        )
+    atr_stop_execution_mode = (
+        str(getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    raw_atr_stop_execution_time = getattr(inp, "atr_stop_execution_time", None)
+    if stop_scheme == "equity_budget" and raw_atr_stop_execution_time is None:
+        raw_atr_stop_execution_time = "close"
+    atr_stop_execution_time = _trend_semantic_helpers._resolve_stop_execution_time(
+        execution_mode=atr_stop_execution_mode,
+        execution_time=raw_atr_stop_execution_time,
+        exec_price=str(inp.exec_price or "open"),
+        mode_field="atr_stop_execution_mode",
+        time_field="atr_stop_execution_time",
+    )
+    if stop_scheme == "equity_budget" and str(atr_stop_execution_time) != "close":
+        raise ValueError(
+            "equity_budget stop only supports close execution (intraday-close or next_day-close)"
         )
     atr_stop_exec_mode = {
         "none": "none",
@@ -1967,6 +2013,7 @@ def backtest_rotation(
         )
         or (pos_mode == "risk_budget")
         or (pos_mode == "inverse_vol")
+        or (stop_scheme == "atr" and atr_stop_mode != "none")
     )
     high_qfq, low_qfq = (
         _load_high_low_prices(
@@ -1978,6 +2025,15 @@ def backtest_rotation(
     close_none = _load_close_prices(
         db, codes=codes, start=calc_start, end=inp.end, adjust="none"
     )
+    # Keep candidate-pool columns stable even when some symbols have no rows
+    # in the selected window (e.g. not listed yet) to avoid KeyError on
+    # column access; such symbols are skipped by availability masks.
+    close_hfq = close_hfq.reindex(columns=codes)
+    close_qfq = close_qfq.reindex(columns=codes)
+    close_none = close_none.reindex(columns=codes)
+    if need_qfq_hl:
+        high_qfq = high_qfq.reindex(columns=codes)
+        low_qfq = low_qfq.reindex(columns=codes)
     if close_none.empty:
         raise ValueError("no execution price data for given range (none)")
 
@@ -2058,6 +2114,7 @@ def backtest_rotation(
     # Return decomposition needs open/close legs for all execution modes.
     need_hfq_ohlc = True
     need_none_ohlc = True
+    need_qfq_ohlc = bool(stop_scheme == "atr" and atr_stop_mode != "none")
     ohlc_hfq = (
         _load_ohlc_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="hfq")
         if need_hfq_ohlc
@@ -2071,6 +2128,16 @@ def backtest_rotation(
     ohlc_none = (
         _load_ohlc_prices(db, codes=codes, start=inp.start, end=inp.end, adjust="none")
         if need_none_ohlc
+        else {
+            "open": pd.DataFrame(),
+            "high": pd.DataFrame(),
+            "low": pd.DataFrame(),
+            "close": pd.DataFrame(),
+        }
+    )
+    ohlc_qfq = (
+        _load_ohlc_prices(db, codes=codes, start=ext_start, end=inp.end, adjust="qfq")
+        if need_qfq_ohlc
         else {
             "open": pd.DataFrame(),
             "high": pd.DataFrame(),
@@ -2114,32 +2181,53 @@ def backtest_rotation(
     if need_none_ohlc:
         for k in ["open", "high", "low", "close"]:
             ohlc_none[k] = ohlc_none[k].sort_index().reindex(dates).ffill()
+    if need_qfq_ohlc:
+        for k in ["open", "high", "low", "close"]:
+            ohlc_qfq[k] = (
+                ohlc_qfq[k]
+                .sort_index()
+                .reindex(dates)
+                .reindex(columns=list(dict.fromkeys(codes)))
+                .ffill()
+            )
     if need_qfq and not close_qfq.empty:
-        close_qfq = close_qfq.sort_index().reindex(dates).ffill()
+        close_qfq = (
+            close_qfq.sort_index()
+            .reindex(dates)
+            .reindex(columns=list(dict.fromkeys(codes)))
+            .ffill()
+        )
     if need_qfq_hl:
-        high_qfq = high_qfq.sort_index().reindex(dates).ffill()
-        low_qfq = low_qfq.sort_index().reindex(dates).ffill()
+        high_qfq = (
+            high_qfq.sort_index()
+            .reindex(dates)
+            .reindex(columns=list(dict.fromkeys(codes)))
+            .ffill()
+        )
+        low_qfq = (
+            low_qfq.sort_index()
+            .reindex(dates)
+            .reindex(columns=list(dict.fromkeys(codes)))
+            .ffill()
+        )
 
-    # Require each selected code has data (legacy mode only).
+    # Symbols with no tradable/signal data are skipped regardless of
+    # dynamic-universe mode.
     miss_exec = [
         c for c in codes if c not in close_none.columns or close_none[c].dropna().empty
     ]
-    if miss_exec and (not bool(getattr(inp, "dynamic_universe", False))):
-        raise ValueError(f"missing execution data (none) for: {miss_exec}")
     miss_sig = [
         c for c in codes if c not in close_qfq.columns or close_qfq[c].dropna().empty
     ]
-    if miss_sig and (not bool(getattr(inp, "dynamic_universe", False))):
-        raise ValueError(f"missing signal data (qfq) for: {miss_sig}")
     # qfq is required for both signal and technical-analysis features
+    miss_ta: list[str] = []
     if need_qfq:
         miss_ta = [
             c
             for c in codes
             if c not in close_qfq.columns or close_qfq[c].dropna().empty
         ]
-        if miss_ta and (not bool(getattr(inp, "dynamic_universe", False))):
-            raise ValueError(f"missing technical-analysis data (qfq) for: {miss_ta}")
+    miss_hl: list[str] = []
     if need_qfq_hl:
         miss_hi = [
             c for c in codes if c not in high_qfq.columns or high_qfq[c].dropna().empty
@@ -2148,10 +2236,17 @@ def backtest_rotation(
             c for c in codes if c not in low_qfq.columns or low_qfq[c].dropna().empty
         ]
         miss_hl = sorted(set(miss_hi + miss_lo))
-        if miss_hl and (not bool(getattr(inp, "dynamic_universe", False))):
-            raise ValueError(
-                f"missing technical-analysis high/low data (qfq) for: {miss_hl}"
-            )
+    untradable_codes_skipped = list(
+        dict.fromkeys(
+            [
+                str(c)
+                for c in (
+                    list(miss_exec) + list(miss_sig) + list(miss_ta) + list(miss_hl)
+                )
+                if str(c).strip()
+            ]
+        )
+    )
 
     raw_mom_scores = _momentum_scores(
         close_qfq[rank_codes], lookback_days=inp.lookback_days, skip_days=inp.skip_days
@@ -2635,7 +2730,7 @@ def backtest_rotation(
     prev_picks_key: tuple[str, ...] | None = None
     prev_segment_stopped_out: bool = False
     # ATR from qfq H/L/C (classic TR-based ATR); aligned to execution calendar.
-    atr_style_mode = atr_stop_exec_mode in {
+    atr_style_mode = (stop_scheme == "atr") and atr_stop_exec_mode in {
         "atr_stop_static",
         "atr_stop_trailing",
         "atr_stop_tightening",
@@ -3165,8 +3260,12 @@ def backtest_rotation(
 
         # Universal ATR stop-loss metadata.
         atr_stop: dict[str, Any] = {
+            "scheme": str(stop_scheme),
             "mode": atr_stop_mode,
             "atr_stop_atr_basis": atr_stop_atr_basis,
+            "execution_mode": str(atr_stop_execution_mode),
+            "execution_time": str(atr_stop_execution_time),
+            "equity_stop_risk_pct": float(equity_stop_risk_pct),
         }
         stop_trigger_date: str | None = None
         stop_triggered = False
@@ -4502,82 +4601,175 @@ def backtest_rotation(
             # weights already copied from previous day; compute exposure for reporting
             exposure = float(w.iloc[start_i].sum()) if start_i < len(dates) else 0.0
 
-        # Compute ATR stop-loss metadata AFTER final picks are fixed.
-        # IMPORTANT: stop-loss uses qfq close for both stop level and trigger.
-        if (
-            atr_stop_exec_mode
-            in {"atr_stop_static", "atr_stop_trailing", "atr_stop_tightening"}
-            and (not dd_in_sleep)
-            and risk_picks
-        ):
-            atr_stop["atr_window_used"] = int(w_atr) if w_atr is not None else None
-            atr_stop["atr_stop_n"] = float(inp.atr_stop_n)
-            atr_stop["atr_stop_m"] = float(inp.atr_stop_m)
-            atr_stop["atr_stop_min_distance_mult"] = float(inp.atr_stop_m)
-            atr_stop["atr_stop_mode"] = str(atr_stop_mode)
-            atr_stop["atr_stop_atr_basis"] = str(atr_stop_atr_basis)
-
-        # In-segment ATR stop-loss check (after weights are written for the segment).
-        # We approximate execution as: hold through close on trigger day, then go cash from next trading day.
-        if (
-            atr_stop_exec_mode
-            in {"atr_stop_static", "atr_stop_trailing", "atr_stop_tightening"}
-            and risk_picks
-        ):
+        stop_enabled = bool(
+            (stop_scheme == "atr" and atr_stop_exec_mode != "none")
+            or (stop_scheme == "equity_budget")
+        )
+        if stop_enabled and (not dd_in_sleep) and risk_picks:
             seg_dates = dates[start_i : end_i + 1]
-            # Build/initialize per-asset state at segment start.
-            # We maintain a trailing stop that never decreases.
+            stop_codes = [str(c) for c in risk_picks if str(c) in rank_codes]
             entry_px: dict[str, float] = {}
             entry_atr: dict[str, float] = {}
             prev_close: dict[str, float] = {}
             stop: dict[str, float] = {}
+            events: list[dict[str, Any]] = []
             atr_n = float(inp.atr_stop_n)
             atr_m = float(inp.atr_stop_m)
             atr_min = float(inp.atr_stop_m)
-            for c in risk_picks:
+
+            equity_at_entry = 1.0
+            if stop_scheme == "equity_budget":
+                _advance_nav_to(int(di))
+                equity_at_entry = float(nav_running.iloc[int(di)])
+                if (not np.isfinite(equity_at_entry)) or equity_at_entry <= 0.0:
+                    equity_at_entry = 1.0
+
+            for c in stop_codes:
                 try:
                     p0 = float(close_qfq.loc[seg_dates[0], c])
-                    a0 = float(atr.loc[seg_dates[0], c])
-                except (KeyError, TypeError, ValueError):  # pragma: no cover
+                except (KeyError, TypeError, ValueError):
                     continue
-                if not (np.isfinite(p0) and np.isfinite(a0) and a0 > 0):
+                if (not np.isfinite(p0)) or p0 <= 0.0:
                     continue
-                entry_px[c] = p0
-                entry_atr[c] = a0
-                prev_close[c] = p0
-                stop[c] = p0 - float(atr_n) * a0
+                wt0 = (
+                    float(w.loc[seg_dates[0], c])
+                    if (c in w.columns and seg_dates[0] in w.index)
+                    else 0.0
+                )
+                if (not np.isfinite(wt0)) or wt0 <= 1e-12:
+                    continue
+                entry_px[c] = float(p0)
+                prev_close[c] = float(p0)
+                if stop_scheme == "atr":
+                    try:
+                        a0 = float(atr.loc[seg_dates[0], c])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if not (np.isfinite(a0) and a0 > 0.0):
+                        continue
+                    entry_atr[c] = float(a0)
+                    stop[c] = float(p0 - float(atr_n) * float(a0))
+                else:
+                    risk_abs = float(equity_at_entry) * float(equity_stop_risk_pct)
+                    notional = float(equity_at_entry) * float(wt0)
+                    if notional <= 1e-12:
+                        continue
+                    dist_pct = float(risk_abs / max(notional, 1e-12))
+                    dist_pct = float(min(max(dist_pct, 0.0), 0.9999))
+                    stop[c] = float(p0 * (1.0 - dist_pct))
+
+            if stop_scheme == "atr":
+                atr_stop["atr_window_used"] = int(w_atr) if w_atr is not None else None
+                atr_stop["atr_stop_n"] = float(inp.atr_stop_n)
+                atr_stop["atr_stop_m"] = float(inp.atr_stop_m)
+                atr_stop["atr_stop_min_distance_mult"] = float(inp.atr_stop_m)
+                atr_stop["atr_stop_mode"] = str(atr_stop_mode)
+                atr_stop["atr_stop_atr_basis"] = str(atr_stop_atr_basis)
             atr_stop["entry_price_by_code"] = {k: float(v) for k, v in entry_px.items()}
             atr_stop["initial_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+            if stop_scheme == "equity_budget":
+                atr_stop["equity_at_entry"] = float(equity_at_entry)
 
-            trig_idx: int | None = None
-            trig_code: str | None = None
-            # Iterate days: first check trigger vs previous stop, then update stop for next day.
+            open_qfq_stop = (
+                ohlc_qfq.get("open", pd.DataFrame())
+                if isinstance(ohlc_qfq, dict)
+                else pd.DataFrame()
+            )
+            low_qfq_stop = (
+                ohlc_qfq.get("low", pd.DataFrame())
+                if isinstance(ohlc_qfq, dict)
+                else pd.DataFrame()
+            )
+            stopped_codes: set[str] = set()
+
             for j, day in enumerate(seg_dates):
-                # 1) check trigger
-                for c in risk_picks:
-                    if c not in stop:
+                # 1) trigger check for each held code (single-asset stop-out).
+                for c in stop_codes:
+                    if c in stopped_codes or c not in stop:
+                        continue
+                    wt_now = (
+                        float(w.loc[day, c])
+                        if (c in w.columns and day in w.index)
+                        else 0.0
+                    )
+                    if (not np.isfinite(wt_now)) or wt_now <= 1e-12:
                         continue
                     try:
-                        px = float(close_qfq.loc[day, c])
-                    except (KeyError, TypeError, ValueError):  # pragma: no cover
+                        px_close = float(close_qfq.loc[day, c])
+                    except (KeyError, TypeError, ValueError):
                         continue
-                    if np.isfinite(px) and px < float(stop[c]):
-                        trig_idx = j
-                        trig_code = c
-                        break
-                if trig_idx is not None:
-                    break
+                    if not np.isfinite(px_close):
+                        continue
+                    px_open = px_close
+                    try:
+                        if c in open_qfq_stop.columns and day in open_qfq_stop.index:
+                            px_open = float(open_qfq_stop.loc[day, c])
+                    except (KeyError, TypeError, ValueError):
+                        px_open = px_close
+                    if not np.isfinite(px_open):
+                        px_open = px_close
+                    px_low = px_close
+                    try:
+                        if c in low_qfq_stop.columns and day in low_qfq_stop.index:
+                            px_low = float(low_qfq_stop.loc[day, c])
+                    except (KeyError, TypeError, ValueError):
+                        px_low = px_close
+                    if not np.isfinite(px_low):
+                        px_low = px_close
 
-                # 2) update stop using today's close and today's ATR (for next day)
-                for c in risk_picks:
-                    if c not in stop:
+                    stop_px = float(stop[c])
+                    triggered = False
+                    trigger_px = px_close
+                    exec_time_now = str(atr_stop_execution_time or "close")
+                    if stop_scheme == "equity_budget":
+                        exec_time_now = "close"
+                    if exec_time_now == "open":
+                        triggered = bool(px_open < stop_px)
+                        trigger_px = float(px_open)
+                    elif exec_time_now == "full_day":
+                        triggered = bool(px_low < stop_px)
+                        trigger_px = float(px_low)
+                    else:
+                        triggered = bool(px_close < stop_px)
+                        trigger_px = float(px_close)
+                    if not triggered:
+                        continue
+
+                    exec_offset = 1 if str(atr_stop_execution_mode) == "next_day" else 0
+                    exec_abs_idx = int(start_i) + int(j) + int(exec_offset)
+                    execution_date = None
+                    if exec_abs_idx < len(dates):
+                        execution_date = dates[exec_abs_idx].date().isoformat()
+                        if exec_abs_idx <= int(end_i):
+                            w.loc[dates[exec_abs_idx] : dates[end_i], c] = 0.0
+                    ev = {
+                        "scheme": str(stop_scheme),
+                        "code": str(c),
+                        "trigger_date": day.date().isoformat(),
+                        "execution_date": execution_date,
+                        "execution_mode": str(atr_stop_execution_mode),
+                        "execution_time": str(exec_time_now),
+                        "trigger_price": float(trigger_px),
+                        "stop_price": float(stop_px),
+                    }
+                    events.append(ev)
+                    stopped_codes.add(str(c))
+                    stop_triggered = True
+                    if stop_trigger_date is None:
+                        stop_trigger_date = day.date().isoformat()
+
+                # 2) update ATR stop for next day (equity_budget stop is static by design).
+                if stop_scheme != "atr":
+                    continue
+                for c in stop_codes:
+                    if c in stopped_codes or c not in stop:
                         continue
                     try:
                         px = float(close_qfq.loc[day, c])
                         a = float(atr.loc[day, c])
-                    except (KeyError, TypeError, ValueError):  # pragma: no cover
+                    except (KeyError, TypeError, ValueError):
                         continue
-                    if not (np.isfinite(px) and np.isfinite(a) and a > 0):
+                    if not (np.isfinite(px) and np.isfinite(a) and a > 0.0):
                         continue
 
                     should_update = True
@@ -4590,7 +4782,6 @@ def backtest_rotation(
                         pc = float(prev_close.get(c, px))
                         should_update = bool((px > ep) or (px > pc))
                     else:
-                        # Tightening ATR basis: entry or latest, based on atr_stop_atr_basis.
                         ep = float(entry_px.get(c, px))
                         a_ref = (
                             float(entry_atr.get(c, a))
@@ -4615,21 +4806,19 @@ def backtest_rotation(
                             else float(a)
                         )
                         cand = px - dist_mult * a_ref
-                        # stop never decreases
                         stop[c] = float(max(float(stop[c]), float(cand)))
-                    prev_close[c] = px
+                    prev_close[c] = float(px)
 
-            if trig_idx is not None:
-                stop_triggered = True
-                stop_trigger_date = seg_dates[trig_idx].date().isoformat()
-                atr_stop["triggered"] = True
-                atr_stop["trigger_date"] = stop_trigger_date
-                atr_stop["trigger_code"] = trig_code
-                if trig_idx + 1 < len(seg_dates):
-                    w.loc[seg_dates[trig_idx + 1] : seg_dates[-1], :] = 0.0
-            else:
-                atr_stop["triggered"] = False
+            atr_stop["triggered"] = bool(events)
+            atr_stop["trigger_date"] = stop_trigger_date
+            atr_stop["trigger_code"] = (
+                str(events[0]["code"]) if events else None
+            )  # backward-compatible summary
+            atr_stop["events"] = events
             atr_stop["final_stop_by_code"] = {k: float(v) for k, v in stop.items()}
+        else:
+            atr_stop["triggered"] = False
+            atr_stop["events"] = []
 
         # Daily close decision for exit controls; execute next trading day.
         use_trend_exit = bool(inp.trend_exit_filter)
@@ -4936,20 +5125,23 @@ def backtest_rotation(
             if daily_exit_meta["events"]:
                 daily_exit_meta["triggered"] = True
 
-        # Carry forward for next rebalance decision (risk holdings only; stop-out means "cash" next decision).
-        prev_picks_key = (
-            tuple(sorted([p for p in (risk_picks or []) if p in rank_codes]))
-            if risk_picks
-            else None
+        # Carry forward based on actual segment-end holdings (after stop/exit adjustments).
+        segment_end_risk_key = tuple(
+            sorted(
+                [str(c) for c in rank_codes if float(w.loc[dates[end_i], c]) > 1e-12]
+            )
         )
-        prev_segment_stopped_out = bool(stop_triggered)
+        prev_picks_key = segment_end_risk_key if segment_end_risk_key else None
+        prev_segment_stopped_out = bool(
+            stop_triggered and (len(segment_end_risk_key) == 0) and bool(risk_picks)
+        )
 
         # Update last-change marker for inertia min-hold.
         if inertia_enabled and (not dd_in_sleep):
             cur_key = tuple(
                 sorted([c for c in rank_codes if float(prev_w_row.get(c, 0.0)) > 1e-12])
             )
-            new_key = tuple(sorted([c for c in (risk_picks or []) if c in rank_codes]))
+            new_key = tuple(segment_end_risk_key)
             if cur_key != new_key:
                 last_change_decision_i = int(i)
 
@@ -5083,6 +5275,7 @@ def backtest_rotation(
                 "end": inp.end.strftime("%Y%m%d"),
             },
             "codes": codes,
+            "untradable_codes_skipped": untradable_codes_skipped,
             "exec_price": ep,
             "daily_rebalance": bool(daily_rebalance),
             "nav": {
@@ -6061,10 +6254,15 @@ def backtest_rotation(
             "end": dates[-1].strftime("%Y%m%d"),
         },
         "score_method": (inp.score_method or "raw_mom"),
+        "stop_scheme": str(stop_scheme),
+        "equity_stop_risk_pct": float(equity_stop_risk_pct),
         "atr_stop_mode": atr_stop_mode,
         "atr_stop_atr_basis": atr_stop_atr_basis,
         "atr_stop_reentry_mode": atr_stop_reentry_mode,
+        "atr_stop_execution_mode": str(atr_stop_execution_mode),
+        "atr_stop_execution_time": str(atr_stop_execution_time),
         "codes": codes,
+        "untradable_codes_skipped": untradable_codes_skipped,
         "benchmark_codes": bench_codes,
         "price_basis": {
             "signal": "qfq",

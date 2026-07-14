@@ -192,6 +192,59 @@ def test_calendar_timing_dynamic_universe_uses_union_interval(session_factory):
     assert bool((out_union.get("meta") or {}).get("dynamic_universe")) is True
 
 
+@pytest.mark.parametrize("dynamic_universe", [False, True])
+def test_calendar_timing_skips_untradable_candidates_regardless_dynamic_universe(
+    session_factory, dynamic_universe: bool
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=80, freq="B")]
+    missing_code = "159985"
+    with sf() as db:
+        for i, d in enumerate(dates):
+            for code, px in [("A1", 100.0 + i), ("B1", 90.0 + i * 0.6)]:
+                for adj in ("none", "hfq", "qfq"):
+                    db.add(
+                        EtfPrice(
+                            code=code,
+                            trade_date=d,
+                            open=float(px),
+                            high=float(px),
+                            low=float(px),
+                            close=float(px),
+                            source="eastmoney",
+                            adjust=adj,
+                        )
+                    )
+        db.commit()
+        out = compute_calendar_timing_strategy_backtest(
+            db,
+            CalendarTimingStrategyInputs(
+                mode="portfolio",
+                code=None,
+                codes=["A1", "B1", missing_code],
+                start=dates[0],
+                end=dates[-1],
+                decision_day=1,
+                hold_days=10,
+                exec_price="close",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+                rebalance_shift="prev",
+                dynamic_universe=bool(dynamic_universe),
+            ),
+        )
+
+    meta = out.get("meta") or {}
+    dropped = list(meta.get("dropped_codes") or [])
+    skipped = list(meta.get("untradable_codes_skipped") or [])
+    assert missing_code in dropped
+    assert missing_code in skipped
+    assert (
+        int(((out.get("metrics") or {}).get("strategy") or {}).get("sample_days") or 0)
+        > 0
+    )
+
+
 def test_calendar_timing_next_plan_includes_current_month_decision(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2026-01-05", "2026-03-23", freq="B")]

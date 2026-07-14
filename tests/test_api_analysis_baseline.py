@@ -621,6 +621,225 @@ def test_api_rotation_backtest_rejects_risk_budget_pct_above_3_percent(
     assert "0.03" in str(err)
 
 
+def test_api_rotation_backtest_accepts_equity_budget_stop_scheme(api_client) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "close",
+        },
+    )
+    assert str(data.get("stop_scheme") or "") == "equity_budget"
+    assert float(data.get("equity_stop_risk_pct") or 0.0) == pytest.approx(
+        0.02, rel=0.0, abs=1e-12
+    )
+
+
+def test_api_rotation_backtest_rejects_equity_budget_non_close_execution(
+    api_client,
+) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "open",
+        },
+        expected_status=422,
+    )
+    assert "equity_budget" in str(err)
+
+
+def test_api_rotation_backtest_rejects_atr_stop_scheme_with_none_mode(
+    api_client,
+) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "stop_scheme": "atr",
+            "atr_stop_mode": "none",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "stop_scheme=atr requires atr_stop_mode" in str(err)
+
+
+@pytest.mark.parametrize(
+    "field,value,err_msg",
+    [
+        (
+            "atr_stop_atr_basis",
+            "oops",
+            "atr_stop_atr_basis must be one of: entry|latest",
+        ),
+        (
+            "atr_stop_reentry_mode",
+            "hold",
+            "atr_stop_reentry_mode must be one of: reenter|wait_next_entry",
+        ),
+    ],
+)
+def test_api_rotation_backtest_rejects_invalid_atr_aux_fields(
+    api_client, field: str, value: str, err_msg: str
+) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    payload = {
+        "codes": ["510300", "511010"],
+        "start": "20240102",
+        "end": "20240110",
+        "rebalance": "weekly",
+        "top_k": 1,
+        "lookback_days": 2,
+        "skip_days": 0,
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+        "stop_scheme": "atr",
+        "atr_stop_mode": "static",
+        "atr_stop_execution_mode": "intraday",
+        "atr_stop_execution_time": "close",
+    }
+    payload[field] = value
+    err = post_json(
+        c,
+        "/api/analysis/rotation",
+        payload,
+        expected_status=422,
+    )
+    assert err_msg in str(err)
+
+
+def test_api_rotation_backtest_legacy_atr_mode_without_stop_scheme_still_works(
+    api_client,
+) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "atr_stop_mode": "static",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+    )
+    assert str(data.get("stop_scheme") or "") == "atr"
+
+
+def test_api_rotation_backtest_explicit_none_stop_scheme_disables_legacy_atr_fallback(
+    api_client,
+) -> None:
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240110",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["510300", "511010"],
+            "start": "20240102",
+            "end": "20240110",
+            "rebalance": "weekly",
+            "top_k": 1,
+            "lookback_days": 2,
+            "skip_days": 0,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+            "stop_scheme": "none",
+            "atr_stop_mode": "static",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+    )
+    assert str(data.get("stop_scheme") or "") == "none"
+    assert str(data.get("atr_stop_mode") or "") == "none"
+
+
 def test_api_rotation_backtest_daily_rebalance_switch(api_client) -> None:
     c = api_client
     engine = c.app.state.engine
@@ -1417,6 +1636,112 @@ def test_capacity_estimate_tencent_volume_fallback_uses_lot_multiplier(engine):
     # volume*price fallback should convert lot volume into shares by *100.
     assert float(liq[1]) == pytest.approx(1_000_000.0, rel=0.0, abs=1e-8)
     assert float(aum[1]) == pytest.approx(100_000.0, rel=0.0, abs=1e-8)
+
+
+def test_capacity_estimate_window_years_limits_statistics_range(engine):
+    dates = [d.date() for d in pd.date_range("2019-01-01", periods=1600, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={"CAPW1": [100.0 + i * 0.01 for i in range(len(dates))]},
+        dates=dates,
+        with_amount=True,
+    )
+    w = []
+    cur = 0.0
+    for i in range(len(dates)):
+        if i % 21 == 0:
+            cur = 1.0 - cur
+        w.append(float(cur))
+    out = {
+        "nav": {"dates": [d.strftime("%Y-%m-%d") for d in dates]},
+        "weights": {"series": {"CAPW1": w}},
+    }
+    sf = make_session_factory(engine)
+    with sf() as db:
+        cap_1y = _build_trend_capacity_estimate(db, out, capacity_window_years=1)
+        cap_5y = _build_trend_capacity_estimate(db, out, capacity_window_years=5)
+        cap_invalid = _build_trend_capacity_estimate(db, out, capacity_window_years=7)
+
+    by_1y = {
+        str((x or {}).get("name") or ""): x for x in (cap_1y.get("scenarios") or [])
+    }
+    by_5y = {
+        str((x or {}).get("name") or ""): x for x in (cap_5y.get("scenarios") or [])
+    }
+    meta_1y = cap_1y.get("meta") or {}
+    meta_5y = cap_5y.get("meta") or {}
+    meta_invalid = cap_invalid.get("meta") or {}
+
+    assert int(meta_1y.get("capacity_window_years") or 0) == 1
+    assert int(meta_5y.get("capacity_window_years") or 0) == 5
+    assert int(meta_invalid.get("capacity_window_years") or 0) == 1
+    assert str(meta_1y.get("capacity_window_end") or "") == str(
+        meta_5y.get("capacity_window_end") or ""
+    )
+    assert int((by_5y.get("balanced") or {}).get("sample_days") or 0) >= int(
+        (by_1y.get("balanced") or {}).get("sample_days") or 0
+    )
+
+
+def test_api_rotation_capacity_window_years_passthrough(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=120, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={
+            "RWC1": [100.0 + i * 0.6 for i in range(len(dates))],
+            "RWC2": [90.0 + i * 0.2 for i in range(len(dates))],
+        },
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/rotation",
+        {
+            "codes": ["RWC1", "RWC2"],
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "rebalance": "weekly",
+            "rebalance_anchor": 2,
+            "top_k": 1,
+            "lookback_days": 20,
+            "skip_days": 0,
+            "capacity_window_years": 3,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    cap = (out or {}).get("capacity_estimate") or {}
+    meta = cap.get("meta") or {}
+    assert int(meta.get("capacity_window_years") or 0) == 3
+
+
+def test_api_trend_capacity_window_years_passthrough(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-02", periods=120, freq="B")]
+    _seed_trend_capacity_prices(
+        engine,
+        code_to_series={"TWC1": [100.0 + i * 0.5 for i in range(len(dates))]},
+        dates=dates,
+        with_amount=True,
+    )
+    c = api_client
+    out = post_json_ok(
+        c,
+        "/api/analysis/trend",
+        {
+            "code": "TWC1",
+            "start": fmt_ymd(dates[0]),
+            "end": fmt_ymd(dates[-1]),
+            "strategy": "ma_filter",
+            "capacity_window_years": 5,
+            "cost_bps": 0.0,
+            "slippage_rate": 0.0,
+        },
+    )
+    cap = (out or {}).get("capacity_estimate") or {}
+    meta = cap.get("meta") or {}
+    assert int(meta.get("capacity_window_years") or 0) == 5
 
 
 @pytest.mark.parametrize("runtime_engine", [None, "bt"])
@@ -3951,6 +4276,174 @@ def test_api_rotation_next_execution_plan_happy_path(api_client):
     assert "plan" in data
     if data["has_execution_plan"]:
         assert "target_weights" in data["plan"]
+
+
+def test_api_rotation_next_execution_plan_rejects_invalid_asof_format(api_client):
+    c = api_client
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        _make_next_execution_plan_payload(
+            codes=_BASELINE_CODES,
+            start="20240102",
+            end="20240103",
+            asof="2024-01-02",
+        ),
+        expected_status=400,
+    )
+    assert "asof must be YYYYMMDD" in str(err)
+
+
+def test_api_rotation_next_execution_plan_accepts_equity_budget_stop_params(api_client):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        {
+            **_make_next_execution_plan_payload(
+                codes=_BASELINE_CODES,
+                start="20240102",
+                end="20240103",
+                asof="20240102",
+            ),
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "close",
+        },
+    )
+    assert "next_trading_day" in data
+    assert "has_execution_plan" in data
+
+
+def test_api_rotation_next_execution_plan_rejects_equity_budget_non_close_execution(
+    api_client,
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        {
+            **_make_next_execution_plan_payload(
+                codes=_BASELINE_CODES,
+                start="20240102",
+                end="20240103",
+                asof="20240102",
+            ),
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "open",
+        },
+        expected_status=422,
+    )
+    assert "equity_budget" in str(err)
+
+
+def test_api_rotation_next_execution_plan_rejects_atr_scheme_with_none_mode(
+    api_client,
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        {
+            **_make_next_execution_plan_payload(
+                codes=_BASELINE_CODES,
+                start="20240102",
+                end="20240103",
+                asof="20240102",
+            ),
+            "stop_scheme": "atr",
+            "atr_stop_mode": "none",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "stop_scheme=atr requires atr_stop_mode" in str(err)
+
+
+@pytest.mark.parametrize(
+    "patch,err_msg",
+    [
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "static",
+                "atr_stop_atr_basis": "oops",
+            },
+            "atr_stop_atr_basis must be one of: entry|latest",
+        ),
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "static",
+                "atr_stop_reentry_mode": "hold",
+            },
+            "atr_stop_reentry_mode must be one of: reenter|wait_next_entry",
+        ),
+        (
+            {
+                "stop_scheme": "atr",
+                "atr_stop_mode": "tightening",
+                "atr_stop_n": 0.5,
+                "atr_stop_m": 1.0,
+            },
+            "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening",
+        ),
+    ],
+)
+def test_api_rotation_next_execution_plan_rejects_invalid_atr_aux_fields(
+    api_client, patch: dict[str, object], err_msg: str
+):
+    c = api_client
+    upsert_and_fetch_etfs(
+        c,
+        codes=_BASELINE_CODES,
+        names=_BASELINE_NAMES,
+        start_date="20240102",
+        end_date="20240103",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-execution-plan",
+        {
+            **_make_next_execution_plan_payload(
+                codes=_BASELINE_CODES,
+                start="20240102",
+                end="20240103",
+                asof="20240102",
+            ),
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+            **patch,
+        },
+        expected_status=422,
+    )
+    assert err_msg in str(err)
 
 
 def test_api_rotation_next_execution_plan_keeps_explicit_empty_picks(
