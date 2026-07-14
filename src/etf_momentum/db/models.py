@@ -381,6 +381,46 @@ class OffFundRegressionFactorConfig(Base):
     )
 
 
+class OffFundResearchState(Base):
+    """
+    Shared global state for off-fund research parameter panel.
+    Single row (id=1): date range, pricing basis, sizing/rebalance controls.
+    """
+
+    __tablename__ = "off_fund_research_state"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False, default=1
+    )
+    start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    adjust: Mapped[str] = mapped_column(String(8), nullable=False, default="hfq")
+    risk_free_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.025)
+    inner_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="risk_parity_cov"
+    )
+    rp_window: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    rebalance_cycle: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="daily"
+    )
+    drift_rebalance_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    drift_abs_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.05
+    )
+    drift_rel_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.25
+    )
+    pair_chart_prefs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class GlobalBenchmarkPool(Base):
     """
     Global benchmark index candidate pool.
@@ -388,14 +428,23 @@ class GlobalBenchmarkPool(Base):
     """
 
     __tablename__ = "global_benchmark_pool"
+    __table_args__ = (
+        UniqueConstraint(
+            "code", "series_kind", name="uq_global_benchmark_pool_code_kind"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(
-        String(64), unique=True, index=True, nullable=False
+    code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    series_kind: Mapped[str] = mapped_column(
+        String(32), index=True, nullable=False, default="price"
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     code_format: Mapped[str | None] = mapped_column(String(32), nullable=True)
     provider_hint: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fallback_sources_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
     end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)  # YYYYMMDD
@@ -430,14 +479,18 @@ class GlobalBenchmarkPrice(Base):
     __table_args__ = (
         UniqueConstraint(
             "code",
+            "series_kind",
             "trade_date",
             "adjust",
-            name="uq_global_benchmark_prices_code_trade_date_adjust",
+            name="uq_global_benchmark_prices_code_kind_trade_date_adjust",
         ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    series_kind: Mapped[str] = mapped_column(
+        String(32), index=True, nullable=False, default="price"
+    )
     trade_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
 
     open: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -1222,6 +1275,7 @@ class LiveClosedRound(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     open_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
     close_date: Mapped[dt.date] = mapped_column(Date, index=True, nullable=False)
+    holding_duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     buy_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sell_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     buy_qty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

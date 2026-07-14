@@ -188,6 +188,15 @@ def ensure_runtime_schema(engine: Engine) -> None:
     if engine.dialect.name == "sqlite":
         ensure_sqlite_schema(engine)
 
+    if inspect(engine).has_table("off_fund_research_state"):
+        off_fund_research_cols = {
+            "pair_chart_prefs_json": "pair_chart_prefs_json TEXT",
+        }
+        for col, ddl in off_fund_research_cols.items():
+            if _has_column(engine, "off_fund_research_state", col):
+                continue
+            _add_column(engine, "off_fund_research_state", ddl)
+
     if inspect(engine).has_table("live_strategy_profile"):
         live_strategy_profile_cols = {
             "capital_mode": "capital_mode VARCHAR(32)",
@@ -214,6 +223,15 @@ def ensure_runtime_schema(engine: Engine) -> None:
             if _has_column(engine, "live_nav_daily", col):
                 continue
             _add_column(engine, "live_nav_daily", ddl)
+
+    if inspect(engine).has_table("live_closed_round"):
+        live_closed_round_cols = {
+            "holding_duration_days": "holding_duration_days INTEGER",
+        }
+        for col, ddl in live_closed_round_cols.items():
+            if _has_column(engine, "live_closed_round", col):
+                continue
+            _add_column(engine, "live_closed_round", ddl)
 
     if not inspect(engine).has_table("futures_pool"):
         return

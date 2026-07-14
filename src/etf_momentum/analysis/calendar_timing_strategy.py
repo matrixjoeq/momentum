@@ -278,11 +278,7 @@ def compute_calendar_timing_strategy_backtest(
         for c in codes
         if c not in close_hfq_base.columns or close_hfq_base[c].dropna().empty
     ]
-    if (miss_exec or miss_hfq) and (not dynamic_universe):
-        if miss_exec:
-            raise ValueError(f"missing execution data (none) for: {miss_exec}")
-        raise ValueError(f"missing benchmark data (hfq) for: {miss_hfq}")
-
+    # Skip untradable/not-listed symbols regardless of dynamic-universe mode.
     valid_codes = [c for c in codes if (c not in miss_exec) and (c not in miss_hfq)]
     if not valid_codes:
         raise ValueError("no valid candidate codes with both none/hfq coverage")
@@ -1268,6 +1264,7 @@ def compute_calendar_timing_strategy_backtest(
             "risk_budget_pct": float(risk_budget_pct),
             "dynamic_universe": bool(dynamic_universe),
             "dropped_codes": dropped_codes,
+            "untradable_codes_skipped": dropped_codes,
             "exec_price": ep,
             "cost_bps": float(inp.cost_bps),
             "slippage_rate": float(inp.slippage_rate),

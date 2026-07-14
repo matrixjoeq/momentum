@@ -119,17 +119,22 @@ class PriceOut(BaseModel):
 class GlobalBenchmarkPoolUpsert(BaseModel):
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=128)
+    series_kind: str | None = Field(default=None, max_length=32)
     code_format: str | None = Field(default=None, max_length=32)
     provider_hint: str | None = Field(default=None, max_length=32)
+    provider_symbol: str | None = Field(default=None, max_length=64)
+    source_locked: bool | None = None
+    fallback_sources: list[dict[str, str]] | None = None
     start_date: str | None = Field(default=None, description="YYYYMMDD")
     end_date: str | None = Field(default=None, description="YYYYMMDD")
 
 
-class GlobalBenchmarkPoolOut(BaseModel):
-    code: str
-    name: str
+class GlobalBenchmarkSeriesOut(BaseModel):
+    series_kind: str
     code_format: str | None = None
     provider_hint: str | None = None
+    provider_symbol: str | None = None
+    source_locked: bool = False
     start_date: str | None
     end_date: str | None
     last_fetch_status: str | None = None
@@ -138,8 +143,15 @@ class GlobalBenchmarkPoolOut(BaseModel):
     last_data_end_date: str | None = None
 
 
+class GlobalBenchmarkPoolOut(BaseModel):
+    code: str
+    name: str
+    series: list[GlobalBenchmarkSeriesOut] = Field(default_factory=list)
+
+
 class GlobalBenchmarkPriceOut(BaseModel):
     code: str
+    series_kind: str
     trade_date: str
     open: float | None
     high: float | None
@@ -153,11 +165,13 @@ class GlobalBenchmarkPriceOut(BaseModel):
 
 class GlobalBenchmarkFetchResult(BaseModel):
     code: str
+    series_kind: str
     inserted_or_updated: int
     status: str
     message: str | None = None
     code_format: str | None = None
     final_provider: str | None = None
+    final_symbol: str | None = None
     provider_attempts: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -174,6 +188,7 @@ class GlobalBenchmarkDefaultInstallRequest(BaseModel):
 class GlobalBenchmarkDefaultInstallItem(BaseModel):
     code: str
     name: str
+    series_kind: str
     action: str
 
 
@@ -192,15 +207,25 @@ class GlobalBenchmarkDefaultAcceptanceRequest(BaseModel):
     continue_on_error: bool = True
 
 
+class GlobalBenchmarkDefaultAcceptanceSeriesItem(BaseModel):
+    series_kind: str
+    status: str
+    message: str | None = None
+    final_provider: str | None = None
+    final_symbol: str | None = None
+    sample_days: int = 0
+    data_start_date: str | None = None
+    data_end_date: str | None = None
+
+
 class GlobalBenchmarkDefaultAcceptanceItem(BaseModel):
     code: str
     name: str
     status: str
-    message: str | None = None
-    final_provider: str | None = None
-    sample_days: int = 0
-    data_start_date: str | None = None
-    data_end_date: str | None = None
+    failure_reason: str | None = None
+    series: list[GlobalBenchmarkDefaultAcceptanceSeriesItem] = Field(
+        default_factory=list
+    )
 
 
 class GlobalBenchmarkDefaultAcceptanceResponse(BaseModel):
@@ -250,6 +275,49 @@ class OffFundNavOut(BaseModel):
     adjust: str
 
 
+class OffFundResearchStateUpdate(BaseModel):
+    start_date: str | None = Field(default=None, description="YYYYMMDD")
+    end_date: str | None = Field(default=None, description="YYYYMMDD")
+    adjust: Literal["hfq", "qfq", "none"] = Field(default="hfq")
+    rf: float = Field(default=0.025, ge=-1.0, le=1.0)
+    inner_mode: Literal["risk_parity_cov", "equal", "custom"] = Field(
+        default="risk_parity_cov"
+    )
+    rp_window: int = Field(default=60, ge=20, le=2000)
+    rebalance_cycle: Literal[
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+        "none",
+    ] = Field(default="daily")
+    drift_rebalance_enabled: bool = Field(default=True)
+    drift_abs_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
+    drift_rel_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    pair_chart_prefs_json: str | None = Field(default=None)
+
+
+class OffFundResearchStateMeta(BaseModel):
+    contract_version: str = "pair_contract_v1"
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OffFundResearchStateOut(BaseModel):
+    start_date: str | None = "20110210"
+    end_date: str | None = None
+    adjust: str = "hfq"
+    rf: float = 0.025
+    inner_mode: str = "risk_parity_cov"
+    rp_window: int = 60
+    rebalance_cycle: str = "daily"
+    drift_rebalance_enabled: bool = True
+    drift_abs_threshold: float = 0.05
+    drift_rel_threshold: float = 0.25
+    pair_chart_prefs_json: str | None = None
+    meta: OffFundResearchStateMeta = Field(default_factory=OffFundResearchStateMeta)
+
+
 class OffFundRegressionFactorRequest(BaseModel):
     key: str = Field(min_length=1, max_length=64)
     label: str | None = Field(default=None, max_length=128)
@@ -277,6 +345,13 @@ class OffFundRegressionFactorConfigOut(BaseModel):
     benchmark_profile: str
     benchmark_factors: list[OffFundRegressionFactorRequest] = Field(
         default_factory=list
+    )
+    effective_benchmark_factors: list[OffFundRegressionFactorRequest] = Field(
+        default_factory=list,
+        description=(
+            "Resolved factor list used by backend: custom factors if provided; "
+            "otherwise factors expanded from benchmark_profile."
+        ),
     )
 
 
@@ -2242,6 +2317,20 @@ class RotationBacktestRequest(BaseModel):
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
     )
+    capacity_window_years: Literal[1, 3, 5] = Field(
+        default=1,
+        description="Capacity statistics window in years: 1|3|5 (default 1 year).",
+    )
+    stop_scheme: str = Field(
+        default="none",
+        description="Stop-loss scheme: none|atr|equity_budget. Backward-compatible: when stop_scheme is omitted and atr_stop_mode!=none, stop_scheme falls back to atr.",
+    )
+    equity_stop_risk_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.05,
+        description="Per-trade initial risk budget as % of total equity for equity_budget stop scheme (0.02 = 2%).",
+    )
     atr_stop_mode: str = Field(
         default="none",
         description="Universal ATR stop mode: none|static|trailing|tightening",
@@ -2256,6 +2345,10 @@ class RotationBacktestRequest(BaseModel):
     atr_stop_execution_mode: str = Field(
         default="intraday",
         description="ATR stop execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    atr_stop_execution_time: Literal["open", "close", "full_day"] | None = Field(
+        default=None,
+        description="ATR stop execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
     )
     atr_stop_window: int = Field(
         default=14, ge=2, description="ATR window for universal stop"
@@ -2386,6 +2479,69 @@ class RotationBacktestRequest(BaseModel):
             raise ValueError(
                 "benchmark_mode must be one of: EW_REBAL|RP_REBAL|IVOL_REBAL|ALL"
             )
+        stop_scheme = (
+            str(getattr(self, "stop_scheme", "none") or "none").strip().lower()
+        )
+        if stop_scheme not in {"none", "atr", "equity_budget"}:
+            raise ValueError("stop_scheme must be one of: none|atr|equity_budget")
+        atr_mode = str(getattr(self, "atr_stop_mode", "none") or "none").strip().lower()
+        if atr_mode not in {"none", "static", "trailing", "tightening"}:
+            raise ValueError(
+                "atr_stop_mode must be one of: none|static|trailing|tightening"
+            )
+        atr_basis = str(getattr(self, "atr_stop_atr_basis", "latest") or "latest")
+        atr_basis = atr_basis.strip().lower()
+        if atr_basis not in {"entry", "latest"}:
+            raise ValueError("atr_stop_atr_basis must be one of: entry|latest")
+        atr_reentry = (
+            str(getattr(self, "atr_stop_reentry_mode", "reenter") or "reenter")
+            .strip()
+            .lower()
+        )
+        if atr_reentry not in {"reenter", "wait_next_entry"}:
+            raise ValueError(
+                "atr_stop_reentry_mode must be one of: reenter|wait_next_entry"
+            )
+        fields_set = set(getattr(self, "__pydantic_fields_set__", set()) or set())
+        stop_scheme_explicit = "stop_scheme" in fields_set
+        if (not stop_scheme_explicit) and stop_scheme == "none" and atr_mode != "none":
+            # Backward compatibility: historical clients only send atr_stop_mode.
+            self.stop_scheme = "atr"
+            stop_scheme = "atr"
+        if stop_scheme == "atr" and atr_mode == "none":
+            raise ValueError(
+                "stop_scheme=atr requires atr_stop_mode to be one of: static|trailing|tightening"
+            )
+        if (
+            stop_scheme == "atr"
+            and atr_mode == "tightening"
+            and float(getattr(self, "atr_stop_n", 0.0))
+            <= float(getattr(self, "atr_stop_m", 0.0))
+        ):
+            raise ValueError(
+                "atr_stop_n must be > atr_stop_m when atr_stop_mode=tightening"
+            )
+        _validate_overlay_execution_mode_time(
+            execution_mode=str(
+                getattr(self, "atr_stop_execution_mode", "intraday") or "intraday"
+            ),
+            execution_time=getattr(self, "atr_stop_execution_time", None),
+            mode_field="atr_stop_execution_mode",
+            time_field="atr_stop_execution_time",
+        )
+        raw_exec_time = getattr(self, "atr_stop_execution_time", None)
+        exec_time_v = (
+            None
+            if raw_exec_time is None
+            else str(raw_exec_time).strip().lower() or None
+        )
+        if stop_scheme == "equity_budget":
+            if exec_time_v is None:
+                self.atr_stop_execution_time = "close"
+            elif exec_time_v != "close":
+                raise ValueError(
+                    "equity_budget stop only supports close execution (intraday-close or next_day-close)"
+                )
         return self
 
 
@@ -2512,7 +2668,7 @@ class RProfitScaleoutTier(BaseModel):
     reduce_fraction: float = Field(
         gt=0.0,
         le=1.0,
-        description="Position fraction to reduce at this tier relative to current remaining position, e.g. 0.4 means sell 40% of remaining",
+        description="Position fraction to reduce at this tier relative to initial position at entry",
     )
 
 
@@ -2524,8 +2680,27 @@ class BiasVTakeProfitTier(BaseModel):
     reduce_fraction: float = Field(
         gt=0.0,
         le=1.0,
-        description="Position fraction to reduce at this BIAS-V threshold relative to current remaining position",
+        description="Position fraction to reduce at this BIAS-V threshold relative to initial position at entry",
     )
+
+
+def _validate_overlay_execution_mode_time(
+    *,
+    execution_mode: str,
+    execution_time: Literal["open", "close", "full_day"] | None,
+    mode_field: str,
+    time_field: str,
+) -> None:
+    mode_v = str(execution_mode or "intraday").strip().lower()
+    if mode_v not in {"intraday", "next_day"}:
+        raise ValueError(f"{mode_field} must be one of: intraday|next_day")
+    if execution_time is None:
+        return
+    time_v = str(execution_time).strip().lower()
+    if time_v not in {"open", "close", "full_day"}:
+        raise ValueError(f"{time_field} must be one of: open|close|full_day")
+    if mode_v == "next_day" and time_v == "full_day":
+        raise ValueError(f"{time_field} must be open|close when {mode_field}=next_day")
 
 
 class TrendBacktestRequest(BaseModel):
@@ -2555,9 +2730,13 @@ class TrendBacktestRequest(BaseModel):
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
     )
-    exec_price: str = Field(
+    capacity_window_years: Literal[1, 3, 5] = Field(
+        default=1,
+        description="Capacity statistics window in years: 1|3|5 (default 1 year).",
+    )
+    exec_price: Literal["open", "close"] = Field(
         default="open",
-        description="open|close; oc2 is deprecated and computed as open/close arithmetic average",
+        description="open|close",
     )
     engine: str | None = Field(
         default=None,
@@ -2725,6 +2904,10 @@ class TrendBacktestRequest(BaseModel):
         default="intraday",
         description="ATR stop execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
     )
+    atr_stop_execution_time: Literal["open", "close", "full_day"] | None = Field(
+        default=None,
+        description="ATR stop execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+    )
     atr_stop_window: int = Field(
         default=14, ge=2, description="ATR window for universal stop"
     )
@@ -2735,6 +2918,45 @@ class TrendBacktestRequest(BaseModel):
         default=0.5,
         gt=0.0,
         description="ATR tightening step m (used by tightening mode)",
+    )
+    ma_trailing_stop_enabled: bool = Field(
+        default=False,
+        description="Enable universal MA/EMA trailing-stop overlay",
+    )
+    ma_trailing_stop_ma_type: str = Field(
+        default="sma",
+        description="MA trailing-stop type: sma|ema",
+    )
+    ma_trailing_stop_execution_mode: str = Field(
+        default="intraday",
+        description="MA trailing-stop execution mode: intraday|next_day",
+    )
+    ma_trailing_stop_execution_time: Literal["open", "close", "full_day"] | None = (
+        Field(
+            default=None,
+            description="MA trailing-stop execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+        )
+    )
+    ma_trailing_stop_effective_delay_days: int = Field(
+        default=3,
+        ge=1,
+        description="MA trailing-stop activation delay in trading days after entry (3 means active from T+3)",
+    )
+    ma_trailing_stop_reduce_window: int = Field(
+        default=10,
+        ge=2,
+        description="Reduce-line MA window used by MA trailing stop",
+    )
+    ma_trailing_stop_exit_window: int = Field(
+        default=20,
+        ge=2,
+        description="Exit-line MA window used by MA trailing stop",
+    )
+    ma_trailing_stop_reduce_fraction: float = Field(
+        default=0.33,
+        gt=0.0,
+        le=1.0,
+        description="Reduce fraction when reduce line triggers, relative to initial position at entry",
     )
     r_take_profit_enabled: bool = Field(
         default=False,
@@ -2748,6 +2970,10 @@ class TrendBacktestRequest(BaseModel):
         default="intraday",
         description="R take-profit execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
     )
+    r_take_profit_execution_time: Literal["open", "close", "full_day"] | None = Field(
+        default=None,
+        description="R take-profit execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+    )
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(
         default=None,
         description="Tiered config: peak>=R multiple activates pullback-exit threshold, e.g. [{r_multiple:2,retrace_ratio:0.5}]",
@@ -2759,6 +2985,16 @@ class TrendBacktestRequest(BaseModel):
     r_profit_scaleout_execution_mode: str = Field(
         default="intraday",
         description="Floating-profit scale-out execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    r_profit_scaleout_execution_time: Literal["open", "close", "full_day"] | None = (
+        Field(
+            default=None,
+            description="R scale-out execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+        )
+    )
+    r_profit_scaleout_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed floating-profit scale-out",
     )
     r_profit_scaleout_tiers: list[RProfitScaleoutTier] | None = Field(
         default=None,
@@ -2774,6 +3010,16 @@ class TrendBacktestRequest(BaseModel):
     bias_v_take_profit_execution_mode: str = Field(
         default="intraday",
         description="BIAS-V take-profit execution mode: intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    bias_v_take_profit_execution_time: Literal["open", "close", "full_day"] | None = (
+        Field(
+            default=None,
+            description="BIAS-V take-profit execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+        )
+    )
+    bias_v_take_profit_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed BIAS-V take-profit tier",
     )
     bias_v_ma_window: int = Field(
         default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"
@@ -2914,6 +3160,36 @@ class TrendBacktestRequest(BaseModel):
             )
         if not math.isfinite(float(self.vol_periodic_rebalance_threshold_pct)):
             raise ValueError("vol_periodic_rebalance_threshold_pct must be finite")
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.atr_stop_execution_mode,
+            execution_time=self.atr_stop_execution_time,
+            mode_field="atr_stop_execution_mode",
+            time_field="atr_stop_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.r_take_profit_execution_mode,
+            execution_time=self.r_take_profit_execution_time,
+            mode_field="r_take_profit_execution_mode",
+            time_field="r_take_profit_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.r_profit_scaleout_execution_mode,
+            execution_time=self.r_profit_scaleout_execution_time,
+            mode_field="r_profit_scaleout_execution_mode",
+            time_field="r_profit_scaleout_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.bias_v_take_profit_execution_mode,
+            execution_time=self.bias_v_take_profit_execution_time,
+            mode_field="bias_v_take_profit_execution_mode",
+            time_field="bias_v_take_profit_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.ma_trailing_stop_execution_mode,
+            execution_time=self.ma_trailing_stop_execution_time,
+            mode_field="ma_trailing_stop_execution_mode",
+            time_field="ma_trailing_stop_execution_time",
+        )
         return self
 
 
@@ -2936,9 +3212,13 @@ class TrendPortfolioBacktestRequest(BaseModel):
         ge=0.0,
         description="One-way adverse slippage spread (absolute price diff)",
     )
-    exec_price: str = Field(
+    capacity_window_years: Literal[1, 3, 5] = Field(
+        default=1,
+        description="Capacity statistics window in years: 1|3|5 (default 1 year).",
+    )
+    exec_price: Literal["open", "close"] = Field(
         default="open",
-        description="open|close; oc2 is deprecated and computed as open/close arithmetic average",
+        description="open|close",
     )
     engine: str | None = Field(
         default=None,
@@ -3088,9 +3368,39 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default="intraday",
         description="intraday|next_day (intraday takes effect from next trading day after entry)",
     )
+    atr_stop_execution_time: Literal["open", "close", "full_day"] | None = Field(
+        default=None,
+        description="ATR stop execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+    )
     atr_stop_window: int = Field(default=14, ge=2)
     atr_stop_n: float = Field(default=2.0, gt=0.0)
     atr_stop_m: float = Field(default=0.5, gt=0.0)
+    ma_trailing_stop_enabled: bool = Field(
+        default=False,
+        description="Enable universal MA/EMA trailing-stop overlay",
+    )
+    ma_trailing_stop_ma_type: str = Field(
+        default="sma",
+        description="MA trailing-stop type: sma|ema",
+    )
+    ma_trailing_stop_execution_mode: str = Field(
+        default="intraday",
+        description="intraday|next_day",
+    )
+    ma_trailing_stop_execution_time: Literal["open", "close", "full_day"] | None = (
+        Field(
+            default=None,
+            description="MA trailing-stop execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+        )
+    )
+    ma_trailing_stop_effective_delay_days: int = Field(
+        default=3,
+        ge=1,
+        description="MA trailing-stop activation delay in trading days after entry (3 means active from T+3)",
+    )
+    ma_trailing_stop_reduce_window: int = Field(default=10, ge=2)
+    ma_trailing_stop_exit_window: int = Field(default=20, ge=2)
+    ma_trailing_stop_reduce_fraction: float = Field(default=0.33, gt=0.0, le=1.0)
     r_take_profit_enabled: bool = Field(
         default=False,
         description="Enable universal R-multiple drawdown take-profit overlay",
@@ -3102,6 +3412,10 @@ class TrendPortfolioBacktestRequest(BaseModel):
         default="intraday",
         description="intraday|next_day (intraday takes effect from next trading day after entry)",
     )
+    r_take_profit_execution_time: Literal["open", "close", "full_day"] | None = Field(
+        default=None,
+        description="R take-profit execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+    )
     r_take_profit_tiers: list[RTakeProfitTier] | None = Field(default=None)
     r_profit_scaleout_enabled: bool = Field(
         default=False,
@@ -3110,6 +3424,16 @@ class TrendPortfolioBacktestRequest(BaseModel):
     r_profit_scaleout_execution_mode: str = Field(
         default="intraday",
         description="intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    r_profit_scaleout_execution_time: Literal["open", "close", "full_day"] | None = (
+        Field(
+            default=None,
+            description="R scale-out execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+        )
+    )
+    r_profit_scaleout_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed floating-profit scale-out",
     )
     r_profit_scaleout_tiers: list[RProfitScaleoutTier] | None = Field(default=None)
     bias_v_take_profit_enabled: bool = Field(
@@ -3121,6 +3445,16 @@ class TrendPortfolioBacktestRequest(BaseModel):
     bias_v_take_profit_execution_mode: str = Field(
         default="intraday",
         description="intraday|next_day (intraday takes effect from next trading day after entry)",
+    )
+    bias_v_take_profit_execution_time: Literal["open", "close", "full_day"] | None = (
+        Field(
+            default=None,
+            description="BIAS-V take-profit execution time: intraday supports open|close|full_day; next_day supports open|close only. null keeps compatibility default (intraday->full_day; next_day->exec_price).",
+        )
+    )
+    bias_v_take_profit_breakeven_stop_enabled: bool = Field(
+        default=True,
+        description="Enable breakeven-stop addon after first executed BIAS-V take-profit tier",
     )
     bias_v_ma_window: int = Field(
         default=20, ge=2, description="MA window in BIAS-V=(close-MA)/ATR"
@@ -3233,6 +3567,36 @@ class TrendPortfolioBacktestRequest(BaseModel):
             )
         if not math.isfinite(float(self.vol_periodic_rebalance_threshold_pct)):
             raise ValueError("vol_periodic_rebalance_threshold_pct must be finite")
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.atr_stop_execution_mode,
+            execution_time=self.atr_stop_execution_time,
+            mode_field="atr_stop_execution_mode",
+            time_field="atr_stop_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.r_take_profit_execution_mode,
+            execution_time=self.r_take_profit_execution_time,
+            mode_field="r_take_profit_execution_mode",
+            time_field="r_take_profit_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.r_profit_scaleout_execution_mode,
+            execution_time=self.r_profit_scaleout_execution_time,
+            mode_field="r_profit_scaleout_execution_mode",
+            time_field="r_profit_scaleout_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.bias_v_take_profit_execution_mode,
+            execution_time=self.bias_v_take_profit_execution_time,
+            mode_field="bias_v_take_profit_execution_mode",
+            time_field="bias_v_take_profit_execution_time",
+        )
+        _validate_overlay_execution_mode_time(
+            execution_mode=self.ma_trailing_stop_execution_mode,
+            execution_time=self.ma_trailing_stop_execution_time,
+            mode_field="ma_trailing_stop_execution_mode",
+            time_field="ma_trailing_stop_execution_time",
+        )
         return self
 
 
@@ -3289,6 +3653,12 @@ class RotationCandidateScreenRequest(BaseModel):
         ge=5,
         le=252,
         description="Forward horizon for momentum significance test",
+    )
+    skip_days: int = Field(
+        default=0,
+        ge=0,
+        le=252,
+        description="Skip recent N trading days when constructing momentum signal",
     )
     factor_weights: dict[str, float] | None = Field(
         default=None,
@@ -3381,7 +3751,9 @@ class TrendOosBootstrapRequest(BaseModel):
         description="ma_filter|ma_cross|donchian|tsmom|linreg_slope|bias|macd_cross|macd_zero_filter|macd_v|random_entry",
     )
     cost_bps: float = Field(default=2.0, ge=0.0)
-    exec_price: str = Field(default="open", description="open|close|oc2")
+    exec_price: Literal["open", "close"] = Field(
+        default="open", description="open|close"
+    )
     engine: str | None = Field(
         default=None,
         description="Backtest engine switch: legacy|bt; null uses server default",
@@ -3638,6 +4010,7 @@ class LiveHoldingOut(BaseModel):
     market_value: float | None = None
     pnl_amount: float | None = None
     pnl_rate: float | None = None
+    holding_duration_days: int | None = None
     price_missing: bool
     stale_days: int | None = None
 
@@ -3653,6 +4026,7 @@ class LiveClosedRoundOut(BaseModel):
     name: str
     open_date: str
     close_date: str
+    holding_duration_days: int | None = None
     buy_count: int
     sell_count: int
     buy_qty: float

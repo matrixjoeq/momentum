@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import etf_momentum.analysis.trend as trend_mod
 from etf_momentum.analysis.trend import (
     TrendInputs,
     _risk_budget_dynamic_weights,
@@ -20,7 +21,9 @@ from etf_momentum.analysis.trend import (
     _apply_intraday_stop_execution_portfolio,
     _apply_intraday_scaleout_execution_single,
     _apply_intraday_scaleout_execution_portfolio,
+    _apply_intraday_or_arbitration_single,
     _build_r_profit_scaleout_plan,
+    _build_ma_trailing_stop_plan,
     _apply_r_multiple_take_profit,
     _apply_bias_v_take_profit,
     _position_risk_from_stop_params,
@@ -157,7 +160,10 @@ def test_trend_single_rejects_mutual_vol_regime_and_periodic_risk_mgmt(
                     slippage_rate=0.0,
                 ),
             )
-    assert "cannot both be enabled" in str(exc.value)
+    msg = str(exc.value)
+    assert "mutually exclusive risk controls" in msg
+    assert "vol_regime_risk_mgmt_enabled" in msg
+    assert "vol_periodic_risk_mgmt_enabled" in msg
 
 
 def test_vol_regime_state_machine_allows_direct_cross_tier_jumps() -> None:
@@ -320,7 +326,7 @@ def test_scaleout_portfolio_incremental_mode_handles_dynamic_weight_path() -> No
     assert float(override.loc[idx[2]]) == pytest.approx(0.03, abs=1e-12)
 
 
-def test_r_profit_scaleout_tiers_reduce_against_remaining_position() -> None:
+def test_r_profit_scaleout_tiers_reduce_against_initial_position() -> None:
     idx = pd.date_range("2024-01-01", periods=7, freq="B")
     base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
     open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
@@ -344,17 +350,135 @@ def test_r_profit_scaleout_tiers_reduce_against_remaining_position() -> None:
             {"r_multiple": 4.0, "reduce_fraction": 0.2},
         ],
         atr_stop_enabled=False,
+        breakeven_stop_enabled=False,
     )
 
     assert float(mult.loc[idx[3]]) == pytest.approx(0.6, abs=1e-12)
-    assert float(mult.loc[idx[4]]) == pytest.approx(0.42, abs=1e-12)
-    assert float(mult.loc[idx[5]]) == pytest.approx(0.336, abs=1e-12)
+    assert float(mult.loc[idx[4]]) == pytest.approx(0.3, abs=1e-12)
+    assert float(mult.loc[idx[5]]) == pytest.approx(0.1, abs=1e-12)
     events = list((stats or {}).get("trigger_events") or [])
     assert [float(e.get("reduce_fraction")) for e in events[:3]] == pytest.approx(
-        [0.4, 0.18, 0.084],
+        [0.4, 0.3, 0.2],
         abs=1e-12,
     )
-    assert str((stats or {}).get("reduce_fraction_basis") or "") == "remaining_position"
+    assert str((stats or {}).get("reduce_fraction_basis") or "") == "initial_position"
+
+
+def test_r_profit_scaleout_direct_jump_accumulates_initial_position() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([100.0, 100.0, 100.0, 145.0, 145.0, 145.0], index=idx, dtype=float)
+    low = pd.Series([95.0] * len(idx), index=idx, dtype=float)
+
+    mult, stats = _build_r_profit_scaleout_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        execution_mode="intraday",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[
+            {"r_multiple": 3.0, "reduce_fraction": 0.33},
+            {"r_multiple": 6.0, "reduce_fraction": 0.33},
+        ],
+        atr_stop_enabled=False,
+        breakeven_stop_enabled=False,
+    )
+
+    # Jump directly to high R zone: same-day tiers accumulate on initial position.
+    assert float(mult.loc[idx[3]]) == pytest.approx(0.34, abs=1e-12)
+    day_events = [
+        e
+        for e in list((stats or {}).get("trigger_events") or [])
+        if str(e.get("date") or "") == idx[3].date().isoformat()
+    ]
+    assert len(day_events) == 2
+    assert sum(
+        float(e.get("reduce_fraction") or 0.0) for e in day_events
+    ) == pytest.approx(0.66, abs=1e-12)
+
+
+def test_r_profit_scaleout_breakeven_stop_intraday_after_first_executed_tier() -> None:
+    idx = pd.date_range("2024-01-01", periods=7, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    high = pd.Series([100.0, 100.0, 100.0, 130.0, 100.0, 100.0, 100.0], index=idx)
+    low = pd.Series([99.0, 99.0, 99.0, 101.0, 99.0, 99.0, 99.0], index=idx, dtype=float)
+
+    mult, stats = _build_r_profit_scaleout_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        execution_mode="intraday",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "reduce_fraction": 0.5}],
+        atr_stop_enabled=False,
+        breakeven_stop_enabled=True,
+    )
+
+    assert float(mult.loc[idx[3]]) == pytest.approx(0.5, abs=1e-12)
+    assert float(mult.loc[idx[4]]) == pytest.approx(0.0, abs=1e-12)
+    be = (stats or {}).get("breakeven_stop") or {}
+    assert bool(be.get("enabled")) is True
+    assert int(be.get("trigger_count") or 0) == 1
+    events = list(be.get("trigger_events") or [])
+    assert events
+    assert str(events[0].get("date") or "") == idx[4].date().isoformat()
+    assert str(events[0].get("trigger_source") or "") in {
+        "low_touch_r_scaleout_breakeven",
+        "gap_open_below_r_scaleout_breakeven",
+    }
+
+
+def test_r_profit_scaleout_breakeven_stop_next_day_reuses_parent_execution_mode() -> (
+    None
+):
+    idx = pd.date_range("2024-01-01", periods=8, freq="B")
+    base_pos = pd.Series(
+        [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float
+    )
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    close = pd.Series([100.0, 100.0, 100.0, 130.0, 99.0, 99.0, 99.0, 99.0], index=idx)
+    high = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    low = pd.Series([99.0] * len(idx), index=idx, dtype=float)
+
+    mult, stats = _build_r_profit_scaleout_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        execution_mode="next_day",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.0, "reduce_fraction": 0.5}],
+        atr_stop_enabled=False,
+        breakeven_stop_enabled=True,
+    )
+
+    assert float(mult.loc[idx[3]]) == pytest.approx(1.0, abs=1e-12)
+    assert float(mult.loc[idx[4]]) == pytest.approx(0.5, abs=1e-12)
+    assert float(mult.loc[idx[5]]) == pytest.approx(0.0, abs=1e-12)
+    be = (stats or {}).get("breakeven_stop") or {}
+    events = list(be.get("trigger_events") or [])
+    assert events
+    assert str(events[0].get("execution_mode") or "") == "next_day"
+    assert str(events[0].get("trigger_date") or "") == idx[4].date().isoformat()
+    assert str(events[0].get("execution_date") or "") == idx[5].date().isoformat()
+    assert str(events[0].get("trigger_source") or "") == (
+        "close_below_r_scaleout_breakeven_next_day_exec"
+    )
 
 
 def test_semi_variance_run_stats_split_continuous_profit_loss_segments() -> None:
@@ -760,7 +884,7 @@ def test_bias_v_take_profit_intraday_high_trigger_and_gap_fill() -> None:
     assert float(ev_gap[0].get("fill_price")) == pytest.approx(106.0)
 
 
-def test_bias_v_take_profit_tiers_reduce_against_remaining_position() -> None:
+def test_bias_v_take_profit_tiers_reduce_against_initial_position() -> None:
     idx = pd.date_range("2024-01-01", periods=6, freq="B")
     base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
     close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
@@ -783,16 +907,473 @@ def test_bias_v_take_profit_tiers_reduce_against_remaining_position() -> None:
             {"threshold": 0.8, "reduce_fraction": 0.3},
             {"threshold": 1.0, "reduce_fraction": 0.2},
         ],
+        breakeven_stop_enabled=False,
     )
 
-    assert float(out.iloc[3]) == pytest.approx(0.336, abs=1e-12)
+    assert float(out.iloc[3]) == pytest.approx(0.1, abs=1e-12)
     events = list((stats or {}).get("trigger_events") or [])
     assert int((stats or {}).get("trigger_count") or 0) == 3
     assert [float(e.get("reduce_fraction")) for e in events[:3]] == pytest.approx(
-        [0.4, 0.18, 0.084],
+        [0.4, 0.3, 0.2],
         abs=1e-12,
     )
-    assert str((stats or {}).get("reduce_fraction_basis") or "") == "remaining_position"
+    assert str((stats or {}).get("reduce_fraction_basis") or "") == "initial_position"
+
+
+def test_bias_v_take_profit_breakeven_stop_disabled_is_noop() -> None:
+    idx = pd.date_range("2024-01-01", periods=6, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float)
+    close = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+    low = pd.Series([99.0, 99.0, 99.0, 99.0, 95.0, 95.0], index=idx, dtype=float)
+    high = pd.Series([100.0, 100.0, 100.0, 108.0, 100.0, 100.0], index=idx, dtype=float)
+    open_ = pd.Series([100.0] * len(idx), index=idx, dtype=float)
+
+    out, stats = _apply_bias_v_take_profit(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        reentry_mode="reenter",
+        ma_window=2,
+        atr_window=2,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 0.5}],
+        breakeven_stop_enabled=False,
+    )
+
+    assert float(out.iloc[3]) == pytest.approx(0.5, abs=1e-12)
+    assert float(out.iloc[4]) == pytest.approx(0.5, abs=1e-12)
+    be = (stats or {}).get("breakeven_stop") or {}
+    assert bool(be.get("enabled")) is False
+    assert int(be.get("trigger_count") or 0) == 0
+
+
+def test_ma_trailing_stop_intraday_vs_next_day_execution() -> None:
+    idx = pd.date_range("2024-01-01", periods=8, freq="B")
+    base_pos = pd.Series(
+        [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float
+    )
+    close = pd.Series(
+        [100.0, 102.0, 104.0, 106.0, 105.0, 104.0, 103.0, 102.0], index=idx
+    )
+    high = (close + 1.0).astype(float)
+    low = (close - 1.0).astype(float)
+    open_ = close.copy()
+
+    mult_intra, stats_intra = _build_ma_trailing_stop_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        ma_type="sma",
+        execution_mode="intraday",
+        effective_delay_days=1,
+        reduce_window=3,
+        exit_window=6,
+        reduce_fraction=0.33,
+    )
+    mult_next, stats_next = _build_ma_trailing_stop_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        ma_type="sma",
+        execution_mode="next_day",
+        effective_delay_days=1,
+        reduce_window=3,
+        exit_window=6,
+        reduce_fraction=0.33,
+    )
+
+    assert float(mult_intra.loc[idx[4]]) == pytest.approx(0.67, abs=1e-12)
+    assert float(mult_next.loc[idx[4]]) == pytest.approx(1.0, abs=1e-12)
+    assert float(mult_next.loc[idx[5]]) == pytest.approx(0.67, abs=1e-12)
+
+    ev_intra = list((stats_intra or {}).get("trigger_events") or [])
+    ev_next = list((stats_next or {}).get("trigger_events") or [])
+    assert ev_intra and ev_next
+    assert str(ev_intra[0].get("execution_mode") or "") == "intraday"
+    assert str(ev_intra[0].get("date") or "") == idx[4].date().isoformat()
+    assert str(ev_next[0].get("execution_mode") or "") == "next_day"
+    assert str(ev_next[0].get("trigger_date") or "") == idx[4].date().isoformat()
+    assert str(ev_next[0].get("execution_date") or "") == idx[5].date().isoformat()
+    assert ev_next[0].get("fill_price") is None
+    assert int((stats_intra or {}).get("effective_delay_days") or 0) == 1
+    assert int((stats_next or {}).get("effective_delay_days") or 0) == 1
+    assert (
+        str((stats_intra or {}).get("reduce_fraction_basis") or "")
+        == "initial_position"
+    )
+    assert (
+        str((stats_next or {}).get("reduce_fraction_basis") or "") == "initial_position"
+    )
+
+
+def test_ma_trailing_stop_effective_delay_days_delays_activation() -> None:
+    idx = pd.date_range("2024-01-01", periods=8, freq="B")
+    base_pos = pd.Series(
+        [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx, dtype=float
+    )
+    close = pd.Series(
+        [100.0, 102.0, 104.0, 106.0, 105.0, 104.0, 103.0, 102.0], index=idx
+    )
+    high = (close + 1.0).astype(float)
+    low = (close - 1.0).astype(float)
+    open_ = close.copy()
+
+    mult_delay3, stats_delay3 = _build_ma_trailing_stop_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        ma_type="sma",
+        execution_mode="intraday",
+        effective_delay_days=3,
+        reduce_window=3,
+        exit_window=6,
+        reduce_fraction=0.33,
+    )
+
+    assert float(mult_delay3.loc[idx[4]]) == pytest.approx(1.0, abs=1e-12)
+    assert float(mult_delay3.loc[idx[5]]) == pytest.approx(0.0, abs=1e-12)
+    assert int((stats_delay3 or {}).get("effective_delay_days") or 0) == 3
+    ev = list((stats_delay3 or {}).get("trigger_events") or [])
+    assert ev
+    assert str(ev[0].get("trigger_date") or "") == idx[5].date().isoformat()
+
+
+def test_overlay_execution_time_resolution_and_validation() -> None:
+    assert (
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="intraday",
+            execution_time=None,
+            exec_price="open",
+            mode_field="m",
+            time_field="t",
+        )
+        == "full_day"
+    )
+    assert (
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="next_day",
+            execution_time=None,
+            exec_price="close",
+            mode_field="m",
+            time_field="t",
+        )
+        == "close"
+    )
+    assert (
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="next_day",
+            execution_time="open",
+            exec_price="close",
+            mode_field="m",
+            time_field="t",
+        )
+        == "open"
+    )
+    with pytest.raises(ValueError):
+        trend_mod._resolve_stop_execution_time(
+            execution_mode="next_day",
+            execution_time="full_day",
+            exec_price="open",
+            mode_field="m",
+            time_field="t",
+        )
+
+
+def test_overlay_execution_time_is_propagated_to_events() -> None:
+    idx = pd.date_range("2024-01-01", periods=8, freq="B")
+    base_pos = pd.Series([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], index=idx)
+    close = pd.Series(
+        [100.0, 102.0, 104.0, 106.0, 105.0, 104.0, 103.0, 102.0], index=idx
+    )
+    high = (close + 1.0).astype(float)
+    low = (close - 1.0).astype(float)
+    open_ = close.copy().astype(float)
+
+    _, atr_stats = _apply_atr_stop(
+        pd.Series([1.0, 1.0, 1.0, 1.0], index=idx[:4], dtype=float),
+        open_=pd.Series([100.0, 96.0, 97.5, 97.0], index=idx[:4], dtype=float),
+        close=pd.Series([100.0, 100.0, 100.0, 100.0], index=idx[:4], dtype=float),
+        high=pd.Series([106.0, 106.0, 106.0, 106.0], index=idx[:4], dtype=float),
+        low=pd.Series([94.0, 96.0, 97.0, 96.0], index=idx[:4], dtype=float),
+        mode="static",
+        atr_basis="entry",
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="open",
+        atr_window=2,
+        n_mult=0.2,
+        m_step=0.5,
+    )
+    atr_events = list((atr_stats or {}).get("trigger_events") or [])
+    assert atr_events and str(atr_events[0].get("execution_time") or "") == "open"
+
+    _, rtp_stats = _apply_r_multiple_take_profit(
+        pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx[:5], dtype=float),
+        open_=pd.Series(
+            [100.0, 100.0, 109.0, 109.0, 109.0], index=idx[:5], dtype=float
+        ),
+        close=pd.Series(
+            [100.0, 100.0, 108.0, 108.0, 108.0], index=idx[:5], dtype=float
+        ),
+        high=pd.Series([100.0, 103.0, 110.0, 112.0, 112.0], index=idx[:5], dtype=float),
+        low=pd.Series([100.0, 97.0, 107.0, 104.0, 104.0], index=idx[:5], dtype=float),
+        enabled=True,
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="close",
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 1.5, "retrace_ratio": 0.3}],
+        atr_stop_enabled=True,
+    )
+    rtp_events = list((rtp_stats or {}).get("trigger_events") or [])
+    assert rtp_events and str(rtp_events[0].get("execution_time") or "") == "close"
+
+    _, rps_stats = _build_r_profit_scaleout_plan(
+        pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx[:5], dtype=float),
+        open_=pd.Series([100.0] * 5, index=idx[:5], dtype=float),
+        close=pd.Series([100.0] * 5, index=idx[:5], dtype=float),
+        high=pd.Series([100.0, 100.0, 110.0, 121.0, 121.0], index=idx[:5], dtype=float),
+        low=pd.Series([95.0] * 5, index=idx[:5], dtype=float),
+        enabled=True,
+        execution_mode="intraday",
+        execution_time="full_day",
+        breakeven_stop_enabled=False,
+        atr_window=2,
+        atr_n=1.0,
+        tiers=[{"r_multiple": 2.0, "reduce_fraction": 0.5}],
+        atr_stop_enabled=False,
+    )
+    rps_events = list((rps_stats or {}).get("trigger_events") or [])
+    assert rps_events and str(rps_events[0].get("execution_time") or "") == "full_day"
+
+    _, bias_stats = _apply_bias_v_take_profit(
+        pd.Series([0.0, 1.0, 1.0, 1.0, 1.0], index=idx[:5], dtype=float),
+        open_=pd.Series(
+            [100.0, 100.0, 100.0, 102.0, 102.0], index=idx[:5], dtype=float
+        ),
+        close=pd.Series(
+            [100.0, 100.0, 100.0, 100.0, 100.0], index=idx[:5], dtype=float
+        ),
+        high=pd.Series([100.0, 100.0, 100.0, 108.0, 108.0], index=idx[:5], dtype=float),
+        low=pd.Series([99.0, 99.0, 99.0, 99.0, 99.0], index=idx[:5], dtype=float),
+        enabled=True,
+        reentry_mode="reenter",
+        execution_mode="intraday",
+        execution_time="full_day",
+        ma_window=2,
+        atr_window=2,
+        tiers=[{"threshold": 0.5, "reduce_fraction": 1.0}],
+        breakeven_stop_enabled=False,
+    )
+    bias_events = list((bias_stats or {}).get("trigger_events") or [])
+    assert bias_events and str(bias_events[0].get("execution_time") or "") == "full_day"
+
+    _, ma_stats = _build_ma_trailing_stop_plan(
+        base_pos,
+        open_=open_,
+        close=close,
+        high=high,
+        low=low,
+        enabled=True,
+        ma_type="sma",
+        execution_mode="intraday",
+        execution_time="close",
+        effective_delay_days=1,
+        reduce_window=3,
+        exit_window=6,
+        reduce_fraction=0.33,
+    )
+    ma_events = list((ma_stats or {}).get("trigger_events") or [])
+    assert ma_events and str(ma_events[0].get("execution_time") or "") == "close"
+
+
+def test_intraday_or_arbitration_prioritizes_full_exit_then_max_partial() -> None:
+    idx = pd.date_range("2024-01-01", periods=3, freq="B")
+    weights = pd.Series([0.0, 1.0, 1.0], index=idx, dtype=float)
+    open_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    close_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    d2 = idx[2].date().isoformat()
+
+    partial_sets = {
+        "atr_stop": {
+            "execution_mode": "intraday",
+            "trigger_events": [
+                {
+                    "date": d2,
+                    "execution_mode": "intraday",
+                    "fill_price": 100.0,
+                    "reduce_fraction": 0.1,
+                }
+            ],
+        },
+        "bias_v_take_profit": {
+            "execution_mode": "intraday",
+            "trigger_events": [
+                {
+                    "date": d2,
+                    "execution_mode": "intraday",
+                    "fill_price": 100.0,
+                    "reduce_fraction": 0.2,
+                }
+            ],
+        },
+        "r_profit_scaleout": {
+            "execution_mode": "intraday",
+            "trigger_events": [
+                {
+                    "date": d2,
+                    "execution_mode": "intraday",
+                    "fill_price": 100.0,
+                    "reduce_fraction": 0.3,
+                }
+            ],
+        },
+    }
+    w_partial, _ = _apply_intraday_or_arbitration_single(
+        weights=weights,
+        event_sets=partial_sets,
+        exec_price="close",
+        open_sig=open_sig,
+        close_sig=close_sig,
+    )
+    assert float(w_partial.loc[idx[2]]) == pytest.approx(0.7, abs=1e-12)
+    assert (
+        partial_sets["r_profit_scaleout"]["trigger_events"][0]["ignored_by_priority"]
+        is False
+    )
+    assert float(
+        partial_sets["r_profit_scaleout"]["trigger_events"][0]["reduce_fraction"]
+    ) == pytest.approx(0.3, abs=1e-12)
+    assert partial_sets["atr_stop"]["trigger_events"][0]["ignored_by_priority"] is True
+    assert (
+        str(partial_sets["atr_stop"]["trigger_events"][0]["ignored_reason"] or "")
+        == "max_partial_wins"
+    )
+
+    full_exit_sets = {
+        "r_profit_scaleout": {
+            "execution_mode": "intraday",
+            "trigger_events": [
+                {
+                    "date": d2,
+                    "execution_mode": "intraday",
+                    "fill_price": 100.0,
+                    "reduce_fraction": 0.5,
+                }
+            ],
+        },
+        "ma_trailing_stop": {
+            "execution_mode": "intraday",
+            "trigger_events": [
+                {
+                    "date": d2,
+                    "execution_mode": "intraday",
+                    "fill_price": 100.0,
+                    "reduce_fraction": 1.0,
+                    "trigger_kind": "exit",
+                }
+            ],
+        },
+    }
+    w_full, _ = _apply_intraday_or_arbitration_single(
+        weights=weights,
+        event_sets=full_exit_sets,
+        exec_price="close",
+        open_sig=open_sig,
+        close_sig=close_sig,
+    )
+    assert float(w_full.loc[idx[2]]) == pytest.approx(0.0, abs=1e-12)
+    assert (
+        full_exit_sets["ma_trailing_stop"]["trigger_events"][0]["ignored_by_priority"]
+        is False
+    )
+    assert float(
+        full_exit_sets["ma_trailing_stop"]["trigger_events"][0]["reduce_fraction"]
+    ) == pytest.approx(1.0, abs=1e-12)
+    assert (
+        full_exit_sets["r_profit_scaleout"]["trigger_events"][0]["ignored_by_priority"]
+        is True
+    )
+    assert (
+        str(
+            full_exit_sets["r_profit_scaleout"]["trigger_events"][0].get(
+                "ignored_reason"
+            )
+            or ""
+        )
+        == "full_exit_wins"
+    )
+
+
+def test_intraday_or_arbitration_full_exit_uses_higher_stop_price_for_long() -> None:
+    idx = pd.date_range("2024-01-01", periods=3, freq="B")
+    weights = pd.Series([0.0, 1.0, 1.0], index=idx, dtype=float)
+    open_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    close_sig = pd.Series([100.0, 100.0, 100.0], index=idx, dtype=float)
+    d2 = idx[2].date().isoformat()
+
+    full_exit_sets = {
+        "atr_stop": {
+            "execution_mode": "intraday",
+            "trigger_events": [
+                {
+                    "date": d2,
+                    "execution_mode": "intraday",
+                    "fill_price": 98.0,
+                    "trigger_price_eff": 98.0,
+                    "reduce_fraction": 1.0,
+                    "trigger_kind": "exit",
+                }
+            ],
+        },
+        "r_profit_scaleout": {
+            "execution_mode": "intraday",
+            "trigger_events": [
+                {
+                    "date": d2,
+                    "execution_mode": "intraday",
+                    "fill_price": 101.0,
+                    "trigger_price_eff": 101.0,
+                    "reduce_fraction": 1.0,
+                    "trigger_kind": "exit",
+                }
+            ],
+        },
+    }
+    w_full, _ = _apply_intraday_or_arbitration_single(
+        weights=weights,
+        event_sets=full_exit_sets,
+        exec_price="close",
+        open_sig=open_sig,
+        close_sig=close_sig,
+    )
+
+    assert float(w_full.loc[idx[2]]) == pytest.approx(0.0, abs=1e-12)
+    assert (
+        full_exit_sets["r_profit_scaleout"]["trigger_events"][0]["ignored_by_priority"]
+        is False
+    )
+    assert (
+        full_exit_sets["atr_stop"]["trigger_events"][0]["ignored_by_priority"] is True
+    )
+    assert float(
+        full_exit_sets["r_profit_scaleout"]["trigger_events"][0]["reduce_fraction"]
+    ) == pytest.approx(1.0, abs=1e-12)
+    assert float(
+        full_exit_sets["atr_stop"]["trigger_events"][0]["reduce_fraction"]
+    ) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_atr_stop_next_day_execution_triggers_on_close_and_schedules_next_day() -> None:
@@ -2660,6 +3241,124 @@ def test_trend_backtest_exposes_r_take_profit_controls(session_factory):
     assert "holding_bias_v_ge_5_count" in by_code
     assert "holding_bias_v_ge_5_max_per_holding" in by_code
     assert "holding_bias_v_ge_5_per_holding_distribution" in by_code
+
+
+def test_trend_backtest_ma_trailing_stop_override_scales_once_with_lot_remap(
+    session_factory, monkeypatch
+):
+    sf = session_factory
+    code = "AAA"
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=140, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            if i < 70:
+                px = 100.0 + i * 0.6
+            else:
+                px = 142.0 - (i - 70) * 1.0
+            _add_price(db, code=code, day=d, close=float(px))
+        db.commit()
+
+        def _fake_apply_intraday_or_arbitration_single(
+            *, weights, event_sets, exec_price, open_sig, close_sig
+        ):
+            del event_sets, exec_price, open_sig, close_sig
+            zeros = pd.Series(0.0, index=weights.index, dtype=float)
+            ma_over = pd.Series(0.01, index=weights.index, dtype=float)
+            return weights.astype(float).copy(), {
+                "atr_stop": zeros.copy(),
+                "bias_v_take_profit": zeros.copy(),
+                "r_take_profit": zeros.copy(),
+                "r_profit_scaleout": zeros.copy(),
+                "ma_trailing_stop": ma_over,
+            }
+
+        monkeypatch.setattr(
+            trend_mod,
+            "_apply_intraday_or_arbitration_single",
+            _fake_apply_intraday_or_arbitration_single,
+        )
+
+        base_out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=5,
+                exec_price="open",
+                atr_stop_mode="none",
+                ma_trailing_stop_enabled=True,
+                ma_trailing_stop_ma_type="sma",
+                ma_trailing_stop_execution_mode="intraday",
+                ma_trailing_stop_effective_delay_days=1,
+                ma_trailing_stop_reduce_window=3,
+                ma_trailing_stop_exit_window=5,
+                ma_trailing_stop_reduce_fraction=0.5,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+        base_series = (
+            ((base_out.get("return_decomposition") or {}).get("series") or {}).get(
+                "ma_trailing_stop_override"
+            )
+        ) or []
+        assert base_series
+        assert any(abs(float(x)) > 1e-12 for x in base_series)
+
+        def _fake_simulate_lot_account_weights(*, target_weights, **kwargs):
+            del kwargs
+            return target_weights.copy().astype(float), {}
+
+        def _fake_remap_return_weights(*, w_eff_before, w_eff_after, w_ret_before):
+            del w_eff_before, w_eff_after
+            risk_scale = pd.Series(0.5, index=w_ret_before.index, dtype=float)
+            return w_ret_before.copy().astype(float), risk_scale
+
+        monkeypatch.setattr(
+            trend_mod,
+            "simulate_lot_account_weights",
+            _fake_simulate_lot_account_weights,
+        )
+        monkeypatch.setattr(
+            trend_mod, "remap_return_weights", _fake_remap_return_weights
+        )
+
+        scaled_out = compute_trend_backtest(
+            db,
+            TrendInputs(
+                code=code,
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=5,
+                exec_price="open",
+                atr_stop_mode="none",
+                ma_trailing_stop_enabled=True,
+                ma_trailing_stop_ma_type="sma",
+                ma_trailing_stop_execution_mode="intraday",
+                ma_trailing_stop_effective_delay_days=1,
+                ma_trailing_stop_reduce_window=3,
+                ma_trailing_stop_exit_window=5,
+                ma_trailing_stop_reduce_fraction=0.5,
+                initial_account_amount=1_000_000.0,
+                position_sizing="fixed_ratio",
+                fixed_pos_ratio=0.8,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    scaled_series = (
+        ((scaled_out.get("return_decomposition") or {}).get("series") or {}).get(
+            "ma_trailing_stop_override"
+        )
+    ) or []
+    assert len(scaled_series) == len(base_series)
+    for base_v, scaled_v in zip(base_series, scaled_series):
+        assert float(scaled_v) == pytest.approx(float(base_v) * 0.5, abs=1e-12)
 
 
 def test_trend_backtest_cash_management_uses_511880_qfq(session_factory):

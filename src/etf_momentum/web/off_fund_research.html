@@ -132,7 +132,8 @@
         Contribution），目标是组内各基金风险贡献相等。
       </div>
       <div class="muted" style="margin-top: 4px">
-        偏离再平衡说明：单资产触发阈值=min(绝对阈值, 目标权重×相对阈值)；偏离触发后重置周期再平衡计时。
+        偏离再平衡说明：单资产触发阈值=min(绝对阈值,
+        目标权重×相对阈值)；偏离触发后重置周期再平衡计时。
       </div>
     </div>
 
@@ -240,18 +241,23 @@
         <div class="muted">自定义因子（每行：KEY|标签=代码1,代码2...）</div>
         <textarea
           id="offClsFactors"
-          placeholder="CSI300|沪深300=000300,510300&#10;CSI500|中证500=000905,510500&#10;CSI1000|中证1000=000852,159845&#10;CSI2000|中证2000=932000,159533"
+          placeholder="KEY|标签=代码1,代码2...&#10;例如：CSI300|沪深300=000300,510300"
         ></textarea>
         <div class="row" style="margin-top: 6px">
           <button id="offClsUseDefault">填充默认模板</button>
         </div>
       </div>
       <div class="muted" style="margin-top: 6px">
-        口径：基金与基准均使用日度后复权（hfq）收益。当前内置 A 股市值基准：沪深300/中证500/中证1000/中证2000。
+        口径：基金与基准均使用日度后复权（hfq）收益。当前内置 cn_stock_core
+        模板由后端统一定义并下发。
       </div>
       <table id="offClsFactorTable"></table>
       <div class="muted" style="margin-top: 6px">本次回归实际生效因子</div>
       <table id="offClsActiveFactors"></table>
+      <div class="muted" style="margin-top: 10px">
+        基准对比图（默认：CSI300 对其余 13 组，口径均为 hfq close）
+      </div>
+      <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
       <table id="offClsTable"></table>
     </div>
     <div class="panel">
@@ -703,6 +709,9 @@
       let offClsConfigs = [];
       let persistTimer = null;
       let lastPersistPayload = "";
+      let offParamPersistTimer = null;
+      let offParamPersistPayload = "";
+      let offParamHydrating = false;
       const pageSize = 12;
       const offPeriodState = {
         weekly: { page: 1, rows: [] },
@@ -710,6 +719,1107 @@
         quarterly: { page: 1, rows: [] },
         yearly: { page: 1, rows: [] },
       };
+      const OFF_FUND_PAIR_PREFS_STORAGE_KEY = "offFundResearch.pairPrefs.v1";
+      const OFF_FUND_PAIR_PRICE_LIMIT = 8000;
+      const OFF_FUND_PAIR_FETCH_TIMEOUT_MS = 10000;
+      const OFF_FUND_PAIR_FETCH_CONCURRENCY = 4;
+      const OFF_FUND_PAIR_UNIVERSE = [
+        { key: "CSI300", label: "沪深300", etf_code: "510300" },
+        { key: "CSI500", label: "中证500", etf_code: "510500" },
+        { key: "CSI1000", label: "中证1000", etf_code: "512100" },
+        { key: "CSI2000", label: "中证2000", etf_code: "563300" },
+        {
+          key: "CSI_ALL_CONSUMER",
+          label: "中证全指可选消费",
+          etf_code: "159936",
+        },
+        { key: "CSI_ALL_MEDICINE", label: "中证全指医药", etf_code: "159938" },
+        {
+          key: "CSI_ALL_INFORMATION",
+          label: "中证全指信息",
+          etf_code: "159939",
+        },
+        { key: "CSI_ALL_FINANCE", label: "中证全指金融", etf_code: "159940" },
+        { key: "CSI_ALL_ENERGY", label: "中证全指能源", etf_code: "159945" },
+        { key: "CSI_ALL_MATERIAL", label: "中证全指材料", etf_code: "159944" },
+        {
+          key: "CSI_300_GROWTH_INNOVATION",
+          label: "300成长创新",
+          etf_code: "159523",
+        },
+        {
+          key: "CSI_300_VALUE_STABILITY",
+          label: "300价值稳健",
+          etf_code: "159510",
+        },
+        {
+          key: "CSI_1000_GROWTH_INNOVATION",
+          label: "1000成长创新",
+          etf_code: "562520",
+        },
+        {
+          key: "CSI_1000_VALUE_STABILITY",
+          label: "1000价值稳健",
+          etf_code: "562530",
+        },
+      ];
+      const OFF_FUND_PAIR_UNIVERSE_BY_KEY = Object.fromEntries(
+        OFF_FUND_PAIR_UNIVERSE.map((x) => [x.key, x]),
+      );
+      const OFF_FUND_PAIR_ETF_CODE_SET = new Set(
+        OFF_FUND_PAIR_UNIVERSE.map((x) => String(x.etf_code)),
+      );
+      const OFF_FUND_PAIR_DEFAULT_PEERS = OFF_FUND_PAIR_UNIVERSE.map(
+        (x) => x.key,
+      ).filter((k) => k !== "CSI300");
+      const OFF_FUND_PAIR_CARD_IDS = OFF_FUND_PAIR_DEFAULT_PEERS.map(
+        (_, i) => `pair_slot_${String(i + 1).padStart(2, "0")}`,
+      );
+      const OFF_FUND_PAIR_DEFAULT_PREFS = Object.fromEntries(
+        OFF_FUND_PAIR_CARD_IDS.map((cardId, idx) => [
+          cardId,
+          { base: "CSI300", peer: OFF_FUND_PAIR_DEFAULT_PEERS[idx] },
+        ]),
+      );
+      let offPairPrefsByCard = {};
+      let offPairFactorEtfByKey = {};
+      const offPairPriceCache = new Map();
+      const offPairRequestVersionByCard = {};
+      let offPairRenderTimer = null;
+      let offPairFetchActive = 0;
+      const offPairFetchQueue = [];
+      let offPairSignalDegradedState = false;
+      const offPairInvalidInputByCard = {};
+      const offPairSnapshotsByCard = {};
+      let offPairRenderParamSnapshot = null;
+      let offPairScheduledOpts = {};
+      const OFF_FUND_PAIR_WARNING_ORDER = [
+        "prefs_trimmed_to_13",
+        "signal_degraded",
+        "samples_truncated",
+        "invalid_trade_date_filtered",
+      ];
+      const OFF_FUND_PAIR_STATUS_MESSAGE_KEY = {
+        ok: "pair.ok",
+        degraded_signal: "pair.degraded_signal",
+        insufficient_samples: "pair.insufficient_samples",
+        truncated_samples: "pair.truncated_samples",
+        invalid_pair: "pair.invalid_pair",
+        data_unavailable: "pair.data_unavailable",
+      };
+      const OFF_FUND_PAIR_EMPTY_DATES_HASH =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+      const OFF_FUND_PAIR_EMPTY_KEY_SERIES_HASH =
+        "26d34bbfdbc0250ea2fc501ea5c6197e0e3443d7d168e99924aa122f6539a6d1";
+
+      function _cloneOffFundPairPrefs() {
+        return JSON.parse(JSON.stringify(OFF_FUND_PAIR_DEFAULT_PREFS));
+      }
+      function _pickFallbackPeer(baseKey) {
+        const k = String(baseKey || "").trim();
+        const first =
+          OFF_FUND_PAIR_DEFAULT_PEERS.find((x) => x && x !== k) ||
+          OFF_FUND_PAIR_UNIVERSE.find((x) => x.key !== k)?.key ||
+          "CSI500";
+        return String(first);
+      }
+      function _pairMessageByKey(messageKey) {
+        const mp = {
+          "pair.ok": "正常",
+          "pair.degraded_signal": "信号降级（使用静态映射）",
+          "pair.insufficient_samples": "样本不足（展示部分曲线）",
+          "pair.truncated_samples": "样本可能截断（达到接口上限）",
+          "pair.invalid_pair": "输入配对非法（已自动回退）",
+          "pair.data_unavailable": "数据不可用",
+        };
+        return String(mp[String(messageKey || "")] || "未知状态");
+      }
+      function _sortedPairWarnings(codes) {
+        const set = new Set((codes || []).map((x) => String(x || "")));
+        return OFF_FUND_PAIR_WARNING_ORDER.filter((x) => set.has(x));
+      }
+      function _pairStatusRecord(code) {
+        const statusCode = String(code || "ok");
+        const messageKey = String(
+          OFF_FUND_PAIR_STATUS_MESSAGE_KEY[statusCode] ||
+            OFF_FUND_PAIR_STATUS_MESSAGE_KEY.ok,
+        );
+        return {
+          status_code: statusCode,
+          status_message_key: messageKey,
+          status_message: _pairMessageByKey(messageKey),
+        };
+      }
+      function normalizeOffFundPairPrefs(raw) {
+        const base = _cloneOffFundPairPrefs();
+        const obj = raw && typeof raw === "object" ? raw : {};
+        for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
+          const it =
+            obj[cardId] && typeof obj[cardId] === "object" ? obj[cardId] : {};
+          const baseKey = String(
+            it.base || base[cardId].base || "CSI300",
+          ).trim();
+          const peerKey = String(
+            it.peer || base[cardId].peer || "CSI500",
+          ).trim();
+          const invalidPairInput =
+            !OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseKey] ||
+            !OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerKey] ||
+            baseKey === peerKey;
+          const cleanBase = OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseKey]
+            ? baseKey
+            : "CSI300";
+          let cleanPeer = OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerKey]
+            ? peerKey
+            : _pickFallbackPeer(cleanBase);
+          if (cleanPeer === cleanBase) cleanPeer = _pickFallbackPeer(cleanBase);
+          base[cardId] = { base: cleanBase, peer: cleanPeer };
+          if (invalidPairInput) offPairInvalidInputByCard[cardId] = true;
+        }
+        return base;
+      }
+      function offFundPairPrefsToJson(prefs) {
+        return JSON.stringify(normalizeOffFundPairPrefs(prefs || {}));
+      }
+      function persistOffFundPairPrefsLocal() {
+        try {
+          localStorage.setItem(
+            OFF_FUND_PAIR_PREFS_STORAGE_KEY,
+            offFundPairPrefsToJson(offPairPrefsByCard),
+          );
+        } catch (_) {}
+      }
+      function loadOffFundPairPrefsLocal() {
+        try {
+          const raw = localStorage.getItem(OFF_FUND_PAIR_PREFS_STORAGE_KEY);
+          if (!raw) return _cloneOffFundPairPrefs();
+          return normalizeOffFundPairPrefs(JSON.parse(raw));
+        } catch (_) {
+          return _cloneOffFundPairPrefs();
+        }
+      }
+      function applyOffFundPairPrefs(prefs, { saveLocal = false } = {}) {
+        offPairPrefsByCard = normalizeOffFundPairPrefs(prefs || {});
+        for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
+          const baseSel = $(`${cardId}_base`);
+          const peerSel = $(`${cardId}_peer`);
+          if (baseSel) baseSel.value = String(offPairPrefsByCard[cardId].base);
+          if (peerSel) peerSel.value = String(offPairPrefsByCard[cardId].peer);
+        }
+        if (saveLocal) persistOffFundPairPrefsLocal();
+      }
+      function scheduleRenderAllOffFundPairCards(delayMs = 180, opts = {}) {
+        const nextOpts = opts && typeof opts === "object" ? { ...opts } : {};
+        if (!Object.prototype.hasOwnProperty.call(nextOpts, "signalDegraded")) {
+          nextOpts.signalDegraded = offPairSignalDegradedState;
+        }
+        offPairScheduledOpts = nextOpts;
+        if (offPairRenderTimer) clearTimeout(offPairRenderTimer);
+        offPairRenderTimer = setTimeout(
+          () => {
+            offPairRenderTimer = null;
+            renderAllOffFundPairCards(offPairScheduledOpts).catch((e) => {
+              if (window.console && window.console.error)
+                window.console.error(e);
+            });
+          },
+          Math.max(0, Number(delayMs) || 0),
+        );
+      }
+      function renderOffFundPairCardShell() {
+        const host = $("offClsPairCards");
+        if (!host) return;
+        host.innerHTML = OFF_FUND_PAIR_CARD_IDS.map((cardId, idx) => {
+          const pref =
+            offPairPrefsByCard[cardId] || OFF_FUND_PAIR_DEFAULT_PREFS[cardId];
+          const baseKey = String(pref.base || "CSI300");
+          const peerKey = String(
+            pref.peer || OFF_FUND_PAIR_DEFAULT_PEERS[idx] || "CSI500",
+          );
+          const options = OFF_FUND_PAIR_UNIVERSE.map((x) => {
+            const label = `${x.key} - ${x.label}`;
+            return `<option value="${esc(x.key)}">${esc(label)}</option>`;
+          }).join("");
+          return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;"><strong>${esc(cardId)}</strong><span id="${esc(cardId)}_status" class="muted">等待计算</span></div><div class="row" style="margin-top:6px;"><div><label>基准</label><select id="${esc(cardId)}_base">${options}</select></div><div><label>对比</label><select id="${esc(cardId)}_peer">${options}</select></div></div><div id="${esc(cardId)}_plot" style="width:100%;height:520px;margin-top:6px;"></div></div>`;
+        }).join("");
+        for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
+          const baseSel = $(`${cardId}_base`);
+          const peerSel = $(`${cardId}_peer`);
+          if (baseSel)
+            baseSel.addEventListener("change", () => {
+              handleOffFundPairSelectionChanged(cardId);
+            });
+          if (peerSel)
+            peerSel.addEventListener("change", () => {
+              handleOffFundPairSelectionChanged(cardId);
+            });
+        }
+        applyOffFundPairPrefs(offPairPrefsByCard, { saveLocal: false });
+      }
+      function handleOffFundPairSelectionChanged(cardId) {
+        const pref =
+          offPairPrefsByCard[cardId] || OFF_FUND_PAIR_DEFAULT_PREFS[cardId];
+        const baseSel = $(`${cardId}_base`);
+        const peerSel = $(`${cardId}_peer`);
+        const baseRaw = String(
+          (baseSel && baseSel.value) || pref.base || "CSI300",
+        ).trim();
+        const peerRaw = String(
+          (peerSel && peerSel.value) || pref.peer || "CSI500",
+        ).trim();
+        const invalidPairInput =
+          !OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseRaw] ||
+          !OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerRaw] ||
+          baseRaw === peerRaw;
+        const base = OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseRaw]
+          ? baseRaw
+          : "CSI300";
+        let peer = OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerRaw]
+          ? peerRaw
+          : _pickFallbackPeer(base);
+        if (peer === base) peer = _pickFallbackPeer(base);
+        offPairInvalidInputByCard[cardId] = invalidPairInput;
+        offPairPrefsByCard[cardId] = { base, peer };
+        applyOffFundPairPrefs(offPairPrefsByCard, { saveLocal: true });
+        scheduleSaveOffParamState(120);
+        renderOffFundPairCard(cardId, {
+          snapshot: _offFundPairDateWindow(),
+        }).catch((e) => _handleOffFundPairRenderError(cardId, e));
+      }
+      function _isLikelyEtfCode(code) {
+        return /^\d{6}$/.test(String(code || "").trim());
+      }
+      function _extractOffFundFactorEtfMap(factors) {
+        const out = {};
+        const rows = Array.isArray(factors) ? factors : [];
+        for (const row of rows) {
+          const key = String((row && row.key) || "").trim();
+          if (!key || !OFF_FUND_PAIR_UNIVERSE_BY_KEY[key]) continue;
+          const candidates = [];
+          candidates.push(String((row && row.selected_code) || "").trim());
+          const aliases = Array.isArray(row && row.aliases) ? row.aliases : [];
+          for (const a of aliases) candidates.push(String(a || "").trim());
+          let picked = "";
+          for (const c of candidates) {
+            if (!c || !_isLikelyEtfCode(c)) continue;
+            if (OFF_FUND_PAIR_ETF_CODE_SET.has(c)) {
+              picked = c;
+              break;
+            }
+          }
+          if (!picked) {
+            for (const c of candidates) {
+              if (!c || !_isLikelyEtfCode(c)) continue;
+              if (c.startsWith("5") || c.startsWith("1")) {
+                picked = c;
+                break;
+              }
+            }
+          }
+          if (picked) out[key] = picked;
+        }
+        return out;
+      }
+      function _offFundPairDateWindow() {
+        return {
+          start:
+            String(($("start") && $("start").value) || "").trim() || "20110210",
+          end: String(($("end") && $("end").value) || "").trim() || todayYmd(),
+          signal_degraded: offPairSignalDegradedState,
+        };
+      }
+      function _normalizePairDateToIso(dateLike) {
+        const s = String(dateLike || "").trim();
+        if (/^\d{8}$/.test(s)) {
+          return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        return "";
+      }
+      async function _acquireOffPairFetchSlot() {
+        if (offPairFetchActive < OFF_FUND_PAIR_FETCH_CONCURRENCY) {
+          offPairFetchActive += 1;
+          return () => {
+            offPairFetchActive = Math.max(0, offPairFetchActive - 1);
+            const next = offPairFetchQueue.shift();
+            if (typeof next === "function") next();
+          };
+        }
+        await new Promise((resolve) => offPairFetchQueue.push(resolve));
+        offPairFetchActive += 1;
+        return () => {
+          offPairFetchActive = Math.max(0, offPairFetchActive - 1);
+          const next = offPairFetchQueue.shift();
+          if (typeof next === "function") next();
+        };
+      }
+      async function _fetchOffFundEtfPriceSeries(etfCode, { start, end }) {
+        const code = String(etfCode || "").trim();
+        if (!code) throw new Error("empty etf code");
+        const cacheKey = `${code}|${start}|${end}|hfq|${OFF_FUND_PAIR_PRICE_LIMIT}`;
+        if (offPairPriceCache.has(cacheKey))
+          return offPairPriceCache.get(cacheKey);
+        const run = async () => {
+          let lastErr = null;
+          for (let i = 0; i < 2; i += 1) {
+            try {
+              const release = await _acquireOffPairFetchSlot();
+              const controller =
+                typeof AbortController !== "undefined"
+                  ? new AbortController()
+                  : null;
+              let timer = null;
+              let timedOut = false;
+              let reqPromise = null;
+              try {
+                const url = `/etf/${encodeURIComponent(code)}/prices?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=hfq&limit=${OFF_FUND_PAIR_PRICE_LIMIT}`;
+                reqPromise = api(
+                  url,
+                  controller
+                    ? { method: "GET", signal: controller.signal }
+                    : { method: "GET" },
+                );
+                const timeoutPromise = new Promise((_, reject) => {
+                  timer = setTimeout(() => {
+                    timedOut = true;
+                    if (controller) {
+                      try {
+                        controller.abort();
+                      } catch (_) {}
+                    }
+                    reject(new Error("request_timeout"));
+                  }, OFF_FUND_PAIR_FETCH_TIMEOUT_MS);
+                });
+                const resp = await Promise.race([reqPromise, timeoutPromise]);
+                const txt = await resp.text();
+                if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+                const rows = txt ? JSON.parse(txt) : [];
+                const byDate = new Map();
+                let invalidTradeDateFiltered = false;
+                for (const r of Array.isArray(rows) ? rows : []) {
+                  const d = String((r && r.trade_date) || "")
+                    .trim()
+                    .slice(0, 10);
+                  const px = Number(r && r.close);
+                  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+                    invalidTradeDateFiltered = true;
+                    continue;
+                  }
+                  if (!Number.isFinite(px) || px <= 0) continue;
+                  byDate.set(d, px);
+                }
+                const dates = Array.from(byDate.keys()).sort();
+                const lastDate = dates.length
+                  ? String(dates[dates.length - 1])
+                  : "";
+                const endIso = _normalizePairDateToIso(end);
+                const truncated =
+                  Array.isArray(rows) &&
+                  rows.length >= OFF_FUND_PAIR_PRICE_LIMIT &&
+                  Boolean(lastDate) &&
+                  Boolean(endIso) &&
+                  String(lastDate) < String(endIso);
+                return {
+                  etfCode: code,
+                  dates,
+                  closeByDate: byDate,
+                  truncated,
+                  invalidTradeDateFiltered,
+                };
+              } finally {
+                clearTimeout(timer);
+                // In environments without AbortController, timeout cannot cancel
+                // the request. Keep the slot occupied until that request settles.
+                if (timedOut && !controller && reqPromise) {
+                  let safetyTimer = null;
+                  let released = false;
+                  const releaseOnce = () => {
+                    if (released) return;
+                    released = true;
+                    if (safetyTimer) clearTimeout(safetyTimer);
+                    release();
+                  };
+                  Promise.resolve(reqPromise)
+                    .catch(() => null)
+                    .finally(() => releaseOnce());
+                  // Safety valve: if the runtime never settles the timed-out fetch,
+                  // do not permanently block the fetch queue.
+                  safetyTimer = setTimeout(
+                    () => releaseOnce(),
+                    OFF_FUND_PAIR_FETCH_TIMEOUT_MS,
+                  );
+                } else {
+                  release();
+                }
+              }
+            } catch (e) {
+              lastErr = e;
+              if (i === 0) await new Promise((r) => setTimeout(r, 250));
+            }
+          }
+          throw lastErr || new Error("fetch failed");
+        };
+        const task = run();
+        offPairPriceCache.set(cacheKey, task);
+        try {
+          const out = await task;
+          offPairPriceCache.set(cacheKey, Promise.resolve(out));
+          return out;
+        } catch (e) {
+          offPairPriceCache.delete(cacheKey);
+          throw e;
+        }
+      }
+      function _alignOffFundPairSeries(baseS, peerS) {
+        const peerSet = new Set(peerS.dates || []);
+        const dates = (baseS.dates || []).filter((d) => peerSet.has(d));
+        const baseClose = [];
+        const peerClose = [];
+        for (const d of dates) {
+          const b = Number(baseS.closeByDate.get(d));
+          const p = Number(peerS.closeByDate.get(d));
+          if (!Number.isFinite(b) || b <= 0 || !Number.isFinite(p) || p <= 0)
+            continue;
+          baseClose.push(b);
+          peerClose.push(p);
+        }
+        const finalDates = [];
+        const finalBase = [];
+        const finalPeer = [];
+        let bi = 0;
+        for (const d of dates) {
+          const b = Number(baseS.closeByDate.get(d));
+          const p = Number(peerS.closeByDate.get(d));
+          if (!Number.isFinite(b) || b <= 0 || !Number.isFinite(p) || p <= 0)
+            continue;
+          finalDates.push(d);
+          finalBase.push(baseClose[bi]);
+          finalPeer.push(peerClose[bi]);
+          bi += 1;
+        }
+        return {
+          dates: finalDates,
+          baseClose: finalBase,
+          peerClose: finalPeer,
+        };
+      }
+      function _rollingMean(values, windowSize) {
+        const n = values.length;
+        const out = new Array(n).fill(null);
+        const w = Math.max(1, Math.floor(Number(windowSize) || 1));
+        for (let i = w - 1; i < n; i += 1) {
+          let ok = true;
+          let sum = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const v = Number(values[j]);
+            if (!Number.isFinite(v)) {
+              ok = false;
+              break;
+            }
+            sum += v;
+          }
+          out[i] = ok ? sum / w : null;
+        }
+        return out;
+      }
+      function _rollingStd(values, windowSize) {
+        const n = values.length;
+        const out = new Array(n).fill(null);
+        const w = Math.max(1, Math.floor(Number(windowSize) || 1));
+        for (let i = w - 1; i < n; i += 1) {
+          let ok = true;
+          let sum = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const v = Number(values[j]);
+            if (!Number.isFinite(v)) {
+              ok = false;
+              break;
+            }
+            sum += v;
+          }
+          if (!ok) continue;
+          const mean = sum / w;
+          let sq = 0;
+          for (let j = i - w + 1; j <= i; j += 1) {
+            const v = Number(values[j]);
+            sq += (v - mean) * (v - mean);
+          }
+          out[i] = Math.sqrt(sq / w);
+        }
+        return out;
+      }
+      function _computeRsi14(values) {
+        const n = values.length;
+        const out = new Array(n).fill(null);
+        if (n < 15) return out;
+        let gains = 0;
+        let losses = 0;
+        for (let i = 1; i <= 14; i += 1) {
+          const a = Number(values[i - 1]);
+          const b = Number(values[i]);
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return out;
+          const d = b - a;
+          gains += d > 0 ? d : 0;
+          losses += d < 0 ? -d : 0;
+        }
+        let avgGain = gains / 14;
+        let avgLoss = losses / 14;
+        const toRsi = (g, l) => {
+          if (l === 0 && g === 0) return 50;
+          if (l === 0) return 100;
+          if (g === 0) return 0;
+          const rs = g / l;
+          return 100 - 100 / (1 + rs);
+        };
+        out[14] = toRsi(avgGain, avgLoss);
+        for (let i = 15; i < n; i += 1) {
+          const prev = Number(values[i - 1]);
+          const cur = Number(values[i]);
+          if (!Number.isFinite(prev) || !Number.isFinite(cur)) {
+            out[i] = null;
+            continue;
+          }
+          const d = cur - prev;
+          const gain = d > 0 ? d : 0;
+          const loss = d < 0 ? -d : 0;
+          avgGain = (avgGain * 13 + gain) / 14;
+          avgLoss = (avgLoss * 13 + loss) / 14;
+          out[i] = toRsi(avgGain, avgLoss);
+        }
+        return out;
+      }
+      function _computeOffFundPairMetrics(aligned) {
+        const dates = aligned.dates || [];
+        const baseClose = aligned.baseClose || [];
+        const peerClose = aligned.peerClose || [];
+        const n = dates.length;
+        if (!n) {
+          return {
+            dates: [],
+            normBase: [],
+            normPeer: [],
+            ratio: [],
+            ratioMa242: [],
+            ratioBbUpper: [],
+            ratioBbLower: [],
+            diff40: [],
+            diff40Ma242: [],
+            rsi14: [],
+          };
+        }
+        const base0 = Number(baseClose[0]);
+        const peer0 = Number(peerClose[0]);
+        if (
+          !Number.isFinite(base0) ||
+          base0 <= 0 ||
+          !Number.isFinite(peer0) ||
+          peer0 <= 0
+        ) {
+          return {
+            dates: [],
+            normBase: [],
+            normPeer: [],
+            ratio: [],
+            ratioMa242: [],
+            ratioBbUpper: [],
+            ratioBbLower: [],
+            diff40: [],
+            diff40Ma242: [],
+            rsi14: [],
+          };
+        }
+        const normBase = baseClose.map((x) => Number(x) / base0);
+        const normPeer = peerClose.map((x) => Number(x) / peer0);
+        const ratioRaw = peerClose.map(
+          (x, i) => Number(x) / Number(baseClose[i]),
+        );
+        const ratio0 = Number(ratioRaw[0]);
+        const ratio = ratioRaw.map((x) =>
+          Number.isFinite(x) && Number.isFinite(ratio0) && ratio0 > 0
+            ? x / ratio0
+            : null,
+        );
+        const ratioMa242 = _rollingMean(ratio, 242);
+        const ratioStd242 = _rollingStd(ratio, 242);
+        const ratioBbUpper = ratioMa242.map((m, i) =>
+          Number.isFinite(m) && Number.isFinite(ratioStd242[i])
+            ? Number(m) + 2 * Number(ratioStd242[i])
+            : null,
+        );
+        const ratioBbLower = ratioMa242.map((m, i) =>
+          Number.isFinite(m) && Number.isFinite(ratioStd242[i])
+            ? Number(m) - 2 * Number(ratioStd242[i])
+            : null,
+        );
+        const diff40 = new Array(n).fill(null);
+        for (let i = 40; i < n; i += 1) {
+          const rb = Number(normBase[i - 40]);
+          const rp = Number(normPeer[i - 40]);
+          const cb = Number(normBase[i]);
+          const cp = Number(normPeer[i]);
+          if (
+            !Number.isFinite(rb) ||
+            !Number.isFinite(rp) ||
+            rb <= 0 ||
+            rp <= 0
+          )
+            continue;
+          if (!Number.isFinite(cb) || !Number.isFinite(cp)) continue;
+          const retBase40 = cb / rb - 1;
+          const retPeer40 = cp / rp - 1;
+          diff40[i] = retPeer40 - retBase40;
+        }
+        const diff40Ma242 = _rollingMean(diff40, 242);
+        const rsi14 = _computeRsi14(ratio);
+        return {
+          dates,
+          normBase,
+          normPeer,
+          ratio,
+          ratioMa242,
+          ratioBbUpper,
+          ratioBbLower,
+          diff40,
+          diff40Ma242,
+          rsi14,
+        };
+      }
+      function _deriveOffFundPairStatus({
+        invalidPairInput,
+        fetchFailed,
+        sampleCount,
+        truncated,
+        signalDegraded,
+      }) {
+        if (invalidPairInput) return _pairStatusRecord("invalid_pair");
+        if (fetchFailed || sampleCount <= 0)
+          return _pairStatusRecord("data_unavailable");
+        if (truncated) return _pairStatusRecord("truncated_samples");
+        if (signalDegraded) return _pairStatusRecord("degraded_signal");
+        if (sampleCount < 282) return _pairStatusRecord("insufficient_samples");
+        return _pairStatusRecord("ok");
+      }
+      function _traceAxesForRow(row) {
+        if (row === 1) return { xaxis: "x", yaxis: "y" };
+        if (row === 2) return { xaxis: "x2", yaxis: "y2" };
+        if (row === 3) return { xaxis: "x3", yaxis: "y3" };
+        return { xaxis: "x4", yaxis: "y4" };
+      }
+      function _buildOffFundPairTraces(metrics, { baseLabel, peerLabel }) {
+        const n = (metrics && metrics.dates && metrics.dates.length) || 0;
+        if (n <= 0) return [];
+        const traceOrder = [
+          "norm_base",
+          "norm_peer",
+          "ratio",
+          "rsi",
+          "diff40",
+          "ratio_ma242",
+          "bb_upper",
+          "bb_lower",
+          "diff40_ma242",
+        ];
+        const enabled = new Set();
+        if (n >= 2) {
+          enabled.add("norm_base");
+          enabled.add("norm_peer");
+          enabled.add("ratio");
+        }
+        if (n >= 15) enabled.add("rsi");
+        if (n >= 41) enabled.add("diff40");
+        if (n >= 242) {
+          enabled.add("ratio_ma242");
+          enabled.add("bb_upper");
+          enabled.add("bb_lower");
+        }
+        if (n >= 282) enabled.add("diff40_ma242");
+        if (n <= 1) enabled.clear();
+        const traceDefs = {
+          norm_base: {
+            row: 1,
+            y: metrics.normBase,
+            name: `${baseLabel} 归一化`,
+            line: { width: 1.8, color: "#4fc3f7" },
+          },
+          norm_peer: {
+            row: 1,
+            y: metrics.normPeer,
+            name: `${peerLabel} 归一化`,
+            line: { width: 1.8, color: "#ffd54f" },
+          },
+          ratio: {
+            row: 2,
+            y: metrics.ratio,
+            name: "比值(对比/基准,归一化)",
+            line: { width: 1.6, color: "#ce93d8" },
+          },
+          rsi: {
+            row: 4,
+            y: metrics.rsi14,
+            name: "RSI14(比值)",
+            line: { width: 1.4, color: "#aed581" },
+          },
+          diff40: {
+            row: 3,
+            y: metrics.diff40,
+            name: "40日收益差(对比-基准)",
+            line: { width: 1.5, color: "#ffab91" },
+          },
+          ratio_ma242: {
+            row: 2,
+            y: metrics.ratioMa242,
+            name: "比值MA242",
+            line: { width: 1.4, dash: "dot", color: "#ef9a9a" },
+          },
+          bb_upper: {
+            row: 2,
+            y: metrics.ratioBbUpper,
+            name: "比值布林上轨",
+            line: { width: 1, dash: "dot", color: "#80cbc4" },
+          },
+          bb_lower: {
+            row: 2,
+            y: metrics.ratioBbLower,
+            name: "比值布林下轨",
+            line: { width: 1, dash: "dot", color: "#80cbc4" },
+          },
+          diff40_ma242: {
+            row: 3,
+            y: metrics.diff40Ma242,
+            name: "40日收益差MA242",
+            line: { width: 1.3, dash: "dot", color: "#f48fb1" },
+          },
+        };
+        const traces = [];
+        const pushTrace = (traceKey, row, y, name, line) => {
+          const ax = _traceAxesForRow(row);
+          traces.push({
+            type: "scatter",
+            mode: "lines",
+            x: metrics.dates,
+            y,
+            name,
+            meta: { trace_key: traceKey },
+            line,
+            ...ax,
+          });
+        };
+        for (const k of traceOrder) {
+          if (!enabled.has(k)) continue;
+          const def = traceDefs[k];
+          if (!def) continue;
+          pushTrace(k, def.row, def.y, def.name, def.line);
+        }
+        return traces;
+      }
+      async function _sha256Hex(text) {
+        if (!(
+          window.crypto &&
+          window.crypto.subtle &&
+          window.crypto.subtle.digest
+        )) {
+          throw new Error("crypto_subtle_unavailable");
+        }
+        const data = new TextEncoder().encode(String(text || ""));
+        const hash = await window.crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hash))
+          .map((x) => x.toString(16).padStart(2, "0"))
+          .join("");
+      }
+      function _seriesHashPart(arr) {
+        return (arr || [])
+          .map((v) =>
+            Number.isFinite(Number(v)) ? Number(v).toFixed(12) : "NA",
+          )
+          .join(",");
+      }
+      async function _buildOffFundPairSignature({
+        statusCode,
+        dates,
+        traces,
+        metrics,
+      }) {
+        const orderedTraceKeys = (traces || []).map((t) =>
+          String((t && t.meta && t.meta.trace_key) || "").trim(),
+        );
+        if (statusCode === "data_unavailable") {
+          return {
+            status_code: statusCode,
+            ordered_trace_keys: [],
+            trace_count: 0,
+            common_dates_hash: OFF_FUND_PAIR_EMPTY_DATES_HASH,
+            key_series_hash: OFF_FUND_PAIR_EMPTY_KEY_SERIES_HASH,
+          };
+        }
+        const commonDates = Array.isArray(dates) ? dates : [];
+        const ratio = Array.isArray(metrics && metrics.ratio)
+          ? metrics.ratio
+          : [];
+        const diff40 = Array.isArray(metrics && metrics.diff40)
+          ? metrics.diff40
+          : [];
+        const rsi = Array.isArray(metrics && metrics.rsi14)
+          ? metrics.rsi14
+          : [];
+        const maxLen = commonDates.length;
+        if (!(
+          ratio.length === maxLen &&
+          diff40.length === maxLen &&
+          rsi.length === maxLen
+        )) {
+          throw new Error("signature_series_length_mismatch");
+        }
+        const keySeries = `ratio:[${_seriesHashPart(ratio)}]|diff40:[${_seriesHashPart(diff40)}]|rsi:[${_seriesHashPart(rsi)}]`;
+        return {
+          status_code: statusCode,
+          ordered_trace_keys: orderedTraceKeys,
+          trace_count: orderedTraceKeys.length,
+          common_dates_hash: await _sha256Hex(commonDates.join(",")),
+          key_series_hash: await _sha256Hex(keySeries),
+        };
+      }
+      function _handleOffFundPairRenderError(cardId, error) {
+        const plotElId = `${cardId}_plot`;
+        const statusEl = $(`${cardId}_status`);
+        const plotEl = $(plotElId);
+        if (window.console && window.console.error) window.console.error(error);
+        if (window.Plotly && typeof window.Plotly.purge === "function") {
+          try {
+            window.Plotly.purge(plotElId);
+          } catch (_) {}
+        }
+        if (plotEl) {
+          plotEl.innerHTML = `<div class="muted" style="padding-top:8px;">${esc(_pairMessageByKey("pair.data_unavailable"))}</div>`;
+        }
+        if (statusEl) {
+          statusEl.textContent =
+            "data_unavailable/pair.data_unavailable | samples=0 | warnings=-";
+        }
+        offPairSnapshotsByCard[cardId] = {
+          card_id: cardId,
+          status_code: "data_unavailable",
+          status_message_key: "pair.data_unavailable",
+          status_message: _pairMessageByKey("pair.data_unavailable"),
+          warnings: [],
+          samples: 0,
+          signature: {
+            status_code: "data_unavailable",
+            ordered_trace_keys: [],
+            trace_count: 0,
+            common_dates_hash: OFF_FUND_PAIR_EMPTY_DATES_HASH,
+            key_series_hash: OFF_FUND_PAIR_EMPTY_KEY_SERIES_HASH,
+          },
+          error: String((error && error.message) || error || "render_error"),
+        };
+        window.__offFundPairSnapshots = offPairSnapshotsByCard;
+      }
+      async function renderOffFundPairCard(cardId, { snapshot = null } = {}) {
+        const pref =
+          offPairPrefsByCard[cardId] || OFF_FUND_PAIR_DEFAULT_PREFS[cardId];
+        const baseKey = String(pref.base || "CSI300");
+        const peerKey = String(pref.peer || "CSI500");
+        const baseInfo = OFF_FUND_PAIR_UNIVERSE_BY_KEY[baseKey];
+        const peerInfo = OFF_FUND_PAIR_UNIVERSE_BY_KEY[peerKey];
+        const statusEl = $(`${cardId}_status`);
+        const plotElId = `${cardId}_plot`;
+        const plotEl = $(plotElId);
+        if (!plotEl || !baseInfo || !peerInfo) return;
+        const version = (Number(offPairRequestVersionByCard[cardId]) || 0) + 1;
+        offPairRequestVersionByCard[cardId] = version;
+        const invalidPairInput = Boolean(offPairInvalidInputByCard[cardId]);
+        // Consume one-shot invalid input marker to avoid stale status leaks across retries.
+        offPairInvalidInputByCard[cardId] = false;
+        if (statusEl) statusEl.textContent = "加载中...";
+        try {
+          const safeSnapshot =
+            snapshot && typeof snapshot === "object"
+              ? snapshot
+              : _offFundPairDateWindow();
+          const start = String(safeSnapshot.start || "20110210");
+          const end = String(safeSnapshot.end || todayYmd());
+          const baseCode = String(
+            offPairFactorEtfByKey[baseKey] || baseInfo.etf_code,
+          );
+          const peerCode = String(
+            offPairFactorEtfByKey[peerKey] || peerInfo.etf_code,
+          );
+          let baseSeries = null;
+          let peerSeries = null;
+          let fetchFailed = false;
+          try {
+            [baseSeries, peerSeries] = await Promise.all([
+              _fetchOffFundEtfPriceSeries(baseCode, { start, end }),
+              _fetchOffFundEtfPriceSeries(peerCode, { start, end }),
+            ]);
+          } catch (_) {
+            fetchFailed = true;
+          }
+          if (Number(offPairRequestVersionByCard[cardId]) !== version) return;
+          const aligned =
+            !fetchFailed && baseSeries && peerSeries
+              ? _alignOffFundPairSeries(baseSeries, peerSeries)
+              : { dates: [], baseClose: [], peerClose: [] };
+          const metrics = _computeOffFundPairMetrics(aligned);
+          const sampleCount = (metrics.dates && metrics.dates.length) || 0;
+          const truncated =
+            Boolean(baseSeries && baseSeries.truncated) ||
+            Boolean(peerSeries && peerSeries.truncated);
+          const invalidTradeDateFiltered =
+            Boolean(baseSeries && baseSeries.invalidTradeDateFiltered) ||
+            Boolean(peerSeries && peerSeries.invalidTradeDateFiltered);
+          const status = _deriveOffFundPairStatus({
+            invalidPairInput,
+            fetchFailed,
+            sampleCount,
+            truncated,
+            signalDegraded: Boolean(safeSnapshot.signal_degraded),
+          });
+          const warnings = _sortedPairWarnings([
+            safeSnapshot.signal_degraded ? "signal_degraded" : "",
+            truncated ? "samples_truncated" : "",
+            invalidTradeDateFiltered ? "invalid_trade_date_filtered" : "",
+          ]);
+          const traces = _buildOffFundPairTraces(metrics, {
+            baseLabel: `${baseInfo.key}-${baseInfo.label}`,
+            peerLabel: `${peerInfo.key}-${peerInfo.label}`,
+          });
+          const layout = {
+            margin: { l: 48, r: 18, t: 20, b: 36 },
+            legend: { orientation: "h", y: 1.05, x: 0 },
+            xaxis: {
+              domain: [0, 1],
+              anchor: "y",
+              showticklabels: false,
+              type: "date",
+            },
+            yaxis: { domain: [0.78, 1], type: "log" },
+            xaxis2: {
+              domain: [0, 1],
+              anchor: "y2",
+              matches: "x",
+              showticklabels: false,
+              type: "date",
+            },
+            yaxis2: { domain: [0.53, 0.75] },
+            xaxis3: {
+              domain: [0, 1],
+              anchor: "y3",
+              matches: "x",
+              showticklabels: false,
+              type: "date",
+            },
+            yaxis3: { domain: [0.28, 0.5] },
+            xaxis4: {
+              domain: [0, 1],
+              anchor: "y4",
+              matches: "x",
+              type: "date",
+            },
+            yaxis4: { domain: [0.03, 0.25], range: [0, 100] },
+            shapes: [
+              {
+                type: "line",
+                xref: "paper",
+                yref: "y4",
+                x0: 0,
+                x1: 1,
+                y0: 70,
+                y1: 70,
+                line: { width: 1, dash: "dot", color: "#78909c" },
+              },
+              {
+                type: "line",
+                xref: "paper",
+                yref: "y4",
+                x0: 0,
+                x1: 1,
+                y0: 30,
+                y1: 30,
+                line: { width: 1, dash: "dot", color: "#78909c" },
+              },
+            ],
+          };
+          const config = { responsive: true, displaylogo: false };
+          if (!window.Plotly) await ensurePlotlyLoaded();
+          const usePlaceholder =
+            status.status_code === "data_unavailable" || sampleCount <= 1;
+          if (usePlaceholder) {
+            if (window.Plotly && typeof window.Plotly.purge === "function") {
+              try {
+                window.Plotly.purge(plotElId);
+              } catch (_) {}
+            }
+            plotEl.innerHTML = `<div class="muted" style="padding-top:8px;">${esc(status.status_message)}</div>`;
+          } else {
+            await window.Plotly.newPlot(plotElId, traces, layout, config);
+          }
+          if (Number(offPairRequestVersionByCard[cardId]) !== version) return;
+          const baseUsed = String(
+            (baseSeries && baseSeries.etfCode) || baseCode,
+          );
+          const peerUsed = String(
+            (peerSeries && peerSeries.etfCode) || peerCode,
+          );
+          const signature = await _buildOffFundPairSignature({
+            statusCode: status.status_code,
+            dates: metrics.dates || [],
+            traces: status.status_code === "data_unavailable" ? [] : traces,
+            metrics,
+          });
+          offPairSnapshotsByCard[cardId] = {
+            card_id: cardId,
+            status_code: status.status_code,
+            status_message_key: status.status_message_key,
+            status_message: status.status_message,
+            warnings,
+            samples: sampleCount,
+            base_key: baseKey,
+            peer_key: peerKey,
+            base_code: baseUsed,
+            peer_code: peerUsed,
+            signature,
+          };
+          window.__offFundPairSnapshots = offPairSnapshotsByCard;
+          if (statusEl) {
+            statusEl.textContent = `${status.status_code}/${status.status_message_key} | samples=${sampleCount} | warnings=${warnings.join(",") || "-"} | base=${baseUsed} peer=${peerUsed}`;
+          }
+        } catch (error) {
+          if (Number(offPairRequestVersionByCard[cardId]) !== version) return;
+          _handleOffFundPairRenderError(cardId, error);
+        }
+      }
+      async function renderAllOffFundPairCards({
+        snapshot = null,
+        signalDegraded = false,
+      } = {}) {
+        if (!$("offClsPairCards")) return;
+        await ensurePlotlyLoaded();
+        const snap =
+          snapshot && typeof snapshot === "object"
+            ? snapshot
+            : _offFundPairDateWindow();
+        offPairRenderParamSnapshot = {
+          start: String(snap.start || "20110210"),
+          end: String(snap.end || todayYmd()),
+          signal_degraded: Boolean(signalDegraded),
+        };
+        let idx = 0;
+        const total = OFF_FUND_PAIR_CARD_IDS.length;
+        await new Promise((resolve) => {
+          const step = () => {
+            const end = Math.min(idx + 2, total);
+            for (; idx < end; idx += 1) {
+              const cardId = OFF_FUND_PAIR_CARD_IDS[idx];
+              renderOffFundPairCard(cardId, {
+                snapshot: offPairRenderParamSnapshot,
+              }).catch((e) => _handleOffFundPairRenderError(cardId, e));
+            }
+            if (idx < total) requestAnimationFrame(step);
+            else resolve();
+          };
+          requestAnimationFrame(step);
+        });
+      }
 
       function parseKvText(txt) {
         const out = {};
@@ -761,10 +1871,13 @@
       }
       function schedulePersistState(delayMs = 180) {
         if (persistTimer) clearTimeout(persistTimer);
-        persistTimer = setTimeout(() => {
-          persistTimer = null;
-          persistStateNow();
-        }, Math.max(0, Number(delayMs) || 0));
+        persistTimer = setTimeout(
+          () => {
+            persistTimer = null;
+            persistStateNow();
+          },
+          Math.max(0, Number(delayMs) || 0),
+        );
       }
       function hydrateStateFromStorage() {
         try {
@@ -808,6 +1921,141 @@
               : {};
           lastPersistPayload = raw;
         } catch (_) {}
+      }
+      function _collectOffParamStateFromUi() {
+        const startDate = String(($("start") && $("start").value) || "").trim();
+        const endDate = String(($("end") && $("end").value) || "").trim();
+        const adjust =
+          String(($("adjust") && $("adjust").value) || "hfq").trim() || "hfq";
+        const rfRaw = Number(
+          String(($("rf") && $("rf").value) || "0.025").trim(),
+        );
+        const rpWindowRaw = Number(
+          String(($("rpWindow") && $("rpWindow").value) || "60").trim(),
+        );
+        const driftAbsRaw = Number(
+          String(
+            ($("driftAbsThreshold") && $("driftAbsThreshold").value) || "0.05",
+          ).trim(),
+        );
+        const driftRelRaw = Number(
+          String(
+            ($("driftRelThreshold") && $("driftRelThreshold").value) || "0.25",
+          ).trim(),
+        );
+        const clamp01 = (v, d) =>
+          Number.isFinite(v) ? Math.min(1, Math.max(0, Number(v))) : d;
+        return {
+          start_date: startDate || null,
+          end_date: endDate || null,
+          adjust: ["hfq", "qfq", "none"].includes(adjust) ? adjust : "hfq",
+          rf: Number.isFinite(rfRaw) ? Math.min(1, Math.max(-1, rfRaw)) : 0.025,
+          inner_mode:
+            String(
+              ($("innerMode") && $("innerMode").value) || "risk_parity_cov",
+            ) || "risk_parity_cov",
+          rp_window: Number.isFinite(rpWindowRaw)
+            ? Math.min(2000, Math.max(20, Math.floor(rpWindowRaw)))
+            : 60,
+          rebalance_cycle:
+            String(
+              ($("rebalanceCycle") && $("rebalanceCycle").value) || "daily",
+            ) || "daily",
+          drift_rebalance_enabled:
+            String(
+              ($("driftRebalanceEnabled") &&
+                $("driftRebalanceEnabled").value) ||
+                "1",
+            ) !== "0",
+          drift_abs_threshold: clamp01(driftAbsRaw, 0.05),
+          drift_rel_threshold: clamp01(driftRelRaw, 0.25),
+          pair_chart_prefs_json: offFundPairPrefsToJson(offPairPrefsByCard),
+        };
+      }
+      function _applyOffParamStateToUi(st) {
+        const s = st && typeof st === "object" ? st : {};
+        if ($("start"))
+          $("start").value = String(
+            (s.start_date == null ? "20110210" : s.start_date) || "",
+          );
+        if ($("end"))
+          $("end").value = String((s.end_date == null ? "" : s.end_date) || "");
+        if ($("adjust")) $("adjust").value = String(s.adjust || "hfq");
+        if ($("rf")) $("rf").value = String(s.rf == null ? 0.025 : s.rf);
+        if ($("innerMode"))
+          $("innerMode").value = String(s.inner_mode || "risk_parity_cov");
+        if ($("rpWindow"))
+          $("rpWindow").value = String(s.rp_window == null ? 60 : s.rp_window);
+        if ($("rebalanceCycle"))
+          $("rebalanceCycle").value = String(s.rebalance_cycle || "daily");
+        if ($("driftRebalanceEnabled"))
+          $("driftRebalanceEnabled").value =
+            s.drift_rebalance_enabled === false ? "0" : "1";
+        if ($("driftAbsThreshold"))
+          $("driftAbsThreshold").value = String(
+            s.drift_abs_threshold == null ? 0.05 : s.drift_abs_threshold,
+          );
+        if ($("driftRelThreshold"))
+          $("driftRelThreshold").value = String(
+            s.drift_rel_threshold == null ? 0.25 : s.drift_rel_threshold,
+          );
+        let pairPrefs = loadOffFundPairPrefsLocal();
+        if (
+          typeof s.pair_chart_prefs_json === "string" &&
+          String(s.pair_chart_prefs_json).trim()
+        ) {
+          try {
+            pairPrefs = normalizeOffFundPairPrefs(
+              JSON.parse(s.pair_chart_prefs_json),
+            );
+          } catch (_) {}
+        }
+        applyOffFundPairPrefs(pairPrefs, { saveLocal: true });
+      }
+      async function saveOffParamStateToBackend({ quiet = true } = {}) {
+        if (offParamHydrating) return;
+        const payload = _collectOffParamStateFromUi();
+        const body = JSON.stringify(payload);
+        if (body === offParamPersistPayload) return;
+        try {
+          const resp = await api("/off-fund/research/state", {
+            method: "PUT",
+            body,
+          });
+          const txt = await resp.text();
+          if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+          offParamPersistPayload = body;
+        } catch (e) {
+          if (!quiet) setMsg(`参数保存失败：${String((e && e.message) || e)}`);
+          throw e;
+        }
+      }
+      function scheduleSaveOffParamState(delayMs = 300) {
+        if (offParamHydrating) return;
+        if (offParamPersistTimer) clearTimeout(offParamPersistTimer);
+        offParamPersistTimer = setTimeout(
+          () => {
+            offParamPersistTimer = null;
+            saveOffParamStateToBackend({ quiet: true }).catch(() => {});
+          },
+          Math.max(0, Number(delayMs) || 0),
+        );
+      }
+      async function loadOffParamStateFromBackend() {
+        const resp = await api("/off-fund/research/state", { method: "GET" });
+        const txt = await resp.text();
+        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+        const out = txt ? JSON.parse(txt) : {};
+        offParamHydrating = true;
+        try {
+          _applyOffParamStateToUi(out || {});
+          offParamPersistPayload = JSON.stringify(
+            _collectOffParamStateFromUi(),
+          );
+          scheduleRenderAllOffFundPairCards(10);
+        } finally {
+          offParamHydrating = false;
+        }
       }
       function ensurePersistentGroupExists(name) {
         const nm = sanitizeGroupName(name) || DEFAULT_PERSISTENT_GROUP;
@@ -1782,7 +3030,8 @@
         const arr = Object.entries(exposures || {})
           .filter(
             ([k, v]) =>
-              String(k || "").toLowerCase() !== "cash" && Number.isFinite(Number(v)),
+              String(k || "").toLowerCase() !== "cash" &&
+              Number.isFinite(Number(v)),
           )
           .sort((a, b) => Number(b[1]) - Number(a[1]))
           .slice(0, 3);
@@ -1794,12 +3043,6 @@
           )
           .join("，");
       }
-      const OFF_CLS_DEFAULT_FACTORS_TEXT = [
-        "CSI300|沪深300=000300,510300",
-        "CSI500|中证500=000905,510500",
-        "CSI1000|中证1000=000852,159845",
-        "CSI2000|中证2000=932000,159533",
-      ].join("\n");
       function factorsTextFromList(factors) {
         const arr = Array.isArray(factors) ? factors : [];
         const rows = [];
@@ -1813,6 +3056,18 @@
           rows.push(`${key}|${label}=${aliases.join(",")}`);
         }
         return rows.join("\n");
+      }
+      function effectiveFactorsFromConfig(cfg) {
+        const effective = Array.isArray(cfg && cfg.effective_benchmark_factors)
+          ? cfg.effective_benchmark_factors
+          : [];
+        if (effective.length) return effective;
+        return Array.isArray(cfg && cfg.benchmark_factors)
+          ? cfg.benchmark_factors
+          : [];
+      }
+      function profileDefaultFactorsText(cfg) {
+        return factorsTextFromList(effectiveFactorsFromConfig(cfg));
       }
       function renderClsConfigSelect() {
         const sel = $("offClsCfgSelect");
@@ -1841,10 +3096,13 @@
         const factors = Array.isArray(cfg.benchmark_factors)
           ? cfg.benchmark_factors
           : [];
+        const profileFactorsText = profileDefaultFactorsText(cfg);
         const mode = factors.length ? "custom" : "profile";
         $("offClsFactorMode").value = mode;
         $("offClsFactors").value =
-          factors.length > 0 ? factorsTextFromList(factors) : OFF_CLS_DEFAULT_FACTORS_TEXT;
+          factors.length > 0
+            ? factorsTextFromList(factors)
+            : profileFactorsText;
         $("offClsCfgName").value = String(cfg.name || "");
         refreshClsFactorInputState();
       }
@@ -1858,7 +3116,9 @@
         offClsConfigs = Array.isArray(rows) ? rows : [];
         renderClsConfigSelect();
         const active =
-          offClsConfigs.find((x) => x && x.is_active) || offClsConfigs[0] || null;
+          offClsConfigs.find((x) => x && x.is_active) ||
+          offClsConfigs[0] ||
+          null;
         if (active) {
           $("offClsCfgSelect").value = String(active.name || "");
           applyClsConfigToUi(active);
@@ -1866,8 +3126,12 @@
       }
       async function saveClsConfigToBackend() {
         const name =
-          String(($("offClsCfgName") && $("offClsCfgName").value) || "").trim() ||
-          String(($("offClsCfgSelect") && $("offClsCfgSelect").value) || "").trim();
+          String(
+            ($("offClsCfgName") && $("offClsCfgName").value) || "",
+          ).trim() ||
+          String(
+            ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
+          ).trim();
         if (!name) throw new Error("请先输入配置名");
         const factorPayload = currentClsFactorPayload();
         const resp = await api("/off-fund/regression/factor-configs", {
@@ -1875,7 +3139,8 @@
           body: JSON.stringify({
             name,
             set_active: true,
-            benchmark_profile: factorPayload.benchmark_profile || "cn_stock_core",
+            benchmark_profile:
+              factorPayload.benchmark_profile || "cn_stock_core",
             benchmark_factors: factorPayload.benchmark_factors || null,
           }),
         });
@@ -1887,7 +3152,9 @@
         setMsg(`已保存因子配置：${name}`);
       }
       async function activateClsConfigFromSelect() {
-        const name = String(($("offClsCfgSelect") && $("offClsCfgSelect").value) || "").trim();
+        const name = String(
+          ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
+        ).trim();
         if (!name) throw new Error("请选择配置");
         const cfg = getClsConfigByName(name);
         if (!cfg) throw new Error("配置不存在");
@@ -1903,7 +3170,9 @@
         setMsg(`已载入并激活因子配置：${name}`);
       }
       async function deleteClsConfigFromSelect() {
-        const name = String(($("offClsCfgSelect") && $("offClsCfgSelect").value) || "").trim();
+        const name = String(
+          ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
+        ).trim();
         if (!name) throw new Error("请选择配置");
         const resp = await api(
           `/off-fund/regression/factor-configs/${encodeURIComponent(name)}`,
@@ -1947,7 +3216,9 @@
         return out;
       }
       function currentClsFactorPayload() {
-        const mode = String(($("offClsFactorMode") && $("offClsFactorMode").value) || "profile");
+        const mode = String(
+          ($("offClsFactorMode") && $("offClsFactorMode").value) || "profile",
+        );
         if (mode === "custom") {
           const factors = parseOffClsFactorsText(
             ($("offClsFactors") && $("offClsFactors").value) || "",
@@ -1993,7 +3264,9 @@
         );
         const minSamples = Math.max(
           40,
-          Math.floor(Number(String($("offClsMinSamples").value || "120").trim())),
+          Math.floor(
+            Number(String($("offClsMinSamples").value || "120").trim()),
+          ),
         );
         const factorPayload = currentClsFactorPayload();
         const resp = await api("/analysis/off-fund/factor-availability", {
@@ -2014,7 +3287,9 @@
           throw new Error((out && out.error) || "因子检查失败");
         renderClsFactorAvailability(out);
         if (!quiet) {
-          const enough = Number((out.meta && out.meta.enough_factor_count) || 0);
+          const enough = Number(
+            (out.meta && out.meta.enough_factor_count) || 0,
+          );
           const total = Number((out.meta && out.meta.factor_count) || 0);
           const req = Number((out.meta && out.meta.required_days) || 0);
           setMsg(`因子检查完成：充足 ${enough}/${total}，要求日数=${req}。`);
@@ -2032,46 +3307,85 @@
         );
         const minSamples = Math.max(
           40,
-          Math.floor(Number(String($("offClsMinSamples").value || "120").trim())),
+          Math.floor(
+            Number(String($("offClsMinSamples").value || "120").trim()),
+          ),
         );
         const gap = Math.max(
           0,
           Math.min(1, Number(String($("offClsGap").value || "0.08").trim())),
         );
-        const factorAvail = await checkClsFactorAvailability({ quiet: true });
+        let factorAvail = null;
+        try {
+          factorAvail = await checkClsFactorAvailability({ quiet: true });
+        } catch (e) {
+          offPairSignalDegradedState = true;
+          offPairFactorEtfByKey = {};
+          scheduleRenderAllOffFundPairCards(20, {
+            snapshot: { start, end },
+            signalDegraded: true,
+          });
+          throw e;
+        }
         const enoughFactors = Number(
           (factorAvail &&
             factorAvail.meta &&
             factorAvail.meta.enough_factor_count) ||
             0,
         );
-        if (enoughFactors < 2)
+        if (enoughFactors < 2) {
+          offPairSignalDegradedState = false;
+          offPairFactorEtfByKey = _extractOffFundFactorEtfMap(
+            (factorAvail && factorAvail.items) || [],
+          );
+          scheduleRenderAllOffFundPairCards(10, {
+            snapshot: { start, end },
+            signalDegraded: false,
+          });
           return setMsg(
             "可用因子不足（<2）。请先调整因子配置或补齐因子历史数据后再运行回归。",
           );
+        }
         const factorPayload = currentClsFactorPayload();
         setMsg("运行基金分类回归中...");
-        const resp = await api("/analysis/off-fund/classify", {
-          method: "POST",
-          body: JSON.stringify({
-            codes: picked,
-            start,
-            end,
-            fund_adjust: "hfq",
-            benchmark_adjust: "hfq",
-            ...factorPayload,
-            rolling_window: rollingWindow,
-            min_samples: minSamples,
-            dominance_gap: gap,
-            include_exposure_series: false,
-          }),
-        });
-        const txt = await resp.text();
-        if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
-        const out = txt ? JSON.parse(txt) : {};
-        if (!out || out.ok !== true)
-          throw new Error((out && out.error) || "分类回归失败");
+        let out = {};
+        try {
+          const resp = await api("/analysis/off-fund/classify", {
+            method: "POST",
+            body: JSON.stringify({
+              codes: picked,
+              start,
+              end,
+              fund_adjust: "hfq",
+              benchmark_adjust: "hfq",
+              ...factorPayload,
+              rolling_window: rollingWindow,
+              min_samples: minSamples,
+              dominance_gap: gap,
+              include_exposure_series: false,
+            }),
+          });
+          const txt = await resp.text();
+          if (!resp.ok) throw new Error(txt || `HTTP ${resp.status}`);
+          out = txt ? JSON.parse(txt) : {};
+          if (!out || out.ok !== true)
+            throw new Error((out && out.error) || "分类回归失败");
+        } catch (e) {
+          offPairSignalDegradedState = true;
+          offPairFactorEtfByKey = {};
+          scheduleRenderAllOffFundPairCards(20, {
+            snapshot: { start, end },
+            signalDegraded: true,
+          });
+          throw e;
+        }
+        offPairSignalDegradedState = false;
         renderClsActiveFactors(out.factors || []);
+        offPairFactorEtfByKey = _extractOffFundFactorEtfMap(out.factors || []);
+        scheduleRenderAllOffFundPairCards(10, {
+          snapshot: { start, end },
+          signalDegraded: false,
+        });
         const factorLabelByKey = {};
         for (const f of Array.isArray(out.factors) ? out.factors : []) {
           const key = String((f && f.key) || "").trim();
@@ -2120,21 +3434,26 @@
         const driftAbsThreshold = Math.max(
           0,
           Number(
-            (($("driftAbsThreshold") && $("driftAbsThreshold").value) || "0.05")
-              .trim(),
+            (
+              ($("driftAbsThreshold") && $("driftAbsThreshold").value) ||
+              "0.05"
+            ).trim(),
           ),
         );
         const driftRelThreshold = Math.max(
           0,
           Number(
-            (($("driftRelThreshold") && $("driftRelThreshold").value) || "0.25")
-              .trim(),
+            (
+              ($("driftRelThreshold") && $("driftRelThreshold").value) ||
+              "0.25"
+            ).trim(),
           ),
         );
         const rpWindow = Math.max(
           20,
           Math.floor(Number(String($("rpWindow").value || "60").trim())),
         );
+        await saveOffParamStateToBackend({ quiet: true }).catch(() => {});
 
         const mpGroup = parseKvText($("assetGroups").value);
         for (const c of picked)
@@ -2215,7 +3534,11 @@
             for (let i = 0; i < codes.length; i++) {
               rcRows.push({ group: g, code: codes[i], rc: null, w_in: wIn[i] });
             }
-          } else if (innerMode === "equal" || codes.length <= 1 || minLen < 20) {
+          } else if (
+            innerMode === "equal" ||
+            codes.length <= 1 ||
+            minLen < 20
+          ) {
             wIn = Array.from({ length: codes.length }, () => 1 / codes.length);
           } else {
             const cov = covMatrix(aligned);
@@ -2527,6 +3850,31 @@
       $("activeGroup").addEventListener("input", () =>
         saveCurrentSubgroupState(),
       );
+      for (const id of [
+        "start",
+        "end",
+        "adjust",
+        "rf",
+        "innerMode",
+        "rpWindow",
+        "rebalanceCycle",
+        "driftRebalanceEnabled",
+        "driftAbsThreshold",
+        "driftRelThreshold",
+      ]) {
+        const el = $(id);
+        if (!el) continue;
+        el.addEventListener("change", () => scheduleSaveOffParamState());
+        el.addEventListener("input", () => scheduleSaveOffParamState());
+        if (id === "start" || id === "end" || id === "adjust") {
+          el.addEventListener("change", () =>
+            scheduleRenderAllOffFundPairCards(),
+          );
+          el.addEventListener("input", () =>
+            scheduleRenderAllOffFundPairCards(),
+          );
+        }
+      }
       $("offDistCode").addEventListener("change", () => {
         if (lastCtx) renderAssetDist(lastCtx);
       });
@@ -2621,8 +3969,6 @@
         persistStateNow();
         setMsg(`已删除大组：${nm}`);
       });
-      if ($("offClsFactors") && !$("offClsFactors").value)
-        $("offClsFactors").value = OFF_CLS_DEFAULT_FACTORS_TEXT;
       function refreshClsFactorInputState() {
         const mode = String(
           ($("offClsFactorMode") && $("offClsFactorMode").value) || "profile",
@@ -2656,7 +4002,22 @@
         refreshClsFactorInputState();
       });
       $("offClsUseDefault").addEventListener("click", () => {
-        $("offClsFactors").value = OFF_CLS_DEFAULT_FACTORS_TEXT;
+        const selectedName = String(
+          ($("offClsCfgSelect") && $("offClsCfgSelect").value) || "",
+        ).trim();
+        const cfg =
+          getClsConfigByName(selectedName) ||
+          (Array.isArray(offClsConfigs)
+            ? offClsConfigs.find((x) => x && x.is_active)
+            : null) ||
+          (Array.isArray(offClsConfigs) ? offClsConfigs[0] : null) ||
+          null;
+        const txt = profileDefaultFactorsText(cfg);
+        if (!txt) {
+          setMsg("后端默认模板暂不可用，请先刷新因子配置。");
+          return;
+        }
+        $("offClsFactors").value = txt;
       });
       $("offClsCheckFactors").addEventListener("click", () =>
         checkClsFactorAvailability().catch((e) =>
@@ -2669,11 +4030,17 @@
       $("runCls").addEventListener("click", () =>
         runClassification().catch((e) => setMsg(String((e && e.message) || e))),
       );
+      offPairPrefsByCard = loadOffFundPairPrefsLocal();
+      renderOffFundPairCardShell();
       wireOffPeriodControls("weekly");
       wireOffPeriodControls("monthly");
       wireOffPeriodControls("quarterly");
       wireOffPeriodControls("yearly");
       hydrateStateFromStorage();
+      loadOffParamStateFromBackend().catch((e) =>
+        setMsg(`参数状态加载失败：${String((e && e.message) || e)}`),
+      );
+      scheduleRenderAllOffFundPairCards(40);
       loadClsConfigsFromBackend().catch((e) =>
         setMsg(`因子配置加载失败：${String((e && e.message) || e)}`),
       );

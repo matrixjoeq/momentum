@@ -1,5 +1,5 @@
 from tests.helpers.api_test_client import FIXED_MINIPROGRAM_POOL, upsert_and_fetch_etfs
-from tests.helpers.rotation_case_data import post_json_ok
+from tests.helpers.rotation_case_data import post_json, post_json_ok
 
 
 def _build_test_client_with_fake_ak(*, fetch_end_date: str):
@@ -126,3 +126,372 @@ def test_api_rotation_next_plan_does_not_require_future_price_row():
     assert data["pick_name"] is not None
     assert data["pick_exposure"] is not None
     assert float(data["pick_exposure"]) >= 0.0
+
+
+def test_api_rotation_next_plan_accepts_equity_budget_stop_params():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 5,
+            "asof": "20240104",
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "close",
+        },
+    )
+    assert data["next_trading_day"] == "2024-01-05"
+    assert data["pick_code"] is not None
+
+
+def test_api_rotation_next_plan_auto_accepts_equity_budget_stop_params():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    data = post_json_ok(
+        c,
+        "/api/analysis/rotation/next-plan-auto",
+        {
+            "asof": "20240104",
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "next_day",
+            "atr_stop_execution_time": "close",
+        },
+    )
+    assert data["next_trading_day"] == "2024-01-05"
+    assert data["pick_code"] is not None
+
+
+def test_api_rotation_next_plan_rejects_equity_budget_non_close_execution():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 5,
+            "asof": "20240104",
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "open",
+        },
+        expected_status=422,
+    )
+    assert "equity_budget" in str(err)
+
+
+def test_api_rotation_next_plan_rejects_atr_scheme_with_none_mode():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 5,
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "none",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "stop_scheme=atr requires atr_stop_mode" in str(err)
+
+
+def test_api_rotation_next_plan_rejects_equity_budget_non_close_even_when_not_effective_day():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    # 2024-01-04 is Thu and next trading day is Fri.
+    # Use Thu anchor (4) so next-plan would short-circuit without execution.
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 4,
+            "asof": "20240104",
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "open",
+        },
+        expected_status=422,
+    )
+    assert "equity_budget" in str(err)
+
+
+def test_api_rotation_next_plan_auto_rejects_equity_budget_non_close_execution():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan-auto",
+        {
+            "asof": "20240104",
+            "stop_scheme": "equity_budget",
+            "equity_stop_risk_pct": 0.02,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "open",
+        },
+        expected_status=422,
+    )
+    assert "equity_budget" in str(err)
+
+
+def test_api_rotation_next_plan_rejects_missing_anchor_weekday():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "asof": "20240104",
+        },
+        expected_status=400,
+    )
+    assert "anchor_weekday must be 1..5" in str(err)
+
+
+def test_api_rotation_next_plan_rejects_invalid_asof_format():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 5,
+            "asof": "2024-01-04",
+        },
+        expected_status=400,
+    )
+    assert "asof must be YYYYMMDD" in str(err)
+
+
+def test_api_rotation_next_plan_auto_rejects_invalid_asof_format():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan-auto",
+        {
+            "asof": "2024-01-04",
+        },
+        expected_status=400,
+    )
+    assert "asof must be YYYYMMDD" in str(err)
+
+
+def test_api_rotation_next_plan_auto_rejects_atr_scheme_with_none_mode():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan-auto",
+        {
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "none",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "stop_scheme=atr requires atr_stop_mode" in str(err)
+
+
+def test_api_rotation_next_plan_rejects_tightening_invalid_nm():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 5,
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "tightening",
+            "atr_stop_n": 0.5,
+            "atr_stop_m": 1.0,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "atr_stop_n must be > atr_stop_m" in str(err)
+
+
+def test_api_rotation_next_plan_auto_rejects_tightening_invalid_nm():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan-auto",
+        {
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "tightening",
+            "atr_stop_n": 0.5,
+            "atr_stop_m": 1.0,
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "atr_stop_n must be > atr_stop_m" in str(err)
+
+
+def test_api_rotation_next_plan_rejects_invalid_atr_basis():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 5,
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "static",
+            "atr_stop_atr_basis": "oops",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "atr_stop_atr_basis must be one of: entry|latest" in str(err)
+
+
+def test_api_rotation_next_plan_auto_rejects_invalid_atr_basis():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan-auto",
+        {
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "static",
+            "atr_stop_atr_basis": "oops",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "atr_stop_atr_basis must be one of: entry|latest" in str(err)
+
+
+def test_api_rotation_next_plan_rejects_invalid_atr_reentry_mode():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan",
+        {
+            "anchor_weekday": 5,
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "static",
+            "atr_stop_reentry_mode": "hold",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "atr_stop_reentry_mode must be one of: reenter|wait_next_entry" in str(err)
+
+
+def test_api_rotation_next_plan_auto_rejects_invalid_atr_reentry_mode():
+    c = _build_test_client_with_fake_ak(fetch_end_date="20240104")
+    upsert_and_fetch_etfs(
+        c,
+        codes=[x[0] for x in FIXED_MINIPROGRAM_POOL],
+        names={k: v for k, v in FIXED_MINIPROGRAM_POOL},
+        start_date="20231101",
+        end_date="20240104",
+    )
+    err = post_json(
+        c,
+        "/api/analysis/rotation/next-plan-auto",
+        {
+            "asof": "20240104",
+            "stop_scheme": "atr",
+            "atr_stop_mode": "static",
+            "atr_stop_reentry_mode": "hold",
+            "atr_stop_execution_mode": "intraday",
+            "atr_stop_execution_time": "close",
+        },
+        expected_status=422,
+    )
+    assert "atr_stop_reentry_mode must be one of: reenter|wait_next_entry" in str(err)

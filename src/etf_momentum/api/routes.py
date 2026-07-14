@@ -28,6 +28,7 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+from pydantic import ValidationError
 
 from .deps import get_akshare, get_session
 from .schemas import (
@@ -82,6 +83,7 @@ from .schemas import (
     SimGbmPhase4Request,
     SimGbmAbSignificanceRequest,
     GlobalBenchmarkPoolOut,
+    GlobalBenchmarkSeriesOut,
     GlobalBenchmarkPoolUpsert,
     GlobalBenchmarkPriceOut,
     GlobalBenchmarkFetchResult,
@@ -91,6 +93,7 @@ from .schemas import (
     GlobalBenchmarkDefaultInstallResponse,
     GlobalBenchmarkDefaultAcceptanceRequest,
     GlobalBenchmarkDefaultAcceptanceItem,
+    GlobalBenchmarkDefaultAcceptanceSeriesItem,
     GlobalBenchmarkDefaultAcceptanceResponse,
     EtfPoolOut,
     EtfPoolUpsert,
@@ -111,6 +114,9 @@ from .schemas import (
     OffFundRegressionFactorAvailabilityRequest,
     OffFundRegressionFactorAvailabilityResponse,
     OffFundRegressionFactorRequest,
+    OffFundResearchStateMeta,
+    OffFundResearchStateOut,
+    OffFundResearchStateUpdate,
     OffFundNavOut,
     OffFundPoolOut,
     OffFundPoolUpsert,
@@ -258,7 +264,9 @@ from ..data.global_benchmark_defaults import (
     DEFAULT_GLOBAL_BENCHMARK_UNIVERSE,
     DefaultGlobalBenchmarkSpec,
 )
-from ..data.global_benchmark_ingestion import ingest_one_global_benchmark
+from ..data.global_benchmark_ingestion import (
+    ingest_one_global_benchmark_series,
+)
 from ..data.rollback import logical_rollback_batch, rollback_batch_with_fallback
 from ..data.stooq_fetcher import FetchRequest as StooqFetchRequest
 from ..data.stooq_fetcher import fetch_stooq_daily_close
@@ -301,10 +309,13 @@ from ..db.global_benchmark_repo import (
     count_global_benchmark_prices,
     delete_global_benchmark_pool,
     get_global_benchmark_pool_by_code,
+    get_global_benchmark_pool_series,
     get_global_benchmark_date_range,
     list_global_benchmark_pool,
     list_global_benchmark_prices,
+    list_global_benchmark_trade_dates,
     normalize_adjust as normalize_global_benchmark_adjust,
+    normalize_series_kind as normalize_global_benchmark_series_kind,
     purge_global_benchmark_data,
     upsert_global_benchmark_pool,
 )
@@ -313,6 +324,10 @@ from ..db.off_fund_regression_repo import (
     list_off_fund_factor_configs,
     set_active_off_fund_factor_config,
     upsert_off_fund_factor_config,
+)
+from ..db.off_fund_research_repo import (
+    get_off_fund_research_state,
+    upsert_off_fund_research_state,
 )
 from ..data.futures_synthesize import _symbol_root_from_main
 from ..db.futures_repo import (
@@ -778,7 +793,38 @@ def _load_trend_daily_notional(
     }
 
 
-def _build_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[str, Any]:
+_CAPACITY_WINDOW_YEARS_ALLOWED = {1, 3, 5}
+_CAPACITY_WINDOW_YEARS_DEFAULT = 1
+
+
+def _normalize_capacity_window_years(value: Any) -> int:
+    try:
+        y = int(value)
+    except (TypeError, ValueError):
+        return _CAPACITY_WINDOW_YEARS_DEFAULT
+    if y not in _CAPACITY_WINDOW_YEARS_ALLOWED:
+        return _CAPACITY_WINDOW_YEARS_DEFAULT
+    return y
+
+
+def _resolve_capacity_window_years(
+    out: dict[str, Any], capacity_window_years: Any | None = None
+) -> int:
+    if capacity_window_years is not None:
+        return _normalize_capacity_window_years(capacity_window_years)
+    if isinstance(out, dict):
+        direct = out.get("capacity_window_years")
+        if direct is not None:
+            return _normalize_capacity_window_years(direct)
+        meta = out.get("meta")
+        if isinstance(meta, dict):
+            return _normalize_capacity_window_years(meta.get("capacity_window_years"))
+    return _CAPACITY_WINDOW_YEARS_DEFAULT
+
+
+def _build_trend_capacity_estimate(
+    db: Session, out: dict[str, Any], *, capacity_window_years: int | None = None
+) -> dict[str, Any]:
     result: dict[str, Any] = {
         "method": "asset_participation_bottleneck_daily",
         "scenarios": [],
@@ -789,10 +835,17 @@ def _build_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[str
     if w.empty:
         result["meta"] = {"status": "unavailable", "reason": "weights_missing"}
         return result
-    idx = pd.DatetimeIndex(w.index)
-    if idx.empty:
+    idx_full = pd.DatetimeIndex(w.index)
+    if idx_full.empty:
         result["meta"] = {"status": "unavailable", "reason": "dates_missing"}
         return result
+    window_years = _resolve_capacity_window_years(out, capacity_window_years)
+    window_end = idx_full.max()
+    window_start_ts = (window_end - pd.DateOffset(years=window_years)).normalize()
+    idx = idx_full[idx_full >= window_start_ts]
+    if idx.empty:
+        idx = pd.DatetimeIndex([window_end])
+    w = w.reindex(index=idx)
     codes = [str(c) for c in w.columns]
     notional_raw, src_meta = _load_trend_daily_notional(
         db, codes=codes, start=idx.min().date(), end=idx.max().date()
@@ -927,6 +980,9 @@ def _build_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[str
         "codes": codes,
         "start": idx.min().strftime("%Y%m%d"),
         "end": idx.max().strftime("%Y%m%d"),
+        "capacity_window_years": int(window_years),
+        "capacity_window_start": idx.min().strftime("%Y%m%d"),
+        "capacity_window_end": idx.max().strftime("%Y%m%d"),
         "source_stats": src_meta,
         "turnover_positive_days": int((turnover_total > eps).sum()),
         "traded_days": int(traded_mask.sum()),
@@ -943,11 +999,15 @@ def _build_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[str
     return result
 
 
-def _attach_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[str, Any]:
+def _attach_trend_capacity_estimate(
+    db: Session, out: dict[str, Any], *, capacity_window_years: int | None = None
+) -> dict[str, Any]:
     if not isinstance(out, dict):
         return out
     try:
-        out["capacity_estimate"] = _build_trend_capacity_estimate(db, out)
+        out["capacity_estimate"] = _build_trend_capacity_estimate(
+            db, out, capacity_window_years=capacity_window_years
+        )
     except Exception as exc:  # pragma: no cover
         out["capacity_estimate"] = {
             "method": "asset_participation_bottleneck_daily",
@@ -959,18 +1019,22 @@ def _attach_trend_capacity_estimate(db: Session, out: dict[str, Any]) -> dict[st
 
 
 def _build_rotation_capacity_estimate(
-    db: Session, out: dict[str, Any]
+    db: Session, out: dict[str, Any], *, capacity_window_years: int | None = None
 ) -> dict[str, Any]:
-    return _build_trend_capacity_estimate(db, out)
+    return _build_trend_capacity_estimate(
+        db, out, capacity_window_years=capacity_window_years
+    )
 
 
 def _attach_rotation_capacity_estimate(
-    db: Session, out: dict[str, Any]
+    db: Session, out: dict[str, Any], *, capacity_window_years: int | None = None
 ) -> dict[str, Any]:
     if not isinstance(out, dict):
         return out
     try:
-        out["capacity_estimate"] = _build_rotation_capacity_estimate(db, out)
+        out["capacity_estimate"] = _build_rotation_capacity_estimate(
+            db, out, capacity_window_years=capacity_window_years
+        )
     except Exception as exc:  # pragma: no cover
         out["capacity_estimate"] = {
             "method": "asset_participation_bottleneck_daily",
@@ -1925,6 +1989,17 @@ def _rotation_inputs_from_payload(
     asset_vol_rules: list[dict] | None = None,
     vol_index_close: dict[str, pd.Series] | None = None,
 ) -> RotationAnalysisInputs:
+    fields_set = set(getattr(payload, "__pydantic_fields_set__", set()) or set())
+    stop_scheme = str(getattr(payload, "stop_scheme", "none") or "none").strip().lower()
+    if stop_scheme not in {"none", "atr", "equity_budget"}:
+        stop_scheme = "none"
+    stop_scheme_explicit = "stop_scheme" in fields_set
+    atr_stop_mode = (
+        str(getattr(payload, "atr_stop_mode", "none") or "none").strip().lower()
+    )
+    if stop_scheme in {"none", "equity_budget"} and stop_scheme_explicit:
+        # Explicit stop_scheme selection should not be overridden by stale atr_stop_mode.
+        atr_stop_mode = "none"
     return RotationAnalysisInputs(
         codes=codes,
         start=start,
@@ -1954,9 +2029,16 @@ def _rotation_inputs_from_payload(
         score_method=payload.score_method,
         cost_bps=payload.cost_bps,
         slippage_rate=payload.slippage_rate,
-        atr_stop_mode=payload.atr_stop_mode,
+        stop_scheme=stop_scheme,
+        stop_scheme_explicit=stop_scheme_explicit,
+        equity_stop_risk_pct=float(getattr(payload, "equity_stop_risk_pct", 0.02)),
+        atr_stop_mode=atr_stop_mode,
         atr_stop_atr_basis=payload.atr_stop_atr_basis,
         atr_stop_reentry_mode=payload.atr_stop_reentry_mode,
+        atr_stop_execution_mode=str(
+            getattr(payload, "atr_stop_execution_mode", "intraday") or "intraday"
+        ),
+        atr_stop_execution_time=getattr(payload, "atr_stop_execution_time", None),
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
@@ -2061,7 +2143,11 @@ def rotation_backtest(
                 getattr(payload, "benchmark_mode", "EW_REBAL") or "EW_REBAL"
             ),
         )
-        return _attach_rotation_capacity_estimate(db, out)
+        return _attach_rotation_capacity_estimate(
+            db,
+            out,
+            capacity_window_years=getattr(payload, "capacity_window_years", None),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -2101,15 +2187,44 @@ def trend_backtest(
         atr_stop_execution_mode=str(
             getattr(payload, "atr_stop_execution_mode", "intraday")
         ),
+        atr_stop_execution_time=getattr(payload, "atr_stop_execution_time", None),
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
+        ma_trailing_stop_enabled=bool(
+            getattr(payload, "ma_trailing_stop_enabled", False)
+        ),
+        ma_trailing_stop_ma_type=str(
+            getattr(payload, "ma_trailing_stop_ma_type", "sma") or "sma"
+        ),
+        ma_trailing_stop_execution_mode=str(
+            getattr(payload, "ma_trailing_stop_execution_mode", "intraday")
+            or "intraday"
+        ),
+        ma_trailing_stop_execution_time=getattr(
+            payload, "ma_trailing_stop_execution_time", None
+        ),
+        ma_trailing_stop_effective_delay_days=int(
+            getattr(payload, "ma_trailing_stop_effective_delay_days", 3) or 3
+        ),
+        ma_trailing_stop_reduce_window=int(
+            getattr(payload, "ma_trailing_stop_reduce_window", 10)
+        ),
+        ma_trailing_stop_exit_window=int(
+            getattr(payload, "ma_trailing_stop_exit_window", 20)
+        ),
+        ma_trailing_stop_reduce_fraction=float(
+            getattr(payload, "ma_trailing_stop_reduce_fraction", 0.33)
+        ),
         r_take_profit_enabled=bool(getattr(payload, "r_take_profit_enabled", False)),
         r_take_profit_reentry_mode=str(
             getattr(payload, "r_take_profit_reentry_mode", "reenter")
         ),
         r_take_profit_execution_mode=str(
             getattr(payload, "r_take_profit_execution_mode", "intraday")
+        ),
+        r_take_profit_execution_time=getattr(
+            payload, "r_take_profit_execution_time", None
         ),
         r_take_profit_tiers=(
             [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
@@ -2121,6 +2236,12 @@ def trend_backtest(
         ),
         r_profit_scaleout_execution_mode=str(
             getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
+        ),
+        r_profit_scaleout_execution_time=getattr(
+            payload, "r_profit_scaleout_execution_time", None
+        ),
+        r_profit_scaleout_breakeven_stop_enabled=bool(
+            getattr(payload, "r_profit_scaleout_breakeven_stop_enabled", True)
         ),
         r_profit_scaleout_tiers=(
             [x.model_dump() for x in getattr(payload, "r_profit_scaleout_tiers", [])]
@@ -2135,6 +2256,12 @@ def trend_backtest(
         ),
         bias_v_take_profit_execution_mode=str(
             getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
+        ),
+        bias_v_take_profit_execution_time=getattr(
+            payload, "bias_v_take_profit_execution_time", None
+        ),
+        bias_v_take_profit_breakeven_stop_enabled=bool(
+            getattr(payload, "bias_v_take_profit_breakeven_stop_enabled", True)
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
@@ -2246,7 +2373,11 @@ def trend_backtest(
             if engine == "bt"
             else compute_trend_backtest(db, inp)
         )
-        out = _attach_trend_capacity_estimate(db, out)
+        out = _attach_trend_capacity_estimate(
+            db,
+            out,
+            capacity_window_years=getattr(payload, "capacity_window_years", None),
+        )
         meta = out.setdefault("meta", {})
         if isinstance(meta, dict):
             meta.setdefault("engine", engine)
@@ -2332,15 +2463,44 @@ def trend_portfolio_backtest(
         atr_stop_execution_mode=str(
             getattr(payload, "atr_stop_execution_mode", "intraday")
         ),
+        atr_stop_execution_time=getattr(payload, "atr_stop_execution_time", None),
         atr_stop_window=payload.atr_stop_window,
         atr_stop_n=payload.atr_stop_n,
         atr_stop_m=payload.atr_stop_m,
+        ma_trailing_stop_enabled=bool(
+            getattr(payload, "ma_trailing_stop_enabled", False)
+        ),
+        ma_trailing_stop_ma_type=str(
+            getattr(payload, "ma_trailing_stop_ma_type", "sma") or "sma"
+        ),
+        ma_trailing_stop_execution_mode=str(
+            getattr(payload, "ma_trailing_stop_execution_mode", "intraday")
+            or "intraday"
+        ),
+        ma_trailing_stop_execution_time=getattr(
+            payload, "ma_trailing_stop_execution_time", None
+        ),
+        ma_trailing_stop_effective_delay_days=int(
+            getattr(payload, "ma_trailing_stop_effective_delay_days", 3) or 3
+        ),
+        ma_trailing_stop_reduce_window=int(
+            getattr(payload, "ma_trailing_stop_reduce_window", 10)
+        ),
+        ma_trailing_stop_exit_window=int(
+            getattr(payload, "ma_trailing_stop_exit_window", 20)
+        ),
+        ma_trailing_stop_reduce_fraction=float(
+            getattr(payload, "ma_trailing_stop_reduce_fraction", 0.33)
+        ),
         r_take_profit_enabled=bool(getattr(payload, "r_take_profit_enabled", False)),
         r_take_profit_reentry_mode=str(
             getattr(payload, "r_take_profit_reentry_mode", "reenter")
         ),
         r_take_profit_execution_mode=str(
             getattr(payload, "r_take_profit_execution_mode", "intraday")
+        ),
+        r_take_profit_execution_time=getattr(
+            payload, "r_take_profit_execution_time", None
         ),
         r_take_profit_tiers=(
             [x.model_dump() for x in getattr(payload, "r_take_profit_tiers", [])]
@@ -2352,6 +2512,12 @@ def trend_portfolio_backtest(
         ),
         r_profit_scaleout_execution_mode=str(
             getattr(payload, "r_profit_scaleout_execution_mode", "intraday")
+        ),
+        r_profit_scaleout_execution_time=getattr(
+            payload, "r_profit_scaleout_execution_time", None
+        ),
+        r_profit_scaleout_breakeven_stop_enabled=bool(
+            getattr(payload, "r_profit_scaleout_breakeven_stop_enabled", True)
         ),
         r_profit_scaleout_tiers=(
             [x.model_dump() for x in getattr(payload, "r_profit_scaleout_tiers", [])]
@@ -2366,6 +2532,12 @@ def trend_portfolio_backtest(
         ),
         bias_v_take_profit_execution_mode=str(
             getattr(payload, "bias_v_take_profit_execution_mode", "intraday")
+        ),
+        bias_v_take_profit_execution_time=getattr(
+            payload, "bias_v_take_profit_execution_time", None
+        ),
+        bias_v_take_profit_breakeven_stop_enabled=bool(
+            getattr(payload, "bias_v_take_profit_breakeven_stop_enabled", True)
         ),
         bias_v_ma_window=int(getattr(payload, "bias_v_ma_window", 20)),
         bias_v_atr_window=int(getattr(payload, "bias_v_atr_window", 20)),
@@ -2433,7 +2605,11 @@ def trend_portfolio_backtest(
             if engine == "bt"
             else compute_trend_portfolio_backtest(db, inp)
         )
-        out = _attach_trend_capacity_estimate(db, out)
+        out = _attach_trend_capacity_estimate(
+            db,
+            out,
+            capacity_window_years=getattr(payload, "capacity_window_years", None),
+        )
         meta = out.setdefault("meta", {})
         if isinstance(meta, dict):
             meta.setdefault("engine", engine)
@@ -2522,6 +2698,7 @@ def screen_rotation_candidates_api(
         factor_weights=payload.factor_weights,
         category_quotas=payload.category_quotas,
         signif_horizon_days=payload.signif_horizon_days,
+        skip_days=payload.skip_days,
     )
     try:
         return screen_rotation_candidates(db, inp)
@@ -3882,7 +4059,11 @@ def rotation_weekly5_open_sim(
         inp = RotationAnalysisInputs(
             **{**base.__dict__, "rebalance_anchor": int(decision_wd)}
         )
-        raw = _attach_rotation_capacity_estimate(db, compute_rotation_backtest(db, inp))
+        raw = _attach_rotation_capacity_estimate(
+            db,
+            compute_rotation_backtest(db, inp),
+            capacity_window_years=getattr(payload, "capacity_window_years", None),
+        )
         out = _slim_for_miniprogram(raw)
         # Filter period_details to show only rows whose *execution date* (start_date) matches the tab weekday.
         # This prevents cross-tab leakage (e.g. Fri rows showing in Mon tab) and aligns UI date semantics.
@@ -4196,6 +4377,7 @@ def rotation_weekly5_open_combo(
             "nav": {"dates": dates},
             "weights": {"series": mix_weight_series},
         },
+        capacity_window_years=getattr(payload, "capacity_window_years", None),
     )
 
     # metrics from composite nav
@@ -4444,8 +4626,16 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
     If the next trading day is a rebalance effective day (open execution), return the top pick based on asof close.
     """
     payload = payload or {}
-    requested_asof = _parse_yyyymmdd(str(payload.get("asof")))
-    anchor = int(payload.get("anchor_weekday"))
+    try:
+        requested_asof = _parse_yyyymmdd(str(payload.get("asof") or ""))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="asof must be YYYYMMDD") from e
+    try:
+        anchor = int(payload.get("anchor_weekday"))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=400, detail="anchor_weekday must be 1..5"
+        ) from e
     if anchor not in {1, 2, 3, 4, 5}:
         raise HTTPException(status_code=400, detail="anchor_weekday must be 1..5")
 
@@ -4474,6 +4664,29 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
     rebalance_effective_next_day = bool(
         next_td > asof and (int(next_td.weekday()) + 1) == int(anchor)
     )
+    # Validate request parameters on all paths (including non-effective day short-circuit),
+    # so invalid stop-scheme payloads consistently return 422 instead of branch-dependent behavior.
+    start_yyyymmdd = str(
+        payload.get("start") or (asof - dt.timedelta(days=3650)).strftime("%Y%m%d")
+    )
+    end_yyyymmdd = next_td.strftime("%Y%m%d")
+    try:
+        wk_req = RotationWeekly5OpenSimRequest.model_validate(
+            {
+                **payload,
+                "codes": codes,
+                "start": start_yyyymmdd,
+                "end": end_yyyymmdd,
+                "rebalance": "weekly",
+                "rebalance_shift": "prev",
+                "anchor_weekday": anchor,
+            }
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from e
 
     # If next trading day is not this tab's execution day, skip computing the pick to avoid
     # misleading UI + unnecessary heavy computations.
@@ -4499,28 +4712,6 @@ def rotation_next_plan(payload: dict, db: Session = Depends(get_session)) -> dic
         # Run the SAME strategy engine as weekly5-open, using the provided parameters (if any),
         # and read the weights on the execution day (next trading day).
         from etf_momentum.strategy.rotation import RotationInputs, backtest_rotation
-
-        # Start/end default: long enough for most indicators; end must cover next_td.
-        # For next-plan we MUST include the execution day (next_td) in the backtest range,
-        # otherwise we cannot read the planned weights on that day.
-        start_yyyymmdd = str(
-            payload.get("start") or (asof - dt.timedelta(days=3650)).strftime("%Y%m%d")
-        )
-        end_yyyymmdd = next_td.strftime("%Y%m%d")
-
-        # Normalize into the weekly5-open request schema so ALL optional settings are supported.
-        # (Clients can send the same JSON as weekly5-open and simply add "asof".)
-        wk_req = RotationWeekly5OpenSimRequest.model_validate(
-            {
-                **payload,
-                "codes": codes,
-                "start": start_yyyymmdd,
-                "end": end_yyyymmdd,
-                "rebalance": "weekly",
-                "rebalance_shift": "prev",
-                "anchor_weekday": anchor,
-            }
-        )
 
         # Mini-program semantics: anchor_weekday is the *execution day* weekday; decision is previous weekday.
         decision_weekday = int(((int(anchor) - 2) % 5) + 1)
@@ -4632,7 +4823,10 @@ def rotation_next_plan_auto(payload: dict, db: Session = Depends(get_session)) -
     Convenience endpoint for the mini-program "mix" page:
     return the plan for the weekday of the next trading day.
     """
-    asof = _parse_yyyymmdd(str((payload or {}).get("asof")))
+    try:
+        asof = _parse_yyyymmdd(str((payload or {}).get("asof") or ""))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="asof must be YYYYMMDD") from e
     # Same as rotation_next_plan: use last available close <= asof.
     codes = _FIXED_CODES[:]
     start = asof - dt.timedelta(days=90)
@@ -4685,7 +4879,10 @@ def rotation_next_execution_plan(
     asof_raw = str(
         payload.get("asof") or payload.get("end") or dt.date.today().strftime("%Y%m%d")
     )
-    requested_asof = _parse_yyyymmdd(asof_raw)
+    try:
+        requested_asof = _parse_yyyymmdd(asof_raw)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="asof must be YYYYMMDD") from e
 
     # Align asof to the last available close <= requested_asof, so intraday calls are stable.
     px = load_close_prices(
@@ -4717,7 +4914,13 @@ def rotation_next_execution_plan(
         ),
         "end": next_td.strftime("%Y%m%d"),
     }
-    req = RotationBacktestRequest.model_validate(req_in)
+    try:
+        req = RotationBacktestRequest.model_validate(req_in)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from e
 
     asset_vol_rules = (
         [r.model_dump() for r in req.asset_vol_index_rules]
@@ -7252,22 +7455,49 @@ def _upsert_default_global_benchmark_spec(
     *,
     spec: DefaultGlobalBenchmarkSpec,
     overwrite_existing: bool,
-) -> str:
-    existing = get_global_benchmark_pool_by_code(db, spec.code)
-    if existing is not None and not overwrite_existing:
-        return "skipped"
-    _ = upsert_global_benchmark_pool(
-        db,
-        code=spec.code,
-        name=spec.name,
-        code_format=spec.code_format,
-        provider_hint=spec.provider_hint,
-        start_date=spec.start_date,
-        end_date=spec.end_date,
-    )
-    if existing is None:
-        return "inserted"
-    return "updated"
+) -> list[GlobalBenchmarkDefaultInstallItem]:
+    actions: list[GlobalBenchmarkDefaultInstallItem] = []
+    for s in (spec.price, spec.total_return):
+        kind = normalize_global_benchmark_series_kind(s.series_kind)
+        existing = get_global_benchmark_pool_by_code(db, spec.code, series_kind=kind)
+        if existing is not None and not overwrite_existing:
+            actions.append(
+                GlobalBenchmarkDefaultInstallItem(
+                    code=spec.code,
+                    name=spec.name,
+                    series_kind=kind,
+                    action="skipped",
+                )
+            )
+            continue
+        primary = s.candidates[0] if s.candidates else None
+        fallback = (
+            [{"provider": x.provider, "symbol": x.symbol} for x in s.candidates[1:]]
+            if len(s.candidates) > 1
+            else None
+        )
+        _ = upsert_global_benchmark_pool(
+            db,
+            code=spec.code,
+            series_kind=kind,
+            name=spec.name,
+            code_format=s.code_format,
+            provider_hint=(primary.provider if primary else "auto"),
+            provider_symbol=(primary.symbol if primary else None),
+            source_locked=False,
+            fallback_sources=fallback,
+            start_date=s.start_date,
+            end_date=s.end_date,
+        )
+        actions.append(
+            GlobalBenchmarkDefaultInstallItem(
+                code=spec.code,
+                name=spec.name,
+                series_kind=kind,
+                action=("inserted" if existing is None else "updated"),
+            )
+        )
+    return actions
 
 
 @router.post(
@@ -7285,28 +7515,23 @@ def install_default_global_benchmark_universe(
     n_updated = 0
     n_skipped = 0
     for spec in DEFAULT_GLOBAL_BENCHMARK_UNIVERSE:
-        action = _upsert_default_global_benchmark_spec(
+        actions = _upsert_default_global_benchmark_spec(
             db,
             spec=spec,
             overwrite_existing=bool(payload.overwrite_existing),
         )
-        items.append(
-            GlobalBenchmarkDefaultInstallItem(
-                code=spec.code,
-                name=spec.name,
-                action=action,
-            )
-        )
-        if action == "inserted":
-            n_inserted += 1
-        elif action == "updated":
-            n_updated += 1
-        else:
-            n_skipped += 1
+        items.extend(actions)
+        for x in actions:
+            if x.action == "inserted":
+                n_inserted += 1
+            elif x.action == "updated":
+                n_updated += 1
+            else:
+                n_skipped += 1
     db.commit()
     return GlobalBenchmarkDefaultInstallResponse(
         ok=True,
-        total=len(DEFAULT_GLOBAL_BENCHMARK_UNIVERSE),
+        total=len(items),
         inserted=n_inserted,
         updated=n_updated,
         skipped=n_skipped,
@@ -7354,62 +7579,120 @@ def run_default_global_benchmark_acceptance(
     n_skip = 0
     for code in requested:
         spec = spec_by_code[code]
-        item = get_global_benchmark_pool_by_code(db, code)
-        if item is None:
-            n_fail += 1
-            row = GlobalBenchmarkDefaultAcceptanceItem(
+        pool_series = get_global_benchmark_pool_series(db, code)
+        series_items: list[GlobalBenchmarkDefaultAcceptanceSeriesItem] = []
+        for kind in ("price", "total_return"):
+            item = pool_series.get(kind)
+            if item is None:
+                series_items.append(
+                    GlobalBenchmarkDefaultAcceptanceSeriesItem(
+                        series_kind=kind,
+                        status="failed",
+                        message="missing series config",
+                        final_provider=None,
+                        final_symbol=None,
+                        sample_days=0,
+                        data_start_date=None,
+                        data_end_date=None,
+                    )
+                )
+                continue
+            if not bool(payload.fetch):
+                n_prices = count_global_benchmark_prices(
+                    db, code=code, series_kind=kind, adjust="none"
+                )
+                d0, d1 = get_global_benchmark_date_range(
+                    db, code=code, series_kind=kind, adjust="none"
+                )
+                series_items.append(
+                    GlobalBenchmarkDefaultAcceptanceSeriesItem(
+                        series_kind=kind,
+                        status="skipped",
+                        message="fetch disabled",
+                        final_provider=None,
+                        final_symbol=None,
+                        sample_days=n_prices,
+                        data_start_date=d0,
+                        data_end_date=d1,
+                    )
+                )
+                continue
+            res = ingest_one_global_benchmark_series(
+                db,
+                ak=ak,
                 code=code,
-                name=spec.name,
-                status="failed",
-                message="missing from pool after install",
-                final_provider=None,
-                sample_days=0,
-                data_start_date=None,
-                data_end_date=None,
+                series_kind=kind,
+                start_date=item.start_date or get_settings().default_start_date,
+                end_date=item.end_date or get_settings().default_end_date,
             )
-            items.append(row)
-            if not payload.continue_on_error:
-                break
-            continue
-        if not bool(payload.fetch):
-            n_skip += 1
-            n_prices = count_global_benchmark_prices(db, code=code, adjust="none")
-            d0, d1 = get_global_benchmark_date_range(db, code=code, adjust="none")
-            items.append(
-                GlobalBenchmarkDefaultAcceptanceItem(
-                    code=code,
-                    name=item.name,
-                    status="skipped",
-                    message="fetch disabled",
-                    final_provider=None,
+            n_prices = count_global_benchmark_prices(
+                db, code=code, series_kind=kind, adjust="none"
+            )
+            d0, d1 = get_global_benchmark_date_range(
+                db, code=code, series_kind=kind, adjust="none"
+            )
+            series_items.append(
+                GlobalBenchmarkDefaultAcceptanceSeriesItem(
+                    series_kind=kind,
+                    status=res.status,
+                    message=res.message,
+                    final_provider=res.final_provider,
+                    final_symbol=res.final_symbol,
                     sample_days=n_prices,
                     data_start_date=d0,
                     data_end_date=d1,
                 )
             )
+
+        if not bool(payload.fetch):
+            n_skip += 1
+            items.append(
+                GlobalBenchmarkDefaultAcceptanceItem(
+                    code=code,
+                    name=spec.name,
+                    status="skipped",
+                    failure_reason=None,
+                    series=series_items,
+                )
+            )
             continue
-        res = ingest_one_global_benchmark(
-            db,
-            ak=ak,
-            code=code,
-            start_date=item.start_date or get_settings().default_start_date,
-            end_date=item.end_date or get_settings().default_end_date,
-        )
-        n_prices = count_global_benchmark_prices(db, code=code, adjust="none")
-        d0, d1 = get_global_benchmark_date_range(db, code=code, adjust="none")
+
+        by_kind = {x.series_kind: x for x in series_items}
+        reason: str | None = None
+        if by_kind.get("price") is None or by_kind["price"].status == "failed":
+            reason = "price_missing"
+        elif (
+            by_kind.get("total_return") is None
+            or by_kind["total_return"].status == "failed"
+        ):
+            reason = "total_return_missing"
+        elif any(x.status != "success" for x in series_items):
+            total_days = sum(int(x.sample_days or 0) for x in series_items)
+            reason = "provider_error" if total_days <= 0 else "coverage_insufficient"
+        else:
+            price_dates = set(
+                list_global_benchmark_trade_dates(
+                    db, code=code, series_kind="price", adjust="none"
+                )
+            )
+            tr_dates = set(
+                list_global_benchmark_trade_dates(
+                    db, code=code, series_kind="total_return", adjust="none"
+                )
+            )
+            if price_dates != tr_dates:
+                reason = "coverage_insufficient"
+        status = "success" if reason is None else "failed"
         items.append(
             GlobalBenchmarkDefaultAcceptanceItem(
                 code=code,
-                name=item.name,
-                status=res.status,
-                message=res.message,
-                final_provider=res.final_provider,
-                sample_days=n_prices,
-                data_start_date=d0,
-                data_end_date=d1,
+                name=spec.name,
+                status=status,
+                failure_reason=reason,
+                series=series_items,
             )
         )
-        if res.status == "success":
+        if status == "success":
             n_succ += 1
         else:
             n_fail += 1
@@ -7425,6 +7708,36 @@ def run_default_global_benchmark_acceptance(
     )
 
 
+def _global_benchmark_pool_out(
+    db: Session, *, code: str, rows
+) -> GlobalBenchmarkPoolOut:
+    first = rows[0]
+    series_rows: list[GlobalBenchmarkSeriesOut] = []
+    for i in rows:
+        d0, d1 = get_global_benchmark_date_range(
+            db,
+            code=i.code,
+            series_kind=i.series_kind,
+            adjust="none",
+        )
+        series_rows.append(
+            GlobalBenchmarkSeriesOut(
+                series_kind=i.series_kind,
+                code_format=i.code_format,
+                provider_hint=i.provider_hint,
+                provider_symbol=i.provider_symbol,
+                source_locked=bool(i.source_locked),
+                start_date=i.start_date,
+                end_date=i.end_date,
+                last_fetch_status=i.last_fetch_status,
+                last_fetch_message=i.last_fetch_message,
+                last_data_start_date=d0,
+                last_data_end_date=d1,
+            )
+        )
+    return GlobalBenchmarkPoolOut(code=code, name=first.name, series=series_rows)
+
+
 @router.get("/global-benchmark", response_model=list[GlobalBenchmarkPoolOut])
 def get_global_benchmarks(
     adjust: str = "none",
@@ -7435,23 +7748,12 @@ def get_global_benchmarks(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     items = list_global_benchmark_pool(db)
+    by_code: dict[str, list] = {}
+    for x in items:
+        by_code.setdefault(x.code, []).append(x)
     out: list[GlobalBenchmarkPoolOut] = []
-    for i in items:
-        rng = get_global_benchmark_date_range(db, code=i.code, adjust=adjust)
-        out.append(
-            GlobalBenchmarkPoolOut(
-                code=i.code,
-                name=i.name,
-                code_format=i.code_format,
-                provider_hint=i.provider_hint,
-                start_date=i.start_date,
-                end_date=i.end_date,
-                last_fetch_status=i.last_fetch_status,
-                last_fetch_message=i.last_fetch_message,
-                last_data_start_date=rng[0],
-                last_data_end_date=rng[1],
-            )
-        )
+    for code in sorted(by_code):
+        out.append(_global_benchmark_pool_out(db, code=code, rows=by_code[code]))
     return out
 
 
@@ -7472,28 +7774,25 @@ def upsert_global_benchmark(
         raise HTTPException(status_code=400, detail="start_date must be <= end_date")
     code_format = str(payload.code_format or "").strip().lower() or None
     provider_hint = str(payload.provider_hint or "").strip().lower() or None
+    series_kind = normalize_global_benchmark_series_kind(payload.series_kind)
     obj = upsert_global_benchmark_pool(
         db,
         code=str(payload.code).strip(),
+        series_kind=series_kind,
         name=str(payload.name).strip(),
         code_format=code_format,
         provider_hint=provider_hint,
+        provider_symbol=(
+            str(payload.provider_symbol).strip() if payload.provider_symbol else None
+        ),
+        source_locked=payload.source_locked,
+        fallback_sources=payload.fallback_sources,
         start_date=payload.start_date,
         end_date=payload.end_date,
     )
     db.commit()
-    return GlobalBenchmarkPoolOut(
-        code=obj.code,
-        name=obj.name,
-        code_format=obj.code_format,
-        provider_hint=obj.provider_hint,
-        start_date=obj.start_date,
-        end_date=obj.end_date,
-        last_fetch_status=obj.last_fetch_status,
-        last_fetch_message=obj.last_fetch_message,
-        last_data_start_date=obj.last_data_start_date,
-        last_data_end_date=obj.last_data_end_date,
-    )
+    rows = list_global_benchmark_pool(db, code=obj.code)
+    return _global_benchmark_pool_out(db, code=obj.code, rows=rows)
 
 
 @router.delete("/global-benchmark/{code}")
@@ -7508,35 +7807,78 @@ def delete_global_benchmark_api(code: str, db: Session = Depends(get_session)) -
 
 @router.post(
     "/global-benchmark/{code}/fetch",
-    response_model=GlobalBenchmarkFetchResult,
+    response_model=list[GlobalBenchmarkFetchResult],
 )
 def fetch_one_global_benchmark(
     code: str,
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
-) -> GlobalBenchmarkFetchResult:
-    item = get_global_benchmark_pool_by_code(db, code)
-    if item is None:
+) -> list[GlobalBenchmarkFetchResult]:
+    rows = list_global_benchmark_pool(db, code=code)
+    if not rows:
         raise HTTPException(status_code=404, detail="global benchmark not found")
-    res = ingest_one_global_benchmark(
+    out: list[GlobalBenchmarkFetchResult] = []
+    for item in rows:
+        res = ingest_one_global_benchmark_series(
+            db,
+            ak=ak,
+            code=code,
+            series_kind=item.series_kind,
+            start_date=item.start_date or get_settings().default_start_date,
+            end_date=item.end_date or get_settings().default_end_date,
+        )
+        out.append(
+            GlobalBenchmarkFetchResult(
+                code=res.code,
+                series_kind=res.series_kind,
+                inserted_or_updated=(
+                    int(res.inserted_or_updated) if res.status == "success" else 0
+                ),
+                status=res.status,
+                message=res.message,
+                code_format=res.code_format,
+                final_provider=res.final_provider,
+                final_symbol=res.final_symbol,
+                provider_attempts=[asdict(x) for x in res.attempts],
+            )
+        )
+    return out
+
+
+@router.post(
+    "/global-benchmark/{code}/fetch/{series_kind}",
+    response_model=GlobalBenchmarkFetchResult,
+)
+def fetch_one_global_benchmark_series_api(
+    code: str,
+    series_kind: str,
+    db: Session = Depends(get_session),
+    ak=Depends(get_akshare),
+) -> GlobalBenchmarkFetchResult:
+    item = get_global_benchmark_pool_by_code(
+        db, code, series_kind=normalize_global_benchmark_series_kind(series_kind)
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="global benchmark series not found")
+    res = ingest_one_global_benchmark_series(
         db,
         ak=ak,
         code=code,
+        series_kind=item.series_kind,
         start_date=item.start_date or get_settings().default_start_date,
         end_date=item.end_date or get_settings().default_end_date,
     )
-    if res.status != "success":
-        raise HTTPException(
-            status_code=500,
-            detail=res.message or "global benchmark ingestion failed",
-        )
     return GlobalBenchmarkFetchResult(
         code=res.code,
-        inserted_or_updated=res.inserted_or_updated,
+        series_kind=res.series_kind,
+        inserted_or_updated=(
+            int(res.inserted_or_updated) if res.status == "success" else 0
+        ),
         status=res.status,
         message=res.message,
         code_format=res.code_format,
         final_provider=res.final_provider,
+        final_symbol=res.final_symbol,
         provider_attempts=[asdict(x) for x in res.attempts],
     )
 
@@ -7551,16 +7893,18 @@ def fetch_all_global_benchmarks(
 ) -> list[GlobalBenchmarkFetchResult]:
     out: list[GlobalBenchmarkFetchResult] = []
     for item in list_global_benchmark_pool(db):
-        res = ingest_one_global_benchmark(
+        res = ingest_one_global_benchmark_series(
             db,
             ak=ak,
             code=item.code,
+            series_kind=item.series_kind,
             start_date=item.start_date or get_settings().default_start_date,
             end_date=item.end_date or get_settings().default_end_date,
         )
         out.append(
             GlobalBenchmarkFetchResult(
                 code=res.code,
+                series_kind=res.series_kind,
                 inserted_or_updated=(
                     int(res.inserted_or_updated) if res.status == "success" else 0
                 ),
@@ -7568,6 +7912,7 @@ def fetch_all_global_benchmarks(
                 message=res.message,
                 code_format=res.code_format,
                 final_provider=res.final_provider,
+                final_symbol=res.final_symbol,
                 provider_attempts=[asdict(x) for x in res.attempts],
             )
         )
@@ -7583,43 +7928,51 @@ def fetch_selected_global_benchmarks(
     db: Session = Depends(get_session),
     ak=Depends(get_akshare),
 ) -> list[GlobalBenchmarkFetchResult]:
-    pool_by_code = {x.code: x for x in list_global_benchmark_pool(db)}
+    pool_by_code: dict[str, list] = {}
+    for x in list_global_benchmark_pool(db):
+        pool_by_code.setdefault(x.code, []).append(x)
     out: list[GlobalBenchmarkFetchResult] = []
     for code in payload.codes:
-        item = pool_by_code.get(code)
-        if item is None:
+        items = pool_by_code.get(code)
+        if not items:
             out.append(
                 GlobalBenchmarkFetchResult(
                     code=code,
+                    series_kind="price",
                     inserted_or_updated=0,
                     status="failed",
                     message="global benchmark not found",
                     code_format=None,
                     final_provider=None,
+                    final_symbol=None,
                     provider_attempts=[],
                 )
             )
             continue
-        res = ingest_one_global_benchmark(
-            db,
-            ak=ak,
-            code=code,
-            start_date=item.start_date or get_settings().default_start_date,
-            end_date=item.end_date or get_settings().default_end_date,
-        )
-        out.append(
-            GlobalBenchmarkFetchResult(
-                code=res.code,
-                inserted_or_updated=(
-                    int(res.inserted_or_updated) if res.status == "success" else 0
-                ),
-                status=res.status,
-                message=res.message,
-                code_format=res.code_format,
-                final_provider=res.final_provider,
-                provider_attempts=[asdict(x) for x in res.attempts],
+        for item in items:
+            res = ingest_one_global_benchmark_series(
+                db,
+                ak=ak,
+                code=code,
+                series_kind=item.series_kind,
+                start_date=item.start_date or get_settings().default_start_date,
+                end_date=item.end_date or get_settings().default_end_date,
             )
-        )
+            out.append(
+                GlobalBenchmarkFetchResult(
+                    code=res.code,
+                    series_kind=res.series_kind,
+                    inserted_or_updated=(
+                        int(res.inserted_or_updated) if res.status == "success" else 0
+                    ),
+                    status=res.status,
+                    message=res.message,
+                    code_format=res.code_format,
+                    final_provider=res.final_provider,
+                    final_symbol=res.final_symbol,
+                    provider_attempts=[asdict(x) for x in res.attempts],
+                )
+            )
     return out
 
 
@@ -7629,6 +7982,7 @@ def fetch_selected_global_benchmarks(
 )
 def get_global_benchmark_prices_api(
     code: str,
+    series_kind: str = "price",
     start: str | None = None,
     end: str | None = None,
     adjust: str = "none",
@@ -7641,6 +7995,7 @@ def get_global_benchmark_prices_api(
         rows = list_global_benchmark_prices(
             db,
             code=code,
+            series_kind=normalize_global_benchmark_series_kind(series_kind),
             adjust=adjust,
             start_date=start_d,
             end_date=end_d,
@@ -7651,6 +8006,7 @@ def get_global_benchmark_prices_api(
     return [
         GlobalBenchmarkPriceOut(
             code=r.code,
+            series_kind=r.series_kind,
             trade_date=r.trade_date.isoformat(),
             open=r.open,
             high=r.high,
@@ -7666,11 +8022,324 @@ def get_global_benchmark_prices_api(
 
 
 def _off_fund_factor_cfg_out(x) -> OffFundRegressionFactorConfigOut:
+    raw_factors = list(x.benchmark_factors or [])
+    effective = (
+        raw_factors
+        if raw_factors
+        else [
+            {
+                "key": spec.key,
+                "label": spec.label,
+                "aliases": list(spec.aliases),
+            }
+            for spec in _build_off_fund_regression_factors(
+                benchmark_profile=str(x.benchmark_profile or "cn_stock_core"),
+                benchmark_factors=None,
+            )[0]
+        ]
+    )
     return OffFundRegressionFactorConfigOut(
         name=str(x.name),
         is_active=bool(x.is_active),
         benchmark_profile=str(x.benchmark_profile or "cn_stock_core"),
-        benchmark_factors=list(x.benchmark_factors or []),
+        benchmark_factors=raw_factors,
+        effective_benchmark_factors=effective,
+    )
+
+
+def _default_off_fund_research_state() -> OffFundResearchStateOut:
+    return OffFundResearchStateOut(
+        start_date="20110210",
+        end_date=None,
+        adjust="hfq",
+        rf=0.025,
+        inner_mode="risk_parity_cov",
+        rp_window=60,
+        rebalance_cycle="daily",
+        drift_rebalance_enabled=True,
+        drift_abs_threshold=0.05,
+        drift_rel_threshold=0.25,
+        pair_chart_prefs_json=None,
+        meta=OffFundResearchStateMeta(),
+    )
+
+
+_PAIR_CONTRACT_VERSION = "pair_contract_v1"
+_PAIR_PREFS_MAX_BYTES = 16 * 1024
+_PAIR_WARNING_ORDER = (
+    "prefs_trimmed_to_13",
+    "signal_degraded",
+    "samples_truncated",
+    "invalid_trade_date_filtered",
+)
+_PAIR_KEY_ORDER = (
+    "CSI300",
+    "CSI500",
+    "CSI1000",
+    "CSI2000",
+    "CSI_ALL_CONSUMER",
+    "CSI_ALL_MEDICINE",
+    "CSI_ALL_INFORMATION",
+    "CSI_ALL_FINANCE",
+    "CSI_ALL_ENERGY",
+    "CSI_ALL_MATERIAL",
+    "CSI_300_GROWTH_INNOVATION",
+    "CSI_300_VALUE_STABILITY",
+    "CSI_1000_GROWTH_INNOVATION",
+    "CSI_1000_VALUE_STABILITY",
+)
+_PAIR_ALLOWED_KEYS = set(_PAIR_KEY_ORDER)
+_PAIR_SLOT_DEFAULT = {
+    "pair_slot_01": "CSI500",
+    "pair_slot_02": "CSI1000",
+    "pair_slot_03": "CSI2000",
+    "pair_slot_04": "CSI_ALL_CONSUMER",
+    "pair_slot_05": "CSI_ALL_MEDICINE",
+    "pair_slot_06": "CSI_ALL_INFORMATION",
+    "pair_slot_07": "CSI_ALL_FINANCE",
+    "pair_slot_08": "CSI_ALL_ENERGY",
+    "pair_slot_09": "CSI_ALL_MATERIAL",
+    "pair_slot_10": "CSI_300_GROWTH_INNOVATION",
+    "pair_slot_11": "CSI_300_VALUE_STABILITY",
+    "pair_slot_12": "CSI_1000_GROWTH_INNOVATION",
+    "pair_slot_13": "CSI_1000_VALUE_STABILITY",
+}
+_PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys())
+
+
+def _pair_sorted_warnings(codes: list[str]) -> list[str]:
+    code_set = {str(c) for c in codes if str(c) in _PAIR_WARNING_ORDER}
+    return [c for c in _PAIR_WARNING_ORDER if c in code_set]
+
+
+def _pair_meta(warnings: list[str] | None = None) -> OffFundResearchStateMeta:
+    return OffFundResearchStateMeta(
+        contract_version=_PAIR_CONTRACT_VERSION,
+        warnings=_pair_sorted_warnings(list(warnings or [])),
+    )
+
+
+def _pair_413(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail={
+            "error_code": "pair_chart_prefs_payload_too_large",
+            "detail": detail,
+            "contract_version": _PAIR_CONTRACT_VERSION,
+        },
+    )
+
+
+def _pair_fallback_peer(slot_id: str, base: str) -> str:
+    peer = str(_PAIR_SLOT_DEFAULT.get(slot_id, "CSI500"))
+    if peer != base:
+        return peer
+    for key in _PAIR_KEY_ORDER:
+        if key != base:
+            return key
+    return "CSI500"
+
+
+def _normalize_pair_chart_prefs_json(
+    raw_json: str | None,
+    *,
+    reject_oversize: bool,
+) -> tuple[str | None, list[str]]:
+    if raw_json is None:
+        return None, []
+    raw_str = str(raw_json)
+    if reject_oversize and len(raw_str.encode("utf-8")) > _PAIR_PREFS_MAX_BYTES:
+        raise _pair_413("pair_chart_prefs_json exceeds 16KB")
+    try:
+        payload = json.loads(raw_str)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail="pair_chart_prefs_json must be valid JSON"
+        ) from e
+    if payload is None:
+        return None, []
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=400, detail="pair_chart_prefs_json must be a JSON object"
+        )
+    warnings: list[str] = []
+    if len(payload) > len(_PAIR_SLOT_IDS):
+        warnings.append("prefs_trimmed_to_13")
+    out: dict[str, dict[str, str]] = {}
+    for slot_id in _PAIR_SLOT_IDS:
+        obj = payload.get(slot_id)
+        if not isinstance(obj, dict):
+            continue
+        base_raw = str(obj.get("base") or "CSI300").strip()
+        peer_raw = str(obj.get("peer") or _PAIR_SLOT_DEFAULT[slot_id]).strip()
+        base = base_raw if base_raw in _PAIR_ALLOWED_KEYS else "CSI300"
+        peer = peer_raw if peer_raw in _PAIR_ALLOWED_KEYS and peer_raw != base else ""
+        if not peer:
+            peer = _pair_fallback_peer(slot_id, base)
+        out[slot_id] = {"base": base, "peer": peer}
+    canon = json.dumps(out, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
+    if reject_oversize and len(canon.encode("utf-8")) > _PAIR_PREFS_MAX_BYTES:
+        raise _pair_413("pair_chart_prefs_json exceeds 16KB after normalization")
+    return canon, warnings
+
+
+@router.get("/off-fund/research/state", response_model=OffFundResearchStateOut)
+def get_off_fund_research_state_api(
+    db: Session = Depends(get_session),
+) -> OffFundResearchStateOut:
+    st = get_off_fund_research_state(db)
+    d = _default_off_fund_research_state()
+    try:
+        pair_prefs_json, pair_warnings = _normalize_pair_chart_prefs_json(
+            str(st.pair_chart_prefs_json)
+            if st.pair_chart_prefs_json is not None
+            else None,
+            reject_oversize=False,
+        )
+    except HTTPException:
+        pair_prefs_json, pair_warnings = None, []
+    return OffFundResearchStateOut(
+        start_date=str(st.start_date or d.start_date),
+        end_date=(str(st.end_date) if st.end_date else None),
+        adjust=str(st.adjust or d.adjust),
+        rf=float(st.risk_free_rate),
+        inner_mode=str(st.inner_mode or d.inner_mode),
+        rp_window=int(st.rp_window),
+        rebalance_cycle=str(st.rebalance_cycle or d.rebalance_cycle),
+        drift_rebalance_enabled=bool(st.drift_rebalance_enabled),
+        drift_abs_threshold=float(st.drift_abs_threshold),
+        drift_rel_threshold=float(st.drift_rel_threshold),
+        pair_chart_prefs_json=pair_prefs_json,
+        meta=_pair_meta(pair_warnings),
+    )
+
+
+@router.put("/off-fund/research/state", response_model=OffFundResearchStateOut)
+def update_off_fund_research_state_api(
+    payload: OffFundResearchStateUpdate,
+    db: Session = Depends(get_session),
+) -> OffFundResearchStateOut:
+    st = get_off_fund_research_state(db)
+    if hasattr(payload, "model_fields_set"):
+        fields_set = payload.model_fields_set
+    else:  # pragma: no cover - pydantic v1 compatibility
+        fields_set = getattr(payload, "__fields_set__", set())
+
+    start_d = (
+        str(payload.start_date or "").strip()
+        if "start_date" in fields_set
+        else str(st.start_date or "").strip()
+    )
+    end_d = (
+        str(payload.end_date or "").strip()
+        if "end_date" in fields_set
+        else str(st.end_date or "").strip()
+    )
+    if start_d and len(start_d) != 8:
+        raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
+    if end_d and len(end_d) != 8:
+        raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
+    if start_d and end_d and start_d > end_d:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+    pair_warnings: list[str] = []
+    if "pair_chart_prefs_json" in fields_set:
+        pair_prefs_json, pair_warnings = _normalize_pair_chart_prefs_json(
+            payload.pair_chart_prefs_json, reject_oversize=True
+        )
+    else:
+        try:
+            pair_prefs_json, keep_warnings = _normalize_pair_chart_prefs_json(
+                str(st.pair_chart_prefs_json)
+                if st.pair_chart_prefs_json is not None
+                else None,
+                reject_oversize=False,
+            )
+            pair_warnings.extend(keep_warnings)
+        except HTTPException:
+            pair_prefs_json = None
+    adjust = (
+        str(payload.adjust)
+        if "adjust" in fields_set
+        else str(st.adjust or _default_off_fund_research_state().adjust)
+    )
+    rf = (
+        float(payload.rf)
+        if "rf" in fields_set
+        else float(st.risk_free_rate if st.risk_free_rate is not None else 0.025)
+    )
+    inner_mode = (
+        str(payload.inner_mode)
+        if "inner_mode" in fields_set
+        else str(st.inner_mode or _default_off_fund_research_state().inner_mode)
+    )
+    rp_window = (
+        int(payload.rp_window)
+        if "rp_window" in fields_set
+        else int(st.rp_window if st.rp_window is not None else 60)
+    )
+    rebalance_cycle = (
+        str(payload.rebalance_cycle)
+        if "rebalance_cycle" in fields_set
+        else str(
+            st.rebalance_cycle or _default_off_fund_research_state().rebalance_cycle
+        )
+    )
+    drift_rebalance_enabled = (
+        bool(payload.drift_rebalance_enabled)
+        if "drift_rebalance_enabled" in fields_set
+        else bool(st.drift_rebalance_enabled)
+    )
+    drift_abs_threshold = (
+        float(payload.drift_abs_threshold)
+        if "drift_abs_threshold" in fields_set
+        else float(
+            st.drift_abs_threshold if st.drift_abs_threshold is not None else 0.05
+        )
+    )
+    drift_rel_threshold = (
+        float(payload.drift_rel_threshold)
+        if "drift_rel_threshold" in fields_set
+        else float(
+            st.drift_rel_threshold if st.drift_rel_threshold is not None else 0.25
+        )
+    )
+    obj = upsert_off_fund_research_state(
+        db,
+        start_date=(start_d or None),
+        end_date=(end_d or None),
+        adjust=adjust,
+        risk_free_rate=rf,
+        inner_mode=inner_mode,
+        rp_window=rp_window,
+        rebalance_cycle=rebalance_cycle,
+        drift_rebalance_enabled=drift_rebalance_enabled,
+        drift_abs_threshold=drift_abs_threshold,
+        drift_rel_threshold=drift_rel_threshold,
+        pair_chart_prefs_json=pair_prefs_json,
+    )
+    db.commit()
+    try:
+        pair_out_json, out_warnings = _normalize_pair_chart_prefs_json(
+            str(obj.pair_chart_prefs_json)
+            if obj.pair_chart_prefs_json is not None
+            else None,
+            reject_oversize=False,
+        )
+    except HTTPException:
+        pair_out_json, out_warnings = None, []
+    return OffFundResearchStateOut(
+        start_date=str(obj.start_date) if obj.start_date else None,
+        end_date=str(obj.end_date) if obj.end_date else None,
+        adjust=str(obj.adjust),
+        rf=float(obj.risk_free_rate),
+        inner_mode=str(obj.inner_mode),
+        rp_window=int(obj.rp_window),
+        rebalance_cycle=str(obj.rebalance_cycle),
+        drift_rebalance_enabled=bool(obj.drift_rebalance_enabled),
+        drift_abs_threshold=float(obj.drift_abs_threshold),
+        drift_rel_threshold=float(obj.drift_rel_threshold),
+        pair_chart_prefs_json=pair_out_json,
+        meta=_pair_meta(pair_warnings + out_warnings),
     )
 
 
@@ -7905,6 +8574,7 @@ def analysis_off_fund_classify(
         close_df=factor_close_raw,
         factor_specs=factor_specs,
         min_samples=int(payload.min_samples),
+        rolling_window=int(payload.rolling_window),
     )
     if factor_close.shape[1] < 2:
         return OffFundRegressionClassifyResponse(

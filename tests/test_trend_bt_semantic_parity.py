@@ -265,6 +265,38 @@ def test_bt_single_semantic_parity_keys_and_metrics(engine):
             assert abs(float(lv) - float(bv)) <= 1e-12
 
 
+def test_bt_meta_params_execution_time_defaults_match_legacy(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendInputs(
+            code="A",
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            exec_price="close",
+            atr_stop_execution_mode="next_day",
+            r_take_profit_execution_mode="next_day",
+            r_profit_scaleout_execution_mode="next_day",
+            bias_v_take_profit_execution_mode="next_day",
+            ma_trailing_stop_execution_mode="next_day",
+        )
+        legacy = compute_trend_backtest(db, inp)
+        bt = compute_trend_backtest_bt(db, inp)
+
+    l_params = ((legacy or {}).get("meta") or {}).get("params") or {}
+    b_params = ((bt or {}).get("meta") or {}).get("params") or {}
+    for key in [
+        "atr_stop_execution_time",
+        "r_take_profit_execution_time",
+        "r_profit_scaleout_execution_time",
+        "bias_v_take_profit_execution_time",
+        "ma_trailing_stop_execution_time",
+    ]:
+        assert str(l_params.get(key) or "") == "close"
+        assert str(b_params.get(key) or "") == str(l_params.get(key) or "")
+
+
 def test_bt_portfolio_semantic_parity_keys_and_core_metrics(engine):
     dates = _seed_case(engine)
     sf = make_session_factory(engine)
@@ -324,30 +356,22 @@ def test_bt_portfolio_semantic_parity_keys_and_core_metrics(engine):
     [
         ("ma_filter", "close", "equal"),
         ("ma_filter", "open", "risk_budget"),
-        ("ma_filter", "oc2", "equal"),
         ("ma_cross", "close", "equal"),
         ("ma_cross", "open", "risk_budget"),
-        ("donchian", "oc2", "equal"),
         ("donchian", "close", "equal"),
         ("donchian", "open", "risk_budget"),
         ("tsmom", "close", "equal"),
         ("tsmom", "open", "risk_budget"),
-        ("tsmom", "oc2", "equal"),
         ("linreg_slope", "close", "equal"),
         ("linreg_slope", "open", "risk_budget"),
-        ("linreg_slope", "oc2", "equal"),
         ("bias", "close", "equal"),
         ("bias", "open", "risk_budget"),
-        ("bias", "oc2", "equal"),
         ("macd_cross", "close", "equal"),
         ("macd_cross", "open", "risk_budget"),
-        ("macd_cross", "oc2", "equal"),
         ("macd_zero_filter", "close", "equal"),
         ("macd_zero_filter", "open", "risk_budget"),
-        ("macd_zero_filter", "oc2", "equal"),
         ("macd_v", "close", "equal"),
         ("macd_v", "open", "risk_budget"),
-        ("macd_v", "oc2", "equal"),
     ],
 )
 def test_bt_single_semantic_parity_matrix(
@@ -411,31 +435,22 @@ def test_bt_single_semantic_parity_matrix(
     [
         ("ma_filter", "close", "equal"),
         ("ma_filter", "open", "risk_budget"),
-        ("ma_filter", "oc2", "equal"),
         ("ma_cross", "close", "equal"),
         ("ma_cross", "open", "risk_budget"),
-        ("ma_cross", "oc2", "equal"),
         ("donchian", "close", "equal"),
         ("donchian", "open", "risk_budget"),
-        ("donchian", "oc2", "equal"),
         ("tsmom", "close", "equal"),
         ("tsmom", "open", "risk_budget"),
-        ("tsmom", "oc2", "equal"),
         ("linreg_slope", "close", "equal"),
         ("linreg_slope", "open", "risk_budget"),
-        ("linreg_slope", "oc2", "equal"),
         ("bias", "close", "equal"),
         ("bias", "open", "risk_budget"),
-        ("bias", "oc2", "equal"),
         ("macd_cross", "close", "equal"),
         ("macd_cross", "open", "risk_budget"),
-        ("macd_cross", "oc2", "equal"),
         ("macd_zero_filter", "close", "equal"),
         ("macd_zero_filter", "open", "risk_budget"),
-        ("macd_zero_filter", "oc2", "equal"),
         ("macd_v", "close", "equal"),
         ("macd_v", "open", "risk_budget"),
-        ("macd_v", "oc2", "equal"),
     ],
 )
 def test_bt_portfolio_semantic_parity_matrix(
@@ -604,10 +619,6 @@ def test_bt_portfolio_effective_weights_semantic_parity(engine):
         ("open", "risk_budget"),
         ("open", "fixed_ratio"),
         ("open", "vol_target"),
-        ("oc2", "equal"),
-        ("oc2", "risk_budget"),
-        ("oc2", "fixed_ratio"),
-        ("oc2", "vol_target"),
     ],
 )
 def test_bt_single_sizing_modes_sentinel_parity(
@@ -667,10 +678,6 @@ def test_bt_single_sizing_modes_sentinel_parity(
         ("open", "risk_budget"),
         ("open", "fixed_ratio"),
         ("open", "vol_target"),
-        ("oc2", "equal"),
-        ("oc2", "risk_budget"),
-        ("oc2", "fixed_ratio"),
-        ("oc2", "vol_target"),
     ],
 )
 def test_bt_portfolio_sizing_modes_sentinel_parity(
@@ -730,10 +737,6 @@ def test_bt_portfolio_sizing_modes_sentinel_parity(
         ("open", "risk_budget"),
         ("open", "fixed_ratio"),
         ("open", "vol_target"),
-        ("oc2", "equal"),
-        ("oc2", "risk_budget"),
-        ("oc2", "fixed_ratio"),
-        ("oc2", "vol_target"),
     ],
 )
 def test_bt_portfolio_quick_mode_sentinel_parity(
@@ -775,6 +778,40 @@ def test_bt_portfolio_quick_mode_sentinel_parity(
     assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
     if math.isfinite(float(lv)) and math.isfinite(float(bv)):
         assert abs(float(lv) - float(bv)) <= 1e-12
+
+
+def test_trend_single_rejects_oc2_exec_price_in_legacy_and_bt(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendInputs(
+            code="A",
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            exec_price="oc2",
+        )
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_backtest(db, inp)
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_backtest_bt(db, inp)
+
+
+def test_trend_portfolio_rejects_oc2_exec_price_in_legacy_and_bt(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendPortfolioInputs(
+            codes=["A", "B", "C"],
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            exec_price="oc2",
+        )
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_portfolio_backtest(db, inp)
+        with pytest.raises(ValueError, match="open\\|close"):
+            compute_trend_portfolio_backtest_bt(db, inp)
 
 
 @pytest.mark.parametrize("quick_mode", [False, True])
@@ -1063,3 +1100,282 @@ def test_bt_portfolio_tightening_reentry_semantic_parity(
     assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
     if math.isfinite(float(lv)) and math.isfinite(float(bv)):
         assert abs(float(lv) - float(bv)) <= 1e-12
+
+
+def test_bt_single_ma_trailing_stop_semantic_parity(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendInputs(
+            code="A",
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            sma_window=20,
+            position_sizing="equal",
+            exec_price="close",
+            ma_trailing_stop_enabled=True,
+            ma_trailing_stop_ma_type="ema",
+            ma_trailing_stop_execution_mode="next_day",
+            ma_trailing_stop_effective_delay_days=3,
+            ma_trailing_stop_reduce_window=10,
+            ma_trailing_stop_exit_window=20,
+            ma_trailing_stop_reduce_fraction=0.33,
+            r_take_profit_enabled=True,
+            r_take_profit_tiers=[{"r_multiple": 2.0, "retrace_ratio": 0.3}],
+            r_profit_scaleout_enabled=True,
+            r_profit_scaleout_tiers=[{"r_multiple": 2.5, "reduce_fraction": 0.2}],
+            quick_mode=True,
+            cost_bps=0.0,
+            slippage_rate=0.0,
+        )
+        legacy = compute_trend_backtest(db, inp)
+        bt = compute_trend_backtest_bt(db, inp)
+
+    assert not sorted(_flat_keys(legacy) - _flat_keys(bt))
+    assert (
+        bool(_get(legacy, "risk_controls.ma_trailing_stop.enabled")) is True
+        and bool(_get(bt, "risk_controls.ma_trailing_stop.enabled")) is True
+    )
+    assert str(
+        _get(bt, "risk_controls.ma_trailing_stop.reduce_fraction_basis") or ""
+    ) == ("initial_position")
+    lv = _get(legacy, "metrics.strategy.cumulative_return")
+    bv = _get(bt, "metrics.strategy.cumulative_return")
+    assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
+    if math.isfinite(float(lv)) and math.isfinite(float(bv)):
+        assert abs(float(lv) - float(bv)) <= 1e-12
+
+
+def test_bt_portfolio_ma_trailing_stop_semantic_parity(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendPortfolioInputs(
+            codes=["A", "B", "C"],
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            sma_window=20,
+            position_sizing="equal",
+            exec_price="close",
+            ma_trailing_stop_enabled=True,
+            ma_trailing_stop_ma_type="sma",
+            ma_trailing_stop_execution_mode="intraday",
+            ma_trailing_stop_effective_delay_days=3,
+            ma_trailing_stop_reduce_window=10,
+            ma_trailing_stop_exit_window=20,
+            ma_trailing_stop_reduce_fraction=0.33,
+            r_take_profit_enabled=True,
+            r_take_profit_tiers=[{"r_multiple": 2.0, "retrace_ratio": 0.3}],
+            r_profit_scaleout_enabled=True,
+            r_profit_scaleout_tiers=[{"r_multiple": 2.5, "reduce_fraction": 0.2}],
+            quick_mode=True,
+            cost_bps=0.0,
+            slippage_rate=0.0,
+        )
+        legacy = compute_trend_portfolio_backtest(db, inp)
+        bt = compute_trend_portfolio_backtest_bt(db, inp)
+
+    assert not sorted(_flat_keys(legacy) - _flat_keys(bt))
+    assert (
+        bool(_get(legacy, "risk_controls.ma_trailing_stop.enabled")) is True
+        and bool(_get(bt, "risk_controls.ma_trailing_stop.enabled")) is True
+    )
+    lv = _get(legacy, "metrics.strategy.cumulative_return")
+    bv = _get(bt, "metrics.strategy.cumulative_return")
+    assert isinstance(lv, (int, float)) and isinstance(bv, (int, float))
+    if math.isfinite(float(lv)) and math.isfinite(float(bv)):
+        assert abs(float(lv) - float(bv)) <= 1e-12
+
+
+def test_bt_portfolio_breakeven_addon_flags_and_addons_block_parity(engine):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+    with sf() as db:
+        inp = TrendPortfolioInputs(
+            codes=["A", "B", "C"],
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            sma_window=20,
+            position_sizing="equal",
+            exec_price="close",
+            atr_stop_mode="none",
+            r_profit_scaleout_enabled=True,
+            r_profit_scaleout_execution_mode="intraday",
+            r_profit_scaleout_breakeven_stop_enabled=False,
+            r_profit_scaleout_tiers=[{"r_multiple": 2.5, "reduce_fraction": 0.2}],
+            bias_v_take_profit_enabled=True,
+            bias_v_take_profit_reentry_mode="reenter",
+            bias_v_take_profit_execution_mode="intraday",
+            bias_v_take_profit_breakeven_stop_enabled=False,
+            bias_v_ma_window=20,
+            bias_v_atr_window=20,
+            bias_v_take_profit_tiers=[{"threshold": 3.0, "reduce_fraction": 0.2}],
+            quick_mode=True,
+            cost_bps=0.0,
+            slippage_rate=0.0,
+        )
+        legacy = compute_trend_portfolio_backtest(db, inp)
+        bt = compute_trend_portfolio_backtest_bt(db, inp)
+
+    assert _get(bt, "risk_controls.addons.r_profit_scaleout_breakeven_stop") is not None
+    assert (
+        _get(bt, "risk_controls.addons.bias_v_take_profit_breakeven_stop") is not None
+    )
+    assert (
+        bool(
+            _get(
+                legacy, "risk_controls.addons.r_profit_scaleout_breakeven_stop.enabled"
+            )
+        )
+        is False
+    )
+    assert (
+        bool(_get(bt, "risk_controls.addons.r_profit_scaleout_breakeven_stop.enabled"))
+        is False
+    )
+    assert (
+        bool(
+            _get(
+                legacy, "risk_controls.addons.bias_v_take_profit_breakeven_stop.enabled"
+            )
+        )
+        is False
+    )
+    assert (
+        bool(_get(bt, "risk_controls.addons.bias_v_take_profit_breakeven_stop.enabled"))
+        is False
+    )
+
+
+def test_bt_single_ma_trailing_stop_override_remap_scales_and_matches_nav(
+    engine, monkeypatch
+):
+    dates = _seed_case(engine)
+    sf = make_session_factory(engine)
+
+    def _fake_apply_intraday_or_arbitration_single(
+        *, weights, event_sets, exec_price, open_sig, close_sig
+    ):
+        del event_sets, exec_price, open_sig, close_sig
+        zeros = pd.Series(0.0, index=weights.index, dtype=float)
+        ma_over = pd.Series(0.01, index=weights.index, dtype=float)
+        return weights.astype(float).copy(), {
+            "atr_stop": zeros.copy(),
+            "bias_v_take_profit": zeros.copy(),
+            "r_take_profit": zeros.copy(),
+            "r_profit_scaleout": zeros.copy(),
+            "ma_trailing_stop": ma_over,
+        }
+
+    def _fake_simulate_lot_account_weights(*, target_weights, **kwargs):
+        del kwargs
+        return target_weights.copy().astype(float), {}
+
+    def _fake_remap_return_weights(*, w_eff_before, w_eff_after, w_ret_before):
+        del w_eff_before, w_eff_after
+        risk_scale = pd.Series(0.5, index=w_ret_before.index, dtype=float)
+        return w_ret_before.copy().astype(float), risk_scale
+
+    monkeypatch.setattr(
+        bt_trend_mod,
+        "_apply_intraday_or_arbitration_single",
+        _fake_apply_intraday_or_arbitration_single,
+    )
+
+    with sf() as db:
+        base_out = compute_trend_backtest_bt(
+            db,
+            TrendInputs(
+                code="A",
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                exec_price="open",
+                atr_stop_mode="none",
+                ma_trailing_stop_enabled=True,
+                ma_trailing_stop_ma_type="sma",
+                ma_trailing_stop_execution_mode="intraday",
+                ma_trailing_stop_effective_delay_days=1,
+                ma_trailing_stop_reduce_window=3,
+                ma_trailing_stop_exit_window=5,
+                ma_trailing_stop_reduce_fraction=0.5,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+        base_ma = (
+            ((base_out.get("return_decomposition") or {}).get("series") or {}).get(
+                "ma_trailing_stop_override"
+            )
+        ) or []
+        assert base_ma and any(abs(float(x)) > 1e-12 for x in base_ma)
+
+        monkeypatch.setattr(
+            bt_trend_mod,
+            "simulate_lot_account_weights",
+            _fake_simulate_lot_account_weights,
+        )
+        monkeypatch.setattr(
+            bt_trend_mod,
+            "remap_return_weights",
+            _fake_remap_return_weights,
+        )
+
+        scaled_out = compute_trend_backtest_bt(
+            db,
+            TrendInputs(
+                code="A",
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=10,
+                exec_price="open",
+                atr_stop_mode="none",
+                ma_trailing_stop_enabled=True,
+                ma_trailing_stop_ma_type="sma",
+                ma_trailing_stop_execution_mode="intraday",
+                ma_trailing_stop_effective_delay_days=1,
+                ma_trailing_stop_reduce_window=3,
+                ma_trailing_stop_exit_window=5,
+                ma_trailing_stop_reduce_fraction=0.5,
+                initial_account_amount=1_000_000.0,
+                position_sizing="fixed_ratio",
+                fixed_pos_ratio=0.8,
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+
+    scaled_decomp = ((scaled_out.get("return_decomposition") or {}).get("series")) or {}
+    scaled_ma = [
+        float(x) for x in (scaled_decomp.get("ma_trailing_stop_override") or [])
+    ]
+    scaled_risk = [float(x) for x in (scaled_decomp.get("risk_exit_override") or [])]
+    scaled_net = [float(x) for x in (scaled_decomp.get("net") or [])]
+    nav_series = [
+        float(x)
+        for x in (
+            (((scaled_out.get("nav") or {}).get("series") or {}).get("STRAT")) or []
+        )
+    ]
+
+    assert len(scaled_ma) == len(base_ma) == len(scaled_risk) == len(nav_series)
+    for base_v, scaled_v in zip(base_ma, scaled_ma):
+        assert float(scaled_v) == pytest.approx(float(base_v) * 0.5, abs=1e-12)
+    for rv, mv in zip(scaled_risk, scaled_ma):
+        assert float(rv) == pytest.approx(float(mv), abs=1e-12)
+
+    assert len(scaled_net) == len(nav_series)
+    nav_rebuild = (
+        bt_trend_mod._as_nav(
+            pd.Series(scaled_net, index=pd.RangeIndex(len(scaled_net)), dtype=float)
+        )
+        .astype(float)
+        .tolist()
+    )
+    for got, rebuilt in zip(nav_series, nav_rebuild):
+        assert float(got) == pytest.approx(float(rebuilt), abs=1e-12)

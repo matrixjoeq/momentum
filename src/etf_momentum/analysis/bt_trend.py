@@ -55,11 +55,20 @@ _apply_r_multiple_take_profit_shared = (
 _build_r_profit_scaleout_plan_shared = (
     _trend_semantic_helpers._build_r_profit_scaleout_plan
 )
+_build_ma_trailing_stop_plan_shared = (
+    _trend_semantic_helpers._build_ma_trailing_stop_plan
+)
 _apply_intraday_scaleout_execution_portfolio = (
     _trend_semantic_helpers._apply_intraday_scaleout_execution_portfolio
 )
 _apply_intraday_scaleout_execution_single = (
     _trend_semantic_helpers._apply_intraday_scaleout_execution_single
+)
+_apply_intraday_or_arbitration_single = (
+    _trend_semantic_helpers._apply_intraday_or_arbitration_single
+)
+_apply_intraday_or_arbitration_portfolio = (
+    _trend_semantic_helpers._apply_intraday_or_arbitration_portfolio
 )
 _normalize_r_profit_scaleout_tiers = (
     _trend_semantic_helpers._normalize_r_profit_scaleout_tiers
@@ -67,6 +76,10 @@ _normalize_r_profit_scaleout_tiers = (
 _normalize_bias_v_take_profit_tiers = (
     _trend_semantic_helpers._normalize_bias_v_take_profit_tiers
 )
+_enforce_risk_control_compatibility = (
+    _trend_semantic_helpers._enforce_risk_control_compatibility
+)
+_resolve_stop_execution_time = _trend_semantic_helpers._resolve_stop_execution_time
 
 Session = Any
 
@@ -212,10 +225,7 @@ def _build_execution_day_components(
         px_none_base = _as_float_like(c_none)
         px_hfq_base = _as_float_like(c_hfq)
     else:
-        ret_none = (0.5 * (ret_exec_open_none + ret_exec_close_none)).astype(float)
-        ret_hfq = (0.5 * (ret_exec_open_hfq + ret_exec_close_hfq)).astype(float)
-        px_none_base = _as_float_like(0.5 * (o_none + c_none))
-        px_hfq_base = _as_float_like(0.5 * (o_hfq + c_hfq))
+        raise ValueError("exec_price must be one of: open|close")
 
     _, ca_mask_raw = corporate_action_mask(
         (1.0 + ret_none).astype(float),
@@ -3283,6 +3293,9 @@ def _validate_bt_single_inputs(inp: Any) -> None:
     strat = str(inp.strategy or "ma_filter").strip().lower()
     if strat not in _SUPPORTED_STRATEGIES:
         raise ValueError(f"invalid strategy={inp.strategy}")
+    ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
+    if ep not in {"open", "close"}:
+        raise ValueError("exec_price must be one of: open|close")
     ma_type = str(getattr(inp, "ma_type", "sma") or "sma").strip().lower()
     if ma_type not in {"sma", "ema", "kama"}:
         raise ValueError("ma_type must be one of: sma|ema|kama")
@@ -3375,6 +3388,13 @@ def _validate_bt_single_inputs(inp: Any) -> None:
     )
     if atr_exec_mode not in STOP_EXECUTION_MODES:
         raise ValueError("atr_stop_execution_mode must be one of: intraday|next_day")
+    _resolve_stop_execution_time(
+        execution_mode=atr_exec_mode,
+        execution_time=getattr(inp, "atr_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="atr_stop_execution_mode",
+        time_field="atr_stop_execution_time",
+    )
     rtp_exec_mode = (
         str(getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday")
         .strip()
@@ -3384,6 +3404,13 @@ def _validate_bt_single_inputs(inp: Any) -> None:
         raise ValueError(
             "r_take_profit_execution_mode must be one of: intraday|next_day"
         )
+    _resolve_stop_execution_time(
+        execution_mode=rtp_exec_mode,
+        execution_time=getattr(inp, "r_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="r_take_profit_execution_mode",
+        time_field="r_take_profit_execution_time",
+    )
     rps_exec_mode = (
         str(getattr(inp, "r_profit_scaleout_execution_mode", "intraday") or "intraday")
         .strip()
@@ -3393,12 +3420,13 @@ def _validate_bt_single_inputs(inp: Any) -> None:
         raise ValueError(
             "r_profit_scaleout_execution_mode must be one of: intraday|next_day"
         )
-    if bool(getattr(inp, "r_take_profit_enabled", False)) and bool(
-        getattr(inp, "r_profit_scaleout_enabled", False)
-    ):
-        raise ValueError(
-            "r_take_profit_enabled and r_profit_scaleout_enabled cannot both be true"
-        )
+    _resolve_stop_execution_time(
+        execution_mode=rps_exec_mode,
+        execution_time=getattr(inp, "r_profit_scaleout_execution_time", None),
+        exec_price=ep,
+        mode_field="r_profit_scaleout_execution_mode",
+        time_field="r_profit_scaleout_execution_time",
+    )
     bv_exec_mode = (
         str(getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday")
         .strip()
@@ -3408,11 +3436,130 @@ def _validate_bt_single_inputs(inp: Any) -> None:
         raise ValueError(
             "bias_v_take_profit_execution_mode must be one of: intraday|next_day"
         )
+    _resolve_stop_execution_time(
+        execution_mode=bv_exec_mode,
+        execution_time=getattr(inp, "bias_v_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="bias_v_take_profit_execution_mode",
+        time_field="bias_v_take_profit_execution_time",
+    )
+    ma_exec_mode = (
+        str(getattr(inp, "ma_trailing_stop_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if ma_exec_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "ma_trailing_stop_execution_mode must be one of: intraday|next_day"
+        )
+    _resolve_stop_execution_time(
+        execution_mode=ma_exec_mode,
+        execution_time=getattr(inp, "ma_trailing_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="ma_trailing_stop_execution_mode",
+        time_field="ma_trailing_stop_execution_time",
+    )
+    ma_type = (
+        str(getattr(inp, "ma_trailing_stop_ma_type", "sma") or "sma").strip().lower()
+    )
+    if ma_type not in {"sma", "ema"}:
+        raise ValueError("ma_trailing_stop_ma_type must be one of: sma|ema")
+    ma_reduce_window = int(getattr(inp, "ma_trailing_stop_reduce_window", 10) or 10)
+    ma_exit_window = int(getattr(inp, "ma_trailing_stop_exit_window", 20) or 20)
+    ma_effective_delay_days = int(
+        getattr(inp, "ma_trailing_stop_effective_delay_days", 3) or 3
+    )
+    ma_reduce_fraction = float(
+        getattr(inp, "ma_trailing_stop_reduce_fraction", 0.33) or 0.33
+    )
+    if ma_reduce_window < 2:
+        raise ValueError("ma_trailing_stop_reduce_window must be >= 2")
+    if ma_exit_window < 2:
+        raise ValueError("ma_trailing_stop_exit_window must be >= 2")
+    if ma_effective_delay_days < 1:
+        raise ValueError("ma_trailing_stop_effective_delay_days must be >= 1")
+    if (
+        (not np.isfinite(ma_reduce_fraction))
+        or ma_reduce_fraction <= 0.0
+        or ma_reduce_fraction > 1.0
+    ):
+        raise ValueError("ma_trailing_stop_reduce_fraction must be in (0, 1]")
+    _enforce_risk_control_compatibility(
+        {
+            "atr_stop": bool(
+                str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
+                != "none"
+            ),
+            "r_take_profit": bool(getattr(inp, "r_take_profit_enabled", False)),
+            "r_profit_scaleout": bool(getattr(inp, "r_profit_scaleout_enabled", False)),
+            "bias_v_take_profit": bool(
+                getattr(inp, "bias_v_take_profit_enabled", False)
+            ),
+            "ma_trailing_stop": bool(getattr(inp, "ma_trailing_stop_enabled", False)),
+            "vol_regime_risk_mgmt_enabled": bool(
+                getattr(inp, "vol_regime_risk_mgmt_enabled", False)
+            ),
+            "vol_periodic_risk_mgmt_enabled": bool(
+                getattr(inp, "vol_periodic_risk_mgmt_enabled", False)
+            ),
+        }
+    )
 
 
 def _build_meta_params(inp: Any) -> dict[str, Any]:
+    ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
+    atr_exec_mode = str(
+        getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
+    )
+    atr_exec_time = _resolve_stop_execution_time(
+        execution_mode=atr_exec_mode,
+        execution_time=getattr(inp, "atr_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="atr_stop_execution_mode",
+        time_field="atr_stop_execution_time",
+    )
+    rtp_exec_mode = str(
+        getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday"
+    )
+    rtp_exec_time = _resolve_stop_execution_time(
+        execution_mode=rtp_exec_mode,
+        execution_time=getattr(inp, "r_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="r_take_profit_execution_mode",
+        time_field="r_take_profit_execution_time",
+    )
+    rps_exec_mode = str(
+        getattr(inp, "r_profit_scaleout_execution_mode", "intraday") or "intraday"
+    )
+    rps_exec_time = _resolve_stop_execution_time(
+        execution_mode=rps_exec_mode,
+        execution_time=getattr(inp, "r_profit_scaleout_execution_time", None),
+        exec_price=ep,
+        mode_field="r_profit_scaleout_execution_mode",
+        time_field="r_profit_scaleout_execution_time",
+    )
+    bias_v_exec_mode = str(
+        getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday"
+    )
+    bias_v_exec_time = _resolve_stop_execution_time(
+        execution_mode=bias_v_exec_mode,
+        execution_time=getattr(inp, "bias_v_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="bias_v_take_profit_execution_mode",
+        time_field="bias_v_take_profit_execution_time",
+    )
+    ma_exec_mode = str(
+        getattr(inp, "ma_trailing_stop_execution_mode", "intraday") or "intraday"
+    )
+    ma_exec_time = _resolve_stop_execution_time(
+        execution_mode=ma_exec_mode,
+        execution_time=getattr(inp, "ma_trailing_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="ma_trailing_stop_execution_mode",
+        time_field="ma_trailing_stop_execution_time",
+    )
     out = {
-        "exec_price": str(getattr(inp, "exec_price", "open") or "open"),
+        "exec_price": str(ep),
         "cost_bps": float(getattr(inp, "cost_bps", 0.0)),
         "slippage_rate": float(getattr(inp, "slippage_rate", 0.0)),
         "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
@@ -3504,9 +3651,8 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "atr_stop_reentry_mode": str(
             getattr(inp, "atr_stop_reentry_mode", "reenter") or "reenter"
         ),
-        "atr_stop_execution_mode": str(
-            getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
-        ),
+        "atr_stop_execution_mode": str(atr_exec_mode),
+        "atr_stop_execution_time": str(atr_exec_time),
         "atr_stop_window": int(getattr(inp, "atr_stop_window", 14) or 14),
         "atr_stop_n": float(getattr(inp, "atr_stop_n", 2.0) or 2.0),
         "atr_stop_m": float(getattr(inp, "atr_stop_m", 0.5) or 0.5),
@@ -3514,14 +3660,15 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "r_take_profit_reentry_mode": str(
             getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter"
         ),
-        "r_take_profit_execution_mode": str(
-            getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday"
-        ),
+        "r_take_profit_execution_mode": str(rtp_exec_mode),
+        "r_take_profit_execution_time": str(rtp_exec_time),
         "r_profit_scaleout_enabled": bool(
             getattr(inp, "r_profit_scaleout_enabled", False)
         ),
-        "r_profit_scaleout_execution_mode": str(
-            getattr(inp, "r_profit_scaleout_execution_mode", "intraday") or "intraday"
+        "r_profit_scaleout_execution_mode": str(rps_exec_mode),
+        "r_profit_scaleout_execution_time": str(rps_exec_time),
+        "r_profit_scaleout_breakeven_stop_enabled": bool(
+            getattr(inp, "r_profit_scaleout_breakeven_stop_enabled", True)
         ),
         "bias_v_take_profit_enabled": bool(
             getattr(inp, "bias_v_take_profit_enabled", False)
@@ -3529,13 +3676,59 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         "bias_v_take_profit_reentry_mode": str(
             getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter"
         ),
-        "bias_v_take_profit_execution_mode": str(
-            getattr(inp, "bias_v_take_profit_execution_mode", "intraday") or "intraday"
+        "bias_v_take_profit_execution_mode": str(bias_v_exec_mode),
+        "bias_v_take_profit_execution_time": str(bias_v_exec_time),
+        "bias_v_take_profit_breakeven_stop_enabled": bool(
+            getattr(inp, "bias_v_take_profit_breakeven_stop_enabled", True)
         ),
         "bias_v_ma_window": int(getattr(inp, "bias_v_ma_window", 20) or 20),
         "bias_v_atr_window": int(getattr(inp, "bias_v_atr_window", 20) or 20),
         "bias_v_take_profit_tiers": _normalize_bias_v_take_profit_tiers(
             getattr(inp, "bias_v_take_profit_tiers", None),
+        ),
+        "ma_trailing_stop_enabled": bool(
+            getattr(inp, "ma_trailing_stop_enabled", False)
+        ),
+        "ma_trailing_stop_ma_type": str(
+            getattr(inp, "ma_trailing_stop_ma_type", "sma") or "sma"
+        ),
+        "ma_trailing_stop_execution_mode": str(ma_exec_mode),
+        "ma_trailing_stop_execution_time": str(ma_exec_time),
+        "ma_trailing_stop_effective_delay_days": int(
+            getattr(inp, "ma_trailing_stop_effective_delay_days", 3) or 3
+        ),
+        "ma_trailing_stop_reduce_window": int(
+            getattr(inp, "ma_trailing_stop_reduce_window", 10) or 10
+        ),
+        "ma_trailing_stop_exit_window": int(
+            getattr(inp, "ma_trailing_stop_exit_window", 20) or 20
+        ),
+        "ma_trailing_stop_reduce_fraction": float(
+            getattr(inp, "ma_trailing_stop_reduce_fraction", 0.33) or 0.33
+        ),
+        "risk_control_compatibility_meta": _trend_semantic_helpers._build_risk_control_compatibility_meta(
+            enabled_flags={
+                "atr_stop": bool(
+                    str(getattr(inp, "atr_stop_mode", "none") or "none").strip().lower()
+                    != "none"
+                ),
+                "r_take_profit": bool(getattr(inp, "r_take_profit_enabled", False)),
+                "r_profit_scaleout": bool(
+                    getattr(inp, "r_profit_scaleout_enabled", False)
+                ),
+                "bias_v_take_profit": bool(
+                    getattr(inp, "bias_v_take_profit_enabled", False)
+                ),
+                "ma_trailing_stop": bool(
+                    getattr(inp, "ma_trailing_stop_enabled", False)
+                ),
+                "vol_regime_risk_mgmt_enabled": bool(
+                    getattr(inp, "vol_regime_risk_mgmt_enabled", False)
+                ),
+                "vol_periodic_risk_mgmt_enabled": bool(
+                    getattr(inp, "vol_periodic_risk_mgmt_enabled", False)
+                ),
+            }
         ),
         "monthly_risk_budget_enabled": bool(
             getattr(inp, "monthly_risk_budget_enabled", False)
@@ -4071,6 +4264,8 @@ def _run_single_backtesting(
         code=code,
     )
     ep = str(getattr(inp, "exec_price", "open") or "open").strip().lower()
+    if ep not in {"open", "close"}:
+        raise ValueError("exec_price must be one of: open|close")
     open_none = bt_df["Open"].astype(float).combine_first(bt_df["Close"].astype(float))
     close_none = bt_df["Close"].astype(float)
     open_hfq = (
@@ -4115,6 +4310,13 @@ def _run_single_backtesting(
         .strip()
         .lower()
     )
+    atr_execution_time = _resolve_stop_execution_time(
+        execution_mode=atr_execution_mode,
+        execution_time=getattr(inp, "atr_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="atr_stop_execution_mode",
+        time_field="atr_stop_execution_time",
+    )
     rtp_enabled = bool(getattr(inp, "r_take_profit_enabled", False))
     rtp_reentry_mode = (
         str(getattr(inp, "r_take_profit_reentry_mode", "reenter") or "reenter")
@@ -4126,7 +4328,17 @@ def _run_single_backtesting(
         .strip()
         .lower()
     )
+    rtp_execution_time = _resolve_stop_execution_time(
+        execution_mode=rtp_execution_mode,
+        execution_time=getattr(inp, "r_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="r_take_profit_execution_mode",
+        time_field="r_take_profit_execution_time",
+    )
     rps_enabled = bool(getattr(inp, "r_profit_scaleout_enabled", False))
+    rps_breakeven_stop_enabled = bool(
+        getattr(inp, "r_profit_scaleout_breakeven_stop_enabled", True)
+    )
     rps_execution_mode = (
         str(getattr(inp, "r_profit_scaleout_execution_mode", "intraday") or "intraday")
         .strip()
@@ -4136,11 +4348,17 @@ def _run_single_backtesting(
         raise ValueError(
             "r_profit_scaleout_execution_mode must be one of: intraday|next_day"
         )
-    if bool(rtp_enabled) and bool(rps_enabled):
-        raise ValueError(
-            "r_take_profit_enabled and r_profit_scaleout_enabled cannot both be true"
-        )
+    rps_execution_time = _resolve_stop_execution_time(
+        execution_mode=rps_execution_mode,
+        execution_time=getattr(inp, "r_profit_scaleout_execution_time", None),
+        exec_price=ep,
+        mode_field="r_profit_scaleout_execution_mode",
+        time_field="r_profit_scaleout_execution_time",
+    )
     bias_v_tp_enabled = bool(getattr(inp, "bias_v_take_profit_enabled", False))
+    bias_v_tp_breakeven_stop_enabled = bool(
+        getattr(inp, "bias_v_take_profit_breakeven_stop_enabled", True)
+    )
     bias_v_tp_reentry_mode = (
         str(getattr(inp, "bias_v_take_profit_reentry_mode", "reenter") or "reenter")
         .strip()
@@ -4151,13 +4369,81 @@ def _run_single_backtesting(
         .strip()
         .lower()
     )
+    bias_v_tp_execution_time = _resolve_stop_execution_time(
+        execution_mode=bias_v_tp_execution_mode,
+        execution_time=getattr(inp, "bias_v_take_profit_execution_time", None),
+        exec_price=ep,
+        mode_field="bias_v_take_profit_execution_mode",
+        time_field="bias_v_take_profit_execution_time",
+    )
+    ma_trailing_stop_enabled = bool(getattr(inp, "ma_trailing_stop_enabled", False))
+    ma_trailing_stop_ma_type = (
+        str(getattr(inp, "ma_trailing_stop_ma_type", "sma") or "sma").strip().lower()
+    )
+    if ma_trailing_stop_ma_type not in {"sma", "ema"}:
+        raise ValueError("ma_trailing_stop_ma_type must be one of: sma|ema")
+    ma_trailing_stop_execution_mode = (
+        str(getattr(inp, "ma_trailing_stop_execution_mode", "intraday") or "intraday")
+        .strip()
+        .lower()
+    )
+    if ma_trailing_stop_execution_mode not in STOP_EXECUTION_MODES:
+        raise ValueError(
+            "ma_trailing_stop_execution_mode must be one of: intraday|next_day"
+        )
+    ma_trailing_stop_execution_time = _resolve_stop_execution_time(
+        execution_mode=ma_trailing_stop_execution_mode,
+        execution_time=getattr(inp, "ma_trailing_stop_execution_time", None),
+        exec_price=ep,
+        mode_field="ma_trailing_stop_execution_mode",
+        time_field="ma_trailing_stop_execution_time",
+    )
+    ma_trailing_stop_reduce_window = int(
+        getattr(inp, "ma_trailing_stop_reduce_window", 10) or 10
+    )
+    ma_trailing_stop_exit_window = int(
+        getattr(inp, "ma_trailing_stop_exit_window", 20) or 20
+    )
+    ma_trailing_stop_effective_delay_days = int(
+        getattr(inp, "ma_trailing_stop_effective_delay_days", 3) or 3
+    )
+    ma_trailing_stop_reduce_fraction = float(
+        getattr(inp, "ma_trailing_stop_reduce_fraction", 0.33) or 0.33
+    )
+    if ma_trailing_stop_reduce_window < 2:
+        raise ValueError("ma_trailing_stop_reduce_window must be >= 2")
+    if ma_trailing_stop_exit_window < 2:
+        raise ValueError("ma_trailing_stop_exit_window must be >= 2")
+    if ma_trailing_stop_effective_delay_days < 1:
+        raise ValueError("ma_trailing_stop_effective_delay_days must be >= 1")
+    if (
+        (not np.isfinite(ma_trailing_stop_reduce_fraction))
+        or ma_trailing_stop_reduce_fraction <= 0.0
+        or ma_trailing_stop_reduce_fraction > 1.0
+    ):
+        raise ValueError("ma_trailing_stop_reduce_fraction must be in (0, 1]")
+    risk_control_compatibility_meta = _enforce_risk_control_compatibility(
+        {
+            "atr_stop": bool(str(atr_mode) != "none"),
+            "r_take_profit": bool(rtp_enabled),
+            "r_profit_scaleout": bool(rps_enabled),
+            "bias_v_take_profit": bool(bias_v_tp_enabled),
+            "ma_trailing_stop": bool(ma_trailing_stop_enabled),
+            "vol_regime_risk_mgmt_enabled": bool(
+                getattr(inp, "vol_regime_risk_mgmt_enabled", False)
+            ),
+            "vol_periodic_risk_mgmt_enabled": bool(
+                getattr(inp, "vol_periodic_risk_mgmt_enabled", False)
+            ),
+        }
+    )
     bias_v_tp_tiers = _normalize_bias_v_take_profit_tiers(
         getattr(inp, "bias_v_take_profit_tiers", None),
     )
     monthly_enabled = bool(getattr(inp, "monthly_risk_budget_enabled", False))
     ps = str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
     # Legacy `compute_trend_backtest` compounds returns with explicit execution-day weight
-    # transitions (shift(1), open vs close vs oc2 legs). The optional Backtest.run fast path
+    # transitions (shift(1), open vs close legs). The optional Backtest.run fast path
     # does not reproduce those semantics; keep it off so BT NAV matches legacy (see
     # tests/test_strategy_execution_timing_regression.py).
     simple_backtesting_mode = False
@@ -4185,6 +4471,12 @@ def _run_single_backtesting(
         "enabled": False,
         "trigger_count": 0,
         "tier_trigger_counts": {},
+        "trigger_events": [],
+        "trace_last_rows": [],
+    }
+    ma_trailing_stop_stats: dict[str, Any] = {
+        "enabled": False,
+        "trigger_count": 0,
         "trigger_events": [],
         "trace_last_rows": [],
     }
@@ -4234,6 +4526,7 @@ def _run_single_backtesting(
             atr_basis=atr_basis,
             reentry_mode=atr_reentry_mode,
             execution_mode=atr_execution_mode,
+            execution_time=atr_execution_time,
             atr_window=int(getattr(inp, "atr_stop_window", 14)),
             n_mult=float(getattr(inp, "atr_stop_n", 2.0)),
             m_step=float(getattr(inp, "atr_stop_m", 0.5)),
@@ -4251,6 +4544,8 @@ def _run_single_backtesting(
             enabled=bias_v_tp_enabled,
             reentry_mode=bias_v_tp_reentry_mode,
             execution_mode=bias_v_tp_execution_mode,
+            execution_time=bias_v_tp_execution_time,
+            breakeven_stop_enabled=bias_v_tp_breakeven_stop_enabled,
             ma_window=int(getattr(inp, "bias_v_ma_window", 20)),
             atr_window=int(getattr(inp, "bias_v_atr_window", 20)),
             tiers=[dict(x) for x in bias_v_tp_tiers],
@@ -4264,6 +4559,7 @@ def _run_single_backtesting(
             enabled=rtp_enabled,
             reentry_mode=rtp_reentry_mode,
             execution_mode=rtp_execution_mode,
+            execution_time=rtp_execution_time,
             atr_window=int(getattr(inp, "atr_stop_window", 14)),
             atr_n=float(getattr(inp, "atr_stop_n", 2.0)),
             tiers=_normalize_r_take_profit_tiers(
@@ -4280,6 +4576,8 @@ def _run_single_backtesting(
                 low=bt_df["SigLow"].astype(float),
                 enabled=bool(rps_enabled),
                 execution_mode=str(rps_execution_mode),
+                execution_time=str(rps_execution_time),
+                breakeven_stop_enabled=bool(rps_breakeven_stop_enabled),
                 atr_window=int(getattr(inp, "atr_stop_window", 14)),
                 atr_n=float(getattr(inp, "atr_stop_n", 2.0)),
                 tiers=_normalize_r_profit_scaleout_tiers(
@@ -4287,6 +4585,21 @@ def _run_single_backtesting(
                 ),
                 atr_stop_enabled=bool(atr_mode != "none"),
             )
+        )
+        _, ma_trailing_stop_stats = _build_ma_trailing_stop_plan_shared(
+            raw_pos_for_exec.astype(float).fillna(0.0),
+            open_=bt_df["SigOpen"].astype(float),
+            close=bt_df["SigClose"].astype(float),
+            high=bt_df["SigHigh"].astype(float),
+            low=bt_df["SigLow"].astype(float),
+            enabled=bool(ma_trailing_stop_enabled),
+            ma_type=str(ma_trailing_stop_ma_type),
+            execution_mode=str(ma_trailing_stop_execution_mode),
+            execution_time=str(ma_trailing_stop_execution_time),
+            effective_delay_days=int(ma_trailing_stop_effective_delay_days),
+            reduce_window=int(ma_trailing_stop_reduce_window),
+            exit_window=int(ma_trailing_stop_exit_window),
+            reduce_fraction=float(ma_trailing_stop_reduce_fraction),
         )
 
         sizing_scale = pd.Series(1.0, index=raw_pos_for_exec.index, dtype=float)
@@ -4421,41 +4734,35 @@ def _run_single_backtesting(
             *,
             mode: str,
             scale_multiplier_mode: str = "absolute",
-        ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
-            w_tmp = weight_in.astype(float).copy()
-            w_tmp, atr_over = _apply_intraday_stop_execution_single(
-                weights=w_tmp,
-                atr_stop_stats=atr_stop_stats,
+        ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
+            del scale_multiplier_mode
+            w_tmp, over_by_overlay = _apply_intraday_or_arbitration_single(
+                weights=weight_in.astype(float).copy(),
+                event_sets={
+                    "atr_stop": atr_stop_stats,
+                    "bias_v_take_profit": bias_v_tp_stats,
+                    "r_take_profit": r_take_profit_stats,
+                    "r_profit_scaleout": r_profit_scaleout_stats,
+                    "ma_trailing_stop": ma_trailing_stop_stats,
+                },
                 exec_price=str(mode),
-                stop_execution_mode=atr_execution_mode,
                 open_sig=open_sig_for_stop,
                 close_sig=close_sig_for_stop,
             )
-            w_tmp, bias_over = _apply_intraday_stop_execution_single(
-                weights=w_tmp,
-                atr_stop_stats=bias_v_tp_stats,
-                exec_price=str(mode),
-                stop_execution_mode=bias_v_tp_execution_mode,
-                open_sig=open_sig_for_stop,
-                close_sig=close_sig_for_stop,
+            atr_over = over_by_overlay.get(
+                "atr_stop", pd.Series(0.0, index=w_tmp.index, dtype=float)
             )
-            w_tmp, rtp_over = _apply_intraday_stop_execution_single(
-                weights=w_tmp,
-                atr_stop_stats=r_take_profit_stats,
-                exec_price=str(mode),
-                stop_execution_mode=rtp_execution_mode,
-                open_sig=open_sig_for_stop,
-                close_sig=close_sig_for_stop,
+            bias_over = over_by_overlay.get(
+                "bias_v_take_profit", pd.Series(0.0, index=w_tmp.index, dtype=float)
             )
-            w_tmp, rps_over = _apply_intraday_scaleout_execution_single(
-                weights=w_tmp,
-                scale_multiplier=r_profit_scaleout_mult,
-                scaleout_stats=r_profit_scaleout_stats,
-                exec_price=str(mode),
-                execution_mode=rps_execution_mode,
-                scale_multiplier_mode=scale_multiplier_mode,
-                open_sig=open_sig_for_stop,
-                close_sig=close_sig_for_stop,
+            rtp_over = over_by_overlay.get(
+                "r_take_profit", pd.Series(0.0, index=w_tmp.index, dtype=float)
+            )
+            rps_over = over_by_overlay.get(
+                "r_profit_scaleout", pd.Series(0.0, index=w_tmp.index, dtype=float)
+            )
+            ma_over = over_by_overlay.get(
+                "ma_trailing_stop", pd.Series(0.0, index=w_tmp.index, dtype=float)
             )
             return (
                 w_tmp.astype(float),
@@ -4463,12 +4770,18 @@ def _run_single_backtesting(
                 bias_over.astype(float),
                 rtp_over.astype(float),
                 rps_over.astype(float),
+                ma_over.astype(float),
             )
 
-        open_leg_mode = "open" if ep == "oc2" else str(ep)
-        w_post, atr_over_post, bias_over_post, rtp_over_post, rps_over_post = (
-            _apply_all_intraday_overlays(w_post, mode=open_leg_mode)
-        )
+        open_leg_mode = str(ep)
+        (
+            w_post,
+            atr_over_post,
+            bias_over_post,
+            rtp_over_post,
+            rps_over_post,
+            ma_over_post,
+        ) = _apply_all_intraday_overlays(w_post, mode=open_leg_mode)
         w = w_post.astype(float)
         w_ret = w.copy().astype(float)
         ret_exec_day = ret_exec_open_day.reindex(w.index).fillna(0.0).astype(float)
@@ -4476,6 +4789,7 @@ def _run_single_backtesting(
         bias_override_ret = bias_over_post.reindex(w.index).fillna(0.0).astype(float)
         rtp_override_ret = rtp_over_post.reindex(w.index).fillna(0.0).astype(float)
         rps_override_ret = rps_over_post.reindex(w.index).fillna(0.0).astype(float)
+        ma_override_ret = ma_over_post.reindex(w.index).fillna(0.0).astype(float)
         if ep == "close":
             w_close_base = w.shift(1).fillna(0.0).astype(float)
             (
@@ -4484,41 +4798,13 @@ def _run_single_backtesting(
                 bias_override_ret,
                 rtp_override_ret,
                 rps_override_ret,
+                ma_override_ret,
             ) = _apply_all_intraday_overlays(
                 w_close_base,
                 mode="close",
                 scale_multiplier_mode="incremental_from_prev",
             )
             ret_exec_day = ret_exec_close_day.reindex(w.index).fillna(0.0).astype(float)
-        elif ep == "oc2":
-            w_close_base = w.shift(1).fillna(0.0).astype(float)
-            w_close, atr_over_close, bias_over_close, rtp_over_close, rps_over_close = (
-                _apply_all_intraday_overlays(
-                    w_close_base,
-                    mode="close",
-                    scale_multiplier_mode="incremental_from_prev",
-                )
-            )
-            w_ret = (0.5 * (w + w_close)).astype(float)
-            ret_exec_day = (
-                0.5
-                * (
-                    ret_exec_open_day.reindex(w.index).fillna(0.0).astype(float)
-                    + ret_exec_close_day.reindex(w.index).fillna(0.0).astype(float)
-                )
-            ).astype(float)
-            atr_override_ret = (
-                0.5 * (atr_override_ret + atr_over_close.reindex(w.index).fillna(0.0))
-            ).astype(float)
-            bias_override_ret = (
-                0.5 * (bias_override_ret + bias_over_close.reindex(w.index).fillna(0.0))
-            ).astype(float)
-            rtp_override_ret = (
-                0.5 * (rtp_override_ret + rtp_over_close.reindex(w.index).fillna(0.0))
-            ).astype(float)
-            rps_override_ret = (
-                0.5 * (rps_override_ret + rps_over_close.reindex(w.index).fillna(0.0))
-            ).astype(float)
         pos_eff = w.astype(float)
         base_ret = (
             (w_ret * ret_exec_day).astype(float)
@@ -4526,6 +4812,7 @@ def _run_single_backtesting(
             + bias_override_ret.astype(float)
             + rtp_override_ret.astype(float)
             + rps_override_ret.astype(float)
+            + ma_override_ret.astype(float)
         )
         turnover = (w - w.shift(1).fillna(0.0)).abs() / 2.0
         cost_comm = turnover * (float(getattr(inp, "cost_bps", 0.0) or 0.0) / 10000.0)
@@ -4681,6 +4968,9 @@ def _run_single_backtesting(
         "rps_override_ret": rps_override_ret.reindex(nav.index)
         .fillna(0.0)
         .astype(float),
+        "ma_trailing_stop_override_ret": ma_override_ret.reindex(nav.index)
+        .fillna(0.0)
+        .astype(float),
         "ret_exec_raw": ret_exec_raw.reindex(nav.index).fillna(0.0).astype(float),
         "px_exec_slip": px_exec_slip.reindex(nav.index).ffill().astype(float),
         "high_exec_day": exec_comp["high_exec_day"]
@@ -4712,6 +5002,8 @@ def _run_single_backtesting(
             "bias_v_take_profit": bias_v_tp_stats,
             "r_take_profit": r_take_profit_stats,
             "r_profit_scaleout": r_profit_scaleout_stats,
+            "ma_trailing_stop": ma_trailing_stop_stats,
+            "compatibility_meta": dict(risk_control_compatibility_meta),
             "vol_risk_adjust": vol_risk_stats,
             "vol_periodic_rebalance": vol_periodic_stats,
             "monthly_risk_budget_gate": monthly_gate_stats,
@@ -4839,6 +5131,15 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
         .reindex(nav.index)
         .fillna(0.0)
     )
+    ma_over = (
+        single.get(
+            "ma_trailing_stop_override_ret",
+            pd.Series(0.0, index=nav.index, dtype=float),
+        )
+        .astype(float)
+        .reindex(nav.index)
+        .fillna(0.0)
+    )
     account_lot_meta: dict[str, Any] | None = None
     init_amt = getattr(inp, "initial_account_amount", None)
     has_initial_account_amount = bool(
@@ -4889,6 +5190,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
             bv_over = (bv_over * risk_scale).astype(float)
             rtp_over = (rtp_over * risk_scale).astype(float)
             rps_over = (rps_over * risk_scale).astype(float)
+            ma_over = (ma_over * risk_scale).astype(float)
             turnover_one_way = (w_eff - w_eff.shift(1).fillna(0.0)).abs() / 2.0
             cost_s = turnover_one_way * (
                 float(getattr(inp, "cost_bps", 0.0) or 0.0) / 10000.0
@@ -4904,6 +5206,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 + bv_over
                 + rtp_over
                 + rps_over
+                + ma_over
                 - cost_s
                 - slip_s
             ).astype(float)
@@ -4990,7 +5293,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 0.5 * w_ret * ret_overnight_close_day * ret_intraday_close_day
             ).astype(float)
         decomp_cash_management = cash_management_ret.reindex(nav.index).astype(float)
-        decomp_risk = (atr_over + bv_over + rtp_over + rps_over).astype(float)
+        decomp_risk = (atr_over + bv_over + rtp_over + rps_over + ma_over).astype(float)
         decomp_cost = (cost_s + slip_s).astype(float)
         decomp_gross = (
             decomp_overnight
@@ -5011,6 +5314,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "bias_v_take_profit_override": bv_over.tolist(),
                 "r_take_profit_override": rtp_over.tolist(),
                 "r_profit_scaleout_override": rps_over.tolist(),
+                "ma_trailing_stop_override": ma_over.tolist(),
                 "risk_exit_override": decomp_risk.tolist(),
                 "cost": decomp_cost.tolist(),
                 "gross": decomp_gross.tolist(),
@@ -5046,6 +5350,9 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                     rps_over.iloc[1:].mean() * 252.0
                 )
                 if len(rps_over) > 1
+                else 0.0,
+                "ann_ma_trailing_stop_override": float(ma_over.iloc[1:].mean() * 252.0)
+                if len(ma_over) > 1
                 else 0.0,
                 "ann_risk_exit_override": float(decomp_risk.iloc[1:].mean() * 252.0)
                 if len(decomp_risk) > 1
@@ -5099,7 +5406,7 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
     # Keep attribution in net-return space by explicitly modeling risk overrides
     # and trading costs as standalone components.
     asset_ret_for_attribution[RISK_EXIT_PROXY_CODE] = (
-        (atr_over + bv_over + rtp_over + rps_over)
+        (atr_over + bv_over + rtp_over + rps_over + ma_over)
         .reindex(nav.index)
         .astype(float)
         .fillna(0.0)
@@ -5333,6 +5640,9 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
             (sem_dbg.get("r_profit_scaleout") or {}).get("trigger_count", 0)
         ),
         "bias_v_take_profit_trigger_count": int(bv_stats.get("trigger_count", 0)),
+        "ma_trailing_stop_trigger_count": int(
+            (sem_dbg.get("ma_trailing_stop") or {}).get("trigger_count", 0)
+        ),
         "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_count),
         "holding_bias_v_ge_5_max_per_holding": int(holding_bias_v_ge_5_max_per_holding),
         "holding_bias_v_ge_5_per_holding_distribution": dict(holding_bias_v_ge_5_dist),
@@ -5453,7 +5763,6 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "benchmark_nav": {
                     "close": "HFQ close-to-close daily returns (BUY_HOLD line; excess vs strategy uses this series)",
                     "open": "same-day open→close (none; hfq on corporate-action days); BUY_HOLD aligned to open execution",
-                    "oc2": "50% same-day open→close + 50% close-to-close (HFQ); BUY_HOLD aligned to OC2 execution",
                 }.get(ep, "unknown exec_price"),
             },
             "params": _build_meta_params(inp),
@@ -5512,6 +5821,9 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 ),
                 "r_profit_scaleout_trigger_count": int(
                     (sem_dbg.get("r_profit_scaleout") or {}).get("trigger_count", 0)
+                ),
+                "ma_trailing_stop_trigger_count": int(
+                    (sem_dbg.get("ma_trailing_stop") or {}).get("trigger_count", 0)
                 ),
                 "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_count),
                 "holding_bias_v_ge_5_max_per_holding": int(
@@ -5660,6 +5972,32 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
             "bias_v_take_profit": dict(sem_dbg.get("bias_v_take_profit") or {}),
             "r_take_profit": dict(sem_dbg.get("r_take_profit") or {}),
             "r_profit_scaleout": dict(sem_dbg.get("r_profit_scaleout") or {}),
+            "ma_trailing_stop": dict(sem_dbg.get("ma_trailing_stop") or {}),
+            "addons": {
+                "r_profit_scaleout_breakeven_stop": {
+                    "enabled": bool(
+                        getattr(inp, "r_profit_scaleout_breakeven_stop_enabled", True)
+                    ),
+                    **dict(
+                        ((sem_dbg.get("r_profit_scaleout") or {}).get("breakeven_stop"))
+                        or {}
+                    ),
+                },
+                "bias_v_take_profit_breakeven_stop": {
+                    "enabled": bool(
+                        getattr(inp, "bias_v_take_profit_breakeven_stop_enabled", True)
+                    ),
+                    **dict(
+                        (
+                            (sem_dbg.get("bias_v_take_profit") or {}).get(
+                                "breakeven_stop"
+                            )
+                        )
+                        or {}
+                    ),
+                },
+            },
+            "compatibility_meta": dict(sem_dbg.get("compatibility_meta") or {}),
             "monthly_risk_budget_gate": {
                 **dict(sem_dbg.get("monthly_risk_budget_gate") or {}),
                 "enabled": bool(getattr(inp, "monthly_risk_budget_enabled", False)),
@@ -5726,17 +6064,49 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "atr_stop_execution_mode": str(
                     getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
                 ),
+                "atr_stop_execution_time": str(
+                    (atr_stats or {}).get("execution_time")
+                    or getattr(inp, "atr_stop_execution_time", None)
+                    or "full_day"
+                ),
                 "r_take_profit_execution_mode": str(
                     getattr(inp, "r_take_profit_execution_mode", "intraday")
                     or "intraday"
+                ),
+                "r_take_profit_execution_time": str(
+                    (rtp_stats or {}).get("execution_time")
+                    or getattr(inp, "r_take_profit_execution_time", None)
+                    or "full_day"
                 ),
                 "r_profit_scaleout_execution_mode": str(
                     getattr(inp, "r_profit_scaleout_execution_mode", "intraday")
                     or "intraday"
                 ),
+                "r_profit_scaleout_execution_time": str(
+                    (rps_stats or {}).get("execution_time")
+                    or getattr(inp, "r_profit_scaleout_execution_time", None)
+                    or "full_day"
+                ),
                 "bias_v_take_profit_execution_mode": str(
                     getattr(inp, "bias_v_take_profit_execution_mode", "intraday")
                     or "intraday"
+                ),
+                "bias_v_take_profit_execution_time": str(
+                    (bv_stats or {}).get("execution_time")
+                    or getattr(inp, "bias_v_take_profit_execution_time", None)
+                    or "full_day"
+                ),
+                "ma_trailing_stop_execution_mode": str(
+                    getattr(inp, "ma_trailing_stop_execution_mode", "intraday")
+                    or "intraday"
+                ),
+                "ma_trailing_stop_execution_time": str(
+                    (ma_stats or {}).get("execution_time")
+                    or getattr(inp, "ma_trailing_stop_execution_time", None)
+                    or "full_day"
+                ),
+                "ma_trailing_stop_effective_delay_days": int(
+                    getattr(inp, "ma_trailing_stop_effective_delay_days", 3) or 3
                 ),
                 "base_signal_prev": (
                     float(single["base_pos"].iloc[-2])
@@ -5763,6 +6133,12 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                 "r_take_profit": dict(rtp_stats),
                 "r_profit_scaleout": {
                     "enabled": bool((rps_stats or {}).get("enabled", False)),
+                    "breakeven_stop_enabled": bool(
+                        getattr(inp, "r_profit_scaleout_breakeven_stop_enabled", True)
+                    ),
+                    "breakeven_stop": dict(
+                        (rps_stats or {}).get("breakeven_stop") or {}
+                    ),
                     "initial_r_mode": (rps_stats or {}).get("initial_r_mode"),
                     "fallback_mode_used": bool(
                         (rps_stats or {}).get("fallback_mode_used", False)
@@ -5774,7 +6150,15 @@ def compute_trend_backtest_bt(db: Session, inp: Any) -> dict[str, Any]:
                     ),
                     "trace_last_rows": (rps_stats or {}).get("trace_last_rows", []),
                 },
-                "bias_v_take_profit": dict(bv_stats),
+                "bias_v_take_profit": {
+                    **dict(bv_stats or {}),
+                    "breakeven_stop_enabled": bool(
+                        getattr(inp, "bias_v_take_profit_breakeven_stop_enabled", True)
+                    ),
+                    "breakeven_stop": dict(
+                        (bv_stats or {}).get("breakeven_stop") or {}
+                    ),
+                },
                 "er_exit_filter": {
                     "enabled": bool(getattr(inp, "er_exit_filter", False)),
                     "window": int(getattr(inp, "er_exit_window", 10) or 10),
@@ -5831,6 +6215,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         code="__BT_VALIDATION__",
         start=inp.start,
         end=inp.end,
+        exec_price=getattr(inp, "exec_price", "open"),
         strategy=inp.strategy,
         ma_type=inp.ma_type,
         kama_fast_window=inp.kama_fast_window,
@@ -5849,21 +6234,69 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         vol_ratio_normal_threshold=inp.vol_ratio_normal_threshold,
         vol_ratio_extreme_threshold=getattr(inp, "vol_ratio_extreme_threshold", 2.20),
         atr_stop_execution_mode=getattr(inp, "atr_stop_execution_mode", "intraday"),
+        atr_stop_execution_time=getattr(inp, "atr_stop_execution_time", None),
         r_take_profit_enabled=bool(getattr(inp, "r_take_profit_enabled", False)),
         r_take_profit_execution_mode=getattr(
             inp, "r_take_profit_execution_mode", "intraday"
         ),
+        r_take_profit_execution_time=getattr(inp, "r_take_profit_execution_time", None),
         r_profit_scaleout_enabled=bool(
             getattr(inp, "r_profit_scaleout_enabled", False)
         ),
         r_profit_scaleout_execution_mode=getattr(
             inp, "r_profit_scaleout_execution_mode", "intraday"
         ),
+        r_profit_scaleout_execution_time=getattr(
+            inp, "r_profit_scaleout_execution_time", None
+        ),
         bias_v_take_profit_execution_mode=getattr(
             inp, "bias_v_take_profit_execution_mode", "intraday"
         ),
+        bias_v_take_profit_execution_time=getattr(
+            inp, "bias_v_take_profit_execution_time", None
+        ),
+        ma_trailing_stop_enabled=bool(getattr(inp, "ma_trailing_stop_enabled", False)),
+        ma_trailing_stop_ma_type=getattr(inp, "ma_trailing_stop_ma_type", "sma"),
+        ma_trailing_stop_execution_mode=getattr(
+            inp, "ma_trailing_stop_execution_mode", "intraday"
+        ),
+        ma_trailing_stop_execution_time=getattr(
+            inp, "ma_trailing_stop_execution_time", None
+        ),
+        ma_trailing_stop_effective_delay_days=int(
+            getattr(inp, "ma_trailing_stop_effective_delay_days", 3) or 3
+        ),
+        ma_trailing_stop_reduce_window=int(
+            getattr(inp, "ma_trailing_stop_reduce_window", 10) or 10
+        ),
+        ma_trailing_stop_exit_window=int(
+            getattr(inp, "ma_trailing_stop_exit_window", 20) or 20
+        ),
+        ma_trailing_stop_reduce_fraction=float(
+            getattr(inp, "ma_trailing_stop_reduce_fraction", 0.33) or 0.33
+        ),
     )
     _validate_bt_single_inputs(single_validation)
+    risk_control_compatibility_meta = _enforce_risk_control_compatibility(
+        {
+            "vol_regime_risk_mgmt_enabled": bool(
+                getattr(inp, "vol_regime_risk_mgmt_enabled", False)
+            ),
+            "vol_periodic_risk_mgmt_enabled": bool(
+                getattr(inp, "vol_periodic_risk_mgmt_enabled", False)
+            ),
+            "atr_stop": str(getattr(inp, "atr_stop_mode", "none") or "none")
+            .strip()
+            .lower()
+            != "none",
+            "r_take_profit": bool(getattr(inp, "r_take_profit_enabled", False)),
+            "r_profit_scaleout": bool(getattr(inp, "r_profit_scaleout_enabled", False)),
+            "bias_v_take_profit": bool(
+                getattr(inp, "bias_v_take_profit_enabled", False)
+            ),
+            "ma_trailing_stop": bool(getattr(inp, "ma_trailing_stop_enabled", False)),
+        }
+    )
     strat = str(inp.strategy or "ma_filter").strip().lower()
     need_hist = (
         max(
@@ -5888,7 +6321,6 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     ret_intraday_close_day_map: dict[str, pd.Series] = {}
     ret_hfq_map: dict[str, pd.Series] = {}
     px_exec_slip_map: dict[str, pd.Series] = {}
-    rps_mult_map: dict[str, pd.Series] = {}
     sig_open_map: dict[str, pd.Series] = {}
     sig_close_map: dict[str, pd.Series] = {}
     score_map: dict[str, pd.Series] = {}
@@ -5959,23 +6391,59 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             atr_stop_atr_basis=inp.atr_stop_atr_basis,
             atr_stop_reentry_mode=inp.atr_stop_reentry_mode,
             atr_stop_execution_mode=inp.atr_stop_execution_mode,
+            atr_stop_execution_time=getattr(inp, "atr_stop_execution_time", None),
             atr_stop_window=inp.atr_stop_window,
             atr_stop_n=inp.atr_stop_n,
             atr_stop_m=inp.atr_stop_m,
             r_take_profit_enabled=inp.r_take_profit_enabled,
             r_take_profit_reentry_mode=inp.r_take_profit_reentry_mode,
             r_take_profit_execution_mode=inp.r_take_profit_execution_mode,
+            r_take_profit_execution_time=getattr(
+                inp, "r_take_profit_execution_time", None
+            ),
             r_take_profit_tiers=inp.r_take_profit_tiers,
             r_profit_scaleout_enabled=getattr(inp, "r_profit_scaleout_enabled", False),
             r_profit_scaleout_execution_mode=getattr(
                 inp, "r_profit_scaleout_execution_mode", "intraday"
             ),
+            r_profit_scaleout_execution_time=getattr(
+                inp, "r_profit_scaleout_execution_time", None
+            ),
+            r_profit_scaleout_breakeven_stop_enabled=getattr(
+                inp, "r_profit_scaleout_breakeven_stop_enabled", True
+            ),
             r_profit_scaleout_tiers=getattr(inp, "r_profit_scaleout_tiers", None),
             bias_v_take_profit_enabled=inp.bias_v_take_profit_enabled,
             bias_v_take_profit_reentry_mode=inp.bias_v_take_profit_reentry_mode,
             bias_v_take_profit_execution_mode=inp.bias_v_take_profit_execution_mode,
+            bias_v_take_profit_execution_time=getattr(
+                inp, "bias_v_take_profit_execution_time", None
+            ),
+            bias_v_take_profit_breakeven_stop_enabled=getattr(
+                inp, "bias_v_take_profit_breakeven_stop_enabled", True
+            ),
             bias_v_ma_window=inp.bias_v_ma_window,
             bias_v_atr_window=inp.bias_v_atr_window,
+            ma_trailing_stop_enabled=getattr(inp, "ma_trailing_stop_enabled", False),
+            ma_trailing_stop_ma_type=getattr(inp, "ma_trailing_stop_ma_type", "sma"),
+            ma_trailing_stop_execution_mode=getattr(
+                inp, "ma_trailing_stop_execution_mode", "intraday"
+            ),
+            ma_trailing_stop_execution_time=getattr(
+                inp, "ma_trailing_stop_execution_time", None
+            ),
+            ma_trailing_stop_effective_delay_days=getattr(
+                inp, "ma_trailing_stop_effective_delay_days", 3
+            ),
+            ma_trailing_stop_reduce_window=getattr(
+                inp, "ma_trailing_stop_reduce_window", 10
+            ),
+            ma_trailing_stop_exit_window=getattr(
+                inp, "ma_trailing_stop_exit_window", 20
+            ),
+            ma_trailing_stop_reduce_fraction=getattr(
+                inp, "ma_trailing_stop_reduce_fraction", 0.33
+            ),
             monthly_risk_budget_enabled=inp.monthly_risk_budget_enabled,
             monthly_risk_budget_pct=inp.monthly_risk_budget_pct,
             # Portfolio semantics: monthly risk budget gate is applied once at
@@ -6110,7 +6578,6 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         ret_overnight_close_day_map[c] = one["ret_overnight_close_day"].astype(float)
         ret_intraday_close_day_map[c] = one["ret_intraday_close_day"].astype(float)
         ret_hfq_map[c] = one["ret_exec_hfq"].astype(float)
-        rps_mult_map[c] = one["rps_multiplier"].astype(float)
         px_exec_slip_map[c] = one["px_exec_slip"].astype(float)
         sig_open_map[c] = one["sig_open"].astype(float)
         sig_close_map[c] = one["sig_close"].astype(float)
@@ -6186,12 +6653,6 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
 
     nav_df = pd.DataFrame(nav_map).sort_index()
     wdf = pd.DataFrame(weight_map).reindex(nav_df.index).fillna(0.0)
-    rps_mult_df = (
-        pd.DataFrame(rps_mult_map).reindex(index=nav_df.index, columns=wdf.columns)
-        if rps_mult_map
-        else pd.DataFrame(1.0, index=nav_df.index, columns=wdf.columns, dtype=float)
-    )
-    rps_mult_df = rps_mult_df.fillna(1.0).astype(float).clip(lower=0.0)
     score_df = pd.DataFrame(score_map).reindex(index=wdf.index, columns=wdf.columns)
     ret_hfq_df = (
         pd.DataFrame(ret_hfq_map)
@@ -7119,6 +7580,22 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         )
         for c in wdf.columns
     }
+    rps_breakeven_by_asset = {
+        str(c): dict((rps_by_asset.get(str(c), {}) or {}).get("breakeven_stop") or {})
+        for c in wdf.columns
+    }
+    bias_v_tp_breakeven_by_asset = {
+        str(c): dict(
+            (bias_v_tp_by_asset.get(str(c), {}) or {}).get("breakeven_stop") or {}
+        )
+        for c in wdf.columns
+    }
+    ma_trailing_stop_by_asset = {
+        str(c): dict(
+            (semantic_debug_by_code.get(str(c), {}) or {}).get("ma_trailing_stop") or {}
+        )
+        for c in wdf.columns
+    }
     w_post = wdf.shift(1).fillna(0.0).astype(float).clip(lower=0.0)
 
     def _apply_all_intraday_overlays_df(
@@ -7126,53 +7603,35 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         *,
         mode: str,
         scale_multiplier_mode: str = "absolute",
-    ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series]:
-        w_tmp = weight_in.astype(float).copy()
-        w_tmp, atr_over = _apply_intraday_stop_execution_portfolio(
-            weights=w_tmp,
-            atr_stop_by_asset=atr_stop_by_asset,
+    ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
+        del scale_multiplier_mode
+        w_tmp, over_by_overlay = _apply_intraday_or_arbitration_portfolio(
+            weights=weight_in.astype(float).copy(),
+            event_sets_by_asset={
+                "atr_stop": atr_stop_by_asset,
+                "bias_v_take_profit": bias_v_tp_by_asset,
+                "r_take_profit": rtp_by_asset,
+                "r_profit_scaleout": rps_by_asset,
+                "ma_trailing_stop": ma_trailing_stop_by_asset,
+            },
             exec_price=str(mode),
-            stop_execution_mode=str(
-                getattr(inp, "atr_stop_execution_mode", "intraday") or "intraday"
-            ),
             open_sig_df=open_sig_df,
             close_sig_df=close_sig_df,
         )
-        w_tmp, bias_over = _apply_intraday_stop_execution_portfolio(
-            weights=w_tmp,
-            atr_stop_by_asset=bias_v_tp_by_asset,
-            exec_price=str(mode),
-            stop_execution_mode=str(
-                getattr(inp, "bias_v_take_profit_execution_mode", "intraday")
-                or "intraday"
-            ),
-            open_sig_df=open_sig_df,
-            close_sig_df=close_sig_df,
+        atr_over = over_by_overlay.get(
+            "atr_stop", pd.Series(0.0, index=w_tmp.index, dtype=float)
         )
-        w_tmp, rtp_over = _apply_intraday_stop_execution_portfolio(
-            weights=w_tmp,
-            atr_stop_by_asset=rtp_by_asset,
-            exec_price=str(mode),
-            stop_execution_mode=str(
-                getattr(inp, "r_take_profit_execution_mode", "intraday") or "intraday"
-            ),
-            open_sig_df=open_sig_df,
-            close_sig_df=close_sig_df,
+        bias_over = over_by_overlay.get(
+            "bias_v_take_profit", pd.Series(0.0, index=w_tmp.index, dtype=float)
         )
-        w_tmp, rps_over = _apply_intraday_scaleout_execution_portfolio(
-            weights=w_tmp,
-            scale_multiplier_df=rps_mult_df.reindex(
-                index=w_tmp.index, columns=w_tmp.columns
-            ),
-            scaleout_by_asset=rps_by_asset,
-            exec_price=str(mode),
-            execution_mode=str(
-                getattr(inp, "r_profit_scaleout_execution_mode", "intraday")
-                or "intraday"
-            ),
-            scale_multiplier_mode=scale_multiplier_mode,
-            open_sig_df=open_sig_df,
-            close_sig_df=close_sig_df,
+        rtp_over = over_by_overlay.get(
+            "r_take_profit", pd.Series(0.0, index=w_tmp.index, dtype=float)
+        )
+        rps_over = over_by_overlay.get(
+            "r_profit_scaleout", pd.Series(0.0, index=w_tmp.index, dtype=float)
+        )
+        ma_over = over_by_overlay.get(
+            "ma_trailing_stop", pd.Series(0.0, index=w_tmp.index, dtype=float)
         )
         return (
             w_tmp.astype(float),
@@ -7180,12 +7639,18 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             bias_over.astype(float),
             rtp_over.astype(float),
             rps_over.astype(float),
+            ma_over.astype(float),
         )
 
-    open_leg_mode = "open" if ep_port == "oc2" else str(ep_port)
-    w_post, atr_over_post, bias_over_post, rtp_over_post, rps_over_post = (
-        _apply_all_intraday_overlays_df(w_post, mode=open_leg_mode)
-    )
+    open_leg_mode = str(ep_port)
+    (
+        w_post,
+        atr_over_post,
+        bias_over_post,
+        rtp_over_post,
+        rps_over_post,
+        ma_over_post,
+    ) = _apply_all_intraday_overlays_df(w_post, mode=open_leg_mode)
     w_eff = w_post.astype(float)
     w_ret = w_eff.copy().astype(float)
     ret_exec_day_df = ret_exec_open_day_df.reindex(
@@ -7201,6 +7666,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     r_profit_scaleout_override_ret = (
         rps_over_post.reindex(w_eff.index).fillna(0.0).astype(float)
     )
+    ma_trailing_stop_override_ret = (
+        ma_over_post.reindex(w_eff.index).fillna(0.0).astype(float)
+    )
     if ep_port == "close":
         w_close_base = w_eff.shift(1).fillna(0.0).astype(float)
         (
@@ -7209,6 +7677,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             bias_v_take_profit_override_ret,
             r_take_profit_override_ret,
             r_profit_scaleout_override_ret,
+            ma_trailing_stop_override_ret,
         ) = _apply_all_intraday_overlays_df(
             w_close_base,
             mode="close",
@@ -7216,53 +7685,6 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         )
         ret_exec_day_df = ret_exec_close_day_df.reindex(
             index=w_eff.index, columns=w_eff.columns
-        ).astype(float)
-    elif ep_port == "oc2":
-        w_close_base = w_eff.shift(1).fillna(0.0).astype(float)
-        w_close, atr_over_close, bias_over_close, rtp_over_close, rps_over_close = (
-            _apply_all_intraday_overlays_df(
-                w_close_base,
-                mode="close",
-                scale_multiplier_mode="incremental_from_prev",
-            )
-        )
-        w_ret = (0.5 * (w_eff + w_close)).astype(float)
-        ret_exec_day_df = (
-            0.5
-            * (
-                ret_exec_open_day_df.reindex(index=w_eff.index, columns=w_eff.columns)
-                + ret_exec_close_day_df.reindex(
-                    index=w_eff.index, columns=w_eff.columns
-                )
-            )
-        ).astype(float)
-        atr_stop_override_ret = (
-            0.5
-            * (
-                atr_stop_override_ret
-                + atr_over_close.reindex(w_eff.index).fillna(0.0).astype(float)
-            )
-        ).astype(float)
-        bias_v_take_profit_override_ret = (
-            0.5
-            * (
-                bias_v_take_profit_override_ret
-                + bias_over_close.reindex(w_eff.index).fillna(0.0).astype(float)
-            )
-        ).astype(float)
-        r_take_profit_override_ret = (
-            0.5
-            * (
-                r_take_profit_override_ret
-                + rtp_over_close.reindex(w_eff.index).fillna(0.0).astype(float)
-            )
-        ).astype(float)
-        r_profit_scaleout_override_ret = (
-            0.5
-            * (
-                r_profit_scaleout_override_ret
-                + rps_over_close.reindex(w_eff.index).fillna(0.0).astype(float)
-            )
         ).astype(float)
     else:
         ret_exec_day_df = ret_exec_open_day_df.reindex(
@@ -7317,6 +7739,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             ).astype(float)
             r_profit_scaleout_override_ret = (
                 r_profit_scaleout_override_ret * risk_scale
+            ).astype(float)
+            ma_trailing_stop_override_ret = (
+                ma_trailing_stop_override_ret * risk_scale
             ).astype(float)
         if bool(
             str(getattr(inp, "position_sizing", "equal") or "equal").strip().lower()
@@ -7375,6 +7800,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         + bias_v_take_profit_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
         + r_take_profit_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
         + r_profit_scaleout_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
+        + ma_trailing_stop_override_ret.reindex(w_eff.index).fillna(0.0).astype(float)
     ).astype(float)
     decomp_cost = (cost + slippage).astype(float)
     port_ret = (
@@ -7452,6 +7878,12 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 .fillna(0.0)
                 .astype(float)
                 .tolist(),
+                "ma_trailing_stop_override": ma_trailing_stop_override_ret.reindex(
+                    w_eff.index
+                )
+                .fillna(0.0)
+                .astype(float)
+                .tolist(),
                 "risk_exit_override": decomp_risk.tolist(),
                 "cost": decomp_cost.tolist(),
                 "gross": decomp_gross.tolist(),
@@ -7491,6 +7923,11 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     r_profit_scaleout_override_ret.iloc[1:].mean() * 252.0
                 )
                 if len(r_profit_scaleout_override_ret) > 1
+                else 0.0,
+                "ann_ma_trailing_stop_override": float(
+                    ma_trailing_stop_override_ret.iloc[1:].mean() * 252.0
+                )
+                if len(ma_trailing_stop_override_ret) > 1
                 else 0.0,
                 "ann_risk_exit_override": float(decomp_risk.iloc[1:].mean() * 252.0)
                 if len(decomp_risk) > 1
@@ -8012,6 +8449,14 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         )
         for c in semantic_debug_by_code
     )
+    ma_trailing_stop_trigger_total = sum(
+        int(
+            (semantic_debug_by_code.get(c, {}).get("ma_trailing_stop") or {}).get(
+                "trigger_count", 0
+            )
+        )
+        for c in semantic_debug_by_code
+    )
     rtp_tier_counts: dict[str, int] = {}
     for c in semantic_debug_by_code:
         tiers = (semantic_debug_by_code.get(c, {}).get("r_take_profit") or {}).get(
@@ -8147,6 +8592,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "r_take_profit_trigger_count": int(rtp_trigger_total),
         "r_profit_scaleout_trigger_count": int(rps_trigger_total),
         "bias_v_take_profit_trigger_count": int(bias_v_tp_trigger_total),
+        "ma_trailing_stop_trigger_count": int(ma_trailing_stop_trigger_total),
         "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_total),
         "holding_bias_v_ge_5_max_per_holding": int(holding_bias_v_ge_5_max_per_holding),
         "holding_bias_v_ge_5_per_holding_distribution": dict(holding_bias_v_ge_5_dist),
@@ -8299,6 +8745,9 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             ),
             "bias_v_take_profit_trigger_count": int(
                 (sem.get("bias_v_take_profit") or {}).get("trigger_count", 0)
+            ),
+            "ma_trailing_stop_trigger_count": int(
+                (sem.get("ma_trailing_stop") or {}).get("trigger_count", 0)
             ),
             "holding_bias_v_ge_5_count": int(
                 holding_bias_v_ge_5_by_code.get(str(c), 0)
@@ -8461,6 +8910,30 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         {
             str(d)
             for v in bias_v_tp_by_asset.values()
+            for d in list((v or {}).get("trigger_dates") or [])
+            if str(d).strip()
+        }
+    )
+    rps_breakeven_trigger_dates = sorted(
+        {
+            str(d)
+            for v in rps_breakeven_by_asset.values()
+            for d in list((v or {}).get("trigger_dates") or [])
+            if str(d).strip()
+        }
+    )
+    bias_v_tp_breakeven_trigger_dates = sorted(
+        {
+            str(d)
+            for v in bias_v_tp_breakeven_by_asset.values()
+            for d in list((v or {}).get("trigger_dates") or [])
+            if str(d).strip()
+        }
+    )
+    ma_trailing_stop_trigger_dates = sorted(
+        {
+            str(d)
+            for v in ma_trailing_stop_by_asset.values()
             for d in list((v or {}).get("trigger_dates") or [])
             if str(d).strip()
         }
@@ -8841,6 +9314,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "r_take_profit_trigger_count": int(rtp_trigger_total),
                 "r_profit_scaleout_trigger_count": int(rps_trigger_total),
                 "bias_v_take_profit_trigger_count": int(bias_v_tp_trigger_total),
+                "ma_trailing_stop_trigger_count": int(ma_trailing_stop_trigger_total),
                 "holding_bias_v_ge_5_count": int(holding_bias_v_ge_5_total),
                 "holding_bias_v_ge_5_max_per_holding": int(
                     holding_bias_v_ge_5_max_per_holding
@@ -8914,6 +9388,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "trades": ([] if quick_mode else trades_with_r),
         "next_plan": portfolio_next_plan,
         "risk_controls": {
+            "compatibility_meta": dict(risk_control_compatibility_meta),
             "vol_regime_risk_mgmt": {
                 "enabled": bool(getattr(inp, "vol_regime_risk_mgmt_enabled", False)),
                 "fast_atr_window": int(
@@ -9141,6 +9616,92 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 ),
                 "trigger_dates": bias_v_tp_trigger_dates[:200],
                 "by_asset": bias_v_tp_by_asset,
+            },
+            "addons": {
+                "r_profit_scaleout_breakeven_stop": {
+                    "enabled": bool(
+                        getattr(inp, "r_profit_scaleout_breakeven_stop_enabled", True)
+                    ),
+                    "trigger_count": int(
+                        sum(
+                            int((v or {}).get("trigger_count", 0) or 0)
+                            for v in rps_breakeven_by_asset.values()
+                        )
+                    ),
+                    "trigger_days": int(len(rps_breakeven_trigger_dates)),
+                    "first_trigger_date": (
+                        rps_breakeven_trigger_dates[0]
+                        if rps_breakeven_trigger_dates
+                        else None
+                    ),
+                    "last_trigger_date": (
+                        rps_breakeven_trigger_dates[-1]
+                        if rps_breakeven_trigger_dates
+                        else None
+                    ),
+                    "trigger_dates": rps_breakeven_trigger_dates[:200],
+                    "by_asset": rps_breakeven_by_asset,
+                },
+                "bias_v_take_profit_breakeven_stop": {
+                    "enabled": bool(
+                        getattr(inp, "bias_v_take_profit_breakeven_stop_enabled", True)
+                    ),
+                    "trigger_count": int(
+                        sum(
+                            int((v or {}).get("trigger_count", 0) or 0)
+                            for v in bias_v_tp_breakeven_by_asset.values()
+                        )
+                    ),
+                    "trigger_days": int(len(bias_v_tp_breakeven_trigger_dates)),
+                    "first_trigger_date": (
+                        bias_v_tp_breakeven_trigger_dates[0]
+                        if bias_v_tp_breakeven_trigger_dates
+                        else None
+                    ),
+                    "last_trigger_date": (
+                        bias_v_tp_breakeven_trigger_dates[-1]
+                        if bias_v_tp_breakeven_trigger_dates
+                        else None
+                    ),
+                    "trigger_dates": bias_v_tp_breakeven_trigger_dates[:200],
+                    "by_asset": bias_v_tp_breakeven_by_asset,
+                },
+            },
+            "ma_trailing_stop": {
+                "enabled": bool(getattr(inp, "ma_trailing_stop_enabled", False)),
+                "ma_type": str(
+                    getattr(inp, "ma_trailing_stop_ma_type", "sma") or "sma"
+                ),
+                "execution_mode": str(
+                    getattr(inp, "ma_trailing_stop_execution_mode", "intraday")
+                    or "intraday"
+                ),
+                "effective_delay_days": int(
+                    getattr(inp, "ma_trailing_stop_effective_delay_days", 3) or 3
+                ),
+                "reduce_window": int(
+                    getattr(inp, "ma_trailing_stop_reduce_window", 10) or 10
+                ),
+                "exit_window": int(
+                    getattr(inp, "ma_trailing_stop_exit_window", 20) or 20
+                ),
+                "reduce_fraction": float(
+                    getattr(inp, "ma_trailing_stop_reduce_fraction", 0.33) or 0.33
+                ),
+                "trigger_count": int(ma_trailing_stop_trigger_total),
+                "trigger_days": int(len(ma_trailing_stop_trigger_dates)),
+                "first_trigger_date": (
+                    ma_trailing_stop_trigger_dates[0]
+                    if ma_trailing_stop_trigger_dates
+                    else None
+                ),
+                "last_trigger_date": (
+                    ma_trailing_stop_trigger_dates[-1]
+                    if ma_trailing_stop_trigger_dates
+                    else None
+                ),
+                "trigger_dates": ma_trailing_stop_trigger_dates[:200],
+                "by_asset": ma_trailing_stop_by_asset,
             },
             "er_exit_filter": {
                 "enabled": bool(getattr(inp, "er_exit_filter", False)),

@@ -26,6 +26,7 @@ class RotationCandidateScreenInputs:
     factor_weights: dict[str, float] | None = None
     category_quotas: dict[str, int] | None = None
     signif_horizon_days: int = 20
+    skip_days: int = 0
 
 
 def _max_drawdown_from_nav(nav: pd.Series) -> float:
@@ -164,6 +165,11 @@ def screen_rotation_candidates(
     horizon = int(inp.signif_horizon_days)
     if horizon < 5:
         raise ValueError("signif_horizon_days must be >= 5")
+    skip_days = int(inp.skip_days)
+    if skip_days < 0:
+        raise ValueError("skip_days must be >= 0")
+    if skip_days > 252:
+        raise ValueError("skip_days must be <= 252")
     factor_w = _normalize_factor_weights(inp.factor_weights)
     quotas = {
         str(k).strip().upper(): int(v)
@@ -174,21 +180,25 @@ def screen_rotation_candidates(
         if v < 0:
             raise ValueError(f"category quota must be >=0: {k}")
 
-    close = load_close_prices(
+    close_raw = load_close_prices(
         db, codes=codes, start=inp.start, end=inp.end, adjust=str(inp.adjust or "hfq")
     )
-    if close.empty:
+    if close_raw.empty:
         raise ValueError("no price data in selected range")
-    close = close.sort_index().ffill().replace([np.inf, -np.inf], np.nan)
-    close = close[codes]
+    close_raw = close_raw.sort_index().replace([np.inf, -np.inf], np.nan)
+    close_raw = close_raw[codes]
+    close = close_raw.ffill()
     # Research correlation uses log returns across modules.
-    ret = np.log(close).diff().replace([np.inf, -np.inf], np.nan)
+    # Guard non-positive close values to avoid invalid log warnings.
+    close_pos = close.where(close > 0.0)
+    ret_all = np.log(close_pos).diff().replace([np.inf, -np.inf], np.nan)
+    ret = ret_all.copy()
     if len(ret) > lb:
         ret = ret.iloc[-lb:]
     ret = ret.dropna(how="all")
     if ret.empty:
         raise ValueError("insufficient returns after cleaning")
-    obs_count = ret.count(axis=0).reindex(codes).fillna(0).astype(int)
+    obs_count = ret_all.count(axis=0).reindex(codes).fillna(0).astype(int)
 
     px = close.reindex(ret.index).ffill()
     mom_63 = (px / px.shift(63) - 1.0).iloc[-1]
@@ -257,10 +267,18 @@ def screen_rotation_candidates(
     score_raw = pd.to_numeric(score_raw, errors="coerce").astype(float).fillna(0.0)
 
     # Advanced momentum significance: does momentum state predict near-future return?
-    mom_sig = (px / px.shift(63) - 1.0).astype(float)
-    fwd_ret = (
-        np.log(px.shift(-horizon) / px).replace([np.inf, -np.inf], np.nan).astype(float)
-    )
+    # Unified basis: close-to-close simple forward return.
+    # Significance pairing must not use forward-filled prices.
+    px_sig = close_raw.sort_index().replace([np.inf, -np.inf], np.nan)
+    mom_num = px_sig.shift(skip_days)
+    mom_den = px_sig.shift(skip_days + lb)
+    mom_sig = (mom_num / mom_den - 1.0).astype(float)
+    mom_sig = mom_sig.where((mom_num > 0.0) & (mom_den > 0.0))
+    fwd_num = px_sig.shift(-horizon)
+    fwd_den = px_sig
+    fwd_ret = (fwd_num / fwd_den - 1.0).astype(float)
+    fwd_ret = fwd_ret.where((fwd_num > 0.0) & (fwd_den > 0.0))
+    fwd_ret = fwd_ret.replace([np.inf, -np.inf], np.nan)
     signif_by_code: dict[str, dict[str, float | int | None | bool]] = {}
     for c in codes:
         m = pd.to_numeric(mom_sig[c], errors="coerce").astype(float)
@@ -501,12 +519,14 @@ def screen_rotation_candidates(
             "end": inp.end.strftime("%Y%m%d"),
             "adjust": str(inp.adjust or "hfq"),
             "lookback_days": int(lb),
+            "skip_days": int(skip_days),
             "top_n": int(top_n),
             "min_n": int(min_n),
             "max_pair_corr": float(max_corr),
             "factor_weights": {k: float(v) for k, v in factor_w.items()},
             "category_quotas": {k: int(v) for k, v in quotas.items()},
             "signif_horizon_days": int(horizon),
+            "signif_return_basis": "close_to_close_simple",
             "min_obs_required": int(min_obs),
             "input_count": int(len(codes)),
             "selected_count": int(len(selected)),

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from etf_momentum.analysis.off_fund_regression import DEFAULT_CN_STOCK_FACTORS
+
 
 def test_off_fund_factor_configs_default_and_upsert(api_client: TestClient) -> None:
     c = api_client
@@ -11,6 +13,9 @@ def test_off_fund_factor_configs_default_and_upsert(api_client: TestClient) -> N
     assert isinstance(rows0, list)
     assert len(rows0) >= 1
     assert any(bool(x.get("is_active")) for x in rows0)
+    active0 = next(x for x in rows0 if bool(x.get("is_active")))
+    assert isinstance(active0.get("effective_benchmark_factors"), list)
+    assert len(active0["effective_benchmark_factors"]) == len(DEFAULT_CN_STOCK_FACTORS)
 
     r1 = c.post(
         "/api/off-fund/regression/factor-configs",
@@ -29,6 +34,7 @@ def test_off_fund_factor_configs_default_and_upsert(api_client: TestClient) -> N
     assert out1["name"] == "测试模板A"
     assert out1["is_active"] is True
     assert len(out1["benchmark_factors"]) == 2
+    assert len(out1["effective_benchmark_factors"]) == 2
 
     r2 = c.get("/api/off-fund/regression/factor-configs")
     assert r2.status_code == 200
@@ -42,12 +48,20 @@ def test_off_fund_factor_configs_activate_and_delete(api_client: TestClient) -> 
     c = api_client
     r1 = c.post(
         "/api/off-fund/regression/factor-configs",
-        json={"name": "模板1", "set_active": False, "benchmark_profile": "cn_stock_core"},
+        json={
+            "name": "模板1",
+            "set_active": False,
+            "benchmark_profile": "cn_stock_core",
+        },
     )
     assert r1.status_code == 200
     r2 = c.post(
         "/api/off-fund/regression/factor-configs",
-        json={"name": "模板2", "set_active": False, "benchmark_profile": "cn_stock_core"},
+        json={
+            "name": "模板2",
+            "set_active": False,
+            "benchmark_profile": "cn_stock_core",
+        },
     )
     assert r2.status_code == 200
 

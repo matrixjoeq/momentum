@@ -140,6 +140,60 @@ def test_api_off_fund_classify_cn_stock_profile(api_client: TestClient) -> None:
     assert "A股" in str(by_code["FUND2"]["label"])
 
 
+def test_api_off_fund_classify_drops_short_history_factor(
+    api_client: TestClient,
+) -> None:
+    start, end = _seed_classification_fixture(api_client)
+    engine = api_client.app.state.engine
+    sf = make_session_factory(engine)
+    d0 = dt.datetime.strptime(start, "%Y%m%d").date()
+    with sf() as db:
+        for i in range(90):
+            d = d0 + dt.timedelta(days=i)
+            px = 1.0 + 0.0015 * i
+            db.add(
+                EtfPrice(
+                    code="SHORTX",
+                    trade_date=d,
+                    open=px,
+                    high=px,
+                    low=px,
+                    close=px,
+                    volume=1000.0,
+                    amount=1000.0 * px,
+                    source="unit_test",
+                    adjust="hfq",
+                )
+            )
+        db.commit()
+    resp = api_client.post(
+        "/api/analysis/off-fund/classify",
+        json={
+            "codes": ["FUND1", "FUND2"],
+            "start": start,
+            "end": end,
+            "fund_adjust": "hfq",
+            "benchmark_adjust": "hfq",
+            "benchmark_factors": [
+                {"key": "F300", "label": "大盘", "aliases": ["000300"]},
+                {"key": "F500", "label": "中盘", "aliases": ["000905"]},
+                {"key": "FSHORT", "label": "短历史", "aliases": ["SHORTX"]},
+            ],
+            "rolling_window": 252,
+            "min_samples": 120,
+            "dominance_gap": 0.08,
+        },
+    )
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["ok"] is True
+    by_code = {x["code"]: x for x in out["items"]}
+    assert by_code["FUND1"]["status"] == "ok"
+    assert by_code["FUND2"]["status"] == "ok"
+    factor_keys = {str(x["key"]) for x in out["factors"]}
+    assert factor_keys == {"F300", "F500"}
+
+
 def test_api_off_fund_classify_returns_error_when_benchmark_empty(
     api_client: TestClient,
 ) -> None:
@@ -147,7 +201,11 @@ def test_api_off_fund_classify_returns_error_when_benchmark_empty(
     sf = make_session_factory(engine)
     d0 = dt.date(2024, 1, 1)
     with sf() as db:
-        db.add(OffFundPool(code="FUNDX", name="样本X", start_date="20240101", end_date="20240201"))
+        db.add(
+            OffFundPool(
+                code="FUNDX", name="样本X", start_date="20240101", end_date="20240201"
+            )
+        )
         for i in range(140):
             d = d0 + dt.timedelta(days=i)
             db.add(

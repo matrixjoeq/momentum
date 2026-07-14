@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func as sa_func, select
@@ -20,9 +21,17 @@ def normalize_adjust(adjust: str | None) -> str:
     return a
 
 
+def normalize_series_kind(series_kind: str | None) -> str:
+    k = str(series_kind or "price").strip().lower()
+    if k not in {"price", "total_return"}:
+        raise ValueError(f"unsupported series_kind: {series_kind}")
+    return k
+
+
 @dataclass(frozen=True)
 class GlobalBenchmarkPriceRow:
     code: str
+    series_kind: str
     trade_date: dt.date
     open: float | None = None
     high: float | None = None
@@ -34,25 +43,64 @@ class GlobalBenchmarkPriceRow:
     adjust: str = "none"
 
 
+def _encode_fallback_sources(v: list[dict[str, str]] | None) -> str | None:
+    if not v:
+        return None
+    return json.dumps(v, ensure_ascii=False)
+
+
+def _decode_fallback_sources(v: str | None) -> list[dict[str, str]]:
+    if not v:
+        return []
+    try:
+        x = json.loads(v)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    if not isinstance(x, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in x:
+        if not isinstance(item, dict):
+            continue
+        p = str(item.get("provider") or "").strip()
+        s = str(item.get("symbol") or "").strip()
+        if not p or not s:
+            continue
+        out.append({"provider": p, "symbol": s})
+    return out
+
+
 def upsert_global_benchmark_pool(
     db: Session,
     *,
     code: str,
+    series_kind: str,
     name: str,
     code_format: str | None,
     provider_hint: str | None,
+    provider_symbol: str | None,
+    source_locked: bool | None,
+    fallback_sources: list[dict[str, str]] | None,
     start_date: str | None,
     end_date: str | None,
 ) -> GlobalBenchmarkPool:
+    kind = normalize_series_kind(series_kind)
     existing = db.execute(
-        select(GlobalBenchmarkPool).where(GlobalBenchmarkPool.code == code)
+        select(GlobalBenchmarkPool).where(
+            GlobalBenchmarkPool.code == code,
+            GlobalBenchmarkPool.series_kind == kind,
+        )
     ).scalar_one_or_none()
     if existing is None:
         obj = GlobalBenchmarkPool(
             code=code,
+            series_kind=kind,
             name=name,
             code_format=code_format,
             provider_hint=provider_hint,
+            provider_symbol=provider_symbol,
+            source_locked=bool(source_locked) if source_locked is not None else False,
+            fallback_sources_json=_encode_fallback_sources(fallback_sources),
             start_date=start_date,
             end_date=end_date,
         )
@@ -62,41 +110,75 @@ def upsert_global_benchmark_pool(
     existing.name = name
     existing.code_format = code_format
     existing.provider_hint = provider_hint
+    existing.provider_symbol = provider_symbol
+    if source_locked is not None:
+        existing.source_locked = bool(source_locked)
+    existing.fallback_sources_json = _encode_fallback_sources(fallback_sources)
     existing.start_date = start_date
     existing.end_date = end_date
     db.flush()
     return existing
 
 
-def list_global_benchmark_pool(db: Session) -> list[GlobalBenchmarkPool]:
-    return list(
-        db.execute(
-            select(GlobalBenchmarkPool).order_by(GlobalBenchmarkPool.code.asc())
-        ).scalars()
+def list_global_benchmark_pool(
+    db: Session,
+    *,
+    code: str | None = None,
+    series_kind: str | None = None,
+) -> list[GlobalBenchmarkPool]:
+    stmt = select(GlobalBenchmarkPool)
+    if code is not None:
+        stmt = stmt.where(GlobalBenchmarkPool.code == str(code))
+    if series_kind is not None:
+        stmt = stmt.where(
+            GlobalBenchmarkPool.series_kind == normalize_series_kind(series_kind)
+        )
+    stmt = stmt.order_by(
+        GlobalBenchmarkPool.code.asc(), GlobalBenchmarkPool.series_kind.asc()
     )
+    return list(db.execute(stmt).scalars())
 
 
 def get_global_benchmark_pool_by_code(
-    db: Session, code: str
+    db: Session, code: str, *, series_kind: str = "price"
 ) -> GlobalBenchmarkPool | None:
+    kind = normalize_series_kind(series_kind)
     return db.execute(
-        select(GlobalBenchmarkPool).where(GlobalBenchmarkPool.code == code)
+        select(GlobalBenchmarkPool).where(
+            GlobalBenchmarkPool.code == code,
+            GlobalBenchmarkPool.series_kind == kind,
+        )
     ).scalar_one_or_none()
 
 
-def delete_global_benchmark_pool(db: Session, code: str) -> bool:
-    obj = get_global_benchmark_pool_by_code(db, code)
-    if obj is None:
+def get_global_benchmark_pool_series(
+    db: Session, code: str
+) -> dict[str, GlobalBenchmarkPool]:
+    rows = list_global_benchmark_pool(db, code=code)
+    return {str(x.series_kind): x for x in rows}
+
+
+def delete_global_benchmark_pool(
+    db: Session, code: str, *, series_kind: str | None = None
+) -> bool:
+    rows = list_global_benchmark_pool(db, code=code, series_kind=series_kind)
+    if not rows:
         return False
-    db.delete(obj)
+    for x in rows:
+        db.delete(x)
     db.flush()
     return True
 
 
-def purge_global_benchmark_data(db: Session, *, code: str) -> dict[str, int]:
-    r_prices = db.execute(
-        delete(GlobalBenchmarkPrice).where(GlobalBenchmarkPrice.code == code)
-    )
+def purge_global_benchmark_data(
+    db: Session, *, code: str, series_kind: str | None = None
+) -> dict[str, int]:
+    stmt = delete(GlobalBenchmarkPrice).where(GlobalBenchmarkPrice.code == code)
+    if series_kind is not None:
+        stmt = stmt.where(
+            GlobalBenchmarkPrice.series_kind == normalize_series_kind(series_kind)
+        )
+    r_prices = db.execute(stmt)
     return {"prices": int(getattr(r_prices, "rowcount", 0) or 0)}
 
 
@@ -104,11 +186,12 @@ def mark_global_benchmark_fetch_status(
     db: Session,
     *,
     code: str,
+    series_kind: str,
     status: str,
     message: str | None = None,
     when: dt.datetime | None = None,
 ) -> None:
-    obj = get_global_benchmark_pool_by_code(db, code)
+    obj = get_global_benchmark_pool_by_code(db, code, series_kind=series_kind)
     if obj is None:
         return
     msg = None if message is None else str(message)
@@ -128,6 +211,7 @@ def upsert_global_benchmark_prices(
     values = [
         {
             "code": r.code,
+            "series_kind": normalize_series_kind(r.series_kind),
             "trade_date": r.trade_date,
             "open": r.open,
             "high": r.high,
@@ -161,6 +245,7 @@ def upsert_global_benchmark_prices(
         stmt = stmt.on_conflict_do_update(
             index_elements=[
                 GlobalBenchmarkPrice.code,
+                GlobalBenchmarkPrice.series_kind,
                 GlobalBenchmarkPrice.trade_date,
                 GlobalBenchmarkPrice.adjust,
             ],
@@ -184,14 +269,17 @@ def list_global_benchmark_prices(
     db: Session,
     *,
     code: str,
+    series_kind: str = "price",
     adjust: str = "none",
     start_date: dt.date | None = None,
     end_date: dt.date | None = None,
     limit: int = 5000,
 ) -> list[GlobalBenchmarkPrice]:
     adj = normalize_adjust(adjust)
+    kind = normalize_series_kind(series_kind)
     stmt = select(GlobalBenchmarkPrice).where(
         GlobalBenchmarkPrice.code == code,
+        GlobalBenchmarkPrice.series_kind == kind,
         GlobalBenchmarkPrice.adjust == adj,
     )
     if start_date is not None:
@@ -203,15 +291,21 @@ def list_global_benchmark_prices(
 
 
 def get_global_benchmark_date_range(
-    db: Session, *, code: str, adjust: str = "none"
+    db: Session,
+    *,
+    code: str,
+    series_kind: str = "price",
+    adjust: str = "none",
 ) -> tuple[str | None, str | None]:
     adj = normalize_adjust(adjust)
+    kind = normalize_series_kind(series_kind)
     start_d, end_d = db.execute(
         select(
             sa_func.min(GlobalBenchmarkPrice.trade_date),
             sa_func.max(GlobalBenchmarkPrice.trade_date),
         ).where(
             GlobalBenchmarkPrice.code == code,
+            GlobalBenchmarkPrice.series_kind == kind,
             GlobalBenchmarkPrice.adjust == adj,
         )
     ).one()
@@ -224,26 +318,58 @@ def count_global_benchmark_prices(
     db: Session,
     *,
     code: str,
+    series_kind: str = "price",
     adjust: str = "none",
 ) -> int:
     adj = normalize_adjust(adjust)
-    n = db.execute(
-        select(sa_func.count(GlobalBenchmarkPrice.id)).where(
+    kind = normalize_series_kind(series_kind)
+    ids = db.execute(
+        select(GlobalBenchmarkPrice.id).where(
             GlobalBenchmarkPrice.code == code,
+            GlobalBenchmarkPrice.series_kind == kind,
             GlobalBenchmarkPrice.adjust == adj,
         )
-    ).scalar_one()
-    return int(n or 0)
+    ).scalars()
+    return int(len(list(ids)))
+
+
+def list_global_benchmark_trade_dates(
+    db: Session,
+    *,
+    code: str,
+    series_kind: str = "price",
+    adjust: str = "none",
+) -> list[dt.date]:
+    adj = normalize_adjust(adjust)
+    kind = normalize_series_kind(series_kind)
+    dates = db.execute(
+        select(GlobalBenchmarkPrice.trade_date).where(
+            GlobalBenchmarkPrice.code == code,
+            GlobalBenchmarkPrice.series_kind == kind,
+            GlobalBenchmarkPrice.adjust == adj,
+        )
+    ).scalars()
+    return sorted({d for d in dates if d is not None})
 
 
 def update_global_benchmark_pool_data_range(
-    db: Session, *, code: str, adjust: str = "none"
+    db: Session,
+    *,
+    code: str,
+    series_kind: str,
+    adjust: str = "none",
 ) -> tuple[str | None, str | None]:
-    obj = get_global_benchmark_pool_by_code(db, code)
+    obj = get_global_benchmark_pool_by_code(db, code, series_kind=series_kind)
     if obj is None:
         return (None, None)
-    start, end = get_global_benchmark_date_range(db, code=code, adjust=adjust)
+    start, end = get_global_benchmark_date_range(
+        db, code=code, series_kind=series_kind, adjust=adjust
+    )
     obj.last_data_start_date = start
     obj.last_data_end_date = end
     db.flush()
     return (start, end)
+
+
+def get_fallback_sources_for_pool_item(x: GlobalBenchmarkPool) -> list[dict[str, str]]:
+    return _decode_fallback_sources(getattr(x, "fallback_sources_json", None))
