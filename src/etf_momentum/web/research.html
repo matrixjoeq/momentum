@@ -723,6 +723,7 @@
             <option value="atr5_atr50_multiple">ATR(5)/ATR(50)</option>
             <option value="bias">价格BIAS（close/MA20-1）</option>
             <option value="bias_v">BIAS-V（(close-MA20)/ATR20）</option>
+            <option value="bb_width_atr20">布林带宽/ATR20（N=20,K=2）</option>
             <option value="price_dev">价格偏离度（log价格-长期均值）</option>
             <option value="volume">成交活跃度（量/额）</option>
             <!-- variants / transforms -->
@@ -17735,6 +17736,7 @@
         ]);
         const _distSyntheticTypes = new Set([
           "efficiency_ratio",
+          "bb_width_atr20",
           ..._distAtrDerivedTypes,
         ]);
         const _distTypeIsPct = (t) =>
@@ -17759,6 +17761,8 @@
                         ? "价格BIAS"
                         : t === "bias_v"
                           ? "BIAS-V"
+                          : t === "bb_width_atr20"
+                            ? "布林带宽/ATR20"
                           : t === "price_dev"
                             ? "价格偏离度"
                             : t === "log_volatility"
@@ -19366,7 +19370,8 @@
             type === "macd_v_dea" ||
             type === "macd_v_h" ||
             type === "macd_v_absh" ||
-            type === "bias_v"
+            type === "bias_v" ||
+            type === "bb_width_atr20"
           ) {
             const ema = (arr, span, minPeriods = span) => {
               const out = new Array(arr.length).fill(NaN);
@@ -19474,6 +19479,18 @@
                 return (c - m) / a;
               });
               return pack(biasV);
+            }
+            if (type === "bb_width_atr20") {
+              const std20 = rollingStd(pClose, 20, 5);
+              const bwAtr20 = pClose.map((_, i) => {
+                const sd = Number(std20[i]);
+                const a = Number(atr20[i]);
+                if (!Number.isFinite(sd) || !Number.isFinite(a) || a <= 0)
+                  return NaN;
+                // Bollinger(N=20, K=2): bandwidth = upper - lower = 4 * std20
+                return (4.0 * sd) / a;
+              });
+              return pack(bwAtr20);
             }
             const atr = wilderAtr(tr, 26);
             const ema12 = ema(pClose, 12, 12);
@@ -21715,7 +21732,7 @@
         const updateDisplay = () => {
           const code = codeSelect.value;
           const typeRaw = typeSelect.value;
-          const type = typeRaw === "macd_v_macd" ? "macd_v_absh" : typeRaw; // "return" | "volatility" | "bias" | "bias_v" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev" | "macd_v_dif" | "macd_v_dea" | "macd_v_absh" | "macd_abs"
+          const type = typeRaw === "macd_v_macd" ? "macd_v_absh" : typeRaw; // "return" | "volatility" | "bias" | "bias_v" | "bb_width_atr20" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev" | "macd_v_dif" | "macd_v_dea" | "macd_v_absh" | "macd_abs"
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
 
           if (!code || !distByCode[code]) {
