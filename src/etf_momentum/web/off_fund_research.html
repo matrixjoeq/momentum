@@ -255,7 +255,7 @@
       <div class="muted" style="margin-top: 6px">本次回归实际生效因子</div>
       <table id="offClsActiveFactors"></table>
       <div class="muted" style="margin-top: 10px">
-        基准对比图（默认：CSI300 对其余 13 组，口径均为 hfq close）
+        基准对比图（默认：CSI300 对其余 17 组，口径均为 hfq close）
       </div>
       <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
       <table id="offClsTable"></table>
@@ -728,6 +728,14 @@
         { key: "CSI500", label: "中证500", etf_code: "510500" },
         { key: "CSI1000", label: "中证1000", etf_code: "512100" },
         { key: "CSI2000", label: "中证2000", etf_code: "563300" },
+        { key: "CYB", label: "创业板指", etf_code: "159915" },
+        { key: "KCP50", label: "科创50", etf_code: "588000" },
+        {
+          key: "CSIFCF",
+          label: "中证全指自由现金流",
+          etf_code: "159232",
+        },
+        { key: "CSIHL", label: "中证红利", etf_code: "515180" },
         {
           key: "CSI_ALL_CONSUMER",
           label: "中证全指可选消费",
@@ -794,7 +802,7 @@
       let offPairRenderParamSnapshot = null;
       let offPairScheduledOpts = {};
       const OFF_FUND_PAIR_WARNING_ORDER = [
-        "prefs_trimmed_to_13",
+        "prefs_trimmed_to_17",
         "signal_degraded",
         "samples_truncated",
         "invalid_trade_date_filtered",
@@ -1513,11 +1521,13 @@
         return traces;
       }
       async function _sha256Hex(text) {
-        if (!(
-          window.crypto &&
-          window.crypto.subtle &&
-          window.crypto.subtle.digest
-        )) {
+        if (
+          !(
+            window.crypto &&
+            window.crypto.subtle &&
+            window.crypto.subtle.digest
+          )
+        ) {
           throw new Error("crypto_subtle_unavailable");
         }
         const data = new TextEncoder().encode(String(text || ""));
@@ -1562,11 +1572,13 @@
           ? metrics.rsi14
           : [];
         const maxLen = commonDates.length;
-        if (!(
-          ratio.length === maxLen &&
-          diff40.length === maxLen &&
-          rsi.length === maxLen
-        )) {
+        if (
+          !(
+            ratio.length === maxLen &&
+            diff40.length === maxLen &&
+            rsi.length === maxLen
+          )
+        ) {
           throw new Error("signature_series_length_mismatch");
         }
         const keySeries = `ratio:[${_seriesHashPart(ratio)}]|diff40:[${_seriesHashPart(diff40)}]|rsi:[${_seriesHashPart(rsi)}]`;

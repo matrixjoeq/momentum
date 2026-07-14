@@ -115,7 +115,8 @@ def test_off_fund_research_state_rejects_invalid_payload(
 def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     client = api_client
     too_many = {
-        f"pair_slot_{i:02d}": {"base": "CSI300", "peer": "CSI500"} for i in range(1, 15)
+        f"pair_slot_{i:02d}": {"base": "CSI300", "peer": "CSI500"}
+        for i in range(1, 19)
     }
     r = client.put(
         "/api/off-fund/research/state",
@@ -124,15 +125,17 @@ def test_off_fund_research_state_trim_and_order(api_client: TestClient) -> None:
     assert r.status_code == 200
     out = r.json()
     assert out["meta"]["contract_version"] == "pair_contract_v1"
-    assert out["meta"]["warnings"] == ["prefs_trimmed_to_13"]
+    assert out["meta"]["warnings"] == ["prefs_trimmed_to_17"]
     prefs = out["pair_chart_prefs_json"]
     assert isinstance(prefs, str)
     assert '"pair_slot_01"' in prefs
     assert '"pair_slot_03"' in prefs
     assert '"pair_slot_13"' in prefs
-    assert '"pair_slot_14"' not in prefs
+    assert '"pair_slot_17"' in prefs
+    assert '"pair_slot_18"' not in prefs
     assert prefs.index('"pair_slot_01"') < prefs.index('"pair_slot_03"')
     assert prefs.index('"pair_slot_03"') < prefs.index('"pair_slot_13"')
+    assert prefs.index('"pair_slot_13"') < prefs.index('"pair_slot_17"')
 
 
 def test_off_fund_state_put_legacy_body_keeps_pair_prefs(

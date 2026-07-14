@@ -8067,7 +8067,7 @@ def _default_off_fund_research_state() -> OffFundResearchStateOut:
 _PAIR_CONTRACT_VERSION = "pair_contract_v1"
 _PAIR_PREFS_MAX_BYTES = 16 * 1024
 _PAIR_WARNING_ORDER = (
-    "prefs_trimmed_to_13",
+    "prefs_trimmed_to_17",
     "signal_degraded",
     "samples_truncated",
     "invalid_trade_date_filtered",
@@ -8077,6 +8077,10 @@ _PAIR_KEY_ORDER = (
     "CSI500",
     "CSI1000",
     "CSI2000",
+    "CYB",
+    "KCP50",
+    "CSIFCF",
+    "CSIHL",
     "CSI_ALL_CONSUMER",
     "CSI_ALL_MEDICINE",
     "CSI_ALL_INFORMATION",
@@ -8093,16 +8097,20 @@ _PAIR_SLOT_DEFAULT = {
     "pair_slot_01": "CSI500",
     "pair_slot_02": "CSI1000",
     "pair_slot_03": "CSI2000",
-    "pair_slot_04": "CSI_ALL_CONSUMER",
-    "pair_slot_05": "CSI_ALL_MEDICINE",
-    "pair_slot_06": "CSI_ALL_INFORMATION",
-    "pair_slot_07": "CSI_ALL_FINANCE",
-    "pair_slot_08": "CSI_ALL_ENERGY",
-    "pair_slot_09": "CSI_ALL_MATERIAL",
-    "pair_slot_10": "CSI_300_GROWTH_INNOVATION",
-    "pair_slot_11": "CSI_300_VALUE_STABILITY",
-    "pair_slot_12": "CSI_1000_GROWTH_INNOVATION",
-    "pair_slot_13": "CSI_1000_VALUE_STABILITY",
+    "pair_slot_04": "CYB",
+    "pair_slot_05": "KCP50",
+    "pair_slot_06": "CSIFCF",
+    "pair_slot_07": "CSIHL",
+    "pair_slot_08": "CSI_ALL_CONSUMER",
+    "pair_slot_09": "CSI_ALL_MEDICINE",
+    "pair_slot_10": "CSI_ALL_INFORMATION",
+    "pair_slot_11": "CSI_ALL_FINANCE",
+    "pair_slot_12": "CSI_ALL_ENERGY",
+    "pair_slot_13": "CSI_ALL_MATERIAL",
+    "pair_slot_14": "CSI_300_GROWTH_INNOVATION",
+    "pair_slot_15": "CSI_300_VALUE_STABILITY",
+    "pair_slot_16": "CSI_1000_GROWTH_INNOVATION",
+    "pair_slot_17": "CSI_1000_VALUE_STABILITY",
 }
 _PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys())
 
@@ -8164,7 +8172,7 @@ def _normalize_pair_chart_prefs_json(
         )
     warnings: list[str] = []
     if len(payload) > len(_PAIR_SLOT_IDS):
-        warnings.append("prefs_trimmed_to_13")
+        warnings.append("prefs_trimmed_to_17")
     out: dict[str, dict[str, str]] = {}
     for slot_id in _PAIR_SLOT_IDS:
         obj = payload.get(slot_id)

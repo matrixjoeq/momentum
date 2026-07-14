@@ -37,6 +37,26 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("932000", "563300"),
     ),
     RegressionFactorSpec(
+        key="CYB",
+        label="创业板指",
+        aliases=("399006", "159915"),
+    ),
+    RegressionFactorSpec(
+        key="KCP50",
+        label="科创50",
+        aliases=("000688", "588000"),
+    ),
+    RegressionFactorSpec(
+        key="CSIFCF",
+        label="中证全指自由现金流",
+        aliases=("932365", "159232"),
+    ),
+    RegressionFactorSpec(
+        key="CSIHL",
+        label="中证红利",
+        aliases=("000922", "515180"),
+    ),
+    RegressionFactorSpec(
         key="CSI_ALL_CONSUMER",
         label="中证全指可选消费",
         aliases=("000989", "159936"),
