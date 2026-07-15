@@ -73,6 +73,8 @@ from .schemas import (
     VixSignalBacktestResponse,
     IndexDistributionRequest,
     IndexDistributionResponse,
+    BaselineGarchVolatilityRequest,
+    BaselineGarchVolatilityResponse,
     VolProxyTimingRequest,
     VolProxyTimingResponse,
     RangeStateMonitorRequest,
@@ -236,7 +238,11 @@ from ..analysis.sim_gbm import (
     montecarlo_rotation_vs_ew,
     simulate_gbm_prices,
 )
-from ..analysis.vol_proxy import VolProxySpec, compute_vol_proxy_levels
+from ..analysis.vol_proxy import (
+    VolProxySpec,
+    compute_gjr_garch_volatility,
+    compute_vol_proxy_levels,
+)
 from ..analysis.range_state import RangeStateConfig, compute_range_state_monitor
 from ..analysis.vol_timing import (
     backtest_tiered_exposure_by_level,
@@ -1822,6 +1828,64 @@ def baseline_analysis(
         return compute_baseline(db, inp)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/analysis/baseline/garch-volatility",
+    response_model=BaselineGarchVolatilityResponse,
+)
+def analysis_baseline_garch_volatility(
+    payload: BaselineGarchVolatilityRequest, db: Session = Depends(get_session)
+) -> BaselineGarchVolatilityResponse:
+    start_d = _parse_yyyymmdd(payload.start)
+    end_d = _parse_yyyymmdd(payload.end)
+    code = str(payload.etf_code).strip()
+    adjust = str(payload.adjust or "hfq").strip().lower()
+    base_meta = {
+        "etf_code": code,
+        "adjust": adjust,
+        "start": payload.start,
+        "end": payload.end,
+    }
+    if end_d < start_d:
+        return BaselineGarchVolatilityResponse(
+            ok=False, error="end_before_start", meta=base_meta
+        )
+
+    close_df = load_close_prices(
+        db, codes=[code], start=start_d, end=end_d, adjust=adjust
+    )
+    if close_df is None or close_df.empty or code not in close_df.columns:
+        return BaselineGarchVolatilityResponse(
+            ok=False, error="empty_etf_close", meta=base_meta
+        )
+
+    close_s = pd.to_numeric(close_df[code], errors="coerce").astype(float)
+    res = compute_gjr_garch_volatility(
+        close_s,
+        ann_factor=int(payload.ann_factor),
+        max_points=int(payload.max_points),
+        min_samples=int(payload.min_samples),
+        return_scale=float(payload.return_scale),
+        arch_lags=int(payload.arch_lags),
+    )
+
+    meta = dict(base_meta)
+    meta.update(dict(res.get("meta") or {}))
+    if not bool(res.get("ok")):
+        return BaselineGarchVolatilityResponse(
+            ok=False,
+            error=str(res.get("error") or "analysis_failed"),
+            meta=meta,
+        )
+    return BaselineGarchVolatilityResponse(
+        ok=True,
+        meta=meta,
+        params=res.get("params"),
+        diagnostics=res.get("diagnostics"),
+        interpretation=res.get("interpretation"),
+        series=res.get("series"),
+    )
 
 
 @router.post("/analysis/baseline/calendar-effect")
@@ -8067,7 +8131,7 @@ def _default_off_fund_research_state() -> OffFundResearchStateOut:
 _PAIR_CONTRACT_VERSION = "pair_contract_v1"
 _PAIR_PREFS_MAX_BYTES = 16 * 1024
 _PAIR_WARNING_ORDER = (
-    "prefs_trimmed_to_17",
+    "prefs_trimmed_to_21",
     "signal_degraded",
     "samples_truncated",
     "invalid_trade_date_filtered",
@@ -8077,40 +8141,48 @@ _PAIR_KEY_ORDER = (
     "CSI500",
     "CSI1000",
     "CSI2000",
+    "CNI2000",
     "CYB",
     "KCP50",
     "CSIFCF",
     "CSIHL",
-    "CSI_ALL_CONSUMER",
-    "CSI_ALL_MEDICINE",
-    "CSI_ALL_INFORMATION",
-    "CSI_ALL_FINANCE",
-    "CSI_ALL_ENERGY",
-    "CSI_ALL_MATERIAL",
     "CSI_300_GROWTH_INNOVATION",
     "CSI_300_VALUE_STABILITY",
     "CSI_1000_GROWTH_INNOVATION",
     "CSI_1000_VALUE_STABILITY",
+    "CSI_ALL_ENERGY",
+    "CSI_ALL_MATERIAL",
+    "CSI_ALL_FINANCE",
+    "CSI_ALL_ELECTRICITY",
+    "CSI_ALL_CONSUMER",
+    "CSI_ALL_CONSUMER_SELECTIVE",
+    "CSI_ALL_MEDICINE",
+    "CSI_ALL_INFORMATION",
+    "CSI_ALL_COMMUNICATION",
 )
 _PAIR_ALLOWED_KEYS = set(_PAIR_KEY_ORDER)
 _PAIR_SLOT_DEFAULT = {
     "pair_slot_01": "CSI500",
     "pair_slot_02": "CSI1000",
     "pair_slot_03": "CSI2000",
-    "pair_slot_04": "CYB",
-    "pair_slot_05": "KCP50",
-    "pair_slot_06": "CSIFCF",
-    "pair_slot_07": "CSIHL",
-    "pair_slot_08": "CSI_ALL_CONSUMER",
-    "pair_slot_09": "CSI_ALL_MEDICINE",
-    "pair_slot_10": "CSI_ALL_INFORMATION",
-    "pair_slot_11": "CSI_ALL_FINANCE",
-    "pair_slot_12": "CSI_ALL_ENERGY",
-    "pair_slot_13": "CSI_ALL_MATERIAL",
-    "pair_slot_14": "CSI_300_GROWTH_INNOVATION",
-    "pair_slot_15": "CSI_300_VALUE_STABILITY",
-    "pair_slot_16": "CSI_1000_GROWTH_INNOVATION",
-    "pair_slot_17": "CSI_1000_VALUE_STABILITY",
+    "pair_slot_04": "CNI2000",
+    "pair_slot_05": "CYB",
+    "pair_slot_06": "KCP50",
+    "pair_slot_07": "CSIFCF",
+    "pair_slot_08": "CSIHL",
+    "pair_slot_09": "CSI_300_GROWTH_INNOVATION",
+    "pair_slot_10": "CSI_300_VALUE_STABILITY",
+    "pair_slot_11": "CSI_1000_GROWTH_INNOVATION",
+    "pair_slot_12": "CSI_1000_VALUE_STABILITY",
+    "pair_slot_13": "CSI_ALL_ENERGY",
+    "pair_slot_14": "CSI_ALL_MATERIAL",
+    "pair_slot_15": "CSI_ALL_FINANCE",
+    "pair_slot_16": "CSI_ALL_ELECTRICITY",
+    "pair_slot_17": "CSI_ALL_CONSUMER",
+    "pair_slot_18": "CSI_ALL_CONSUMER_SELECTIVE",
+    "pair_slot_19": "CSI_ALL_MEDICINE",
+    "pair_slot_20": "CSI_ALL_INFORMATION",
+    "pair_slot_21": "CSI_ALL_COMMUNICATION",
 }
 _PAIR_SLOT_IDS = tuple(_PAIR_SLOT_DEFAULT.keys())
 
@@ -8172,7 +8244,7 @@ def _normalize_pair_chart_prefs_json(
         )
     warnings: list[str] = []
     if len(payload) > len(_PAIR_SLOT_IDS):
-        warnings.append("prefs_trimmed_to_17")
+        warnings.append("prefs_trimmed_to_21")
     out: dict[str, dict[str, str]] = {}
     for slot_id in _PAIR_SLOT_IDS:
         obj = payload.get(slot_id)

@@ -255,7 +255,7 @@
       <div class="muted" style="margin-top: 6px">本次回归实际生效因子</div>
       <table id="offClsActiveFactors"></table>
       <div class="muted" style="margin-top: 10px">
-        基准对比图（默认：CSI300 对其余 17 组，口径均为 hfq close）
+        基准对比图（默认：CSI300 对其余 21 组，口径均为 hfq close）
       </div>
       <div id="offClsPairCards" class="two" style="margin-top: 8px"></div>
       <table id="offClsTable"></table>
@@ -510,6 +510,11 @@
           } catch (_) {}
           const btn = document.getElementById("themeToggle");
           if (btn) btn.textContent = theme === "dark" ? "切换白天" : "切换黑夜";
+          try {
+            window.dispatchEvent(
+              new CustomEvent("momentum-theme-change", { detail: { theme } }),
+            );
+          } catch (_) {}
         };
         document.addEventListener("DOMContentLoaded", () => {
           const btn = document.createElement("button");
@@ -728,6 +733,7 @@
         { key: "CSI500", label: "中证500", etf_code: "510500" },
         { key: "CSI1000", label: "中证1000", etf_code: "512100" },
         { key: "CSI2000", label: "中证2000", etf_code: "563300" },
+        { key: "CNI2000", label: "国证2000", etf_code: "159907" },
         { key: "CYB", label: "创业板指", etf_code: "159915" },
         { key: "KCP50", label: "科创50", etf_code: "588000" },
         {
@@ -736,20 +742,6 @@
           etf_code: "159232",
         },
         { key: "CSIHL", label: "中证红利", etf_code: "515180" },
-        {
-          key: "CSI_ALL_CONSUMER",
-          label: "中证全指可选消费",
-          etf_code: "159936",
-        },
-        { key: "CSI_ALL_MEDICINE", label: "中证全指医药", etf_code: "159938" },
-        {
-          key: "CSI_ALL_INFORMATION",
-          label: "中证全指信息",
-          etf_code: "159939",
-        },
-        { key: "CSI_ALL_FINANCE", label: "中证全指金融", etf_code: "159940" },
-        { key: "CSI_ALL_ENERGY", label: "中证全指能源", etf_code: "159945" },
-        { key: "CSI_ALL_MATERIAL", label: "中证全指材料", etf_code: "159944" },
         {
           key: "CSI_300_GROWTH_INNOVATION",
           label: "300成长创新",
@@ -769,6 +761,31 @@
           key: "CSI_1000_VALUE_STABILITY",
           label: "1000价值稳健",
           etf_code: "562530",
+        },
+        { key: "CSI_ALL_ENERGY", label: "中证全指能源", etf_code: "159945" },
+        { key: "CSI_ALL_MATERIAL", label: "中证全指材料", etf_code: "159944" },
+        { key: "CSI_ALL_FINANCE", label: "中证全指金融", etf_code: "159940" },
+        {
+          key: "CSI_ALL_ELECTRICITY",
+          label: "中证全指电力公用事业",
+          etf_code: "159611",
+        },
+        { key: "CSI_ALL_CONSUMER", label: "中证主要消费", etf_code: "159928" },
+        {
+          key: "CSI_ALL_CONSUMER_SELECTIVE",
+          label: "中证全指可选消费",
+          etf_code: "159936",
+        },
+        { key: "CSI_ALL_MEDICINE", label: "中证全指医药", etf_code: "159938" },
+        {
+          key: "CSI_ALL_INFORMATION",
+          label: "中证全指信息",
+          etf_code: "159939",
+        },
+        {
+          key: "CSI_ALL_COMMUNICATION",
+          label: "中证全指通信",
+          etf_code: "515880",
         },
       ];
       const OFF_FUND_PAIR_UNIVERSE_BY_KEY = Object.fromEntries(
@@ -802,7 +819,7 @@
       let offPairRenderParamSnapshot = null;
       let offPairScheduledOpts = {};
       const OFF_FUND_PAIR_WARNING_ORDER = [
-        "prefs_trimmed_to_17",
+        "prefs_trimmed_to_21",
         "signal_degraded",
         "samples_truncated",
         "invalid_trade_date_filtered",
@@ -819,6 +836,25 @@
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
       const OFF_FUND_PAIR_EMPTY_KEY_SERIES_HASH =
         "26d34bbfdbc0250ea2fc501ea5c6197e0e3443d7d168e99924aa122f6539a6d1";
+
+      function _offFundPairPlotThemeTokens() {
+        const root = document.documentElement;
+        const css = window.getComputedStyle
+          ? window.getComputedStyle(root)
+          : null;
+        const readVar = (name, fallback) => {
+          const v = css ? String(css.getPropertyValue(name) || "").trim() : "";
+          return v || fallback;
+        };
+        const isLight =
+          String(root.getAttribute("data-theme") || "dark") === "light";
+        return {
+          isLight,
+          plotBg: readVar("--plot-bg", isLight ? "#ffffff" : "#0f172a"),
+          plotFg: readVar("--plot-fg", isLight ? "#111827" : "#e5e7eb"),
+          plotGrid: readVar("--plot-grid", isLight ? "#d1d5db" : "#334155"),
+        };
+      }
 
       function _cloneOffFundPairPrefs() {
         return JSON.parse(JSON.stringify(OFF_FUND_PAIR_DEFAULT_PREFS));
@@ -948,7 +984,7 @@
             const label = `${x.key} - ${x.label}`;
             return `<option value="${esc(x.key)}">${esc(label)}</option>`;
           }).join("");
-          return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;"><strong>${esc(cardId)}</strong><span id="${esc(cardId)}_status" class="muted">等待计算</span></div><div class="row" style="margin-top:6px;"><div><label>基准</label><select id="${esc(cardId)}_base">${options}</select></div><div><label>对比</label><select id="${esc(cardId)}_peer">${options}</select></div></div><div id="${esc(cardId)}_plot" style="width:100%;height:520px;margin-top:6px;"></div></div>`;
+          return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center;"><strong>${esc(cardId)}</strong><span id="${esc(cardId)}_status" class="muted">等待计算</span></div><div class="row" style="margin-top:6px;"><div><label>基准</label><select id="${esc(cardId)}_base">${options}</select></div><div><label>对比</label><select id="${esc(cardId)}_peer">${options}</select></div></div><div id="${esc(cardId)}_plot" style="width:100%;height:780px;margin-top:6px;"></div></div>`;
         }).join("");
         for (const cardId of OFF_FUND_PAIR_CARD_IDS) {
           const baseSel = $(`${cardId}_base`);
@@ -1521,13 +1557,11 @@
         return traces;
       }
       async function _sha256Hex(text) {
-        if (
-          !(
-            window.crypto &&
-            window.crypto.subtle &&
-            window.crypto.subtle.digest
-          )
-        ) {
+        if (!(
+          window.crypto &&
+          window.crypto.subtle &&
+          window.crypto.subtle.digest
+        )) {
           throw new Error("crypto_subtle_unavailable");
         }
         const data = new TextEncoder().encode(String(text || ""));
@@ -1572,13 +1606,11 @@
           ? metrics.rsi14
           : [];
         const maxLen = commonDates.length;
-        if (
-          !(
-            ratio.length === maxLen &&
-            diff40.length === maxLen &&
-            rsi.length === maxLen
-          )
-        ) {
+        if (!(
+          ratio.length === maxLen &&
+          diff40.length === maxLen &&
+          rsi.length === maxLen
+        )) {
           throw new Error("signature_series_length_mismatch");
         }
         const keySeries = `ratio:[${_seriesHashPart(ratio)}]|diff40:[${_seriesHashPart(diff40)}]|rsi:[${_seriesHashPart(rsi)}]`;
@@ -1695,39 +1727,83 @@
             baseLabel: `${baseInfo.key}-${baseInfo.label}`,
             peerLabel: `${peerInfo.key}-${peerInfo.label}`,
           });
+          const plotTheme = _offFundPairPlotThemeTokens();
           const layout = {
-            margin: { l: 48, r: 18, t: 20, b: 36 },
-            legend: { orientation: "h", y: 1.05, x: 0 },
+            margin: { l: 48, r: 18, t: 72, b: 36 },
+            paper_bgcolor: plotTheme.plotBg,
+            plot_bgcolor: plotTheme.plotBg,
+            font: { color: plotTheme.plotFg },
+            legend: {
+              orientation: "h",
+              x: 0,
+              xanchor: "left",
+              y: 1.12,
+              yanchor: "bottom",
+            },
             xaxis: {
               domain: [0, 1],
               anchor: "y",
               showticklabels: false,
               type: "date",
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
             },
-            yaxis: { domain: [0.78, 1], type: "log" },
+            yaxis: {
+              domain: [0.78, 1],
+              type: "log",
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
+            },
             xaxis2: {
               domain: [0, 1],
               anchor: "y2",
               matches: "x",
               showticklabels: false,
               type: "date",
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
             },
-            yaxis2: { domain: [0.53, 0.75] },
+            yaxis2: {
+              domain: [0.53, 0.75],
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
+            },
             xaxis3: {
               domain: [0, 1],
               anchor: "y3",
               matches: "x",
               showticklabels: false,
               type: "date",
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
             },
-            yaxis3: { domain: [0.28, 0.5] },
+            yaxis3: {
+              domain: [0.28, 0.5],
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
+            },
             xaxis4: {
               domain: [0, 1],
               anchor: "y4",
               matches: "x",
               type: "date",
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
             },
-            yaxis4: { domain: [0.03, 0.25], range: [0, 100] },
+            yaxis4: {
+              domain: [0.03, 0.25],
+              range: [0, 100],
+              gridcolor: plotTheme.plotGrid,
+              linecolor: plotTheme.plotGrid,
+              zerolinecolor: plotTheme.plotGrid,
+            },
             shapes: [
               {
                 type: "line",
@@ -1737,7 +1813,7 @@
                 x1: 1,
                 y0: 70,
                 y1: 70,
-                line: { width: 1, dash: "dot", color: "#78909c" },
+                line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
               },
               {
                 type: "line",
@@ -1747,7 +1823,7 @@
                 x1: 1,
                 y0: 30,
                 y1: 30,
-                line: { width: 1, dash: "dot", color: "#78909c" },
+                line: { width: 1, dash: "dot", color: plotTheme.plotGrid },
               },
             ],
           };
@@ -4042,6 +4118,9 @@
       $("runCls").addEventListener("click", () =>
         runClassification().catch((e) => setMsg(String((e && e.message) || e))),
       );
+      window.addEventListener("momentum-theme-change", () => {
+        scheduleRenderAllOffFundPairCards(30);
+      });
       offPairPrefsByCard = loadOffFundPairPrefsLocal();
       renderOffFundPairCardShell();
       wireOffPeriodControls("weekly");

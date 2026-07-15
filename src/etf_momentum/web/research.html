@@ -635,8 +635,10 @@
 
     <!-- RSI is overlaid on NAV and ratio charts (secondary axis) -->
 
-    <div class="panel">
-      <h3>傅里叶变换分析（候选标的）</h3>
+    <details class="panel">
+      <summary>
+        <h3 style="display: inline; margin: 0">傅里叶变换分析（候选标的）</h3>
+      </summary>
       <div class="muted">
         口径：对数收益（Δlog(P)）；输出主导周期、频段能量占比（低/中/高频）与谱熵。默认同时给出全区间与近1年/近半年窗口。
       </div>
@@ -659,10 +661,14 @@
       </div>
       <div id="fftSummary" class="muted" style="margin-top: 8px"></div>
       <table id="fftTable"></table>
-    </div>
+    </details>
 
-    <div class="panel">
-      <h3>滚动FFT指标时间序列（等权 EW）</h3>
+    <details class="panel">
+      <summary>
+        <h3 style="display: inline; margin: 0">
+          滚动FFT指标时间序列（等权 EW）
+        </h3>
+      </summary>
       <div class="muted">
         展示 EW
         组合在不同滚动窗口下的谱熵与高频能量占比随时间变化（按步长采样）。如果某些阶段谱熵显著下降/高频占比下降，才可能用于降低换手或提高入场门槛。
@@ -675,7 +681,7 @@
         id="fftRollHigh"
         style="width: 100%; height: 420px; margin-top: 8px"
       ></div>
-    </div>
+    </details>
 
     <div class="panel">
       <h3>各标的收益率与波动率分布统计</h3>
@@ -987,6 +993,273 @@
         ></div>
         <table id="distRangeStateStats" style="margin-top: 8px"></table>
       </details>
+      <details class="panel" style="margin-top: 10px">
+        <summary>
+          <h4 style="display: inline; margin: 0">各周期日历效应研究</h4>
+        </summary>
+        <div class="muted" style="margin-top: 10px">
+          周内日历效应（按交易日星期，日度收盘价收益率）
+        </div>
+        <div class="muted" style="margin-top: 6px">
+          仅使用当前「选择标的」在所选区间内的日线：对每个交易日取当日相对前一交易日的<strong>收盘价简单收益</strong>，再按星期筛选（与上方「价格复权口径」一致，1=周一
+          … 5=周五）。用于观察是否存在周内效应及随时间漂移。
+        </div>
+        <div class="row no-print" style="margin-top: 8px; align-items: end">
+          <div>
+            <label>周内第 n 天（1=周一 … 5=周五）</label>
+            <select id="distWkdaySelect" style="min-width: 200px">
+              <option value="1" selected>1 · 周一</option>
+              <option value="2">2 · 周二</option>
+              <option value="3">3 · 周三</option>
+              <option value="4">4 · 周四</option>
+              <option value="5">5 · 周五</option>
+            </select>
+          </div>
+        </div>
+        <div id="distWkdayHint" class="muted" style="margin-top: 6px"></div>
+        <div
+          id="distWkdayCurve"
+          style="width: 100%; height: 320px; margin-top: 8px"
+        ></div>
+        <div
+          id="distWkdayHist"
+          style="width: 100%; height: 300px; margin-top: 12px"
+        ></div>
+        <table id="distWkdayStats" style="margin-top: 8px"></table>
+        <div class="muted" style="margin-top: 10px">
+          月内日历效应（按公历日，日度收盘价收益率）
+        </div>
+        <div class="muted" style="margin-top: 6px">
+          与下方「月内日历效应（单标的）」持有 n
+          交易日的月内扫描不同：此处仅筛选<strong>交易日期</strong>的公历「几号」为
+          n（1～31），对该日取相对前一交易日的<strong>收盘价简单收益</strong>。若某月没有
+          n 号（如 2 月 30
+          日）或该日非交易日，则该月不产生样本。复权口径与「价格复权口径」一致。
+        </div>
+        <div class="row no-print" style="margin-top: 8px; align-items: end">
+          <div>
+            <label>月内第 n 天（1=1号 … 31=31号）</label>
+            <select id="distMonthDomSelect" style="min-width: 220px">
+              <option value="1" selected>1 号</option>
+              <option value="2">2 号</option>
+              <option value="3">3 号</option>
+              <option value="4">4 号</option>
+              <option value="5">5 号</option>
+              <option value="6">6 号</option>
+              <option value="7">7 号</option>
+              <option value="8">8 号</option>
+              <option value="9">9 号</option>
+              <option value="10">10 号</option>
+              <option value="11">11 号</option>
+              <option value="12">12 号</option>
+              <option value="13">13 号</option>
+              <option value="14">14 号</option>
+              <option value="15">15 号</option>
+              <option value="16">16 号</option>
+              <option value="17">17 号</option>
+              <option value="18">18 号</option>
+              <option value="19">19 号</option>
+              <option value="20">20 号</option>
+              <option value="21">21 号</option>
+              <option value="22">22 号</option>
+              <option value="23">23 号</option>
+              <option value="24">24 号</option>
+              <option value="25">25 号</option>
+              <option value="26">26 号</option>
+              <option value="27">27 号</option>
+              <option value="28">28 号</option>
+              <option value="29">29 号</option>
+              <option value="30">30 号</option>
+              <option value="31">31 号</option>
+            </select>
+          </div>
+        </div>
+        <div id="distMonthDomHint" class="muted" style="margin-top: 6px"></div>
+        <div
+          id="distMonthDomCurve"
+          style="width: 100%; height: 320px; margin-top: 8px"
+        ></div>
+        <div
+          id="distMonthDomHist"
+          style="width: 100%; height: 300px; margin-top: 12px"
+        ></div>
+        <table id="distMonthDomStats" style="margin-top: 8px"></table>
+        <div class="muted" style="margin-top: 10px">
+          年内周序日历效应（公历年第 n 周，周度收盘价收益率）
+        </div>
+        <div class="muted" style="margin-top: 6px">
+          以<strong>公历每年 1 月 1 日起算</strong>划分周块（第 1 周≈第 1～7
+          个公历日，依此类推）。对每个<strong>自然年</strong>内落在所选周块的全部交易日：取该周内<strong>首交易日收盘</strong>与<strong>末交易日收盘</strong>计算<strong>周度简单收益</strong>（每年该周至多
+          1 个样本）。闰年「第 53 周」已并入<strong>第 52 周</strong
+          >。复权口径与「价格复权口径」一致。
+        </div>
+        <div class="row no-print" style="margin-top: 8px; align-items: end">
+          <div>
+            <label>年内第 n 周（1～52）</label>
+            <select id="distYearWeekSelect" style="min-width: 200px">
+              <option value="1" selected>第 1 周</option>
+              <option value="2">第 2 周</option>
+              <option value="3">第 3 周</option>
+              <option value="4">第 4 周</option>
+              <option value="5">第 5 周</option>
+              <option value="6">第 6 周</option>
+              <option value="7">第 7 周</option>
+              <option value="8">第 8 周</option>
+              <option value="9">第 9 周</option>
+              <option value="10">第 10 周</option>
+              <option value="11">第 11 周</option>
+              <option value="12">第 12 周</option>
+              <option value="13">第 13 周</option>
+              <option value="14">第 14 周</option>
+              <option value="15">第 15 周</option>
+              <option value="16">第 16 周</option>
+              <option value="17">第 17 周</option>
+              <option value="18">第 18 周</option>
+              <option value="19">第 19 周</option>
+              <option value="20">第 20 周</option>
+              <option value="21">第 21 周</option>
+              <option value="22">第 22 周</option>
+              <option value="23">第 23 周</option>
+              <option value="24">第 24 周</option>
+              <option value="25">第 25 周</option>
+              <option value="26">第 26 周</option>
+              <option value="27">第 27 周</option>
+              <option value="28">第 28 周</option>
+              <option value="29">第 29 周</option>
+              <option value="30">第 30 周</option>
+              <option value="31">第 31 周</option>
+              <option value="32">第 32 周</option>
+              <option value="33">第 33 周</option>
+              <option value="34">第 34 周</option>
+              <option value="35">第 35 周</option>
+              <option value="36">第 36 周</option>
+              <option value="37">第 37 周</option>
+              <option value="38">第 38 周</option>
+              <option value="39">第 39 周</option>
+              <option value="40">第 40 周</option>
+              <option value="41">第 41 周</option>
+              <option value="42">第 42 周</option>
+              <option value="43">第 43 周</option>
+              <option value="44">第 44 周</option>
+              <option value="45">第 45 周</option>
+              <option value="46">第 46 周</option>
+              <option value="47">第 47 周</option>
+              <option value="48">第 48 周</option>
+              <option value="49">第 49 周</option>
+              <option value="50">第 50 周</option>
+              <option value="51">第 51 周</option>
+              <option value="52">第 52 周</option>
+            </select>
+          </div>
+        </div>
+        <div id="distYearWeekHint" class="muted" style="margin-top: 6px"></div>
+        <div
+          id="distYearWeekCurve"
+          style="width: 100%; height: 320px; margin-top: 8px"
+        ></div>
+        <div
+          id="distYearWeekHist"
+          style="width: 100%; height: 300px; margin-top: 12px"
+        ></div>
+        <table id="distYearWeekStats" style="margin-top: 8px"></table>
+        <div class="muted" style="margin-top: 10px">
+          年内月份日历效应（公历第 n 月，月度收盘价收益率）
+        </div>
+        <div class="muted" style="margin-top: 6px">
+          对每个<strong>自然年</strong>的公历 n 月（1=一月 …
+          12=十二月）：取该月内<strong>首交易日收盘</strong>与<strong>末交易日收盘</strong>计算<strong>月度简单收益</strong>（每年该月至多
+          1
+          个样本）。与「月内几号」的日度收益不同；复权口径与「价格复权口径」一致。
+        </div>
+        <div class="row no-print" style="margin-top: 8px; align-items: end">
+          <div>
+            <label>年内第 n 月（1～12）</label>
+            <select id="distYearMonthSelect" style="min-width: 200px">
+              <option value="1" selected>1 月</option>
+              <option value="2">2 月</option>
+              <option value="3">3 月</option>
+              <option value="4">4 月</option>
+              <option value="5">5 月</option>
+              <option value="6">6 月</option>
+              <option value="7">7 月</option>
+              <option value="8">8 月</option>
+              <option value="9">9 月</option>
+              <option value="10">10 月</option>
+              <option value="11">11 月</option>
+              <option value="12">12 月</option>
+            </select>
+          </div>
+        </div>
+        <div id="distYearMonthHint" class="muted" style="margin-top: 6px"></div>
+        <div
+          id="distYearMonthCurve"
+          style="width: 100%; height: 320px; margin-top: 8px"
+        ></div>
+        <div
+          id="distYearMonthHist"
+          style="width: 100%; height: 300px; margin-top: 12px"
+        ></div>
+        <table id="distYearMonthStats" style="margin-top: 8px"></table>
+        <div class="muted" style="margin-top: 10px">月内日历效应（单标的）</div>
+        <div class="row no-print" style="margin-top: 6px; align-items: end">
+          <div>
+            <label>月内日期 d（1~31）</label>
+            <input id="distCalDay" value="1" style="min-width: 120px" />
+          </div>
+          <div>
+            <label>扫描模式</label>
+            <select id="distCalMode" style="min-width: 150px">
+              <option value="single">单日</option>
+              <option value="all" selected>全扫描 1~31</option>
+            </select>
+          </div>
+          <div>
+            <label>持有 n（交易日）</label>
+            <input id="distCalHoldN" value="5" style="min-width: 120px" />
+          </div>
+          <div>
+            <label>买入价</label>
+            <select id="distCalEntryPx" style="min-width: 120px">
+              <option value="open">open</option>
+              <option value="close" selected>close</option>
+            </select>
+          </div>
+          <div>
+            <label>卖出价</label>
+            <select id="distCalExitPx" style="min-width: 120px">
+              <option value="open">open</option>
+              <option value="close" selected>close</option>
+            </select>
+          </div>
+          <div>
+            <label>非交易日处理</label>
+            <select id="distCalShift" style="min-width: 140px">
+              <option value="next" selected>next</option>
+              <option value="prev">prev</option>
+              <option value="skip">skip</option>
+            </select>
+          </div>
+          <div>
+            <label>热力图指标</label>
+            <select id="distCalMetric" style="min-width: 160px">
+              <option value="mean" selected>均值</option>
+              <option value="median">中位数</option>
+              <option value="win_rate">胜率</option>
+              <option value="sharpe">夏普（非年化）</option>
+            </select>
+          </div>
+        </div>
+        <div id="distCalHint" class="muted" style="margin-top: 6px"></div>
+        <div
+          id="distCalHeatmap"
+          style="width: 100%; height: 280px; margin-top: 8px"
+        ></div>
+        <div
+          id="distCalHist"
+          style="width: 100%; height: 280px; margin-top: 8px"
+        ></div>
+        <table id="distCalTable" style="margin-top: 8px"></table>
+      </details>
       <div
         id="distHistogram"
         style="width: 100%; height: 420px; margin-top: 12px"
@@ -1026,268 +1299,6 @@
       <table id="distMomentumTsTable" style="margin-top: 8px"></table>
       <table id="distMomentumCsTable" style="margin-top: 8px"></table>
       <div class="muted" style="margin-top: 10px">
-        周内日历效应（按交易日星期，日度收盘价收益率）
-      </div>
-      <div class="muted" style="margin-top: 6px">
-        仅使用当前「选择标的」在所选区间内的日线：对每个交易日取当日相对前一交易日的<strong>收盘价简单收益</strong>，再按星期筛选（与上方「价格复权口径」一致，1=周一
-        … 5=周五）。用于观察是否存在周内效应及随时间漂移。
-      </div>
-      <div class="row no-print" style="margin-top: 8px; align-items: end">
-        <div>
-          <label>周内第 n 天（1=周一 … 5=周五）</label>
-          <select id="distWkdaySelect" style="min-width: 200px">
-            <option value="1" selected>1 · 周一</option>
-            <option value="2">2 · 周二</option>
-            <option value="3">3 · 周三</option>
-            <option value="4">4 · 周四</option>
-            <option value="5">5 · 周五</option>
-          </select>
-        </div>
-      </div>
-      <div id="distWkdayHint" class="muted" style="margin-top: 6px"></div>
-      <div
-        id="distWkdayCurve"
-        style="width: 100%; height: 320px; margin-top: 8px"
-      ></div>
-      <div
-        id="distWkdayHist"
-        style="width: 100%; height: 300px; margin-top: 12px"
-      ></div>
-      <table id="distWkdayStats" style="margin-top: 8px"></table>
-      <div class="muted" style="margin-top: 10px">
-        月内日历效应（按公历日，日度收盘价收益率）
-      </div>
-      <div class="muted" style="margin-top: 6px">
-        与下方「月内日历效应（单标的）」持有 n
-        交易日的月内扫描不同：此处仅筛选<strong>交易日期</strong>的公历「几号」为
-        n（1～31），对该日取相对前一交易日的<strong>收盘价简单收益</strong>。若某月没有
-        n 号（如 2 月 30
-        日）或该日非交易日，则该月不产生样本。复权口径与「价格复权口径」一致。
-      </div>
-      <div class="row no-print" style="margin-top: 8px; align-items: end">
-        <div>
-          <label>月内第 n 天（1=1号 … 31=31号）</label>
-          <select id="distMonthDomSelect" style="min-width: 220px">
-            <option value="1" selected>1 号</option>
-            <option value="2">2 号</option>
-            <option value="3">3 号</option>
-            <option value="4">4 号</option>
-            <option value="5">5 号</option>
-            <option value="6">6 号</option>
-            <option value="7">7 号</option>
-            <option value="8">8 号</option>
-            <option value="9">9 号</option>
-            <option value="10">10 号</option>
-            <option value="11">11 号</option>
-            <option value="12">12 号</option>
-            <option value="13">13 号</option>
-            <option value="14">14 号</option>
-            <option value="15">15 号</option>
-            <option value="16">16 号</option>
-            <option value="17">17 号</option>
-            <option value="18">18 号</option>
-            <option value="19">19 号</option>
-            <option value="20">20 号</option>
-            <option value="21">21 号</option>
-            <option value="22">22 号</option>
-            <option value="23">23 号</option>
-            <option value="24">24 号</option>
-            <option value="25">25 号</option>
-            <option value="26">26 号</option>
-            <option value="27">27 号</option>
-            <option value="28">28 号</option>
-            <option value="29">29 号</option>
-            <option value="30">30 号</option>
-            <option value="31">31 号</option>
-          </select>
-        </div>
-      </div>
-      <div id="distMonthDomHint" class="muted" style="margin-top: 6px"></div>
-      <div
-        id="distMonthDomCurve"
-        style="width: 100%; height: 320px; margin-top: 8px"
-      ></div>
-      <div
-        id="distMonthDomHist"
-        style="width: 100%; height: 300px; margin-top: 12px"
-      ></div>
-      <table id="distMonthDomStats" style="margin-top: 8px"></table>
-      <div class="muted" style="margin-top: 10px">
-        年内周序日历效应（公历年第 n 周，周度收盘价收益率）
-      </div>
-      <div class="muted" style="margin-top: 6px">
-        以<strong>公历每年 1 月 1 日起算</strong>划分周块（第 1 周≈第 1～7
-        个公历日，依此类推）。对每个<strong>自然年</strong>内落在所选周块的全部交易日：取该周内<strong>首交易日收盘</strong>与<strong>末交易日收盘</strong>计算<strong>周度简单收益</strong>（每年该周至多
-        1 个样本）。闰年「第 53 周」已并入<strong>第 52 周</strong
-        >。复权口径与「价格复权口径」一致。
-      </div>
-      <div class="row no-print" style="margin-top: 8px; align-items: end">
-        <div>
-          <label>年内第 n 周（1～52）</label>
-          <select id="distYearWeekSelect" style="min-width: 200px">
-            <option value="1" selected>第 1 周</option>
-            <option value="2">第 2 周</option>
-            <option value="3">第 3 周</option>
-            <option value="4">第 4 周</option>
-            <option value="5">第 5 周</option>
-            <option value="6">第 6 周</option>
-            <option value="7">第 7 周</option>
-            <option value="8">第 8 周</option>
-            <option value="9">第 9 周</option>
-            <option value="10">第 10 周</option>
-            <option value="11">第 11 周</option>
-            <option value="12">第 12 周</option>
-            <option value="13">第 13 周</option>
-            <option value="14">第 14 周</option>
-            <option value="15">第 15 周</option>
-            <option value="16">第 16 周</option>
-            <option value="17">第 17 周</option>
-            <option value="18">第 18 周</option>
-            <option value="19">第 19 周</option>
-            <option value="20">第 20 周</option>
-            <option value="21">第 21 周</option>
-            <option value="22">第 22 周</option>
-            <option value="23">第 23 周</option>
-            <option value="24">第 24 周</option>
-            <option value="25">第 25 周</option>
-            <option value="26">第 26 周</option>
-            <option value="27">第 27 周</option>
-            <option value="28">第 28 周</option>
-            <option value="29">第 29 周</option>
-            <option value="30">第 30 周</option>
-            <option value="31">第 31 周</option>
-            <option value="32">第 32 周</option>
-            <option value="33">第 33 周</option>
-            <option value="34">第 34 周</option>
-            <option value="35">第 35 周</option>
-            <option value="36">第 36 周</option>
-            <option value="37">第 37 周</option>
-            <option value="38">第 38 周</option>
-            <option value="39">第 39 周</option>
-            <option value="40">第 40 周</option>
-            <option value="41">第 41 周</option>
-            <option value="42">第 42 周</option>
-            <option value="43">第 43 周</option>
-            <option value="44">第 44 周</option>
-            <option value="45">第 45 周</option>
-            <option value="46">第 46 周</option>
-            <option value="47">第 47 周</option>
-            <option value="48">第 48 周</option>
-            <option value="49">第 49 周</option>
-            <option value="50">第 50 周</option>
-            <option value="51">第 51 周</option>
-            <option value="52">第 52 周</option>
-          </select>
-        </div>
-      </div>
-      <div id="distYearWeekHint" class="muted" style="margin-top: 6px"></div>
-      <div
-        id="distYearWeekCurve"
-        style="width: 100%; height: 320px; margin-top: 8px"
-      ></div>
-      <div
-        id="distYearWeekHist"
-        style="width: 100%; height: 300px; margin-top: 12px"
-      ></div>
-      <table id="distYearWeekStats" style="margin-top: 8px"></table>
-      <div class="muted" style="margin-top: 10px">
-        年内月份日历效应（公历第 n 月，月度收盘价收益率）
-      </div>
-      <div class="muted" style="margin-top: 6px">
-        对每个<strong>自然年</strong>的公历 n 月（1=一月 …
-        12=十二月）：取该月内<strong>首交易日收盘</strong>与<strong>末交易日收盘</strong>计算<strong>月度简单收益</strong>（每年该月至多
-        1
-        个样本）。与「月内几号」的日度收益不同；复权口径与「价格复权口径」一致。
-      </div>
-      <div class="row no-print" style="margin-top: 8px; align-items: end">
-        <div>
-          <label>年内第 n 月（1～12）</label>
-          <select id="distYearMonthSelect" style="min-width: 200px">
-            <option value="1" selected>1 月</option>
-            <option value="2">2 月</option>
-            <option value="3">3 月</option>
-            <option value="4">4 月</option>
-            <option value="5">5 月</option>
-            <option value="6">6 月</option>
-            <option value="7">7 月</option>
-            <option value="8">8 月</option>
-            <option value="9">9 月</option>
-            <option value="10">10 月</option>
-            <option value="11">11 月</option>
-            <option value="12">12 月</option>
-          </select>
-        </div>
-      </div>
-      <div id="distYearMonthHint" class="muted" style="margin-top: 6px"></div>
-      <div
-        id="distYearMonthCurve"
-        style="width: 100%; height: 320px; margin-top: 8px"
-      ></div>
-      <div
-        id="distYearMonthHist"
-        style="width: 100%; height: 300px; margin-top: 12px"
-      ></div>
-      <table id="distYearMonthStats" style="margin-top: 8px"></table>
-      <div class="muted" style="margin-top: 10px">月内日历效应（单标的）</div>
-      <div class="row no-print" style="margin-top: 6px; align-items: end">
-        <div>
-          <label>月内日期 d（1~31）</label>
-          <input id="distCalDay" value="1" style="min-width: 120px" />
-        </div>
-        <div>
-          <label>扫描模式</label>
-          <select id="distCalMode" style="min-width: 150px">
-            <option value="single">单日</option>
-            <option value="all" selected>全扫描 1~31</option>
-          </select>
-        </div>
-        <div>
-          <label>持有 n（交易日）</label>
-          <input id="distCalHoldN" value="5" style="min-width: 120px" />
-        </div>
-        <div>
-          <label>买入价</label>
-          <select id="distCalEntryPx" style="min-width: 120px">
-            <option value="open">open</option>
-            <option value="close" selected>close</option>
-          </select>
-        </div>
-        <div>
-          <label>卖出价</label>
-          <select id="distCalExitPx" style="min-width: 120px">
-            <option value="open">open</option>
-            <option value="close" selected>close</option>
-          </select>
-        </div>
-        <div>
-          <label>非交易日处理</label>
-          <select id="distCalShift" style="min-width: 140px">
-            <option value="next" selected>next</option>
-            <option value="prev">prev</option>
-            <option value="skip">skip</option>
-          </select>
-        </div>
-        <div>
-          <label>热力图指标</label>
-          <select id="distCalMetric" style="min-width: 160px">
-            <option value="mean" selected>均值</option>
-            <option value="median">中位数</option>
-            <option value="win_rate">胜率</option>
-            <option value="sharpe">夏普（非年化）</option>
-          </select>
-        </div>
-      </div>
-      <div id="distCalHint" class="muted" style="margin-top: 6px"></div>
-      <div
-        id="distCalHeatmap"
-        style="width: 100%; height: 280px; margin-top: 8px"
-      ></div>
-      <div
-        id="distCalHist"
-        style="width: 100%; height: 280px; margin-top: 8px"
-      ></div>
-      <table id="distCalTable" style="margin-top: 8px"></table>
-      <div class="muted" style="margin-top: 10px">
         滚动年化波动率分位数（基于日收益滚动 std 年化）
       </div>
       <table id="distRollingAnnVolQuantiles" style="margin-top: 8px"></table>
@@ -1295,6 +1306,23 @@
         id="distRollingAnnVol"
         style="width: 100%; height: 320px; margin-top: 12px"
       ></div>
+      <div class="muted" style="margin-top: 10px">
+        GJR-GARCH(1,1)-t 条件波动率拟合（价格与波动同图）
+      </div>
+      <div id="distGarchHint" class="muted" style="margin-top: 6px"></div>
+      <div
+        id="distGarchChart"
+        style="width: 100%; height: 360px; margin-top: 8px"
+      ></div>
+      <table id="distGarchTable" style="margin-top: 8px"></table>
+      <div class="muted" style="margin-top: 10px">
+        GARCH 条件波动率分布（年化）与当前值分位
+      </div>
+      <div
+        id="distGarchVolHistogram"
+        style="width: 100%; height: 320px; margin-top: 8px"
+      ></div>
+      <table id="distGarchVolQuantiles" style="margin-top: 8px"></table>
       <div class="muted" style="margin-top: 10px">
         后视镜综合偏离指标（跟随“选择标的”展示；仅客观展示时序）
       </div>
@@ -18043,6 +18071,11 @@
         const periodSelect = $("distPeriodSelect");
         const rollWinSelect = $("distRollVolWindow");
         const rollQTable = $("distRollingAnnVolQuantiles");
+        const garchHintEl = $("distGarchHint");
+        const garchChartEl = $("distGarchChart");
+        const garchTableEl = $("distGarchTable");
+        const garchVolHistEl = $("distGarchVolHistogram");
+        const garchVolQuantilesEl = $("distGarchVolQuantiles");
         const futNInput = $("distFutureN");
         const futFitOn = $("distFutureFitOn");
         const futProbTable = $("distFutureProbTable");
@@ -18130,32 +18163,32 @@
                           ? "BIAS-V"
                           : t === "bb_width_atr20"
                             ? "布林带宽/ATR20"
-                          : t === "price_dev"
-                            ? "价格偏离度"
-                            : t === "log_volatility"
-                              ? "对数波动率(log)"
-                              : t === "log_return_dev"
-                                ? "对数收益偏离"
-                                : t === "log_vol_dev"
-                                  ? "波动率对数偏离"
-                                  : t === "volume"
-                                    ? "成交活跃度"
-                                    : t === "rvol"
-                                      ? "相对成交量(RVOL)"
-                                      : t === "macd_v_dif"
-                                        ? "MACD-V（DIF）"
-                                        : t === "macd_v_dea"
-                                          ? "MACD-V（DEA）"
-                                          : t === "macd_v_absh" ||
-                                              t === "macd_v_macd"
-                                            ? "MACD-V（|H|=|2*(DIF-DEA)|）"
-                                            : t === "macd_abs"
-                                              ? "标准MACD（|MACD|, 12/26/9）"
-                                              : t === "momentum_20_0"
-                                                ? "动量因子强弱（固定20/0）"
-                                                : t === "lppl"
-                                                  ? "LPPL崩盘预测"
-                                                  : "成交量偏离(log)";
+                            : t === "price_dev"
+                              ? "价格偏离度"
+                              : t === "log_volatility"
+                                ? "对数波动率(log)"
+                                : t === "log_return_dev"
+                                  ? "对数收益偏离"
+                                  : t === "log_vol_dev"
+                                    ? "波动率对数偏离"
+                                    : t === "volume"
+                                      ? "成交活跃度"
+                                      : t === "rvol"
+                                        ? "相对成交量(RVOL)"
+                                        : t === "macd_v_dif"
+                                          ? "MACD-V（DIF）"
+                                          : t === "macd_v_dea"
+                                            ? "MACD-V（DEA）"
+                                            : t === "macd_v_absh" ||
+                                                t === "macd_v_macd"
+                                              ? "MACD-V（|H|=|2*(DIF-DEA)|）"
+                                              : t === "macd_abs"
+                                                ? "标准MACD（|MACD|, 12/26/9）"
+                                                : t === "momentum_20_0"
+                                                  ? "动量因子强弱（固定20/0）"
+                                                  : t === "lppl"
+                                                    ? "LPPL崩盘预测"
+                                                    : "成交量偏离(log)";
 
         // cache per-code distributions/baseline payloads
         window.__distDistributionsByCode =
@@ -18524,6 +18557,569 @@
             },
             { responsive: true },
           );
+        };
+
+        const _distGarchErrorLabel = (errCode) => {
+          const e = String(errCode || "")
+            .trim()
+            .toLowerCase();
+          if (!e) return "未知错误";
+          if (e === "dependency_unavailable") return "缺少 arch 依赖，暂不可用";
+          if (e === "insufficient_samples") return "样本不足，无法拟合";
+          if (e === "fit_failed") return "模型拟合失败";
+          if (e === "empty_etf_close") return "缺少可用价格数据";
+          if (e === "end_before_start") return "结束日期早于开始日期";
+          return e;
+        };
+
+        const _renderDistGarchPlaceholder = (msg) => {
+          if (garchChartEl)
+            garchChartEl.innerHTML = `<div class='muted'>${esc(String(msg || "无数据"))}</div>`;
+          if (garchTableEl) garchTableEl.innerHTML = "";
+          if (garchVolHistEl)
+            garchVolHistEl.innerHTML = `<div class='muted'>${esc(String(msg || "无数据"))}</div>`;
+          if (garchVolQuantilesEl) garchVolQuantilesEl.innerHTML = "";
+        };
+
+        const _distGarchCache = () => {
+          window.__distGarchByKey = window.__distGarchByKey || {};
+          return window.__distGarchByKey;
+        };
+
+        const _distGarchKey = ({ code, adjust, start, end }) =>
+          `${String(adjust || "hfq").toLowerCase()}|${String(code || "").trim()}|${String(start || "").trim()}|${String(end || "").trim()}`;
+
+        const _renderDistGarchResult = (
+          payload,
+          { fromCache = false } = {},
+        ) => {
+          if (!garchChartEl || !garchTableEl) return;
+          const data = payload && typeof payload === "object" ? payload : {};
+          const meta =
+            data.meta && typeof data.meta === "object" ? data.meta : {};
+          const code = String(meta.etf_code || codeSelect.value || "").trim();
+          const adjust =
+            String(meta.adjust || "")
+              .trim()
+              .toLowerCase() || "-";
+          if (!data.ok) {
+            const label = _distGarchErrorLabel(data.error);
+            if (garchHintEl)
+              garchHintEl.textContent = `GARCH 拟合不可用：${label}${fromCache ? "（缓存）" : ""}`;
+            _renderDistGarchPlaceholder(label);
+            const rows = [
+              ["状态", "失败"],
+              ["错误码", String(data.error || "-")],
+              ["说明", label],
+            ];
+            garchTableEl.innerHTML =
+              "<tr><th>项目</th><th>结果</th></tr>" +
+              rows
+                .map(
+                  (r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`,
+                )
+                .join("");
+            return;
+          }
+
+          const series =
+            data.series && typeof data.series === "object" ? data.series : {};
+          const pxDates = Array.isArray(series.price_dates)
+            ? series.price_dates
+            : [];
+          const pxClose = Array.isArray(series.price_close)
+            ? series.price_close
+            : [];
+          const volDates = Array.isArray(series.vol_dates)
+            ? series.vol_dates
+            : [];
+          const volAnn = Array.isArray(series.cond_vol_annualized)
+            ? series.cond_vol_annualized
+            : [];
+          const n = Math.min(
+            pxDates.length,
+            pxClose.length,
+            volDates.length,
+            volAnn.length,
+          );
+          const xPrice = [];
+          const yPrice = [];
+          const xVol = [];
+          const yVol = [];
+          for (let i = 0; i < n; i++) {
+            const d1 = String(pxDates[i] || "").trim();
+            const d2 = String(volDates[i] || "").trim();
+            const p = Number(pxClose[i]);
+            const v = Number(volAnn[i]);
+            if (!d1 || !d2 || !Number.isFinite(v) || v <= 0) continue;
+            if (Number.isFinite(p) && p > 0) {
+              xPrice.push(d1);
+              yPrice.push(p);
+            }
+            xVol.push(d2);
+            yVol.push(v);
+          }
+          if (!xVol.length || !yVol.length) {
+            if (garchHintEl)
+              garchHintEl.textContent =
+                "GARCH 返回为空：当前区间缺少可绘制样本";
+            _renderDistGarchPlaceholder("当前区间无可绘制 GARCH 序列");
+            return;
+          }
+          if (typeof Plotly === "undefined") {
+            _renderDistGarchPlaceholder("Plotly 未加载，无法绘图");
+            return;
+          }
+
+          Plotly.newPlot(
+            "distGarchChart",
+            [
+              {
+                x: xPrice,
+                y: yPrice,
+                type: "scatter",
+                mode: "lines",
+                name: `${adjust} close`,
+                yaxis: "y",
+                line: { width: 1.4 },
+                hovertemplate: "%{x}<br>close=%{y:.3f}<extra></extra>",
+              },
+              {
+                x: xVol,
+                y: yVol,
+                type: "scatter",
+                mode: "lines",
+                name: "GJR-GARCH 条件波动率(年化)",
+                yaxis: "y2",
+                line: { width: 1.8, color: "rgba(214,39,40,0.92)" },
+                hovertemplate: "%{x}<br>ann_vol=%{y:.2%}<extra></extra>",
+              },
+            ],
+            {
+              margin: { t: 40, l: 56, r: 72, b: 40 },
+              title: {
+                text: `${codeLabel(code)} - GJR-GARCH(1,1)-t 条件波动率`,
+                font: { size: 14 },
+              },
+              xaxis: { title: "日期" },
+              yaxis: { title: "价格" },
+              yaxis2: {
+                title: "条件波动率（年化）",
+                tickformat: ".1%",
+                overlaying: "y",
+                side: "right",
+                showgrid: false,
+              },
+              legend: { orientation: "h" },
+            },
+            { responsive: true, displayModeBar: false },
+          );
+
+          const volSamples = yVol.filter((v) => Number.isFinite(v) && v > 0);
+          const curVolInfo = (() => {
+            for (let i = yVol.length - 1; i >= 0; i--) {
+              const v = Number(yVol[i]);
+              const d = String(xVol[i] || "").trim();
+              if (Number.isFinite(v) && v > 0 && d)
+                return { value: v, date: d };
+            }
+            return { value: NaN, date: "" };
+          })();
+          const _percentileRank = (arr, v) => {
+            const xs = (Array.isArray(arr) ? arr : [])
+              .map(Number)
+              .filter((x) => Number.isFinite(x))
+              .sort((a, b) => a - b);
+            const cur = Number(v);
+            if (!xs.length || !Number.isFinite(cur)) return NaN;
+            let le = 0;
+            for (const x of xs) {
+              if (x <= cur) le += 1;
+            }
+            return (le / xs.length) * 100.0;
+          };
+          const curPctRank = _percentileRank(volSamples, curVolInfo.value);
+
+          const params =
+            data.params && typeof data.params === "object" ? data.params : {};
+          const diag =
+            data.diagnostics && typeof data.diagnostics === "object"
+              ? data.diagnostics
+              : {};
+          const interp =
+            data.interpretation && typeof data.interpretation === "object"
+              ? data.interpretation
+              : {};
+          const pre =
+            diag.arch_lm_pre && typeof diag.arch_lm_pre === "object"
+              ? diag.arch_lm_pre
+              : {};
+          const post =
+            diag.arch_lm_post && typeof diag.arch_lm_post === "object"
+              ? diag.arch_lm_post
+              : {};
+          const score = Number(interp.value_score);
+          const modelValue = String(interp.model_value || "-").toLowerCase();
+          const scoreTxt = Number.isFinite(score) ? score.toFixed(3) : "-";
+          const levelTxt =
+            modelValue === "high"
+              ? "高"
+              : modelValue === "medium"
+                ? "中"
+                : modelValue === "low"
+                  ? "低"
+                  : "-";
+          if (garchHintEl) {
+            const nObs = Number(diag.n_obs_returns);
+            const nTxt = Number.isFinite(nObs) ? String(Math.round(nObs)) : "-";
+            const cTxt = fromCache ? "（缓存）" : "";
+            garchHintEl.textContent = `模型价值=${levelTxt}（score=${scoreTxt}）· 收益样本=${nTxt} · adjust=${adjust} ${cTxt}`;
+          }
+          const rows = [
+            ["模型价值", `${levelTxt}（score=${scoreTxt}）`],
+            ["解读", String(interp.summary || "-")],
+            [
+              "关键理由",
+              Array.isArray(interp.reasons) && interp.reasons.length
+                ? interp.reasons.join("；")
+                : "-",
+            ],
+            [
+              "参数",
+              `mu=${fmtNum(params.mu)}，omega=${fmtNum(params.omega)}，alpha=${fmtNum(params.alpha1)}，gamma=${fmtNum(params.gamma1)}，beta=${fmtNum(params.beta1)}，nu=${fmtNum(params.nu)}`,
+            ],
+            ["持久性", fmtNum(params.persistence)],
+            [
+              "无条件波动率（年化）",
+              Number.isFinite(Number(params.unconditional_vol_annualized))
+                ? fmtPct(params.unconditional_vol_annualized)
+                : "-",
+            ],
+            [
+              "当前条件波动率分位",
+              Number.isFinite(curPctRank)
+                ? `P${curPctRank.toFixed(1)}（当前值=${fmtPct(curVolInfo.value)}${curVolInfo.date ? `, 日期=${curVolInfo.date}` : ""}）`
+                : "-",
+            ],
+            ["收敛", diag.converged ? "是" : "否"],
+            [
+              "AIC/BIC",
+              `${Number.isFinite(Number(diag.aic)) ? Number(diag.aic).toFixed(3) : "-"} / ${Number.isFinite(Number(diag.bic)) ? Number(diag.bic).toFixed(3) : "-"}`,
+            ],
+            [
+              "标准化残差（均值/标准差/偏度/峰度）",
+              `${fmtNum(diag.std_resid_mean)} / ${fmtNum(diag.std_resid_std)} / ${fmtNum(diag.std_resid_skew)} / ${fmtNum(diag.std_resid_kurtosis_excess)}`,
+            ],
+            [
+              "ARCH-LM（拟合前）",
+              pre.ok
+                ? `stat=${fmtNum(pre.stat)}，p=${fmtNum(pre.pvalue)}，${pre.significant ? "显著" : "不显著"}`
+                : "样本不足",
+            ],
+            [
+              "ARCH-LM（拟合后）",
+              post.ok
+                ? `stat=${fmtNum(post.stat)}，p=${fmtNum(post.pvalue)}，${post.significant ? "显著" : "不显著"}`
+                : "样本不足",
+            ],
+          ];
+          garchTableEl.innerHTML =
+            "<tr><th>项目</th><th>结果</th></tr>" +
+            rows
+              .map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`)
+              .join("");
+
+          if (garchVolHistEl && garchVolQuantilesEl) {
+            if (volSamples.length < 5) {
+              garchVolHistEl.innerHTML =
+                "<div class='muted'>样本不足，无法绘制 GARCH 波动率分布</div>";
+              garchVolQuantilesEl.innerHTML = "";
+            } else {
+              const bins = Math.min(
+                48,
+                Math.max(12, Math.round(Math.sqrt(volSamples.length) * 3)),
+              );
+              const lo0 = Math.min(...volSamples);
+              const hi0 = Math.max(...volSamples);
+              const spanRaw = hi0 - lo0;
+              const span =
+                spanRaw > 0 ? spanRaw : Math.max(Math.abs(lo0), 1.0) * 1e-6;
+              const left = spanRaw > 0 ? lo0 : lo0 - span * 0.5;
+              const step = span / bins;
+              const edges = new Array(bins + 1)
+                .fill(0)
+                .map((_, i) => left + step * i);
+              const counts = new Array(bins).fill(0);
+              for (const v of volSamples) {
+                const idx = Math.min(
+                  bins - 1,
+                  Math.max(0, Math.floor((v - left) / step)),
+                );
+                counts[idx] += 1;
+              }
+              const mids = counts.map((_, i) => (edges[i] + edges[i + 1]) / 2);
+
+              Plotly.newPlot(
+                "distGarchVolHistogram",
+                [
+                  {
+                    x: mids,
+                    y: counts,
+                    type: "bar",
+                    name: "频数",
+                    marker: { color: "#4c78a8" },
+                    hovertemplate: "vol=%{x:.2%}<br>频数=%{y}<extra></extra>",
+                  },
+                ],
+                {
+                  margin: { t: 36, l: 56, r: 20, b: 42 },
+                  title: {
+                    text: `${codeLabel(code)} - GARCH 条件波动率分布（年化）`,
+                    font: { size: 13 },
+                  },
+                  xaxis: { title: "条件波动率（年化）", tickformat: ".1%" },
+                  yaxis: { title: "频数" },
+                  shapes: (() => {
+                    const out = [];
+                    if (
+                      Number.isFinite(curVolInfo.value) &&
+                      curVolInfo.value > 0
+                    ) {
+                      out.push({
+                        type: "line",
+                        xref: "x",
+                        yref: "paper",
+                        x0: Number(curVolInfo.value),
+                        x1: Number(curVolInfo.value),
+                        y0: 0,
+                        y1: 1,
+                        line: {
+                          color: "rgba(214,39,40,0.95)",
+                          width: 2.0,
+                          dash: "solid",
+                        },
+                      });
+                    }
+                    return out;
+                  })(),
+                  annotations: [
+                    {
+                      xref: "paper",
+                      yref: "paper",
+                      x: 0.01,
+                      y: 0.98,
+                      showarrow: false,
+                      text: `样本数=${volSamples.length} · 当前值=${fmtPct(curVolInfo.value)} · 当前分位=${Number.isFinite(curPctRank) ? `P${curPctRank.toFixed(1)}` : "-"}`,
+                      font: { size: 11, color: "#666" },
+                    },
+                  ],
+                },
+                { responsive: true, displayModeBar: false },
+              );
+
+              const qMap = {
+                q01:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 1)
+                    : NaN,
+                q05:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 5)
+                    : NaN,
+                q10:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 10)
+                    : NaN,
+                q25:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 25)
+                    : NaN,
+                q50:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 50)
+                    : NaN,
+                q75:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 75)
+                    : NaN,
+                q90:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 90)
+                    : NaN,
+                q95:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 95)
+                    : NaN,
+                q99:
+                  typeof _percentile === "function"
+                    ? _percentile(volSamples, 99)
+                    : NaN,
+              };
+              const qRows = [
+                [
+                  "分位数",
+                  "1%",
+                  "5%",
+                  "10%",
+                  "25%",
+                  "50%",
+                  "75%",
+                  "90%",
+                  "95%",
+                  "99%",
+                ],
+                [
+                  "数值",
+                  fmtPct(qMap.q01),
+                  fmtPct(qMap.q05),
+                  fmtPct(qMap.q10),
+                  fmtPct(qMap.q25),
+                  fmtPct(qMap.q50),
+                  fmtPct(qMap.q75),
+                  fmtPct(qMap.q90),
+                  fmtPct(qMap.q95),
+                  fmtPct(qMap.q99),
+                ],
+              ];
+              if (Number.isFinite(curVolInfo.value)) {
+                qRows.push([
+                  `当前值（${esc(curVolInfo.date || "-")}）`,
+                  fmtPct(curVolInfo.value),
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                ]);
+                qRows.push([
+                  "当前分位",
+                  Number.isFinite(curPctRank)
+                    ? `P${curPctRank.toFixed(1)}`
+                    : "-",
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                  "",
+                ]);
+              }
+              garchVolQuantilesEl.innerHTML = qRows
+                .map((row, i) => {
+                  const tag = i === 0 ? "th" : "td";
+                  return `<tr>${row.map((c) => `<${tag}>${c}</${tag}>`).join("")}</tr>`;
+                })
+                .join("");
+            }
+          }
+        };
+
+        const _distFetchGarch = async ({ code, adjust, start, end }) => {
+          const cache = _distGarchCache();
+          const key = _distGarchKey({ code, adjust, start, end });
+          if (cache[key])
+            return { data: cache[key], fromCache: true, stale: false };
+
+          if (
+            window.__distGarchAbortCtrl &&
+            typeof window.__distGarchAbortCtrl.abort === "function"
+          ) {
+            try {
+              window.__distGarchAbortCtrl.abort();
+            } catch (_eAbort) {
+              /* ignore */
+            }
+          }
+          const controller = new AbortController();
+          window.__distGarchAbortCtrl = controller;
+          const reqId = Number((window.__distGarchReqId || 0) + 1);
+          window.__distGarchReqId = reqId;
+
+          const payload = {
+            etf_code: String(code || "").trim(),
+            start: String(start || "").trim(),
+            end: String(end || "").trim(),
+            adjust: String(adjust || "hfq")
+              .trim()
+              .toLowerCase(),
+            max_points: 0,
+            min_samples: 120,
+            arch_lags: 10,
+            ann_factor: 252,
+            return_scale: 100.0,
+          };
+          const resp = await api("/analysis/baseline/garch-volatility", {
+            method: "POST",
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+          const text = await resp.text();
+          if (reqId !== window.__distGarchReqId) {
+            return { data: null, fromCache: false, stale: true };
+          }
+          if (!resp.ok) {
+            throw new Error(text || `HTTP ${resp.status}`);
+          }
+          const data = JSON.parse(text || "{}");
+          cache[key] = data;
+          const keys = Object.keys(cache);
+          if (keys.length > 64) {
+            delete cache[keys[0]];
+          }
+          window.__distGarchByKey = cache;
+          return { data, fromCache: false, stale: false };
+        };
+
+        const _renderDistGarchPanel = async () => {
+          if (!garchChartEl || !garchTableEl) return;
+          const code = String(codeSelect.value || "").trim();
+          const adjust = String((adjustSelect && adjustSelect.value) || "qfq")
+            .trim()
+            .toLowerCase();
+          const start = String((rangeStart && rangeStart.value) || "").trim();
+          const end = String((rangeEnd && rangeEnd.value) || "").trim();
+          if (!code || !start || !end) {
+            if (garchHintEl) garchHintEl.textContent = "";
+            _renderDistGarchPlaceholder("请选择标的并设置区间后查看 GARCH");
+            return;
+          }
+          const key = _distGarchKey({ code, adjust, start, end });
+          const cache = _distGarchCache();
+          if (cache[key]) {
+            _renderDistGarchResult(cache[key], { fromCache: true });
+            return;
+          }
+
+          if (garchHintEl) garchHintEl.textContent = "GARCH 拟合中...";
+          _renderDistGarchPlaceholder("GARCH 拟合中...");
+          try {
+            const out = await _distFetchGarch({ code, adjust, start, end });
+            if (out.stale || !out.data) return;
+            _renderDistGarchResult(out.data, { fromCache: !!out.fromCache });
+          } catch (eGarch) {
+            if (eGarch && eGarch.name === "AbortError") return;
+            const msg = String(
+              eGarch && eGarch.message ? eGarch.message : eGarch,
+            );
+            if (garchHintEl) garchHintEl.textContent = "GARCH 拟合请求失败";
+            _renderDistGarchPlaceholder(`请求失败：${msg}`);
+          }
+        };
+
+        const _scheduleDistGarchPanel = () => {
+          if (window.__distGarchRenderTimer) {
+            clearTimeout(window.__distGarchRenderTimer);
+          }
+          window.__distGarchRenderTimer = setTimeout(() => {
+            _renderDistGarchPanel().catch(() => {
+              /* ignore */
+            });
+          }, 120);
         };
 
         const _plotMirrorTs = () => {
@@ -22550,6 +23146,7 @@
           const typeRaw = typeSelect.value;
           const type = typeRaw === "macd_v_macd" ? "macd_v_absh" : typeRaw; // "return" | "volatility" | "bias" | "bias_v" | "bb_width_atr20" | "price_dev" | "log_volatility" | "log_return_dev" | "log_vol_dev" | "volume" | "rvol" | "vol_dev" | "macd_v_dif" | "macd_v_dea" | "macd_v_absh" | "macd_abs"
           const period = periodSelect.value; // "daily", "weekly", "monthly", "quarterly", "yearly"
+          _scheduleDistGarchPanel();
 
           if (!code || !distByCode[code]) {
             _renderDailyLogReturnAcf("");
@@ -23322,6 +23919,7 @@
                 _renderDistRangeStateMonitor().catch(() => {
                   /* ignore */
                 });
+                _scheduleDistGarchPanel();
                 return;
               }
               distByCode[c] = b.period_distributions[c];
@@ -23381,6 +23979,7 @@
               _renderDistRangeStateMonitor().catch(() => {
                 /* ignore */
               });
+              _scheduleDistGarchPanel();
             }
           };
           const _syncRangeFromQuick = () => {

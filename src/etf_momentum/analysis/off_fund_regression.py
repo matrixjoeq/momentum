@@ -37,6 +37,11 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("932000", "563300"),
     ),
     RegressionFactorSpec(
+        key="CNI2000",
+        label="国证2000",
+        aliases=("399303", "159907"),
+    ),
+    RegressionFactorSpec(
         key="CYB",
         label="创业板指",
         aliases=("399006", "159915"),
@@ -57,36 +62,6 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         aliases=("000922", "515180"),
     ),
     RegressionFactorSpec(
-        key="CSI_ALL_CONSUMER",
-        label="中证全指可选消费",
-        aliases=("000989", "159936"),
-    ),
-    RegressionFactorSpec(
-        key="CSI_ALL_MEDICINE",
-        label="中证全指医药",
-        aliases=("000991", "159938"),
-    ),
-    RegressionFactorSpec(
-        key="CSI_ALL_INFORMATION",
-        label="中证全指信息",
-        aliases=("000993", "159939"),
-    ),
-    RegressionFactorSpec(
-        key="CSI_ALL_FINANCE",
-        label="中证全指金融",
-        aliases=("000992", "159940"),
-    ),
-    RegressionFactorSpec(
-        key="CSI_ALL_ENERGY",
-        label="中证全指能源",
-        aliases=("000986", "159945"),
-    ),
-    RegressionFactorSpec(
-        key="CSI_ALL_MATERIAL",
-        label="中证全指材料",
-        aliases=("000987", "159944"),
-    ),
-    RegressionFactorSpec(
         key="CSI_300_GROWTH_INNOVATION",
         label="300成长创新",
         aliases=("931589", "159523"),
@@ -105,6 +80,51 @@ DEFAULT_CN_STOCK_FACTORS: tuple[RegressionFactorSpec, ...] = (
         key="CSI_1000_VALUE_STABILITY",
         label="1000价值稳健",
         aliases=("931588", "562530"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_ENERGY",
+        label="中证全指能源",
+        aliases=("000986", "159945"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_MATERIAL",
+        label="中证全指材料",
+        aliases=("000987", "159944"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_FINANCE",
+        label="中证全指金融",
+        aliases=("000992", "159940"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_ELECTRICITY",
+        label="中证全指电力公用事业",
+        aliases=("h30199", "159611"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_CONSUMER",
+        label="中证主要消费",
+        aliases=("000932", "159928"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_CONSUMER_SELECTIVE",
+        label="中证全指可选消费",
+        aliases=("000989", "159936"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_MEDICINE",
+        label="中证全指医药",
+        aliases=("000991", "159938"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_INFORMATION",
+        label="中证全指信息",
+        aliases=("000993", "159939"),
+    ),
+    RegressionFactorSpec(
+        key="CSI_ALL_COMMUNICATION",
+        label="中证全指通信",
+        aliases=("931160", "515880"),
     ),
 )
 

@@ -1817,6 +1817,104 @@ class IndexDistributionResponse(BaseModel):
     error: str | None = None
 
 
+class BaselineGarchVolatilityRequest(BaseModel):
+    etf_code: str = Field(min_length=1, description="ETF code, e.g. 510300")
+    start: str = Field(description="YYYYMMDD")
+    end: str = Field(description="YYYYMMDD")
+    adjust: Literal["hfq", "qfq", "none"] = Field(
+        default="hfq", description="qfq/hfq/none for ETF prices"
+    )
+    max_points: int = Field(
+        default=0,
+        ge=0,
+        le=6000,
+        description="Max return points used for fitting (0 means no cap)",
+    )
+    min_samples: int = Field(
+        default=120, ge=60, le=3000, description="Minimum cleaned return samples"
+    )
+    arch_lags: int = Field(
+        default=10, ge=1, le=40, description="ARCH-LM lag count for diagnostics"
+    )
+    ann_factor: int = Field(
+        default=252, ge=200, le=400, description="Annualization factor"
+    )
+    return_scale: float = Field(
+        default=100.0,
+        gt=0.0,
+        le=10000.0,
+        description="Scale applied before fitting, e.g. 100 means percent returns",
+    )
+
+
+class BaselineGarchArchLmOut(BaseModel):
+    ok: bool
+    lags: int
+    n_obs: int
+    stat: float | None = None
+    pvalue: float | None = None
+    significant: bool | None = None
+
+
+class BaselineGarchParamsOut(BaseModel):
+    mu: float | None = None
+    omega: float | None = None
+    alpha1: float | None = None
+    gamma1: float | None = None
+    beta1: float | None = None
+    nu: float | None = None
+    persistence: float | None = None
+    unconditional_var_daily: float | None = None
+    unconditional_vol_daily: float | None = None
+    unconditional_vol_annualized: float | None = None
+
+
+class BaselineGarchDiagnosticsOut(BaseModel):
+    converged: bool
+    convergence_flag: int
+    n_obs_raw: int
+    n_obs_price: int
+    n_obs_returns: int
+    dropped_obs: int
+    ann_factor: int
+    return_scale: float
+    loglikelihood: float | None = None
+    aic: float | None = None
+    bic: float | None = None
+    std_resid_mean: float | None = None
+    std_resid_std: float | None = None
+    std_resid_skew: float | None = None
+    std_resid_kurtosis_excess: float | None = None
+    arch_lm_pre: BaselineGarchArchLmOut
+    arch_lm_post: BaselineGarchArchLmOut
+
+
+class BaselineGarchInterpretationOut(BaseModel):
+    model_value: Literal["high", "medium", "low"]
+    value_score: float = Field(ge=0.0, le=1.0)
+    summary: str
+    reasons: list[str] = Field(default_factory=list)
+
+
+class BaselineGarchSeriesOut(BaseModel):
+    price_dates: list[str] = Field(default_factory=list)
+    price_close: list[float | None] = Field(default_factory=list)
+    vol_dates: list[str] = Field(default_factory=list)
+    cond_vol_daily: list[float | None] = Field(default_factory=list)
+    cond_vol_annualized: list[float | None] = Field(default_factory=list)
+    log_returns: list[float | None] = Field(default_factory=list)
+
+
+class BaselineGarchVolatilityResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+    params: BaselineGarchParamsOut | None = None
+    diagnostics: BaselineGarchDiagnosticsOut | None = None
+    interpretation: BaselineGarchInterpretationOut | None = None
+    series: BaselineGarchSeriesOut | None = None
+
+
 class VolProxyMethod(BaseModel):
     """
     Volatility proxy computed from the ETF OHLC series.

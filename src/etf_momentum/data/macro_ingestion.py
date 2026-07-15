@@ -7,6 +7,8 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from ..data.chinamoney_bond_fetcher import FetchRequest as ChinaMoneyBondFetchRequest
+from ..data.chinamoney_bond_fetcher import fetch_chinamoney_bond_yield
 from ..data.fred_fetcher import FetchRequest as FredFetchRequest
 from ..data.fred_fetcher import fetch_fred_daily_close
 from ..data.sina_fetcher import FetchRequest as SinaFetchRequest
@@ -144,6 +146,82 @@ MACRO_SERIES: list[MacroSeriesSpec] = [
         category="oil",
         unit="USD/bbl",
     ),
+    # --- China bond yields (ChinaMoney 收盘收益率曲线, 到期收益率) ---
+    # 中债国债到期收益率 2Y/10Y/30Y.
+    MacroSeriesSpec(
+        series_id="CN_TB_2Y",
+        provider="chinamoney_bond",
+        provider_symbol="国债@2",
+        name="中债国债到期收益率(2Y)",
+        category="cn_rates",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="CN_TB_10Y",
+        provider="chinamoney_bond",
+        provider_symbol="国债@10",
+        name="中债国债到期收益率(10Y)",
+        category="cn_rates",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="CN_TB_30Y",
+        provider="chinamoney_bond",
+        provider_symbol="国债@30",
+        name="中债国债到期收益率(30Y)",
+        category="cn_rates",
+        unit="%",
+    ),
+    # 中债中短期票据到期收益率 (AAA/AA+/AA), 2Y/10Y.
+    # 说明: 中短期票据曲线最长约 15Y, 不提供 30Y 关键期限点, 故信用债仅取 2Y/10Y.
+    MacroSeriesSpec(
+        series_id="CN_MTN_AAA_2Y",
+        provider="chinamoney_bond",
+        provider_symbol="中短期票据(AAA)@2",
+        name="中债中短期票据到期收益率(AAA,2Y)",
+        category="cn_credit",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="CN_MTN_AAA_10Y",
+        provider="chinamoney_bond",
+        provider_symbol="中短期票据(AAA)@10",
+        name="中债中短期票据到期收益率(AAA,10Y)",
+        category="cn_credit",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="CN_MTN_AAPLUS_2Y",
+        provider="chinamoney_bond",
+        provider_symbol="中短期票据(AA+)@2",
+        name="中债中短期票据到期收益率(AA+,2Y)",
+        category="cn_credit",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="CN_MTN_AAPLUS_10Y",
+        provider="chinamoney_bond",
+        provider_symbol="中短期票据(AA+)@10",
+        name="中债中短期票据到期收益率(AA+,10Y)",
+        category="cn_credit",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="CN_MTN_AA_2Y",
+        provider="chinamoney_bond",
+        provider_symbol="中短期票据(AA)@2",
+        name="中债中短期票据到期收益率(AA,2Y)",
+        category="cn_credit",
+        unit="%",
+    ),
+    MacroSeriesSpec(
+        series_id="CN_MTN_AA_10Y",
+        provider="chinamoney_bond",
+        provider_symbol="中短期票据(AA)@10",
+        name="中债中短期票据到期收益率(AA,10Y)",
+        category="cn_credit",
+        unit="%",
+    ),
 ]
 
 
@@ -208,6 +286,25 @@ def fetch_macro_daily_close(
             YahooFetchRequest(symbol=sym, start_date=start, end_date=end)
         )
         return df, {"provider": "yahoo", "symbol": sym}
+    if prov == "chinamoney_bond":
+        # provider_symbol encodes "<曲线中文名>@<期限年数>", e.g. "国债@2".
+        label, _, tenor_str = sym.rpartition("@")
+        try:
+            tenor = float(tenor_str)
+        except ValueError:
+            return pd.DataFrame(), {
+                "provider": prov,
+                "symbol": sym,
+                "error": "bad_provider_symbol",
+            }
+        return fetch_chinamoney_bond_yield(
+            ChinaMoneyBondFetchRequest(
+                symbol_label=label,
+                tenor_years=tenor,
+                start_date=start,
+                end_date=end,
+            )
+        )
     return pd.DataFrame(), {
         "provider": prov,
         "symbol": sym,
