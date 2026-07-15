@@ -1141,6 +1141,159 @@ def test_trend_portfolio_risk_budget_leverage_respects_max_multiple_and_fallback
         assert float(expo.max()) <= 1.2000001
 
 
+def test_trend_portfolio_risk_budget_standard_rebalances_on_turnover_event(
+    session_factory,
+):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=90, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            a = 100.0 + i * 0.8
+            if i < 35:
+                b = 95.0 + i * 0.7
+            elif i == 35:
+                b = 70.0
+            else:
+                b = max(40.0, 70.0 - (i - 35) * 0.4)
+            _add_price_hl(
+                db,
+                code="A1",
+                day=d,
+                close=float(a),
+                high=float(a + 1.2),
+                low=float(a - 1.2),
+            )
+            _add_price_hl(
+                db,
+                code="A2",
+                day=d,
+                close=float(b),
+                high=float(b + 1.0),
+                low=float(max(1.0, b - 1.0)),
+            )
+        db.commit()
+        common = dict(
+            codes=["A1", "A2"],
+            start=dates[0],
+            end=dates[-1],
+            strategy="ma_filter",
+            sma_window=2,
+            position_sizing="risk_budget",
+            risk_budget_atr_window=5,
+            risk_budget_pct=0.02,
+            risk_budget_overcap_policy="scale",
+            cost_bps=0.0,
+            slippage_rate=0.0,
+        )
+        out_cons = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                **common,
+                risk_budget_rebalance_mode="conservative",
+            ),
+        )
+        out_std = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                **common,
+                risk_budget_rebalance_mode="standard",
+            ),
+        )
+    w_cons = pd.DataFrame((out_cons.get("weights") or {}).get("series") or {})
+    w_std = pd.DataFrame((out_std.get("weights") or {}).get("series") or {})
+    assert not w_cons.empty and not w_std.empty
+    assert "A1" in w_cons.columns and "A1" in w_std.columns
+    # After A2 exits, standard mode rebalances A1 on turnover event; conservative keeps
+    # previous scaled exposure.
+    assert float(w_std["A1"].iloc[-1]) > float(w_cons["A1"].iloc[-1]) + 1e-9
+
+    params_std = (out_std.get("meta") or {}).get("params") or {}
+    assert str(params_std.get("risk_budget_rebalance_mode") or "") == "standard"
+    rc_std = (out_std.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
+    assert str(rc_std.get("rebalance_mode") or "") == "standard"
+    assert int(rc_std.get("standard_event_rebalance_count") or 0) > 0
+
+
+def test_trend_portfolio_rejects_invalid_risk_budget_rebalance_mode(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=50, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            _add_price(db, code="A1", day=d, close=100 + i * 0.6)
+            _add_price(db, code="A2", day=d, close=90 + i * 0.5)
+        db.commit()
+        with pytest.raises(
+            ValueError,
+            match="risk_budget_rebalance_mode must be one of: conservative\\|standard",
+        ):
+            compute_trend_portfolio_backtest(
+                db,
+                TrendPortfolioInputs(
+                    codes=["A1", "A2"],
+                    start=dates[0],
+                    end=dates[-1],
+                    strategy="ma_filter",
+                    sma_window=2,
+                    position_sizing="risk_budget",
+                    risk_budget_atr_window=20,
+                    risk_budget_pct=0.02,
+                    risk_budget_rebalance_mode="intraday",
+                    cost_bps=0.0,
+                    slippage_rate=0.0,
+                ),
+            )
+
+
+def test_trend_portfolio_standard_mode_keeps_event_day_weights_nonzero(session_factory):
+    sf = session_factory
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=12, freq="B")]
+    with sf() as db:
+        for i, d in enumerate(dates):
+            a = 100.0 + i * 1.0
+            b = (95.0 + i * 0.8) if i < len(dates) - 1 else 60.0
+            _add_price_hl(
+                db,
+                code="A1",
+                day=d,
+                close=float(a),
+                high=float(a + 1.0),
+                low=float(a - 1.0),
+            )
+            _add_price_hl(
+                db,
+                code="A2",
+                day=d,
+                close=float(b),
+                high=float(max(2.0, b + 1.0)),
+                low=float(max(1.0, b - 1.0)),
+            )
+        db.commit()
+        out_std = compute_trend_portfolio_backtest(
+            db,
+            TrendPortfolioInputs(
+                codes=["A1", "A2"],
+                start=dates[0],
+                end=dates[-1],
+                strategy="ma_filter",
+                sma_window=2,
+                position_sizing="risk_budget",
+                risk_budget_atr_window=2,
+                risk_budget_pct=0.02,
+                risk_budget_overcap_policy="scale",
+                risk_budget_rebalance_mode="standard",
+                cost_bps=0.0,
+                slippage_rate=0.0,
+            ),
+        )
+    w_std = pd.DataFrame((out_std.get("weights") or {}).get("series") or {})
+    assert not w_std.empty
+    assert "A1" in w_std.columns
+    # Final day is a constituent turnover event (A2 exits). Standard mode must still
+    # write event-day weights instead of leaving the row at the default zero vector.
+    assert float(w_std["A1"].iloc[-1]) > 0.0
+    assert float(w_std.iloc[-1].sum()) > 0.0
+
+
 def test_trend_portfolio_monthly_risk_budget_blocks_entries(session_factory):
     sf = session_factory
     dates = [d.date() for d in pd.date_range("2024-01-01", periods=100, freq="B")]

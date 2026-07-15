@@ -315,8 +315,34 @@ def test_futures_trend_backtest_api_contract(api_client: TestClient) -> None:
     assert syms[0].get("trend_execution_adjust") == "hfq"
     assert out["meta"].get("backtest_mode") == "portfolio"
     assert out["meta"].get("position_sizing") == "equal"
+    assert out["meta"].get("risk_budget_rebalance_mode") == "conservative"
     assert out["meta"].get("monthly_risk_budget_enabled") is False
     assert out["meta"].get("monthly_risk_budget_effective") is False
+
+    resp_rb_std = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "cost_bps": 5.0,
+            "fee_side": "two_way",
+            "slippage_type": "percent",
+            "slippage_value": 0.0005,
+            "slippage_side": "two_way",
+            "position_sizing": "risk_budget",
+            "risk_budget_rebalance_mode": "standard",
+        },
+    )
+    assert resp_rb_std.status_code == 200
+    rb_std = resp_rb_std.json()
+    assert rb_std["ok"] is True
+    assert rb_std["meta"].get("risk_budget_rebalance_mode") == "standard"
+    port_rb = rb_std["meta"].get("portfolio") or {}
+    rb_stats = port_rb.get("risk_budget") or {}
+    assert rb_stats.get("rebalance_mode") == "standard"
 
     resp_mon = client.post(
         "/api/futures/research/trend-backtest",
@@ -828,6 +854,20 @@ def test_futures_trend_backtest_rejects_invalid_semantics(
     assert bad_filter_ma.status_code == 200
     assert bad_filter_ma.json()["ok"] is False
     assert bad_filter_ma.json()["error"] == "ma_filter_requires_kama"
+
+    bad_rb_mode = client.post(
+        "/api/futures/research/trend-backtest",
+        json={
+            "range_key": "all",
+            "exec_price": "close",
+            "fast_ma": 2,
+            "slow_ma": 3,
+            "min_points": 2,
+            "position_sizing": "risk_budget",
+            "risk_budget_rebalance_mode": "intraday",
+        },
+    )
+    assert bad_rb_mode.status_code == 422
 
 
 def test_futures_trend_backtest_risk_budget_accepts_both_direction(

@@ -729,6 +729,15 @@ class FuturesTrendBacktestRequest(BaseModel):
         le=10.0,
         description="Cap when policy=leverage_entry; above cap, scale to this gross",
     )
+    risk_budget_rebalance_mode: Literal["conservative", "standard"] = Field(
+        default="conservative",
+        description=(
+            "Risk-budget rebalance mode for policy=scale: "
+            "conservative keeps scaled positions unchanged until the next turnover event; "
+            "standard recalculates existing and new weights with event-day ATR on constituent "
+            "turnover days, then applies a single proportional scale if needed"
+        ),
+    )
     monthly_risk_budget_enabled: bool = Field(
         default=False,
         description="Portfolio only: ETF-aligned monthly max-loss gate on new entries",
@@ -2885,6 +2894,15 @@ class TrendBacktestRequest(BaseModel):
         le=10.0,
         description="Max leverage multiple when risk_budget_overcap_policy=leverage_entry",
     )
+    risk_budget_rebalance_mode: Literal["conservative", "standard"] = Field(
+        default="conservative",
+        description=(
+            "Risk-budget rebalance mode when overcap_policy=scale: "
+            "conservative keeps scaled-down existing positions unchanged until next "
+            "constituent turnover event; standard recomputes existing+new targets with "
+            "turnover-day ATR and applies one proportional scale if needed"
+        ),
+    )
     vol_regime_risk_mgmt_enabled: bool = Field(
         default=False,
         description="Enable post-entry volatility-regime risk management in risk_budget sizing",
@@ -3367,6 +3385,15 @@ class TrendPortfolioBacktestRequest(BaseModel):
         ge=1.0,
         le=10.0,
         description="Max leverage multiple when risk_budget_overcap_policy=leverage_entry",
+    )
+    risk_budget_rebalance_mode: Literal["conservative", "standard"] = Field(
+        default="conservative",
+        description=(
+            "Risk-budget rebalance mode when overcap_policy=scale: "
+            "conservative keeps scaled-down existing positions unchanged until next "
+            "constituent turnover event; standard recomputes existing+new targets with "
+            "turnover-day ATR and applies one proportional scale if needed"
+        ),
     )
     vol_regime_risk_mgmt_enabled: bool = Field(
         default=False,

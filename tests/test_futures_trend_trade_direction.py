@@ -243,3 +243,75 @@ def test_risk_budget_flattens_inactive_short_position() -> None:
     )
     assert float(w_out.loc[idx[1], "X"]) < 0.0
     assert abs(float(w_out.loc[idx[2], "X"])) < 1e-12
+
+
+def test_risk_budget_standard_rebalances_on_turnover_with_latest_atr() -> None:
+    idx = pd.date_range("2024-01-02", periods=4, freq="D")
+    sig = pd.DataFrame(
+        {
+            "A": [0.0, 1.0, 1.0, 1.0],
+            "B": [0.0, 0.0, 1.0, 0.0],
+        },
+        index=idx,
+        dtype=float,
+    )
+    score = pd.DataFrame(
+        {
+            "A": [0.0, 1.0, 2.0, 1.0],
+            "B": [0.0, 0.0, 1.0, 0.0],
+        },
+        index=idx,
+        dtype=float,
+    )
+    close_a = pd.Series([80.0, 80.0, 80.0, 80.0], index=idx, dtype=float)
+    close_b = pd.Series([80.0, 80.0, 80.0, 80.0], index=idx, dtype=float)
+    exec_by = {
+        "A": pd.DataFrame(
+            {
+                "Open": close_a.values,
+                "High": [80.5, 80.5, 80.5, 82.0],
+                "Low": [79.5, 79.5, 79.5, 78.0],
+                "Close": close_a.values,
+            },
+            index=idx,
+        ),
+        "B": pd.DataFrame(
+            {
+                "Open": close_b.values,
+                "High": [80.5, 80.5, 80.5, 80.5],
+                "Low": [79.5, 79.5, 79.5, 79.5],
+                "Close": close_b.values,
+            },
+            index=idx,
+        ),
+    }
+    w_cons, _ = risk_budget_weights(
+        sig_direction_df=sig,
+        score_df=score,
+        exec_by_code=exec_by,
+        common_idx=idx,
+        risk_budget_atr_window=2,
+        risk_budget_pct=0.01,
+        policy="scale",
+        max_leverage_multiple=2.0,
+        rebalance_mode="conservative",
+    )
+    w_std, _ = risk_budget_weights(
+        sig_direction_df=sig,
+        score_df=score,
+        exec_by_code=exec_by,
+        common_idx=idx,
+        risk_budget_atr_window=2,
+        risk_budget_pct=0.01,
+        policy="scale",
+        max_leverage_multiple=2.0,
+        rebalance_mode="standard",
+    )
+
+    # Day 3: B enters and both targets (0.8, 0.8) are over-cap, so both scale to 0.5.
+    assert abs(float(w_cons.loc[idx[2], "A"]) - 0.5) < 1e-12
+    assert abs(float(w_std.loc[idx[2], "A"]) - 0.5) < 1e-12
+    # Day 4: B exits. Conservative keeps prior scaled A; standard rebalances on the
+    # turnover day using latest ATR for A (ATR=2.5 -> target=0.32).
+    assert abs(float(w_cons.loc[idx[3], "A"]) - 0.5) < 1e-12
+    assert abs(float(w_std.loc[idx[3], "A"]) - 0.32) < 1e-12

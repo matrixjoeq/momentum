@@ -4859,6 +4859,13 @@
           </select>
         </div>
         <div>
+          <label>风险预算仓位重算</label>
+          <select id="trendRiskBudgetRebalanceMode" style="min-width: 180px">
+            <option value="conservative" selected>保守（只降不升）</option>
+            <option value="standard">标准（调仓日按ATR重算）</option>
+          </select>
+        </div>
+        <div>
           <label>风险预算最大杠杆倍数(1~10)</label>
           <input id="trendRiskBudgetMaxLeverage" value="2.0" />
         </div>
@@ -8224,6 +8231,7 @@
           "trendRiskBudgetAtrWin",
           "trendRiskBudgetPct",
           "trendRiskBudgetOvercapPolicy",
+          "trendRiskBudgetRebalanceMode",
           "trendRiskBudgetMaxLeverage",
           "trendVolRegimeRiskMgmtEnable",
           "trendVolPeriodicRiskMgmtEnable",
@@ -11499,6 +11507,7 @@
         const rbAtrEl = $("trendRiskBudgetAtrWin");
         const rbPctEl = $("trendRiskBudgetPct");
         const rbOvercapEl = $("trendRiskBudgetOvercapPolicy");
+        const rbRebalanceModeEl = $("trendRiskBudgetRebalanceMode");
         const rbMaxLevEl = $("trendRiskBudgetMaxLeverage");
         const volMgmtOnEl = $("trendVolRegimeRiskMgmtEnable");
         const periodicVolMgmtOnEl = $("trendVolPeriodicRiskMgmtEnable");
@@ -11551,6 +11560,10 @@
         if (rbOvercapEl) {
           rbOvercapEl.disabled = !isRiskBudget;
           rbOvercapEl.style.opacity = isRiskBudget ? "1" : "0.55";
+        }
+        if (rbRebalanceModeEl) {
+          rbRebalanceModeEl.disabled = !isRiskBudget;
+          rbRebalanceModeEl.style.opacity = isRiskBudget ? "1" : "0.55";
         }
         if (rbMaxLevEl) {
           const overcap =
@@ -12043,6 +12056,8 @@
             "毁灭线（账户可承受最大回撤）：用于 RoR 公式 ((1-P)/P)^(maxrisk/A)，可输入百分比（如30表示30%）。",
           trendRiskBudgetOvercapPolicy:
             "风险预算超限处理：等比例缩放/跳过开仓/替换开仓/杠杆开仓（仅组合风险预算生效）。",
+          trendRiskBudgetRebalanceMode:
+            "风险预算仓位重算模式：保守=超限降仓后不主动放大；标准=仅在标的调入/调出事件日按当日ATR统一重算，若不超限可放大，若超限则等比缩放。",
           trendRiskBudgetMaxLeverage:
             "最大杠杆倍数：仅杠杆开仓生效，超过该值后回退为按上限倍数等比例缩放（1.0~10.0）。",
           trendMonthlyRiskBudgetEnable:
@@ -32394,6 +32409,11 @@
             $("trendRiskBudgetOvercapPolicy").value
               ? String($("trendRiskBudgetOvercapPolicy").value)
               : "scale",
+          risk_budget_rebalance_mode:
+            $("trendRiskBudgetRebalanceMode") &&
+            $("trendRiskBudgetRebalanceMode").value
+              ? String($("trendRiskBudgetRebalanceMode").value)
+              : "conservative",
           risk_budget_max_leverage_multiple: Number(
             ($("trendRiskBudgetMaxLeverage") &&
             $("trendRiskBudgetMaxLeverage").value
@@ -32870,6 +32890,11 @@
             $("trendRiskBudgetOvercapPolicy").value
               ? String($("trendRiskBudgetOvercapPolicy").value)
               : "scale",
+          risk_budget_rebalance_mode:
+            $("trendRiskBudgetRebalanceMode") &&
+            $("trendRiskBudgetRebalanceMode").value
+              ? String($("trendRiskBudgetRebalanceMode").value)
+              : "conservative",
           risk_budget_max_leverage_multiple: Number(
             ($("trendRiskBudgetMaxLeverage") &&
             $("trendRiskBudgetMaxLeverage").value
@@ -33289,6 +33314,13 @@
           return setMsg(
             "风险预算超限处理非法，请选择 等比例缩放/跳过开仓/替换开仓/杠杆开仓",
           );
+        }
+        if (
+          !["conservative", "standard"].includes(
+            String(common.risk_budget_rebalance_mode),
+          )
+        ) {
+          return setMsg("风险预算仓位重算模式非法，请选择 保守/标准");
         }
         if (
           !Number.isFinite(common.risk_budget_max_leverage_multiple) ||
@@ -33771,6 +33803,10 @@
           (((data || {}).meta || {}).params || {}).risk_budget_overcap_policy ||
             "scale",
         );
+        const rbMode = String(
+          (((data || {}).meta || {}).params || {}).risk_budget_rebalance_mode ||
+            "conservative",
+        );
         const rbMaxLev = Number(
           (((data || {}).meta || {}).params || {})
             .risk_budget_max_leverage_multiple || 2.0,
@@ -33782,11 +33818,16 @@
             replace_entry: "替换开仓",
             leverage_entry: "杠杆开仓",
           }[rbOvercapPolicy] || rbOvercapPolicy;
+        const rbModeLabel =
+          {
+            conservative: "保守（只降不升）",
+            standard: "标准（调仓日按ATR重算）",
+          }[rbMode] || rbMode;
         const riskBudgetSummary =
           String(
             (((data || {}).meta || {}).params || {}).position_sizing || "",
           ).toLowerCase() === "risk_budget"
-            ? `风险预算仓位：ATR周期 ${Math.floor(Number((((data || {}).meta || {}).params || {}).risk_budget_atr_window || 20))}，预算 ${fmtPct(Number((((data || {}).meta || {}).params || {}).risk_budget_pct || 0.01))} / 标的 / ATR；超限处理=${rbOvercapLabel}${rbOvercapPolicy === "leverage_entry" ? `（最大杠杆${fmtNum(rbMaxLev)}x）` : ""}。`
+            ? `风险预算仓位：ATR周期 ${Math.floor(Number((((data || {}).meta || {}).params || {}).risk_budget_atr_window || 20))}，预算 ${fmtPct(Number((((data || {}).meta || {}).params || {}).risk_budget_pct || 0.01))} / 标的 / ATR；重算模式=${rbModeLabel}；超限处理=${rbOvercapLabel}${rbOvercapPolicy === "leverage_entry" ? `（最大杠杆${fmtNum(rbMaxLev)}x）` : ""}。`
             : "风险预算仓位：未启用。";
         setReport(
           "趋势研究报告式解读",

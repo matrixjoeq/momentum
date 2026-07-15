@@ -3339,6 +3339,15 @@ def _validate_bt_single_inputs(inp: Any) -> None:
         or risk_budget_pct > 0.03
     ):
         raise ValueError("risk_budget_pct must be in [0.001, 0.03]")
+    risk_budget_rebalance_mode = (
+        str(getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative")
+        .strip()
+        .lower()
+    )
+    if risk_budget_rebalance_mode not in {"conservative", "standard"}:
+        raise ValueError(
+            "risk_budget_rebalance_mode must be one of: conservative|standard"
+        )
     risk_of_ruin_maxrisk = float(getattr(inp, "risk_of_ruin_maxrisk", 0.30) or 0.30)
     if (
         (not np.isfinite(risk_of_ruin_maxrisk))
@@ -3608,6 +3617,10 @@ def _build_meta_params(inp: Any) -> dict[str, Any]:
         ),
         "risk_budget_max_leverage_multiple": float(
             getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0
+        ),
+        "risk_budget_rebalance_mode": str(
+            getattr(inp, "risk_budget_rebalance_mode", "conservative")
+            or "conservative"
         ),
         "initial_account_amount": (
             None
@@ -6830,6 +6843,11 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     overcap_leverage_max_multiple = 0.0
     overcap_leverage_max_multiple_by_code = {str(c): 0.0 for c in wdf.columns}
     risk_budget_overcap_daily_counts: dict[str, dict[str, Any]] = {}
+    standard_event_rebalance_total = 0
+    standard_event_scale_up_total = 0
+    standard_event_scale_down_total = 0
+    standard_transition_under_to_over_total = 0
+    standard_transition_over_to_under_total = 0
     fixed_ext_events: list[dict[str, Any]] = []
     fixed_skip_events: list[dict[str, Any]] = []
     if ps == "fixed_ratio":
@@ -6889,6 +6907,12 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
     if ps == "risk_budget":
         policy = (
             str(getattr(inp, "risk_budget_overcap_policy", "scale") or "scale")
+            .strip()
+            .lower()
+        )
+        rb_mode = (
+            str(getattr(inp, "risk_budget_rebalance_mode", "conservative")
+                or "conservative")
             .strip()
             .lower()
         )
@@ -6987,6 +7011,8 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
             str(c): float("nan") for c in wdf.columns
         }
         rb_entry_seq_by_code: dict[str, int] = {str(c): -1 for c in wdf.columns}
+        prev_rb_active_set: set[str] = set()
+        prev_rb_overcap_state: bool | None = None
         day_seq = 0
         for d in wdf.index:
             day_seq += 1
@@ -7131,6 +7157,22 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 cand.sort(key=lambda x: (x[0], x[1], x[2]))
                 return str(cand[0][2])
 
+            def _base_target_for_code(key: str) -> float:
+                px = float(
+                    price_sig_by_code.get(key, pd.DataFrame(index=wdf.index))
+                    .get("close", pd.Series(np.nan, index=wdf.index))
+                    .reindex(wdf.index)
+                    .loc[d]
+                )
+                a = (
+                    float(atr_budget_df.loc[d, key])
+                    if (key in atr_budget_df.columns and d in atr_budget_df.index)
+                    else float("nan")
+                )
+                if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
+                    return float(risk_budget_pct) * float(px) / float(a)
+                return float("nan")
+
             for c in wdf.columns:
                 key_c = str(c)
                 if (float(w_row.loc[c]) > eps) and (key_c not in active_set):
@@ -7139,6 +7181,69 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     rb_entry_price_by_code[key_c] = float("nan")
                     rb_entry_seq_by_code[key_c] = -1
 
+            is_standard_scale_mode = (
+                str(rb_mode) == "standard"
+                and str(policy) == "scale"
+                and (not bool(vol_regime_risk_mgmt_enabled))
+                and (not bool(vol_periodic_risk_mgmt_enabled))
+            )
+            has_constituent_event = active_set != prev_rb_active_set
+            if is_standard_scale_mode and has_constituent_event:
+                desired_row = (
+                    w_row.copy().astype(float).reindex(wdf.columns).fillna(0.0)
+                )
+                for c in active_codes:
+                    key = str(c)
+                    target_now = _base_target_for_code(key)
+                    if np.isfinite(target_now) and target_now > 0.0:
+                        desired_row.loc[c] = float(target_now)
+                    elif float(desired_row.loc[c]) <= eps:
+                        desired_row.loc[c] = 0.0
+                desired_total = float(desired_row.sum())
+                overcap_now = bool(desired_total > 1.0 + eps)
+                if (
+                    prev_rb_overcap_state is not None
+                    and bool(prev_rb_overcap_state) != bool(overcap_now)
+                ):
+                    if overcap_now:
+                        pre_scale = desired_row.copy().astype(float)
+                        w_row = (desired_row * (1.0 / desired_total)).astype(float)
+                        overcap_scale_total += 1
+                        _inc_overcap_daily("scale", 1)
+                        for cc in w_row.index:
+                            key_cc = str(cc)
+                            before = (
+                                float(pre_scale.loc[cc])
+                                if np.isfinite(float(pre_scale.loc[cc]))
+                                else 0.0
+                            )
+                            after = (
+                                float(w_row.loc[cc])
+                                if np.isfinite(float(w_row.loc[cc]))
+                                else 0.0
+                            )
+                            if before > after + eps:
+                                overcap_scale_by_code[key_cc] = int(
+                                    overcap_scale_by_code.get(key_cc, 0) + 1
+                                )
+                        standard_event_scale_down_total += 1
+                        standard_transition_under_to_over_total += 1
+                    else:
+                        w_row = desired_row.astype(float)
+                        standard_event_scale_up_total += 1
+                        standard_transition_over_to_under_total += 1
+                    standard_event_rebalance_total += 1
+                    for key_cc in wdf.columns:
+                        kk = str(key_cc)
+                        if bool(overcap_skip_episode_active.get(kk, False)):
+                            overcap_skip_episode_active[kk] = False
+                    wdf.loc[d] = w_row.to_numpy(dtype=float)
+                    prev_rb_w = w_row.copy()
+                    prev_rb_active_set = set(active_set)
+                    prev_rb_overcap_state = bool(overcap_now)
+                    continue
+                prev_rb_overcap_state = bool(overcap_now)
+
             for c in active_codes:
                 px = float(
                     price_sig_by_code.get(str(c), pd.DataFrame(index=wdf.index))
@@ -7146,14 +7251,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     .reindex(wdf.index)
                     .loc[d]
                 )
-                a = (
-                    float(atr_budget_df.loc[d, c])
-                    if (c in atr_budget_df.columns and d in atr_budget_df.index)
-                    else float("nan")
-                )
-                base_target = float("nan")
-                if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
-                    base_target = float(risk_budget_pct) * float(px) / float(a)
+                base_target = _base_target_for_code(str(c))
                 has_pos = bool(float(w_row.loc[c]) > eps)
                 key = str(c)
                 if not has_pos:
@@ -7329,6 +7427,7 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                     overcap_skip_episode_active[kk] = False
             wdf.loc[d] = w_row.to_numpy(dtype=float)
             prev_rb_w = w_row.copy()
+            prev_rb_active_set = set(active_set)
 
     monthly_attempted_total = 0
     monthly_blocked_total = 0
@@ -8707,6 +8806,17 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
         "vol_risk_overcap_replace_in_count": int(overcap_replace_total),
         "vol_risk_overcap_leverage_usage_count": int(overcap_leverage_usage_total),
         "vol_risk_overcap_leverage_max_multiple": float(overcap_leverage_max_multiple),
+        "vol_risk_standard_event_rebalance_count": int(standard_event_rebalance_total),
+        "vol_risk_standard_event_scale_up_count": int(standard_event_scale_up_total),
+        "vol_risk_standard_event_scale_down_count": int(
+            standard_event_scale_down_total
+        ),
+        "vol_risk_standard_transition_under_to_over_count": int(
+            standard_transition_under_to_over_total
+        ),
+        "vol_risk_standard_transition_over_to_under_count": int(
+            standard_transition_over_to_under_total
+        ),
     }
     by_code_stats: dict[str, dict[str, Any]] = {}
     for c in wdf.columns:
@@ -9339,6 +9449,21 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "vol_risk_overcap_leverage_max_multiple": float(
                     overcap_leverage_max_multiple
                 ),
+                "vol_risk_standard_event_rebalance_count": int(
+                    standard_event_rebalance_total
+                ),
+                "vol_risk_standard_event_scale_up_count": int(
+                    standard_event_scale_up_total
+                ),
+                "vol_risk_standard_event_scale_down_count": int(
+                    standard_event_scale_down_total
+                ),
+                "vol_risk_standard_transition_under_to_over_count": int(
+                    standard_transition_under_to_over_total
+                ),
+                "vol_risk_standard_transition_over_to_under_count": int(
+                    standard_transition_over_to_under_total
+                ),
                 "vol_periodic_rebalance_trigger_count": int(vol_periodic_trigger_total),
                 "monthly_risk_budget_blocked_entry_count": int(monthly_blocked_total),
                 "cash_management_proxy_code": str(CASH_MANAGEMENT_PROXY_CODE),
@@ -9438,7 +9563,22 @@ def compute_trend_portfolio_backtest_bt(db: Session, inp: Any) -> dict[str, Any]
                 "overcap_max_leverage_multiple": float(
                     getattr(inp, "risk_budget_max_leverage_multiple", 2.0) or 2.0
                 ),
+                "rebalance_mode": str(
+                    getattr(inp, "risk_budget_rebalance_mode", "conservative")
+                    or "conservative"
+                ),
                 "overcap_scale_count": int(overcap_scale_total),
+                "standard_event_rebalance_count": int(standard_event_rebalance_total),
+                "standard_event_scale_up_count": int(standard_event_scale_up_total),
+                "standard_event_scale_down_count": int(
+                    standard_event_scale_down_total
+                ),
+                "standard_transition_under_to_over_count": int(
+                    standard_transition_under_to_over_total
+                ),
+                "standard_transition_over_to_under_count": int(
+                    standard_transition_over_to_under_total
+                ),
                 "overcap_skip_entry_decision_count": int(overcap_skip_decision_total),
                 "overcap_skip_entry_episode_count": int(overcap_skip_episode_total),
                 "overcap_skip_entry_decision_count_by_code": dict(

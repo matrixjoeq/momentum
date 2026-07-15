@@ -326,6 +326,7 @@ class TrendInputs:
     risk_budget_pct: float = 0.01
     risk_budget_overcap_policy: str = "scale"
     risk_budget_max_leverage_multiple: float = 2.0
+    risk_budget_rebalance_mode: str = "conservative"
     vol_regime_risk_mgmt_enabled: bool = False
     vol_ratio_fast_atr_window: int = 5
     vol_ratio_slow_atr_window: int = 50
@@ -387,6 +388,9 @@ class TrendPortfolioInputs:
     )
     risk_budget_max_leverage_multiple: float = (
         2.0  # only used when overcap_policy=leverage_entry
+    )
+    risk_budget_rebalance_mode: str = (
+        "conservative"  # conservative | standard (turnover-day rebalance)
     )
     vol_regime_risk_mgmt_enabled: bool = False
     vol_ratio_fast_atr_window: int = 5
@@ -7781,6 +7785,15 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
         or risk_budget_max_leverage_multiple > 10.0
     ):
         raise ValueError("risk_budget_max_leverage_multiple must be in [1.0, 10.0]")
+    risk_budget_rebalance_mode = (
+        str(getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative")
+        .strip()
+        .lower()
+    )
+    if risk_budget_rebalance_mode not in {"conservative", "standard"}:
+        raise ValueError(
+            "risk_budget_rebalance_mode must be one of: conservative|standard"
+        )
     vol_regime_risk_mgmt_enabled = bool(
         getattr(inp, "vol_regime_risk_mgmt_enabled", False)
     )
@@ -9757,6 +9770,7 @@ def compute_trend_backtest(db: Session, inp: TrendInputs) -> dict[str, Any]:
                 "risk_budget_max_leverage_multiple": float(
                     risk_budget_max_leverage_multiple
                 ),
+                "risk_budget_rebalance_mode": str(risk_budget_rebalance_mode),
                 "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
                 "vol_periodic_risk_mgmt_enabled": bool(vol_periodic_risk_mgmt_enabled),
                 "vol_periodic_rebalance_threshold_pct": float(
@@ -10225,6 +10239,15 @@ def compute_trend_portfolio_backtest(
         or risk_budget_max_leverage_multiple > 10.0
     ):
         raise ValueError("risk_budget_max_leverage_multiple must be in [1.0, 10.0]")
+    risk_budget_rebalance_mode = (
+        str(getattr(inp, "risk_budget_rebalance_mode", "conservative") or "conservative")
+        .strip()
+        .lower()
+    )
+    if risk_budget_rebalance_mode not in {"conservative", "standard"}:
+        raise ValueError(
+            "risk_budget_rebalance_mode must be one of: conservative|standard"
+        )
     vol_regime_risk_mgmt_enabled = bool(
         getattr(inp, "vol_regime_risk_mgmt_enabled", False)
     )
@@ -11513,6 +11536,13 @@ def compute_trend_portfolio_backtest(
         str(c): 0.0 for c in codes
     }
     risk_budget_overcap_daily_counts: dict[str, dict[str, int]] = {}
+    risk_budget_standard_event_rebalance_count = 0
+    risk_budget_standard_event_scale_up_count = 0
+    risk_budget_standard_event_scale_down_count = 0
+    risk_budget_standard_transition_under_to_over_count = 0
+    risk_budget_standard_transition_over_to_under_count = 0
+    prev_rb_active_set: set[str] = set()
+    prev_rb_overcap_state: bool | None = None
     day_seq = 0
     vol_risk_adjust_by_asset: dict[str, dict[str, int]] = {
         str(c): {
@@ -11739,6 +11769,21 @@ def compute_trend_portfolio_backtest(
                 cand.sort(key=lambda x: (x[0], x[1], x[2]))
                 return str(cand[0][2])
 
+            def _base_target_for_code(key: str) -> float:
+                px = (
+                    float(close_qfq.loc[d, key])
+                    if (key in close_qfq.columns and d in close_qfq.index)
+                    else float("nan")
+                )
+                a = (
+                    float(atr_budget_df.loc[d, key])
+                    if (key in atr_budget_df.columns and d in atr_budget_df.index)
+                    else float("nan")
+                )
+                if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
+                    return float(risk_budget_pct) * float(px) / float(a)
+                return float("nan")
+
             # Exit when base signal is no longer active.
             for c in codes:
                 if (w_row.loc[c] > 1e-12) and (c not in active_set):
@@ -11747,249 +11792,322 @@ def compute_trend_portfolio_backtest(
                     rb_state_by_code[key_c] = "FLAT"
                     rb_entry_price_by_code[key_c] = float("nan")
                     rb_entry_seq_by_code[key_c] = -1
-            # Keep existing active positions at their entry-time risk-budget weight.
-            for c in active_codes:
-                px = (
-                    float(close_qfq.loc[d, c])
-                    if (c in close_qfq.columns and d in close_qfq.index)
-                    else float("nan")
-                )
-                a = (
-                    float(atr_budget_df.loc[d, c])
-                    if (c in atr_budget_df.columns and d in atr_budget_df.index)
-                    else float("nan")
-                )
-                base_target = float("nan")
-                if np.isfinite(px) and px > 0.0 and np.isfinite(a) and a > 0.0:
-                    base_target = float(risk_budget_pct) * float(px) / float(a)
-                has_pos = bool(w_row.loc[c] > 1e-12)
-                key = str(c)
-                if not has_pos:
-                    if np.isfinite(base_target) and base_target > 0.0:
-                        proposed_total = float(w_row.sum() + float(base_target))
-                        overcap_on_new_entry = bool(proposed_total > 1.0 + 1e-12)
-                        if (
-                            overcap_on_new_entry
-                            and str(risk_budget_overcap_policy) == "skip_entry"
-                        ):
-                            risk_budget_overcap_skip_decision_count += 1
-                            _inc_overcap_daily("skip_entry", 1)
-                            risk_budget_overcap_skip_decision_by_code[key] = int(
-                                risk_budget_overcap_skip_decision_by_code.get(key, 0)
-                                + 1
+
+            is_standard_scale_mode = (
+                str(risk_budget_rebalance_mode) == "standard"
+                and str(risk_budget_overcap_policy) == "scale"
+                and (not bool(vol_regime_risk_mgmt_enabled))
+                and (not bool(periodic_enabled))
+            )
+            has_constituent_event = active_set != prev_rb_active_set
+            did_standard_event_rebalance = False
+            if is_standard_scale_mode and has_constituent_event:
+                desired_row = w_row.copy().astype(float).reindex(codes).fillna(0.0)
+                for c in active_codes:
+                    key = str(c)
+                    target_now = _base_target_for_code(key)
+                    if np.isfinite(target_now) and target_now > 0.0:
+                        desired_row.loc[c] = float(target_now)
+                    elif float(desired_row.loc[c]) <= 1e-12:
+                        desired_row.loc[c] = 0.0
+                desired_total = float(desired_row.sum())
+                overcap_now = bool(desired_total > 1.0 + 1e-12)
+                if (
+                    prev_rb_overcap_state is not None
+                    and bool(prev_rb_overcap_state) != bool(overcap_now)
+                ):
+                    if overcap_now:
+                        pre_scale = desired_row.copy().astype(float)
+                        w_row = (desired_row * (1.0 / desired_total)).astype(float)
+                        risk_budget_overcap_scale_count += 1
+                        _inc_overcap_daily("scale", 1)
+                        for cc in w_row.index:
+                            key_cc = str(cc)
+                            before = (
+                                float(pre_scale.loc[cc])
+                                if np.isfinite(float(pre_scale.loc[cc]))
+                                else 0.0
                             )
-                            skipped_today.add(key)
-                            if not bool(
-                                risk_budget_overcap_skip_episode_active_by_code.get(
-                                    key, False
+                            after = (
+                                float(w_row.loc[cc])
+                                if np.isfinite(float(w_row.loc[cc]))
+                                else 0.0
+                            )
+                            if before > after + 1e-12:
+                                risk_budget_overcap_scale_by_code[key_cc] = int(
+                                    risk_budget_overcap_scale_by_code.get(key_cc, 0) + 1
                                 )
+                        risk_budget_standard_event_scale_down_count += 1
+                        risk_budget_standard_transition_under_to_over_count += 1
+                    else:
+                        w_row = desired_row.astype(float)
+                        risk_budget_standard_event_scale_up_count += 1
+                        risk_budget_standard_transition_over_to_under_count += 1
+                    risk_budget_standard_event_rebalance_count += 1
+                    for cc in codes:
+                        key_cc = str(cc)
+                        if bool(
+                            risk_budget_overcap_skip_episode_active_by_code.get(
+                                key_cc, False
+                            )
+                        ):
+                            risk_budget_overcap_skip_episode_active_by_code[key_cc] = (
+                                False
+                            )
+                    did_standard_event_rebalance = True
+                prev_rb_overcap_state = bool(overcap_now)
+
+            if not did_standard_event_rebalance:
+                # Keep existing active positions at their entry-time risk-budget weight.
+                for c in active_codes:
+                    px = (
+                        float(close_qfq.loc[d, c])
+                        if (c in close_qfq.columns and d in close_qfq.index)
+                        else float("nan")
+                    )
+                    base_target = _base_target_for_code(str(c))
+                    has_pos = bool(w_row.loc[c] > 1e-12)
+                    key = str(c)
+                    if not has_pos:
+                        if np.isfinite(base_target) and base_target > 0.0:
+                            proposed_total = float(w_row.sum() + float(base_target))
+                            overcap_on_new_entry = bool(proposed_total > 1.0 + 1e-12)
+                            if (
+                                overcap_on_new_entry
+                                and str(risk_budget_overcap_policy) == "skip_entry"
                             ):
-                                risk_budget_overcap_skip_episode_active_by_code[key] = (
-                                    True
-                                )
-                                risk_budget_overcap_skip_episode_count += 1
-                                risk_budget_overcap_skip_episode_by_code[key] = int(
-                                    risk_budget_overcap_skip_episode_by_code.get(key, 0)
+                                risk_budget_overcap_skip_decision_count += 1
+                                _inc_overcap_daily("skip_entry", 1)
+                                risk_budget_overcap_skip_decision_by_code[key] = int(
+                                    risk_budget_overcap_skip_decision_by_code.get(key, 0)
                                     + 1
                                 )
-                            continue
-                        if (
-                            overcap_on_new_entry
-                            and str(risk_budget_overcap_policy) == "replace_entry"
-                        ):
-                            out_code = _select_replace_out_code(key)
-                            if out_code:
-                                w_row.loc[out_code] = 0.0
-                                rb_state_by_code[out_code] = "FLAT"
-                                rb_entry_price_by_code[out_code] = float("nan")
-                                rb_entry_seq_by_code[out_code] = -1
-                                risk_budget_overcap_replace_count += 1
-                                _inc_overcap_daily("replace_entry", 1)
-                                risk_budget_overcap_replace_out_by_code[out_code] = int(
-                                    risk_budget_overcap_replace_out_by_code.get(
-                                        out_code, 0
+                                skipped_today.add(key)
+                                if not bool(
+                                    risk_budget_overcap_skip_episode_active_by_code.get(
+                                        key, False
                                     )
-                                    + 1
-                                )
-                                risk_budget_overcap_replace_in_by_code[key] = int(
-                                    risk_budget_overcap_replace_in_by_code.get(key, 0)
-                                    + 1
-                                )
-                        _set_new_risk_budget_entry(key, float(base_target))
-                        if (
-                            overcap_on_new_entry
-                            and str(risk_budget_overcap_policy) == "replace_entry"
-                        ):
-                            _apply_overcap_scale_once()
-                        elif (
-                            overcap_on_new_entry
-                            and str(risk_budget_overcap_policy) == "leverage_entry"
-                        ):
-                            lev_now = float(w_row.sum())
-                            if lev_now > 1.0 + 1e-12:
-                                risk_budget_overcap_leverage_usage_count += 1
-                                _inc_overcap_daily("leverage_entry", 1)
-                                landed_lev = float(
-                                    min(
-                                        float(lev_now),
-                                        float(risk_budget_max_leverage_multiple),
-                                    )
-                                )
-                                risk_budget_overcap_leverage_max_multiple = float(
-                                    max(
-                                        float(
-                                            risk_budget_overcap_leverage_max_multiple
-                                        ),
-                                        landed_lev,
-                                    )
-                                )
-                                row = risk_budget_overcap_daily_counts.setdefault(
-                                    d_key,
-                                    {
-                                        "scale": 0,
-                                        "skip_entry": 0,
-                                        "replace_entry": 0,
-                                        "leverage_entry": 0,
-                                        "leverage_multiple_max": 0.0,
-                                    },
-                                )
-                                row["leverage_multiple_max"] = float(
-                                    max(
-                                        float(
-                                            row.get("leverage_multiple_max", 0.0) or 0.0
-                                        ),
-                                        landed_lev,
-                                    )
-                                )
-                                for cc in codes:
-                                    key_cc = str(cc)
-                                    if float(w_row.loc[key_cc]) > 1e-12:
-                                        risk_budget_overcap_leverage_usage_by_code[
-                                            key_cc
-                                        ] = int(
-                                            risk_budget_overcap_leverage_usage_by_code.get(
-                                                key_cc, 0
-                                            )
-                                            + 1
-                                        )
-                                        risk_budget_overcap_leverage_max_multiple_by_code[
-                                            key_cc
-                                        ] = float(
-                                            max(
-                                                float(
-                                                    risk_budget_overcap_leverage_max_multiple_by_code.get(
-                                                        key_cc, 0.0
-                                                    )
-                                                ),
-                                                landed_lev,
-                                            )
-                                        )
-                                if (
-                                    lev_now
-                                    > float(risk_budget_max_leverage_multiple) + 1e-12
                                 ):
-                                    _apply_overcap_scale_once(
-                                        float(risk_budget_max_leverage_multiple)
+                                    risk_budget_overcap_skip_episode_active_by_code[key] = (
+                                        True
                                     )
-                    continue
-                if bool(periodic_enabled):
+                                    risk_budget_overcap_skip_episode_count += 1
+                                    risk_budget_overcap_skip_episode_by_code[key] = int(
+                                        risk_budget_overcap_skip_episode_by_code.get(key, 0)
+                                        + 1
+                                    )
+                                continue
+                            if (
+                                overcap_on_new_entry
+                                and str(risk_budget_overcap_policy) == "replace_entry"
+                            ):
+                                out_code = _select_replace_out_code(key)
+                                if out_code:
+                                    w_row.loc[out_code] = 0.0
+                                    rb_state_by_code[out_code] = "FLAT"
+                                    rb_entry_price_by_code[out_code] = float("nan")
+                                    rb_entry_seq_by_code[out_code] = -1
+                                    risk_budget_overcap_replace_count += 1
+                                    _inc_overcap_daily("replace_entry", 1)
+                                    risk_budget_overcap_replace_out_by_code[out_code] = int(
+                                        risk_budget_overcap_replace_out_by_code.get(
+                                            out_code, 0
+                                        )
+                                        + 1
+                                    )
+                                    risk_budget_overcap_replace_in_by_code[key] = int(
+                                        risk_budget_overcap_replace_in_by_code.get(key, 0)
+                                        + 1
+                                    )
+                            _set_new_risk_budget_entry(key, float(base_target))
+                            if (
+                                overcap_on_new_entry
+                                and str(risk_budget_overcap_policy) == "replace_entry"
+                            ):
+                                _apply_overcap_scale_once()
+                            elif (
+                                overcap_on_new_entry
+                                and str(risk_budget_overcap_policy) == "leverage_entry"
+                            ):
+                                lev_now = float(w_row.sum())
+                                if lev_now > 1.0 + 1e-12:
+                                    risk_budget_overcap_leverage_usage_count += 1
+                                    _inc_overcap_daily("leverage_entry", 1)
+                                    landed_lev = float(
+                                        min(
+                                            float(lev_now),
+                                            float(risk_budget_max_leverage_multiple),
+                                        )
+                                    )
+                                    risk_budget_overcap_leverage_max_multiple = float(
+                                        max(
+                                            float(
+                                                risk_budget_overcap_leverage_max_multiple
+                                            ),
+                                            landed_lev,
+                                        )
+                                    )
+                                    row = risk_budget_overcap_daily_counts.setdefault(
+                                        d_key,
+                                        {
+                                            "scale": 0,
+                                            "skip_entry": 0,
+                                            "replace_entry": 0,
+                                            "leverage_entry": 0,
+                                            "leverage_multiple_max": 0.0,
+                                        },
+                                    )
+                                    row["leverage_multiple_max"] = float(
+                                        max(
+                                            float(
+                                                row.get("leverage_multiple_max", 0.0)
+                                                or 0.0
+                                            ),
+                                            landed_lev,
+                                        )
+                                    )
+                                    for cc in codes:
+                                        key_cc = str(cc)
+                                        if float(w_row.loc[key_cc]) > 1e-12:
+                                            risk_budget_overcap_leverage_usage_by_code[
+                                                key_cc
+                                            ] = int(
+                                                risk_budget_overcap_leverage_usage_by_code.get(
+                                                    key_cc, 0
+                                                )
+                                                + 1
+                                            )
+                                            risk_budget_overcap_leverage_max_multiple_by_code[
+                                                key_cc
+                                            ] = float(
+                                                max(
+                                                    float(
+                                                        risk_budget_overcap_leverage_max_multiple_by_code.get(
+                                                            key_cc, 0.0
+                                                        )
+                                                    ),
+                                                    landed_lev,
+                                                )
+                                            )
+                                    if (
+                                        lev_now
+                                        > float(risk_budget_max_leverage_multiple) + 1e-12
+                                    ):
+                                        _apply_overcap_scale_once(
+                                            float(risk_budget_max_leverage_multiple)
+                                        )
+                        continue
+                    if bool(periodic_enabled):
+                        if not np.isfinite(base_target):
+                            continue
+                        if bool(periodic_uses_lot_threshold):
+                            w_row.loc[c] = float(base_target)
+                            continue
+                        px_now = float(px) if np.isfinite(float(px)) else float("nan")
+                        if (not np.isfinite(px_now)) or px_now <= 0.0:
+                            continue
+                        cur_weight = (
+                            float(w_row.loc[c])
+                            if np.isfinite(float(w_row.loc[c]))
+                            else 0.0
+                        )
+                        cur_share_proxy = (
+                            cur_weight / px_now if cur_weight > 1e-12 else 0.0
+                        )
+                        tgt_share_proxy = (
+                            float(base_target) / px_now
+                            if float(base_target) > 1e-12
+                            else 0.0
+                        )
+                        vol_periodic_rebalance_by_asset[key][
+                            "periodic_rebalance_evaluated_count"
+                        ] += 1
+                        if cur_share_proxy <= 1e-12:
+                            should_rebalance = tgt_share_proxy > 1e-12
+                        else:
+                            rel_change = abs(tgt_share_proxy - cur_share_proxy) / abs(
+                                cur_share_proxy
+                            )
+                            should_rebalance = rel_change + 1e-12 >= float(
+                                vol_periodic_rebalance_threshold_pct
+                            )
+                        if should_rebalance:
+                            w_row.loc[c] = float(base_target)
+                            vol_periodic_rebalance_by_asset[key][
+                                "periodic_rebalance_trigger_count"
+                            ] += 1
+                        else:
+                            vol_periodic_rebalance_by_asset[key][
+                                "periodic_rebalance_skip_count"
+                            ] += 1
+                        continue
+                    if not bool(vol_regime_risk_mgmt_enabled):
+                        continue
+                    st = str(rb_state_by_code.get(key, "NORMAL") or "NORMAL").upper()
+                    af = (
+                        float(atr_ratio_fast_df.loc[d, c])
+                        if (
+                            c in atr_ratio_fast_df.columns
+                            and d in atr_ratio_fast_df.index
+                        )
+                        else float("nan")
+                    )
+                    aslow = (
+                        float(atr_ratio_slow_df.loc[d, c])
+                        if (
+                            c in atr_ratio_slow_df.columns
+                            and d in atr_ratio_slow_df.index
+                        )
+                        else float("nan")
+                    )
+                    ratio = (
+                        (af / aslow)
+                        if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0)
+                        else float("nan")
+                    )
                     if not np.isfinite(base_target):
                         continue
-                    if bool(periodic_uses_lot_threshold):
-                        w_row.loc[c] = float(base_target)
-                        continue
-                    px_now = float(px) if np.isfinite(float(px)) else float("nan")
-                    if (not np.isfinite(px_now)) or px_now <= 0.0:
-                        continue
-                    cur_weight = (
-                        float(w_row.loc[c]) if np.isfinite(float(w_row.loc[c])) else 0.0
+                    next_state = _next_vol_regime_state(
+                        st,
+                        ratio=ratio,
+                        expand_threshold=float(vol_ratio_expand_threshold),
+                        contract_threshold=float(vol_ratio_contract_threshold),
+                        normal_threshold=float(vol_ratio_normal_threshold),
+                        extreme_threshold=float(vol_ratio_extreme_threshold),
                     )
-                    cur_share_proxy = cur_weight / px_now if cur_weight > 1e-12 else 0.0
-                    tgt_share_proxy = (
-                        float(base_target) / px_now
-                        if float(base_target) > 1e-12
-                        else 0.0
-                    )
-                    vol_periodic_rebalance_by_asset[key][
-                        "periodic_rebalance_evaluated_count"
-                    ] += 1
-                    if cur_share_proxy <= 1e-12:
-                        should_rebalance = tgt_share_proxy > 1e-12
-                    else:
-                        rel_change = abs(tgt_share_proxy - cur_share_proxy) / abs(
-                            cur_share_proxy
-                        )
-                        should_rebalance = rel_change + 1e-12 >= float(
-                            vol_periodic_rebalance_threshold_pct
-                        )
-                    if should_rebalance:
+                    if str(next_state) != st:
                         w_row.loc[c] = float(base_target)
-                        vol_periodic_rebalance_by_asset[key][
-                            "periodic_rebalance_trigger_count"
-                        ] += 1
-                    else:
-                        vol_periodic_rebalance_by_asset[key][
-                            "periodic_rebalance_skip_count"
-                        ] += 1
-                    continue
-                if not bool(vol_regime_risk_mgmt_enabled):
-                    continue
-                st = str(rb_state_by_code.get(key, "NORMAL") or "NORMAL").upper()
-                af = (
-                    float(atr_ratio_fast_df.loc[d, c])
-                    if (c in atr_ratio_fast_df.columns and d in atr_ratio_fast_df.index)
-                    else float("nan")
-                )
-                aslow = (
-                    float(atr_ratio_slow_df.loc[d, c])
-                    if (c in atr_ratio_slow_df.columns and d in atr_ratio_slow_df.index)
-                    else float("nan")
-                )
-                ratio = (
-                    (af / aslow)
-                    if (np.isfinite(af) and np.isfinite(aslow) and aslow > 0.0)
-                    else float("nan")
-                )
-                if not np.isfinite(base_target):
-                    continue
-                next_state = _next_vol_regime_state(
-                    st,
-                    ratio=ratio,
-                    expand_threshold=float(vol_ratio_expand_threshold),
-                    contract_threshold=float(vol_ratio_contract_threshold),
-                    normal_threshold=float(vol_ratio_normal_threshold),
-                    extreme_threshold=float(vol_ratio_extreme_threshold),
-                )
-                if str(next_state) != st:
-                    w_row.loc[c] = float(base_target)
-                    rb_state_by_code[key] = str(next_state)
-                    vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
-                    if next_state == "REDUCED":
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_reduce_on_expand_count"
-                        ] += 1
-                    if next_state == "INCREASED":
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_increase_on_contract_count"
-                        ] += 1
-                    if next_state == "NORMAL" and st in {"REDUCED", "EXTREME"}:
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_recover_from_expand_count"
-                        ] += 1
-                    if next_state == "NORMAL" and st == "INCREASED":
-                        vol_risk_adjust_by_asset[key][
-                            "vol_risk_adjust_recover_from_contract_count"
-                        ] += 1
-            w_row = w_row.clip(lower=0.0)
-            if str(risk_budget_overcap_policy) != "leverage_entry":
-                _apply_overcap_scale_once()
-            for cc in codes:
-                key_cc = str(cc)
-                if bool(
-                    risk_budget_overcap_skip_episode_active_by_code.get(key_cc, False)
-                ) and (key_cc not in skipped_today):
-                    risk_budget_overcap_skip_episode_active_by_code[key_cc] = False
+                        rb_state_by_code[key] = str(next_state)
+                        vol_risk_adjust_by_asset[key]["vol_risk_adjust_total_count"] += 1
+                        if next_state == "REDUCED":
+                            vol_risk_adjust_by_asset[key][
+                                "vol_risk_adjust_reduce_on_expand_count"
+                            ] += 1
+                        if next_state == "INCREASED":
+                            vol_risk_adjust_by_asset[key][
+                                "vol_risk_adjust_increase_on_contract_count"
+                            ] += 1
+                        if next_state == "NORMAL" and st in {"REDUCED", "EXTREME"}:
+                            vol_risk_adjust_by_asset[key][
+                                "vol_risk_adjust_recover_from_expand_count"
+                            ] += 1
+                        if next_state == "NORMAL" and st == "INCREASED":
+                            vol_risk_adjust_by_asset[key][
+                                "vol_risk_adjust_recover_from_contract_count"
+                            ] += 1
+                w_row = w_row.clip(lower=0.0)
+                if str(risk_budget_overcap_policy) != "leverage_entry":
+                    _apply_overcap_scale_once()
+                for cc in codes:
+                    key_cc = str(cc)
+                    if bool(
+                        risk_budget_overcap_skip_episode_active_by_code.get(
+                            key_cc, False
+                        )
+                    ) and (key_cc not in skipped_today):
+                        risk_budget_overcap_skip_episode_active_by_code[key_cc] = False
             prev_rb_w = w_row.copy()
+            prev_rb_active_set = set(active_set)
         elif not active_codes:
             w_row = pd.Series(0.0, index=codes, dtype=float)
         elif ps == "equal":
@@ -13456,6 +13574,21 @@ def compute_trend_portfolio_backtest(
     trade_stats["overall"]["vol_risk_overcap_leverage_max_multiple"] = float(
         risk_budget_overcap_leverage_max_multiple
     )
+    trade_stats["overall"]["vol_risk_standard_event_rebalance_count"] = int(
+        risk_budget_standard_event_rebalance_count
+    )
+    trade_stats["overall"]["vol_risk_standard_event_scale_up_count"] = int(
+        risk_budget_standard_event_scale_up_count
+    )
+    trade_stats["overall"]["vol_risk_standard_event_scale_down_count"] = int(
+        risk_budget_standard_event_scale_down_count
+    )
+    trade_stats["overall"]["vol_risk_standard_transition_under_to_over_count"] = int(
+        risk_budget_standard_transition_under_to_over_count
+    )
+    trade_stats["overall"]["vol_risk_standard_transition_over_to_under_count"] = int(
+        risk_budget_standard_transition_over_to_under_count
+    )
     trade_stats["overall"]["monthly_risk_budget_attempted_entry_count"] = int(
         total_monthly_risk_budget_attempted_entries
     )
@@ -13724,6 +13857,21 @@ def compute_trend_portfolio_backtest(
     )
     m_strat["vol_risk_overcap_leverage_max_multiple"] = float(
         risk_budget_overcap_leverage_max_multiple
+    )
+    m_strat["vol_risk_standard_event_rebalance_count"] = int(
+        risk_budget_standard_event_rebalance_count
+    )
+    m_strat["vol_risk_standard_event_scale_up_count"] = int(
+        risk_budget_standard_event_scale_up_count
+    )
+    m_strat["vol_risk_standard_event_scale_down_count"] = int(
+        risk_budget_standard_event_scale_down_count
+    )
+    m_strat["vol_risk_standard_transition_under_to_over_count"] = int(
+        risk_budget_standard_transition_under_to_over_count
+    )
+    m_strat["vol_risk_standard_transition_over_to_under_count"] = int(
+        risk_budget_standard_transition_over_to_under_count
     )
     m_strat["vol_periodic_rebalance_trigger_count"] = int(
         total_vol_periodic_rebalance_trigger
@@ -13994,6 +14142,7 @@ def compute_trend_portfolio_backtest(
                 "risk_budget_max_leverage_multiple": float(
                     risk_budget_max_leverage_multiple
                 ),
+                "risk_budget_rebalance_mode": str(risk_budget_rebalance_mode),
                 "vol_regime_risk_mgmt_enabled": bool(vol_regime_risk_mgmt_enabled),
                 "vol_periodic_risk_mgmt_enabled": bool(vol_periodic_risk_mgmt_enabled),
                 "vol_periodic_rebalance_threshold_pct": float(
@@ -14339,6 +14488,22 @@ def compute_trend_portfolio_backtest(
                 "overcap_policy": str(risk_budget_overcap_policy),
                 "overcap_max_leverage_multiple": float(
                     risk_budget_max_leverage_multiple
+                ),
+                "rebalance_mode": str(risk_budget_rebalance_mode),
+                "standard_event_rebalance_count": int(
+                    risk_budget_standard_event_rebalance_count
+                ),
+                "standard_event_scale_up_count": int(
+                    risk_budget_standard_event_scale_up_count
+                ),
+                "standard_event_scale_down_count": int(
+                    risk_budget_standard_event_scale_down_count
+                ),
+                "standard_transition_under_to_over_count": int(
+                    risk_budget_standard_transition_under_to_over_count
+                ),
+                "standard_transition_over_to_under_count": int(
+                    risk_budget_standard_transition_over_to_under_count
                 ),
                 "overcap_skip_entry_decision_count": int(
                     risk_budget_overcap_skip_decision_count
