@@ -5,7 +5,13 @@ import hashlib
 import json
 from decimal import ROUND_HALF_UP, Decimal
 
-from etf_momentum.db.models import EtfPrice, LiveHoldingSnapshot, LiveNavDaily
+from etf_momentum.db.models import (
+    EtfPrice,
+    LiveHoldingSnapshot,
+    LiveNavDaily,
+    LiveTrade,
+    LiveTradeAuditLog,
+)
 from etf_momentum.calendar.trading_calendar import trading_days
 from tests.helpers.rotation_case_data import get_json, post_json, post_response
 
@@ -1838,7 +1844,102 @@ def test_live_account_snapshot_import_allows_deleted_trade_audit_logs(
     )
     assert imported["ok"] is True
     assert int(imported["inserted_counts"]["trade_audit_logs"]) >= 1
-    assert any("without remap" in str(x) for x in imported.get("warnings", []))
+    assert any(
+        "remapped deleted trade_id" in str(x) for x in imported.get("warnings", [])
+    )
+
+
+def test_live_account_snapshot_import_deleted_audit_trade_id_no_collision(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入审计账户B", "initial_cash": 30000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略审计B"})
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-AD-B"},
+    )
+    hid = int(h["id"])
+    t1 = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-audit-b-k1",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159916",
+            "name": "深证ETF",
+            "trade_date": "20240624",
+            "trade_time": "10:00:00",
+            "side": "BUY",
+            "price": 8.20,
+            "quantity": 100,
+            "fee": 0.3,
+            "idempotency_key": "snapshot-audit-b-k2",
+        },
+    )
+    tid_deleted = int(t1["id"])
+    r_del = c.request(
+        "DELETE",
+        f"/api/live/trades/{tid_deleted}",
+        json={"reason": "测试删除成交审计ID冲突"},
+    )
+    assert r_del.status_code == 200
+
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    assert int(len(snapshot["payload"]["trades"])) == 1
+    imported = post_json(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+        },
+    )
+    assert imported["ok"] is True
+
+    with session_factory() as db:
+        trade_ids = {
+            int(x.id)
+            for x in db.query(LiveTrade).filter(LiveTrade.account_id == int(aid)).all()
+        }
+        logs = (
+            db.query(LiveTradeAuditLog)
+            .filter(
+                LiveTradeAuditLog.account_id == int(aid),
+                LiveTradeAuditLog.action == "delete",
+            )
+            .all()
+        )
+        assert logs
+        target = next(x for x in logs if str(x.reason) == "测试删除成交审计ID冲突")
+        assert int(target.trade_id) not in trade_ids
+        assert int(target.trade_id) < 0
 
 
 def test_live_account_snapshot_export_preserves_repo_buyback_interest_days_zero(
@@ -1929,3 +2030,554 @@ def test_live_account_snapshot_export_preserves_repo_buyback_interest_days_zero(
         int(x["trade_id"]): x for x in snapshot2["payload"]["repo_trade_details"]
     }
     assert any(int(x.get("interest_days", -1)) == 0 for x in details2.values())
+
+
+def test_live_account_snapshot_import_request_id_dry_run_not_cached(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入幂等账户A", "initial_cash": 50000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略幂等A"})
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-IDEMP"},
+    )
+    hid = int(h["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-idemp-base-k1",
+        },
+    )
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    rid = "snapshot-request-dryrun-1"
+    dry_run = post_json(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "dry_run": True,
+            "import_request_id": rid,
+            "payload": snapshot,
+        },
+    )
+    assert dry_run["dry_run"] is True
+
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159916",
+            "name": "深证ETF",
+            "trade_date": "20240624",
+            "trade_time": "10:00:00",
+            "side": "BUY",
+            "price": 8.20,
+            "quantity": 100,
+            "fee": 0.3,
+            "idempotency_key": "snapshot-idemp-extra-k2",
+        },
+    )
+    before_total = int(
+        get_json(c, f"/api/live/trades?account_id={aid}&page=1&page_size=100")["total"]
+    )
+    assert before_total == 2
+
+    imported = post_json(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "dry_run": False,
+            "import_request_id": rid,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+    )
+    assert imported["ok"] is True
+    assert imported["dry_run"] is False
+    after_total = int(
+        get_json(c, f"/api/live/trades?account_id={aid}&page=1&page_size=100")["total"]
+    )
+    assert after_total == 1
+
+
+def test_live_account_snapshot_import_request_id_conflict_on_payload_change(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入幂等账户B", "initial_cash": 50000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略幂等B"})
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-IDEMP-B"},
+    )
+    hid = int(h["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-idemp-b-k1",
+        },
+    )
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    rid = "snapshot-request-payload-check-1"
+    ok = post_json(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "import_request_id": rid,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+    )
+    assert ok["ok"] is True
+    changed = json.loads(json.dumps(snapshot))
+    changed["payload"]["account"]["notes"] = "changed payload"
+    r = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "import_request_id": rid,
+            "payload": changed,
+            "payload_sha256": _snapshot_sha256(changed),
+        },
+        expected_status=409,
+    )
+    assert "different payload" in str(r.json().get("detail", ""))
+
+
+def test_live_account_snapshot_import_rejects_repo_detail_on_non_repo_trade(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入Repo校验账户A", "initial_cash": 50000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略普通A"})
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-REPO-CHECK"},
+    )
+    hid = int(h["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-repo-illegal-k1",
+        },
+    )
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    trade_id = int(snapshot["payload"]["trades"][0]["id"])
+    snapshot["payload"]["repo_trade_details"] = [
+        {
+            "trade_id": trade_id,
+            "repo_action": "LEND",
+            "principal_amount": 1000.0,
+            "annual_rate_pct": 1.46,
+            "interest_days": 3,
+            "day_count_basis": 365,
+            "open_trade_id": None,
+        }
+    ]
+    r = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+        expected_status=400,
+    )
+    assert "only allowed for bond_repo trades" in str(r.json().get("detail", ""))
+
+
+def test_live_account_snapshot_import_rejects_repo_open_trade_id_non_repo_reference(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入Repo校验账户B", "initial_cash": 120000}
+    )
+    aid = int(acc["id"])
+    st_etf = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略普通B"})
+    sid_etf = int(st_etf["id"])
+    st_repo = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "策略逆回购B", "strategy_type": "bond_repo"},
+    )
+    sid_repo = int(st_repo["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-REPO-OPEN-CHECK"},
+    )
+    hid = int(h["id"])
+
+    etf_trade = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_etf,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-repo-open-illegal-etf-k1",
+        },
+    )
+    open_repo = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_repo,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240621",
+            "trade_time": "15:30:00",
+            "side": "BUY",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10000.0,
+            "repo_action": "LEND",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "snapshot-repo-open-illegal-open-k2",
+        },
+    )
+    close_repo = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_repo,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240624",
+            "trade_time": "00:00:00",
+            "side": "SELL",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10001.2,
+            "repo_action": "BUYBACK",
+            "repo_principal_amount": 10000.0,
+            "repo_open_trade_id": int(open_repo["id"]),
+            "idempotency_key": "snapshot-repo-open-illegal-close-k3",
+        },
+    )
+
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    details = snapshot["payload"]["repo_trade_details"]
+    close_trade_id = int(close_repo["id"])
+    for d in details:
+        if int(d["trade_id"]) == close_trade_id:
+            d["open_trade_id"] = int(etf_trade["id"])
+            break
+    r = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+        expected_status=400,
+    )
+    assert "must reference a bond_repo trade" in str(r.json().get("detail", ""))
+
+
+def test_live_account_snapshot_import_rejects_repo_action_side_mismatch(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入Repo校验账户C", "initial_cash": 120000}
+    )
+    aid = int(acc["id"])
+    st_repo = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "策略逆回购C", "strategy_type": "bond_repo"},
+    )
+    sid_repo = int(st_repo["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-REPO-SIDE-CHECK"},
+    )
+    hid = int(h["id"])
+
+    open_repo = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_repo,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240621",
+            "trade_time": "15:30:00",
+            "side": "BUY",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10000.0,
+            "repo_action": "LEND",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "snapshot-repo-side-open-k1",
+        },
+    )
+    close_repo = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_repo,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240624",
+            "trade_time": "00:00:00",
+            "side": "SELL",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10001.2,
+            "repo_action": "BUYBACK",
+            "repo_principal_amount": 10000.0,
+            "repo_open_trade_id": int(open_repo["id"]),
+            "idempotency_key": "snapshot-repo-side-close-k2",
+        },
+    )
+
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    details = snapshot["payload"]["repo_trade_details"]
+    close_trade_id = int(close_repo["id"])
+    for d in details:
+        if int(d["trade_id"]) == close_trade_id:
+            d["repo_action"] = "LEND"
+            break
+    r = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+        expected_status=400,
+    )
+    assert "LEND detail must map to BUY side trade" in str(r.json().get("detail", ""))
+
+
+def test_live_account_snapshot_import_rejects_duplicate_trade_id(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入重复ID账户A", "initial_cash": 50000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略重复IDA"})
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-DUP-ID-A"},
+    )
+    hid = int(h["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-dup-id-k1",
+        },
+    )
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    assert len(snapshot["payload"]["trades"]) == 1
+    dup = json.loads(json.dumps(snapshot["payload"]["trades"][0]))
+    dup["idempotency_key"] = "snapshot-dup-id-k2"
+    snapshot["payload"]["trades"].append(dup)
+    r = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+        expected_status=400,
+    )
+    assert "duplicate trade id in payload" in str(r.json().get("detail", ""))
+
+
+def test_live_account_snapshot_import_rejects_repo_open_trade_id_self_reference(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入Repo校验账户D", "initial_cash": 120000}
+    )
+    aid = int(acc["id"])
+    st_repo = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "策略逆回购D", "strategy_type": "bond_repo"},
+    )
+    sid_repo = int(st_repo["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-REPO-SELF-CHECK"},
+    )
+    hid = int(h["id"])
+
+    open_repo = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_repo,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240621",
+            "trade_time": "15:30:00",
+            "side": "BUY",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10000.0,
+            "repo_action": "LEND",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "snapshot-repo-self-open-k1",
+        },
+    )
+    close_repo = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid_repo,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240624",
+            "trade_time": "00:00:00",
+            "side": "SELL",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10001.2,
+            "repo_action": "BUYBACK",
+            "repo_principal_amount": 10000.0,
+            "repo_open_trade_id": int(open_repo["id"]),
+            "idempotency_key": "snapshot-repo-self-close-k2",
+        },
+    )
+
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    details = snapshot["payload"]["repo_trade_details"]
+    close_trade_id = int(close_repo["id"])
+    for d in details:
+        if int(d["trade_id"]) == close_trade_id:
+            d["open_trade_id"] = close_trade_id
+            break
+    r = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+        expected_status=400,
+    )
+    assert "must not reference itself" in str(r.json().get("detail", ""))

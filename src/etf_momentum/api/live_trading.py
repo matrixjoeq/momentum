@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1937,9 +1938,25 @@ def _validate_snapshot_references(doc: LiveAccountSnapshotDocument, *, account_i
     payload = doc.payload
     if int(payload.account.id) != int(account_id):
         raise HTTPException(status_code=400, detail="payload account id mismatch")
-    strategy_ids = {int(x.id) for x in payload.strategies}
-    holder_ids = {int(x.id) for x in payload.shareholders}
-    trade_ids = {int(x.id) for x in payload.trades}
+    strategy_id_list = [int(x.id) for x in payload.strategies]
+    if len(set(strategy_id_list)) != len(strategy_id_list):
+        raise HTTPException(status_code=400, detail="duplicate strategy id in payload")
+    strategy_ids = set(strategy_id_list)
+    strategy_type_by_id = {
+        int(x.id): _norm_strategy_type(x.strategy_type) for x in payload.strategies
+    }
+    holder_id_list = [int(x.id) for x in payload.shareholders]
+    if len(set(holder_id_list)) != len(holder_id_list):
+        raise HTTPException(
+            status_code=400, detail="duplicate shareholder_account id in payload"
+        )
+    holder_ids = set(holder_id_list)
+    trade_id_list = [int(x.id) for x in payload.trades]
+    if len(set(trade_id_list)) != len(trade_id_list):
+        raise HTTPException(status_code=400, detail="duplicate trade id in payload")
+    trade_by_id = {int(x.id): x for x in payload.trades}
+    trade_ids = set(trade_by_id.keys())
+    repo_detail_seen_trade_ids: set[int] = set()
 
     for x in payload.strategy_cashflows:
         if int(x.strategy_id) not in strategy_ids:
@@ -1962,16 +1979,112 @@ def _validate_snapshot_references(doc: LiveAccountSnapshotDocument, *, account_i
                 ),
             )
     for x in payload.repo_trade_details:
-        if int(x.trade_id) not in trade_ids:
+        tid = int(x.trade_id)
+        if tid in repo_detail_seen_trade_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"duplicate trade_id in repo_trade_details: {tid}",
+            )
+        repo_detail_seen_trade_ids.add(tid)
+        if tid not in trade_ids:
             raise HTTPException(
                 status_code=400,
                 detail=f"unknown trade_id in repo_trade_details: {x.trade_id}",
+            )
+        t = trade_by_id[tid]
+        if strategy_type_by_id.get(int(t.strategy_id), "etf_spot") != "bond_repo":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "repo_trade_details are only allowed for bond_repo trades, "
+                    f"trade_id={tid}"
+                ),
+            )
+        side = _norm_side(t.side)
+        action = _norm_repo_action(x.repo_action, side=side)
+        if action == "LEND" and side != "BUY":
+            raise HTTPException(
+                status_code=400,
+                detail=(f"repo LEND detail must map to BUY side trade, trade_id={tid}"),
+            )
+        if action == "BUYBACK" and side != "SELL":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"repo BUYBACK detail must map to SELL side trade, trade_id={tid}"
+                ),
+            )
+        if action == "LEND" and x.open_trade_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"repo LEND trade must not set open_trade_id: trade_id={tid}",
             )
         if x.open_trade_id is not None and int(x.open_trade_id) not in trade_ids:
             raise HTTPException(
                 status_code=400,
                 detail=f"unknown open_trade_id in repo_trade_details: {x.open_trade_id}",
             )
+        if x.open_trade_id is not None:
+            open_tid = int(x.open_trade_id)
+            if open_tid == tid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"repo open_trade_id must not reference itself, trade_id={tid}"
+                    ),
+                )
+            open_trade = trade_by_id[open_tid]
+            if (
+                strategy_type_by_id.get(int(open_trade.strategy_id), "etf_spot")
+                != "bond_repo"
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "repo open_trade_id must reference a bond_repo trade, "
+                        f"open_trade_id={open_tid}"
+                    ),
+                )
+            if _norm_side(open_trade.side) != "BUY":
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "repo open_trade_id must reference BUY/LEND side trade, "
+                        f"open_trade_id={open_tid}"
+                    ),
+                )
+            if _norm_code(open_trade.code) != _norm_code(t.code):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "repo open_trade_id must reference same code, "
+                        f"trade_id={tid}, open_trade_id={open_tid}"
+                    ),
+                )
+            if int(open_trade.strategy_id) != int(t.strategy_id):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "repo open_trade_id must reference same strategy, "
+                        f"trade_id={tid}, open_trade_id={open_tid}"
+                    ),
+                )
+            if int(open_trade.shareholder_account_id) != int(t.shareholder_account_id):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "repo open_trade_id must reference same shareholder_account_id, "
+                        f"trade_id={tid}, open_trade_id={open_tid}"
+                    ),
+                )
+    for t in payload.trades:
+        tid = int(t.id)
+        if strategy_type_by_id.get(int(t.strategy_id), "etf_spot") == "bond_repo":
+            if tid not in repo_detail_seen_trade_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"missing repo detail for bond_repo trade_id: {tid}",
+                )
     for x in payload.corporate_actions:
         if x.account_id is not None and int(x.account_id) != int(account_id):
             raise HTTPException(
@@ -2866,7 +2979,24 @@ def live_import_account_snapshot(
     try:
         idempotent_job: SyncJob | None = None
         import_request_id = str(payload.import_request_id or "").strip() or None
-        if import_request_id is not None:
+
+        doc = payload.payload
+        _validate_snapshot_contract(doc)
+        _validate_snapshot_size(doc)
+        _validate_snapshot_references(doc, account_id=account_id)
+        payload_sha = _payload_sha256_hex(doc)
+        if payload.payload_sha256 and payload.payload_sha256.lower() != payload_sha:
+            raise HTTPException(status_code=400, detail="payload_sha256 mismatch")
+
+        account = (
+            db.query(LiveAccount)
+            .filter(LiveAccount.id == int(account_id))
+            .one_or_none()
+        )
+        if account is None:
+            raise HTTPException(status_code=404, detail="account not found")
+
+        if import_request_id is not None and not bool(payload.dry_run):
             dedupe_key = _import_job_dedupe_key(account_id, import_request_id)
             existing_job = (
                 db.query(SyncJob)
@@ -2882,10 +3012,20 @@ def live_import_account_snapshot(
                 and existing_job.result_json
             ):
                 try:
-                    return LiveAccountImportResponse.model_validate(
+                    cached = LiveAccountImportResponse.model_validate(
                         json.loads(existing_job.result_json)
                     )
-                except Exception:
+                    if str(cached.payload_sha256) == str(payload_sha):
+                        return cached
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "import_request_id already used with different payload"
+                        ),
+                    )
+                except HTTPException:
+                    raise
+                except (json.JSONDecodeError, TypeError, ValidationError):
                     pass
             if existing_job is not None and existing_job.status in {
                 "queued",
@@ -2911,22 +3051,6 @@ def live_import_account_snapshot(
                 idempotent_job.error_message = None
                 idempotent_job.result_json = None
                 db.flush()
-
-        doc = payload.payload
-        _validate_snapshot_contract(doc)
-        _validate_snapshot_size(doc)
-        _validate_snapshot_references(doc, account_id=account_id)
-        payload_sha = _payload_sha256_hex(doc)
-        if payload.payload_sha256 and payload.payload_sha256.lower() != payload_sha:
-            raise HTTPException(status_code=400, detail="payload_sha256 mismatch")
-
-        account = (
-            db.query(LiveAccount)
-            .filter(LiveAccount.id == int(account_id))
-            .one_or_none()
-        )
-        if account is None:
-            raise HTTPException(status_code=404, detail="account not found")
 
         old_strategy_ids = _strategy_ids_for_account(db, account_id=account_id)
         would_delete_counts = _count_account_scope_rows(
@@ -2960,14 +3084,6 @@ def live_import_account_snapshot(
                 import_request_id=import_request_id,
                 imported_at=None,
             )
-            if idempotent_job is not None:
-                idempotent_job.status = "success"
-                idempotent_job.result_json = json.dumps(
-                    out.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                )
-                idempotent_job.finished_at = dt.datetime.now(dt.timezone.utc)
             return out
 
         if conflicts:
@@ -3250,19 +3366,31 @@ def live_import_account_snapshot(
             )
             inserted_counts["corporate_actions"] += 1
 
+        deleted_trade_id_remap: dict[int, int] = {}
+
         for al in sorted(
             doc.payload.trade_audit_logs,
             key=lambda x: (int(x.trade_id), str(x.action)),
         ):
-            mapped_trade_id = trade_map.get(int(al.trade_id))
+            old_trade_id = int(al.trade_id)
+            mapped_trade_id = trade_map.get(old_trade_id)
             if mapped_trade_id is None:
-                mapped_trade_id = int(al.trade_id)
-                warnings.append(
-                    (
-                        "trade_audit_log keeps original trade_id without remap: "
-                        f"{int(al.trade_id)}"
+                remapped_deleted_id = deleted_trade_id_remap.get(old_trade_id)
+                is_new_deleted_mapping = remapped_deleted_id is None
+                if remapped_deleted_id is None:
+                    # Use negative IDs for deleted-trade audit logs to avoid
+                    # accidental future collisions with positive auto-increment
+                    # trade IDs.
+                    remapped_deleted_id = -int(old_trade_id)
+                    deleted_trade_id_remap[old_trade_id] = remapped_deleted_id
+                mapped_trade_id = remapped_deleted_id
+                if is_new_deleted_mapping:
+                    warnings.append(
+                        (
+                            "trade_audit_log remapped deleted trade_id: "
+                            f"{old_trade_id}->{int(mapped_trade_id)}"
+                        )
                     )
-                )
             db.add(
                 LiveTradeAuditLog(
                     trade_id=int(mapped_trade_id),
@@ -3869,6 +3997,7 @@ def _apply_trade_values(
     if qty <= 0:
         raise HTTPException(status_code=400, detail="quantity must be > 0")
     repo_detail: dict[str, Any] | None = None
+    repo_name = ""
     if strategy_type == "bond_repo":
         repo_detail = _build_repo_detail_payload(payload, side=side)
         if repo_detail["repo_action"] == "LEND" and not _is_repo_lend_time_allowed(
