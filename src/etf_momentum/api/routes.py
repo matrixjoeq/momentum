@@ -2375,6 +2375,12 @@ def trend_backtest(
         risk_budget_max_leverage_multiple=float(
             getattr(payload, "risk_budget_max_leverage_multiple", 2.0)
         ),
+        risk_budget_rebalance_mode=str(
+            getattr(payload, "risk_budget_rebalance_mode", "conservative")
+            or "conservative"
+        )
+        .strip()
+        .lower(),
         vol_regime_risk_mgmt_enabled=bool(
             getattr(payload, "vol_regime_risk_mgmt_enabled", False)
         ),
@@ -2480,6 +2486,12 @@ def trend_portfolio_backtest(
         risk_budget_max_leverage_multiple=float(
             getattr(payload, "risk_budget_max_leverage_multiple", 2.0)
         ),
+        risk_budget_rebalance_mode=str(
+            getattr(payload, "risk_budget_rebalance_mode", "conservative")
+            or "conservative"
+        )
+        .strip()
+        .lower(),
         vol_regime_risk_mgmt_enabled=bool(
             getattr(payload, "vol_regime_risk_mgmt_enabled", False)
         ),
@@ -9958,6 +9970,12 @@ def futures_research_trend_backtest_api(
         risk_budget_max_leverage_multiple=float(
             getattr(payload, "risk_budget_max_leverage_multiple", 2.0)
         ),
+        risk_budget_rebalance_mode=str(
+            getattr(payload, "risk_budget_rebalance_mode", "conservative")
+            or "conservative"
+        )
+        .strip()
+        .lower(),
         monthly_risk_budget_enabled=bool(
             getattr(payload, "monthly_risk_budget_enabled", False)
         ),

@@ -816,6 +816,7 @@ def compute_futures_group_trend_backtest(
     risk_budget_pct: float = 0.01,
     risk_budget_overcap_policy: str = "scale",
     risk_budget_max_leverage_multiple: float = 2.0,
+    risk_budget_rebalance_mode: str = "conservative",
     monthly_risk_budget_enabled: bool = False,
     monthly_risk_budget_pct: float = 0.06,
     monthly_risk_budget_include_new_trade_risk: bool = False,
@@ -902,6 +903,9 @@ def compute_futures_group_trend_backtest(
     rb_pol = str(risk_budget_overcap_policy or "scale").strip().lower()
     if rb_pol not in {"scale", "skip_entry", "replace_entry", "leverage_entry"}:
         return {"ok": False, "error": "invalid_risk_budget_overcap_policy"}
+    rb_mode = str(risk_budget_rebalance_mode or "conservative").strip().lower()
+    if rb_mode not in {"conservative", "standard"}:
+        return {"ok": False, "error": "invalid_risk_budget_rebalance_mode"}
 
     atm_raw = str(atr_stop_mode or "none").strip().lower()
     if atm_raw not in {"none", "static", "trailing", "tightening"}:
@@ -1228,6 +1232,7 @@ def compute_futures_group_trend_backtest(
                 risk_budget_pct=float(risk_budget_pct),
                 policy=rb_pol,
                 max_leverage_multiple=float(risk_budget_max_leverage_multiple),
+                rebalance_mode=rb_mode,
             )
             portfolio_meta["position_sizing"] = "risk_budget"
             portfolio_meta["risk_budget"] = rb_stats
@@ -1682,6 +1687,7 @@ def compute_futures_group_trend_backtest(
             "risk_budget_max_leverage_multiple": float(
                 risk_budget_max_leverage_multiple
             ),
+            "risk_budget_rebalance_mode": rb_mode,
             "monthly_risk_budget_requested": bool(monthly_risk_budget_enabled),
             "monthly_risk_budget_enabled": bool(monthly_eff),
             "monthly_risk_budget_effective": bool(bm == "portfolio" and monthly_eff),

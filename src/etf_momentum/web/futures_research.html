@@ -378,6 +378,13 @@
               </select>
             </div>
             <div>
+              <label>风险预算模式</label>
+              <select id="trendRbRebalanceMode" style="min-width: 180px">
+                <option value="conservative" selected>保守（只降不升）</option>
+                <option value="standard">标准（调仓事件日按ATR重算）</option>
+              </select>
+            </div>
+            <div>
               <label>最大杠杆倍数</label>
               <input
                 id="trendRbMaxLev"
@@ -1367,6 +1374,9 @@
           rbAtrWin: String($("trendRbAtrWin")?.value ?? "20"),
           rbPct: String($("trendRbPct")?.value ?? "1"),
           rbOvercap: String($("trendRbOvercap")?.value || "scale"),
+          rbRebalanceMode: String(
+            $("trendRbRebalanceMode")?.value || "conservative",
+          ),
           rbMaxLev: String($("trendRbMaxLev")?.value ?? "2"),
           monthlyRbEnable: String($("trendMonthlyRbEnable")?.value || "false"),
           monthlyRbPct: String($("trendMonthlyRbPct")?.value ?? "6"),
@@ -1457,6 +1467,7 @@
           if (el) el.value = p.positionSizing;
         }
         setSelectIfOptionExists("trendRbOvercap", p.rbOvercap);
+        setSelectIfOptionExists("trendRbRebalanceMode", p.rbRebalanceMode);
         if (p.monthlyRbEnable === "true" || p.monthlyRbEnable === "false") {
           const el = $("trendMonthlyRbEnable");
           if (el) el.value = p.monthlyRbEnable;
@@ -3642,6 +3653,11 @@
         const mode = m.backtest_mode || "-";
         const ps = m.position_sizing;
         const psStr = ps == null || ps === "" ? "-" : String(ps);
+        const rbMode =
+          m.risk_budget_rebalance_mode == null ||
+          String(m.risk_budget_rebalance_mode).trim() === ""
+            ? "-"
+            : String(m.risk_budget_rebalance_mode);
         const mon =
           m.monthly_risk_budget_effective === true
             ? "开"
@@ -3678,7 +3694,7 @@
         const lotM =
           lotMeta && lotMeta.engine === "lot_account" ? "离散手数" : "-";
         $("trendMeta").textContent =
-          `分组=${m.group_name || "-"} | 策略=${stratDetail} | 通用入场过滤=${entryFilterOn ? "开" : "关"}(多/空MA=${longFilterMa}/${shortFilterMa}) | 模式=${mode} | 仓位法=${psStr} | 月度门控=${mon} | 资金=${acWan}×使用${psp} | 预留=${rsv} | 回测保证金率=${bmr} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 引擎=${lotM} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
+          `分组=${m.group_name || "-"} | 策略=${stratDetail} | 通用入场过滤=${entryFilterOn ? "开" : "关"}(多/空MA=${longFilterMa}/${shortFilterMa}) | 模式=${mode} | 仓位法=${psStr} | 风险预算模式=${rbMode} | 月度门控=${mon} | 资金=${acWan}×使用${psp} | 预留=${rsv} | 回测保证金率=${bmr} | 成本=${Number(m.cost_bps || 0).toFixed(1)}bps | 引擎=${lotM} | 区间=${m.start || "-"}~${m.end || "-"} | 动态候选池=${m.dynamic_universe ? "是" : "否"} | 执行价=${m.exec_price || "-"}`;
         const s = out.summary || {};
         $("trendSummaryWrap").innerHTML =
           `<table class="corr"><thead><tr><th>策略累计收益</th><th>基准累计收益</th><th>超额累计收益</th></tr></thead>` +
@@ -4008,6 +4024,9 @@
           risk_budget_pct: rbPct / 100.0,
           risk_budget_overcap_policy: String(
             $("trendRbOvercap").value || "scale",
+          ),
+          risk_budget_rebalance_mode: String(
+            $("trendRbRebalanceMode").value || "conservative",
           ),
           risk_budget_max_leverage_multiple: rbLev,
           monthly_risk_budget_enabled:

@@ -2406,6 +2406,57 @@ def test_api_trend_single_trade_stats_include_semi_variance(
     _assert_trade_extreme_stats_shape(by_code)
 
 
+def test_api_trend_portfolio_risk_budget_rebalance_mode_contract(engine, api_client):
+    dates = [d.date() for d in pd.date_range("2024-01-01", periods=120, freq="B")]
+    seed_prices(
+        engine,
+        code_to_series={
+            "RBM1": [100.0 + i * 0.5 + ((i % 8) - 4) * 0.08 for i in range(120)],
+            "RBM2": [90.0 + i * 0.45 + ((i % 11) - 5) * 0.09 for i in range(120)],
+        },
+        dates=dates,
+    )
+    c = api_client
+    base_payload = {
+        "codes": ["RBM1", "RBM2"],
+        "start": fmt_ymd(dates[0]),
+        "end": fmt_ymd(dates[-1]),
+        "strategy": "ma_filter",
+        "sma_window": 2,
+        "position_sizing": "risk_budget",
+        "risk_budget_atr_window": 20,
+        "risk_budget_pct": 0.01,
+        "risk_budget_overcap_policy": "scale",
+        "cost_bps": 0.0,
+        "slippage_rate": 0.0,
+    }
+    out_std = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**base_payload, "risk_budget_rebalance_mode": "standard"},
+    )
+    params = ((out_std.get("meta") or {}).get("params") or {})
+    assert str(params.get("risk_budget_rebalance_mode") or "") == "standard"
+    rc = (out_std.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
+    assert str(rc.get("rebalance_mode") or "") == "standard"
+
+    out_std_bt = post_json_ok(
+        c,
+        "/api/analysis/trend/portfolio",
+        {**base_payload, "risk_budget_rebalance_mode": "standard", "engine": "bt"},
+    )
+    params_bt = ((out_std_bt.get("meta") or {}).get("params") or {})
+    assert str(params_bt.get("risk_budget_rebalance_mode") or "") == "standard"
+    rc_bt = (out_std_bt.get("risk_controls") or {}).get("vol_regime_risk_mgmt") or {}
+    assert str(rc_bt.get("rebalance_mode") or "") == "standard"
+
+    bad = c.post(
+        "/api/analysis/trend/portfolio",
+        json={**base_payload, "risk_budget_rebalance_mode": "intraday"},
+    )
+    assert bad.status_code == 422
+
+
 @pytest.mark.parametrize("runtime_engine", [None, "bt"])
 def test_api_trend_portfolio_trade_stats_include_semi_variance(
     runtime_engine, engine, api_client
