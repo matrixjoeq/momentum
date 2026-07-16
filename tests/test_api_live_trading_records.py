@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 from decimal import ROUND_HALF_UP, Decimal
 
 from etf_momentum.db.models import EtfPrice, LiveHoldingSnapshot, LiveNavDaily
@@ -80,6 +82,17 @@ def _seed_live_prices(session_factory) -> None:
                         )
                     )
         db.commit()
+
+
+def _snapshot_sha256(payload_doc: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            payload_doc,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def test_live_trading_records_contract(api_client, session_factory):
@@ -1485,3 +1498,434 @@ def test_live_trade_rejects_when_account_cash_insufficient_without_financing(
         expected_status=400,
     )
     assert "insufficient account cash" in str(r.json().get("detail", ""))
+
+
+def test_live_account_snapshot_export_import_overwrite_contract(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入导出账户A", "initial_cash": 100000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略快照A"})
+    sid = int(st["id"])
+    holder = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-A"},
+    )
+    hid = int(holder["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 1000,
+            "fee": 2.0,
+            "idempotency_key": "snapshot-base-k1",
+        },
+    )
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240624",
+            "trade_time": "10:00:00",
+            "side": "SELL",
+            "price": 4.20,
+            "quantity": 300,
+            "fee": 1.0,
+            "idempotency_key": "snapshot-base-k2",
+        },
+    )
+    exported = get_json(c, f"/api/live/accounts/{aid}/export")
+    assert exported["format"] == "etf_momentum_live_account_snapshot"
+    assert int(exported["version"]) == 1
+    original_total = int(
+        get_json(c, f"/api/live/trades?account_id={aid}&page=1&page_size=200")["total"]
+    )
+
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159916",
+            "name": "深证ETF",
+            "trade_date": "20240625",
+            "trade_time": "10:30:00",
+            "side": "BUY",
+            "price": 8.20,
+            "quantity": 100,
+            "fee": 0.3,
+            "idempotency_key": "snapshot-extra-k3",
+        },
+    )
+    assert (
+        int(
+            get_json(c, f"/api/live/trades?account_id={aid}&page=1&page_size=200")[
+                "total"
+            ]
+        )
+        == original_total + 1
+    )
+
+    req = {
+        "replace_all": True,
+        "payload": exported,
+        "payload_sha256": _snapshot_sha256(exported),
+        "import_request_id": "snapshot-import-req-1",
+    }
+    imp = post_json(c, f"/api/live/accounts/{aid}/import", req)
+    assert imp["ok"] is True
+    assert imp["dry_run"] is False
+    assert int(imp["deleted_counts"]["trades"]) == original_total + 1
+    assert int(imp["inserted_counts"]["trades"]) == original_total
+    after = get_json(c, f"/api/live/trades?account_id={aid}&page=1&page_size=200")
+    assert int(after["total"]) == original_total
+    assert all(
+        str(x.get("idempotency_key") or "") != "snapshot-extra-k3"
+        for x in after["items"]
+    )
+
+    # same import_request_id must be idempotent and return previous result snapshot
+    imp_retry = post_json(c, f"/api/live/accounts/{aid}/import", req)
+    assert imp_retry["import_request_id"] == "snapshot-import-req-1"
+    assert imp_retry["payload_sha256"] == imp["payload_sha256"]
+    assert imp_retry["imported_at"] == imp["imported_at"]
+
+    _assert_scope_financial_audit(c, scope_type="account", scope_id=aid)
+    strategies_now = get_json(c, f"/api/live/accounts/{aid}/strategies")
+    for row in strategies_now:
+        _assert_scope_financial_audit(c, scope_type="strategy", scope_id=int(row["id"]))
+
+
+def test_live_account_snapshot_import_dry_run_reports_unique_conflict(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc_a = post_json(
+        c, "/api/live/accounts", {"name": "导入冲突账户A", "initial_cash": 50000}
+    )
+    aid_a = int(acc_a["id"])
+    st_a = post_json(c, f"/api/live/accounts/{aid_a}/strategies", {"name": "策略A"})
+    sid_a = int(st_a["id"])
+    h_a = post_json(
+        c,
+        f"/api/live/accounts/{aid_a}/shareholders",
+        {"shareholder_account": "SNAP-CA"},
+    )
+    hid_a = int(h_a["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid_a,
+            "strategy_id": sid_a,
+            "shareholder_account_id": hid_a,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "dryrun-source-idem",
+        },
+    )
+    exported = get_json(c, f"/api/live/accounts/{aid_a}/export")
+
+    acc_b = post_json(
+        c, "/api/live/accounts", {"name": "导入冲突账户B", "initial_cash": 50000}
+    )
+    aid_b = int(acc_b["id"])
+    st_b = post_json(c, f"/api/live/accounts/{aid_b}/strategies", {"name": "策略B"})
+    sid_b = int(st_b["id"])
+    h_b = post_json(
+        c,
+        f"/api/live/accounts/{aid_b}/shareholders",
+        {"shareholder_account": "SNAP-CB"},
+    )
+    hid_b = int(h_b["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid_b,
+            "strategy_id": sid_b,
+            "shareholder_account_id": hid_b,
+            "code": "159916",
+            "name": "深证ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 8.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "dryrun-conflict-key",
+        },
+    )
+
+    assert exported["payload"]["trades"]
+    exported["payload"]["trades"][0]["idempotency_key"] = "dryrun-conflict-key"
+    before_total = int(
+        get_json(c, f"/api/live/trades?account_id={aid_a}&page=1&page_size=100")[
+            "total"
+        ]
+    )
+    r = c.post(
+        f"/api/live/accounts/{aid_a}/import",
+        json={
+            "replace_all": True,
+            "dry_run": True,
+            "payload": exported,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert body["dry_run"] is True
+    assert any(
+        str(x.get("field")) == "idempotency_key" for x in body.get("conflicts", [])
+    )
+    after_total = int(
+        get_json(c, f"/api/live/trades?account_id={aid_a}&page=1&page_size=100")[
+            "total"
+        ]
+    )
+    assert after_total == before_total
+
+
+def test_live_account_snapshot_import_contract_errors(api_client, session_factory):
+    _seed_live_prices(session_factory)
+    c = api_client
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入校验账户A", "initial_cash": 30000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略校验A"})
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-VA"},
+    )
+    hid = int(h["id"])
+    post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-validate-k1",
+        },
+    )
+    exported = get_json(c, f"/api/live/accounts/{aid}/export")
+    r_bad_sha = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": exported,
+            "payload_sha256": "0" * 64,
+        },
+        expected_status=400,
+    )
+    assert "payload_sha256 mismatch" in str(r_bad_sha.json().get("detail", ""))
+
+    r_extra = post_response(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "dry_run": True,
+            "payload": exported,
+            "unknown_field": "x",
+        },
+        expected_status=422,
+    )
+    assert r_extra.status_code == 422
+
+
+def test_live_account_snapshot_import_allows_deleted_trade_audit_logs(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入审计账户A", "initial_cash": 20000}
+    )
+    aid = int(acc["id"])
+    st = post_json(c, f"/api/live/accounts/{aid}/strategies", {"name": "策略审计A"})
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-AD"},
+    )
+    hid = int(h["id"])
+    t = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "159915",
+            "name": "创业板ETF",
+            "trade_date": "20240621",
+            "trade_time": "09:31:00",
+            "side": "BUY",
+            "price": 4.10,
+            "quantity": 100,
+            "fee": 0.2,
+            "idempotency_key": "snapshot-audit-delete-k1",
+        },
+    )
+    tid = int(t["id"])
+    r_del = c.request(
+        "DELETE",
+        f"/api/live/trades/{tid}",
+        json={"reason": "测试删除成交审计导入"},
+    )
+    assert r_del.status_code == 200
+
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    assert int(len(snapshot["payload"]["trades"])) == 0
+    assert int(len(snapshot["payload"]["trade_audit_logs"])) >= 1
+    assert any(
+        int(x.get("trade_id", 0)) == tid
+        for x in snapshot["payload"]["trade_audit_logs"]
+    )
+
+    imported = post_json(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+        },
+    )
+    assert imported["ok"] is True
+    assert int(imported["inserted_counts"]["trade_audit_logs"]) >= 1
+    assert any("without remap" in str(x) for x in imported.get("warnings", []))
+
+
+def test_live_account_snapshot_export_preserves_repo_buyback_interest_days_zero(
+    api_client, session_factory
+):
+    _seed_live_prices(session_factory)
+    c = api_client
+
+    acc = post_json(
+        c, "/api/live/accounts", {"name": "导入Repo账户A", "initial_cash": 100000}
+    )
+    aid = int(acc["id"])
+    st = post_json(
+        c,
+        f"/api/live/accounts/{aid}/strategies",
+        {"name": "逆回购策略A", "strategy_type": "bond_repo"},
+    )
+    sid = int(st["id"])
+    h = post_json(
+        c,
+        f"/api/live/accounts/{aid}/shareholders",
+        {"shareholder_account": "SNAP-REPO"},
+    )
+    hid = int(h["id"])
+
+    open_trade = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240621",
+            "trade_time": "15:30:00",
+            "side": "BUY",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10000.0,
+            "repo_action": "LEND",
+            "repo_principal_amount": 10000.0,
+            "repo_interest_days": 3,
+            "idempotency_key": "snapshot-repo-open-k1",
+        },
+    )
+    close_trade = post_json(
+        c,
+        "/api/live/trades",
+        {
+            "account_id": aid,
+            "strategy_id": sid,
+            "shareholder_account_id": hid,
+            "code": "204001",
+            "name": "国债逆回购",
+            "trade_date": "20240624",
+            "trade_time": "00:00:00",
+            "side": "SELL",
+            "price": 1.46,
+            "quantity": 10,
+            "amount": 10001.2,
+            "repo_action": "BUYBACK",
+            "repo_principal_amount": 10000.0,
+            "repo_open_trade_id": int(open_trade["id"]),
+            "idempotency_key": "snapshot-repo-close-k1",
+        },
+    )
+    assert close_trade["repo_action"] == "BUYBACK"
+    assert close_trade["repo_interest_days"] is None
+
+    snapshot = get_json(c, f"/api/live/accounts/{aid}/export")
+    details = {int(x["trade_id"]): x for x in snapshot["payload"]["repo_trade_details"]}
+    close_detail = details[int(close_trade["id"])]
+    assert int(close_detail["interest_days"]) == 0
+
+    imported = post_json(
+        c,
+        f"/api/live/accounts/{aid}/import",
+        {
+            "replace_all": True,
+            "payload": snapshot,
+            "payload_sha256": _snapshot_sha256(snapshot),
+        },
+    )
+    assert imported["ok"] is True
+    snapshot2 = get_json(c, f"/api/live/accounts/{aid}/export")
+    details2 = {
+        int(x["trade_id"]): x for x in snapshot2["payload"]["repo_trade_details"]
+    }
+    assert any(int(x.get("interest_days", -1)) == 0 for x in details2.values())

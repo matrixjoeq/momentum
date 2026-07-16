@@ -145,9 +145,17 @@
           <label>股东账号</label>
           <select id="holderSelect"></select>
         </div>
+        <button id="exportAccountBtn">导出账户</button>
+        <button id="importAccountBtn">导入账户(全覆盖)</button>
         <button id="refreshAllBtn">刷新全部</button>
         <button id="replayBtn">重放计算</button>
       </div>
+      <input
+        id="importAccountFile"
+        type="file"
+        accept=".json,application/json"
+        style="display: none"
+      />
       <div id="msg" class="muted" style="margin-top: 8px"></div>
     </div>
 
@@ -867,12 +875,42 @@
           let err = `${res.status} ${res.statusText}`;
           try {
             const j = await res.json();
-            if (j && j.detail) err = String(j.detail);
+            if (j && j.detail) {
+              err =
+                typeof j.detail === "string"
+                  ? j.detail
+                  : JSON.stringify(j.detail);
+            }
           } catch (_) {}
           throw new Error(err);
         }
         return res.json();
       };
+
+      function tsCompactNow() {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        return `${y}${m}${dd}_${hh}${mm}${ss}`;
+      }
+
+      function downloadJsonFile(filename, obj) {
+        const blob = new Blob([JSON.stringify(obj, null, 2)], {
+          type: "application/json;charset=utf-8",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
 
       function toYmdToday() {
         const d = new Date();
@@ -3936,6 +3974,76 @@
             msg(e.message, true);
           }
         };
+
+        $("exportAccountBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            if (!aid) throw new Error("请先选择账户");
+            const out = await api(`/accounts/${aid}/export`);
+            const accountName =
+              out?.payload?.account?.name || `account_${String(aid)}`;
+            const safeName = String(accountName).replace(
+              /[^\w\u4e00-\u9fa5-]+/g,
+              "_",
+            );
+            downloadJsonFile(
+              `live_account_${safeName}_${tsCompactNow()}.json`,
+              out,
+            );
+            msg("账户快照已导出");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("importAccountBtn").onclick = async () => {
+          try {
+            const aid = Number($("accountSelect").value || 0);
+            if (!aid) throw new Error("请先选择账户");
+            const ok = window.confirm(
+              "导入将全覆盖当前账户下的策略、股东账号、流水、成交与企业行为，是否继续？",
+            );
+            if (!ok) return;
+            const inp = $("importAccountFile");
+            inp.value = "";
+            inp.dataset.accountId = String(aid);
+            inp.click();
+          } catch (e) {
+            msg(e.message, true);
+          }
+        };
+
+        $("importAccountFile").addEventListener("change", async (ev) => {
+          try {
+            const aid = Number(ev?.target?.dataset?.accountId || 0);
+            const file = ev?.target?.files?.[0];
+            if (!aid) throw new Error("账户无效，请重新选择账户");
+            if (!file) return;
+            const text = await file.text();
+            const snapshot = JSON.parse(text);
+            const reqId = `ui_${aid}_${Date.now()}`;
+            const out = await api(`/accounts/${aid}/import`, {
+              method: "POST",
+              body: JSON.stringify({
+                replace_all: true,
+                strict_alias_mode: true,
+                dry_run: false,
+                import_request_id: reqId,
+                payload: snapshot,
+              }),
+            });
+            if (!out?.ok) {
+              throw new Error(
+                `导入失败: ${JSON.stringify(out?.conflicts || out || {})}`,
+              );
+            }
+            await loadAccounts(aid);
+            await refreshAll();
+            msg("账户快照导入完成");
+          } catch (e) {
+            msg(e.message, true);
+          }
+        });
 
         $("refreshAllBtn").onclick = async () => {
           try {

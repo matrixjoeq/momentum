@@ -4,7 +4,7 @@ import math
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ValidationPolicyOut(BaseModel):
@@ -4078,6 +4078,146 @@ class LiveCorporateActionOut(BaseModel):
     cash_per_share: float | None = None
     notes: str | None = None
     created_at: str
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class LiveSnapshotAccount(_StrictModel):
+    id: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=128)
+    base_ccy: str = Field(min_length=1, max_length=16)
+    initial_cash: float = Field(ge=0.0)
+    notes: str | None = None
+
+
+class LiveSnapshotShareholder(_StrictModel):
+    id: int = Field(ge=1)
+    shareholder_account: str = Field(min_length=1, max_length=64)
+    notes: str | None = None
+
+
+class LiveSnapshotStrategy(_StrictModel):
+    id: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=128)
+    strategy_type: str = Field(description="etf_spot|bond_repo")
+    capital_mode: str = Field(description="segregated|shared_account_cash")
+    notes: str | None = None
+
+
+class LiveSnapshotAccountCashflow(_StrictModel):
+    id: int | None = Field(default=None, ge=1)
+    flow_date: str = Field(description="YYYY-MM-DD")
+    amount: float
+    flow_type: str
+    transfer_id: str | None = Field(default=None, max_length=64)
+    notes: str | None = None
+
+
+class LiveSnapshotStrategyCashflow(_StrictModel):
+    id: int | None = Field(default=None, ge=1)
+    strategy_id: int = Field(ge=1)
+    flow_date: str = Field(description="YYYY-MM-DD")
+    amount: float
+    flow_type: str
+    transfer_id: str | None = Field(default=None, max_length=64)
+    notes: str | None = None
+
+
+class LiveSnapshotTrade(_StrictModel):
+    id: int = Field(ge=1)
+    strategy_id: int = Field(ge=1)
+    shareholder_account_id: int = Field(ge=1)
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(default="", max_length=128)
+    trade_date: str = Field(description="YYYY-MM-DD")
+    trade_time: str = Field(description="HH:MM:SS")
+    side: str = Field(description="BUY|SELL")
+    price: float = Field(gt=0.0)
+    quantity: float = Field(gt=0.0)
+    fee: float = Field(ge=0.0)
+    amount: float = Field(ge=0.0)
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    broker_trade_no: str | None = Field(default=None, max_length=128)
+    notes: str | None = None
+
+
+class LiveSnapshotRepoTradeDetail(_StrictModel):
+    trade_id: int = Field(ge=1)
+    repo_action: str = Field(description="LEND|BUYBACK")
+    principal_amount: float = Field(gt=0.0)
+    annual_rate_pct: float = Field(gt=0.0)
+    interest_days: int = Field(ge=0)
+    day_count_basis: int = Field(ge=1)
+    open_trade_id: int | None = Field(default=None, ge=1)
+
+
+class LiveSnapshotCorporateAction(_StrictModel):
+    id: int | None = Field(default=None, ge=1)
+    account_id: int | None = Field(default=None, ge=1)
+    strategy_id: int | None = Field(default=None, ge=1)
+    event_type: str = Field(
+        description="cash_dividend|split|share_conversion|code_change"
+    )
+    code: str = Field(min_length=1, max_length=32)
+    new_code: str | None = Field(default=None, max_length=32)
+    event_date: str = Field(description="YYYY-MM-DD")
+    effective_date: str = Field(description="YYYY-MM-DD")
+    ratio_factor: float | None = Field(default=None, gt=0.0)
+    cash_per_share: float | None = Field(default=None, ge=0.0)
+    notes: str | None = None
+
+
+class LiveSnapshotTradeAuditLog(_StrictModel):
+    trade_id: int = Field(ge=1)
+    strategy_id: int = Field(ge=1)
+    action: str = Field(description="update|delete")
+    reason: str = Field(min_length=1, max_length=500)
+    snapshot_json: str | None = None
+
+
+class LiveAccountSnapshotPayload(_StrictModel):
+    account: LiveSnapshotAccount
+    shareholders: list[LiveSnapshotShareholder] = Field(default_factory=list)
+    strategies: list[LiveSnapshotStrategy] = Field(default_factory=list)
+    account_cashflows: list[LiveSnapshotAccountCashflow] = Field(default_factory=list)
+    strategy_cashflows: list[LiveSnapshotStrategyCashflow] = Field(default_factory=list)
+    trades: list[LiveSnapshotTrade] = Field(default_factory=list)
+    repo_trade_details: list[LiveSnapshotRepoTradeDetail] = Field(default_factory=list)
+    corporate_actions: list[LiveSnapshotCorporateAction] = Field(default_factory=list)
+    trade_audit_logs: list[LiveSnapshotTradeAuditLog] = Field(default_factory=list)
+
+
+class LiveAccountSnapshotDocument(_StrictModel):
+    format: str
+    version: int
+    exported_at: str
+    payload: LiveAccountSnapshotPayload
+
+
+class LiveAccountImportRequest(_StrictModel):
+    replace_all: Literal[True] = True
+    strict_alias_mode: bool = True
+    dry_run: bool = False
+    payload: LiveAccountSnapshotDocument
+    payload_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    import_request_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class LiveAccountImportResponse(_StrictModel):
+    ok: bool
+    dry_run: bool
+    deleted_counts: dict[str, int] = Field(default_factory=dict)
+    inserted_counts: dict[str, int] = Field(default_factory=dict)
+    would_delete_counts: dict[str, int] = Field(default_factory=dict)
+    would_insert_counts: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    conflicts: list[dict[str, Any]] = Field(default_factory=list)
+    lock_wait_ms: int = 0
+    payload_sha256: str
+    import_request_id: str | None = None
+    imported_at: str | None = None
 
 
 class LiveReplayRequest(BaseModel):

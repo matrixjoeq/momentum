@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import math
+import threading
+import time
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
@@ -18,6 +21,9 @@ from sqlalchemy.orm import Session
 
 from .deps import get_session
 from .schemas import (
+    LiveAccountImportRequest,
+    LiveAccountImportResponse,
+    LiveAccountSnapshotDocument,
     LiveAccountCashflowCreateRequest,
     LiveAccountCreateRequest,
     LiveAccountOut,
@@ -71,6 +77,7 @@ from ..db.models import (
     LiveTrade,
     LiveTradeAuditLog,
     LiveRepoTradeDetail,
+    SyncJob,
 )
 
 router = APIRouter()
@@ -82,6 +89,16 @@ REPO_SYMBOL_NAME_MAP: dict[str, str] = {
     "204001": "GC001",
     "131810": "R-001",
 }
+SNAPSHOT_FORMAT = "etf_momentum_live_account_snapshot"
+SNAPSHOT_VERSION = 1
+IMPORT_LOCK_TIMEOUT_SEC = 5.0
+MAX_IMPORT_PAYLOAD_BYTES = 10 * 1024 * 1024
+MAX_IMPORT_TRADES = 20000
+MAX_IMPORT_ACCOUNT_CASHFLOWS = 5000
+MAX_IMPORT_STRATEGY_CASHFLOWS = 5000
+MAX_IMPORT_CORPORATE_ACTIONS = 5000
+_ACCOUNT_IMPORT_LOCKS: dict[int, threading.Lock] = {}
+_ACCOUNT_IMPORT_LOCKS_GUARD = threading.Lock()
 
 
 @dataclass
@@ -674,6 +691,46 @@ def _safe_json_float(x: float | int | None) -> float | None:
     return v if math.isfinite(v) else None
 
 
+def _upsert_symbol_alias(
+    db: Session,
+    *,
+    old_code: str,
+    new_code: str,
+    effective_date: dt.date,
+    notes: str | None,
+) -> None:
+    old_norm = _norm_code(old_code)
+    new_norm = _norm_code(new_code)
+    existing = (
+        db.query(LiveSymbolAlias)
+        .filter(
+            LiveSymbolAlias.old_code == old_norm,
+            LiveSymbolAlias.effective_date == effective_date,
+        )
+        .one_or_none()
+    )
+    if existing is not None:
+        existing_new = _norm_code(existing.new_code)
+        if existing_new != new_norm:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "symbol alias conflict on "
+                    f"{old_norm}@{effective_date.isoformat()}: "
+                    f"{existing_new} != {new_norm}"
+                ),
+            )
+        return
+    db.add(
+        LiveSymbolAlias(
+            old_code=old_norm,
+            new_code=new_norm,
+            effective_date=effective_date,
+            notes=notes,
+        )
+    )
+
+
 def _calc_metrics(nav: pd.Series, ret: pd.Series) -> dict[str, Any]:
     if nav.empty:
         return {
@@ -983,13 +1040,12 @@ def _replay_scope(db: Session, scope: _Scope) -> dict[str, Any]:
                             st_new.total_fee += st_old.total_fee
                             if st_old.legs:
                                 st_new.ensure_legs().extend(st_old.legs)
-                    db.add(
-                        LiveSymbolAlias(
-                            old_code=code,
-                            new_code=new_code,
-                            effective_date=day,
-                            notes=ev.notes,
-                        )
+                    _upsert_symbol_alias(
+                        db,
+                        old_code=code,
+                        new_code=new_code,
+                        effective_date=day,
+                        notes=ev.notes,
                     )
 
         if scope.scope_type == "strategy":
@@ -1800,6 +1856,918 @@ def _serialize_trade(
     )
 
 
+def _canonical_json_bytes(obj: Any) -> bytes:
+    return json.dumps(
+        obj,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _payload_sha256_hex(doc: LiveAccountSnapshotDocument) -> str:
+    return hashlib.sha256(
+        _canonical_json_bytes(doc.model_dump(mode="json"))
+    ).hexdigest()
+
+
+def _import_job_dedupe_key(account_id: int, import_request_id: str) -> str:
+    return f"live_import:{int(account_id)}:{str(import_request_id).strip()}"
+
+
+def _acquire_account_import_lock(account_id: int) -> tuple[threading.Lock, int]:
+    t0 = time.perf_counter()
+    with _ACCOUNT_IMPORT_LOCKS_GUARD:
+        lock = _ACCOUNT_IMPORT_LOCKS.get(int(account_id))
+        if lock is None:
+            lock = threading.Lock()
+            _ACCOUNT_IMPORT_LOCKS[int(account_id)] = lock
+    ok = lock.acquire(timeout=IMPORT_LOCK_TIMEOUT_SEC)
+    wait_ms = int((time.perf_counter() - t0) * 1000.0)
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail="import lock timeout, please retry",
+        )
+    return lock, wait_ms
+
+
+def _snapshot_counts(payload: Any) -> dict[str, int]:
+    return {
+        "shareholders": len(payload.shareholders),
+        "strategies": len(payload.strategies),
+        "account_cashflows": len(payload.account_cashflows),
+        "strategy_cashflows": len(payload.strategy_cashflows),
+        "trades": len(payload.trades),
+        "repo_trade_details": len(payload.repo_trade_details),
+        "corporate_actions": len(payload.corporate_actions),
+        "trade_audit_logs": len(payload.trade_audit_logs),
+    }
+
+
+def _validate_snapshot_contract(doc: LiveAccountSnapshotDocument) -> None:
+    if str(doc.format) != SNAPSHOT_FORMAT:
+        raise HTTPException(status_code=400, detail="unsupported snapshot format")
+    if int(doc.version) != SNAPSHOT_VERSION:
+        raise HTTPException(status_code=400, detail="unsupported snapshot version")
+
+
+def _validate_snapshot_size(doc: LiveAccountSnapshotDocument) -> None:
+    body_len = len(_canonical_json_bytes(doc.model_dump(mode="json")))
+    payload = doc.payload
+    if body_len > MAX_IMPORT_PAYLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="snapshot payload is too large")
+    if len(payload.trades) > MAX_IMPORT_TRADES:
+        raise HTTPException(status_code=413, detail="too many trades in snapshot")
+    if len(payload.account_cashflows) > MAX_IMPORT_ACCOUNT_CASHFLOWS:
+        raise HTTPException(
+            status_code=413, detail="too many account_cashflows in snapshot"
+        )
+    if len(payload.strategy_cashflows) > MAX_IMPORT_STRATEGY_CASHFLOWS:
+        raise HTTPException(
+            status_code=413, detail="too many strategy_cashflows in snapshot"
+        )
+    if len(payload.corporate_actions) > MAX_IMPORT_CORPORATE_ACTIONS:
+        raise HTTPException(
+            status_code=413, detail="too many corporate_actions in snapshot"
+        )
+
+
+def _validate_snapshot_references(doc: LiveAccountSnapshotDocument, *, account_id: int):
+    payload = doc.payload
+    if int(payload.account.id) != int(account_id):
+        raise HTTPException(status_code=400, detail="payload account id mismatch")
+    strategy_ids = {int(x.id) for x in payload.strategies}
+    holder_ids = {int(x.id) for x in payload.shareholders}
+    trade_ids = {int(x.id) for x in payload.trades}
+
+    for x in payload.strategy_cashflows:
+        if int(x.strategy_id) not in strategy_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown strategy_id in strategy_cashflows: {x.strategy_id}",
+            )
+    for x in payload.trades:
+        if int(x.strategy_id) not in strategy_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown strategy_id in trades: {x.strategy_id}",
+            )
+        if int(x.shareholder_account_id) not in holder_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "unknown shareholder_account_id in trades: "
+                    f"{x.shareholder_account_id}"
+                ),
+            )
+    for x in payload.repo_trade_details:
+        if int(x.trade_id) not in trade_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown trade_id in repo_trade_details: {x.trade_id}",
+            )
+        if x.open_trade_id is not None and int(x.open_trade_id) not in trade_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown open_trade_id in repo_trade_details: {x.open_trade_id}",
+            )
+    for x in payload.corporate_actions:
+        if x.account_id is not None and int(x.account_id) != int(account_id):
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid account_id in corporate_actions: {x.account_id}",
+            )
+        if x.strategy_id is not None and int(x.strategy_id) not in strategy_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown strategy_id in corporate_actions: {x.strategy_id}",
+            )
+    for x in payload.trade_audit_logs:
+        if int(x.strategy_id) not in strategy_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown strategy_id in trade_audit_logs: {x.strategy_id}",
+            )
+
+
+def _collect_unique_conflicts(
+    db: Session, *, account_id: int, doc: LiveAccountSnapshotDocument
+) -> list[dict[str, Any]]:
+    payload = doc.payload
+    conflicts: list[dict[str, Any]] = []
+    incoming_name = str(payload.account.name or "").strip()
+    if incoming_name:
+        hit = (
+            db.query(LiveAccount.id)
+            .filter(
+                LiveAccount.id != int(account_id), LiveAccount.name == incoming_name
+            )
+            .first()
+        )
+        if hit is not None:
+            conflicts.append(
+                {
+                    "kind": "account_name_conflict",
+                    "field": "account.name",
+                    "value": incoming_name,
+                }
+            )
+
+    idem_vals = [
+        str(x.idempotency_key).strip() for x in payload.trades if x.idempotency_key
+    ]
+    broker_vals = [
+        str(x.broker_trade_no).strip() for x in payload.trades if x.broker_trade_no
+    ]
+    if len(set(idem_vals)) != len(idem_vals):
+        conflicts.append(
+            {
+                "kind": "payload_duplicate",
+                "field": "idempotency_key",
+                "value": "duplicate",
+            }
+        )
+    if len(set(broker_vals)) != len(broker_vals):
+        conflicts.append(
+            {
+                "kind": "payload_duplicate",
+                "field": "broker_trade_no",
+                "value": "duplicate",
+            }
+        )
+    if idem_vals:
+        rows = (
+            db.query(LiveTrade.idempotency_key)
+            .filter(
+                LiveTrade.account_id != int(account_id),
+                LiveTrade.idempotency_key.in_(sorted(set(idem_vals))),
+            )
+            .all()
+        )
+        for row in rows:
+            conflicts.append(
+                {
+                    "kind": "unique_conflict",
+                    "field": "idempotency_key",
+                    "value": str(row[0]),
+                }
+            )
+    if broker_vals:
+        rows = (
+            db.query(LiveTrade.broker_trade_no)
+            .filter(
+                LiveTrade.account_id != int(account_id),
+                LiveTrade.broker_trade_no.in_(sorted(set(broker_vals))),
+            )
+            .all()
+        )
+        for row in rows:
+            conflicts.append(
+                {
+                    "kind": "unique_conflict",
+                    "field": "broker_trade_no",
+                    "value": str(row[0]),
+                }
+            )
+    return conflicts
+
+
+def _collect_alias_conflicts(
+    db: Session,
+    *,
+    doc: LiveAccountSnapshotDocument,
+    strict_alias_mode: bool,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    payload = doc.payload
+    imported_alias: dict[tuple[str, str], str] = {}
+    conflicts: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    touched_codes: set[str] = set()
+    for t in payload.trades:
+        touched_codes.add(_norm_code(t.code))
+    for ev in payload.corporate_actions:
+        touched_codes.add(_norm_code(ev.code))
+        if ev.new_code:
+            touched_codes.add(_norm_code(ev.new_code))
+        if str(ev.event_type).strip().lower() == "code_change" and ev.new_code:
+            key = (_norm_code(ev.code), _to_date(ev.effective_date).isoformat())
+            new_code = _norm_code(ev.new_code)
+            old_new = imported_alias.get(key)
+            if old_new is not None and old_new != new_code:
+                conflicts.append(
+                    {
+                        "kind": "snapshot_alias_conflict",
+                        "old_code": key[0],
+                        "effective_date": key[1],
+                        "expected_new_code": old_new,
+                        "actual_new_code": new_code,
+                    }
+                )
+            imported_alias[key] = new_code
+    if not imported_alias and not touched_codes:
+        return conflicts, warnings
+
+    for row in db.query(LiveSymbolAlias).all():
+        key = (_norm_code(row.old_code), row.effective_date.isoformat())
+        existing_new = _norm_code(row.new_code)
+        if key in imported_alias:
+            if imported_alias[key] != existing_new:
+                conflicts.append(
+                    {
+                        "kind": "alias_key_conflict",
+                        "old_code": key[0],
+                        "effective_date": key[1],
+                        "expected_new_code": imported_alias[key],
+                        "actual_new_code": existing_new,
+                    }
+                )
+            continue
+        old_code = key[0]
+        if old_code in touched_codes or existing_new in touched_codes:
+            msg = (
+                "external alias may affect imported chain: "
+                f"{old_code}->{existing_new}@{key[1]}"
+            )
+            if strict_alias_mode:
+                conflicts.append(
+                    {
+                        "kind": "alias_external_pollution",
+                        "old_code": old_code,
+                        "effective_date": key[1],
+                        "new_code": existing_new,
+                    }
+                )
+            else:
+                warnings.append(msg)
+    return conflicts, warnings
+
+
+def _collect_funding_and_position_conflicts(
+    doc: LiveAccountSnapshotDocument,
+) -> list[dict[str, Any]]:
+    payload = doc.payload
+    conflicts: list[dict[str, Any]] = []
+    strategy_type_by_id = {
+        int(x.id): _norm_strategy_type(x.strategy_type) for x in payload.strategies
+    }
+    repo_by_trade_id = {int(x.trade_id): x for x in payload.repo_trade_details}
+    trades_sorted = sorted(
+        payload.trades,
+        key=lambda x: (_to_date(x.trade_date), _norm_time(x.trade_time), int(x.id)),
+    )
+
+    stock_qty: dict[tuple[int, int, str], float] = defaultdict(float)
+    repo_principal: dict[tuple[int, int, str], float] = defaultdict(float)
+    cash = float(payload.account.initial_cash)
+    flows = sorted(
+        payload.account_cashflows, key=lambda x: (_to_date(x.flow_date), int(x.id or 0))
+    )
+    fptr = 0
+    for t in trades_sorted:
+        tday = _to_date(t.trade_date)
+        while fptr < len(flows) and _to_date(flows[fptr].flow_date) <= tday:
+            f = flows[fptr]
+            flow_type = str(f.flow_type or "").strip().lower()
+            notes = str(f.notes or "").strip().lower()
+            if not flow_type.startswith("transfer_") and notes != "initial_cash":
+                cash += float(f.amount)
+            fptr += 1
+        sid = int(t.strategy_id)
+        hid = int(t.shareholder_account_id)
+        code = _norm_code(t.code)
+        strategy_type = strategy_type_by_id.get(sid, "etf_spot")
+        side = _norm_side(t.side)
+        key = (sid, hid, code)
+        if strategy_type == "bond_repo":
+            detail = repo_by_trade_id.get(int(t.id))
+            if detail is None:
+                conflicts.append({"kind": "repo_detail_missing", "trade_id": int(t.id)})
+                continue
+            principal = float(detail.principal_amount)
+            action = _norm_repo_action(detail.repo_action, side=side)
+            if action == "LEND":
+                repo_principal[key] += principal
+            else:
+                cur = float(repo_principal.get(key, 0.0))
+                if cur + 1e-9 < principal:
+                    conflicts.append(
+                        {
+                            "kind": "repo_buyback_exceeds_open",
+                            "trade_id": int(t.id),
+                            "remaining_principal": cur,
+                            "buyback_principal": principal,
+                        }
+                    )
+                repo_principal[key] = max(cur - principal, 0.0)
+            cash_delta = _trade_cash_delta(
+                side=side,
+                amount=float(t.amount),
+                fee=float(t.fee),
+                strategy_type=strategy_type,
+                repo_detail={
+                    "repo_action": action,
+                    "principal_amount": principal,
+                },
+            )
+        else:
+            qty = float(t.quantity)
+            if side == "BUY":
+                stock_qty[key] += qty
+            else:
+                cur = float(stock_qty.get(key, 0.0))
+                if cur + 1e-9 < qty:
+                    conflicts.append(
+                        {
+                            "kind": "sell_exceeds_position",
+                            "trade_id": int(t.id),
+                            "remaining_qty": cur,
+                            "sell_qty": qty,
+                        }
+                    )
+                stock_qty[key] = max(cur - qty, 0.0)
+            cash_delta = _trade_cash_delta(
+                side=side,
+                amount=float(t.amount),
+                fee=float(t.fee),
+                strategy_type=strategy_type,
+                repo_detail=None,
+            )
+        if cash + cash_delta < -1e-6:
+            conflicts.append(
+                {
+                    "kind": "insufficient_account_cash",
+                    "trade_id": int(t.id),
+                    "cash_before": cash,
+                    "cash_delta": cash_delta,
+                }
+            )
+        cash += cash_delta
+    return conflicts
+
+
+def _strategy_ids_for_account(db: Session, *, account_id: int) -> list[int]:
+    return [
+        int(x.id)
+        for x in db.query(LiveStrategy.id)
+        .filter(LiveStrategy.account_id == int(account_id))
+        .all()
+    ]
+
+
+def _count_account_scope_rows(
+    db: Session, *, account_id: int, strategy_ids: list[int]
+) -> dict[str, int]:
+    trade_ids = [
+        int(x.id)
+        for x in db.query(LiveTrade.id)
+        .filter(LiveTrade.account_id == int(account_id))
+        .all()
+    ]
+    out = {
+        "shareholders": int(
+            db.query(LiveShareholderAccount)
+            .filter(LiveShareholderAccount.account_id == int(account_id))
+            .count()
+        ),
+        "strategies": int(
+            db.query(LiveStrategy)
+            .filter(LiveStrategy.account_id == int(account_id))
+            .count()
+        ),
+        "account_cashflows": int(
+            db.query(LiveAccountCashflow)
+            .filter(LiveAccountCashflow.account_id == int(account_id))
+            .count()
+        ),
+        "strategy_cashflows": 0,
+        "trades": len(trade_ids),
+        "repo_trade_details": 0,
+        "trade_audit_logs": int(
+            db.query(LiveTradeAuditLog)
+            .filter(LiveTradeAuditLog.account_id == int(account_id))
+            .count()
+        ),
+        "corporate_actions": 0,
+        "derived_closed_rounds": 0,
+        "derived_closed_round_legs": 0,
+        "derived_holdings": 0,
+        "derived_nav": 0,
+    }
+    if strategy_ids:
+        out["strategy_cashflows"] = int(
+            db.query(LiveStrategyCashflow)
+            .filter(LiveStrategyCashflow.strategy_id.in_(strategy_ids))
+            .count()
+        )
+        out["corporate_actions"] = int(
+            db.query(LiveCorporateActionEvent)
+            .filter(
+                (LiveCorporateActionEvent.account_id == int(account_id))
+                | (LiveCorporateActionEvent.strategy_id.in_(strategy_ids))
+            )
+            .count()
+        )
+    else:
+        out["corporate_actions"] = int(
+            db.query(LiveCorporateActionEvent)
+            .filter(LiveCorporateActionEvent.account_id == int(account_id))
+            .count()
+        )
+    if trade_ids:
+        out["repo_trade_details"] = int(
+            db.query(LiveRepoTradeDetail)
+            .filter(LiveRepoTradeDetail.trade_id.in_(trade_ids))
+            .count()
+        )
+    round_ids = [
+        int(x.id)
+        for x in db.query(LiveClosedRound.id)
+        .filter(
+            (LiveClosedRound.scope_type == "account")
+            & (LiveClosedRound.scope_id == int(account_id))
+        )
+        .all()
+    ]
+    if strategy_ids:
+        round_ids.extend(
+            int(x.id)
+            for x in db.query(LiveClosedRound.id)
+            .filter(
+                (LiveClosedRound.scope_type == "strategy")
+                & (LiveClosedRound.scope_id.in_(strategy_ids))
+            )
+            .all()
+        )
+    out["derived_closed_rounds"] = len(round_ids)
+    if round_ids:
+        out["derived_closed_round_legs"] = int(
+            db.query(LiveClosedRoundLeg)
+            .filter(LiveClosedRoundLeg.round_id.in_(round_ids))
+            .count()
+        )
+    out["derived_holdings"] = int(
+        db.query(LiveHoldingSnapshot)
+        .filter(
+            (LiveHoldingSnapshot.scope_type == "account")
+            & (LiveHoldingSnapshot.scope_id == int(account_id))
+        )
+        .count()
+    )
+    out["derived_nav"] = int(
+        db.query(LiveNavDaily)
+        .filter(
+            (LiveNavDaily.scope_type == "account")
+            & (LiveNavDaily.scope_id == int(account_id))
+        )
+        .count()
+    )
+    if strategy_ids:
+        out["derived_holdings"] += int(
+            db.query(LiveHoldingSnapshot)
+            .filter(
+                (LiveHoldingSnapshot.scope_type == "strategy")
+                & (LiveHoldingSnapshot.scope_id.in_(strategy_ids))
+            )
+            .count()
+        )
+        out["derived_nav"] += int(
+            db.query(LiveNavDaily)
+            .filter(
+                (LiveNavDaily.scope_type == "strategy")
+                & (LiveNavDaily.scope_id.in_(strategy_ids))
+            )
+            .count()
+        )
+    return out
+
+
+def _export_account_snapshot_document(
+    db: Session, *, account_id: int
+) -> LiveAccountSnapshotDocument:
+    account = (
+        db.query(LiveAccount).filter(LiveAccount.id == int(account_id)).one_or_none()
+    )
+    if account is None:
+        raise HTTPException(status_code=404, detail="account not found")
+    shareholders = (
+        db.query(LiveShareholderAccount)
+        .filter(LiveShareholderAccount.account_id == int(account_id))
+        .order_by(LiveShareholderAccount.id.asc())
+        .all()
+    )
+    strategies = (
+        db.query(LiveStrategy)
+        .filter(LiveStrategy.account_id == int(account_id))
+        .order_by(LiveStrategy.id.asc())
+        .all()
+    )
+    strategy_ids = [int(x.id) for x in strategies]
+    profile_map = _strategy_profile_map(db, strategy_ids)
+    account_cashflows = (
+        db.query(LiveAccountCashflow)
+        .filter(LiveAccountCashflow.account_id == int(account_id))
+        .order_by(LiveAccountCashflow.flow_date.asc(), LiveAccountCashflow.id.asc())
+        .all()
+    )
+    if strategy_ids:
+        strategy_cashflows = (
+            db.query(LiveStrategyCashflow)
+            .filter(LiveStrategyCashflow.strategy_id.in_(strategy_ids))
+            .order_by(
+                LiveStrategyCashflow.flow_date.asc(),
+                LiveStrategyCashflow.id.asc(),
+            )
+            .all()
+        )
+    else:
+        strategy_cashflows = []
+    trades = (
+        db.query(LiveTrade)
+        .filter(LiveTrade.account_id == int(account_id))
+        .order_by(
+            LiveTrade.trade_date.asc(),
+            LiveTrade.trade_time.asc(),
+            LiveTrade.id.asc(),
+        )
+        .all()
+    )
+    trade_ids = [int(x.id) for x in trades]
+    repo_map = _repo_detail_map(db, trade_ids)
+    if strategy_ids:
+        corporate_actions = (
+            db.query(LiveCorporateActionEvent)
+            .filter(
+                (LiveCorporateActionEvent.account_id == int(account_id))
+                | (LiveCorporateActionEvent.strategy_id.in_(strategy_ids))
+            )
+            .order_by(
+                LiveCorporateActionEvent.effective_date.asc(),
+                LiveCorporateActionEvent.id.asc(),
+            )
+            .all()
+        )
+    else:
+        corporate_actions = (
+            db.query(LiveCorporateActionEvent)
+            .filter(LiveCorporateActionEvent.account_id == int(account_id))
+            .order_by(
+                LiveCorporateActionEvent.effective_date.asc(),
+                LiveCorporateActionEvent.id.asc(),
+            )
+            .all()
+        )
+    trade_audit_logs = (
+        db.query(LiveTradeAuditLog)
+        .filter(LiveTradeAuditLog.account_id == int(account_id))
+        .order_by(LiveTradeAuditLog.id.asc())
+        .all()
+    )
+    return LiveAccountSnapshotDocument(
+        format=SNAPSHOT_FORMAT,
+        version=SNAPSHOT_VERSION,
+        exported_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+        payload={
+            "account": {
+                "id": int(account.id),
+                "name": str(account.name),
+                "base_ccy": str(account.base_ccy),
+                "initial_cash": float(account.initial_cash),
+                "notes": account.notes,
+            },
+            "shareholders": [
+                {
+                    "id": int(x.id),
+                    "shareholder_account": str(x.shareholder_account),
+                    "notes": x.notes,
+                }
+                for x in shareholders
+            ],
+            "strategies": [
+                {
+                    "id": int(x.id),
+                    "name": str(x.name),
+                    "strategy_type": profile_map.get(
+                        int(x.id), ("etf_spot", "segregated")
+                    )[0],
+                    "capital_mode": profile_map.get(
+                        int(x.id), ("etf_spot", "segregated")
+                    )[1],
+                    "notes": x.notes,
+                }
+                for x in strategies
+            ],
+            "account_cashflows": [
+                {
+                    "id": int(x.id),
+                    "flow_date": x.flow_date.isoformat(),
+                    "amount": float(x.amount),
+                    "flow_type": str(x.flow_type),
+                    "transfer_id": x.transfer_id,
+                    "notes": x.notes,
+                }
+                for x in account_cashflows
+            ],
+            "strategy_cashflows": [
+                {
+                    "id": int(x.id),
+                    "strategy_id": int(x.strategy_id),
+                    "flow_date": x.flow_date.isoformat(),
+                    "amount": float(x.amount),
+                    "flow_type": str(x.flow_type),
+                    "transfer_id": x.transfer_id,
+                    "notes": x.notes,
+                }
+                for x in strategy_cashflows
+            ],
+            "trades": [
+                {
+                    "id": int(x.id),
+                    "strategy_id": int(x.strategy_id),
+                    "shareholder_account_id": int(x.shareholder_account_id),
+                    "code": _norm_code(x.code),
+                    "name": str(x.name or ""),
+                    "trade_date": x.trade_date.isoformat(),
+                    "trade_time": _norm_time(str(x.trade_time)),
+                    "side": _norm_side(x.side),
+                    "price": float(x.price),
+                    "quantity": float(x.quantity),
+                    "fee": float(x.fee),
+                    "amount": float(x.amount),
+                    "idempotency_key": x.idempotency_key,
+                    "broker_trade_no": x.broker_trade_no,
+                    "notes": x.notes,
+                }
+                for x in trades
+            ],
+            "repo_trade_details": [
+                {
+                    "trade_id": int(x.trade_id),
+                    "repo_action": _norm_repo_action(
+                        x.repo_action,
+                        side=_norm_side(
+                            next(t for t in trades if int(t.id) == int(x.trade_id)).side
+                        ),
+                    ),
+                    "principal_amount": float(x.principal_amount),
+                    "annual_rate_pct": float(x.annual_rate_pct),
+                    "interest_days": int(x.interest_days),
+                    "day_count_basis": int(x.day_count_basis),
+                    "open_trade_id": (
+                        int(x.open_trade_id) if x.open_trade_id is not None else None
+                    ),
+                }
+                for x in sorted(repo_map.values(), key=lambda y: int(y.trade_id))
+            ],
+            "corporate_actions": [
+                {
+                    "id": int(x.id),
+                    "account_id": (
+                        int(x.account_id) if x.account_id is not None else None
+                    ),
+                    "strategy_id": (
+                        int(x.strategy_id) if x.strategy_id is not None else None
+                    ),
+                    "event_type": str(x.event_type),
+                    "code": _norm_code(x.code),
+                    "new_code": _norm_code(x.new_code) if x.new_code else None,
+                    "event_date": x.event_date.isoformat(),
+                    "effective_date": x.effective_date.isoformat(),
+                    "ratio_factor": (
+                        float(x.ratio_factor) if x.ratio_factor is not None else None
+                    ),
+                    "cash_per_share": (
+                        float(x.cash_per_share)
+                        if x.cash_per_share is not None
+                        else None
+                    ),
+                    "notes": x.notes,
+                }
+                for x in corporate_actions
+            ],
+            "trade_audit_logs": [
+                {
+                    "trade_id": int(x.trade_id),
+                    "strategy_id": int(x.strategy_id),
+                    "action": str(x.action),
+                    "reason": str(x.reason),
+                    "snapshot_json": x.snapshot_json,
+                }
+                for x in trade_audit_logs
+            ],
+        },
+    )
+
+
+def _delete_account_scope_rows(
+    db: Session, *, account_id: int, strategy_ids: list[int]
+) -> None:
+    if strategy_ids:
+        round_ids = [
+            int(x.id)
+            for x in db.query(LiveClosedRound.id)
+            .filter(
+                (
+                    (LiveClosedRound.scope_type == "account")
+                    & (LiveClosedRound.scope_id == int(account_id))
+                )
+                | (
+                    (LiveClosedRound.scope_type == "strategy")
+                    & (LiveClosedRound.scope_id.in_(strategy_ids))
+                )
+            )
+            .all()
+        ]
+    else:
+        round_ids = [
+            int(x.id)
+            for x in db.query(LiveClosedRound.id)
+            .filter(
+                LiveClosedRound.scope_type == "account",
+                LiveClosedRound.scope_id == int(account_id),
+            )
+            .all()
+        ]
+    if round_ids:
+        (
+            db.query(LiveClosedRoundLeg)
+            .filter(LiveClosedRoundLeg.round_id.in_(round_ids))
+            .delete(synchronize_session=False)
+        )
+    if strategy_ids:
+        (
+            db.query(LiveClosedRound)
+            .filter(
+                (
+                    (LiveClosedRound.scope_type == "account")
+                    & (LiveClosedRound.scope_id == int(account_id))
+                )
+                | (
+                    (LiveClosedRound.scope_type == "strategy")
+                    & (LiveClosedRound.scope_id.in_(strategy_ids))
+                )
+            )
+            .delete(synchronize_session=False)
+        )
+        (
+            db.query(LiveHoldingSnapshot)
+            .filter(
+                (
+                    (LiveHoldingSnapshot.scope_type == "account")
+                    & (LiveHoldingSnapshot.scope_id == int(account_id))
+                )
+                | (
+                    (LiveHoldingSnapshot.scope_type == "strategy")
+                    & (LiveHoldingSnapshot.scope_id.in_(strategy_ids))
+                )
+            )
+            .delete(synchronize_session=False)
+        )
+        (
+            db.query(LiveNavDaily)
+            .filter(
+                (
+                    (LiveNavDaily.scope_type == "account")
+                    & (LiveNavDaily.scope_id == int(account_id))
+                )
+                | (
+                    (LiveNavDaily.scope_type == "strategy")
+                    & (LiveNavDaily.scope_id.in_(strategy_ids))
+                )
+            )
+            .delete(synchronize_session=False)
+        )
+    else:
+        (
+            db.query(LiveClosedRound)
+            .filter(
+                LiveClosedRound.scope_type == "account",
+                LiveClosedRound.scope_id == int(account_id),
+            )
+            .delete(synchronize_session=False)
+        )
+        (
+            db.query(LiveHoldingSnapshot)
+            .filter(
+                LiveHoldingSnapshot.scope_type == "account",
+                LiveHoldingSnapshot.scope_id == int(account_id),
+            )
+            .delete(synchronize_session=False)
+        )
+        (
+            db.query(LiveNavDaily)
+            .filter(
+                LiveNavDaily.scope_type == "account",
+                LiveNavDaily.scope_id == int(account_id),
+            )
+            .delete(synchronize_session=False)
+        )
+
+    trade_ids = [
+        int(x.id)
+        for x in db.query(LiveTrade.id)
+        .filter(LiveTrade.account_id == int(account_id))
+        .all()
+    ]
+    if trade_ids:
+        (
+            db.query(LiveRepoTradeDetail)
+            .filter(LiveRepoTradeDetail.trade_id.in_(trade_ids))
+            .delete(synchronize_session=False)
+        )
+    (
+        db.query(LiveTradeAuditLog)
+        .filter(LiveTradeAuditLog.account_id == int(account_id))
+        .delete(synchronize_session=False)
+    )
+    (
+        db.query(LiveTrade)
+        .filter(LiveTrade.account_id == int(account_id))
+        .delete(synchronize_session=False)
+    )
+    if strategy_ids:
+        (
+            db.query(LiveStrategyCashflow)
+            .filter(LiveStrategyCashflow.strategy_id.in_(strategy_ids))
+            .delete(synchronize_session=False)
+        )
+    (
+        db.query(LiveAccountCashflow)
+        .filter(LiveAccountCashflow.account_id == int(account_id))
+        .delete(synchronize_session=False)
+    )
+    if strategy_ids:
+        (
+            db.query(LiveCorporateActionEvent)
+            .filter(
+                (LiveCorporateActionEvent.account_id == int(account_id))
+                | (LiveCorporateActionEvent.strategy_id.in_(strategy_ids))
+            )
+            .delete(synchronize_session=False)
+        )
+        (
+            db.query(LiveStrategyProfile)
+            .filter(LiveStrategyProfile.strategy_id.in_(strategy_ids))
+            .delete(synchronize_session=False)
+        )
+    else:
+        (
+            db.query(LiveCorporateActionEvent)
+            .filter(LiveCorporateActionEvent.account_id == int(account_id))
+            .delete(synchronize_session=False)
+        )
+    (
+        db.query(LiveStrategy)
+        .filter(LiveStrategy.account_id == int(account_id))
+        .delete(synchronize_session=False)
+    )
+    (
+        db.query(LiveShareholderAccount)
+        .filter(LiveShareholderAccount.account_id == int(account_id))
+        .delete(synchronize_session=False)
+    )
+
+
 @router.post("/accounts", response_model=LiveAccountOut)
 def live_create_account(
     payload: LiveAccountCreateRequest, db: Session = Depends(get_session)
@@ -1875,6 +2843,483 @@ def live_delete_account(account_id: int, db: Session = Depends(get_session)):
         return {"ok": True}
     db.delete(row)
     return {"ok": True}
+
+
+@router.get(
+    "/accounts/{account_id}/export",
+    response_model=LiveAccountSnapshotDocument,
+)
+def live_export_account_snapshot(account_id: int, db: Session = Depends(get_session)):
+    return _export_account_snapshot_document(db, account_id=account_id)
+
+
+@router.post(
+    "/accounts/{account_id}/import",
+    response_model=LiveAccountImportResponse,
+)
+def live_import_account_snapshot(
+    account_id: int,
+    payload: LiveAccountImportRequest,
+    db: Session = Depends(get_session),
+):
+    lock, lock_wait_ms = _acquire_account_import_lock(account_id)
+    try:
+        idempotent_job: SyncJob | None = None
+        import_request_id = str(payload.import_request_id or "").strip() or None
+        if import_request_id is not None:
+            dedupe_key = _import_job_dedupe_key(account_id, import_request_id)
+            existing_job = (
+                db.query(SyncJob)
+                .filter(
+                    SyncJob.job_type == "live_import_account",
+                    SyncJob.dedupe_key == dedupe_key,
+                )
+                .one_or_none()
+            )
+            if (
+                existing_job is not None
+                and existing_job.status == "success"
+                and existing_job.result_json
+            ):
+                try:
+                    return LiveAccountImportResponse.model_validate(
+                        json.loads(existing_job.result_json)
+                    )
+                except Exception:
+                    pass
+            if existing_job is not None and existing_job.status in {
+                "queued",
+                "running",
+            }:
+                raise HTTPException(
+                    status_code=409, detail="same import_request_id is running"
+                )
+            if existing_job is None:
+                idempotent_job = SyncJob(
+                    job_type="live_import_account",
+                    dedupe_key=dedupe_key,
+                    status="running",
+                    run_date=shift_to_trading_day(dt.date.today(), shift="prev"),
+                    full_refresh=True,
+                    adjusts="none",
+                )
+                db.add(idempotent_job)
+                db.flush()
+            else:
+                idempotent_job = existing_job
+                idempotent_job.status = "running"
+                idempotent_job.error_message = None
+                idempotent_job.result_json = None
+                db.flush()
+
+        doc = payload.payload
+        _validate_snapshot_contract(doc)
+        _validate_snapshot_size(doc)
+        _validate_snapshot_references(doc, account_id=account_id)
+        payload_sha = _payload_sha256_hex(doc)
+        if payload.payload_sha256 and payload.payload_sha256.lower() != payload_sha:
+            raise HTTPException(status_code=400, detail="payload_sha256 mismatch")
+
+        account = (
+            db.query(LiveAccount)
+            .filter(LiveAccount.id == int(account_id))
+            .one_or_none()
+        )
+        if account is None:
+            raise HTTPException(status_code=404, detail="account not found")
+
+        old_strategy_ids = _strategy_ids_for_account(db, account_id=account_id)
+        would_delete_counts = _count_account_scope_rows(
+            db, account_id=account_id, strategy_ids=old_strategy_ids
+        )
+        would_insert_counts = _snapshot_counts(doc.payload)
+        conflicts: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        conflicts.extend(_collect_unique_conflicts(db, account_id=account_id, doc=doc))
+        alias_conflicts, alias_warnings = _collect_alias_conflicts(
+            db,
+            doc=doc,
+            strict_alias_mode=bool(payload.strict_alias_mode),
+        )
+        conflicts.extend(alias_conflicts)
+        warnings.extend(alias_warnings)
+        conflicts.extend(_collect_funding_and_position_conflicts(doc))
+
+        if payload.dry_run:
+            out = LiveAccountImportResponse(
+                ok=len(conflicts) == 0,
+                dry_run=True,
+                deleted_counts={},
+                inserted_counts={},
+                would_delete_counts=would_delete_counts,
+                would_insert_counts=would_insert_counts,
+                warnings=warnings,
+                conflicts=conflicts,
+                lock_wait_ms=lock_wait_ms,
+                payload_sha256=payload_sha,
+                import_request_id=import_request_id,
+                imported_at=None,
+            )
+            if idempotent_job is not None:
+                idempotent_job.status = "success"
+                idempotent_job.result_json = json.dumps(
+                    out.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                idempotent_job.finished_at = dt.datetime.now(dt.timezone.utc)
+            return out
+
+        if conflicts:
+            raise HTTPException(
+                status_code=409,
+                detail={"conflicts": conflicts, "warnings": warnings},
+            )
+
+        account.name = str(doc.payload.account.name).strip()
+        account.base_ccy = str(doc.payload.account.base_ccy).strip().upper()
+        account.initial_cash = float(doc.payload.account.initial_cash)
+        account.notes = doc.payload.account.notes
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            raise HTTPException(
+                status_code=409, detail="account name already exists"
+            ) from exc
+
+        _delete_account_scope_rows(
+            db, account_id=account_id, strategy_ids=old_strategy_ids
+        )
+        db.flush()
+
+        strategy_map: dict[int, int] = {}
+        holder_map: dict[int, int] = {}
+        trade_map: dict[int, int] = {}
+        inserted_counts = {
+            "shareholders": 0,
+            "strategies": 0,
+            "account_cashflows": 0,
+            "strategy_cashflows": 0,
+            "trades": 0,
+            "repo_trade_details": 0,
+            "corporate_actions": 0,
+            "trade_audit_logs": 0,
+        }
+
+        for sh in sorted(doc.payload.shareholders, key=lambda x: int(x.id)):
+            row = LiveShareholderAccount(
+                account_id=int(account_id),
+                shareholder_account=str(sh.shareholder_account).strip(),
+                notes=sh.notes,
+            )
+            db.add(row)
+            db.flush()
+            holder_map[int(sh.id)] = int(row.id)
+            inserted_counts["shareholders"] += 1
+
+        for st in sorted(doc.payload.strategies, key=lambda x: int(x.id)):
+            strategy_type = _norm_strategy_type(st.strategy_type)
+            capital_mode = _norm_capital_mode(
+                st.capital_mode, strategy_type=strategy_type
+            )
+            row = LiveStrategy(
+                account_id=int(account_id),
+                name=str(st.name).strip(),
+                notes=st.notes,
+            )
+            db.add(row)
+            db.flush()
+            db.add(
+                LiveStrategyProfile(
+                    strategy_id=int(row.id),
+                    strategy_type=strategy_type,
+                    capital_mode=capital_mode,
+                )
+            )
+            db.flush()
+            strategy_map[int(st.id)] = int(row.id)
+            inserted_counts["strategies"] += 1
+
+        init_rows = [
+            x
+            for x in doc.payload.account_cashflows
+            if str(x.notes or "").strip().lower() == "initial_cash"
+        ]
+        init_flow_date = (
+            min(_to_date(x.flow_date) for x in init_rows)
+            if init_rows
+            else shift_to_trading_day(dt.date.today(), shift="prev")
+        )
+        if float(account.initial_cash) > 0.0:
+            db.add(
+                LiveAccountCashflow(
+                    account_id=int(account_id),
+                    flow_date=init_flow_date,
+                    amount=float(account.initial_cash),
+                    flow_type="deposit",
+                    transfer_id=None,
+                    notes="initial_cash",
+                )
+            )
+            inserted_counts["account_cashflows"] += 1
+        for cf in sorted(
+            doc.payload.account_cashflows,
+            key=lambda x: (_to_date(x.flow_date), int(x.id or 0)),
+        ):
+            if str(cf.notes or "").strip().lower() == "initial_cash":
+                continue
+            db.add(
+                LiveAccountCashflow(
+                    account_id=int(account_id),
+                    flow_date=_to_date(cf.flow_date),
+                    amount=float(cf.amount),
+                    flow_type=str(cf.flow_type).strip().lower(),
+                    transfer_id=cf.transfer_id,
+                    notes=cf.notes,
+                )
+            )
+            inserted_counts["account_cashflows"] += 1
+
+        for cf in sorted(
+            doc.payload.strategy_cashflows,
+            key=lambda x: (_to_date(x.flow_date), int(x.id or 0)),
+        ):
+            sid = strategy_map[int(cf.strategy_id)]
+            db.add(
+                LiveStrategyCashflow(
+                    strategy_id=sid,
+                    flow_date=_to_date(cf.flow_date),
+                    amount=float(cf.amount),
+                    flow_type=str(cf.flow_type).strip().lower(),
+                    transfer_id=cf.transfer_id,
+                    notes=cf.notes,
+                )
+            )
+            inserted_counts["strategy_cashflows"] += 1
+
+        strategy_type_by_old_id = {
+            int(x.id): _norm_strategy_type(x.strategy_type)
+            for x in doc.payload.strategies
+        }
+        repo_detail_by_old_trade_id = {
+            int(x.trade_id): x for x in doc.payload.repo_trade_details
+        }
+        for t in sorted(
+            doc.payload.trades,
+            key=lambda x: (_to_date(x.trade_date), _norm_time(x.trade_time), int(x.id)),
+        ):
+            old_trade_id = int(t.id)
+            old_sid = int(t.strategy_id)
+            strategy_type = strategy_type_by_old_id.get(old_sid, "etf_spot")
+            qty = float(t.quantity)
+            side_norm = _norm_side(t.side)
+            trade_date = _to_date(t.trade_date)
+            trade_time = _norm_time(t.trade_time)
+            repo_detail_payload: dict[str, Any] | None = None
+            repo_open_old_trade_id: int | None = None
+            if strategy_type != "bond_repo":
+                lot_ratio = qty / 100.0
+                if not math.isclose(
+                    lot_ratio, round(lot_ratio), rel_tol=0.0, abs_tol=1e-9
+                ):
+                    raise HTTPException(
+                        status_code=400, detail="quantity must be a multiple of 100"
+                    )
+            else:
+                qty_int = int(round(qty))
+                if not math.isclose(qty, float(qty_int), rel_tol=0.0, abs_tol=1e-9):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="repo quantity must be a positive integer",
+                    )
+                rd = repo_detail_by_old_trade_id.get(old_trade_id)
+                if rd is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"missing repo detail for trade_id: {old_trade_id}",
+                    )
+                repo_detail_payload = {
+                    "repo_action": _norm_repo_action(rd.repo_action, side=side_norm),
+                    "principal_amount": float(rd.principal_amount),
+                    "annual_rate_pct": float(rd.annual_rate_pct),
+                    "interest_days": int(rd.interest_days),
+                    "day_count_basis": int(rd.day_count_basis),
+                    "open_trade_id": (
+                        int(rd.open_trade_id) if rd.open_trade_id is not None else None
+                    ),
+                }
+                repo_open_old_trade_id = (
+                    int(rd.open_trade_id) if rd.open_trade_id is not None else None
+                )
+            _validate_trade_funding_constraints(
+                db,
+                account_id=int(account_id),
+                strategy_id=int(strategy_map[old_sid]),
+                strategy_type=strategy_type,
+                trade_date=trade_date,
+                trade_time=trade_time,
+                side=side_norm,
+                amount=float(t.amount),
+                fee=float(t.fee),
+                repo_detail=repo_detail_payload,
+            )
+            row = LiveTrade(
+                account_id=int(account_id),
+                strategy_id=int(strategy_map[old_sid]),
+                shareholder_account_id=int(holder_map[int(t.shareholder_account_id)]),
+                code=_norm_code(t.code),
+                name=str(t.name or ""),
+                trade_date=trade_date,
+                trade_time=trade_time,
+                side=side_norm,
+                price=float(t.price),
+                quantity=float(t.quantity),
+                fee=float(t.fee),
+                amount=float(t.amount),
+                idempotency_key=t.idempotency_key,
+                broker_trade_no=t.broker_trade_no,
+                notes=t.notes,
+            )
+            db.add(row)
+            try:
+                db.flush()
+            except IntegrityError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="duplicate idempotency_key or broker_trade_no",
+                ) from exc
+            trade_map[int(t.id)] = int(row.id)
+            inserted_counts["trades"] += 1
+            if repo_detail_payload is not None:
+                mapped_open_trade_id = None
+                if repo_open_old_trade_id is not None:
+                    mapped_open_trade_id = trade_map.get(int(repo_open_old_trade_id))
+                    if mapped_open_trade_id is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                "repo_open_trade_id must reference an earlier trade "
+                                f"in import order: {repo_open_old_trade_id}"
+                            ),
+                        )
+                db.add(
+                    LiveRepoTradeDetail(
+                        trade_id=int(row.id),
+                        repo_action=str(repo_detail_payload["repo_action"]),
+                        principal_amount=float(repo_detail_payload["principal_amount"]),
+                        annual_rate_pct=float(repo_detail_payload["annual_rate_pct"]),
+                        interest_days=int(repo_detail_payload["interest_days"]),
+                        day_count_basis=int(repo_detail_payload["day_count_basis"]),
+                        open_trade_id=(
+                            int(mapped_open_trade_id)
+                            if mapped_open_trade_id is not None
+                            else None
+                        ),
+                    )
+                )
+                db.flush()
+                inserted_counts["repo_trade_details"] += 1
+
+        for ev in sorted(
+            doc.payload.corporate_actions,
+            key=lambda x: (_to_date(x.effective_date), int(x.id or 0)),
+        ):
+            db.add(
+                LiveCorporateActionEvent(
+                    account_id=(int(account_id) if ev.account_id is not None else None),
+                    strategy_id=(
+                        int(strategy_map[int(ev.strategy_id)])
+                        if ev.strategy_id is not None
+                        else None
+                    ),
+                    event_type=str(ev.event_type).strip().lower(),
+                    code=_norm_code(ev.code),
+                    new_code=_norm_code(ev.new_code) if ev.new_code else None,
+                    event_date=_to_date(ev.event_date),
+                    effective_date=_to_date(ev.effective_date),
+                    ratio_factor=(
+                        float(ev.ratio_factor) if ev.ratio_factor is not None else None
+                    ),
+                    cash_per_share=(
+                        float(ev.cash_per_share)
+                        if ev.cash_per_share is not None
+                        else None
+                    ),
+                    notes=ev.notes,
+                )
+            )
+            inserted_counts["corporate_actions"] += 1
+
+        for al in sorted(
+            doc.payload.trade_audit_logs,
+            key=lambda x: (int(x.trade_id), str(x.action)),
+        ):
+            mapped_trade_id = trade_map.get(int(al.trade_id))
+            if mapped_trade_id is None:
+                mapped_trade_id = int(al.trade_id)
+                warnings.append(
+                    (
+                        "trade_audit_log keeps original trade_id without remap: "
+                        f"{int(al.trade_id)}"
+                    )
+                )
+            db.add(
+                LiveTradeAuditLog(
+                    trade_id=int(mapped_trade_id),
+                    account_id=int(account_id),
+                    strategy_id=int(strategy_map[int(al.strategy_id)]),
+                    action=str(al.action),
+                    reason=str(al.reason),
+                    snapshot_json=al.snapshot_json,
+                )
+            )
+            inserted_counts["trade_audit_logs"] += 1
+
+        db.flush()
+        new_strategy_ids = sorted(strategy_map.values())
+        for sid in new_strategy_ids:
+            _replay_scope(
+                db,
+                _Scope(
+                    scope_type="strategy",
+                    scope_id=int(sid),
+                    account_id=int(account_id),
+                    strategy_id=int(sid),
+                ),
+            )
+        _replay_scope(
+            db,
+            _Scope(
+                scope_type="account",
+                scope_id=int(account_id),
+                account_id=int(account_id),
+                strategy_id=None,
+            ),
+        )
+        imported_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        out = LiveAccountImportResponse(
+            ok=True,
+            dry_run=False,
+            deleted_counts=would_delete_counts,
+            inserted_counts=inserted_counts,
+            would_delete_counts=would_delete_counts,
+            would_insert_counts=would_insert_counts,
+            warnings=warnings,
+            conflicts=[],
+            lock_wait_ms=lock_wait_ms,
+            payload_sha256=payload_sha,
+            import_request_id=import_request_id,
+            imported_at=imported_at,
+        )
+        if idempotent_job is not None:
+            idempotent_job.status = "success"
+            idempotent_job.result_json = json.dumps(
+                out.model_dump(mode="json"), ensure_ascii=False, sort_keys=True
+            )
+            idempotent_job.finished_at = dt.datetime.now(dt.timezone.utc)
+        return out
+    finally:
+        lock.release()
 
 
 @router.post(
